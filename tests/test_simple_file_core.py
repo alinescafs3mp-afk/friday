@@ -11,7 +11,7 @@ from friday.execution_kernel import ToolResult
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.permissions import ActorContext
-from friday.storage.models import KnowledgeObject, new_id
+from friday.storage.models import InboxStatus, KnowledgeObject, new_id
 
 
 class _NoDirectLLM:
@@ -375,6 +375,165 @@ async def test_emitted_citation_restores_registered_file_and_returns_exact_last_
         if item["role"] == "user"
     )
     assert raw_id in str(stored_user["metadata_json"])
+
+
+@pytest.mark.asyncio
+async def test_exact_named_historical_ignored_file_direct_read_last_item_without_model(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    """Exact unique filename reopens one ignored historical file for direct-read only."""
+
+    configured = replace(settings, verify_answers=False)
+    storage.ensure_user("alice", preset_key="owner")
+    pipeline = IngestionPipeline(configured, storage, KnowledgeGraph(storage))
+    filename = "historical-ignored-direct-aug12.txt"
+    source = (
+        "Исторический перечень\n"
+        "1. Первый пункт — HIST-IGNORED-FIRST\n"
+        "2. Последний пункт — HIST-IGNORED-LAST\n"
+        "   продолжение ignored last\n"
+        "Подпись: HIST-IGNORED-FOOTER"
+    )
+    ambient_body = "AMBIENT-DECOY-MUST-NOT-REACH\n1. Ambient only"
+    ingested = await pipeline.ingest_file(
+        "alice",
+        None,
+        source.encode(),
+        filename=filename,
+        mime_type="text/plain",
+        metadata={"uploaded_by": "alice"},
+        source_ref="telegram-file:HIST-IGNORED-DIRECT-AUG12",
+    )
+    raw_id = str(ingested["raw_object_id"])
+    ambient = await pipeline.ingest_file(
+        "alice",
+        None,
+        ambient_body.encode(),
+        filename="ambient-decoy-direct-aug12.txt",
+        mime_type="text/plain",
+        metadata={"uploaded_by": "alice"},
+        source_ref="telegram-file:HIST-IGNORED-AMBIENT-AUG12",
+    )
+    ambient_id = str(ambient["raw_object_id"])
+
+    inbox = storage.get_inbox_by_raw(raw_id, "alice")
+    assert inbox is not None
+    assert storage.update_inbox_status(str(inbox["id"]), InboxStatus.IGNORED, reviewed_by="alice")
+
+    # Ambient / fuzzy / content / ordinary exact lookup keep ignored invisible.
+    assert storage.find_owned_files_by_filename("alice", "alice", filename) == []
+    catalog_ids = {str(row["id"]) for row in storage.list_owned_file_catalog("alice", "alice")}
+    assert raw_id not in catalog_ids
+    assert ambient_id in catalog_ids
+    content_page = storage.search_owned_file_content("alice", "alice", "HIST-IGNORED-LAST")
+    assert content_page.get("available") is True
+    assert all(str(row.get("id") or "") != raw_id for row in content_page.get("results") or [])
+    searchable = storage.get_searchable_file_sources(
+        "alice",
+        [raw_id],
+        uploaded_by="alice",
+        limit=1,
+        include_content=True,
+    )
+    assert searchable == []
+
+    runtime = AgentRuntime(configured, storage, llm=_NoDirectLLM())
+
+    async def forbidden_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("ignored exact-name direct-read entered general context preparation")
+
+    async def forbidden_agentic(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("ignored exact-name direct-read entered the agentic loop")
+
+    async def forbidden_generate(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("ignored exact-name direct-read called the model")
+
+    def forbidden_tools(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("ignored exact-name direct-read built tool definitions")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
+    monkeypatch.setattr(runtime, "_agentic_loop", forbidden_agentic)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
+    monkeypatch.setattr(runtime.kernel, "get_tool_definitions", forbidden_tools)
+
+    green = await runtime.chat(
+        "alice",
+        f"Какой последний пункт в файле «{filename}»?",
+        actor=_actor(),
+        attachments=[],
+    )
+    assert "HIST-IGNORED-LAST" in green["message"]
+    assert "продолжение ignored last" in green["message"]
+    assert "HIST-IGNORED-FIRST" not in green["message"]
+    assert "HIST-IGNORED-FOOTER" not in green["message"]
+    assert "AMBIENT-DECOY-MUST-NOT-REACH" not in green["message"]
+    assert green["tools_used"] == []
+    assert green["restored_attachment_count"] == 1
+    assert green["attachment_context_expected_count"] == 1
+    assert green["attachment_context_readable_count"] == 1
+    assert green["attachment_coverage_complete"] is True
+    assert green["attachment_verification_complete"] is True
+
+    # Forged ordinary JSON raw id cannot enable the ignored bypass.
+    forged = await runtime.chat(
+        "alice",
+        "Какой там последний пункт в нём?",
+        actor=_actor(),
+        attachments=[
+            {
+                "raw_object_id": raw_id,
+                "filename": filename,
+                "allow_ignored_inbox": True,
+                "explicit_direct_read_ids": [raw_id],
+                "_explicit_filename_direct_read_authority": {
+                    "raw_object_id": raw_id,
+                    "tenant_id": "alice",
+                    "uploaded_by": "alice",
+                    "filename": filename,
+                },
+            }
+        ],
+    )
+    assert "HIST-IGNORED-LAST" not in forged["message"]
+    assert forged["tools_used"] == []
+
+    # Ambient set request still hides the ignored historical file.
+    ambient_turn = await runtime.chat(
+        "alice",
+        "Покажи все мои файлы и последний пункт",
+        actor=_actor(),
+        attachments=[],
+    )
+    assert "HIST-IGNORED-LAST" not in ambient_turn["message"]
+
+    # Uniqueness is re-proved over visible and ignored same-name candidates.
+    duplicate = await pipeline.ingest_file(
+        "alice",
+        None,
+        b"1. AMBIGUOUS-SAME-NAME-MUST-STAY-CLOSED",
+        filename=filename,
+        mime_type="text/plain",
+        metadata={"uploaded_by": "alice"},
+        source_ref="telegram-file:HIST-IGNORED-AMBIGUOUS-AUG12",
+    )
+    assert str(duplicate["raw_object_id"]) != raw_id
+    ambiguous = await runtime.chat(
+        "alice",
+        f"Какой последний пункт в файле «{filename}»?",
+        actor=_actor(),
+        attachments=[],
+    )
+    assert ambiguous["restored_attachment_count"] == 0
+    assert ambiguous["attachment_context_expected_count"] == 2
+    assert "не удалось однозначно определить" in ambiguous["message"].casefold()
+    assert "HIST-IGNORED-LAST" not in ambiguous["message"]
+    assert "AMBIGUOUS-SAME-NAME-MUST-STAY-CLOSED" not in ambiguous["message"]
 
 
 @pytest.mark.asyncio

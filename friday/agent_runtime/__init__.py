@@ -101,6 +101,7 @@ from friday.reports import SUPPORTED_KINDS, sheet_title_from_report_title, spec_
 from friday.retrieval import best_snippet, is_relational_query
 from friday.storage import FridayStorage, normalize_conversation_mode, validate_user_id
 from friday.storage._core import iso_date
+from friday.storage._intake import resolve_owned_file_exact_filename_direct_read
 from friday.storage.models import FeedbackItem, FeedbackType, InboxStatus, new_id, normalize_known_at
 from friday.text_shape import (
     TEXT_SHAPE_INVALID,
@@ -306,6 +307,18 @@ class _ResolvedTelegramReplyAttachment(_OwnedAttachment):
 
 
 _TELEGRAM_REPLY_UPLOADER_ATTR = "_telegram_reply_uploaded_by"
+_EXPLICIT_DIRECT_READ_AUTHORITY_ATTR = "_explicit_filename_direct_read_authority"
+
+
+@dataclass(frozen=True, slots=True)
+class _ExplicitFilenameDirectReadAuthority:
+    """One JSON-unforgeable exact-name permission for one Raw and uploader."""
+
+    raw_object_id: str
+    tenant_id: str
+    uploaded_by: str
+    filename: str
+    normalized_filename: str
 
 
 def _resolved_telegram_reply_attachment(
@@ -353,6 +366,80 @@ def _retain_resolved_telegram_reply_uploader(source: Any, carrier: Any) -> Any:
     return carrier
 
 
+def _make_explicit_filename_direct_read_authority(
+    *,
+    raw_object_id: str,
+    tenant_id: str,
+    uploaded_by: str,
+    filename: str,
+) -> _ExplicitFilenameDirectReadAuthority | None:
+    """Build authority only from one storage-resolved exact filename row."""
+
+    raw_id = str(raw_object_id or "").strip()
+    tenant = str(tenant_id or "").strip()
+    person = str(uploaded_by or "").strip()
+    exact_filename = str(filename or "").strip()
+    normalized = _normalized_attachment_selector(exact_filename)
+    if (
+        not _RAW_OBJECT_ID_RE.fullmatch(raw_id)
+        or not tenant
+        or not person
+        or not exact_filename
+        or len(exact_filename) > 260
+        or not normalized
+    ):
+        return None
+    return _ExplicitFilenameDirectReadAuthority(
+        raw_object_id=raw_id,
+        tenant_id=tenant,
+        uploaded_by=person,
+        filename=exact_filename,
+        normalized_filename=normalized,
+    )
+
+
+def _explicit_filename_direct_read_authority_of(
+    item: Any,
+) -> _ExplicitFilenameDirectReadAuthority | None:
+    """Read a complete bound authority only from a private attachment carrier."""
+
+    if not (isinstance(item, (_OwnedAttachment, _ProjectedAttachment)) or is_trusted_office_attachment(item)):
+        return None
+    authority = getattr(item, _EXPLICIT_DIRECT_READ_AUTHORITY_ATTR, None)
+    if not isinstance(authority, _ExplicitFilenameDirectReadAuthority):
+        return None
+    if (
+        str(item.get("raw_object_id") or "") != authority.raw_object_id
+        or _normalized_attachment_selector(str(item.get("filename") or "")) != authority.normalized_filename
+    ):
+        return None
+    return authority
+
+
+def _mark_explicit_filename_direct_read(
+    item: Any,
+    authority: _ExplicitFilenameDirectReadAuthority,
+) -> Any:
+    """Attach one complete exact-name authority; a boolean flag is insufficient."""
+
+    if not (isinstance(item, (_OwnedAttachment, _ProjectedAttachment)) or is_trusted_office_attachment(item)):
+        return item
+    if (
+        str(item.get("raw_object_id") or "") != authority.raw_object_id
+        or _normalized_attachment_selector(str(item.get("filename") or "")) != authority.normalized_filename
+    ):
+        return item
+    object.__setattr__(item, _EXPLICIT_DIRECT_READ_AUTHORITY_ATTR, authority)
+    return item
+
+
+def _retain_explicit_filename_direct_read(source: Any, carrier: Any) -> Any:
+    """Carry exact-name direct-read authority across private in-process wraps."""
+
+    authority = _explicit_filename_direct_read_authority_of(source)
+    return _mark_explicit_filename_direct_read(carrier, authority) if authority is not None else carrier
+
+
 def _private_owned_attachment_copy(
     value: Mapping[str, Any],
     *,
@@ -365,7 +452,8 @@ def _private_owned_attachment_copy(
         carrier = cast(Any, trusted_office_attachment(value))
     else:
         carrier = _OwnedAttachment(value)
-    return cast(_OwnedAttachment, _retain_resolved_telegram_reply_uploader(source, carrier))
+    carrier = cast(_OwnedAttachment, _retain_resolved_telegram_reply_uploader(source, carrier))
+    return cast(_OwnedAttachment, _retain_explicit_filename_direct_read(source, carrier))
 
 
 class _WorkspaceInboxAttachment(dict[str, Any]):
@@ -682,6 +770,10 @@ def _projected_attachment_from_source(
     """Build a projected carrier and transfer a derived view from a stamped source."""
 
     projected = _ProjectedAttachment(dict(fields))
+    projected = cast(
+        _ProjectedAttachment,
+        _retain_explicit_filename_direct_read(source, projected),
+    )
     source_view = _file_evidence_view_of(source)
     if source_view is not None:
         _stamp_file_evidence(projected, _derive_projected_evidence_view(source_view, projected))
@@ -13289,6 +13381,7 @@ def _bounded_attachment_projection(
             else clean
         )
         # Re-wrap keeps private type identity; transfer stamp without rebuild.
+        carrier = _retain_explicit_filename_direct_read(source, carrier)
         sanitised_sources.append(_retain_file_evidence_stamp(source, carrier))
     sources = sanitised_sources
 
@@ -18501,6 +18594,7 @@ class AgentRuntime:
         *,
         tenant_id: str,
         person_id: str,
+        direct_read_authority: _ExplicitFilenameDirectReadAuthority | None = None,
     ) -> dict[str, Any] | None:
         """Bounded projection of a file uploaded by this exact person.
 
@@ -18508,22 +18602,44 @@ class AgentRuntime:
         second, mandatory boundary in a shared archive: knowing a colleague's
         opaque Raw Object id must never make their pending file conversation
         evidence for somebody else.  Missing/oversized metadata fails closed.
+
+        An Inbox-ignored row is reachable only with a frozen process-private
+        authority binding this Raw, tenant, uploader and exact canonical
+        filename. Ordinary JSON/raw-id paths cannot construct that carrier.
+        Every later reauthorization repeats the exact-name uniqueness query.
         """
 
         if not _RAW_OBJECT_ID_RE.fullmatch(str(raw_id or "")):
             return None
-        reader = getattr(self.storage, "get_searchable_file_sources", None)
-        rows = (
-            reader(
+        if direct_read_authority is not None:
+            if (
+                not isinstance(direct_read_authority, _ExplicitFilenameDirectReadAuthority)
+                or direct_read_authority.raw_object_id != raw_id
+                or direct_read_authority.tenant_id != tenant_id
+                or direct_read_authority.uploaded_by != person_id
+            ):
+                return None
+            rows = resolve_owned_file_exact_filename_direct_read(
+                self.storage,
                 tenant_id,
-                [raw_id],
-                uploaded_by=person_id,
-                limit=1,
+                person_id,
+                direct_read_authority.filename,
+                expected_raw_id=raw_id,
                 include_content=True,
             )
-            if callable(reader)
-            else []
-        )
+        else:
+            reader = getattr(self.storage, "get_searchable_file_sources", None)
+            rows = (
+                reader(
+                    tenant_id,
+                    [raw_id],
+                    uploaded_by=person_id,
+                    limit=1,
+                    include_content=True,
+                )
+                if callable(reader)
+                else []
+            )
         if (
             not isinstance(rows, list)
             or len(rows) != 1
@@ -18538,6 +18654,11 @@ class AgentRuntime:
         raw = rows[0]
         metadata = bounded_raw_file_metadata(raw.get("_raw_metadata"))
         if str(metadata.get("uploaded_by") or "") != person_id:
+            return None
+        if direct_read_authority is not None and (
+            _normalized_attachment_selector(str(metadata.get("filename") or ""))
+            != direct_read_authority.normalized_filename
+        ):
             return None
 
         raw_text = str(raw.get("_raw_content") or "")
@@ -18649,8 +18770,12 @@ class AgentRuntime:
             result["empty_text"] = True
         if office_index is not None:
             result[OFFICE_STRUCTURE_KEY] = office_index
-            return trusted_office_attachment(result)
-        return _OwnedAttachment(result)
+            owned = trusted_office_attachment(result)
+        else:
+            owned = _OwnedAttachment(result)
+        if direct_read_authority is not None:
+            _mark_explicit_filename_direct_read(owned, direct_read_authority)
+        return owned
 
     def _named_person_aggregation_window(
         self,
@@ -18888,11 +19013,13 @@ class AgentRuntime:
                 continue
             raw_id = str(item.get("raw_object_id") or "") if isinstance(item, Mapping) else ""
             attachment_uploader = _resolved_telegram_reply_uploader(item) or person_id
+            direct_read_authority = _explicit_filename_direct_read_authority_of(item)
             canonical = (
                 self._owned_file_attachment(
                     raw_id,
                     tenant_id=tenant_id,
                     person_id=attachment_uploader,
+                    direct_read_authority=direct_read_authority,
                 )
                 if _RAW_OBJECT_ID_RE.fullmatch(raw_id)
                 else item
@@ -18903,6 +19030,7 @@ class AgentRuntime:
                 hydrated.append(item)
                 continue
             canonical = _retain_resolved_telegram_reply_uploader(item, canonical)
+            canonical = _retain_explicit_filename_direct_read(item, canonical)
             stored = canonical.get(_OWNED_SAFE_DOCUMENT_METADATA)
             safe = _safe_document_metadata_projection(stored) if isinstance(stored, Mapping) else {}
             safe_format = str(safe.get("format") or "")
@@ -18954,6 +19082,7 @@ class AgentRuntime:
                 raw_id,
                 tenant_id=tenant_id,
                 person_id=attachment_uploader,
+                direct_read_authority=direct_read_authority,
             )
             header = inspected.get("_document_metadata") if isinstance(inspected, Mapping) else None
             projected_header = (
@@ -18963,6 +19092,7 @@ class AgentRuntime:
                 hydrated.append(item if canonical is None else canonical)
                 continue
             canonical = _retain_resolved_telegram_reply_uploader(item, canonical)
+            canonical = _retain_explicit_filename_direct_read(item, canonical)
             canonical_stored = canonical.get(_OWNED_SAFE_DOCUMENT_METADATA)
             canonical_safe = _safe_document_metadata_projection(
                 canonical_stored if isinstance(canonical_stored, Mapping) else canonical
@@ -19131,6 +19261,7 @@ class AgentRuntime:
                 raw_id,
                 tenant_id=context.user_id,
                 person_id=_resolved_telegram_reply_uploader(item) or context.person_id,
+                direct_read_authority=_explicit_filename_direct_read_authority_of(item),
             )
             if canonical is not None:
                 authorised_indexes.add(file_index)
@@ -19199,15 +19330,18 @@ class AgentRuntime:
                 hydrated.append(item)
                 continue
             attachment_uploader = _resolved_telegram_reply_uploader(item) or person_id
+            direct_read_authority = _explicit_filename_direct_read_authority_of(item)
             canonical = self._owned_file_attachment(
                 raw_id,
                 tenant_id=tenant_id,
                 person_id=attachment_uploader,
+                direct_read_authority=direct_read_authority,
             )
             if canonical is None:
                 hydrated.append(unavailable(item))
                 continue
             canonical = _retain_resolved_telegram_reply_uploader(item, canonical)
+            canonical = _retain_explicit_filename_direct_read(item, canonical)
             registration_state = str(canonical.get("_registered_file_record") or "invalid")
             if registration_state == "invalid":
                 hydrated.append(unavailable(canonical))
@@ -19252,11 +19386,13 @@ class AgentRuntime:
                 raw_id,
                 tenant_id=tenant_id,
                 person_id=attachment_uploader,
+                direct_read_authority=direct_read_authority,
             )
             if canonical is None:
                 hydrated.append(unavailable(item))
                 continue
             canonical = _retain_resolved_telegram_reply_uploader(item, canonical)
+            canonical = _retain_explicit_filename_direct_read(item, canonical)
 
             verified = dict(canonical)
             verified["_registered_file_bytes_verified"] = True
@@ -19288,6 +19424,7 @@ class AgentRuntime:
                 raw_id,
                 tenant_id=tenant_id,
                 person_id=attachment_uploader,
+                direct_read_authority=direct_read_authority,
             )
             source_text = str(inspected.get("_runtime_source_text") or inspected.get("text_preview") or "")
             extraction_success = inspected.get("extraction_success") is True
@@ -19296,6 +19433,7 @@ class AgentRuntime:
                 hydrated.append(unavailable(item if canonical is None else canonical))
                 continue
             canonical = _retain_resolved_telegram_reply_uploader(item, canonical)
+            canonical = _retain_explicit_filename_direct_read(item, canonical)
 
             recovered = dict(canonical)
             recovered.update(
@@ -19340,12 +19478,11 @@ class AgentRuntime:
             )
             if office_index is not None:
                 recovered[OFFICE_STRUCTURE_KEY] = office_index
-                hydrated.append(
-                    _retain_resolved_telegram_reply_uploader(
-                        canonical,
-                        trusted_office_attachment(recovered),
-                    )
+                recovered_carrier = _retain_resolved_telegram_reply_uploader(
+                    canonical,
+                    trusted_office_attachment(recovered),
                 )
+                hydrated.append(_retain_explicit_filename_direct_read(canonical, recovered_carrier))
             else:
                 recovered.pop(OFFICE_STRUCTURE_KEY, None)
                 hydrated.append(_private_owned_attachment_copy(recovered, source=canonical))
@@ -20038,6 +20175,25 @@ class AgentRuntime:
                 hydrated.append(attachment)
         return hydrated
 
+    def _hydrate_explicit_filename_direct_read(
+        self,
+        authority: _ExplicitFilenameDirectReadAuthority,
+        *,
+        tenant_id: str,
+        person_id: str,
+    ) -> list[dict[str, Any]]:
+        """Hydrate exactly one bound direct-read authority, never a raw-id set."""
+
+        if authority.tenant_id != tenant_id or authority.uploaded_by != person_id:
+            return []
+        attachment = self._owned_file_attachment(
+            authority.raw_object_id,
+            tenant_id=tenant_id,
+            person_id=person_id,
+            direct_read_authority=authority,
+        )
+        return [attachment] if attachment is not None else []
+
     def _restore_latest_uploaded_attachments(
         self,
         history: list[dict[str, Any]],
@@ -20154,14 +20310,32 @@ class AgentRuntime:
         )
         exact_name_ids: list[str] = []
         exact_name_rows: list[Mapping[str, Any]] = []
-        exact_name_reader = getattr(self.storage, "find_owned_files_by_filename", None)
-        if callable(exact_name_reader):
-            for filename in parsed_filename_mentions:
-                for row in exact_name_reader(tenant_id, person_id, filename):
-                    raw_id = str(row.get("id") or "") if isinstance(row, Mapping) else ""
-                    if _RAW_OBJECT_ID_RE.fullmatch(raw_id) and raw_id not in exact_name_ids:
-                        exact_name_ids.append(raw_id)
-                        exact_name_rows.append(row)
+        exact_direct_read_authority: _ExplicitFilenameDirectReadAuthority | None = None
+        # Explicit exact-filename direct-read may surface a unique historical
+        # file even when its Inbox verdict is ignored. Ambient catalog / search
+        # / citations keep using the non-ignored finders.
+        for filename in parsed_filename_mentions:
+            exact_rows = resolve_owned_file_exact_filename_direct_read(
+                self.storage,
+                tenant_id,
+                person_id,
+                filename,
+            )
+            for row in exact_rows:
+                raw_id = str(row.get("id") or "") if isinstance(row, Mapping) else ""
+                if _RAW_OBJECT_ID_RE.fullmatch(raw_id) and raw_id not in exact_name_ids:
+                    exact_name_ids.append(raw_id)
+                    exact_name_rows.append(row)
+            # The bypass is deliberately singular. Multiple named files or two
+            # same-name candidates keep using ordinary verdict-aware hydration.
+            if len(parsed_filename_mentions) == 1 and len(exact_rows) == 1:
+                row = exact_rows[0]
+                exact_direct_read_authority = _make_explicit_filename_direct_read_authority(
+                    raw_object_id=str(row.get("id") or ""),
+                    tenant_id=tenant_id,
+                    uploaded_by=person_id,
+                    filename=str(row.get("filename") or ""),
+                )
         catalog, archive_catalog_complete = self._conversation_document_catalog(
             history,
             tenant_id=tenant_id,
@@ -20197,9 +20371,22 @@ class AgentRuntime:
             has_attachment_lineage = any(
                 self._message_attachment_ids(item) or self._message_had_attachments(item) for item in history
             )
+            strict_exact_miss = bool(
+                parsed_filename_mentions
+                and (
+                    _EXPLICIT_ATTACHMENT_REFERENCE.search(message)
+                    or _ATTACHMENT_COMPARISON_ACTION.search(message)
+                    or _ATTACHMENT_SELECTIVE_REFERENCE.search(message)
+                    or _attachment_filename_has_private_lead(message)
+                )
+            )
             return (
                 [],
-                1 if has_attachment_lineage and reference_kind != "indirect" and not requests_all else 0,
+                max(1, len(parsed_filename_mentions))
+                if strict_exact_miss
+                else 1
+                if has_attachment_lineage and reference_kind != "indirect" and not requests_all
+                else 0,
             )
 
         latest_ids: list[str] = []
@@ -20318,10 +20505,19 @@ class AgentRuntime:
             )
         if selected_indices:
             selected_ids = [catalog_ids[index] for index in sorted(selected_indices)]
-            hydrated = self._hydrate_conversation_document_ids(
-                selected_ids,
-                tenant_id=tenant_id,
-                person_id=person_id,
+            hydrated = (
+                self._hydrate_explicit_filename_direct_read(
+                    exact_direct_read_authority,
+                    tenant_id=tenant_id,
+                    person_id=person_id,
+                )
+                if exact_direct_read_authority is not None
+                and selected_ids == [exact_direct_read_authority.raw_object_id]
+                else self._hydrate_conversation_document_ids(
+                    selected_ids,
+                    tenant_id=tenant_id,
+                    person_id=person_id,
+                )
             )
             return hydrated, len(selected_ids)
         if requested_names:
@@ -20329,7 +20525,7 @@ class AgentRuntime:
             # itself proof that the person meant a private upload.  Exact known
             # names resolve above; unknown names fail closed only when the turn
             # also says file/upload/compare.
-            return [], 0
+            return [], max(1, len(requested_names)) if strict_filename_context else 0
 
         if _ATTACHMENT_BOTH_REFERENCE.search(message):
             if already_supplied_count:

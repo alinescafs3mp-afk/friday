@@ -73,6 +73,73 @@ class PublicFileCitationSource:
     uploaded_by: str
 
 
+def resolve_owned_file_exact_filename_direct_read(
+    storage: StorageShared,
+    user_id: str,
+    uploaded_by: str,
+    filename: str,
+    *,
+    expected_raw_id: str | None = None,
+    include_content: bool = False,
+) -> list[dict[str, Any]]:
+    """Resolve one exact uploader-owned filename, including Inbox ``ignored``.
+
+    This is deliberately a module-level, runtime-only boundary rather than a
+    general ``FridayStorage`` method.  Ambient catalog, fuzzy/content search,
+    replay and citations keep using verdict-aware storage methods which exclude
+    ignored material.  A fixed ``LIMIT 2`` proves uniqueness after every
+    tenant/uploader/lifecycle/privacy predicate.  When ``expected_raw_id`` is
+    supplied, the same single SELECT both re-proves uniqueness and binds that
+    exact Raw before projecting its body.
+    """
+
+    tenant = str(user_id or "").strip()
+    person = str(uploaded_by or "").strip()
+    clean_filename = str(filename or "").strip()
+    expected = str(expected_raw_id or "").strip()
+    if (
+        not tenant
+        or not person
+        or not clean_filename
+        or len(clean_filename) > 260
+        or (expected_raw_id is not None and not expected)
+    ):
+        return []
+    content_projection = (
+        ", r.raw_content AS _raw_content, r.metadata_json AS _raw_metadata" if include_content else ""
+    )
+    rows = storage.execute(
+        f"""SELECT r.id, r.source, r.source_ref, r.content_type, r.received_at,
+                   r.content_hash,
+                   substr(json_extract(r.metadata_json,'$.filename'),1,260) AS filename
+                   {content_projection}
+              FROM raw_objects r
+             WHERE r.user_id=? AND r.deleted_at IS NULL
+               AND r.content_type='file'
+               AND {_exact_uploader_raw_dependency("r")}
+               AND json_type(r.metadata_json,'$.filename')='text'
+               AND length(json_extract(r.metadata_json,'$.filename')) BETWEEN 1 AND 260
+               AND replace(
+                       jericho_casefold(substr(json_extract(r.metadata_json,'$.filename'),1,261)),
+                       'ё','е')=
+                   replace(jericho_casefold(?),'ё','е')
+               AND {_not_audio_document("r")}
+               AND {_not_private_raw_dependency("r")}
+               AND EXISTS (
+                   SELECT 1 FROM users exact_direct_read_uploader
+                    WHERE exact_direct_read_uploader.id=?
+                      AND exact_direct_read_uploader.status='active'
+               )
+             ORDER BY r.received_at ASC, r.id ASC
+             LIMIT 2""",  # nosec B608 - only fixed privacy predicates
+        (tenant, person, clean_filename, person),
+    ).fetchall()
+    result = [dict(row) for row in rows]
+    if expected_raw_id is not None and (len(result) != 1 or str(result[0].get("id") or "") != expected):
+        return []
+    return result
+
+
 def _telegram_file_source_ref_kind(source_ref: str) -> str:
     """Validate one closed Telegram file identity without granting authority."""
 
