@@ -8,11 +8,14 @@ authority rules.
 
 ## Archive authority
 
-- Shared owner archive only: `--tenant-id` **must equal** `--owner-id`, and the
-  database must contain **exactly one** active `preset_key=owner` row whose id
-  equals that value (zero / two+ active owners refuse; the tool never picks
-  “first”). Owner A cannot stamp Raw rows of tenant B. The same gate runs on
-  preflight plan and again on the in-transaction replan.
+- Shared owner archive only: `--tenant-id` **must equal** `--owner-id`, and both
+  must be the exact `LEGACY_OWNER_USER_ID` string. That users row must exist
+  once with `status='active'` and `preset_key='owner'`. Other active
+  owner-preset accounts are allowed and **ignored** by this gate (the tool never
+  scans the owner-preset population or picks “first”). A non-canonical tenant,
+  a missing/inactive/non-owner canonical row, or tenant≠owner fails closed.
+  Owner A cannot stamp Raw rows of tenant B. The same gate runs on preflight
+  plan and again on the in-transaction replan.
 - Primary mapping class `identity_current`:
   `user_identities(source='telegram', external_id=chat_id)` → exactly one
   active user, plus exactly one **owned unarchived** Telegram
@@ -30,9 +33,12 @@ It does **not**:
 - assign ownership to the archive operator/owner in bulk;
 - invent identity from filename, path, content, latest message, or model;
 - create `file_source_aliases`;
-- mutate CLI imports, private/ignored/deleted/audio rows, explicit
+- mutate CLI imports, private/ignored/deleted rows, explicit
   `uploaded_by: null`, existing uploaders, ambiguous/unmapped chats, or
   invalid/legacy/disk-failed registrations.
+- grant document-read authority: exact audio/voice attribution is
+  **metadata-only** in this offline tool. Runtime document readers still
+  exclude audio/voice carriers.
 
 ## Preview (read-only)
 
@@ -43,8 +49,8 @@ writes:
 .venv/bin/python tools/backfill_legacy_telegram_uploader_provenance.py \
   --database /absolute/path/to/jericho.sqlite3 \
   --files-root /absolute/path/to/data/files \
-  --tenant-id TENANT_ID \
-  --owner-id OWNER_ID \
+  --tenant-id CANONICAL_OWNER_ID \
+  --owner-id CANONICAL_OWNER_ID \
   --report /private/path/legacy-tg-uploader-preview.json
 ```
 
@@ -61,20 +67,22 @@ Apply requires **all** of:
 3. `--expect-plan-sha256` equal to the current plan SHA;
 4. verified full DB backup under `--backup-dir`;
 5. `--i-confirm-writers-stopped` (stopped-writers acknowledgement);
-6. active operator-owner (`preset_key=owner`, `status=active`) separate from
-   the mapped uploaders written into metadata.
+6. canonical archive owner (`LEGACY_OWNER_USER_ID`, `preset_key=owner`,
+   `status=active`) separate from the mapped uploaders written into metadata.
+   Claim schema is `…claim.v2`; a v1 manifest is refused.
 
-Claim manifest shape:
+Claim manifest shape (counts come from the current plan; do not reuse a
+remembered integer):
 
 ```json
 {
   "approved": true,
-  "candidate_count": 19,
+  "candidate_count": "<integer from the current plan>",
   "claim_scope": "exact_legacy_telegram_uploader_mappings",
-  "owner_id": "OWNER_ID",
+  "owner_id": "CANONICAL_OWNER_ID",
   "plan_sha256": "COPY_THE_64_HEX_PREVIEW_VALUE",
-  "schema": "friday.legacy-telegram-uploader-provenance-claim.v1",
-  "tenant_id": "TENANT_ID"
+  "schema": "friday.legacy-telegram-uploader-provenance-claim.v2",
+  "tenant_id": "CANONICAL_OWNER_ID"
 }
 ```
 
@@ -82,11 +90,11 @@ Claim manifest shape:
 .venv/bin/python tools/backfill_legacy_telegram_uploader_provenance.py \
   --database /absolute/path/to/jericho.sqlite3 \
   --files-root /absolute/path/to/data/files \
-  --tenant-id TENANT_ID \
-  --owner-id OWNER_ID \
+  --tenant-id CANONICAL_OWNER_ID \
+  --owner-id CANONICAL_OWNER_ID \
   --apply \
   --claim-manifest /private/path/claim.json \
-  --expect-count 19 \
+  --expect-count COPY_THE_CURRENT_PLAN_CANDIDATE_COUNT \
   --expect-plan-sha256 COPY_THE_64_HEX_PREVIEW_VALUE \
   --backup-dir /private/path/backups \
   --i-confirm-writers-stopped \
@@ -114,18 +122,19 @@ A Raw is planned only when **all** hold:
    positive decimal ASCII identity;
 4. closed exact mapping (`identity_current` or `legacy_external_current` only);
 5. owned unarchived session JOIN as above;
-6. tenant is exact shared owner archive (`tenant_id == owner_id`),
-   `source='upload'`, `content_type='file'`, live, public/non-private, non-audio,
-   not ignored in inbox;
+6. tenant is the exact shared canonical owner archive
+   (`tenant_id == owner_id == LEGACY_OWNER_USER_ID`), `source='upload'`,
+   `content_type='file'`, live, public/non-private, not ignored in inbox;
 7. registration is modern-valid and registered bytes under `--files-root`
    verify size and SHA via the shared verifier.
 
 Ambiguous, unmapped, mismatched, existing uploader, explicit null, CLI import,
-private, ignored, deleted, **audio/voice carriers**, invalid/legacy registration,
-and disk hash/size mismatch remain zero-write. Mapping inventory still counts
-exact/ambiguous/unmapped Telegram rows without `uploaded_by`; only non-audio
-exact rows become plan candidates.
+private, ignored, deleted, invalid/legacy registration, and disk hash/size
+mismatch remain zero-write. Exact audio/voice carriers **may** be planned by
+this offline tool (`planned_audio` on the private plan/report); that write is
+metadata `uploaded_by` plus audit only. Document readers keep the audio veto.
 
-Private plan basis (v2) includes mapping evidence class and full conversation /
-session identity material so an authority change changes `plan_sha256`. Basis
-values are never printed in public reports.
+Private plan basis (v3) includes mapping evidence class, conversation/session
+identity material, canonical-owner gates, and per-candidate `audio_carrier` so
+an authority or audio-class change changes `plan_sha256`. Basis values are
+never printed in public reports.

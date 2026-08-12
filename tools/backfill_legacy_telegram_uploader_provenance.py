@@ -36,6 +36,7 @@ from friday.file_delivery import (  # noqa: E402
     classify_file_registration,
     verify_registered_file_bytes,
 )
+from friday.permissions import LEGACY_OWNER_USER_ID  # noqa: E402
 from friday.raw_metadata import RAW_FILE_METADATA_MAX_BYTES, bounded_raw_file_metadata  # noqa: E402
 from friday.storage import SCHEMA_VERSION  # noqa: E402
 from friday.storage._privacy import (  # noqa: E402
@@ -43,8 +44,8 @@ from friday.storage._privacy import (  # noqa: E402
     _not_private_raw_dependency,
 )
 
-PLAN_SCHEMA = "friday.legacy-telegram-uploader-provenance-plan.v2"
-CLAIM_SCHEMA = "friday.legacy-telegram-uploader-provenance-claim.v1"
+PLAN_SCHEMA = "friday.legacy-telegram-uploader-provenance-plan.v3"
+CLAIM_SCHEMA = "friday.legacy-telegram-uploader-provenance-claim.v2"
 REPORT_SCHEMA = "friday.legacy-telegram-uploader-provenance-report.v1"
 CLAIM_SCOPE = "exact_legacy_telegram_uploader_mappings"
 AUDIT_ACTION = "cli.legacy_telegram_uploader.backfill"
@@ -145,31 +146,38 @@ def _required_tables(conn: sqlite3.Connection) -> None:
         raise ContractError("database must already be at the current Friday schema")
 
 
-def _assert_shared_owner_archive(conn: sqlite3.Connection, *, tenant_id: str, owner_id: str) -> None:
-    """Shared owner archive only: tenant must equal the unique active owner id.
+def _assert_canonical_owner_archive(conn: sqlite3.Connection, *, tenant_id: str, owner_id: str) -> None:
+    """Shared owner archive only: tenant/owner must be the canonical archive owner.
 
-    Proves global uniqueness in one closed check:
-    - tenant_id == owner_id;
-    - exactly one ``users`` row with ``preset_key='owner' AND status='active'``;
-    - that row's id equals owner_id.
+    The archive owner is the exact ``LEGACY_OWNER_USER_ID`` string, not “whichever
+    active ``preset_key=owner`` row happens to be unique in this database”:
 
-    Zero, two, or more active owners refuse with ContractError (never pick first).
+    - ``tenant_id == owner_id == LEGACY_OWNER_USER_ID``;
+    - that exact users row exists once, ``status='active'``, ``preset_key='owner'``.
+
+    Other active owner-preset accounts are allowed and ignored by this gate.
     """
 
     if tenant_id != owner_id:
         raise ContractError("tenant id must equal owner id for the shared owner archive")
-    # Query the active-owner population, not the passed id — LIMIT 2 detects
-    # multiplicity without relying on PK-of-one-row as uniqueness proof.
+    if tenant_id != LEGACY_OWNER_USER_ID or owner_id != LEGACY_OWNER_USER_ID:
+        raise ContractError("tenant/owner must be the canonical archive owner")
     rows = conn.execute(
-        """SELECT id FROM users
-            WHERE preset_key = 'owner' AND status = 'active'
-            LIMIT 2"""
+        "SELECT id, preset_key, status FROM users WHERE id=? LIMIT 2",
+        (LEGACY_OWNER_USER_ID,),
     ).fetchall()
     if len(rows) != 1:
-        raise ContractError("database must have exactly one active owner account")
-    active_id = str(rows[0]["id"] if hasattr(rows[0], "keys") else rows[0][0])
-    if active_id != owner_id:
-        raise ContractError("owner id is not the unique active owner account")
+        raise ContractError("canonical archive owner row is missing or not unique")
+    row = rows[0]
+    found_id = str(row["id"] if hasattr(row, "keys") else row[0])
+    preset = str(row["preset_key"] if hasattr(row, "keys") else row[1] or "")
+    status = str(row["status"] if hasattr(row, "keys") else row[2] or "")
+    if found_id != LEGACY_OWNER_USER_ID:
+        raise ContractError("canonical archive owner row is missing or not unique")
+    if preset != "owner":
+        raise ContractError("canonical archive owner must have preset_key=owner")
+    if status != "active":
+        raise ContractError("canonical archive owner must be active")
 
 
 def _resolve_files_root(files_root: Path | None) -> Path:
@@ -403,6 +411,7 @@ class ProvenanceCandidate:
     session_user_id: str
     session_channel_id: str
     session_updated_at: str
+    audio_carrier: bool
 
     def public_projection(self) -> dict[str, str]:
         return {
@@ -412,8 +421,9 @@ class ProvenanceCandidate:
             "registration_class": self.registration_class,
         }
 
-    def private_basis_entry(self) -> dict[str, str]:
+    def private_basis_entry(self) -> dict[str, Any]:
         return {
+            "audio_carrier": self.audio_carrier,
             "chat_id": self.chat_id,
             "content_hash": self.content_hash,
             "conversation_id": self.conversation_id,
@@ -463,7 +473,11 @@ class Plan:
 
 
 def _candidate_scan_rows(conn: sqlite3.Connection, *, tenant_id: str) -> list[sqlite3.Row]:
-    """Live upload files: public + non-ignored. Audio counted then refused."""
+    """Live upload files: public + non-ignored.
+
+    Audio/voice carriers are inventoried (``nonaudio`` flag) so the offline tool
+    can attribute them; they stay out of runtime document readers.
+    """
 
     return list(
         conn.execute(
@@ -492,7 +506,7 @@ def build_plan(
     owner = _safe_identity(owner_id, label="owner id")
     root = _resolve_files_root(files_root)
     _required_tables(conn)
-    _assert_shared_owner_archive(conn, tenant_id=tenant, owner_id=owner)
+    _assert_canonical_owner_archive(conn, tenant_id=tenant, owner_id=owner)
 
     counts: dict[str, int] = {
         "rows_scanned": 0,
@@ -509,6 +523,7 @@ def build_plan(
         "explicit_null_uploader": 0,
         "unreadable_metadata": 0,
         "refused_audio": 0,
+        "planned_audio": 0,
         "refused_registration_legacy": 0,
         "refused_registration_invalid": 0,
         "refused_registration_disk": 0,
@@ -556,7 +571,7 @@ def build_plan(
             counts["unmapped"] += 1
             continue
 
-        # Exact Telegram mapping inventory (before nonaudio / registration gates).
+        # Exact Telegram mapping inventory (before registration gates).
         counts["telegram_no_uploader"] += 1
         counts["exact"] += 1
         if hit.evidence_class == EVIDENCE_IDENTITY_CURRENT:
@@ -567,11 +582,7 @@ def build_plan(
             counts["unmapped"] += 1
             continue
 
-        # Audio/voice carriers stay zero-write (document inventory rule).
-        if int(row["nonaudio"] or 0) != 1:
-            counts["refused_audio"] += 1
-            continue
-
+        audio_carrier = int(row["nonaudio"] or 0) != 1
         content_hash = str(row["content_hash"] or "")
         refusal_key, reg_class = _registration_gate(
             metadata,
@@ -585,6 +596,8 @@ def build_plan(
         raw_id = str(row["id"] or "")
         if not raw_id:
             raise ContractError("candidate has no Raw id")
+        if audio_carrier:
+            counts["planned_audio"] += 1
         candidates.append(
             ProvenanceCandidate(
                 raw_id=raw_id,
@@ -602,6 +615,7 @@ def build_plan(
                 session_user_id=hit.session_user_id,
                 session_channel_id=hit.session_channel_id,
                 session_updated_at=hit.session_updated_at,
+                audio_carrier=audio_carrier,
             )
         )
 
@@ -612,15 +626,18 @@ def build_plan(
         "claim_scope": CLAIM_SCOPE,
         "tenant_id": tenant,
         "owner_id": owner,
+        "planned_audio": counts["planned_audio"],
         "gates": {
+            "canonical_owner": True,
             "disk_verified": True,
             "exact_telegram_mapping": True,
             "mapping_evidence_closed": True,
+            "offline_audio_attribution": True,
             "owned_unarchived_session": True,
+            "peer_owner_presets_ignored": True,
             "shared_owner_archive": True,
             "tenant_equals_owner": True,
             "modern_valid_registration": True,
-            "not_audio_document": True,
             "not_ignored_inbox": True,
             "not_private_raw": True,
             "source": "upload",
@@ -704,6 +721,13 @@ def _validate_claim(
         raise ContractError("claim manifest is not explicitly approved")
     if claim.get("schema") != CLAIM_SCHEMA or claim.get("claim_scope") != CLAIM_SCOPE:
         raise ContractError("claim manifest schema or scope is invalid")
+    if (
+        claim.get("tenant_id") != LEGACY_OWNER_USER_ID
+        or claim.get("owner_id") != LEGACY_OWNER_USER_ID
+        or plan.tenant_id != LEGACY_OWNER_USER_ID
+        or plan.owner_id != LEGACY_OWNER_USER_ID
+    ):
+        raise ContractError("claim manifest is not the canonical archive owner")
     if claim.get("tenant_id") != plan.tenant_id or claim.get("owner_id") != plan.owner_id:
         raise ContractError("claim manifest identity does not match")
     if type(claim.get("candidate_count")) is not int:
@@ -750,7 +774,6 @@ def _postcheck_transaction(
                   FROM raw_objects r
                  WHERE r.id=? AND r.user_id=? AND r.deleted_at IS NULL
                    AND r.source='upload' AND r.content_type='file'
-                   AND {_not_audio_document("r")}
                    AND {_not_private_raw_dependency("r")}
                    AND {_not_ignored_inbox("r")}""",  # nosec B608
             (candidate.raw_id, plan.tenant_id),
@@ -898,7 +921,11 @@ def apply_plan(
                     or hit_now.chat_id != candidate.chat_id
                 ):
                     raise ContractError("candidate mapping drifted under CAS")
-                if plan.tenant_id != plan.owner_id:
+                if (
+                    plan.tenant_id != plan.owner_id
+                    or plan.tenant_id != LEGACY_OWNER_USER_ID
+                    or plan.owner_id != LEGACY_OWNER_USER_ID
+                ):
                     raise ContractError("tenant/owner archive contract drifted under CAS")
                 refusal, _reg = _registration_gate(
                     meta_now,
@@ -915,7 +942,6 @@ def apply_plan(
                           AND deleted_at IS NULL AND content_type='file'
                           AND source='upload'
                           AND content_hash=?
-                          AND {_not_audio_document("raw_objects")}
                           AND {_not_private_raw_dependency("raw_objects")}
                           AND {_not_ignored_inbox("raw_objects")}""",  # nosec B608
                     (
@@ -1011,7 +1037,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--owner-id",
         required=True,
-        help="Active operator-owner who approves the claim (preset owner)",
+        help="Canonical archive owner (LEGACY_OWNER_USER_ID); peer owner presets are ignored",
     )
     parser.add_argument("--report", type=Path)
     parser.add_argument("--apply", action="store_true")

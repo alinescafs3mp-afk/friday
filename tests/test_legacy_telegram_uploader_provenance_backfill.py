@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from friday.audit_privacy import sanitize_audit_action
+from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
 from tools.backfill_legacy_telegram_uploader_provenance import (
     AUDIT_ACTION,
@@ -17,6 +18,7 @@ from tools.backfill_legacy_telegram_uploader_provenance import (
     CLAIM_SCOPE,
     EVIDENCE_IDENTITY_CURRENT,
     EVIDENCE_LEGACY_EXTERNAL_CURRENT,
+    PLAN_SCHEMA,
     ContractError,
     _connect,
     _tag,
@@ -55,8 +57,15 @@ def _insert_tg_file(
     legacy: bool = False,
     corrupt_hash: bool = False,
     source: str = "upload",
+    filename: str = "doc.bin",
+    mime_type: str = "application/octet-stream",
+    media_kind: str | None = None,
 ) -> str:
     digest, _relative, metadata = _register_bytes(settings, tenant, body)
+    metadata["filename"] = filename
+    metadata["mime_type"] = mime_type
+    if media_kind is not None:
+        metadata["media_kind"] = media_kind
     if chat_id is not None:
         metadata["chat_id"] = chat_id
     if channel:
@@ -161,7 +170,7 @@ def _claim(tmp_path: Path, plan) -> Path:
 
 
 def test_exact_owner_and_jbl_mapping_accepted(settings, storage) -> None:
-    tenant = "alice"
+    tenant = LEGACY_OWNER_USER_ID
     storage.ensure_user(tenant, preset_key="owner")
     _seed_users_and_sessions(storage)
     files_root = Path(settings.files_dir)
@@ -196,7 +205,7 @@ def test_exact_owner_and_jbl_mapping_accepted(settings, storage) -> None:
 def test_foreign_tenant_with_matching_identity_session_refused(settings, storage) -> None:
     """Owner A cannot plan Raw rows belonging to foreign tenant B."""
 
-    owner = "alice"
+    owner = LEGACY_OWNER_USER_ID
     foreign = "bob-tenant"
     storage.ensure_user(owner, preset_key="owner")
     storage.ensure_user(foreign, preset_key="user")
@@ -233,7 +242,7 @@ def test_foreign_tenant_with_matching_identity_session_refused(settings, storage
 
 
 def test_session_conversation_owner_mismatch_and_archived_refused(settings, storage) -> None:
-    tenant = "alice"
+    tenant = LEGACY_OWNER_USER_ID
     storage.ensure_user(tenant, preset_key="owner")
     _seed_users_and_sessions(storage)
     files_root = Path(settings.files_dir)
@@ -302,7 +311,7 @@ def test_session_conversation_owner_mismatch_and_archived_refused(settings, stor
 
 
 def test_duplicate_identity_and_session_refused(settings, storage) -> None:
-    tenant = "alice"
+    tenant = LEGACY_OWNER_USER_ID
     storage.ensure_user(tenant, preset_key="owner")
     _seed_users_and_sessions(storage)
     files_root = Path(settings.files_dir)
@@ -364,7 +373,7 @@ def test_duplicate_identity_and_session_refused(settings, storage) -> None:
 
 
 def test_plan_sha_changes_when_session_conversation_evidence_changes(settings, storage) -> None:
-    tenant = "alice"
+    tenant = LEGACY_OWNER_USER_ID
     storage.ensure_user(tenant, preset_key="owner")
     _seed_users_and_sessions(storage)
     files_root = Path(settings.files_dir)
@@ -424,7 +433,7 @@ def test_plan_sha_changes_when_session_conversation_evidence_changes(settings, s
 
 
 def test_mismatched_ambiguous_unmapped_null_ignored_invalid_refused(settings, storage) -> None:
-    tenant = "alice"
+    tenant = LEGACY_OWNER_USER_ID
     storage.ensure_user(tenant, preset_key="owner")
     _seed_users_and_sessions(storage)
     files_root = Path(settings.files_dir)
@@ -518,7 +527,7 @@ def test_mismatched_ambiguous_unmapped_null_ignored_invalid_refused(settings, st
 def test_legacy_external_fallback_when_identity_absent(settings, storage) -> None:
     """Closed legacy class: active users.source/external_id + owned session, no identity."""
 
-    tenant = "alice"
+    tenant = LEGACY_OWNER_USER_ID
     storage.ensure_user(tenant, preset_key="owner")
     files_root = Path(settings.files_dir)
     now = "2026-01-01T00:00:00Z"
@@ -562,7 +571,7 @@ def test_legacy_external_fallback_when_identity_absent(settings, storage) -> Non
 
 
 def test_plan_mutation_changes_sha_and_public_report_is_private(settings, storage) -> None:
-    tenant = "alice"
+    tenant = LEGACY_OWNER_USER_ID
     storage.ensure_user(tenant, preset_key="owner")
     _seed_users_and_sessions(storage)
     files_root = Path(settings.files_dir)
@@ -622,7 +631,7 @@ def test_plan_mutation_changes_sha_and_public_report_is_private(settings, storag
 
 
 def test_successful_apply_writes_mapped_uploader_and_audit(settings, storage, tmp_path) -> None:
-    tenant = "alice"
+    tenant = LEGACY_OWNER_USER_ID
     storage.ensure_user(tenant, preset_key="owner")
     _seed_users_and_sessions(storage)
     files_root = Path(settings.files_dir)
@@ -721,7 +730,7 @@ def test_postcondition_failure_after_writes_rolls_back_metadata_and_audit(
 ) -> None:
     """One exact node: writes are visible inside the tx, then both roll back."""
 
-    tenant = "alice"
+    tenant = LEGACY_OWNER_USER_ID
     storage.ensure_user(tenant, preset_key="owner")
     _seed_users_and_sessions(storage)
     files_root = Path(settings.files_dir)
@@ -792,58 +801,6 @@ def test_postcondition_failure_after_writes_rolls_back_metadata_and_audit(
     assert original_postcheck is not None
 
 
-def test_exact_voice_audio_is_zero_write(settings, storage) -> None:
-    """Exact Telegram mapping on voice/audio carriers remains refused (nonaudio gate)."""
-
-    tenant = "alice"
-    storage.ensure_user(tenant, preset_key="owner")
-    _seed_users_and_sessions(storage)
-    files_root = Path(settings.files_dir)
-
-    body = b"VOICE-OGG-BYTES-FAKE"
-    digest = hashlib.sha256(body).hexdigest()
-    relative = f"{tenant[:12]}/{digest[:2]}/{digest}.ogg"
-    path = Path(settings.files_dir) / relative
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(body)
-    raw = RawObject(
-        id=new_id("raw"),
-        user_id=tenant,
-        source="upload",
-        source_ref=f"telegram-file:AgADTEST-VOICE-{digest[:8]}",
-        raw_content="voice note",
-        content_type="file",
-        content_hash=digest,
-        metadata_json={
-            "filename": "voice.ogg",
-            "mime_type": "audio/ogg",
-            "media_kind": "voice",
-            "channel": "telegram-bridge",
-            "chat_id": 101,
-            "sha256": digest,
-            "size_bytes": len(body),
-            "stored_path": relative,
-        },
-    )
-    storage.store_raw_object(raw)
-
-    conn = _connect(Path(settings.database_path), read_only=True)
-    try:
-        plan = build_plan(
-            conn,
-            tenant_id=tenant,
-            owner_id=tenant,
-            files_root=files_root,
-        )
-    finally:
-        conn.close()
-
-    assert plan.counts["exact"] >= 1
-    assert plan.counts["refused_audio"] >= 1
-    assert plan.candidate_count == 0
-    assert all(c.raw_id != raw.id for c in plan.candidates)
-
-
 def test_missing_files_root_fails_closed() -> None:
     with pytest.raises(ContractError, match="files root"):
         from tools.backfill_legacy_telegram_uploader_provenance import _resolve_files_root
@@ -851,50 +808,51 @@ def test_missing_files_root_fails_closed() -> None:
         _resolve_files_root(None)
 
 
-def test_second_active_owner_refuses_build_plan(settings, storage) -> None:
-    """Two active preset_key=owner rows refuse even when tenant==owner_id matches one."""
-
-    tenant = "alice"
-    storage.ensure_user(tenant, preset_key="owner")
-    _seed_users_and_sessions(storage)
-    files_root = Path(settings.files_dir)
-    _insert_tg_file(settings, storage, tenant=tenant, body=b"DUAL-OWNER-PLAN", chat_id=101)
-
-    now = "2026-01-01T00:00:00Z"
-    with storage.transaction() as db:
-        db.execute(
-            """INSERT INTO users(
-                   id,source,external_id,preset_key,status,created_at,updated_at,last_seen_at
-               ) VALUES(?,?,?,?,?,?,?,?)""",
-            ("alice-second-owner", "local", "", "owner", "active", now, now, now),
-        )
-
-    conn = _connect(Path(settings.database_path), read_only=True)
-    try:
-        with pytest.raises(ContractError, match="exactly one active owner"):
-            build_plan(
-                conn,
-                tenant_id=tenant,
-                owner_id=tenant,
-                files_root=files_root,
-            )
-    finally:
-        conn.close()
-
-
-def test_second_active_owner_between_preflight_and_replan_rolls_back(
+def test_canonical_operator_with_peer_owner_presets_applies_exact_audio_provenance_but_audio_stays_out_of_document_readers(
     settings, storage, tmp_path, monkeypatch
 ) -> None:
-    """Second active owner injected after preflight makes in-tx replan refuse; no writes."""
+    """Canonical owner + peer owners: exact audio is attributed offline, not readable."""
 
-    tenant = "alice"
+    tenant = LEGACY_OWNER_USER_ID
     storage.ensure_user(tenant, preset_key="owner")
+    storage.ensure_user("peer-owner-alpha", preset_key="owner")
+    storage.ensure_user("peer-owner-beta", preset_key="owner")
     _seed_users_and_sessions(storage)
     files_root = Path(settings.files_dir)
-    raw_id = _insert_tg_file(settings, storage, tenant=tenant, body=b"RACE-OWNER", chat_id=101)
+
+    assert PLAN_SCHEMA.endswith(".v3")
+    assert CLAIM_SCHEMA.endswith(".v2")
+
+    audio_id = _insert_tg_file(
+        settings,
+        storage,
+        tenant=tenant,
+        body=b"VOICE-OGG-BYTES-FAKE",
+        chat_id=101,
+        filename="voice.ogg",
+        mime_type="audio/ogg",
+        media_kind="voice",
+    )
+    doc_id = _insert_tg_file(
+        settings,
+        storage,
+        tenant=tenant,
+        body=b"EXACT-DOC-BYTES",
+        chat_id=202,
+        filename="note.bin",
+    )
+    amb_id = _insert_tg_file(settings, storage, tenant=tenant, body=b"AMB-BYTES", chat_id=303)
+    unmapped_id = _insert_tg_file(settings, storage, tenant=tenant, body=b"UNMAP-BYTES", chat_id=999001)
 
     conn = _connect(Path(settings.database_path), read_only=True)
     try:
+        with pytest.raises(ContractError, match="canonical archive owner"):
+            build_plan(
+                conn,
+                tenant_id="peer-owner-alpha",
+                owner_id="peer-owner-alpha",
+                files_root=files_root,
+            )
         plan = build_plan(
             conn,
             tenant_id=tenant,
@@ -903,11 +861,44 @@ def test_second_active_owner_between_preflight_and_replan_rolls_back(
         )
     finally:
         conn.close()
-    assert plan.candidate_count == 1
+
+    assert plan.candidate_count == 2
+    by_raw = {candidate.raw_id: candidate for candidate in plan.candidates}
+    assert set(by_raw) == {audio_id, doc_id}
+    assert by_raw[audio_id].mapped_uploader_id == "tg-exact"
+    assert by_raw[doc_id].mapped_uploader_id == "tg-jbl"
+    assert by_raw[audio_id].audio_carrier is True
+    assert by_raw[doc_id].audio_carrier is False
+    assert plan.counts["planned_audio"] == 1
+    assert plan.counts["refused_audio"] == 0
+    assert plan.counts["ambiguous"] >= 1
+    assert plan.counts["unmapped"] >= 1
+    public = plan.public_summary(mode="dry_run")
+    assert public["counts"]["planned_audio"] == 1
+    public_text = json.dumps(public, ensure_ascii=True, sort_keys=True)
+    assert tenant not in public_text
+    assert audio_id not in public_text
+    assert "voice.ogg" not in public_text
 
     claim_path = _claim(tmp_path, plan)
     backup_dir = tmp_path / "backups"
     backup_dir.mkdir(mode=0o700)
+    stale = json.loads(claim_path.read_text(encoding="utf-8"))
+    stale["schema"] = "friday.legacy-telegram-uploader-provenance-claim.v1"
+    stale_path = tmp_path / "stale-claim.json"
+    _write_private_json(stale_path, stale)
+    with pytest.raises(ContractError, match="schema or scope"):
+        apply_plan(
+            Path(settings.database_path),
+            tenant_id=tenant,
+            owner_id=tenant,
+            files_root=files_root,
+            claim_manifest=stale_path,
+            expected_count=plan.candidate_count,
+            expected_plan_sha256=plan.plan_sha256,
+            backup_dir=backup_dir,
+            writers_stopped_acknowledged=True,
+        )
 
     import tools.backfill_legacy_telegram_uploader_provenance as mod
 
@@ -917,7 +908,6 @@ def test_second_active_owner_between_preflight_and_replan_rolls_back(
     def wrapping_build_plan(conn_arg, *, tenant_id, owner_id, files_root):  # noqa: ANN001
         calls["n"] += 1
         if calls["n"] == 1:
-            # Preflight succeeds; inject a second active owner before replan.
             result = original_build(
                 conn_arg,
                 tenant_id=tenant_id,
@@ -927,11 +917,8 @@ def test_second_active_owner_between_preflight_and_replan_rolls_back(
             now = "2026-01-02T00:00:00Z"
             with storage.transaction() as db:
                 db.execute(
-                    """INSERT INTO users(
-                           id,source,external_id,preset_key,status,
-                           created_at,updated_at,last_seen_at
-                       ) VALUES(?,?,?,?,?,?,?,?)""",
-                    ("alice-race-owner", "local", "", "owner", "active", now, now, now),
+                    "UPDATE users SET status='disabled', updated_at=? WHERE id=?",
+                    (now, tenant),
                 )
             return result
         return original_build(
@@ -942,37 +929,91 @@ def test_second_active_owner_between_preflight_and_replan_rolls_back(
         )
 
     monkeypatch.setattr(mod, "build_plan", wrapping_build_plan)
-
-    with pytest.raises(ContractError, match="exactly one active owner"):
-        mod.apply_plan(
-            Path(settings.database_path),
-            tenant_id=tenant,
-            owner_id=tenant,
-            files_root=files_root,
-            claim_manifest=claim_path,
-            expected_count=plan.candidate_count,
-            expected_plan_sha256=plan.plan_sha256,
-            backup_dir=backup_dir,
-            writers_stopped_acknowledged=True,
-        )
+    try:
+        with pytest.raises(ContractError, match="canonical archive owner must be active"):
+            mod.apply_plan(
+                Path(settings.database_path),
+                tenant_id=tenant,
+                owner_id=tenant,
+                files_root=files_root,
+                claim_manifest=claim_path,
+                expected_count=plan.candidate_count,
+                expected_plan_sha256=plan.plan_sha256,
+                backup_dir=backup_dir,
+                writers_stopped_acknowledged=True,
+            )
+    finally:
+        monkeypatch.setattr(mod, "build_plan", original_build)
 
     assert calls["n"] >= 2
-    meta_after = json.loads(
-        storage.execute("SELECT metadata_json FROM raw_objects WHERE id=?", (raw_id,)).fetchone()[0]
-    )
-    assert "uploaded_by" not in meta_after
+    for raw_id in (audio_id, doc_id, amb_id, unmapped_id):
+        meta_after = json.loads(
+            storage.execute("SELECT metadata_json FROM raw_objects WHERE id=?", (raw_id,)).fetchone()[0]
+        )
+        assert "uploaded_by" not in meta_after
     audit_n = storage.execute(
         "SELECT COUNT(*) AS n FROM audit_log WHERE action=?",
         (AUDIT_ACTION,),
     ).fetchone()
-    n = int(audit_n["n"] if hasattr(audit_n, "keys") else audit_n[0])
-    assert n == 0
+    assert int(audit_n["n"] if hasattr(audit_n, "keys") else audit_n[0]) == 0
+
+    with storage.transaction() as db:
+        db.execute(
+            "UPDATE users SET status='active', updated_at=? WHERE id=?",
+            ("2026-01-02T00:01:00Z", tenant),
+        )
+
+    applied, extra = apply_plan(
+        Path(settings.database_path),
+        tenant_id=tenant,
+        owner_id=tenant,
+        files_root=files_root,
+        claim_manifest=claim_path,
+        expected_count=plan.candidate_count,
+        expected_plan_sha256=plan.plan_sha256,
+        backup_dir=backup_dir,
+        writers_stopped_acknowledged=True,
+    )
+    assert applied.candidate_count == 2
+    assert extra["applied"] == 2
+    assert applied.counts["planned_audio"] == 1
+
+    meta_audio = json.loads(
+        storage.execute("SELECT metadata_json FROM raw_objects WHERE id=?", (audio_id,)).fetchone()[0]
+    )
+    meta_doc = json.loads(
+        storage.execute("SELECT metadata_json FROM raw_objects WHERE id=?", (doc_id,)).fetchone()[0]
+    )
+    meta_amb = json.loads(
+        storage.execute("SELECT metadata_json FROM raw_objects WHERE id=?", (amb_id,)).fetchone()[0]
+    )
+    meta_unmapped = json.loads(
+        storage.execute("SELECT metadata_json FROM raw_objects WHERE id=?", (unmapped_id,)).fetchone()[0]
+    )
+    assert meta_audio["uploaded_by"] == "tg-exact"
+    assert meta_doc["uploaded_by"] == "tg-jbl"
+    assert "uploaded_by" not in meta_amb
+    assert "uploaded_by" not in meta_unmapped
+    audits = storage.execute(
+        "SELECT target_id FROM audit_log WHERE action=?",
+        (AUDIT_ACTION,),
+    ).fetchall()
+    assert {row[0] for row in audits} == {audio_id, doc_id}
+
+    visible = storage.get_searchable_file_sources(tenant, [audio_id, doc_id])
+    assert [row["id"] for row in visible] == [doc_id]
+    jbl_visible = storage.get_searchable_file_sources(tenant, [audio_id, doc_id], uploaded_by="tg-jbl")
+    assert [row["id"] for row in jbl_visible] == [doc_id]
+    assert storage.get_searchable_file_sources(tenant, [audio_id], uploaded_by="tg-exact") == []
+    assert storage.find_owned_files_by_filename(tenant, "tg-exact", "voice.ogg") == []
+    found_doc = storage.find_owned_files_by_filename(tenant, "tg-jbl", "note.bin")
+    assert [row["id"] for row in found_doc] == [doc_id]
 
 
 def test_unique_active_owner_still_accepted(settings, storage) -> None:
-    """Exactly one active owner with tenant==owner remains accepted for exact mapping."""
+    """Canonical owner stays accepted when an inactive peer owner row exists."""
 
-    tenant = "alice"
+    tenant = LEGACY_OWNER_USER_ID
     storage.ensure_user(tenant, preset_key="owner")
     # Inactive second owner must not poison the unique-active gate.
     now = "2026-01-01T00:00:00Z"
