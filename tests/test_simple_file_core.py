@@ -457,7 +457,10 @@ async def test_explicit_mcp_inbox_read_never_substitutes_same_named_upload(
     monkeypatch.setattr(runtime, "_agentic_loop", forbidden_agentic)
     result = await runtime.chat(
         "alice",
-        "Прочитай report-unique-aug12.odt из MCP inbox и назови значение поля X.",
+        (
+            "Прочитай report-unique-aug12.odt из MCP inbox и верни точное значение "
+            "после «Поле X». Ответь только значением."
+        ),
         actor=_actor(),
     )
 
@@ -486,11 +489,25 @@ async def test_explicit_mcp_inbox_read_never_substitutes_same_named_upload(
     assert [name for name, _arguments in kernel.calls] == ["workspace_read", "workspace_read"]
     assert len(seen_prompts) == 2
 
+    for unsafe_request in (
+        "Прочитай report-unique-aug12.odt из MCP inbox и верни файл в MCP outbox.",
+        ("Прочитай report-unique-aug12.odt из MCP inbox и верни файл с проверочным маркером в MCP outbox."),
+        "Прочитай report-unique-aug12.odt из MCP inbox и повтори отправку, указав код.",
+    ):
+        kernel.calls.clear()
+        rejected = await runtime.chat("alice", unsafe_request, actor=_actor())
+        assert "одну операцию" in rejected["message"]
+        assert kernel.calls == []
+        assert len(seen_prompts) == 2
+
     kernel.ambiguous = True
     kernel.calls.clear()
     ambiguous = await runtime.chat(
         "alice",
-        "Прочитай report-unique-aug12.odt из MCP inbox и назови значение поля X.",
+        (
+            "Прочитай report-unique-aug12.odt из MCP inbox и верни точное значение "
+            "после «Поле X». Ответь только значением."
+        ),
         actor=_actor(),
     )
     assert "несколько файлов" in ambiguous["message"]

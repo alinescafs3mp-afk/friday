@@ -14128,6 +14128,13 @@ _ATTACHMENT_READ_ONLY_RESULT_HEAD = re.compile(
     r"таблиц|список|value|line|field|item|fragment|data|quote|result)\w*",
     re.IGNORECASE,
 )
+_ATTACHMENT_READ_ONLY_OUTPUT_RESULT = re.compile(
+    r"(?:верн|вывед|привед|повтор|процитир)\w*\b"
+    r"(?:\s+(?:мне|нам|только|точн\w*|дословн\w*)){0,4}\s+"
+    r"\b(?:значени|строк|поле|пункт|фрагмент|данн|сведени|цитат|вывод|результат|"
+    r"таблиц|список|текст|маркер|код|содержим)\w*\b",
+    re.IGNORECASE,
+)
 
 
 def _closed_attachment_read_only_request(message: str) -> bool:
@@ -14157,6 +14164,12 @@ def _closed_attachment_read_only_request(message: str) -> bool:
         # closed result vocabulary while unknown coordinated imperatives still
         # retain the ordinary route.
         if _ATTACHMENT_READ_ONLY_RESULT_HEAD.fullmatch(match.group("head")):
+            continue
+        # ``и верни только значение`` is an answer-shape clause, not a second
+        # effect.  Admit it only when the output verb is locally bound to a
+        # closed result noun; ``верни файл`` and unknown coordinated actions
+        # remain outside the deterministic read-only route.
+        if _ATTACHMENT_READ_ONLY_OUTPUT_RESULT.match(tail):
             continue
         if not _ATTACHMENT_READ_ONLY_ACTION.fullmatch(match.group("head")):
             return False
