@@ -267,12 +267,19 @@ def test_live_probes_fail_closed_on_any_ordinary_web_tool_attempt() -> None:
         del args, kwargs
         return ({"bounded": True}, True)
 
+    async def late_make_file(*args, **kwargs):
+        del args, kwargs
+        return None
+
     app = SimpleNamespace(
         state=SimpleNamespace(
             embeddings=SimpleNamespace(embed=embed),
             hybrid_searcher=SimpleNamespace(_reranker=None),
             kernel=SimpleNamespace(execute=execute),
-            agent=SimpleNamespace(_build_attachment_hierarchy_bundle=hierarchy),
+            agent=SimpleNamespace(
+                _build_attachment_hierarchy_bundle=hierarchy,
+                _file_for_a_request_that_wanted_one=late_make_file,
+            ),
             settings=SimpleNamespace(
                 embeddings_base_url="http://127.0.0.1:8102/v1",
                 rerank_base_url="http://127.0.0.1:8103",
@@ -290,6 +297,7 @@ def test_live_probes_fail_closed_on_any_ordinary_web_tool_attempt() -> None:
         assert built == ({"bounded": True}, True)
         assert probes.counts["hierarchy_calls"] == 1
         assert probes.counts["hierarchy_complete"] == 1
+        assert probes.counts["llm_chat_attempts"] == 0
     finally:
         probes.close()
 
@@ -721,6 +729,10 @@ def test_d10_oracles_require_exact_delivery_requisites_and_mcp_shape(
             del filename, mime_type, content, source_ref
             return {}
 
+        @staticmethod
+        def resolve_ref(_source_ref):  # noqa: ANN001
+            return "raw_authorized"
+
         def chat(self, _case_id, _message, **_kwargs):  # noqa: ANN001
             self.calls += 1
             if self.calls == 1:
@@ -783,6 +795,49 @@ def test_d10_oracles_require_exact_delivery_requisites_and_mcp_shape(
     else:
         assert result["status"] == "passed", result
         assert all(result["checks"].values())
+        subturns = result["diagnostics"]["subturns"]
+        assert tuple(subturns) == ("metadata", "regular", "mcp")
+        assert subturns["regular"]["reply_ref_bound_before"] is True
+        assert subturns["mcp"]["reply_ref_bound_before"] is True
+
+
+def test_d10_subturn_diagnostic_is_closed_and_content_free(monkeypatch) -> None:
+    runner = _module()
+    secret = "PRIVATE-SYNTHETIC-CONTENT"
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 10.125)
+
+    diagnostic = runner._closed_d10_subturn(
+        {
+            "message": secret,
+            "files": [{"filename": secret}],
+            "tools_used": ["workspace_create"],
+            "context": {"llm_failed": True, "private": secret},
+        },
+        10.0,
+        {
+            "llm_chat_attempts": 2,
+            "late_make_file_attempts": 1,
+            "workspace_create_kernel_attempts": 1,
+            "workspace_create_mcp_attempts": 1,
+        },
+        reply_ref_bound=True,
+    )
+
+    assert diagnostic == {
+        "duration_ms": 125,
+        "http_returned": True,
+        "llm_failed": True,
+        "files_count": 1,
+        "tools_count": 1,
+        "attempts": {
+            "llm_chat_attempts": 2,
+            "late_make_file_attempts": 1,
+            "workspace_create_kernel_attempts": 1,
+            "workspace_create_mcp_attempts": 1,
+        },
+        "reply_ref_bound_before": True,
+    }
+    assert secret not in json.dumps(diagnostic, sort_keys=True)
 
 
 def test_cli_self_test_is_closed_json_and_does_not_start_live_worker() -> None:

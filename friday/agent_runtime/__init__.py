@@ -9020,6 +9020,27 @@ def _workspace_create_has_action_cancellation(actionable: str) -> bool:
     return False
 
 
+def _workspace_create_authorized_clause(actionable: str) -> str:
+    """Return one sentence-local imperative for the external outbox.
+
+    A benign lead sentence (for example a request/correlation label) must not
+    hide the following command.  Conversely, mentioning ``workspace_create``
+    in one sentence cannot authorise an unrelated file imperative in another.
+    Quote and code spans have already been blanked by
+    :func:`_workspace_create_actionable_text`.
+    """
+
+    for raw_clause in re.split(r"(?<=[.!?])\s+", actionable):
+        clause = raw_clause.strip()
+        if not clause or not _WORKSPACE_CREATE_IMPERATIVE.match(clause):
+            continue
+        if _WORKSPACE_CREATE_IDENTIFIER_DIRECTIVE.match(clause) or _WORKSPACE_CREATE_OUTBOX_CUE.search(
+            clause
+        ):
+            return clause
+    return ""
+
+
 def _workspace_create_success_evidence(filename: str) -> str:
     return _WORKSPACE_CREATE_SUCCESS_EVIDENCE_PREFIX + json.dumps(
         {"filename": str(filename or "")},
@@ -9068,12 +9089,7 @@ def _workspace_create_channel_request(message: str) -> bool:
         return False
     if _WORKSPACE_CREATE_META.search(actionable) or _WORKSPACE_CREATE_DATA_MENTION.search(actionable):
         return False
-    if not _WORKSPACE_CREATE_IMPERATIVE.search(actionable):
-        return False
-    return bool(
-        _WORKSPACE_CREATE_IDENTIFIER_DIRECTIVE.search(actionable)
-        or _WORKSPACE_CREATE_OUTBOX_CUE.search(actionable)
-    )
+    return bool(_workspace_create_authorized_clause(actionable))
 
 
 def _explicit_workspace_create_intent(message: str) -> _WorkspaceCreateIntent | None:
@@ -12970,6 +12986,15 @@ _ATTACHMENT_COMPOUND_CLAUSE_BOUNDARY = re.compile(
     r"(?:[.!?;]\s*|\b(?:и|а\s+также|затем)\b)",
     re.IGNORECASE,
 )
+_DIRECT_ATTACHMENT_FILE_OTHER_EFFECT = re.compile(
+    r"\b(?:запомн\w*|добав\w*|удал\w*|измен\w*|отправ\w*|перешл\w*|"
+    r"опублик\w*|remember\w*|store\w*|add\w*|delete\w*|update\w*|send\w*|"
+    r"publish\w*)\b|"
+    r"\b(?:сохран\w*|запис\w*|save|write)\b[^.!?\n]{0,64}"
+    r"\b(?:памят\w*|правил\w*|календар\w*|задач\w*|мисси\w*|"
+    r"memory|rule|calendar|task|mission)\b",
+    re.IGNORECASE,
+)
 
 
 def _attachment_temporal_read_clause(message: str) -> str:
@@ -13021,6 +13046,37 @@ def _attachment_requests_a_tool_action(message: str) -> bool:
     )
 
 
+def _supported_direct_attachment_file_only_request(message: str) -> bool:
+    """A closed local projection which needs only final ``make_file``.
+
+    The model writes the body; the existing verified late builder owns the one
+    requested carrier.  This is deliberately narrower than the general direct
+    file classifier: one supported output name is mandatory, and any second
+    effect or archive/outbound channel keeps the ordinary agentic route.
+    """
+
+    visible = " ".join(_classification_text(message).split())
+    if not visible or not _is_direct_file_request(visible):
+        return False
+    kind = _file_kind_from_request(visible)
+    output_stem, output_supported = _requested_output_filename_stem(visible, kind=kind)
+    if not output_supported or not output_stem:
+        return False
+    return not (
+        _workspace_create_channel_mentioned(message)
+        or asks_for_the_web(visible)
+        or _ASKS_FOR_A_REMINDER.search(visible)
+        or _ASKS_FOR_VOICE.search(visible)
+        or _attachment_requests_archive_tool(visible)
+        or _attachment_temporal_read_clause(visible)
+        or _ATTACHMENT_EXPLICIT_COMPUTE_TOOL_ACTION.search(_QUOTED_TEXT.sub(" ", visible))
+        or _ASKS_ABOUT_PERSONAL_STORAGE.search(visible)
+        or _ABOUT_MY_OWN_STUFF.search(visible)
+        or _ATTACHMENT_CROSS_CONTEXT_REQUEST.search(visible)
+        or _DIRECT_ATTACHMENT_FILE_OTHER_EFFECT.search(visible)
+    )
+
+
 def _current_attachment_can_skip_archive(
     message: str,
     *,
@@ -13048,6 +13104,8 @@ def _current_attachment_can_skip_archive(
         return True
     text = " ".join(str(message or "").split())
     if not text:
+        return True
+    if _supported_direct_attachment_file_only_request(text):
         return True
     return not (
         _attachment_requests_a_tool_action(text)
@@ -18977,6 +19035,20 @@ class AgentRuntime:
         attachment_tool_action_requested = bool(
             not synthetic_document_notice and _attachment_requests_a_tool_action(clean_message)
         )
+        direct_attachment_file_projection_turn = bool(
+            not document_metadata_owned
+            and not foreign_private_request
+            and not dangerous_instruction_request
+            and not fabricated_outside_deed_request
+            and not private_web_search_blocked
+            and not synthetic_document_notice
+            and not attachment_resolution_failed
+            and not multi_attachment_incomplete
+            and not attachment_query_closed_answer
+            and authenticated_attachment_scope
+            and attachment_context_complete
+            and _supported_direct_attachment_file_only_request(clean_message)
+        )
         office_exact = (
             None
             if (
@@ -19034,6 +19106,7 @@ class AgentRuntime:
             and not multi_attachment_incomplete
             and office_exact is None
             and not full_source_prepass_required
+            and not attachment_tool_action_requested
             and office_arbiter_applies(clean_message, attachments)
         ):
             # Четыре русские регулярки ловили 19 форм вопроса из 32 (замер
@@ -19547,6 +19620,23 @@ class AgentRuntime:
             # close every schema here so that example text cannot select an
             # alternate carrier before the late builder is suppressed below.
             visible_tools = []
+        if direct_attachment_file_projection_turn:
+            # The accepted model body still crosses the ordinary verifier and
+            # deed guards; only then does the existing late builder create the
+            # one code-owned supported output.  Sending every local schema here
+            # made a four-line DOCX request spend its whole 90-second attachment
+            # budget before producing any text.
+            visible_tools = []
+        if clean_workspace_intent is not None:
+            # This channel grants exactly one external effect.  Forcing the
+            # choice while still advertising every other schema needlessly
+            # inflated the prompt and left alternate capabilities visible.
+            visible_tools = [
+                tool
+                for tool in visible_tools
+                if str((tool.get("function") or {}).get("name") or tool.get("name") or "")
+                == "workspace_create"
+            ]
         if hierarchical_attachment_turn and not attachment_tool_action_requested:
             # A complete, authenticated whole-document read already has its
             # bounded source plan. Unrelated schemas add prompt cost and divert
@@ -19980,7 +20070,12 @@ class AgentRuntime:
                 "tools_used": inventory_preflight_tools_used,
                 "tool_evidence": inventory_preflight_evidence,
             }
-        elif hierarchical_attachment_turn and self.llm.enabled and not visible_tools:
+        elif (
+            hierarchical_attachment_turn
+            and not direct_attachment_file_projection_turn
+            and self.llm.enabled
+            and not visible_tools
+        ):
             response = await self._hierarchical_attachment_response(
                 context,
                 asked_of_model,

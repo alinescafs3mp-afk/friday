@@ -578,33 +578,17 @@ class _D10RoutingLLM:
                 ],
             }
         if "metadata-export.docx" in last_user and not tool_result_after_user:
+            if offered or tool_choice is not None:
+                raise AssertionError("regular D10 export retained agentic schemas")
             return {
                 **common,
-                "content": "",
-                "tool_calls": [
-                    {
-                        "id": "d10-regular-make-file",
-                        "function": {
-                            "name": "make_file",
-                            "arguments": json.dumps(
-                                {
-                                    "kind": "docx",
-                                    "title": "metadata export",
-                                    "blocks": [
-                                        {"kind": "text", "text": "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ"},
-                                        {"kind": "text", "text": "17-ДСП/1"},
-                                        {"kind": "text", "text": "10 августа 2026 года"},
-                                        {"kind": "text", "text": "Иван Иванович Иванов"},
-                                    ],
-                                },
-                                ensure_ascii=False,
-                            ),
-                        },
-                    }
-                ],
+                "content": (
+                    "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ\n17-ДСП/1\n10 августа 2026 года\nИван Иванович Иванов"
+                ),
+                "tool_calls": None,
             }
         if "metadata-export.docx" in last_user:
-            return {**common, "content": "Файл отправлен в этот чат.", "tool_calls": None}
+            raise AssertionError("regular D10 export unexpectedly entered an agentic follow-up")
         if "workspace_create" in last_user and tool_result_after_user:
             return {
                 **common,
@@ -765,8 +749,31 @@ def test_exact_d10_three_turn_api_keeps_reply_source_and_forces_only_workspace_e
         )
         assert regular.status_code == 200, regular.text
         make_file_before_workspace = sum(name == "make_file" for name, _arguments in executed)
+        regular_payload = regular.json()
+        regular_files = regular_payload.get("files") or []
+        assert regular_payload["tools_used"] == ["make_file"]
+        assert make_file_before_workspace == 1
+        assert len(regular_files) == 1
+        assert regular_files[0]["filename"] == "metadata-export.docx"
+        import docx
+
+        document = docx.Document(
+            io.BytesIO(base64.b64decode(regular_files[0]["content_base64"], validate=True))
+        )
+        paragraphs = [paragraph.text for paragraph in document.paragraphs if paragraph.text]
+        assert paragraphs[1:] == [
+            "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ",
+            "17-ДСП/1",
+            "10 августа 2026 года",
+            "Иван Иванович Иванов",
+        ]
+        regular_model_calls = [call for call in llm.calls if "metadata-export.docx" in call["user"]]
+        assert len(regular_model_calls) == 1
+        assert regular_model_calls[0]["offered"] == set()
+        assert regular_model_calls[0]["tool_choice"] is None
 
         workspace_prompt = (
+            "Контекст проверки SYNTHETIC-D10. "
             "Используй именно workspace_create и создай в MCP outbox файл mcp-metadata.txt. "
             "Первая строка — только значение номера документа без подписи. Вторая строка — "
             "только значение контрольного маркера без подписи. Никаких других строк."
@@ -798,7 +805,7 @@ def test_exact_d10_three_turn_api_keeps_reply_source_and_forces_only_workspace_e
     assert sum(name == "make_file" for name, _arguments in executed) == make_file_before_workspace
     forced = [call for call in llm.calls if call["tool_choice"] == "workspace_create"]
     assert len(forced) == 1
-    assert "workspace_create" in forced[0]["offered"]
+    assert forced[0]["offered"] == {"workspace_create"}
     assert workspace.json()["tools_used"] == ["workspace_create"]
     assert workspace.json().get("files") == []
     final_user = next(row for row in reversed(rows) if row.get("role") == "user")

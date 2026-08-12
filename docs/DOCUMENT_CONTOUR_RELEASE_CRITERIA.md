@@ -167,6 +167,10 @@ closed failure codes as evidence.
 
 ### Test execution budget
 
+- The working cadence is product-first: run the live product battery, collect
+  its defects, fix that batch, run only the necessary regression/static checks,
+  freeze a new candidate and return to the live product battery.  Offline test
+  volume is never a substitute for exercising the product again.
 - Do not turn each small edit into a broad or multi-hour test campaign.  After
   a narrow fix, run only its exact reproducer, the nearest two or three positive/
   negative controls, and static checks for the changed files.

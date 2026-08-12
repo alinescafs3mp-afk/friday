@@ -747,6 +747,7 @@ class LiveProbes:
     def __init__(self, app: Any) -> None:
         self.app = app
         self.counts = {
+            "llm_chat_attempts": 0,
             "embedding_calls": 0,
             "embedding_successes": 0,
             "reranker_calls": 0,
@@ -757,7 +758,10 @@ class LiveProbes:
             "source_search_successes": 0,
             "hierarchy_calls": 0,
             "hierarchy_complete": 0,
+            "late_make_file_attempts": 0,
+            "workspace_create_kernel_attempts": 0,
             "workspace_create_kernel": 0,
+            "workspace_create_mcp_attempts": 0,
             "workspace_create_mcp": 0,
             "forbidden_web_calls": 0,
         }
@@ -832,6 +836,8 @@ class LiveProbes:
                 # content-free battery failure after the turn finishes.
                 self.counts["forbidden_web_calls"] += 1
                 raise BatteryFailure("external_web_tool_attempted")
+            if name == "workspace_create":
+                self.counts["workspace_create_kernel_attempts"] += 1
             result = await original_execute(name, arguments, **kwargs)
             if name == "source_search":
                 self.counts["source_search_calls"] += 1
@@ -867,6 +873,17 @@ class LiveProbes:
         self._restore.append(lambda: setattr(kernel, "execute", original_execute))
 
         agent = self.app.state.agent
+        llm: Any = getattr(agent, "llm", None)
+        original_llm_chat = getattr(llm, "chat", None)
+        if callable(original_llm_chat):
+
+            async def llm_chat(*args: Any, **kwargs: Any):
+                self.counts["llm_chat_attempts"] += 1
+                return await original_llm_chat(*args, **kwargs)
+
+            llm.chat = llm_chat
+            self._restore.append(lambda: setattr(llm, "chat", original_llm_chat))
+
         original_hierarchy = agent._build_attachment_hierarchy_bundle
 
         async def hierarchy(*args: Any, **kwargs: Any):
@@ -878,6 +895,17 @@ class LiveProbes:
 
         agent._build_attachment_hierarchy_bundle = hierarchy
         self._restore.append(lambda: setattr(agent, "_build_attachment_hierarchy_bundle", original_hierarchy))
+
+        original_late_make_file = agent._file_for_a_request_that_wanted_one
+
+        async def late_make_file(*args: Any, **kwargs: Any):
+            self.counts["late_make_file_attempts"] += 1
+            return await original_late_make_file(*args, **kwargs)
+
+        agent._file_for_a_request_that_wanted_one = late_make_file
+        self._restore.append(
+            lambda: setattr(agent, "_file_for_a_request_that_wanted_one", original_late_make_file)
+        )
 
         original_send = httpx.AsyncClient.send
         embedding_base = str(self.app.state.settings.embeddings_base_url).rstrip("/")
@@ -899,6 +927,8 @@ class LiveProbes:
             original_call = manager.call_tool
 
             async def call_tool(alias: str, name: str, arguments: dict[str, Any]):
+                if alias == "workspace" and name == "exchange_create":
+                    self.counts["workspace_create_mcp_attempts"] += 1
                 result = await original_call(alias, name, arguments)
                 if alias == "workspace" and name == "exchange_create":
                     self.counts["workspace_create_mcp"] += 1
@@ -1719,6 +1749,41 @@ def _case_09(h: Harness) -> dict[str, Any]:
     return h.case_result("D09", started, checks)
 
 
+_D10_ATTEMPT_COUNTERS = (
+    "llm_chat_attempts",
+    "late_make_file_attempts",
+    "workspace_create_kernel_attempts",
+    "workspace_create_mcp_attempts",
+)
+
+
+def _closed_d10_subturn(
+    response: Mapping[str, Any],
+    started: float,
+    counters: Mapping[str, int],
+    *,
+    reply_ref_bound: bool | None = None,
+) -> dict[str, Any]:
+    """Content-free routing evidence for one returned D10 HTTP turn."""
+
+    raw_files = response.get("files")
+    raw_tools = response.get("tools_used")
+    context = _mapping(response.get("context"))
+    closed = {
+        "duration_ms": round((time.monotonic() - started) * 1000),
+        # Harness._call raises on every non-200/non-object response, so reaching
+        # this projection is itself the closed HTTP-success signal.
+        "http_returned": True,
+        "llm_failed": context.get("llm_failed") is True,
+        "files_count": len(raw_files) if isinstance(raw_files, list) else 0,
+        "tools_count": len(raw_tools) if isinstance(raw_tools, list) else 0,
+        "attempts": {name: int(counters.get(name, 0)) for name in _D10_ATTEMPT_COUNTERS},
+    }
+    if reply_ref_bound is not None:
+        closed["reply_ref_bound_before"] = bool(reply_ref_bound)
+    return closed
+
+
 def _case_10(h: Harness) -> dict[str, Any]:
     started = time.monotonic()
     marker = _marker(h, "META-EXPORT")
@@ -1739,6 +1804,8 @@ def _case_10(h: Harness) -> dict[str, Any]:
     source_ref = _source_ref(h, "METADATA")
     regular_name = _filename(h, "metadata-export", "docx", fallback="metadata-export.docx")
     mcp_name = _filename(h, "mcp-metadata", "txt", fallback="mcp-metadata.txt")
+    metadata_before = h.probes.snapshot()
+    metadata_started = time.monotonic()
     metadata = h.chat(
         "D10",
         "Покажи все технические метаданные контейнера и все видимые реквизиты этого документа.",
@@ -1755,7 +1822,15 @@ def _case_10(h: Harness) -> dict[str, Any]:
             source_ref,
         ),
     )
+    metadata_diagnostic = _closed_d10_subturn(
+        metadata,
+        metadata_started,
+        h.probes.delta(metadata_before),
+    )
     text = str(metadata.get("message") or "")
+    regular_reply_ref_bound = bool(h.resolve_ref(source_ref))
+    regular_before = h.probes.snapshot()
+    regular_started = time.monotonic()
     regular = h.chat(
         "D10",
         f"Создай обычный Word-файл {regular_name} по процитированному документу. "
@@ -1763,6 +1838,12 @@ def _case_10(h: Harness) -> dict[str, Any]:
         "и подписанта из предыдущего ответа.",
         reply_document_source_ref=source_ref,
         reply_to=text[:1000],
+    )
+    regular_diagnostic = _closed_d10_subturn(
+        regular,
+        regular_started,
+        h.probes.delta(regular_before),
+        reply_ref_bound=regular_reply_ref_bound,
     )
     raw_files = regular.get("files")
     files: list[Any] = raw_files if isinstance(raw_files, list) else []
@@ -1806,7 +1887,9 @@ def _case_10(h: Harness) -> dict[str, Any]:
             for index, expected in enumerate(regular_expected_fields)
         )
     )
+    mcp_reply_ref_bound = bool(h.resolve_ref(source_ref))
     before = h.probes.snapshot()
+    mcp_started = time.monotonic()
     mcp = h.chat(
         "D10",
         f"Используй именно workspace_create и создай в MCP outbox файл {mcp_name}. "
@@ -1816,6 +1899,12 @@ def _case_10(h: Harness) -> dict[str, Any]:
         reply_to=text[:1000],
     )
     delta = h.probes.delta(before)
+    mcp_diagnostic = _closed_d10_subturn(
+        mcp,
+        mcp_started,
+        delta,
+        reply_ref_bound=mcp_reply_ref_bound,
+    )
     outbox = Path(str(h.settings.mcp_workspace_outbox_dir)) / mcp_name
     outbox_bytes = outbox.read_bytes() if outbox.is_file() else b""
     outbox_lines = tuple(
@@ -1884,7 +1973,15 @@ def _case_10(h: Harness) -> dict[str, Any]:
         "mcp_reported_tool": "workspace_create" in list(mcp.get("tools_used") or []),
         "mcp_no_duplicate_chat_file": not list(mcp.get("files") or []),
     }
-    return h.case_result("D10", started, checks, delta)
+    result = h.case_result("D10", started, checks, delta)
+    result["diagnostics"] = {
+        "subturns": {
+            "metadata": metadata_diagnostic,
+            "regular": regular_diagnostic,
+            "mcp": mcp_diagnostic,
+        }
+    }
+    return result
 
 
 _CASE_RUNNERS: tuple[Callable[[Harness], dict[str, Any]], ...] = (

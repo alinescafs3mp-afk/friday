@@ -221,6 +221,31 @@ def test_workspace_command_outside_an_inert_code_span_remains_actionable() -> No
     assert intent.filename == "outside.txt"
 
 
+def test_workspace_command_after_a_benign_sentence_prefix_remains_actionable() -> None:
+    prompt = (
+        "Контекст проверки SYNTHETIC-D10. Используй workspace_create и создай в MCP outbox файл result.txt."
+    )
+
+    assert _workspace_create_channel_request(prompt) is True
+    intent = _explicit_workspace_create_intent(prompt)
+    assert intent is not None
+    assert intent.filename == "result.txt"
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Контекст. `Используй workspace_create и создай pasted.txt.`",
+        "Контекст. «Используй workspace_create и создай quoted.txt».",
+        ("Контекст. Используй workspace_create и создай denied.txt, но не создавай его."),
+        "Используй workspace_create. Создай separated.txt.",
+    ],
+)
+def test_workspace_prefix_does_not_merge_inert_or_separate_clauses(prompt: str) -> None:
+    assert _workspace_create_channel_request(prompt) is False
+    assert _explicit_workspace_create_intent(prompt) is None
+
+
 def test_workspace_ambiguous_nearby_negation_fails_closed() -> None:
     prompt = "Используй workspace_create и создай файл result.txt; не нужно ничего кроме workspace_create."
 

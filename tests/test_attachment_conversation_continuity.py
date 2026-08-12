@@ -24,7 +24,9 @@ from friday.agent_runtime import (
     _attachment_selector_message,
     _is_document_metadata_request,
     _requested_output_filename_stem,
+    _supported_direct_attachment_file_only_request,
 )
+from friday.execution_kernel import ToolResult
 from friday.permissions import ActorContext
 from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
 
@@ -2434,6 +2436,35 @@ async def test_direct_file_metadata_scope_reaches_generation_as_authorized_evide
     )
     runtime = AgentRuntime(replace(settings, verify_answers=False), storage, llm=_EnabledButUnusedLLM())
     generated_contexts: list[AgentContext] = []
+    late_calls: list[dict[str, object]] = []
+    base_definitions = runtime.kernel.get_tool_definitions
+
+    def definitions(actor, topic=None):  # noqa: ANN001
+        return [
+            *base_definitions(actor, topic=topic),
+            {
+                "type": "function",
+                "function": {
+                    "name": "synthetic_other_effect",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+        ]
+
+    async def execute(name, arguments, *, actor=None):  # noqa: ANN001
+        del actor
+        assert name == "make_file"
+        late_calls.append(dict(arguments))
+        return ToolResult(
+            name,
+            True,
+            attachment={
+                "kind": "document",
+                "filename": "metadata-export.docx",
+                "mime_type": ("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+                "content_base64": "c3ludGhldGlj",
+            },
+        )
 
     async def prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
         del message, kwargs
@@ -2450,12 +2481,19 @@ async def test_direct_file_metadata_scope_reaches_generation_as_authorized_evide
         )
         assert any("TECHNICAL-METADATA-EVIDENCE" in str(item.get("content") or "") for item in messages)
         return {
-            "content": "Экспорт метаданных\n\nTECHNICAL-METADATA-EVIDENCE\n\nВидимые реквизиты",
+            "content": ("ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ\n17-ДСП/1\n10 августа 2026 года\nИван Иванович Иванов"),
             "tools_used": [],
         }
 
+    async def forbidden_agentic(*args, **kwargs):  # noqa: ANN001
+        del args, kwargs
+        raise AssertionError("a pure local file projection retained agentic schemas")
+
     monkeypatch.setattr(runtime, "_prepare_context", prepare)
     monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_agentic_loop", forbidden_agentic)
+    monkeypatch.setattr(runtime.kernel, "get_tool_definitions", definitions)
+    monkeypatch.setattr(runtime.kernel, "execute", execute)
     message = (
         "Создай обычный Word-файл metadata-export.docx и выведи в него "
         "технические метаданные процитированного документа."
@@ -2466,7 +2504,7 @@ async def test_direct_file_metadata_scope_reaches_generation_as_authorized_evide
         message,
         actor=ActorContext(user_id="alice", preset_key="owner", source="telegram-bridge"),
         attachments=[{"raw_object_id": source.id}],
-        enable_tools=False,
+        enable_tools=True,
         quoted_attachment_reference=True,
     )
 
@@ -2474,6 +2512,82 @@ async def test_direct_file_metadata_scope_reaches_generation_as_authorized_evide
     assert "TECHNICAL-METADATA-EVIDENCE" in generated_contexts[0].document_metadata_evidence
     assert generated_contexts[0].late_make_file_attempts == 1
     assert result["tools_used"] == ["make_file"]
+    assert len(result["files"]) == 1
+    assert [call["filename"] for call in late_calls] == ["metadata-export"]
+
+
+@pytest.mark.asyncio
+async def test_compound_attachment_file_effect_retains_agentic_route(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    source = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "Проверяемые реквизиты",
+        filename="source.odt",
+    )
+    runtime = AgentRuntime(replace(settings, verify_answers=False), storage, llm=_EnabledButUnusedLLM())
+    agentic_calls: list[tuple[str, set[str]]] = []
+    base_definitions = runtime.kernel.get_tool_definitions
+
+    def definitions(actor, topic=None):  # noqa: ANN001
+        return [
+            *base_definitions(actor, topic=topic),
+            {
+                "type": "function",
+                "function": {
+                    "name": "synthetic_other_effect",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+        ]
+
+    async def prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
+        del message, kwargs
+        return AgentContext(conversation_id=conversation_id, user_id=user_id, person_id="alice")
+
+    async def agentic(context, message, actor, tools, attachments, **kwargs):  # noqa: ANN001
+        del context, actor, attachments, kwargs
+        agentic_calls.append(
+            (
+                str(message),
+                {
+                    str((item.get("function") or {}).get("name") or "")
+                    for item in tools
+                    if isinstance(item, dict)
+                },
+            )
+        )
+        return {"content": "Составной запрос остался на agentic-маршруте.", "tools_used": []}
+
+    async def forbidden_generate(*args, **kwargs):  # noqa: ANN001
+        del args, kwargs
+        raise AssertionError("a compound effect was projected as a tool-free file turn")
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_agentic_loop", agentic)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
+    monkeypatch.setattr(runtime.kernel, "get_tool_definitions", definitions)
+    message = (
+        "Создай Word-файл metadata-export.docx по процитированному документу "
+        "и напомни мне об этом завтра в 09:00."
+    )
+
+    assert _supported_direct_attachment_file_only_request(message) is False
+    await runtime.chat(
+        "alice",
+        message,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="telegram-bridge"),
+        attachments=[{"raw_object_id": source.id}],
+        enable_tools=True,
+        quoted_attachment_reference=True,
+    )
+
+    assert len(agentic_calls) == 1
+    assert agentic_calls[0][1]
 
 
 @pytest.mark.parametrize(
