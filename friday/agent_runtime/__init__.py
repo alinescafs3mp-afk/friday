@@ -10419,7 +10419,8 @@ def _attachment_query_anchors(message: str, terms: tuple[str, ...]) -> tuple[str
         return bool(
             token.casefold() in _CONTENT_FILE_SUFFIXES
             and re.search(
-                r"\b(?:из|в|во|по|для|from|in|for)\s*\Z",
+                r"\b(?:из|в|во|по|для|from|in|for)\s+"
+                r"(?:(?:файл|документ|формат|file|document|format)\w*\s+)?\Z",
                 qualifier_prefix,
                 re.IGNORECASE,
             )
@@ -10435,27 +10436,25 @@ def _attachment_query_anchors(message: str, terms: tuple[str, ...]) -> tuple[str
         admit(" ".join(quoted.split()), explicit=True)
     for matched in _ATTACHMENT_QUERY_ADDRESS.finditer(visible):
         admit(matched.group(0), explicit=True)
-    # Once the person supplied an explicit quoted/address body target, it is the
-    # complete set of anchors allowed to prove absence.  Nearby uppercase words
-    # commonly describe the selected carrier (ODT/PDF/TXT) or answer shape; they
-    # remain optional ranking terms but cannot erase valid windows from every
-    # selected file merely because the carrier name is absent from its body.
-    if anchors:
-        return tuple(anchors[:3])
     for matched in _ATTACHMENT_QUERY_TOKEN.finditer(visible):
         token = matched.group(0)
         # ``из ODT`` / ``в PDF`` identifies which already-authorised source a
         # field belongs to; it is not a claim that the letters ODT/PDF occur in
         # the body.  Keep the term useful for ranking if it really occurs, but
         # never let this closed source qualifier prove a body-wide absence.
-        if source_qualifier(matched):
+        # With an explicit quoted field, a bare known extension is far more
+        # likely the selected carrier than a second body literal regardless of
+        # the surrounding grammar (``из ODT``, ``в документе ODT``, ``ODT
+        # документ``). A real format string can still be requested explicitly
+        # by quoting it. Machine identifiers such as CASE-404 remain required.
+        if source_qualifier(matched) or (anchors and token.casefold() in _CONTENT_FILE_SUFFIXES):
             continue
         if any(char.isdigit() for char in token) or token[1:].isupper():
             admit(token)
 
     tokens = list(_ATTACHMENT_QUERY_TOKEN.finditer(visible))
     for index, matched in enumerate(tokens):
-        if source_qualifier(matched):
+        if source_qualifier(matched) or (anchors and matched.group(0).casefold() in _CONTENT_FILE_SUFFIXES):
             continue
         token = matched.group(0)
         normalised = _normalise_attachment_query_term(token)

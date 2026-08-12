@@ -786,6 +786,24 @@ def test_multi_file_field_labels_are_body_targets_but_format_names_are_source_qu
     assert stopword_state.status == "matched"
     assert "инженер" in str(quoted_stopword[0]["transient_text"])
 
+    # A quoted field label does not displace an independent machine identity.
+    # The wrong record must still close as absent after the complete owned scan.
+    _wrong_record, wrong_record_state = _project_attachments_for_request(
+        "Найди «Контрольное поле» для CASE-404 в документе ODT.",
+        [
+            _OwnedAttachment(
+                {
+                    "filename": "cases.odt",
+                    "transient_text": "Контрольное поле: OTHER\n",
+                    "extraction_success": True,
+                    "verification_eligible": True,
+                }
+            )
+        ],
+    )
+    assert wrong_record_state.status == "not_found"
+    assert wrong_record_state.scan_complete is True
+
 
 def test_two_distant_matches_are_both_retained_with_exact_source_offsets(
     settings: Any,
