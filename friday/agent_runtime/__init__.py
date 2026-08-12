@@ -402,13 +402,13 @@ def _clone_resolved_telegram_reply_attachment(
     if authority is not None:
         object.__setattr__(cloned, _HISTORICAL_DIRECT_READ_AUTHORITY_ATTR, authority)
         object.__setattr__(cloned, _TELEGRAM_REPLY_UPLOADER_ATTR, authority.uploaded_by)
-        return cloned
+        return _retain_file_evidence_stamp(item, cloned)
     object.__setattr__(
         cloned,
         _TELEGRAM_REPLY_UPLOADER_ATTR,
         str(getattr(item, _TELEGRAM_REPLY_UPLOADER_ATTR, "") or ""),
     )
-    return cloned
+    return _retain_file_evidence_stamp(item, cloned)
 
 
 def _historical_direct_read_authority_of(
@@ -560,7 +560,37 @@ def _private_owned_attachment_copy(
     else:
         carrier = _OwnedAttachment(value)
     carrier = cast(_OwnedAttachment, _retain_historical_direct_read_authority(source, carrier))
-    return cast(_OwnedAttachment, _retain_explicit_filename_direct_read(source, carrier))
+    carrier = cast(_OwnedAttachment, _retain_explicit_filename_direct_read(source, carrier))
+    return cast(_OwnedAttachment, _retain_file_evidence_stamp(source, carrier))
+
+
+def _withhold_nonverifiable_attachment(item: Any) -> Any:
+    """Strip a non-verifiable body and restamp; keep carrier kind and authority."""
+
+    if not isinstance(item, Mapping):
+        return item
+    withheld = dict(item)
+    withheld["transient_text"] = ""
+    withheld["extraction_success"] = False
+    withheld["verification_eligible"] = False
+    withheld.pop("empty_text", None)
+    withheld.pop("_source_readable", None)
+    if is_trusted_office_attachment(item):
+        carrier: Any = trusted_office_attachment(withheld)
+    elif isinstance(item, _ProjectedAttachment):
+        carrier = _ProjectedAttachment(withheld)
+    elif isinstance(item, _WorkspaceInboxAttachment):
+        carrier = _WorkspaceInboxAttachment(withheld)
+    elif isinstance(item, _OwnedAttachment):
+        carrier = _OwnedAttachment(withheld)
+    else:
+        return withheld
+    carrier = _retain_historical_direct_read_authority(item, carrier)
+    carrier = _retain_explicit_filename_direct_read(item, carrier)
+    view = _build_file_evidence_view(carrier)
+    if view is not None and _carrier_matches_evidence_view(carrier, view):
+        _stamp_file_evidence(carrier, view)
+    return carrier
 
 
 class _WorkspaceInboxAttachment(dict[str, Any]):
@@ -677,6 +707,9 @@ def _stamp_file_evidence(item: Any, view: FileEvidenceView) -> Any:
     """Attach evidence only on process-private attachment carriers."""
 
     if not _private_file_evidence_carrier(item):
+        return item
+    item_raw = str(item.get("raw_object_id") or "") or None
+    if view.raw_id != item_raw:
         return item
     object.__setattr__(item, _FILE_EVIDENCE_ATTR, view)
     return item
@@ -886,7 +919,14 @@ def _projected_attachment_from_source(
         _retain_explicit_filename_direct_read(source, projected),
     )
     source_view = _file_evidence_view_of(source)
-    if source_view is not None:
+    dest_raw = str(projected.get("raw_object_id") or "") or None
+    source_raw = str(source.get("raw_object_id") or "") or None if isinstance(source, Mapping) else None
+    if (
+        source_view is not None
+        and _carrier_matches_evidence_view(source, source_view)
+        and dest_raw == source_raw
+        and dest_raw == source_view.raw_id
+    ):
         _stamp_file_evidence(projected, _derive_projected_evidence_view(source_view, projected))
     return projected
 
@@ -895,7 +935,12 @@ def _retain_file_evidence_stamp(source: Any, carrier: Any) -> Any:
     """Copy an existing stamp onto a same-identity private re-wrap (no rebuild)."""
 
     source_view = _file_evidence_view_of(source)
-    if source_view is not None and _private_file_evidence_carrier(carrier):
+    if (
+        source_view is not None
+        and _private_file_evidence_carrier(carrier)
+        and _carrier_matches_evidence_view(source, source_view)
+        and _carrier_matches_evidence_view(carrier, source_view)
+    ):
         _stamp_file_evidence(carrier, source_view)
     return carrier
 
@@ -905,19 +950,166 @@ def _file_evidence_set_from_attachments(
     *,
     expected_count: int,
 ) -> FileEvidenceSet | None:
-    """Return a set only when every item already carries a stamped FileEvidenceView.
+    """Return a set only from already-stamped private views of the exact set.
 
-    No lazy build from dictionary flags.  Ordinary API dicts and unstamped
-    private carriers yield ``None`` so the legacy lattice remains authority.
+    No lazy build from dictionary flags. Any unstamped member, identity
+    mismatch, or a cardinality mismatch closes the whole set (``None``);
+    terminals then report 0/False.
     """
 
     views: list[FileEvidenceView] = []
     for item in attachments:
         view = _file_evidence_view_of(item)
-        if view is None:
+        if view is None or not _carrier_matches_evidence_view(item, view):
             return None
         views.append(view)
-    return FileEvidenceSet(items=tuple(views), expected_count=max(0, int(expected_count or 0)))
+    expected = max(0, int(expected_count or 0))
+    if len(views) != expected:
+        return None
+    return FileEvidenceSet(items=tuple(views), expected_count=expected)
+
+
+def _file_evidence_set_public_metrics(
+    evidence_set: FileEvidenceSet | None,
+) -> tuple[int, bool, bool, bool]:
+    """Public readable/context/coverage/verification from one closed set."""
+
+    if evidence_set is None:
+        return 0, False, False, False
+    return (
+        evidence_set.source_readable_count,
+        evidence_set.context_complete,
+        evidence_set.coverage_complete,
+        evidence_set.verification_complete,
+    )
+
+
+def _empty_source_evidence_set(evidence_set: FileEvidenceSet | None) -> bool:
+    """True only when every aligned source view is a complete EMPTY body."""
+
+    if evidence_set is None or not evidence_set.context_complete:
+        return False
+    return all(
+        view.body_kind == FileBodyKind.EMPTY
+        and view.source_complete
+        and view.verification_eligible
+        and view.source_readable
+        for view in evidence_set.items
+    )
+
+
+def _carrier_matches_evidence_view(item: Any, view: FileEvidenceView | None) -> bool:
+    """Raw identity alignment between a private carrier and its closed view."""
+
+    if view is None or not _private_file_evidence_carrier(item):
+        return False
+    item_raw = str(item.get("raw_object_id") or "") or None
+    return view.raw_id == item_raw
+
+
+def _metadata_view_admits(item: Any, view: FileEvidenceView | None) -> bool:
+    """Durable metadata may render only from a readable registered view."""
+
+    if view is None or not _carrier_matches_evidence_view(item, view):
+        return False
+    if not (isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item)):
+        return False
+    if not view.source_readable:
+        return False
+    item_raw = str(item.get("raw_object_id") or "") or None
+    if not item_raw:
+        return False
+    return view.registration == FileRegistrationKind.VALID and view.disk_verified and view.raw_id == item_raw
+
+
+def _metadata_set_admitted(
+    attachments: Sequence[Any],
+    evidence_set: FileEvidenceSet | None,
+) -> bool:
+    """All-or-none metadata/details admission for one selected source set."""
+
+    if evidence_set is None:
+        return False
+    if (
+        len(evidence_set.items) != len(attachments)
+        or len(evidence_set.items) != evidence_set.expected_count
+        or evidence_set.expected_count <= 0
+    ):
+        return False
+    return all(
+        _metadata_view_admits(item, view) for item, view in zip(attachments, evidence_set.items, strict=True)
+    )
+
+
+def _metadata_terminal_evidence_set(
+    attachments: Sequence[Any],
+    evidence_set: FileEvidenceSet | None,
+) -> FileEvidenceSet | None:
+    """Metadata-owned terminal: the exact source set, or closed None.
+
+    None publishes readable=0 / false flags via public metrics while the
+    caller keeps the original expected cardinality. Do not mint an empty
+    FileEvidenceSet(expected=0).
+    """
+
+    return evidence_set if _metadata_set_admitted(attachments, evidence_set) else None
+
+
+def _aligned_terminal_carriers(
+    carriers: Sequence[Any],
+    evidence_set: FileEvidenceSet | None,
+) -> list[Any]:
+    """Carriers that still match the selected terminal set, else none."""
+
+    if evidence_set is None or len(carriers) != len(evidence_set.items):
+        return []
+    aligned = [
+        item
+        for item, view in zip(carriers, evidence_set.items, strict=True)
+        if _carrier_matches_evidence_view(item, view)
+    ]
+    return aligned if len(aligned) == len(carriers) else []
+
+
+def _query_closed_answer_from_projected_set(
+    evidence_set: FileEvidenceSet | None,
+    projection: AttachmentRequestProjection,
+    *,
+    expected_count: int,
+    carriers: Sequence[Any],
+) -> str:
+    """Admit NOT_FOUND/UNKNOWN only from an aligned projected FileEvidenceSet."""
+
+    if evidence_set is None:
+        return ""
+    expected = max(0, int(expected_count or 0))
+    if (
+        expected <= 0
+        or evidence_set.expected_count != expected
+        or len(evidence_set.items) != expected
+        or len(carriers) != expected
+    ):
+        return ""
+    if not all(
+        _carrier_matches_evidence_view(item, view)
+        for item, view in zip(carriers, evidence_set.items, strict=True)
+    ):
+        return ""
+    if not all(view.projection_applied for view in evidence_set.items):
+        return ""
+    status = projection.status
+    if status == "not_found":
+        if projection.scan_complete and all(
+            view.source_complete and view.source_readable for view in evidence_set.items
+        ):
+            return _ATTACHMENT_QUERY_NOT_FOUND
+        return ""
+    if status == "unknown" and (
+        not projection.scan_complete
+        or any(not view.source_complete or not view.source_readable for view in evidence_set.items)
+    ):
+        return _ATTACHMENT_QUERY_UNKNOWN
+    return ""
 
 
 @dataclass(frozen=True)
@@ -9013,14 +9205,26 @@ def _shown_document_metadata_value(name: str, value: Any) -> str:
     return str(value)
 
 
-def _document_metadata_answer(attachments: Sequence[Mapping[str, Any]]) -> str:
+def _document_metadata_answer(
+    attachments: Sequence[Mapping[str, Any]],
+    *,
+    evidence_set: FileEvidenceSet | None = None,
+) -> str:
     """Render the authoritative native/header block of authorised metadata."""
+
+    if evidence_set is not None and not _metadata_set_admitted(attachments, evidence_set):
+        return ""
 
     rendered_lines: list[str] = []
     rendered_chars = 0
     omitted_lines = max(0, len(attachments) - _CONVERSATION_ATTACHMENT_MAX_FILES)
     technical_incomplete = bool(omitted_lines)
     body_limit = 15_300
+    paired: Sequence[tuple[Mapping[str, Any], FileEvidenceView | None]]
+    if evidence_set is None:
+        paired = [(item, None) for item in attachments]
+    else:
+        paired = list(zip(attachments, evidence_set.items, strict=True))
 
     def append_line(line: str) -> None:
         nonlocal omitted_lines, rendered_chars
@@ -9031,11 +9235,13 @@ def _document_metadata_answer(attachments: Sequence[Mapping[str, Any]]) -> str:
         rendered_lines.append(line)
         rendered_chars += added
 
-    for item in attachments[:_CONVERSATION_ATTACHMENT_MAX_FILES]:
+    for item, view in paired[:_CONVERSATION_ATTACHMENT_MAX_FILES]:
         if not (isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item)):
             # JSON callers can manufacture an ordinary mapping, including all
             # public-looking metadata keys.  Only a process-private attachment
             # minted after storage/uploader authorization may own this answer.
+            continue
+        if view is not None and not _carrier_matches_evidence_view(item, view):
             continue
         stored = item.get(_OWNED_SAFE_DOCUMENT_METADATA)
         if not isinstance(stored, Mapping):
@@ -11972,6 +12178,8 @@ def _attachment_display_filename(value: Any) -> str:
 def _last_attachment_item_answer(
     message: str,
     attachments: Sequence[Mapping[str, Any]],
+    *,
+    evidence_set: FileEvidenceSet | None = None,
 ) -> str:
     """Return one exact final item from one complete authenticated source.
 
@@ -11985,17 +12193,27 @@ def _last_attachment_item_answer(
 
     if not _ATTACHMENT_LAST_ITEM_REQUEST.search(_classification_text(message)):
         return ""
-    if len(attachments) != 1:
+    if (
+        evidence_set is None
+        or evidence_set.expected_count != 1
+        or len(evidence_set.items) != 1
+        or len(attachments) != 1
+    ):
         return (
             "Не удалось однозначно определить один файл для запроса о последнем пункте. "
             "Укажите точное имя файла."
         )
     item = attachments[0]
+    view = evidence_set.items[0]
     if not (
         (isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item))
-        and item.get("_registered_file_bytes_verified") is True
-        and _attachment_has_verifiable_content(item)
-        and _attachment_source_complete(item)
+        and _carrier_matches_evidence_view(item, view)
+        and view.registration == FileRegistrationKind.VALID
+        and view.disk_verified
+        and view.body_kind == FileBodyKind.EXTRACTED
+        and view.source_readable
+        and view.source_complete
+        and view.verification_eligible
     ):
         return (
             "Последний пункт определить надёжно не удалось: полный текст выбранного файла сейчас недоступен."
@@ -12199,11 +12417,6 @@ def _registered_upload_receipt_answer(
         )
 
     aligned = evidence_set
-    if aligned is None:
-        aligned = _file_evidence_set_from_attachments(
-            attachments,
-            expected_count=expected_count,
-        )
     views: tuple[FileEvidenceView | None, ...]
     if aligned is not None and len(aligned.items) == len(attachments):
         views = tuple(aligned.items)
@@ -19193,9 +19406,9 @@ class AgentRuntime:
             if canonical is None:
                 hydrated.append(item)
                 continue
-            canonical = _retain_historical_direct_read_authority(item, canonical)
-            canonical = _retain_explicit_filename_direct_read(item, canonical)
-            stored = canonical.get(_OWNED_SAFE_DOCUMENT_METADATA)
+            stored = item.get(_OWNED_SAFE_DOCUMENT_METADATA)
+            if not isinstance(stored, Mapping):
+                stored = canonical.get(_OWNED_SAFE_DOCUMENT_METADATA)
             safe = _safe_document_metadata_projection(stored) if isinstance(stored, Mapping) else {}
             safe_format = str(safe.get("format") or "")
             schema_version = safe.get("metadata_schema_version")
@@ -19204,11 +19417,8 @@ class AgentRuntime:
                 and schema_version == TECHNICAL_METADATA_SCHEMA_VERSION
                 and safe.get(TECHNICAL_METADATA_TEXT_CODEC_FIELD) == TECHNICAL_METADATA_TEXT_CODEC_VERSION
             )
-            if metadata_current:
-                hydrated.append(canonical)
-                continue
-            if not _RAW_OBJECT_ID_RE.fullmatch(raw_id):
-                hydrated.append(canonical)
+            if metadata_current or not _RAW_OBJECT_ID_RE.fullmatch(raw_id):
+                hydrated.append(item)
                 continue
             try:
                 authorized = await run_blocking(
@@ -19230,53 +19440,69 @@ class AgentRuntime:
                     metadata_only=True,
                 )
             except (AuthorizedFileReadError, FileRecordUnavailable, TypeError, ValueError):
-                hydrated.append(canonical)
+                hydrated.append(item)
                 continue
             except Exception as exc:  # noqa: BLE001 - optional legacy hydration fails closed
                 LOGGER.warning(
                     "On-demand document metadata inspection failed (%s)",
                     type(exc).__name__,
                 )
-                hydrated.append(canonical)
+                hydrated.append(item)
                 continue
 
             # File privacy can change while the bounded parser runs.  Require
             # the exact uploader-owned row again before admitting header data.
-            canonical = self._owned_file_attachment(
-                raw_id,
-                tenant_id=tenant_id,
-                person_id=attachment_uploader,
-                direct_read_authority=direct_read_authority,
-                historical_authority=_historical_direct_read_authority_of(item),
-            )
+            if (
+                self._owned_file_attachment(
+                    raw_id,
+                    tenant_id=tenant_id,
+                    person_id=attachment_uploader,
+                    direct_read_authority=direct_read_authority,
+                    historical_authority=_historical_direct_read_authority_of(item),
+                )
+                is None
+            ):
+                hydrated.append(item)
+                continue
             header = inspected.get("_document_metadata") if isinstance(inspected, Mapping) else None
             projected_header = (
                 _safe_document_metadata_projection(header) if isinstance(header, Mapping) else {}
             )
-            if canonical is None or not projected_header:
-                hydrated.append(item if canonical is None else canonical)
+            if not projected_header:
+                hydrated.append(item)
                 continue
-            canonical = _retain_historical_direct_read_authority(item, canonical)
-            canonical = _retain_explicit_filename_direct_read(item, canonical)
-            canonical_stored = canonical.get(_OWNED_SAFE_DOCUMENT_METADATA)
-            canonical_safe = _safe_document_metadata_projection(
-                canonical_stored if isinstance(canonical_stored, Mapping) else canonical
+            original_stored = item.get(_OWNED_SAFE_DOCUMENT_METADATA)
+            original_safe = _safe_document_metadata_projection(
+                original_stored if isinstance(original_stored, Mapping) else {}
             )
-            merged = {**canonical_safe, **projected_header}
-            # Filename/MIME/size belong to the authorized durable envelope, not
-            # to an embedded header which may disagree with it.
+            merged = {**original_safe, **projected_header}
             for envelope_key in ("filename", "mime_type", "format", "size_bytes"):
-                if envelope_key in canonical_safe:
-                    merged[envelope_key] = canonical_safe[envelope_key]
-            recovered = dict(canonical)
+                if envelope_key in original_safe:
+                    merged[envelope_key] = original_safe[envelope_key]
+            recovered = dict(item)
             recovered[_OWNED_SAFE_DOCUMENT_METADATA] = merged
-            hydrated.append(_private_owned_attachment_copy(recovered, source=canonical))
+            if item.get("_registered_file_bytes_verified") is True:
+                recovered["_registered_file_bytes_verified"] = True
+            if is_trusted_office_attachment(item):
+                carrier: Any = trusted_office_attachment(recovered)
+            elif isinstance(item, _ProjectedAttachment):
+                carrier = _ProjectedAttachment(recovered)
+            elif isinstance(item, _WorkspaceInboxAttachment):
+                carrier = _WorkspaceInboxAttachment(recovered)
+            else:
+                carrier = _private_owned_attachment_copy(recovered, source=item)
+            carrier = _retain_historical_direct_read_authority(item, carrier)
+            carrier = _retain_explicit_filename_direct_read(item, carrier)
+            carrier = _retain_file_evidence_stamp(item, carrier)
+            hydrated.append(carrier)
         return hydrated
 
     async def _document_content_details_answer(
         self,
         context: AgentContext,
         attachments: list[dict[str, Any]],
+        *,
+        evidence_set: FileEvidenceSet | None = None,
     ) -> str:
         """Extract formal details as exact quotes from authorised parsed text.
 
@@ -19286,21 +19512,42 @@ class AgentRuntime:
         canonical chunk and owns all coverage/provenance fields.
         """
 
-        owned_sources = [
-            item
-            for item in attachments[:_CONVERSATION_ATTACHMENT_MAX_FILES]
-            if isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item)
-        ]
+        if evidence_set is not None and not _metadata_set_admitted(attachments, evidence_set):
+            return ""
+        if evidence_set is None:
+            owned_sources = [
+                item
+                for item in attachments[:_CONVERSATION_ATTACHMENT_MAX_FILES]
+                if isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item)
+            ]
+        else:
+            owned_sources = [
+                item
+                for item, view in zip(attachments, evidence_set.items, strict=True)
+                if (isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item))
+                and _carrier_matches_evidence_view(item, view)
+                and view.source_readable
+            ][:_CONVERSATION_ATTACHMENT_MAX_FILES]
         (
             chunks,
             _manifests,
-            files_total,
-            files_readable,
-            source_complete,
+            plan_files_total,
+            plan_files_readable,
+            plan_source_complete,
             chunks_required,
             _source_chars_total,
             _source_chars_planned,
         ) = _attachment_whole_source_plan(owned_sources)
+        if evidence_set is not None:
+            files_total = evidence_set.expected_count
+            files_readable = min(evidence_set.source_readable_count, plan_files_readable)
+            source_complete = bool(
+                all(view.source_complete for view in evidence_set.items) and plan_source_complete
+            )
+        else:
+            files_total = plan_files_total
+            files_readable = plan_files_readable
+            source_complete = plan_source_complete
         chunks_planned = len(chunks)
         records: list[DocumentDetailEvidence] = []
         processed = 0
@@ -21527,10 +21774,8 @@ class AgentRuntime:
         supplied_attachments = [
             _clone_resolved_telegram_reply_attachment(item)
             if isinstance(item, _ResolvedTelegramReplyAttachment)
-            else trusted_office_attachment(item)
-            if is_trusted_office_attachment(item)
-            else _OwnedAttachment(item)
-            if isinstance(item, _OwnedAttachment)
+            else _private_owned_attachment_copy(item, source=item)
+            if isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item)
             else dict(item)
             for item in (attachments or [])
             if isinstance(item, dict)
@@ -22148,16 +22393,6 @@ class AgentRuntime:
                 tenant_id=tenant_id,
                 person_id=person_id,
             )
-        document_metadata_answer = (
-            _document_metadata_answer(active_attachment_set)
-            if document_metadata_scope in {"both", "technical"}
-            else (
-                "Не удалось определить доступный выбранный документ. "
-                "Укажите точное имя ранее загруженного файла."
-                if document_metadata_scope == "details" and not active_attachment_set
-                else ""
-            )
-        )
         # Non-verifiable bodies: keep advisory OCR/transcription for same-turn
         # synthesis (with the existing prompt caveat), but strip provenance stubs
         # and empty failed extractions so they cannot fake readable evidence.
@@ -22169,21 +22404,41 @@ class AgentRuntime:
             body = str(item.get("transient_text") or "")
             if item.get("advisory_only") is True and body.strip() and not _is_file_provenance_stub(body):
                 continue
-            withheld = dict(item)
-            withheld["transient_text"] = ""
-            withheld["extraction_success"] = False
-            withheld.pop("empty_text", None)
-            withheld_carrier = (
-                trusted_office_attachment(withheld)
-                if is_trusted_office_attachment(item)
-                else _OwnedAttachment(withheld)
-                if isinstance(item, _OwnedAttachment)
-                else withheld
+            active_attachment_set[position] = _withhold_nonverifiable_attachment(item)
+        attachment_expected_count = (
+            1
+            if workspace_inbox_resolution.attachment is not None
+            else 0
+            if workspace_inbox_request is not None
+            else min(restored_attachment_expected_count, 100)
+            if selector_replaces_current
+            else min(selected_expected_count, 100)
+            if restore_prior_for_current_multi
+            else min(supplied_attachment_count, 100)
+            if supplied_attachment_count
+            else max(replay_attachment_count, restored_attachment_expected_count)
+            if replay_source_message_id
+            else restored_attachment_expected_count
+        )
+        active_source_evidence_set = _file_evidence_set_from_attachments(
+            active_attachment_set,
+            expected_count=attachment_expected_count,
+        )
+        document_metadata_answer = (
+            _document_metadata_answer(
+                active_attachment_set,
+                evidence_set=active_source_evidence_set,
             )
-            active_attachment_set[position] = _retain_historical_direct_read_authority(
-                item,
-                withheld_carrier,
+            if document_metadata_scope in {"both", "technical"} and active_source_evidence_set is not None
+            else (
+                "Не удалось определить доступный выбранный документ. "
+                "Укажите точное имя ранее загруженного файла."
+                if document_metadata_scope == "details"
+                and not active_attachment_set
+                and active_source_evidence_set is not None
+                else ""
             )
+        )
         whole_document_task = (
             ""
             if document_metadata_owned
@@ -22213,31 +22468,14 @@ class AgentRuntime:
                 )
             )
         )
-        # Source loss belongs to the authorised extractor result, before the
-        # request projector reuses ``text_truncated`` to describe a bounded
-        # prompt view.  A complete 20 KB DOCX may be clipped for one prompt and
-        # still be fully available to hierarchy/search; that is not a partial
-        # parse and must not produce the source-loss warning.
-        attachment_has_unread_tail = bool(not document_metadata_owned) and any(
-            item.get(flag) is True
-            for item in active_attachment_set
-            if isinstance(item, Mapping)
-            for flag in (
-                "text_truncated",
-                "extraction_truncated",
-                "rows_truncated",
-                "archive_truncated",
-                "source_truncated_for_parse",
-                "parse_deadline_reached",
-                "parse_pages_truncated",
-            )
-        )
         if document_metadata_owned:
             # Metadata is a header-only read.  Do not project body text, OCR a
             # scan, build a hierarchy, retrieve ambient context or hand any
             # document value to a model merely to print an allowlisted header.
+            # Source evidence stays on active_attachment_set / source set.
             attachments = []
             attachment_request_projection = AttachmentRequestProjection()
+            projected_evidence_set = None
         else:
             attachments, attachment_request_projection = _project_attachments_for_request(
                 attachment_task_message,
@@ -22268,125 +22506,64 @@ class AgentRuntime:
                     person_id=attachment_authority_person,
                     require_projected_direct_read_authority=True,
                 )
-        attachment_expected_count = (
-            1
-            if workspace_inbox_resolution.attachment is not None
-            else 0
-            if workspace_inbox_request is not None
-            else min(restored_attachment_expected_count, 100)
-            if selector_replaces_current
-            else min(selected_expected_count, 100)
-            if restore_prior_for_current_multi
-            else min(supplied_attachment_count, 100)
-            if supplied_attachment_count
-            else max(replay_attachment_count, restored_attachment_expected_count)
-            if replay_source_message_id
-            else restored_attachment_expected_count
+            projected_evidence_set = _file_evidence_set_from_attachments(
+                attachments,
+                expected_count=attachment_expected_count,
+            )
+        empty_attachment_answer = _empty_source_evidence_set(active_source_evidence_set)
+        last_attachment_item_answer = (
+            _last_attachment_item_answer(
+                clean_message,
+                active_attachment_set,
+                evidence_set=active_source_evidence_set,
+            )
+            if not unsupported_host_path_request
+            and not file_access_denied
+            and not attachment_resolution_failed
+            else ""
         )
-        empty_attachment_answer = bool(
-            attachment_expected_count
-            and attachment_expected_count <= _CONVERSATION_ATTACHMENT_MAX_FILES
-            and len(attachments) == attachment_expected_count
-            and all(item.get("empty_text") is True for item in attachments)
+        synthetic_notice_owns_terminal = bool(
+            synthetic_document_notice
+            and not unsupported_host_path_request
+            and not file_access_denied
+            and not attachment_resolution_failed
         )
-        attachment_evidence = _attachment_evidence_chunks(attachments)
+        uses_source_terminal = bool(
+            synthetic_notice_owns_terminal
+            or document_metadata_owned
+            or empty_attachment_answer
+            or last_attachment_item_answer
+        )
+        if document_metadata_owned:
+            terminal_evidence_set = _metadata_terminal_evidence_set(
+                active_attachment_set,
+                active_source_evidence_set,
+            )
+            terminal_carriers: Sequence[Any] = (
+                active_attachment_set if terminal_evidence_set is not None else ()
+            )
+        elif uses_source_terminal:
+            terminal_evidence_set = active_source_evidence_set
+            terminal_carriers = active_attachment_set
+        else:
+            terminal_evidence_set = projected_evidence_set
+            terminal_carriers = attachments
+        (
+            attachment_readable_count,
+            attachment_context_complete,
+            attachment_coverage_complete,
+            attachment_verification_complete,
+        ) = _file_evidence_set_public_metrics(terminal_evidence_set)
+        attachment_evidence = _attachment_evidence_chunks(
+            _aligned_terminal_carriers(terminal_carriers, terminal_evidence_set)
+        )
         if document_metadata_evidence_requested and document_metadata_answer:
             attachment_evidence = [
                 {"tool": "attachment", "output": document_metadata_answer},
                 *attachment_evidence,
             ][:_ATTACHMENT_EVIDENCE_MAX_CHUNKS]
-        # Legacy lattice (kept for dual-write equality with FileEvidenceSet).
-        legacy_attachment_readable_count = sum(
-            1
-            for item in attachments
-            if (
-                _projected_source_is_readable(item)
-                or (
-                    _attachment_has_readable_content(item)
-                    and not (
-                        isinstance(item, _ProjectedAttachment)
-                        and item.get("_request_projection_applied") is True
-                    )
-                    and (
-                        bool(str(item.get("transient_text") or "").strip())
-                        or item.get("_office_prompt_available") is True
-                        or item.get("empty_text") is True
-                    )
-                )
-            )
-        )
-        legacy_attachment_context_complete = bool(
-            attachment_expected_count
-            and attachment_expected_count <= _CONVERSATION_ATTACHMENT_MAX_FILES
-            and legacy_attachment_readable_count == attachment_expected_count
-        )
-        legacy_attachment_coverage_complete = bool(
-            legacy_attachment_context_complete
-            and all(
-                (
-                    (
-                        item.get("_office_index_complete") is True
-                        and item.get("_office_prompt_complete") is True
-                    )
-                    if item.get("_office_structured") is True
-                    else item.get("_source_text_complete") is True
-                    if item.get("_request_projection_applied") is True
-                    else (
-                        item.get("extraction_success", True) is not False
-                        and not item.get("text_truncated")
-                        and not item.get("extraction_truncated")
-                        and not item.get("rows_truncated")
-                        and not item.get("archive_truncated")
-                        and not item.get("source_truncated_for_parse")
-                        and not item.get("parse_deadline_reached")
-                        and not item.get("parse_pages_truncated")
-                    )
-                )
-                for item in attachments
-            )
-        )
-        legacy_attachment_verification_complete = bool(
-            legacy_attachment_coverage_complete
-            and sum(
-                1
-                for item in attachments
-                if (
-                    (_projected_source_is_readable(item) and item.get("_source_text_complete") is True)
-                    or (
-                        _attachment_has_verifiable_content(item)
-                        and not (
-                            isinstance(item, _ProjectedAttachment)
-                            and item.get("_request_projection_applied") is True
-                        )
-                        and (
-                            bool(str(item.get("transient_text") or "").strip())
-                            or item.get("_office_prompt_available") is True
-                            or item.get("empty_text") is True
-                        )
-                    )
-                )
-                and item.get("verification_eligible", True) is not False
-            )
-            == attachment_expected_count
-        )
-        # CS1: prefer process-private FileEvidenceSet when every item is stamped.
-        evidence_set = _file_evidence_set_from_attachments(
-            attachments,
-            expected_count=attachment_expected_count,
-        )
-        if evidence_set is not None:
-            attachment_readable_count = evidence_set.source_readable_count
-            attachment_context_complete = evidence_set.context_complete
-            attachment_coverage_complete = evidence_set.coverage_complete
-            attachment_verification_complete = evidence_set.verification_complete
-        else:
-            attachment_readable_count = legacy_attachment_readable_count
-            attachment_context_complete = legacy_attachment_context_complete
-            attachment_coverage_complete = legacy_attachment_coverage_complete
-            attachment_verification_complete = legacy_attachment_verification_complete
-
         multi_attachment_incomplete = bool(
-            not document_metadata_owned
+            not uses_source_terminal
             and multi_attachment_requested_count is not None
             and (
                 attachment_expected_count != multi_attachment_requested_count
@@ -22402,36 +22579,13 @@ class AgentRuntime:
             if multi_attachment_incomplete and multi_attachment_requested_count is not None
             else ""
         )
-        # A bare-upload receipt renders the verified source carriers themselves,
-        # not their bounded prompt projections. Keep its evidence set on that
-        # exact post-disk-verify sequence: projection clipping must neither
-        # downgrade a complete source nor authorize a different body carrier.
-        synthetic_upload_receipt_evidence_set = (
-            _file_evidence_set_from_attachments(
-                active_attachment_set,
-                expected_count=attachment_expected_count,
-            )
-            if synthetic_document_notice
-            else None
-        )
         synthetic_upload_receipt_answer = (
             _registered_upload_receipt_answer(
                 active_attachment_set,
                 expected_count=attachment_expected_count,
-                evidence_set=synthetic_upload_receipt_evidence_set,
+                evidence_set=active_source_evidence_set,
             )
-            if synthetic_document_notice
-            and not unsupported_host_path_request
-            and not file_access_denied
-            and not attachment_resolution_failed
-            else ""
-        )
-        last_attachment_item_answer = (
-            _last_attachment_item_answer(clean_message, active_attachment_set)
-            if not unsupported_host_path_request
-            and not file_access_denied
-            and not attachment_resolution_failed
-            and not multi_attachment_incomplete
+            if synthetic_notice_owns_terminal
             else ""
         )
         attachment_resolution_failed_answer = (
@@ -22456,30 +22610,50 @@ class AgentRuntime:
         named_person_corpus_closed_answer, named_person_corpus_notice = _named_person_corpus_messages(
             named_person_corpus
         )
-        attachment_query_closed_answer = (
-            _ATTACHMENT_QUERY_NOT_FOUND
-            if attachment_request_projection.status == "not_found"
-            else _ATTACHMENT_QUERY_UNKNOWN
-            if attachment_request_projection.status == "unknown"
-            else ""
+        attachment_query_closed_answer = _query_closed_answer_from_projected_set(
+            projected_evidence_set,
+            attachment_request_projection,
+            expected_count=attachment_expected_count,
+            carriers=attachments,
         )
-        advisory_body_count = sum(
-            1
-            for item in attachments
-            if item.get("advisory_only") is True
-            and str(item.get("transient_text") or "").strip()
-            and not _is_file_provenance_stub(str(item.get("transient_text") or ""))
+        attachment_has_unread_tail = bool(
+            not document_metadata_owned
+            and terminal_evidence_set is not None
+            and any(
+                not view.source_complete
+                and (
+                    view.source_readable
+                    or view.body_kind
+                    in {
+                        FileBodyKind.EXTRACTED,
+                        FileBodyKind.ADVISORY,
+                        FileBodyKind.EMPTY,
+                        FileBodyKind.PROJECTED,
+                    }
+                )
+                for view in terminal_evidence_set.items
+            )
         )
-        advisory_projection_incomplete = any(
-            item.get("advisory_only") is True
-            and bool(str(item.get("transient_text") or "").strip())
-            and item.get("_prompt_projection_complete") is False
-            for item in attachments
+        advisory_body_count = 0
+        advisory_projection_incomplete = False
+        if terminal_evidence_set is not None and len(terminal_evidence_set.items) == len(terminal_carriers):
+            for item, view in zip(terminal_carriers, terminal_evidence_set.items, strict=True):
+                if view.body_kind != FileBodyKind.ADVISORY or not _carrier_matches_evidence_view(item, view):
+                    continue
+                body = str(item.get("transient_text") or "") if isinstance(item, Mapping) else ""
+                if not body.strip() or _is_file_provenance_stub(body):
+                    continue
+                advisory_body_count += 1
+                if isinstance(item, Mapping) and item.get("_prompt_projection_complete") is False:
+                    advisory_projection_incomplete = True
+        terminal_cardinality_closed = bool(
+            terminal_evidence_set is not None
+            and terminal_evidence_set.expected_count == attachment_expected_count
+            and len(terminal_evidence_set.items) == attachment_expected_count
         )
         unreadable_attachment_answer = bool(
             attachment_expected_count
             and attachment_expected_count <= _CONVERSATION_ATTACHMENT_MAX_FILES
-            and len(attachments) == attachment_expected_count
             and attachment_readable_count == 0
             and advisory_body_count == 0
             # A blank visible prefix plus a proven unread tail is partial
@@ -22490,14 +22664,15 @@ class AgentRuntime:
             and not empty_attachment_answer
             and not attachment_resolution_failed
             and not multi_attachment_incomplete
+            and (terminal_cardinality_closed or (not uses_source_terminal and terminal_evidence_set is None))
             # Prefer the explicit "will not guess" contract over a generic
             # query-scan UNKNOWN when every selected file has zero body — neither
             # verified text nor advisory OCR/transcription.
         )
         partially_unreadable_attachment_answer = bool(
-            attachment_expected_count > 1
+            terminal_cardinality_closed
+            and attachment_expected_count > 1
             and attachment_expected_count <= _CONVERSATION_ATTACHMENT_MAX_FILES
-            and len(attachments) == attachment_expected_count
             and 0 < attachment_readable_count < attachment_expected_count
             and not attachment_resolution_failed
             and not multi_attachment_incomplete
@@ -23077,10 +23252,15 @@ class AgentRuntime:
                 remainder_known=True,
                 current_attachment_present=bool(active_attachment_set),
             )
-            if active_attachment_set and document_metadata_scope in {"both", "details"}:
+            if (
+                active_attachment_set
+                and active_source_evidence_set is not None
+                and document_metadata_scope in {"both", "details"}
+            ):
                 details_answer = await self._document_content_details_answer(
                     context,
                     active_attachment_set,
+                    evidence_set=active_source_evidence_set,
                 )
                 context.structural_answer = "\n\n".join(
                     part for part in (document_metadata_answer, details_answer) if part
@@ -23955,23 +24135,30 @@ class AgentRuntime:
         )
         if isinstance(hierarchy_bundle_value, _AttachmentHierarchyBundle):
             attachment_evidence = [{"tool": "attachment", "output": hierarchy_bundle_value.evidence}]
-            attachment_expected_count = max(
-                attachment_expected_count,
-                hierarchy_bundle_value.files_total,
+            source_readable_count = attachment_readable_count
+            source_context_complete = attachment_context_complete
+            source_coverage_complete = attachment_coverage_complete
+            source_verification_complete = attachment_verification_complete
+            attachment_readable_count = min(
+                max(0, int(hierarchy_bundle_value.files_readable)),
+                source_readable_count,
             )
-            attachment_readable_count = hierarchy_bundle_value.files_readable
             attachment_context_complete = bool(
-                attachment_expected_count
+                source_context_complete
+                and attachment_expected_count
                 and hierarchy_bundle_value.files_total == attachment_expected_count
                 and attachment_readable_count == attachment_expected_count
             )
             attachment_coverage_complete = bool(
-                attachment_context_complete
+                source_coverage_complete
+                and attachment_context_complete
                 and hierarchy_bundle_value.source_complete
                 and hierarchy_bundle_value.map_complete
                 and hierarchy_complete
             )
-            attachment_verification_complete = attachment_coverage_complete
+            attachment_verification_complete = bool(
+                source_verification_complete and attachment_coverage_complete
+            )
             if not hierarchy_complete and not response.get("llm_failed"):
                 hierarchy_notice = (
                     "Не весь исходный материал удалось разобрать или обработать; "
