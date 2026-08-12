@@ -9209,6 +9209,18 @@ def _workspace_exact_value_contract(message: str) -> _WorkspaceExactValueContrac
     )
 
 
+def _is_workspace_exact_two_field_contract(
+    contract: _WorkspaceExactValueContract | None,
+) -> bool:
+    """Accept the closed pair in either user-requested output order."""
+
+    return bool(
+        contract is not None
+        and len(contract.fields) == 2
+        and set(contract.fields) == {"document_number", "control_marker"}
+    )
+
+
 def _direct_exact_file_field_contract(message: str) -> _DirectExactFileFieldContract | None:
     """Recognise the one ordered field projection with deterministic evidence."""
 
@@ -19376,11 +19388,21 @@ class AgentRuntime:
             )
             else None
         )
-        workspace_exact_content_failed = bool(
+        workspace_exact_two_field_contract = _is_workspace_exact_two_field_contract(
+            workspace_exact_value_contract
+        )
+        workspace_exact_direct_authorized = bool(
             clean_workspace_intent is not None
+            and workspace_reply_attachment_contract
+            and workspace_exact_two_field_contract
+            and workspace_exact_content is not None
+        )
+        workspace_exact_content_failed = bool(
+            clean_workspace_channel_requested
             and workspace_exact_value_requested
             and (
-                not workspace_reply_attachment_contract
+                clean_workspace_intent is None
+                or not workspace_reply_attachment_contract
                 or workspace_exact_value_contract is None
                 or workspace_exact_content is None
             )
@@ -19646,6 +19668,38 @@ class AgentRuntime:
                 open_remainder="",
                 remainder_known=True,
                 current_attachment_present=bool(attachment_expected_count),
+            )
+        elif workspace_exact_content_failed:
+            # The user asked for the exact value-only outbox contract, but its
+            # authorised source/field projection is not complete and unique.
+            # This is a closed pre-effect failure; a model cannot manufacture
+            # the missing evidence or turn it into mutation authority.
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                ingestion=dict(ingestion_result or {}),
+                interaction_mode=interaction_mode,
+                search_query=clean_message,
+                current_attachment_present=bool(active_attachment_set),
+            )
+        elif workspace_exact_direct_authorized:
+            # One authorised reply attachment, one safe outbox filename and a
+            # closed two-value projection are already fully determined by
+            # code.  General retrieval and its optional semantic arbiters add
+            # no authority or evidence here; skipping them also ensures the
+            # single MCP mutation cannot lose its attachment deadline to a
+            # classifier which is irrelevant to this exact route.
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                ingestion=dict(ingestion_result or {}),
+                interaction_mode=interaction_mode,
+                search_query=clean_message,
+                current_attachment_present=True,
             )
         elif document_metadata_owned:
             # The selected Raw Object has already crossed the ordinary
@@ -20449,10 +20503,13 @@ class AgentRuntime:
                 bundle=context.attachment_hierarchy_bundle,
                 hierarchy_complete=context.attachment_hierarchy_complete,
             )
-        elif self.llm.enabled and (
-            visible_tools
-            or _workspace_create_channel_request(asked_of_model)
-            or bool(workspace_authority_message)
+        elif workspace_exact_direct_authorized or (
+            self.llm.enabled
+            and (
+                visible_tools
+                or _workspace_create_channel_request(asked_of_model)
+                or bool(workspace_authority_message)
+            )
         ):
             outbound_tool_allowlist = (
                 frozenset({"web_search", "web_research", "web_fetch"}) if restricted_outbound_turn else None
@@ -20465,6 +20522,9 @@ class AgentRuntime:
                 }
                 if workspace_exact_content is not None:
                     workspace_agentic_kwargs["workspace_exact_content"] = workspace_exact_content
+                    workspace_agentic_kwargs["workspace_exact_direct_authorized"] = (
+                        workspace_exact_direct_authorized
+                    )
                 response = await self._agentic_loop(
                     context,
                     asked_of_model,
@@ -24205,6 +24265,7 @@ class AgentRuntime:
         outbound_tool_allowlist: frozenset[str] | None = None,
         workspace_authority_message: str = "",
         workspace_exact_content: str = "",
+        workspace_exact_direct_authorized: bool = False,
     ) -> dict[str, Any]:
         def outward_tool_is_allowed(tool_name: str) -> bool:
             if tool_name not in _OUTBOUND_TOOL_NAMES:
@@ -24214,7 +24275,8 @@ class AgentRuntime:
             )
 
         workspace_authority_message = str(workspace_authority_message or "").strip()
-        if _explicit_workspace_create_intent(workspace_authority_message) is None:
+        workspace_direct_intent = _explicit_workspace_create_intent(workspace_authority_message)
+        if workspace_direct_intent is None:
             workspace_authority_message = ""
         workspace_exact_content = str(workspace_exact_content or "")
         if (
@@ -24224,6 +24286,86 @@ class AgentRuntime:
             or "\x00" in workspace_exact_content
         ):
             workspace_exact_content = ""
+        workspace_direct_contract = _workspace_exact_value_contract(workspace_authority_message)
+        workspace_direct_schema_names = {
+            str((tool.get("function") or {}).get("name") or tool.get("name") or "")
+            for tool in tools
+            if isinstance(tool, Mapping)
+        }
+        workspace_direct_exact = bool(
+            workspace_exact_direct_authorized is True
+            and workspace_direct_intent is not None
+            and workspace_exact_content
+            and _is_workspace_exact_two_field_contract(workspace_direct_contract)
+        )
+        if workspace_direct_exact:
+            # All mutation arguments have already been derived from the current
+            # user's visible command and one complete, authorised reply source.
+            # A model call can add neither evidence nor authority; it can only
+            # delay or corrupt this exact two-value projection.  Execute the
+            # single visible capability once and never retry an uncertain
+            # mutating outcome.
+            assert workspace_direct_intent is not None
+            if "workspace_create" not in workspace_direct_schema_names:
+                return {
+                    "content": (
+                        "Не удалось создать файл во внешнем MCP outbox: инструмент "
+                        "workspace_create недоступен в этом ходе. Файл не создан."
+                    ),
+                    "tools_used": [],
+                    "web_query_notice": "",
+                    "knowledge_object_ids": [],
+                    "tool_evidence": [],
+                    "voice_clip": None,
+                    "file_clips": [],
+                    "_structural_file_count": 0,
+                    "_workspace_create_owned": True,
+                }
+            filename = workspace_direct_intent.filename
+            try:
+                tool_result = await self.kernel.execute(
+                    "workspace_create",
+                    {"filename": filename, "content": workspace_exact_content},
+                    actor=actor,
+                )
+            except Exception as exc:  # noqa: BLE001 - mutating outcome may be uncertain
+                LOGGER.error("workspace_create exact call failed (%s)", type(exc).__name__)
+                tool_result = ToolResult(
+                    "workspace_create",
+                    False,
+                    error="workspace_create outcome is uncertain after attempted execution",
+                )
+            if tool_result.success:
+                return {
+                    "content": f"Файл {filename} создан во внешнем MCP outbox.",
+                    "tools_used": ["workspace_create"],
+                    "web_query_notice": "",
+                    "knowledge_object_ids": [],
+                    "tool_evidence": [
+                        {
+                            "tool": "workspace_create",
+                            "output": _workspace_create_success_evidence(filename),
+                        }
+                    ],
+                    "voice_clip": None,
+                    "file_clips": [],
+                    "_structural_file_count": 0,
+                    "_workspace_create_owned": True,
+                }
+            return {
+                "content": (
+                    "Не удалось подтвердить результат вызова workspace_create. Проверьте "
+                    "внешний MCP outbox; повторный вызов автоматически не выполнялся."
+                ),
+                "tools_used": ["workspace_create"],
+                "web_query_notice": "",
+                "knowledge_object_ids": [],
+                "tool_evidence": [],
+                "voice_clip": None,
+                "file_clips": [],
+                "_structural_file_count": 0,
+                "_workspace_create_owned": True,
+            }
         messages = self._build_initial_messages(context, message, attachments, tool_enabled=True)
         # A current-file turn must not spend the foreground timeout anew on
         # every tool round, final synthesis and clean salvage.  Bound only the

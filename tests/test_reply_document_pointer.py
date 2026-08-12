@@ -811,15 +811,134 @@ def test_exact_d10_three_turn_api_keeps_reply_source_and_forces_only_workspace_e
     assert workspace_calls == [{"filename": "mcp-metadata.txt", "content": "17-ДСП/1\nMETA-EXPORT-1\n"}]
     assert sum(name == "make_file" for name, _arguments in executed) == make_file_before_workspace
     forced = [call for call in llm.calls if call["tool_choice"] == "workspace_create"]
-    assert len(forced) == 1
-    assert forced[0]["offered"] == {"workspace_create"}
-    assert len([call for call in llm.calls if "workspace_create" in call["user"]]) == 1
+    assert forced == []
+    assert [call for call in llm.calls if "workspace_create" in call["user"]] == []
     assert workspace.json()["tools_used"] == ["workspace_create"]
     assert workspace.json().get("files") == []
     final_user = next(row for row in reversed(rows) if row.get("role") == "user")
     final_metadata = json.loads(str(final_user.get("metadata_json") or "{}"))
     assert final_metadata["conversation_attachment_raw_ids"] == [selected_raw_id]
     assert final_metadata["attachment_origin"] == "reply_reference"
+
+
+def _assert_exact_workspace_direct_effect_with_disabled_llm(
+    settings,
+    monkeypatch,
+    *,
+    workspace_prompt: str,
+    expected_content: str,
+) -> None:
+    from friday.execution_kernel import ToolResult
+    from friday.server import create_app
+
+    scoped = replace(settings, verify_answers=True, shared_archive=True)
+    app = create_app(scoped)
+    llm = _D10RoutingLLM()
+    llm.enabled = False
+    executed: list[tuple[str, dict[str, Any]]] = []
+
+    with TestClient(app) as client:
+        app.state.agent.llm = llm
+        kernel = app.state.agent.kernel
+        base_definitions = kernel.get_tool_definitions
+
+        def definitions(actor, topic=None):  # noqa: ANN001
+            result = list(base_definitions(actor, topic=topic))
+            names = {
+                str((item.get("function") or {}).get("name") or "")
+                for item in result
+                if isinstance(item, Mapping)
+            }
+            if "workspace_create" not in names:
+                result.append(_workspace_tool_schema("workspace_create"))
+            return result
+
+        async def execute(name, arguments, *, actor=None):  # noqa: ANN001, ARG001
+            executed.append((str(name), dict(arguments)))
+            return ToolResult(str(name), True, data={"created": True})
+
+        monkeypatch.setattr(kernel, "get_tool_definitions", definitions)
+        monkeypatch.setattr(kernel, "execute", execute)
+        me = _bridge_call(client, scoped, "GET", "/api/me", user="1001")
+        assert me.status_code == 200, me.text
+        uploader = str(me.json()["actor"]["user_id"])
+        app.state.storage.update_user(uploader, preset_key="owner")
+        source_ref = "telegram-file:D10-DISABLED-LLM"
+        source = "ПРИКАЗ № 17-ДСП/1\nКонтрольный маркер: META-EXPORT-1\n"
+        _stored_reply_file(
+            app.state.storage,
+            LEGACY_OWNER_USER_ID,
+            uploader,
+            "D10-DISABLED-LLM",
+            content=source,
+            extra_metadata={
+                "extraction_success": True,
+                "extraction_chars": len(source),
+                "mime_type": "text/plain",
+            },
+        )
+        conversation = app.state.storage.create_conversation(
+            uploader,
+            title="disabled llm exact workspace",
+        )
+        workspace = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": workspace_prompt,
+                "conversation_id": str(conversation["id"]),
+                "source_ref": "telegram-update:d10-disabled-llm",
+                "telegram_message_id": 7199,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "reply_document_source_ref": source_ref,
+            },
+            user="1001",
+        )
+
+    assert workspace.status_code == 200, workspace.text
+    assert llm.calls == []
+    assert executed == [
+        (
+            "workspace_create",
+            {"filename": "mcp-metadata.txt", "content": expected_content},
+        )
+    ]
+    assert workspace.json()["tools_used"] == ["workspace_create"]
+    assert workspace.json().get("files") == []
+
+
+def test_exact_workspace_direct_effect_does_not_require_enabled_llm(
+    settings,
+    monkeypatch,
+) -> None:
+    _assert_exact_workspace_direct_effect_with_disabled_llm(
+        settings,
+        monkeypatch,
+        workspace_prompt=(
+            "Используй именно workspace_create и создай в MCP outbox файл mcp-metadata.txt. "
+            "Первая строка — только значение номера документа без подписи. Вторая строка — "
+            "только значение контрольного маркера без подписи. Никаких других строк."
+        ),
+        expected_content="17-ДСП/1\nMETA-EXPORT-1\n",
+    )
+
+
+def test_exact_workspace_reversed_field_order_runs_directly_with_disabled_llm(
+    settings,
+    monkeypatch,
+) -> None:
+    _assert_exact_workspace_direct_effect_with_disabled_llm(
+        settings,
+        monkeypatch,
+        workspace_prompt=(
+            "Используй именно workspace_create и создай в MCP outbox файл mcp-metadata.txt. "
+            "Первая строка — только значение контрольного маркера без подписи. Вторая строка — "
+            "только значение номера документа без подписи. Никаких других строк."
+        ),
+        expected_content="META-EXPORT-1\n17-ДСП/1\n",
+    )
 
 
 def test_unresolved_or_foreign_workspace_reply_pointer_has_no_effect_or_late_file(

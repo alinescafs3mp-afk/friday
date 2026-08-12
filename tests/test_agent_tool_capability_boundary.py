@@ -405,9 +405,10 @@ async def test_exact_workspace_failed_result_is_reported_as_uncertain_without_re
         attachments=None,
         workspace_authority_message=_EXACT_WORKSPACE_PROMPT,
         workspace_exact_content="DOC-42\nCONTROL-MARKER\n",
+        workspace_exact_direct_authorized=True,
     )
 
-    assert llm.calls == 1
+    assert llm.calls == 0
     assert kernel.executed == [
         (
             "workspace_create",
@@ -500,6 +501,9 @@ async def test_workspace_intent_without_authorized_schema_fails_before_model(
         ActorContext(user_id="mallory", preset_key="guest", source="test"),
         tools=[_tool_schema("memory_search")],
         attachments=None,
+        workspace_authority_message=_EXACT_WORKSPACE_PROMPT,
+        workspace_exact_content="DOC-42\nCONTROL-MARKER\n",
+        workspace_exact_direct_authorized=True,
     )
 
     assert llm.calls == 0
