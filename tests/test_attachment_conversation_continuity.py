@@ -553,14 +553,10 @@ async def test_same_turn_odt_metadata_request_selects_the_only_current_upload(
         del args, kwargs
         raise AssertionError("same-turn metadata route entered general model routing")
 
-    async def no_visible_details(*args, **kwargs):  # noqa: ANN002, ANN003
-        del args, kwargs
-        return ""
-
     monkeypatch.setattr(runtime, "_prepare_context", forbidden)
     monkeypatch.setattr(runtime, "_generate_response", forbidden)
     monkeypatch.setattr(runtime, "_agentic_loop", forbidden)
-    monkeypatch.setattr(runtime, "_document_content_details_answer", no_visible_details)
+    monkeypatch.setattr(runtime, "_document_content_details_answer", forbidden)
     result = await runtime.chat(
         "alice",
         "покажи метаданные по этому файлу",

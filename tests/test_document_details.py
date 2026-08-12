@@ -156,7 +156,7 @@ def test_renderer_never_turns_empty_or_partial_extraction_into_absence() -> None
 
 
 def test_metadata_scope_separates_technical_properties_from_body_details() -> None:
-    assert _document_metadata_request_scope("Покажи метаданные этого документа") == "both"
+    assert _document_metadata_request_scope("Покажи метаданные этого документа") == "technical"
     assert _document_metadata_request_scope("Покажи технические свойства этого документа") == "technical"
     assert _document_metadata_request_scope("Покажи реквизиты этого документа") == "details"
     assert (

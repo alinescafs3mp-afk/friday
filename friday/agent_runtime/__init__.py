@@ -7601,7 +7601,7 @@ def _document_metadata_request_scope(
         return "technical"
     if details_scope:
         return "details"
-    return "both"
+    return "technical"
 
 
 def _is_document_metadata_request(message: str, *, selected_document: bool = False) -> bool:
