@@ -14783,6 +14783,13 @@ _ATTACHMENT_READ_ONLY_OUTPUT_LOOKUP_SUFFIX = re.compile(
     r"(?:(?:этом|данн)\w*\s+)?(?:файл|документ|вложени)\w*",
     re.IGNORECASE,
 )
+_ATTACHMENT_READ_ONLY_OUTPUT_RESULT_SEQUENCE_SUFFIX = re.compile(
+    rf"(?:после|из)\s*(?:"
+    rf"(?:,?\s*(?:и|затем|потом)\s+){_ATTACHMENT_READ_ONLY_RESULT_HEAD.pattern}"
+    r"(?:\s+(?:после|из))?\s*"
+    r")+",
+    re.IGNORECASE,
+)
 
 
 def _attachment_read_only_output_result_clause(tail: str) -> bool:
@@ -14793,7 +14800,11 @@ def _attachment_read_only_output_result_clause(tail: str) -> bool:
     if matched is None:
         return False
     remainder = clause[matched.end() :].strip()
-    return not remainder or bool(_ATTACHMENT_READ_ONLY_OUTPUT_LOOKUP_SUFFIX.fullmatch(remainder))
+    return bool(
+        not remainder
+        or _ATTACHMENT_READ_ONLY_OUTPUT_LOOKUP_SUFFIX.fullmatch(remainder)
+        or _ATTACHMENT_READ_ONLY_OUTPUT_RESULT_SEQUENCE_SUFFIX.fullmatch(remainder)
+    )
 
 
 def _closed_attachment_read_only_request(message: str) -> bool:
@@ -14835,6 +14846,8 @@ def _closed_attachment_read_only_request(message: str) -> bool:
     for clause in _split_tag_request_clauses(visible):
         normalized = clause.strip(" \t,:—-")
         if not normalized or _ATTACHMENT_READ_ONLY_FORMAT_CLAUSE.fullmatch(normalized):
+            continue
+        if _attachment_read_only_output_result_clause(normalized):
             continue
         if not _ATTACHMENT_READ_ONLY_ACTION.search(normalized):
             return False

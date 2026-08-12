@@ -6,7 +6,7 @@ from dataclasses import replace
 
 import pytest
 
-from friday.agent_runtime import AgentRuntime
+from friday.agent_runtime import AgentRuntime, _closed_attachment_read_only_request
 from friday.execution_kernel import ToolResult
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
@@ -183,6 +183,19 @@ async def test_current_upload_and_exact_named_prior_use_registered_disk_sources_
     storage,
     monkeypatch,
 ) -> None:
+    request = (
+        "Сравни этот файл с ранее загруженным файлом «codex-live-a-aug12.txt». "
+        "Верни дословно значение после «Контрольный код A» и значение после "
+        "«Контрольный код B»."
+    )
+    assert _closed_attachment_read_only_request(request) is True
+    for unsafe_tail in (
+        " И отправь файл.",
+        " И сохрани результат в память.",
+        " И верни файл в MCP outbox.",
+    ):
+        assert _closed_attachment_read_only_request(request + unsafe_tail) is False
+
     configured = replace(settings, verify_answers=False)
     storage.ensure_user("alice", preset_key="owner")
     pipeline = IngestionPipeline(configured, storage, KnowledgeGraph(storage))
@@ -237,8 +250,24 @@ async def test_current_upload_and_exact_named_prior_use_registered_disk_sources_
 
     seen: list[list[dict]] = []
 
+    async def forbidden_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("closed file read entered general context preparation")
+
+    async def forbidden_agentic(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("closed file read entered the agentic loop")
+
+    def forbidden_tools(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("closed file read built tool definitions")
+
     async def generate(context, message, attachments):  # noqa: ANN001
-        del context, message
+        del message
+        assert context.focused_attachment_turn is True
+        assert context.conversation_history == []
+        assert context.ingestion == {}
+        assert context.knowledge_hits == []
         snapshot = [dict(item) for item in attachments]
         seen.append(snapshot)
         visible = "\n".join(str(item.get("transient_text") or "") for item in snapshot)
@@ -250,12 +279,13 @@ async def test_current_upload_and_exact_named_prior_use_registered_disk_sources_
             "tools_used": [],
         }
 
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
+    monkeypatch.setattr(runtime, "_agentic_loop", forbidden_agentic)
+    monkeypatch.setattr(runtime.kernel, "get_tool_definitions", forbidden_tools)
     monkeypatch.setattr(runtime, "_generate_response", generate)
     result = await runtime.chat(
         "alice",
-        "Сравни этот файл с ранее загруженным файлом «codex-live-a-aug12.txt». "
-        "Верни дословно значение после «Контрольный код A» и значение после "
-        "«Контрольный код B».",
+        request,
         actor=_actor(),
         conversation_id=first_receipt["conversation_id"],
         attachments=[{"raw_object_id": second_id}],
