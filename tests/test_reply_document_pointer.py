@@ -1795,7 +1795,6 @@ def test_missing_reply_alias_recovers_exact_bytes_once_and_replays_without_redow
         for label, flags in (
             ("blocked-private", {}),
             ("blocked-deleted", {"deleted": True}),
-            ("blocked-ignored", {"ignored": True}),
         ):
             blocked_raw = _stored_reply_file(
                 app.state.storage,
@@ -2266,3 +2265,1484 @@ def test_missing_reply_alias_recovers_exact_bytes_once_and_replays_without_redow
     finally:
         archive_bridge._archive_passwords.clear()  # noqa: SLF001
         archive_bridge._inbox.close()  # noqa: SLF001
+
+
+def _ensure_file_knowledge(
+    storage: Any,
+    *,
+    tenant: str,
+    raw_id: str,
+    title: str,
+    body: str,
+) -> str:
+    existing = storage.get_knowledge_by_raw(raw_id, tenant)
+    if existing is not None:
+        return str(existing["id"])
+    knowledge = KnowledgeObject(
+        id=new_id("ko"),
+        user_id=tenant,
+        raw_object_id=raw_id,
+        content=body,
+        content_type="file",
+        title=title,
+        summary=body[:200],
+    )
+    storage.store_knowledge_object(knowledge)
+    inbox = storage.get_inbox_by_raw(raw_id, tenant) or storage.find_inbox_by_raw(raw_id, tenant)
+    if inbox is None:
+        storage.store_inbox_item(
+            InboxItem(
+                id=new_id("inbox"),
+                user_id=tenant,
+                raw_object_id=raw_id,
+                knowledge_object_id=knowledge.id,
+                status=InboxStatus.CLASSIFIED,
+            )
+        )
+    else:
+        storage.execute(
+            "UPDATE inbox SET knowledge_object_id=? WHERE id=?",
+            (knowledge.id, inbox["id"]),
+        )
+        storage.commit()
+    return knowledge.id
+
+
+def _force_stale_cached_extraction(storage: Any, raw_id: str, tenant: str) -> None:
+    row = storage.get_raw_object(raw_id, tenant)
+    assert row is not None
+    meta = row.get("metadata_json")
+    if isinstance(meta, str):
+        meta = json.loads(meta)
+    assert isinstance(meta, dict)
+    stale = dict(meta)
+    stale["extraction_success"] = False
+    stale["text_extraction_success"] = False
+    storage.execute(
+        "UPDATE raw_objects SET raw_content=?, metadata_json=? WHERE id=?",
+        (
+            f"[File: {stale.get('filename') or 'stale.txt'}]",
+            json.dumps(stale, ensure_ascii=False, sort_keys=True),
+            raw_id,
+        ),
+    )
+    storage.commit()
+
+
+def _public_blob(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def test_historical_ignored_structural_reply_direct_read_and_exact_name_followup(
+    settings,
+    monkeypatch,
+) -> None:
+    """Typed historical authority: reply, recovery, citations, lineage, exact-name."""
+
+    import friday.agent_runtime as runtime_module
+    from friday.server import create_app
+    from friday.storage._intake import resolve_tenant_telegram_reply_aliases
+
+    scoped = replace(
+        settings,
+        verify_answers=False,
+        shared_archive=True,
+        telegram_user_rate_limit_per_minute=1_000,
+        telegram_global_rate_limit_per_minute=5_000,
+    )
+    app = create_app(scoped)
+
+    class _NoReplyLLM:
+        enabled = True
+        model = "ignored-reply-direct-read"
+
+        async def chat(self, messages, **kwargs):  # noqa: ANN001
+            del messages, kwargs
+            raise AssertionError("ignored historical reply direct-read called the model")
+
+    class _OrderedCitationModel:
+        enabled = True
+        model = "ignored-ordered-citation"
+        total_budget_sec = 5.0
+
+        def __init__(self, first: str, second: str, absent: str) -> None:
+            self.first = first
+            self.second = second
+            self.absent = absent
+            self.payloads: list[str] = []
+
+        async def chat(self, messages, **_kwargs):  # noqa: ANN001
+            payload = json.dumps(messages, ensure_ascii=False)
+            self.payloads.append(payload)
+            assert self.first in payload
+            assert self.second in payload
+            assert payload.index(self.first) < payload.index(self.second)
+            assert self.absent not in payload
+            return {
+                "content": f"Сравнение: {self.first}; {self.second}.",
+                "tool_calls": None,
+                "_queue_wait_sec": 0.0,
+            }
+
+    class _DetailsLLM:
+        enabled = True
+        model = "ignored-details"
+        total_budget_sec = 5.0
+
+        async def chat(self, messages, **_kwargs):  # noqa: ANN001
+            del messages
+            return {
+                "content": '{"details":[]}',
+                "tool_calls": None,
+                "_queue_wait_sec": 0.0,
+            }
+
+    last_item_body = (
+        "Исторический перечень\n"
+        "1. Первый пункт — HIST-REPLY-IGNORED-FIRST\n"
+        "2. Последний пункт — HIST-REPLY-IGNORED-LAST\n"
+        "   продолжение ignored last\n"
+        "Подпись: HIST-REPLY-IGNORED-FOOTER"
+    )
+    recovery_body = (
+        "Восстановленный перечень\n"
+        "1. Первый пункт — HIST-RECOVERY-IGNORED-FIRST\n"
+        "2. Последний пункт — HIST-RECOVERY-IGNORED-LAST\n"
+    )
+    exact_name = "hist-ignored-exact-aug12.txt"
+    exact_body = (
+        "Точное имя\n"
+        "1. Первый пункт — HIST-EXACT-IGNORED-FIRST\n"
+        "2. Последний пункт — HIST-EXACT-IGNORED-LAST\n"
+        "   продолжение exact last\n"
+    )
+    citation_a_body = (
+        "Материал владельца\n"
+        "1. Первый пункт — HIST-CITE-OWNER-A-FIRST\n"
+        "2. Последний пункт — HIST-CITE-OWNER-A-LAST\n"
+        "   продолжение owner A\n"
+    )
+    citation_b_body = (
+        "Материал JBL\n"
+        "1. Первый пункт — HIST-CITE-JBL-B-FIRST\n"
+        "2. Последний пункт — HIST-CITE-JBL-B-LAST\n"
+        "   продолжение jbl B\n"
+    )
+    citation_c_body = "Посторонний. HIST-CITE-AMBIENT-C-MUST-STAY-CLOSED.\n"
+
+    def _mark_ignored(raw_id: str, reviewer: str) -> None:
+        inbox = app.state.storage.get_inbox_by_raw(raw_id, LEGACY_OWNER_USER_ID)
+        assert inbox is not None
+        assert app.state.storage.update_inbox_status(
+            str(inbox["id"]), InboxStatus.IGNORED, reviewed_by=reviewer
+        )
+
+    def _assert_closed(payload: Mapping[str, Any], *needles: str) -> None:
+        text = str(payload.get("message") or "")
+        for needle in needles:
+            assert needle not in text
+        assert int(payload.get("attachment_context_readable_count") or 0) == 0
+
+    def _assert_public(payload: Any, *secrets: str) -> None:
+        encoded = _public_blob(payload)
+        for secret in secrets:
+            if secret:
+                assert secret not in encoded
+        assert "conversation_attachment_raw_ids" not in encoded
+        assert "conversation_attachment_uploaders" not in encoded
+        assert "selector_kind" not in encoded
+        assert "historical_authority" not in encoded
+        assert "reply_direct_read" not in encoded
+        assert "allow_ignored" not in encoded
+        assert "stored_path" not in encoded
+
+    with TestClient(app) as client:
+        canonical_chat = app.state.agent.chat
+        me = _bridge_call(client, scoped, "GET", "/api/me", user="1001")
+        jbl_me = _bridge_call(client, scoped, "GET", "/api/me", user="2002")
+        assert me.status_code == 200, me.text
+        assert jbl_me.status_code == 200, jbl_me.text
+        uploader = str(me.json()["actor"]["user_id"])
+        jbl = str(jbl_me.json()["actor"]["user_id"])
+        assert uploader != jbl
+        app.state.storage.update_user(uploader, preset_key="owner")
+        app.state.storage.update_user(jbl, preset_key="user")
+
+        async def upload_ack(_user_id, _message, **kwargs):  # noqa: ANN001
+            actor = kwargs["actor"]
+            conversation_id = str(kwargs.get("conversation_id") or "")
+            if not conversation_id:
+                conversation_id = str(app.state.storage.create_conversation(actor.own_id)["id"])
+            return {
+                "conversation_id": conversation_id,
+                "message": "accepted",
+                "context": {"interaction_mode": "dialogue"},
+            }
+
+        monkeypatch.setattr(app.state.agent, "chat", upload_ack)
+        upload = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "",
+                "source_ref": "telegram-update:ignored-reply-upload",
+                "telegram_message_id": 9101,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "document": {
+                    "filename": "hist-ignored-reply.txt",
+                    "mime_type": "text/plain",
+                    "media_kind": "document",
+                    "source_ref": "telegram-file:IGNORED-REPLY-ORIGINAL",
+                    "file_unique_id": "IGNORED-REPLY-STABLE",
+                    "content_base64": base64.b64encode(last_item_body.encode()).decode("ascii"),
+                },
+            },
+            user="1001",
+        )
+        assert upload.status_code == 200, upload.text
+        alias_raw = app.state.storage.resolve_owned_file_source_ref(
+            LEGACY_OWNER_USER_ID,
+            uploader,
+            "telegram-file:IGNORED-REPLY-ORIGINAL",
+        )
+        assert alias_raw
+        _mark_ignored(alias_raw, uploader)
+        assert (
+            app.state.storage.find_owned_files_by_filename(
+                LEGACY_OWNER_USER_ID, uploader, "hist-ignored-reply.txt"
+            )
+            == []
+        )
+        assert (
+            app.state.storage.get_searchable_file_sources(
+                LEGACY_OWNER_USER_ID, [alias_raw], uploaded_by=uploader
+            )
+            == []
+        )
+
+        recovered = asyncio.run(
+            app.state.ingestion.ingest_file(
+                LEGACY_OWNER_USER_ID,
+                None,
+                recovery_body.encode(),
+                filename="hist-ignored-recovery.txt",
+                mime_type="text/plain",
+                metadata={"uploaded_by": uploader},
+                source_ref="telegram-file:IGNORED-RECOVERY-ORIG",
+            )
+        )
+        recovery_raw = str(recovered["raw_object_id"])
+        _mark_ignored(recovery_raw, uploader)
+
+        exact = asyncio.run(
+            app.state.ingestion.ingest_file(
+                LEGACY_OWNER_USER_ID,
+                None,
+                exact_body.encode(),
+                filename=exact_name,
+                mime_type="text/plain",
+                metadata={"uploaded_by": uploader},
+                source_ref="telegram-file:IGNORED-EXACT-NAME",
+            )
+        )
+        exact_raw = str(exact["raw_object_id"])
+        _mark_ignored(exact_raw, uploader)
+
+        owner_cite_upload = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "",
+                "source_ref": "telegram-update:ignored-cite-owner-a",
+                "telegram_message_id": 9401,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+                "document": {
+                    "filename": "OWNER-A.txt",
+                    "mime_type": "text/plain",
+                    "media_kind": "document",
+                    "source_ref": "telegram-file:IGNORED-CITE-OWNER-A",
+                    "file_unique_id": "IGNORED-CITE-OWNER-A",
+                    "content_base64": base64.b64encode(citation_a_body.encode()).decode("ascii"),
+                },
+            },
+            user="1001",
+        )
+        assert owner_cite_upload.status_code == 200, owner_cite_upload.text
+        raw_a = app.state.storage.resolve_owned_file_source_ref(
+            LEGACY_OWNER_USER_ID, uploader, "telegram-file:IGNORED-CITE-OWNER-A"
+        )
+        assert raw_a
+        jbl_cite_upload = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "",
+                "source_ref": "telegram-update:ignored-cite-jbl-b",
+                "telegram_message_id": 9402,
+                "telegram_user": {"id": 2002, "first_name": "JBL"},
+                "document": {
+                    "filename": "JBL-B.txt",
+                    "mime_type": "text/plain",
+                    "media_kind": "document",
+                    "source_ref": "telegram-file:IGNORED-CITE-JBL-B",
+                    "file_unique_id": "IGNORED-CITE-JBL-B",
+                    "content_base64": base64.b64encode(citation_b_body.encode()).decode("ascii"),
+                },
+            },
+            user="2002",
+        )
+        assert jbl_cite_upload.status_code == 200, jbl_cite_upload.text
+        raw_b = app.state.storage.resolve_owned_file_source_ref(
+            LEGACY_OWNER_USER_ID, jbl, "telegram-file:IGNORED-CITE-JBL-B"
+        )
+        assert raw_b
+        ambient_c_upload = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "",
+                "source_ref": "telegram-update:ignored-cite-owner-c",
+                "telegram_message_id": 9403,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+                "document": {
+                    "filename": "OWNER-C.txt",
+                    "mime_type": "text/plain",
+                    "media_kind": "document",
+                    "source_ref": "telegram-file:CITE-AMBIENT-C",
+                    "file_unique_id": "CITE-AMBIENT-C",
+                    "content_base64": base64.b64encode(citation_c_body.encode()).decode("ascii"),
+                },
+            },
+            user="1001",
+        )
+        assert ambient_c_upload.status_code == 200, ambient_c_upload.text
+        raw_c = app.state.storage.resolve_owned_file_source_ref(
+            LEGACY_OWNER_USER_ID, uploader, "telegram-file:CITE-AMBIENT-C"
+        )
+        assert raw_c
+        ko_a = _ensure_file_knowledge(
+            app.state.storage,
+            tenant=LEGACY_OWNER_USER_ID,
+            raw_id=str(raw_a),
+            title="A",
+            body=citation_a_body,
+        )
+        ko_b = _ensure_file_knowledge(
+            app.state.storage,
+            tenant=LEGACY_OWNER_USER_ID,
+            raw_id=str(raw_b),
+            title="B",
+            body=citation_b_body,
+        )
+        ko_c = _ensure_file_knowledge(
+            app.state.storage,
+            tenant=LEGACY_OWNER_USER_ID,
+            raw_id=str(raw_c),
+            title="C",
+            body=citation_c_body,
+        )
+        _mark_ignored(str(raw_a), uploader)
+        _mark_ignored(str(raw_b), jbl)
+
+        audio = _stored_reply_file(
+            app.state.storage,
+            LEGACY_OWNER_USER_ID,
+            uploader,
+            "IGNORED-AUDIO",
+            ignored=True,
+            extra_metadata={"mime_type": "audio/ogg", "media_kind": "voice", "filename": "note.ogg"},
+        )
+        deleted = _stored_reply_file(
+            app.state.storage,
+            LEGACY_OWNER_USER_ID,
+            uploader,
+            "IGNORED-DELETED",
+            ignored=True,
+            deleted=True,
+        )
+        inactive_user = "inactive-ignored-uploader"
+        app.state.storage.ensure_user(inactive_user, preset_key="user")
+        inactive = _stored_reply_file(
+            app.state.storage,
+            LEGACY_OWNER_USER_ID,
+            inactive_user,
+            "IGNORED-INACTIVE",
+            ignored=True,
+        )
+        with app.state.storage.transaction() as conn:
+            conn.execute("UPDATE users SET status='disabled' WHERE id=?", (inactive_user,))
+
+        _force_stale_cached_extraction(app.state.storage, alias_raw, LEGACY_OWNER_USER_ID)
+
+        inspect_calls: list[dict[str, Any]] = []
+        inspect_fail_names: set[str] = set()
+        ingest_calls: list[bytes] = []
+        disk_reads: list[tuple[str, str]] = []
+        canonical_inspect = app.state.ingestion.inspect_file_transient
+        canonical_ingest = app.state.ingestion.ingest_file
+        canonical_disk = runtime_module.read_authorized_file
+
+        async def inspect_spy(*args, **kwargs):  # noqa: ANN002, ANN003
+            filename = str(kwargs.get("filename") or "")
+            inspect_calls.append(
+                {
+                    "filename": filename,
+                    "metadata_only": kwargs.get("metadata_only") is True,
+                }
+            )
+            if filename in inspect_fail_names:
+                raise RuntimeError("forced parser failure")
+            return await canonical_inspect(*args, **kwargs)
+
+        async def ingest_spy(*args, **kwargs):  # noqa: ANN002, ANN003
+            ingest_calls.append(bytes(args[2]))
+            assert kwargs.get("exact_byte_identity_only") is True
+            return await canonical_ingest(*args, **kwargs)
+
+        def disk_spy(*args, **kwargs):  # noqa: ANN002, ANN003
+            disk_reads.append((str(args[2]), str(kwargs.get("person_id") or "")))
+            return canonical_disk(*args, **kwargs)
+
+        projection_seams: list[tuple[Any, Any, int]] = []
+        verifier_calls: list[dict[str, Any]] = []
+        canonical_project = runtime_module._projected_attachment_from_source
+        canonical_verify = app.state.agent._verify_registered_file_attachments
+
+        def project_spy(source, fields):  # noqa: ANN001
+            result = canonical_project(source, fields)
+            projection_seams.append((source, result, len(disk_reads)))
+            return result
+
+        async def verify_spy(  # noqa: ANN001
+            attachments,
+            *,
+            tenant_id,
+            person_id,
+            require_projected_direct_read_authority=False,
+        ):
+            verifier_calls.append(
+                {
+                    "ids": [id(item) for item in attachments],
+                    "require": require_projected_direct_read_authority,
+                    "reads_before": len(disk_reads),
+                }
+            )
+            return await canonical_verify(
+                attachments,
+                tenant_id=tenant_id,
+                person_id=person_id,
+                require_projected_direct_read_authority=require_projected_direct_read_authority,
+            )
+
+        monkeypatch.setattr(app.state.ingestion, "inspect_file_transient", inspect_spy)
+        monkeypatch.setattr(runtime_module, "read_authorized_file", disk_spy)
+        monkeypatch.setattr(runtime_module, "_projected_attachment_from_source", project_spy)
+        monkeypatch.setattr(app.state.agent, "_verify_registered_file_attachments", verify_spy)
+
+        app.state.agent.llm = _NoReplyLLM()
+        monkeypatch.setattr(app.state.agent, "chat", canonical_chat)
+
+        async def forbidden_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
+            del args, kwargs
+            raise AssertionError("ignored historical reply entered general context preparation")
+
+        async def forbidden_agentic(*args, **kwargs):  # noqa: ANN002, ANN003
+            del args, kwargs
+            raise AssertionError("ignored historical reply entered the agentic loop")
+
+        def forbidden_tools(*args, **kwargs):  # noqa: ANN002, ANN003
+            del args, kwargs
+            raise AssertionError("ignored historical reply requested tool definitions")
+
+        original_prepare = app.state.agent._prepare_context
+        original_agentic = app.state.agent._agentic_loop
+        original_tools = app.state.agent.kernel.get_tool_definitions
+        monkeypatch.setattr(app.state.agent, "_prepare_context", forbidden_prepare)
+        monkeypatch.setattr(app.state.agent, "_agentic_loop", forbidden_agentic)
+        monkeypatch.setattr(app.state.agent.kernel, "get_tool_definitions", forbidden_tools)
+
+        alias_reply = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Какой последний пункт?",
+                "source_ref": "telegram-update:ignored-reply-existing-alias",
+                "telegram_message_id": 9102,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "reply_document_message_id": 9101,
+                "reply_document_file_unique_id": "IGNORED-REPLY-STABLE",
+                "reply_document_source_ref": "telegram-file:IGNORED-REPLY-CHURNED",
+            },
+            user="1001",
+        )
+        assert alias_reply.status_code == 200, alias_reply.text
+        alias_payload = alias_reply.json()
+        assert "HIST-REPLY-IGNORED-LAST" in alias_payload["message"]
+        assert "продолжение ignored last" in alias_payload["message"]
+        assert "HIST-REPLY-IGNORED-FIRST" not in alias_payload["message"]
+        assert alias_payload["attachment_context_expected_count"] == 1
+        assert alias_payload["attachment_context_readable_count"] == 1
+        assert alias_payload["attachment_coverage_complete"] is True
+        assert alias_payload["attachment_verification_complete"] is True
+        assert alias_payload.get("tools_used") == []
+        assert any(not call["metadata_only"] for call in inspect_calls)
+        assert projection_seams
+        projected_by_id = {id(item): item for _source, item, _reads in projection_seams}
+        production_verify = [call for call in verifier_calls if call["require"] is True]
+        assert production_verify
+        production_ids = production_verify[0]["ids"]
+        assert any(object_id in projected_by_id for object_id in production_ids)
+        projected = next(
+            projected_by_id[object_id] for object_id in production_ids if object_id in projected_by_id
+        )
+        reads_at_first_project = projection_seams[0][2]
+        consumer_reads = len(disk_reads)
+        projected_authority = runtime_module._historical_direct_read_authority_of(projected)
+        assert projected_authority is not None
+        assert projected_authority.raw_object_id == alias_raw
+        assert projected_authority.tenant_id == LEGACY_OWNER_USER_ID
+        assert projected_authority.uploaded_by == uploader
+        assert projected_authority.selector_kind == "telegram_reply"
+        production_view = runtime_module._file_evidence_view_of(projected)
+        assert production_view is not None
+        assert str(production_view.raw_id or "") == alias_raw
+        assert (alias_raw, uploader) in disk_reads[reads_at_first_project:consumer_reads]
+        wrong_raw_carrier = runtime_module._ProjectedAttachment(
+            {
+                "raw_object_id": str(raw_c),
+                "filename": "OWNER-C.txt",
+                "transient_text": citation_c_body,
+                "_source_readable": True,
+                "_registered_file_bytes_verified": True,
+            }
+        )
+        runtime_module._retain_historical_direct_read_authority(projected, wrong_raw_carrier)
+        assert runtime_module._historical_direct_read_authority_of(wrong_raw_carrier) is None
+        mismatch_reads = len(disk_reads)
+        mismatched = asyncio.run(
+            app.state.agent._verify_registered_file_attachments(  # noqa: SLF001
+                [wrong_raw_carrier],
+                tenant_id=LEGACY_OWNER_USER_ID,
+                person_id=uploader,
+                require_projected_direct_read_authority=True,
+            )
+        )
+        assert runtime_module._historical_direct_read_authority_of(wrong_raw_carrier) is None
+        assert disk_reads[mismatch_reads:] == []
+        assert all(
+            "HIST-REPLY-IGNORED-LAST" not in str(item.get("transient_text") or "")
+            and "HIST-CITE-AMBIENT-C-MUST-STAY-CLOSED" not in str(item.get("transient_text") or "")
+            for item in mismatched
+        )
+        alias_row = app.state.storage.get_raw_object(alias_raw, LEGACY_OWNER_USER_ID)
+        assert alias_row is not None
+        alias_meta = alias_row.get("metadata_json")
+        if isinstance(alias_meta, str):
+            alias_meta = json.loads(alias_meta)
+        assert isinstance(alias_meta, dict)
+        _assert_public(
+            alias_payload,
+            alias_raw,
+            recovery_raw,
+            exact_raw,
+            uploader,
+            jbl,
+            "telegram-file:",
+            str(alias_meta.get("sha256") or ""),
+            str(alias_meta.get("stored_path") or ""),
+        )
+
+        app.state.agent.llm = _DetailsLLM()
+        alias_details = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "кто подписал этот документ",
+                "source_ref": "telegram-update:ignored-reply-details-2",
+                "telegram_message_id": 9105,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "reply_document_message_id": 9101,
+                "reply_document_file_unique_id": "IGNORED-REPLY-STABLE",
+                "reply_document_source_ref": "telegram-file:IGNORED-REPLY-CHURNED",
+            },
+            user="1001",
+        )
+        assert alias_details.status_code == 200, alias_details.text
+        assert "Не удалось определить доступный выбранный документ" not in alias_details.json()["message"]
+        app.state.agent.llm = _NoReplyLLM()
+
+        alias_meta = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "покажи метаданные этого файла",
+                "source_ref": "telegram-update:ignored-reply-metadata",
+                "telegram_message_id": 9106,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "reply_document_message_id": 9101,
+                "reply_document_file_unique_id": "IGNORED-REPLY-STABLE",
+                "reply_document_source_ref": "telegram-file:IGNORED-REPLY-CHURNED",
+            },
+            user="1001",
+        )
+        assert alias_meta.status_code == 200, alias_meta.text
+        assert "hist-ignored-reply.txt" in alias_meta.json()["message"]
+        assert "HIST-REPLY-IGNORED-LAST" not in alias_meta.json()["message"]
+
+        lineage_follow = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Какой там последний пункт в нём?",
+                "conversation_id": alias_payload["conversation_id"],
+                "source_ref": "telegram-update:ignored-reply-lineage-only",
+                "telegram_message_id": 9103,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+            },
+            user="1001",
+        )
+        assert lineage_follow.status_code == 200, lineage_follow.text
+        _assert_closed(lineage_follow.json(), "HIST-REPLY-IGNORED-LAST")
+
+        recovery_refs = (
+            "telegram-message:5001:9201",
+            "telegram-unique:IGNORED-RECOVERY-STABLE",
+            "telegram-file:IGNORED-RECOVERY-CHURNED",
+        )
+        assert (
+            resolve_tenant_telegram_reply_aliases(app.state.storage, LEGACY_OWNER_USER_ID, recovery_refs)
+            is None
+        )
+        before_raw_count = int(
+            app.state.storage.execute(
+                "SELECT COUNT(*) AS n FROM raw_objects WHERE user_id=?",
+                (LEGACY_OWNER_USER_ID,),
+            ).fetchone()["n"]
+        )
+        before_message_count = int(
+            app.state.storage.execute("SELECT COUNT(*) AS n FROM messages").fetchone()["n"]
+        )
+        recovery_pointer = {
+            "message": "Какой последний пункт?",
+            "source_ref": "telegram-update:ignored-reply-missing-alias",
+            "telegram_message_id": 9202,
+            "telegram_user": {"id": 1001, "first_name": "Alice"},
+            "reply_document_message_id": 9201,
+            "reply_document_file_unique_id": "IGNORED-RECOVERY-STABLE",
+            "reply_document_source_ref": "telegram-file:IGNORED-RECOVERY-CHURNED",
+        }
+        monkeypatch.setattr(app.state.ingestion, "ingest_file", ingest_spy)
+        phase_one = _bridge_call(client, scoped, "POST", "/api/chat", recovery_pointer, user="1001")
+        assert phase_one.status_code == 200, phase_one.text
+        assert phase_one.json() == {"reply_media_recovery_required": True}
+        assert ingest_calls == []
+        assert (
+            int(
+                app.state.storage.execute(
+                    "SELECT COUNT(*) AS n FROM raw_objects WHERE user_id=?",
+                    (LEGACY_OWNER_USER_ID,),
+                ).fetchone()["n"]
+            )
+            == before_raw_count
+        )
+        assert int(app.state.storage.execute("SELECT COUNT(*) AS n FROM messages").fetchone()["n"]) == (
+            before_message_count
+        )
+        assert (
+            app.state.storage.execute(
+                "SELECT 1 FROM request_idempotency WHERE user_id=? AND request_key=?",
+                (uploader, "telegram-update:ignored-reply-missing-alias"),
+            ).fetchone()
+            is None
+        )
+
+        phase_two = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                **recovery_pointer,
+                "source_ref": "telegram-update:ignored-reply-missing-alias-recovery",
+                "reply_document_recovery": {
+                    "filename": "hist-ignored-recovery.txt",
+                    "mime_type": "text/plain",
+                    "media_kind": "document",
+                    "source_ref": "telegram-file:IGNORED-RECOVERY-CHURNED",
+                    "file_unique_id": "IGNORED-RECOVERY-STABLE",
+                    "content_base64": base64.b64encode(recovery_body.encode()).decode("ascii"),
+                },
+            },
+            user="1001",
+        )
+        assert phase_two.status_code == 200, phase_two.text
+        recovery_payload = phase_two.json()
+        assert "HIST-RECOVERY-IGNORED-LAST" in recovery_payload["message"]
+        assert recovery_payload["attachment_context_readable_count"] == 1
+        assert recovery_payload["attachment_coverage_complete"] is True
+        assert recovery_payload["attachment_verification_complete"] is True
+        assert ingest_calls == [recovery_body.encode()]
+        assert resolve_tenant_telegram_reply_aliases(
+            app.state.storage, LEGACY_OWNER_USER_ID, recovery_refs
+        ) == (recovery_raw, uploader)
+        recovery_row = app.state.storage.get_raw_object(recovery_raw, LEGACY_OWNER_USER_ID)
+        assert recovery_row is not None
+        recovery_meta = recovery_row.get("metadata_json")
+        if isinstance(recovery_meta, str):
+            recovery_meta = json.loads(recovery_meta)
+        assert isinstance(recovery_meta, dict)
+        stored = scoped.files_dir / str(recovery_meta["stored_path"])
+        assert stored.read_bytes() == recovery_body.encode()
+        assert recovery_meta["size_bytes"] == len(recovery_body.encode())
+        assert recovery_meta["sha256"] == hashlib.sha256(recovery_body.encode()).hexdigest()
+
+        pointer_replay = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                **recovery_pointer,
+                "source_ref": "telegram-update:ignored-reply-missing-alias-replay",
+                "telegram_message_id": 9203,
+            },
+            user="1001",
+        )
+        assert pointer_replay.status_code == 200, pointer_replay.text
+        assert "HIST-RECOVERY-IGNORED-LAST" in pointer_replay.json()["message"]
+        assert ingest_calls == [recovery_body.encode()]
+        monkeypatch.setattr(app.state.ingestion, "ingest_file", canonical_ingest)
+
+        exact_turn = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": f"Какой последний пункт в файле «{exact_name}»?",
+                "source_ref": "telegram-update:ignored-exact-name",
+                "telegram_message_id": 9301,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+            },
+            user="1001",
+        )
+        assert exact_turn.status_code == 200, exact_turn.text
+        exact_payload = exact_turn.json()
+        assert "HIST-EXACT-IGNORED-LAST" in exact_payload["message"]
+        assert "продолжение exact last" in exact_payload["message"]
+        assert exact_payload["attachment_context_readable_count"] == 1
+        assert exact_payload["attachment_coverage_complete"] is True
+        follow = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Какой там последний пункт в нём?",
+                "conversation_id": exact_payload["conversation_id"],
+                "source_ref": "telegram-update:ignored-exact-followup",
+                "telegram_message_id": 9302,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+            },
+            user="1001",
+        )
+        assert follow.status_code == 200, follow.text
+        follow_payload = follow.json()
+        assert "HIST-EXACT-IGNORED-LAST" in follow_payload["message"]
+        assert follow_payload["restored_attachment_count"] == 1
+        assert follow_payload["attachment_context_readable_count"] == 1
+        named_again = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": f"Какой последний пункт в файле «{exact_name}»?",
+                "source_ref": "telegram-update:ignored-exact-name-meta",
+                "telegram_message_id": 9303,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+            },
+            user="1001",
+        )
+        assert named_again.status_code == 200, named_again.text
+        metadata_turn = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "покажи метаданные этого файла",
+                "conversation_id": named_again.json()["conversation_id"],
+                "source_ref": "telegram-update:ignored-exact-metadata",
+                "telegram_message_id": 9304,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+            },
+            user="1001",
+        )
+        assert metadata_turn.status_code == 200, metadata_turn.text
+        metadata_payload = metadata_turn.json()
+        assert exact_name in metadata_payload["message"]
+        assert "HIST-EXACT-IGNORED-LAST" not in metadata_payload["message"]
+        assert "Не удалось определить доступный выбранный документ" not in metadata_payload["message"]
+
+        cite_conversation = app.state.storage.create_conversation(uploader, title="ignored citations")
+        app.state.storage.set_channel_conversation(uploader, "telegram", "5001", cite_conversation["id"])
+        cite_source = app.state.storage.store_message(
+            cite_conversation["id"],
+            uploader,
+            "assistant",
+            "Источники: A [K1], B [K2], C [K3].",
+            metadata={"knowledge_citations": {"K1": ko_a, "K2": ko_b, "K3": ko_c}},
+        )
+        one_cite = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Какой последний пункт? [K1]",
+                "source_ref": "telegram-update:ignored-cite-one",
+                "telegram_message_id": 9501,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+            },
+            user="1001",
+        )
+        assert one_cite.status_code == 200, one_cite.text
+        one_cite_payload = one_cite.json()
+        assert "HIST-CITE-OWNER-A-LAST" in one_cite_payload["message"]
+        assert "HIST-CITE-JBL-B-LAST" not in one_cite_payload["message"]
+        assert "HIST-CITE-AMBIENT-C-MUST-STAY-CLOSED" not in one_cite_payload["message"]
+        assert one_cite_payload["attachment_context_readable_count"] == 1
+        _assert_public(one_cite_payload, str(raw_a), str(raw_b), str(raw_c), uploader, jbl, ko_a, ko_b)
+
+        ordered_model = _OrderedCitationModel(
+            "HIST-CITE-JBL-B-LAST",
+            "HIST-CITE-OWNER-A-LAST",
+            "HIST-CITE-AMBIENT-C-MUST-STAY-CLOSED",
+        )
+        disk_reads.clear()
+        app.state.agent.llm = ordered_model
+        two_cite = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Сравни [K2], затем [K1]",
+                "source_ref": "telegram-update:ignored-cite-two",
+                "telegram_message_id": 9502,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+                "reply_source_message_id": str(cite_source["id"]),
+            },
+            user="1001",
+        )
+        assert two_cite.status_code == 200, two_cite.text
+        two_cite_payload = two_cite.json()
+        assert "HIST-CITE-JBL-B-LAST" in two_cite_payload["message"]
+        assert "HIST-CITE-OWNER-A-LAST" in two_cite_payload["message"]
+        assert "HIST-CITE-AMBIENT-C-MUST-STAY-CLOSED" not in two_cite_payload["message"]
+        assert two_cite_payload["attachment_context_expected_count"] == 2
+        assert two_cite_payload["attachment_context_readable_count"] == 2
+        assert two_cite_payload["attachment_coverage_complete"] is True
+        assert disk_reads[:2] == [(str(raw_b), jbl), (str(raw_a), uploader)]
+        assert (str(raw_c), uploader) not in disk_reads
+        _assert_public(two_cite_payload, str(raw_a), str(raw_b), str(raw_c), uploader, jbl, ko_a, ko_b)
+        implicit_replay = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Какой там последний пункт в нём?",
+                "conversation_id": two_cite_payload["conversation_id"],
+                "source_ref": "telegram-update:ignored-cite-implicit-replay",
+                "telegram_message_id": 9506,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+            },
+            user="1001",
+        )
+        assert implicit_replay.status_code == 200, implicit_replay.text
+        _assert_closed(
+            implicit_replay.json(),
+            "HIST-CITE-JBL-B-LAST",
+            "HIST-CITE-OWNER-A-LAST",
+        )
+        lineage_conversation = app.state.storage.create_conversation(uploader, title="ignored lineage")
+        app.state.storage.set_channel_conversation(uploader, "telegram", "5001", lineage_conversation["id"])
+        lineage_source = app.state.storage.store_message(
+            lineage_conversation["id"],
+            uploader,
+            "assistant",
+            "Ответ по двум файлам.",
+            metadata={
+                "attachment_context_used": True,
+                "conversation_attachment_raw_ids": [str(raw_b), str(raw_a)],
+                "conversation_attachment_uploaders": {str(raw_b): jbl},
+            },
+        )
+        disk_reads.clear()
+        ordered_model.payloads.clear()
+        lineage_reply = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Сравни их",
+                "source_ref": "telegram-update:ignored-assistant-lineage",
+                "telegram_message_id": 9503,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+                "reply_source_message_id": str(lineage_source["id"]),
+            },
+            user="1001",
+        )
+        assert lineage_reply.status_code == 200, lineage_reply.text
+        lineage_payload = lineage_reply.json()
+        assert "HIST-CITE-JBL-B-LAST" in lineage_payload["message"]
+        assert "HIST-CITE-OWNER-A-LAST" in lineage_payload["message"]
+        assert "HIST-CITE-AMBIENT-C-MUST-STAY-CLOSED" not in lineage_payload["message"]
+        assert lineage_payload["attachment_context_expected_count"] == 2
+        assert lineage_payload["attachment_context_readable_count"] == 2
+        assert disk_reads[:2] == [(str(raw_b), jbl), (str(raw_a), uploader)]
+        assert (str(raw_c), uploader) not in disk_reads
+        _assert_public(lineage_payload, str(raw_a), str(raw_b), str(raw_c), uploader, jbl)
+
+        history = _bridge_call(
+            client,
+            scoped,
+            "GET",
+            f"/api/conversations/{cite_conversation['id']}/messages",
+            user="1001",
+        )
+        assert history.status_code == 200, history.text
+        _assert_public(history.json(), str(raw_a), str(raw_b), str(raw_c), uploader, jbl, ko_a, ko_b)
+
+        app.state.storage.execute(
+            "UPDATE raw_objects SET deleted_at='2026-08-12T00:00:00+00:00' WHERE id=?",
+            (str(raw_b),),
+        )
+        app.state.storage.commit()
+        app.state.agent.llm = _NoReplyLLM()
+        blocked_pair = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Сравни [K2], затем [K1]",
+                "source_ref": "telegram-update:ignored-cite-blocked-member",
+                "telegram_message_id": 9504,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+                "reply_source_message_id": str(cite_source["id"]),
+            },
+            user="1001",
+        )
+        assert blocked_pair.status_code == 200, blocked_pair.text
+        _assert_closed(
+            blocked_pair.json(),
+            "HIST-CITE-JBL-B-LAST",
+            "HIST-CITE-OWNER-A-LAST",
+        )
+        app.state.storage.execute(
+            "UPDATE raw_objects SET deleted_at=NULL WHERE id=?",
+            (str(raw_b),),
+        )
+        app.state.storage.commit()
+
+        app.state.storage.set_permission_override(uploader, "files.read", "deny")
+        try:
+            denied = _bridge_call(
+                client,
+                scoped,
+                "POST",
+                "/api/chat",
+                {
+                    "message": "Какой последний пункт? [K1]",
+                    "source_ref": "telegram-update:ignored-cite-no-files-read",
+                    "telegram_message_id": 9505,
+                    "telegram_user": {"id": 1001, "first_name": "Owner"},
+                },
+                user="1001",
+            )
+            assert denied.status_code == 200, denied.text
+            _assert_closed(denied.json(), "HIST-CITE-OWNER-A-LAST")
+        finally:
+            app.state.storage.set_permission_override(uploader, "files.read", None)
+
+        def _snapshot_meta(raw_id: str) -> str:
+            row = app.state.storage.get_raw_object(raw_id, LEGACY_OWNER_USER_ID)
+            assert row is not None
+            meta = row.get("metadata_json")
+            if isinstance(meta, str):
+                return str(meta)
+            return json.dumps(meta, ensure_ascii=False, sort_keys=True)
+
+        def _write_meta(raw_id: str, payload: str) -> None:
+            app.state.storage.execute(
+                "UPDATE raw_objects SET metadata_json=? WHERE id=?",
+                (payload, raw_id),
+            )
+            app.state.storage.commit()
+
+        original_a_meta = _snapshot_meta(str(raw_a))
+        broken_a = json.loads(original_a_meta)
+        owner_a_sha = str(broken_a.get("sha256") or "")
+        owner_a_path = str(broken_a.get("stored_path") or "")
+        broken_a["sha256"] = "0" * 64
+        _write_meta(str(raw_a), json.dumps(broken_a, ensure_ascii=False, sort_keys=True))
+        disk_reads.clear()
+        sha_lineage = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Какой последний пункт?",
+                "source_ref": "telegram-update:ignored-lineage-sha-break",
+                "telegram_message_id": 9510,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+                "reply_source_message_id": str(lineage_source["id"]),
+            },
+            user="1001",
+        )
+        assert sha_lineage.status_code == 200, sha_lineage.text
+        sha_payload = sha_lineage.json()
+        _assert_closed(sha_payload, "HIST-CITE-JBL-B-LAST", "HIST-CITE-OWNER-A-LAST")
+        assert sha_payload.get("attachment_context_expected_count") == 2
+        assert sha_payload.get("attachment_context_readable_count") == 0
+        assert sha_payload.get("attachment_coverage_complete") is not True
+        assert sha_payload.get("attachment_verification_complete") is not True
+        _write_meta(str(raw_a), original_a_meta)
+
+        _force_stale_cached_extraction(app.state.storage, str(raw_a), LEGACY_OWNER_USER_ID)
+        inspect_fail_names.add("OWNER-A.txt")
+        unreadable_lineage = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Какой последний пункт?",
+                "source_ref": "telegram-update:ignored-lineage-unreadable",
+                "telegram_message_id": 9514,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+                "reply_source_message_id": str(lineage_source["id"]),
+            },
+            user="1001",
+        )
+        assert unreadable_lineage.status_code == 200, unreadable_lineage.text
+        unreadable_payload = unreadable_lineage.json()
+        _assert_closed(unreadable_payload, "HIST-CITE-JBL-B-LAST", "HIST-CITE-OWNER-A-LAST")
+        assert unreadable_payload.get("attachment_context_expected_count") == 2
+        assert unreadable_payload.get("attachment_context_readable_count") == 0
+        assert unreadable_payload.get("attachment_coverage_complete") is not True
+        assert unreadable_payload.get("attachment_verification_complete") is not True
+        inspect_fail_names.clear()
+        _write_meta(str(raw_a), original_a_meta)
+        app.state.storage.execute(
+            "UPDATE raw_objects SET raw_content=? WHERE id=?",
+            (citation_a_body, str(raw_a)),
+        )
+        app.state.storage.commit()
+
+        app.state.storage.set_permission_override(uploader, "admin.all_data.read", "deny")
+        try:
+            disk_reads.clear()
+            denied_admin = _bridge_call(
+                client,
+                scoped,
+                "POST",
+                "/api/chat",
+                {
+                    "message": "Какой последний пункт?",
+                    "source_ref": "telegram-update:ignored-lineage-no-admin",
+                    "telegram_message_id": 9511,
+                    "telegram_user": {"id": 1001, "first_name": "Owner"},
+                    "reply_source_message_id": str(lineage_source["id"]),
+                },
+                user="1001",
+            )
+            assert denied_admin.status_code == 200, denied_admin.text
+            _assert_closed(denied_admin.json(), "HIST-CITE-JBL-B-LAST", "HIST-CITE-OWNER-A-LAST")
+            assert disk_reads == []
+        finally:
+            app.state.storage.set_permission_override(uploader, "admin.all_data.read", None)
+
+        malformed_cite = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Какой последний пункт? [K0]",
+                "conversation_id": cite_conversation["id"],
+                "source_ref": "telegram-update:ignored-cite-malformed",
+                "telegram_message_id": 9512,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+                "reply_source_message_id": str(cite_source["id"]),
+            },
+            user="1001",
+        )
+        assert malformed_cite.status_code == 200, malformed_cite.text
+        malformed_payload = malformed_cite.json()
+        _assert_closed(malformed_payload, "HIST-CITE-OWNER-A-LAST", "HIST-CITE-JBL-B-LAST")
+        assert malformed_payload.get("attachment_coverage_complete") is not True
+        assert malformed_payload.get("attachment_verification_complete") is not True
+
+        duplicate_cite = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Какой последний пункт? [K1], [K1]",
+                "conversation_id": cite_conversation["id"],
+                "source_ref": "telegram-update:ignored-cite-duplicate",
+                "telegram_message_id": 9515,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+                "reply_source_message_id": str(cite_source["id"]),
+            },
+            user="1001",
+        )
+        assert duplicate_cite.status_code == 200, duplicate_cite.text
+        _assert_closed(duplicate_cite.json(), "HIST-CITE-OWNER-A-LAST", "HIST-CITE-JBL-B-LAST")
+
+        original_b_meta = _snapshot_meta(str(raw_b))
+        broken_b = json.loads(original_b_meta)
+        broken_b["sha256"] = "0" * 64
+        _write_meta(str(raw_b), json.dumps(broken_b, ensure_ascii=False, sort_keys=True))
+        invalid_cite = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Какой последний пункт? [K2], затем [K1]",
+                "conversation_id": cite_conversation["id"],
+                "source_ref": "telegram-update:ignored-cite-disk-invalid",
+                "telegram_message_id": 9513,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+                "reply_source_message_id": str(cite_source["id"]),
+            },
+            user="1001",
+        )
+        assert invalid_cite.status_code == 200, invalid_cite.text
+        _assert_closed(invalid_cite.json(), "HIST-CITE-OWNER-A-LAST", "HIST-CITE-JBL-B-LAST")
+        _write_meta(str(raw_b), original_b_meta)
+
+        class _AmbientLLM:
+            enabled = True
+            model = "ignored-ambient-closed"
+            total_budget_sec = 5.0
+
+            async def chat(self, messages, **_kwargs):  # noqa: ANN001
+                del messages
+                return {
+                    "content": "По доступным источникам совпадений не видно.",
+                    "tool_calls": None,
+                    "_queue_wait_sec": 0.0,
+                }
+
+        monkeypatch.setattr(app.state.agent, "_prepare_context", original_prepare)
+        monkeypatch.setattr(app.state.agent, "_agentic_loop", original_agentic)
+        monkeypatch.setattr(app.state.agent.kernel, "get_tool_definitions", original_tools)
+        app.state.agent.llm = _AmbientLLM()
+
+        forged = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Какой там последний пункт в нём?",
+                "source_ref": "telegram-update:ignored-forged-payload",
+                "telegram_message_id": 9310,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "attachments": [
+                    {
+                        "raw_object_id": exact_raw,
+                        "filename": exact_name,
+                        "allow_ignored_inbox": True,
+                        "explicit_direct_read_ids": [exact_raw],
+                    }
+                ],
+            },
+            user="1001",
+        )
+        assert forged.status_code == 200, forged.text
+        _assert_closed(forged.json(), "HIST-EXACT-IGNORED-LAST")
+
+        ambient = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Покажи все мои файлы и последний пункт",
+                "source_ref": "telegram-update:ignored-ambient",
+                "telegram_message_id": 9305,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+            },
+            user="1001",
+        )
+        assert ambient.status_code == 200, ambient.text
+        ambient_text = str(ambient.json().get("message") or "")
+        for needle in (
+            "HIST-EXACT-IGNORED-LAST",
+            "HIST-REPLY-IGNORED-LAST",
+            "HIST-RECOVERY-IGNORED-LAST",
+            "HIST-CITE-OWNER-A-LAST",
+            "HIST-CITE-JBL-B-LAST",
+        ):
+            assert needle not in ambient_text
+
+        fuzzy = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Найди что-нибудь про HIST-CITE-OWNER-A-LAST в моих файлах",
+                "source_ref": "telegram-update:ignored-fuzzy",
+                "telegram_message_id": 9307,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+            },
+            user="1001",
+        )
+        assert fuzzy.status_code == 200, fuzzy.text
+        fuzzy_text = str(fuzzy.json().get("message") or "")
+        assert "HIST-CITE-OWNER-A-LAST" not in fuzzy_text
+        assert "продолжение owner A" not in fuzzy_text
+
+        content = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "где написано продолжение ignored last",
+                "source_ref": "telegram-update:ignored-content-search",
+                "telegram_message_id": 9308,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+            },
+            user="1001",
+        )
+        assert content.status_code == 200, content.text
+        content_text = str(content.json().get("message") or "")
+        assert "HIST-REPLY-IGNORED-LAST" not in content_text
+        assert "продолжение ignored last" not in content_text
+
+        conflict = asyncio.run(
+            app.state.ingestion.ingest_file(
+                LEGACY_OWNER_USER_ID,
+                None,
+                b"1. CONFLICT-SAME-NAME-MUST-STAY-CLOSED",
+                filename=exact_name,
+                mime_type="text/plain",
+                metadata={"uploaded_by": uploader},
+                source_ref="telegram-file:IGNORED-EXACT-CONFLICT",
+            )
+        )
+        assert str(conflict["raw_object_id"]) != exact_raw
+        ambiguous = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": f"Какой последний пункт в файле «{exact_name}»?",
+                "source_ref": "telegram-update:ignored-exact-conflict",
+                "telegram_message_id": 9306,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+            },
+            user="1001",
+        )
+        assert ambiguous.status_code == 200, ambiguous.text
+        ambiguous = ambiguous.json()
+        assert ambiguous["attachment_context_expected_count"] == 2
+        assert "HIST-EXACT-IGNORED-LAST" not in ambiguous["message"]
+        assert "CONFLICT-SAME-NAME-MUST-STAY-CLOSED" not in ambiguous["message"]
+
+        assert (
+            resolve_tenant_telegram_reply_aliases(
+                app.state.storage,
+                LEGACY_OWNER_USER_ID,
+                ("telegram-file:IGNORED-AUDIO",),
+            )
+            is None
+        )
+        assert (
+            resolve_tenant_telegram_reply_aliases(
+                app.state.storage,
+                LEGACY_OWNER_USER_ID,
+                ("telegram-file:IGNORED-DELETED",),
+            )
+            is None
+        )
+        assert (
+            resolve_tenant_telegram_reply_aliases(
+                app.state.storage,
+                LEGACY_OWNER_USER_ID,
+                ("telegram-file:IGNORED-INACTIVE",),
+            )
+            is None
+        )
+        for pointer_label, unique in (
+            ("audio", "IGNORED-AUDIO"),
+            ("deleted", "IGNORED-DELETED"),
+            ("inactive", "IGNORED-INACTIVE"),
+        ):
+            pointer = _bridge_call(
+                client,
+                scoped,
+                "POST",
+                "/api/chat",
+                {
+                    "message": "Какой последний пункт?",
+                    "source_ref": f"telegram-update:ignored-api-{pointer_label}",
+                    "telegram_message_id": 9610 + len(pointer_label),
+                    "telegram_user": {"id": 1001, "first_name": "Alice"},
+                    "reply_document_source_ref": f"telegram-file:{unique}",
+                    "reply_document_file_unique_id": unique,
+                },
+                user="1001",
+            )
+            assert pointer.status_code == 200, pointer.text
+            _assert_closed(pointer.json(), "HIST-REPLY-IGNORED-LAST", "HIST-EXACT-IGNORED-LAST")
+
+        private_raw = _stored_reply_file(
+            app.state.storage,
+            LEGACY_OWNER_USER_ID,
+            uploader,
+            "IGNORED-PRIVATE",
+            ignored=True,
+        )
+        private_knowledge = KnowledgeObject(
+            id=new_id("ko"),
+            user_id=LEGACY_OWNER_USER_ID,
+            raw_object_id=private_raw.id,
+            content=private_raw.raw_content,
+            content_type="text",
+            title="private reply dependency",
+        )
+        app.state.storage.store_knowledge_object(private_knowledge)
+        private_entity = Entity(
+            id=new_id("ent"),
+            user_id=LEGACY_OWNER_USER_ID,
+            name=f"Private reply entity {private_raw.id}",
+            entity_type=EntityType.EVENT,
+        )
+        app.state.storage.create_entity(private_entity)
+        app.state.storage.link_knowledge_entity(
+            LEGACY_OWNER_USER_ID,
+            private_knowledge.id,
+            private_entity.id,
+            status="accepted",
+        )
+        with app.state.storage.transaction() as connection:
+            connection.execute(
+                """INSERT INTO private_entity_owners(
+                       entity_id, person_id, privacy_kind, created_at)
+                   VALUES(?, ?, 'reminder', '2026-08-12T00:00:00+00:00')""",
+                (private_entity.id, "another-person"),
+            )
+        private_ptr = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Какой последний пункт?",
+                "source_ref": "telegram-update:ignored-api-private",
+                "telegram_message_id": 9620,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "reply_document_source_ref": "telegram-file:IGNORED-PRIVATE",
+                "reply_document_file_unique_id": "IGNORED-PRIVATE",
+            },
+            user="1001",
+        )
+        assert private_ptr.status_code == 200, private_ptr.text
+        _assert_closed(private_ptr.json(), private_raw.raw_content, "HIST-REPLY-IGNORED-LAST")
+
+        conflict_left = _stored_reply_file(
+            app.state.storage,
+            LEGACY_OWNER_USER_ID,
+            uploader,
+            "STRUCT-CONFLICT-LEFT",
+        )
+        conflict_right = _stored_reply_file(
+            app.state.storage,
+            LEGACY_OWNER_USER_ID,
+            uploader,
+            "STRUCT-CONFLICT-RIGHT",
+        )
+        app.state.storage.execute(
+            """INSERT INTO file_source_aliases(
+                   user_id, uploaded_by, source_ref, raw_object_id, created_at
+               ) VALUES(?, ?, ?, ?, '2026-08-12T00:00:00+00:00')""",
+            (
+                LEGACY_OWNER_USER_ID,
+                uploader,
+                "telegram-unique:STRUCT-CONFLICT",
+                conflict_left.id,
+            ),
+        )
+        app.state.storage.execute(
+            """INSERT INTO file_source_aliases(
+                   user_id, uploaded_by, source_ref, raw_object_id, created_at
+               ) VALUES(?, ?, ?, ?, '2026-08-12T00:00:00+00:00')""",
+            (
+                LEGACY_OWNER_USER_ID,
+                uploader,
+                "telegram-message:5001:9601",
+                conflict_right.id,
+            ),
+        )
+        app.state.storage.commit()
+        alias_conflict = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Какой последний пункт?",
+                "source_ref": "telegram-update:ignored-struct-alias-conflict",
+                "telegram_message_id": 9630,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "reply_document_message_id": 9601,
+                "reply_document_file_unique_id": "STRUCT-CONFLICT",
+            },
+            user="1001",
+        )
+        assert alias_conflict.status_code == 200, alias_conflict.text
+        _assert_closed(
+            alias_conflict.json(),
+            conflict_left.raw_content,
+            conflict_right.raw_content,
+            "HIST-REPLY-IGNORED-LAST",
+        )
+
+        _assert_public(
+            alias_payload,
+            owner_a_sha,
+            owner_a_path,
+            hashlib.sha256(last_item_body.encode()).hexdigest(),
+            hashlib.sha256(recovery_body.encode()).hexdigest(),
+        )
+        del audio, deleted, inactive, private_raw

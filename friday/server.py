@@ -33,10 +33,10 @@ from friday.account_gate import AccountActivityGate, AccountGateClosed
 from friday.admin_api import router as admin_router
 from friday.agent_runtime import (
     AgentRuntime,
+    _historical_direct_read_attachment,
     _is_file_provenance_stub,
     _mime_is_visual_without_text_layer,
     _OwnedAttachment,
-    _resolved_telegram_reply_attachment,
     _validated_attachment_lineage_metadata,
     asks_for_the_web,
 )
@@ -120,6 +120,7 @@ from friday.storage._intake import (
     TELEGRAM_REPLY_RESOLVED,
     bind_owned_telegram_reply_aliases,
     bind_owned_telegram_reply_recovery_aliases,
+    resolve_structural_telegram_reply_direct_read,
     resolve_tenant_telegram_reply_alias_state,
     resolve_tenant_telegram_reply_aliases,
 )
@@ -2403,13 +2404,19 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         authorized_attachments: list[dict[str, Any]] = []
                         for raw_id in lineage_raw_ids:
                             uploaded_by = lineage_uploaders.get(raw_id, actor.own_id)
+                            if (
+                                uploaded_by != actor.own_id
+                                and not state.auth_service.authorize(actor, "admin.all_data.read").allowed
+                            ):
+                                authorized_attachments = []
+                                break
                             try:
                                 canonical_rows = await run_blocking(
-                                    state.storage.get_searchable_file_sources,
+                                    resolve_structural_telegram_reply_direct_read,
+                                    state.storage,
                                     actor.user_id,
-                                    [raw_id],
-                                    uploaded_by=uploaded_by,
-                                    limit=1,
+                                    uploaded_by,
+                                    raw_id,
                                     include_content=False,
                                 )
                             except Exception as exc:  # noqa: BLE001 - verdict change stays closed
@@ -2431,11 +2438,16 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             ):
                                 authorized_attachments = []
                                 break
-                            authorized_attachments.append(
-                                _resolved_telegram_reply_attachment(raw_id, uploaded_by)
-                                if raw_id in lineage_uploaders
-                                else {"raw_object_id": raw_id}
+                            minted = _historical_direct_read_attachment(
+                                raw_id,
+                                tenant_id=actor.user_id,
+                                uploaded_by=uploaded_by,
+                                selector_kind="assistant_lineage",
                             )
+                            if minted is None:
+                                authorized_attachments = []
+                                break
+                            authorized_attachments.append(minted)
                         if len(authorized_attachments) == len(lineage_raw_ids):
                             attachments.extend(authorized_attachments)
             quoted_attachment_reference = reply_pointer_present
@@ -2472,12 +2484,14 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     # marker type, never as caller JSON. Runtime performs its
                     # ordinary atomic lifecycle/privacy/registry read against
                     # that exact uploader before any file text becomes visible.
-                    attachments.append(
-                        _resolved_telegram_reply_attachment(
-                            reply_raw_id,
-                            reply_uploaded_by,
-                        )
+                    minted = _historical_direct_read_attachment(
+                        reply_raw_id,
+                        tenant_id=actor.user_id,
+                        uploaded_by=reply_uploaded_by,
+                        selector_kind="telegram_reply",
                     )
+                    if minted is not None:
+                        attachments.append(minted)
                 else:
                     try:
                         reply_state = await run_blocking(
@@ -2500,12 +2514,14 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             reply_state.raw_object_id,
                             reply_state.uploaded_by,
                         )
-                        attachments.append(
-                            _resolved_telegram_reply_attachment(
-                                reply_state.raw_object_id,
-                                reply_state.uploaded_by,
-                            )
+                        minted = _historical_direct_read_attachment(
+                            reply_state.raw_object_id,
+                            tenant_id=actor.user_id,
+                            uploaded_by=reply_state.uploaded_by,
+                            selector_kind="telegram_reply",
                         )
+                        if minted is not None:
+                            attachments.append(minted)
 
             if recovery_supplied and (
                 not reply_pointer_present
@@ -2657,7 +2673,14 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 )
                 if final_resolution != (recovered_raw_id, actor.own_id):
                     raise IdempotencyConflictError("Telegram reply recovery did not converge")
-                attachments.append(_resolved_telegram_reply_attachment(recovered_raw_id, actor.own_id))
+                minted = _historical_direct_read_attachment(
+                    recovered_raw_id,
+                    tenant_id=actor.user_id,
+                    uploaded_by=actor.own_id,
+                    selector_kind="telegram_reply",
+                )
+                if minted is not None:
+                    attachments.append(minted)
             elif recovery_supplied and reply_resolution_status == TELEGRAM_REPLY_BLOCKED:
                 raise HTTPException(status_code=409, detail="Reply media recovery is blocked")
             if document:

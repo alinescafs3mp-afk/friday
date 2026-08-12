@@ -140,6 +140,143 @@ def resolve_owned_file_exact_filename_direct_read(
     return result
 
 
+def resolve_structural_telegram_reply_direct_read(
+    storage: StorageShared,
+    user_id: str,
+    uploaded_by: str,
+    raw_object_id: str,
+    *,
+    include_content: bool = False,
+) -> list[dict[str, Any]]:
+    """Re-authorize one structural Telegram reply Raw, including Inbox ``ignored``.
+
+    This is a runtime-only boundary. Ambient catalog, search, citations and
+    ordinary replay keep using verdict-aware readers. Authority still requires
+    the exact tenant, exact active uploader, live non-audio public file and a
+    process-private reply carrier; a public raw-id payload cannot call this.
+    """
+
+    tenant = str(user_id or "").strip()
+    person = str(uploaded_by or "").strip()
+    raw_id = str(raw_object_id or "").strip()
+    if not tenant or not person or not raw_id:
+        return []
+    content_projection = (
+        ", r.raw_content AS _raw_content, r.metadata_json AS _raw_metadata" if include_content else ""
+    )
+    rows = storage.execute(
+        f"""SELECT r.id, r.source, r.source_ref, r.content_type, r.received_at,
+                   r.content_hash{content_projection}
+              FROM raw_objects r
+             WHERE r.user_id=? AND r.id=? AND r.deleted_at IS NULL
+               AND r.content_type='file'
+               AND {_exact_uploader_raw_dependency("r")}
+               AND {_not_audio_document("r")}
+               AND {_not_private_raw_dependency("r")}
+               AND EXISTS (
+                   SELECT 1 FROM users historical_direct_read_uploader
+                    WHERE historical_direct_read_uploader.id=?
+                      AND historical_direct_read_uploader.status='active'
+               )
+             LIMIT 2""",  # nosec B608 - only fixed privacy predicates
+        (tenant, raw_id, person, person),
+    ).fetchall()
+    return [dict(row) for row in rows] if len(rows) == 1 else []
+
+
+def resolve_explicit_file_citation_sources(
+    storage: StorageShared,
+    user_id: str,
+    knowledge_ids: Sequence[str],
+    *,
+    limit: int = _PUBLIC_FILE_CITATION_MAX,
+) -> list[PublicFileCitationSource]:
+    """Ordered all-or-none explicit citation join; Inbox ``ignored`` is not a veto.
+
+    Ambient/latest citation recall keeps using
+    ``resolve_public_file_citation_sources``. This resolver is only for an
+    explicit ``[K#]`` / exact-cited-assistant selector. It still requires the
+    same tenant, live/non-private KO, live/non-private/non-audio file Raw,
+    exact bounded metadata uploader and an active uploader, and closes the
+    whole set on any missing or extra member.
+    """
+
+    page_size = max(1, min(int(limit), _PUBLIC_FILE_CITATION_MAX))
+    ordered_ids: list[str] = []
+    for value in knowledge_ids:
+        knowledge_id = str(value or "").strip()
+        if not knowledge_id or not _KNOWLEDGE_OBJECT_ID_RE.fullmatch(knowledge_id):
+            return []
+        if knowledge_id in ordered_ids:
+            return []
+        ordered_ids.append(knowledge_id)
+        if len(ordered_ids) > page_size:
+            return []
+    if not ordered_ids:
+        return []
+
+    tenant = str(user_id or "").strip()
+    if not tenant:
+        return []
+
+    uploader_expr = _bounded_raw_uploader_expression("r")
+    placeholders = ",".join("?" for _item in ordered_ids)
+    rows = storage.execute(
+        f"""SELECT k.id AS knowledge_object_id,
+                   r.id AS raw_object_id,
+                   {uploader_expr} AS uploaded_by
+              FROM knowledge_objects k
+              JOIN raw_objects r
+                ON r.id=k.raw_object_id
+               AND r.user_id=k.user_id
+             WHERE k.user_id=?
+               AND k.id IN ({placeholders})
+               AND k.deleted_at IS NULL
+               AND {_not_private_knowledge_dependency("k")}
+               AND r.deleted_at IS NULL
+               AND r.content_type='file'
+               AND {_not_audio_document("r")}
+               AND {_not_private_raw_dependency("r")}
+               AND {uploader_expr} IS NOT NULL
+               AND {uploader_expr}<>''
+               AND EXISTS (
+                   SELECT 1 FROM users exact_citation_uploader
+                    WHERE exact_citation_uploader.id={uploader_expr}
+                      AND exact_citation_uploader.status='active'
+               )""",  # nosec B608 - placeholders and fixed privacy clauses only
+        (tenant, *ordered_ids),
+    ).fetchall()
+    found = {
+        str(row["knowledge_object_id"]): (
+            str(row["raw_object_id"] or ""),
+            str(row["uploaded_by"] or ""),
+        )
+        for row in rows
+    }
+    if len(found) != len(ordered_ids):
+        return []
+    result: list[PublicFileCitationSource] = []
+    for knowledge_id in ordered_ids:
+        pair = found.get(knowledge_id)
+        if pair is None:
+            return []
+        raw_id, uploaded_by = pair
+        if not raw_id or not uploaded_by:
+            return []
+        try:
+            validated_uploader = validate_user_id(uploaded_by)
+        except ValueError:
+            return []
+        result.append(
+            PublicFileCitationSource(
+                knowledge_object_id=knowledge_id,
+                raw_object_id=raw_id,
+                uploaded_by=validated_uploader,
+            )
+        )
+    return result
+
+
 def _telegram_file_source_ref_kind(source_ref: str) -> str:
     """Validate one closed Telegram file identity without granting authority."""
 
@@ -196,11 +333,6 @@ def bind_owned_telegram_reply_aliases(
                    AND {_not_audio_document("r")}
                    AND {_not_private_raw_dependency("r")}
                    AND {_exact_uploader_raw_dependency("r")}
-                   AND NOT EXISTS (
-                       SELECT 1 FROM inbox i
-                        WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
-                          AND i.status='ignored'
-                   )
                  LIMIT 1""",  # nosec B608 - fixed predicates, values are bound
             (exact_raw, exact_user, exact_uploader),
         ).fetchone()
@@ -262,11 +394,6 @@ def bind_owned_telegram_reply_recovery_aliases(
                    AND {_not_audio_document("r")}
                    AND {_not_private_raw_dependency("r")}
                    AND {_exact_uploader_raw_dependency("r")}
-                   AND NOT EXISTS (
-                       SELECT 1 FROM inbox i
-                        WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
-                          AND i.status='ignored'
-                   )
                  LIMIT 1""",  # nosec B608 - fixed predicates, values are bound
             (exact_raw, exact_user, exact_uploader),
         ).fetchone()
@@ -369,11 +496,6 @@ def resolve_owned_telegram_reply_aliases(
                AND {_not_audio_document("r")}
                AND {_not_private_raw_dependency("r")}
                AND {_exact_uploader_raw_dependency("r")}
-               AND NOT EXISTS (
-                   SELECT 1 FROM inbox i
-                    WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
-                      AND i.status='ignored'
-               )
              LIMIT 2""",  # nosec B608 - fixed predicates and bounded placeholders only
         (*parameters, exact_user, exact_uploader),
     ).fetchall()
@@ -471,11 +593,6 @@ def resolve_tenant_telegram_reply_aliases(
                 AND ({exact_raw_uploader})=b.uploaded_by
                 AND {_not_audio_document("r")}
                 AND {_not_private_raw_dependency("r")}
-                AND NOT EXISTS (
-                    SELECT 1 FROM inbox i
-                     WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
-                       AND i.status='ignored'
-                )
               LIMIT 2""",  # nosec B608 - fixed predicates and bounded placeholders only
         (*parameters, exact_user),
     ).fetchall()
@@ -498,9 +615,11 @@ def resolve_tenant_telegram_reply_alias_state(
 ) -> TelegramReplyResolution:
     """Distinguish a missing reply identity from unsafe durable state.
 
-    Recovery is permitted only for ``absent``.  A stale, private, ignored,
-    deleted, cross-uploader, or conflicting binding is ``blocked`` rather than
-    being mistaken for an invitation to download and re-ingest bytes.
+    Recovery is permitted only for ``absent``.  A stale, private, deleted,
+    cross-uploader, or conflicting binding is ``blocked`` rather than being
+    mistaken for an invitation to download and re-ingest bytes.  An Inbox
+    ``ignored`` row remains a live structural-reply target when every other
+    gate still holds.
     """
 
     exact_user = str(user_id or "").strip()
