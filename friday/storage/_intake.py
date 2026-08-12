@@ -38,6 +38,157 @@ from friday.storage._privacy import (
     _not_private_raw_dependency,
 )
 
+_TELEGRAM_FILE_SOURCE_PREFIX = "telegram-file:"
+_TELEGRAM_UNIQUE_SOURCE_PREFIX = "telegram-unique:"
+_TELEGRAM_MESSAGE_SOURCE_REF = re.compile(r"telegram-message:-?[1-9][0-9]{0,31}:[1-9][0-9]{0,31}\Z")
+
+
+def _telegram_file_source_ref_kind(source_ref: str) -> str:
+    """Validate one closed Telegram file identity without granting authority."""
+
+    exact_ref = str(source_ref or "")
+    if not exact_ref or exact_ref != exact_ref.strip() or len(exact_ref) > 500:
+        return ""
+    if _TELEGRAM_MESSAGE_SOURCE_REF.fullmatch(exact_ref):
+        return "message"
+    for prefix, kind in (
+        (_TELEGRAM_FILE_SOURCE_PREFIX, "file"),
+        (_TELEGRAM_UNIQUE_SOURCE_PREFIX, "unique"),
+    ):
+        if not exact_ref.startswith(prefix):
+            continue
+        opaque = exact_ref.removeprefix(prefix)
+        if opaque and all(char.isascii() and 33 <= ord(char) <= 126 for char in opaque):
+            return kind
+    return ""
+
+
+def bind_owned_telegram_reply_aliases(
+    storage: StorageShared,
+    user_id: str,
+    uploaded_by: str,
+    raw_object_id: str,
+    source_refs: tuple[str, ...],
+) -> bool:
+    """Atomically bind server-derived message/unique identities to one Raw.
+
+    The ordinary ingestion alias method intentionally accepts only
+    ``telegram-file:``.  Keeping these two stronger identities in a separate
+    function prevents an arbitrary upload ``source_ref`` from impersonating a
+    bridge-authenticated chat/message pair or Telegram's stable unique id.
+    """
+
+    exact_user = str(user_id or "").strip()
+    exact_uploader = str(uploaded_by or "").strip()
+    exact_raw = str(raw_object_id or "").strip()
+    aliases = list(dict.fromkeys(str(value or "") for value in source_refs))
+    if (
+        not exact_user
+        or not exact_uploader
+        or not exact_raw
+        or not aliases
+        or len(aliases) > 2
+        or any(_telegram_file_source_ref_kind(value) not in {"message", "unique"} for value in aliases)
+    ):
+        return False
+    with storage.transaction() as conn:
+        canonical = conn.execute(
+            f"""SELECT r.id FROM raw_objects r
+                 WHERE r.id=? AND r.user_id=? AND r.source='upload'
+                   AND r.content_type='file' AND r.deleted_at IS NULL
+                   AND {_not_audio_document("r")}
+                   AND {_not_private_raw_dependency("r")}
+                   AND {_exact_uploader_raw_dependency("r")}
+                 LIMIT 1""",  # nosec B608 - fixed predicates, values are bound
+            (exact_raw, exact_user, exact_uploader),
+        ).fetchone()
+        if canonical is None:
+            return False
+        placeholders = ",".join("?" for _value in aliases)
+        existing = conn.execute(
+            f"""SELECT source_ref, raw_object_id FROM file_source_aliases
+                 WHERE user_id=? AND uploaded_by=?
+                   AND source_ref IN ({placeholders})""",  # nosec B608 - placeholders only
+            (exact_user, exact_uploader, *aliases),
+        ).fetchall()
+        existing_by_ref = {str(row["source_ref"]): str(row["raw_object_id"]) for row in existing}
+        if any(existing_by_ref.get(source_ref, exact_raw) != exact_raw for source_ref in aliases):
+            raise SourceReferenceConflictError(
+                "Telegram reply identity is already bound to different content"
+            )
+        for source_ref in aliases:
+            if source_ref in existing_by_ref:
+                continue
+            conn.execute(
+                """INSERT INTO file_source_aliases(
+                       user_id, uploaded_by, source_ref, raw_object_id, created_at
+                   ) VALUES(?, ?, ?, ?, ?)""",
+                (exact_user, exact_uploader, source_ref, exact_raw, utc_now()),
+            )
+    return True
+
+
+def resolve_owned_telegram_reply_aliases(
+    storage: StorageShared,
+    user_id: str,
+    uploaded_by: str,
+    source_refs: tuple[str, ...],
+) -> str | None:
+    """Atomically re-authorize a closed set of Telegram reply identities.
+
+    Missing/churned identities may be absent, but every identity that resolves
+    must converge on exactly one currently readable Raw Object.  A disagreement
+    between message id, stable unique id and current file id fails closed.
+    """
+
+    exact_user = str(user_id or "").strip()
+    exact_uploader = str(uploaded_by or "").strip()
+    refs = list(dict.fromkeys(str(value or "") for value in source_refs))
+    kinds = [_telegram_file_source_ref_kind(value) for value in refs]
+    if not exact_user or not exact_uploader or not refs or len(refs) > 3 or any(not kind for kind in kinds):
+        return None
+    alias_placeholders = ",".join("?" for _value in refs)
+    file_refs = [source_ref for source_ref, kind in zip(refs, kinds, strict=True) if kind == "file"]
+    bound_sql = f"""SELECT a.raw_object_id
+                       FROM file_source_aliases a
+                      WHERE a.user_id=? AND a.uploaded_by=?
+                        AND a.source_ref IN ({alias_placeholders})"""
+    parameters: list[Any] = [exact_user, exact_uploader, *refs]
+    if file_refs:
+        uploader_namespace = hashlib.sha256(exact_uploader.encode("utf-8")).hexdigest()[:24]
+        legacy_refs = [
+            value
+            for source_ref in file_refs
+            for value in (source_ref, f"uploader:{uploader_namespace}:{source_ref}")
+        ]
+        legacy_placeholders = ",".join("?" for _value in legacy_refs)
+        bound_sql += f"""
+                    UNION
+                    SELECT legacy.id
+                      FROM raw_objects legacy
+                     WHERE legacy.user_id=? AND legacy.source='upload'
+                       AND legacy.source_ref IN ({legacy_placeholders})"""
+        parameters.extend((exact_user, *legacy_refs))
+    rows = storage.execute(
+        f"""WITH bound(raw_object_id) AS ({bound_sql})
+             SELECT DISTINCT r.id FROM bound b
+             JOIN raw_objects r ON r.id=b.raw_object_id
+             WHERE r.user_id=? AND r.source='upload'
+               AND r.content_type='file' AND r.deleted_at IS NULL
+               AND (SELECT COUNT(DISTINCT raw_object_id) FROM bound)=1
+               AND {_not_audio_document("r")}
+               AND {_not_private_raw_dependency("r")}
+               AND {_exact_uploader_raw_dependency("r")}
+               AND NOT EXISTS (
+                   SELECT 1 FROM inbox i
+                    WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
+                      AND i.status='ignored'
+               )
+             LIMIT 2""",  # nosec B608 - fixed predicates and bounded placeholders only
+        (*parameters, exact_user, exact_uploader),
+    ).fetchall()
+    return str(rows[0]["id"]) if len(rows) == 1 else None
+
 
 def _bounded_public_inbox_card(item: Mapping[str, Any]) -> dict[str, Any]:
     """Structural Inbox card without reviewer identity or advisory text."""
@@ -182,7 +333,7 @@ class IntakeMixin(StorageShared):
 
         exact_ref = str(source_ref or "").strip()
         exact_uploader = str(uploaded_by or "").strip()
-        if not exact_uploader or not exact_ref.startswith("telegram-file:") or len(exact_ref) > 500:
+        if not exact_uploader or _telegram_file_source_ref_kind(exact_ref) != "file" or len(exact_ref) > 500:
             return None
         uploader_namespace = hashlib.sha256(exact_uploader.encode("utf-8")).hexdigest()[:24]
         scoped_ref = f"uploader:{uploader_namespace}:{exact_ref}"
@@ -251,9 +402,8 @@ class IntakeMixin(StorageShared):
             not exact_user
             or not exact_uploader
             or not exact_raw
-            or not exact_ref.startswith("telegram-file:")
+            or _telegram_file_source_ref_kind(exact_ref) != "file"
             or len(exact_ref) > 500
-            or any(char.isspace() or ord(char) < 33 for char in exact_ref.removeprefix("telegram-file:"))
         ):
             return False
         with self.transaction() as conn:

@@ -24,6 +24,7 @@ from friday.telegram_bridge._base import (
     quote,
     refusal_notice,
 )
+from friday.telegram_bridge._media import _reply_document_file_unique_id
 from friday.telegram_bridge._views import _TIMELINE_SHOWN
 
 
@@ -1356,6 +1357,14 @@ class CommandsMixin(BridgeShared):
             reply_document_source_ref = self._reply_document_source_ref(message)
             if reply_document_source_ref:
                 payload["reply_document_source_ref"] = reply_document_source_ref
+                if replied_message_id > 0:
+                    # The backend combines this code-owned structural id with
+                    # the authenticated bridge chat id.  Neither quoted text nor
+                    # a filename participates in the resulting authority.
+                    payload["reply_document_message_id"] = replied_message_id
+                unique_id = _reply_document_file_unique_id(message)
+                if unique_id:
+                    payload["reply_document_file_unique_id"] = unique_id
         if archive_password is not None:
             payload["archive_password"] = archive_password
         # На что человек ответил репликой. Прежде `reply_to_message` не читался

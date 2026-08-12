@@ -19,6 +19,12 @@ from friday.document_metadata_codec import (
 )
 from friday.documents import VisualAsset
 from friday.documents._office_structure import validate_office_structure_index
+from friday.file_delivery import (
+    LEGACY_UNREGISTERED,
+    REGISTERED_VALID,
+    classify_file_registration,
+    verify_registered_file_bytes,
+)
 from friday.ingestion._base import (
     LOGGER,
     Any,
@@ -44,6 +50,7 @@ from friday.ingestion._base import (
     base64,
     hashlib,
     hmac,
+    json,
     looks_like_audio,
     mimetypes,
     new_id,
@@ -1478,10 +1485,16 @@ class FilesMixin(PipelineShared):
                 scope_uploaded_by=uploader_scoped,
             )
         if existing:
-            self._validate_existing_file_source(existing, digest)
-            # An exact retry can also repair a missing/corrupt content-addressed
-            # file left by an interrupted older ingestion attempt.
-            self._store_file(user_id, file_content, digest, filename)
+            # An exact retry repairs missing/corrupt content-addressed bytes and
+            # incomplete modern registration fields, but never inherits a broken
+            # registration as a successful ready file without re-verification.
+            existing = self._prepare_existing_file_for_replay(
+                user_id,
+                existing,
+                file_content,
+                digest,
+                filename,
+            )
             bind_transport_alias(str(existing.get("id") or ""))
             return self._replay_file_source(user_id, existing)
 
@@ -1680,7 +1693,14 @@ class FilesMixin(PipelineShared):
                     )
                 if structurally_equivalent and technical_metadata_equivalent:
                     LOGGER.info("Тот же текст уже принят; повторяю прежний исход")
-                    self._store_file(user_id, file_content, digest, filename)
+                    # Semantic/text equivalence reuses the *existing* Raw and its
+                    # registered identity.  It must not rebind that Raw to the new
+                    # container's byte digest or repair registration from the new
+                    # bytes (exact source-ref/content-hash retry owns that path).
+                    same_document = self._accept_semantic_duplicate_for_replay(
+                        user_id,
+                        same_document,
+                    )
                     bind_transport_alias(str(same_document.get("id") or ""))
                     return self._replay_file_source(user_id, same_document)
         media_label = media_kind or "File"
@@ -1975,7 +1995,16 @@ class FilesMixin(PipelineShared):
                 # semantics during a rolling upgrade.
                 existing = find_existing_source()
                 if existing:
-                    self._validate_existing_file_source(existing, digest)
+                    # Same writer lock: repair on this connection so we never
+                    # open a nested BEGIN IMMEDIATE against the live transaction.
+                    existing = self._prepare_existing_file_for_replay(
+                        user_id,
+                        existing,
+                        file_content,
+                        digest,
+                        filename,
+                        conn=conn,
+                    )
                     bind_transport_alias(str(existing.get("id") or ""))
                     return self._replay_file_source(user_id, existing)
 
@@ -2438,18 +2467,166 @@ class FilesMixin(PipelineShared):
                 staged.unlink(missing_ok=True)
 
     def _validate_existing_file_source(self, existing: dict[str, Any], digest: str) -> None:
-        existing_metadata = _json_dict(existing.get("metadata_json"))
-        existing_digest = str(existing_metadata.get("sha256") or existing.get("content_hash") or "")
-        if not existing_digest:
-            # Путь может быть и относительным (новая форма), и абсолютным (уже
-            # записанные строки). Проверять только абсолютную форму значило бы, что
-            # после перехода на относительные пути дедупликация молча перестаёт
-            # срабатывать и те же документы лягут в хранилище вторым экземпляром.
-            raw_path = str(existing_metadata.get("stored_path") or "")
-            stored_path = Path(raw_path)
-            if raw_path and not stored_path.is_absolute():
-                stored_path = self.settings.files_dir / stored_path
-            if stored_path.is_file():
-                existing_digest = FilesMixin._file_sha256(stored_path)
-        if not existing_digest or not hmac.compare_digest(existing_digest, digest):
+        """Refuse dedup when the existing row is bound to different bytes.
+
+        Content hash is the durable identity.  Metadata ``sha256`` and on-disk
+        bytes are secondary checks used only when the row predates a filled
+        ``content_hash``.  A mismatched modern registration is not rewritten
+        here — ``_prepare_existing_file_for_replay`` repairs location fields
+        only after identity is proven.
+        """
+
+        expected = str(digest or "").casefold()
+        if not expected:
             raise IdempotencyConflictError("source_ref is already bound to different file content")
+        existing_hash = str(existing.get("content_hash") or "").strip().casefold()
+        if existing_hash:
+            if not hmac.compare_digest(existing_hash, expected):
+                raise IdempotencyConflictError("source_ref is already bound to different file content")
+            return
+        existing_metadata = _json_dict(existing.get("metadata_json"))
+        existing_digest = str(existing_metadata.get("sha256") or "").strip().casefold()
+        if existing_digest:
+            if not hmac.compare_digest(existing_digest, expected):
+                raise IdempotencyConflictError("source_ref is already bound to different file content")
+            return
+        # Last resort for pre-hash rows: re-hash the registered path only when it
+        # is a relative in-root regular file.  Absolute/symlink paths do not
+        # authorize content identity.
+        raw_path = str(existing_metadata.get("stored_path") or "")
+        if not raw_path or raw_path.startswith("/") or ".." in Path(raw_path).parts:
+            raise IdempotencyConflictError("source_ref is already bound to different file content")
+        stored_path = self.settings.files_dir / raw_path
+        try:
+            if stored_path.is_symlink() or not stored_path.is_file():
+                raise IdempotencyConflictError("source_ref is already bound to different file content")
+            existing_digest = FilesMixin._file_sha256(stored_path)
+        except OSError as exc:
+            raise IdempotencyConflictError("source_ref is already bound to different file content") from exc
+        if not existing_digest or not hmac.compare_digest(existing_digest, expected):
+            raise IdempotencyConflictError("source_ref is already bound to different file content")
+
+    def _accept_semantic_duplicate_for_replay(
+        self,
+        user_id: str,
+        existing: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Reuse one text/structure-equivalent Raw without touching new bytes.
+
+        Exact byte retries use ``_prepare_existing_file_for_replay``.  This path
+        only proves the *existing* modern registration and returns that Raw
+        unchanged.  Legacy (no disk registration) and modern-invalid rows fail
+        closed: semantic dedup must not rebind a fresh transport alias onto an
+        unready Raw, and must not repair it from the new container bytes.
+        """
+
+        del user_id  # tenant already scoped by the finder; kept for call symmetry
+        metadata = _json_dict(existing.get("metadata_json"))
+        content_hash = str(existing.get("content_hash") or "")
+        classification = classify_file_registration(metadata, content_hash=content_hash)
+        if classification.state == LEGACY_UNREGISTERED:
+            raise IdempotencyConflictError("existing semantic duplicate has no disk registration")
+        verdict = verify_registered_file_bytes(
+            self.settings.files_dir,
+            metadata,
+            content_hash=content_hash,
+        )
+        if verdict.state == REGISTERED_VALID:
+            return existing
+        raise IdempotencyConflictError("existing semantic duplicate registration is not ready for replay")
+
+    def _prepare_existing_file_for_replay(
+        self,
+        user_id: str,
+        existing: dict[str, Any],
+        file_content: bytes,
+        digest: str,
+        filename: str,
+        *,
+        conn: Any | None = None,
+    ) -> dict[str, Any]:
+        """Prove byte identity, restore bytes, and repair incomplete registration.
+
+        Used only for exact source-ref / content-hash retries.  Semantic text
+        dedup must not call this: different container bytes with the same body
+        text must not rewrite the first Raw's registration.
+
+        ``conn`` reuses an already-open writer transaction (race path inside
+        ``ingest_file``) so repair never nests ``BEGIN IMMEDIATE``.
+        """
+
+        self._validate_existing_file_source(existing, digest)
+        target = self._store_file(user_id, file_content, digest, filename)
+        relative = _storage_relative(self.settings.files_dir, target)
+        if not relative or relative.startswith("/") or Path(relative).is_absolute():
+            raise IdempotencyConflictError("source_ref is already bound to different file content")
+        if ".." in Path(relative).parts:
+            raise IdempotencyConflictError("source_ref is already bound to different file content")
+
+        metadata = _json_dict(existing.get("metadata_json"))
+        content_hash = str(existing.get("content_hash") or digest).casefold()
+        verdict = verify_registered_file_bytes(
+            self.settings.files_dir,
+            metadata,
+            content_hash=content_hash,
+        )
+        if verdict.state == REGISTERED_VALID:
+            return existing
+
+        repaired = {
+            **metadata,
+            "stored_path": relative,
+            "sha256": digest,
+            "size_bytes": len(file_content),
+        }
+        if not str(repaired.get("filename") or "").strip():
+            repaired["filename"] = filename
+        meta_json = json.dumps(repaired, ensure_ascii=False, sort_keys=True)
+        raw_id = str(existing.get("id") or "")
+
+        def _apply(writer: Any) -> None:
+            row = writer.execute(
+                """SELECT id, content_hash FROM raw_objects
+                    WHERE id=? AND user_id=? AND content_type='file' AND deleted_at IS NULL""",
+                (raw_id, user_id),
+            ).fetchone()
+            if row is None:
+                raise IdempotencyConflictError("source_ref is already bound to different file content")
+            row_hash = str(row["content_hash"] or "").strip()
+            if row_hash and not hmac.compare_digest(row_hash.casefold(), digest.casefold()):
+                raise IdempotencyConflictError("source_ref is already bound to different file content")
+            writer.execute(
+                """UPDATE raw_objects
+                      SET metadata_json=?,
+                          content_hash=CASE
+                              WHEN content_hash IS NULL OR content_hash='' THEN ?
+                              ELSE content_hash
+                          END
+                    WHERE id=? AND user_id=? AND content_type='file' AND deleted_at IS NULL""",
+                (meta_json, digest, raw_id, user_id),
+            )
+
+        if conn is not None:
+            _apply(conn)
+            row = conn.execute(
+                """SELECT * FROM raw_objects WHERE id=? AND user_id=?""",
+                (raw_id, user_id),
+            ).fetchone()
+            refreshed = dict(row) if row is not None else None
+        else:
+            with self.storage.transaction() as writer:
+                _apply(writer)
+            refreshed = self.storage.get_raw_object(raw_id, user_id)
+        if refreshed is None:
+            raise IdempotencyConflictError("source_ref is already bound to different file content")
+        # Final proof: ordinary authorized readers must now see a valid registration.
+        final_meta = _json_dict(refreshed.get("metadata_json"))
+        final_hash = str(refreshed.get("content_hash") or "")
+        final = verify_registered_file_bytes(
+            self.settings.files_dir,
+            final_meta,
+            content_hash=final_hash,
+        )
+        if final.state != REGISTERED_VALID:
+            raise IdempotencyConflictError("source_ref is already bound to different file content")
+        return refreshed

@@ -83,6 +83,7 @@ async def test_no_caption_reply_sends_exact_file_pointer_without_redownload(tmp_
                 "message_id": 101,
                 "document": {
                     "file_id": "REPLY_FILE_ABC",
+                    "file_unique_id": "STABLE_REPLY_FILE_ABC",
                     "file_name": "без подписи.docx",
                     "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 },
@@ -96,6 +97,8 @@ async def test_no_caption_reply_sends_exact_file_pointer_without_redownload(tmp_
 
     [chat] = [call for call in backend.calls if call["path"] == "/api/chat"]
     assert chat["body"]["reply_document_source_ref"] == "telegram-file:REPLY_FILE_ABC"
+    assert chat["body"]["reply_document_message_id"] == 101
+    assert chat["body"]["reply_document_file_unique_id"] == "STABLE_REPLY_FILE_ABC"
     assert "document" not in chat["body"]
     assert "reply_to" not in chat["body"]
     assert not any(url.endswith("/getFile") for url, _payload in telegram.calls)
@@ -1191,6 +1194,108 @@ def test_server_resolves_only_current_uploaders_live_nonignored_reply_file(setti
 
     assert captured["kwargs"]["attachments"] == [{"raw_object_id": valid.id}]
     assert captured["kwargs"]["quoted_attachment_reference"] is True
+
+
+def test_server_reply_transport_aliases_survive_file_id_churn_and_reject_conflicts(
+    settings,
+    monkeypatch,
+) -> None:
+    from friday.server import create_app
+
+    scoped = replace(settings, verify_answers=False, shared_archive=True)
+    app = create_app(scoped)
+    captured: list[dict[str, Any]] = []
+    with TestClient(app) as client:
+        me = _bridge_call(client, scoped, "GET", "/api/me", user="1001")
+        assert me.status_code == 200, me.text
+        uploader = str(me.json()["actor"]["user_id"])
+        tenant = LEGACY_OWNER_USER_ID
+        storage = app.state.storage
+        storage.update_user(uploader, preset_key="user")
+
+        async def chat_spy(user_id, message, **kwargs):
+            captured.append({"user_id": user_id, "message": message, "kwargs": kwargs})
+            conversation_id = str(kwargs.get("conversation_id") or "")
+            if not conversation_id:
+                conversation_id = str(storage.create_conversation(uploader, title="reply aliases")["id"])
+            return {
+                "conversation_id": conversation_id,
+                "message": "ok",
+                "context": {"interaction_mode": "dialogue"},
+            }
+
+        monkeypatch.setattr(app.state.agent, "chat", chat_spy)
+        upload = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "",
+                "source_ref": "telegram-update:reply-alias-upload",
+                "telegram_message_id": 501,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "document": {
+                    "filename": "reply-alias.txt",
+                    "mime_type": "text/plain",
+                    "media_kind": "document",
+                    "source_ref": "telegram-file:ORIGINAL-FILE-ID",
+                    "file_unique_id": "STABLE-UNIQUE-ID",
+                    "content_base64": base64.b64encode(b"first\nlast\n").decode("ascii"),
+                },
+            },
+            user="1001",
+        )
+        assert upload.status_code == 200, upload.text
+        raw_id = storage.resolve_owned_file_source_ref(
+            tenant,
+            uploader,
+            "telegram-file:ORIGINAL-FILE-ID",
+        )
+        assert raw_id
+
+        reply = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "покажи его метаданные",
+                "source_ref": "telegram-update:reply-alias-success",
+                "telegram_message_id": 502,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "reply_document_message_id": 501,
+                "reply_document_file_unique_id": "STABLE-UNIQUE-ID",
+                # Telegram may rotate file_id in a later reply descriptor.
+                "reply_document_source_ref": "telegram-file:CHURNED-UNBOUND-ID",
+            },
+            user="1001",
+        )
+        assert reply.status_code == 200, reply.text
+        assert captured[-1]["kwargs"]["attachments"] == [{"raw_object_id": raw_id}]
+        assert captured[-1]["kwargs"]["quoted_attachment_reference"] is True
+
+        conflicting = _stored_reply_file(storage, tenant, uploader, "CONFLICTING-FILE-ID")
+        conflict = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "покажи его метаданные",
+                "source_ref": "telegram-update:reply-alias-conflict",
+                "telegram_message_id": 503,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "reply_document_message_id": 501,
+                "reply_document_file_unique_id": "STABLE-UNIQUE-ID",
+                "reply_document_source_ref": "telegram-file:CONFLICTING-FILE-ID",
+            },
+            user="1001",
+        )
+        assert conflict.status_code == 200, conflict.text
+        assert conflicting.id != raw_id
+        assert captured[-1]["kwargs"]["attachments"] == []
+        assert captured[-1]["kwargs"]["quoted_attachment_reference"] is True
 
 
 def test_content_dedup_binds_fresh_telegram_ref_to_canonical_odt_for_reply_metadata(

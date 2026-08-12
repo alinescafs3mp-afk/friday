@@ -105,10 +105,15 @@ from friday.security import verify_bridge_request
 from friday.storage import (
     DeletedAccountError,
     PrivateMaterialQuarantineError,
+    SourceReferenceConflictError,
     deleted_account_tombstone_key,
     deleted_identity_tombstone_key,
     init_storage,
     normalize_conversation_mode,
+)
+from friday.storage._intake import (
+    bind_owned_telegram_reply_aliases,
+    resolve_owned_telegram_reply_aliases,
 )
 from friday.storage.models import (
     AuditEntry,
@@ -786,6 +791,7 @@ def _chat_request_fingerprint(
             "filename": str(document.get("filename") or "telegram-file.bin"),
             "mime_type": str(document.get("mime_type") or "application/octet-stream"),
             "source_ref": str(document.get("source_ref") or "").strip()[:500],
+            "file_unique_id": str(document.get("file_unique_id") or "")[:480],
             "content_sha256": document_digest,
         }
     canonical = {
@@ -799,6 +805,12 @@ def _chat_request_fingerprint(
         "reply_document_source_ref": (
             str(body.get("reply_document_source_ref"))[:500]
             if isinstance(body.get("reply_document_source_ref"), str)
+            else None
+        ),
+        "reply_document_message_id": body.get("reply_document_message_id"),
+        "reply_document_file_unique_id": (
+            str(body.get("reply_document_file_unique_id"))[:480]
+            if isinstance(body.get("reply_document_file_unique_id"), str)
             else None
         ),
         "reply_source_message_id": reply_source_message_id,
@@ -2199,13 +2211,43 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             actor.source == "telegram-bridge"
             and document is None
             and not reply_assistant_pointer_present
-            and "reply_document_source_ref" in body
+            and any(
+                key in body
+                for key in (
+                    "reply_document_source_ref",
+                    "reply_document_message_id",
+                    "reply_document_file_unique_id",
+                )
+            )
         )
         reply_document_source_ref = ""
         if reply_pointer_present and isinstance(body.get("reply_document_source_ref"), str):
             candidate_reply_ref = str(body["reply_document_source_ref"]).strip()
             if len(candidate_reply_ref) <= 500:
                 reply_document_source_ref = candidate_reply_ref
+        reply_document_message_ref = ""
+        raw_reply_message_id = body.get("reply_document_message_id")
+        if (
+            reply_pointer_present
+            and isinstance(raw_reply_message_id, int)
+            and not isinstance(raw_reply_message_id, bool)
+            and 0 < raw_reply_message_id <= (2**63 - 1)
+        ):
+            authenticated_chat_id = str(getattr(request.state, "bridge_chat_id", "") or "")
+            reply_document_message_ref = (
+                f"telegram-message:{int(authenticated_chat_id)}:{raw_reply_message_id}"
+            )
+        reply_document_unique_ref = ""
+        raw_reply_unique_id = body.get("reply_document_file_unique_id")
+        if reply_pointer_present and isinstance(raw_reply_unique_id, str):
+            unique_id = raw_reply_unique_id
+            if (
+                unique_id
+                and unique_id == unique_id.strip()
+                and len(unique_id) <= 480
+                and all(char.isascii() and 33 <= ord(char) <= 126 for char in unique_id)
+            ):
+                reply_document_unique_ref = f"telegram-unique:{unique_id}"
         forward_value = body.get("forward")
         forward_meta: dict[str, Any] = forward_value if isinstance(forward_value, dict) else {}
         file_content: bytes | None = None
@@ -2397,14 +2439,37 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         if canonical_ids == set(lineage_raw_ids):
                             attachments.extend({"raw_object_id": raw_id} for raw_id in lineage_raw_ids)
             quoted_attachment_reference = reply_pointer_present
-            if reply_document_source_ref and state.auth_service.authorize(actor, "files.read").allowed:
-                try:
-                    reply_raw_id = await run_blocking(
-                        state.storage.resolve_owned_file_source_ref,
-                        actor.user_id,
-                        actor.own_id,
+            reply_document_refs = tuple(
+                dict.fromkeys(
+                    value
+                    for value in (
+                        reply_document_message_ref,
+                        reply_document_unique_ref,
                         reply_document_source_ref,
                     )
+                    if value
+                )
+            )
+            if reply_document_refs and state.auth_service.authorize(actor, "files.read").allowed:
+                try:
+                    if reply_document_refs == (reply_document_source_ref,):
+                        # Backward-compatible bridge/API payloads carry only the
+                        # ephemeral file id.  Keep their established resolver;
+                        # the multi-identity path below adds no looser fallback.
+                        reply_raw_id = await run_blocking(
+                            state.storage.resolve_owned_file_source_ref,
+                            actor.user_id,
+                            actor.own_id,
+                            reply_document_source_ref,
+                        )
+                    else:
+                        reply_raw_id = await run_blocking(
+                            resolve_owned_telegram_reply_aliases,
+                            state.storage,
+                            actor.user_id,
+                            actor.own_id,
+                            reply_document_refs,
+                        )
                 except Exception as exc:  # noqa: BLE001 - unresolved pointer stays closed
                     LOGGER.warning("Reply document pointer resolution failed (%s)", type(exc).__name__)
                     reply_raw_id = None
@@ -2575,6 +2640,49 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             actor=actor,
                         )
                     raw_id = str(file_ingestion.get("raw_object_id") or "")
+                    if (
+                        raw_id
+                        and actor.source == "telegram-bridge"
+                        and media_kind not in {"audio", "voice"}
+                        and not mime_type.casefold().startswith("audio/")
+                    ):
+                        transport_aliases: list[str] = []
+                        upload_message_id = body.get("telegram_message_id")
+                        if (
+                            isinstance(upload_message_id, int)
+                            and not isinstance(upload_message_id, bool)
+                            and 0 < upload_message_id <= (2**63 - 1)
+                        ):
+                            authenticated_chat_id = str(getattr(request.state, "bridge_chat_id", "") or "")
+                            transport_aliases.append(
+                                f"telegram-message:{int(authenticated_chat_id)}:{upload_message_id}"
+                            )
+                        upload_unique_id = document.get("file_unique_id")
+                        if isinstance(upload_unique_id, str) and (
+                            upload_unique_id
+                            and upload_unique_id == upload_unique_id.strip()
+                            and len(upload_unique_id) <= 480
+                            and all(char.isascii() and 33 <= ord(char) <= 126 for char in upload_unique_id)
+                        ):
+                            transport_aliases.append(f"telegram-unique:{upload_unique_id}")
+                        if transport_aliases:
+                            try:
+                                bound = await run_blocking(
+                                    bind_owned_telegram_reply_aliases,
+                                    state.storage,
+                                    actor.user_id,
+                                    actor.own_id,
+                                    raw_id,
+                                    tuple(transport_aliases),
+                                )
+                            except SourceReferenceConflictError as exc:
+                                raise IdempotencyConflictError(
+                                    "Telegram reply identity is unavailable for this upload"
+                                ) from exc
+                            if not bound:
+                                raise IdempotencyConflictError(
+                                    "Telegram reply identity could not be authorized"
+                                )
                     current_turn_raw = (
                         await run_blocking(state.storage.get_raw_object, raw_id, actor.user_id)
                         if raw_id and state.auth_service.authorize(actor, "files.read").allowed

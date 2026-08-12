@@ -245,6 +245,7 @@ _SAFE_AUDIT_ACTIONS = frozenset(
         "audit.unknown",
         "auth.failed",
         "cli.knowledge.purge",
+        "cli.file_uploader.backfill",
         "container.create",
         "entity.create",
         "entity.delete",

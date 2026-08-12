@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -147,9 +148,11 @@ def test_long_listing_keeps_valid_json_and_continuation_metadata() -> None:
     projected = _project_listing(
         {
             "entries": rows,
+            "returned": len(rows),
             "matched_at_least": 201,
             "complete": False,
             "scan_limit_reached": False,
+            "snapshot_sha256": "a" * 64,
             "next_cursor": 200,
         },
         requested_cursor=0,
@@ -268,6 +271,9 @@ async def test_fixed_stdio_tools_use_kernel_auth_and_exact_exchange_bytes(settin
         )
         assert reading.success is True
         assert reading.data["text"].startswith("ORION-42")
+        assert (
+            reading.data["source_sha256"] == hashlib.sha256(("ORION-42\n" * 200).encode("utf-8")).hexdigest()
+        )
         assert reading.data["projection_complete"] is False
         assert reading.data["next_offset"] == 1_000
 

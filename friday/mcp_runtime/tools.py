@@ -6,6 +6,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import re
 import sys
 from collections.abc import Mapping
 from pathlib import Path, PurePath
@@ -94,6 +95,8 @@ def _project_listing(payload: Mapping[str, Any], *, requested_cursor: int) -> di
     raw_entries = payload.get("entries")
     if not isinstance(raw_entries, list) or len(raw_entries) > _MAX_TOOL_ROWS:
         raise MCPUnavailableError("invalid MCP listing")
+    if _strict_int(payload.get("returned"), field="returned count") != len(raw_entries):
+        raise MCPUnavailableError("invalid MCP listing count")
     canonical_entries: list[dict[str, Any]] = []
     for raw in raw_entries:
         if not isinstance(raw, Mapping):
@@ -119,10 +122,22 @@ def _project_listing(payload: Mapping[str, Any], *, requested_cursor: int) -> di
     next_cursor = None if next_cursor_raw is None else _strict_int(next_cursor_raw, field="next cursor")
     server_complete = _strict_bool(payload.get("complete"), field="completeness")
     scan_limit_reached = _strict_bool(payload.get("scan_limit_reached"), field="scan limit")
+    snapshot_sha256 = str(payload.get("snapshot_sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", snapshot_sha256):
+        raise MCPUnavailableError("invalid MCP listing snapshot")
+    matched_at_least = _strict_int(payload.get("matched_at_least"), field="match count")
+    if matched_at_least < requested_cursor + len(canonical_entries):
+        raise MCPUnavailableError("invalid MCP listing match count")
+    if server_complete:
+        if next_cursor is not None or scan_limit_reached:
+            raise MCPUnavailableError("invalid MCP listing completion")
+    elif next_cursor is None or next_cursor != requested_cursor + len(canonical_entries):
+        raise MCPUnavailableError("invalid MCP listing continuation")
     base: dict[str, Any] = {
         "scope": "workspace_inbox",
-        "matched_at_least": _strict_int(payload.get("matched_at_least"), field="match count"),
+        "matched_at_least": matched_at_least,
         "scan_limit_reached": scan_limit_reached,
+        "snapshot_sha256": snapshot_sha256,
     }
     entries: list[dict[str, Any]] = []
     for row in canonical_entries:
@@ -323,6 +338,11 @@ def bind_workspace_mcp_tools(
                 "mime_type": str(transient.get("mime_type") or "application/octet-stream")[:128],
                 "size_bytes": descriptor.size_bytes,
                 "sha256": hashlib.sha256(content).hexdigest(),
+                # Every continuation reparses the registered bytes.  Pin the
+                # resulting canonical source as well as the file bytes so a
+                # caller cannot assemble pages produced by different OCR or
+                # parser outcomes for the same immutable file.
+                "source_sha256": hashlib.sha256(source.encode("utf-8")).hexdigest(),
                 "readable": bool(extraction_success and source.strip()),
                 "source_complete": source_complete,
                 "advisory_only": bool(transient.get("advisory_only")),

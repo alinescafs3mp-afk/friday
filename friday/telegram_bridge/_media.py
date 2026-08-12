@@ -39,6 +39,27 @@ _CONFIGURED_LIMIT_MESSAGE = (
 _REPLY_DOCUMENT_SOURCE_REF_MAX_CHARS = 500
 
 
+def _reply_document_file_unique_id(message: dict[str, Any]) -> str:
+    """Return Telegram's bounded stable identity for the replied media."""
+
+    replied = message.get("reply_to_message")
+    if not isinstance(replied, dict):
+        return ""
+    descriptor, _filename, _mime_type, _media_kind = MediaMixin._select_media(
+        replied,
+        {"update_id": int(replied.get("message_id") or 0)},
+    )
+    unique_id = str(descriptor.get("file_unique_id") or "") if isinstance(descriptor, dict) else ""
+    if (
+        unique_id
+        and unique_id == unique_id.strip()
+        and len(unique_id) <= 480
+        and all(char.isascii() and 33 <= ord(char) <= 126 for char in unique_id)
+    ):
+        return unique_id
+    return ""
+
+
 class MediaMixin(BridgeShared):
     _UNSUPPORTED_LABELS = (
         ("sticker", "стикер"),
@@ -167,6 +188,18 @@ class MediaMixin(BridgeShared):
             "source_ref": f"telegram-file:{file_id}",
             "media_kind": media_kind,
         }
+        file_unique_id = str(descriptor.get("file_unique_id") or "")
+        if (
+            file_unique_id
+            and file_unique_id == file_unique_id.strip()
+            and len(file_unique_id) <= 480
+            and all(char.isascii() and 33 <= ord(char) <= 126 for char in file_unique_id)
+        ):
+            # Telegram documents the unique id as stable across bots and over
+            # file_id churn.  It remains an identity hint only: the backend
+            # scopes it to the authenticated tenant/uploader and rechecks the
+            # current Raw/Inbox verdict on every reply.
+            prepared["file_unique_id"] = file_unique_id
         duration = descriptor.get("duration")
         if isinstance(duration, int) and duration > 0:
             prepared["duration"] = duration

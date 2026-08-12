@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import ipaddress
 import json
 import logging
@@ -78,7 +79,14 @@ from friday.execution_kernel import (
     complete_person_matches,
     resolvable_person_matches,
 )
-from friday.file_delivery import AuthorizedFileReadError, FileRecordUnavailable, read_authorized_file
+from friday.file_delivery import (
+    LEGACY_UNREGISTERED,
+    REGISTERED_VALID,
+    AuthorizedFileReadError,
+    FileRecordUnavailable,
+    classify_file_registration,
+    read_authorized_file,
+)
 from friday.knowledge_graph import build_user_model, normalize_event_date
 from friday.morphology import LEXICAL_MIN_STEM_INPUT, stem
 from friday.office_attestation import (
@@ -291,6 +299,16 @@ class _OwnedAttachment(dict[str, Any]):
     """Full ephemeral text reloaded through tenant/person ownership checks."""
 
 
+class _WorkspaceInboxAttachment(dict[str, Any]):
+    """Ephemeral text returned by an authorised, revalidated MCP inbox read."""
+
+
+def _authenticated_text_attachment(value: Any) -> bool:
+    """Whether full text came from one of the two code-owned file contours."""
+
+    return isinstance(value, (_OwnedAttachment, _WorkspaceInboxAttachment))
+
+
 @dataclass(frozen=True)
 class AttachmentRequestProjection:
     """Closed result of a deterministic local full-text attachment scan."""
@@ -347,6 +365,9 @@ _ATTACHMENT_QUERY_UNKNOWN = (
 _CONVERSATION_ATTACHMENT_RAW_IDS = "conversation_attachment_raw_ids"
 _CONVERSATION_UPLOADED_RAW_IDS = "conversation_uploaded_raw_ids"
 _SOURCE_SEARCH_RESULT_RAW_IDS = "source_search_result_raw_ids"
+_WORKSPACE_INBOX_RELATIVE_PATH = "workspace_inbox_relative_path"
+_WORKSPACE_INBOX_SHA256 = "workspace_inbox_sha256"
+_WORKSPACE_INBOX_SOURCE_SHA256 = "workspace_inbox_source_sha256"
 _RAW_OBJECT_ID_RE = re.compile(r"^raw_[A-Za-z0-9_-]{1,72}$")
 _ATTACHMENT_CROSS_CONTEXT_REQUEST = re.compile(
     r"(?:\b(?:предыдущ|прошл|раньше|друг(?:ой|ие|их)|соседн)\w*\s+"
@@ -7054,6 +7075,31 @@ _ATTACHMENT_FILENAME_REFERENCE = re.compile(
     rf"{_ATTACHMENT_FILE_EXTENSION}(?![\w-]|\.[\w]))",
     re.IGNORECASE,
 )
+# A host path is never the name of a registered upload.  In particular,
+# ``прочитай файл /tmp/a.pdf`` must not fall through to the generic
+# explicit-file branch and silently open the newest Telegram document.  The
+# configured MCP inbox has its own relative-path authority below; arbitrary
+# absolute/traversal paths are not accepted by either contour.
+_ATTACHMENT_HOST_PATH_REFERENCE = re.compile(
+    r"(?:"
+    r"(?<![\w.-])(?:file://|~/)(?:[^\s\r\n]+)|"
+    # Do not reinterpret either slash in ``https://...`` as an absolute
+    # path. A leading slash is a path only at a real token boundary.
+    r"(?<![\w.:/\\-])//[^\s\r\n]+|"
+    r"(?<![\w.:/\\-])/(?!/)[^\s\r\n]+|"
+    r"(?<![\w.-])[A-Za-z]:[\\/][^\s\r\n]+|"
+    r"(?<![\w.-])\\\\[^\s\r\n]+|"
+    r"(?<![\w.-])(?:\.\.?[\\/])[^\s\r\n]+|"
+    r"(?<![\w.-])[^\s\r\n]+[\\/]\.\.?(?:[\\/][^\s\r\n]*)?"
+    r")",
+    re.IGNORECASE,
+)
+_ATTACHMENT_HOST_PATH_READ_ACTION = re.compile(
+    r"\b(?:прочит|открой|открыть|посмотр|покаж|найд|поищ|извлек|проанализ|"
+    r"read|open|inspect|show|find|search|extract|analy[sz]e)\w*\b|"
+    rf"\b{_ATTACHMENT_REFERENCE_NOUN}\b",
+    re.IGNORECASE,
+)
 _DOCUMENT_METADATA_ACTION = re.compile(
     r"\b(?:покаж|вывед|напиш|выдай|дай|перечисл|отобраз|сообщ)\w*\b|"
     r"\b(?:show|display|list|give|print|write|provide)\b",
@@ -7061,6 +7107,13 @@ _DOCUMENT_METADATA_ACTION = re.compile(
 )
 _DOCUMENT_METADATA_NOUN = re.compile(
     r"\b(?:метаданн|свойств|реквизит)\w*\b|\bmetadata\b|\bproperties\b",
+    re.IGNORECASE,
+)
+_DOCUMENT_METADATA_SELECTED_SHORTHAND = re.compile(
+    rf"^\s*(?:(?:пожалуйста|please)\s*[,.:—-]?\s*)?"
+    rf"(?:вс[её]\s+|all\s+)?(?:метаданн\w*|свойств\w*|реквизит\w*|metadata|properties)"
+    rf"(?:\s+(?:эт\w+|данн\w+|текущ\w+|выбранн\w+|присланн\w+|загруженн\w+)?)?"
+    rf"(?:\s*{_ATTACHMENT_REFERENCE_NOUN})?\s*[?!.]*\s*$",
     re.IGNORECASE,
 )
 _DOCUMENT_METADATA_LOCAL_TARGET = re.compile(
@@ -7235,6 +7288,33 @@ _DEICTIC_ATTACHMENT_CONTINUATION = re.compile(
     r"\b(?:прочит\w*|посмотр\w*)\s+(?:его|е[её])\b|"
     r"^\s*содержим(?:ое|ого)\s*[?!.]*\s*$"
     r")",
+    re.IGNORECASE,
+)
+# Natural Telegram typing errors must not erase an immediately active file.
+# This remains a strong *same-file* surface (``этот`` + what-is-inside), not a
+# fuzzy filename selector and not ambient archive search.
+_DEICTIC_SAME_FILE_TOPIC = re.compile(
+    r"(?:"
+    r"\b(?:о\s+ч[её]м|что\s+внутри|что\s+там|содержим\w*)\b"
+    r"[^.!?\n]{0,40}\bэт(?:от|ом)\s*ф\s*айл\w*\b|"
+    r"\bэт(?:от|ом)\s*ф\s*айл\w*\b[^.!?\n]{0,40}"
+    r"\b(?:о\s+ч[её]м|что\s+внутри|что\s+там|содержим\w*)\b"
+    r")",
+    re.IGNORECASE,
+)
+_DEICTIC_CURRENT_ATTACHMENT_REFERENCE = re.compile(
+    rf"\b(?:эт|данн|текущ)[A-Za-zА-Яа-яЁё]*\s+{_ATTACHMENT_REFERENCE_NOUN}\b|"
+    rf"\b{_ATTACHMENT_REFERENCE_NOUN}\s+(?:эт|данн|текущ)[A-Za-zА-Яа-яЁё]*\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_ANY_REFERENCE = re.compile(
+    r"\b(?:люб(?:ой|ую|ого|ом)|какой[- ]нибудь|один\s+из|any\s+one|either)\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_LAST_ITEM_REQUEST = re.compile(
+    r"\bпоследн\w*\s+(?:пункт|строк|запис|элемент|позици)\w*\b|"
+    r"\b(?:пункт|строк|запис|элемент|позици)\w*\s+последн\w*\b|"
+    r"\blast\s+(?:item|row|record|entry|position)\b",
     re.IGNORECASE,
 )
 _REQUIRES_COMPLETE_ATTACHMENT_EVIDENCE = re.compile(
@@ -7580,6 +7660,7 @@ def _document_metadata_request_scope(
             selected_document
             and re.search(r"\b(?:какие|каковы|what)\s+(?:метаданн\w*|metadata)\b", text, re.IGNORECASE)
         )
+        or (selected_document and _DOCUMENT_METADATA_SELECTED_SHORTHAND.fullmatch(text))
     )
     if not _DOCUMENT_METADATA_NOUN.search(text) or not positive_surface:
         return ""
@@ -8365,12 +8446,33 @@ def _attachment_reference_kind(message: str) -> str:
     text = " ".join(str(message or "").split())
     if not text:
         return ""
+    if _ATTACHMENT_HOST_PATH_REFERENCE.search(text):
+        # A path is a source discriminator, never permission to substitute a
+        # recent registered upload.  The caller returns a code-owned path
+        # refusal (or the separately validated MCP-inbox route).
+        return ""
     if _is_document_metadata_request(text):
         return "explicit"
     if _NON_ATTACHMENT_REFERENCE.search(text):
         return ""
     if _RECENT_UPLOAD_ATTACHMENT_REFERENCE.search(text):
         return "recent_upload"
+    # Resolve a strong immediate continuation before the broader explicit noun
+    # patterns.  ``что внутри этого файла`` and the common ``этотф айл`` typo
+    # point at the active file; they do not ask the catalog for a newer row.
+    if (
+        _DEICTIC_SAME_FILE_TOPIC.search(text)
+        or _DEICTIC_CURRENT_ATTACHMENT_REFERENCE.search(text)
+        or _DEICTIC_ATTACHMENT_CONTINUATION.search(text)
+        or _ATTACHMENT_LAST_ITEM_REQUEST.search(text)
+    ) and not (
+        _ATTACHMENT_FILENAME_REFERENCE.search(text)
+        or _ATTACHMENT_COMPARISON_ACTION.search(text)
+        or _DOCUMENT_METADATA_OTHER_TARGET.search(text)
+        or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(text)
+        or _ATTACHMENT_NUMERIC_ORDINAL.search(text)
+    ):
+        return "deictic"
     if _EXPLICIT_ATTACHMENT_REFERENCE.search(text):
         return "explicit"
     if _ATTACHMENT_FILENAME_REFERENCE.search(text):
@@ -8383,8 +8485,6 @@ def _attachment_reference_kind(message: str) -> str:
         return "explicit"
     if _ATTACHMENT_ALL_REFERENCE.search(text) or _ATTACHMENT_SELECTIVE_REFERENCE.search(text):
         return "explicit"
-    if _DEICTIC_ATTACHMENT_CONTINUATION.search(text):
-        return "deictic"
     if _INDIRECT_ATTACHMENT_TOPIC_REFERENCE.search(text):
         return "indirect"
     if _ATTACHMENT_RECORD_POSITION.search(text):
@@ -8984,6 +9084,168 @@ class _WorkspaceExactValueContract:
 
 
 @dataclass(frozen=True)
+class _WorkspaceInboxRequest:
+    """One deterministic operation over the configured read-only MCP inbox."""
+
+    operation: Literal["list", "search", "read", "invalid"]
+    relative_path: str = ""
+    basename: str = ""
+    query: str = ""
+    reason: str = ""
+    expected_sha256: str = ""
+    expected_source_sha256: str = ""
+
+
+@dataclass(frozen=True)
+class _WorkspaceInboxResolution:
+    """Closed pre-model outcome of one MCP inbox request."""
+
+    attachment: _WorkspaceInboxAttachment | None = None
+    answer: str = ""
+    tools_used: tuple[str, ...] = ()
+    relative_path: str = ""
+    sha256: str = ""
+    source_sha256: str = ""
+
+
+_WORKSPACE_INBOX_CUE = re.compile(
+    r"(?:\b(?:mcp|workspace)\s*[-_ ]?\s*(?:inbox|инбокс)\b|"
+    r"\b(?:inbox|инбокс)\s+(?:mcp|workspace)\b|"
+    r"\b(?:подключ[её]нн\w*\s+)?(?:папк|каталог)\w*\s+(?:mcp|workspace)\b)",
+    re.IGNORECASE,
+)
+_WORKSPACE_INBOX_LIST_ACTION = re.compile(
+    r"\b(?:покаж|перечисл|вывед|дай|список|содержим)\w*\b[^.!?\n]{0,64}"
+    r"\b(?:файл|папк|каталог|объект)\w*\b|"
+    r"\b(?:list|show|display)\b[^.!?\n]{0,64}\b(?:files?|directories|entries)\b",
+    re.IGNORECASE,
+)
+_WORKSPACE_INBOX_SEARCH_ACTION = re.compile(
+    r"\b(?:найд|поищ|отыщ)\w*\s+(?:файл\w*\s+)?|"
+    r"\b(?:find|search|locate)\b\s+(?:for\s+)?(?:a\s+)?(?:file\s+)?",
+    re.IGNORECASE,
+)
+_WORKSPACE_INBOX_READ_ACTION = re.compile(
+    r"\b(?:прочит|открой|открыть|посмотр|проанализ|разбер|извлек|перескаж|сравн|"
+    r"ответ|скажи|назов|покаж\w*\s+(?:значени|содержим|поле|код))\w*\b|"
+    r"\b(?:read|open|inspect|analy[sz]e|extract|summari[sz]e|answer)\b",
+    re.IGNORECASE,
+)
+_WORKSPACE_INBOX_READ_NEGATED = re.compile(
+    r"\b(?:не|никогда\s+не)\s+(?:читай|прочит|откры|смотр|ищ|анализир)\w*\b|"
+    r"\b(?:do\s+not|don't|don’t|never)\s+(?:read|open|inspect|search|analy[sz]e)\b",
+    re.IGNORECASE,
+)
+_WORKSPACE_RELATIVE_PATH_TOKEN = re.compile(
+    r"(?<![\w./\\-])(?P<path>[\w@+(),.\[\]-]+(?:/[\w@+(),.\[\]-]+)+)"
+    r"(?![\w./\\-])",
+    re.IGNORECASE,
+)
+_WORKSPACE_QUOTED_DATA = re.compile(r"[«\"'`](?P<data>[^«»\"'`\r\n]{1,1024})[»\"'`]")
+_WORKSPACE_INBOX_MAX_LIST_PAGES = 32
+_WORKSPACE_INBOX_MAX_READ_PAGES = 32
+_WORKSPACE_INBOX_MAX_SOURCE_CHARS = 200_000
+
+
+def _workspace_inbox_request(message: str) -> _WorkspaceInboxRequest | None:
+    """Parse an explicit MCP-inbox operation without granting host-path access.
+
+    The source cue and action must be unquoted current-user speech.  A quoted
+    filename/path is admitted only as inert data after that independent
+    authority is present.  Once an inbox cue exists, even an invalid request
+    owns the route and can never fall back to a similarly named upload.
+    """
+
+    original = _classification_text(message)
+    actionable = _workspace_create_actionable_text(message)
+    if not _WORKSPACE_INBOX_CUE.search(actionable):
+        return None
+    if (
+        _WORKSPACE_CREATE_NEGATED.search(actionable)
+        or _WORKSPACE_INBOX_READ_NEGATED.search(actionable)
+        or _workspace_create_has_action_cancellation(actionable)
+    ):
+        return _WorkspaceInboxRequest("invalid", reason="cancelled_or_negated")
+    host_surface = re.sub(r"\bhttps?://[^\s\r\n]+", " ", original, flags=re.IGNORECASE)
+    if _ATTACHMENT_HOST_PATH_REFERENCE.search(host_surface):
+        return _WorkspaceInboxRequest("invalid", reason="host_or_traversal_path")
+
+    candidates: list[str] = []
+    for matched in _WORKSPACE_QUOTED_DATA.finditer(original):
+        value = str(matched.group("data") or "").strip()
+        if "/" in value or _ATTACHMENT_FILENAME_REFERENCE.fullmatch(value):
+            candidates.append(value)
+    candidates.extend(
+        str(matched.group("path") or "").strip()
+        for matched in _WORKSPACE_RELATIVE_PATH_TOKEN.finditer(original)
+    )
+    candidates.extend(
+        str(matched.group("filename") or "").strip()
+        for matched in _attachment_filename_reference_matches(original)
+    )
+    targets = list(dict.fromkeys(value for value in candidates if value))
+    if len(targets) > 1:
+        return _WorkspaceInboxRequest("invalid", reason="multiple_targets")
+    target = targets[0] if targets else ""
+
+    if _WORKSPACE_INBOX_LIST_ACTION.search(actionable) and not target:
+        return _WorkspaceInboxRequest("list")
+    if (
+        _WORKSPACE_INBOX_SEARCH_ACTION.search(actionable)
+        and target
+        and not _WORKSPACE_INBOX_READ_ACTION.search(actionable)
+    ):
+        # A pure filename-location request returns the deterministic listing;
+        # a request to inspect or answer from that file continues to read.
+        return _WorkspaceInboxRequest("search", query=target.rsplit("/", 1)[-1])
+    if target and _WORKSPACE_INBOX_READ_ACTION.search(actionable):
+        candidate = (
+            _WorkspaceInboxRequest("read", relative_path=target)
+            if "/" in target
+            else _WorkspaceInboxRequest("read", basename=target)
+        )
+        if not _closed_attachment_read_only_request(_workspace_inbox_task_message(original, candidate)):
+            return _WorkspaceInboxRequest("invalid", reason="compound_or_unproven_read")
+        return candidate
+    return _WorkspaceInboxRequest("invalid", reason="unsupported_or_missing_target")
+
+
+def _safe_workspace_relative_path(value: Any) -> str:
+    """Validate the same relative-path language exposed by the MCP wrapper."""
+
+    candidate = str(value or "")
+    if not candidate or "\x00" in candidate or "\\" in candidate or candidate.startswith("/"):
+        return ""
+    parts = candidate.split("/")
+    if any(not part or part in {".", ".."} or len(part.encode("utf-8")) > 255 for part in parts):
+        return ""
+    return "/".join(parts)
+
+
+def _workspace_filename_identity(value: Any) -> str:
+    return unicodedata.normalize("NFC", str(value or "")).casefold()
+
+
+def _workspace_inbox_task_message(message: str, request: _WorkspaceInboxRequest) -> str:
+    """Remove the already resolved source locator from the content question."""
+
+    visible = _classification_text(message)
+    chars = list(visible)
+    for matched in _WORKSPACE_INBOX_CUE.finditer(visible):
+        chars[matched.start() : matched.end()] = " " * (matched.end() - matched.start())
+    target = request.relative_path or request.basename
+    if target:
+        folded_target = target.casefold()
+        folded_visible = visible.casefold()
+        cursor = 0
+        while (position := folded_visible.find(folded_target, cursor)) >= 0:
+            chars[position : position + len(target)] = " " * len(target)
+            cursor = position + len(target)
+    projected = " ".join("".join(chars).split()).strip(" ,:;—-")
+    return projected or "Прочитай выбранный файл."
+
+
+@dataclass(frozen=True)
 class _DirectExactFileFieldContract:
     """Closed ordered attachment fields eligible for verifier bypass."""
 
@@ -9559,7 +9821,10 @@ def _filename_clue_ids(
 def _descriptive_filename_selector(message: str) -> bool:
     """Whether an explicit file phrase carries a plausible filename clue."""
 
-    return bool(_EXPLICIT_ATTACHMENT_REFERENCE.search(message) and _filename_clue_terms(message))
+    return bool(
+        (_EXPLICIT_ATTACHMENT_REFERENCE.search(message) or _EXPLICIT_DESCRIPTIVE_FILENAME_CUE.search(message))
+        and _filename_clue_terms(message)
+    )
 
 
 _EXPLICIT_DESCRIPTIVE_FILENAME_CUE = re.compile(
@@ -10964,6 +11229,126 @@ def _attachment_has_verifiable_content(item: Mapping[str, Any]) -> bool:
     return item.get("verification_eligible", True) is not False
 
 
+_LIST_ITEM_LINE = re.compile(r"^\s*(?:(?:\d{1,9}|[A-Za-zА-Яа-яЁё])\s*[.)]|[-–—•*])\s+\S")
+
+
+def _attachment_display_filename(value: Any) -> str:
+    candidate = str(value or "файл").replace("\\", "/").rsplit("/", 1)[-1]
+    candidate = "".join(char for char in candidate if char >= " " and char != "\x7f").strip(" .")
+    return candidate[:260] or "файл"
+
+
+def _last_attachment_item_answer(
+    message: str,
+    attachments: Sequence[Mapping[str, Any]],
+) -> str:
+    """Return one exact final item from one complete authenticated source.
+
+    This is a positional operation, not semantic search.  Once SQLite has
+    resolved exactly one file and its registered bytes/full parser body are
+    complete, asking for the last point does not need a model to choose a
+    passage. Numbered/bulleted records own only their indented continuation
+    lines. Without a closed record boundary the answer stays UNKNOWN. The
+    literal is bounded and copied unchanged from the canonical extractor text.
+    """
+
+    if not _ATTACHMENT_LAST_ITEM_REQUEST.search(_classification_text(message)):
+        return ""
+    if len(attachments) != 1:
+        return (
+            "Не удалось однозначно определить один файл для запроса о последнем пункте. "
+            "Укажите точное имя файла."
+        )
+    item = attachments[0]
+    if not (
+        (isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item))
+        and item.get("_registered_file_bytes_verified") is True
+        and _attachment_has_verifiable_content(item)
+        and _attachment_source_complete(item)
+    ):
+        return (
+            "Последний пункт определить надёжно не удалось: полный текст выбранного файла сейчас недоступен."
+        )
+    source = str(item.get("transient_text") or "")
+    logical_lines = source.splitlines()
+    last_record_index = next(
+        (
+            index
+            for index in range(len(logical_lines) - 1, -1, -1)
+            if _LIST_ITEM_LINE.match(logical_lines[index])
+        ),
+        None,
+    )
+    if last_record_index is None:
+        return "Последний пункт определить надёжно не удалось: структура выбранного файла неоднозначна."
+    record_lines = [logical_lines[last_record_index].lstrip()]
+    for line in logical_lines[last_record_index + 1 :]:
+        # A continuation is admitted only when the extractor preserved its
+        # indentation. Blank lines, signatures and independent footers are new
+        # blocks; EOF alone never makes them part of the list item.
+        if not line.strip() or not line[:1].isspace() or _LIST_ITEM_LINE.match(line):
+            break
+        record_lines.append(line)
+    literal = "\n".join(record_lines).strip()
+    if not literal or len(literal) > 4_000 or literal not in source:
+        return "Последний пункт определить надёжно не удалось: структура выбранного файла неоднозначна."
+    filename = _attachment_display_filename(item.get("filename"))
+    return f"Последний пункт в «{filename}»:\n{literal}"
+
+
+def _registered_upload_receipt_answer(
+    attachments: Sequence[Mapping[str, Any]],
+    *,
+    expected_count: int,
+) -> str:
+    """A model-free receipt for a bare upload with durable conversation links."""
+
+    if expected_count <= 0:
+        return ""
+    if len(attachments) != expected_count:
+        return (
+            f"Получено файлов: {expected_count}, но подтвердить регистрацию и чтение "
+            f"удалось для {len(attachments)}. Повторно пришлите только отсутствующие файлы."
+        )
+    lines: list[str] = []
+    all_complete = True
+    for item in attachments:
+        filename = _attachment_display_filename(item.get("filename"))
+        disk_verified = item.get("_registered_file_bytes_verified") is True
+        readable = bool(disk_verified and _attachment_has_readable_content(item))
+        complete = bool(readable and _attachment_source_complete(item))
+        all_complete = all_complete and complete
+        if readable:
+            source_chars = len(str(item.get("transient_text") or ""))
+            coverage = "полностью" if complete else "частично"
+            trust = " (распознавание требует проверки)" if item.get("advisory_only") is True else ""
+            lines.append(
+                f"• «{filename}»: зарегистрирован, байты на диске проверены, "
+                f"содержимое извлечено {coverage} ({source_chars} знаков){trust}."
+            )
+        elif disk_verified:
+            lines.append(
+                f"• «{filename}»: зарегистрирован, байты на диске проверены, "
+                "но извлечь содержимое текущим парсером не удалось."
+            )
+        else:
+            lines.append(
+                f"• «{filename}»: запись есть, но подтвердить зарегистрированные "
+                "байты на диске сейчас не удалось."
+            )
+    lead = (
+        "Файл сохранён и полностью прочитан."
+        if expected_count == 1 and all_complete
+        else "Файлы зарегистрированы; состояние чтения указано ниже."
+    )
+    followup = (
+        "Он привязан к этому сообщению — можно сразу спросить о содержимом или назвать его позже."
+        if expected_count == 1
+        else "Они привязаны к этому сообщению — можно обобщить, сравнить или назвать нужные файлы."
+    )
+    return "\n".join((lead, *lines, followup))
+
+
 def _attachment_needs_full_source_prepass(
     active: list[dict[str, Any]],
     projected: list[dict[str, Any]],
@@ -11119,7 +11504,7 @@ def _attachment_lossless_unit_rle_bundle(
     if (
         not admitted
         or len(admitted) > _ATTACHMENT_MAP_MAX_FILES
-        or any(not isinstance(item, _OwnedAttachment) for item in admitted)
+        or any(not _authenticated_text_attachment(item) for item in admitted)
     ):
         return None
     (
@@ -11867,10 +12252,10 @@ def _project_attachments_for_request(
 ) -> tuple[list[dict[str, Any]], AttachmentRequestProjection]:
     """Select query-relevant full-file passages under one shared 24k budget.
 
-    Only ``_OwnedAttachment`` values carry the full text authority required for
-    a conclusive scan.  Ordinary dictionaries remain on the legacy bounded
-    projection path, so a caller cannot forge “fully searched” by spelling an
-    internal metadata key.
+    Only process-private SQLite-owned or MCP-revalidated attachments carry the
+    full text authority required for a conclusive scan. Ordinary dictionaries
+    remain on the legacy bounded projection path, so a caller cannot forge
+    “fully searched” by spelling an internal metadata key.
     """
 
     body_query = _attachment_body_query_surface(message, selector_resolved=selector_resolved)
@@ -11922,7 +12307,7 @@ def _project_attachments_for_request(
     if (
         (whole_document_task or (exact_complete_source_request and not has_office_source))
         and (multi_count is None or multi_count == len(sources))
-        and all(isinstance(item, _OwnedAttachment) for item in sources)
+        and all(_authenticated_text_attachment(item) for item in sources)
         and sum(len(str(item.get("transient_text") or "")) for item in sources)
         <= _FOCUSED_ATTACHMENT_CONTEXT_CHARS
     ):
@@ -11939,7 +12324,7 @@ def _project_attachments_for_request(
         return projected, AttachmentRequestProjection()
     if not terms or not sources:
         return _bounded_attachment_projection(sources), AttachmentRequestProjection()
-    if not all(isinstance(item, _OwnedAttachment) for item in sources):
+    if not all(_authenticated_text_attachment(item) for item in sources):
         # Completeness is an authority property, not a caller-supplied flag.
         # Legacy/public descriptors keep their established readable bounded
         # projection and can never produce a conclusive local-search result.
@@ -12019,7 +12404,7 @@ def _project_attachments_for_request(
             # into “unreadable file”.
             legacy_text = (
                 str(legacy_projection[position].get("transient_text") or "")
-                if position < len(legacy_projection) and not isinstance(sources[position], _OwnedAttachment)
+                if position < len(legacy_projection) and not _authenticated_text_attachment(sources[position])
                 else ""
             )
             item.update(
@@ -12142,6 +12527,8 @@ def _bounded_attachment_projection(
         sources.append(
             _ProjectedAttachment(source)
             if isinstance(source, _ProjectedAttachment)
+            else _WorkspaceInboxAttachment(source)
+            if isinstance(source, _WorkspaceInboxAttachment)
             else _OwnedAttachment(source)
             if isinstance(source, _OwnedAttachment)
             else trusted_office_attachment(source)
@@ -12160,6 +12547,7 @@ def _bounded_attachment_projection(
     for source in sources:
         trusted = is_trusted_office_attachment(source)
         owned = isinstance(source, _OwnedAttachment)
+        workspace = isinstance(source, _WorkspaceInboxAttachment)
         clean = {
             key: value
             for key, value in source.items()
@@ -12168,7 +12556,13 @@ def _bounded_attachment_projection(
         if not trusted:
             clean.pop(OFFICE_STRUCTURE_KEY, None)
         sanitised_sources.append(
-            trusted_office_attachment(clean) if trusted else _OwnedAttachment(clean) if owned else clean
+            trusted_office_attachment(clean)
+            if trusted
+            else _WorkspaceInboxAttachment(clean)
+            if workspace
+            else _OwnedAttachment(clean)
+            if owned
+            else clean
         )
     sources = sanitised_sources
 
@@ -12265,7 +12659,7 @@ def _bounded_attachment_projection(
             projected.append(_ProjectedAttachment(item))
             continue
         original = str(item.get("transient_text") or "")
-        source_complete = bool(isinstance(source, _OwnedAttachment) and _attachment_source_complete(item))
+        source_complete = bool(_authenticated_text_attachment(source) and _attachment_source_complete(item))
         fair_share = plain_allocations.get(position, 0)
         excerpt = original[:fair_share] if fair_share > 0 else ""
         remaining -= len(excerpt)
@@ -13641,10 +14035,6 @@ def _attachment_requests_archive_tool(message: str) -> bool:
     )
 
 
-_ATTACHMENT_COMPOUND_CLAUSE_BOUNDARY = re.compile(
-    r"(?:[.!?;]\s*|\b(?:и|а\s+также|затем)\b)",
-    re.IGNORECASE,
-)
 _DIRECT_ATTACHMENT_FILE_OTHER_EFFECT = re.compile(
     r"\b(?:запомн\w*|добав\w*|удал\w*|измен\w*|отправ\w*|перешл\w*|"
     r"опублик\w*|remember\w*|store\w*|add\w*|delete\w*|update\w*|send\w*|"
@@ -13654,6 +14044,58 @@ _DIRECT_ATTACHMENT_FILE_OTHER_EFFECT = re.compile(
     r"memory|rule|calendar|task|mission)\b",
     re.IGNORECASE,
 )
+
+_ATTACHMENT_READ_ONLY_ACTION = re.compile(
+    r"\b(?:прочит|открой|открыть|посмотр|покаж|найд|поищ|извлек|"
+    r"проанализ|обобщ|резюм|перескаж|сравн|перечисл|назов|посчита|"
+    r"скажи|ответ|объясн|опиш|уточн|проверь|"
+    r"что|кто|где|когда|как|каков|какая|какие|сколько|дай|"
+    r"read|open|inspect|show|find|search|extract|analy[sz]|summar|"
+    r"compare|list|count|tell|explain|describe|what|who|where|when|how)\w*\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COORDINATED_ACTION = re.compile(
+    r"\b(?:и|затем|потом|а\s+также)\s+(?:пожалуйста\s+)?(?P<head>[A-Za-zА-Яа-яЁё]+)",
+    re.IGNORECASE,
+)
+_ATTACHMENT_READ_ONLY_FORMAT_CLAUSE = re.compile(
+    r"^(?:кратко|подробно|дословно|по\s+пунктам|в\s+виде\s+таблицы|"
+    r"briefly|verbatim|in\s+detail)$",
+    re.IGNORECASE,
+)
+
+
+def _closed_attachment_read_only_request(message: str) -> bool:
+    """Prove a bounded read-only file question instead of inferring purity.
+
+    Unknown coordinated imperatives stay on the ordinary route, where a second
+    action cannot be silently discarded. Filename conjunctions are data, not a
+    second action.
+    """
+
+    visible = " ".join(_QUOTED_TEXT.sub(" ", _classification_text(message)).split())
+    if not visible or not _ATTACHMENT_READ_ONLY_ACTION.search(visible):
+        return False
+    if (
+        _ASKS_ABOUT_PERSONAL_STORAGE.search(visible)
+        or _ABOUT_MY_OWN_STUFF.search(visible)
+        or _ATTACHMENT_CROSS_CONTEXT_REQUEST.search(visible)
+        or _archived_source_search_query(visible)
+    ):
+        return False
+    for match in _ATTACHMENT_COORDINATED_ACTION.finditer(visible):
+        tail = visible[match.start("head") :]
+        if _ATTACHMENT_FILENAME_REFERENCE.match(tail):
+            continue
+        if not _ATTACHMENT_READ_ONLY_ACTION.fullmatch(match.group("head")):
+            return False
+    for clause in _split_tag_request_clauses(visible):
+        normalized = clause.strip(" \t,:—-")
+        if not normalized or _ATTACHMENT_READ_ONLY_FORMAT_CLAUSE.fullmatch(normalized):
+            continue
+        if not _ATTACHMENT_READ_ONLY_ACTION.search(normalized):
+            return False
+    return True
 
 
 def _attachment_temporal_read_clause(message: str) -> str:
@@ -13667,9 +14109,15 @@ def _attachment_temporal_read_clause(message: str) -> str:
     """
 
     visible = temporal_routing_text(_classification_text(message))
+    fragments = _split_tag_request_clauses(visible)
     if not _ATTACHMENT_SUMMARY_REQUEST.search(visible):
-        return ""
-    for fragment in _ATTACHMENT_COMPOUND_CLAUSE_BOUNDARY.split(visible):
+        # A question about a date *inside* the selected file remains a local
+        # read. Only an independently actionable later clause authorises the
+        # owner's timeline/calendar route.
+        if len(fragments) <= 1:
+            return ""
+        fragments = fragments[1:]
+    for fragment in fragments:
         candidate = fragment.strip(" \t,:—-")
         if (
             not candidate
@@ -13695,6 +14143,12 @@ def _attachment_requests_a_tool_action(message: str) -> bool:
         or _attachment_requests_archive_tool(visible)
         or _attachment_temporal_read_clause(visible)
         or _ATTACHMENT_EXPLICIT_COMPUTE_TOOL_ACTION.search(unquoted)
+        or re.search(
+            r"\b(?:постав|назнач)\w*[^.!?\n]{0,40}\b(?:задач|мисси)\w*\b|"
+            r"\b(?:set|assign|create)\w*[^.!?\n]{0,40}\b(?:task|mission)\w*\b",
+            unquoted,
+            re.IGNORECASE,
+        )
         or re.search(
             r"\b(?:сохрани|запомни|запиши|добавь|создай|удали|измени|"
             r"отправь|перешли|опубликуй|save|remember|store|add|create|"
@@ -16853,6 +17307,348 @@ class AgentRuntime:
         self.kernel = kernel or ExecutionKernel(AuthorizationService(storage), settings=settings)
 
     @staticmethod
+    def _workspace_listing_page(
+        data: Any,
+    ) -> tuple[list[dict[str, Any]], bool, int | None, str] | None:
+        """Validate one projected MCP listing page before trusting identities."""
+
+        if not isinstance(data, Mapping) or data.get("scope") != "workspace_inbox":
+            return None
+        entries = data.get("entries")
+        returned = data.get("returned")
+        complete = data.get("complete")
+        projection_truncated = data.get("projection_truncated")
+        scan_limit_reached = data.get("scan_limit_reached")
+        next_cursor = data.get("next_cursor")
+        snapshot_sha256 = str(data.get("snapshot_sha256") or "")
+        if (
+            not isinstance(entries, list)
+            or len(entries) > 200
+            or type(returned) is not int
+            or returned != len(entries)
+            or type(complete) is not bool
+            or type(projection_truncated) is not bool
+            or type(scan_limit_reached) is not bool
+            or not re.fullmatch(r"[0-9a-f]{64}", snapshot_sha256)
+            or (next_cursor is not None and (type(next_cursor) is not int or next_cursor < 0))
+            or (complete and (projection_truncated or scan_limit_reached or next_cursor is not None))
+        ):
+            return None
+        projected: list[dict[str, Any]] = []
+        for raw in entries:
+            if not isinstance(raw, Mapping):
+                return None
+            path = _safe_workspace_relative_path(raw.get("path"))
+            name = str(raw.get("name") or "")
+            kind = str(raw.get("type") or "")
+            size = raw.get("size_bytes")
+            modified = raw.get("modified_ns")
+            if (
+                not path
+                or name != path.rsplit("/", 1)[-1]
+                or kind not in {"file", "directory"}
+                or type(size) is not int
+                or size < 0
+                or type(modified) is not int
+                or modified < 0
+            ):
+                return None
+            projected.append(
+                {
+                    "path": path,
+                    "name": name,
+                    "type": kind,
+                    "size_bytes": size,
+                    "modified_ns": modified,
+                }
+            )
+        return projected, bool(complete), cast(int | None, next_cursor), snapshot_sha256
+
+    async def _workspace_listing(
+        self,
+        *,
+        actor: ActorContext,
+        tool_name: Literal["workspace_list", "workspace_search"],
+        arguments: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], bool, tuple[str, ...]]:
+        """Collect a bounded complete workspace page sequence without a model."""
+
+        cursor = 0
+        rows: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        snapshot_sha256 = ""
+        attempts: list[str] = []
+        for _ in range(_WORKSPACE_INBOX_MAX_LIST_PAGES):
+            current = {**arguments, "cursor": cursor, "limit": 200}
+            attempts.append(tool_name)
+            result = await self.kernel.execute(tool_name, current, actor=actor)
+            if not result.success:
+                return [], False, tuple(attempts)
+            validated = self._workspace_listing_page(result.data)
+            if validated is None:
+                return [], False, tuple(attempts)
+            page, complete, next_cursor, page_snapshot_sha256 = validated
+            if not snapshot_sha256:
+                snapshot_sha256 = page_snapshot_sha256
+            elif not hmac.compare_digest(snapshot_sha256, page_snapshot_sha256):
+                return [], False, tuple(attempts)
+            for row in page:
+                path = str(row["path"])
+                if path in seen:
+                    return [], False, tuple(attempts)
+                seen.add(path)
+                rows.append(row)
+            if complete:
+                return rows, True, tuple(attempts)
+            if next_cursor is None or next_cursor <= cursor:
+                return [], False, tuple(attempts)
+            cursor = next_cursor
+        return [], False, tuple(attempts)
+
+    async def _workspace_read_attachment(
+        self,
+        *,
+        actor: ActorContext,
+        relative_path: str,
+    ) -> tuple[_WorkspaceInboxAttachment | None, tuple[str, ...], str]:
+        """Read one stable MCP file through bounded, identity-pinned pages."""
+
+        path = _safe_workspace_relative_path(relative_path)
+        if not path:
+            return None, (), "invalid_path"
+        offset = 0
+        chunks: list[str] = []
+        attempts: list[str] = []
+        identity: tuple[str, str, str, int, int, bool, bool] | None = None
+        for _ in range(_WORKSPACE_INBOX_MAX_READ_PAGES):
+            attempts.append("workspace_read")
+            result = await self.kernel.execute(
+                "workspace_read",
+                {"relative_path": path, "offset": offset},
+                actor=actor,
+            )
+            if not result.success or not isinstance(result.data, Mapping):
+                return None, tuple(attempts), "unavailable"
+            data = result.data
+            result_path = _safe_workspace_relative_path(data.get("path"))
+            filename = str(data.get("filename") or "")
+            sha256 = str(data.get("sha256") or "")
+            source_sha256 = str(data.get("source_sha256") or "")
+            size_bytes = data.get("size_bytes")
+            text_chars = data.get("text_chars")
+            page_offset = data.get("offset")
+            next_offset = data.get("next_offset")
+            projection_complete = data.get("projection_complete")
+            source_complete = data.get("source_complete")
+            advisory_only = data.get("advisory_only")
+            verification_eligible = data.get("verification_eligible")
+            readable = data.get("readable")
+            unsupported_format = data.get("unsupported_format")
+            text = data.get("text")
+            if (
+                data.get("scope") != "workspace_inbox"
+                or result_path != path
+                or filename != path.rsplit("/", 1)[-1]
+                or not re.fullmatch(r"[0-9a-f]{64}", sha256)
+                or not re.fullmatch(r"[0-9a-f]{64}", source_sha256)
+                or type(size_bytes) is not int
+                or size_bytes < 0
+                or type(text_chars) is not int
+                or text_chars < 0
+                or text_chars > _WORKSPACE_INBOX_MAX_SOURCE_CHARS
+                or type(page_offset) is not int
+                or page_offset != offset
+                or type(projection_complete) is not bool
+                or type(source_complete) is not bool
+                or type(advisory_only) is not bool
+                or type(verification_eligible) is not bool
+                or type(readable) is not bool
+                or type(unsupported_format) is not bool
+                or not source_complete
+                or not readable
+                or unsupported_format
+                or not isinstance(text, str)
+                or (next_offset is not None and (type(next_offset) is not int or next_offset <= offset))
+                or (next_offset is not None and next_offset != offset + len(text))
+                or offset + len(text) > text_chars
+                or projection_complete is not (next_offset is None)
+            ):
+                return None, tuple(attempts), "invalid_result"
+            current_identity = (
+                result_path,
+                sha256,
+                source_sha256,
+                size_bytes,
+                text_chars,
+                advisory_only,
+                verification_eligible,
+            )
+            if identity is None:
+                identity = current_identity
+            elif identity != current_identity:
+                return None, tuple(attempts), "changed_during_read"
+            chunks.append(text)
+            if projection_complete:
+                full_text = "".join(chunks)
+                if len(full_text) != text_chars or not source_complete:
+                    return None, tuple(attempts), "incomplete_source"
+                return (
+                    _WorkspaceInboxAttachment(
+                        {
+                            "filename": filename,
+                            "workspace_relative_path": result_path,
+                            "workspace_sha256": sha256,
+                            "workspace_source_sha256": source_sha256,
+                            "size_bytes": size_bytes,
+                            "mime_type": str(data.get("mime_type") or "application/octet-stream")[:128],
+                            "transient_text": full_text,
+                            "extraction_success": True,
+                            "empty_text": not bool(full_text),
+                            "advisory_only": advisory_only,
+                            "verification_eligible": verification_eligible,
+                            "text_truncated": False,
+                            "extraction_truncated": False,
+                            "archive_truncated": False,
+                            "source_truncated_for_parse": False,
+                            "parse_deadline_reached": False,
+                            "parse_pages_truncated": False,
+                            "_workspace_file_bytes_verified": True,
+                        }
+                    ),
+                    tuple(attempts),
+                    "",
+                )
+            offset = cast(int, next_offset)
+        return None, tuple(attempts), "too_large_for_bounded_read"
+
+    async def _resolve_workspace_inbox_request(
+        self,
+        request: _WorkspaceInboxRequest,
+        *,
+        actor: ActorContext,
+    ) -> _WorkspaceInboxResolution:
+        """Resolve one explicit inbox operation before retrieval or generation."""
+
+        if request.operation == "invalid":
+            return _WorkspaceInboxResolution(
+                answer=(
+                    "Произвольные пути хоста и неоднозначные цели не открываются. "
+                    "Укажите один относительный путь внутри MCP inbox, например `dept/report.odt`."
+                    if request.reason in {"host_or_traversal_path", "multiple_targets"}
+                    else "Укажите одну операцию и один файл или относительный путь внутри MCP inbox."
+                )
+            )
+        if request.operation in {"list", "search"}:
+            tool_name: Literal["workspace_list", "workspace_search"] = (
+                "workspace_search" if request.operation == "search" else "workspace_list"
+            )
+            arguments: dict[str, Any] = {"relative_dir": ""}
+            if tool_name == "workspace_list":
+                arguments["recursive"] = True
+            else:
+                arguments["query"] = request.query
+            rows, complete, listing_attempts = await self._workspace_listing(
+                actor=actor,
+                tool_name=tool_name,
+                arguments=arguments,
+            )
+            if not complete:
+                return _WorkspaceInboxResolution(
+                    answer="MCP inbox сейчас недоступен или его полный список подтвердить не удалось.",
+                    tools_used=listing_attempts,
+                )
+            shown = rows[:50]
+            heading = (
+                f"В MCP inbox найдено объектов: {len(rows)}."
+                if request.operation == "list"
+                else f"По имени в MCP inbox найдено объектов: {len(rows)}."
+            )
+            body = "\n".join(
+                f"• {row['path']} ({'файл' if row['type'] == 'file' else 'папка'})" for row in shown
+            )
+            suffix = "\nПоказаны первые 50." if len(rows) > len(shown) else ""
+            return _WorkspaceInboxResolution(
+                answer="\n".join(part for part in (heading, body) if part) + suffix,
+                tools_used=listing_attempts,
+            )
+
+        relative_path = request.relative_path
+        attempts: tuple[str, ...] = ()
+        if request.basename:
+            rows, complete, list_attempts = await self._workspace_listing(
+                actor=actor,
+                tool_name="workspace_list",
+                arguments={"relative_dir": "", "recursive": True},
+            )
+            attempts = list_attempts
+            if not complete:
+                return _WorkspaceInboxResolution(
+                    answer=(
+                        "Полный список MCP inbox подтвердить не удалось; укажите точный "
+                        "относительный путь, чтобы не подставить одноимённый файл."
+                    ),
+                    tools_used=attempts,
+                )
+            identity = _workspace_filename_identity(request.basename)
+            candidates = [
+                str(row["path"])
+                for row in rows
+                if row.get("type") == "file" and _workspace_filename_identity(row.get("name")) == identity
+            ]
+            if len(candidates) != 1:
+                return _WorkspaceInboxResolution(
+                    answer=(
+                        "В MCP inbox нет файла с таким точным именем; ранее загруженный файл не подставлялся."
+                        if not candidates
+                        else "В MCP inbox несколько файлов с таким именем. Укажите точный относительный путь."
+                    ),
+                    tools_used=attempts,
+                )
+            relative_path = candidates[0]
+        attachment, read_attempts, _error = await self._workspace_read_attachment(
+            actor=actor,
+            relative_path=relative_path,
+        )
+        attempts = (*attempts, *read_attempts)
+        if attachment is None:
+            return _WorkspaceInboxResolution(
+                answer=(
+                    "Файл в MCP inbox найден, но полностью и неизменно прочитать его не удалось. "
+                    "Другой загруженный файл не подставлялся."
+                ),
+                tools_used=attempts,
+            )
+        if request.expected_sha256 and not hmac.compare_digest(
+            request.expected_sha256,
+            str(attachment.get("workspace_sha256") or ""),
+        ):
+            return _WorkspaceInboxResolution(
+                answer=(
+                    "Файл в MCP inbox изменился после предыдущего ответа. "
+                    "Укажите его относительный путь явно, чтобы подтвердить новую версию."
+                ),
+                tools_used=attempts,
+            )
+        if request.expected_source_sha256 and not hmac.compare_digest(
+            request.expected_source_sha256,
+            str(attachment.get("workspace_source_sha256") or ""),
+        ):
+            return _WorkspaceInboxResolution(
+                answer=(
+                    "Извлечённый текст файла в MCP inbox изменился после предыдущего ответа. "
+                    "Укажите его относительный путь явно, чтобы подтвердить новую версию разбора."
+                ),
+                tools_used=attempts,
+            )
+        return _WorkspaceInboxResolution(
+            attachment=attachment,
+            tools_used=attempts,
+            relative_path=str(attachment.get("workspace_relative_path") or ""),
+            sha256=str(attachment.get("workspace_sha256") or ""),
+            source_sha256=str(attachment.get("workspace_source_sha256") or ""),
+        )
+
+    @staticmethod
     def _record_web_projection(
         context: AgentContext,
         status: str,
@@ -17016,6 +17812,18 @@ class AgentRuntime:
             except (TypeError, ValueError):
                 return 0
 
+        registration_verdict = classify_file_registration(
+            metadata,
+            content_hash=str(raw.get("content_hash") or ""),
+        )
+        registered_file_record = (
+            "valid"
+            if registration_verdict.state == REGISTERED_VALID
+            else "legacy"
+            if registration_verdict.state == LEGACY_UNREGISTERED
+            else "invalid"
+        )
+
         result = {
             "filename": str(metadata.get("filename") or "attachment")[:260],
             "mime_type": mime_type[:160],
@@ -17038,6 +17846,11 @@ class AgentRuntime:
             # Only real extracted body or a proven empty textual body may enter
             # verification.  Parser-open success alone is not evidence.
             "verification_eligible": bool((usable_raw_text or empty_text) and not advisory_only),
+            # Process-private migration marker. Real ingestion writes the
+            # content-addressed location and digest together; old unit fixtures
+            # and pre-file-store rows may lack both and cannot be revalidated on
+            # disk until they are migrated.
+            "_registered_file_record": registered_file_record,
         }
         safe_document_metadata = _safe_document_metadata_projection(metadata)
         if safe_document_metadata:
@@ -17551,64 +18364,82 @@ class AgentRuntime:
         )
         return render_document_details(records, coverage)
 
-    async def _hydrate_unreadable_visual_attachments(
+    async def _verify_registered_file_attachments(
         self,
         attachments: list[dict[str, Any]],
         *,
         tenant_id: str,
         person_id: str,
     ) -> list[dict[str, Any]]:
-        """Recover stale image/PDF replays through the current local vision path.
+        """Verify every registered source on disk and recover stale extraction.
 
-        Content-hash replay intentionally reuses an immutable Raw Object.  A
-        scan first seen while vision was disabled therefore keeps its old
-        provenance stub forever unless the *current turn* performs a bounded
-        visual inspection.  Do that only after the opaque Raw id has resolved
-        to this exact uploader, and read the bytes under the same transactional
-        privacy gate used by downloads.  The OCR body remains process-private,
-        advisory-only and ineligible for verified source claims.
+        SQLite is the file index and authority; ``stored_path`` is only the
+        registered location.  A selected persisted Raw must therefore cross
+        the same transaction-scoped path/regular-file/size/SHA-256 read as a
+        download before its cached extractor text is used.  If the immutable
+        Raw predates a capable parser, inspect those already verified bytes in
+        memory for this turn and re-authorize the Raw afterwards.  Healthy
+        cached text is not reparsed, so ordinary follow-ups stay cheap.
+
+        This deliberately covers every supported document kind, not only
+        images/PDFs.  OCR remains advisory and verifier-ineligible; native
+        parser text keeps its normal verification contract.
         """
 
         ingestion = getattr(self.kernel, "ingestion", None)
         inspect = getattr(ingestion, "inspect_file_transient", None)
-        if not callable(inspect):
-            return attachments
+
+        def unavailable(canonical: Mapping[str, Any]) -> _OwnedAttachment:
+            failed = dict(canonical)
+            failed.pop(OFFICE_STRUCTURE_KEY, None)
+            failed["transient_text"] = ""
+            failed["extraction_success"] = False
+            failed["extraction_error"] = "registered_file_unavailable"
+            failed["verification_eligible"] = False
+            failed["_registered_file_bytes_verified"] = False
+            failed.pop("empty_text", None)
+            return _OwnedAttachment(failed)
 
         hydrated: list[dict[str, Any]] = []
         for item in attachments:
-            if not isinstance(item, _OwnedAttachment):
+            if not (isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item)):
                 hydrated.append(item)
                 continue
             raw_id = str(item.get("raw_object_id") or "")
+            if not _RAW_OBJECT_ID_RE.fullmatch(raw_id):
+                # Explicit no-save/transient material has no durable DB/disk
+                # pointer by design. It remains current-turn evidence and is
+                # never relabelled as a failed registered-file read.
+                hydrated.append(item)
+                continue
             canonical = self._owned_file_attachment(
                 raw_id,
                 tenant_id=tenant_id,
                 person_id=person_id,
             )
-            if not isinstance(canonical, _OwnedAttachment):
-                hydrated.append(item)
+            if canonical is None:
+                hydrated.append(unavailable(item))
                 continue
-            body = str(canonical.get("transient_text") or "")
-            if canonical.get("advisory_only") is True and body.strip():
-                hydrated.append(item)
+            registration_state = str(canonical.get("_registered_file_record") or "invalid")
+            if registration_state == "invalid":
+                hydrated.append(unavailable(canonical))
+                continue
+            if registration_state == "legacy":
+                # Legacy rows created before the content-addressed store remain
+                # readable only from their immutable Raw text. A dedicated
+                # migration/backfill owns those records; pretending that a disk
+                # verification happened here would be worse than carrying the
+                # explicit false marker.
+                legacy = dict(canonical)
+                legacy["_registered_file_bytes_verified"] = False
+                hydrated.append(
+                    trusted_office_attachment(legacy)
+                    if is_trusted_office_attachment(canonical)
+                    else _OwnedAttachment(legacy)
+                )
                 continue
             filename = str(canonical.get("filename") or "attachment")[:260]
             mime_type = str(canonical.get("mime_type") or "")[:160]
-            visual_candidate = bool(
-                mime_type.casefold().startswith("image/")
-                or (mime_type.casefold() == "application/pdf" and len(body.strip()) < 160)
-                or (
-                    len(body.strip()) < 160
-                    and re.search(
-                        r"\.(?:pdf|png|jpe?g|webp|bmp|tiff?)$",
-                        filename,
-                        re.IGNORECASE,
-                    )
-                )
-            )
-            if not visual_candidate:
-                hydrated.append(item)
-                continue
             try:
                 authorized = await run_blocking(
                     read_authorized_file,
@@ -17619,40 +18450,72 @@ class AgentRuntime:
                     person_id=person_id,
                     max_bytes=self.settings.max_upload_bytes,
                 )
+            except (AuthorizedFileReadError, FileRecordUnavailable, ValueError):
+                hydrated.append(unavailable(canonical))
+                continue
+            except Exception as exc:  # noqa: BLE001 - registered-byte read fails closed
+                LOGGER.warning(
+                    "Registered attachment byte verification failed (%s)",
+                    type(exc).__name__,
+                )
+                hydrated.append(unavailable(canonical))
+                continue
+
+            # Re-check uploader ownership after the blocking read. A quarantine
+            # or account-boundary change must invalidate even healthy cached
+            # extractor text.
+            canonical = self._owned_file_attachment(
+                raw_id,
+                tenant_id=tenant_id,
+                person_id=person_id,
+            )
+            if canonical is None:
+                hydrated.append(unavailable(item))
+                continue
+
+            verified = dict(canonical)
+            verified["_registered_file_bytes_verified"] = True
+            body = str(canonical.get("transient_text") or "")
+            if body.strip() or canonical.get("empty_text") is True:
+                hydrated.append(
+                    trusted_office_attachment(verified)
+                    if is_trusted_office_attachment(canonical)
+                    else _OwnedAttachment(verified)
+                )
+                continue
+            if not callable(inspect):
+                hydrated.append(_OwnedAttachment(verified))
+                continue
+
+            try:
                 inspected = await inspect(
                     authorized.content,
                     filename=authorized.filename or filename,
                     mime_type=authorized.mime_type or mime_type,
                 )
-            except (AuthorizedFileReadError, FileRecordUnavailable, ValueError):
-                hydrated.append(item)
-                continue
             except Exception as exc:  # noqa: BLE001 - optional recovery fails closed
                 LOGGER.warning(
-                    "On-demand visual attachment recovery failed (%s)",
+                    "On-demand registered attachment recovery failed (%s)",
                     type(exc).__name__,
                 )
-                hydrated.append(item)
+                hydrated.append(_OwnedAttachment(verified))
                 continue
 
-            # Re-check uploader ownership after the blocking read/vision call;
-            # a quarantine or account-boundary change must invalidate recovery.
+            # A parser/OCR call can outlive a privacy change. Reauthorize once
+            # more before admitting its process-private text.
             canonical = self._owned_file_attachment(
                 raw_id,
                 tenant_id=tenant_id,
                 person_id=person_id,
             )
             source_text = str(inspected.get("_runtime_source_text") or inspected.get("text_preview") or "")
-            if (
-                not isinstance(canonical, _OwnedAttachment)
-                or inspected.get("extraction_success") is not True
-                or inspected.get("advisory_only") is not True
-                or not source_text.strip()
-            ):
-                hydrated.append(item)
+            extraction_success = inspected.get("extraction_success") is True
+            advisory_only = inspected.get("advisory_only") is True
+            if canonical is None or not extraction_success:
+                hydrated.append(unavailable(verified if canonical is None else canonical))
                 continue
 
-            recovered = _OwnedAttachment(canonical)
+            recovered = dict(canonical)
             recovered.update(
                 {
                     "filename": authorized.filename or filename,
@@ -17660,20 +18523,45 @@ class AgentRuntime:
                     "transient_text": source_text,
                     "extraction_success": True,
                     "extraction_error": "",
-                    "text_truncated": inspected.get("text_truncated") is True,
+                    # The whole process-private source accompanies the turn;
+                    # preview clipping is not source loss.
+                    "text_truncated": inspected.get("_runtime_source_truncated") is True,
                     "parse_deadline_reached": inspected.get("parse_deadline_reached") is True,
                     "parse_pages_read": max(0, int(inspected.get("parse_pages_read") or 0)),
                     "parse_pages_truncated": inspected.get("parse_pages_truncated") is True,
                     "parse_total_pages": max(0, int(inspected.get("parse_total_pages") or 0)),
                     "archive_truncated": inspected.get("archive_truncated") is True,
                     "source_truncated_for_parse": (inspected.get("source_truncated_for_parse") is True),
-                    "advisory_only": True,
-                    "verification_eligible": False,
-                    "_runtime_visual_hydrated": True,
+                    "advisory_only": advisory_only,
+                    "verification_eligible": bool(not advisory_only),
+                    "_registered_file_bytes_verified": True,
+                    "_runtime_file_reparsed": True,
                 }
             )
-            recovered.pop("empty_text", None)
-            hydrated.append(recovered)
+            if source_text.strip():
+                recovered.pop("empty_text", None)
+            else:
+                recovered["empty_text"] = True
+
+            document_metadata = inspected.get("_document_metadata")
+            projected_metadata = (
+                _safe_document_metadata_projection(document_metadata)
+                if isinstance(document_metadata, Mapping)
+                else {}
+            )
+            if projected_metadata:
+                recovered[_OWNED_SAFE_DOCUMENT_METADATA] = projected_metadata
+
+            office_index = validate_runtime_office_index(
+                inspected.get(OFFICE_STRUCTURE_KEY),
+                source_text,
+            )
+            if office_index is not None:
+                recovered[OFFICE_STRUCTURE_KEY] = office_index
+                hydrated.append(trusted_office_attachment(recovered))
+            else:
+                recovered.pop(OFFICE_STRUCTURE_KEY, None)
+                hydrated.append(_OwnedAttachment(recovered))
         return hydrated
 
     def _validated_current_attachment_ids(
@@ -17755,6 +18643,118 @@ class AgentRuntime:
             return False
         metadata = _bounded_json_mapping(message.get("metadata_json"), max_chars=65_536)
         return metadata.get("attachment_context_used") is True
+
+    @staticmethod
+    def _message_knowledge_citations(message: Mapping[str, Any]) -> dict[str, str]:
+        """Return the bounded citation map from exactly one assistant row.
+
+        Citation metadata is a pointer cache, not file authority.  Callers must
+        still resolve the Knowledge Object under the current tenant/uploader
+        boundary and then hydrate its Raw Object through ``_owned_file_attachment``.
+        """
+
+        if str(message.get("role") or "") != "assistant":
+            return {}
+        metadata = _bounded_json_mapping(message.get("metadata_json"), max_chars=65_536)
+        raw = metadata.get("knowledge_citations")
+        if not isinstance(raw, Mapping) or len(raw) > _CITATION_MAX_LABELS:
+            return {}
+        result: dict[str, str] = {}
+        for label, value in raw.items():
+            clean_label = str(label or "").strip().upper()
+            knowledge_id = str(value or "").strip()
+            if (
+                not re.fullmatch(r"K[1-9][0-9]?", clean_label)
+                or not re.fullmatch(r"ko_[A-Za-z0-9_-]{8,120}", knowledge_id)
+                or clean_label in result
+            ):
+                return {}
+            result[clean_label] = knowledge_id
+        return result
+
+    @staticmethod
+    def _message_workspace_inbox_reference(
+        message: Mapping[str, Any],
+    ) -> tuple[str, str, str] | None:
+        """Restore one private MCP path only from the immediately emitted answer."""
+
+        if str(message.get("role") or "") != "assistant":
+            return None
+        metadata = _bounded_json_mapping(message.get("metadata_json"), max_chars=65_536)
+        path = _safe_workspace_relative_path(metadata.get(_WORKSPACE_INBOX_RELATIVE_PATH))
+        digest = str(metadata.get(_WORKSPACE_INBOX_SHA256) or "")
+        source_digest = str(metadata.get(_WORKSPACE_INBOX_SOURCE_SHA256) or "")
+        if (
+            not path
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)
+            or not re.fullmatch(r"[0-9a-f]{64}", source_digest)
+        ):
+            return None
+        return path, digest, source_digest
+
+    def _restore_latest_cited_file_attachments(
+        self,
+        message: str,
+        history: list[dict[str, Any]],
+        *,
+        tenant_id: str,
+        person_id: str,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Turn the immediately preceding answer's citations into file pointers.
+
+        A single ``[K1]`` answer followed by ``что в нём`` is the same source
+        continuity as an attachment-backed answer.  Multiple citations are
+        admitted only when the person explicitly names their labels or uses a
+        plural/all-set continuation; singular deictics never guess among them.
+        """
+
+        previous = next(
+            (item for item in reversed(history) if str(item.get("role") or "") in {"user", "assistant"}),
+            None,
+        )
+        if previous is None or str(previous.get("role") or "") != "assistant":
+            return [], 0
+        citations = self._message_knowledge_citations(previous)
+        if not citations:
+            return [], 0
+        explicit_labels = [str(label).upper() for label in _citation_labels(message)]
+        if explicit_labels:
+            if any(label not in citations for label in explicit_labels):
+                return [], len(explicit_labels)
+            selected_ids = list(dict.fromkeys(citations[label] for label in explicit_labels))
+        elif len(citations) == 1:
+            selected_ids = list(citations.values())
+        elif (
+            re.search(r"\b(?:в|из|по|про)\s+них\b", message, re.IGNORECASE)
+            or _ATTACHMENT_ALL_REFERENCE.search(message)
+            or _ATTACHMENT_BOTH_REFERENCE.search(message)
+            or _ATTACHMENT_COMPARISON_ACTION.search(message)
+        ):
+            selected_ids = list(dict.fromkeys(citations.values()))
+        else:
+            return [], len(citations)
+
+        restored: list[dict[str, Any]] = []
+        expected_raw_ids: list[str] = []
+        for knowledge_id in selected_ids:
+            knowledge = self.storage.get_knowledge_object(
+                knowledge_id,
+                tenant_id,
+                uploaded_by=person_id,
+            )
+            raw_id = str((knowledge or {}).get("raw_object_id") or "")
+            if not _RAW_OBJECT_ID_RE.fullmatch(raw_id):
+                continue
+            if raw_id not in expected_raw_ids:
+                expected_raw_ids.append(raw_id)
+            attachment = self._owned_file_attachment(
+                raw_id,
+                tenant_id=tenant_id,
+                person_id=person_id,
+            )
+            if attachment is not None and raw_id not in self._raw_attachment_ids(restored):
+                restored.append(attachment)
+        return restored, len(expected_raw_ids) or len(selected_ids)
 
     @classmethod
     def _latest_source_search_result_ids(cls, history: list[dict[str, Any]]) -> list[str]:
@@ -18089,7 +19089,12 @@ class AgentRuntime:
         requests_all = bool(
             _requests_all_attachment_set(message) or _ATTACHMENT_ALL_REFERENCE.search(message)
         )
-        descriptive_filename_selector = _descriptive_filename_selector(message)
+        deictic_record_request = bool(
+            reference_kind == "deictic" and _ATTACHMENT_LAST_ITEM_REQUEST.search(message)
+        )
+        descriptive_filename_selector = bool(
+            reference_kind != "deictic" and _descriptive_filename_selector(message)
+        )
         parsed_filename_mentions = _attachment_filename_mentions(message)
         generic_archived_content_lookup = bool(
             _archived_source_search_query(message)
@@ -18115,7 +19120,7 @@ class AgentRuntime:
                 parsed_filename_mentions
                 or descriptive_filename_selector
                 or _DOCUMENT_METADATA_OTHER_TARGET.search(message)
-                or _ATTACHMENT_SELECTIVE_REFERENCE.search(message)
+                or (_ATTACHMENT_SELECTIVE_REFERENCE.search(message) and not deictic_record_request)
                 or reference_kind == "indirect"
                 or requests_all
                 or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(message)
@@ -18347,7 +19352,7 @@ class AgentRuntime:
         terms = _attachment_reference_terms(message)
         selective = bool(
             descriptive_filename_selector
-            or _ATTACHMENT_SELECTIVE_REFERENCE.search(message)
+            or (_ATTACHMENT_SELECTIVE_REFERENCE.search(message) and not deictic_record_request)
             or (_ATTACHMENT_COMPARISON_ACTION.search(message) and len(catalog) > 1)
             or (reference_kind == "indirect" and _INDIRECT_ATTACHMENT_TOPIC_REFERENCE.search(message))
         )
@@ -18435,6 +19440,19 @@ class AgentRuntime:
                 winners = [item for score, item in scored if score == best]
                 if len(winners) == 1:
                     return winners, 1
+                if _ATTACHMENT_ANY_REFERENCE.search(message):
+                    # Explicit “любой” authorises a stable code-owned tie-break.
+                    # Catalog order is oldest→newest, so choose the newest
+                    # equally matching owned row; the model never selects ids.
+                    catalog_position = {raw_id: index for index, raw_id in enumerate(catalog_ids)}
+                    chosen = max(
+                        winners,
+                        key=lambda item: catalog_position.get(
+                            str(item.get("raw_object_id") or ""),
+                            -1,
+                        ),
+                    )
+                    return [chosen], 1
                 return [], len(winners)
             return ([], 0) if reference_kind == "indirect" else ([], 1)
 
@@ -18631,6 +19649,12 @@ class AgentRuntime:
                 return [], 0
         else:
             reference_kind = _attachment_reference_kind(message)
+            archived_lookup = bool(_archived_source_search_query(message))
+            if not reference_kind and archived_lookup:
+                # A fresh-conversation request to find a fact in a file sent
+                # earlier is still deterministic file navigation. Resolve its
+                # uploader-owned Raw id before any model/tool loop.
+                reference_kind = "indirect"
             if (
                 not reference_kind
                 and allow_file_read
@@ -18676,7 +19700,17 @@ class AgentRuntime:
                     (item for item in reversed(recent) if str(item.get("role") or "") == "assistant"),
                     None,
                 )
-                if previous_assistant is None or not self._message_used_attachment(previous_assistant):
+                if previous_assistant is None:
+                    return [], 0
+                if not self._message_used_attachment(previous_assistant):
+                    cited, cited_expected = self._restore_latest_cited_file_attachments(
+                        message,
+                        recent,
+                        tenant_id=tenant_id,
+                        person_id=person_id,
+                    )
+                    if cited_expected:
+                        return cited, cited_expected
                     return [], 0
             if not allow_file_read:
                 return [], 1
@@ -18856,8 +19890,54 @@ class AgentRuntime:
         clean_workspace_intent = _explicit_workspace_create_intent(clean_message)
         workspace_exact_value_requested = _workspace_exact_value_contract_requested(clean_message)
         workspace_exact_value_contract = _workspace_exact_value_contract(clean_message)
-        attachment_selector_message = _attachment_selector_message(clean_message)
-        attachment_reference_kind = _attachment_reference_kind(attachment_selector_message)
+        workspace_inbox_request = _workspace_inbox_request(clean_message)
+        if (
+            workspace_inbox_request is None
+            and supplied_attachment_count == 0
+            and not quoted_attachment_reference
+            and not reply_assistant_reference
+            and _attachment_reference_kind(_attachment_selector_message(clean_message)) == "deictic"
+        ):
+            previous_assistant = next(
+                (
+                    item
+                    for item in reversed(prior_history)
+                    if str(item.get("role") or "") in {"user", "assistant"}
+                ),
+                None,
+            )
+            workspace_reference = (
+                self._message_workspace_inbox_reference(previous_assistant)
+                if previous_assistant is not None
+                else None
+            )
+            if workspace_reference is not None:
+                workspace_inbox_request = _WorkspaceInboxRequest(
+                    "read",
+                    relative_path=workspace_reference[0],
+                    expected_sha256=workspace_reference[1],
+                    expected_source_sha256=workspace_reference[2],
+                )
+        workspace_inbox_source_conflict = bool(
+            workspace_inbox_request is not None
+            and (supplied_attachment_count or quoted_attachment_reference or reply_assistant_reference)
+        )
+        visible_file_surface = _classification_text(clean_message)
+        # Web URLs are outbound source locators, not host filesystem paths. Do
+        # not let their slash/traversal-looking suffixes steal the web route.
+        path_guard_surface = re.sub(r"\bhttps?://[^\s\r\n]+", " ", visible_file_surface, flags=re.IGNORECASE)
+        unsupported_host_path_request = bool(
+            _ATTACHMENT_HOST_PATH_REFERENCE.search(path_guard_surface)
+            and _ATTACHMENT_HOST_PATH_READ_ACTION.search(path_guard_surface)
+        )
+        attachment_selector_message = (
+            "" if workspace_inbox_request is not None else _attachment_selector_message(clean_message)
+        )
+        attachment_reference_kind = (
+            ""
+            if workspace_inbox_request is not None
+            else _attachment_reference_kind(attachment_selector_message)
+        )
         # A stop order is the emergency path: after conversation ownership and
         # the sticky private-lineage state are known, it must not depend on the
         # execution kernel, file authorization, attachment restoration, search,
@@ -18915,8 +19995,20 @@ class AgentRuntime:
         may_read_files = bool(
             authorization is not None and authorization.authorize(actor, "files.read").allowed
         )
+        explicit_private_file_request = bool(
+            workspace_inbox_request is None
+            and (
+                supplied_attachment_count
+                or quoted_attachment_reference
+                or reply_assistant_reference
+                or attachment_reference_kind
+                or _multi_attachment_open_task_count(clean_message) is not None
+                or _requests_all_attachment_set(clean_message)
+            )
+        )
+        file_access_denied = bool(not may_read_files and explicit_private_file_request)
         named_person_corpus = self._select_named_person_corpus(
-            named_person_aggregation_scope,
+            None if workspace_inbox_request is not None else named_person_aggregation_scope,
             actor=actor,
         )
         # Capability revocation takes effect on every turn. Ownership and an
@@ -19110,7 +20202,10 @@ class AgentRuntime:
                     additional_raw_ids=(current_attachment_ids if current_catalog_selector else ()),
                 )
                 if (
-                    not structural_attachment_resolution_failed
+                    workspace_inbox_request is None
+                    and not unsupported_host_path_request
+                    and not file_access_denied
+                    and not structural_attachment_resolution_failed
                     and (
                         not supplied_attachment_count
                         or restore_prior_for_current_multi
@@ -19169,6 +20264,7 @@ class AgentRuntime:
         archived_source_focus = _archived_source_search_focus(clean_message, archived_source_query)
         archived_source_lookup_turn = bool(
             archived_source_query
+            and workspace_inbox_request is None
             and not named_person_corpus.applies
             and supplied_attachment_count == 0
             and not attachments
@@ -19195,6 +20291,7 @@ class AgentRuntime:
             # the user row before execution so a crash cannot reopen outbound
             # tools on the next deictic turn.
             or archived_source_lookup_turn
+            or workspace_inbox_request is not None
         )
         user_metadata: dict[str, Any] | None = None
         if supplied_attachment_count:
@@ -19299,11 +20396,30 @@ class AgentRuntime:
             clean_message,
             metadata=user_metadata,
         )
+        workspace_inbox_resolution = _WorkspaceInboxResolution()
+        if workspace_inbox_request is not None:
+            workspace_inbox_resolution = (
+                _WorkspaceInboxResolution(
+                    answer=(
+                        "В одном ходе указан и MCP inbox, и вложение/цитата. "
+                        "Укажите один источник; автоматически смешивать или подменять файлы я не буду."
+                    )
+                )
+                if workspace_inbox_source_conflict
+                else await self._resolve_workspace_inbox_request(
+                    workspace_inbox_request,
+                    actor=actor,
+                )
+            )
         # A current upload remains the default source.  Explicit comparison or
         # set references may add resolved earlier files; without any reference,
         # ordinary questions still receive no ambient old attachment text.
         active_candidates = (
-            restored_attachments
+            [workspace_inbox_resolution.attachment]
+            if workspace_inbox_resolution.attachment is not None
+            else []
+            if workspace_inbox_request is not None
+            else restored_attachments
             if selector_replaces_current
             else [*restored_attachments, *attachment_list]
             if restore_prior_for_current_multi
@@ -19318,6 +20434,17 @@ class AgentRuntime:
             if raw_id:
                 active_raw_ids.add(raw_id)
             active_attachment_set.append(item)
+        attachment_authority_tenant = named_person_corpus.tenant_id or tenant_id
+        attachment_authority_person = named_person_corpus.person_id or person_id
+        if may_read_files and active_attachment_set and workspace_inbox_request is None:
+            # The Raw row selected above is the SQLite authority; prove that its
+            # registered immutable bytes still exist and match before cached
+            # text, metadata or a current-parser recovery can answer anything.
+            active_attachment_set = await self._verify_registered_file_attachments(
+                active_attachment_set,
+                tenant_id=attachment_authority_tenant,
+                person_id=attachment_authority_person,
+            )
         # Metadata/detail wording selects evidence.  It owns the terminal turn
         # only for a direct read.  An explicit, supported file-creation request
         # with an authorised selected document must continue through ordinary
@@ -19331,12 +20458,12 @@ class AgentRuntime:
             document_metadata_requested and not document_metadata_owned
         )
         attachment_task_message = (
-            named_person_corpus.task_message
+            _workspace_inbox_task_message(clean_message, workspace_inbox_request)
+            if (workspace_inbox_request is not None and workspace_inbox_resolution.attachment is not None)
+            else named_person_corpus.task_message
             if named_person_corpus.applies and named_person_corpus.task_message
             else clean_message
         )
-        attachment_authority_tenant = named_person_corpus.tenant_id or tenant_id
-        attachment_authority_person = named_person_corpus.person_id or person_id
         if document_metadata_scope in {"both", "technical"} and may_read_files and active_attachment_set:
             active_attachment_set = await self._hydrate_legacy_document_metadata(
                 active_attachment_set,
@@ -19353,12 +20480,6 @@ class AgentRuntime:
                 else ""
             )
         )
-        if may_read_files and active_attachment_set and not document_metadata_owned:
-            active_attachment_set = await self._hydrate_unreadable_visual_attachments(
-                active_attachment_set,
-                tenant_id=attachment_authority_tenant,
-                person_id=attachment_authority_person,
-            )
         # Non-verifiable bodies: keep advisory OCR/transcription for same-turn
         # synthesis (with the existing prompt caveat), but strip provenance stubs
         # and empty failed extractions so they cannot fake readable evidence.
@@ -19441,11 +20562,17 @@ class AgentRuntime:
                 active_attachment_set,
                 synthetic_document_notice=synthetic_document_notice,
                 selector_resolved=bool(
-                    active_attachment_set and strict_attachment_selector and not attachment_resolution_failed
+                    active_attachment_set
+                    and (workspace_inbox_resolution.attachment is not None or strict_attachment_selector)
+                    and not attachment_resolution_failed
                 ),
             )
         attachment_expected_count = (
-            min(restored_attachment_expected_count, 100)
+            1
+            if workspace_inbox_resolution.attachment is not None
+            else 0
+            if workspace_inbox_request is not None
+            else min(restored_attachment_expected_count, 100)
             if selector_replaces_current
             else min(selected_expected_count, 100)
             if restore_prior_for_current_multi
@@ -19545,6 +20672,25 @@ class AgentRuntime:
             f"{attachment_readable_count} из {multi_attachment_requested_count}. "
             "Полнота набора неизвестна; повторно пришлите только действительно недостающие документы."
             if multi_attachment_incomplete and multi_attachment_requested_count is not None
+            else ""
+        )
+        synthetic_upload_receipt_answer = (
+            _registered_upload_receipt_answer(
+                active_attachment_set,
+                expected_count=attachment_expected_count,
+            )
+            if synthetic_document_notice
+            and not unsupported_host_path_request
+            and not file_access_denied
+            and not attachment_resolution_failed
+            else ""
+        )
+        last_attachment_item_answer = (
+            _last_attachment_item_answer(clean_message, active_attachment_set)
+            if not unsupported_host_path_request
+            and not file_access_denied
+            and not attachment_resolution_failed
+            and not multi_attachment_incomplete
             else ""
         )
         attachment_resolution_failed_answer = (
@@ -19650,7 +20796,8 @@ class AgentRuntime:
             and not fabricated_outside_deed_request
             and not private_web_search_blocked
             and (
-                bool(named_person_corpus.applies and active_attachment_set)
+                workspace_inbox_resolution.attachment is not None
+                or bool(named_person_corpus.applies and active_attachment_set)
                 or _current_attachment_can_skip_archive(
                     clean_message,
                     supplied_attachment_count=attachment_expected_count,
@@ -19661,7 +20808,7 @@ class AgentRuntime:
         authenticated_attachment_scope = bool(
             active_attachment_set
             and all(
-                isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item)
+                _authenticated_text_attachment(item) or is_trusted_office_attachment(item)
                 for item in active_attachment_set
             )
         )
@@ -19701,8 +20848,31 @@ class AgentRuntime:
         attachment_tool_action_requested = bool(
             not synthetic_document_notice and _attachment_requests_a_tool_action(clean_message)
         )
+        pure_file_read_turn = bool(
+            authenticated_attachment_scope
+            and attachment_context_complete
+            and current_attachment_local
+            and (
+                workspace_inbox_resolution.attachment is not None
+                or _closed_attachment_read_only_request(clean_message)
+            )
+            and not unsupported_host_path_request
+            and not file_access_denied
+            and not attachment_resolution_failed
+            and not multi_attachment_incomplete
+            and not attachment_query_closed_answer
+            and not synthetic_document_notice
+            and not document_metadata_owned
+            and not attachment_tool_action_requested
+            and not asks_for_the_web(clean_message)
+            and not _ASKS_FOR_VOICE.search(clean_message)
+            and not _is_direct_file_request(clean_message)
+            and clean_workspace_intent is None
+            and not clean_workspace_channel_requested
+        )
         direct_attachment_file_projection_turn = bool(
-            not document_metadata_owned
+            workspace_inbox_request is None
+            and not document_metadata_owned
             and not foreign_private_request
             and not dangerous_instruction_request
             and not fabricated_outside_deed_request
@@ -19838,6 +21008,7 @@ class AgentRuntime:
             and not multi_attachment_incomplete
             and office_exact is None
             and not full_source_prepass_required
+            and not pure_file_read_turn
             and not attachment_tool_action_requested
             and office_arbiter_applies(clean_message, attachments)
         ):
@@ -19928,6 +21099,52 @@ class AgentRuntime:
                 open_remainder="",
                 remainder_known=True,
             )
+        elif workspace_inbox_request is not None and workspace_inbox_resolution.answer:
+            # An explicit MCP-inbox source owns this turn even on denial,
+            # ambiguity or an invalid path. Never substitute an uploaded file
+            # and never ask retrieval/model to guess which filesystem was meant.
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                interaction_mode=interaction_mode,
+                structural_answer=workspace_inbox_resolution.answer,
+                open_remainder="",
+                remainder_known=True,
+            )
+        elif unsupported_host_path_request:
+            # Arbitrary host paths are neither registered uploads nor MCP-inbox
+            # authority. Never strip them to a basename and never substitute a
+            # recent Telegram file or ask a model to guess the source.
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                interaction_mode=interaction_mode,
+                structural_answer=(
+                    "Произвольные пути хоста не открываются. Загрузите файл либо "
+                    "поместите его в настроенный MCP inbox и укажите относительный путь; "
+                    "другой ранее загруженный файл подставлен не будет."
+                ),
+                open_remainder="",
+                remainder_known=True,
+            )
+        elif file_access_denied:
+            # A private-file referent without the current capability is a closed
+            # denial. Falling through to retrieval/model both leaks existence
+            # cues and can fabricate an answer from ambient memory.
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                interaction_mode=interaction_mode,
+                structural_answer="Нет доступа к чтению файлов для этого запроса.",
+                open_remainder="",
+                remainder_known=True,
+            )
         elif dangerous_instruction_request:
             # A procedural explosive-construction request is settled by code
             # before retrieval, arbiters, schemas, tools or generation.  A
@@ -20015,6 +21232,34 @@ class AgentRuntime:
                 open_remainder="",
                 remainder_known=True,
                 current_attachment_present=bool(supplied_attachment_count),
+            )
+        elif synthetic_upload_receipt_answer:
+            # Registration, disk integrity and extraction are already known.
+            # A bare Telegram upload is an intake receipt, not a request for a
+            # stylistic model summary; the next human question keeps the exact
+            # opaque Raw pointer persisted above.
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                interaction_mode=interaction_mode,
+                structural_answer=synthetic_upload_receipt_answer,
+                open_remainder="",
+                remainder_known=True,
+                current_attachment_present=True,
+            )
+        elif last_attachment_item_answer:
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                interaction_mode=interaction_mode,
+                structural_answer=last_attachment_item_answer,
+                open_remainder="",
+                remainder_known=True,
+                current_attachment_present=True,
             )
         elif named_person_corpus_closed_answer:
             context = AgentContext(
@@ -20172,6 +21417,22 @@ class AgentRuntime:
                 search_query=clean_message,
                 outward_verdict=("человек", None),
             )
+        elif pure_file_read_turn:
+            # The deterministic file contour already chose and verified the
+            # complete source set. Skip intake learning, archive/KO retrieval,
+            # graph expansion and semantic arbiters. The only optional model
+            # step left is free-form synthesis over these exact local bytes.
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                ingestion={},
+                interaction_mode=interaction_mode,
+                search_query=attachment_task_message,
+                current_attachment_present=True,
+                focused_attachment_turn=True,
+            )
         elif (
             empty_attachment_answer
             or unreadable_attachment_answer
@@ -20301,7 +21562,7 @@ class AgentRuntime:
         # Цитата ставится ПОСЛЕ сборки контекста — намеренно. К этому моменту и
         # классификатор намерения, и поиск по архиву уже отработали по собственным
         # словам человека, и приклеенный чужой текст на них повлиять не может.
-        context.reply_quote = "" if isolated_outbound_turn else reply_quote
+        context.reply_quote = "" if (isolated_outbound_turn or pure_file_read_turn) else reply_quote
 
         # Реплике разговора инструменты не предлагаются вовсе.
         #
@@ -20370,6 +21631,12 @@ class AgentRuntime:
                 and not fabricated_outside_deed_request
                 and not private_web_search_blocked
                 and not document_metadata_owned
+                and not pure_file_read_turn
+                and not (
+                    context.structural_answer
+                    and context.remainder_known
+                    and not context.open_remainder.strip()
+                )
                 # A backend-authored bare-upload notice grants no authority to
                 # call a tool; its filename is untrusted data.  A real caption
                 # keeps authorised local tools even when archive retrieval was
@@ -20860,7 +22127,7 @@ class AgentRuntime:
         ):
             response = {
                 "content": "",
-                "tools_used": inventory_preflight_tools_used,
+                "tools_used": list(workspace_inbox_resolution.tools_used) or inventory_preflight_tools_used,
                 "tool_evidence": inventory_preflight_evidence,
             }
         elif (
@@ -20923,6 +22190,17 @@ class AgentRuntime:
                 )
         else:
             response = await self._generate_response(generation_context, asked_of_model, attachments)
+
+        if workspace_inbox_resolution.tools_used:
+            response["tools_used"] = list(
+                dict.fromkeys(
+                    [
+                        *workspace_inbox_resolution.tools_used,
+                        *(str(name) for name in (response.get("tools_used") or []) if str(name)),
+                    ]
+                )
+            )
+            response["_workspace_inbox_read_owned"] = workspace_inbox_resolution.attachment is not None
 
         hierarchy_bundle_value = response.pop(
             "_attachment_hierarchy_bundle",
@@ -22964,6 +24242,20 @@ class AgentRuntime:
                 **(
                     {_CONVERSATION_ATTACHMENT_RAW_IDS: assistant_attachment_raw_ids}
                     if assistant_attachment_raw_ids
+                    else {}
+                ),
+                **(
+                    {
+                        _WORKSPACE_INBOX_RELATIVE_PATH: workspace_inbox_resolution.relative_path,
+                        _WORKSPACE_INBOX_SHA256: workspace_inbox_resolution.sha256,
+                        _WORKSPACE_INBOX_SOURCE_SHA256: workspace_inbox_resolution.source_sha256,
+                    }
+                    if (
+                        workspace_inbox_resolution.attachment is not None
+                        and workspace_inbox_resolution.relative_path
+                        and workspace_inbox_resolution.sha256
+                        and workspace_inbox_resolution.source_sha256
+                    )
                     else {}
                 ),
                 "document_metadata_owned": response.get("_document_metadata_owned") is True,
@@ -30140,7 +31432,11 @@ class AgentRuntime:
                 "content": MODE_GUIDANCE[context.interaction_mode],
             }
         )
-        if not context.isolated_outbound_turn and not context.isolated_shape_turn:
+        if (
+            not context.isolated_outbound_turn
+            and not context.isolated_shape_turn
+            and not context.focused_attachment_turn
+        ):
             if context.kb_size == 0:
                 messages.append({"role": "system", "content": EMPTY_KB_GUIDANCE})
             elif context.kb_size < _SMALL_KB_THRESHOLD:

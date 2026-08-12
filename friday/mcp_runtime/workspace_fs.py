@@ -12,9 +12,11 @@ import argparse
 import base64
 import binascii
 import hashlib
+import json
 import os
 import secrets
 import stat
+import unicodedata
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
@@ -261,7 +263,13 @@ def _scan_entries(
                 os.close(directory_fd)
     finally:
         pending.clear()
-    rows.sort(key=lambda item: str(item["path"]).casefold())
+    rows.sort(
+        key=lambda item: (
+            unicodedata.normalize("NFC", str(item["path"])).casefold(),
+            unicodedata.normalize("NFC", str(item["path"])),
+            str(item["path"]),
+        )
+    )
     return rows, scan_complete
 
 
@@ -281,6 +289,14 @@ def list_workspace_entries(
         raise WorkspacePathError("search query is too long")
     scanned_rows, scan_complete = _scan_entries(root, relative_dir, recursive=recursive)
     matching = [row for row in scanned_rows if not needle or needle in str(row["path"]).casefold()]
+    snapshot_sha256 = hashlib.sha256(
+        json.dumps(
+            matching,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
     page = matching[offset : offset + page_size]
     has_more = len(matching) > offset + len(page)
     complete = scan_complete and not has_more
@@ -291,6 +307,7 @@ def list_workspace_entries(
         "matched_at_least": len(matching),
         "complete": complete,
         "scan_limit_reached": not scan_complete,
+        "snapshot_sha256": snapshot_sha256,
         "next_cursor": next_cursor,
         "page_limit": page_size,
     }
