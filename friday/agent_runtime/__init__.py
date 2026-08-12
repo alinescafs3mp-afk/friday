@@ -309,6 +309,22 @@ def _authenticated_text_attachment(value: Any) -> bool:
     return isinstance(value, (_OwnedAttachment, _WorkspaceInboxAttachment))
 
 
+def _projected_source_is_readable(value: Any) -> bool:
+    """Readability of the canonical source behind a private prompt projection.
+
+    A conclusive no-match projection intentionally has an empty prompt body.
+    That says nothing about whether the registered source was read.  Only the
+    process-private marker may carry this distinction; a public JSON mapping
+    with similarly named keys has no authority.
+    """
+
+    return bool(
+        isinstance(value, _ProjectedAttachment)
+        and value.get("_request_projection_applied") is True
+        and value.get("_source_readable") is True
+    )
+
+
 @dataclass(frozen=True)
 class AttachmentRequestProjection:
     """Closed result of a deterministic local full-text attachment scan."""
@@ -7409,7 +7425,7 @@ _MULTI_ATTACHMENT_SUMMARY_COUNT = re.compile(
     r"\b(?:(?:эти|вс[её]|последн\w*|недавн\w*)\s+)?"
     r"(?P<count>\d{1,2}|оба|обе|обоих|обеих|both|два|две|двух|три|тр[её]х|тр[её]м|"
     r"четыре|четыр[её]х|пять|шесть|семь|восемь|девять)\s+"
-    r"(?:(?:последн|недавн|загруженн|присланн|прикрепл[её]нн|эти)\w*\s+){0,3}"
+    r"(?:(?:последн|недавн|загруженн|присланн|прикрепл[её]нн|приложенн|эти)\w*\s+){0,3}"
     r"(?:файл|документ|вложен|таблиц)\w*\b",
     re.IGNORECASE,
 )
@@ -7491,13 +7507,13 @@ def _multi_attachment_summary_count(message: str) -> int | None:
 _MULTI_ATTACHMENT_COMPARISON_COUNT = re.compile(
     r"\b(?P<count>\d{1,2}|оба|обе|обоих|обеих|both|два|две|двух|три|тр[её]х|тр[её]м|"
     r"четыре|четыр[её]х|пять|шесть|семь|восемь|девять)\s+"
-    r"(?:(?:последн|недавн|загруженн|присланн|прикрепл[её]нн|эти)\w*\s+){0,3}"
+    r"(?:(?:последн|недавн|загруженн|присланн|прикрепл[её]нн|приложенн|эти)\w*\s+){0,3}"
     r"(?:файл|документ|вложен|таблиц)\w*\b",
     re.IGNORECASE,
 )
 _ALL_ATTACHMENT_SET_REQUEST = re.compile(
     r"(?:"
-    r"\bвс(?:е|ё|ех)\s+(?:(?:последн|недавн|загруженн|присланн|прикрепл[её]нн|эти)\w*\s+){0,3}"
+    r"\bвс(?:е|ё|ех)\s+(?:(?:последн|недавн|загруженн|присланн|прикрепл[её]нн|приложенн|эти)\w*\s+){0,3}"
     r"(?:файл|документ|вложен|таблиц)\w*\b|"
     r"\ball\s+(?:(?:recent|uploaded|attached|these)\s+){0,3}"
     r"(?:files?|documents?|attachments?)\b"
@@ -10241,11 +10257,17 @@ def _attachment_body_query_surface(message: str, *, selector_resolved: bool = Fa
     return " ".join(projected.split())
 
 
-def _normalise_attachment_query_term(candidate: str) -> str:
+def _normalise_attachment_query_term(candidate: str, *, explicit: bool = False) -> str:
     folded = candidate.casefold().strip("- ")
-    if len(folded) < 3 or folded in _ATTACHMENT_QUERY_STOPWORDS:
+    if len(folded) < 3 or (not explicit and folded in _ATTACHMENT_QUERY_STOPWORDS):
         return ""
-    if any(folded.startswith(prefix) for prefix in _ATTACHMENT_QUERY_STOP_PREFIXES):
+    # A quoted literal is an explicit body target, even when its first word is
+    # normally generic request vocabulary.  In particular, real documents use
+    # labels such as «Контрольное поле» and «Контрольный маркер».  Dropping that
+    # quote left only source qualifiers (ODT/PDF/TXT) as strong anchors and a
+    # correctly selected multi-file set was then closed as NOT_FOUND before the
+    # answer model saw either file.
+    if not explicit and any(folded.startswith(prefix) for prefix in _ATTACHMENT_QUERY_STOP_PREFIXES):
         return ""
     adjective_surname = re.fullmatch(
         r"([а-яё]{4,}(?:ск|цк))(?:ий|ого|ому|им|ом|ая|ой|ую|ие|их|ими)",
@@ -10315,10 +10337,14 @@ def _attachment_query_terms(message: str) -> tuple[str, ...]:
             -len(value),
         )
     )
-    candidates: list[str] = quoted + addresses + tokens
+    candidates: list[tuple[str, bool]] = (
+        [(candidate, True) for candidate in quoted]
+        + [(candidate, True) for candidate in addresses]
+        + [(candidate, False) for candidate in tokens]
+    )
     terms: list[str] = []
-    for candidate in candidates:
-        folded = _normalise_attachment_query_term(candidate)
+    for candidate, explicit in candidates:
+        folded = _normalise_attachment_query_term(candidate, explicit=explicit)
         if not folded:
             continue
         if folded not in terms:
@@ -10387,23 +10413,50 @@ def _attachment_query_anchors(message: str, terms: tuple[str, ...]) -> tuple[str
     visible = _classification_text(message)
     anchors: list[str] = []
 
-    def admit(candidate: str) -> None:
-        term = _normalise_attachment_query_term(candidate)
+    def source_qualifier(matched: re.Match[str]) -> bool:
+        token = matched.group(0)
+        qualifier_prefix = visible[max(0, matched.start() - 24) : matched.start()]
+        return bool(
+            token.casefold() in _CONTENT_FILE_SUFFIXES
+            and re.search(
+                r"\b(?:из|в|во|по|для|from|in|for)\s*\Z",
+                qualifier_prefix,
+                re.IGNORECASE,
+            )
+        )
+
+    def admit(candidate: str, *, explicit: bool = False) -> None:
+        term = _normalise_attachment_query_term(candidate, explicit=explicit)
         if term in terms and term not in anchors:
             anchors.append(term)
 
     # A quoted literal or identifier is an explicit target regardless of case.
     for quoted in _ATTACHMENT_QUERY_QUOTED.findall(visible):
-        admit(" ".join(quoted.split()))
+        admit(" ".join(quoted.split()), explicit=True)
     for matched in _ATTACHMENT_QUERY_ADDRESS.finditer(visible):
-        admit(matched.group(0))
+        admit(matched.group(0), explicit=True)
+    # Once the person supplied an explicit quoted/address body target, it is the
+    # complete set of anchors allowed to prove absence.  Nearby uppercase words
+    # commonly describe the selected carrier (ODT/PDF/TXT) or answer shape; they
+    # remain optional ranking terms but cannot erase valid windows from every
+    # selected file merely because the carrier name is absent from its body.
+    if anchors:
+        return tuple(anchors[:3])
     for matched in _ATTACHMENT_QUERY_TOKEN.finditer(visible):
         token = matched.group(0)
+        # ``из ODT`` / ``в PDF`` identifies which already-authorised source a
+        # field belongs to; it is not a claim that the letters ODT/PDF occur in
+        # the body.  Keep the term useful for ranking if it really occurs, but
+        # never let this closed source qualifier prove a body-wide absence.
+        if source_qualifier(matched):
+            continue
         if any(char.isdigit() for char in token) or token[1:].isupper():
             admit(token)
 
     tokens = list(_ATTACHMENT_QUERY_TOKEN.finditer(visible))
     for index, matched in enumerate(tokens):
+        if source_qualifier(matched):
+            continue
         token = matched.group(0)
         normalised = _normalise_attachment_query_term(token)
         surname_shaped = bool(
@@ -14063,6 +14116,11 @@ _ATTACHMENT_READ_ONLY_FORMAT_CLAUSE = re.compile(
     r"briefly|verbatim|in\s+detail)$",
     re.IGNORECASE,
 )
+_ATTACHMENT_READ_ONLY_RESULT_HEAD = re.compile(
+    r"(?:значени|строк|поле|пункт|фрагмент|данн|сведени|цитат|вывод|результат|"
+    r"таблиц|список|value|line|field|item|fragment|data|quote|result)\w*",
+    re.IGNORECASE,
+)
 
 
 def _closed_attachment_read_only_request(message: str) -> bool:
@@ -14086,6 +14144,12 @@ def _closed_attachment_read_only_request(message: str) -> bool:
     for match in _ATTACHMENT_COORDINATED_ACTION.finditer(visible):
         tail = visible[match.start("head") :]
         if _ATTACHMENT_FILENAME_REFERENCE.match(tail):
+            continue
+        # ``сначала значение A, затем значение B`` orders a read-only answer;
+        # the noun after the coordinator is not a second speech act.  Admit a
+        # closed result vocabulary while unknown coordinated imperatives still
+        # retain the ordinary route.
+        if _ATTACHMENT_READ_ONLY_RESULT_HEAD.fullmatch(match.group("head")):
             continue
         if not _ATTACHMENT_READ_ONLY_ACTION.fullmatch(match.group("head")):
             return False
@@ -20597,14 +20661,19 @@ class AgentRuntime:
         attachment_readable_count = sum(
             1
             for item in attachments
-            if _attachment_has_readable_content(item)
-            and (
-                item.get("_source_readable") is True
-                if item.get("_request_projection_applied") is True
-                else (
-                    bool(str(item.get("transient_text") or "").strip())
-                    or item.get("_office_prompt_available") is True
-                    or item.get("empty_text") is True
+            if (
+                _projected_source_is_readable(item)
+                or (
+                    _attachment_has_readable_content(item)
+                    and not (
+                        isinstance(item, _ProjectedAttachment)
+                        and item.get("_request_projection_applied") is True
+                    )
+                    and (
+                        bool(str(item.get("transient_text") or "").strip())
+                        or item.get("_office_prompt_available") is True
+                        or item.get("empty_text") is True
+                    )
                 )
             )
         )
@@ -20643,14 +20712,19 @@ class AgentRuntime:
             and sum(
                 1
                 for item in attachments
-                if _attachment_has_verifiable_content(item)
-                and (
-                    item.get("_source_readable") is True
-                    if item.get("_request_projection_applied") is True
-                    else (
-                        bool(str(item.get("transient_text") or "").strip())
-                        or item.get("_office_prompt_available") is True
-                        or item.get("empty_text") is True
+                if (
+                    (_projected_source_is_readable(item) and item.get("_source_text_complete") is True)
+                    or (
+                        _attachment_has_verifiable_content(item)
+                        and not (
+                            isinstance(item, _ProjectedAttachment)
+                            and item.get("_request_projection_applied") is True
+                        )
+                        and (
+                            bool(str(item.get("transient_text") or "").strip())
+                            or item.get("_office_prompt_available") is True
+                            or item.get("empty_text") is True
+                        )
                     )
                 )
                 and item.get("verification_eligible", True) is not False

@@ -70,8 +70,8 @@ async def test_registered_upload_receipt_and_two_file_read_use_only_selected_dis
     configured = replace(settings, verify_answers=False)
     storage.ensure_user("alice", preset_key="owner")
     pipeline = IngestionPipeline(configured, storage, KnowledgeGraph(storage))
-    first_text = "FILE-CORE-AUG12-A\nПервый источник: северный маршрут."
-    second_text = "FILE-CORE-AUG12-B\nВторой источник: южный маршрут."
+    first_text = "Контрольное поле: FILE-CORE-AUG12-A\nПервый источник: северный маршрут."
+    second_text = "Контрольное поле B: FILE-CORE-AUG12-B\nВторой источник: южный маршрут."
     first = await pipeline.ingest_file(
         "alice",
         None,
@@ -143,12 +143,17 @@ async def test_registered_upload_receipt_and_two_file_read_use_only_selected_dis
 
     compared = await runtime.chat(
         "alice",
-        "Сравни оба этих файла.",
+        "Сравни два приложенных файла. Сначала назови значение после «Контрольное поле» "
+        "из ODT, затем значение после «Контрольное поле B» из TXT.",
         actor=_actor(),
         attachments=[{"raw_object_id": first_id}, {"raw_object_id": second_id}],
     )
     assert compared["message"] == "Сравнение построено только по двум выбранным маршрутам."
     assert compared["tools_used"] == []
+    assert compared["attachment_context_expected_count"] == 2
+    assert compared["attachment_context_readable_count"] == 2
+    assert compared["attachment_query_status"] == "matched"
+    assert compared["attachment_query_files_matched"] == 2
     assert [len(call) for call in generation_calls] == [1, 2]
 
 

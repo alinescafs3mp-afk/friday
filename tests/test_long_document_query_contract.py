@@ -23,6 +23,8 @@ from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     AttachmentRequestProjection,
+    _multi_attachment_open_task_count,
+    _OwnedAttachment,
     _project_attachments_for_request,
     _source_windows,
 )
@@ -644,6 +646,9 @@ async def test_complete_owned_absence_is_code_owned_not_found_without_model_gues
     assert result["message"].startswith(_ATTACHMENT_QUERY_NOT_FOUND)
     assert guessed not in result["message"]
     assert llm.calls == [] and evidence == []
+    assert result["attachment_context_readable_count"] == 1
+    assert result["attachment_coverage_complete"] is True
+    assert result["attachment_verification_complete"] is True
     _assert_no_action_or_web_carrier(result, llm, kernel)
     metadata = _assistant_query_metadata(storage, result["conversation_id"])
     assert metadata["attachment_query_status"] == "not_found"
@@ -726,6 +731,60 @@ def test_unauthenticated_transient_absence_cannot_claim_complete_not_found() -> 
     assert state.status != "not_found"
     assert state.scan_complete is False
     assert not projected or projected[0].get("_source_text_complete") is not True
+
+
+def test_multi_file_field_labels_are_body_targets_but_format_names_are_source_qualifiers() -> None:
+    first_value = "SYNTHETIC-FIRST-FIELD-VALUE"
+    second_value = "SYNTHETIC-SECOND-FIELD-VALUE"
+    attachments = [
+        _OwnedAttachment(
+            {
+                "filename": "first-source.odt",
+                "transient_text": f"Контрольное поле: {first_value}\n",
+                "extraction_success": True,
+                "verification_eligible": True,
+            }
+        ),
+        _OwnedAttachment(
+            {
+                "filename": "second-source.txt",
+                "transient_text": f"Контрольное поле B: {second_value}\n",
+                "extraction_success": True,
+                "verification_eligible": True,
+            }
+        ),
+    ]
+
+    projected, state = _project_attachments_for_request(
+        "Сравни два приложенных файла. Ответь сначала значением после "
+        "«Контрольное поле» из ODT, затем значением после «Контрольное поле B» из TXT.",
+        attachments,
+    )
+
+    assert state.status == "matched"
+    assert state.scan_complete is True
+    assert state.files_scanned == state.files_matched == 2
+    assert first_value in str(projected[0]["transient_text"])
+    assert second_value in str(projected[1]["transient_text"])
+    assert _multi_attachment_open_task_count("Сравни два приложенных файла.") == 2
+
+    # Exact stopwords remain valid quoted field labels, while a carrier format
+    # in a natural noun phrase cannot become a second required body anchor.
+    quoted_stopword, stopword_state = _project_attachments_for_request(
+        "Какое значение указано после «Должность» в документе ODT?",
+        [
+            _OwnedAttachment(
+                {
+                    "filename": "roles.odt",
+                    "transient_text": "Должность: инженер\n",
+                    "extraction_success": True,
+                    "verification_eligible": True,
+                }
+            )
+        ],
+    )
+    assert stopword_state.status == "matched"
+    assert "инженер" in str(quoted_stopword[0]["transient_text"])
 
 
 def test_two_distant_matches_are_both_retained_with_exact_source_offsets(
