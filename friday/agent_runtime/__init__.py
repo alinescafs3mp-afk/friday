@@ -54,6 +54,7 @@ from friday.agent_runtime.tool_protocol import (
     classify_tool_turn,
     normalize_native_tool_calls,
 )
+from friday.archive_formats import archive_dispatch_kind
 from friday.citation_check import CITATION_MARKER_RE as _KNOWLEDGE_CITATION_RE
 from friday.citation_check import citation_labels as _citation_labels
 from friday.citation_check import citation_overlap
@@ -11804,6 +11805,7 @@ _QUICKLOOK_TOTAL_MAX_CHARS = 3500
 _QUICKLOOK_TRUNCATION_MARK = "[фрагмент сокращён]"
 _QUICKLOOK_STATUS_FILENAME_MAX_CHARS = 120
 _QUICKLOOK_FILENAME_TRUNCATION_MARK = "[имя сокращено]"
+_QUICKLOOK_ARCHIVE_MEMBER_HEADER = re.compile(r"^---\s+\S(?:.*\S)?\s+---$")
 
 
 def _quicklook_display_filename(value: Any) -> str:
@@ -11838,13 +11840,31 @@ def _quicklook_select_literals(
     *,
     max_snippets: int,
     max_chars: int,
+    archive_payload: bool = False,
 ) -> list[tuple[str, bool]]:
     """Source-order literal prefixes that remain exact substrings of *source*."""
 
     selected: list[tuple[str, bool]] = []
     if max_snippets <= 0 or max_chars <= 0 or not source:
         return selected
-    for raw_line in source.splitlines():
+    source_lines = source.splitlines()
+    candidate_lines = source_lines
+    if archive_payload:
+        payload_lines: list[str] = []
+        inside_member = False
+        for raw_line in source_lines:
+            literal = raw_line.strip()
+            if _QUICKLOOK_ARCHIVE_MEMBER_HEADER.fullmatch(literal):
+                inside_member = True
+                continue
+            if inside_member:
+                payload_lines.append(raw_line)
+        # Archives without an extractable text member still get their bounded
+        # catalog preview. Once the extractor emitted a member boundary, the
+        # member payload is more useful than repeating its own catalog/header.
+        if any(line.strip() for line in payload_lines):
+            candidate_lines = payload_lines
+    for raw_line in candidate_lines:
         literal = raw_line.strip()
         if not literal or _is_file_provenance_stub(literal):
             continue
@@ -11991,6 +12011,13 @@ def _registered_upload_receipt_answer(
             source,
             max_snippets=max_snippets,
             max_chars=max_chars,
+            archive_payload=(
+                archive_dispatch_kind(
+                    str(item.get("filename") or ""),
+                    str(item.get("mime_type") or ""),
+                )
+                is not None
+            ),
         )
         if not literals:
             file_blocks.append(block)

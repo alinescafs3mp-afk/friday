@@ -5,17 +5,29 @@ from __future__ import annotations
 import io
 import json
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 import pyzipper
 
+from friday.agent_runtime import AgentRuntime
 from friday.archive_formats import archive_dispatch_kind
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import ActorContext
 from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
 _PASSWORD = "only-in-this-request"
+
+
+class _NoArchiveQuicklookLLM:
+    enabled = True
+    model = "archive-quicklook-closed-route"
+
+    async def chat(self, messages, **kwargs):  # pragma: no cover - receipt owns this turn
+        del messages, kwargs
+        raise AssertionError("archive bare-upload quicklook called the model")
 
 
 def _encrypted_zip() -> bytes:
@@ -27,7 +39,7 @@ def _encrypted_zip() -> bytes:
         encryption=pyzipper.WZ_AES,
     ) as archive:
         archive.setpassword(_PASSWORD.encode())
-        archive.writestr("note.txt", "ARCHIVE-INTEGRATION-MARKER")
+        archive.writestr("nested/note.txt", "ARCHIVE-INTEGRATION-MARKER")
     return payload.getvalue()
 
 
@@ -121,6 +133,7 @@ async def test_mime_only_archive_challenges_before_dedup_and_persists_exact_byte
         payload,
         filename="protected.bin",
         mime_type="application/zip",
+        metadata={"uploaded_by": "alice"},
         source_ref="archive-password-test",
     )
     wrong = await pipeline.ingest_file(
@@ -129,6 +142,7 @@ async def test_mime_only_archive_challenges_before_dedup_and_persists_exact_byte
         payload,
         filename="protected.bin",
         mime_type="application/zip",
+        metadata={"uploaded_by": "alice"},
         source_ref="archive-password-test",
         archive_password="wrong-password",
     )
@@ -146,6 +160,7 @@ async def test_mime_only_archive_challenges_before_dedup_and_persists_exact_byte
         payload,
         filename="protected.bin",
         mime_type="application/zip",
+        metadata={"uploaded_by": "alice"},
         source_ref="archive-password-test",
         archive_password=_PASSWORD,
     )
@@ -159,7 +174,35 @@ async def test_mime_only_archive_challenges_before_dedup_and_persists_exact_byte
     assert raw_metadata["sha256"] == raw["content_hash"]
     assert raw_metadata["size_bytes"] == len(payload)
     assert dedup_calls == 1 and enrichment_calls == 1
+    assert storage.execute("SELECT COUNT(*) AS count FROM raw_objects").fetchone()["count"] == 1
     assert Path(unlocked["stored_path"]).read_bytes() == payload
+
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_NoArchiveQuicklookLLM(),
+    )
+
+    async def forbidden_runtime_path(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("archive bare-upload quicklook entered a model/context seam")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_runtime_path)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden_runtime_path)
+    receipt = await runtime.chat(
+        "alice",
+        "Загружен документ: protected.bin",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        attachments=[{"raw_object_id": str(unlocked["raw_object_id"])}],
+        synthetic_document_notice=True,
+    )
+    assert "› ARCHIVE-INTEGRATION-MARKER" in receipt["message"]
+    assert receipt["message_format"] == "plain"
+    assert receipt["attachment_context_expected_count"] == 1
+    assert receipt["attachment_context_readable_count"] == 1
+    assert receipt["attachment_coverage_complete"] is True
+    assert receipt["attachment_verification_complete"] is True
+    assert receipt["tools_used"] == []
 
 
 @pytest.mark.asyncio
