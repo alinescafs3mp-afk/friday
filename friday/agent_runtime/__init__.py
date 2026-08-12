@@ -19342,6 +19342,28 @@ class AgentRuntime:
             if direct_attachment_exact_file_projection_turn
             else None
         )
+        direct_attachment_exact_source_values = (
+            _direct_exact_source_values(
+                direct_exact_file_field_contract,
+                direct_attachment_literal_source,
+            )
+            if (
+                direct_attachment_exact_file_projection_turn
+                and direct_exact_file_field_contract is not None
+                and direct_attachment_literal_source is not None
+            )
+            else None
+        )
+        if direct_attachment_exact_source_values is not None and (
+            len(direct_attachment_exact_source_values) != 4
+            or len(set(direct_attachment_exact_source_values)) != 4
+        ):
+            direct_attachment_exact_source_values = None
+        direct_attachment_exact_body = (
+            "\n".join(direct_attachment_exact_source_values)
+            if direct_attachment_exact_source_values is not None
+            else None
+        )
         workspace_exact_content = (
             _workspace_exact_source_content(
                 workspace_exact_value_contract,
@@ -20371,6 +20393,26 @@ class AgentRuntime:
                 "tools_used": [],
                 "_workspace_create_owned": True,
             }
+        elif direct_attachment_exact_file_projection_turn:
+            # The request names one closed, ordered four-field projection and
+            # the structural resolver has already authenticated one complete
+            # attachment.  Its uniquely parsed values are stronger evidence
+            # than a model paraphrase, and need neither an initial generation
+            # nor the late carrier's model fill.  Missing/ambiguous source
+            # fields fail closed here before any model or irreversible effect.
+            response = {
+                "content": (
+                    direct_attachment_exact_body
+                    if direct_attachment_exact_body is not None
+                    else (
+                        "Не удалось однозначно получить все четыре запрошенных реквизита "
+                        "из одного полностью прочитанного документа. Файл пока не создан."
+                    )
+                ),
+                "tools_used": [],
+                "_model_generated": False,
+                "_direct_exact_file_body_owned": direct_attachment_exact_body is not None,
+            }
         elif office_exact is not None:
             # The model is not allowed to nominate the members of an exact set.
             # A complete authoritative index is rendered deterministically; all
@@ -20531,7 +20573,7 @@ class AgentRuntime:
         )
         direct_file_body_recovery_required = bool(
             direct_attachment_exact_file_projection_turn
-            and direct_attachment_literal_source is not None
+            and direct_attachment_exact_body is not None
             and not response.get("llm_failed")
             and not direct_file_body_grounded
         )
@@ -21410,6 +21452,7 @@ class AgentRuntime:
             or response.get("_unreadable_attachment_owned") is True
             or response.get("_attachment_model_failure_owned") is True
             or response.get("_workspace_create_owned") is True
+            or response.get("_direct_exact_file_body_owned") is True
             or direct_file_body_rejected
             or office_model_claim_rejected
             or outside_deed_replaced

@@ -2532,33 +2532,40 @@ async def test_direct_file_metadata_scope_reaches_generation_as_authorized_evide
 
 
 @pytest.mark.asyncio
-async def test_direct_exact_file_rejects_wrong_unique_source_tokens_for_requested_fields(
+@pytest.mark.parametrize(
+    "source_text",
+    (
+        (
+            "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ\n"
+            "ПРИКАЗ № 17-ДСП/1\n"
+            "ПРИКАЗ № 18-ДСП/2\n"
+            "Дата документа: 10 августа 2026 года\n"
+            "Подписант: начальник отдела Иван Иванович Иванов"
+        ),
+        ("ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ\nПРИКАЗ № 17-ДСП/1\nДата документа: 10 августа 2026 года"),
+    ),
+    ids=("ambiguous-number", "missing-signatory"),
+)
+async def test_direct_exact_file_fails_closed_before_model_for_unproven_source_fields(
     settings,
     storage,
     monkeypatch,
+    source_text,
 ) -> None:
-    source_text = (
-        "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ\n"
-        "ПРИКАЗ № 17-ДСП/1\n"
-        "Дата документа: 10 августа 2026 года\n"
-        "Контрольный маркер: META-EXPORT-1\n"
-        "Подписант: начальник отдела Иван Иванович Иванов"
-    )
-    body = "ПРИКАЗ\nДата\nКонтрольный\nначальник"
     source = _pending_file(storage, "alice", "alice", source_text, filename="source.odt")
 
-    class FailedLiteralFillLLM:
+    class ForbiddenLLM:
         enabled = True
-        model = "failed-literal-fill"
+        model = "forbidden-direct-exact"
         total_budget_sec = 5.0
 
         async def chat(self, _messages, **_kwargs):
-            return {"content": body, "tool_calls": None, "_queue_wait_sec": 0.0}
+            raise AssertionError("unproven exact source reached the model")
 
     runtime = AgentRuntime(
         replace(settings, verify_answers=True),
         storage,
-        llm=FailedLiteralFillLLM(),
+        llm=ForbiddenLLM(),
     )
     kernel_calls: list[str] = []
 
@@ -2567,7 +2574,7 @@ async def test_direct_exact_file_rejects_wrong_unique_source_tokens_for_requeste
         return AgentContext(conversation_id=conversation_id, user_id=user_id, person_id="alice")
 
     async def generate(_context, _message, _attachments):
-        return {"content": body, "tools_used": [], "_model_generated": True}
+        raise AssertionError("unproven exact source reached generation")
 
     async def execute(name, arguments, *, actor=None):  # noqa: ANN001
         del arguments, actor

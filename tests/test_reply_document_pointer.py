@@ -582,27 +582,8 @@ class _D10RoutingLLM:
                     }
                 ],
             }
-        late_file_fill = any(
-            "Напиши СОДЕРЖИМОЕ документа" in str(item.get("content") or "")
-            for item in messages
-            if isinstance(item, Mapping) and str(item.get("role") or "") == "system"
-        )
         if "metadata-export.docx" in last_user and not tool_result_after_user:
-            if offered or tool_choice is not None:
-                raise AssertionError("regular D10 export retained agentic schemas")
-            if not late_file_fill:
-                return {
-                    **common,
-                    "content": "Готово — файл metadata-export.docx уже создан.",
-                    "tool_calls": None,
-                }
-            return {
-                **common,
-                "content": (
-                    "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ\n17-ДСП/1\n10 августа 2026 года\nИван Иванович Иванов"
-                ),
-                "tool_calls": None,
-            }
+            raise AssertionError("closed direct D10 export reached the model")
         if "metadata-export.docx" in last_user:
             raise AssertionError("regular D10 export unexpectedly entered an agentic follow-up")
         if "workspace_create" in last_user and tool_result_after_user:
@@ -796,9 +777,7 @@ def test_exact_d10_three_turn_api_keeps_reply_source_and_forces_only_workspace_e
             "Иван Иванович Иванов",
         ]
         regular_model_calls = [call for call in llm.calls if "metadata-export.docx" in call["user"]]
-        assert len(regular_model_calls) == 2
-        assert all(call["offered"] == set() for call in regular_model_calls)
-        assert all(call["tool_choice"] is None for call in regular_model_calls)
+        assert regular_model_calls == []
 
         workspace_prompt = (
             "Контекст проверки SYNTHETIC-D10. "
