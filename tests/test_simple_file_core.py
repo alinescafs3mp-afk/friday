@@ -178,6 +178,103 @@ async def test_registered_upload_receipt_and_two_file_read_use_only_selected_dis
 
 
 @pytest.mark.asyncio
+async def test_current_upload_and_exact_named_prior_use_registered_disk_sources_only(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    configured = replace(settings, verify_answers=False)
+    storage.ensure_user("alice", preset_key="owner")
+    pipeline = IngestionPipeline(configured, storage, KnowledgeGraph(storage))
+    sources = (
+        (
+            "codex-live-a-aug12.txt",
+            "Контрольный код A\nALPHA-REGISTERED-AUG12\nПервый источник зарегистрирован.",
+            "telegram-file:CURRENT-PRIOR-A",
+        ),
+        (
+            "codex-live-b-aug12.txt",
+            "Контрольный код B\nBETA-REGISTERED-AUG12\nВторой источник зарегистрирован.",
+            "telegram-file:CURRENT-PRIOR-B",
+        ),
+        (
+            "ambient-decoy-aug12.txt",
+            "DECOY-MUST-NOT-REACH-THE-MODEL",
+            "telegram-file:CURRENT-PRIOR-DECOY",
+        ),
+    )
+    ingested = []
+    for filename, body, source_ref in sources:
+        ingested.append(
+            await pipeline.ingest_file(
+                "alice",
+                None,
+                body.encode(),
+                filename=filename,
+                mime_type="text/plain",
+                metadata={"uploaded_by": "alice"},
+                source_ref=source_ref,
+            )
+        )
+    first_id, second_id, decoy_id = (str(item["raw_object_id"]) for item in ingested)
+    runtime = AgentRuntime(configured, storage, llm=_NoDirectLLM())
+
+    first_receipt = await runtime.chat(
+        "alice",
+        "Загружен документ: codex-live-a-aug12.txt",
+        actor=_actor(),
+        attachments=[{"raw_object_id": first_id}],
+        synthetic_document_notice=True,
+    )
+    await runtime.chat(
+        "alice",
+        "Загружен документ: ambient-decoy-aug12.txt",
+        actor=_actor(),
+        conversation_id=first_receipt["conversation_id"],
+        attachments=[{"raw_object_id": decoy_id}],
+        synthetic_document_notice=True,
+    )
+
+    seen: list[list[dict]] = []
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message
+        snapshot = [dict(item) for item in attachments]
+        seen.append(snapshot)
+        visible = "\n".join(str(item.get("transient_text") or "") for item in snapshot)
+        assert "ALPHA-REGISTERED-AUG12" in visible
+        assert "BETA-REGISTERED-AUG12" in visible
+        assert "DECOY-MUST-NOT-REACH-THE-MODEL" not in visible
+        return {
+            "content": "ALPHA-REGISTERED-AUG12\nBETA-REGISTERED-AUG12",
+            "tools_used": [],
+        }
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    result = await runtime.chat(
+        "alice",
+        "Сравни этот файл с ранее загруженным файлом «codex-live-a-aug12.txt». "
+        "Верни дословно значение после «Контрольный код A» и значение после "
+        "«Контрольный код B».",
+        actor=_actor(),
+        conversation_id=first_receipt["conversation_id"],
+        attachments=[{"raw_object_id": second_id}],
+    )
+
+    assert result["message"] == "ALPHA-REGISTERED-AUG12\nBETA-REGISTERED-AUG12"
+    assert result["tools_used"] == []
+    assert result["attachment_context_expected_count"] == 2
+    assert result["attachment_context_readable_count"] == 2
+    assert result["attachment_coverage_complete"] is True
+    assert result["attachment_verification_complete"] is True
+    assert len(seen) == 1
+    assert [str(item.get("raw_object_id") or "") for item in seen[0]] == [
+        first_id,
+        second_id,
+    ]
+
+
+@pytest.mark.asyncio
 async def test_emitted_citation_restores_registered_file_and_returns_exact_last_item_without_model(
     settings,
     storage,

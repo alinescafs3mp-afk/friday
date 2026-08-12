@@ -6728,6 +6728,17 @@ def _named_person_aggregation_scope(
     """Closed current/prior scope for one named-user content aggregation."""
 
     visible = _classification_text(message)
+    if not _named_person_query_from(visible) and _attachment_filename_mentions(
+        _attachment_selector_message(visible)
+    ):
+        # An exact input filename is a stronger source selector than the
+        # personless all-upload corpus heuristic.  In particular, the generic
+        # time grammar can read ``с ... и ...`` as an explicit range and the
+        # word ``загруженным`` as an arrival-clock cue.  Output filenames are
+        # removed by ``_attachment_selector_message``; let the ordinary exact
+        # attachment resolver own what remains before either heuristic can turn
+        # a file read/comparison into a bogus date-range clarification.
+        return None
     if _attachment_temporal_read_clause(visible) and not _named_person_query_from(visible):
         # ``обобщи документ и покажи, что происходило вчера`` contains a
         # document task and a separate owner-timeline clock.  The latter must
