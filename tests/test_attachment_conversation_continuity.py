@@ -528,6 +528,60 @@ async def test_document_metadata_is_authorised_and_rendered_without_model_or_bod
 
 
 @pytest.mark.asyncio
+async def test_same_turn_odt_metadata_request_selects_the_only_current_upload(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    raw = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "PRIVATE-ODT-BODY-" * 1_024,
+        filename="current-20kb.odt",
+        extra_metadata={
+            "mime_type": "application/vnd.oasis.opendocument.text",
+            "size_bytes": 20_480,
+            "title": "Текущий ODT",
+            "creator": "Автор ODT",
+        },
+    )
+    conversation = storage.create_conversation("alice")
+    runtime = AgentRuntime(settings, storage, llm=_EnabledButUnusedLLM())
+
+    async def forbidden(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("same-turn metadata route entered general model routing")
+
+    async def no_visible_details(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        return ""
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden)
+    monkeypatch.setattr(runtime, "_agentic_loop", forbidden)
+    monkeypatch.setattr(runtime, "_document_content_details_answer", no_visible_details)
+    result = await runtime.chat(
+        "alice",
+        "покажи метаданные по этому файлу",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[_current_attachment(raw)],
+        enable_tools=True,
+    )
+
+    assert result["tools_used"] == []
+    assert result["context"]["llm_failed"] is False
+    assert "current-20kb.odt" in result["message"]
+    assert "Текущий ODT" in result["message"]
+    assert "Автор ODT" in result["message"]
+    assert "PRIVATE-ODT-BODY" not in result["message"]
+    rows = storage.get_conversation_messages(conversation["id"], user_id="alice", limit=10)
+    assistant_metadata = json.loads(str(rows[-1].get("metadata_json") or "{}"))
+    assert assistant_metadata["document_metadata_owned"] is True
+
+
+@pytest.mark.asyncio
 async def test_metadata_of_another_document_uses_a_newly_attached_current_pointer(
     settings,
     storage,

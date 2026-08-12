@@ -1041,7 +1041,7 @@ async def test_readable_attachment_llm_failure_keeps_stage_honesty_and_only_stru
     assert llm.events == []
     assert owner_notifications == ["alice"]
     assert "Вложение прочитано" in result["message"]
-    assert "Ошибка возникла на этапе подготовки ответа" in result["message"]
+    assert "Сбой произошёл при формировании ответа моделью, не при разборе файла" in result["message"]
     assert "загруз" not in result["message"].lower()
     assert result["files"] == [structural_file]
     assert observed_voice_inputs == [None]

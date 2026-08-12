@@ -13798,7 +13798,7 @@ def _readable_attachment_model_failure(
     else:
         # Never claim a read when the parser had no usable body (scan/stub/0 chars).
         lead = "Модель не сформировала ответ по вложению."
-    tail = " Ошибка возникла на этапе подготовки ответа."
+    tail = " Сбой произошёл при формировании ответа моделью, не при разборе файла."
     if reusable and readable_count == expected_count and readable_count > 0:
         tail += " Файл сохранён; повторно загружать его не нужно — повторите запрос позже."
     else:
@@ -18836,7 +18836,9 @@ class AgentRuntime:
         )
         document_metadata_scope = _document_metadata_request_scope(
             clean_message,
-            selected_document=bool(quoted_attachment_reference or reply_assistant_reference),
+            selected_document=bool(
+                supplied_attachment_count == 1 or quoted_attachment_reference or reply_assistant_reference
+            ),
         )
         document_metadata_requested = bool(document_metadata_scope)
         document_metadata_file_requested = False
