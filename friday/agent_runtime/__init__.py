@@ -232,10 +232,12 @@ _CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES = 5_000
 _ATTACHMENT_MAP_CHUNK_CHARS = 20_000
 # Large hierarchy-only maps may use a wider leaf when the configured model
 # context can carry it.  Ordinary planners keep the 20k default above.  The
-# 64k target turns the measured 306k source from six serial waves into two at
-# the bounded three-call fan-out, without approaching a 32k-token input edge.
+# 64k is the lower wide-leaf target.  The exact serialized-input guard below is
+# the real upper bound: a single-sequence profile must be allowed to use more of
+# its context window instead of manufacturing several requests which can only
+# queue behind one another.
 _ATTACHMENT_MAP_WIDE_CHUNK_CHARS = 64_000
-_ATTACHMENT_MAP_MAX_CHUNK_CHARS = 72_000
+_ATTACHMENT_MAP_MAX_CHUNK_CHARS = 256_000
 _ATTACHMENT_MAP_TARGET_WAVES = 2
 _ATTACHMENT_MAP_MODEL_OUTPUT_TOKENS = 500
 # The map request also carries a system instruction, JSON keys, filename,
@@ -11033,8 +11035,8 @@ def _attachment_hierarchy_map_chunk_chars(
 
     Small maps retain the established 20k leaves.  Once that would require
     more than two waves, widen only as far as both the configured model input
-    envelope and the finite 72k hierarchy ceiling allow.  Exact serialized
-    prompts are checked again immediately before each model call.
+    envelope and the finite hierarchy ceiling allow.  Exact serialized prompts
+    are checked again immediately before each model call.
     """
 
     source_lengths = [
@@ -11068,6 +11070,29 @@ def _attachment_hierarchy_map_chunk_chars(
         (source_chars + target_leaves - 1) // target_leaves,
     )
     return min(safe_max, target_width)
+
+
+def _attachment_hierarchy_prepass_budget_sec(
+    *,
+    chunk_count: int,
+    parallelism: int,
+    serialized_input_chars: int,
+) -> float:
+    """Budget hierarchy work by actual serialised input, within the old cap.
+
+    A wave count alone underprices a few near-context-size leaves.  Convert the
+    exact schema-free prompt workload into conservative 64k work units and feed
+    the larger of that count and the real leaf count into the existing bounded
+    wave policy.  This never raises the established 150-second ceiling.
+    """
+
+    workload_units = (
+        max(0, int(serialized_input_chars)) + _ATTACHMENT_MAP_WIDE_CHUNK_CHARS - 1
+    ) // _ATTACHMENT_MAP_WIDE_CHUNK_CHARS
+    return _attachment_prepass_budget_sec(
+        max(max(0, int(chunk_count)), workload_units),
+        parallelism,
+    )
 
 
 def _attachment_whole_source_plan(
@@ -24059,9 +24084,18 @@ class AgentRuntime:
 
         foreground_slots = max(1, int(self.settings.llm_foreground_slots))
         # Leave one configured foreground slot available to unrelated chat
-        # turns.  Three leaf calls are enough to expose vLLM batching without
-        # letting one large document occupy the whole interactive queue.
-        map_parallelism = max(1, min(3, foreground_slots - 1))
+        # turns, but never submit more document generations than the selected
+        # runtime profile can execute at once.  In particular, max_num_seqs=1
+        # must remain a genuinely serial plan instead of several HTTP requests
+        # contending for the same model sequence and one shared deadline.
+        map_parallelism = max(
+            1,
+            min(
+                3,
+                max(1, foreground_slots - 1),
+                max(1, int(self.settings.profile.max_num_seqs)),
+            ),
+        )
         map_chunk_chars = _attachment_hierarchy_map_chunk_chars(
             attachments,
             max_model_len=self.settings.profile.max_model_len,
@@ -24181,9 +24215,16 @@ class AgentRuntime:
                     }
                 )
 
+        serialized_map_input_chars = sum(
+            sum(_message_chars(item) for item in map_model_messages(chunk)) for chunk in chunks
+        )
         prepass_deadline = self._ensure_attachment_prepass_deadline(
             context,
-            requested_budget_sec=_attachment_prepass_budget_sec(len(chunks), map_parallelism),
+            requested_budget_sec=_attachment_hierarchy_prepass_budget_sec(
+                chunk_count=len(chunks),
+                parallelism=map_parallelism,
+                serialized_input_chars=serialized_map_input_chars,
+            ),
         )
         map_semaphore = asyncio.Semaphore(map_parallelism)
 

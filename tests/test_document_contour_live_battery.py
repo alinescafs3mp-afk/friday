@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -36,6 +37,57 @@ def test_manifest_is_exactly_ten_unique_document_scenarios() -> None:
     assert [item.case_id for item in runner.SCENARIOS] == [f"D{index:02d}" for index in range(1, 11)]
     assert len(runner._CASE_RUNNERS) == 10
     assert all(item.contract for item in runner.SCENARIOS)
+
+
+def test_d07_scan_fixture_roundtrip_keeps_the_complete_secret_inside_page() -> None:
+    import pypdf
+    from PIL import Image, ImageDraw, ImageOps
+
+    runner = _module()
+    marker = "SCAN-PAGE-FIVE-" + "F" * 12
+    font_path = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+    available_width = (
+        runner._SCAN_FIXTURE_WIDTH - runner._SCAN_FIXTURE_TEXT_X - runner._SCAN_FIXTURE_RIGHT_MARGIN
+    )
+    marker_font = runner._scan_fixture_font(marker, font_path, max_width=available_width)
+    left, _top, right, _bottom = marker_font.getbbox(marker)
+    assert right - left <= available_width
+
+    reader = pypdf.PdfReader(io.BytesIO(runner._scan_pdf(marker)))
+    assert len(reader.pages) == 5
+    images = list(reader.pages[-1].images)
+    assert len(images) == 1
+    page = images[0].image.convert("L")
+    marker_band = page.crop(
+        (
+            0,
+            runner._SCAN_SECRET_VALUE_Y,
+            page.width,
+            runner._SCAN_SECRET_VALUE_Y + runner._SCAN_FIXTURE_FONT_SIZE + 32,
+        )
+    )
+    ink = ImageOps.invert(marker_band).getbbox()
+    expected_page = Image.new("L", page.size, "white")
+    ImageDraw.Draw(expected_page).text(
+        (runner._SCAN_FIXTURE_TEXT_X, runner._SCAN_SECRET_VALUE_Y),
+        marker,
+        fill="black",
+        font=marker_font,
+    )
+    expected_ink = ImageOps.invert(
+        expected_page.crop(
+            (
+                0,
+                runner._SCAN_SECRET_VALUE_Y,
+                page.width,
+                runner._SCAN_SECRET_VALUE_Y + runner._SCAN_FIXTURE_FONT_SIZE + 32,
+            )
+        )
+    ).getbbox()
+    assert ink is not None
+    assert ink == expected_ink
+    assert ink[0] >= runner._SCAN_FIXTURE_TEXT_X
+    assert ink[2] <= page.width - runner._SCAN_FIXTURE_RIGHT_MARGIN
 
 
 def test_d03_prompt_authorizes_approximate_filename_navigation_without_becoming_exact() -> None:

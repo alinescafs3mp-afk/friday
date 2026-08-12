@@ -676,24 +676,68 @@ def _xlsx_bytes(rows: Sequence[Sequence[str]]) -> bytes:
     return output.getvalue()
 
 
+_SCAN_FIXTURE_WIDTH = 1_600
+_SCAN_FIXTURE_HEIGHT = 2_200
+_SCAN_FIXTURE_TEXT_X = 110
+_SCAN_FIXTURE_RIGHT_MARGIN = 110
+_SCAN_FIXTURE_FONT_SIZE = 76
+_SCAN_SECRET_LABEL_Y = 800
+_SCAN_SECRET_VALUE_Y = 940
+
+
+def _scan_fixture_font(text: str, font_path: Path, *, max_width: int) -> Any:
+    """Return the largest fixture font whose complete text fits the page."""
+
+    from PIL import ImageFont
+
+    if font_path.is_file():
+        for size in range(_SCAN_FIXTURE_FONT_SIZE, 11, -1):
+            font = ImageFont.truetype(str(font_path), size)
+            left, _top, right, _bottom = font.getbbox(text)
+            if right - left <= max_width:
+                return font
+    font = ImageFont.load_default()
+    left, _top, right, _bottom = font.getbbox(text)
+    if right - left <= max_width:
+        return font
+    raise BatteryFailure("scan_fixture_text_does_not_fit")
+
+
 def _scan_pdf(marker: str, *, pages: int = 5, fixture_scope: str = "") -> bytes:
     from PIL import Image, ImageDraw, ImageFont
     from reportlab.lib.utils import ImageReader  # type: ignore[import-untyped]
     from reportlab.pdfgen import canvas  # type: ignore[import-untyped]
 
     font_path = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
-    font = ImageFont.truetype(str(font_path), 76) if font_path.is_file() else ImageFont.load_default()
+    font: Any = (
+        ImageFont.truetype(str(font_path), _SCAN_FIXTURE_FONT_SIZE)
+        if font_path.is_file()
+        else ImageFont.load_default()
+    )
+    secret_width = _SCAN_FIXTURE_WIDTH - _SCAN_FIXTURE_TEXT_X - _SCAN_FIXTURE_RIGHT_MARGIN
     output = io.BytesIO()
     pdf = canvas.Canvas(output, pagesize=(800, 1100), pageCompression=1)
     for page in range(1, pages + 1):
-        image = Image.new("RGB", (1600, 2200), "white")
+        image = Image.new("RGB", (_SCAN_FIXTURE_WIDTH, _SCAN_FIXTURE_HEIGHT), "white")
         draw = ImageDraw.Draw(image)
         draw.text((110, 180), f"SYNTHETIC SCAN PAGE {page}", fill="black", font=font)
         draw.text((110, 480), f"CONTROL PAGE NUMBER {page}", fill="black", font=font)
         if fixture_scope:
             draw.text((110, 650), f"FIXTURE SCOPE {fixture_scope} PAGE {page}", fill="black", font=font)
         if page == pages:
-            draw.text((110, 860), f"SECRET CODE {marker}", fill="black", font=font)
+            draw.text(
+                (_SCAN_FIXTURE_TEXT_X, _SCAN_SECRET_LABEL_Y),
+                "SECRET CODE",
+                fill="black",
+                font=font,
+            )
+            secret_font = _scan_fixture_font(marker, font_path, max_width=secret_width)
+            draw.text(
+                (_SCAN_FIXTURE_TEXT_X, _SCAN_SECRET_VALUE_Y),
+                marker,
+                fill="black",
+                font=secret_font,
+            )
         encoded = io.BytesIO()
         image.save(encoded, format="PNG", optimize=True)
         encoded.seek(0)

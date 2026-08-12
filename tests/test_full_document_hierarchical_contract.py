@@ -436,7 +436,15 @@ async def test_parallel_map_is_bounded_and_reassembles_out_of_order_tails(
 ) -> None:
     source = "PARALLEL_HEAD\n" + "p" * 99_970 + "\nSINGLE_TAIL"
     llm = _ConcurrentMapLLM("unused")
-    runtime = AgentRuntime(replace(settings, llm_foreground_slots=4), storage, llm=llm)
+    runtime = AgentRuntime(
+        replace(
+            settings,
+            llm_foreground_slots=4,
+            profile=replace(settings.profile, max_num_seqs=3),
+        ),
+        storage,
+        llm=llm,
+    )
     context = AgentContext(
         conversation_id="synthetic-parallel-map",
         user_id="synthetic-parallel-map-owner",
@@ -463,7 +471,7 @@ async def test_parallel_map_is_bounded_and_reassembles_out_of_order_tails(
 
 
 @pytest.mark.asyncio
-async def test_a_306k_hierarchy_maps_in_two_model_safe_waves(
+async def test_a_306k_hierarchy_respects_single_sequence_profile_and_input_budget(
     settings: Any,
     storage: Any,
 ) -> None:
@@ -494,11 +502,14 @@ async def test_a_306k_hierarchy_maps_in_two_model_safe_waves(
 
     payloads = _chunk_payloads(llm)
     _assert_exact_coverage(payloads, [("dynamic-306k.txt", source)])
-    assert 1 < len(payloads) <= 6
+    assert len(payloads) == 3
     assert all(
         len(str(item["text"])) <= agent_runtime_module._ATTACHMENT_MAP_MAX_CHUNK_CHARS for item in payloads
     )
-    assert llm.max_active_maps == 3
+    assert llm.max_active_maps == 1
+    assert context.attachment_prepass_deadline is not None
+    remaining = context.attachment_prepass_deadline - agent_runtime_module.time.monotonic()
+    assert 149.0 <= remaining <= 150.0
     assert all(
         sum(agent_runtime_module._message_chars(item) for item in call["messages"])
         <= agent_runtime_module._attachment_map_input_char_budget(settings.profile.max_model_len)
@@ -613,7 +624,11 @@ async def test_parallel_map_failure_stays_partial_and_cannot_pass(
     )
 
     result = await _run(
-        replace(settings, llm_foreground_slots=4),
+        replace(
+            settings,
+            llm_foreground_slots=4,
+            profile=replace(settings.profile, max_num_seqs=3),
+        ),
         storage,
         monkeypatch,
         question="Обобщи весь документ целиком.",
@@ -1585,7 +1600,11 @@ async def test_hierarchy_uses_one_unrenewed_prepass_deadline(
     llm = _SlowMapLLM("Этот ответ не должен быть сгенерирован после дедлайна.")
 
     result = await _run(
-        replace(settings, llm_foreground_slots=4),
+        replace(
+            settings,
+            llm_foreground_slots=4,
+            profile=replace(settings.profile, max_num_seqs=3),
+        ),
         storage,
         monkeypatch,
         question="Обобщи весь документ целиком.",
