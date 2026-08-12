@@ -6,7 +6,11 @@ from dataclasses import replace
 
 import pytest
 
-from friday.agent_runtime import AgentRuntime, _closed_attachment_read_only_request
+from friday.agent_runtime import (
+    AgentRuntime,
+    _closed_attachment_read_only_request,
+    _is_document_metadata_request,
+)
 from friday.execution_kernel import ToolResult
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
@@ -542,6 +546,14 @@ async def test_current_odt_metadata_and_followup_use_the_registered_file_contour
     storage,
     monkeypatch,
 ) -> None:
+    assert _is_document_metadata_request(
+        "Метаданные этого файла: назови только название и автора.",
+        selected_document=True,
+    )
+    assert not _is_document_metadata_request(
+        "Не называй метаданные этого файла.",
+        selected_document=True,
+    )
     configured = replace(settings, verify_answers=False)
     storage.ensure_user("alice", preset_key="owner")
     pipeline = IngestionPipeline(configured, storage, KnowledgeGraph(storage))
@@ -586,7 +598,7 @@ async def test_current_odt_metadata_and_followup_use_the_registered_file_contour
 
     metadata = await runtime.chat(
         "alice",
-        "Метаданные",
+        "Метаданные этого файла: назови только название и автора.",
         actor=_actor(),
         attachments=[{"raw_object_id": raw_id}],
     )

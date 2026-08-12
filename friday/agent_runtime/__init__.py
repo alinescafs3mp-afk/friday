@@ -7916,7 +7916,7 @@ _ATTACHMENT_HOST_PATH_READ_ACTION = re.compile(
     re.IGNORECASE,
 )
 _DOCUMENT_METADATA_ACTION = re.compile(
-    r"\b(?:покаж|вывед|напиш|выдай|дай|перечисл|отобраз|сообщ)\w*\b|"
+    r"\b(?:покаж|вывед|напиш|выдай|дай|назов|перечисл|отобраз|сообщ)\w*\b|"
     r"\b(?:show|display|list|give|print|write|provide)\b",
     re.IGNORECASE,
 )
@@ -7969,7 +7969,7 @@ _DOCUMENT_METADATA_OTHER_TARGET = re.compile(
 )
 _NEGATED_DOCUMENT_METADATA_ACTION = re.compile(
     r"\bне\s+(?:(?:надо|нужно|стоит)\s+)?"
-    r"(?:показыва|вывод|писа|выдава|дава|перечисля|отобража|сообща)\w*\b|"
+    r"(?:показыва|вывод|писа|выдава|дава|называ|перечисля|отобража|сообща)\w*\b|"
     r"\b(?:do\s+not|don't)\s+(?:show|display|list|give|print|write|provide)\b",
     re.IGNORECASE,
 )
