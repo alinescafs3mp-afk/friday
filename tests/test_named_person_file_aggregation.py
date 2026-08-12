@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from friday.agent_runtime import (
+    _UNCONFIRMED_SUPPORTED_DEED,
     AgentContext,
     AgentRuntime,
     _named_person_aggregation_scope,
@@ -342,3 +343,109 @@ async def test_chat_synthesis_receives_tails_from_each_selected_file(
     assert seen and "FIRST-TAIL" in seen[0] and "SECOND-TAIL" in seen[0]
     assert "Сводка по двум файлам" in result["message"]
     assert "FOREIGN" not in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_complete_named_person_corpus_owns_only_passive_historical_file_state(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    runtime, actor, tenant = _runtime(settings, storage)
+    runtime.settings = replace(
+        runtime.settings,
+        llm_enabled=True,
+        verify_answers=True,
+        verify_min_answer_chars=1,
+    )
+    runtime.llm.settings = runtime.settings
+    _file(
+        storage,
+        tenant,
+        "usr_jbl",
+        "first.txt",
+        "KAPPA-731",
+        "2026-08-08T09:00:00+00:00",
+    )
+    _file(
+        storage,
+        tenant,
+        "usr_jbl",
+        "second.txt",
+        "SIGMA-482",
+        "2026-08-09T09:00:00+00:00",
+    )
+    _file(
+        storage,
+        tenant,
+        "usr_jbl",
+        "third.txt",
+        "OMEGA-915",
+        "2026-08-10T09:00:00+00:00",
+    )
+    _file(
+        storage,
+        tenant,
+        "usr_jbl",
+        "outside-window.txt",
+        "OUTSIDE-WINDOW-004",
+        "2026-08-12T09:00:00+00:00",
+    )
+    generated = iter(
+        (
+            ("Исторические файлы сохранены в архиве: OMEGA-915, SIGMA-482, KAPPA-731."),
+            "Я создала и прикрепила файл с итогами.",
+        )
+    )
+    seen_source_sequences: list[list[str]] = []
+    verifier_evidence: list[list[str]] = []
+
+    async def prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
+        del message, kwargs
+        return AgentContext(conversation_id=conversation_id, user_id=user_id, person_id=actor.own_id)
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message
+        seen_source_sequences.append([str(item.get("transient_text") or "") for item in attachments or []])
+        return {
+            "content": next(generated),
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    async def verify(question, answer, context, *, tool_evidence=None):  # noqa: ANN001
+        del question, answer, context
+        verifier_evidence.append(
+            [
+                str(item.get("output") or "")
+                for item in tool_evidence or []
+                if str(item.get("tool") or "") == "attachment"
+            ]
+        )
+        return {"status": "passed", "ok": True, "score": 1.0, "issues": []}
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_verify_response", verify)
+    request = "Обобщи данные, которые приходили от пользователя JBL с 7 по 11 августа"
+
+    passive = await runtime.chat(actor.own_id, request, actor=actor, enable_tools=True)
+    active = await runtime.chat(actor.own_id, request, actor=actor, enable_tools=True)
+
+    assert seen_source_sequences == [
+        ["OMEGA-915", "SIGMA-482", "KAPPA-731"],
+        ["OMEGA-915", "SIGMA-482", "KAPPA-731"],
+    ]
+    assert len(verifier_evidence) == 1
+    joined_evidence = "\n".join(verifier_evidence[0])
+    assert joined_evidence.index("OMEGA-915") < joined_evidence.index("SIGMA-482")
+    assert joined_evidence.index("SIGMA-482") < joined_evidence.index("KAPPA-731")
+    assert "OUTSIDE-WINDOW-004" not in joined_evidence
+    assert _UNCONFIRMED_SUPPORTED_DEED not in passive["message"]
+    assert "Исторические файлы сохранены" in passive["message"]
+    assert passive["message"].index("OMEGA-915") < passive["message"].index("SIGMA-482")
+    assert passive["message"].index("SIGMA-482") < passive["message"].index("KAPPA-731")
+    assert "OUTSIDE-WINDOW-004" not in passive["message"]
+    assert passive["verification_status"] == "passed"
+    assert _UNCONFIRMED_SUPPORTED_DEED in active["message"]
+    assert "Я создала и прикрепила" not in active["message"]

@@ -24,6 +24,7 @@ from friday.agent_runtime import (
     AgentRuntime,
     AttachmentRequestProjection,
     _project_attachments_for_request,
+    _source_windows,
 )
 from friday.execution_kernel import ToolResult
 from friday.permissions import AuthorizationService
@@ -751,6 +752,23 @@ def test_two_distant_matches_are_both_retained_with_exact_source_offsets(
     assert first in carrier and second in carrier
     for offset in source.target_offsets:
         assert any(int(item["start"]) <= offset < int(item["end"]) for item in windows)
+
+
+def test_source_window_keeps_label_value_line_without_next_paragraph() -> None:
+    for line_break in ("\r\n", "\n"):
+        text = line_break.join(("[page]", "FIELD LABEL", "VALUE", "", "CONTROL SECRET"))
+        start = text.index("FIELD LABEL")
+        end = start + len("FIELD LABEL")
+
+        windows = _source_windows(text, [(start, end)])
+
+        assert len(windows) == 1
+        left, right = windows[0]
+        carrier = text[left:right]
+        assert 0 <= left <= start < end <= right <= min(len(text), end + 2200)
+        assert carrier.index("FIELD LABEL") < carrier.index("VALUE")
+        assert "CONTROL SECRET" not in carrier
+        assert right == text.index(line_break * 2) + len(line_break)
 
 
 @pytest.mark.asyncio

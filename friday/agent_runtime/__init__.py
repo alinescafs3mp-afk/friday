@@ -11823,7 +11823,10 @@ def _source_windows(text: str, spans: list[tuple[int, int]]) -> list[tuple[int, 
             if not breaks:
                 right = right_ceiling
                 break
-            right = min(breaks) + 1
+            line_break = min(breaks)
+            right = line_break + 1
+            if right < right_ceiling and text[line_break : right + 1] == "\r\n":
+                right += 1
         overlapping = next(
             (
                 index
@@ -21268,8 +21271,19 @@ class AgentRuntime:
             else 0
         )
         structural_file_clips = all_response_files[:structural_file_count]
+        named_person_passive_source_scope = bool(
+            named_person_corpus.applies
+            and named_person_corpus.complete
+            and named_person_corpus.expected_count > 0
+            and named_person_corpus.selected_count == named_person_corpus.expected_count
+            and attachment_expected_count == named_person_corpus.expected_count
+            and attachment_readable_count == attachment_expected_count
+            and attachment_verification_complete
+            and authenticated_attachment_scope
+            and not attachment_tool_action_requested
+        )
         passive_attachment_summary_scope = bool(
-            synthetic_document_notice
+            (synthetic_document_notice or named_person_passive_source_scope)
             and current_attachment_local
             and attachment_expected_count > 0
             and attachment_readable_count > 0
