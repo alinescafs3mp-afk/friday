@@ -11816,17 +11816,32 @@ def _source_windows(text: str, spans: list[tuple[int, int]]) -> list[tuple[int, 
             left += 1
         right_ceiling = min(len(text), end + 2200)
         right = end
-        for _ in range(2):
-            newline = text.find("\n", right, right_ceiling)
-            carriage = text.find("\r", right, right_ceiling)
-            breaks = [value for value in (newline, carriage) if value >= 0]
-            if not breaks:
-                right = right_ceiling
-                break
+        newline = text.find("\n", right, right_ceiling)
+        carriage = text.find("\r", right, right_ceiling)
+        breaks = [value for value in (newline, carriage) if value >= 0]
+        if not breaks:
+            right = right_ceiling
+        else:
             line_break = min(breaks)
             right = line_break + 1
             if right < right_ceiling and text[line_break : right + 1] == "\r\n":
                 right += 1
+            skipped_blank_lines = 0
+            while right < right_ceiling:
+                newline = text.find("\n", right, right_ceiling)
+                carriage = text.find("\r", right, right_ceiling)
+                breaks = [value for value in (newline, carriage) if value >= 0]
+                next_break = min(breaks) if breaks else right_ceiling
+                after_break = min(right_ceiling, next_break + 1)
+                if after_break < right_ceiling and text[next_break : after_break + 1] == "\r\n":
+                    after_break += 1
+                if text[right:next_break].strip():
+                    right = after_break
+                    break
+                if skipped_blank_lines >= 1:
+                    break
+                skipped_blank_lines += 1
+                right = after_break
         overlapping = next(
             (
                 index

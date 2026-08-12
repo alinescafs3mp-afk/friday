@@ -756,7 +756,7 @@ def test_two_distant_matches_are_both_retained_with_exact_source_offsets(
 
 def test_source_window_keeps_label_value_line_without_next_paragraph() -> None:
     for line_break in ("\r\n", "\n"):
-        text = line_break.join(("[page]", "FIELD LABEL", "VALUE", "", "CONTROL SECRET"))
+        text = line_break.join(("[page]", "FIELD LABEL", "", "VALUE", "", "CONTROL SECRET"))
         start = text.index("FIELD LABEL")
         end = start + len("FIELD LABEL")
 
@@ -768,7 +768,7 @@ def test_source_window_keeps_label_value_line_without_next_paragraph() -> None:
         assert 0 <= left <= start < end <= right <= min(len(text), end + 2200)
         assert carrier.index("FIELD LABEL") < carrier.index("VALUE")
         assert "CONTROL SECRET" not in carrier
-        assert right == text.index(line_break * 2) + len(line_break)
+        assert right == text.index(line_break, text.index("VALUE")) + len(line_break)
 
 
 @pytest.mark.asyncio
