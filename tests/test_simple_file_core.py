@@ -458,8 +458,8 @@ async def test_explicit_mcp_inbox_read_never_substitutes_same_named_upload(
     result = await runtime.chat(
         "alice",
         (
-            "Прочитай report-unique-aug12.odt из MCP inbox и верни точное значение "
-            "после «Поле X». Ответь только значением."
+            "Прочитай файл report-unique-aug12.odt из MCP inbox и верни дословно "
+            "проверочный маркер, записанный внутри файла."
         ),
         actor=_actor(),
     )
@@ -494,6 +494,10 @@ async def test_explicit_mcp_inbox_read_never_substitutes_same_named_upload(
         ("Прочитай report-unique-aug12.odt из MCP inbox и верни файл с проверочным маркером в MCP outbox."),
         "Прочитай report-unique-aug12.odt из MCP inbox и повтори отправку, указав код.",
         "Прочитай report-unique-aug12.odt из MCP inbox и верни данные в базу.",
+        (
+            "Прочитай report-unique-aug12.odt из MCP inbox и верни дословно "
+            "проверочный маркер, записанный внутри файла, и отправь его в outbox."
+        ),
     ):
         kernel.calls.clear()
         rejected = await runtime.chat("alice", unsafe_request, actor=_actor())
@@ -506,8 +510,8 @@ async def test_explicit_mcp_inbox_read_never_substitutes_same_named_upload(
     ambiguous = await runtime.chat(
         "alice",
         (
-            "Прочитай report-unique-aug12.odt из MCP inbox и верни точное значение "
-            "после «Поле X». Ответь только значением."
+            "Прочитай файл report-unique-aug12.odt из MCP inbox и верни дословно "
+            "проверочный маркер, записанный внутри файла."
         ),
         actor=_actor(),
     )
