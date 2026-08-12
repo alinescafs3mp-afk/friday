@@ -712,6 +712,11 @@ def test_d10_oracles_require_exact_delivery_requisites_and_mcp_shape(
             assert arguments["filename"] == "mcp-metadata.txt"
             return SimpleNamespace(success=False)
 
+    class FakePortal:
+        @staticmethod
+        def call(function):  # noqa: ANN001
+            return asyncio.run(function())
+
     class FakeHarness:
         run_index = 1
         owner_id = "owner"
@@ -722,6 +727,7 @@ def test_d10_oracles_require_exact_delivery_requisites_and_mcp_shape(
             self.settings = SimpleNamespace(mcp_workspace_outbox_dir=outbox)
             self.probes = FakeProbes()
             self.app = SimpleNamespace(state=SimpleNamespace(kernel=FakeKernel()))
+            self.client = SimpleNamespace(portal=FakePortal())
             self.calls = 0
 
         @staticmethod

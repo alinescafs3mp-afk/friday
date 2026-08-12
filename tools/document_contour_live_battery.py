@@ -1923,13 +1923,15 @@ def _case_10(h: Harness) -> dict[str, Any]:
             preset_key="owner",
             source="document-live-battery",
         )
-        repeated = asyncio.run(
-            h.app.state.kernel.execute(
+
+        async def repeat_workspace_create() -> Any:
+            return await h.app.state.kernel.execute(
                 "workspace_create",
                 {"filename": mcp_name, "content": "must-not-overwrite"},
                 actor=owner,
             )
-        )
+
+        repeated = h.client.portal.call(repeat_workspace_create)
         overwrite_refused = bool(
             repeated.success is False
             and outbox.is_file()
