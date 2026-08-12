@@ -114,7 +114,27 @@ async def test_registered_upload_receipt_and_two_file_read_use_only_selected_dis
     assert "зарегистрирован" in receipt["message"]
     assert "байты на диске проверены" in receipt["message"]
     assert "содержимое извлечено полностью" in receipt["message"]
+    assert "Быстрый обзор содержимого" in receipt["message"]
+    assert f"› {first_text.splitlines()[0]}" in receipt["message"]
+    assert f"› {first_text.splitlines()[1]}" in receipt["message"]
+    # Literals are exact substrings of the registered Raw body.
+    for line in first_text.splitlines():
+        if f"› {line}" in receipt["message"]:
+            assert line in first_text
+    assert receipt["message_format"] == "plain"
     assert receipt["tools_used"] == []
+    assert "…" not in receipt["message"]
+    # Regenerate of synthetic intake must reproduce the same deterministic text.
+    regenerated = await runtime.chat(
+        "alice",
+        "Загружен документ: route-north-aug12.txt",
+        actor=_actor(),
+        attachments=[{"raw_object_id": first_id}],
+        synthetic_document_notice=True,
+    )
+    assert regenerated["message"] == receipt["message"]
+    assert regenerated["message_format"] == "plain"
+    assert regenerated["tools_used"] == []
 
     generation_calls: list[list[dict]] = []
 

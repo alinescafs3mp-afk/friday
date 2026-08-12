@@ -326,6 +326,31 @@ class _UpdateInbox:
             value = document.get(key)
             if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
                 descriptor[key] = value
+        # A password challenge raised while recovering media from an exact
+        # Telegram reply must remain a reply recovery on the next update.  The
+        # marker and structural identities are bridge-owned: callers cannot put
+        # arbitrary paths, filenames or quoted text into this durable record.
+        if document.get("_friday_reply_recovery") is True:
+            reply_source_ref = str(document.get("_friday_reply_document_source_ref") or "")
+            reply_unique_id = str(document.get("_friday_reply_document_file_unique_id") or "")
+            raw_reply_message_id = document.get("_friday_reply_document_message_id")
+            if isinstance(raw_reply_message_id, bool) or not isinstance(raw_reply_message_id, (int, str)):
+                return
+            try:
+                reply_message_id = int(raw_reply_message_id)
+            except (TypeError, ValueError):
+                return
+            if (
+                reply_message_id <= 0
+                or reply_source_ref != f"telegram-file:{file_id}"
+                or reply_unique_id != file_unique_id
+            ):
+                return
+            descriptor["_friday_reply_recovery"] = True
+            descriptor["_friday_reply_document_source_ref"] = reply_source_ref
+            descriptor["_friday_reply_document_message_id"] = reply_message_id
+            if reply_unique_id:
+                descriptor["_friday_reply_document_file_unique_id"] = reply_unique_id
         now = time.time()
         expires_at = now + max(60.0, min(float(ttl_sec), 24 * 3600.0))
         self._conn.execute(
@@ -372,11 +397,39 @@ class _UpdateInbox:
             return None
         if not isinstance(document, dict) or not str(document.get("file_id") or ""):
             return None
-        return {
+        reply_recovery = document.pop("_friday_reply_recovery", None) is True
+        reply_source_ref = str(document.pop("_friday_reply_document_source_ref", "") or "")
+        raw_reply_message_id = document.pop("_friday_reply_document_message_id", 0)
+        reply_unique_id = str(document.pop("_friday_reply_document_file_unique_id", "") or "")
+        result: dict[str, Any] = {
             "document": document,
             "safe_query": str(row["safe_query"] or ""),
             "original_message_id": int(row["original_message_id"] or 0),
         }
+        if reply_recovery:
+            file_id = str(document.get("file_id") or "")
+            file_unique_id = str(document.get("file_unique_id") or "")
+            if isinstance(raw_reply_message_id, bool) or not isinstance(raw_reply_message_id, (int, str)):
+                return None
+            try:
+                reply_message_id = int(raw_reply_message_id)
+            except (TypeError, ValueError):
+                return None
+            if (
+                reply_message_id <= 0
+                or reply_source_ref != f"telegram-file:{file_id}"
+                or reply_unique_id != file_unique_id
+            ):
+                return None
+            result.update(
+                {
+                    "reply_recovery": True,
+                    "reply_document_source_ref": reply_source_ref,
+                    "reply_document_message_id": reply_message_id,
+                    "reply_document_file_unique_id": reply_unique_id,
+                }
+            )
+        return result
 
     def clear_archive_password_challenge(self, chat_id: int, user_id: int) -> None:
         self._conn.execute(

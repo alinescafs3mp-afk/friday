@@ -679,18 +679,51 @@ async def test_bare_docx_summary_is_not_misclassified_as_an_exact_inventory(
     monkeypatch,
     incomplete: bool,
 ) -> None:
+    """Bare notice is a zero-model receipt; only an explicit summary is model-bearing."""
+
     storage.ensure_user("alice", preset_key="owner")
     runtime = AgentRuntime(
         replace(settings, verify_answers=False),
         storage,
         llm=_NeverModel(),
     )
+    attachment = _trusted_synthetic_docx(incomplete=incomplete)
     draft = (
         "Сводка документа: указаны две позиции — Alpha и Beta. "
         "Это полный обзор всех двух позиций в прочитанной структуре."
     )
 
+    async def forbidden_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("bare upload notice entered general context preparation")
+
+    async def forbidden_generate(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("bare upload notice called the model")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
+    receipt = await runtime.chat(
+        "alice",
+        "Загружен документ: synthetic-summary.docx",
+        actor=_actor(),
+        attachments=[attachment],
+        enable_tools=False,
+        synthetic_document_notice=True,
+    )
+    assert receipt["tools_used"] == []
+    assert receipt["message_format"] == "plain"
+    assert receipt["message"] != draft
+    assert receipt["message"] != OFFICE_EXACT_UNAVAILABLE_MESSAGE
+    assert "пришлите" not in receipt["message"].casefold()
+    # Deterministic status/quicklook only — no free-form model inventory.
+    assert "зарегистрирован" in receipt["message"].casefold() or "файл" in receipt["message"].casefold()
+
+    generate_calls = {"n": 0}
+
     async def generate(context, message, attachments):  # noqa: ANN001, ARG001
+        del context, message
+        generate_calls["n"] += 1
         assert attachments
         projected = attachments[0]
         if incomplete:
@@ -704,15 +737,29 @@ async def test_bare_docx_summary_is_not_misclassified_as_an_exact_inventory(
         return {"content": draft, "tools_used": [], "_model_generated": True}
 
     monkeypatch.setattr(runtime, "_generate_response", generate)
+
+    # Explicit content request may use the ordinary local path; prepare stays off
+    # for pure-file, but if prepare is hit it must not invent archive evidence.
+    async def local_prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
+        del message, kwargs
+        return AgentContext(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            person_id=user_id,
+            conversation_history=[],
+        )
+
+    monkeypatch.setattr(runtime, "_prepare_context", local_prepare)
     reply = await runtime.chat(
         "alice",
-        "Загружен документ: synthetic-summary.docx",
+        "Кратко перескажи этот файл.",
         actor=_actor(),
-        attachments=[_trusted_synthetic_docx(incomplete=incomplete)],
+        conversation_id=receipt["conversation_id"],
+        attachments=[attachment],
         enable_tools=False,
-        synthetic_document_notice=True,
     )
 
+    assert generate_calls["n"] == 1
     assert reply["message"] == draft
     assert reply["message"] != OFFICE_EXACT_UNAVAILABLE_MESSAGE
     assert "пришлите" not in reply["message"].casefold()

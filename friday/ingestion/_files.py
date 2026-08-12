@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 
+from friday.archive_formats import archive_dispatch_kind
 from friday.document_metadata_codec import (
     TECHNICAL_METADATA_SCHEMA_VERSION,
     TECHNICAL_METADATA_TEXT_CODEC_FIELD,
@@ -1369,6 +1370,7 @@ class FilesMixin(PipelineShared):
         source_ref: str = "",
         force_review: bool = False,
         archive_password: str | None = None,
+        exact_byte_identity_only: bool = False,
     ) -> dict[str, Any]:
         if len(file_content) > self.settings.max_upload_bytes:
             raise ValueError("file exceeds FRIDAY_MAX_UPLOAD_BYTES")
@@ -1382,10 +1384,8 @@ class FilesMixin(PipelineShared):
         # authentication and make a wrong password look successful.  Restrict
         # the eager parse to archive containers so ordinary duplicate documents
         # retain the inexpensive hash-first path.
-        archive_suffix = Path(filename.casefold()).suffix
-        eager_archive_suffixes = {".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".zst"}
         extraction = None
-        if archive_suffix in eager_archive_suffixes:
+        if archive_dispatch_kind(filename, mime_type) is not None:
             extraction = await asyncio.to_thread(
                 self._doc_extractor.extract,
                 file_content,
@@ -1611,7 +1611,7 @@ class FilesMixin(PipelineShared):
         # пустой у всех сразу, и такая склейка объявила бы одним документом всё,
         # что не разобралось.
         text_digest = _extracted_text_digest(text_content)
-        if text_digest:
+        if text_digest and not exact_byte_identity_only:
             same_document = self.storage.find_file_by_extracted_text(
                 user_id,
                 text_digest,

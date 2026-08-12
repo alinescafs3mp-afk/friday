@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as datetime_time
 from difflib import SequenceMatcher
+from enum import Enum
 from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
 
@@ -97,7 +98,7 @@ from friday.people import unambiguous
 from friday.permissions import ActorContext, AuthorizationService
 from friday.reports import SUPPORTED_KINDS, sheet_title_from_report_title, spec_from_payload
 from friday.retrieval import best_snippet, is_relational_query
-from friday.storage import FridayStorage, normalize_conversation_mode
+from friday.storage import FridayStorage, normalize_conversation_mode, validate_user_id
 from friday.storage._core import iso_date
 from friday.storage.models import FeedbackItem, FeedbackType, InboxStatus, new_id, normalize_known_at
 from friday.text_shape import (
@@ -299,8 +300,159 @@ class _OwnedAttachment(dict[str, Any]):
     """Full ephemeral text reloaded through tenant/person ownership checks."""
 
 
+class _ResolvedTelegramReplyAttachment(_OwnedAttachment):
+    """Opaque Raw/uploader pair proven by server-side Telegram aliases."""
+
+
+_TELEGRAM_REPLY_UPLOADER_ATTR = "_telegram_reply_uploaded_by"
+
+
+def _resolved_telegram_reply_attachment(
+    raw_object_id: str,
+    uploaded_by: str,
+) -> _ResolvedTelegramReplyAttachment:
+    """Build a process-private reply authority that JSON callers cannot forge."""
+
+    item = _ResolvedTelegramReplyAttachment({"raw_object_id": str(raw_object_id or "")})
+    object.__setattr__(item, _TELEGRAM_REPLY_UPLOADER_ATTR, str(uploaded_by or ""))
+    return item
+
+
+def _clone_resolved_telegram_reply_attachment(
+    item: _ResolvedTelegramReplyAttachment,
+) -> _ResolvedTelegramReplyAttachment:
+    cloned = _ResolvedTelegramReplyAttachment(item)
+    object.__setattr__(
+        cloned,
+        _TELEGRAM_REPLY_UPLOADER_ATTR,
+        str(getattr(item, _TELEGRAM_REPLY_UPLOADER_ATTR, "") or ""),
+    )
+    return cloned
+
+
+def _resolved_telegram_reply_uploader(item: Any) -> str:
+    """Read an uploader only from a process-private attachment carrier."""
+
+    if not (isinstance(item, (_OwnedAttachment, _ProjectedAttachment)) or is_trusted_office_attachment(item)):
+        return ""
+    try:
+        return validate_user_id(str(getattr(item, _TELEGRAM_REPLY_UPLOADER_ATTR, "") or ""))
+    except ValueError:
+        return ""
+
+
+def _retain_resolved_telegram_reply_uploader(source: Any, carrier: Any) -> Any:
+    """Carry alias-proven uploader authority across private in-process wraps."""
+
+    uploaded_by = _resolved_telegram_reply_uploader(source)
+    if uploaded_by and (
+        isinstance(carrier, (_OwnedAttachment, _ProjectedAttachment)) or is_trusted_office_attachment(carrier)
+    ):
+        object.__setattr__(carrier, _TELEGRAM_REPLY_UPLOADER_ATTR, uploaded_by)
+    return carrier
+
+
+def _private_owned_attachment_copy(
+    value: Mapping[str, Any],
+    *,
+    source: Any,
+) -> _OwnedAttachment:
+    """Re-wrap canonical fields without dropping private reply authority."""
+
+    carrier: _OwnedAttachment
+    if is_trusted_office_attachment(source):
+        carrier = cast(Any, trusted_office_attachment(value))
+    else:
+        carrier = _OwnedAttachment(value)
+    return cast(_OwnedAttachment, _retain_resolved_telegram_reply_uploader(source, carrier))
+
+
 class _WorkspaceInboxAttachment(dict[str, Any]):
     """Ephemeral text returned by an authorised, revalidated MCP inbox read."""
+
+
+class FileRegistrationKind(str, Enum):
+    """Process-private registration class for one attachment."""
+
+    NONE = "none"
+    LEGACY = "legacy"
+    INVALID = "invalid"
+    VALID = "valid"
+
+
+class FileBodyKind(str, Enum):
+    """Process-private body class for one attachment."""
+
+    NONE = "none"
+    EMPTY = "empty"
+    EXTRACTED = "extracted"
+    ADVISORY = "advisory"
+    PROJECTED = "projected"
+
+
+@dataclass(frozen=True, slots=True)
+class FileEvidenceView:
+    """Immutable process-private evidence after auth + byte verification.
+
+    Never serialized to SQLite or public API JSON.  Only private attachment
+    marker types may host this view; a forged public ``dict`` cannot.
+    """
+
+    raw_id: str | None
+    registration: FileRegistrationKind
+    disk_verified: bool
+    workspace_relative_path: str | None
+    workspace_sha256: str | None
+    workspace_source_sha256: str | None
+    body_kind: FileBodyKind
+    source_complete: bool
+    projection_applied: bool
+    projection_empty_no_match: bool
+    source_readable: bool
+    verification_eligible: bool
+
+
+@dataclass(frozen=True, slots=True)
+class FileEvidenceSet:
+    """Closed cardinality projection over private FileEvidenceView items."""
+
+    items: tuple[FileEvidenceView, ...]
+    expected_count: int
+
+    @property
+    def source_readable_count(self) -> int:
+        return sum(1 for item in self.items if item.source_readable)
+
+    @property
+    def context_complete(self) -> bool:
+        return bool(
+            self.expected_count > 0
+            and self.expected_count <= _CONVERSATION_ATTACHMENT_MAX_FILES
+            and len(self.items) == self.expected_count
+            and self.source_readable_count == self.expected_count
+        )
+
+    @property
+    def coverage_complete(self) -> bool:
+        return bool(self.context_complete and all(item.source_complete for item in self.items))
+
+    @property
+    def verification_complete(self) -> bool:
+        return bool(
+            self.coverage_complete
+            and all(item.verification_eligible and item.source_readable for item in self.items)
+        )
+
+
+_FILE_EVIDENCE_ATTR = "_file_evidence_view"
+
+
+def _private_file_evidence_carrier(item: Any) -> bool:
+    """Process-private carriers that may host a FileEvidenceView stamp."""
+
+    return isinstance(
+        item, (_OwnedAttachment, _ProjectedAttachment, _WorkspaceInboxAttachment)
+    ) or is_trusted_office_attachment(item)
 
 
 def _authenticated_text_attachment(value: Any) -> bool:
@@ -323,6 +475,245 @@ def _projected_source_is_readable(value: Any) -> bool:
         and value.get("_request_projection_applied") is True
         and value.get("_source_readable") is True
     )
+
+
+def _stamp_file_evidence(item: Any, view: FileEvidenceView) -> Any:
+    """Attach evidence only on process-private attachment carriers."""
+
+    if not _private_file_evidence_carrier(item):
+        return item
+    object.__setattr__(item, _FILE_EVIDENCE_ATTR, view)
+    return item
+
+
+def _file_evidence_view_of(item: Any) -> FileEvidenceView | None:
+    if not _private_file_evidence_carrier(item):
+        return None
+    view = getattr(item, _FILE_EVIDENCE_ATTR, None)
+    return view if isinstance(view, FileEvidenceView) else None
+
+
+def _classify_file_body_fields(
+    item: Mapping[str, Any],
+) -> tuple[FileBodyKind, bool, bool, bool]:
+    """Body/projection signals from a private carrier (no registration authority)."""
+
+    projection_applied = bool(
+        isinstance(item, _ProjectedAttachment) and item.get("_request_projection_applied") is True
+    )
+    body_text = str(item.get("transient_text") or "")
+    if projection_applied:
+        body_kind = FileBodyKind.PROJECTED
+        projection_empty_no_match = not body_text.strip()
+        body_readable = item.get("_source_readable") is True
+    elif (
+        isinstance(item, _ProjectedAttachment)
+        and item.get("_office_structured") is True
+        and item.get("_office_prompt_available") is True
+    ):
+        # Structural Office prompt is the body; transient_text is intentionally blank.
+        body_kind = FileBodyKind.EXTRACTED
+        projection_empty_no_match = False
+        body_readable = True
+    elif item.get("advisory_only") is True:
+        body_kind = FileBodyKind.ADVISORY
+        projection_empty_no_match = False
+        body_readable = _attachment_has_readable_content(item)
+    elif item.get("empty_text") is True:
+        body_kind = FileBodyKind.EMPTY
+        projection_empty_no_match = False
+        body_readable = _attachment_has_readable_content(item)
+    elif body_text.strip() and not _is_file_provenance_stub(body_text):
+        body_kind = FileBodyKind.EXTRACTED
+        projection_empty_no_match = False
+        body_readable = _attachment_has_readable_content(item)
+    else:
+        body_kind = FileBodyKind.NONE
+        projection_empty_no_match = False
+        body_readable = _attachment_has_readable_content(item)
+    return body_kind, projection_applied, projection_empty_no_match, body_readable
+
+
+def _file_source_complete_signal(
+    item: Mapping[str, Any],
+    *,
+    projection_applied: bool,
+) -> bool:
+    if projection_applied:
+        return item.get("_source_text_complete") is True
+    if item.get("_office_structured") is True:
+        return item.get("_office_index_complete") is True and item.get("_office_prompt_complete") is True
+    return _attachment_source_complete(item)
+
+
+def _build_file_evidence_view(item: Any) -> FileEvidenceView | None:
+    """Derive one view from a private attachment after verify/MCP read/projection."""
+
+    if not _private_file_evidence_carrier(item):
+        return None
+
+    raw_id = str(item.get("raw_object_id") or "") or None
+    if isinstance(item, _WorkspaceInboxAttachment):
+        registration = FileRegistrationKind.NONE
+        disk_verified = item.get("_workspace_file_bytes_verified") is True
+        workspace_relative_path = str(item.get("workspace_relative_path") or "") or None
+        workspace_sha256 = str(item.get("workspace_sha256") or "") or None
+        workspace_source_sha256 = str(item.get("workspace_source_sha256") or "") or None
+    else:
+        record = str(item.get("_registered_file_record") or "")
+        if record == "valid":
+            registration = FileRegistrationKind.VALID
+        elif record == "legacy":
+            registration = FileRegistrationKind.LEGACY
+        elif (
+            record == "invalid"
+            or any(key in item for key in ("stored_path", "sha256", "size_bytes"))
+            or raw_id
+        ):
+            registration = FileRegistrationKind.INVALID
+        else:
+            registration = FileRegistrationKind.NONE
+        disk_verified = item.get("_registered_file_bytes_verified") is True
+        workspace_relative_path = None
+        workspace_sha256 = None
+        workspace_source_sha256 = None
+
+    body_kind, projection_applied, projection_empty_no_match, source_readable = _classify_file_body_fields(
+        item
+    )
+
+    if isinstance(item, _WorkspaceInboxAttachment) or registration == FileRegistrationKind.VALID:
+        source_readable = bool(source_readable and disk_verified)
+    elif registration == FileRegistrationKind.LEGACY:
+        # Legacy: no disk proof; keep body-based readability only.
+        pass
+    elif registration == FileRegistrationKind.INVALID:
+        source_readable = False
+        disk_verified = False
+
+    source_complete = _file_source_complete_signal(item, projection_applied=projection_applied)
+
+    verification_eligible = bool(
+        item.get("verification_eligible", True) is not False
+        and body_kind not in {FileBodyKind.ADVISORY, FileBodyKind.NONE}
+        and (
+            disk_verified
+            or registration == FileRegistrationKind.LEGACY
+            or registration == FileRegistrationKind.NONE
+        )
+    )
+    if body_kind == FileBodyKind.ADVISORY:
+        verification_eligible = False
+
+    return FileEvidenceView(
+        raw_id=raw_id,
+        registration=registration,
+        disk_verified=disk_verified,
+        workspace_relative_path=workspace_relative_path,
+        workspace_sha256=workspace_sha256,
+        workspace_source_sha256=workspace_source_sha256,
+        body_kind=body_kind,
+        source_complete=source_complete,
+        projection_applied=projection_applied,
+        projection_empty_no_match=projection_empty_no_match,
+        source_readable=source_readable,
+        verification_eligible=verification_eligible,
+    )
+
+
+def _derive_projected_evidence_view(
+    source_view: FileEvidenceView,
+    projected: Mapping[str, Any],
+) -> FileEvidenceView:
+    """Transfer pins from a stamped source; narrow body/projection/completeness only.
+
+    Never upgrades registration/disk/workspace identity or source_readable /
+    verification_eligible beyond the stamped source.
+    """
+
+    body_kind, projection_applied, projection_empty_no_match, body_readable = _classify_file_body_fields(
+        projected
+    )
+    source_readable = bool(body_readable and source_view.source_readable)
+    if source_view.registration == FileRegistrationKind.INVALID:
+        source_readable = False
+    elif source_view.registration == FileRegistrationKind.VALID:
+        source_readable = bool(source_readable and source_view.disk_verified)
+
+    source_complete = bool(
+        source_view.source_complete
+        and _file_source_complete_signal(projected, projection_applied=projection_applied)
+    )
+
+    verification_eligible = bool(
+        projected.get("verification_eligible", True) is not False
+        and body_kind not in {FileBodyKind.ADVISORY, FileBodyKind.NONE}
+        and source_view.verification_eligible
+        and (
+            source_view.disk_verified
+            or source_view.registration == FileRegistrationKind.LEGACY
+            or source_view.registration == FileRegistrationKind.NONE
+        )
+    )
+    if body_kind == FileBodyKind.ADVISORY:
+        verification_eligible = False
+
+    return FileEvidenceView(
+        raw_id=source_view.raw_id,
+        registration=source_view.registration,
+        disk_verified=source_view.disk_verified,
+        workspace_relative_path=source_view.workspace_relative_path,
+        workspace_sha256=source_view.workspace_sha256,
+        workspace_source_sha256=source_view.workspace_source_sha256,
+        body_kind=body_kind,
+        source_complete=source_complete,
+        projection_applied=projection_applied,
+        projection_empty_no_match=projection_empty_no_match,
+        source_readable=source_readable,
+        verification_eligible=verification_eligible,
+    )
+
+
+def _projected_attachment_from_source(
+    source: Any,
+    fields: Mapping[str, Any],
+) -> _ProjectedAttachment:
+    """Build a projected carrier and transfer a derived view from a stamped source."""
+
+    projected = _ProjectedAttachment(dict(fields))
+    source_view = _file_evidence_view_of(source)
+    if source_view is not None:
+        _stamp_file_evidence(projected, _derive_projected_evidence_view(source_view, projected))
+    return projected
+
+
+def _retain_file_evidence_stamp(source: Any, carrier: Any) -> Any:
+    """Copy an existing stamp onto a same-identity private re-wrap (no rebuild)."""
+
+    source_view = _file_evidence_view_of(source)
+    if source_view is not None and _private_file_evidence_carrier(carrier):
+        _stamp_file_evidence(carrier, source_view)
+    return carrier
+
+
+def _file_evidence_set_from_attachments(
+    attachments: Sequence[Any],
+    *,
+    expected_count: int,
+) -> FileEvidenceSet | None:
+    """Return a set only when every item already carries a stamped FileEvidenceView.
+
+    No lazy build from dictionary flags.  Ordinary API dicts and unstamped
+    private carriers yield ``None`` so the legacy lattice remains authority.
+    """
+
+    views: list[FileEvidenceView] = []
+    for item in attachments:
+        view = _file_evidence_view_of(item)
+        if view is None:
+            return None
+        views.append(view)
+    return FileEvidenceSet(items=tuple(views), expected_count=max(0, int(expected_count or 0)))
 
 
 @dataclass(frozen=True)
@@ -379,6 +770,7 @@ _ATTACHMENT_QUERY_UNKNOWN = (
 
 
 _CONVERSATION_ATTACHMENT_RAW_IDS = "conversation_attachment_raw_ids"
+_CONVERSATION_ATTACHMENT_UPLOADERS = "conversation_attachment_uploaders"
 _CONVERSATION_UPLOADED_RAW_IDS = "conversation_uploaded_raw_ids"
 _SOURCE_SEARCH_RESULT_RAW_IDS = "source_search_result_raw_ids"
 _WORKSPACE_INBOX_RELATIVE_PATH = "workspace_inbox_relative_path"
@@ -7648,6 +8040,50 @@ def _bounded_json_mapping(value: Any, *, max_chars: int = 65_536) -> dict[str, A
     return dict(parsed) if isinstance(parsed, Mapping) else {}
 
 
+def _validated_attachment_lineage_metadata(
+    value: Any,
+    *,
+    require_attachment_context_used: bool = False,
+) -> tuple[list[str], dict[str, str]]:
+    """Return one closed ordered Raw lineage and its exact uploader overrides.
+
+    The uploader map is optional for legacy/same-person rows.  Once present it
+    is part of the authority envelope: a malformed type, extra Raw key or bad
+    user id invalidates the whole lineage instead of silently falling back to
+    the current person for that file.
+    """
+
+    metadata = _bounded_json_mapping(value, max_chars=65_536)
+    if require_attachment_context_used and metadata.get("attachment_context_used") is not True:
+        return [], {}
+    raw_values = metadata.get(_CONVERSATION_ATTACHMENT_RAW_IDS)
+    if not isinstance(raw_values, list) or len(raw_values) > _CONVERSATION_ATTACHMENT_MAX_FILES:
+        return [], {}
+    ordered_ids: list[str] = []
+    for value_item in raw_values:
+        raw_id = value_item if isinstance(value_item, str) else ""
+        if raw_id != raw_id.strip() or not _RAW_OBJECT_ID_RE.fullmatch(raw_id) or raw_id in ordered_ids:
+            return [], {}
+        ordered_ids.append(raw_id)
+
+    if _CONVERSATION_ATTACHMENT_UPLOADERS not in metadata:
+        return ordered_ids, {}
+    uploader_values = metadata.get(_CONVERSATION_ATTACHMENT_UPLOADERS)
+    if not isinstance(uploader_values, Mapping) or len(uploader_values) > len(ordered_ids):
+        return [], {}
+    uploaders: dict[str, str] = {}
+    for raw_value, uploader_value in uploader_values.items():
+        raw_id = raw_value if isinstance(raw_value, str) else ""
+        uploader = uploader_value if isinstance(uploader_value, str) else ""
+        if raw_id not in ordered_ids or uploader != uploader.strip():
+            return [], {}
+        try:
+            uploaders[raw_id] = validate_user_id(uploader)
+        except ValueError:
+            return [], {}
+    return ordered_ids, uploaders
+
+
 def _document_metadata_request_scope(
     message: str,
     *,
@@ -11348,12 +11784,149 @@ def _last_attachment_item_answer(
     return f"Последний пункт в «{filename}»:\n{literal}"
 
 
+# Bare-upload quicklook budgets (deterministic extractive preview only).
+_QUICKLOOK_SINGLE_MAX_SNIPPETS = 3
+_QUICKLOOK_SINGLE_MAX_CHARS = 240
+_QUICKLOOK_MULTI_MAX_SNIPPETS = 1
+_QUICKLOOK_MULTI_MAX_CHARS = 160
+_QUICKLOOK_TOTAL_MAX_CHARS = 3500
+_QUICKLOOK_TRUNCATION_MARK = "[фрагмент сокращён]"
+_QUICKLOOK_STATUS_FILENAME_MAX_CHARS = 120
+_QUICKLOOK_FILENAME_TRUNCATION_MARK = "[имя сокращено]"
+
+
+def _quicklook_display_filename(value: Any) -> str:
+    """Bound one untrusted filename without slicing a status line or literal."""
+
+    filename = _attachment_display_filename(value)
+    if len(filename) <= _QUICKLOOK_STATUS_FILENAME_MAX_CHARS:
+        return filename
+    remaining = _QUICKLOOK_STATUS_FILENAME_MAX_CHARS - len(_QUICKLOOK_FILENAME_TRUNCATION_MARK)
+    tail_chars = min(40, max(1, remaining // 3))
+    head_chars = max(1, remaining - tail_chars)
+    return f"{filename[:head_chars]}{_QUICKLOOK_FILENAME_TRUNCATION_MARK}{filename[-tail_chars:]}"
+
+
+def _quicklook_line_is_safe(text: str) -> bool:
+    """Reject unsafe control/format characters instead of normalizing them."""
+
+    for char in text:
+        code = ord(char)
+        if code < 32 and char not in "\t":
+            return False
+        if code == 0x7F or 0x80 <= code <= 0x9F:
+            return False
+        # Unicode format controls (Cf) are not admitted as literal display.
+        if unicodedata.category(char) == "Cf":
+            return False
+    return True
+
+
+def _quicklook_select_literals(
+    source: str,
+    *,
+    max_snippets: int,
+    max_chars: int,
+) -> list[tuple[str, bool]]:
+    """Source-order literal prefixes that remain exact substrings of *source*."""
+
+    selected: list[tuple[str, bool]] = []
+    if max_snippets <= 0 or max_chars <= 0 or not source:
+        return selected
+    for raw_line in source.splitlines():
+        literal = raw_line.strip()
+        if not literal or _is_file_provenance_stub(literal):
+            continue
+        if not _quicklook_line_is_safe(literal):
+            continue
+        if literal not in source:
+            continue
+        truncated = len(literal) > max_chars
+        shown = literal[:max_chars] if truncated else literal
+        if not shown or shown not in source:
+            continue
+        selected.append((shown, truncated))
+        if len(selected) >= max_snippets:
+            break
+    return selected
+
+
+def _quicklook_may_show_literals(item: Any, view: FileEvidenceView | None) -> bool:
+    """Strict CS1 gate: stamped VALID+disk+complete EXTRACTED private carriers only."""
+
+    if view is None:
+        return False
+    if not (isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item)):
+        return False
+    item_raw = str(item.get("raw_object_id") or "") or None
+    if not item_raw or view.raw_id != item_raw:
+        return False
+    if view.registration != FileRegistrationKind.VALID:
+        return False
+    if not view.disk_verified:
+        return False
+    if view.body_kind != FileBodyKind.EXTRACTED:
+        return False
+    if not (view.source_readable and view.source_complete and view.verification_eligible):
+        return False
+    source = str(item.get("transient_text") or "")
+    return bool(source.strip()) and not _is_file_provenance_stub(source)
+
+
+def _quicklook_status_line(
+    item: Any,
+    view: FileEvidenceView | None,
+    *,
+    filename: str,
+) -> str:
+    """Status-only line; never trusts public Mapping registration flags alone."""
+
+    if view is None:
+        return f"• «{filename}»: запись есть, но подтвердить доказательную регистрацию сейчас не удалось."
+    if view.registration == FileRegistrationKind.VALID and view.disk_verified:
+        if view.body_kind == FileBodyKind.EMPTY and view.source_complete:
+            return f"• «{filename}»: зарегистрирован, байты на диске проверены, текстовое содержимое пусто."
+        if view.body_kind == FileBodyKind.ADVISORY:
+            return (
+                f"• «{filename}»: зарегистрирован, байты на диске проверены, "
+                "распознавание предварительное/не подтверждено."
+            )
+        if view.body_kind == FileBodyKind.EXTRACTED and view.source_readable:
+            if view.source_complete:
+                source_chars = len(str(item.get("transient_text") or ""))
+                if source_chars <= 0 and item.get("_office_prompt_available") is True:
+                    # Structural Office body is not counted as transient chars.
+                    return (
+                        f"• «{filename}»: зарегистрирован, байты на диске проверены, "
+                        "содержимое извлечено полностью."
+                    )
+                return (
+                    f"• «{filename}»: зарегистрирован, байты на диске проверены, "
+                    f"содержимое извлечено полностью ({source_chars} знаков)."
+                )
+            return (
+                f"• «{filename}»: зарегистрирован, байты на диске проверены, "
+                "извлечена только часть содержимого."
+            )
+        return (
+            f"• «{filename}»: зарегистрирован, байты на диске проверены, "
+            "но извлечь содержимое текущим парсером не удалось."
+        )
+    return f"• «{filename}»: запись есть, но подтвердить зарегистрированные байты на диске сейчас не удалось."
+
+
 def _registered_upload_receipt_answer(
-    attachments: Sequence[Mapping[str, Any]],
+    attachments: Sequence[Any],
     *,
     expected_count: int,
+    evidence_set: FileEvidenceSet | None = None,
 ) -> str:
-    """A model-free receipt for a bare upload with durable conversation links."""
+    """A model-free receipt plus strict CS1-gated literal quicklook for bare upload.
+
+    Zero model, zero arbiter, zero retrieval/tools.  Snippets require an aligned
+    stamped ``FileEvidenceSet`` and only VALID+disk+complete EXTRACTED private
+    carriers.  Public Mapping flags alone never authorize body display.
+    """
 
     if expected_count <= 0:
         return ""
@@ -11362,43 +11935,100 @@ def _registered_upload_receipt_answer(
             f"Получено файлов: {expected_count}, но подтвердить регистрацию и чтение "
             f"удалось для {len(attachments)}. Повторно пришлите только отсутствующие файлы."
         )
-    lines: list[str] = []
-    all_complete = True
-    for item in attachments:
-        filename = _attachment_display_filename(item.get("filename"))
-        disk_verified = item.get("_registered_file_bytes_verified") is True
-        readable = bool(disk_verified and _attachment_has_readable_content(item))
-        complete = bool(readable and _attachment_source_complete(item))
-        all_complete = all_complete and complete
-        if readable:
-            source_chars = len(str(item.get("transient_text") or ""))
-            coverage = "полностью" if complete else "частично"
-            trust = " (распознавание требует проверки)" if item.get("advisory_only") is True else ""
-            lines.append(
-                f"• «{filename}»: зарегистрирован, байты на диске проверены, "
-                f"содержимое извлечено {coverage} ({source_chars} знаков){trust}."
+
+    aligned = evidence_set
+    if aligned is None:
+        aligned = _file_evidence_set_from_attachments(
+            attachments,
+            expected_count=expected_count,
+        )
+    views: tuple[FileEvidenceView | None, ...]
+    if aligned is not None and len(aligned.items) == len(attachments):
+        views = tuple(aligned.items)
+    else:
+        views = tuple(None for _ in attachments)
+
+    multi = expected_count > 1
+    max_snippets = _QUICKLOOK_MULTI_MAX_SNIPPETS if multi else _QUICKLOOK_SINGLE_MAX_SNIPPETS
+    max_chars = _QUICKLOOK_MULTI_MAX_CHARS if multi else _QUICKLOOK_SINGLE_MAX_CHARS
+
+    fully_read = True
+    file_blocks: list[list[str]] = []
+    for item, view in zip(attachments, views, strict=True):
+        filename = _quicklook_display_filename(item.get("filename") if isinstance(item, Mapping) else None)
+        block = [_quicklook_status_line(item, view, filename=filename)]
+        item_fully = bool(
+            view is not None
+            and view.registration == FileRegistrationKind.VALID
+            and view.disk_verified
+            and view.source_complete
+            and view.source_readable
+            and view.body_kind != FileBodyKind.ADVISORY
+            and (
+                view.body_kind == FileBodyKind.EMPTY
+                or (view.body_kind == FileBodyKind.EXTRACTED and view.verification_eligible)
             )
-        elif disk_verified:
-            lines.append(
-                f"• «{filename}»: зарегистрирован, байты на диске проверены, "
-                "но извлечь содержимое текущим парсером не удалось."
-            )
-        else:
-            lines.append(
-                f"• «{filename}»: запись есть, но подтвердить зарегистрированные "
-                "байты на диске сейчас не удалось."
-            )
-    lead = (
-        "Файл сохранён и полностью прочитан."
-        if expected_count == 1 and all_complete
-        else "Файлы зарегистрированы; состояние чтения указано ниже."
-    )
+        )
+        if not item_fully:
+            fully_read = False
+
+        if not _quicklook_may_show_literals(item, view):
+            file_blocks.append(block)
+            continue
+        source = str(item.get("transient_text") or "")
+        literals = _quicklook_select_literals(
+            source,
+            max_snippets=max_snippets,
+            max_chars=max_chars,
+        )
+        if not literals:
+            file_blocks.append(block)
+            continue
+        block.append(f"Быстрый обзор содержимого «{filename}» (дословные фрагменты):")
+        for shown, truncated in literals:
+            block.append(f"› {shown}")
+            if truncated:
+                block.append(_QUICKLOOK_TRUNCATION_MARK)
+        file_blocks.append(block)
+
+    if expected_count == 1 and fully_read:
+        lead = "Файл сохранён и полностью прочитан."
+    elif multi:
+        lead = "Файлы зарегистрированы; состояние чтения указано ниже."
+    else:
+        lead = "Файл зарегистрирован; состояние чтения указано ниже."
     followup = (
         "Он привязан к этому сообщению — можно сразу спросить о содержимом или назвать его позже."
         if expected_count == 1
         else "Они привязаны к этому сообщению — можно обобщить, сравнить или назвать нужные файлы."
     )
-    return "\n".join((lead, *lines, followup))
+    # Status has priority over preview text. Admit a deterministic prefix of
+    # whole, filename-bounded status lines, then add each file's literal block
+    # only when every later admitted status still fits. No body literal is ever
+    # cut by the response-budget renderer. The conversational follow-up is
+    # useful but optional and is appended only when the closed total permits it.
+    admitted_status_count = 0
+    status_only_lines = [lead]
+    for block in file_blocks:
+        candidate = [*status_only_lines, block[0]]
+        if len("\n".join(candidate)) > _QUICKLOOK_TOTAL_MAX_CHARS:
+            break
+        status_only_lines.append(block[0])
+        admitted_status_count += 1
+
+    rendered = [lead]
+    for index, block in enumerate(file_blocks[:admitted_status_count]):
+        rendered.append(block[0])
+        literal_block = block[1:]
+        if not literal_block:
+            continue
+        remaining_statuses = [later[0] for later in file_blocks[index + 1 : admitted_status_count]]
+        if len("\n".join([*rendered, *literal_block, *remaining_statuses])) <= _QUICKLOOK_TOTAL_MAX_CHARS:
+            rendered.extend(literal_block)
+
+    if len("\n".join([*rendered, followup])) <= _QUICKLOOK_TOTAL_MAX_CHARS:
+        rendered.append(followup)
+    return "\n".join(rendered)
 
 
 def _attachment_needs_full_source_prepass(
@@ -12355,7 +12985,7 @@ def _project_attachments_for_request(
                     "_office_full_text_fit": True,
                 }
             )
-            return [_ProjectedAttachment(item)], AttachmentRequestProjection()
+            return [_projected_attachment_from_source(sources[0], item)], AttachmentRequestProjection()
     if (
         (whole_document_task or (exact_complete_source_request and not has_office_source))
         and (multi_count is None or multi_count == len(sources))
@@ -12372,7 +13002,7 @@ def _project_attachments_for_request(
                     "_prompt_projection_complete": True,
                 }
             )
-            projected.append(_ProjectedAttachment(item))
+            projected.append(_projected_attachment_from_source(source, item))
         return projected, AttachmentRequestProjection()
     if not terms or not sources:
         return _bounded_attachment_projection(sources), AttachmentRequestProjection()
@@ -12475,7 +13105,7 @@ def _project_attachments_for_request(
                     "_request_projection_windows": [],
                 }
             )
-            projected.append(_ProjectedAttachment(item))
+            projected.append(_projected_attachment_from_source(sources[position], item))
         return projected, AttachmentRequestProjection(
             applied=True,
             status=status,
@@ -12490,7 +13120,9 @@ def _project_attachments_for_request(
     # slice; labels are counted inside the same hard budget.
     file_budget = max(1000, _ATTACHMENT_CONTEXT_CHARS // max(1, matched_files))
     projected = []
-    for item, text, source_complete, file_scan_complete, windows, file_match_count in per_file:
+    for position, (item, text, source_complete, file_scan_complete, windows, file_match_count) in enumerate(
+        per_file
+    ):
         admitted_windows: list[tuple[int, int]] = []
         remaining = file_budget
         for start, end in windows:
@@ -12550,7 +13182,7 @@ def _project_attachments_for_request(
                 ),
             }
         )
-        projected.append(_ProjectedAttachment(item))
+        projected.append(_projected_attachment_from_source(sources[position], item))
     return projected, AttachmentRequestProjection(
         applied=True,
         status="matched",
@@ -12576,17 +13208,11 @@ def _bounded_attachment_projection(
     for source in attachments or []:
         if not isinstance(source, dict):
             continue
-        sources.append(
-            _ProjectedAttachment(source)
-            if isinstance(source, _ProjectedAttachment)
-            else _WorkspaceInboxAttachment(source)
-            if isinstance(source, _WorkspaceInboxAttachment)
-            else _OwnedAttachment(source)
-            if isinstance(source, _OwnedAttachment)
-            else trusted_office_attachment(source)
-            if is_trusted_office_attachment(source)
-            else dict(source)
-        )
+        if _private_file_evidence_carrier(source):
+            # Keep private carrier identity + any existing stamp.
+            sources.append(source)
+        else:
+            sources.append(dict(source))
         if len(sources) >= _CONVERSATION_ATTACHMENT_MAX_FILES:
             break
     if sources and all(isinstance(item, _ProjectedAttachment) for item in sources):
@@ -12615,7 +13241,7 @@ def _bounded_attachment_projection(
             clean = {key: value for key, value in source.items() if not key.startswith("_")}
         if not trusted:
             clean.pop(OFFICE_STRUCTURE_KEY, None)
-        sanitised_sources.append(
+        carrier = (
             trusted_office_attachment(clean)
             if trusted
             else _WorkspaceInboxAttachment(clean)
@@ -12624,6 +13250,8 @@ def _bounded_attachment_projection(
             if owned
             else clean
         )
+        # Re-wrap keeps private type identity; transfer stamp without rebuild.
+        sanitised_sources.append(_retain_file_evidence_stamp(source, carrier))
     sources = sanitised_sources
 
     validated_native_positions = {
@@ -12695,7 +13323,7 @@ def _bounded_attachment_projection(
             )
             if position == first_office_position:
                 item["_office_prompt_serialized"] = office_bundle.serialized
-            projected.append(_ProjectedAttachment(item))
+            projected.append(_projected_attachment_from_source(source, item))
             continue
         if position in validated_native_positions:
             # Exact-valid native Office must never fall back to the legacy raw
@@ -12716,7 +13344,7 @@ def _bounded_attachment_projection(
                     "verification_eligible": False,
                 }
             )
-            projected.append(_ProjectedAttachment(item))
+            projected.append(_projected_attachment_from_source(source, item))
             continue
         original = str(item.get("transient_text") or "")
         source_complete = bool(_authenticated_text_attachment(source) and _attachment_source_complete(item))
@@ -12728,7 +13356,7 @@ def _bounded_attachment_projection(
         item["_prompt_projection_complete"] = len(excerpt) == len(original)
         if len(excerpt) < len(original):
             item["text_truncated"] = True
-        projected.append(_ProjectedAttachment(item))
+        projected.append(_projected_attachment_from_source(source, item))
     return projected
 
 
@@ -17596,29 +18224,33 @@ class AgentRuntime:
                 full_text = "".join(chunks)
                 if len(full_text) != text_chars or not source_complete:
                     return None, tuple(attempts), "incomplete_source"
+                workspace_item = _WorkspaceInboxAttachment(
+                    {
+                        "filename": filename,
+                        "workspace_relative_path": result_path,
+                        "workspace_sha256": sha256,
+                        "workspace_source_sha256": source_sha256,
+                        "size_bytes": size_bytes,
+                        "mime_type": str(data.get("mime_type") or "application/octet-stream")[:128],
+                        "transient_text": full_text,
+                        "extraction_success": True,
+                        "empty_text": not bool(full_text),
+                        "advisory_only": advisory_only,
+                        "verification_eligible": verification_eligible,
+                        "text_truncated": False,
+                        "extraction_truncated": False,
+                        "archive_truncated": False,
+                        "source_truncated_for_parse": False,
+                        "parse_deadline_reached": False,
+                        "parse_pages_truncated": False,
+                        "_workspace_file_bytes_verified": True,
+                    }
+                )
+                workspace_view = _build_file_evidence_view(workspace_item)
+                if workspace_view is not None:
+                    _stamp_file_evidence(workspace_item, workspace_view)
                 return (
-                    _WorkspaceInboxAttachment(
-                        {
-                            "filename": filename,
-                            "workspace_relative_path": result_path,
-                            "workspace_sha256": sha256,
-                            "workspace_source_sha256": source_sha256,
-                            "size_bytes": size_bytes,
-                            "mime_type": str(data.get("mime_type") or "application/octet-stream")[:128],
-                            "transient_text": full_text,
-                            "extraction_success": True,
-                            "empty_text": not bool(full_text),
-                            "advisory_only": advisory_only,
-                            "verification_eligible": verification_eligible,
-                            "text_truncated": False,
-                            "extraction_truncated": False,
-                            "archive_truncated": False,
-                            "source_truncated_for_parse": False,
-                            "parse_deadline_reached": False,
-                            "parse_pages_truncated": False,
-                            "_workspace_file_bytes_verified": True,
-                        }
-                    ),
+                    workspace_item,
                     tuple(attempts),
                     "",
                 )
@@ -18204,11 +18836,12 @@ class AgentRuntime:
                 hydrated.append(item)
                 continue
             raw_id = str(item.get("raw_object_id") or "") if isinstance(item, Mapping) else ""
+            attachment_uploader = _resolved_telegram_reply_uploader(item) or person_id
             canonical = (
                 self._owned_file_attachment(
                     raw_id,
                     tenant_id=tenant_id,
-                    person_id=person_id,
+                    person_id=attachment_uploader,
                 )
                 if _RAW_OBJECT_ID_RE.fullmatch(raw_id)
                 else item
@@ -18218,6 +18851,7 @@ class AgentRuntime:
             if canonical is None:
                 hydrated.append(item)
                 continue
+            canonical = _retain_resolved_telegram_reply_uploader(item, canonical)
             stored = canonical.get(_OWNED_SAFE_DOCUMENT_METADATA)
             safe = _safe_document_metadata_projection(stored) if isinstance(stored, Mapping) else {}
             safe_format = str(safe.get("format") or "")
@@ -18240,7 +18874,7 @@ class AgentRuntime:
                     self.settings.files_dir,
                     raw_id,
                     tenant_id,
-                    person_id=person_id,
+                    person_id=attachment_uploader,
                     max_bytes=min(
                         max(1, int(self.settings.max_upload_bytes)),
                         _DOCUMENT_METADATA_ON_DEMAND_MAX_BYTES,
@@ -18268,7 +18902,7 @@ class AgentRuntime:
             canonical = self._owned_file_attachment(
                 raw_id,
                 tenant_id=tenant_id,
-                person_id=person_id,
+                person_id=attachment_uploader,
             )
             header = inspected.get("_document_metadata") if isinstance(inspected, Mapping) else None
             projected_header = (
@@ -18277,6 +18911,7 @@ class AgentRuntime:
             if canonical is None or not projected_header:
                 hydrated.append(item if canonical is None else canonical)
                 continue
+            canonical = _retain_resolved_telegram_reply_uploader(item, canonical)
             canonical_stored = canonical.get(_OWNED_SAFE_DOCUMENT_METADATA)
             canonical_safe = _safe_document_metadata_projection(
                 canonical_stored if isinstance(canonical_stored, Mapping) else canonical
@@ -18289,11 +18924,7 @@ class AgentRuntime:
                     merged[envelope_key] = canonical_safe[envelope_key]
             recovered = dict(canonical)
             recovered[_OWNED_SAFE_DOCUMENT_METADATA] = merged
-            hydrated.append(
-                trusted_office_attachment(recovered)
-                if is_trusted_office_attachment(canonical)
-                else _OwnedAttachment(recovered)
-            )
+            hydrated.append(_private_owned_attachment_copy(recovered, source=canonical))
         return hydrated
 
     async def _document_content_details_answer(
@@ -18448,7 +19079,7 @@ class AgentRuntime:
             canonical = self._owned_file_attachment(
                 raw_id,
                 tenant_id=context.user_id,
-                person_id=context.person_id,
+                person_id=_resolved_telegram_reply_uploader(item) or context.person_id,
             )
             if canonical is not None:
                 authorised_indexes.add(file_index)
@@ -18502,7 +19133,7 @@ class AgentRuntime:
             failed["verification_eligible"] = False
             failed["_registered_file_bytes_verified"] = False
             failed.pop("empty_text", None)
-            return _OwnedAttachment(failed)
+            return _private_owned_attachment_copy(failed, source=canonical)
 
         hydrated: list[dict[str, Any]] = []
         for item in attachments:
@@ -18516,14 +19147,16 @@ class AgentRuntime:
                 # never relabelled as a failed registered-file read.
                 hydrated.append(item)
                 continue
+            attachment_uploader = _resolved_telegram_reply_uploader(item) or person_id
             canonical = self._owned_file_attachment(
                 raw_id,
                 tenant_id=tenant_id,
-                person_id=person_id,
+                person_id=attachment_uploader,
             )
             if canonical is None:
                 hydrated.append(unavailable(item))
                 continue
+            canonical = _retain_resolved_telegram_reply_uploader(item, canonical)
             registration_state = str(canonical.get("_registered_file_record") or "invalid")
             if registration_state == "invalid":
                 hydrated.append(unavailable(canonical))
@@ -18536,11 +19169,7 @@ class AgentRuntime:
                 # explicit false marker.
                 legacy = dict(canonical)
                 legacy["_registered_file_bytes_verified"] = False
-                hydrated.append(
-                    trusted_office_attachment(legacy)
-                    if is_trusted_office_attachment(canonical)
-                    else _OwnedAttachment(legacy)
-                )
+                hydrated.append(_private_owned_attachment_copy(legacy, source=canonical))
                 continue
             filename = str(canonical.get("filename") or "attachment")[:260]
             mime_type = str(canonical.get("mime_type") or "")[:160]
@@ -18551,7 +19180,7 @@ class AgentRuntime:
                     self.settings.files_dir,
                     raw_id,
                     tenant_id,
-                    person_id=person_id,
+                    person_id=attachment_uploader,
                     max_bytes=self.settings.max_upload_bytes,
                 )
             except (AuthorizedFileReadError, FileRecordUnavailable, ValueError):
@@ -18571,24 +19200,21 @@ class AgentRuntime:
             canonical = self._owned_file_attachment(
                 raw_id,
                 tenant_id=tenant_id,
-                person_id=person_id,
+                person_id=attachment_uploader,
             )
             if canonical is None:
                 hydrated.append(unavailable(item))
                 continue
+            canonical = _retain_resolved_telegram_reply_uploader(item, canonical)
 
             verified = dict(canonical)
             verified["_registered_file_bytes_verified"] = True
             body = str(canonical.get("transient_text") or "")
             if body.strip() or canonical.get("empty_text") is True:
-                hydrated.append(
-                    trusted_office_attachment(verified)
-                    if is_trusted_office_attachment(canonical)
-                    else _OwnedAttachment(verified)
-                )
+                hydrated.append(_private_owned_attachment_copy(verified, source=canonical))
                 continue
             if not callable(inspect):
-                hydrated.append(_OwnedAttachment(verified))
+                hydrated.append(_private_owned_attachment_copy(verified, source=canonical))
                 continue
 
             try:
@@ -18602,7 +19228,7 @@ class AgentRuntime:
                     "On-demand registered attachment recovery failed (%s)",
                     type(exc).__name__,
                 )
-                hydrated.append(_OwnedAttachment(verified))
+                hydrated.append(_private_owned_attachment_copy(verified, source=canonical))
                 continue
 
             # A parser/OCR call can outlive a privacy change. Reauthorize once
@@ -18610,14 +19236,15 @@ class AgentRuntime:
             canonical = self._owned_file_attachment(
                 raw_id,
                 tenant_id=tenant_id,
-                person_id=person_id,
+                person_id=attachment_uploader,
             )
             source_text = str(inspected.get("_runtime_source_text") or inspected.get("text_preview") or "")
             extraction_success = inspected.get("extraction_success") is True
             advisory_only = inspected.get("advisory_only") is True
             if canonical is None or not extraction_success:
-                hydrated.append(unavailable(verified if canonical is None else canonical))
+                hydrated.append(unavailable(item if canonical is None else canonical))
                 continue
+            canonical = _retain_resolved_telegram_reply_uploader(item, canonical)
 
             recovered = dict(canonical)
             recovered.update(
@@ -18662,11 +19289,21 @@ class AgentRuntime:
             )
             if office_index is not None:
                 recovered[OFFICE_STRUCTURE_KEY] = office_index
-                hydrated.append(trusted_office_attachment(recovered))
+                hydrated.append(
+                    _retain_resolved_telegram_reply_uploader(
+                        canonical,
+                        trusted_office_attachment(recovered),
+                    )
+                )
             else:
                 recovered.pop(OFFICE_STRUCTURE_KEY, None)
-                hydrated.append(_OwnedAttachment(recovered))
-        return hydrated
+                hydrated.append(_private_owned_attachment_copy(recovered, source=canonical))
+        # CS1: stamp process-private evidence views after registered-byte verify.
+        stamped: list[dict[str, Any]] = []
+        for item in hydrated:
+            view = _build_file_evidence_view(item)
+            stamped.append(_stamp_file_evidence(item, view) if view is not None else item)
+        return stamped
 
     def _validated_current_attachment_ids(
         self,
@@ -18678,9 +19315,19 @@ class AgentRuntime:
         """Only owned file ids may become durable conversation pointers."""
 
         valid: list[str] = []
-        for raw_id in self._raw_attachment_ids(attachments):
-            if self._owned_file_attachment(raw_id, tenant_id=tenant_id, person_id=person_id):
+        for item in attachments or []:
+            raw_id = str(item.get("raw_object_id") or "").strip()
+            if not _RAW_OBJECT_ID_RE.fullmatch(raw_id) or raw_id in valid:
+                continue
+            attachment_uploader = _resolved_telegram_reply_uploader(item) or person_id
+            if self._owned_file_attachment(
+                raw_id,
+                tenant_id=tenant_id,
+                person_id=attachment_uploader,
+            ):
                 valid.append(raw_id)
+            if len(valid) >= _CONVERSATION_ATTACHMENT_MAX_FILES:
+                break
         return valid[:_CONVERSATION_ATTACHMENT_MAX_FILES]
 
     @staticmethod
@@ -18697,6 +19344,55 @@ class AgentRuntime:
             if _RAW_OBJECT_ID_RE.fullmatch(raw_id) and raw_id not in result:
                 result.append(raw_id)
         return result
+
+    @staticmethod
+    def _message_reply_attachment_lineage(
+        message: Mapping[str, Any],
+    ) -> tuple[list[str], dict[str, str]]:
+        """Validated ordered Raw lineage plus exact shared-uploader overrides."""
+
+        if str(message.get("role") or "") != "assistant":
+            return [], {}
+        return _validated_attachment_lineage_metadata(
+            message.get("metadata_json"),
+            require_attachment_context_used=True,
+        )
+
+    @staticmethod
+    def _message_user_attachment_lineage(
+        message: Mapping[str, Any],
+    ) -> tuple[list[str], dict[str, str]]:
+        """Validated replay lineage from one exact persisted user row."""
+
+        if str(message.get("role") or "") != "user":
+            return [], {}
+        return _validated_attachment_lineage_metadata(message.get("metadata_json"))
+
+    def _restore_authorized_attachment_lineage(
+        self,
+        raw_ids: Sequence[str],
+        uploader_overrides: Mapping[str, str],
+        *,
+        tenant_id: str,
+        person_id: str,
+    ) -> list[dict[str, Any]]:
+        """Reauthorize one ordered lineage all-or-none under exact uploaders."""
+
+        restored: list[dict[str, Any]] = []
+        for raw_id in raw_ids:
+            uploaded_by = str(uploader_overrides.get(raw_id) or person_id)
+            attachment = self._owned_file_attachment(
+                raw_id,
+                tenant_id=tenant_id,
+                person_id=uploaded_by,
+            )
+            if attachment is None:
+                return []
+            if raw_id in uploader_overrides:
+                authority = _resolved_telegram_reply_attachment(raw_id, uploaded_by)
+                attachment = _retain_resolved_telegram_reply_uploader(authority, attachment)
+            restored.append(attachment)
+        return restored
 
     @classmethod
     def _message_catalog_attachment_ids(cls, message: Mapping[str, Any]) -> list[str]:
@@ -18796,6 +19492,195 @@ class AgentRuntime:
             return None
         return path, digest, source_digest
 
+    @staticmethod
+    def _ordered_explicit_citation_labels(message: str) -> tuple[list[str], bool]:
+        """Return request-order citation labels and whether the set is closed-invalid.
+
+        Duplicate labels in the user request close the whole multi-citation set
+        instead of silently collapsing to first-wins.  Unknown labels are not
+        decided here — callers map against the exact assistant citation map.
+
+        After subtracting every exact valid marker span, any residual
+        citation-like surface that starts with ``[`` + optional whitespace +
+        Latin ``K`` (case-insensitive) also closes the selector.  That covers
+        closed-but-malformed brackets (``[K0]``, ``[K100]``, ``[K1,,K2]``) and
+        unclosed ``[K…`` tails.  Bare ``K1`` without ``[`` is not a selector.
+        """
+
+        text = str(message or "")
+        ordered: list[str] = []
+        seen: set[str] = set()
+        closed = False
+        covered: list[tuple[int, int]] = []
+        for match in _KNOWLEDGE_CITATION_RE.finditer(text):
+            covered.append(match.span())
+            for raw_label in re.split(r"\s*,\s*", match.group(1)):
+                label = raw_label.strip().upper()
+                if not label or not re.fullmatch(r"K[1-9][0-9]?", label):
+                    closed = True
+                    continue
+                if label in seen:
+                    closed = True
+                    continue
+                seen.add(label)
+                ordered.append(label)
+        if text:
+            # Mask exact valid marker spans so residual citation-like surfaces
+            # are visible without re-matching accepted labels.
+            residual_chars = list(text)
+            for start, end in covered:
+                for index in range(start, min(end, len(residual_chars))):
+                    residual_chars[index] = " "
+            residual = "".join(residual_chars)
+            if re.search(r"\[\s*K", residual, re.IGNORECASE):
+                closed = True
+        return ordered, closed
+
+    def _assistant_message_citation_map(
+        self,
+        *,
+        message_id: str,
+        conversation_id: str,
+        user_id: str,
+    ) -> dict[str, str]:
+        """Load emitted knowledge_citations only from one exact owned assistant row."""
+
+        source_id = str(message_id or "").strip()
+        if not source_id or not conversation_id or not user_id:
+            return {}
+        try:
+            source = self.storage.get_message(source_id, user_id)
+        except Exception:  # noqa: BLE001 - closed unresolved pointer
+            return {}
+        if not isinstance(source, Mapping):
+            return {}
+        if str(source.get("role") or "") != "assistant":
+            return {}
+        if str(source.get("conversation_id") or "") != str(conversation_id):
+            return {}
+        source_owner = str(source.get("user_id") or "")
+        # Assistant rows are owned by the conversation person; mismatch closes.
+        if source_owner and source_owner != str(user_id):
+            return {}
+        return self._message_knowledge_citations(source)
+
+    def _restore_explicit_citation_file_attachments(
+        self,
+        message: str,
+        history: list[dict[str, Any]],
+        *,
+        tenant_id: str,
+        person_id: str,
+        actor: ActorContext,
+        conversation_id: str,
+        reply_assistant_message_id: str | None = None,
+        allow_file_read: bool = False,
+    ) -> tuple[list[dict[str, Any]], int, bool]:
+        """Independent multi-citation file selector (ordered, all-or-none).
+
+        Explicit ``[K#]`` labels are a first-class selector ahead of
+        filename/catalog/latest logic.  A native reply may target one exact
+        assistant row's emitted citation map even when a newer answer exists.
+        Returns ``(attachments, expected_count, selector_applied)``.
+        """
+
+        explicit_labels, labels_closed = self._ordered_explicit_citation_labels(message)
+        reply_id = str(reply_assistant_message_id or "").strip()
+        # labels_closed alone owns the turn even when the valid label list is
+        # empty (e.g. sole ``[K0]`` / unclosed ``[K1``) — no catalog/latest.
+        selector_requested = bool(explicit_labels or reply_id or labels_closed)
+        if not selector_requested:
+            return [], 0, False
+        if not allow_file_read:
+            expected = len(explicit_labels) if explicit_labels else 1
+            return [], expected, True
+        if labels_closed:
+            return [], max(len(explicit_labels), 1), True
+
+        citations: dict[str, str] = {}
+        if reply_id:
+            citations = self._assistant_message_citation_map(
+                message_id=reply_id,
+                conversation_id=conversation_id,
+                user_id=person_id,
+            )
+            if not citations:
+                return [], max(len(explicit_labels), 1), True
+        else:
+            previous = next(
+                (item for item in reversed(history) if str(item.get("role") or "") in {"user", "assistant"}),
+                None,
+            )
+            if previous is None or str(previous.get("role") or "") != "assistant":
+                return [], max(len(explicit_labels), 1), True
+            citations = self._message_knowledge_citations(previous)
+            if not citations:
+                return [], max(len(explicit_labels), 1), True
+
+        if explicit_labels:
+            if any(label not in citations for label in explicit_labels):
+                return [], len(explicit_labels), True
+            selected_knowledge_ids = list(dict.fromkeys(citations[label] for label in explicit_labels))
+            expected = len(explicit_labels)
+        else:
+            # Reply without explicit labels: emitted citation order only.
+            selected_knowledge_ids = list(dict.fromkeys(citations.values()))
+            expected = len(selected_knowledge_ids)
+            if expected < 1:
+                return [], 1, True
+
+        resolver = getattr(self.storage, "resolve_public_file_citation_sources", None)
+        if not callable(resolver):
+            return [], expected, True
+        try:
+            resolved = resolver(
+                tenant_id,
+                selected_knowledge_ids,
+                limit=_CONVERSATION_ATTACHMENT_MAX_FILES,
+            )
+        except (TypeError, ValueError):
+            return [], expected, True
+        if not isinstance(resolved, list) or len(resolved) != len(selected_knowledge_ids):
+            return [], expected, True
+
+        authorization = getattr(self.kernel, "authorization", None)
+        restored: list[dict[str, Any]] = []
+        for item in resolved:
+            knowledge_id = str(getattr(item, "knowledge_object_id", "") or "")
+            raw_id = str(getattr(item, "raw_object_id", "") or "")
+            uploaded_by = str(getattr(item, "uploaded_by", "") or "")
+            if isinstance(item, Mapping):
+                knowledge_id = str(item.get("knowledge_object_id") or knowledge_id)
+                raw_id = str(item.get("raw_object_id") or raw_id)
+                uploaded_by = str(item.get("uploaded_by") or uploaded_by)
+            if not knowledge_id or not _RAW_OBJECT_ID_RE.fullmatch(raw_id) or not uploaded_by:
+                return [], expected, True
+            try:
+                uploaded_by = validate_user_id(uploaded_by)
+            except ValueError:
+                return [], expected, True
+            if uploaded_by != person_id:
+                allowed_foreign = bool(
+                    authorization is not None
+                    and authorization.authorize(actor, "admin.all_data.read").allowed
+                )
+                if not allowed_foreign:
+                    return [], expected, True
+            attachment = self._owned_file_attachment(
+                raw_id,
+                tenant_id=tenant_id,
+                person_id=uploaded_by,
+            )
+            if attachment is None:
+                return [], expected, True
+            if uploaded_by != person_id:
+                authority = _resolved_telegram_reply_attachment(raw_id, uploaded_by)
+                attachment = _retain_resolved_telegram_reply_uploader(authority, attachment)
+            restored.append(attachment)
+        if len(restored) != len(selected_knowledge_ids):
+            return [], expected, True
+        return restored, expected, True
+
     def _restore_latest_cited_file_attachments(
         self,
         message: str,
@@ -18810,6 +19695,10 @@ class AgentRuntime:
         continuity as an attachment-backed answer.  Multiple citations are
         admitted only when the person explicitly names their labels or uses a
         plural/all-set continuation; singular deictics never guess among them.
+
+        Explicit multi-label requests are owned by
+        :meth:`_restore_explicit_citation_file_attachments` and must not fall
+        through this legacy same-person path.
         """
 
         previous = next(
@@ -18821,8 +19710,15 @@ class AgentRuntime:
         citations = self._message_knowledge_citations(previous)
         if not citations:
             return [], 0
-        explicit_labels = [str(label).upper() for label in _citation_labels(message)]
+        explicit_labels, labels_closed = self._ordered_explicit_citation_labels(message)
+        if labels_closed:
+            return [], max(len(explicit_labels), 1)
         if explicit_labels:
+            # Ordered multi-label / mixed-uploader citation flow is owned by
+            # ``_restore_explicit_citation_file_attachments`` and must not
+            # soft-fall through this same-person legacy path.
+            if len(explicit_labels) > 1:
+                return [], len(explicit_labels)
             if any(label not in citations for label in explicit_labels):
                 return [], len(explicit_labels)
             selected_ids = list(dict.fromkeys(citations[label] for label in explicit_labels))
@@ -19671,7 +20567,7 @@ class AgentRuntime:
         tenant_id: str,
         person_id: str,
         allow_file_read: bool,
-    ) -> tuple[bool, int, list[str]]:
+    ) -> tuple[bool, int, list[str], dict[str, str]]:
         """Server-authorized replay state from one exact, budgeted user row.
 
         Text equality is deliberately insufficient: ordinary people repeat
@@ -19684,7 +20580,7 @@ class AgentRuntime:
 
         source_id = str(replay_source_message_id or "").strip()
         if not source_id:
-            return False, 0, []
+            return False, 0, [], {}
         budgeted_ids = {
             str(item.get("id") or "") for item in _history_within_budget(history) if item.get("id")
         }
@@ -19692,27 +20588,33 @@ class AgentRuntime:
             if str(item.get("id") or "") != source_id or str(item.get("role") or "") != "user":
                 continue
             if str(item.get("content") or "").strip() != str(message or "").strip():
-                return False, 0, []
+                return False, 0, [], {}
             metadata = _bounded_json_mapping(item.get("metadata_json"), max_chars=16_384)
             had_attachments = metadata.get("had_attachments") is True
             try:
                 attachment_count = max(0, min(int(metadata.get("attachment_count") or 0), 100))
             except (TypeError, ValueError):
                 attachment_count = 0
-            valid_ids = []
+            raw_ids, uploader_overrides = self._message_user_attachment_lineage(item)
+            valid_ids: list[str] = []
+            valid_uploaders: dict[str, str] = {}
             if allow_file_read and source_id in budgeted_ids:
-                valid_ids = [
-                    raw_id
-                    for raw_id in self._message_attachment_ids(item)
-                    if self._owned_file_attachment(
-                        raw_id,
-                        tenant_id=tenant_id,
-                        person_id=person_id,
-                    )
-                    is not None
-                ][:_CONVERSATION_ATTACHMENT_MAX_FILES]
-            return had_attachments or bool(valid_ids), max(attachment_count, len(valid_ids)), valid_ids
-        return False, 0, []
+                restored = self._restore_authorized_attachment_lineage(
+                    raw_ids,
+                    uploader_overrides,
+                    tenant_id=tenant_id,
+                    person_id=person_id,
+                )
+                if len(restored) == len(raw_ids):
+                    valid_ids = list(raw_ids)
+                    valid_uploaders = dict(uploader_overrides)
+            return (
+                had_attachments or bool(valid_ids),
+                max(attachment_count, len(raw_ids), len(valid_ids)),
+                valid_ids,
+                valid_uploaders,
+            )
+        return False, 0, [], {}
 
     def _restore_conversation_attachments(
         self,
@@ -19737,6 +20639,7 @@ class AgentRuntime:
 
         recent = _history_within_budget(history)
         raw_ids: list[str] = []
+        uploader_overrides: dict[str, str] = {}
         expected_count = 0
         source_message: Mapping[str, Any] | None = None
         source_id = str(replay_source_message_id or "").strip()
@@ -19747,7 +20650,7 @@ class AgentRuntime:
                 if str(item.get("content") or "").strip() != str(message or "").strip():
                     return [], 0
                 source_message = item
-                raw_ids = self._message_attachment_ids(item)
+                raw_ids, uploader_overrides = self._message_user_attachment_lineage(item)
                 break
             else:
                 return [], 0
@@ -19806,6 +20709,24 @@ class AgentRuntime:
                 )
                 if previous_assistant is None:
                     return [], 0
+                if not allow_file_read:
+                    return [], 1
+                lineage_ids, uploader_overrides = self._message_reply_attachment_lineage(previous_assistant)
+                if uploader_overrides:
+                    if len(lineage_ids) > 1 and not (
+                        re.search(r"\b(?:в|из|по|про)\s+них\b", message, re.IGNORECASE)
+                        or _ATTACHMENT_ALL_REFERENCE.search(message)
+                        or _ATTACHMENT_BOTH_REFERENCE.search(message)
+                        or _ATTACHMENT_COMPARISON_ACTION.search(message)
+                    ):
+                        return [], len(lineage_ids)
+                    restored_shared = self._restore_authorized_attachment_lineage(
+                        lineage_ids,
+                        uploader_overrides,
+                        tenant_id=tenant_id,
+                        person_id=person_id,
+                    )
+                    return restored_shared, len(lineage_ids)
                 if not self._message_used_attachment(previous_assistant):
                     cited, cited_expected = self._restore_latest_cited_file_attachments(
                         message,
@@ -19856,17 +20777,13 @@ class AgentRuntime:
             expected_count = max(expected_count, len(self._message_attachment_ids(source_message)))
         if not allow_file_read:
             return [], expected_count
-
-        restored: list[dict[str, Any]] = []
-        for raw_id in raw_ids:
-            attachment = self._owned_file_attachment(
-                raw_id,
-                tenant_id=tenant_id,
-                person_id=person_id,
-            )
-            if attachment is not None:
-                restored.append(attachment)
-        return restored[:_CONVERSATION_ATTACHMENT_MAX_FILES], expected_count
+        restored = self._restore_authorized_attachment_lineage(
+            raw_ids,
+            uploader_overrides,
+            tenant_id=tenant_id,
+            person_id=person_id,
+        )
+        return restored, expected_count
 
     async def chat(
         self,
@@ -19887,6 +20804,7 @@ class AgentRuntime:
         reply_to: str | None = None,
         quoted_attachment_reference: bool = False,
         reply_assistant_reference: bool = False,
+        reply_assistant_message_id: str | None = None,
     ) -> dict[str, Any]:
         turn_started = time.monotonic()
         clean_message = (message or "").strip()
@@ -19953,6 +20871,7 @@ class AgentRuntime:
         supplied_attachment_count = sum(1 for item in (attachments or []) if isinstance(item, dict))
         quoted_attachment_reference = quoted_attachment_reference is True
         reply_assistant_reference = reply_assistant_reference is True
+        reply_assistant_message_id = str(reply_assistant_message_id or "").strip() or None
         # The server deliberately preserves the structural fact that Telegram
         # carried a reply-to-file pointer even when its exact, authorized
         # source_ref did not resolve.  In that case an older conversation file
@@ -19961,7 +20880,12 @@ class AgentRuntime:
         quoted_attachment_resolution_failed = bool(
             quoted_attachment_reference and supplied_attachment_count == 0
         )
-        reply_assistant_resolution_failed = bool(reply_assistant_reference and supplied_attachment_count == 0)
+        # A native reply on an assistant multi-citation answer may carry only
+        # the exact message id; Runtime resolves emitted knowledge_citations
+        # before treating the structural pointer as failed.
+        reply_assistant_resolution_failed = bool(
+            reply_assistant_reference and supplied_attachment_count == 0 and not reply_assistant_message_id
+        )
         structural_attachment_resolution_failed = bool(
             quoted_attachment_resolution_failed or reply_assistant_resolution_failed
         )
@@ -20087,7 +21011,9 @@ class AgentRuntime:
         # needs ``had_attachments`` to warn instead of silently replaying a turn
         # without its evidence.
         supplied_attachments = [
-            trusted_office_attachment(item)
+            _clone_resolved_telegram_reply_attachment(item)
+            if isinstance(item, _ResolvedTelegramReplyAttachment)
+            else trusted_office_attachment(item)
             if is_trusted_office_attachment(item)
             else _OwnedAttachment(item)
             if isinstance(item, _OwnedAttachment)
@@ -20099,6 +21025,15 @@ class AgentRuntime:
         may_read_files = bool(
             authorization is not None and authorization.authorize(actor, "files.read").allowed
         )
+        explicit_citation_labels, explicit_citation_labels_closed = self._ordered_explicit_citation_labels(
+            clean_message
+        )
+        # Closed-invalid citation-like tokens (malformed or residual after
+        # valid spans) still request the independent citation selector so the
+        # turn cannot fall through to filename/catalog/latest.
+        explicit_citation_selector_requested = bool(
+            explicit_citation_labels or reply_assistant_message_id or explicit_citation_labels_closed
+        )
         explicit_private_file_request = bool(
             workspace_inbox_request is None
             and (
@@ -20106,6 +21041,7 @@ class AgentRuntime:
                 or quoted_attachment_reference
                 or reply_assistant_reference
                 or attachment_reference_kind
+                or explicit_citation_selector_requested
                 or _multi_attachment_open_task_count(clean_message) is not None
                 or _requests_all_attachment_set(clean_message)
             )
@@ -20135,18 +21071,20 @@ class AgentRuntime:
         )
         current_attachment_authorized = False
         if current_attachment_ids and len(current_attachment_ids) == supplied_attachment_count:
-            canonical_current = [
-                owned
-                for raw_id in current_attachment_ids
-                if (
-                    owned := self._owned_file_attachment(
-                        raw_id,
-                        tenant_id=tenant_id,
-                        person_id=person_id,
-                    )
+            original_by_raw_id = {
+                str(item.get("raw_object_id") or "").strip(): item for item in attachment_list
+            }
+            canonical_current: list[dict[str, Any]] = []
+            for raw_id in current_attachment_ids:
+                original = original_by_raw_id.get(raw_id)
+                uploaded_by = _resolved_telegram_reply_uploader(original) or person_id
+                owned = self._owned_file_attachment(
+                    raw_id,
+                    tenant_id=tenant_id,
+                    person_id=uploaded_by,
                 )
-                is not None
-            ]
+                if owned is not None:
+                    canonical_current.append(_retain_resolved_telegram_reply_uploader(original, owned))
             if len(canonical_current) == supplied_attachment_count:
                 # The owned Raw object is the authority for bytes/identity.  A
                 # current extractor may additionally report a *more restrictive*
@@ -20191,15 +21129,18 @@ class AgentRuntime:
         if workspace_reply_attachment_contract:
             attachment_selector_message = _workspace_reply_attachment_selector_message(clean_message)
             attachment_reference_kind = _attachment_reference_kind(attachment_selector_message)
-        replay_had_attachments, replay_attachment_count, replay_attachment_ids = (
-            self._replay_source_attachment_state(
-                clean_message,
-                prior_history,
-                replay_source_message_id=replay_source_message_id,
-                tenant_id=tenant_id,
-                person_id=person_id,
-                allow_file_read=may_read_files,
-            )
+        (
+            replay_had_attachments,
+            replay_attachment_count,
+            replay_attachment_ids,
+            replay_attachment_uploaders,
+        ) = self._replay_source_attachment_state(
+            clean_message,
+            prior_history,
+            replay_source_message_id=replay_source_message_id,
+            tenant_id=tenant_id,
+            person_id=person_id,
+            allow_file_read=may_read_files,
         )
         # Resolve the active set before persisting this user row, so a normal
         # file follow-up also carries forward the same opaque pointers. Without
@@ -20286,6 +21227,7 @@ class AgentRuntime:
                 limit=_CONVERSATION_ATTACHMENT_HISTORY_LIMIT,
             )
         restored_attachments: list[dict[str, Any]]
+        citation_selector_applied = False
         if named_person_corpus.applies:
             # This set was selected by exact uploader before any body read and
             # every id was re-authorized against the current Raw/Inbox verdict.
@@ -20293,6 +21235,43 @@ class AgentRuntime:
             # participant's corpus would be merged with the caller's old file.
             restored_attachments = list(named_person_corpus.attachments)
             restored_attachment_expected_count = named_person_corpus.expected_count
+        elif (
+            workspace_inbox_request is None
+            and not unsupported_host_path_request
+            and not structural_attachment_resolution_failed
+            and not replay_source_message_id
+            and not supplied_attachment_count
+            and explicit_citation_selector_requested
+        ):
+            # Explicit [K#] labels and native reply-to-assistant multi-citation
+            # are an independent selector: ordered, all-or-none, no
+            # filename/catalog/latest fallback when the set fails to close.
+            (
+                restored_attachments,
+                restored_attachment_expected_count,
+                citation_selector_applied,
+            ) = self._restore_explicit_citation_file_attachments(
+                clean_message,
+                prior_history,
+                tenant_id=tenant_id,
+                person_id=person_id,
+                actor=actor,
+                conversation_id=str(conversation_id),
+                reply_assistant_message_id=reply_assistant_message_id,
+                allow_file_read=may_read_files and not file_access_denied,
+            )
+            if (
+                reply_assistant_reference
+                and supplied_attachment_count == 0
+                and (
+                    not citation_selector_applied
+                    or restored_attachment_expected_count <= 0
+                    or len(restored_attachments) != restored_attachment_expected_count
+                )
+            ):
+                reply_assistant_resolution_failed = True
+                structural_attachment_resolution_failed = True
+                restored_attachments = []
         else:
             restored_attachments, restored_attachment_expected_count = (
                 self._restore_conversation_attachments(
@@ -20346,6 +21325,11 @@ class AgentRuntime:
         attachment_resolution_failed = bool(
             structural_attachment_resolution_failed
             or (
+                citation_selector_applied
+                and restored_attachment_expected_count
+                and len(restored_attachments) < restored_attachment_expected_count
+            )
+            or (
                 may_read_files
                 and restored_attachment_expected_count
                 and (
@@ -20359,6 +21343,14 @@ class AgentRuntime:
                 and len(distinct_selected_ids) < selected_expected_count
             )
         )
+        if attachment_resolution_failed and citation_selector_applied:
+            # Closed multi-citation set: never keep a healthy sibling alone and
+            # never fall through into filename/catalog/latest restoration.
+            restored_attachments = []
+            restored_attachment_ids = []
+            distinct_selected_ids = []
+            selected_expected_count = restored_attachment_expected_count
+
         # Web tools now use the ordinary same-tenant turn context.  Private
         # attachment lineage no longer creates a history-free/prefetch-only
         # chamber; authorization and the web transport's own safety boundaries
@@ -20451,6 +21443,28 @@ class AgentRuntime:
                 **(user_metadata or {}),
                 _CONVERSATION_ATTACHMENT_RAW_IDS: resolved_turn_attachment_ids,
             }
+            resolved_turn_uploaders: dict[str, str] = {}
+            for raw_id in resolved_turn_attachment_ids:
+                candidates = {
+                    uploaded_by
+                    for item in (*attachment_list, *restored_attachments)
+                    if str(item.get("raw_object_id") or "") == raw_id
+                    and (uploaded_by := _resolved_telegram_reply_uploader(item))
+                    and uploaded_by != person_id
+                }
+                replay_uploader = replay_attachment_uploaders.get(raw_id)
+                if replay_uploader and replay_uploader != person_id:
+                    candidates.add(replay_uploader)
+                if len(candidates) == 1:
+                    resolved_turn_uploaders[raw_id] = candidates.pop()
+                elif len(candidates) > 1:
+                    # Conflicting private authorities must never be serialized
+                    # as a caller-usable fallback. The Raw pointer remains, but
+                    # its mixed-uploader continuation closes on the next read.
+                    resolved_turn_uploaders = {}
+                    break
+            if resolved_turn_uploaders:
+                user_metadata[_CONVERSATION_ATTACHMENT_UPLOADERS] = resolved_turn_uploaders
         if quoted_attachment_reference:
             # Structural Telegram reply provenance.  It may deliberately carry
             # no Raw id when the exact source_ref failed authorization; persist
@@ -20540,6 +21554,7 @@ class AgentRuntime:
             active_attachment_set.append(item)
         attachment_authority_tenant = named_person_corpus.tenant_id or tenant_id
         attachment_authority_person = named_person_corpus.person_id or person_id
+        verified_reply_attachment_uploaders: dict[str, str] = {}
         if may_read_files and active_attachment_set and workspace_inbox_request is None:
             # The Raw row selected above is the SQLite authority; prove that its
             # registered immutable bytes still exist and match before cached
@@ -20549,6 +21564,25 @@ class AgentRuntime:
                 tenant_id=attachment_authority_tenant,
                 person_id=attachment_authority_person,
             )
+            if citation_selector_applied and active_attachment_set:
+                # Multi-citation is all-or-none through registered-byte verify:
+                # one SHA/disk failure closes the whole ordered set before model.
+                verified_count = sum(
+                    1
+                    for item in active_attachment_set
+                    if isinstance(item, Mapping) and item.get("_registered_file_bytes_verified") is True
+                )
+                if verified_count != len(active_attachment_set):
+                    active_attachment_set = []
+                    attachment_resolution_failed = True
+            verified_reply_attachment_uploaders = {
+                str(item.get("raw_object_id") or "").strip(): uploaded_by
+                for item in active_attachment_set
+                if isinstance(item, Mapping)
+                and item.get("_registered_file_bytes_verified") is True
+                and (uploaded_by := _resolved_telegram_reply_uploader(item))
+                and _RAW_OBJECT_ID_RE.fullmatch(str(item.get("raw_object_id") or "").strip())
+            }
         # Metadata/detail wording selects evidence.  It owns the terminal turn
         # only for a direct read.  An explicit, supported file-creation request
         # with an authorised selected document must continue through ordinary
@@ -20599,12 +21633,16 @@ class AgentRuntime:
             withheld["transient_text"] = ""
             withheld["extraction_success"] = False
             withheld.pop("empty_text", None)
-            active_attachment_set[position] = (
+            withheld_carrier = (
                 trusted_office_attachment(withheld)
                 if is_trusted_office_attachment(item)
                 else _OwnedAttachment(withheld)
                 if isinstance(item, _OwnedAttachment)
                 else withheld
+            )
+            active_attachment_set[position] = _retain_resolved_telegram_reply_uploader(
+                item,
+                withheld_carrier,
             )
         whole_document_task = (
             ""
@@ -20698,7 +21736,8 @@ class AgentRuntime:
                 {"tool": "attachment", "output": document_metadata_answer},
                 *attachment_evidence,
             ][:_ATTACHMENT_EVIDENCE_MAX_CHUNKS]
-        attachment_readable_count = sum(
+        # Legacy lattice (kept for dual-write equality with FileEvidenceSet).
+        legacy_attachment_readable_count = sum(
             1
             for item in attachments
             if (
@@ -20717,13 +21756,13 @@ class AgentRuntime:
                 )
             )
         )
-        attachment_context_complete = bool(
+        legacy_attachment_context_complete = bool(
             attachment_expected_count
             and attachment_expected_count <= _CONVERSATION_ATTACHMENT_MAX_FILES
-            and attachment_readable_count == attachment_expected_count
+            and legacy_attachment_readable_count == attachment_expected_count
         )
-        attachment_coverage_complete = bool(
-            attachment_context_complete
+        legacy_attachment_coverage_complete = bool(
+            legacy_attachment_context_complete
             and all(
                 (
                     (
@@ -20747,8 +21786,8 @@ class AgentRuntime:
                 for item in attachments
             )
         )
-        attachment_verification_complete = bool(
-            attachment_coverage_complete
+        legacy_attachment_verification_complete = bool(
+            legacy_attachment_coverage_complete
             and sum(
                 1
                 for item in attachments
@@ -20771,6 +21810,22 @@ class AgentRuntime:
             )
             == attachment_expected_count
         )
+        # CS1: prefer process-private FileEvidenceSet when every item is stamped.
+        evidence_set = _file_evidence_set_from_attachments(
+            attachments,
+            expected_count=attachment_expected_count,
+        )
+        if evidence_set is not None:
+            attachment_readable_count = evidence_set.source_readable_count
+            attachment_context_complete = evidence_set.context_complete
+            attachment_coverage_complete = evidence_set.coverage_complete
+            attachment_verification_complete = evidence_set.verification_complete
+        else:
+            attachment_readable_count = legacy_attachment_readable_count
+            attachment_context_complete = legacy_attachment_context_complete
+            attachment_coverage_complete = legacy_attachment_coverage_complete
+            attachment_verification_complete = legacy_attachment_verification_complete
+
         multi_attachment_incomplete = bool(
             not document_metadata_owned
             and multi_attachment_requested_count is not None
@@ -20788,10 +21843,23 @@ class AgentRuntime:
             if multi_attachment_incomplete and multi_attachment_requested_count is not None
             else ""
         )
+        # A bare-upload receipt renders the verified source carriers themselves,
+        # not their bounded prompt projections. Keep its evidence set on that
+        # exact post-disk-verify sequence: projection clipping must neither
+        # downgrade a complete source nor authorize a different body carrier.
+        synthetic_upload_receipt_evidence_set = (
+            _file_evidence_set_from_attachments(
+                active_attachment_set,
+                expected_count=attachment_expected_count,
+            )
+            if synthetic_document_notice
+            else None
+        )
         synthetic_upload_receipt_answer = (
             _registered_upload_receipt_answer(
                 active_attachment_set,
                 expected_count=attachment_expected_count,
+                evidence_set=synthetic_upload_receipt_evidence_set,
             )
             if synthetic_document_notice
             and not unsupported_host_path_request
@@ -24342,6 +25410,11 @@ class AgentRuntime:
             if assistant_used_attachment
             else []
         )
+        assistant_attachment_uploaders = {
+            raw_id: verified_reply_attachment_uploaders[raw_id]
+            for raw_id in assistant_attachment_raw_ids
+            if raw_id in verified_reply_attachment_uploaders
+        }
         assistant_message = self.storage.store_message(
             conversation_id,
             user_id,
@@ -24356,6 +25429,11 @@ class AgentRuntime:
                 **(
                     {_CONVERSATION_ATTACHMENT_RAW_IDS: assistant_attachment_raw_ids}
                     if assistant_attachment_raw_ids
+                    else {}
+                ),
+                **(
+                    {_CONVERSATION_ATTACHMENT_UPLOADERS: assistant_attachment_uploaders}
+                    if assistant_attachment_uploaders
                     else {}
                 ),
                 **(
@@ -24560,6 +25638,7 @@ class AgentRuntime:
                     exact_text_shape_delivery
                     or response.get("_office_exact_owned") is True
                     or response.get("_document_metadata_owned") is True
+                    or bool(synthetic_upload_receipt_answer)
                 )
                 else "markdown"
             ),

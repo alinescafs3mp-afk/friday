@@ -384,9 +384,19 @@ async def test_generated_upload_notice_filename_has_no_tool_or_classifier_author
         del args, kwargs
         raise AssertionError("a generated filename received delegated tools")
 
+    async def forbidden_prepare(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("bare upload notice entered general context preparation")
+
+    async def forbidden_generate(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("bare upload notice called the model")
+
     monkeypatch.setattr(runtime, "_is_small_talk_by_arbiter", forbidden_classifier)
     monkeypatch.setattr(runtime, "_web_query_by_arbiter", forbidden_classifier)
     monkeypatch.setattr(runtime, "_agentic_loop", forbidden_agentic_loop)
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
 
     result = await runtime.chat(
         "alice",
@@ -405,20 +415,15 @@ async def test_generated_upload_notice_filename_has_no_tool_or_classifier_author
         enable_tools=True,
     )
 
-    # A deterministic receipt may replace this one model call later; this test
-    # intentionally constrains authority, not whether an acknowledgement is LLM-
-    # or code-owned.
-    assert len(llm.calls) <= 1
-    assert all(call["kwargs"].get("tools") == [] for call in llm.calls)
-    primary_prompt = "\n".join(
-        str(message.get("content") or "") for call in llm.calls for message in call["messages"]
-    )
-    assert "PRIOR-UPLOAD-QUESTION-SENTINEL" not in primary_prompt
-    assert "PRIOR-UPLOAD-ANSWER-SENTINEL" not in primary_prompt
-    assert "SYNTHETIC-UPLOAD-BODY" in primary_prompt
+    # Bare intake is a code-owned receipt: zero model, zero tools, zero classifiers.
+    assert llm.calls == []
     assert result["tools_used"] == []
     assert result["files"] == []
     assert result["context"]["llm_failed"] is False
+    assert result["message_format"] == "plain"
+    assert "PRIOR-UPLOAD-QUESTION-SENTINEL" not in result["message"]
+    assert "PRIOR-UPLOAD-ANSWER-SENTINEL" not in result["message"]
+    assert "SYNTHETIC-UPLOAD-BODY" not in result["message"]
 
 
 @pytest.mark.asyncio
@@ -2232,7 +2237,9 @@ async def test_advisory_vision_and_voice_reach_synthesis_but_never_verification(
 
 @pytest.mark.parametrize(
     ("body_chars", "expects_partial"),
-    [(25_001, False), (73_001, True)],
+    # Ordinary attachment projection envelope is 24k; stay under it for the
+    # complete case and use a clearly oversize body for partial projection.
+    [(20_000, False), (73_001, True)],
 )
 @pytest.mark.asyncio
 async def test_long_advisory_ocr_stays_in_synthesis_instead_of_empty_hierarchy(
@@ -2242,6 +2249,8 @@ async def test_long_advisory_ocr_stays_in_synthesis_instead_of_empty_hierarchy(
     body_chars,
     expects_partial,
 ):
+    """Bare notice is status-only for advisory OCR; explicit Q keeps synthesis, not hierarchy."""
+
     head = "ADVISORY-LONG-OCR-HEAD\n"
     tail = "\nADVISORY-LONG-OCR-TAIL"
     advisory_text = head + "x" * (body_chars - len(head) - len(tail)) + tail
@@ -2253,6 +2262,49 @@ async def test_long_advisory_ocr_stays_in_synthesis_instead_of_empty_hierarchy(
         llm=_UnusedEnabledLLM(),
         kernel=ExecutionKernel(auth, settings),
     )
+    attachment = agent_runtime_module._OwnedAttachment(  # noqa: SLF001 - process authority under test
+        {
+            "filename": "synthetic-long-scan.pdf",
+            "transient_text": advisory_text,
+            "extraction_success": True,
+            "advisory_only": True,
+            "verification_eligible": False,
+        }
+    )
+
+    async def forbidden_prepare(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("bare upload notice entered general context preparation")
+
+    async def forbidden_generate(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("bare upload notice called the model")
+
+    async def forbidden_hierarchy(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("advisory OCR entered the verifiable hierarchy")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
+    monkeypatch.setattr(runtime, "_build_attachment_hierarchy_bundle", forbidden_hierarchy)
+    monkeypatch.setattr(runtime, "_hierarchical_attachment_response", forbidden_hierarchy)
+    receipt = await runtime.chat(
+        "alice",
+        "Загружен документ: synthetic-long-scan.pdf",
+        actor=auth.actor_for_user("alice", source="test"),
+        attachments=[attachment],
+        enable_tools=False,
+        synthetic_document_notice=True,
+    )
+    # Bare advisory: status/warning only — no model, no OCR literals in the receipt.
+    assert receipt["tools_used"] == []
+    assert receipt["message_format"] == "plain"
+    assert head.strip() not in receipt["message"]
+    assert tail.strip() not in receipt["message"]
+    assert "› " not in receipt["message"]
+    assert receipt["attachment_verification_complete"] is False
+    assert receipt["verified"] is False
+
     shown: list[dict[str, Any]] = []
 
     async def prepare(user_id, message, conversation_id, **kwargs):
@@ -2273,31 +2325,15 @@ async def test_long_advisory_ocr_stays_in_synthesis_instead_of_empty_hierarchy(
             "_model_generated": True,
         }
 
-    async def forbidden_hierarchy(*args, **kwargs):
-        del args, kwargs
-        raise AssertionError("advisory OCR entered the verifiable hierarchy")
-
     monkeypatch.setattr(runtime, "_prepare_context", prepare)
     monkeypatch.setattr(runtime, "_generate_response", generate)
-    monkeypatch.setattr(runtime, "_build_attachment_hierarchy_bundle", forbidden_hierarchy)
-    monkeypatch.setattr(runtime, "_hierarchical_attachment_response", forbidden_hierarchy)
     result = await runtime.chat(
         "alice",
-        "Загружен документ: synthetic-long-scan.pdf",
+        "что в этом файле?",
         actor=auth.actor_for_user("alice", source="test"),
-        attachments=[
-            agent_runtime_module._OwnedAttachment(  # noqa: SLF001 - process authority under test
-                {
-                    "filename": "synthetic-long-scan.pdf",
-                    "transient_text": advisory_text,
-                    "extraction_success": True,
-                    "advisory_only": True,
-                    "verification_eligible": False,
-                }
-            )
-        ],
+        conversation_id=receipt["conversation_id"],
+        attachments=[attachment],
         enable_tools=False,
-        synthetic_document_notice=True,
     )
 
     assert len(shown) == 1

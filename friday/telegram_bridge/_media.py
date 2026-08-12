@@ -101,8 +101,9 @@ class MediaMixin(BridgeShared):
         """Return an exact bounded pointer to supported media being replied to.
 
         This is a structural Telegram reference, not another upload: no bytes are
-        downloaded here.  The backend must still re-authorize tenant, uploader and
-        the current file verdict before turning it into an opaque Raw id.
+        downloaded here.  The backend must still resolve the durable alias to one
+        same-tenant uploader and re-authorize the current file verdict before
+        turning it into an opaque Raw id.
         """
 
         replied = message.get("reply_to_message")

@@ -36,6 +36,8 @@ from friday.agent_runtime import (
     _is_file_provenance_stub,
     _mime_is_visual_without_text_layer,
     _OwnedAttachment,
+    _resolved_telegram_reply_attachment,
+    _validated_attachment_lineage_metadata,
     asks_for_the_web,
 )
 from friday.agent_runtime._office_attachments import (
@@ -75,6 +77,7 @@ from friday.execution_kernel import ExecutionKernel
 from friday.executive import ExecutiveService
 from friday.executive.api import admin_router as missions_admin_router
 from friday.executive.api import router as missions_router
+from friday.file_delivery import AuthorizedFileReadError, FileRecordUnavailable, read_authorized_file
 from friday.generated_files import persist_generated_response_files
 from friday.http_errors import relation_history_http_detail
 from friday.ingestion import (
@@ -112,8 +115,13 @@ from friday.storage import (
     normalize_conversation_mode,
 )
 from friday.storage._intake import (
+    TELEGRAM_REPLY_ABSENT,
+    TELEGRAM_REPLY_BLOCKED,
+    TELEGRAM_REPLY_RESOLVED,
     bind_owned_telegram_reply_aliases,
-    resolve_owned_telegram_reply_aliases,
+    bind_owned_telegram_reply_recovery_aliases,
+    resolve_tenant_telegram_reply_alias_state,
+    resolve_tenant_telegram_reply_aliases,
 )
 from friday.storage.models import (
     AuditEntry,
@@ -2194,6 +2202,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         )
         document_value = body.get("document")
         document: dict[str, Any] | None = document_value if isinstance(document_value, dict) else None
+        recovery_value = body.get("reply_document_recovery")
+        recovery_supplied = "reply_document_recovery" in body
+        reply_document_recovery: dict[str, Any] | None = (
+            recovery_value if isinstance(recovery_value, dict) else None
+        )
         raw_reply_source_message_id = body.pop("reply_source_message_id", None)
         reply_assistant_pointer_present = bool(
             actor.source == "telegram-bridge" and document is None and raw_reply_source_message_id is not None
@@ -2374,6 +2387,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         )
                         source_message = None
                     lineage_raw_ids: list[str] = []
+                    lineage_uploaders: dict[str, str] = {}
                     if (
                         isinstance(source_message, dict)
                         and str(source_message.get("role") or "") == "assistant"
@@ -2381,63 +2395,49 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         and str(source_message.get("conversation_id") or "") == conversation_id
                         and state.storage.get_conversation(conversation_id, actor.own_id) is not None
                     ):
-                        raw_metadata = source_message.get("metadata_json")
-                        try:
-                            lineage_metadata = (
-                                json.loads(raw_metadata)
-                                if isinstance(raw_metadata, str) and len(raw_metadata) <= 65_536
-                                else {}
-                            )
-                        except (TypeError, ValueError):
-                            lineage_metadata = {}
-                        values = (
-                            lineage_metadata.get("conversation_attachment_raw_ids")
-                            if isinstance(lineage_metadata, dict)
-                            and lineage_metadata.get("attachment_context_used") is True
-                            else None
+                        lineage_raw_ids, lineage_uploaders = _validated_attachment_lineage_metadata(
+                            source_message.get("metadata_json"),
+                            require_attachment_context_used=True,
                         )
-                        if isinstance(values, list):
-                            malformed = False
-                            for value in values[:13]:
-                                raw_id = str(value or "").strip()
-                                if (
-                                    not re.fullmatch(r"raw_[A-Za-z0-9_-]{8,120}", raw_id)
-                                    or raw_id in lineage_raw_ids
-                                    or len(lineage_raw_ids) >= 12
-                                ):
-                                    malformed = True
-                                    break
-                                lineage_raw_ids.append(raw_id)
-                            if malformed or len(values) != len(lineage_raw_ids):
-                                lineage_raw_ids = []
                     if lineage_raw_ids:
-                        try:
-                            canonical_rows = await run_blocking(
-                                state.storage.get_searchable_file_sources,
-                                actor.user_id,
-                                lineage_raw_ids,
-                                uploaded_by=actor.own_id,
-                                limit=len(lineage_raw_ids),
-                                include_content=False,
+                        authorized_attachments: list[dict[str, Any]] = []
+                        for raw_id in lineage_raw_ids:
+                            uploaded_by = lineage_uploaders.get(raw_id, actor.own_id)
+                            try:
+                                canonical_rows = await run_blocking(
+                                    state.storage.get_searchable_file_sources,
+                                    actor.user_id,
+                                    [raw_id],
+                                    uploaded_by=uploaded_by,
+                                    limit=1,
+                                    include_content=False,
+                                )
+                            except Exception as exc:  # noqa: BLE001 - verdict change stays closed
+                                LOGGER.warning(
+                                    "Assistant reply attachment reauthorization failed (%s)",
+                                    type(exc).__name__,
+                                )
+                                authorized_attachments = []
+                                break
+                            if not (
+                                len(canonical_rows) == 1
+                                and isinstance(canonical_rows[0], dict)
+                                and str(canonical_rows[0].get("id") or "") == raw_id
+                                and re.fullmatch(
+                                    r"[0-9a-f]{64}",
+                                    str(canonical_rows[0].get("content_hash") or ""),
+                                    re.IGNORECASE,
+                                )
+                            ):
+                                authorized_attachments = []
+                                break
+                            authorized_attachments.append(
+                                _resolved_telegram_reply_attachment(raw_id, uploaded_by)
+                                if raw_id in lineage_uploaders
+                                else {"raw_object_id": raw_id}
                             )
-                        except Exception as exc:  # noqa: BLE001 - verdict change stays closed
-                            LOGGER.warning(
-                                "Assistant reply attachments reauthorization failed (%s)",
-                                type(exc).__name__,
-                            )
-                            canonical_rows = []
-                        canonical_ids = {
-                            str(row.get("id") or "")
-                            for row in canonical_rows
-                            if isinstance(row, dict)
-                            and re.fullmatch(
-                                r"[0-9a-f]{64}",
-                                str(row.get("content_hash") or ""),
-                                re.IGNORECASE,
-                            )
-                        }
-                        if canonical_ids == set(lineage_raw_ids):
-                            attachments.extend({"raw_object_id": raw_id} for raw_id in lineage_raw_ids)
+                        if len(authorized_attachments) == len(lineage_raw_ids):
+                            attachments.extend(authorized_attachments)
             quoted_attachment_reference = reply_pointer_present
             reply_document_refs = tuple(
                 dict.fromkeys(
@@ -2450,34 +2450,216 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     if value
                 )
             )
-            if reply_document_refs and state.auth_service.authorize(actor, "files.read").allowed:
+            reply_files_read = state.auth_service.authorize(actor, "files.read").allowed
+            reply_files_upload = state.auth_service.authorize(actor, "files.upload").allowed
+            reply_resolution_status = TELEGRAM_REPLY_BLOCKED
+            reply_resolution: tuple[str, str] | None = None
+            if reply_document_refs and reply_files_read:
                 try:
-                    if reply_document_refs == (reply_document_source_ref,):
-                        # Backward-compatible bridge/API payloads carry only the
-                        # ephemeral file id.  Keep their established resolver;
-                        # the multi-identity path below adds no looser fallback.
-                        reply_raw_id = await run_blocking(
-                            state.storage.resolve_owned_file_source_ref,
-                            actor.user_id,
-                            actor.own_id,
-                            reply_document_source_ref,
-                        )
-                    else:
-                        reply_raw_id = await run_blocking(
-                            resolve_owned_telegram_reply_aliases,
-                            state.storage,
-                            actor.user_id,
-                            actor.own_id,
-                            reply_document_refs,
-                        )
+                    reply_resolution = await run_blocking(
+                        resolve_tenant_telegram_reply_aliases,
+                        state.storage,
+                        actor.user_id,
+                        reply_document_refs,
+                    )
                 except Exception as exc:  # noqa: BLE001 - unresolved pointer stays closed
                     LOGGER.warning("Reply document pointer resolution failed (%s)", type(exc).__name__)
-                    reply_raw_id = None
-                if reply_raw_id:
-                    # Only the authorized opaque id crosses into Runtime.  It will
-                    # do its ordinary canonical attachment read; source_ref,
-                    # filenames and file text never come from this request field.
-                    attachments.append({"raw_object_id": reply_raw_id})
+                    reply_resolution = None
+                if reply_resolution:
+                    reply_resolution_status = TELEGRAM_REPLY_RESOLVED
+                    reply_raw_id, reply_uploaded_by = reply_resolution
+                    # The alias-proven Raw/uploader pair crosses as a private
+                    # marker type, never as caller JSON. Runtime performs its
+                    # ordinary atomic lifecycle/privacy/registry read against
+                    # that exact uploader before any file text becomes visible.
+                    attachments.append(
+                        _resolved_telegram_reply_attachment(
+                            reply_raw_id,
+                            reply_uploaded_by,
+                        )
+                    )
+                else:
+                    try:
+                        reply_state = await run_blocking(
+                            resolve_tenant_telegram_reply_alias_state,
+                            state.storage,
+                            actor.user_id,
+                            reply_document_refs,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - recovery stays closed
+                        LOGGER.warning(
+                            "Reply document recovery state failed (%s)",
+                            type(exc).__name__,
+                        )
+                        reply_state = None
+                    reply_resolution_status = (
+                        str(reply_state.status) if reply_state is not None else TELEGRAM_REPLY_BLOCKED
+                    )
+                    if reply_state is not None and reply_state.status == TELEGRAM_REPLY_RESOLVED:
+                        reply_resolution = (
+                            reply_state.raw_object_id,
+                            reply_state.uploaded_by,
+                        )
+                        attachments.append(
+                            _resolved_telegram_reply_attachment(
+                                reply_state.raw_object_id,
+                                reply_state.uploaded_by,
+                            )
+                        )
+
+            if recovery_supplied and (
+                not reply_pointer_present
+                or document is not None
+                or reply_document_recovery is None
+                or not reply_document_source_ref
+                or not reply_document_message_ref
+            ):
+                raise HTTPException(status_code=400, detail="Invalid reply media recovery")
+            if recovery_supplied and not (reply_files_read and reply_files_upload):
+                raise HTTPException(status_code=403, detail="Reply media recovery is not allowed")
+
+            if (
+                reply_resolution_status == TELEGRAM_REPLY_ABSENT
+                and reply_files_read
+                and reply_files_upload
+                and reply_document_source_ref
+                and reply_document_message_ref
+            ):
+                if reply_document_recovery is None:
+                    if source_ref and lease_token:
+                        state.storage.idempotency_release(actor.own_id, source_ref, lease_token)
+                        lease_token = ""
+                    return {"reply_media_recovery_required": True}
+
+                recovery_source_ref = reply_document_recovery.get("source_ref")
+                recovery_unique_id = reply_document_recovery.get("file_unique_id")
+                recovery_unique_ref = (
+                    f"telegram-unique:{recovery_unique_id}"
+                    if isinstance(recovery_unique_id, str)
+                    and recovery_unique_id
+                    and recovery_unique_id == recovery_unique_id.strip()
+                    and len(recovery_unique_id) <= 480
+                    and all(char.isascii() and 33 <= ord(char) <= 126 for char in recovery_unique_id)
+                    else ""
+                )
+                recovery_media_kind = str(reply_document_recovery.get("media_kind") or "")
+                recovery_mime_type = str(
+                    reply_document_recovery.get("mime_type") or "application/octet-stream"
+                )
+                recovery_filename = str(reply_document_recovery.get("filename") or "telegram-file.bin")
+                if (
+                    recovery_source_ref != reply_document_source_ref
+                    or recovery_unique_ref != reply_document_unique_ref
+                    or recovery_media_kind not in {"animation", "document", "photo", "video", "video_note"}
+                    or recovery_mime_type.casefold().startswith("audio/")
+                    or not recovery_filename
+                    or len(recovery_filename) > 1024
+                    or len(recovery_mime_type) > 255
+                ):
+                    raise HTTPException(status_code=400, detail="Invalid reply media recovery")
+                encoded_recovery = reply_document_recovery.get("content_base64")
+                if not isinstance(encoded_recovery, str):
+                    raise HTTPException(status_code=400, detail="Invalid reply media recovery")
+                try:
+                    recovery_content = base64.b64decode(encoded_recovery, validate=True)
+                except (ValueError, binascii.Error) as exc:
+                    raise HTTPException(status_code=400, detail="Invalid reply media recovery") from exc
+                if len(recovery_content) > settings.max_upload_bytes:
+                    raise HTTPException(status_code=413, detail="File is too large")
+
+                recovery_metadata: dict[str, Any] = {
+                    "channel": actor.source,
+                    "chat_id": getattr(request.state, "bridge_chat_id", ""),
+                    "media_kind": recovery_media_kind,
+                    "uploaded_by": actor.own_id,
+                }
+                recovery_kwargs = {"archive_password": archive_password} if archive_password else {}
+                recovery_ingest_ref = (
+                    "telegram-recovery:"
+                    + hashlib.sha256(
+                        json.dumps(
+                            [actor.own_id, *reply_document_refs],
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    ).hexdigest()
+                )
+                try:
+                    file_ingestion = await state.ingestion.ingest_file(
+                        actor.user_id,
+                        None,
+                        recovery_content,
+                        filename=recovery_filename,
+                        mime_type=recovery_mime_type,
+                        media_kind=recovery_media_kind,
+                        metadata=recovery_metadata,
+                        source_ref=recovery_ingest_ref,
+                        exact_byte_identity_only=True,
+                        **recovery_kwargs,
+                    )
+                except SourceReferenceConflictError as exc:
+                    raise IdempotencyConflictError("Telegram reply file identity is unavailable") from exc
+                password_challenge = _archive_password_challenge(file_ingestion)
+                if password_challenge is not None:
+                    if source_ref and lease_token:
+                        state.storage.idempotency_release(actor.own_id, source_ref, lease_token)
+                        lease_token = ""
+                    return _public_chat_for_actor(
+                        password_challenge,
+                        storage=state.storage,
+                        actor=actor,
+                    )
+                recovered_raw_id = str(file_ingestion.get("raw_object_id") or "")
+                try:
+                    recovered_file = await run_blocking(
+                        read_authorized_file,
+                        state.storage,
+                        state.settings.files_dir,
+                        recovered_raw_id,
+                        actor.user_id,
+                        person_id=actor.own_id,
+                        max_bytes=settings.max_upload_bytes,
+                    )
+                except (FileRecordUnavailable, AuthorizedFileReadError) as exc:
+                    raise IdempotencyConflictError("Recovered Telegram reply bytes are unavailable") from exc
+                recovery_digest = hashlib.sha256(recovery_content).hexdigest()
+                if len(recovered_file.content) != len(recovery_content) or not hmac.compare_digest(
+                    hashlib.sha256(recovered_file.content).hexdigest(),
+                    recovery_digest,
+                ):
+                    raise IdempotencyConflictError("Recovered Telegram reply bytes could not be verified")
+                try:
+                    aliases_bound = await run_blocking(
+                        bind_owned_telegram_reply_recovery_aliases,
+                        state.storage,
+                        actor.user_id,
+                        actor.own_id,
+                        recovered_raw_id,
+                        tuple(
+                            value
+                            for value in (
+                                reply_document_message_ref,
+                                reply_document_unique_ref,
+                                reply_document_source_ref,
+                            )
+                            if value
+                        ),
+                    )
+                except SourceReferenceConflictError as exc:
+                    raise IdempotencyConflictError("Telegram reply recovery identity is unavailable") from exc
+                if not aliases_bound:
+                    raise IdempotencyConflictError("Telegram reply recovery identity could not be authorized")
+                final_resolution = await run_blocking(
+                    resolve_tenant_telegram_reply_aliases,
+                    state.storage,
+                    actor.user_id,
+                    reply_document_refs,
+                )
+                if final_resolution != (recovered_raw_id, actor.own_id):
+                    raise IdempotencyConflictError("Telegram reply recovery did not converge")
+                attachments.append(_resolved_telegram_reply_attachment(recovered_raw_id, actor.own_id))
+            elif recovery_supplied and reply_resolution_status == TELEGRAM_REPLY_BLOCKED:
+                raise HTTPException(status_code=409, detail="Reply media recovery is blocked")
             if document:
                 state.auth_service.require(actor, "files.upload")
                 if file_content is None:  # pragma: no cover - narrowed by document validation above
@@ -2847,6 +3029,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 reply_to=str(body.get("reply_to") or "").strip() or None,
                 quoted_attachment_reference=quoted_attachment_reference,
                 reply_assistant_reference=reply_assistant_reference,
+                # Exact assistant row for multi-citation fan-out. Runtime rechecks
+                # role/conversation/emitted knowledge_citations; caller JSON is
+                # never a citation map grant.
+                reply_assistant_message_id=reply_source_message_id or None,
             )
             # ``make_file`` keeps inline base64 for existing clients, but the
             # durable authority is an exact-byte, person-owned artifact.  Freeze

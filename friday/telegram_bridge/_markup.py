@@ -54,6 +54,12 @@ _BULLET = re.compile(r"^(\s*)[-*+]\s+(?=\S)", re.MULTILINE)
 # spaces after the inline star is the shape emitted by that failure and keeps
 # this distinct from multiplication or ordinary prose.
 _INLINE_BULLET = re.compile(r"[ \t]+\*[ \t]{2,}(?=\S)")
+_FLATTENED_LIST_LABEL = re.compile(
+    r"^(?:"
+    r"\*\*[^*\n]{1,80}[:;—–-]\*\*|\*\*[^*\n]{1,80}\*\*[ \t]*[:;—–-]|"
+    r"__[^_\n]{1,80}[:;—–-]__|__[^_\n]{1,80}__[ \t]*[:;—–-]"
+    r")(?:[ \t]+|$)"
+)
 # Markdown quote markers have to become Telegram's supported blockquote tag;
 # leaving ``>`` as escaped prose preserves bytes but loses the requested shape.
 _ESCAPED_QUOTE = re.compile(r"^&gt;[ \t]?(.*)$", re.MULTILINE)
@@ -71,25 +77,67 @@ _STASHED_CODE = re.compile(r"\x00code[0-9]+\x00")
 def _restore_flattened_bullets(source: str) -> str:
     """Put flattened sibling bullets back on separate Markdown lines.
 
-    Only lines which already begin with a real Markdown bullet are repaired.
-    This is deliberately narrower than replacing every `` *   `` sequence:
-    code has already been stashed, but arithmetic and literal prose must still
-    remain byte-for-byte text.
+    Lines which already begin with a real Markdown bullet are unambiguous.  A
+    prose preamble is repaired only when repeated siblings also look like list
+    prose/labels.  This is deliberately narrower than replacing every
+    `` *   `` sequence: code has already been stashed, but arithmetic and
+    literal prose must still remain byte-for-byte text.
     """
 
     restored: list[str] = []
     for line in source.split("\n"):
         marker = _BULLET.match(line)
         body = line[marker.end() :] if marker is not None else ""
-        if marker is None or _INLINE_BULLET.search(body) is None:
+        if marker is not None and _INLINE_BULLET.search(body) is not None:
+            indent = marker.group(1)
+            # The leading marker itself has the same whitespace shape. Split
+            # only the body after it, otherwise the first "sibling" is an
+            # empty string and becomes a spurious leading blank line.
+            siblings = _INLINE_BULLET.split(body)
+            restored.append(f"{line[: marker.end()]}{siblings[0]}")
+            restored.extend(f"{indent}* {sibling}" for sibling in siblings[1:])
+            continue
+
+        inline_markers = list(_INLINE_BULLET.finditer(line))
+        if len(inline_markers) < 2:
             restored.append(line)
             continue
-        indent = marker.group(1)
-        # The leading marker itself has the same whitespace shape. Split only
-        # the body after it, otherwise the first "sibling" is an empty string
-        # and becomes a spurious leading blank line.
-        siblings = _INLINE_BULLET.split(body)
-        restored.append(f"{line[: marker.end()]}{siblings[0]}")
+
+        # Models also flatten a list after a prose/Markdown preamble:
+        # ``**Сводка:** *   one *   two``.  Repair only a repeated list whose
+        # preamble visibly closes with punctuation or balanced emphasis.  The
+        # repeat threshold keeps arithmetic such as ``5 *   3`` literal.
+        preamble = line[: inline_markers[0].start()].rstrip()
+        stripped = preamble.strip()
+        punctuation_closed = stripped.endswith((".", ":", ";", "!", "?", "…"))
+        emphasis_closed = bool(
+            stripped.endswith("**")
+            and stripped.count("**") >= 2
+            and stripped.count("**") % 2 == 0
+            or stripped.endswith("__")
+            and stripped.count("__") >= 2
+            and stripped.count("__") % 2 == 0
+        )
+        if not stripped or not (punctuation_closed or emphasis_closed):
+            restored.append(line)
+            continue
+        indent = line[: len(line) - len(line.lstrip())]
+        siblings = _INLINE_BULLET.split(line)
+        item_bodies = [sibling.strip() for sibling in siblings[1:]]
+        has_markdown_label = any(_FLATTENED_LIST_LABEL.match(body) is not None for body in item_bodies)
+        has_prose_item = any(
+            len(re.findall(r"[^\W\d_]+", body, flags=re.UNICODE)) >= 2
+            and body.rstrip().endswith((".", ":", ";", "!", "?", "…"))
+            for body in item_bodies
+        )
+        # Balanced emphasis by itself is not list evidence: ``**5** * 3 * 2``
+        # is an ordinary product.  A punctuation-led preamble may introduce
+        # ordinary sentence items; an emphasis-led one needs an explicit
+        # Markdown label unless its items are themselves closed prose.
+        if not has_markdown_label and not (punctuation_closed and has_prose_item):
+            restored.append(line)
+            continue
+        restored.append(siblings[0].rstrip())
         restored.extend(f"{indent}* {sibling}" for sibling in siblings[1:])
     return "\n".join(restored)
 

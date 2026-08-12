@@ -19,9 +19,13 @@ from friday.agent_runtime import (
     _UNCONFIRMED_SUPPORTED_DEED,
     AgentContext,
     AgentRuntime,
+    FileRegistrationKind,
     _claims_an_unconfirmed_supported_deed,
+    _file_evidence_view_of,
 )
 from friday.execution_kernel import ExecutionKernel
+from friday.ingestion import IngestionPipeline
+from friday.knowledge_graph import KnowledgeGraph
 from friday.permissions import ActorContext, AuthorizationService
 
 _FALSE_OUTSIDE_REPORT = "Я уже заказала курьера к служебному входу."
@@ -85,16 +89,44 @@ def _runtime(settings, storage, monkeypatch, *, verify_answers: bool = False) ->
     return runtime
 
 
+async def _registered_text_attachment(
+    settings,
+    storage,
+    *,
+    filename: str,
+    source_text: str,
+) -> dict[str, str]:
+    """Create the same durable SQLite + content-addressed file source used in production."""
+
+    outcome = await IngestionPipeline(settings, storage, KnowledgeGraph(storage)).ingest_file(
+        "alice",
+        None,
+        source_text.encode(),
+        filename=filename,
+        mime_type="text/plain",
+        metadata={"uploaded_by": "alice"},
+        source_ref=f"test-file:{filename}",
+    )
+    raw_id = str(outcome["raw_object_id"])
+    raw = storage.get_raw_object(raw_id, "alice")
+    assert raw is not None
+    stored = json.loads(str(raw["metadata_json"] or "{}"))
+    stored_path = Path(settings.files_dir) / str(stored["stored_path"])
+    assert stored_path.is_file()
+    assert stored_path.read_bytes() == source_text.encode()
+    return {"raw_object_id": raw_id}
+
+
 @pytest.mark.parametrize(
     ("source_text", "truthful_summary"),
     [
         (
             "Статус заказа\nЗаказ оформлен 11 августа 2026 года оператором поставщика.",
-            "Заказ оформлен 11 августа 2026 года оператором поставщика.",
+            "По данным файла: Заказ оформлен 11 августа 2026 года оператором поставщика.",
         ),
         (
             "Статус документа\nДокумент подготовлен 11 августа 2026 года отделом снабжения.",
-            "Документ подготовлен 11 августа 2026 года отделом снабжения.",
+            "По данным файла: Документ подготовлен 11 августа 2026 года отделом снабжения.",
         ),
     ],
     ids=("outside-action-source-state", "supported-file-source-state"),
@@ -108,35 +140,78 @@ async def test_a_bare_upload_summary_keeps_a_truthful_state_from_its_source(
     source_text: str,
     truthful_summary: str,
 ) -> None:
-    """A status read from the uploaded document is not Friday claiming her own deed."""
+    """Bare notice is zero-model; a truthful source summary is a follow-up, not a self-deed."""
 
     assert Path(settings.database_path).is_relative_to(tmp_path)
     runtime = _runtime(settings, storage, monkeypatch)
+    attachment = await _registered_text_attachment(
+        settings,
+        storage,
+        filename="synthetic-source-status.txt",
+        source_text=source_text,
+    )
+
+    async def forbidden_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("bare upload notice prepared general context")
+
+    async def forbidden_generate(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("bare upload notice called the model")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
+    receipt = await runtime.chat(
+        "alice",
+        "Загружен документ: synthetic-source-status.txt",
+        actor=_actor(),
+        attachments=[attachment],
+        enable_tools=False,
+        synthetic_document_notice=True,
+    )
+    assert receipt["tools_used"] == []
+    assert receipt["message"] != truthful_summary
+    assert receipt["message_format"] == "plain"
+    assert "зарегистрирован" in receipt["message"]
+    assert "байты на диске проверены" in receipt["message"]
+    assert f"› {source_text.splitlines()[0]}" in receipt["message"]
+    assert f"› {source_text.splitlines()[1]}" in receipt["message"]
+    receipt_meta = json.loads(
+        str(storage.get_message(str(receipt["message_id"]), "alice")["metadata_json"] or "{}")
+    )
+    receipt_guards = receipt_meta.get("structural", {}).get("output_guards", {})
+    assert receipt_guards.get("outside_deed_replaced") is not True
+    assert receipt_guards.get("supported_deed_replaced") is not True
+
     shown_sources: list[str] = []
+    shown_evidence = []
 
     async def generate(context, message, attachments):  # noqa: ANN001
         del context, message
         shown_sources.extend(str(item.get("transient_text") or "") for item in attachments)
+        shown_evidence.extend(_file_evidence_view_of(item) for item in attachments)
         return {"content": truthful_summary, "tools_used": [], "_model_generated": True}
 
+    monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
     monkeypatch.setattr(runtime, "_generate_response", generate)
     reply = await runtime.chat(
         "alice",
-        "Загружен документ: synthetic-source-status.txt",
+        "Кратко перескажи этот файл.",
         actor=_actor(),
-        attachments=[
-            {
-                "filename": "synthetic-source-status.txt",
-                "transient_text": source_text,
-                "extraction_success": True,
-                "verification_eligible": True,
-            }
-        ],
+        conversation_id=receipt["conversation_id"],
+        attachments=[],
         enable_tools=False,
-        synthetic_document_notice=True,
     )
 
     assert shown_sources == [source_text]
+    assert len(shown_evidence) == 1
+    evidence = shown_evidence[0]
+    assert evidence is not None
+    assert evidence.registration is FileRegistrationKind.VALID
+    assert evidence.disk_verified is True
+    assert evidence.source_readable is True
+    assert evidence.source_complete is True
+    assert evidence.verification_eligible is True
     assert reply["message"] == truthful_summary
     stored = storage.get_message(str(reply["message_id"]), "alice")
     metadata = json.loads(str(stored["metadata_json"] or "{}"))
@@ -163,30 +238,69 @@ async def test_a_bare_upload_does_not_hide_an_active_model_deed(
     blocked_answer: str,
     guard_name: str,
 ) -> None:
+    """Bare notice never synthesizes; unsupported deeds are blocked on explicit follow-up."""
+
     assert Path(settings.database_path).is_relative_to(tmp_path)
     runtime = _runtime(settings, storage, monkeypatch)
+    source_text = f"Недоверенная строка внутри файла: {model_claim}"
+    attachment = await _registered_text_attachment(
+        settings,
+        storage,
+        filename="synthetic-active-deed.txt",
+        source_text=source_text,
+    )
 
-    async def generate(context, message, attachments):  # noqa: ANN001
-        del context, message, attachments
-        return {"content": model_claim, "tools_used": [], "_model_generated": True}
+    async def forbidden_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("bare upload notice prepared general context")
 
-    monkeypatch.setattr(runtime, "_generate_response", generate)
-    reply = await runtime.chat(
+    async def forbidden_generate(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("bare upload notice called the model")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
+    receipt = await runtime.chat(
         "alice",
         "Загружен документ: synthetic-active-deed.txt",
         actor=_actor(),
-        attachments=[
-            {
-                "filename": "synthetic-active-deed.txt",
-                "transient_text": f"Недоверенная строка внутри файла: {model_claim}",
-                "extraction_success": True,
-                "verification_eligible": True,
-            }
-        ],
+        attachments=[attachment],
         enable_tools=False,
         synthetic_document_notice=True,
     )
+    assert receipt["tools_used"] == []
+    assert receipt["message"] != blocked_answer
+    assert receipt["message"] != model_claim
+    assert "зарегистрирован" in receipt["message"]
+    assert "байты на диске проверены" in receipt["message"]
+    assert f"› {source_text}" in receipt["message"]
 
+    shown_evidence = []
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message
+        shown_evidence.extend(_file_evidence_view_of(item) for item in attachments)
+        return {"content": model_claim, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Кратко перескажи этот файл.",
+        actor=_actor(),
+        conversation_id=receipt["conversation_id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert len(shown_evidence) == 1
+    evidence = shown_evidence[0]
+    assert evidence is not None
+    assert evidence.registration is FileRegistrationKind.VALID
+    assert evidence.disk_verified is True
+    assert evidence.source_readable is True
+    assert evidence.source_complete is True
+    assert evidence.verification_eligible is True
     assert reply["message"] == blocked_answer
     stored = storage.get_message(str(reply["message_id"]), "alice")
     metadata = json.loads(str(stored["metadata_json"] or "{}"))

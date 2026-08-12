@@ -39,6 +39,7 @@ from typing import Any, Protocol
 
 from bs4 import BeautifulSoup
 
+from friday.archive_formats import archive_dispatch_kind
 from friday.archive_passwords import archive_password_candidates
 from friday.documents._office_structure import (
     build_docx_text_and_structure,
@@ -171,7 +172,6 @@ _ODF_STATISTIC_ATTRIBUTES = {
 }
 _OFFICE_EXTENSIONS = {".docx", ".xlsx", ".pptx", ".odt", ".rtf"}
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
-_ARCHIVE_EXTENSIONS = {".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".zst"}
 _MAX_NESTING_DEPTH = 2
 _MAX_ARCHIVE_PREVIEW_FILES = 24
 _MAX_STRUCTURED_PARSE_BYTES = 2 * 1024 * 1024
@@ -577,8 +577,35 @@ class DocumentExtractor:
         lowered = safe_name.casefold()
         ext = self._compound_extension(lowered)
         detected_mime = mime_type or mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+        archive_kind = archive_dispatch_kind(safe_name, detected_mime)
         try:
-            if ext in _TEXT_EXTENSIONS:
+            if archive_kind is not None:
+                # The same closed MIME/suffix decision is used by the eager
+                # ingestion gate.  Keep it first: an explicitly declared ZIP
+                # named ``.bin`` (or even with a misleading ordinary suffix)
+                # must not pass persistence before its password is validated.
+                # Passwords are credentials, so retries are a closed set of
+                # representation variants rather than guesses.  Every attempt
+                # consumes the same upload-wide budget and deadline.  Only an
+                # explicit invalid-password result permits the next variant;
+                # limits, missing backends and corrupt archives fail closed.
+                for candidate in password_candidates or (None,):
+                    try:
+                        result = self._extract_archive(
+                            content,
+                            safe_name,
+                            archive_kind,
+                            _depth,
+                            budget,
+                            deadline,
+                            candidate,
+                        )
+                    except ArchivePasswordInvalid:
+                        continue
+                    break
+                else:
+                    raise ArchivePasswordInvalid
+            elif ext in _TEXT_EXTENSIONS:
                 result = self._extract_text(content, ext)
             elif ext in _HTML_EXTENSIONS or detected_mime in {"text/html", "application/xhtml+xml"}:
                 result = self._extract_html(content)
@@ -607,28 +634,6 @@ class DocumentExtractor:
                 result = self._extract_email(content)
             elif ext == ".rtf":
                 result = self._extract_rtf(content)
-            elif ext in _ARCHIVE_EXTENSIONS or ext.startswith(".tar."):
-                # Passwords are credentials, so retries are a closed set of
-                # representation variants rather than guesses.  Every attempt
-                # consumes the same upload-wide budget and deadline.  Only an
-                # explicit invalid-password result permits the next variant;
-                # limits, missing backends and corrupt archives fail closed.
-                for candidate in password_candidates or (None,):
-                    try:
-                        result = self._extract_archive(
-                            content,
-                            safe_name,
-                            ext,
-                            _depth,
-                            budget,
-                            deadline,
-                            candidate,
-                        )
-                    except ArchivePasswordInvalid:
-                        continue
-                    break
-                else:
-                    raise ArchivePasswordInvalid
             elif detected_mime.startswith("text/"):
                 result = self._extract_text(content, ext or ".txt")
             else:
@@ -641,28 +646,28 @@ class DocumentExtractor:
         except ArchivePasswordRequired:
             result = DocumentResult(
                 "",
-                {"filename": safe_name, "format": ext.lstrip(".")},
+                {"filename": safe_name, "format": (archive_kind or ext).lstrip(".")},
                 False,
                 "archive_password_required",
             )
         except ArchivePasswordInvalid:
             result = DocumentResult(
                 "",
-                {"filename": safe_name, "format": ext.lstrip(".")},
+                {"filename": safe_name, "format": (archive_kind or ext).lstrip(".")},
                 False,
                 "archive_password_invalid",
             )
         except ArchiveBackendUnavailable:
             result = DocumentResult(
                 "",
-                {"filename": safe_name, "format": ext.lstrip(".")},
+                {"filename": safe_name, "format": (archive_kind or ext).lstrip(".")},
                 False,
                 "archive_backend_unavailable",
             )
         except ArchiveExtractionError:
             result = DocumentResult(
                 "",
-                {"filename": safe_name, "format": ext.lstrip(".")},
+                {"filename": safe_name, "format": (archive_kind or ext).lstrip(".")},
                 False,
                 "archive_extract_failed",
             )

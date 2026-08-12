@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import io
@@ -13,11 +14,20 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
+import pyzipper
 from fastapi.testclient import TestClient
 
 from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.security import sign_bridge_request
-from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
+from friday.storage.models import (
+    Entity,
+    EntityType,
+    InboxItem,
+    InboxStatus,
+    KnowledgeObject,
+    RawObject,
+    new_id,
+)
 from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
 
@@ -1129,7 +1139,8 @@ def test_workspace_output_line_preserves_authorized_second_document_selector(
     assert [str(item.get("raw_object_id") or "") for item in restored] == [selected_second.id]
 
 
-def test_server_resolves_only_current_uploaders_live_nonignored_reply_file(settings, monkeypatch) -> None:
+def test_server_resolves_only_live_nonignored_same_tenant_reply_file(settings, monkeypatch) -> None:
+    import friday.server as server_module
     from friday.server import create_app
 
     scoped = replace(settings, verify_answers=False, shared_archive=True)
@@ -1156,14 +1167,14 @@ def test_server_resolves_only_current_uploaders_live_nonignored_reply_file(setti
         assert storage.resolve_owned_file_source_ref(tenant, uploader, "telegram-file:LEGACY") == legacy.id
         for label in ("FOREIGN", "IGNORED", "DELETED"):
             assert storage.resolve_owned_file_source_ref(tenant, uploader, f"telegram-file:{label}") is None
-        resolution_calls: list[tuple[str, str, str]] = []
-        original_resolver = storage.resolve_owned_file_source_ref
+        resolution_calls: list[tuple[str, tuple[str, ...]]] = []
+        original_resolver = server_module.resolve_tenant_telegram_reply_aliases
 
-        def observed_resolver(user_id, uploaded_by, source_ref):
-            resolution_calls.append((user_id, uploaded_by, source_ref))
-            return original_resolver(user_id, uploaded_by, source_ref)
+        def observed_resolver(storage_arg, user_id, source_refs):
+            resolution_calls.append((user_id, source_refs))
+            return original_resolver(storage_arg, user_id, source_refs)
 
-        monkeypatch.setattr(storage, "resolve_owned_file_source_ref", observed_resolver)
+        monkeypatch.setattr(server_module, "resolve_tenant_telegram_reply_aliases", observed_resolver)
 
         async def chat_spy(user_id, message, **kwargs):
             captured.update(user_id=user_id, message=message, kwargs=kwargs)
@@ -1190,7 +1201,7 @@ def test_server_resolves_only_current_uploaders_live_nonignored_reply_file(setti
             user="1001",
         )
         assert response.status_code == 200, response.text
-        assert resolution_calls == [(tenant, uploader, valid_pointer)]
+        assert resolution_calls == [(tenant, (valid_pointer,))]
 
     assert captured["kwargs"]["attachments"] == [{"raw_object_id": valid.id}]
     assert captured["kwargs"]["quoted_attachment_reference"] is True
@@ -1296,6 +1307,181 @@ def test_server_reply_transport_aliases_survive_file_id_churn_and_reject_conflic
         assert conflicting.id != raw_id
         assert captured[-1]["kwargs"]["attachments"] == []
         assert captured[-1]["kwargs"]["quoted_attachment_reference"] is True
+
+
+def test_owner_structural_reply_reads_active_shared_uploaders_registered_file(
+    settings,
+    monkeypatch,
+) -> None:
+    import friday.agent_runtime as runtime_module
+    from friday.server import create_app
+
+    scoped = replace(settings, verify_answers=False, shared_archive=True)
+    app = create_app(scoped)
+    with TestClient(app) as client:
+        canonical_chat = app.state.agent.chat
+        owner_me = _bridge_call(client, scoped, "GET", "/api/me", user="1001")
+        sender_me = _bridge_call(client, scoped, "GET", "/api/me", user="2002")
+        assert owner_me.status_code == 200, owner_me.text
+        assert sender_me.status_code == 200, sender_me.text
+        owner = str(owner_me.json()["actor"]["user_id"])
+        sender = str(sender_me.json()["actor"]["user_id"])
+        assert owner != sender
+        app.state.storage.update_user(owner, preset_key="owner")
+        app.state.storage.update_user(sender, preset_key="user")
+
+        async def upload_ack(user_id, _message, **kwargs):
+            del user_id
+            conversation_id = str(kwargs.get("conversation_id") or "")
+            if not conversation_id:
+                conversation_id = str(app.state.storage.create_conversation(sender)["id"])
+            return {
+                "conversation_id": conversation_id,
+                "message": "accepted",
+                "context": {"interaction_mode": "dialogue"},
+            }
+
+        monkeypatch.setattr(app.state.agent, "chat", upload_ack)
+        upload = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "",
+                "source_ref": "telegram-update:shared-reply-upload",
+                "telegram_message_id": 8801,
+                "telegram_user": {"id": 2002, "first_name": "Sender"},
+                "document": {
+                    "filename": "shared-reply.odt",
+                    "mime_type": "application/vnd.oasis.opendocument.text",
+                    "media_kind": "document",
+                    "source_ref": "telegram-file:SHARED-ORIGINAL-ID",
+                    "file_unique_id": "SHARED-STABLE-ID",
+                    "content_base64": base64.b64encode(
+                        _synthetic_metadata_odt(
+                            title="Shared sender title",
+                            body=("Контрольный маркер: SHARED-REPLY-BODY-MARKER",),
+                        )
+                    ).decode("ascii"),
+                },
+            },
+            user="2002",
+        )
+        assert upload.status_code == 200, upload.text
+        raw_id = app.state.storage.resolve_owned_file_source_ref(
+            LEGACY_OWNER_USER_ID,
+            sender,
+            "telegram-file:SHARED-ORIGINAL-ID",
+        )
+        assert raw_id
+
+        disk_read_people: list[str] = []
+        canonical_disk_read = runtime_module.read_authorized_file
+
+        def observed_disk_read(*args, **kwargs):
+            disk_read_people.append(str(kwargs.get("person_id") or ""))
+            return canonical_disk_read(*args, **kwargs)
+
+        class BodyModel:
+            enabled = True
+            model = "synthetic-shared-reply-body"
+            total_budget_sec = 5.0
+
+            def __init__(self) -> None:
+                self.payloads: list[str] = []
+
+            async def chat(self, messages, **_kwargs):
+                payload = json.dumps(messages, ensure_ascii=False)
+                self.payloads.append(payload)
+                assert "SHARED-REPLY-BODY-MARKER" in payload
+                return {
+                    "content": "Ответ из SHARED-REPLY-BODY-MARKER.",
+                    "tool_calls": None,
+                    "_queue_wait_sec": 0.0,
+                }
+
+        body_model = BodyModel()
+        monkeypatch.setattr(runtime_module, "read_authorized_file", observed_disk_read)
+        monkeypatch.setattr(app.state.agent, "chat", canonical_chat)
+        app.state.agent.llm = body_model
+        reply = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Скажи, какой контрольный маркер указан в этом файле?",
+                "source_ref": "telegram-update:shared-reply-read",
+                "telegram_message_id": 8802,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+                "reply_document_message_id": 8801,
+                "reply_document_file_unique_id": "SHARED-STABLE-ID",
+                "reply_document_source_ref": "telegram-file:SHARED-CHURNED-ID",
+            },
+            user="1001",
+        )
+        assert reply.status_code == 200, reply.text
+        reply_payload = reply.json()
+        assert "SHARED-REPLY-BODY-MARKER" in str(reply_payload.get("message") or "")
+        assert reply_payload["attachment_context_readable_count"] == 1
+        assert reply_payload["attachment_coverage_complete"] is True
+        assert reply_payload["attachment_verification_complete"] is True
+        assert disk_read_people == [sender]
+
+        follow_up = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "А подробнее по нему?",
+                "source_ref": "telegram-update:shared-reply-follow-up",
+                "telegram_message_id": 8803,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+            },
+            user="1001",
+        )
+        assert follow_up.status_code == 200, follow_up.text
+        follow_up_payload = follow_up.json()
+        assert follow_up_payload["attachment_context_readable_count"] == 1
+        assert follow_up_payload["attachment_coverage_complete"] is True
+        assert follow_up_payload["attachment_verification_complete"] is True
+        assert follow_up_payload["restored_attachment_count"] == 1
+        assert disk_read_people == [sender, sender]
+
+        history = app.state.storage.get_conversation_messages(
+            str(reply_payload["conversation_id"]),
+            user_id=owner,
+        )
+        denied, denied_expected = app.state.agent._restore_conversation_attachments(  # noqa: SLF001
+            "А подробнее по нему?",
+            history[:2],
+            tenant_id=LEGACY_OWNER_USER_ID,
+            person_id=owner,
+            allow_file_read=False,
+        )
+        assert denied == []
+        assert denied_expected == 1
+        assert disk_read_people == [sender, sender]
+
+        forged = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "покажи метаданные этого файла",
+                "source_ref": "telegram-update:shared-reply-forged",
+                "telegram_message_id": 8804,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+                "attachments": [{"raw_object_id": raw_id}],
+            },
+            user="1001",
+        )
+        assert forged.status_code == 200, forged.text
+        assert forged.json()["attachment_context_readable_count"] == 0
+        assert disk_read_people == [sender, sender]
 
 
 def test_content_dedup_binds_fresh_telegram_ref_to_canonical_odt_for_reply_metadata(
@@ -1437,3 +1623,646 @@ async def test_same_odt_text_with_changed_technical_metadata_keeps_second_reply_
     second_metadata = json.loads(str(second_raw.get("metadata_json") or "{}"))
     assert second_metadata["title"] == "Synthetic title B"
     assert second_metadata["title"] != "Synthetic title A"
+
+
+def test_missing_reply_alias_recovers_exact_bytes_once_and_replays_without_redownload(
+    settings,
+    monkeypatch,
+) -> None:
+    from friday.server import create_app
+
+    scoped = replace(settings, verify_answers=False, shared_archive=True)
+    app = create_app(scoped)
+    recovered_bytes = b"exact historical telegram bytes\n"
+    archive_password = "exact-reply-archive-password"
+    archive_buffer = io.BytesIO()
+    with pyzipper.AESZipFile(
+        archive_buffer,
+        mode="w",
+        compression=pyzipper.ZIP_DEFLATED,
+        encryption=pyzipper.WZ_AES,
+    ) as archive:
+        archive.setpassword(archive_password.encode("utf-8"))
+        archive.writestr("note.txt", "synthetic exact reply archive body")
+    archive_bytes = archive_buffer.getvalue()
+    model_calls: list[dict[str, Any]] = []
+    ingest_calls: list[bytes] = []
+
+    async def chat_spy(user_id, message, **kwargs):  # noqa: ANN001
+        model_calls.append({"user_id": user_id, "message": message, **kwargs})
+        conversation_id = str(kwargs.get("conversation_id") or "")
+        if not conversation_id:
+            person_id = str(kwargs.get("actor").own_id)
+            conversation_id = str(
+                app.state.storage.create_conversation(person_id, title="recovered reply")["id"]
+            )
+        return {
+            "conversation_id": conversation_id,
+            "message": "ok",
+            "context": {"interaction_mode": "dialogue"},
+        }
+
+    source_ref = "telegram-update:reply-exact-byte-recovery"
+    file_ref = "telegram-file:HISTORICAL-CHURNED-FILE"
+    unique_id = "HISTORICAL-STABLE-UNIQUE"
+    message_id = 7301
+    base_payload = {
+        "message": "покажи метаданные этого файла",
+        "source_ref": source_ref,
+        "telegram_message_id": 7302,
+        "telegram_user": {"id": 1001, "first_name": "Alice"},
+        "reply_document_source_ref": file_ref,
+        "reply_document_message_id": message_id,
+        "reply_document_file_unique_id": unique_id,
+    }
+
+    with TestClient(app) as client:
+        canonical_ingest = app.state.ingestion.ingest_file
+
+        async def ingest_spy(*args, **kwargs):  # noqa: ANN002, ANN003
+            ingest_calls.append(bytes(args[2]))
+            assert kwargs.get("exact_byte_identity_only") is True
+            return await canonical_ingest(*args, **kwargs)
+
+        monkeypatch.setattr(app.state.agent, "chat", chat_spy)
+        monkeypatch.setattr(app.state.ingestion, "ingest_file", ingest_spy)
+        me = _bridge_call(client, scoped, "GET", "/api/me", user="1001")
+        assert me.status_code == 200, me.text
+        uploader = str(me.json()["actor"]["user_id"])
+        app.state.storage.update_user(uploader, preset_key="user")
+        decoy = _stored_reply_file(
+            app.state.storage,
+            LEGACY_OWNER_USER_ID,
+            uploader,
+            "same-visible-name",
+            content="different decoy bytes",
+        )
+        before_raw_count = int(
+            app.state.storage.execute(
+                "SELECT COUNT(*) AS n FROM raw_objects WHERE user_id=?",
+                (LEGACY_OWNER_USER_ID,),
+            ).fetchone()["n"]
+        )
+        before_message_count = int(
+            app.state.storage.execute("SELECT COUNT(*) AS n FROM messages").fetchone()["n"]
+        )
+        before_conversation_count = int(
+            app.state.storage.execute("SELECT COUNT(*) AS n FROM conversations").fetchone()["n"]
+        )
+        before_user_count = int(app.state.storage.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"])
+
+        phase_one = _bridge_call(client, scoped, "POST", "/api/chat", base_payload, user="1001")
+        assert phase_one.status_code == 200, phase_one.text
+        assert phase_one.json() == {"reply_media_recovery_required": True}
+        assert model_calls == []
+        assert ingest_calls == []
+        assert (
+            int(
+                app.state.storage.execute(
+                    "SELECT COUNT(*) AS n FROM raw_objects WHERE user_id=?",
+                    (LEGACY_OWNER_USER_ID,),
+                ).fetchone()["n"]
+            )
+            == before_raw_count
+        )
+        assert int(app.state.storage.execute("SELECT COUNT(*) AS n FROM messages").fetchone()["n"]) == (
+            before_message_count
+        )
+        assert (
+            int(app.state.storage.execute("SELECT COUNT(*) AS n FROM conversations").fetchone()["n"])
+            == before_conversation_count
+        )
+        assert int(app.state.storage.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]) == (
+            before_user_count
+        )
+        assert (
+            app.state.storage.execute(
+                "SELECT 1 FROM request_idempotency WHERE user_id=? AND request_key=?",
+                (uploader, source_ref),
+            ).fetchone()
+            is None
+        )
+
+        recovered_payload = {
+            **base_payload,
+            "reply_document_recovery": {
+                "filename": "same-visible-name.txt",
+                "mime_type": "text/plain",
+                "media_kind": "document",
+                "source_ref": file_ref,
+                "file_unique_id": unique_id,
+                "content_base64": base64.b64encode(recovered_bytes).decode("ascii"),
+            },
+        }
+        phase_two = _bridge_call(client, scoped, "POST", "/api/chat", recovered_payload, user="1001")
+        assert phase_two.status_code == 200, phase_two.text
+        assert phase_two.json()["message"] == "ok"
+        assert len(model_calls) == 1
+        assert ingest_calls == [recovered_bytes]
+        attachment = model_calls[0]["attachments"]
+        assert len(attachment) == 1
+        recovered_raw_id = str(attachment[0].get("raw_object_id") or "")
+        assert recovered_raw_id and recovered_raw_id != decoy.id
+        raw = app.state.storage.get_raw_object(recovered_raw_id, LEGACY_OWNER_USER_ID)
+        assert raw is not None
+        metadata = json.loads(str(raw.get("metadata_json") or "{}"))
+        stored = scoped.files_dir / str(metadata["stored_path"])
+        assert stored.read_bytes() == recovered_bytes
+        assert metadata["size_bytes"] == len(recovered_bytes)
+        assert metadata["sha256"] == hashlib.sha256(recovered_bytes).hexdigest()
+        message_ref = f"telegram-message:5001:{message_id}"
+        refs = (message_ref, f"telegram-unique:{unique_id}", file_ref)
+        from friday.storage._intake import resolve_tenant_telegram_reply_aliases
+
+        assert resolve_tenant_telegram_reply_aliases(
+            app.state.storage,
+            LEGACY_OWNER_USER_ID,
+            refs,
+        ) == (recovered_raw_id, uploader)
+
+        replay = _bridge_call(client, scoped, "POST", "/api/chat", base_payload, user="1001")
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["idempotent_replay"] is True
+        assert len(model_calls) == 1
+        assert ingest_calls == [recovered_bytes]
+
+        from friday.storage._intake import (
+            TELEGRAM_REPLY_BLOCKED,
+            bind_owned_telegram_reply_recovery_aliases,
+            resolve_tenant_telegram_reply_alias_state,
+        )
+
+        for label, flags in (
+            ("blocked-private", {}),
+            ("blocked-deleted", {"deleted": True}),
+            ("blocked-ignored", {"ignored": True}),
+        ):
+            blocked_raw = _stored_reply_file(
+                app.state.storage,
+                LEGACY_OWNER_USER_ID,
+                uploader,
+                label,
+                **flags,
+            )
+            if label == "blocked-private":
+                private_knowledge = KnowledgeObject(
+                    id=new_id("ko"),
+                    user_id=LEGACY_OWNER_USER_ID,
+                    raw_object_id=blocked_raw.id,
+                    content=blocked_raw.raw_content,
+                    content_type="text",
+                    title="private reply dependency",
+                )
+                app.state.storage.store_knowledge_object(private_knowledge)
+                private_entity = Entity(
+                    id=new_id("ent"),
+                    user_id=LEGACY_OWNER_USER_ID,
+                    name=f"Private reply entity {blocked_raw.id}",
+                    entity_type=EntityType.EVENT,
+                )
+                app.state.storage.create_entity(private_entity)
+                app.state.storage.link_knowledge_entity(
+                    LEGACY_OWNER_USER_ID,
+                    private_knowledge.id,
+                    private_entity.id,
+                    status="accepted",
+                )
+                with app.state.storage.transaction() as connection:
+                    connection.execute(
+                        """INSERT INTO private_entity_owners(
+                               entity_id, person_id, privacy_kind, created_at)
+                           VALUES(?, ?, 'reminder', '2026-08-12T00:00:00+00:00')""",
+                        (private_entity.id, "another-person"),
+                    )
+            blocked_ref = f"telegram-unique:{label.upper()}"
+            app.state.storage.execute(
+                """INSERT INTO file_source_aliases(
+                       user_id, uploaded_by, source_ref, raw_object_id, created_at
+                   ) VALUES(?, ?, ?, ?, '2026-08-12T00:00:00+00:00')""",
+                (LEGACY_OWNER_USER_ID, uploader, blocked_ref, blocked_raw.id),
+            )
+            app.state.storage.commit()
+            assert (
+                resolve_tenant_telegram_reply_alias_state(
+                    app.state.storage,
+                    LEGACY_OWNER_USER_ID,
+                    (blocked_ref,),
+                ).status
+                == TELEGRAM_REPLY_BLOCKED
+            )
+            assert (
+                bind_owned_telegram_reply_recovery_aliases(
+                    app.state.storage,
+                    LEGACY_OWNER_USER_ID,
+                    uploader,
+                    blocked_raw.id,
+                    (
+                        f"telegram-message:5001:{7400 + len(label)}",
+                        f"telegram-file:BIND-{label.upper()}",
+                    ),
+                )
+                is False
+            )
+
+        conflicting = _stored_reply_file(
+            app.state.storage,
+            LEGACY_OWNER_USER_ID,
+            uploader,
+            "blocked-conflict-a",
+        )
+        conflict_ref = "telegram-unique:BLOCKED-CONFLICT"
+        app.state.storage.execute(
+            """INSERT INTO file_source_aliases(
+                   user_id, uploaded_by, source_ref, raw_object_id, created_at
+               ) VALUES(?, ?, ?, ?, '2026-08-12T00:00:00+00:00')""",
+            (LEGACY_OWNER_USER_ID, uploader, conflict_ref, conflicting.id),
+        )
+        app.state.storage.commit()
+        assert (
+            resolve_tenant_telegram_reply_alias_state(
+                app.state.storage,
+                LEGACY_OWNER_USER_ID,
+                (message_ref, conflict_ref),
+            ).status
+            == TELEGRAM_REPLY_BLOCKED
+        )
+        atomic_candidate = _stored_reply_file(
+            app.state.storage,
+            LEGACY_OWNER_USER_ID,
+            uploader,
+            "atomic-candidate",
+        )
+        atomic_new_refs = (
+            "telegram-message:5001:7991",
+            conflict_ref,
+            "telegram-file:ATOMIC-NEW-FILE",
+        )
+        alias_count_before = int(
+            app.state.storage.execute("SELECT COUNT(*) AS n FROM file_source_aliases").fetchone()["n"]
+        )
+        from friday.storage import SourceReferenceConflictError
+
+        with pytest.raises(SourceReferenceConflictError):
+            bind_owned_telegram_reply_recovery_aliases(
+                app.state.storage,
+                LEGACY_OWNER_USER_ID,
+                uploader,
+                atomic_candidate.id,
+                atomic_new_refs,
+            )
+        assert (
+            int(app.state.storage.execute("SELECT COUNT(*) AS n FROM file_source_aliases").fetchone()["n"])
+            == alias_count_before
+        )
+        assert (
+            app.state.storage.execute(
+                "SELECT 1 FROM file_source_aliases WHERE user_id=? AND source_ref IN (?, ?)",
+                (LEGACY_OWNER_USER_ID, atomic_new_refs[0], atomic_new_refs[2]),
+            ).fetchone()
+            is None
+        )
+
+        archive_source_ref = "telegram-update:reply-exact-byte-archive"
+        archive_file_ref = "telegram-file:HISTORICAL-ENCRYPTED-ARCHIVE"
+        archive_unique_id = "HISTORICAL-ENCRYPTED-UNIQUE"
+        archive_message_id = 8301
+        archive_base_payload = {
+            "message": "покажи содержимое этого архива",
+            "source_ref": archive_source_ref,
+            "telegram_message_id": 8302,
+            "telegram_user": {"id": 1001, "first_name": "Alice"},
+            "reply_document_source_ref": archive_file_ref,
+            "reply_document_message_id": archive_message_id,
+            "reply_document_file_unique_id": archive_unique_id,
+        }
+        archive_recovery_payload = {
+            **archive_base_payload,
+            "reply_document_recovery": {
+                "filename": "historical-protected.zip",
+                "mime_type": "application/zip",
+                "media_kind": "document",
+                "source_ref": archive_file_ref,
+                "file_unique_id": archive_unique_id,
+                "content_base64": base64.b64encode(archive_bytes).decode("ascii"),
+            },
+        }
+        archive_raw_before = int(
+            app.state.storage.execute(
+                "SELECT COUNT(*) AS n FROM raw_objects WHERE user_id=?",
+                (LEGACY_OWNER_USER_ID,),
+            ).fetchone()["n"]
+        )
+        archive_ingest_before = len(ingest_calls)
+        archive_model_before = len(model_calls)
+
+        archive_phase_one = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            archive_base_payload,
+            user="1001",
+        )
+        assert archive_phase_one.status_code == 200, archive_phase_one.text
+        assert archive_phase_one.json() == {"reply_media_recovery_required": True}
+        for password, challenge_key in (
+            (None, "archive_password_required"),
+            ("wrong-exact-reply-password", "archive_password_invalid"),
+        ):
+            attempt = dict(archive_recovery_payload)
+            if password is not None:
+                attempt["archive_password"] = password
+            challenge = _bridge_call(client, scoped, "POST", "/api/chat", attempt, user="1001")
+            assert challenge.status_code == 200, challenge.text
+            assert challenge.json()[challenge_key] is True
+            assert len(model_calls) == archive_model_before
+            assert (
+                int(
+                    app.state.storage.execute(
+                        "SELECT COUNT(*) AS n FROM raw_objects WHERE user_id=?",
+                        (LEGACY_OWNER_USER_ID,),
+                    ).fetchone()["n"]
+                )
+                == archive_raw_before
+            )
+            assert (
+                app.state.storage.execute(
+                    "SELECT 1 FROM file_source_aliases WHERE user_id=? AND source_ref=?",
+                    (LEGACY_OWNER_USER_ID, archive_file_ref),
+                ).fetchone()
+                is None
+            )
+            assert (
+                app.state.storage.execute(
+                    "SELECT 1 FROM request_idempotency WHERE user_id=? AND request_key=?",
+                    (uploader, archive_source_ref),
+                ).fetchone()
+                is None
+            )
+
+        archive_correct = {
+            **archive_recovery_payload,
+            "archive_password": archive_password,
+        }
+        archive_success = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            archive_correct,
+            user="1001",
+        )
+        assert archive_success.status_code == 200, archive_success.text
+        assert archive_success.json()["message"] == "ok"
+        assert len(model_calls) == archive_model_before + 1
+        assert ingest_calls[archive_ingest_before:] == [archive_bytes, archive_bytes, archive_bytes]
+        archive_refs = (
+            f"telegram-message:5001:{archive_message_id}",
+            f"telegram-unique:{archive_unique_id}",
+            archive_file_ref,
+        )
+        resolved_archive = resolve_tenant_telegram_reply_aliases(
+            app.state.storage,
+            LEGACY_OWNER_USER_ID,
+            archive_refs,
+        )
+        assert resolved_archive is not None
+        archive_raw_id, archive_uploader = resolved_archive
+        assert archive_uploader == uploader
+        archive_raw = app.state.storage.get_raw_object(archive_raw_id, LEGACY_OWNER_USER_ID)
+        assert archive_raw is not None
+        archive_metadata = json.loads(str(archive_raw.get("metadata_json") or "{}"))
+        archive_stored = scoped.files_dir / str(archive_metadata["stored_path"])
+        assert archive_stored.read_bytes() == archive_bytes
+        assert archive_metadata["size_bytes"] == len(archive_bytes)
+        assert archive_metadata["sha256"] == hashlib.sha256(archive_bytes).hexdigest()
+        archive_replay = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            archive_base_payload,
+            user="1001",
+        )
+        assert archive_replay.status_code == 200, archive_replay.text
+        assert archive_replay.json()["idempotent_replay"] is True
+        assert ingest_calls[archive_ingest_before:] == [archive_bytes, archive_bytes, archive_bytes]
+
+    class _RecoveryDownload:
+        headers = {"Content-Length": str(len(recovered_bytes))}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def raise_for_status(self) -> None:
+            return None
+
+        async def aiter_bytes(self):
+            yield recovered_bytes[:7]
+            yield recovered_bytes[7:]
+
+    class _RecoveryTelegram(_Telegram):
+        async def post(self, url, json=None, **_kwargs):
+            self.calls.append((url, json))
+            if url.endswith("/getFile"):
+                return _Response({"ok": True, "result": {"file_path": "documents/recovered.bin"}})
+            return _Response()
+
+        def stream(self, method, url):  # noqa: ANN001
+            assert method == "GET"
+            assert url.endswith("/documents/recovered.bin")
+            return _RecoveryDownload()
+
+    class _RecoveryBackend(_Backend):
+        async def request(self, method, url, *, content=None, headers=None):
+            path = urlsplit(url).path
+            body = json.loads(content.decode("utf-8")) if content else None
+            self.calls.append({"method": method, "path": path, "body": body, "headers": headers})
+            if len(self.calls) == 1:
+                return _Response({"reply_media_recovery_required": True})
+            assert body["reply_document_source_ref"] == file_ref
+            descriptor = body["reply_document_recovery"]
+            assert descriptor["source_ref"] == file_ref
+            assert descriptor["file_unique_id"] == unique_id
+            assert base64.b64decode(descriptor["content_base64"], validate=True) == recovered_bytes
+            return _Response({"message": "ok", "message_format": "plain"})
+
+    bridge = TelegramBridge(
+        TelegramConfig(
+            bot_token="123:token",
+            bridge_secret="B" * 48,
+            allowed_chat_ids=[5001],
+            inbox_db_path=str(scoped.data_dir / "reply-recovery-bridge.sqlite3"),
+        )
+    )
+    telegram = _RecoveryTelegram()
+    backend = _RecoveryBackend()
+    update = {
+        "update_id": 7303,
+        "message": {
+            "message_id": 7302,
+            "chat": {"id": 5001},
+            "from": {"id": 1001, "first_name": "Alice"},
+            "text": "покажи метаданные этого файла",
+            "reply_to_message": {
+                "message_id": message_id,
+                "document": {
+                    "file_id": file_ref.removeprefix("telegram-file:"),
+                    "file_unique_id": unique_id,
+                    "file_name": "same-visible-name.txt",
+                    "mime_type": "text/plain",
+                    "file_size": len(recovered_bytes),
+                },
+            },
+        },
+    }
+    try:
+        asyncio.run(bridge._process_update(telegram, backend, update, cached_response=None))
+    finally:
+        bridge._inbox.close()
+    assert len([call for call in backend.calls if call["path"] == "/api/chat"]) == 2
+    assert len([url for url, _payload in telegram.calls if url.endswith("/getFile")]) == 1
+
+    class _ArchiveRecoveryDownload:
+        headers = {"Content-Length": str(len(archive_bytes))}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def raise_for_status(self) -> None:
+            return None
+
+        async def aiter_bytes(self):
+            yield archive_bytes
+
+    class _ArchiveRecoveryTelegram(_Telegram):
+        async def post(self, url, json=None, **_kwargs):
+            self.calls.append((url, json))
+            if url.endswith("/getFile"):
+                return _Response({"ok": True, "result": {"file_path": "documents/protected.zip"}})
+            return _Response()
+
+        def stream(self, method, url):  # noqa: ANN001
+            assert method == "GET"
+            assert url.endswith("/documents/protected.zip")
+            return _ArchiveRecoveryDownload()
+
+    class _ArchiveRecoveryBackend(_Backend):
+        async def request(self, method, url, *, content=None, headers=None):
+            path = urlsplit(url).path
+            body = json.loads(content.decode("utf-8")) if content else None
+            self.calls.append({"method": method, "path": path, "body": body, "headers": headers})
+            assert "document" not in body
+            if "reply_document_recovery" not in body:
+                return _Response({"reply_media_recovery_required": True})
+            descriptor = body["reply_document_recovery"]
+            assert descriptor["source_ref"] == "telegram-file:HISTORICAL-PROTECTED-ARCHIVE"
+            assert descriptor["file_unique_id"] == "HISTORICAL-PROTECTED-UNIQUE"
+            assert base64.b64decode(descriptor["content_base64"], validate=True) == archive_bytes
+            if body.get("archive_password") is None:
+                return _Response({"archive_password_required": True})
+            if body["archive_password"] != archive_password:
+                return _Response({"archive_password_invalid": True})
+            return _Response({"message": "ok", "message_format": "plain"})
+
+    archive_bridge = TelegramBridge(
+        TelegramConfig(
+            bot_token="123:token",
+            bridge_secret="B" * 48,
+            allowed_chat_ids=[5001],
+            inbox_db_path=str(scoped.data_dir / "reply-recovery-archive-bridge.sqlite3"),
+        )
+    )
+    archive_telegram = _ArchiveRecoveryTelegram()
+    archive_backend = _ArchiveRecoveryBackend()
+    archive_reply_message_id = 8401
+    archive_update = {
+        "update_id": 8403,
+        "message": {
+            "message_id": 8402,
+            "chat": {"id": 5001},
+            "from": {"id": 1001, "first_name": "Alice"},
+            "text": "покажи содержимое этого архива",
+            "reply_to_message": {
+                "message_id": archive_reply_message_id,
+                "document": {
+                    "file_id": "HISTORICAL-PROTECTED-ARCHIVE",
+                    "file_unique_id": "HISTORICAL-PROTECTED-UNIQUE",
+                    "file_name": "historical-protected.zip",
+                    "mime_type": "application/zip",
+                    "file_size": len(archive_bytes),
+                },
+            },
+        },
+    }
+    try:
+        asyncio.run(
+            archive_bridge._process_update(  # noqa: SLF001
+                archive_telegram,
+                archive_backend,
+                archive_update,
+                cached_response=None,
+            )
+        )
+        pending = archive_bridge._inbox.archive_password_challenge(5001, 1001)  # noqa: SLF001
+        assert pending is not None and pending["reply_recovery"] is True
+        assert pending["reply_document_message_id"] == archive_reply_message_id
+        assert pending["reply_document_source_ref"] == "telegram-file:HISTORICAL-PROTECTED-ARCHIVE"
+        assert pending["reply_document_file_unique_id"] == "HISTORICAL-PROTECTED-UNIQUE"
+
+        for update_id, password in (
+            (8404, "wrong-exact-reply-password"),
+            (8405, archive_password),
+        ):
+            followup = {
+                "update_id": update_id,
+                "message": {
+                    "message_id": update_id,
+                    "chat": {"id": 5001},
+                    "from": {"id": 1001, "first_name": "Alice"},
+                    "text": password,
+                },
+            }
+            safe_followup = archive_bridge._sanitize_update_before_store(followup)  # noqa: SLF001
+            asyncio.run(
+                archive_bridge._process_update(  # noqa: SLF001
+                    archive_telegram,
+                    archive_backend,
+                    safe_followup,
+                    cached_response=None,
+                )
+            )
+            pending = archive_bridge._inbox.archive_password_challenge(5001, 1001)  # noqa: SLF001
+            if password == archive_password:
+                assert pending is None
+            else:
+                assert pending is not None and pending["reply_recovery"] is True
+
+        chat_bodies = [call["body"] for call in archive_backend.calls if call["path"] == "/api/chat"]
+        assert len(chat_bodies) == 6
+        for phase_one_body in chat_bodies[::2]:
+            assert "document" not in phase_one_body
+            assert "reply_document_recovery" not in phase_one_body
+            assert phase_one_body["reply_document_source_ref"] == "telegram-file:HISTORICAL-PROTECTED-ARCHIVE"
+            assert phase_one_body["reply_document_message_id"] == archive_reply_message_id
+            assert phase_one_body["reply_document_file_unique_id"] == "HISTORICAL-PROTECTED-UNIQUE"
+        assert [body.get("archive_password") for body in chat_bodies[1::2]] == [
+            None,
+            "wrong-exact-reply-password",
+            archive_password,
+        ]
+        assert all("document" not in body for body in chat_bodies[1::2])
+        assert all("reply_document_recovery" in body for body in chat_bodies[1::2])
+        assert len([url for url, _payload in archive_telegram.calls if url.endswith("/getFile")]) == 3
+        durable_dump = "\n".join(archive_bridge._inbox._conn.iterdump())  # noqa: SLF001
+        assert archive_password not in durable_dump
+        assert "wrong-exact-reply-password" not in durable_dump
+    finally:
+        archive_bridge._archive_passwords.clear()  # noqa: SLF001
+        archive_bridge._inbox.close()  # noqa: SLF001

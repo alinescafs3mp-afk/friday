@@ -322,7 +322,19 @@ class CommandsMixin(BridgeShared):
             message = dict(message)
             message.pop("text", None)
             message["caption"] = str(pending_archive.get("safe_query") or "")
-            message["document"] = dict(pending_archive["document"])
+            if pending_archive.get("reply_recovery") is True:
+                # Keep the historical media as a structural reply pointer.  It
+                # must pass through the same ABSENT -> bounded redownload ->
+                # exact-byte recovery route as the original turn; presenting it
+                # as current media would silently fall back to ordinary upload
+                # deduplication after a password challenge.
+                message.pop("document", None)
+                message["reply_to_message"] = {
+                    "message_id": int(pending_archive["reply_document_message_id"]),
+                    "document": dict(pending_archive["document"]),
+                }
+            else:
+                message["document"] = dict(pending_archive["document"])
             update["message"] = message
         elif (
             update.get("friday_archive_password_supplied") is True
@@ -1384,16 +1396,63 @@ class CommandsMixin(BridgeShared):
                 external_user_id,
                 str(chat_id),
             )
+            if response.get("reply_media_recovery_required") is True:
+                if document is not None or not isinstance(replied_to, dict):
+                    raise PermanentUpdateError("Backend requested invalid reply media recovery")
+                try:
+                    recovered_document = await self._prepare_document(
+                        telegram,
+                        replied_to,
+                        {"update_id": replied_message_id or int(update["update_id"])},
+                    )
+                except MediaTooLargeError as exc:
+                    await register_backend_user()
+                    await self._send_message(
+                        telegram,
+                        chat_id,
+                        str(exc)
+                        or "Файл слишком большой — Telegram-медиа превышает допустимый размер и не сохранено.",
+                    )
+                    return
+                if recovered_document is None:
+                    raise PermanentUpdateError("Replied Telegram media is unavailable")
+                payload["reply_document_recovery"] = recovered_document
+                response = await self._backend_json(
+                    backend,
+                    "POST",
+                    "/api/chat",
+                    payload,
+                    external_user_id,
+                    str(chat_id),
+                )
+                if response.get("reply_media_recovery_required") is True:
+                    raise PermanentUpdateError("Backend did not accept reply media recovery")
             password_challenge = bool(
                 response.get("archive_password_required") is True
                 or response.get("archive_password_invalid") is True
             )
             archive_descriptor = self._archive_document_descriptor(message)
+            if archive_descriptor is None and "reply_document_recovery" in payload:
+                archive_descriptor = (
+                    self._archive_document_descriptor(replied_to) if isinstance(replied_to, dict) else None
+                )
             if password_challenge and archive_descriptor is not None:
+                challenge_descriptor = dict(archive_descriptor)
+                if "reply_document_recovery" in payload:
+                    challenge_descriptor.update(
+                        {
+                            "_friday_reply_recovery": True,
+                            "_friday_reply_document_source_ref": payload.get("reply_document_source_ref"),
+                            "_friday_reply_document_message_id": payload.get("reply_document_message_id"),
+                            "_friday_reply_document_file_unique_id": payload.get(
+                                "reply_document_file_unique_id", ""
+                            ),
+                        }
+                    )
                 self._inbox.remember_archive_password_challenge(
                     chat_id,
                     int(external_user_id),
-                    archive_descriptor,
+                    challenge_descriptor,
                     safe_query=text,
                     original_message_id=int(message.get("message_id") or 0),
                 )

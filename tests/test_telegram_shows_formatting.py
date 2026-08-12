@@ -94,10 +94,24 @@ def test_flattened_model_bullets_become_real_list_lines() -> None:
     )
 
 
-def test_spaced_multiplication_is_not_rewritten_as_a_list() -> None:
-    source = "цена 5 *   3 рубля"
+def test_flattened_bullets_after_a_markdown_preamble_become_list_lines() -> None:
+    source = "**Сводка** *   **Первый:** текст *   **Второй:** текст"
 
-    assert to_telegram_html(source) == source
+    assert to_telegram_html(source) == ("<b>Сводка</b>\n• <b>Первый:</b> текст\n• <b>Второй:</b> текст")
+
+
+def test_spaced_multiplication_is_not_rewritten_as_a_list() -> None:
+    sources = (
+        "цена 5 *   3 рубля",
+        "Умножение: **5** *   3 *   2",
+        "Умножение: **5** *   **3** *   **2**",
+    )
+
+    assert [to_telegram_html(source) for source in sources] == [
+        "цена 5 *   3 рубля",
+        "Умножение: <b>5</b> *   3 *   2",
+        "Умножение: <b>5</b> *   <b>3</b> *   <b>2</b>",
+    ]
 
 
 def test_markdown_quote_becomes_a_telegram_blockquote() -> None:

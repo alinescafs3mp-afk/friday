@@ -246,6 +246,8 @@ _SAFE_AUDIT_ACTIONS = frozenset(
         "auth.failed",
         "cli.knowledge.purge",
         "cli.file_uploader.backfill",
+        "cli.legacy_telegram_uploader.backfill",
+        "cli.telegram_file_aliases.backfill",
         "container.create",
         "entity.create",
         "entity.delete",

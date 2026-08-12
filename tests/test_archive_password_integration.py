@@ -5,10 +5,12 @@ from __future__ import annotations
 import io
 import json
 import zipfile
+from pathlib import Path
 
 import pytest
 import pyzipper
 
+from friday.archive_formats import archive_dispatch_kind
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.telegram_bridge import TelegramBridge, TelegramConfig
@@ -82,22 +84,51 @@ def _archive_update(update_id: int, *, caption: str = "") -> dict:
 
 
 @pytest.mark.asyncio
-async def test_ingestion_password_challenge_creates_no_raw_or_file(settings, storage) -> None:
+async def test_mime_only_archive_challenges_before_dedup_and_persists_exact_bytes(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    assert archive_dispatch_kind("protected.bin", "application/zip") == ".zip"
+    assert archive_dispatch_kind("report.docx", "application/zip") is None
+    assert archive_dispatch_kind("document.odt", "application/zip") is None
+    assert archive_dispatch_kind("book.epub", "application/zip") is None
+    assert archive_dispatch_kind("bundle.7z", "application/zip") == ".7z"
+
     pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
     payload = _encrypted_zip()
+    dedup_calls = 0
+    enrichment_calls = 0
+    original_find = storage.find_file_by_content_hash
+    original_enrich = pipeline._enrich  # noqa: SLF001
+
+    def tracked_find(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        nonlocal dedup_calls
+        dedup_calls += 1
+        return original_find(*args, **kwargs)
+
+    def tracked_enrich(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        nonlocal enrichment_calls
+        enrichment_calls += 1
+        return original_enrich(*args, **kwargs)
+
+    monkeypatch.setattr(storage, "find_file_by_content_hash", tracked_find)
+    monkeypatch.setattr(pipeline, "_enrich", tracked_enrich)
 
     missing = await pipeline.ingest_file(
         "alice",
         None,
         payload,
-        filename="protected.zip",
+        filename="protected.bin",
+        mime_type="application/zip",
         source_ref="archive-password-test",
     )
     wrong = await pipeline.ingest_file(
         "alice",
         None,
         payload,
-        filename="protected.zip",
+        filename="protected.bin",
+        mime_type="application/zip",
         source_ref="archive-password-test",
         archive_password="wrong-password",
     )
@@ -105,8 +136,30 @@ async def test_ingestion_password_challenge_creates_no_raw_or_file(settings, sto
     assert missing["archive_password_required"] is True
     assert wrong["archive_password_invalid"] is True
     assert missing["persisted"] is False and wrong["persisted"] is False
+    assert dedup_calls == 0 and enrichment_calls == 0
     assert storage.execute("SELECT COUNT(*) AS count FROM raw_objects").fetchone()["count"] == 0
     assert not any(settings.files_dir.rglob("*"))
+
+    unlocked = await pipeline.ingest_file(
+        "alice",
+        None,
+        payload,
+        filename="protected.bin",
+        mime_type="application/zip",
+        source_ref="archive-password-test",
+        archive_password=_PASSWORD,
+    )
+
+    raw = storage.get_raw_object(unlocked["raw_object_id"], "alice")
+    raw_metadata = json.loads(raw["metadata_json"])
+    assert unlocked["extraction"]["success"] is True
+    assert "ARCHIVE-INTEGRATION-MARKER" in raw["raw_content"]
+    assert raw_metadata["filename"] == "protected.bin"
+    assert raw_metadata["mime_type"] == "application/zip"
+    assert raw_metadata["sha256"] == raw["content_hash"]
+    assert raw_metadata["size_bytes"] == len(payload)
+    assert dedup_calls == 1 and enrichment_calls == 1
+    assert Path(unlocked["stored_path"]).read_bytes() == payload
 
 
 @pytest.mark.asyncio
