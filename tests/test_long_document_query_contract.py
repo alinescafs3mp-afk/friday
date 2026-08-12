@@ -23,9 +23,11 @@ from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     AttachmentRequestProjection,
+    _bounded_attachment_projection,
     _multi_attachment_open_task_count,
     _OwnedAttachment,
     _project_attachments_for_request,
+    _projected_source_is_readable,
     _source_windows,
 )
 from friday.execution_kernel import ToolResult
@@ -731,6 +733,21 @@ def test_unauthenticated_transient_absence_cannot_claim_complete_not_found() -> 
     assert state.status != "not_found"
     assert state.scan_complete is False
     assert not projected or projected[0].get("_source_text_complete") is not True
+
+    forged = _bounded_attachment_projection(
+        [
+            {
+                "transient_text": "",
+                "_request_projection_applied": True,
+                "_source_readable": True,
+                "_source_text_complete": True,
+            }
+        ]
+    )
+    assert len(forged) == 1
+    assert _projected_source_is_readable(forged[0]) is False
+    assert forged[0].get("_request_projection_applied") is not True
+    assert forged[0].get("_source_readable") is not True
 
 
 def test_multi_file_field_labels_are_body_targets_but_format_names_are_source_qualifiers() -> None:

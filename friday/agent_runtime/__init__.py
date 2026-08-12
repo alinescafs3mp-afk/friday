@@ -12600,11 +12600,19 @@ def _bounded_attachment_projection(
         trusted = is_trusted_office_attachment(source)
         owned = isinstance(source, _OwnedAttachment)
         workspace = isinstance(source, _WorkspaceInboxAttachment)
-        clean = {
-            key: value
-            for key, value in source.items()
-            if key != "_attachment_projection_v1" and not key.startswith("_office_")
-        }
+        if trusted or owned or workspace:
+            clean = {
+                key: value
+                for key, value in source.items()
+                if key != "_attachment_projection_v1" and not key.startswith("_office_")
+            }
+        else:
+            # An ordinary mapping may have arrived verbatim from ``/api/chat``.
+            # No underscore-prefixed runtime field from that boundary is data:
+            # after this function wraps the result in ``_ProjectedAttachment``,
+            # retaining one would turn caller spelling into process-private
+            # authority (notably `_source_readable`).
+            clean = {key: value for key, value in source.items() if not key.startswith("_")}
         if not trusted:
             clean.pop(OFFICE_STRUCTURE_KEY, None)
         sanitised_sources.append(
