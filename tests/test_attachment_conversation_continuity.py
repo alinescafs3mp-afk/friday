@@ -2434,9 +2434,10 @@ async def test_direct_file_metadata_scope_reaches_generation_as_authorized_evide
             "title": "TECHNICAL-METADATA-EVIDENCE",
         },
     )
-    runtime = AgentRuntime(replace(settings, verify_answers=False), storage, llm=_EnabledButUnusedLLM())
+    runtime = AgentRuntime(replace(settings, verify_answers=True), storage, llm=_EnabledButUnusedLLM())
     generated_contexts: list[AgentContext] = []
     late_calls: list[dict[str, object]] = []
+    verifier_calls: list[str] = []
     base_definitions = runtime.kernel.get_tool_definitions
 
     def definitions(actor, topic=None):  # noqa: ANN001
@@ -2481,9 +2482,17 @@ async def test_direct_file_metadata_scope_reaches_generation_as_authorized_evide
         )
         assert any("TECHNICAL-METADATA-EVIDENCE" in str(item.get("content") or "") for item in messages)
         return {
-            "content": ("ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ\n17-ДСП/1\n10 августа 2026 года\nИван Иванович Иванов"),
+            "content": (
+                "Сводка реквизитов\n"
+                "Документ содержит видимые административные сведения.\n"
+                "Они изложены здесь кратко и своими словами."
+            ),
             "tools_used": [],
         }
+
+    async def verify(_question, answer, _context, **_kwargs):
+        verifier_calls.append(str(answer))
+        return {"status": "passed", "ok": True, "score": 1.0, "issues": []}
 
     async def forbidden_agentic(*args, **kwargs):  # noqa: ANN001
         del args, kwargs
@@ -2492,6 +2501,7 @@ async def test_direct_file_metadata_scope_reaches_generation_as_authorized_evide
     monkeypatch.setattr(runtime, "_prepare_context", prepare)
     monkeypatch.setattr(runtime, "_generate_response", generate)
     monkeypatch.setattr(runtime, "_agentic_loop", forbidden_agentic)
+    monkeypatch.setattr(runtime, "_verify_response", verify)
     monkeypatch.setattr(runtime.kernel, "get_tool_definitions", definitions)
     monkeypatch.setattr(runtime.kernel, "execute", execute)
     message = (
@@ -2510,10 +2520,79 @@ async def test_direct_file_metadata_scope_reaches_generation_as_authorized_evide
 
     assert len(generated_contexts) == 1
     assert "TECHNICAL-METADATA-EVIDENCE" in generated_contexts[0].document_metadata_evidence
+    assert verifier_calls == [
+        "Сводка реквизитов\n"
+        "Документ содержит видимые административные сведения.\n"
+        "Они изложены здесь кратко и своими словами."
+    ]
     assert generated_contexts[0].late_make_file_attempts == 1
     assert result["tools_used"] == ["make_file"]
     assert len(result["files"]) == 1
     assert [call["filename"] for call in late_calls] == ["metadata-export"]
+
+
+@pytest.mark.asyncio
+async def test_direct_exact_file_rejects_wrong_unique_source_tokens_for_requested_fields(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    source_text = (
+        "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ\n"
+        "ПРИКАЗ № 17-ДСП/1\n"
+        "Дата документа: 10 августа 2026 года\n"
+        "Контрольный маркер: META-EXPORT-1\n"
+        "Подписант: начальник отдела Иван Иванович Иванов"
+    )
+    body = "ПРИКАЗ\nДата\nКонтрольный\nначальник"
+    source = _pending_file(storage, "alice", "alice", source_text, filename="source.odt")
+
+    class FailedLiteralFillLLM:
+        enabled = True
+        model = "failed-literal-fill"
+        total_budget_sec = 5.0
+
+        async def chat(self, _messages, **_kwargs):
+            return {"content": body, "tool_calls": None, "_queue_wait_sec": 0.0}
+
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=True),
+        storage,
+        llm=FailedLiteralFillLLM(),
+    )
+    kernel_calls: list[str] = []
+
+    async def prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
+        del message, kwargs
+        return AgentContext(conversation_id=conversation_id, user_id=user_id, person_id="alice")
+
+    async def generate(_context, _message, _attachments):
+        return {"content": body, "tools_used": [], "_model_generated": True}
+
+    async def execute(name, arguments, *, actor=None):  # noqa: ANN001
+        del arguments, actor
+        kernel_calls.append(str(name))
+        raise AssertionError("unproven direct-file body reached make_file")
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime.kernel, "execute", execute)
+    result = await runtime.chat(
+        "alice",
+        (
+            "Создай Word-файл metadata-export.docx по процитированному документу. "
+            "Включи ровно четыре строки: гриф, номер документа, видимую дату "
+            "документа и подписанта."
+        ),
+        actor=ActorContext(user_id="alice", preset_key="owner", source="telegram-bridge"),
+        attachments=[{"raw_object_id": source.id}],
+        enable_tools=True,
+        quoted_attachment_reference=True,
+    )
+
+    assert result["files"] == []
+    assert result["tools_used"] == []
+    assert kernel_calls == []
 
 
 @pytest.mark.asyncio

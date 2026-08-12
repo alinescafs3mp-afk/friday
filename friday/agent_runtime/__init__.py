@@ -8925,11 +8925,53 @@ _WORKSPACE_OUTPUT_LINE_PREFIX = re.compile(
     r"\s*(?:[-–—:]\s*)?",
     re.IGNORECASE,
 )
+_WORKSPACE_EXACT_VALUE_LINE = re.compile(
+    rf"(?P<ordinal>{_ATTACHMENT_ORDINAL_TOKEN.pattern})\s+"
+    r"(?:строк\w*|line)\b\s*(?:[-–—:]\s*)?"
+    r"(?:только\s+значение|(?:only\s+)?(?:the\s+)?value(?:\s+only)?)\s+"
+    r"(?P<field>номера\s+документа|контрольного\s+маркера|"
+    r"document\s+number|control\s+marker)\s+"
+    r"(?:без\s+подписи|without\s+(?:a\s+)?label)",
+    re.IGNORECASE,
+)
+_WORKSPACE_EXACT_VALUE_CUE = re.compile(
+    r"\b(?:только\s+значение|(?:only\s+)?(?:the\s+)?value(?:\s+only)?)\b",
+    re.IGNORECASE,
+)
+_WORKSPACE_NO_OTHER_LINES = re.compile(
+    r"\b(?:никаких\s+других\s+строк|без\s+других\s+строк|"
+    r"no\s+other\s+lines?|without\s+(?:any\s+)?other\s+lines?)\b",
+    re.IGNORECASE,
+)
+_DIRECT_EXACT_FILE_FIELD = re.compile(
+    r"(?P<classification>\bгриф\w*\b)|"
+    r"(?P<number>\bномер\w*\s+документ\w*\b)|"
+    r"(?P<date>\b(?:видим\w*\s+)?дат\w*\s+документ\w*\b)|"
+    r"(?P<signatory>\bподписант\w*\b)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
 class _WorkspaceCreateIntent:
     filename: str
+
+
+@dataclass(frozen=True)
+class _WorkspaceExactValueContract:
+    """One closed, ordered value-only projection requested for MCP output."""
+
+    fields: tuple[Literal["document_number", "control_marker"], ...]
+
+
+@dataclass(frozen=True)
+class _DirectExactFileFieldContract:
+    """Closed ordered attachment fields eligible for verifier bypass."""
+
+    fields: tuple[
+        Literal["classification", "document_number", "document_date", "signatory"],
+        ...,
+    ]
 
 
 _WORKSPACE_CREATE_SUCCESS_EVIDENCE_PREFIX = "workspace-create-success-v1:"
@@ -9114,6 +9156,81 @@ def _explicit_workspace_create_intent(message: str) -> _WorkspaceCreateIntent | 
     if dot <= 0 or filename[dot:].casefold() not in _WORKSPACE_CREATE_TEXT_SUFFIXES:
         return None
     return _WorkspaceCreateIntent(filename=filename)
+
+
+def _workspace_exact_value_contract_requested(message: str) -> bool:
+    """Whether the visible command claims a closed value-only line contract."""
+
+    actionable = _workspace_create_actionable_text(message)
+    return bool(
+        _WORKSPACE_EXACT_VALUE_CUE.search(actionable) and _WORKSPACE_OUTPUT_LINE_PREFIX.search(actionable)
+    )
+
+
+def _workspace_exact_value_contract(message: str) -> _WorkspaceExactValueContract | None:
+    """Parse the small closed line contract used by exact MCP projections.
+
+    Unknown fields, missing ordinals and unparsed line clauses fail closed.  A
+    free-form workspace request returns ``None`` and keeps the ordinary model-
+    authored content path.
+    """
+
+    actionable = _workspace_create_actionable_text(message)
+    if not _workspace_exact_value_contract_requested(actionable):
+        return None
+    if not _WORKSPACE_NO_OTHER_LINES.search(actionable):
+        return None
+    requirements: dict[int, Literal["document_number", "control_marker"]] = {}
+    for matched in _WORKSPACE_EXACT_VALUE_LINE.finditer(actionable):
+        ordinal = str(matched.group("ordinal") or "").casefold()
+        ordinal_index = next(
+            (value for prefix, value in _ATTACHMENT_ORDINAL_PREFIXES if ordinal.startswith(prefix)),
+            -1,
+        )
+        raw_field = " ".join(str(matched.group("field") or "").casefold().split())
+        field: Literal["document_number", "control_marker"]
+        if raw_field in {"номера документа", "document number"}:
+            field = "document_number"
+        elif raw_field in {"контрольного маркера", "control marker"}:
+            field = "control_marker"
+        else:  # pragma: no cover - regex keeps the mapping closed
+            return None
+        if ordinal_index < 0 or ordinal_index in requirements or field in requirements.values():
+            return None
+        requirements[ordinal_index] = field
+    if not requirements or sorted(requirements) != list(range(len(requirements))):
+        return None
+    # Every output-line prefix must have crossed the closed field parser.  This
+    # prevents one recognised line from legitimising an extra free-form line.
+    if len(list(_WORKSPACE_OUTPUT_LINE_PREFIX.finditer(actionable))) != len(requirements):
+        return None
+    return _WorkspaceExactValueContract(
+        fields=tuple(requirements[index] for index in range(len(requirements)))
+    )
+
+
+def _direct_exact_file_field_contract(message: str) -> _DirectExactFileFieldContract | None:
+    """Recognise the one ordered field projection with deterministic evidence."""
+
+    if _requested_exact_file_body_count(message) != 4:
+        return None
+    fields: list[Literal["classification", "document_number", "document_date", "signatory"]] = []
+    for matched in _DIRECT_EXACT_FILE_FIELD.finditer(_classification_text(message)):
+        if matched.group("classification"):
+            fields.append("classification")
+        elif matched.group("number"):
+            fields.append("document_number")
+        elif matched.group("date"):
+            fields.append("document_date")
+        elif matched.group("signatory"):
+            fields.append("signatory")
+    expected: tuple[
+        Literal["classification", "document_number", "document_date", "signatory"],
+        ...,
+    ] = ("classification", "document_number", "document_date", "signatory")
+    if tuple(fields) != expected:
+        return None
+    return _DirectExactFileFieldContract(fields=expected)
 
 
 def _workspace_reply_attachment_selector_message(message: str) -> str:
@@ -11062,6 +11179,167 @@ def _attachment_whole_source_plan(
         source_chars_total,
         source_chars_planned,
     )
+
+
+def _one_complete_attachment_source(
+    attachments: list[dict[str, Any]] | None,
+) -> str | None:
+    """Return one authenticated source only when every planned byte is present."""
+
+    (
+        chunks,
+        _manifests,
+        files_total,
+        files_readable,
+        source_complete,
+        chunks_required,
+        source_chars_total,
+        source_chars_planned,
+    ) = _attachment_whole_source_plan(attachments)
+    if not (
+        files_total == files_readable == 1
+        and source_complete
+        and chunks_required == len(chunks)
+        and source_chars_planned == source_chars_total
+    ):
+        return None
+    cursor = 0
+    parts: list[str] = []
+    for expected_index, chunk in enumerate(chunks, start=1):
+        if (
+            chunk.file_index != 1
+            or chunk.chunk_index != expected_index
+            or chunk.chunks_in_file != len(chunks)
+            or chunk.start != cursor
+            or chunk.end != chunk.start + len(chunk.text)
+        ):
+            return None
+        parts.append(chunk.text)
+        cursor = chunk.end
+    if cursor != source_chars_total:
+        return None
+    return "".join(parts)
+
+
+_WORKSPACE_DOCUMENT_NUMBER_SOURCE = re.compile(
+    r"(?<![\w-])(?:ПРИКАЗ[ \t]+№|Номер[ \t]+документа[ \t]*:)[ \t]*"
+    r"(?P<value>[^\s]{1,512})",
+    re.IGNORECASE,
+)
+_WORKSPACE_CONTROL_MARKER_SOURCE = re.compile(
+    r"(?<![\w-])Контрольный[ \t]+маркер[ \t]*:[ \t]*(?P<value>[^\s]{1,512})",
+    re.IGNORECASE,
+)
+_DIRECT_CLASSIFICATION_SOURCE = re.compile(
+    r"(?<![\w-])(?P<value>ДЛЯ[ \t]+СЛУЖЕБНОГО[ \t]+ПОЛЬЗОВАНИЯ)(?![\w-])",
+    re.IGNORECASE,
+)
+_DIRECT_DOCUMENT_DATE_SOURCE = re.compile(
+    r"(?<![\w-])Дата[ \t]+документа[ \t]*:[ \t]*"
+    r"(?P<value>(?:\d{1,2}[ \t]+[А-ЯЁа-яё-]{3,32}[ \t]+\d{4}[ \t]+года|"
+    r"\d{1,2}[.]\d{1,2}[.]\d{4}|\d{4}-\d{2}-\d{2}))",
+    re.IGNORECASE,
+)
+_DIRECT_SIGNATORY_SOURCE = re.compile(
+    r"(?i:Подписант)[ \t]*:[ \t]*(?:[а-яё][а-яё-]*[ \t]+){0,8}"
+    r"(?P<value>[А-ЯЁ][а-яё-]{1,63}(?:[ \t]+[А-ЯЁ][а-яё-]{1,63}){2})"
+)
+
+
+def _unique_workspace_source_value(source: str, field: str) -> str | None:
+    pattern = (
+        _WORKSPACE_DOCUMENT_NUMBER_SOURCE
+        if field == "document_number"
+        else _WORKSPACE_CONTROL_MARKER_SOURCE
+        if field == "control_marker"
+        else None
+    )
+    if pattern is None:
+        return None
+    values = list(
+        dict.fromkeys(
+            unicodedata.normalize("NFC", str(matched.group("value") or "").strip(" \t"))
+            for matched in pattern.finditer(source)
+        )
+    )
+    if len(values) != 1 or not values[0] or "\x00" in values[0]:
+        return None
+    return values[0]
+
+
+def _workspace_exact_source_content(
+    contract: _WorkspaceExactValueContract,
+    attachments: list[dict[str, Any]] | None,
+) -> str | None:
+    """Project requested values from one complete source before any effect."""
+
+    source = _one_complete_attachment_source(attachments)
+    if source is None:
+        return None
+    values: list[str] = []
+    for source_field in contract.fields:
+        value = _unique_workspace_source_value(source, source_field)
+        if value is None:
+            return None
+        values.append(value)
+    return "\n".join(values) + "\n"
+
+
+def _unique_direct_source_match(pattern: re.Pattern[str], source: str) -> str | None:
+    values = list(
+        dict.fromkeys(
+            " ".join(unicodedata.normalize("NFC", str(matched.group("value") or "")).split())
+            for matched in pattern.finditer(source)
+        )
+    )
+    if len(values) != 1 or not values[0]:
+        return None
+    return values[0]
+
+
+def _direct_exact_source_values(
+    contract: _DirectExactFileFieldContract,
+    source: str,
+) -> tuple[str, ...] | None:
+    values: list[str] = []
+    for source_field in contract.fields:
+        value = (
+            _unique_direct_source_match(_DIRECT_CLASSIFICATION_SOURCE, source)
+            if source_field == "classification"
+            else _unique_workspace_source_value(source, "document_number")
+            if source_field == "document_number"
+            else _unique_direct_source_match(_DIRECT_DOCUMENT_DATE_SOURCE, source)
+            if source_field == "document_date"
+            else _unique_direct_source_match(_DIRECT_SIGNATORY_SOURCE, source)
+            if source_field == "signatory"
+            else None
+        )
+        if value is None:
+            return None
+        values.append(value)
+    return tuple(values)
+
+
+def _direct_file_body_is_literal_grounded(
+    request: str,
+    body: str,
+    source: str | None,
+) -> bool:
+    """Accept a direct carrier body only as unique literal source excerpts."""
+
+    contract = _direct_exact_file_field_contract(request)
+    if contract is None or source is None or not str(body or "").strip():
+        return False
+    exact_blocks = _validated_exact_file_body_blocks(request, body)
+    if exact_blocks is None:
+        return False
+    source_values = _direct_exact_source_values(contract, source)
+    if source_values is None:
+        return False
+    body_values = tuple(
+        " ".join(unicodedata.normalize("NFC", str(block.get("text") or "")).split()) for block in exact_blocks
+    )
+    return body_values == source_values
 
 
 def _bounded_regex_spans(
@@ -18193,6 +18471,8 @@ class AgentRuntime:
         )
         clean_workspace_channel_requested = _workspace_create_channel_request(clean_message)
         clean_workspace_intent = _explicit_workspace_create_intent(clean_message)
+        workspace_exact_value_requested = _workspace_exact_value_contract_requested(clean_message)
+        workspace_exact_value_contract = _workspace_exact_value_contract(clean_message)
         attachment_selector_message = _attachment_selector_message(clean_message)
         attachment_reference_kind = _attachment_reference_kind(attachment_selector_message)
         # A stop order is the emergency path: after conversation ownership and
@@ -19048,6 +19328,40 @@ class AgentRuntime:
             and authenticated_attachment_scope
             and attachment_context_complete
             and _supported_direct_attachment_file_only_request(clean_message)
+        )
+        direct_exact_file_field_contract = (
+            _direct_exact_file_field_contract(clean_message)
+            if direct_attachment_file_projection_turn
+            else None
+        )
+        direct_attachment_exact_file_projection_turn = bool(
+            direct_attachment_file_projection_turn and direct_exact_file_field_contract is not None
+        )
+        direct_attachment_literal_source = (
+            _one_complete_attachment_source(active_attachment_set)
+            if direct_attachment_exact_file_projection_turn
+            else None
+        )
+        workspace_exact_content = (
+            _workspace_exact_source_content(
+                workspace_exact_value_contract,
+                active_attachment_set,
+            )
+            if (
+                clean_workspace_intent is not None
+                and workspace_reply_attachment_contract
+                and workspace_exact_value_contract is not None
+            )
+            else None
+        )
+        workspace_exact_content_failed = bool(
+            clean_workspace_intent is not None
+            and workspace_exact_value_requested
+            and (
+                not workspace_reply_attachment_contract
+                or workspace_exact_value_contract is None
+                or workspace_exact_content is None
+            )
         )
         office_exact = (
             None
@@ -20048,6 +20362,15 @@ class AgentRuntime:
                 "tools_used": [],
                 "_unreadable_attachment_owned": True,
             }
+        elif workspace_exact_content_failed:
+            response = {
+                "content": (
+                    "Не удалось однозначно получить все запрошенные значения из одного "
+                    "полностью прочитанного документа. Файл во внешнем MCP outbox не создан."
+                ),
+                "tools_used": [],
+                "_workspace_create_owned": True,
+            }
         elif office_exact is not None:
             # The model is not allowed to nominate the members of an exact set.
             # A complete authoritative index is rendered deterministically; all
@@ -20093,15 +20416,20 @@ class AgentRuntime:
                 frozenset({"web_search", "web_research", "web_fetch"}) if restricted_outbound_turn else None
             )
             if workspace_authority_message:
+                workspace_agentic_kwargs: dict[str, Any] = {
+                    "outbound_allowed": not outbound_blocked,
+                    "outbound_tool_allowlist": outbound_tool_allowlist,
+                    "workspace_authority_message": workspace_authority_message,
+                }
+                if workspace_exact_content is not None:
+                    workspace_agentic_kwargs["workspace_exact_content"] = workspace_exact_content
                 response = await self._agentic_loop(
                     context,
                     asked_of_model,
                     actor,
                     visible_tools,
                     attachments,
-                    outbound_allowed=not outbound_blocked,
-                    outbound_tool_allowlist=outbound_tool_allowlist,
-                    workspace_authority_message=workspace_authority_message,
+                    **workspace_agentic_kwargs,
                 )
             else:
                 # Preserve the established internal call seam for ordinary
@@ -20192,6 +20520,42 @@ class AgentRuntime:
         if response.get("llm_failed") and self.llm.enabled:
             self._tell_the_owner_the_model_is_silent(user_id)
         content = (response.get("content") or "").strip()
+        direct_file_body_grounded = bool(
+            direct_attachment_exact_file_projection_turn
+            and not response.get("llm_failed")
+            and _direct_file_body_is_literal_grounded(
+                clean_message,
+                content,
+                direct_attachment_literal_source,
+            )
+        )
+        direct_file_body_recovery_required = bool(
+            direct_attachment_exact_file_projection_turn
+            and direct_attachment_literal_source is not None
+            and not response.get("llm_failed")
+            and not direct_file_body_grounded
+        )
+        direct_file_body_rejected = bool(
+            direct_attachment_exact_file_projection_turn
+            and not response.get("llm_failed")
+            and not direct_file_body_grounded
+        )
+        if direct_file_body_rejected:
+            # A pure attachment-to-file order carries independent effect
+            # authority, but model prose is not its accepted body.  Discard an
+            # ungrounded draft (including a premature "file created" claim)
+            # before deed/verifier boundaries.  The late builder gets at most
+            # one separate, source-grounded body attempt below.
+            content = (
+                "Не удалось доказательно сформировать содержимое файла по выбранному "
+                "документу. Файл пока не создан."
+            )
+            response["content"] = content
+            response["file_clips"] = []
+            response["voice_clip"] = None
+            response["knowledge_object_ids"] = []
+            response["_model_generated"] = False
+            response["_direct_file_body_rejected"] = True
         false_readable_attachment_refusal_replaced = False
         readable_attachment_refusal = bool(
             self.llm.enabled
@@ -20700,7 +21064,7 @@ class AgentRuntime:
             if isinstance(item, Mapping) and str(item.get("filename") or "").strip()
         ]
         workspace_deed_filename = _confirmed_workspace_create_filename(
-            asked_of_model,
+            workspace_authority_message or asked_of_model,
             response.get("tool_evidence"),
         )
         external_file_deed_descriptors = (
@@ -21045,6 +21409,8 @@ class AgentRuntime:
             if response.get("_office_exact_owned") is True
             or response.get("_unreadable_attachment_owned") is True
             or response.get("_attachment_model_failure_owned") is True
+            or response.get("_workspace_create_owned") is True
+            or direct_file_body_rejected
             or office_model_claim_rejected
             or outside_deed_replaced
             or supported_deed_replaced
@@ -21176,8 +21542,10 @@ class AgentRuntime:
         if (
             not foreign_private_request
             and response.get("_office_exact_owned") is not True
+            and response.get("_workspace_create_owned") is not True
             and shape_contract is None
             and not exact_quote_pipeline_owned
+            and not direct_attachment_exact_file_projection_turn
             and self.settings.verify_answers
             and self.llm.enabled
             and not response.get("llm_failed")
@@ -21639,7 +22007,8 @@ class AgentRuntime:
             and not web_evidence_replaced
             and not synthetic_document_notice
             and not outside_deed_replaced
-            and not supported_deed_replaced
+            and (not supported_deed_replaced or direct_file_body_recovery_required)
+            and (not direct_file_body_rejected or direct_file_body_recovery_required)
             and not false_model_outage_replaced
             and not archive_status_only_replaced
             and shape_contract is None
@@ -21649,7 +22018,11 @@ class AgentRuntime:
             and response.get("_unreadable_attachment_owned") is not True
             and not clean_workspace_channel_requested
             and not workspace_channel_data_only
-            and (not capability_refusal or bool(_REFUSAL_OFFERS_LOCAL_FILE.search(compact_model_said)))
+            and (
+                direct_file_body_recovery_required
+                or not capability_refusal
+                or bool(_REFUSAL_OFFERS_LOCAL_FILE.search(compact_model_said))
+            )
             and asked_for_a_file
             and not context.asked_for_an_archive
             and not response.get("file_clips")
@@ -21659,7 +22032,7 @@ class AgentRuntime:
                 if isinstance(item, Mapping)
             )
         ):
-            late_file_content = content
+            late_file_content = "" if direct_file_body_recovery_required else content
             if web_evidence_used:
                 web_file_companions: list[str] = []
                 if web_evidence_status == "partial":
@@ -21703,6 +22076,9 @@ class AgentRuntime:
                     ],
                 ],
                 context=context,
+                literal_source_text=(
+                    direct_attachment_literal_source if direct_attachment_exact_file_projection_turn else None
+                ),
             )
             late_attempts = max(0, context.late_make_file_attempts - late_attempts_before)
             if late_attempts:
@@ -21713,6 +22089,17 @@ class AgentRuntime:
                 ledger.extend("make_file" for _ in range(late_attempts))
             if made:
                 response = {**response, "file_clips": [made]}
+                if direct_attachment_exact_file_projection_turn:
+                    delivered_name = str(made.get("filename") or "").strip()
+                    content = (
+                        f"Готово — файл {delivered_name} приложен к ответу."
+                        if delivered_name
+                        else "Готово — файл приложен к ответу."
+                    )
+                    response["content"] = content
+                    response["_model_generated"] = False
+                    response.pop("_direct_file_body_rejected", None)
+                    model_said = ""
         if context.source_search_advisory_evidence and model_said:
             # OCR/transcript excerpts are useful for recall and synthesis, but
             # cannot independently certify the claims generated from them.
@@ -23774,6 +24161,7 @@ class AgentRuntime:
         outbound_allowed: bool = True,
         outbound_tool_allowlist: frozenset[str] | None = None,
         workspace_authority_message: str = "",
+        workspace_exact_content: str = "",
     ) -> dict[str, Any]:
         def outward_tool_is_allowed(tool_name: str) -> bool:
             if tool_name not in _OUTBOUND_TOOL_NAMES:
@@ -23785,6 +24173,14 @@ class AgentRuntime:
         workspace_authority_message = str(workspace_authority_message or "").strip()
         if _explicit_workspace_create_intent(workspace_authority_message) is None:
             workspace_authority_message = ""
+        workspace_exact_content = str(workspace_exact_content or "")
+        if (
+            not workspace_authority_message
+            or not workspace_exact_content
+            or len(workspace_exact_content.encode("utf-8")) > 8_192
+            or "\x00" in workspace_exact_content
+        ):
+            workspace_exact_content = ""
         messages = self._build_initial_messages(context, message, attachments, tool_enabled=True)
         # A current-file turn must not spend the foreground timeout anew on
         # every tool round, final synthesis and clean salvage.  Bound only the
@@ -24338,11 +24734,15 @@ class AgentRuntime:
                 carrier_allowed = True
                 if forced_workspace_call and call.name == "workspace_create":
                     if isinstance(call.arguments, Mapping):
-                        # Content remains model-authored from the authenticated
-                        # context.  Only the exact current-user output filename
-                        # is code-owned, preventing a side-channel path/name swap.
+                        # A free-form outbox body remains model-authored.  A
+                        # closed value-only projection has already been derived
+                        # from one complete authenticated source, so both
+                        # visible output fields are code-owned before the sole
+                        # irreversible call.
                         call_arguments = dict(call.arguments)
                         call_arguments["filename"] = forced_workspace_filename
+                        if workspace_exact_content:
+                            call_arguments["content"] = workspace_exact_content
                     else:
                         carrier_allowed = False
                 elif call.name == "make_file" and isinstance(call.arguments, Mapping):
@@ -24697,6 +25097,23 @@ class AgentRuntime:
                             "tool": call.name,
                             "output": canonical_tool_evidence or str(rendered),
                         }
+                    )
+                if forced_workspace_call and workspace_exact_content:
+                    if tool_result.success and call.name == "workspace_create":
+                        return {
+                            "content": (f"Файл {forced_workspace_filename} создан во внешнем MCP outbox."),
+                            "tools_used": tools_used,
+                            "web_query_notice": " ".join(web_notice),
+                            "knowledge_object_ids": tool_knowledge_ids,
+                            "tool_evidence": tool_evidence,
+                            "voice_clip": voice_clip,
+                            "file_clips": file_clips,
+                            "_structural_file_count": structural_file_count,
+                            "_workspace_create_owned": True,
+                        }
+                    return workspace_create_failure(
+                        "Не удалось подтвердить результат вызова workspace_create. Проверьте "
+                        "внешний MCP outbox; повторный вызов автоматически не выполнялся."
                     )
                 round_results.append((str(openai_call["id"]), str(rendered)))
 
@@ -26309,6 +26726,7 @@ class AgentRuntime:
         *,
         evidence: list[dict[str, str]] | None = None,
         context: AgentContext | None = None,
+        literal_source_text: str | None = None,
     ) -> dict[str, Any] | None:
         """Просили файл — файл будет, даже если модель его не собрала.
 
@@ -26345,7 +26763,12 @@ class AgentRuntime:
             # вызовом. Если оснований нет, отказ всё равно случится, но по своей
             # причине и с записью в лог.
             return None
-        failed = bool(_ANSWER_IS_A_FAILURE.search(answer))
+        literal_grounding_required = literal_source_text is not None
+        literal_body_accepted = bool(
+            not literal_grounding_required
+            or _direct_file_body_is_literal_grounded(request, answer, literal_source_text)
+        )
+        failed = bool(_ANSWER_IS_A_FAILURE.search(answer) or not literal_body_accepted)
         blocks = [] if failed else _blocks_from_text(answer)
         exact_body_blocks = None if failed else _validated_exact_file_body_blocks(request, answer)
         if exact_body_blocks is not None:
@@ -26418,6 +26841,18 @@ class AgentRuntime:
                         ),
                     }
                 ]
+                if _requested_exact_file_body_count(request) is not None:
+                    fill_messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "У запроса закрытая форма ровно N строк/абзацев. Верни ровно "
+                                "эти N строк тела без отдельного заголовка и без подтверждения "
+                                "создания файла. Каждая строка должна быть дословным фрагментом "
+                                "переданного источника."
+                            ),
+                        }
+                    )
                 # Preserve every canonical hierarchy/Office envelope byte for
                 # the carrier stage.  Embedding it into the system message (or
                 # slicing it to 4k) would both change the evidence universe and
@@ -26488,6 +26923,13 @@ class AgentRuntime:
                     exact_body_blocks = _validated_exact_file_body_blocks(request, clean)
                     if exact_body_blocks is not None:
                         blocks = exact_body_blocks
+                    if literal_grounding_required and not _direct_file_body_is_literal_grounded(
+                        request,
+                        clean,
+                        literal_source_text,
+                    ):
+                        LOGGER.warning("output-carrier: source-literal body validation failed")
+                        return None
                     # Иначе документ, собранный вторым заходом, получал имя по
                     # реплике из чата: «Собираю отчёт по документам которые
                     # появились в архиве в июле 2026 года.docx».

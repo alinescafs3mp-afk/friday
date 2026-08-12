@@ -378,6 +378,48 @@ async def test_forced_workspace_plain_answer_never_mutates_or_retries(
 
 
 @pytest.mark.asyncio
+async def test_exact_workspace_failed_result_is_reported_as_uncertain_without_retry(
+    settings,
+    storage,
+):
+    storage.ensure_user("alice")
+    llm = _ForcedWorkspaceLLM()
+
+    class UncertainKernel(_RecordingKernel):
+        async def execute(self, name, arguments, *, actor=None):  # noqa: ANN001, ARG002
+            self.executed.append((name, dict(arguments)))
+            return ToolResult(name, False, error="synthetic timeout after start")
+
+    kernel = UncertainKernel()
+    runtime = AgentRuntime(settings, storage, llm=llm, kernel=kernel)  # type: ignore[arg-type]
+
+    result = await runtime._agentic_loop(  # noqa: SLF001
+        AgentContext(
+            conversation_id="synthetic-workspace-uncertain",
+            user_id="alice",
+            interaction_mode="dialogue",
+        ),
+        _EXACT_WORKSPACE_PROMPT,
+        ActorContext(user_id="alice", preset_key="owner", source="test"),
+        tools=[_tool_schema("workspace_create")],
+        attachments=None,
+        workspace_authority_message=_EXACT_WORKSPACE_PROMPT,
+        workspace_exact_content="DOC-42\nCONTROL-MARKER\n",
+    )
+
+    assert llm.calls == 1
+    assert kernel.executed == [
+        (
+            "workspace_create",
+            {"filename": "mcp-metadata.txt", "content": "DOC-42\nCONTROL-MARKER\n"},
+        )
+    ]
+    assert result["tools_used"] == ["workspace_create"]
+    assert "проверьте" in result["content"].casefold()
+    assert "файл не создан" not in result["content"].casefold()
+
+
+@pytest.mark.asyncio
 async def test_forced_workspace_round_rejects_all_bundled_side_effects(
     settings,
     storage,

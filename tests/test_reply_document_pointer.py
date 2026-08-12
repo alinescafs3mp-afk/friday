@@ -195,17 +195,19 @@ def _stored_reply_file(
     deleted=False,
     namespaced=True,
     extra_metadata: dict | None = None,
+    content: str | None = None,
 ):
     base_ref = f"telegram-file:{label}"
     namespace = hashlib.sha256(uploader.encode("utf-8")).hexdigest()[:24]
+    raw_content = content if content is not None else f"content {label}"
     raw = RawObject(
         id=new_id("raw"),
         user_id=tenant,
         source="upload",
         source_ref=f"uploader:{namespace}:{base_ref}" if namespaced else base_ref,
-        raw_content=f"content {label}",
+        raw_content=raw_content,
         content_type="file",
-        content_hash=hashlib.sha256(f"content {label}".encode()).hexdigest(),
+        content_hash=hashlib.sha256(raw_content.encode()).hexdigest(),
         metadata_json={
             "filename": f"{label}.docx",
             "uploaded_by": uploader,
@@ -472,6 +474,7 @@ def _synthetic_metadata_odt(
     *,
     transport_marker: bytes = b"",
     title: str = "Canonical alias title",
+    body: tuple[str, ...] = ("Synthetic body.",),
 ) -> bytes:
     payload = io.BytesIO()
     with zipfile.ZipFile(payload, "w") as archive:
@@ -483,7 +486,9 @@ def _synthetic_metadata_odt(
 <office:document-content
  xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
  xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
- <office:body><office:text><text:p>Synthetic body.</text:p></office:text></office:body>
+ <office:body><office:text>"""
+            + "".join(f"<text:p>{line}</text:p>" for line in body)
+            + """</office:text></office:body>
 </office:document-content>""",
         )
         archive.writestr(
@@ -569,7 +574,7 @@ class _D10RoutingLLM:
                             "arguments": json.dumps(
                                 {
                                     "filename": "model-must-not-choose.txt",
-                                    "content": "17-ДСП/1\nMETA-EXPORT-1\n",
+                                    "content": "№ 17-ДСП/1\nMETA-EXPORT-1\n",
                                 },
                                 ensure_ascii=False,
                             ),
@@ -577,9 +582,20 @@ class _D10RoutingLLM:
                     }
                 ],
             }
+        late_file_fill = any(
+            "Напиши СОДЕРЖИМОЕ документа" in str(item.get("content") or "")
+            for item in messages
+            if isinstance(item, Mapping) and str(item.get("role") or "") == "system"
+        )
         if "metadata-export.docx" in last_user and not tool_result_after_user:
             if offered or tool_choice is not None:
                 raise AssertionError("regular D10 export retained agentic schemas")
+            if not late_file_fill:
+                return {
+                    **common,
+                    "content": "Готово — файл metadata-export.docx уже создан.",
+                    "tool_calls": None,
+                }
             return {
                 **common,
                 "content": (
@@ -590,11 +606,7 @@ class _D10RoutingLLM:
         if "metadata-export.docx" in last_user:
             raise AssertionError("regular D10 export unexpectedly entered an agentic follow-up")
         if "workspace_create" in last_user and tool_result_after_user:
-            return {
-                **common,
-                "content": "Файл mcp-metadata.txt во внешнем MCP outbox создан.",
-                "tool_calls": None,
-            }
+            raise AssertionError("exact workspace success requested a post-effect LLM call")
         return {**common, "content": "Синтетический ответ.", "tool_calls": None}
 
 
@@ -617,7 +629,7 @@ def test_exact_d10_three_turn_api_keeps_reply_source_and_forces_only_workspace_e
     from friday.execution_kernel import ToolResult
     from friday.server import create_app
 
-    scoped = replace(settings, verify_answers=False, shared_archive=True)
+    scoped = replace(settings, verify_answers=True, shared_archive=True)
     app = create_app(scoped)
     llm = _D10RoutingLLM()
     executed: list[tuple[str, dict[str, Any]]] = []
@@ -666,6 +678,12 @@ def test_exact_d10_three_turn_api_keeps_reply_source_and_forces_only_workspace_e
         monkeypatch.setattr(kernel, "get_tool_definitions", definitions)
         monkeypatch.setattr(kernel, "execute", execute)
         monkeypatch.setattr(app.state.agent, "_prepare_context", prepare)
+
+        async def forbidden_generic_verifier(*_args, **_kwargs):
+            raise AssertionError("direct attachment export entered the generic verifier/repair path")
+
+        monkeypatch.setattr(app.state.agent, "_verify_response", forbidden_generic_verifier)
+        monkeypatch.setattr(app.state.agent, "_repair_once", forbidden_generic_verifier)
         me = _bridge_call(client, scoped, "GET", "/api/me", user="1001")
         assert me.status_code == 200, me.text
         uploader = str(me.json()["actor"]["user_id"])
@@ -688,7 +706,17 @@ def test_exact_d10_three_turn_api_keeps_reply_source_and_forces_only_workspace_e
                     "mime_type": "application/vnd.oasis.opendocument.text",
                     "media_kind": "document",
                     "source_ref": source_ref,
-                    "content_base64": base64.b64encode(_synthetic_metadata_odt()).decode("ascii"),
+                    "content_base64": base64.b64encode(
+                        _synthetic_metadata_odt(
+                            body=(
+                                "ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ",
+                                "ПРИКАЗ № 17-ДСП/1",
+                                "Дата документа: 10 августа 2026 года",
+                                "Контрольный маркер: META-EXPORT-1",
+                                "Подписант: начальник отдела Иван Иванович Иванов",
+                            )
+                        )
+                    ).decode("ascii"),
                 },
             },
             user="1001",
@@ -768,9 +796,9 @@ def test_exact_d10_three_turn_api_keeps_reply_source_and_forces_only_workspace_e
             "Иван Иванович Иванов",
         ]
         regular_model_calls = [call for call in llm.calls if "metadata-export.docx" in call["user"]]
-        assert len(regular_model_calls) == 1
-        assert regular_model_calls[0]["offered"] == set()
-        assert regular_model_calls[0]["tool_choice"] is None
+        assert len(regular_model_calls) == 2
+        assert all(call["offered"] == set() for call in regular_model_calls)
+        assert all(call["tool_choice"] is None for call in regular_model_calls)
 
         workspace_prompt = (
             "Контекст проверки SYNTHETIC-D10. "
@@ -806,6 +834,7 @@ def test_exact_d10_three_turn_api_keeps_reply_source_and_forces_only_workspace_e
     forced = [call for call in llm.calls if call["tool_choice"] == "workspace_create"]
     assert len(forced) == 1
     assert forced[0]["offered"] == {"workspace_create"}
+    assert len([call for call in llm.calls if "workspace_create" in call["user"]]) == 1
     assert workspace.json()["tools_used"] == ["workspace_create"]
     assert workspace.json().get("files") == []
     final_user = next(row for row in reversed(rows) if row.get("role") == "user")
@@ -868,6 +897,101 @@ def test_unresolved_or_foreign_workspace_reply_pointer_has_no_effect_or_late_fil
             assert response.json().get("tools_used") == []
 
     assert executed == []
+
+
+@pytest.mark.parametrize(
+    ("label", "content", "extra_metadata"),
+    [
+        (
+            "AMBIGUOUS-WORKSPACE-SOURCE",
+            "ПРИКАЗ № DOC-A\nНомер документа: DOC-B\nКонтрольный маркер: MARKER-A",
+            {},
+        ),
+        (
+            "PARTIAL-WORKSPACE-SOURCE",
+            "ПРИКАЗ № DOC-A\nКонтрольный маркер: MARKER-A",
+            {"text_truncated": True},
+        ),
+    ],
+)
+def test_exact_workspace_projection_denies_ambiguous_or_partial_source_before_effect(
+    settings,
+    monkeypatch,
+    label: str,
+    content: str,
+    extra_metadata: dict,
+) -> None:
+    from friday.server import create_app
+
+    scoped = replace(settings, verify_answers=False, shared_archive=True)
+    app = create_app(scoped)
+    model_calls: list[object] = []
+    kernel_calls: list[str] = []
+
+    class ForbiddenLLM:
+        enabled = True
+        model = "forbidden-workspace-source-model"
+        total_budget_sec = 5.0
+
+        async def chat(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            model_calls.append((args, kwargs))
+            raise AssertionError("ambiguous/partial exact source reached the model")
+
+    with TestClient(app) as client:
+        app.state.agent.llm = ForbiddenLLM()
+        base_execute = app.state.agent.kernel.execute
+
+        async def execute(name, arguments, *, actor=None):  # noqa: ANN001
+            kernel_calls.append(str(name))
+            return await base_execute(name, arguments, actor=actor)
+
+        monkeypatch.setattr(app.state.agent.kernel, "execute", execute)
+        me = _bridge_call(client, scoped, "GET", "/api/me", user="1001")
+        uploader = str(me.json()["actor"]["user_id"])
+        app.state.storage.update_user(uploader, preset_key="owner")
+        _stored_reply_file(
+            app.state.storage,
+            LEGACY_OWNER_USER_ID,
+            uploader,
+            label,
+            content=content,
+            extra_metadata={
+                "extraction_success": True,
+                "text_extraction_success": True,
+                "mime_type": "text/plain",
+                **extra_metadata,
+            },
+        )
+        response = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": (
+                    "Используй именно workspace_create и создай в MCP outbox файл exact.txt. "
+                    "Первая строка — только значение номера документа без подписи. "
+                    "Вторая строка — только значение контрольного маркера без подписи. "
+                    "Никаких других строк."
+                ),
+                "source_ref": f"telegram-update:{label}",
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "reply_document_source_ref": f"telegram-file:{label}",
+            },
+            user="1001",
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json().get("tools_used") == []
+    assert response.json().get("files") == []
+    assert "не создан" in str(response.json().get("message") or "").casefold()
+    assert not any(
+        isinstance(call, tuple)
+        and isinstance(call[1], Mapping)
+        and call[1].get("tool_choice") == "workspace_create"
+        for call in model_calls
+    )
+    assert kernel_calls == []
 
 
 def test_workspace_output_line_preserves_authorized_second_document_selector(
