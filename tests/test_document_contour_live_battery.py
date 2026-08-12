@@ -115,6 +115,20 @@ def test_d03_prompt_authorizes_approximate_filename_navigation_without_becoming_
     assert _filename_clue_ids(runner._D03_PROMPT, catalog) == ([target_id], 1)
 
 
+def test_d04_answer_oracle_checks_the_requested_identity_not_the_private_nonce() -> None:
+    runner = _module()
+
+    assert runner._d04_answer_has_requested_identity(
+        "В подразделении РЭБ командиром взвода числится капитан Орлов."
+    )
+    assert not runner._d04_answer_has_requested_identity(
+        "В подразделении РЭБ командиром взвода числится капитан Соколов."
+    )
+    assert not runner._d04_answer_has_requested_identity("Командиром указан капитан Орлов.")
+    assert not runner._d04_answer_has_requested_identity("Капитан Орлов не является командиром взвода РЭБ.")
+    assert not runner._d04_answer_has_requested_identity("Командиром взвода РЭБ числится не капитан Орлов.")
+
+
 def test_offline_self_test_never_imports_server_or_uses_production_database(monkeypatch) -> None:
     runner = _module()
     monkeypatch.setenv("FRIDAY_DATABASE_PATH", "/sentinel/production.sqlite3")

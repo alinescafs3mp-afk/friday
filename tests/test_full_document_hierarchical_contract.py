@@ -523,6 +523,93 @@ async def test_a_306k_hierarchy_respects_single_sequence_profile_and_input_budge
 
 
 @pytest.mark.asyncio
+async def test_repetitive_306k_source_uses_exact_lossless_carrier_without_leaf_models(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    total_chars = 306_179
+    head_value = "ORIGIN-CONTROL"
+    middle_value = "CENTER-CONTROL"
+    tail_value = "ENDING-CONTROL"
+    head = f"Начальный раздел содержит {head_value}.\n"
+    middle = f"Средний раздел содержит {middle_value}.\n"
+    tail = f"Заключительный раздел содержит {tail_value}."
+    repeated = "Нейтральный абзац описывает один и тот же порядок учёта, проверки и согласования. "
+    remaining = total_chars - len(head) - len(middle) - len(tail)
+    repetitions, suffix_chars = divmod(remaining, len(repeated))
+    before_middle = repetitions // 2
+    source = (
+        head
+        + repeated * before_middle
+        + middle
+        + repeated * (repetitions - before_middle)
+        + repeated[:suffix_chars]
+        + tail
+    )
+    assert len(source) == total_chars
+
+    class _LosslessCarrierLLM(_HierarchyLLM):
+        async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+            blob = _blob(messages)
+            assert CHUNK_PREFIX not in blob
+            assert REDUCE_PREFIX not in blob
+            return await super().chat(messages, **kwargs)
+
+    llm = _LosslessCarrierLLM(f"Документ содержит {head_value}, {middle_value} и {tail_value}.")
+    result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question="Обобщи весь документ и отдельно перечисли три опорных значения по порядку.",
+        attachments=[_owned("repetitive-306k.txt", source)],
+        llm=llm,
+    )
+
+    assert _chunk_payloads(llm) == []
+    assert not any(
+        str(item.get("content") or "").startswith(REDUCE_PREFIX)
+        for call in llm.calls
+        for item in call["messages"]
+    )
+    synthesis, verification = _canonical_map_blocks(llm)
+    assert synthesis == verification and len(synthesis) == 1
+    carrier = _payload(synthesis[0], MAP_PREFIX)
+    coverage = carrier["coverage"]
+    assert coverage["map_strategy"] == "lossless_unit_rle"
+    assert coverage["model_map_calls"] == 0
+    assert coverage["complete"] is True
+    assert coverage["source_chars_total"] == coverage["source_chars_planned"] == len(source)
+    assert len(carrier["records"]) == 1
+    record = carrier["records"][0]
+    cursor = 0
+    rebuilt: list[str] = []
+    for run in record["runs"]:
+        assert run["start"] == cursor
+        assert run["end"] - run["start"] == run["unit_chars"] * run["repeat"]
+        rebuilt.append(run["text"] * run["repeat"])
+        cursor = run["end"]
+    assert cursor == len(source)
+    assert "".join(rebuilt) == source
+    assert all(value in result["message"] for value in (head_value, middle_value, tail_value))
+    assert result["attachment_coverage_complete"] is True
+    assert result["attachment_verification_complete"] is True
+
+    noncompressible = "".join(
+        f"Неповторяющаяся строка с порядковым номером {index:04d}.\n" for index in range(600)
+    )
+    assert (
+        agent_runtime_module._attachment_lossless_unit_rle_bundle(
+            [_owned("noncompressible.txt", noncompressible)],
+            message="Обобщи весь документ.",
+            task_kind="summary",
+            max_model_len=settings.profile.max_model_len,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
 async def test_escape_dense_hierarchy_replans_contiguous_leaves_to_serialized_budget(
     settings: Any,
     storage: Any,

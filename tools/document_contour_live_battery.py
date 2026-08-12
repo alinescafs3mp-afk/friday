@@ -788,6 +788,27 @@ def _contains_all(value: str, expected: Sequence[str]) -> bool:
     return all(_normalized(item) in normalized for item in expected)
 
 
+def _d04_answer_has_requested_identity(value: str) -> bool:
+    """Check the public semantic answer, not a hidden fixture nonce."""
+
+    normalized = _normalized(value)
+    if not _contains_all(normalized, ("РЭБ", "командир", "взвод", "капитан Орлов")):
+        return False
+    identity = r"капитан\s+орлов"
+    role = r"командир\w*\s+взвод\w*"
+    for clause in re.split(r"[.!?;\n]+", normalized):
+        identity_match = re.search(identity, clause)
+        role_match = re.search(role, clause)
+        if identity_match is None or role_match is None or re.search(r"\bрэб\b", clause) is None:
+            continue
+        if abs(identity_match.start() - role_match.start()) > 120:
+            continue
+        if re.search(r"\b(?:не|никто|иной|другой)\b", clause):
+            continue
+        return True
+    return False
+
+
 def _docx_non_title_lines(payload: bytes) -> tuple[str, ...]:
     """Return normalized non-empty DOCX paragraphs, excluding its title."""
 
@@ -1529,9 +1550,9 @@ def _case_04(h: Harness) -> dict[str, Any]:
         "target_first": bool(source.get("raw_ids") and source["raw_ids"][0] == target_raw),
         "canonical_excerpt": _contains_all(
             str(source.get("first_excerpt") or ""),
-            ("Подразделение РЭБ", "Командир взвода", "капитан Орлов"),
+            ("Подразделение РЭБ", "Командир взвода", "капитан Орлов", marker),
         ),
-        "answer_target": marker.casefold() in str(answer.get("message") or "").casefold(),
+        "answer_target": _d04_answer_has_requested_identity(str(answer.get("message") or "")),
         "no_false_absence": "не найден" not in _normalized(str(answer.get("message") or "")),
     }
     return h.case_result("D04", started, checks, delta)

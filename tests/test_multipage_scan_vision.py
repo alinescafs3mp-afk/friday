@@ -242,6 +242,70 @@ async def test_five_page_scan_balances_low_resolution_batches_within_aggregate_c
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("reread_agrees", [True, False])
+async def test_asset_evidence_quote_requires_one_agreeing_targeted_reread(
+    settings,
+    storage,
+    reread_agrees: bool,
+) -> None:
+    quote = "VISIBLE REFERENCE 7F3A"
+
+    class EvidenceGapVision:
+        enabled = True
+        model = "offline-evidence-gap-vision"
+
+        def __init__(self) -> None:
+            self.calls = 0
+            self.rereads = 0
+
+        async def chat(self, messages, **kwargs):
+            del kwargs
+            self.calls += 1
+            content = messages[-1]["content"]
+            targeted = any(
+                "TARGETED OCR REREAD" in str(item.get("text") or "")
+                for item in content
+                if item.get("type") == "text"
+            )
+            if targeted:
+                self.rereads += 1
+                value = quote if reread_agrees else "A DIFFERENT VISIBLE VALUE"
+                return {"content": json.dumps({"asset_id": "A1", "text": value})}
+            return {
+                "content": json.dumps(
+                    {
+                        "pages": [{"asset_id": "A1", "text": "VISIBLE PAGE HEADING"}],
+                        "text": "",
+                        "title": "Synthetic raster scan",
+                        "summary": "One page",
+                        "document_type": "scan",
+                        "entities": [],
+                        "evidence": [{"asset_id": "A1", "quote": quote, "claim": "Visible reference"}],
+                        "warnings": [],
+                        "confidence": 0.8,
+                    }
+                )
+            }
+
+    llm = EvidenceGapVision()
+    result = await _pipeline(settings, storage, llm)._extract_visual_document(  # noqa: SLF001
+        _raster_pdf(1),
+        filename="evidence-gap.pdf",
+        mime_type="application/pdf",
+    )
+
+    assert result is not None and result["success"] is True
+    assert llm.calls == 2 and llm.rereads == 1
+    assert result["evidence_reread_attempted"] is True
+    assert (quote in result["text"]) is reread_agrees
+    assert result["evidence_reread_confirmed"] is reread_agrees
+    assert result["evidence_text_inconsistent"] is (not reread_agrees)
+    assert result["partial"] is (not reread_agrees)
+    assert result["text_truncated"] is False
+    assert ("vision_evidence_text_inconsistent" in result["warnings"]) is (not reread_agrees)
+
+
+@pytest.mark.asyncio
 async def test_pdf_pages_and_each_vision_request_have_independent_pixel_bounds(
     settings,
     storage,

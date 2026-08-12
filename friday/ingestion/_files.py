@@ -748,7 +748,62 @@ class FilesMixin(PipelineShared):
             "reported_asset_ids": reported_asset_ids or expected_asset_ids,
             "model": self.settings.llm_model,
             "advisory_only": True,
+            # Process-private reconciliation input.  The document combiner may
+            # compare asset-scoped quotes with the page carrier, but this map is
+            # never copied into durable metadata or an API receipt.
+            "_page_text": page_text,
         }
+
+    async def _reread_visual_asset_text(self, asset: VisualAsset, *, asset_id: str) -> str:
+        """Transcribe one discrepant page once without supplying the expected quote."""
+
+        llm = self.llm
+        if llm is None:
+            return ""
+        encoded = base64.b64encode(asset.data).decode("ascii")
+        try:
+            response = await llm.chat(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are Friday's local document OCR extractor. Output strict JSON only. "
+                            "Transcribe visible text exactly; do not infer or complete obscured text."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"TARGETED OCR REREAD FOR ASSET {asset_id}. Return exactly one JSON "
+                                    "object with keys asset_id and text. Preserve every visible character "
+                                    "and line in supplied order."
+                                ),
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{asset.mime_type};base64,{encoded}",
+                                },
+                            },
+                        ],
+                    },
+                ],
+                temperature=0.0,
+                max_tokens=self.settings.cognition_max_tokens,
+                priority="foreground",
+                reject_repeated_token_degeneration=False,
+            )
+            parsed = _parse_model_response(response, what="Vision evidence reread")
+        except Exception as exc:
+            LOGGER.info("Local vision evidence reread failed (%s)", type(exc).__name__)
+            return ""
+        reported_asset = _bounded_text(parsed.get("asset_id"), 12).upper().strip()
+        if reported_asset != asset_id:
+            return ""
+        return _bounded_text(parsed.get("text"), self.settings.max_extracted_text_chars).strip()
 
     async def _extract_visual_document(
         self,
@@ -1031,6 +1086,86 @@ class FilesMixin(PipelineShared):
             pages_read = len(successful_page_numbers) if successful_page_numbers else len(successful_assets)
         pages_total = max(pages_total, pages_read)
 
+        # Some valid vision responses place a visibly transcribed value in an
+        # asset-scoped evidence quote while accidentally omitting it from that
+        # asset's canonical ``pages[].text`` carrier.  Do not silently discard
+        # the value and do not trust the first response alone.  At most one
+        # discrepant asset receives one independent transcription-only reread,
+        # still inside the original 120-second document deadline.  Only quotes
+        # reproduced exactly (apart from whitespace layout) enter the carrier;
+        # every unresolved disagreement keeps the extraction partial/UNKNOWN.
+        def quote_in_text(quote: str, text: str) -> bool:
+            normalized_quote = " ".join(quote.split())
+            normalized_text = " ".join(text.split())
+            return bool(normalized_quote and normalized_quote in normalized_text)
+
+        asset_lookup = {f"A{index}": asset for index, asset in enumerate(successful_assets, start=1)}
+        result_lookup: dict[str, dict[str, Any]] = {}
+        missing_quotes: dict[str, list[str]] = {}
+        for successful_batch, result in successful:
+            page_text = result.get("_page_text")
+            page_text_by_asset = page_text if isinstance(page_text, dict) else {}
+            descriptors = [item for item in _json_list(result.get("assets")) if isinstance(item, dict)]
+            for descriptor in descriptors:
+                asset_id = _bounded_text(descriptor.get("asset_id"), 12).upper().strip()
+                if asset_id in asset_lookup:
+                    result_lookup[asset_id] = result
+            for candidate in _json_list(result.get("evidence")):
+                if not isinstance(candidate, dict):
+                    continue
+                asset_id = _bounded_text(candidate.get("asset_id"), 12).upper().strip()
+                quote = _bounded_text(candidate.get("quote"), 400).strip()
+                if not quote or asset_id not in asset_lookup:
+                    continue
+                visible = str(page_text_by_asset.get(asset_id) or "")
+                if not visible and len(successful_batch) == 1:
+                    visible = str(result.get("text") or "")
+                if not quote_in_text(quote, visible):
+                    bucket = missing_quotes.setdefault(asset_id, [])
+                    if quote not in bucket:
+                        bucket.append(quote)
+
+        evidence_reread_attempted = False
+        evidence_reread_confirmed = False
+        if missing_quotes:
+            target_asset_id = max(
+                missing_quotes,
+                key=lambda asset_id: max(len(quote) for quote in missing_quotes[asset_id]),
+            )
+            remaining = common_deadline - loop.time()
+            if remaining > 0:
+                evidence_reread_attempted = True
+                try:
+                    async with asyncio.timeout(remaining):
+                        reread_text = await self._reread_visual_asset_text(
+                            asset_lookup[target_asset_id],
+                            asset_id=target_asset_id,
+                        )
+                except TimeoutError:
+                    reread_text = ""
+                    ocr_deadline_reached = True
+                confirmed = [
+                    quote for quote in missing_quotes[target_asset_id] if quote_in_text(quote, reread_text)
+                ]
+                if confirmed:
+                    evidence_reread_confirmed = True
+                    target_result = result_lookup.get(target_asset_id)
+                    if target_result is not None:
+                        carrier = str(target_result.get("text") or "").rstrip()
+                        additions = [quote for quote in confirmed if not quote_in_text(quote, carrier)]
+                        if additions:
+                            target_result["text"] = "\n".join((carrier, *additions)).strip()
+                    unresolved = [
+                        quote for quote in missing_quotes[target_asset_id] if quote not in confirmed
+                    ]
+                    if unresolved:
+                        missing_quotes[target_asset_id] = unresolved
+                    else:
+                        missing_quotes.pop(target_asset_id, None)
+            else:
+                ocr_deadline_reached = True
+        evidence_text_inconsistent = bool(missing_quotes)
+
         text_parts: list[str] = []
         summaries: list[str] = []
         titles: list[str] = []
@@ -1095,6 +1230,8 @@ class FilesMixin(PipelineShared):
             warnings.append("vision_pages_truncated")
         if text_truncated:
             warnings.append("vision_text_truncated")
+        if evidence_text_inconsistent:
+            warnings.append("vision_evidence_text_inconsistent")
         warnings = list(dict.fromkeys(warnings))[:20]
 
         confidence = round(_clamp(weighted_confidence / max(1, len(successful_assets))), 3)
@@ -1119,13 +1256,16 @@ class FilesMixin(PipelineShared):
             "pages_total": pages_total,
             "pages_read": pages_read,
             "pages_truncated": pages_truncated,
-            "partial": pages_truncated or bool(batch_error) or text_truncated,
+            "partial": pages_truncated or bool(batch_error) or text_truncated or evidence_text_inconsistent,
             "deadline_reached": deadline_reached,
             "page_cap_reached": page_cap_reached,
             "text_truncated": text_truncated,
             "batches_total": batch_attempts,
             "batches_read": len(successful),
             "batch_fallback_used": fallback_used,
+            "evidence_reread_attempted": evidence_reread_attempted,
+            "evidence_reread_confirmed": evidence_reread_confirmed,
+            "evidence_text_inconsistent": evidence_text_inconsistent,
             "assets": [
                 {"asset_id": f"A{index}", **asset.to_dict()}
                 for index, asset in enumerate(successful_assets, start=1)
