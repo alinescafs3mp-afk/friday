@@ -484,24 +484,39 @@ async def test_replied_archive_password_is_ephemeral_and_current_media_wins_pend
             safe_query="Открой старый архив",
             original_message_id=4499,
         )
-        ordinary = {
-            "update_id": 4503,
-            "message": {
-                "message_id": 4503,
-                "chat": {"id": 5001},
-                "from": {"id": 1001},
-                "text": "Почему архив не открылся?",
-            },
-        }
-        safe_ordinary = bridge._sanitize_update_before_store(ordinary)  # noqa: SLF001
-        assert "friday_archive_password_followup" not in safe_ordinary
-        await bridge._process_update(object(), object(), safe_ordinary, cached_response=None)  # noqa: SLF001
-        ordinary_payload = backend_payloads.pop()
-        assert ordinary_payload["message"] == "Почему архив не открылся?"
-        assert "document" not in ordinary_payload
-        assert "archive_password" not in ordinary_payload
-        assert "reply_document_source_ref" not in ordinary_payload
-        assert bridge._inbox.archive_password_challenge(5001, 1001) is None  # noqa: SLF001
+        for offset, ordinary_text in enumerate(
+            ("Почему архив не открылся?", "Почему?", "неверный!", "стоп."),
+            start=3,
+        ):
+            if offset > 3:
+                bridge._inbox.remember_archive_password_challenge(  # noqa: SLF001
+                    5001,
+                    1001,
+                    archive,
+                    safe_query="Открой старый архив",
+                    original_message_id=4499,
+                )
+            ordinary = {
+                "update_id": 4500 + offset,
+                "message": {
+                    "message_id": 4500 + offset,
+                    "chat": {"id": 5001},
+                    "from": {"id": 1001},
+                    "text": ordinary_text,
+                },
+            }
+            safe_ordinary = bridge._sanitize_update_before_store(ordinary)  # noqa: SLF001
+            assert "friday_archive_password_followup" not in safe_ordinary
+            assert safe_ordinary["message"]["text"] == ordinary_text
+            await bridge._process_update(  # noqa: SLF001
+                object(), object(), safe_ordinary, cached_response=None
+            )
+            ordinary_payload = backend_payloads.pop()
+            assert ordinary_payload["message"] == ordinary_text
+            assert "document" not in ordinary_payload
+            assert "archive_password" not in ordinary_payload
+            assert "reply_document_source_ref" not in ordinary_payload
+            assert bridge._inbox.archive_password_challenge(5001, 1001) is None  # noqa: SLF001
     finally:
         bridge._archive_passwords.clear()  # noqa: SLF001
         bridge._inbox.close()  # noqa: SLF001

@@ -75,6 +75,61 @@ _PRESENTATION_PASSWORD_QUOTES = {
 }
 
 
+def _message_text_field(message: dict[str, Any]) -> tuple[str, str]:
+    if isinstance(message.get("text"), str):
+        return "text", str(message.get("text") or "")
+    if isinstance(message.get("caption"), str):
+        return "caption", str(message.get("caption") or "")
+    return "", ""
+
+
+def _scrub_archive_password_directive(message: dict[str, Any]) -> tuple[str, str | None]:
+    """Remove one explicit credential from a message before durable storage."""
+
+    field, original = _message_text_field(message)
+    if not field:
+        return original, None
+    safe_text, secret = strip_archive_password_directives(original)
+    if secret is None:
+        return original, None
+    message[field] = safe_text
+    # Telegram entity offsets refer to the pre-redaction text and must never be
+    # used to reconstruct the removed credential.
+    message.pop("entities", None)
+    message.pop("caption_entities", None)
+    return safe_text, secret
+
+
+def _standalone_archive_password(value: str) -> str | None:
+    """Accept a closed credential shape, never an ambiguous one-word utterance.
+
+    Passwords containing spaces or plain words remain supported through the
+    advertised ``пароль: …`` form. Matching presentation quotes are also an
+    explicit credential boundary. An unquoted standalone value must contain a
+    digit or an internal credential separator; terminal sentence punctuation
+    alone is not a credential signal. This keeps ordinary prose such as
+    ``Почему?`` or ``стоп.`` out of the pending-archive channel while retaining
+    the historical one-token password-followup form used by the bridge.
+    """
+
+    safe = bounded_archive_password(value)
+    if safe is None:
+        return None
+    core = value.strip(" \t")
+    if not core:
+        return None
+    if len(core) >= 2 and _PRESENTATION_PASSWORD_QUOTES.get(core[0]) == core[-1]:
+        return safe
+    if any(character.isspace() for character in core):
+        return None
+    without_sentence_punctuation = core.rstrip(".!?,;:…")
+    if without_sentence_punctuation and all(
+        character.isalpha() for character in without_sentence_punctuation
+    ):
+        return None
+    return safe
+
+
 class _LazyUpdateInbox:
     """Delay every SQLite touch until the bridge owns its process lease."""
 
@@ -411,58 +466,6 @@ class TransportMixin(BridgeShared):
     def _bounded_ephemeral_archive_password(value: str | None) -> str | None:
         return bounded_archive_password(value)
 
-    @staticmethod
-    def _message_text_field(message: dict[str, Any]) -> tuple[str, str]:
-        if isinstance(message.get("text"), str):
-            return "text", str(message.get("text") or "")
-        if isinstance(message.get("caption"), str):
-            return "caption", str(message.get("caption") or "")
-        return "", ""
-
-    @staticmethod
-    def _scrub_archive_password_directive(message: dict[str, Any]) -> tuple[str, str | None]:
-        """Remove one explicit credential from a message before durable storage."""
-
-        field, original = TransportMixin._message_text_field(message)
-        if not field:
-            return original, None
-        safe_text, secret = strip_archive_password_directives(original)
-        if secret is None:
-            return original, None
-        message[field] = safe_text
-        # Telegram entity offsets refer to the pre-redaction text and must never
-        # be used to reconstruct the removed credential.
-        message.pop("entities", None)
-        message.pop("caption_entities", None)
-        return safe_text, secret
-
-    @staticmethod
-    def _standalone_archive_password(value: str) -> str | None:
-        """Accept an unambiguous one-token credential, not arbitrary prose.
-
-        Passwords containing spaces remain supported through the explicit
-        ``пароль: …`` form.  Matching presentation quotes are also an explicit
-        credential boundary.  This prevents every ordinary sentence after a
-        challenge from becoming another wrong-password retry.
-        """
-
-        safe = bounded_archive_password(value)
-        if safe is None:
-            return None
-        core = value.strip(" \t")
-        if not core:
-            return None
-        if len(core) >= 2 and _PRESENTATION_PASSWORD_QUOTES.get(core[0]) == core[-1]:
-            return safe
-        if any(character.isspace() for character in core):
-            return None
-        # A plain alphabetic word is much more likely to be a complaint or a
-        # command ("неверный", "стоп") than a credential.  Such passwords use
-        # the advertised explicit directive instead.
-        if all(character.isalpha() for character in core):
-            return None
-        return safe
-
     def _sanitize_update_before_store(self, update: dict[str, Any]) -> dict[str, Any]:
         """Strip archive credentials before the first durable Telegram write."""
 
@@ -478,8 +481,8 @@ class TransportMixin(BridgeShared):
         if not chat_id or not user_id:
             return safe_update
 
-        text_field, original_text = self._message_text_field(message)
-        safe_text, explicit_secret = self._scrub_archive_password_directive(message)
+        text_field, original_text = _message_text_field(message)
+        safe_text, explicit_secret = _scrub_archive_password_directive(message)
         descriptor = self._archive_document_descriptor(message)
         current_media, _filename, _mime_type, _media_kind = self._select_media(message, safe_update)
         replied_to = message.get("reply_to_message")
@@ -488,8 +491,8 @@ class TransportMixin(BridgeShared):
         replied_explicit_secret: str | None = None
         replied_archive = None
         if replied_message is not None:
-            _reply_field, replied_original_text = self._message_text_field(replied_message)
-            _safe_reply, replied_explicit_secret = self._scrub_archive_password_directive(replied_message)
+            _reply_field, replied_original_text = _message_text_field(replied_message)
+            _safe_reply, replied_explicit_secret = _scrub_archive_password_directive(replied_message)
             replied_archive = self._archive_document_descriptor(replied_message)
         pending = self._inbox.archive_password_challenge(chat_id, user_id)
         followup = False
@@ -512,7 +515,7 @@ class TransportMixin(BridgeShared):
         elif pending is not None:
             candidate_secret = explicit_secret or replied_explicit_secret
             if candidate_secret is None:
-                candidate_secret = self._standalone_archive_password(original_text)
+                candidate_secret = _standalone_archive_password(original_text)
                 if candidate_secret is not None and text_field:
                     message[text_field] = ""
                     message.pop("entities", None)
@@ -528,7 +531,7 @@ class TransportMixin(BridgeShared):
                 # the quoted credential itself is scrubbed before SQLite.
                 candidate_secret = self._bounded_ephemeral_archive_password(replied_original_text)
                 if candidate_secret is not None:
-                    reply_field, _reply_text = self._message_text_field(replied_message)
+                    reply_field, _reply_text = _message_text_field(replied_message)
                     if reply_field:
                         replied_message[reply_field] = ""
                         replied_message.pop("entities", None)
