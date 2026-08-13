@@ -206,6 +206,81 @@ def test_base_exception_kills_and_reaps_every_started_worker_group(
     assert battery.subprocess.Popen is fake_popen
 
 
+def test_thread_start_interruption_cannot_escape_worker_teardown(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run_root = tmp_path / "acceptance"
+    run_root.mkdir(mode=0o700)
+    sealed = acceptance._preseal_passes("p06", run_root, acceptance._load_manifests())
+    candidate_files = (
+        "tools/synthetic_live_acceptance.py",
+        "tools/synthetic_live_battery.py",
+    )
+    candidate_digest = "a" * 64
+    worker_entered = threading.Event()
+    release_worker = threading.Event()
+    model_environment = {"FRIDAY_LLM_BASE_URL": "http://127.0.0.1:8001/v1"}
+
+    class StartInterrupted(BaseException):
+        pass
+
+    class HardExitObserved(BaseException):
+        pass
+
+    class FakeExecutor:
+        def __init__(self, _environment: dict[str, str], *, instrument_path: Path) -> None:
+            assert instrument_path == acceptance.RUNNER_PATH
+            self._candidate_files = candidate_files
+            self._candidate_source_sha256 = candidate_digest
+
+        def __enter__(self) -> FakeExecutor:
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def _assert_candidate_unchanged(self) -> None:
+            return None
+
+        def __call__(self, *_args: Any, **_kwargs: Any) -> Any:
+            worker_entered.set()
+            release_worker.wait()
+            raise RuntimeError("private detail")
+
+    original_start = threading.Thread.start
+    starts = 0
+
+    def interrupt_second_start(thread: threading.Thread) -> None:
+        nonlocal starts
+        starts += 1
+        if starts == 2:
+            assert worker_entered.wait(timeout=1.0)
+            raise StartInterrupted()
+        original_start(thread)
+
+    def observe_hard_exit() -> None:
+        assert isinstance(battery.subprocess, acceptance._TrackedSubprocessModule)
+        raise HardExitObserved()
+
+    monkeypatch.setattr(battery, "_candidate_source_paths", lambda **_kwargs: candidate_files)
+    monkeypatch.setattr(battery, "_candidate_source_digest", lambda **_kwargs: candidate_digest)
+    monkeypatch.setattr(battery, "SubprocessPassExecutor", FakeExecutor)
+    monkeypatch.setattr(threading.Thread, "start", interrupt_second_start)
+    monkeypatch.setattr(acceptance, "WORKER_THREAD_TEARDOWN_WAIT_SEC", 0.02)
+    monkeypatch.setattr(acceptance, "_hard_exit_after_incomplete_teardown", observe_hard_exit)
+
+    try:
+        with pytest.raises(HardExitObserved):
+            acceptance._execute_sealed(
+                sealed,
+                concurrency=2,
+                model_environment=model_environment,
+            )
+    finally:
+        release_worker.set()
+
+
 def test_cancellation_hostile_worker_forces_process_exit_before_proxy_or_lock_release(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

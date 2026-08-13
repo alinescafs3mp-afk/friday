@@ -944,10 +944,16 @@ def _execute_sealed(
             )
             for index in range(worker_count)
         ]
+        started_threads: list[threading.Thread] = []
         with _WorkerProcessRegistry() as registry:
-            for thread in threads:
-                thread.start()
             try:
+                # Thread startup belongs to the same lifecycle transaction as
+                # result collection.  A signal or start failure here must not
+                # release the process proxy and host lock while a previously
+                # started worker can still resume and spawn a child.
+                for thread in threads:
+                    started_threads.append(thread)
+                    thread.start()
                 for _index in range(len(sealed)):
                     kind, payload = completed.get()
                     if kind == "error":
@@ -966,21 +972,23 @@ def _execute_sealed(
                 try:
                     processes_clear = registry.stop_and_reap()
                     deadline = time.monotonic() + WORKER_THREAD_TEARDOWN_WAIT_SEC
-                    for thread in threads:
+                    for thread in started_threads:
+                        if thread.ident is None:
+                            continue
                         thread.join(timeout=max(0.0, deadline - time.monotonic()))
                 finally:
                     if can_mask_signals:
                         signal.signal(signal.SIGTERM, previous_sigterm)
                         signal.signal(signal.SIGINT, previous_sigint)
-                if not processes_clear or any(thread.is_alive() for thread in threads):
+                if not processes_clear or any(thread.is_alive() for thread in started_threads):
                     _hard_exit_after_incomplete_teardown()
                     raise battery.BatteryContractError("acceptance_worker_teardown_incomplete") from None
                 raise
             else:
                 deadline = time.monotonic() + WORKER_THREAD_TEARDOWN_WAIT_SEC
-                for thread in threads:
+                for thread in started_threads:
                     thread.join(timeout=max(0.0, deadline - time.monotonic()))
-                if any(thread.is_alive() for thread in threads):
+                if any(thread.is_alive() for thread in started_threads):
                     stop.set()
                     registry.stop_and_reap()
                     _hard_exit_after_incomplete_teardown()
