@@ -32696,14 +32696,21 @@ class AgentRuntime:
         if not str(kind).startswith("правило"):
             return False
         existing = self._standing_rules(context.person_id or context.user_id)
-        action, rule, previous_rule, remainder = await _call_with_turn_deadline(
-            self._standing_rule_by_arbiter,
-            message,
-            existing,
-            previous_turn=context.previous_user_turn,
-            turn_deadline=context.turn_deadline,
-            expired="turn deadline expired during standing-rule arbitration",
-        )
+        try:
+            action, rule, previous_rule, remainder = await _call_with_turn_deadline(
+                self._standing_rule_by_arbiter,
+                message,
+                existing,
+                previous_turn=context.previous_user_turn,
+                turn_deadline=context.turn_deadline,
+                expired="turn deadline expired during standing-rule arbitration",
+            )
+        except TimeoutError:
+            # The classifier is optional.  Expiry must restore the ordinary
+            # conversation/archive path, not turn a user message which is
+            # already durable into an HTTP failure.
+            LOGGER.info("Standing-rule arbitration: turn deadline expired")
+            return False
         # Неизвестный остаток — это ВСЯ реплика, а не пустота: см. арбитр. Ход
         # тогда идёт к модели как раньше, подтверждение просто встаёт первым.
         rest = message if remainder is None else remainder
@@ -32868,16 +32875,20 @@ class AgentRuntime:
         if not str(kind).startswith("поправка"):
             return False
         existing = self._corrections(context.person_id or context.user_id)
-        action, correction, previous, remainder = await _call_with_turn_deadline(
-            self._standing_rule_by_arbiter,
-            message,
-            existing,
-            previous_turn=context.previous_user_turn,
-            corrected_answer=context.previous_answer,
-            candidate_kind="correction",
-            turn_deadline=context.turn_deadline,
-            expired="turn deadline expired during correction arbitration",
-        )
+        try:
+            action, correction, previous, remainder = await _call_with_turn_deadline(
+                self._standing_rule_by_arbiter,
+                message,
+                existing,
+                previous_turn=context.previous_user_turn,
+                corrected_answer=context.previous_answer,
+                candidate_kind="correction",
+                turn_deadline=context.turn_deadline,
+                expired="turn deadline expired during correction arbitration",
+            )
+        except TimeoutError:
+            LOGGER.info("Correction arbitration: turn deadline expired")
+            return False
         rest = message if remainder is None else remainder
         if not action:
             LOGGER.info(

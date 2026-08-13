@@ -1092,3 +1092,41 @@ async def test_expired_explicit_news_turn_starts_no_web_research() -> None:
 
     assert runtime.kernel.calls == []
     assert tools_used == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("learner_name", "verdict_kind", "listing_name"),
+    [
+        ("_learn_a_standing_rule", "правило", "_standing_rules"),
+        ("_learn_a_correction", "поправка", "_corrections"),
+    ],
+)
+async def test_expired_optional_rule_arbitration_falls_back_without_http_failure(
+    learner_name: str,
+    verdict_kind: str,
+    listing_name: str,
+) -> None:
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    setattr(runtime, listing_name, lambda _user_id: [])
+    arbiter_started = False
+
+    async def arbiter(*_args, **_kwargs):
+        nonlocal arbiter_started
+        arbiter_started = True
+        return "", "", "", None
+
+    runtime._standing_rule_by_arbiter = arbiter  # type: ignore[method-assign]  # noqa: SLF001
+    context = AgentContext(
+        conversation_id="expired-rule-arbitration",
+        user_id="alice",
+        person_id="alice",
+        outward_verdict=(verdict_kind, "candidate"),
+        turn_deadline=time.monotonic() - 1.0,
+    )
+
+    handled = await getattr(runtime, learner_name)("synthetic instruction", context)
+
+    assert handled is False
+    assert arbiter_started is False
+    assert context.structural_answer == ""
