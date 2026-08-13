@@ -402,16 +402,16 @@ def create_workspace_server(inbox_root: Path, outbox_root: Path, *, max_output_b
         description="Read-only inbox and create-only outbox configured by Friday.",
     )
     read_only = ToolAnnotations(
-        readOnlyHint=True,
-        destructiveHint=False,
-        idempotentHint=True,
-        openWorldHint=False,
+        read_only_hint=True,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
     )
     create_only = ToolAnnotations(
-        readOnlyHint=False,
-        destructiveHint=False,
-        idempotentHint=False,
-        openWorldHint=False,
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=False,
     )
 
     @server.tool(name="exchange_list", annotations=read_only, structured_output=True)

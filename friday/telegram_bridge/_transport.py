@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import re
 from contextlib import suppress
+from typing import TYPE_CHECKING
 
 from friday.archive_passwords import bounded_archive_password, strip_archive_password_directives
 from friday.telegram_bridge._base import (
@@ -153,6 +154,13 @@ class _LazyUpdateInbox:
 
 
 class TransportMixin(BridgeShared):
+    if TYPE_CHECKING:
+
+        @staticmethod
+        def _select_media(
+            message: dict[str, Any], update: dict[str, Any]
+        ) -> tuple[dict[str, Any] | None, str, str, str]: ...
+
     def __init__(self, config: TelegramConfig) -> None:
         config.validate()
         self.config = config

@@ -127,7 +127,7 @@ class _MCPConnection:
                     discovered: set[str] = set()
                     cursor: str | None = None
                     for _ in range(10):
-                        page = await client.list_tools(cursor=cursor, cache_mode="reload")
+                        page = await client.list_tools(cursor=cursor, cache_mode="refresh")
                         discovered.update(str(tool.name) for tool in page.tools)
                         cursor = page.next_cursor
                         if not cursor:

@@ -7208,7 +7208,7 @@ class _ExactUploaderFileSelection:
     """One closed exact-filename source selected under one named uploader."""
 
     applies: bool = False
-    attachments: tuple[_OwnedAttachment, ...] = ()
+    attachments: tuple[dict[str, Any], ...] = ()
     expected_count: int = 0
     tenant_id: str = ""
     person_id: str = ""
@@ -23461,7 +23461,7 @@ class AgentRuntime:
             return (
                 (hydrated, bounded_expected) if len(hydrated) == bounded_expected else ([], bounded_expected)
             )
-        hydrated: list[dict[str, Any]] = []
+        legacy_hydrated: list[dict[str, Any]] = []
         for raw_id in selected_ids:
             uploaded_by = str(selected_uploaders.get(raw_id) or person_id)
             attachment = self._owned_file_attachment(
@@ -23471,8 +23471,8 @@ class AgentRuntime:
             )
             if attachment is None:
                 continue
-            hydrated.append(attachment)
-        return hydrated, bounded_expected
+            legacy_hydrated.append(attachment)
+        return legacy_hydrated, bounded_expected
 
     def _restore_conversation_attachments(
         self,
@@ -36284,13 +36284,17 @@ class AgentRuntime:
                                 timed_out_sources,
                             )
                         ):
-                            canonical_completed = max(0, completed_sources - filtered_count)
-                            canonical_failed = failed_sources + filtered_count
+                            completed_count = cast(int, completed_sources)
+                            failed_count = cast(int, failed_sources)
+                            requested_count = cast(int, requested_sources)
+                            timed_out_count = cast(int, timed_out_sources)
+                            canonical_completed = max(0, completed_count - filtered_count)
+                            canonical_failed = failed_count + filtered_count
                             web_payload["completed_sources"] = canonical_completed
                             web_payload["failed_sources"] = canonical_failed
                             web_payload["requested_sources"] = max(
-                                requested_sources,
-                                canonical_failed + timed_out_sources,
+                                requested_count,
+                                canonical_failed + timed_out_count,
                             )
                     web_payload["sources"] = relevant_payload_sources
                     web_payload["usable_sources"] = len(relevant_payload_sources)
