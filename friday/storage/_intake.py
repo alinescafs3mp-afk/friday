@@ -1545,14 +1545,23 @@ class IntakeMixin(StorageShared):
         page_size = max(1, min(int(limit), 5_001))
         rows = self.execute(
             f"""SELECT r.id, r.content_type, r.received_at,
-                       substr(COALESCE(json_extract(r.metadata_json,'$.filename'),''),1,260)
-                           AS filename
-                  FROM raw_objects r
+                       CASE WHEN typeof(r.metadata_json)='text'
+                                  AND json_valid(r.metadata_json)
+                            THEN substr(
+                                     COALESCE(json_extract(r.metadata_json,'$.filename'),''),
+                                     1,
+                                     260
+                                 )
+                            ELSE ''
+                        END AS filename
+                 FROM raw_objects r
                  WHERE r.user_id=? AND r.deleted_at IS NULL
                    AND r.content_type='file'
-                   AND json_valid(r.metadata_json)
-                   AND json_type(r.metadata_json,'$.uploaded_by')='text'
-                   AND json_extract(r.metadata_json,'$.uploaded_by')=?
+                   AND {_exact_uploader_raw_dependency("r")}
+                   AND EXISTS (
+                       SELECT 1 FROM users uploader_user
+                        WHERE uploader_user.id=? AND uploader_user.status='active'
+                   )
                    AND {_not_audio_document("r")}
                    AND {_not_private_raw_dependency("r")}
                    AND NOT EXISTS (
@@ -1562,7 +1571,7 @@ class IntakeMixin(StorageShared):
                    )
                  ORDER BY r.received_at ASC, r.rowid ASC
                  LIMIT ?""",  # nosec B608 - only fixed privacy predicates
-            (str(user_id), str(uploaded_by), page_size),
+            (str(user_id), str(uploaded_by), str(uploaded_by), page_size),
         ).fetchall()
         return [dict(row) for row in rows]
 

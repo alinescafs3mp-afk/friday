@@ -216,6 +216,16 @@ async def test_named_inventory_without_a_date_is_all_time_but_temporal_cues_stay
         kernel=kernel,
     )
     monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_retrieval)
+    catalog_calls: list[tuple[str, str, int]] = []
+
+    def body_free_catalog(user_id: str, uploaded_by: str, *, limit: int = 5_000):  # noqa: ANN202
+        catalog_calls.append((user_id, uploaded_by, limit))
+        return [
+            {"id": "raw_alpha", "filename": "alpha.pdf", "content_type": "file"},
+            {"id": "raw_beta", "filename": "beta.docx", "content_type": "file"},
+        ]
+
+    monkeypatch.setattr(storage, "list_owned_file_catalog", body_free_catalog)
 
     all_time = await runtime.chat(
         "alice",
@@ -233,22 +243,12 @@ async def test_named_inventory_without_a_date_is_all_time_but_temporal_cues_stay
         actor=_actor(),
     )
 
-    expected_call = {
-        "person": "jbl",
-        "since": None,
-        "until": None,
-        "limit": 200,
-        "offset": 0,
-        "documents_only": True,
-    }
-    assert kernel.calls == [
-        expected_call,
-        expected_call,
-    ]
+    assert kernel.calls == []
+    assert catalog_calls == [("jbl", "jbl", 5_001), ("jbl", "jbl", 5_001)]
     for reply in (all_time, explicit_all_time):
         assert "за всё время" in reply["message"].casefold()
         assert "alpha.pdf" in reply["message"] and "beta.docx" in reply["message"]
-        assert reply["tools_used"] == ["user_activity"]
+        assert reply["tools_used"] == []
     assert "неизвест" in unclosed["message"].casefold()
     assert unclosed["tools_used"] == []
 
@@ -297,6 +297,7 @@ async def test_named_inventory_relative_day_followup_stays_code_owned(
 async def test_self_document_inventory_needs_neither_a_name_day_nor_admin_tool_schema(
     settings,
     storage,
+    monkeypatch,
 ) -> None:
     storage.ensure_user("alice", preset_key="user", display_name="Алиса")
     kernel = _InventoryKernel(available=False, person_name="Алиса")
@@ -307,6 +308,16 @@ async def test_self_document_inventory_needs_neither_a_name_day_nor_admin_tool_s
         kernel=kernel,
     )
     actor = ActorContext(user_id="alice", preset_key="user", source="test")
+    catalog_calls: list[tuple[str, str, int]] = []
+
+    def body_free_catalog(user_id: str, uploaded_by: str, *, limit: int = 5_000):  # noqa: ANN202
+        catalog_calls.append((user_id, uploaded_by, limit))
+        return [
+            {"id": "raw_alpha", "filename": "alpha.pdf", "content_type": "file"},
+            {"id": "raw_beta", "filename": "beta.docx", "content_type": "file"},
+        ]
+
+    monkeypatch.setattr(storage, "list_owned_file_catalog", body_free_catalog)
 
     first = await runtime.chat(
         "alice",
@@ -320,24 +331,13 @@ async def test_self_document_inventory_needs_neither_a_name_day_nor_admin_tool_s
         conversation_id=first["conversation_id"],
     )
 
-    assert len(kernel.calls) == 2
-    assert all(
-        call
-        == {
-            "person": "alice",
-            "since": None,
-            "until": None,
-            "limit": 200,
-            "offset": 0,
-            "documents_only": True,
-        }
-        for call in kernel.calls
-    )
+    assert kernel.calls == []
+    assert catalog_calls == [("alice", "alice", 5_001), ("alice", "alice", 5_001)]
     for reply in (first, repeated):
         assert "участник не определён" not in reply["message"].casefold()
         assert "за всё время" in reply["message"].casefold()
         assert "alpha.pdf" in reply["message"] and "beta.docx" in reply["message"]
-        assert reply["tools_used"] == ["user_activity"]
+        assert reply["tools_used"] == []
     assert "Проверила выборку повторно" in repeated["message"]
 
     for temporal_request in (
@@ -346,7 +346,8 @@ async def test_self_document_inventory_needs_neither_a_name_day_nor_admin_tool_s
         "Какие документы я скидывал в первом квартале?",
     ):
         scoped = await runtime.chat("alice", temporal_request, actor=actor)
-        assert len(kernel.calls) == 2, f"{temporal_request!r} was silently widened to all time"
+        assert kernel.calls == [], f"{temporal_request!r} was silently widened to all time"
+        assert len(catalog_calls) == 2, f"{temporal_request!r} was silently widened to all time"
         assert "неизвест" in scoped["message"].casefold()
 
 

@@ -81,6 +81,9 @@ from friday.execution_kernel import (
     ToolResult,
     _memory_graph_context_for_llm,
     _safe_filename,
+    _web_research_collision_topic_class,
+    _web_research_collision_topic_query,
+    _web_research_source_matches_topic,
     complete_person_matches,
     resolvable_person_matches,
 )
@@ -7628,6 +7631,36 @@ def _render_person_document_inventory(
             "Перечень полон только для документов с подтверждённым автором; "
             "утверждать «это всё» по человеку нельзя."
         )
+    return "\n".join(lines)
+
+
+def _render_body_free_person_document_inventory(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    person: str,
+    repeated_completeness_check: bool,
+) -> str:
+    """Render an uploader-scoped filename catalog without hydrating any body."""
+
+    who = " ".join(str(person or "участник").split())[:120] or "участник"
+    prefix = "Проверила выборку повторно. " if repeated_completeness_check else ""
+    filenames = [
+        " ".join(str(row.get("filename") or "").split())[:260] or "(имя файла не указано)" for row in rows
+    ]
+    lines = [f"{prefix}За всё время файлов с подтверждённой отметкой загрузившего {who}: {len(filenames)}."]
+    shown = filenames[:50]
+    lines.extend(
+        f"{index}. {_quicklook_display_filename(filename)}" for index, filename in enumerate(shown, 1)
+    )
+    if len(filenames) > len(shown):
+        lines.append(
+            f"Показаны первые {len(shown)} из {len(filenames)}; уточните имя или период для продолжения."
+        )
+    else:
+        lines.append(
+            f"Показан весь перечень с подтверждённой отметкой автора: {len(shown)} из {len(filenames)}."
+        )
+    lines.append("Материалы без достоверной отметки загрузившего в этот перечень не приписываются никому.")
     return "\n".join(lines)
 
 
@@ -16155,11 +16188,22 @@ _PUBLIC_NEWS_REQUEST_QUESTION = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# A plain public-news roundup is one read followed by one synthesis, not an
+# open-ended agentic research session.  Keep this deadline local to that route:
+# changing the router-wide timeout would also cut document analysis and every
+# unrelated conversation.  The caller cancels and drains the local HTTP task;
+# a remote server which ignores disconnects remains the remote operator's
+# responsibility.
+_SIMPLE_PUBLIC_NEWS_TIMEOUT_SEC = 60.0
+_SIMPLE_PUBLIC_NEWS_MAX_TOKENS = 900
+
 _FOREIGN_PUBLIC_SOURCE_SCOPE = re.compile(
     r"не\s+из\s+ру\w*|не\s+рос\w+|не\s+рунет\w*|вне\s+рунет\w*|"
     r"зарубежн\w+|иностранн\w+|западн\w+\s+(?:сми|пресс\w*|источник\w*)|"
-    r"миров\w+\s+(?:сми|пресс\w*|новост\w*)|на\s+английск\w+|"
-    r"english\s+sources?|foreign\s+(?:press|media|sources?)|world\s+news",
+    r"миров\w+\s+(?:сми|пресс\w*|новост\w*)|"
+    r"международн\w+\s+(?:сайт\w*|сми|пресс\w*|источник\w*|новост\w*)|"
+    r"на\s+английск\w+|english\s+sources?|foreign\s+(?:press|media|sources?)|"
+    r"international\s+(?:sites?|press|media|sources?|news)|world\s+news",
     re.IGNORECASE,
 )
 
@@ -16184,6 +16228,35 @@ def _web_source_class_on_speech(speech: str) -> str:
     if not visible or not _FOREIGN_PUBLIC_SOURCE_SCOPE.search(visible):
         return ""
     return "foreign" if _web_action_on_speech(visible) else ""
+
+
+def _public_news_item_matches_collision_topic(
+    speech: str,
+    item: Mapping[str, Any],
+) -> bool:
+    """Reject lexical collisions for topics whose short name is ambiguous.
+
+    ``foreign`` proves only a public non-Russian DNS class.  It cannot prove
+    that airport SVO is a news article about the identically spelt Russian
+    abbreviation.  Keep this check narrow and data-based: topics without a
+    known collision retain the ordinary search contract.
+    """
+
+    topic_class = _web_research_collision_topic_class(speech)
+    return _web_research_source_matches_topic(item, topic_class)
+
+
+def _public_news_search_query(speech: str, query: str, source_class: str) -> str:
+    """Expand one known ambiguous foreign-news topic without a model call."""
+
+    topic_class = _web_research_collision_topic_class(speech)
+    if source_class == "foreign" and topic_class:
+        # Latin ``SVO`` is also Sheremetyevo's airport code.  Preserve the
+        # original visible request in the notice/audit contract, but give the
+        # provider an unambiguous public topic so the single permitted search
+        # is useful instead of returning an airport timetable.
+        return _web_research_collision_topic_query(topic_class)
+    return query
 
 
 def _web_action_on_speech(speech: str) -> bool:
@@ -23548,19 +23621,15 @@ class AgentRuntime:
             user_id=user_id,
             limit=20,
         )
-        person_inventory_followup = (
-            _person_document_inventory_followup(
-                person_effect_message,
-                [item for item in prior_history if isinstance(item, dict)],
-            )
-            if file_turn.proved("person")
-            else None
+        person_inventory_followup = _person_document_inventory_followup(
+            person_effect_message,
+            [item for item in prior_history if isinstance(item, dict)],
         )
         person_inventory_turn = bool(
-            file_turn.proved("person")
-            and (
-                _PERSON_DOCUMENT_INVENTORY.search(file_authority_speech(person_effect_message))
-                or person_inventory_followup is not None
+            person_inventory_followup is not None
+            or (
+                file_turn.proved("person")
+                and (_PERSON_DOCUMENT_INVENTORY.search(file_authority_speech(person_effect_message)))
             )
         )
         named_person_aggregation_scope = (
@@ -23967,7 +24036,11 @@ class AgentRuntime:
             )
         restored_attachments: list[dict[str, Any]]
         citation_selector_applied = False
-        if filename_inventory_request is not None or quoted_file_command_is_data:
+        if person_inventory_turn or filename_inventory_request is not None or quoted_file_command_is_data:
+            # A named-uploader inventory is a code-owned body-free/system read.
+            # It must not inherit the last file merely because the immediately
+            # preceding turn happened to use one: that stale carrier previously
+            # ran an attachment query first and removed the inventory capability.
             restored_attachments, restored_attachment_expected_count = [], 0
         elif filename_clue_selection.applies:
             # Candidate discovery inspected only the body-free filename catalog;
@@ -24109,11 +24182,19 @@ class AgentRuntime:
             distinct_selected_ids = []
             selected_expected_count = restored_attachment_expected_count
 
-        # Web tools now use the ordinary same-tenant turn context.  Private
-        # attachment lineage no longer creates a history-free/prefetch-only
-        # chamber; authorization and the web transport's own safety boundaries
-        # remain responsible for what can be read and where URLs may connect.
-        isolated_outbound_turn = False
+        # A self-contained public-news request is safer and materially cheaper
+        # in a one-way chamber: only the current command becomes the query, one
+        # code-owned public read runs, and one bounded tool-free synthesis sees
+        # its result.  Other web turns retain the ordinary contextual route.
+        simple_public_news_turn = bool(
+            file_turn.actions == frozenset({"web"})
+            and _public_news_site_request(file_turn.speech)
+            and not synthetic_document_notice
+            and not supplied_attachment_count
+            and not quoted_attachment_reference
+            and not reply_assistant_reference
+        )
+        isolated_outbound_turn = simple_public_news_turn
         archived_source_query = _archived_source_search_query(clean_message)
         archived_source_focus = _archived_source_search_focus(clean_message, archived_source_query)
         archived_source_lookup_turn = bool(
@@ -24141,6 +24222,7 @@ class AgentRuntime:
             or supplied_attachment_count
             or replay_had_attachments
             or restored_attachment_expected_count
+            or person_inventory_turn
             or named_person_corpus.applies
             or exact_uploader_file.applies
             or filename_inventory_request is not None
@@ -25690,6 +25772,19 @@ class AgentRuntime:
             )
             else []
         )
+        # This is an internal preflight authority bit, captured before the local
+        # file capability projection intentionally removes source_search from the
+        # model-visible list.  The helper below clears every schema before it
+        # executes the read, and ExecutionKernel independently repeats the real
+        # knowledge.read authorization/audit check.
+        source_search_preflight_authorized = bool(
+            archived_source_lookup_turn
+            and any(
+                str((tool.get("function") or {}).get("name") or tool.get("name") or "") == "source_search"
+                for tool in visible_tools
+                if isinstance(tool, Mapping)
+            )
+        )
         visible_tools = _file_turn_capability_tools(visible_tools, file_turn)
         if (
             file_source_only
@@ -25743,11 +25838,7 @@ class AgentRuntime:
             # chance to broaden it after exact uploader selection.  The same
             # holds for the singular exact/fuzzy filename selector.
             visible_tools = []
-        if archived_source_lookup_turn and not any(
-            str((tool.get("function") or {}).get("name") or tool.get("name") or "") == "source_search"
-            for tool in visible_tools
-            if isinstance(tool, Mapping)
-        ):
+        if archived_source_lookup_turn and not source_search_preflight_authorized:
             context.structural_answer = (
                 "Не удалось проверить ранее загруженные источники: локальный поиск "
                 "недоступен для этого хода. Искомый факт остаётся неизвестным."
@@ -26205,6 +26296,7 @@ class AgentRuntime:
             self.llm.enabled
             and (
                 visible_tools
+                or source_search_preflight_authorized
                 or _workspace_create_channel_request(asked_of_model)
                 or bool(workspace_authority_message)
             )
@@ -26236,14 +26328,19 @@ class AgentRuntime:
                 # turns and test/adapter doubles which implement that exact
                 # signature.  The extra authority argument exists only for the
                 # narrowly validated structural workspace reply contract.
+                ordinary_agentic_kwargs: dict[str, Any] = {
+                    "outbound_allowed": not outbound_blocked,
+                    "outbound_tool_allowlist": outbound_tool_allowlist,
+                }
+                if source_search_preflight_authorized:
+                    ordinary_agentic_kwargs["source_search_authorized"] = True
                 response = await self._agentic_loop(
                     context,
                     asked_of_model,
                     actor,
                     visible_tools,
                     attachments,
-                    outbound_allowed=not outbound_blocked,
-                    outbound_tool_allowlist=outbound_tool_allowlist,
+                    **ordinary_agentic_kwargs,
                 )
         else:
             response = await self._generate_response(generation_context, asked_of_model, attachments)
@@ -27378,6 +27475,7 @@ class AgentRuntime:
             not foreign_private_request
             and response.get("_office_exact_owned") is not True
             and response.get("_workspace_create_owned") is not True
+            and response.get("_simple_public_news_owned") is not True
             and shape_contract is None
             and not exact_quote_pipeline_owned
             and not direct_attachment_exact_file_projection_turn
@@ -30110,6 +30208,7 @@ class AgentRuntime:
         workspace_authority_message: str = "",
         workspace_exact_content: str = "",
         workspace_exact_direct_authorized: bool = False,
+        source_search_authorized: bool | None = None,
     ) -> dict[str, Any]:
         def outward_tool_is_allowed(tool_name: str) -> bool:
             if tool_name not in _OUTBOUND_TOOL_NAMES:
@@ -30243,6 +30342,15 @@ class AgentRuntime:
             tool_evidence,
             context,
             attachments,
+            authorized=(
+                any(
+                    str((tool.get("function") or {}).get("name") or tool.get("name") or "") == "source_search"
+                    for tool in tools
+                    if isinstance(tool, Mapping)
+                )
+                if source_search_authorized is None
+                else source_search_authorized
+            ),
         )
         if source_lookup_owned and context.structural_answer and context.remainder_known:
             return {
@@ -30288,6 +30396,74 @@ class AgentRuntime:
                 if str((tool.get("function") or {}).get("name") or tool.get("name") or "")
                 not in _OUTBOUND_TOOL_NAMES
             ]
+        if context.isolated_outbound_turn and turn_auth.actions == frozenset({"web"}):
+            # The explicit public-news lane owns the whole turn.  Search has
+            # already happened exactly once above; never enter tool rounds,
+            # salvage or the ordinary verifier, each of which could spend the
+            # global 240-second model budget again.
+            if context.web_evidence_status not in {"sourced", "partial"} or not context.web_sources:
+                return {
+                    "content": _WEB_EVIDENCE_MISSING,
+                    "tools_used": tools_used,
+                    "web_query_notice": " ".join(web_notice),
+                    "knowledge_object_ids": [],
+                    "tool_evidence": tool_evidence,
+                    "voice_clip": None,
+                    "file_clips": [],
+                    "_structural_file_count": 0,
+                    "_simple_public_news_owned": True,
+                }
+            try:
+                synthesis = await asyncio.wait_for(
+                    self.llm.chat(
+                        messages,
+                        temperature=0.0,
+                        max_tokens=_SIMPLE_PUBLIC_NEWS_MAX_TOKENS,
+                        tools=[],
+                    ),
+                    timeout=_SIMPLE_PUBLIC_NEWS_TIMEOUT_SEC,
+                )
+                raw = str(synthesis.get("content") or "") if isinstance(synthesis, Mapping) else ""
+                turn = classify_tool_turn(raw)
+                clean = _strip_tool_call_markup(turn.text).strip() if turn.kind == "answer" else ""
+                accepted = bool(
+                    clean
+                    and clean == raw.strip()
+                    and isinstance(synthesis, Mapping)
+                    and not synthesis.get("tool_calls")
+                    and not synthesis.get("tools_used")
+                    and str(synthesis.get("finish_reason") or "stop") == "stop"
+                )
+            except TimeoutError:
+                LOGGER.warning(
+                    "simple public-news synthesis exceeded %.0fs; returning accepted sources",
+                    _SIMPLE_PUBLIC_NEWS_TIMEOUT_SEC,
+                )
+                clean = ""
+                accepted = False
+            except Exception as exc:  # noqa: BLE001 - accepted sources survive model failure
+                LOGGER.warning("simple public-news synthesis failed (%s)", type(exc).__name__)
+                clean = ""
+                accepted = False
+            if not accepted:
+                clean = (
+                    "Поиск завершён и проверяемые источники получены, но модель не успела "
+                    "подготовить сводку за ограниченное время. Ниже оставляю найденные ссылки; "
+                    "факты без завершённой обработки не пересказываю."
+                )
+            return {
+                "content": clean,
+                "_model_generated": accepted,
+                "tools_used": tools_used,
+                "web_query_notice": " ".join(web_notice),
+                "knowledge_object_ids": [],
+                "tool_evidence": tool_evidence,
+                "llm_failed": not accepted,
+                "voice_clip": None,
+                "file_clips": [],
+                "_structural_file_count": 0,
+                "_simple_public_news_owned": True,
+            }
         # Про ЧЕЛОВЕКА — раньше, чем про свою ленту.
         #
         # Замерено: «чем занимался Yato вчера?» — слово «вчера» поднимало ленту
@@ -33103,6 +33279,8 @@ class AgentRuntime:
         tool_evidence: list[dict[str, str]],
         context: AgentContext,
         attachments: list[dict[str, Any]] | None,
+        *,
+        authorized: bool,
     ) -> bool:
         """Run exactly one local Raw Object lookup for an explicit old-file fact.
 
@@ -33125,12 +33303,7 @@ class AgentRuntime:
             or bool(attachments)
         ):
             return False
-        available = {
-            str((tool.get("function") or {}).get("name") or tool.get("name") or "")
-            for tool in tools
-            if isinstance(tool, Mapping)
-        }
-        if "source_search" not in available:
+        if not authorized:
             return False
 
         # Capability was proved from the schema offered for this turn.  From
@@ -33380,12 +33553,31 @@ class AgentRuntime:
             str((tool.get("function") or {}).get("name") or tool.get("name") or "") for tool in tools
         }
         authorization = getattr(self.kernel, "authorization", None)
+        inventory_day_text = _classification_text(day_source)
+        body_free_all_time_inventory = bool(
+            document_inventory
+            and (
+                _PERSON_DOCUMENT_ALL_TIME_SCOPE.search(inventory_day_text)
+                or (
+                    lexical_time_window_kind(
+                        inventory_day_text,
+                        today=self._local_today(),
+                    )
+                    is None
+                    and not _PERSON_DOCUMENT_TEMPORAL_CUE.search(inventory_day_text)
+                )
+            )
+        )
         self_inventory_allowed = bool(
             self_document_inventory
             and authorization is not None
             and authorization.authorize(actor, "files.read").allowed
         )
-        if "user_activity" not in available and not self_inventory_allowed:
+        if (
+            "user_activity" not in available
+            and not self_inventory_allowed
+            and not body_free_all_time_inventory
+        ):
             LOGGER.info(
                 "person-prefetch: инструмента нет среди доступных (%d шт.)",
                 len(available),
@@ -33485,6 +33677,63 @@ class AgentRuntime:
                 LOGGER.info("person-document-inventory: closed day not resolved")
                 return settle_inventory_unknown("границы дня не определены")
             since, until, requested_day, day_complete = day_window
+            if requested_day == "всё время" and since is None and until is None:
+                # An all-time filename inventory needs neither Raw bodies nor a
+                # model-visible oversight schema.  Resolve the active account
+                # above, check the read policy explicitly, then use the bounded
+                # body-free uploader catalog.  This also avoids semantic KO
+                # titles replacing the literal upload names the person asked for.
+                self_target = chosen.user_id == actor.own_id
+                metadata_allowed = bool(
+                    authorization is not None
+                    and authorization.authorize(
+                        actor,
+                        "files.read" if self_target else "admin.activity.read",
+                    ).allowed
+                )
+                filename_allowed = bool(
+                    authorization is not None
+                    and authorization.authorize(
+                        actor,
+                        "files.read" if self_target else "admin.all_data.read",
+                    ).allowed
+                )
+                if not (metadata_allowed and filename_allowed):
+                    return settle_inventory_unknown("нет доступа к перечню имён файлов")
+                tenant = actor.user_id if actor.shared_tenant else chosen.user_id
+                try:
+                    catalog = self.storage.list_owned_file_catalog(
+                        tenant,
+                        chosen.user_id,
+                        limit=_CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES + 1,
+                    )
+                except Exception as exc:  # noqa: BLE001 - a failed catalog is UNKNOWN
+                    LOGGER.warning("Body-free person inventory failed (%s)", type(exc).__name__)
+                    return settle_inventory_unknown("каталог файлов недоступен")
+                if len(catalog) > _CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES:
+                    return settle_inventory_unknown("каталог превышает безопасный предел")
+                answer = _render_body_free_person_document_inventory(
+                    [row for row in catalog if isinstance(row, Mapping)],
+                    person=chosen.display_name or chosen.username or chosen.user_id,
+                    repeated_completeness_check=repeated_document_check,
+                )
+                LOGGER.info("person-document-inventory: body-free code-owned answer, %d chars", len(answer))
+                if context is not None:
+                    context.structural_answer = answer
+                    context.person_document_inventory_settled = True
+                    context.open_remainder = ""
+                    context.remainder_known = True
+                    context.knowledge_hits = []
+                    context.entity_hits = []
+                    context.retrieval_trace = []
+                    context.graph_context = {}
+                tools[:] = [
+                    tool
+                    for tool in tools
+                    if str((tool.get("function") or {}).get("name") or tool.get("name") or "")
+                    != "user_activity"
+                ]
+                return True
             try:
                 result = await self.kernel.execute(
                     "user_activity",
@@ -35364,9 +35613,16 @@ class AgentRuntime:
                 return  # вопрос не про внешний мир — интернет тут ни при чём
             query = self.web_query_from(web_message)
         source_class = _web_source_class_on_speech(turn_auth.speech)
+        topic_class = ""
+        if context is not None and context.isolated_outbound_turn:
+            if source_class == "foreign":
+                topic_class = _web_research_collision_topic_class(turn_auth.speech)
+            query = _public_news_search_query(turn_auth.speech, query, source_class)
         web_arguments: dict[str, Any] = {"query": query, "max_sources": 3}
         if source_class:
             web_arguments["source_class"] = source_class
+        if topic_class:
+            web_arguments["topic_class"] = topic_class
         try:
             result = await self.kernel.execute("web_research", web_arguments, actor=actor)
         except Exception as exc:  # noqa: BLE001 — предварительный поиск не должен ронять ход
@@ -35395,6 +35651,63 @@ class AgentRuntime:
             transport_success=result.success,
             source_class=source_class,
         )
+        if (
+            web_status in {"sourced", "partial"}
+            and web_payload is not None
+            and _public_news_site_request(turn_auth.speech)
+        ):
+            payload_sources = web_payload.get("sources")
+            if not isinstance(payload_sources, list):
+                web_status, web_sources, web_payload = "failed", [], None
+            else:
+                relevant_payload_sources = [
+                    item
+                    for item in payload_sources
+                    if isinstance(item, Mapping)
+                    and _public_news_item_matches_collision_topic(turn_auth.speech, item)
+                ]
+                relevant_urls = {str(item.get("url") or "") for item in relevant_payload_sources}
+                relevant_web_sources = [
+                    source for source in web_sources if str(source.get("url") or "") in relevant_urls
+                ]
+                if not relevant_payload_sources or not relevant_web_sources:
+                    web_status, web_sources, web_payload = "failed", [], None
+                else:
+                    filtered_count = len(payload_sources) - len(relevant_payload_sources)
+                    if filtered_count:
+                        web_status = "partial"
+                        completed_sources = web_payload.get("completed_sources")
+                        failed_sources = web_payload.get("failed_sources")
+                        requested_sources = web_payload.get("requested_sources")
+                        timed_out_sources = web_payload.get("timed_out_sources")
+                        # The projector validated this counter group before the
+                        # defense-in-depth topic filter.  Canonicalize the same
+                        # report after removing collision rows so the model does
+                        # not see "two completed" beside one admitted source.
+                        if all(
+                            isinstance(value, int) and not isinstance(value, bool)
+                            for value in (
+                                completed_sources,
+                                failed_sources,
+                                requested_sources,
+                                timed_out_sources,
+                            )
+                        ):
+                            canonical_completed = max(0, completed_sources - filtered_count)
+                            canonical_failed = failed_sources + filtered_count
+                            web_payload["completed_sources"] = canonical_completed
+                            web_payload["failed_sources"] = canonical_failed
+                            web_payload["requested_sources"] = max(
+                                requested_sources,
+                                canonical_failed + timed_out_sources,
+                            )
+                    web_payload["sources"] = relevant_payload_sources
+                    web_payload["usable_sources"] = len(relevant_payload_sources)
+                    web_payload["summary"] = (
+                        f"Accepted {len(relevant_payload_sources)} readable public source"
+                        f"{'s' if len(relevant_payload_sources) != 1 else ''}."
+                    )
+                    web_sources = relevant_web_sources
         rendered = ""
         if web_status in {"sourced", "partial"} and web_sources and web_payload is not None:
             result.data = web_payload

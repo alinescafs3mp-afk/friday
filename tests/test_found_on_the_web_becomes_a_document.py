@@ -178,6 +178,120 @@ async def test_the_answer_still_carries_the_sources(settings, storage):
 
 
 @pytest.mark.anyio
+async def test_collision_topic_is_filtered_before_any_page_is_captured(settings, storage):
+    """An airport collision may reach the provider, but never Raw/Inbox."""
+
+    storage.ensure_user("alice", preset_key="admin")
+    airport_text = (
+        "Sheremetyevo SVO is the largest airport in Russia; this page contains terminal "
+        "departures, airline desks, baggage rules, and a live flight schedule. "
+    ) * 4
+    relevant_text = (
+        "Ukraine war reporting describes a confirmed dated military development and "
+        "the public statements surrounding it. "
+    ) * 4
+    surfer = _Surfer(
+        [
+            {
+                "url": "https://www.svo.aero/en/timetable/departures/",
+                "title": "SVO airport departures",
+                "text": airport_text,
+            },
+            {
+                "url": "https://foreign.example.org/ukraine-update",
+                "title": "Ukraine war update",
+                "text": relevant_text,
+            },
+        ]
+    )
+    kernel = _kernel(settings, storage, surfer)
+    actor = ActorContext(user_id="alice", preset_key="admin", source="test")
+
+    result = await kernel.execute(
+        "web_research",
+        {
+            "query": "Russia Ukraine war latest news",
+            "max_sources": 2,
+            "topic_class": "russia_ukraine_war_news",
+        },
+        actor=actor,
+    )
+
+    assert result.success, result.error
+    assert [item["url"] for item in result.data["sources"]] == ["https://foreign.example.org/ukraine-update"]
+    assert result.data["completed_sources"] == 1
+    assert result.data["failed_sources"] == 1
+    assert result.data["topic_filtered_sources"] == 1
+    assert [item["url"] for item in result.data.get("captured") or []] == [
+        "https://foreign.example.org/ukraine-update"
+    ]
+    durable = "\n".join(
+        str(row["source_ref"] or "") + "\n" + str(row["raw_content"] or "")
+        for row in storage.execute(
+            "SELECT source_ref, raw_content FROM raw_objects WHERE user_id='alice'"
+        ).fetchall()
+    )
+    assert "svo.aero" not in durable.casefold()
+    assert "airport" not in durable.casefold()
+    assert "foreign.example.org/ukraine-update" in durable
+
+
+@pytest.mark.anyio
+async def test_collision_only_report_fails_without_capturing_an_airport(settings, storage):
+    storage.ensure_user("alice", preset_key="admin")
+    airport_text = (
+        "SVO airport departure board for terminals, airlines, baggage and scheduled flights. "
+    ) * 5
+    surfer = _Surfer(
+        [
+            {
+                "url": "https://www.svo.aero/en/timetable/departures/",
+                "title": "SVO airport departures",
+                "text": airport_text,
+            }
+        ]
+    )
+    kernel = _kernel(settings, storage, surfer)
+    actor = ActorContext(user_id="alice", preset_key="admin", source="test")
+
+    result = await kernel.execute(
+        "web_research",
+        {
+            "query": "Russia Ukraine war latest news",
+            "topic_class": "russia_ukraine_war_news",
+        },
+        actor=actor,
+    )
+
+    assert result.success, result.error
+    assert result.data["search_failed"] is True
+    assert result.data["error"] == "topic_mismatch"
+    assert result.data["sources"] == []
+    assert not (result.data.get("captured") or [])
+    assert storage.list_inbox("alice") == []
+    assert storage.execute("SELECT COUNT(*) AS c FROM raw_objects WHERE user_id='alice'").fetchone()["c"] == 0
+
+
+@pytest.mark.anyio
+async def test_unknown_research_topic_class_is_rejected_before_outbound_work(settings, storage):
+    storage.ensure_user("alice", preset_key="admin")
+    surfer = _Surfer()
+    kernel = _kernel(settings, storage, surfer)
+    actor = ActorContext(user_id="alice", preset_key="admin", source="test")
+
+    report = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="public news",
+        topic_class="model_invented_topic",
+    )
+
+    assert report["outbound_attempted"] is False
+    assert report["error"] == "invalid_topic_class"
+    assert surfer.asked == []
+    assert storage.list_inbox("alice") == []
+
+
+@pytest.mark.anyio
 async def test_a_page_that_changed_between_two_readings_is_saved_anyway(settings, storage):
     """Мутация: вернуть `source_ref=url` — тест краснеет.
 

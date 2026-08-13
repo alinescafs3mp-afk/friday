@@ -90,6 +90,19 @@ if TYPE_CHECKING:
 #: Ниже этого объёма страница знанием не становится — сохранять нечего.
 _WEB_CAPTURE_MIN_CHARS = 200
 _WEB_REPORT_FAILURE_FLAGS = frozenset({"search_failed", "search_timed_out", "refused", "quota_exhausted"})
+_WEB_RESEARCH_TOPIC_CLASS_VALUES = ("russia_ukraine_war_news",)
+_WEB_RESEARCH_TOPIC_ALIASES: dict[str, re.Pattern[str]] = {
+    "russia_ukraine_war_news": re.compile(r"\b(?:сво|svo)\b", re.IGNORECASE),
+}
+_WEB_RESEARCH_TOPIC_QUERIES = {
+    "russia_ukraine_war_news": "Russia Ukraine war latest news",
+}
+_WEB_RESEARCH_TOPIC_EVIDENCE: dict[str, re.Pattern[str]] = {
+    "russia_ukraine_war_news": re.compile(
+        r"(?:\bсво\b|\b(?:украин|войн|воен|фронт|ukrain|militar|conflict)\w*|\bwar\b)",
+        re.IGNORECASE,
+    ),
+}
 _LEGACY_NUMERIC_IPV4 = re.compile(
     r"(?:0x[0-9a-f]+|0[0-7]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|0[0-7]+|[0-9]+)){0,3}",
     re.IGNORECASE,
@@ -109,6 +122,32 @@ _PRIVATE_DNS_SUFFIXES = (
     ".onion",
     ".test",
 )
+
+
+def _web_research_collision_topic_class(speech: str) -> str:
+    """Return one closed topic class for a known ambiguous news alias."""
+
+    visible = " ".join(str(speech or "").split())
+    matches = [
+        topic_class for topic_class, pattern in _WEB_RESEARCH_TOPIC_ALIASES.items() if pattern.search(visible)
+    ]
+    return matches[0] if len(matches) == 1 else ""
+
+
+def _web_research_collision_topic_query(topic_class: str) -> str:
+    """Return the code-owned provider query for a closed collision class."""
+
+    return _WEB_RESEARCH_TOPIC_QUERIES.get(str(topic_class or "").strip(), "")
+
+
+def _web_research_source_matches_topic(item: Mapping[str, Any], topic_class: str) -> bool:
+    """Prove relevance before a web result can be captured or shown."""
+
+    evidence = _WEB_RESEARCH_TOPIC_EVIDENCE.get(str(topic_class or "").strip())
+    if evidence is None:
+        return not str(topic_class or "").strip()
+    surface = " ".join(str(item.get(key) or "") for key in ("title", "search_title", "snippet", "text"))
+    return bool(evidence.search(surface))
 
 
 def _capturable_public_web_url(value: Any) -> str:
@@ -5290,9 +5329,11 @@ class ExecutionKernel:
         query: str,
         max_sources: int = 3,
         source_class: str = "",
+        topic_class: str = "",
     ) -> dict[str, Any]:
         _, _, web, _ = self._require_services()
         query = str(query or "").strip()
+        topic_class = str(topic_class or "").strip()
         try:
             source_class = normalize_search_source_class(source_class)
         except ValueError:
@@ -5302,6 +5343,14 @@ class ExecutionKernel:
                 "outbound_attempted": False,
                 "search_failed": True,
                 "error": "invalid_source_class",
+            }
+        if topic_class and topic_class not in _WEB_RESEARCH_TOPIC_CLASS_VALUES:
+            return {
+                "query": "",
+                "sources": [],
+                "outbound_attempted": False,
+                "search_failed": True,
+                "error": "invalid_topic_class",
             }
         if not query:
             return {
@@ -5335,6 +5384,8 @@ class ExecutionKernel:
             report = {**raw_report, "query": query, "outbound_attempted": True}
             if source_class:
                 report["source_class"] = source_class
+            if topic_class:
+                report["topic_class"] = topic_class
         except Exception as exc:  # noqa: BLE001 — disclose stage, never provider details
             LOGGER.warning("Web research provider failed after outbound start (%s)", type(exc).__name__)
             return {
@@ -5376,6 +5427,74 @@ class ExecutionKernel:
                     "error": "source_class_mismatch",
                 }
             report["source_class_satisfied"] = bool(fact_sources)
+        if topic_class:
+            raw_sources = report.get("sources")
+            if not isinstance(raw_sources, list):
+                return {
+                    "query": query,
+                    "topic_class": topic_class,
+                    "topic_class_satisfied": False,
+                    "sources": [],
+                    "outbound_attempted": True,
+                    "search_failed": True,
+                    "error": "topic_report_malformed",
+                }
+            completed_sources = report.get("completed_sources")
+            failed_sources = report.get("failed_sources")
+            requested_sources = report.get("requested_sources")
+            timed_out_sources = report.get("timed_out_sources")
+            search_timed_out = report.get("search_timed_out")
+            if (
+                not isinstance(completed_sources, int)
+                or isinstance(completed_sources, bool)
+                or completed_sources != len(raw_sources)
+                or not isinstance(failed_sources, int)
+                or isinstance(failed_sources, bool)
+                or failed_sources < 0
+                or not isinstance(requested_sources, int)
+                or isinstance(requested_sources, bool)
+                or requested_sources < 0
+                or not isinstance(timed_out_sources, int)
+                or isinstance(timed_out_sources, bool)
+                or timed_out_sources < 0
+                or not isinstance(search_timed_out, bool)
+                or (bool(raw_sources) and requested_sources == 0)
+                or failed_sources + timed_out_sources > requested_sources
+                or requested_sources > completed_sources + failed_sources + timed_out_sources
+            ):
+                # A malformed adapter report cannot authorize durable capture.
+                return {
+                    "query": query,
+                    "topic_class": topic_class,
+                    "topic_class_satisfied": False,
+                    "sources": [],
+                    "outbound_attempted": True,
+                    "search_failed": True,
+                    "error": "topic_report_malformed",
+                }
+            relevant_sources = [
+                item
+                for item in raw_sources
+                if isinstance(item, Mapping) and _web_research_source_matches_topic(item, topic_class)
+            ]
+            filtered_sources = len(raw_sources) - len(relevant_sources)
+            canonical_failed_sources = failed_sources + filtered_sources
+            report["sources"] = relevant_sources
+            report["completed_sources"] = len(relevant_sources)
+            report["failed_sources"] = canonical_failed_sources
+            report["requested_sources"] = max(
+                requested_sources,
+                canonical_failed_sources + timed_out_sources,
+            )
+            report["topic_filtered_sources"] = filtered_sources
+            report["topic_class_satisfied"] = bool(relevant_sources)
+            if not relevant_sources:
+                report.update(
+                    {
+                        "search_failed": True,
+                        "error": "topic_mismatch",
+                    }
+                )
         captured = await self._capture_web_sources(actor, query, report)
         return {**report, "captured": captured} if captured else report
 
@@ -7222,6 +7341,11 @@ class ExecutionKernel:
                     "type": "string",
                     "enum": list(SEARCH_SOURCE_CLASS_VALUES),
                     "description": "closed source class; foreign excludes Russian source hosts",
+                },
+                "topic_class": {
+                    "type": "string",
+                    "enum": list(_WEB_RESEARCH_TOPIC_CLASS_VALUES),
+                    "description": "optional fail-closed relevance class for a known ambiguous topic",
                 },
             },
             ["query"],
