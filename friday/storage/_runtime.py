@@ -303,7 +303,7 @@ class RuntimeMixin(StorageShared):
         if request_hash and not re.fullmatch(r"[0-9a-f]{64}", request_hash):
             raise ValueError("request_hash must be a lowercase SHA-256 hex digest")
         now = datetime.now(UTC)
-        now_text = now.isoformat(timespec="seconds")
+        now_text = now.isoformat(timespec="microseconds")
         token = new_id("lease")
         with self.transaction() as conn:
             row = conn.execute(
@@ -345,6 +345,25 @@ class RuntimeMixin(StorageShared):
             except ValueError:
                 updated_at = datetime.min.replace(tzinfo=UTC)
             if updated_at <= now - timedelta(seconds=max(1, int(lease_seconds))):
+                pending_response = _json_load(row["response_json"], {})
+                if pending_response.get("idempotency_effect_uncertain") is True:
+                    # A durable effect fence is not an abandoned pre-effect
+                    # lease.  While fresh it reports ordinary in-progress below;
+                    # after process death makes it stale, freeze and replay the
+                    # bounded uncertainty response instead of stealing the key
+                    # and executing a possibly committed effect again.
+                    conn.execute(
+                        """UPDATE request_idempotency
+                           SET state='complete', lease_token='', updated_at=?
+                           WHERE user_id=? AND request_key=? AND state='pending'""",
+                        (now_text, user_id, request_key),
+                    )
+                    return {
+                        "status": "replay",
+                        "response": pending_response,
+                        "lease_token": "",
+                        "stale_effect_fence_recovered": True,
+                    }
                 conn.execute(
                     """UPDATE request_idempotency
                        SET request_hash=?, lease_token=?, response_json='{}', state='pending', updated_at=?
@@ -361,7 +380,42 @@ class RuntimeMixin(StorageShared):
             cursor = conn.execute(
                 """UPDATE request_idempotency SET updated_at=?
                    WHERE user_id=? AND request_key=? AND state='pending' AND lease_token=?""",
-                (utc_now(), user_id, request_key, lease_token),
+                (datetime.now(UTC).isoformat(timespec="microseconds"), user_id, request_key, lease_token),
+            )
+        return cursor.rowcount == 1
+
+    def idempotency_mark_effect_possible(
+        self,
+        user_id: str,
+        request_key: str,
+        lease_token: str,
+        response: dict[str, Any],
+    ) -> bool:
+        """Durably make a pending request non-stealable before a possible effect.
+
+        A normal pending lease may be recovered after its heartbeat expires.
+        Once a mutating handler is about to start, however, process death can no
+        longer prove that the effect did not commit.  The existing ``complete``
+        response sentinel is a durable non-stealable fence: fresh concurrent
+        retries still see ``in_progress``; after SIGKILL makes the lease stale,
+        ``idempotency_claim`` freezes and replays the bounded uncertainty response
+        instead of executing the effect twice.
+        """
+
+        if not request_key or not lease_token:
+            return False
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                """UPDATE request_idempotency
+                   SET response_json=?, updated_at=?
+                   WHERE user_id=? AND request_key=? AND state='pending' AND lease_token=?""",
+                (
+                    json.dumps(response, ensure_ascii=False, sort_keys=True),
+                    datetime.now(UTC).isoformat(timespec="microseconds"),
+                    user_id,
+                    request_key,
+                    lease_token,
+                ),
             )
         return cursor.rowcount == 1
 
@@ -381,7 +435,7 @@ class RuntimeMixin(StorageShared):
                    WHERE user_id=? AND request_key=? AND state='pending' AND lease_token=?""",
                 (
                     json.dumps(response, ensure_ascii=False, sort_keys=True),
-                    utc_now(),
+                    datetime.now(UTC).isoformat(timespec="microseconds"),
                     user_id,
                     request_key,
                     lease_token,
@@ -411,7 +465,7 @@ class RuntimeMixin(StorageShared):
         """Compatibility helper for callers that already completed their work."""
         if not request_key:
             return
-        now = utc_now()
+        now = datetime.now(UTC).isoformat(timespec="microseconds")
         with self.transaction() as conn:
             conn.execute(
                 """INSERT INTO request_idempotency(
@@ -450,7 +504,14 @@ class RuntimeMixin(StorageShared):
         with self.transaction() as conn:
             cursor = conn.execute(
                 """DELETE FROM request_idempotency
-                   WHERE datetime(COALESCE(NULLIF(updated_at, ''), created_at)) < datetime('now', ?)""",
+                   WHERE datetime(COALESCE(NULLIF(updated_at, ''), created_at)) < datetime('now', ?)
+                     AND CASE WHEN json_valid(response_json)
+                              THEN COALESCE(
+                                  json_extract(response_json, '$.idempotency_effect_uncertain'),
+                                  0
+                              )
+                              ELSE 0
+                         END <> 1""",
                 (f"-{max(1, min(int(days), 365))} days",),
             )
         return cursor.rowcount

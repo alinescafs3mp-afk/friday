@@ -18,6 +18,7 @@ import pytest
 
 import friday.agent_runtime as agent_runtime
 from friday.agent_runtime import AgentContext, AgentRuntime
+from friday.agent_runtime.llm import LLMRouter
 from friday.execution_kernel import ToolResult
 from friday.permissions import ActorContext
 
@@ -208,6 +209,25 @@ class _OneShotNewsModel:
         }
 
 
+class _ProductionShapeNewsRouter(LLMRouter):
+    """An LLMRouter instance without network I/O, to pin production kwargs."""
+
+    def __init__(self, settings) -> None:  # noqa: ANN001
+        super().__init__(replace(settings, llm_enabled=True))
+        self.retry_flags: list[bool] = []
+
+    async def chat(self, messages, *, tools=None, allow_retries=True, **_kwargs):  # noqa: ANN001
+        self.retry_flags.append(bool(allow_retries))
+        assert tools == []
+        assert PUBLIC_FACT in json.dumps(messages, ensure_ascii=False)
+        return {
+            "content": f"{PUBLIC_FACT}\n\nИсточник: [{PUBLIC_TITLE}]({PUBLIC_URL})",
+            "tool_calls": None,
+            "finish_reason": "stop",
+            "_queue_wait_sec": 0.0,
+        }
+
+
 class _CancellableHangingModel:
     enabled = True
     model = "synthetic-cancellable-hang"
@@ -326,6 +346,31 @@ async def test_simple_foreign_news_runs_one_research_then_one_tool_free_synthesi
     assert PUBLIC_FACT in reply["message"]
     assert PUBLIC_URL in _telegram_body(reply)
     assert "Russia Ukraine war latest news" in reply["web_query_notice"]
+
+
+@pytest.mark.asyncio
+async def test_simple_news_disables_production_transport_retries_after_web_effect(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    kernel = _SyntheticNewsKernel()
+    model = _ProductionShapeNewsRouter(settings)
+    runtime = _runtime(settings, storage, model=model, kernel=kernel)
+
+    async def forbidden_context(*args: Any, **kwargs: Any) -> AgentContext:
+        del args, kwargs
+        raise AssertionError("simple public-news turn entered ambient context/classifier retrieval")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_context)
+    monkeypatch.setattr(runtime, "_verify_response", _forbid_second_model_stage)
+    monkeypatch.setattr(runtime, "_repair_once", _forbid_second_model_stage)
+
+    reply = await runtime.chat(OWNER, REQUEST, actor=_actor())
+
+    assert model.retry_flags == [False]
+    assert len(kernel.calls) == 1
+    assert PUBLIC_FACT in reply["message"]
 
 
 @pytest.mark.asyncio

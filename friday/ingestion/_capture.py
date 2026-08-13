@@ -7,6 +7,8 @@ exactly as before and no call site moved.
 
 from __future__ import annotations
 
+import time
+
 from friday.ingestion._base import (
     Any,
     IdempotencyConflictError,
@@ -54,7 +56,10 @@ class CaptureMixin(PipelineShared):
         force_knowledge: bool = False,
         force_review: bool = False,
         metadata: dict[str, Any] | None = None,
+        turn_deadline: float | None = None,
     ) -> dict[str, Any]:
+        if turn_deadline is not None and time.monotonic() >= turn_deadline:
+            raise TimeoutError("request deadline expired before text ingestion")
         content = (content or "").strip()
         if not content:
             raise ValueError("content is required")
@@ -124,6 +129,8 @@ class CaptureMixin(PipelineShared):
         # form one logical ingestion unit. Holding a SQLite IMMEDIATE transaction
         # across the unit prevents another process from observing a half-promoted
         # Raw Object and removes the source_ref check-then-insert race.
+        if turn_deadline is not None and time.monotonic() >= turn_deadline:
+            raise TimeoutError("request deadline expired before text ingestion commit")
         with self.storage.transaction():
             existing_raw = (
                 self.storage.find_raw_by_source_ref(user_id, source, source_ref) if source_ref else None

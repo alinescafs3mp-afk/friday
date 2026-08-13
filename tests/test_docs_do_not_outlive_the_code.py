@@ -26,6 +26,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 ARCHITECTURE = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
 SOL_GUIDANCE = (ROOT / "sol" / "SOL.md").read_text(encoding="utf-8")
+BACKUP_GUIDANCE = (ROOT / "docs" / "BACKUP_AND_RESTORE.md").read_text(encoding="utf-8")
 
 
 def test_the_readme_states_the_version_the_package_has():
@@ -81,6 +82,16 @@ def test_every_module_path_named_in_the_architecture_exists():
         path for path in referenced if not (ROOT / path).exists() and not (ROOT / "friday" / path).exists()
     )
     assert not missing, f"ARCHITECTURE.md ссылается на несуществующие файлы: {missing}"
+
+
+def test_backup_guidance_names_the_runtime_database_and_file_backup_contract():
+    """The recovery runbook must not point an operator at one guessed DB name."""
+
+    assert "FRIDAY_DATABASE_PATH" in BACKUP_GUIDANCE
+    assert "data/state/jericho.sqlite3" in BACKUP_GUIDANCE
+    assert "data/backups/files/" in BACKUP_GUIDANCE
+    assert "не распространяет удаления" in BACKUP_GUIDANCE
+    assert "FRIDAY_BACKUP_KEEP" in BACKUP_GUIDANCE
 
 
 # --- утверждения интерфейса о самом себе ------------------------------------

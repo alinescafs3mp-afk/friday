@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -12,7 +13,13 @@ from fastapi.testclient import TestClient
 
 from friday.config import ensure_runtime_dirs, validate_settings
 from friday.execution_kernel import ExecutionKernel, ToolResult
-from friday.mcp_runtime.client import MCPClientManager, MCPUnavailableError
+from friday.mcp_runtime import client as mcp_client_module
+from friday.mcp_runtime.client import (
+    MCPClientManager,
+    MCPServerDefinition,
+    MCPUnavailableError,
+    _MCPConnection,
+)
 from friday.mcp_runtime.tools import (
     _project_listing,
     _project_read_result,
@@ -302,6 +309,50 @@ def test_workspace_audit_fingerprints_content_and_paths() -> None:
     assert details["path_suffix"] == ".txt"
     assert len(details["path_sha256"]) == 64
     assert len(details["content_sha256"]) == 64
+
+
+@pytest.mark.asyncio
+async def test_failed_mcp_cleanup_never_holds_the_connection_lock(monkeypatch) -> None:
+    entered_cleanup = asyncio.Event()
+    release_cleanup = asyncio.Event()
+
+    class _FailingClient:
+        async def call_tool(self, *_args, **_kwargs):
+            raise RuntimeError("synthetic transport failure")
+
+    class _HangingStack:
+        async def aclose(self) -> None:
+            entered_cleanup.set()
+            await release_cleanup.wait()
+
+    definition = MCPServerDefinition(
+        alias="synthetic",
+        command="/bin/true",
+        args=(),
+        allowed_tools=frozenset({"read"}),
+        call_timeout_sec=1.0,
+    )
+    connection = _MCPConnection(definition)
+    connection._client = _FailingClient()  # type: ignore[assignment]  # noqa: SLF001
+    connection._stack = _HangingStack()  # type: ignore[assignment]  # noqa: SLF001
+    connection.available = True
+    monkeypatch.setattr(mcp_client_module, "_MCP_CLOSE_TIMEOUT_SEC", 0.5)
+
+    with pytest.raises(RuntimeError, match="synthetic transport failure"):
+        await connection.call("read", {})
+    assert not entered_cleanup.is_set(), "request task violated MCP cleanup task affinity"
+
+    with pytest.raises(MCPUnavailableError, match="unavailable"):
+        await asyncio.wait_for(connection.call("read", {}), timeout=0.05)
+    with pytest.raises(MCPUnavailableError, match="lifecycle restart"):
+        await connection.connect()
+
+    closing = asyncio.create_task(connection.close())
+    await asyncio.wait_for(entered_cleanup.wait(), timeout=0.2)
+    with pytest.raises(MCPUnavailableError, match="unavailable"):
+        await asyncio.wait_for(connection.call("read", {}), timeout=0.05)
+    release_cleanup.set()
+    await asyncio.wait_for(closing, timeout=0.2)
 
 
 def test_backend_lifecycle_starts_and_closes_workspace_child(settings) -> None:

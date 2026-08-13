@@ -519,6 +519,11 @@ class FridaySettings:
     whisper_compute_type: str
     whisper_language: str
     whisper_max_audio_sec: float
+    # Wall-clock ceiling for one local transcription await.  The native
+    # CTranslate2 worker cannot be interrupted safely from Python, so timeout
+    # returns the upload path to the caller while run_blocking keeps any
+    # physically surviving work visible to admission/shutdown diagnostics.
+    whisper_timeout_sec: float
     whisper_download_root: str
     # Local text-to-speech, spoken on request within a conversation. Same optional
     # 'jericho[voice]' extra as whisper above (piper-tts, onnxruntime-based; shares
@@ -1044,6 +1049,7 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         whisper_compute_type=env("FRIDAY_WHISPER_COMPUTE_TYPE", "int8"),
         whisper_language=env("FRIDAY_WHISPER_LANGUAGE", ""),
         whisper_max_audio_sec=_float_env("FRIDAY_WHISPER_MAX_AUDIO_SEC", 900.0, minimum=0.0),
+        whisper_timeout_sec=_float_env("FRIDAY_WHISPER_TIMEOUT_SEC", 180.0, minimum=1.0),
         whisper_download_root=env("FRIDAY_WHISPER_DOWNLOAD_ROOT", ""),
         tts_enabled=_bool_env("FRIDAY_TTS_ENABLED", False),
         tts_voice=env("FRIDAY_TTS_VOICE", "ru_RU-irina-medium"),

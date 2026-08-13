@@ -508,7 +508,7 @@ class CommandsMixin(BridgeShared):
                         backend,
                         "POST",
                         "/api/me/regenerate",
-                        {},
+                        {"operation_id": f"telegram-update:{update_id}"},
                         external_user_id,
                         str(chat_id),
                     )

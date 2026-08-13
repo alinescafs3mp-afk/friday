@@ -482,6 +482,7 @@ class LLMRouter:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | None = None,
         reject_repeated_token_degeneration: bool = True,
+        allow_retries: bool = True,
     ) -> dict[str, Any]:
         if not self.enabled:
             raise LLMUnavailableError("LLM is disabled")
@@ -520,6 +521,7 @@ class LLMRouter:
                     tool_choice,
                     half_open_probe=half_open_probe,
                     reject_repeated_token_degeneration=reject_repeated_token_degeneration,
+                    allow_retries=allow_retries,
                 )
             except BaseException:
                 # A full ReadTimeout replaces the sentinel with a fresh finite
@@ -596,6 +598,7 @@ class LLMRouter:
         *,
         half_open_probe: bool = False,
         reject_repeated_token_degeneration: bool = True,
+        allow_retries: bool = True,
     ) -> dict[str, Any]:
         payload = self._prepare_payload(messages, temperature, max_tokens, tools, tool_choice)
         last_error: Exception | None = None
@@ -624,7 +627,12 @@ class LLMRouter:
                 LOGGER.warning("LLM endpoint became silent during retry; skipping request")
                 raise LLMUnavailableError("LLM endpoint is in silent cooldown")
 
-        for attempt in range(MAX_RETRIES):
+        # Some routes have already completed an expensive or externally visible
+        # stage and own a deterministic fallback.  They can opt out of transport
+        # retries so one failed synthesis never starts a second generation for
+        # the same accepted evidence.
+        max_attempts = MAX_RETRIES if allow_retries else 1
+        for attempt in range(max_attempts):
             if attempt and time.monotonic() >= deadline:
                 LOGGER.warning("LLM budget of %.0fs is spent; not retrying", self.total_budget_sec)
                 break
@@ -639,7 +647,8 @@ class LLMRouter:
                         client.post(f"{self.base_url}/chat/completions", json=payload)
                     )
                     if (
-                        response.status_code == 400
+                        allow_retries
+                        and response.status_code == 400
                         and payload.get("tools")
                         and _tools_unsupported(response.text)
                     ):
@@ -737,7 +746,7 @@ class LLMRouter:
             except httpx.HTTPStatusError as exc:
                 last_error = exc
                 status = exc.response.status_code
-                if status not in _TRANSIENT_HTTP_STATUSES or attempt >= MAX_RETRIES - 1:
+                if status not in _TRANSIENT_HTTP_STATUSES or attempt >= max_attempts - 1:
                     raise
                 retry_after = _retry_after_seconds(exc.response)
                 delay = retry_after if retry_after is not None else RETRY_BASE_DELAY * (2**attempt)
@@ -764,7 +773,7 @@ class LLMRouter:
                 raise
             except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
                 last_error = exc
-                if attempt >= MAX_RETRIES - 1:
+                if attempt >= max_attempts - 1:
                     raise
                 delay = min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
                 LOGGER.warning("LLM transport error, retrying in %.1fs", delay)

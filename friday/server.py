@@ -15,8 +15,8 @@ import re
 import secrets
 import time
 from collections import defaultdict, deque
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from collections.abc import AsyncIterator, Mapping
+from contextlib import ExitStack, asynccontextmanager, suppress
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -73,7 +73,7 @@ from friday.config import (
     validate_settings,
 )
 from friday.diagnostics.runtime_lease import ProcessLease
-from friday.execution_kernel import ExecutionKernel
+from friday.execution_kernel import ExecutionKernel, mark_request_effect_possible, track_request_effects
 from friday.executive import ExecutiveService
 from friday.executive.api import admin_router as missions_admin_router
 from friday.executive.api import router as missions_router
@@ -142,6 +142,97 @@ _REALM_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
 # a trace id, plain enough that it cannot smuggle a header or a log line.
 _REQUEST_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
 _SERVER_REQUEST_ID_RE = re.compile(r"[0-9a-f]{24}")
+_REGENERATE_OPERATION_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}")
+_REGENERATE_IDEMPOTENCY_LEASE_SECONDS = 90
+_REGENERATE_IDEMPOTENCY_HEARTBEAT_SECONDS = 30.0
+
+_IDEMPOTENCY_UNCERTAIN_MESSAGE = (
+    "⚠️ Предыдущая обработка оборвалась после начала изменяющего действия. "
+    "Не повторяю запрос автоматически: неизвестно, успело ли действие завершиться. "
+    "Сначала проверьте результат; если его нет, отправьте команду заново."
+)
+
+
+def _idempotency_uncertain_response() -> dict[str, Any]:
+    """A terminal replay which prevents an uncertain effect from running twice."""
+
+    return {
+        "message": _IDEMPOTENCY_UNCERTAIN_MESSAGE,
+        "answer": _IDEMPOTENCY_UNCERTAIN_MESSAGE,
+        "context": {"interaction_mode": "dialogue"},
+        "idempotency_effect_uncertain": True,
+    }
+
+
+def _mark_request_effect_possible(
+    storage: Any,
+    user_id: str,
+    request_key: str,
+    lease_token: str,
+) -> bool:
+    """Commit the hard-kill-safe terminal fence before a mutator may start."""
+
+    return storage.idempotency_mark_effect_possible(
+        user_id,
+        request_key,
+        lease_token,
+        _idempotency_uncertain_response(),
+    )
+
+
+def _generated_file_persistence_eligible(result: Mapping[str, Any]) -> bool:
+    """Whether generated-file postprocessing can enter its persistent path."""
+
+    files = result.get("files")
+    return bool(
+        isinstance(files, list)
+        and any(isinstance(item, Mapping) for item in files)
+        and re.fullmatch(r"msg_[0-9a-f]{16}", str(result.get("message_id") or "").strip())
+    )
+
+
+def _regenerate_retry_source_user_message(
+    storage: Any,
+    last_user: Mapping[str, Any],
+    *,
+    conversation_id: str,
+    user_id: str,
+) -> Mapping[str, Any]:
+    """Collapse an appended replay row only onto an uncertain parent request.
+
+    A completed regenerate intentionally permits another alternative; only a
+    parent whose effect outcome is uncertain represents a transport retry.
+    """
+
+    metadata = _json_load(last_user.get("metadata_json"), {})
+    parent_id = str(
+        metadata.get("regenerate_parent_user_message_id")
+        or metadata.get("regenerate_root_user_message_id")
+        or ""
+    ).strip()
+    if not re.fullmatch(r"msg_[0-9a-f]{16}", parent_id):
+        return last_user
+    candidate = storage.get_message(parent_id, user_id)
+    if not isinstance(candidate, Mapping):
+        return last_user
+    if (
+        str(candidate.get("role") or "") != "user"
+        or str(candidate.get("conversation_id") or "") != conversation_id
+        or str(candidate.get("content") or "").strip() != str(last_user.get("content") or "").strip()
+    ):
+        return last_user
+    parent_key = f"regenerate:{conversation_id}:{parent_id}"
+    request_row = storage.execute(
+        """SELECT state, response_json FROM request_idempotency
+             WHERE user_id=? AND request_key=?""",
+        (user_id, parent_key),
+    ).fetchone()
+    if request_row is None:
+        return last_user
+    response = _json_load(request_row["response_json"], {})
+    if response.get("idempotency_effect_uncertain") is not True:
+        return last_user
+    return candidate
 
 
 def _public_chat_for_actor(
@@ -1758,9 +1849,19 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
     # Гонка двух /regenerate закрыта idempotency_claim по разговору+user-ходу (G17a).
     @application.post("/api/me/regenerate", tags=["chat"])
     async def regenerate_last_turn(request: Request) -> dict[str, Any]:
+        _turn_deadline = time.monotonic() + request.app.state.settings.agent_turn_budget_sec
         actor = _require(request, "chat.use")
         state = request.app.state
         body = await _request_json(request)
+        operation_supplied = "operation_id" in body
+        operation_id = body.get("operation_id")
+        if operation_supplied and (
+            not isinstance(operation_id, str)
+            or operation_id != operation_id.strip()
+            or not _REGENERATE_OPERATION_ID_RE.fullmatch(operation_id)
+        ):
+            raise HTTPException(status_code=400, detail="Invalid regenerate operation_id")
+        operation_id = str(operation_id or "")
         conversation_id = str(body.get("conversation_id") or "").strip() or None
         channel_chat_id = getattr(request.state, "bridge_chat_id", None)
         if actor.source == "telegram-bridge" and channel_chat_id:
@@ -1811,6 +1912,15 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 status_code=400,
                 detail="В разговоре нет вопроса для повтора",
             )
+        if not operation_id:
+            last_user = dict(
+                _regenerate_retry_source_user_message(
+                    state.storage,
+                    last_user,
+                    conversation_id=conversation_id,
+                    user_id=actor.own_id,
+                )
+            )
         message = str(last_user.get("content") or "").strip()
         if not message:
             raise HTTPException(
@@ -1819,9 +1929,16 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             )
         last_meta = _json_load(last_user.get("metadata_json"), {})
         had_attachments = bool(last_meta.get("had_attachments"))
-        # Ключ включает id user-хода: concurrent double-tap на ОДИН ход дедупится,
-        # а повторный /regenerate после успешного (новый user-ряд с новым id) — нет.
-        request_key = f"regenerate:{conversation_id}:{last_user.get('id') or ''}"
+        # A replay row points to the request which appended it.  When that
+        # parent's durable outcome is uncertain we keep its key; after a normal
+        # completion the tail gets a fresh key so another deliberate click can
+        # produce a new alternative.
+        request_key = (
+            f"regenerate:{conversation_id}:operation:"
+            f"{hashlib.sha256(operation_id.encode('ascii')).hexdigest()}"
+            if operation_id
+            else f"regenerate:{conversation_id}:{last_user.get('id') or ''}"
+        )
         claim = state.storage.idempotency_claim(
             # Тот же довод, что и в чате: ключ принадлежит человеку. Здесь он
             # вдобавок содержит идентификатор разговора, но разговор в общем
@@ -1829,7 +1946,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             # людей на ровном месте.
             actor.own_id,
             request_key,
-            lease_seconds=90,
+            lease_seconds=_REGENERATE_IDEMPOTENCY_LEASE_SECONDS,
         )
         if claim["status"] == "replay":
             cached = claim.get("response") or {}
@@ -1850,6 +1967,28 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 headers={"Retry-After": "2"},
             )
         lease_token = str(claim.get("lease_token") or "")
+        heartbeat: asyncio.Task[None] | None = None
+
+        async def renew_lease() -> None:
+            while True:
+                await asyncio.sleep(_REGENERATE_IDEMPOTENCY_HEARTBEAT_SECONDS)
+                if not state.storage.idempotency_renew(actor.own_id, request_key, lease_token):
+                    return
+
+        heartbeat = asyncio.create_task(renew_lease(), name="jericho-regenerate-idempotency-heartbeat")
+        request_effects = None
+        effect_stack = ExitStack()
+        request_effects = effect_stack.enter_context(
+            track_request_effects(
+                functools.partial(
+                    _mark_request_effect_possible,
+                    state.storage,
+                    actor.own_id,
+                    request_key,
+                    lease_token,
+                )
+            )
+        )
         try:
             result = await state.agent.chat(
                 actor.user_id,
@@ -1871,7 +2010,15 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 # text such as «сделай сводку» must never bind itself to an old
                 # or newer private file merely because the words match.
                 replay_source_message_id=str(last_user.get("id") or ""),
+                turn_deadline=_turn_deadline,
             )
+            if _generated_file_persistence_eligible(result):
+                if time.monotonic() >= _turn_deadline:
+                    raise TimeoutError("turn budget exhausted before generated-file persistence")
+                if not mark_request_effect_possible():
+                    raise RuntimeError(
+                        "Request idempotency fence could not be committed before generated-file persistence"
+                    )
             result = await asyncio.to_thread(
                 persist_generated_response_files,
                 state.storage,
@@ -1896,6 +2043,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 if not str(result.get("grounding_warning") or "").strip():
                     result["grounding_warning"] = notice
             if actor.source == "telegram-bridge" and channel_chat_id:
+                if not mark_request_effect_possible():
+                    raise RuntimeError(
+                        "Request idempotency fence could not be committed before channel session persistence"
+                    )
                 state.storage.set_channel_conversation(
                     actor.own_id,
                     "telegram",
@@ -1913,8 +2064,22 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             return public_result
         except BaseException:
             if lease_token:
-                state.storage.idempotency_release(actor.own_id, request_key, lease_token)
+                if request_effects is not None and request_effects.possible:
+                    state.storage.idempotency_complete(
+                        actor.own_id,
+                        request_key,
+                        lease_token,
+                        _idempotency_uncertain_response(),
+                    )
+                else:
+                    state.storage.idempotency_release(actor.own_id, request_key, lease_token)
             raise
+        finally:
+            effect_stack.close()
+            if heartbeat is not None:
+                heartbeat.cancel()
+                with suppress(asyncio.CancelledError):
+                    await heartbeat
 
     # G19: предстоящие напоминания (entity_time → outbound_notifications kind=reminder).
     # Self-service как /api/me/instructions: chat.use, только actor.user_id.
@@ -2171,6 +2336,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
 
     @application.post("/api/chat", tags=["chat"])
     async def chat(request: Request) -> dict[str, Any]:
+        # One admission clock covers validation, attachment recovery/ingestion,
+        # conversation persistence, every model/tool round and verification.
+        # The bridge waits this budget plus its separate 60-second transport
+        # reserve; no later stage may mint a fresh full-turn allowance.
+        _turn_deadline = time.monotonic() + request.app.state.settings.agent_turn_budget_sec
         actor = _require(request, "chat.use")
         state = request.app.state
         body = await _request_json(request)
@@ -2352,6 +2522,32 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         return
 
             heartbeat = asyncio.create_task(renew_lease(), name="jericho-idempotency-heartbeat")
+
+        effect_fence_committed = False
+        effect_stack = ExitStack()
+        request_effects = None
+        if source_ref and lease_token:
+            request_effects = effect_stack.enter_context(
+                track_request_effects(
+                    functools.partial(
+                        _mark_request_effect_possible,
+                        state.storage,
+                        actor.own_id,
+                        source_ref,
+                        lease_token,
+                    )
+                )
+            )
+
+        def ensure_effect_fence() -> None:
+            """Lazily fence immediately before the first persistent seam."""
+
+            nonlocal effect_fence_committed
+            if effect_fence_committed or not (source_ref and lease_token):
+                return
+            if not mark_request_effect_possible():
+                raise RuntimeError("Request idempotency fence could not be committed before persistence")
+            effect_fence_committed = True
 
         try:
             file_ingestion = None
@@ -2545,6 +2741,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     if source_ref and lease_token:
                         state.storage.idempotency_release(actor.own_id, source_ref, lease_token)
                         lease_token = ""
+                        effect_fence_committed = False
                     return {"reply_media_recovery_required": True}
 
                 recovery_source_ref = reply_document_recovery.get("source_ref")
@@ -2601,6 +2798,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     ).hexdigest()
                 )
                 try:
+                    ensure_effect_fence()
                     file_ingestion = await state.ingestion.ingest_file(
                         actor.user_id,
                         None,
@@ -2611,6 +2809,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         metadata=recovery_metadata,
                         source_ref=recovery_ingest_ref,
                         exact_byte_identity_only=True,
+                        turn_deadline=_turn_deadline,
                         **recovery_kwargs,
                     )
                 except SourceReferenceConflictError as exc:
@@ -2620,6 +2819,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     if source_ref and lease_token:
                         state.storage.idempotency_release(actor.own_id, source_ref, lease_token)
                         lease_token = ""
+                        effect_fence_committed = False
                     return _public_chat_for_actor(
                         password_challenge,
                         storage=state.storage,
@@ -2695,6 +2895,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         file_content,
                         filename=filename,
                         mime_type=mime_type,
+                        turn_deadline=_turn_deadline,
                         **transient_kwargs,
                     )
                     password_challenge = _archive_password_challenge(transient_file)
@@ -2702,6 +2903,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         if source_ref and lease_token:
                             state.storage.idempotency_release(actor.own_id, source_ref, lease_token)
                             lease_token = ""
+                            effect_fence_committed = False
                         return _public_chat_for_actor(
                             password_challenge,
                             storage=state.storage,
@@ -2823,6 +3025,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     # арендатором. Замерено 2026-08-04 — 3295 документов из 3296 не
                     # несут ни одного признака автора.
                     archive_kwargs = {"archive_password": archive_password} if archive_password else {}
+                    ensure_effect_fence()
                     file_ingestion = await state.ingestion.ingest_file(
                         actor.user_id,
                         None,
@@ -2832,6 +3035,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         media_kind=media_kind,
                         metadata={**file_metadata, "uploaded_by": actor.own_id},
                         source_ref=str(document.get("source_ref") or source_ref or ""),
+                        turn_deadline=_turn_deadline,
                         **archive_kwargs,
                     )
                     password_challenge = _archive_password_challenge(file_ingestion)
@@ -2839,6 +3043,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         if source_ref and lease_token:
                             state.storage.idempotency_release(actor.own_id, source_ref, lease_token)
                             lease_token = ""
+                            effect_fence_committed = False
                         return _public_chat_for_actor(
                             password_challenge,
                             storage=state.storage,
@@ -3002,6 +3207,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     }
                 else:
                     try:
+                        ensure_effect_fence()
                         ingestion_result = await state.ingestion.ingest_text(
                             actor.user_id,
                             message,
@@ -3016,6 +3222,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                                 "telegram_message_id": body.get("telegram_message_id"),
                                 **({"forward": forward_meta} if forward_meta else {}),
                             },
+                            turn_deadline=_turn_deadline,
                         )
                     except PrivateMaterialQuarantineError:
                         # Карантин приватного материала — штатный отказ, а не сбой.
@@ -3056,11 +3263,16 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 # role/conversation/emitted knowledge_citations; caller JSON is
                 # never a citation map grant.
                 reply_assistant_message_id=reply_source_message_id or None,
+                turn_deadline=_turn_deadline,
             )
             # ``make_file`` keeps inline base64 for existing clients, but the
             # durable authority is an exact-byte, person-owned artifact.  Freeze
             # it before the HTTP/idempotency response is published so refreshes
             # can recover the link from assistant-message history.
+            if _generated_file_persistence_eligible(result):
+                if time.monotonic() >= _turn_deadline:
+                    raise TimeoutError("turn budget exhausted before generated-file persistence")
+                ensure_effect_fence()
             result = await asyncio.to_thread(
                 persist_generated_response_files,
                 state.storage,
@@ -3093,6 +3305,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     f"{notice}\n\n{previous_warning}" if previous_warning else notice
                 )
             if actor.source == "telegram-bridge" and channel_chat_id:
+                ensure_effect_fence()
                 state.storage.set_channel_conversation(
                     actor.own_id,
                     "telegram",
@@ -3115,9 +3328,18 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             return public_result
         except BaseException:
             if source_ref and lease_token:
-                state.storage.idempotency_release(actor.own_id, source_ref, lease_token)
+                if effect_fence_committed or (request_effects is not None and request_effects.possible):
+                    state.storage.idempotency_complete(
+                        actor.own_id,
+                        source_ref,
+                        lease_token,
+                        _idempotency_uncertain_response(),
+                    )
+                else:
+                    state.storage.idempotency_release(actor.own_id, source_ref, lease_token)
             raise
         finally:
+            effect_stack.close()
             if heartbeat is not None:
                 heartbeat.cancel()
                 with suppress(asyncio.CancelledError):

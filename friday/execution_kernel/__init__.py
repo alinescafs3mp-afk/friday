@@ -22,8 +22,9 @@ import unicodedata
 import urllib.parse
 import zipfile
 from collections import Counter
-from collections.abc import Awaitable, Callable, Mapping, Sequence
-from contextlib import suppress
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path, PurePath
@@ -1154,6 +1155,76 @@ class ToolResult:
             encoded = encoded[:11_900] + "\n… (truncated)"
             self.truncated = True
         return f"Результат {self.tool_name}:\n{encoded}"
+
+
+@dataclass
+class RequestEffects:
+    """Request-local proof that persistent work crossed its effect boundary.
+
+    The idempotency lease lives in the HTTP layer, while AgentRuntime and the
+    execution kernel own conversation and tool writes.  This deliberately tiny
+    mutable witness crosses those layers through a ``ContextVar``: a cancelled
+    request can distinguish a failure before any persistent write (safe to
+    retry) from interrupted work whose effect must not be replayed automatically.
+
+    It records possibility, not success.  Once a conversation/message write or
+    ``mutate``/``high`` handler starts, failure cannot prove it did not commit.
+    """
+
+    before_effect: Callable[[], bool]
+    possible: bool = False
+
+
+_REQUEST_EFFECTS: ContextVar[RequestEffects | None] = ContextVar(
+    "jericho_request_effects",
+    default=None,
+)
+
+
+@contextmanager
+def track_request_effects(
+    before_effect: Callable[[], bool],
+) -> Iterator[RequestEffects]:
+    """Track persistent writes for one surrounding keyed request."""
+
+    effects = RequestEffects(before_effect=before_effect)
+    token = _REQUEST_EFFECTS.set(effects)
+    try:
+        yield effects
+    finally:
+        _REQUEST_EFFECTS.reset(token)
+
+
+def _mark_request_effect_possible() -> bool:
+    effects = _REQUEST_EFFECTS.get()
+    if effects is None:
+        return True
+    if effects.possible:
+        return True
+    if not effects.before_effect():
+        return False
+    effects.possible = True
+    return True
+
+
+def mark_request_effect_possible() -> bool:
+    """Durably fence the surrounding keyed request before any persistent write.
+
+    AgentRuntime owns conversation/message writes that happen before model tools
+    are selected.  It calls this same boundary so a hard kill after the user row
+    cannot turn the request lease stale and append that turn a second time.
+    Outside a tracked keyed request there is no lease to fence and ordinary
+    unkeyed API behavior remains unchanged.
+    """
+
+    return _mark_request_effect_possible()
+
+
+def request_effect_possible() -> bool:
+    """Whether the surrounding keyed request has crossed its durable fence."""
+
+    effects = _REQUEST_EFFECTS.get()
+    return bool(effects is not None and effects.possible)
 
 
 _LLM_TOOL_PAYLOAD_MAX_CHARS = 11_900
@@ -3140,6 +3211,17 @@ class ExecutionKernel:
             await self._audit(actor, name, False, "invalid_arguments", details=details)
             return ToolResult(name, False, error="Invalid tool arguments: TypeError")
         if changes_data:
+            # The surrounding request's durable terminal fence must be committed
+            # before the first persistent boundary, including the durable
+            # ``started`` audit row.  A ContextVar alone catches cancellation
+            # but not SIGKILL; losing the lease therefore fails closed.
+            if not _mark_request_effect_possible():
+                await self._audit(actor, name, False, "idempotency_fence_lost", details=details)
+                return ToolResult(
+                    name,
+                    False,
+                    error="Mutating tool refused: request idempotency fence could not be committed",
+                )
             await self._audit(actor, name, True, "started", details=details)
         try:
             async with asyncio.timeout(timeout):

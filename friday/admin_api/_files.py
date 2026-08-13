@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 from fastapi.responses import Response
-from starlette.concurrency import run_in_threadpool
 
 from friday.admin_api._deps import (
     Any,
@@ -31,6 +30,7 @@ from friday.file_delivery import (
     read_authorized_file,
 )
 from friday.storage._privacy import _not_private_raw_dependency
+from friday.workers._blocking import run_blocking
 
 router = APIRouter()
 
@@ -42,6 +42,17 @@ async def list_files(
     limit: int = Query(500, ge=1, le=5000),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
+    return await run_blocking(_list_files_sync, request, user_id, limit, offset)
+
+
+def _list_files_sync(
+    request: Request,
+    user_id: str | None,
+    limit: int,
+    offset: int,
+) -> dict[str, Any]:
+    """Collect the SQLite-backed page without holding the serving event loop."""
+
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
     _audit_cross_tenant_read(request, "admin.files.read", target)
@@ -87,11 +98,16 @@ async def list_files(
 
 @router.get("/files/{raw_id}/download")
 async def download_file(raw_id: str, request: Request, user_id: str):
+    return await run_blocking(_download_file_sync, raw_id, request, user_id)
+
+
+def _download_file_sync(raw_id: str, request: Request, user_id: str) -> Response:
+    """Authorize, revalidate, read and audit one file on the blocking executor."""
+
     _require(request, "admin.all_data.read")
     state = _services(request)
     try:
-        stored = await run_in_threadpool(
-            read_authorized_file,
+        stored = read_authorized_file(
             state.storage,
             state.settings.files_dir,
             raw_id,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import inspect
 import ipaddress
 import json
 import logging
@@ -85,6 +86,7 @@ from friday.execution_kernel import (
     _web_research_collision_topic_query,
     _web_research_source_matches_topic,
     complete_person_matches,
+    mark_request_effect_possible,
     resolvable_person_matches,
 )
 from friday.file_delivery import (
@@ -164,10 +166,10 @@ _OUTSIDE_DEED_RECOVERY_MAX_CHARS = 4_000
 # under a second, but three successful live Office summaries took 60--71 seconds
 # while the endpoint was degraded.  Keep 90 seconds for final synthesis.  The
 # full-source prepass starts at the same budget and can grow to 150 seconds for
-# many bounded parallel waves, while the complete attachment turn stays within
-# the bridge's roughly 240-second envelope.  Neither deadline is renewed between
-# stages.  Verification + repair + re-verification share a separate single
-# secondary budget below.
+# many bounded parallel waves.  These narrower attachment ceilings are also
+# clipped by the one absolute turn deadline derived from the bridge contract;
+# no later route stage gets a fresh turn clock.  Verification + repair +
+# re-verification share a separate single secondary budget below.
 _ATTACHMENT_OPTIONAL_STAGE_TIMEOUT_SEC = 5.0
 _ATTACHMENT_GENERATION_TIMEOUT_SEC = 90.0
 _ATTACHMENT_PREPASS_BASE_TIMEOUT_SEC = 90.0
@@ -187,20 +189,94 @@ def _attachment_prepass_budget_sec(chunk_count: int, parallelism: int) -> float:
     )
 
 
-def _remaining_attachment_secondary_budget(deadline: float | None) -> float:
-    """Return one shared verifier/repair budget without ever renewing it."""
+def _remaining_deadline_budget(*deadlines: float | None) -> float | None:
+    """Return time to the earliest absolute deadline, without renewing any."""
 
-    if deadline is None:
-        return _ATTACHMENT_SECONDARY_BUDGET_SEC
-    return max(0.0, deadline - time.monotonic())
+    active = [deadline for deadline in deadlines if deadline is not None]
+    if not active:
+        return None
+    return max(0.0, min(active) - time.monotonic())
+
+
+def _turn_deadline_expired(turn_deadline: float | None) -> bool:
+    """Say whether a new stage/effect may still be admitted this turn."""
+
+    remaining = _remaining_deadline_budget(turn_deadline)
+    return remaining is not None and remaining <= 0
+
+
+def _accepts_keyword(function: Any, keyword: str) -> bool:
+    """Inspect a monkeypatchable seam before adding a new optional keyword.
+
+    Runtime collaborators accept ``turn_deadline`` explicitly, while older
+    adapters and focused test doubles often preserve the historical signature.
+    Retrying after ``TypeError`` is unsafe for calls which may already have
+    crossed a persistent or external boundary, so compatibility is decided
+    before the first invocation.
+    """
+
+    try:
+        parameters = inspect.signature(function).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD or parameter.name == keyword
+        for parameter in parameters
+    )
+
+
+async def _await_with_turn_deadline(
+    awaitable: Any,
+    turn_deadline: float | None,
+    *,
+    expired: str,
+) -> Any:
+    """Await one cooperative stage against the request's absolute clock."""
+
+    remaining = _remaining_deadline_budget(turn_deadline)
+    if remaining is None:
+        return await awaitable
+    if remaining <= 0:
+        close = getattr(awaitable, "close", None)
+        if callable(close):
+            close()
+        raise TimeoutError(expired)
+    return await asyncio.wait_for(awaitable, timeout=remaining)
+
+
+async def _call_with_turn_deadline(
+    function: Any,
+    /,
+    *args: Any,
+    turn_deadline: float | None,
+    expired: str,
+    **kwargs: Any,
+) -> Any:
+    """Call a legacy-compatible async seam and bound its complete await."""
+
+    if turn_deadline is not None and _accepts_keyword(function, "turn_deadline"):
+        kwargs["turn_deadline"] = turn_deadline
+    return await _await_with_turn_deadline(
+        function(*args, **kwargs),
+        turn_deadline,
+        expired=expired,
+    )
+
+
+def _remaining_attachment_secondary_budget(
+    deadline: float | None,
+    turn_deadline: float | None = None,
+) -> float:
+    """Return one shared verifier/repair budget without renewing the turn."""
+
+    remaining = _remaining_deadline_budget(deadline, turn_deadline)
+    return _ATTACHMENT_SECONDARY_BUDGET_SEC if remaining is None else remaining
 
 
 def _remaining_attachment_primary_budget(deadline: float | None) -> float | None:
     """Return the unrenewed model budget for one attachment turn."""
 
-    if deadline is None:
-        return None
-    return max(0.0, deadline - time.monotonic())
+    return _remaining_deadline_budget(deadline)
 
 
 # How many successful tool outputs to carry into answer verification as evidence,
@@ -13447,6 +13523,7 @@ async def _maybe_bounded_file_overview(
     attachments: Sequence[Any],
     *,
     evidence_set: FileEvidenceSet | None,
+    turn_deadline: float | None = None,
 ) -> tuple[str, bool]:
     """One tools-empty overview call. Any miss keeps the deterministic fallback."""
 
@@ -13455,6 +13532,12 @@ async def _maybe_bounded_file_overview(
     sources = _upload_overview_source_slices(attachments, evidence_set=evidence_set)
     if not sources:
         return fallback, False
+    remaining = _remaining_deadline_budget(turn_deadline)
+    if remaining is not None and remaining <= 0:
+        return fallback, False
+    timeout = (
+        _UPLOAD_OVERVIEW_TIMEOUT_SEC if remaining is None else min(_UPLOAD_OVERVIEW_TIMEOUT_SEC, remaining)
+    )
     payload = json.dumps(
         {
             "sources": [
@@ -13476,7 +13559,7 @@ async def _maybe_bounded_file_overview(
                 tools=[],
                 priority="foreground",
             ),
-            timeout=_UPLOAD_OVERVIEW_TIMEOUT_SEC,
+            timeout=timeout,
         )
     except TimeoutError:
         LOGGER.info("bounded file overview: deadline expired")
@@ -19861,6 +19944,11 @@ class AgentContext:
     #: such as ``прочитай первый найденный файл`` reopen the file actually
     #: returned by that search instead of the oldest file in the archive.
     source_search_result_raw_ids: list[str] = field(default_factory=list)
+    #: One monotonic wall-clock deadline for the complete user turn.  It starts
+    #: at ``chat()`` entry and is never renewed by prepass, tool rounds,
+    #: synthesis, salvage, verification or repair.  Narrower attachment-stage
+    #: deadlines below remain in force through ``min(stage, turn)``.
+    turn_deadline: float | None = None
     #: One wall-clock deadline shared by every primary model call on an
     #: attachment turn, including semantic prefetches and late file content.
     #: Local tools/effects are deliberately outside this deadline.
@@ -20103,6 +20191,7 @@ class AgentRuntime:
         actor: ActorContext,
         tool_name: Literal["workspace_list", "workspace_search"],
         arguments: dict[str, Any],
+        turn_deadline: float | None = None,
     ) -> tuple[list[dict[str, Any]], bool, tuple[str, ...]]:
         """Collect a bounded complete workspace page sequence without a model."""
 
@@ -20112,9 +20201,18 @@ class AgentRuntime:
         snapshot_sha256 = ""
         attempts: list[str] = []
         for _ in range(_WORKSPACE_INBOX_MAX_LIST_PAGES):
+            if _turn_deadline_expired(turn_deadline):
+                return rows, False, tuple(attempts)
             current = {**arguments, "cursor": cursor, "limit": 200}
             attempts.append(tool_name)
-            result = await self.kernel.execute(tool_name, current, actor=actor)
+            try:
+                result = await _await_with_turn_deadline(
+                    self.kernel.execute(tool_name, current, actor=actor),
+                    turn_deadline=turn_deadline,
+                    expired="turn deadline expired during MCP workspace listing",
+                )
+            except TimeoutError:
+                return rows, False, tuple(attempts)
             if not result.success:
                 return [], False, tuple(attempts)
             validated = self._workspace_listing_page(result.data)
@@ -20143,6 +20241,7 @@ class AgentRuntime:
         *,
         actor: ActorContext,
         relative_path: str,
+        turn_deadline: float | None = None,
     ) -> tuple[_WorkspaceInboxAttachment | None, tuple[str, ...], str]:
         """Read one stable MCP file through bounded, identity-pinned pages."""
 
@@ -20154,12 +20253,21 @@ class AgentRuntime:
         attempts: list[str] = []
         identity: tuple[str, str, str, int, int, bool, bool] | None = None
         for _ in range(_WORKSPACE_INBOX_MAX_READ_PAGES):
+            if _turn_deadline_expired(turn_deadline):
+                return None, tuple(attempts), "turn_deadline_exhausted"
             attempts.append("workspace_read")
-            result = await self.kernel.execute(
-                "workspace_read",
-                {"relative_path": path, "offset": offset},
-                actor=actor,
-            )
+            try:
+                result = await _await_with_turn_deadline(
+                    self.kernel.execute(
+                        "workspace_read",
+                        {"relative_path": path, "offset": offset},
+                        actor=actor,
+                    ),
+                    turn_deadline=turn_deadline,
+                    expired="turn deadline expired during MCP workspace read",
+                )
+            except TimeoutError:
+                return None, tuple(attempts), "turn_deadline_exhausted"
             if not result.success or not isinstance(result.data, Mapping):
                 return None, tuple(attempts), "unavailable"
             data = result.data
@@ -20263,6 +20371,7 @@ class AgentRuntime:
         request: _WorkspaceInboxRequest,
         *,
         actor: ActorContext,
+        turn_deadline: float | None = None,
     ) -> _WorkspaceInboxResolution:
         """Resolve one explicit inbox operation before retrieval or generation."""
 
@@ -20288,6 +20397,7 @@ class AgentRuntime:
                 actor=actor,
                 tool_name=tool_name,
                 arguments=arguments,
+                turn_deadline=turn_deadline,
             )
             if not complete:
                 return _WorkspaceInboxResolution(
@@ -20316,6 +20426,7 @@ class AgentRuntime:
                 actor=actor,
                 tool_name="workspace_list",
                 arguments={"relative_dir": "", "recursive": True},
+                turn_deadline=turn_deadline,
             )
             attempts = list_attempts
             if not complete:
@@ -20345,6 +20456,7 @@ class AgentRuntime:
         attachment, read_attempts, _error = await self._workspace_read_attachment(
             actor=actor,
             relative_path=relative_path,
+            turn_deadline=turn_deadline,
         )
         attempts = (*attempts, *read_attempts)
         if attachment is None:
@@ -21158,6 +21270,7 @@ class AgentRuntime:
         *,
         tenant_id: str,
         person_id: str,
+        turn_deadline: float | None = None,
     ) -> list[dict[str, Any]]:
         """Inspect only legacy file headers when durable rows predate metadata.
 
@@ -21175,6 +21288,9 @@ class AgentRuntime:
 
         hydrated: list[dict[str, Any]] = []
         for index, item in enumerate(attachments):
+            if turn_deadline is not None and (_remaining_deadline_budget(turn_deadline) or 0.0) <= 0:
+                hydrated.extend(attachments[index:])
+                break
             if index >= _CONVERSATION_ATTACHMENT_MAX_FILES:
                 hydrated.append(item)
                 continue
@@ -21212,23 +21328,30 @@ class AgentRuntime:
                 hydrated.append(item)
                 continue
             try:
-                authorized = await run_blocking(
-                    read_authorized_file,
-                    self.storage,
-                    self.settings.files_dir,
-                    raw_id,
-                    tenant_id,
-                    person_id=attachment_uploader,
-                    max_bytes=min(
-                        max(1, int(self.settings.max_upload_bytes)),
-                        _DOCUMENT_METADATA_ON_DEMAND_MAX_BYTES,
+                authorized = await _await_with_turn_deadline(
+                    run_blocking(
+                        read_authorized_file,
+                        self.storage,
+                        self.settings.files_dir,
+                        raw_id,
+                        tenant_id,
+                        person_id=attachment_uploader,
+                        max_bytes=min(
+                            max(1, int(self.settings.max_upload_bytes)),
+                            _DOCUMENT_METADATA_ON_DEMAND_MAX_BYTES,
+                        ),
                     ),
+                    turn_deadline,
+                    expired="turn deadline expired during document metadata authorization",
                 )
-                inspected = await inspect(
+                inspected = await _call_with_turn_deadline(
+                    inspect,
                     authorized.content,
                     filename=authorized.filename or str(canonical.get("filename") or "attachment"),
                     mime_type=authorized.mime_type or str(canonical.get("mime_type") or ""),
                     metadata_only=True,
+                    turn_deadline=turn_deadline,
+                    expired="turn deadline expired during document metadata inspection",
                 )
             except (AuthorizedFileReadError, FileRecordUnavailable, TypeError, ValueError):
                 hydrated.append(item)
@@ -21492,6 +21615,7 @@ class AgentRuntime:
         tenant_id: str,
         person_id: str,
         require_projected_direct_read_authority: bool = False,
+        turn_deadline: float | None = None,
     ) -> list[dict[str, Any]]:
         """Verify every registered source on disk and recover stale extraction.
 
@@ -21523,7 +21647,14 @@ class AgentRuntime:
             return _private_owned_attachment_copy(failed, source=canonical)
 
         hydrated: list[dict[str, Any]] = []
-        for item in attachments:
+        for position, item in enumerate(attachments):
+            if turn_deadline is not None and (_remaining_deadline_budget(turn_deadline) or 0.0) <= 0:
+                for pending in attachments[position:]:
+                    if isinstance(pending, Mapping):
+                        hydrated.append(unavailable(pending))
+                    else:
+                        hydrated.append(pending)
+                break
             if not (
                 isinstance(item, (_OwnedAttachment, _ProjectedAttachment))
                 or is_trusted_office_attachment(item)
@@ -21586,14 +21717,18 @@ class AgentRuntime:
             filename = str(canonical.get("filename") or "attachment")[:260]
             mime_type = str(canonical.get("mime_type") or "")[:160]
             try:
-                authorized = await run_blocking(
-                    read_authorized_file,
-                    self.storage,
-                    self.settings.files_dir,
-                    raw_id,
-                    tenant_id,
-                    person_id=attachment_uploader,
-                    max_bytes=self.settings.max_upload_bytes,
+                authorized = await _await_with_turn_deadline(
+                    run_blocking(
+                        read_authorized_file,
+                        self.storage,
+                        self.settings.files_dir,
+                        raw_id,
+                        tenant_id,
+                        person_id=attachment_uploader,
+                        max_bytes=self.settings.max_upload_bytes,
+                    ),
+                    turn_deadline,
+                    expired="turn deadline expired during attachment authorization",
                 )
             except (AuthorizedFileReadError, FileRecordUnavailable, ValueError):
                 hydrated.append(unavailable(canonical))
@@ -21633,10 +21768,13 @@ class AgentRuntime:
                 continue
 
             try:
-                inspected = await inspect(
+                inspected = await _call_with_turn_deadline(
+                    inspect,
                     authorized.content,
                     filename=authorized.filename or filename,
                     mime_type=authorized.mime_type or mime_type,
+                    turn_deadline=turn_deadline,
+                    expired="turn deadline expired during attachment recovery",
                 )
             except Exception as exc:  # noqa: BLE001 - optional recovery fails closed
                 LOGGER.warning(
@@ -23569,8 +23707,11 @@ class AgentRuntime:
         quoted_attachment_reference: bool = False,
         reply_assistant_reference: bool = False,
         reply_assistant_message_id: str | None = None,
+        turn_deadline: float | None = None,
     ) -> dict[str, Any]:
         turn_started = time.monotonic()
+        if turn_deadline is None:
+            turn_deadline = turn_started + self.settings.agent_turn_budget_sec
         clean_message = (message or "").strip()
         # Цитата ограничена: человек может ответить на документ в тысячу строк, а
         # смысл здесь только в том, НА ЧТО он показал.
@@ -23597,12 +23738,20 @@ class AgentRuntime:
         requested_mode = normalize_conversation_mode(mode) if mode is not None else None
         conversation = self.storage.get_conversation(conversation_id, user_id) if conversation_id else None
         if not conversation:
+            if not mark_request_effect_possible():
+                raise RuntimeError(
+                    "Request idempotency fence could not be committed before conversation creation"
+                )
             conversation = self.storage.create_conversation(
                 user_id,
                 title=clean_message[:80],
                 mode=requested_mode or "dialogue",
             )
         elif requested_mode and requested_mode != conversation.get("mode"):
+            if not mark_request_effect_possible():
+                raise RuntimeError(
+                    "Request idempotency fence could not be committed before conversation update"
+                )
             conversation = (
                 self.storage.set_conversation_mode(
                     str(conversation["id"]),
@@ -23767,6 +23916,8 @@ class AgentRuntime:
                     **(stop_metadata or {}),
                     "synthetic_document_notice": True,
                 }
+            if not mark_request_effect_possible():
+                raise RuntimeError("Request idempotency fence could not be committed before message storage")
             self.storage.store_message(
                 conversation_id,
                 user_id,
@@ -24352,6 +24503,35 @@ class AgentRuntime:
             # которого первый ход не получал. Признак — свойство хода, значит
             # жить он должен на ходе, а не в памяти одного запроса.
             user_metadata = {**(user_metadata or {}), "synthetic_document_notice": True}
+        if replay_source_message_id:
+            replay_parent_id = str(replay_source_message_id)
+            replay_root_id = replay_parent_id
+            replay_parent = self.storage.get_message(replay_parent_id, user_id)
+            if (
+                isinstance(replay_parent, Mapping)
+                and str(replay_parent.get("role") or "") == "user"
+                and str(replay_parent.get("conversation_id") or "") == conversation_id
+                and str(replay_parent.get("content") or "").strip() == clean_message
+            ):
+                replay_parent_metadata = _bounded_json_mapping(
+                    replay_parent.get("metadata_json"),
+                    max_chars=16_384,
+                )
+                candidate_root = str(
+                    replay_parent_metadata.get("regenerate_root_user_message_id") or ""
+                ).strip()
+                if re.fullmatch(r"msg_[0-9a-f]{16}", candidate_root):
+                    replay_root_id = candidate_root
+            # Parent binds a crash retry to the request which appended this row;
+            # root keeps attachment authority stable across deliberate repeated
+            # alternatives without making every click replay the first answer.
+            user_metadata = {
+                **(user_metadata or {}),
+                "regenerate_parent_user_message_id": replay_parent_id,
+                "regenerate_root_user_message_id": replay_root_id,
+            }
+        if not mark_request_effect_possible():
+            raise RuntimeError("Request idempotency fence could not be committed before message storage")
         self.storage.store_message(
             conversation_id,
             user_id,
@@ -24369,9 +24549,12 @@ class AgentRuntime:
                     )
                 )
                 if workspace_inbox_source_conflict
-                else await self._resolve_workspace_inbox_request(
+                else await _call_with_turn_deadline(
+                    self._resolve_workspace_inbox_request,
                     workspace_inbox_request,
                     actor=actor,
+                    turn_deadline=turn_deadline,
+                    expired="turn deadline expired during MCP workspace resolution",
                 )
             )
         # A current upload remains the default source.  Explicit comparison or
@@ -24410,10 +24593,13 @@ class AgentRuntime:
             # The Raw row selected above is the SQLite authority; prove that its
             # registered immutable bytes still exist and match before cached
             # text, metadata or a current-parser recovery can answer anything.
-            active_attachment_set = await self._verify_registered_file_attachments(
+            active_attachment_set = await _call_with_turn_deadline(
+                self._verify_registered_file_attachments,
                 active_attachment_set,
                 tenant_id=attachment_authority_tenant,
                 person_id=attachment_authority_person,
+                turn_deadline=turn_deadline,
+                expired="turn deadline expired during registered attachment verification",
             )
             if citation_selector_applied and active_attachment_set:
                 # Multi-citation is all-or-none through registered-byte verify:
@@ -24475,10 +24661,13 @@ class AgentRuntime:
             else clean_message
         )
         if document_metadata_scope in {"both", "technical"} and may_read_files and active_attachment_set:
-            active_attachment_set = await self._hydrate_legacy_document_metadata(
+            active_attachment_set = await _call_with_turn_deadline(
+                self._hydrate_legacy_document_metadata,
                 active_attachment_set,
                 tenant_id=tenant_id,
                 person_id=person_id,
+                turn_deadline=turn_deadline,
+                expired="turn deadline expired during legacy document metadata hydration",
             )
         # Non-verifiable bodies: keep advisory OCR/transcription for same-turn
         # synthesis (with the existing prompt caveat), but strip provenance stubs
@@ -24603,11 +24792,14 @@ class AgentRuntime:
                         or _historical_direct_read_authority_of(source) is not None
                         or _explicit_filename_direct_read_authority_of(source) is not None
                     )
-                    verified_item = await self._verify_registered_file_attachments(
+                    verified_item = await _call_with_turn_deadline(
+                        self._verify_registered_file_attachments,
                         [item],
                         tenant_id=attachment_authority_tenant,
                         person_id=attachment_authority_person,
                         require_projected_direct_read_authority=require_direct,
+                        turn_deadline=turn_deadline,
+                        expired="turn deadline expired during projected attachment verification",
                     )
                     reverified.extend(verified_item)
                 attachments = reverified
@@ -24725,6 +24917,7 @@ class AgentRuntime:
                     fallback_receipt,
                     active_attachment_set,
                     evidence_set=active_source_evidence_set,
+                    turn_deadline=turn_deadline,
                 )
             elif fallback_receipt:
                 synthetic_upload_receipt_answer = fallback_receipt
@@ -25109,14 +25302,25 @@ class AgentRuntime:
             #
             # Вызов стоит ТОЛЬКО там, где точный ответ вообще возможен: одно
             # офисное вложение с полной структурой. Медиана вызова 0.18 с.
+            office_timeout = (
+                _ATTACHMENT_OPTIONAL_STAGE_TIMEOUT_SEC
+                if attachment_expected_count
+                else max(1.0, float(self.settings.llm_timeout_sec))
+            )
+            remaining_turn = _remaining_deadline_budget(turn_deadline)
+            if remaining_turn is not None:
+                office_timeout = min(office_timeout, remaining_turn)
             try:
-                arbitrated = await asyncio.wait_for(
-                    self._office_intent_arbiter(file_turn.speech),
-                    timeout=(
-                        _ATTACHMENT_OPTIONAL_STAGE_TIMEOUT_SEC
-                        if attachment_expected_count
-                        else max(1.0, float(self.settings.llm_timeout_sec))
-                    ),
+                if office_timeout <= 0:
+                    raise TimeoutError("turn budget exhausted before Office intent arbiter")
+                office_deadline = time.monotonic() + office_timeout
+                if turn_deadline is not None:
+                    office_deadline = min(office_deadline, turn_deadline)
+                arbitrated = await _call_with_turn_deadline(
+                    self._office_intent_arbiter,
+                    file_turn.speech,
+                    turn_deadline=office_deadline,
+                    expired="Office intent arbiter deadline expired",
                 )
             except TimeoutError:
                 LOGGER.info("Office intent arbiter: optional attachment deadline expired")
@@ -25350,6 +25554,7 @@ class AgentRuntime:
                 open_remainder="",
                 remainder_known=True,
                 current_attachment_present=bool(active_attachment_set),
+                turn_deadline=turn_deadline,
             )
         elif quoted_file_command_is_data:
             context = AgentContext(
@@ -25449,6 +25654,7 @@ class AgentRuntime:
                 open_remainder="",
                 remainder_known=True,
                 current_attachment_present=bool(active_attachment_set),
+                turn_deadline=turn_deadline,
             )
             if (
                 active_attachment_set
@@ -25595,7 +25801,13 @@ class AgentRuntime:
                 private_context_lineage=turn_private_context_lineage,
                 current_attachment_present=bool(attachment_expected_count),
                 current_attachment_local=current_attachment_local,
+                turn_deadline=turn_deadline,
             )
+
+        # Every construction branch above joins the same request clock.  This
+        # assignment is deliberately based on the timestamp captured at method
+        # entry, not on when routing/context preparation happened to finish.
+        context.turn_deadline = turn_deadline
 
         if document_metadata_evidence_requested and document_metadata_answer:
             # This is the same bounded allowlisted projection used by the
@@ -26494,6 +26706,7 @@ class AgentRuntime:
                 current_attachment_present=True,
                 focused_attachment_turn=True,
                 isolated_shape_turn=True,
+                turn_deadline=context.turn_deadline,
                 attachment_primary_deadline=context.attachment_primary_deadline,
                 attachment_hierarchy_bundle=context.attachment_hierarchy_bundle,
                 attachment_hierarchy_complete=context.attachment_hierarchy_complete,
@@ -26898,7 +27111,9 @@ class AgentRuntime:
             and _informational_outside_deed_recovery_authorized(clean_message, topic=effective_topic)
         )
         if outside_deed_recovery_isolated:
-            remaining_turn_sec = self.settings.agent_turn_budget_sec - (time.monotonic() - turn_started)
+            remaining_turn_sec = _remaining_deadline_budget(context.turn_deadline)
+            if remaining_turn_sec is None:
+                remaining_turn_sec = self.settings.agent_turn_budget_sec - (time.monotonic() - turn_started)
             recovery_timeout_sec = min(_OUTSIDE_DEED_RECOVERY_TIMEOUT_SEC, remaining_turn_sec)
             outside_deed_recovery_attempted = bool(
                 self.llm.enabled
@@ -27232,7 +27447,11 @@ class AgentRuntime:
                 shape_status = explicit_text_shape_status(asked_of_model, repaired_shape)
             if shape_contract is not None and shape_status == TEXT_SHAPE_INVALID:
                 first_generation_clean = bool(shape_turn_isolated)
-                remaining_turn_sec = self.settings.agent_turn_budget_sec - (time.monotonic() - turn_started)
+                remaining_turn_sec = _remaining_deadline_budget(context.turn_deadline)
+                if remaining_turn_sec is None:
+                    remaining_turn_sec = self.settings.agent_turn_budget_sec - (
+                        time.monotonic() - turn_started
+                    )
                 regen_timeout_sec = min(_TEXT_SHAPE_REGEN_TIMEOUT_SEC, remaining_turn_sec)
                 should_regenerate = bool(
                     first_generation_clean
@@ -27449,9 +27668,15 @@ class AgentRuntime:
             if file_turn.proved("local_read")
             else str(asked_of_model or clean_message).strip()
         )
-        context.attachment_secondary_deadline = (
-            time.monotonic() + _ATTACHMENT_SECONDARY_BUDGET_SEC if attachment_evidence else None
-        )
+        if attachment_evidence:
+            secondary_deadline = time.monotonic() + _ATTACHMENT_SECONDARY_BUDGET_SEC
+            context.attachment_secondary_deadline = (
+                min(secondary_deadline, context.turn_deadline)
+                if context.turn_deadline is not None
+                else secondary_deadline
+            )
+        else:
+            context.attachment_secondary_deadline = None
         if response.get("_office_exact_owned") is True:
             exact_status = str(response.get("_office_exact_status") or VERDICT_UNKNOWN)
             verification = {
@@ -27978,6 +28203,7 @@ class AgentRuntime:
                 for item in (response.get("tool_evidence") or [])
                 if isinstance(item, Mapping)
             )
+            and not _turn_deadline_expired(context.turn_deadline)
         ):
             late_file_content = "" if direct_file_body_recovery_required else content
             if web_evidence_used:
@@ -28684,6 +28910,7 @@ class AgentRuntime:
                     or web_evidence_replaced
                     or false_model_outage_replaced
                     or bounded_overview_owns_terminal
+                    or _turn_deadline_expired(context.turn_deadline)
                 )
                 else await self._voice_of_the_final_answer(
                     response.get("voice_clip"),
@@ -28704,6 +28931,7 @@ class AgentRuntime:
                     reminder_descriptors=reminder_deed_descriptors,
                     reminder_delivery_scheduled=reminder_delivery_scheduled,
                     read_only_timeline_file_report=read_only_timeline_file_report,
+                    turn_deadline=context.turn_deadline,
                 )
             ),
             "files": response.get("file_clips") or [],
@@ -28819,7 +29047,12 @@ class AgentRuntime:
             "entity_hits": 0,
         }
 
-    async def _office_intent_arbiter(self, question: str) -> str:
+    async def _office_intent_arbiter(
+        self,
+        question: str,
+        *,
+        turn_deadline: float | None = None,
+    ) -> str:
         """Спросить модель, просят ли полный пересчёт или перечень по всей таблице.
 
         Понимание вместо перечисления форм. Четыре русские регулярки ловили 19
@@ -28835,7 +29068,8 @@ class AgentRuntime:
         if not self.llm or not self.llm.enabled:
             return ""
         try:
-            response = await self.llm.chat(
+            response = await self._deadline_bounded_chat(
+                turn_deadline,
                 [
                     {"role": "system", "content": OFFICE_INTENT_ARBITER_SYSTEM},
                     {"role": "user", "content": question},
@@ -28866,6 +29100,7 @@ class AgentRuntime:
         private_context_lineage: bool = False,
         current_attachment_present: bool = False,
         current_attachment_local: bool = False,
+        turn_deadline: float | None = None,
     ) -> AgentContext:
         search_query = self._contextualize_query(message, prior_history)
         context = AgentContext(
@@ -28878,6 +29113,7 @@ class AgentRuntime:
             interaction_mode=normalize_conversation_mode(interaction_mode),
             current_attachment_present=current_attachment_present,
             current_attachment_auto_summary=bool(current_attachment_present and synthetic_document_notice),
+            turn_deadline=turn_deadline,
             # Start each bounded model stage lazily.  A mandatory whole-source
             # prepass now has a separate deadline and must not age the primary
             # answer budget while it is still reading the file.
@@ -28922,7 +29158,9 @@ class AgentRuntime:
             # соседний арбитр (`_web_query_by_arbiter`) его для того же и
             # получает.
             context.small_talk = await self._is_small_talk_by_arbiter(
-                message, previous_turn=_last_exchange(prior_history)
+                message,
+                previous_turn=_last_exchange(prior_history),
+                turn_deadline=context.turn_deadline,
             )
         # Прямая просьба поискать в интернете — не повод обыскивать архив.
         # Замерено: сам поиск на боевом корпусе стоит 2.7 секунды, и на
@@ -29019,7 +29257,11 @@ class AgentRuntime:
                     context=context,
                 )
                 if current_attachment_present
-                else self._web_query_by_arbiter(message, previous_turn=previous)
+                else self._turn_web_query_by_arbiter(
+                    message,
+                    previous_turn=previous,
+                    context=context,
+                )
             )
             arbiter = asyncio.create_task(arbiter_call)
         # Small talk and an outward query are never archive requests.
@@ -29037,38 +29279,44 @@ class AgentRuntime:
             context.knowledge_hits = []
         elif searcher:
             try:
-                retrieval_result = await searcher.search(
-                    user_id,
-                    search_query,
-                    limit=retrieval_limit,
-                    kg=kg,
-                    # Обычный путь оставляет расширение выключенным: на 20
-                    # документных эталонах оно снижало recall@10 0.35 -> 0.15.
-                    # Отдельный заранее объявленный замер на 12 реляционных кейсах
-                    # дал ровно допустимый net_gain=2 без сбоев, поэтому расширение
-                    # включается только для измеренного relational-language класса.
-                    #
-                    # Проверяется `message` (текст ЭТОГО хода), не `search_query`:
-                    # `_contextualize_query` для короткого местоименного follow-up'а
-                    # склеивает его с ПРЕДЫДУЩИМ ходом ради поиска — но тогда
-                    # реляционная фраза из прошлого вопроса (`с кем работал...`)
-                    # включала граф и для текущего хода, который об этом не
-                    # спрашивал. Найдено состязательным ревью, подтверждено
-                    # прогоном: `is_relational_query(search_query)` был True для
-                    # «А когда это было?» после «С кем работал Иван?», хотя сам
-                    # текущий вопрос — нет. Заодно чинит слепое пятно замера:
-                    # склеенный запрос содержит `\n` и `_is_mineable_eval_query`
-                    # его исключает — эта форма никогда не проверялась метрикой.
-                    # A generated document acknowledgement is not the user's query.
-                    # Its filename is untrusted content and may happen to contain a
-                    # relational phrase, so it must not reach the measured classifier.
-                    graph_expansion=(False if synthetic_document_notice else is_relational_query(message)),
-                    # The reasons a candidate was DROPPED are computed on every
-                    # query and thrown away unless asked for. Keeping a compact
-                    # copy is what makes "я точно сохранял эту заметку" answerable
-                    # without re-running an approximation of the query by hand in
-                    # the admin panel — which is a different run.
-                    explain=True,
+                retrieval_result = await _await_with_turn_deadline(
+                    searcher.search(
+                        user_id,
+                        search_query,
+                        limit=retrieval_limit,
+                        kg=kg,
+                        # Обычный путь оставляет расширение выключенным: на 20
+                        # документных эталонах оно снижало recall@10 0.35 -> 0.15.
+                        # Отдельный заранее объявленный замер на 12 реляционных кейсах
+                        # дал ровно допустимый net_gain=2 без сбоев, поэтому расширение
+                        # включается только для измеренного relational-language класса.
+                        #
+                        # Проверяется `message` (текст ЭТОГО хода), не `search_query`:
+                        # `_contextualize_query` для короткого местоименного follow-up'а
+                        # склеивает его с ПРЕДЫДУЩИМ ходом ради поиска — но тогда
+                        # реляционная фраза из прошлого вопроса (`с кем работал...`)
+                        # включала граф и для текущего хода, который об этом не
+                        # спрашивал. Найдено состязательным ревью, подтверждено
+                        # прогоном: `is_relational_query(search_query)` был True для
+                        # «А когда это было?» после «С кем работал Иван?», хотя сам
+                        # текущий вопрос — нет. Заодно чинит слепое пятно замера:
+                        # склеенный запрос содержит `\n` и `_is_mineable_eval_query`
+                        # его исключает — эта форма никогда не проверялась метрикой.
+                        # A generated document acknowledgement is not the user's query.
+                        # Its filename is untrusted content and may happen to contain a
+                        # relational phrase, so it must not reach the measured classifier.
+                        graph_expansion=(
+                            False if synthetic_document_notice else is_relational_query(message)
+                        ),
+                        # The reasons a candidate was DROPPED are computed on every
+                        # query and thrown away unless asked for. Keeping a compact
+                        # copy is what makes "я точно сохранял эту заметку" answerable
+                        # without re-running an approximation of the query by hand in
+                        # the admin panel — which is a different run.
+                        explain=True,
+                    ),
+                    context.turn_deadline,
+                    expired="turn deadline expired during hybrid retrieval",
                 )
                 found = retrieval_result.get("results", [])
                 # Совпадение с нулевым счётом — это не слабое совпадение, а его
@@ -29149,16 +29397,40 @@ class AgentRuntime:
                     # leaves "Task exception was never retrieved" behind.
                     await asyncio.gather(arbiter, return_exceptions=True)
                 raise
+            except TimeoutError:
+                # A timeout is not a search-engine failure for which a fresh
+                # synchronous SQLite pass receives a new clock.  Stop both
+                # parallel branches and continue without archive hits.
+                LOGGER.warning("Hybrid retrieval exceeded the absolute turn deadline")
+                context.knowledge_hits = []
+                if arbiter is not None:
+                    if not arbiter.done():
+                        arbiter.cancel()
+                    await asyncio.gather(arbiter, return_exceptions=True)
+                    arbiter = None
             except Exception as exc:
-                LOGGER.warning(
-                    "Hybrid retrieval failed; using SQLite search (%s)",
-                    type(exc).__name__,
-                )
-                context.knowledge_hits = self.storage.search_knowledge(
-                    user_id,
-                    search_query,
-                    limit=retrieval_limit,
-                )
+                remaining = _remaining_deadline_budget(context.turn_deadline)
+                if remaining is not None and remaining <= 0:
+                    LOGGER.warning(
+                        "Hybrid retrieval failed after the turn deadline (%s)",
+                        type(exc).__name__,
+                    )
+                    context.knowledge_hits = []
+                    if arbiter is not None:
+                        if not arbiter.done():
+                            arbiter.cancel()
+                        await asyncio.gather(arbiter, return_exceptions=True)
+                        arbiter = None
+                else:
+                    LOGGER.warning(
+                        "Hybrid retrieval failed; using SQLite search (%s)",
+                        type(exc).__name__,
+                    )
+                    context.knowledge_hits = self.storage.search_knowledge(
+                        user_id,
+                        search_query,
+                        limit=retrieval_limit,
+                    )
         else:
             context.knowledge_hits = self.storage.search_knowledge(
                 user_id,
@@ -29589,9 +29861,19 @@ class AgentRuntime:
         if not context.current_attachment_present:
             return None
         if context.attachment_primary_deadline is None:
-            context.attachment_primary_deadline = time.monotonic() + min(
+            stage_deadline = time.monotonic() + min(
                 _ATTACHMENT_GENERATION_TIMEOUT_SEC,
                 max(1.0, float(self.settings.llm_timeout_sec)),
+            )
+            context.attachment_primary_deadline = (
+                min(stage_deadline, context.turn_deadline)
+                if context.turn_deadline is not None
+                else stage_deadline
+            )
+        elif context.turn_deadline is not None:
+            context.attachment_primary_deadline = min(
+                context.attachment_primary_deadline,
+                context.turn_deadline,
             )
         return context.attachment_primary_deadline
 
@@ -29618,8 +29900,47 @@ class AgentRuntime:
             # calls. The LLM client still applies ``llm_timeout_sec`` to each
             # request; capping the whole hierarchy by that same single-call
             # timeout made later waves expire before they could start.
-            context.attachment_prepass_deadline = time.monotonic() + budget
+            stage_deadline = time.monotonic() + budget
+            context.attachment_prepass_deadline = (
+                min(stage_deadline, context.turn_deadline)
+                if context.turn_deadline is not None
+                else stage_deadline
+            )
+        elif context.turn_deadline is not None:
+            context.attachment_prepass_deadline = min(
+                context.attachment_prepass_deadline,
+                context.turn_deadline,
+            )
         return context.attachment_prepass_deadline
+
+    async def _deadline_bounded_chat(
+        self,
+        deadline: float | None,
+        messages: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Run one model await without crossing an absolute monotonic deadline."""
+
+        remaining = _remaining_deadline_budget(deadline)
+        if remaining is None:
+            return await self.llm.chat(messages, **kwargs)
+        if remaining <= 0:
+            raise TimeoutError("turn model budget exhausted")
+        return await asyncio.wait_for(self.llm.chat(messages, **kwargs), timeout=remaining)
+
+    async def _turn_bounded_chat(
+        self,
+        context: AgentContext | None,
+        messages: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Run one model await without crossing the request's absolute deadline."""
+
+        return await self._deadline_bounded_chat(
+            context.turn_deadline if context is not None else None,
+            messages,
+            **kwargs,
+        )
 
     async def _attachment_primary_chat(
         self,
@@ -29630,7 +29951,10 @@ class AgentRuntime:
         """Run one model await inside the attachment turn's shared primary budget."""
 
         deadline = self._ensure_attachment_primary_deadline(context) if context is not None else None
-        remaining = _remaining_attachment_primary_budget(deadline)
+        remaining = _remaining_deadline_budget(
+            deadline,
+            context.turn_deadline if context is not None else None,
+        )
         if remaining is None:
             return await self.llm.chat(messages, **kwargs)
         if remaining <= 0:
@@ -29649,7 +29973,7 @@ class AgentRuntime:
         """Run one map/reduce await without spending the answer-stage budget."""
 
         deadline = self._ensure_attachment_prepass_deadline(context)
-        remaining = _remaining_attachment_primary_budget(deadline)
+        remaining = _remaining_deadline_budget(deadline, context.turn_deadline)
         if remaining is None:
             return await self.llm.chat(messages, **kwargs)
         if remaining <= 0:
@@ -30265,6 +30589,20 @@ class AgentRuntime:
                     "_workspace_create_owned": True,
                 }
             filename = workspace_direct_intent.filename
+            if _turn_deadline_expired(context.turn_deadline):
+                return {
+                    "content": (
+                        "Общий бюджет времени хода исчерпан до вызова workspace_create. Файл не создан."
+                    ),
+                    "tools_used": [],
+                    "web_query_notice": "",
+                    "knowledge_object_ids": [],
+                    "tool_evidence": [],
+                    "voice_clip": None,
+                    "file_clips": [],
+                    "_structural_file_count": 0,
+                    "_workspace_create_owned": True,
+                }
             try:
                 tool_result = await self.kernel.execute(
                     "workspace_create",
@@ -30413,15 +30751,28 @@ class AgentRuntime:
                     "_structural_file_count": 0,
                     "_simple_public_news_owned": True,
                 }
+            news_timeout = _remaining_deadline_budget(context.turn_deadline)
+            if news_timeout is None:
+                news_timeout = _SIMPLE_PUBLIC_NEWS_TIMEOUT_SEC
+            else:
+                news_timeout = min(_SIMPLE_PUBLIC_NEWS_TIMEOUT_SEC, news_timeout)
             try:
+                if news_timeout <= 0:
+                    raise TimeoutError("turn model budget exhausted before news synthesis")
+                news_model_kwargs: dict[str, Any] = {
+                    "temperature": 0.0,
+                    "max_tokens": _SIMPLE_PUBLIC_NEWS_MAX_TOKENS,
+                    "tools": [],
+                }
+                if isinstance(self.llm, LLMRouter):
+                    # Search has already completed once and its accepted source
+                    # fallback is deterministic.  Production transport must not
+                    # start a second remote generation; legacy in-process
+                    # adapters keep their established call signature.
+                    news_model_kwargs["allow_retries"] = False
                 synthesis = await asyncio.wait_for(
-                    self.llm.chat(
-                        messages,
-                        temperature=0.0,
-                        max_tokens=_SIMPLE_PUBLIC_NEWS_MAX_TOKENS,
-                        tools=[],
-                    ),
-                    timeout=_SIMPLE_PUBLIC_NEWS_TIMEOUT_SEC,
+                    self.llm.chat(messages, **news_model_kwargs),
+                    timeout=news_timeout,
                 )
                 raw = str(synthesis.get("content") or "") if isinstance(synthesis, Mapping) else ""
                 turn = classify_tool_turn(raw)
@@ -30437,7 +30788,7 @@ class AgentRuntime:
             except TimeoutError:
                 LOGGER.warning(
                     "simple public-news synthesis exceeded %.0fs; returning accepted sources",
-                    _SIMPLE_PUBLIC_NEWS_TIMEOUT_SEC,
+                    news_timeout,
                 )
                 clean = ""
                 accepted = False
@@ -30684,24 +31035,22 @@ class AgentRuntime:
         # follow-up; past that, the loop stops STARTING new calls (an in-flight one
         # is never interrupted).
         #
-        # This is wall clock from the moment the turn entered this loop, NOT the
-        # per-call budget's clock — but it is adjusted to exclude the same thing
-        # `total_budget_sec` excludes. `LLMRouter.chat` now reports how long each
-        # call waited for one of the four shared foreground slots
-        # (`_queue_wait_sec`, llm.py) before it ever reached the model; every such
-        # wait pushes this deadline back by the same amount. Without that, a
-        # deployment at real concurrent load (four people chatting at once is
-        # already the whole slot budget) would charge a healthy, busy endpoint's
-        # queueing time against the SAME turn's tool-round allowance and cut its
-        # rounds short for being busy, not for being slow — the opposite of what
-        # this budget exists to catch.
+        # This is the one wall clock captured when ``chat()`` accepted the user
+        # turn.  Prepass, routing, semaphore queueing, tool rounds, final
+        # synthesis and salvage all consume it.  Queue wait cannot extend this
+        # deadline: the Telegram bridge experiences that wall time too and has
+        # only its fixed post-turn transport reserve.
         # Бюджет берётся у РОУТЕРА, а не у настроек напрямую: роутер бывает
         # подменён (тестовый двойник, иной транспорт), и цикл обязан следовать
         # тому, кто на самом деле ходит к модели. Согласие этого числа с тем,
         # которое ждёт мост, закреплено отдельной пробой на боевом роутере —
         # именно там два числа однажды и разъехались.
         loop_budget_sec = self.llm.total_budget_sec * 2
-        loop_deadline = time.monotonic() + loop_budget_sec
+        if context.turn_deadline is None:
+            # Internal adapters/tests may call this seam directly rather than
+            # through ``chat()``.  They still receive one non-renewable clock.
+            context.turn_deadline = time.monotonic() + loop_budget_sec
+        loop_deadline = context.turn_deadline
 
         for round_number in range(max_tool_rounds):
             if total_calls >= max_tool_calls:
@@ -30729,7 +31078,6 @@ class AgentRuntime:
                     )
                 else:
                     result = await attachment_bounded_chat(messages, tools=tools)
-                loop_deadline += float(result.get("_queue_wait_sec", 0.0) or 0.0)
             except Exception as exc:
                 LOGGER.error("LLM tool loop failed (%s)", type(exc).__name__)
                 return {
@@ -30935,6 +31283,21 @@ class AgentRuntime:
                 and not _ASKS_ABOUT_PERSONAL_STORAGE.search(turn_auth.speech)
             )
             for call, openai_call in zip(selected_calls, openai_calls, strict=True):
+                # A model can select several effects in one response.  The
+                # first one may legitimately run past the request wall (an
+                # entered mutator is never cancelled), but that does not renew
+                # authority to START its siblings afterwards.  Keep a tool
+                # result for every selected call so the assistant/tool message
+                # protocol remains valid while failing the skipped calls closed.
+                if context.turn_deadline is not None and time.monotonic() >= context.turn_deadline:
+                    total_calls += 1
+                    round_results.append(
+                        (
+                            str(openai_call["id"]),
+                            "Инструмент не запущен: общий бюджет времени хода исчерпан.",
+                        )
+                    )
+                    continue
                 if not outward_tool_is_allowed(call.name):
                     # Privacy denial has stronger semantics than a generic
                     # unoffered capability.  Outbound schemas are intentionally
@@ -31078,7 +31441,38 @@ class AgentRuntime:
                         carrier_allowed = False
                 tool_was_executed = bool(carrier_allowed and isinstance(call_arguments, dict))
                 if tool_was_executed:
-                    tool_result = await self.kernel.execute(call.name, call_arguments, actor=actor)
+                    get_tool = getattr(self.kernel, "get_tool", None)
+                    tool_spec = get_tool(call.name) if callable(get_tool) else None
+                    declared_risk = str(getattr(tool_spec, "risk", "") or "")
+                    if declared_risk == "observe":
+                        try:
+                            tool_result = await _await_with_turn_deadline(
+                                self.kernel.execute(call.name, call_arguments, actor=actor),
+                                context.turn_deadline,
+                                expired=f"turn deadline expired during observing tool {call.name}",
+                            )
+                        except TimeoutError:
+                            tool_result = ToolResult(
+                                call.name,
+                                False,
+                                error="Инструмент чтения остановлен: общий бюджет времени хода исчерпан",
+                            )
+                    else:
+                        # Unknown/legacy adapters are not safe to cancel after
+                        # entry: only the kernel's explicit immutable risk
+                        # declaration can prove an operation observe-only.
+                        if _turn_deadline_expired(context.turn_deadline):
+                            tool_result = ToolResult(
+                                call.name,
+                                False,
+                                error="Инструмент не запущен: общий бюджет времени хода исчерпан",
+                            )
+                        else:
+                            tool_result = await self.kernel.execute(
+                                call.name,
+                                call_arguments,
+                                actor=actor,
+                            )
                 else:
                     LOGGER.warning("output-carrier: модельный носитель отклонён до рендера")
                     tool_result = ToolResult(
@@ -31465,10 +31859,9 @@ class AgentRuntime:
         # вопрос и собранный контекст, инструменты не предлагаются вовсе.
         # Обычный ответ по архиву лучше отказа — человек хотя бы получит то, что
         # система уже нашла.
-        salvage_timeout = (
-            max(0.0, attachment_primary_deadline - time.monotonic())
-            if attachment_primary_deadline is not None
-            else None
+        salvage_timeout = _remaining_deadline_budget(
+            attachment_primary_deadline,
+            context.turn_deadline,
         )
         salvaged = await self._answer_without_tools(
             context,
@@ -31758,6 +32151,7 @@ class AgentRuntime:
         previous_turn: str = "",
         corrected_answer: str = "",
         candidate_kind: str = "rule",
+        turn_deadline: float | None = None,
     ) -> tuple[str, str, str, str | None]:
         """Confirm one suspected behaviour rule or factual correction.
 
@@ -31853,7 +32247,8 @@ class AgentRuntime:
         else:
             return "", "", "", None
         try:
-            answer = await self.llm.chat(
+            answer = await self._deadline_bounded_chat(
+                turn_deadline,
                 [
                     {
                         "role": "system",
@@ -32194,14 +32589,32 @@ class AgentRuntime:
         """
         if not _ASKS_WHAT_I_AM.search(message):
             return
+        served_name = ""
+        try:
+            served_name = await _await_with_turn_deadline(
+                run_blocking(self._served_model_name),
+                context.turn_deadline,
+                expired="turn deadline expired during served-model discovery",
+            )
+        except TimeoutError:
+            LOGGER.info("self-description: общий бюджет хода исчерпан до имени модели")
+        except Exception as exc:  # noqa: BLE001 - configured identity remains authoritative
+            LOGGER.warning(
+                "self-description: имя модели не удалось получить (%s)",
+                type(exc).__name__,
+            )
         context.structural_answer = "\n\n".join(
             part
             for part in (
                 context.structural_answer,
-                _self_description(self.settings, served_name=self._served_model_name()),
+                _self_description(self.settings, served_name=served_name),
             )
             if part
         )
+        if _turn_deadline_expired(context.turn_deadline):
+            context.open_remainder = ""
+            context.remainder_known = True
+            return
         rest = await self._remainder_after(
             message,
             "чем является Пятница и на чём она работает",
@@ -32265,7 +32678,10 @@ class AgentRuntime:
             return False
         existing = self._standing_rules(context.person_id or context.user_id)
         action, rule, previous_rule, remainder = await self._standing_rule_by_arbiter(
-            message, existing, previous_turn=context.previous_user_turn
+            message,
+            existing,
+            previous_turn=context.previous_user_turn,
+            turn_deadline=context.turn_deadline,
         )
         # Неизвестный остаток — это ВСЯ реплика, а не пустота: см. арбитр. Ход
         # тогда идёт к модели как раньше, подтверждение просто встаёт первым.
@@ -32437,6 +32853,7 @@ class AgentRuntime:
             previous_turn=context.previous_user_turn,
             corrected_answer=context.previous_answer,
             candidate_kind="correction",
+            turn_deadline=context.turn_deadline,
         )
         rest = message if remainder is None else remainder
         if not action:
@@ -32772,6 +33189,8 @@ class AgentRuntime:
         # kernel call as well: a timeout or exception may happen after a durable
         # effect, and retrying that unknown outcome is unsafe.
         tools[:] = [tool for tool in tools if str((tool.get("function") or {}).get("name") or "") != "remind"]
+        if _turn_deadline_expired(context.turn_deadline):
+            return False
         try:
             result = await self.kernel.execute("remind", {"what": what, "when": when}, actor=actor)
         except Exception as exc:  # noqa: BLE001 — напоминание не должно ронять ответ
@@ -32869,8 +33288,14 @@ class AgentRuntime:
         # уехал сочинённый docx с именем «Собери документы за 13 число.docx».
         # Просили присланное, а получили выдумку на пустом месте.
         context.asked_for_an_archive = True
+        if _turn_deadline_expired(context.turn_deadline):
+            return False
         try:
-            result = await self.kernel.execute("collect_files", {"days": days}, actor=actor)
+            result = await _await_with_turn_deadline(
+                self.kernel.execute("collect_files", {"days": days}, actor=actor),
+                context.turn_deadline,
+                expired="turn deadline expired during archive collection",
+            )
         except Exception as exc:  # noqa: BLE001 — сборка архива не должна ронять ответ
             LOGGER.warning("Archive assembly failed (%s)", type(exc).__name__)
             return False
@@ -33000,6 +33425,8 @@ class AgentRuntime:
         инструментов: содержимое либо уже есть в ответе, либо запрашивается
         прямым «дай текст документа». Формат берётся из просьбы человека.
         """
+        if context is not None and _turn_deadline_expired(context.turn_deadline):
+            return None
         answer = redact_friday_api_tokens(answer)
         if literal_source_text is not None:
             literal_source_text = redact_friday_api_tokens(literal_source_text)
@@ -33203,15 +33630,32 @@ class AgentRuntime:
                 LOGGER.warning("Could not obtain document content (%s)", type(exc).__name__)
         if not blocks:
             return None
+        if context is not None and _turn_deadline_expired(context.turn_deadline):
+            return None
         # Когда ответа не получилось, заголовок берётся из просьбы человека:
         # иначе им становится «Не удалось безопасно завершить вызов инструмента»,
         # и это же попадает в имя файла.
         if context is not None:
             context.late_make_file_attempts += 1
-        return await self._make_file_from_answer(request, "" if failed else answer, actor, blocks=blocks)
+        turn_deadline = context.turn_deadline if context is not None else None
+        return await _call_with_turn_deadline(
+            self._make_file_from_answer,
+            request,
+            "" if failed else answer,
+            actor,
+            blocks=blocks,
+            turn_deadline=turn_deadline,
+            expired="turn deadline expired during file rendering",
+        )
 
     async def _make_file_from_answer(
-        self, request: str, answer: str, actor: ActorContext, *, blocks: list[dict[str, Any]] | None = None
+        self,
+        request: str,
+        answer: str,
+        actor: ActorContext,
+        *,
+        blocks: list[dict[str, Any]] | None = None,
+        turn_deadline: float | None = None,
     ) -> dict[str, Any] | None:
         """Собрать файл из уже написанного ответа, раз модель этого не сделала.
 
@@ -33256,11 +33700,17 @@ class AgentRuntime:
             # extension.  Passing the code-owned stem avoids both path text and
             # a duplicated ``.docx.docx`` suffix.
             arguments["filename"] = requested_filename
+        if _turn_deadline_expired(turn_deadline):
+            return None
         try:
-            result = await self.kernel.execute(
-                "make_file",
-                arguments,
-                actor=actor,
+            result = await _await_with_turn_deadline(
+                self.kernel.execute(
+                    "make_file",
+                    arguments,
+                    actor=actor,
+                ),
+                turn_deadline,
+                expired="turn deadline expired during file rendering",
             )
         except Exception as exc:  # noqa: BLE001 — упаковка не должна ронять готовый ответ
             LOGGER.warning("Fallback file build failed (%s)", type(exc).__name__)
@@ -33337,13 +33787,21 @@ class AgentRuntime:
             attachments=None,
             tool_enabled=True,
         )
-        tools_used.append("source_search")
+        turn_deadline = context.turn_deadline
+        result: ToolResult | None = None
+        if not _turn_deadline_expired(turn_deadline):
+            tools_used.append("source_search")
         try:
-            result = await self.kernel.execute(
-                "source_search",
-                {"query": query, "focus": focus, "limit": _SOURCE_SEARCH_PAGE_SIZE},
-                actor=actor,
-            )
+            if not _turn_deadline_expired(turn_deadline):
+                result = await _await_with_turn_deadline(
+                    self.kernel.execute(
+                        "source_search",
+                        {"query": query, "focus": focus, "limit": _SOURCE_SEARCH_PAGE_SIZE},
+                        actor=actor,
+                    ),
+                    turn_deadline,
+                    expired="turn deadline expired during archived source search",
+                )
         except Exception as exc:  # noqa: BLE001 - a local read failure is a closed UNKNOWN
             LOGGER.warning("source-prefetch: local source search failed (%s)", type(exc).__name__)
             result = None
@@ -33644,8 +34102,16 @@ class AgentRuntime:
             # его правдоподобным. Замерено 2026-08-04 на живой переписке владельца:
             # первая реплика ЕГО текущей беседы была выдана за начало разговора
             # другого человека.
-            return await self._prefetch_own_messages(
-                message, actor, tools, messages, tools_used, tool_evidence
+            return await _call_with_turn_deadline(
+                self._prefetch_own_messages,
+                message,
+                actor,
+                tools,
+                messages,
+                tools_used,
+                tool_evidence,
+                turn_deadline=getattr(context, "turn_deadline", None),
+                expired="turn deadline expired during own-message search",
             )
         if document_inventory:
             day_window: tuple[str | None, str | None, str, bool] | None = (
@@ -33734,26 +34200,34 @@ class AgentRuntime:
                     != "user_activity"
                 ]
                 return True
-            try:
-                result = await self.kernel.execute(
-                    "user_activity",
-                    {
-                        # The resolver already proved one exact account.  Pass
-                        # its stable id into the kernel; passing the display
-                        # name would make the kernel resolve an ambiguous alias
-                        # all over again and discard the @handle clarification.
-                        "person": chosen.user_id,
-                        "since": since,
-                        "until": until,
-                        "limit": 200,
-                        "offset": 0,
-                        "documents_only": True,
-                    },
-                    actor=actor,
-                )
-            except Exception as exc:  # noqa: BLE001 — exact read failure becomes UNKNOWN
-                LOGGER.warning("Exact person document inventory failed (%s)", type(exc).__name__)
-                result = None
+            turn_deadline = getattr(context, "turn_deadline", None)
+            result: ToolResult | None = None
+            activity_attempted = False
+            if not _turn_deadline_expired(turn_deadline):
+                activity_attempted = True
+                try:
+                    result = await _await_with_turn_deadline(
+                        self.kernel.execute(
+                            "user_activity",
+                            {
+                                # The resolver already proved one exact account.  Pass
+                                # its stable id into the kernel; passing the display
+                                # name would make the kernel resolve an ambiguous alias
+                                # all over again and discard the @handle clarification.
+                                "person": chosen.user_id,
+                                "since": since,
+                                "until": until,
+                                "limit": 200,
+                                "offset": 0,
+                                "documents_only": True,
+                            },
+                            actor=actor,
+                        ),
+                        turn_deadline,
+                        expired="turn deadline expired during exact person activity",
+                    )
+                except Exception as exc:  # noqa: BLE001 — exact read failure becomes UNKNOWN
+                    LOGGER.warning("Exact person document inventory failed (%s)", type(exc).__name__)
             data = (
                 result.data
                 if result is not None and result.success and isinstance(result.data, Mapping)
@@ -33782,7 +34256,8 @@ class AgentRuntime:
                     repeated_completeness_check=repeated_document_check,
                 )
             LOGGER.info("person-document-inventory: code-owned answer, %d chars", len(answer))
-            tools_used.append("user_activity")
+            if activity_attempted:
+                tools_used.append("user_activity")
             if inventory_data_valid and data is not None and len(tool_evidence) < _MAX_TOOL_EVIDENCE:
                 tool_evidence.append(
                     {
@@ -33806,9 +34281,18 @@ class AgentRuntime:
             ]
             return True
 
+        turn_deadline = getattr(context, "turn_deadline", None)
+        if _turn_deadline_expired(turn_deadline):
+            return False
         try:
-            result = await self.kernel.execute(
-                "user_activity", {"person": chosen.display_name or chosen.user_id}, actor=actor
+            result = await _await_with_turn_deadline(
+                self.kernel.execute(
+                    "user_activity",
+                    {"person": chosen.display_name or chosen.user_id},
+                    actor=actor,
+                ),
+                turn_deadline,
+                expired="turn deadline expired during person activity",
             )
         except Exception as exc:  # noqa: BLE001 — надзорный вызов не должен ронять ход
             LOGGER.warning("Prefetch user activity failed (%s)", type(exc).__name__)
@@ -33872,6 +34356,8 @@ class AgentRuntime:
         messages: list[dict[str, Any]],
         tools_used: list[str],
         tool_evidence: list[dict[str, str]],
+        *,
+        turn_deadline: float | None = None,
     ) -> bool:
         """«О чём мы вчера говорили?» — ответ лежит в переписке, а не в документах.
 
@@ -33896,9 +34382,17 @@ class AgentRuntime:
         if "message_search" not in available:
             LOGGER.info("own-messages-prefetch: инструмента нет среди доступных")
             return False  # права этого человека не обходим
+        if _turn_deadline_expired(turn_deadline):
+            return False
         try:
-            result = await self.kernel.execute(
-                "message_search", {"query": message[:200], "limit": 20}, actor=actor
+            result = await _await_with_turn_deadline(
+                self.kernel.execute(
+                    "message_search",
+                    {"query": message[:200], "limit": 20},
+                    actor=actor,
+                ),
+                turn_deadline,
+                expired="turn deadline expired during own-message search",
             )
         except Exception as exc:  # noqa: BLE001 — поиск по своей переписке не должен ронять ход
             LOGGER.warning("own-messages-prefetch: поиск не удался (%s)", type(exc).__name__)
@@ -34207,12 +34701,17 @@ class AgentRuntime:
             failure = "Не удалось получить точные счётчики личного архива. Ноль подставлять не буду."
             rendered_answer = ""
             result: ToolResult | None = None
-            if tool_name in available:
+            turn_deadline = getattr(context, "turn_deadline", None)
+            if tool_name in available and not _turn_deadline_expired(turn_deadline):
                 # A forced route is attempted exactly once. The model cannot
                 # repeat it later and replace an aggregate with a page length.
                 tools_used.append(tool_name)
                 try:
-                    result = await self.kernel.execute(tool_name, {}, actor=actor)
+                    result = await _await_with_turn_deadline(
+                        self.kernel.execute(tool_name, {}, actor=actor),
+                        turn_deadline,
+                        expired="turn deadline expired during archive statistics",
+                    )
                 except Exception as exc:  # noqa: BLE001 — подсчёт не должен ронять ход
                     LOGGER.warning("Prefetch %s failed (%s)", tool_name, type(exc).__name__)
                 if result is not None and result.success and isinstance(result.data, Mapping):
@@ -34256,9 +34755,14 @@ class AgentRuntime:
             tag_result: ToolResult | None = None
             rendered_answer = ""
             try:
-                if tool_name in available:
+                turn_deadline = getattr(context, "turn_deadline", None)
+                if tool_name in available and not _turn_deadline_expired(turn_deadline):
                     tools_used.append(tool_name)
-                    tag_result = await self.kernel.execute(tool_name, {}, actor=actor)
+                    tag_result = await _await_with_turn_deadline(
+                        self.kernel.execute(tool_name, {}, actor=actor),
+                        turn_deadline,
+                        expired="turn deadline expired during archive tag inventory",
+                    )
             except Exception as exc:  # noqa: BLE001 — подсчёт не должен ронять ход
                 LOGGER.warning("Prefetch %s failed (%s)", tool_name, type(exc).__name__)
             if tag_result is not None and tag_result.success and isinstance(tag_result.data, Mapping):
@@ -34293,7 +34797,12 @@ class AgentRuntime:
                 "; ".join(settled_parts),
             )
 
-    async def _is_a_timeline_question(self, message: str) -> bool:
+    async def _is_a_timeline_question(
+        self,
+        message: str,
+        *,
+        turn_deadline: float | None = None,
+    ) -> bool:
         """Спросить модель, о чём вопрос, когда шаблон молчит.
 
         Список фраз — плохая замена пониманию: «расскажи про 29 июля», «чем
@@ -34312,7 +34821,8 @@ class AgentRuntime:
         if not self.llm.enabled:
             return False
         try:
-            answer = await self.llm.chat(
+            answer = await self._deadline_bounded_chat(
+                turn_deadline,
                 [
                     {
                         "role": "system",
@@ -34839,13 +35349,18 @@ class AgentRuntime:
                 requested_end = local_now
             if requested_end.date() == local_now.date() and requested_end > local_now:
                 requested_until = local_now.isoformat(timespec="seconds")
-        if tool_name in available:
+        turn_deadline = getattr(context, "turn_deadline", None)
+        if tool_name in available and not _turn_deadline_expired(turn_deadline):
             tools_used.append(tool_name)
             arguments: dict[str, Any] = {"since": requested_since, "until": requested_until}
             if tool_name == "what_happened":
                 arguments["limit"] = 40
             try:
-                result = await self.kernel.execute(tool_name, arguments, actor=actor)
+                result = await _await_with_turn_deadline(
+                    self.kernel.execute(tool_name, arguments, actor=actor),
+                    turn_deadline,
+                    expired="turn deadline expired during timeline prefetch",
+                )
             except Exception as exc:  # noqa: BLE001 — лента не должна ронять ход
                 LOGGER.warning("Prefetch %s failed (%s)", tool_name, type(exc).__name__)
 
@@ -34899,7 +35414,13 @@ class AgentRuntime:
             }
         )
 
-    async def _mentions_someone_from_the_archive(self, message: str, actor: ActorContext) -> bool:
+    async def _mentions_someone_from_the_archive(
+        self,
+        message: str,
+        actor: ActorContext,
+        *,
+        turn_deadline: float | None = None,
+    ) -> bool:
         """Есть ли в вопросе имя человека, который живёт в графе ЭТОГО человека.
 
         Такой вопрос — про архив, чем бы он ни выглядел для арбитра. Проверка
@@ -34920,8 +35441,19 @@ class AgentRuntime:
         ]
         candidates = [word for word in words if word.casefold() not in _NOT_A_NAME][:6]
         for word in candidates:
+            if turn_deadline is not None and (_remaining_deadline_budget(turn_deadline) or 0.0) <= 0:
+                # Privacy is one-way: an inconclusive local-name check cannot
+                # authorise sending the same token to a public provider.
+                return True
             try:
-                found = await run_blocking(graph.search_entities, actor.user_id, word, limit=3)
+                found = await _await_with_turn_deadline(
+                    run_blocking(graph.search_entities, actor.user_id, word, limit=3),
+                    turn_deadline,
+                    expired="turn deadline expired during local person lookup",
+                )
+            except TimeoutError:
+                LOGGER.warning("Local person lookup exceeded the turn deadline; blocking outbound search")
+                return True
             except Exception as exc:  # noqa: BLE001 — проверка не должна ронять ход
                 LOGGER.warning(
                     "Could not check the graph for a personal name (%s)",
@@ -34951,6 +35483,7 @@ class AgentRuntime:
         reminder_descriptors: list[str] | tuple[str, ...] = (),
         reminder_delivery_scheduled: bool = False,
         read_only_timeline_file_report: bool = False,
+        turn_deadline: float | None = None,
     ) -> dict[str, Any] | None:
         """Озвучивается ТОТ ЖЕ ответ, что написан, — вместе с оговорками.
 
@@ -35030,6 +35563,8 @@ class AgentRuntime:
         ):
             LOGGER.warning("tts: усечённая звуковая проекция отклонена выходным рубежом")
             return None
+        if _turn_deadline_expired(turn_deadline):
+            return None
         try:
             result = await self.kernel.execute("speak", {"text": audible}, actor=actor)
         except Exception as exc:  # noqa: BLE001 — озвучка не должна ронять готовый ответ
@@ -35040,7 +35575,13 @@ class AgentRuntime:
             return None
         return attachment
 
-    async def _is_small_talk_by_arbiter(self, message: str, *, previous_turn: str = "") -> bool:
+    async def _is_small_talk_by_arbiter(
+        self,
+        message: str,
+        *,
+        previous_turn: str = "",
+        turn_deadline: float | None = None,
+    ) -> bool:
         """Спросить модель, реплика это или запрос, когда список молчит.
 
         Список коротких фраз — быстрый путь, но он закрытый по построению, и
@@ -35061,7 +35602,8 @@ class AgentRuntime:
         if not self.llm.enabled:
             return False
         try:
-            answer = await self.llm.chat(
+            answer = await self._deadline_bounded_chat(
+                turn_deadline,
                 [
                     {
                         "role": "system",
@@ -35125,6 +35667,25 @@ class AgentRuntime:
         verdict = str(answer.get("content") or "").strip().casefold()
         return verdict.startswith("разговор")
 
+    async def _turn_web_query_by_arbiter(
+        self,
+        message: str,
+        *,
+        previous_turn: str = "",
+        context: AgentContext | None = None,
+    ) -> tuple[str, str | None]:
+        """Preserve the legacy arbiter seam while bounding its whole await."""
+
+        remaining = _remaining_deadline_budget(context.turn_deadline if context is not None else None)
+        if remaining is not None and remaining <= 0:
+            return "", None
+        try:
+            call = self._web_query_by_arbiter(message, previous_turn=previous_turn)
+            return await asyncio.wait_for(call, timeout=remaining) if remaining is not None else await call
+        except TimeoutError:
+            LOGGER.info("Web intent check: turn deadline expired")
+            return "", None
+
     async def _attachment_web_query_by_arbiter(
         self,
         message: str,
@@ -35140,8 +35701,9 @@ class AgentRuntime:
         verdict; history and authorised local tools remain available.
         """
 
-        remaining = _remaining_attachment_primary_budget(
-            context.attachment_primary_deadline if context is not None else None
+        remaining = _remaining_deadline_budget(
+            context.attachment_primary_deadline if context is not None else None,
+            context.turn_deadline if context is not None else None,
         )
         timeout = (
             _ATTACHMENT_OPTIONAL_STAGE_TIMEOUT_SEC
@@ -35543,8 +36105,21 @@ class AgentRuntime:
         # search the web still wins; otherwise check this before asking the
         # arbiter, whose misclassification once sent an employee surname to a
         # public provider without adding any evidence to the answer.
-        if not asked_outright and await self._mentions_someone_from_the_archive(web_message, actor):
-            return
+        if not asked_outright:
+            try:
+                local_person = await _call_with_turn_deadline(
+                    self._mentions_someone_from_the_archive,
+                    web_message,
+                    actor,
+                    turn_deadline=getattr(context, "turn_deadline", None),
+                    expired="turn deadline expired during local person lookup",
+                )
+            except TimeoutError:
+                # A timeout is an inconclusive privacy check, never permission
+                # to disclose the candidate query to a public search provider.
+                return
+            if local_person:
+                return
         # «Что было 26 июля в 15 часов» — вопрос о собственной ленте, и время в нём
         # названо прямо. Арбитр на такой вопрос отвечал «интернет» (замерено), а
         # цена ошибки высокая: демонстрационный вопрос уходил бы в поисковик
@@ -35567,6 +36142,8 @@ class AgentRuntime:
         # Вердикт уже посчитан параллельно поиску — второй раз модель не
         # спрашиваем. Заново только там, где параллельного расчёта не было
         # (прямая просьба «найди в интернете» обходит поиск целиком).
+        # The bounded wrapper below is the sole live call to the legacy
+        # ``_web_query_by_arbiter(message)`` seam; adapters keep that signature.
         kind: str
         second: str | None
         if context is not None and context.isolated_outbound_turn and asked_outright:
@@ -35574,7 +36151,14 @@ class AgentRuntime:
             # may influence the outbound query are the current visible request.
             kind, second = "интернет", self.web_query_from(web_message)
         else:
-            kind, second = verdict if verdict is not None else await self._web_query_by_arbiter(web_message)
+            kind, second = (
+                verdict
+                if verdict is not None
+                else await self._turn_web_query_by_arbiter(
+                    web_message,
+                    context=context,
+                )
+            )
         # Второе поле вердикта — поисковая строка ТОЛЬКО у вида «интернет».
         #
         # У остальных видов оно значит другое: у «человека» — ИМЯ участника, у
@@ -35623,7 +36207,14 @@ class AgentRuntime:
             web_arguments["source_class"] = source_class
         if topic_class:
             web_arguments["topic_class"] = topic_class
+        turn_deadline = getattr(context, "turn_deadline", None)
+        if _turn_deadline_expired(turn_deadline):
+            return
         try:
+            # Registry truth declares web_research ``mutate`` because accepted
+            # pages are persisted into Raw/Inbox.  Once admitted, do not cancel
+            # it at the turn wall and turn a possibly committed capture into an
+            # ordinary timeout; the pre-start gate above is the deadline seam.
             result = await self.kernel.execute("web_research", web_arguments, actor=actor)
         except Exception as exc:  # noqa: BLE001 — предварительный поиск не должен ронять ход
             LOGGER.warning("Prefetch web search failed (%s)", type(exc).__name__)
@@ -36694,7 +37285,7 @@ class AgentRuntime:
                 result = (
                     await self._attachment_primary_chat(context, initial_messages, tools=[])
                     if attachment_turn
-                    else await self.llm.chat(initial_messages)
+                    else await self._turn_bounded_chat(context, initial_messages)
                 )
                 content = str(result.get("content") or "").strip()
                 if content:
@@ -37014,14 +37605,17 @@ class AgentRuntime:
                     ),
                 }
             )
-            attachment_timeout = _remaining_attachment_secondary_budget(context.attachment_secondary_deadline)
-            if attachment_entries and attachment_timeout <= 0:
-                LOGGER.info("Repair pass skipped: attachment secondary budget exhausted")
+            repair_timeout = _remaining_deadline_budget(
+                context.attachment_secondary_deadline if attachment_entries else None,
+                context.turn_deadline,
+            )
+            if repair_timeout is not None and repair_timeout <= 0:
+                LOGGER.info("Repair pass skipped: turn/attachment deadline exhausted")
                 return ""
             repair_call = self.llm.chat(repair_messages, tools=[])
             fixed = (
-                await asyncio.wait_for(repair_call, timeout=attachment_timeout)
-                if attachment_entries
+                await asyncio.wait_for(repair_call, timeout=repair_timeout)
+                if repair_timeout is not None
                 else await repair_call
             )
         except Exception as exc:  # noqa: BLE001 — неудачная починка не должна ронять ответ
@@ -37151,16 +37745,19 @@ class AgentRuntime:
             # длинном ответе JSON обрывался на середине списка. Оборванный JSON —
             # это `verdict not parseable`, то есть «не удалось проверить», и
             # человек видел предупреждение там, где проверка на самом деле шла.
-            attachment_timeout = _remaining_attachment_secondary_budget(context.attachment_secondary_deadline)
-            if attachment_entries and attachment_timeout <= 0:
-                return _unknown_verdict("attachment verification budget exhausted")
+            verification_timeout = _remaining_deadline_budget(
+                context.attachment_secondary_deadline if attachment_entries else None,
+                context.turn_deadline,
+            )
+            if verification_timeout is not None and verification_timeout <= 0:
+                return _unknown_verdict("turn or attachment verification budget exhausted")
             verification_call = self.llm.chat(messages, temperature=0.0, max_tokens=900)
             result = (
                 await asyncio.wait_for(
                     verification_call,
-                    timeout=attachment_timeout,
+                    timeout=verification_timeout,
                 )
-                if attachment_entries
+                if verification_timeout is not None
                 else await verification_call
             )
         except Exception as exc:

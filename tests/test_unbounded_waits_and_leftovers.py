@@ -226,22 +226,14 @@ async def test_a_slow_but_alive_endpoint_cannot_hold_a_slot_for_every_round(sett
 
 
 @pytest.mark.asyncio
-async def test_semaphore_queueing_does_not_count_against_a_busy_but_healthy_turn(
+async def test_semaphore_queueing_still_counts_against_the_transport_request_wall(
     settings, storage, monkeypatch
 ):
-    """The finding this pins: at real concurrent load (four people chatting is
-    already the whole `_foreground_sem` budget), most of a call's elapsed time can
-    be spent WAITING for a slot, not generating. `LLMRouter.chat` now reports that
-    wait as `_queue_wait_sec`, and the loop must push its own deadline back by the
-    same amount each round — otherwise a perfectly healthy, busy endpoint gets its
-    tool rounds cut short for the wrong reason (see the comment above
-    `loop_budget_sec` in `_agentic_loop`).
+    """The bridge measures wall time, including foreground-slot queueing.
 
-    Same 100s `total_budget_sec` as the sibling test (`loop_budget_sec=200`), but
-    each call's 100s is split 90s queueing / 10s real generation. Uncorrected, this
-    is indistinguishable from the sibling test's slow-endpoint case and stops after
-    3 round-calls. Corrected, every round only spends its real 10s against the
-    budget, so all 5 of `research` mode's rounds run.
+    Queue telemetry must therefore never push the absolute turn deadline into
+    the future.  Otherwise each queued model stage renews a clock that began at
+    HTTP admission and the bridge can give up while the backend is still busy.
     """
     import time as time_module
 
@@ -275,9 +267,8 @@ async def test_semaphore_queueing_does_not_count_against_a_busy_but_healthy_turn
         attachments=None,
     )
 
-    # All 5 research-mode rounds run (queueing excluded) + 1 final synthesis call.
-    assert llm.calls == 6, f"queueing was charged against the turn budget: only {llm.calls} calls ran"
-    assert result["content"] == "Итоговый ответ."
+    assert llm.calls == 2, "reported queue wait renewed the absolute request clock"
+    assert result["llm_failed"] is True
 
 
 @pytest.mark.asyncio

@@ -157,3 +157,44 @@ async def test_vision_can_accept_valid_ocr_json_with_a_long_visual_separator(
         reject_repeated_token_degeneration=False,
     )
     assert result["content"] == content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ("http_503", "transport"))
+async def test_retry_opt_out_sends_one_post_and_never_backs_off(
+    settings,
+    monkeypatch,
+    failure_kind: str,
+) -> None:
+    posts: list[str] = []
+    sleeps: list[float] = []
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **_kwargs):
+            posts.append(url)
+            request = httpx.Request("POST", url)
+            if failure_kind == "http_503":
+                return httpx.Response(503, request=request, text="temporarily unavailable")
+            raise httpx.ConnectError("synthetic connection failure", request=request)
+
+    async def record_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: _Client())
+    monkeypatch.setattr("friday.agent_runtime.llm.asyncio.sleep", record_sleep)
+    router = LLMRouter(replace(settings, llm_enabled=True))
+
+    with pytest.raises((httpx.HTTPStatusError, httpx.ConnectError)):
+        await router.chat(
+            [{"role": "user", "content": "one accepted-evidence synthesis"}],
+            allow_retries=False,
+        )
+
+    assert len(posts) == 1
+    assert sleeps == []

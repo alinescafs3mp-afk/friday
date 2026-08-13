@@ -8,9 +8,11 @@ suite stays fast and free of the optional faster-whisper dependency.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 import math
+import threading
 
 import pytest
 
@@ -157,6 +159,77 @@ async def test_voice_note_transcribes_inbox_first_then_confirms(settings, storag
     ko = storage.get_knowledge_by_raw(result["raw_object_id"], "alice")
     assert ko is not None
     assert [hit["id"] for hit in storage.search_knowledge("alice", "Казань")] == [ko["id"]]
+
+
+@pytest.mark.asyncio
+async def test_timed_out_physical_transcription_keeps_exclusive_admission_until_it_drains(
+    settings,
+    storage,
+    monkeypatch,
+):
+    release = threading.Event()
+    finished = threading.Event()
+    state_lock = threading.Lock()
+    state = {"active": 0, "peak": 0, "physical_calls": 0}
+
+    def blocking_transcribe(content, **kwargs):  # noqa: ANN001
+        del content
+        with state_lock:
+            state["active"] += 1
+            state["physical_calls"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        try:
+            release.wait(timeout=2.0)
+            return _fake_transcribe(b"", **kwargs)
+        finally:
+            with state_lock:
+                state["active"] -= 1
+            finished.set()
+
+    monkeypatch.setattr("friday.ingestion._files.transcribe_bytes", blocking_transcribe)
+    configured = dataclasses.replace(
+        settings,
+        whisper_enabled=True,
+        whisper_timeout_sec=0.02,
+    )
+    pipeline = IngestionPipeline(configured, storage, KnowledgeGraph(storage), None)
+
+    try:
+        first = await pipeline._transcribe_audio(  # noqa: SLF001
+            b"first",
+            filename="first.oga",
+            mime_type="audio/ogg",
+            metadata=None,
+        )
+        assert first is None
+        with state_lock:
+            assert state["active"] == 1
+
+        second = await pipeline._transcribe_audio(  # noqa: SLF001
+            b"second",
+            filename="second.oga",
+            mime_type="audio/ogg",
+            metadata=None,
+        )
+        assert second is None
+        with state_lock:
+            assert state["physical_calls"] == 1
+            assert state["peak"] == 1
+    finally:
+        release.set()
+        assert await asyncio.to_thread(finished.wait, 1.0)
+
+    third = await pipeline._transcribe_audio(  # noqa: SLF001
+        b"third",
+        filename="third.oga",
+        mime_type="audio/ogg",
+        metadata=None,
+    )
+    assert third is not None
+    with state_lock:
+        assert state["active"] == 0
+        assert state["physical_calls"] == 2
+        assert state["peak"] == 1
 
 
 @pytest.mark.asyncio

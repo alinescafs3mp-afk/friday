@@ -18,6 +18,29 @@ from typing import Any
 from mcp import Client, StdioServerParameters, stdio_client
 
 LOGGER = logging.getLogger(__name__)
+_MCP_CLOSE_TIMEOUT_SEC = 5.0
+
+
+async def _bounded_stack_close(stack: AsyncExitStack, *, alias: str) -> None:
+    """Bound cooperative cleanup while preserving MCP/AnyIO task affinity.
+
+    The MCP stdio context owns an AnyIO cancel scope and must be exited by the
+    same task that entered it.  Spawning/detaching ``aclose`` breaks that
+    invariant.  Cleanup is instead invoked in-place, always after the
+    connection lock has been released.  A cooperative transport observes this
+    timeout; a cancellation-hostile third-party context can delay its caller,
+    but can no longer wedge every later call behind the connection lock.
+    """
+
+    try:
+        async with asyncio.timeout(_MCP_CLOSE_TIMEOUT_SEC):
+            await stack.aclose()
+    except TimeoutError:
+        LOGGER.warning(
+            "MCP server %s cleanup exceeded %.0fs",
+            alias,
+            _MCP_CLOSE_TIMEOUT_SEC,
+        )
 
 
 class MCPUnavailableError(RuntimeError):
@@ -50,6 +73,7 @@ class _MCPConnection:
     def __init__(self, definition: MCPServerDefinition) -> None:
         self.definition = definition
         self._stack: AsyncExitStack | None = None
+        self._retired_stacks: list[AsyncExitStack] = []
         self._client: Client | None = None
         self._lock = asyncio.Lock()
         self.available = False
@@ -68,9 +92,15 @@ class _MCPConnection:
         return allowed
 
     async def connect(self) -> None:
+        failed_stack: AsyncExitStack | None = None
+        failure: BaseException | None = None
         async with self._lock:
             if self._client is not None:
                 return
+            if self._retired_stacks:
+                raise MCPUnavailableError(
+                    "MCP server has a retired connection; lifecycle restart is required"
+                )
             stack = AsyncExitStack()
             try:
                 # MCP owns the handle for exactly this AsyncExitStack lifetime.
@@ -115,16 +145,23 @@ class _MCPConnection:
                     self.definition.alias,
                     len(self.definition.allowed_tools),
                 )
-            except BaseException:
-                with suppress(BaseException):
-                    await stack.aclose()
+            except BaseException as exc:
                 self.available = False
-                raise
+                failed_stack = stack
+                failure = exc
+        # Third-party context-manager cleanup is deliberately outside the
+        # connection lock.  Even a cancellation-hostile child cannot prevent a
+        # concurrent caller from observing the detached unavailable state.
+        if failed_stack is not None:
+            with suppress(BaseException):
+                await _bounded_stack_close(failed_stack, alias=self.definition.alias)
+        if failure is not None:
+            raise failure
 
     async def call(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if tool_name not in self.definition.allowed_tools:
             raise MCPUnavailableError("MCP tool is not allowlisted")
-        failed_stack: AsyncExitStack | None = None
+        failure: BaseException | None = None
         async with self._lock:
             client = self._client
             if client is None or not self.available:
@@ -136,31 +173,43 @@ class _MCPConnection:
                         arguments,
                         read_timeout_seconds=self.definition.call_timeout_sec,
                     )
-            except BaseException:
+            except BaseException as exc:
                 self.available = False
                 self._client = None
-                failed_stack = self._stack
+                if self._stack is not None:
+                    # MCP's stdio context embeds an AnyIO cancel scope and must
+                    # be exited by the lifecycle task which entered it.  A
+                    # request task cannot safely call ``aclose`` here.  Retire
+                    # the stack for manager shutdown while publishing the
+                    # unavailable state under the lock immediately.
+                    self._retired_stacks.append(self._stack)
                 self._stack = None
-                if failed_stack is not None:
-                    with suppress(BaseException):
-                        await failed_stack.aclose()
-                raise
-            if result.is_error:
-                raise MCPUnavailableError("MCP tool returned an error")
-            structured = result.structured_content
-            if not isinstance(structured, dict):
-                raise MCPUnavailableError("MCP tool returned no structured result")
-            return dict(structured)
+                failure = exc
+            else:
+                if result.is_error:
+                    raise MCPUnavailableError("MCP tool returned an error")
+                structured = result.structured_content
+                if not isinstance(structured, dict):
+                    raise MCPUnavailableError("MCP tool returned no structured result")
+                return dict(structured)
+        assert failure is not None
+        raise failure
 
     async def close(self) -> None:
         async with self._lock:
-            stack = self._stack
+            stacks = [*self._retired_stacks]
+            self._retired_stacks.clear()
+            if self._stack is not None:
+                stacks.append(self._stack)
             self._stack = None
             self._client = None
             self.available = False
-            if stack is not None:
-                with suppress(BaseException):
-                    await stack.aclose()
+        # Never hold the connection lock across third-party cleanup.  The
+        # manager lifecycle task owns these contexts; later calls observe the
+        # unavailable state without waiting for a child process to exit.
+        for stack in stacks:
+            with suppress(BaseException):
+                await _bounded_stack_close(stack, alias=self.definition.alias)
 
 
 class MCPClientManager:

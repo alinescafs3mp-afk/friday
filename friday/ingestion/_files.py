@@ -7,6 +7,7 @@ exactly as before and no call site moved.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Mapping, Sequence
 
@@ -69,6 +70,7 @@ from friday.office_attestation import (
     verify_office_structure_attestation,
 )
 from friday.private_fs import ensure_private_directory, restrict_private_file
+from friday.workers._blocking import run_blocking
 
 _OFFICE_STRUCTURE_METADATA_KEY = "office_structure_v1"
 _OFFICE_STRUCTURE_ATTESTATION_KEY = OFFICE_STRUCTURE_ATTESTATION_METADATA_KEY
@@ -94,6 +96,7 @@ _VISION_OCR_FALLBACK_RESERVE_SEC = 45.0
 _VISION_PAGE_MAX_PIXELS = 1_048_576
 _VISION_BATCH_MAX_PIXELS = 1_048_576
 _VISION_PDF_RENDER_BUDGET_FLOOR_SEC = 30.0
+_WHISPER_INFERENCE_LOCK = threading.Lock()
 _PDF_RENDER_SOURCE_RE = re.compile(r"^pdf-page-(\d+)-(?:render|image-\d+)$", re.IGNORECASE)
 _DOCUMENT_METADATA_STRING_FIELDS = (
     "title",
@@ -151,6 +154,55 @@ _DOCUMENT_METADATA_STRING_FIELDS = (
     "capture_date",
     "image_orientation",
 )
+
+
+class _WhisperInferenceBusy(RuntimeError):
+    """Another physical CTranslate2 transcription is still running."""
+
+
+def _transcribe_bytes_admitted(content: bytes, **kwargs: Any) -> Any:
+    """Admit at most one physical Whisper inference in this process.
+
+    The lock is acquired and released inside the executor worker.  Therefore a
+    timed-out/cancelled coroutine cannot release admission while CTranslate2 is
+    still using CPU/GPU, and a retry returns busy instead of starting a second
+    inference on top of the orphan.
+    """
+
+    if not _WHISPER_INFERENCE_LOCK.acquire(blocking=False):
+        raise _WhisperInferenceBusy
+    try:
+        return transcribe_bytes(content, **kwargs)
+    finally:
+        _WHISPER_INFERENCE_LOCK.release()
+
+
+def _remaining_ingestion_budget(turn_deadline: float | None) -> float | None:
+    if turn_deadline is None:
+        return None
+    return max(0.0, turn_deadline - time.monotonic())
+
+
+def _ensure_ingestion_budget(turn_deadline: float | None) -> None:
+    remaining = _remaining_ingestion_budget(turn_deadline)
+    if remaining is not None and remaining <= 0:
+        raise TimeoutError("request deadline expired during ingestion")
+
+
+async def _await_with_turn_deadline(awaitable: Any, turn_deadline: float | None) -> Any:
+    """Await one ingestion stage without ever renewing the request clock."""
+
+    remaining = _remaining_ingestion_budget(turn_deadline)
+    if remaining is None:
+        return await awaitable
+    if remaining <= 0:
+        close = getattr(awaitable, "close", None)
+        if callable(close):
+            close()
+        raise TimeoutError("request deadline expired before ingestion stage")
+    return await asyncio.wait_for(awaitable, timeout=remaining)
+
+
 _DOCUMENT_METADATA_COUNT_FIELDS = (
     "editing_cycles",
     "page_count",
@@ -1289,6 +1341,7 @@ class FilesMixin(PipelineShared):
         filename: str,
         mime_type: str,
         metadata: dict[str, Any] | None,
+        turn_deadline: float | None = None,
     ) -> dict[str, Any] | None:
         """Transcribe voice/audio to text locally (§9).
 
@@ -1318,16 +1371,32 @@ class FilesMixin(PipelineShared):
         language = str(self.settings.whisper_language or "").strip()
         if not language:
             language = str((metadata or {}).get("language_code") or "").strip()
+        transcription_deadline = time.monotonic() + self.settings.whisper_timeout_sec
+        if turn_deadline is not None:
+            transcription_deadline = min(transcription_deadline, turn_deadline)
+        effective_timeout = _remaining_ingestion_budget(transcription_deadline) or 0.0
         try:
-            transcript = await asyncio.to_thread(
-                transcribe_bytes,
-                content,
-                model=self.settings.whisper_model,
-                language=language or None,
-                device=self.settings.whisper_device,
-                compute_type=self.settings.whisper_compute_type,
-                download_root=self.settings.whisper_download_root or None,
+            transcript = await _await_with_turn_deadline(
+                run_blocking(
+                    _transcribe_bytes_admitted,
+                    content,
+                    model=self.settings.whisper_model,
+                    language=language or None,
+                    device=self.settings.whisper_device,
+                    compute_type=self.settings.whisper_compute_type,
+                    download_root=self.settings.whisper_download_root or None,
+                ),
+                transcription_deadline,
             )
+        except _WhisperInferenceBusy:
+            LOGGER.warning("whisper: another physical transcription is still running")
+            return None
+        except TimeoutError:
+            LOGGER.warning(
+                "whisper: transcription exceeded %.0fs; leaving audio for review",
+                effective_timeout,
+            )
+            return None
         except WhisperUnavailable:
             LOGGER.warning("whisper: unavailable; leaving audio for review")
             return None
@@ -1371,7 +1440,9 @@ class FilesMixin(PipelineShared):
         force_review: bool = False,
         archive_password: str | None = None,
         exact_byte_identity_only: bool = False,
+        turn_deadline: float | None = None,
     ) -> dict[str, Any]:
+        _ensure_ingestion_budget(turn_deadline)
         if len(file_content) > self.settings.max_upload_bytes:
             raise ValueError("file exceeds FRIDAY_MAX_UPLOAD_BYTES")
         filename = self._sanitize_filename(filename or (file_path.name if file_path else "upload.bin"))
@@ -1386,12 +1457,15 @@ class FilesMixin(PipelineShared):
         # retain the inexpensive hash-first path.
         extraction = None
         if archive_dispatch_kind(filename, mime_type) is not None:
-            extraction = await asyncio.to_thread(
-                self._doc_extractor.extract,
-                file_content,
-                filename,
-                mime_type,
-                archive_password=archive_password,
+            extraction = await _await_with_turn_deadline(
+                asyncio.to_thread(
+                    self._doc_extractor.extract,
+                    file_content,
+                    filename,
+                    mime_type,
+                    archive_password=archive_password,
+                ),
+                turn_deadline,
             )
             if extraction.error in {"archive_password_required", "archive_password_invalid"}:
                 password_invalid = extraction.error == "archive_password_invalid"
@@ -1506,12 +1580,15 @@ class FilesMixin(PipelineShared):
         # still allows seconds of unpacking, and seconds of a frozen backend is
         # not a thing to leave in place.
         if extraction is None:
-            extraction = await asyncio.to_thread(
-                self._doc_extractor.extract,
-                file_content,
-                filename,
-                mime_type,
-                archive_password=archive_password,
+            extraction = await _await_with_turn_deadline(
+                asyncio.to_thread(
+                    self._doc_extractor.extract,
+                    file_content,
+                    filename,
+                    mime_type,
+                    archive_password=archive_password,
+                ),
+                turn_deadline,
             )
         if extraction.error in {"archive_password_required", "archive_password_invalid"}:
             # Defensive fallback for a nested encrypted archive reached through
@@ -1551,10 +1628,13 @@ class FilesMixin(PipelineShared):
         native_text_available = bool(text_content.strip())
         vision: dict[str, Any] | None = None
         if len(text_content.strip()) < 160:
-            vision = await self._extract_visual_document(
-                file_content,
-                filename=filename,
-                mime_type=mime_type,
+            vision = await _await_with_turn_deadline(
+                self._extract_visual_document(
+                    file_content,
+                    filename=filename,
+                    mime_type=mime_type,
+                ),
+                turn_deadline,
             )
             if vision and vision.get("success") and vision.get("text"):
                 text_content = str(vision["text"])[: self.settings.max_extracted_text_chars]
@@ -1584,8 +1664,13 @@ class FilesMixin(PipelineShared):
             and looks_like_audio(content_type=mime_type, filename=filename)
         ):
             transcription = await self._transcribe_audio(
-                file_content, filename=filename, mime_type=mime_type, metadata=metadata
+                file_content,
+                filename=filename,
+                mime_type=mime_type,
+                metadata=metadata,
+                turn_deadline=turn_deadline,
             )
+            _ensure_ingestion_budget(turn_deadline)
             if transcription and transcription.get("text"):
                 text_content = str(transcription["text"])[: self.settings.max_extracted_text_chars]
         # The structure is a closed, content-free projection over the *exact*
@@ -1843,6 +1928,7 @@ class FilesMixin(PipelineShared):
             + (-0.15 if not extraction_succeeded else 0.0)
         )
         file_importance = _estimate_file_importance(filename, mime_type, len(file_content), file_quality)
+        _ensure_ingestion_budget(turn_deadline)
         target_path, staged_path = self._stage_file(user_id, file_content, digest, filename)
         target_preexisted = target_path.exists()
         file_metadata = {
@@ -2205,6 +2291,7 @@ class FilesMixin(PipelineShared):
         preview_chars: int = 24_000,
         archive_password: str | None = None,
         metadata_only: bool = False,
+        turn_deadline: float | None = None,
     ) -> dict[str, Any]:
         """Extract an attachment for the current turn without persisting it.
 
@@ -2213,17 +2300,21 @@ class FilesMixin(PipelineShared):
         the Knowledge Graph; only a bounded in-memory excerpt is handed to the
         local agent for the current response.
         """
+        _ensure_ingestion_budget(turn_deadline)
         if len(file_content) > self.settings.max_upload_bytes:
             raise ValueError("file exceeds FRIDAY_MAX_UPLOAD_BYTES")
         safe_filename = self._sanitize_filename(filename or "upload.bin")
         guessed_type, _ = mimetypes.guess_type(safe_filename)
         safe_mime_type = (mime_type or guessed_type or "application/octet-stream").split(";", 1)[0].strip()
         if metadata_only:
-            document_metadata = await asyncio.to_thread(
-                self._doc_extractor.extract_document_metadata,
-                file_content,
-                safe_filename,
-                safe_mime_type,
+            document_metadata = await _await_with_turn_deadline(
+                asyncio.to_thread(
+                    self._doc_extractor.extract_document_metadata,
+                    file_content,
+                    safe_filename,
+                    safe_mime_type,
+                ),
+                turn_deadline,
             )
             return {
                 "filename": safe_filename,
@@ -2235,12 +2326,15 @@ class FilesMixin(PipelineShared):
             }
         # Async for the same reason as `ingest_file`: this runs while a Telegram
         # user waits for a reply, on the loop that serves everyone else.
-        extraction = await asyncio.to_thread(
-            self._doc_extractor.extract,
-            file_content,
-            safe_filename,
-            safe_mime_type,
-            archive_password=archive_password,
+        extraction = await _await_with_turn_deadline(
+            asyncio.to_thread(
+                self._doc_extractor.extract,
+                file_content,
+                safe_filename,
+                safe_mime_type,
+                archive_password=archive_password,
+            ),
+            turn_deadline,
         )
         if extraction.error in {"archive_password_required", "archive_password_invalid"}:
             password_invalid = extraction.error == "archive_password_invalid"
@@ -2259,10 +2353,13 @@ class FilesMixin(PipelineShared):
             native_text = ""
         vision: dict[str, Any] | None = None
         if len(native_text.strip()) < 160:
-            vision = await self._extract_visual_document(
-                file_content,
-                filename=safe_filename,
-                mime_type=safe_mime_type,
+            vision = await _await_with_turn_deadline(
+                self._extract_visual_document(
+                    file_content,
+                    filename=safe_filename,
+                    mime_type=safe_mime_type,
+                ),
+                turn_deadline,
             )
         vision_text = (
             str(vision.get("text") or "") if vision is not None and vision.get("success") is True else ""

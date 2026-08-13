@@ -159,6 +159,7 @@ FRIDAY_WHISPER_DEVICE=cpu
 FRIDAY_WHISPER_COMPUTE_TYPE=int8
 FRIDAY_WHISPER_LANGUAGE=
 FRIDAY_WHISPER_MAX_AUDIO_SEC=900
+FRIDAY_WHISPER_TIMEOUT_SEC=180
 # Retention window (days) before a soft-deleted object is eligible for `jericho purge`.
 FRIDAY_PURGE_RETENTION_DAYS=30
 # Offsite mirror for verified backups (external disk / synced folder).

@@ -374,6 +374,9 @@ async def test_every_backend_answer_path_preserves_code_owned_plain_text_provena
     assert sent
     assert sent[-1][0] == literal
     assert sent[-1][1]["text_format"] == "plain"
+    if path_kind == "retry":
+        regenerate = next(call for call in backend.calls if call["path"] == "/api/me/regenerate")
+        assert regenerate["body"] == {"operation_id": "telegram-update:7103"}
 
 
 @pytest.mark.asyncio

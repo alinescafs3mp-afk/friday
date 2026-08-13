@@ -174,7 +174,7 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # roles distinct and returns totals separately from its bounded page.
 # 359 → 360: the admin messenger reads one bounded chronological tail per
 # person instead of issuing one request for each of five conversations.
-EXPECTED_MEMBER_COUNT = 360
+EXPECTED_MEMBER_COUNT = 361
 EXPECTED_SIGNATURES: dict[str, str] = {
     "bind_owned_file_source_ref_alias": "(self, user_id: 'str', uploaded_by: 'str', source_ref: 'str', raw_object_id: 'str') -> 'bool'",
     "find_owned_files_by_filename": "(self, user_id: 'str', uploaded_by: 'str', filename: 'str') -> 'list[dict[str, Any]]'",
@@ -319,6 +319,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "idempotency_claim": "(self, user_id: 'str', request_key: 'str', *, request_hash: 'str' = '', lease_seconds: 'int' = 300) -> 'dict[str, Any]'",
     "idempotency_complete": "(self, user_id: 'str', request_key: 'str', lease_token: 'str', response: 'dict[str, Any]') -> 'bool'",
     "idempotency_get": "(self, user_id: 'str', request_key: 'str', *, request_hash: 'str' = '') -> 'dict[str, Any] | None'",
+    "idempotency_mark_effect_possible": "(self, user_id: 'str', request_key: 'str', lease_token: 'str', response: 'dict[str, Any]') -> 'bool'",
     "idempotency_prune": "(self, *, days: 'int' = 30) -> 'int'",
     "idempotency_release": "(self, user_id: 'str', request_key: 'str', lease_token: 'str') -> 'bool'",
     "idempotency_renew": "(self, user_id: 'str', request_key: 'str', lease_token: 'str') -> 'bool'",
