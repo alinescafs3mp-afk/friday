@@ -18,7 +18,13 @@ from typing import Any
 import pytest
 from docx import Document
 
-from friday.agent_runtime import AgentRuntime, asks_for_the_web
+from friday.agent_runtime import (
+    AgentContext,
+    AgentRuntime,
+    _filename_clue_request,
+    asks_for_the_web,
+    file_turn_authority,
+)
 from friday.agent_runtime._office_attachments import (
     OFFICE_EXACT_UNAVAILABLE_MESSAGE,
     OFFICE_STRUCTURE_KEY,
@@ -38,6 +44,39 @@ NEWS_REQUEST = "Покажешь свежие новости за прошедш
 PUBLIC_URL = "https://public.synthetic.example.com/news"
 PUBLIC_FACT = "Синтетическая публичная новость подтверждена источником."
 PRIVATE_PREFIX = "PRIVATE-SYNTHETIC-DOC-CANARY"
+
+
+def test_foreign_news_sites_are_web_authority_without_becoming_a_file_summary() -> None:
+    request = "Сделай сводку по новостям СВО на зарубежных сайтах"
+
+    assert asks_for_the_web(request) is True
+    authority = file_turn_authority(request)
+    assert authority.proved("web")
+    assert not authority.proved("local_read")
+
+    world_question = "Какие мировые новости вышли вчера?"
+    assert asks_for_the_web(world_question) is True
+    assert file_turn_authority(world_question).proved("web")
+
+    for data_only in (
+        "В зарубежных СМИ сегодня обсуждают новости.",
+        "«Сделай сводку по новостям на зарубежных сайтах»",
+    ):
+        assert asks_for_the_web(data_only) is False
+        assert not file_turn_authority(data_only).proved("web")
+
+    local_request = "Сделай сводку новостей из этого файла о зарубежных СМИ"
+    assert asks_for_the_web(local_request) is False
+    local_authority = file_turn_authority(local_request)
+    assert local_authority.proved("local_read")
+    assert not local_authority.proved("web")
+
+    for web_scope in (
+        "В интернете найди, я кидал уже",
+        "В сети посмотри, я уже присылал",
+        "В онлайн найди, я загружал раньше",
+    ):
+        assert _filename_clue_request(web_scope) is None
 
 
 def _actor() -> ActorContext:
@@ -129,6 +168,49 @@ class _ScriptedModel:
         raise AssertionError("synthetic model received an uncontracted payload")
 
 
+@pytest.mark.asyncio
+async def test_foreign_source_authority_survives_the_arbiter_query_rewrite(settings, storage) -> None:
+    kernel = _SyntheticWebKernel()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_ScriptedModel({}),
+        kernel=kernel,
+    )
+    request = "Какие мировые новости вышли вчера?"
+    context = AgentContext(
+        conversation_id="foreign-rewrite",
+        user_id=OWNER,
+        outward_verdict=("интернет", "elections latest developments"),
+    )
+    messages: list[dict[str, Any]] = []
+    tools_used: list[str] = []
+    evidence: list[dict[str, str]] = []
+
+    await runtime._prefetch_the_web_if_asked(  # noqa: SLF001
+        request,
+        _actor(),
+        [_tool("web_research")],
+        messages,
+        tools_used,
+        evidence,
+        [],
+        context,
+    )
+
+    assert kernel.calls == [
+        (
+            "web_research",
+            {
+                "query": "elections latest developments",
+                "max_sources": 3,
+                "source_class": "foreign",
+            },
+        )
+    ]
+    assert context.web_evidence_status == "sourced"
+
+
 class _NeverModel:
     enabled = True
     model = "synthetic-never-called"
@@ -173,6 +255,7 @@ def _render_docx(
 
 
 def _store_docx(
+    settings,
     storage,
     *,
     target_chars: int,
@@ -199,11 +282,18 @@ def _store_docx(
     assert validate_runtime_office_index(index, extracted.text) == index
 
     source_hash = hashlib.sha256(payload).hexdigest()
+    relative_path = f"{OWNER}/{source_hash[:2]}/{source_hash}.docx"
+    stored_path = settings.files_dir / relative_path
+    stored_path.parent.mkdir(parents=True, exist_ok=True)
+    stored_path.write_bytes(payload)
     metadata: dict[str, Any] = {
         "filename": f"synthetic-{document_number}-{target_chars}.docx",
         "uploaded_by": OWNER,
         "extraction_success": True,
         "text_extraction_success": True,
+        "stored_path": relative_path,
+        "sha256": source_hash,
+        "size_bytes": len(payload),
     }
     if complete:
         token = sign_office_structure_index(storage, index, source_hash)
@@ -247,9 +337,18 @@ def _store_docx(
     )
 
 
-def _store_generic_text(storage) -> _StoredDocument:
+def _store_generic_text(settings, storage) -> _StoredDocument:
     marker = "PRIVATE-SYNTHETIC-LOCAL-NEWS-CANARY"
-    text = f"{marker}\nНовости в документе за прошедшие сутки: синтетическая локальная запись."
+    text = (
+        f"{marker}\nПо данным из интернета, в документе за прошедшие сутки есть "
+        "синтетическая локальная запись."
+    )
+    payload = text.encode()
+    source_hash = hashlib.sha256(payload).hexdigest()
+    relative_path = f"{OWNER}/{source_hash[:2]}/{source_hash}.txt"
+    stored_path = settings.files_dir / relative_path
+    stored_path.parent.mkdir(parents=True, exist_ok=True)
+    stored_path.write_bytes(payload)
     raw = RawObject(
         id=new_id("raw"),
         user_id=OWNER,
@@ -257,11 +356,15 @@ def _store_generic_text(storage) -> _StoredDocument:
         source_ref=new_id("synthetic-source"),
         raw_content=text,
         content_type="file",
+        content_hash=source_hash,
         metadata_json={
             "filename": "synthetic-local-news.txt",
             "uploaded_by": OWNER,
             "extraction_success": True,
             "text_extraction_success": True,
+            "stored_path": relative_path,
+            "sha256": source_hash,
+            "size_bytes": len(payload),
         },
     )
     storage.store_raw_object(raw)
@@ -317,7 +420,7 @@ async def test_three_complete_bare_docx_summaries_survive_then_news_keeps_histor
 ) -> None:
     storage.ensure_user(OWNER, preset_key="owner")
     documents = [
-        _store_docx(storage, target_chars=target, document_number=number)
+        _store_docx(settings, storage, target_chars=target, document_number=number)
         for number, target in enumerate((832, 1416, 1590), start=1)
     ]
     expected_summaries = {
@@ -341,7 +444,8 @@ async def test_three_complete_bare_docx_summaries_survive_then_news_keeps_histor
         response = await _upload_notice(runtime, document, conversation_id=conversation_id)
         conversation_id = str(response["conversation_id"])
 
-        assert response["message"] == expected_summaries[document.marker]
+        assert response["message"].endswith(expected_summaries[document.marker])
+        assert "Подробный обзор" in response["message"]
         assert response["message"] != OFFICE_EXACT_UNAVAILABLE_MESSAGE
         assert response["tools_used"] == []
         assert response["attachment_context_expected_count"] == 1
@@ -397,7 +501,7 @@ async def test_old_attachment_lineage_beyond_prompt_tail_still_allows_only_curre
     storage,
 ) -> None:
     storage.ensure_user(OWNER, preset_key="owner")
-    document = _store_docx(storage, target_chars=832, document_number=41)
+    document = _store_docx(settings, storage, target_chars=832, document_number=41)
     summary = "Синтетическая закрытая сводка с PRIVATE-HISTORICAL-ANSWER-CANARY."
     model = _ScriptedModel({document.marker: summary})
     kernel = _SyntheticWebKernel()
@@ -469,7 +573,7 @@ async def test_complete_signed_docx_exact_list_and_count_are_code_owned(
     lists_people: bool,
 ) -> None:
     storage.ensure_user(OWNER, preset_key="owner")
-    document = _store_docx(storage, target_chars=1416, document_number=52)
+    document = _store_docx(settings, storage, target_chars=1416, document_number=52)
     kernel = _SyntheticWebKernel()
     runtime = AgentRuntime(
         replace(settings, verify_answers=True, verify_min_answer_chars=1),
@@ -509,6 +613,7 @@ async def test_readable_incomplete_docx_is_partial_then_exact_followup_is_unknow
 ) -> None:
     storage.ensure_user(OWNER, preset_key="owner")
     document = _store_docx(
+        settings,
         storage,
         target_chars=832,
         document_number=63,
@@ -531,8 +636,8 @@ async def test_readable_incomplete_docx_is_partial_then_exact_followup_is_unknow
     # matters publicly is that readable bytes remain readable while whole-file
     # certainty is UNKNOWN; it must not be reported as an absent/lost upload.
     assert uploaded["message"] != OFFICE_EXACT_UNAVAILABLE_MESSAGE
-    assert "неполон" in uploaded["message"].casefold()
-    assert "неизвест" in uploaded["message"].casefold()
+    assert "не весь исходный материал" in uploaded["message"].casefold()
+    assert "частич" in uploaded["message"].casefold()
     assert "прикреп" not in uploaded["message"].casefold()
     assert "файл отсутств" not in uploaded["message"].casefold()
     assert uploaded["attachment_context_available"] is True
@@ -577,8 +682,8 @@ async def test_news_inside_a_current_document_is_local_not_a_web_request(
     storage.ensure_user(OWNER, preset_key="owner")
     request = "Покажи новости в документе за прошедшие сутки."
     assert asks_for_the_web(request) is False
-    document = _store_generic_text(storage)
-    answer = "В документе есть одна синтетическая локальная новостная запись."
+    document = _store_generic_text(settings, storage)
+    answer = "По данным из интернета, в документе есть одна синтетическая локальная запись."
     model = _ScriptedModel({document.marker: answer})
     kernel = _SyntheticWebKernel()
     runtime = AgentRuntime(
@@ -613,7 +718,7 @@ async def test_same_sentence_document_summary_and_web_request_executes_public_re
     storage.ensure_user(OWNER, preset_key="owner")
     request = "Обобщи весь документ и поищи актуальные данные в интернете."
     assert asks_for_the_web(request) is True
-    document = _store_generic_text(storage)
+    document = _store_generic_text(settings, storage)
     model = _ScriptedModel({document.marker: "Синтетическая локальная сводка."})
     kernel = _SyntheticWebKernel()
     runtime = AgentRuntime(
@@ -636,7 +741,7 @@ async def test_same_sentence_document_summary_and_web_request_executes_public_re
     assert kernel.calls == [
         (
             "web_research",
-            {"query": runtime.web_query_from(request), "max_sources": 3},
+            {"query": "актуальные", "max_sources": 3},
         )
     ]
 
@@ -660,7 +765,7 @@ async def test_attachment_derived_news_carriers_can_use_web(
     expected_restored: int,
 ) -> None:
     storage.ensure_user(OWNER, preset_key="owner")
-    document = _store_docx(storage, target_chars=832, document_number=74)
+    document = _store_docx(settings, storage, target_chars=832, document_number=74)
     summary = f"Синтетическая сводка: {document.names[0]}."
     model = _ScriptedModel({document.marker: summary})
     kernel = _SyntheticWebKernel()

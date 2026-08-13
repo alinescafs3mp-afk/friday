@@ -25,6 +25,7 @@ from friday.admin_api._deps import (
     _target_user,
 )
 from friday.api.projections import is_public_opaque_id, public_conversation_message
+from friday.workers._blocking import run_blocking
 
 router = APIRouter()
 
@@ -59,6 +60,12 @@ async def chat_feed(request: Request, limit: int = Query(100, ge=1, le=500)) -> 
     Читается ПОД полным доступом и пишется в след: это чужая переписка, и
     «посмотрел ленту» должно быть отличимо от «ничего не делал».
     """
+    return await run_blocking(_chat_feed_sync, request, limit)
+
+
+def _chat_feed_sync(request: Request, limit: int) -> dict[str, Any]:
+    """Collect the cross-tenant feed without holding the serving event loop."""
+
     _require(request, "admin.all_data.read")
     _audit_cross_tenant_read(request, "admin.chat_feed.read", None, limit=limit)
     storage = _services(request).storage
@@ -66,6 +73,13 @@ async def chat_feed(request: Request, limit: int = Query(100, ge=1, le=500)) -> 
     for row in storage.list_chat_feed(limit=limit):
         metadata = _json_value(row.get("metadata_json"), {})
         metadata = metadata if isinstance(metadata, dict) else {}
+        last_message = public_conversation_message(
+            {
+                "role": row.get("last_role") or "",
+                "content": row.get("last_content") or "",
+                "created_at": row.get("last_at"),
+            }
+        )
         items.append(
             {
                 "user_id": row.get("user_id"),
@@ -76,7 +90,11 @@ async def chat_feed(request: Request, limit: int = Query(100, ge=1, le=500)) -> 
                 # Есть ли куда ответить: без чата кнопка ответа бессмысленна, и
                 # человек должен видеть это заранее, а не после нажатия.
                 "chat_id": str(metadata.get("chat_id") or ""),
-                "last_content": row.get("last_content") or "",
+                # Feed previews are an outward transcript carrier too.  Reuse
+                # the same projection as the full thread so a historical
+                # credential cannot reappear merely because this endpoint
+                # returns a denormalized last-message column.
+                "last_content": last_message.get("content") or "",
                 "last_role": row.get("last_role") or "",
                 "last_at": row.get("last_at"),
                 "last_conversation_id": row.get("last_conversation_id") or "",
@@ -94,6 +112,34 @@ async def chat_feed(request: Request, limit: int = Query(100, ge=1, le=500)) -> 
         # Файлы, принятые до 2026-08-04, не помечены автором. Без этого числа
         # «у всех по нулю файлов» читается как «никто ничего не присылал».
         "files_without_an_author": storage.files_without_an_author(),
+    }
+
+
+@router.get("/chats/{user_id}/messages")
+async def chat_thread(
+    user_id: str,
+    request: Request,
+    limit: int = Query(500, ge=1, le=1000),
+) -> dict[str, Any]:
+    """A bounded person-level transcript in one read and one audit event."""
+
+    return await run_blocking(_chat_thread_sync, request, user_id, limit)
+
+
+def _chat_thread_sync(request: Request, user_id: str, limit: int) -> dict[str, Any]:
+    _require(request, "admin.all_data.read")
+    storage = _services(request).storage
+    if storage.get_user(user_id) is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    _audit_cross_tenant_read(request, "admin.messages.read", user_id, scope="chat_thread")
+    page = storage.list_chat_thread(user_id, limit=limit)
+    public_items = [public_conversation_message(item) for item in page["items"]]
+    return {
+        "user_id": user_id,
+        "items": public_items,
+        "count": len(public_items),
+        "total": int(page["total"]),
+        "limit": int(page["limit"]),
     }
 
 
@@ -151,6 +197,23 @@ async def list_all_conversations(
     include_archived: bool = False,
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    return await run_blocking(
+        _list_all_conversations_sync,
+        request,
+        user_id,
+        include_archived,
+        limit,
+        offset,
+    )
+
+
+def _list_all_conversations_sync(
+    request: Request,
+    user_id: str | None,
+    include_archived: bool,
+    limit: int,
+    offset: int,
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     target = _target_user(request, user_id)
@@ -222,6 +285,23 @@ async def conversation_messages(
     user_id: str,
     limit: int = Query(500, ge=1, le=1000),
     offset: int | None = Query(default=None, ge=0),
+) -> dict[str, Any]:
+    return await run_blocking(
+        _conversation_messages_sync,
+        conversation_id,
+        request,
+        user_id,
+        limit,
+        offset,
+    )
+
+
+def _conversation_messages_sync(
+    conversation_id: str,
+    request: Request,
+    user_id: str,
+    limit: int,
+    offset: int | None,
 ) -> dict[str, Any]:
     _require(request, "admin.all_data.read")
     if not _services(request).storage.get_conversation(conversation_id, user_id):

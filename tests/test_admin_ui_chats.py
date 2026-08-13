@@ -79,8 +79,10 @@ def test_the_owner_sees_who_wrote_and_can_answer(live_admin):
             pytest.skip(f"no chromium available: {exc}")
         page = browser.new_page()
         console: list[str] = []
+        requests: list[str] = []
         page.on("console", lambda message: console.append(f"{message.type}: {message.text}"))
         page.on("pageerror", lambda error: console.append(f"pageerror: {error}"))
+        page.on("request", lambda request: requests.append(request.url))
 
         page.goto(f"{base}/admin/", wait_until="networkidle")
         page.evaluate("token => sessionStorage.setItem('jericho_api_token', token)", TOKEN)
@@ -101,11 +103,19 @@ def test_the_owner_sees_who_wrote_and_can_answer(live_admin):
         assert "нет чата" in feed_text, "не помечен человек, которому нельзя ответить"
 
         # Клик открывает переписку этого человека.
+        requests.clear()
         page.locator(".chat-row", has_text="Петров").first.click()
         page.wait_for_timeout(900)
         thread = page.locator(".thread").inner_text()
         assert "Скинул смету" in thread, "сообщение человека не показано"
         assert "Принял, записала" in thread, "ответ Пятницы не показан"
+        assert sum("/api/admin/chats/usr_petrov/messages?limit=500" in url for url in requests) == 1
+        assert not any("/api/admin/chats?limit=" in url for url in requests), (
+            "клик повторно загрузил тяжёлую ленту людей"
+        )
+        assert not any("/api/admin/conversations?" in url for url in requests), (
+            "клик снова собирает переписку каскадом по разговорам"
+        )
 
         # И ответ уходит в очередь доставки.
         page.locator("#replyText").fill("Петров, жду отчёт до пятницы")

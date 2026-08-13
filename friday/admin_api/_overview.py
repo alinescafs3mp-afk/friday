@@ -160,11 +160,33 @@ def _overview_sync(request: Request) -> dict[str, Any]:
         if counts["knowledge_objects"] == 0
         else []
     )
+    schema_row = storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
+    try:
+        schema_version: int | None = int(schema_row["value"]) if schema_row else None
+    except (TypeError, ValueError):
+        schema_version = None
+    fts_available = storage.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='knowledge_fts' LIMIT 1"
+    ).fetchone()
+    database_path = storage.settings.database_path
+    # The landing page used to call ``storage.diagnostics()`` here.  That is a
+    # full operator audit: integrity_check over the whole database plus decoding
+    # and privacy-projecting every historical knowledge snapshot.  A page view
+    # must not impersonate that check or make the serving loop wait for it.  This
+    # projection reports only facts which are cheap and current; the UI names the
+    # integrity verdict as not run and sends the operator to Diagnostics for it.
+    database = {
+        "database_size_bytes": database_path.stat().st_size if database_path.exists() else 0,
+        "schema_version": schema_version,
+        "fts_available": bool(fts_available),
+        "integrity_check": "not_run",
+        "ok": None,
+    }
     return {
         "counts": counts,
         "pending_inbox": pending_count,
-        "backups": storage.list_backups()[:5],
-        "database": storage.diagnostics(),
+        "backups": storage.list_backups(limit=5),
+        "database": database,
         "bootstrap_suggestions": bootstrap,
     }
 

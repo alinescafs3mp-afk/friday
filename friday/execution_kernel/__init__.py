@@ -67,12 +67,15 @@ from friday.tts import TTSUnavailable, synthesize_speech
 from friday.web_surfer import (
     SEARCH_DOMAIN_LIST_MAX,
     SEARCH_FRESHNESS_VALUES,
+    SEARCH_SOURCE_CLASS_VALUES,
     AllProvidersRefusedError,
     SearchFilterUnavailableError,
     normalize_search_domains,
     normalize_search_filters,
     normalize_search_language,
     normalize_search_region,
+    normalize_search_source_class,
+    web_source_matches_class,
 )
 from friday.workers._blocking import run_blocking
 
@@ -1384,6 +1387,8 @@ def _web_research_for_llm(data: dict[str, Any]) -> tuple[str, bool]:
     for key in (
         "query",
         "summary",
+        "source_class",
+        "source_class_satisfied",
         "requested_sources",
         "completed_sources",
         "timed_out_sources",
@@ -3598,6 +3603,14 @@ class ExecutionKernel:
                 max_sources = args.get("max_sources")
                 if isinstance(max_sources, int):
                     details["max_sources"] = max_sources
+                source_class = args.get("source_class")
+                if isinstance(source_class, str):
+                    try:
+                        canonical_source_class = normalize_search_source_class(source_class)
+                    except ValueError:
+                        canonical_source_class = ""
+                    if canonical_source_class:
+                        details["source_class"] = canonical_source_class
             return details
         if tool_name == "collect_files":
             # Найдено ревью собственных правок 2026-08-03. Инструмент отдаёт
@@ -5270,9 +5283,26 @@ class ExecutionKernel:
                 "error": "Web provider failed after outbound attempt.",
             }
 
-    async def _web_research(self, *, actor: ActorContext, query: str, max_sources: int = 3) -> dict[str, Any]:
+    async def _web_research(
+        self,
+        *,
+        actor: ActorContext,
+        query: str,
+        max_sources: int = 3,
+        source_class: str = "",
+    ) -> dict[str, Any]:
         _, _, web, _ = self._require_services()
         query = str(query or "").strip()
+        try:
+            source_class = normalize_search_source_class(source_class)
+        except ValueError:
+            return {
+                "query": "",
+                "sources": [],
+                "outbound_attempted": False,
+                "search_failed": True,
+                "error": "invalid_source_class",
+            }
         if not query:
             return {
                 "query": "",
@@ -5287,13 +5317,24 @@ class ExecutionKernel:
         query = query[:_MAX_OUTBOUND_QUERY_CHARS]
         bounded_sources = max(1, min(int(max_sources), 8))
         try:
-            raw_report = await web.research(query, max_sources=bounded_sources)
+            if source_class:
+                raw_report = await web.research(
+                    query,
+                    max_sources=bounded_sources,
+                    source_class=source_class,
+                )
+            else:
+                # Keep compatibility with bounded local WebSurfer wrappers that
+                # predate the closed optional source-class parameter.
+                raw_report = await web.research(query, max_sources=bounded_sources)
             if not isinstance(raw_report, Mapping):
                 raise TypeError("web research report is not a mapping")
             # The adapter owns source data, never the disclosure ledger.  Keep
             # the exact bounded string this handler sent even if a malformed
             # adapter returns a different `query` field.
             report = {**raw_report, "query": query, "outbound_attempted": True}
+            if source_class:
+                report["source_class"] = source_class
         except Exception as exc:  # noqa: BLE001 — disclose stage, never provider details
             LOGGER.warning("Web research provider failed after outbound start (%s)", type(exc).__name__)
             return {
@@ -5303,6 +5344,38 @@ class ExecutionKernel:
                 "search_failed": True,
                 "error": "Web provider failed after outbound attempt.",
             }
+        if source_class:
+            raw_sources = report.get("sources")
+            source_rows = raw_sources if isinstance(raw_sources, list) else []
+            fact_sources = [
+                item
+                for item in source_rows
+                if isinstance(item, Mapping)
+                and not str(item.get("error") or "").strip()
+                and str(item.get("text") or "").strip()
+            ]
+            if any(
+                not web_source_matches_class(str(item.get("url") or ""), source_class)
+                for item in fact_sources
+            ):
+                # Adapter contracts are not trusted as evidence.  A mismatch is
+                # a failed research result and is rejected before either Raw
+                # capture or a model-visible projection can consume it.
+                return {
+                    "query": query,
+                    "source_class": source_class,
+                    "source_class_satisfied": False,
+                    "sources": [],
+                    "requested_sources": bounded_sources,
+                    "completed_sources": 0,
+                    "timed_out_sources": 0,
+                    "failed_sources": 0,
+                    "search_timed_out": False,
+                    "outbound_attempted": True,
+                    "search_failed": True,
+                    "error": "source_class_mismatch",
+                }
+            report["source_class_satisfied"] = bool(fact_sources)
         captured = await self._capture_web_sources(actor, query, report)
         return {**report, "captured": captured} if captured else report
 
@@ -7142,7 +7215,15 @@ class ExecutionKernel:
             "web_research",
             "Поиск и чтение нескольких публичных источников.",
             "web.research",
-            {"query": {"type": "string"}, "max_sources": {"type": "integer", "minimum": 1, "maximum": 8}},
+            {
+                "query": {"type": "string"},
+                "max_sources": {"type": "integer", "minimum": 1, "maximum": 8},
+                "source_class": {
+                    "type": "string",
+                    "enum": list(SEARCH_SOURCE_CLASS_VALUES),
+                    "description": "closed source class; foreign excludes Russian source hosts",
+                },
+            },
             ["query"],
             # `mutate`, а не `observe`: инструмент КЛАДЁТ найденные страницы в Raw
             # Object и во входящие (`_capture_web_sources`). Класс риска — это

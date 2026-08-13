@@ -110,6 +110,7 @@ from friday.storage._intake import (
     resolve_structural_telegram_reply_direct_read,
 )
 from friday.storage.models import FeedbackItem, FeedbackType, InboxStatus, new_id, normalize_known_at
+from friday.telemetry.logging import redact_friday_api_tokens
 from friday.text_shape import (
     TEXT_SHAPE_INVALID,
     TEXT_SHAPE_UNOWNED,
@@ -142,6 +143,7 @@ from friday.time_routing import (
     temporal_routing_text,
 )
 from friday.tts import sanitize_text
+from friday.web_surfer import normalize_search_source_class, web_source_matches_class
 from friday.workers._blocking import run_blocking
 
 LOGGER = logging.getLogger(__name__)
@@ -2403,12 +2405,16 @@ _FILE_CREATION_AFTER_COORDINATOR = re.compile(
     re.IGNORECASE,
 )
 _DIRECT_TABLE_FILE_OBJECT = re.compile(
-    r"\b(?:сдела\w*|созда\w*|собер\w*|собра\w*|сформир\w*|подготов\w*|"
+    r"(?:\b(?:сдела\w*|созда\w*|собер\w*|собра\w*|сформир\w*|подготов\w*|"
     r"оформ\w*|состав\w*|выгруз\w*|экспорт\w*|конверт\w*|преобраз\w*|"
     r"генерир\w*|сгенерир\w*|пришл\w*|отправ\w*|сохран\w*|дай|нужн\w*)\b(?:"
     r"[^.!?\n]{0,80}\b(?:в\s+виде|как)\s+таблиц\w*\b|"
     r"(?:\s+(?!(?:по|из|с|на\s+основе)\b)\w+)"
-    r"{0,4}\s+таблиц\w*\b)",
+    r"{0,4}\s+таблиц\w*\b)|"
+    # Natural anaphoric order after a file answer: ``его в виде таблички
+    # оформить``.  It still requires both the table object and a creation verb.
+    r"\b(?:в\s+виде|как)\s+(?:таблиц|таблич)\w*\b[^.!?\n]{0,40}"
+    r"\b(?:оформ\w*|сдела\w*|созда\w*|сформир\w*|подготов\w*)\b)",
     re.IGNORECASE,
 )
 
@@ -7118,6 +7124,59 @@ class _NamedPersonCorpusSelection:
     undated: int = 0
 
 
+@dataclass(frozen=True)
+class _ExactUploaderFileSelection:
+    """One closed exact-filename source selected under one named uploader."""
+
+    applies: bool = False
+    attachments: tuple[_OwnedAttachment, ...] = ()
+    expected_count: int = 0
+    tenant_id: str = ""
+    person_id: str = ""
+    person_name: str = ""
+    reason: str = ""
+
+
+_NAMED_UPLOADER_BEFORE_FILE = re.compile(
+    r"\b(?:(?:пользовател|участник)\w*\s+)?"
+    r"(?P<name>@?[0-9A-Za-zА-ЯЁа-яё_.-]{2,64}"
+    r"(?:\s+[0-9A-Za-zА-ЯЁа-яё_.-]{2,64}){0,2})\s+"
+    r"(?:скид\w*|присыл\w*|присла\w*|загруж\w*|отправл\w*|отправил\w*)"
+    r"(?:\s+тебе)?\s+(?:файл|документ|вложен)\w*\b",
+    re.IGNORECASE,
+)
+_NAMED_UPLOADER_AFTER_FILE = re.compile(
+    # A literal filename normally contains a dot, so sentence punctuation
+    # cannot be the delimiter here.  Keep the relation on one short line and
+    # require the explicit ``от <person>`` carrier.
+    r"\b(?:файл|документ|вложен)\w*[^!?\n]{0,120}\bот\s+"
+    r"(?:(?:пользовател|участник)\w*\s+)?"
+    r"(?P<name>@?[0-9A-Za-zА-ЯЁа-яё_.-]{2,64})\b",
+    re.IGNORECASE,
+)
+
+
+def _named_uploader_exact_file_request(message: str) -> tuple[str, str] | None:
+    """Return one explicit uploader + exact filename pair, or fail closed."""
+
+    authority = file_turn_authority(message)
+    filenames = authority.source_filenames()
+    if len(filenames) != 1 or authority.quote_data():
+        return None
+    if (
+        _requests_all_attachment_set(message)
+        or _requests_both_attachment_sources(message)
+        or _ATTACHMENT_COMPARISON_ACTION.search(_record_source_command_text(message))
+    ):
+        return None
+    surface = authority.source_selector_surface()
+    matched = _NAMED_UPLOADER_BEFORE_FILE.search(surface) or _NAMED_UPLOADER_AFTER_FILE.search(surface)
+    name = " ".join(str(matched.group("name") if matched else "").split()).strip(" @?!.;,:«»\"'")
+    if not name:
+        return None
+    return name, filenames[0]
+
+
 def _named_person_query_from(message: str) -> str:
     visible = _classification_text(message)
     match = _NAMED_PERSON_CARRIER.search(visible) or _NAMED_PERSON_FROM_CARRIER.search(visible)
@@ -7130,10 +7189,17 @@ def _named_person_aggregation_scope(
 ) -> _NamedPersonAggregationScope | None:
     """Closed current/prior scope for one named-user content aggregation."""
 
-    if not file_turn_authority(message).proved("person"):
-        return None
     visible = _classification_text(message)
     speech = file_authority_speech(visible)
+    person_proved = file_turn_authority(message).proved("person")
+    scope_only = bool(_NAMED_PERSON_SCOPE_ONLY.fullmatch(speech))
+    implicit_clocked_self_corpus = bool(
+        _NAMED_PERSON_AGGREGATION_ACTION.search(speech)
+        and _NAMED_PERSON_AGGREGATION_SUBJECT.search(speech)
+        and (_NAMED_PERSON_RECEIVED_TIME.search(speech) or _NAMED_PERSON_DOCUMENT_TIME.search(speech))
+    )
+    if not (person_proved or scope_only or implicit_clocked_self_corpus):
+        return None
     if not _named_person_query_from(visible) and file_turn_authority(message).source_filenames():
         # An exact input filename is a stronger source selector than the
         # personless all-upload corpus heuristic.  In particular, the generic
@@ -8278,7 +8344,7 @@ _ATTACHMENT_SUMMARY_REQUEST = re.compile(
     r"(?:"
     r"\b(?:сдела\w*|дай|подготов\w*|состав\w*|напиш\w*|сформулир\w*)\b"
     r"[^.!?\n]{0,80}\b(?:сводк\w*|резюме|обзор\w*|вывод\w*|итог\w*)\b|"
-    r"\b(?:кратк\w*\s+)?(?:перескаж\w*|обобщ\w*|суммариз\w*|резюмир\w*)\b|"
+    r"\b(?:кратк\w*\s+)?(?:перескаж\w*|обобщ\w*|обощ\w*|суммариз\w*|резюмир\w*)\b|"
     r"\b(?:дай|сдела\w*|подготов\w*|состав\w*|напиш\w*|излож\w*)\b"
     r"[^.!?\n]{0,80}\b(?:кратк\w*\s+)?содержани\w*\b|"
     r"\bподвед\w*\s+итог\w*\b|"
@@ -8601,6 +8667,29 @@ def _multi_attachment_open_task_count(message: str) -> int | None:
     if _requests_both_attachment_sources(message):
         return 2
     return None
+
+
+_ACTIVE_MULTI_ATTACHMENT_SET = re.compile(
+    r"\bэт\w*\s+(?:\d{1,2}|два|две|двух|три|тр[её]х|четыре|четыр[её]х|"
+    r"пять|шесть|семь|восемь|девять)\s+"
+    r"(?:файл|документ|вложен|таблиц)\w*\b|"
+    r"\b(?:these|those)\s+(?:two|three|four|five|six|seven|eight|nine|\d{1,2})\s+"
+    r"(?:files?|documents?|attachments?)\b",
+    re.IGNORECASE,
+)
+
+
+def _requests_active_multi_attachment_set(message: str) -> bool:
+    """Current conversational file set, distinct from catalog first/last-N."""
+
+    command = _record_source_command_text(message)
+    return bool(
+        _ACTIVE_MULTI_ATTACHMENT_SET.search(command)
+        and not _attachment_count_range_side(message)
+        and not _attachment_navigation_filename_mentions(message)
+        and not _ATTACHMENT_WORD_ORDINAL_PHRASE.search(command)
+        and not _ATTACHMENT_NUMERIC_ORDINAL.search(command)
+    )
 
 
 def _requests_all_attachment_set(message: str) -> bool:
@@ -9626,7 +9715,11 @@ def _attachment_reference_kind(message: str) -> str:
         return "deictic"
     if _EXPLICIT_ATTACHMENT_REFERENCE.search(command):
         return "explicit"
-    if _attachment_navigation_filename_mentions(message) or _descriptive_filename_selector(message):
+    if (
+        _attachment_navigation_filename_mentions(message)
+        or _descriptive_filename_selector(message)
+        or _filename_clue_request(message) is not None
+    ):
         return "explicit"
     if (
         _ATTACHMENT_WORD_ORDINAL_PHRASE.search(command)
@@ -10993,14 +11086,14 @@ def _filename_clue_terms(message: str) -> tuple[str, ...]:
 
     result: list[str] = []
     for phrase in _attachment_reference_terms(message):
-        for matched in re.finditer(r"[^\W_]{5,}", phrase):
+        for matched in re.finditer(r"[^\W_]{4,}", phrase):
             token = matched.group(0)
             if token in _ATTACHMENT_TOPIC_STOP_WORDS or any(
                 token.startswith(prefix) for prefix in _ATTACHMENT_TOPIC_STOP_PREFIXES
             ):
                 continue
-            normalized = stem(token, min_input=5).casefold().replace("ё", "е")
-            if len(normalized) >= 5 and normalized not in result:
+            normalized = stem(token, min_input=4).casefold().replace("ё", "е")
+            if len(normalized) >= 4 and normalized not in result:
                 result.append(normalized)
             if len(result) >= 8:
                 return tuple(result)
@@ -11008,12 +11101,12 @@ def _filename_clue_terms(message: str) -> tuple[str, ...]:
 
 
 def _filename_clue_match(term: str, token: str) -> float:
-    normalized = stem(token, min_input=5).casefold().replace("ё", "е")
-    if len(normalized) < 5:
+    normalized = stem(token, min_input=4).casefold().replace("ё", "е")
+    if len(normalized) < 4:
         return 0.0
     if term == normalized:
         return 1.0
-    if min(len(term), len(normalized)) >= 5 and (term.startswith(normalized) or normalized.startswith(term)):
+    if min(len(term), len(normalized)) >= 4 and (term.startswith(normalized) or normalized.startswith(term)):
         return 0.96
     ratio = SequenceMatcher(None, term, normalized, autojunk=False).ratio()
     return ratio if ratio >= 0.84 else 0.0
@@ -11022,11 +11115,14 @@ def _filename_clue_match(term: str, token: str) -> float:
 def _filename_clue_ids(
     message: str,
     catalog: Sequence[Mapping[str, str]],
+    *,
+    terms: Sequence[str] | None = None,
+    minimum_matches: int | None = None,
 ) -> tuple[list[str], int]:
     """Rank descriptive terms against filenames before any body search."""
 
-    terms = _filename_clue_terms(message)
-    if not terms:
+    clue_terms = tuple(dict.fromkeys(terms or _filename_clue_terms(message)))[:8]
+    if not clue_terms:
         return [], 0
     scored: list[tuple[float, str]] = []
     for item in catalog[:_CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES]:
@@ -11035,11 +11131,16 @@ def _filename_clue_ids(
             continue
         _stem, _extension, tokens, _compact = _filename_match_parts(str(item.get("filename") or ""))
         matches = [
-            max((_filename_clue_match(term, token) for token in tokens), default=0.0) for term in terms
+            max((_filename_clue_match(term, token) for token in tokens), default=0.0) for term in clue_terms
         ]
         positive = [score for score in matches if score > 0]
-        long_match = any(score > 0 and len(term) >= 8 for term, score in zip(terms, matches, strict=True))
-        if not long_match and len(positive) < 2:
+        long_match = any(
+            score > 0 and len(term) >= 8 for term, score in zip(clue_terms, matches, strict=True)
+        )
+        if minimum_matches is not None:
+            if len(positive) < max(1, min(int(minimum_matches), len(clue_terms))):
+                continue
+        elif not long_match and len(positive) < 2:
             continue
         scored.append((len(positive) + sum(positive) / max(1, len(positive)), raw_id))
     if not scored:
@@ -11053,6 +11154,7 @@ def _descriptive_filename_selector(message: str) -> bool:
     """Whether an explicit file phrase carries a plausible filename clue."""
 
     command = _record_source_command_text(message)
+    visible = _classification_text(message)
     named_cue = bool(
         _EXPLICIT_DESCRIPTIVE_FILENAME_CUE.search(command)
         or re.search(
@@ -11061,10 +11163,25 @@ def _descriptive_filename_selector(message: str) -> bool:
             command,
             flags=re.IGNORECASE,
         )
+        or re.search(
+            r"\bв\s+[0-9A-Za-zА-ЯЁа-яё_.-]{4,80}\s+"
+            r"(?:посмотр\w*|проверь\w*|поищ\w*|найд\w*)\b",
+            command,
+            flags=re.IGNORECASE,
+        )
     )
-    return bool(
-        (_EXPLICIT_ATTACHMENT_REFERENCE.search(command) or named_cue) and _filename_clue_terms(message)
+    quoted_prior_name_cue = bool(
+        re.search(
+            rf"\b(?:ранее\s+)?(?:загружен|прислан|отправлен)\w*\s+"
+            rf"{_ATTACHMENT_REFERENCE_NOUN}\b\s*[«\"]",
+            visible,
+            flags=re.IGNORECASE,
+        )
     )
+    # A generic carrier such as ``из загруженного документа`` identifies the
+    # conversation attachment; the neighbouring web/topic words are not its
+    # filename.  Descriptive lookup needs its own positive naming grammar.
+    return bool((named_cue or quoted_prior_name_cue) and _filename_clue_terms(message))
 
 
 _EXPLICIT_DESCRIPTIVE_FILENAME_CUE = re.compile(
@@ -11076,6 +11193,154 @@ _EXPLICIT_DESCRIPTIVE_FILENAME_CUE = re.compile(
     r")",
     re.IGNORECASE,
 )
+
+
+@dataclass(frozen=True)
+class _FilenameInventoryRequest:
+    term: str
+
+
+@dataclass(frozen=True)
+class _FilenameClueRequest:
+    """A closed, unquoted request to discover one prior upload by its filename."""
+
+    terms: tuple[str, ...]
+    minimum_matches: int
+    display_clue: str
+
+
+@dataclass(frozen=True)
+class _FilenameClueSelection:
+    """Body-free candidate verdict followed, at most, by one exact re-read."""
+
+    applies: bool = False
+    attachments: tuple[dict[str, Any], ...] = ()
+    expected_count: int = 0
+    answer: str = ""
+
+
+_FILENAME_INVENTORY_ACTION = re.compile(
+    r"\b(?:есть|найд\w*|покаж\w*|перечисл\w*|какие|сколько|проверь\w*)\b",
+    re.IGNORECASE,
+)
+_FILENAME_INVENTORY_SCOPE = re.compile(
+    r"\b(?:файл|документ|вложен)\w*[^.!?\n]{0,100}"
+    r"\b(?:в\s+названи\w*|в\s+имени|названи\w*)\b",
+    re.IGNORECASE,
+)
+
+_FILENAME_CLUE_TOKEN = r"[0-9A-Za-zА-ЯЁа-яё][0-9A-Za-zА-ЯЁа-яё_.-]{3,39}"
+_NATURAL_FILENAME_CLUE = re.compile(
+    rf"\bв\s+(?P<clue>{_FILENAME_CLUE_TOKEN})\s+"
+    r"(?:посмотр\w*|поищ\w*|провер\w*|найд\w*)\b",
+    re.IGNORECASE,
+)
+_PRIOR_UPLOAD_FILENAME_CUE = re.compile(
+    r"(?:"
+    r"\b(?:я\s+)?(?:уже\s+|раньше\s+)?"
+    r"(?:кидал|скидывал|присылал|отправлял|загружал)\w*\b|"
+    r"\b(?:кидал|скидывал|присылал|отправлял|загружал)\w*"
+    r"(?:\s+\w+){0,3}\s+(?:уже|раньше)\b"
+    r")",
+    re.IGNORECASE,
+)
+_APPROX_FILENAME_PAIR_THERE = re.compile(
+    rf"\b(?P<first>{_FILENAME_CLUE_TOKEN})\s+(?P<second>{_FILENAME_CLUE_TOKEN})"
+    r"\s*[,;:–—-]?\s*(?:(?:он|она|оно|они)\s+)?там\s+"
+    r"(?:есть|указан\w*|упомянут\w*|написан\w*)\b",
+    re.IGNORECASE,
+)
+_APPROX_FILENAME_PAIR_ACTION = re.compile(
+    rf"(?:"
+    rf"\b(?:в|из)\s+(?P<source_first>{_FILENAME_CLUE_TOKEN})\s+"
+    rf"(?P<source_second>{_FILENAME_CLUE_TOKEN})\s+"
+    r"(?:посмотр\w*|поищ\w*|провер\w*|найд\w*)\b|"
+    r"\b(?:посмотр\w*|поищ\w*|провер\w*|найд\w*)\s+"
+    rf"(?:в|из)\s+(?P<action_first>{_FILENAME_CLUE_TOKEN})\s+"
+    rf"(?P<action_second>{_FILENAME_CLUE_TOKEN})\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _filename_clue_is_web_scope(value: str) -> bool:
+    """A web location is an action scope, never a prior filename clue."""
+
+    normalized = stem(value, min_input=4).casefold().replace("ё", "е")
+    return normalized in {"интернет", "сет", "онлайн", "online", "web", "сайте", "сайт"}
+
+
+def _filename_clue_request(message: str) -> _FilenameClueRequest | None:
+    """Recognise two bounded body-free filename discovery forms.
+
+    All authority comes from current speech.  Quoted examples cannot select a
+    file, and query literals are never promoted into filename clues.
+    """
+
+    command = _record_source_command_text(message)
+    if not command:
+        return None
+
+    natural = _NATURAL_FILENAME_CLUE.search(command)
+    if natural is not None and _PRIOR_UPLOAD_FILENAME_CUE.search(command):
+        raw_clue = str(natural.group("clue") or "").strip()
+        if _filename_clue_is_web_scope(raw_clue):
+            return None
+        terms = _filename_clue_terms(raw_clue)
+        if len(terms) == 1:
+            return _FilenameClueRequest(terms=terms, minimum_matches=1, display_clue=raw_clue)
+
+    pair = _APPROX_FILENAME_PAIR_THERE.search(command) or _APPROX_FILENAME_PAIR_ACTION.search(command)
+    if pair is None:
+        return None
+    groups = pair.groupdict()
+    first = str(groups.get("first") or groups.get("source_first") or groups.get("action_first") or "")
+    second = str(groups.get("second") or groups.get("source_second") or groups.get("action_second") or "")
+    # ``найди в интернете свежие новости`` has the same shallow shape as
+    # ``найди в БПЛА штат``.  A web location is an action scope, never a
+    # descriptive filename.  Close it before catalog lookup so an otherwise
+    # valid file+web continuation can restore its real attachment lineage.
+    if _filename_clue_is_web_scope(first):
+        return None
+    terms = _filename_clue_terms(f"{first} {second}")
+    if len(terms) != 2 or terms[0] == terms[1]:
+        return None
+    return _FilenameClueRequest(
+        terms=terms,
+        minimum_matches=2,
+        display_clue=f"{first} {second}".strip(),
+    )
+
+
+def _filename_inventory_request(message: str) -> _FilenameInventoryRequest | None:
+    """Parse a body-free filename substring inventory request."""
+
+    command = _record_source_command_text(message)
+    if not (_FILENAME_INVENTORY_ACTION.search(command) and _FILENAME_INVENTORY_SCOPE.search(command)):
+        return None
+    quoted = [
+        match.group(0)[1:-1].strip()
+        for match in _QUOTED_TEXT.finditer(_classification_text(message))
+        if 2 <= len(match.group(0)[1:-1].strip()) <= 80
+    ]
+    if len(quoted) == 1:
+        term = quoted[0]
+    elif quoted:
+        return None
+    else:
+        matched = re.search(
+            r"\b(?:слово|фраз[ау]|подстрок[ау])\s+"
+            r"(?P<term>[0-9A-Za-zА-ЯЁа-яё_.-]{2,80})\b",
+            command,
+            re.IGNORECASE,
+        )
+        if matched is None:
+            return None
+        term = str(matched.group("term") or "").strip()
+    normalized = _normalized_attachment_selector(term)
+    if not normalized or len(normalized) > 80:
+        return None
+    return _FilenameInventoryRequest(term=term)
 
 
 def _raw_file_is_audio(content_type: str, metadata: Mapping[str, Any]) -> bool:
@@ -12692,7 +12957,7 @@ _UPLOAD_OVERVIEW_TIMEOUT_SEC = 20.0
 _UPLOAD_OVERVIEW_MAX_SOURCE_CHARS = 24_000
 _UPLOAD_OVERVIEW_MIN_SOURCE_CHARS = 80
 _UPLOAD_OVERVIEW_MAX_CHARS = 2_600
-_UPLOAD_OVERVIEW_MAX_TOKENS = 700
+_UPLOAD_OVERVIEW_MAX_TOKENS = 900
 _UPLOAD_OVERVIEW_TOTAL_MAX_CHARS = 6_500
 _UPLOAD_OVERVIEW_HEADING = "Подробный обзор:"
 _UPLOAD_OVERVIEW_SYSTEM = (
@@ -12702,13 +12967,16 @@ _UPLOAD_OVERVIEW_SYSTEM = (
     "Используй только text этих источников, в том же порядке, не смешивая их. "
     "Не выдумывай факты, примеры, числа и имена. "
     "Пиши обычным текстом без разметки, ссылок и команд. "
+    "Заверши ответ полностью; не более 2200 знаков и не более шести коротких абзацев. "
     "Укажи назначение и тип материала, структуру (разделы, листы, поля), "
     "главные темы, заметные факты из текста и что можно спросить дальше."
 )
 _ADJACENT_OVERVIEW_UNRESOLVED = "Не могу сделать обзор: нет однозначно выбранного файла."
 _ADJACENT_ATTACHMENT_OVERVIEW_REQUEST = re.compile(
     r"(?:"
-    r"(?:дай|сделай)\s+обзор(?:\s+(?:этого\s+)?файла)?|"
+    r"(?:дай|сделай)\s+(?:обзор|сводк\w*)"
+    r"(?:\s+(?:по\s+)?(?:этому|данному|этому\s+же)\s+файлу|"
+    r"\s+(?:этого\s+)?файла)?|"
     r"кратко\s+по\s+(?:этому\s+)?файлу|"
     r"summary|abstract"
     r")"
@@ -15429,6 +15697,7 @@ def _project_web_tool_result(
     *,
     transport_success: bool = True,
     limit: int = 5,
+    source_class: str = "",
 ) -> tuple[str, list[dict[str, str]], dict[str, Any] | None]:
     """Classify a web tool result by usable evidence, not handler transport.
 
@@ -15438,6 +15707,10 @@ def _project_web_tool_result(
     single authority used by the prompt, verifier, metadata and delivery.
     """
 
+    try:
+        source_class = normalize_search_source_class(source_class)
+    except ValueError:
+        return "failed", [], None
     if not transport_success or not isinstance(data, Mapping):
         return "failed", [], None
     if "outbound_attempted" not in data:
@@ -15714,6 +15987,12 @@ def _project_web_tool_result(
     else:
         return "failed", [], None
 
+    if source_class and any(not web_source_matches_class(source["url"], source_class) for source in usable):
+        # The provider-side filter is an enforcement boundary, not a hint.  A
+        # malformed/legacy adapter must not smuggle a Russian fact-bearing page
+        # into a foreign-source result merely because its transport succeeded.
+        return "failed", [], None
+
     all_distinct: list[dict[str, str]] = []
     seen: set[str] = set()
     for source in usable:
@@ -15757,6 +16036,8 @@ def _project_web_tool_result(
             }
             projected_data["sources"] = filtered_items
             projected_data["usable_sources"] = len(filtered_items)
+            if source_class:
+                projected_data["source_class"] = source_class
             projected_data["summary"] = (
                 f"Accepted {len(filtered_items)} readable public source"
                 f"{'s' if len(filtered_items) != 1 else ''}."
@@ -15852,6 +16133,59 @@ def _direct_file_request_uses_the_web(message: str) -> bool:
     return bool(visible and _is_direct_file_request(visible) and _DIRECT_FILE_WEB_SOURCE.search(visible))
 
 
+_PUBLIC_NEWS_TOPIC = re.compile(r"\bновост\w*\b|\bnews\b", re.IGNORECASE)
+_PUBLIC_NEWS_SOURCE_SCOPE = re.compile(
+    r"\b(?:сайт\w*|источник\w*|сми|пресс\w*|медиа|"
+    r"зарубежн\w*|иностранн\w*|международн\w*|миров\w*|"
+    r"foreign|international|world)\b",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_REQUEST_COMMAND = re.compile(
+    r"^\W*(?:(?:а|и|ну|пожалуйста|мож(?:ешь|ете)|давай(?:те)?)\W+)*"
+    r"(?:сдела\w*|дай|дайте|подготов\w*|состав\w*|собер\w*|покаж\w*|"
+    r"расскаж\w*|найд\w*|поищ\w*|привед\w*|give|show|find|summari[sz]e)\b",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_REQUEST_QUESTION = re.compile(
+    r"^\W*(?:(?:а|и|ну|пожалуйста)\W+)*"
+    r"(?:какие\b[^.!?\n]{0,90}\bновост\w*|"
+    r"что\s+(?:нового\s+)?(?:пиш\w*|сообща\w*|вышл\w*|произошл\w*)\b"
+    r"[^.!?\n]{0,90}\b(?:новост\w*|сми|пресс\w*)|"
+    r"what\b[^.!?\n]{0,90}\bnews\b)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_FOREIGN_PUBLIC_SOURCE_SCOPE = re.compile(
+    r"не\s+из\s+ру\w*|не\s+рос\w+|не\s+рунет\w*|вне\s+рунет\w*|"
+    r"зарубежн\w+|иностранн\w+|западн\w+\s+(?:сми|пресс\w*|источник\w*)|"
+    r"миров\w+\s+(?:сми|пресс\w*|новост\w*)|на\s+английск\w+|"
+    r"english\s+sources?|foreign\s+(?:press|media|sources?)|world\s+news",
+    re.IGNORECASE,
+)
+
+
+def _public_news_site_request(speech: str) -> bool:
+    """A command/question for a public-news source set, not a mere mention."""
+
+    visible = " ".join(str(speech or "").split())
+    return bool(
+        visible
+        and _PUBLIC_NEWS_TOPIC.search(visible)
+        and _PUBLIC_NEWS_SOURCE_SCOPE.search(visible)
+        and not _FRESH_PUBLIC_NEWS_LOCAL_SCOPE.search(visible)
+        and (_PUBLIC_NEWS_REQUEST_COMMAND.search(visible) or _PUBLIC_NEWS_REQUEST_QUESTION.search(visible))
+    )
+
+
+def _web_source_class_on_speech(speech: str) -> str:
+    """Closed source-class authority proved on current unquoted speech."""
+
+    visible = " ".join(str(speech or "").split())
+    if not visible or not _FOREIGN_PUBLIC_SOURCE_SCOPE.search(visible):
+        return ""
+    return "foreign" if _web_action_on_speech(visible) else ""
+
+
 def _web_action_on_speech(speech: str) -> bool:
     """Web request proved on an already-unquoted surface."""
 
@@ -15865,6 +16199,7 @@ def _web_action_on_speech(speech: str) -> bool:
         _ASKS_FOR_THE_WEB.search(visible)
         or _ASKS_FOR_THE_WEB_AFTER_COORDINATOR.search(visible)
         or fresh_public_news
+        or _public_news_site_request(visible)
         or (_is_direct_file_request(visible) and _DIRECT_FILE_WEB_SOURCE.search(visible))
     )
 
@@ -15877,7 +16212,7 @@ def asks_for_the_web(message: str) -> bool:
     команда, а не факт: замерено, что пятнадцать таких просьб подряд дали
     пятнадцать записей в Inbox.
     """
-    visible = _classification_text(message)
+    visible = _record_source_command_text(message)
     fresh_public_news = bool(
         _ASKS_FOR_FRESH_PUBLIC_NEWS.fullmatch(visible) and not _FRESH_PUBLIC_NEWS_LOCAL_SCOPE.search(visible)
     )
@@ -15885,6 +16220,7 @@ def asks_for_the_web(message: str) -> bool:
         _ASKS_FOR_THE_WEB.search(visible)
         or _ASKS_FOR_THE_WEB_AFTER_COORDINATOR.search(visible)
         or fresh_public_news
+        or _public_news_site_request(visible)
         or _direct_file_request_uses_the_web(visible)
     )
 
@@ -16402,6 +16738,12 @@ def file_turn_authority(message: str) -> FileTurnAuthority:
             _EXPLICIT_ATTACHMENT_REFERENCE.search(speech)
             or _ATTACHMENT_COMPARISON_ACTION.search(speech)
             or _DOCUMENT_METADATA_NOUN.search(speech)
+            or re.search(
+                r"\b(?:о\s+ч[её]м|про\s+что|что\s+(?:в|внутри)|"
+                r"какое\s+содержани|расскаж\w*\s+о)\b",
+                speech,
+                re.IGNORECASE,
+            )
         )
     )
     deictic_content_navigation = bool(
@@ -16413,10 +16755,12 @@ def file_turn_authority(message: str) -> FileTurnAuthority:
         and _ATTACHMENT_READ_ONLY_ACTION.search(speech)
     )
     if (
-        _file_route_action_command(message)
+        (_file_route_action_command(message) and not _public_news_site_request(speech))
         or _independent_source_set_request(message)
+        or _filename_clue_request(message) is not None
         or source_identity_navigation
         or deictic_content_navigation
+        or (_is_direct_file_request(speech) and re.search(r"\b(?:его|е[её]|это)\b", speech, re.IGNORECASE))
     ):
         actions.add("local_read")
     if _web_action_on_speech(speech):
@@ -20122,6 +20466,8 @@ class AgentRuntime:
             return None
 
         raw_text = str(raw.get("_raw_content") or "")
+        transient_raw_text = redact_friday_api_tokens(raw_text)
+        credential_redacted = transient_raw_text != raw_text
         extraction_success = metadata.get("extraction_success") is True
         advisory_only = bool(metadata.get("vision_review_required") or metadata.get("transcription"))
         archive_truncated = metadata.get("archive_truncated") is True
@@ -20159,6 +20505,7 @@ class AgentRuntime:
         office_index = (
             validate_runtime_office_index(stored_office_index, raw_text)
             if text_available
+            and not credential_redacted
             and isinstance(stored_office_index, Mapping)
             and verify_office_structure_attestation(
                 self.storage,
@@ -20172,7 +20519,12 @@ class AgentRuntime:
         # One request-aware projector below either selects matching passages or
         # balances the ordinary 24k envelope.  Nothing here is persisted into a
         # message or returned by the API.
-        text = raw_text if text_available else ""
+        # Raw remains immutable and byte-exact.  Old rows indexed before
+        # extractor hardening are projected through a process-private redacted
+        # body before any model, verifier, tool or late carrier can consume it.
+        # An Office index embeds literal cell text/offsets, so it is withheld
+        # when that projection changed rather than leaking the unredacted cell.
+        text = transient_raw_text if text_available else ""
 
         def nonnegative_int(name: str) -> int:
             try:
@@ -20446,6 +20798,285 @@ class AgentRuntime:
             reason=reason,
             unattributed=unattributed,
             undated=undated,
+        )
+
+    def _select_exact_uploader_file(
+        self,
+        request: tuple[str, str] | None,
+        *,
+        actor: ActorContext,
+    ) -> _ExactUploaderFileSelection:
+        """Resolve a named uploader before reading one exact registered file."""
+
+        if request is None:
+            return _ExactUploaderFileSelection()
+        person_query, filename = request
+        chosen = unambiguous(resolvable_person_matches(self.storage, actor, person_query))
+        if chosen is None:
+            return _ExactUploaderFileSelection(
+                applies=True,
+                expected_count=1,
+                reason="person_not_unique",
+            )
+        authorization = getattr(self.kernel, "authorization", None)
+        self_target = chosen.user_id == actor.own_id
+        allowed = bool(
+            authorization is not None
+            and authorization.authorize(
+                actor,
+                "files.read" if self_target else "admin.all_data.read",
+            ).allowed
+        )
+        person_name = chosen.display_name or chosen.username or chosen.user_id
+        if not allowed:
+            return _ExactUploaderFileSelection(
+                applies=True,
+                expected_count=1,
+                person_name=person_name,
+                reason="access_denied",
+            )
+        tenant = actor.user_id if actor.shared_tenant else chosen.user_id
+        rows = resolve_owned_file_exact_filename_direct_read(
+            self.storage,
+            tenant,
+            chosen.user_id,
+            filename,
+        )
+        if not rows:
+            catalog = self.storage.list_owned_file_catalog(
+                tenant,
+                chosen.user_id,
+                limit=_CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES + 1,
+            )
+            if len(catalog) > _CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES:
+                return _ExactUploaderFileSelection(
+                    applies=True,
+                    expected_count=1,
+                    tenant_id=tenant,
+                    person_id=chosen.user_id,
+                    person_name=person_name,
+                    reason="catalog_capped",
+                )
+            fuzzy_ids, fuzzy_expected = _fuzzy_filename_ids(
+                filename,
+                [
+                    {
+                        "raw_object_id": str(item.get("id") or ""),
+                        "filename": str(item.get("filename") or ""),
+                    }
+                    for item in catalog
+                    if isinstance(item, Mapping)
+                ],
+            )
+            if fuzzy_expected == 1 and len(fuzzy_ids) == 1:
+                selected = next(
+                    (item for item in catalog if str(item.get("id") or "") == fuzzy_ids[0]),
+                    None,
+                )
+                if isinstance(selected, Mapping):
+                    rows = resolve_owned_file_exact_filename_direct_read(
+                        self.storage,
+                        tenant,
+                        chosen.user_id,
+                        str(selected.get("filename") or ""),
+                        expected_raw_id=fuzzy_ids[0],
+                    )
+            elif fuzzy_expected > 1:
+                return _ExactUploaderFileSelection(
+                    applies=True,
+                    expected_count=1,
+                    tenant_id=tenant,
+                    person_id=chosen.user_id,
+                    person_name=person_name,
+                    reason="file_ambiguous",
+                )
+        if len(rows) != 1:
+            return _ExactUploaderFileSelection(
+                applies=True,
+                expected_count=1,
+                tenant_id=tenant,
+                person_id=chosen.user_id,
+                person_name=person_name,
+                reason="file_not_unique",
+            )
+        row = rows[0]
+        authority = _make_explicit_filename_direct_read_authority(
+            raw_object_id=str(row.get("id") or ""),
+            tenant_id=tenant,
+            uploaded_by=chosen.user_id,
+            filename=str(row.get("filename") or ""),
+        )
+        if authority is None:
+            return _ExactUploaderFileSelection(
+                applies=True,
+                expected_count=1,
+                tenant_id=tenant,
+                person_id=chosen.user_id,
+                person_name=person_name,
+                reason="file_not_unique",
+            )
+        owned = self._owned_file_attachment(
+            authority.raw_object_id,
+            tenant_id=tenant,
+            person_id=chosen.user_id,
+            direct_read_authority=authority,
+        )
+        if owned is None:
+            return _ExactUploaderFileSelection(
+                applies=True,
+                expected_count=1,
+                tenant_id=tenant,
+                person_id=chosen.user_id,
+                person_name=person_name,
+                reason="reauthorization_failed",
+            )
+        object.__setattr__(owned, _TELEGRAM_REPLY_UPLOADER_ATTR, chosen.user_id)
+        return _ExactUploaderFileSelection(
+            applies=True,
+            attachments=(owned,),
+            expected_count=1,
+            tenant_id=tenant,
+            person_id=chosen.user_id,
+            person_name=person_name,
+        )
+
+    def _filename_inventory_answer(
+        self,
+        request: _FilenameInventoryRequest | None,
+        *,
+        tenant_id: str,
+        person_id: str,
+    ) -> str:
+        """Render one complete body-free filename substring inventory."""
+
+        if request is None:
+            return ""
+        catalog = self.storage.list_owned_file_catalog(
+            tenant_id,
+            person_id,
+            limit=_CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES + 1,
+        )
+        if len(catalog) > _CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES:
+            return (
+                "Полный каталог имён файлов сейчас не помещается в безопасный предел; "
+                "утверждать, сколько совпадений есть, нельзя. Уточните имя точнее."
+            )
+        needle = _normalized_attachment_selector(request.term)
+        matches = [
+            str(item.get("filename") or "")[:260]
+            for item in catalog
+            if isinstance(item, Mapping)
+            and needle in _normalized_attachment_selector(str(item.get("filename") or ""))
+        ]
+        if not matches:
+            return f"В названиях доступных файлов совпадений с «{request.term[:80]}» не найдено."
+        shown = matches[:50]
+        lines = [f"В названиях доступных файлов найдено совпадений: {len(matches)}."]
+        lines.extend(f"• {_quicklook_display_filename(name)}" for name in shown)
+        if len(matches) > len(shown):
+            lines.append(f"Показаны первые {len(shown)}; уточните имя для более короткого списка.")
+        return "\n".join(lines)
+
+    def _select_filename_clue(
+        self,
+        request: _FilenameClueRequest | None,
+        *,
+        tenant_id: str,
+        person_id: str,
+    ) -> _FilenameClueSelection:
+        """Resolve filename metadata first and hydrate only one exact winner."""
+
+        if request is None:
+            return _FilenameClueSelection()
+        catalog_rows = self.storage.list_owned_file_catalog(
+            tenant_id,
+            person_id,
+            limit=_CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES + 1,
+        )
+        if len(catalog_rows) > _CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES:
+            return _FilenameClueSelection(
+                applies=True,
+                answer=("Каталог имён файлов не помещается в безопасный предел. Укажите точное имя файла."),
+            )
+        catalog = [
+            {
+                "raw_object_id": str(item.get("id") or ""),
+                "filename": str(item.get("filename") or "")[:260],
+            }
+            for item in catalog_rows
+            if isinstance(item, Mapping)
+        ]
+        winner_ids, _winner_count = _filename_clue_ids(
+            "",
+            catalog,
+            terms=request.terms,
+            minimum_matches=request.minimum_matches,
+        )
+        by_id = {
+            str(item.get("raw_object_id") or ""): str(item.get("filename") or "")
+            for item in catalog
+            if _RAW_OBJECT_ID_RE.fullmatch(str(item.get("raw_object_id") or ""))
+        }
+        winners = [(raw_id, by_id.get(raw_id, "")) for raw_id in winner_ids if by_id.get(raw_id)]
+        if not winners:
+            return _FilenameClueSelection(
+                applies=True,
+                answer=(
+                    "По подсказке в имени файла "
+                    f"«{request.display_clue[:80]}» не найдено однозначного ранее загруженного файла. "
+                    "Уточните его точное имя."
+                ),
+            )
+        if len(winners) != 1:
+            shown = winners[:20]
+            lines = [f"В названиях доступных файлов найдено совпадений: {len(winners)}."]
+            lines.extend(f"• {_quicklook_display_filename(filename)}" for _raw_id, filename in shown)
+            if len(winners) > len(shown):
+                lines.append(f"• …и ещё {len(winners) - len(shown)}")
+            lines.append("Укажите точное имя файла.")
+            return _FilenameClueSelection(applies=True, answer="\n".join(lines))
+
+        raw_id, filename = winners[0]
+        rows = resolve_owned_file_exact_filename_direct_read(
+            self.storage,
+            tenant_id,
+            person_id,
+            filename,
+            expected_raw_id=raw_id,
+        )
+        if len(rows) != 1:
+            return _FilenameClueSelection(
+                applies=True,
+                answer=(
+                    "Кандидат по имени файла больше не проходит точную проверку доступа. "
+                    "Другой файл не подставлен."
+                ),
+            )
+        authority = _make_explicit_filename_direct_read_authority(
+            raw_object_id=str(rows[0].get("id") or ""),
+            tenant_id=tenant_id,
+            uploaded_by=person_id,
+            filename=str(rows[0].get("filename") or ""),
+        )
+        if authority is None:
+            return _FilenameClueSelection(
+                applies=True,
+                answer="Файл не прошёл точную проверку доступа; другой файл не подставлен.",
+            )
+        hydrated = self._hydrate_explicit_filename_direct_read(
+            authority,
+            tenant_id=tenant_id,
+            person_id=person_id,
+        )
+        if len(hydrated) != 1:
+            return _FilenameClueSelection(
+                applies=True,
+                answer="Файл не прошёл повторную проверку доступа; другой файл не подставлен.",
+            )
+        return _FilenameClueSelection(
+            applies=True,
+            attachments=(hydrated[0],),
+            expected_count=1,
         )
 
     async def _hydrate_legacy_document_metadata(
@@ -20951,7 +21582,9 @@ class AgentRuntime:
                 direct_read_authority=direct_read_authority,
                 historical_authority=historical_authority,
             )
-            source_text = str(inspected.get("_runtime_source_text") or inspected.get("text_preview") or "")
+            source_text = redact_friday_api_tokens(
+                str(inspected.get("_runtime_source_text") or inspected.get("text_preview") or "")
+            )
             extraction_success = inspected.get("extraction_success") is True
             advisory_only = inspected.get("advisory_only") is True
             if canonical is None or not extraction_success:
@@ -20997,9 +21630,13 @@ class AgentRuntime:
             if projected_metadata:
                 recovered[_OWNED_SAFE_DOCUMENT_METADATA] = projected_metadata
 
-            office_index = validate_runtime_office_index(
-                inspected.get(OFFICE_STRUCTURE_KEY),
-                source_text,
+            raw_recovered_text = str(
+                inspected.get("_runtime_source_text") or inspected.get("text_preview") or ""
+            )
+            office_index = (
+                validate_runtime_office_index(inspected.get(OFFICE_STRUCTURE_KEY), raw_recovered_text)
+                if source_text == raw_recovered_text
+                else None
             )
             if office_index is not None:
                 recovered[OFFICE_STRUCTURE_KEY] = office_index
@@ -21830,7 +22467,7 @@ class AgentRuntime:
     ) -> tuple[list[dict[str, Any]], int]:
         """Carry the immediately preceding active file on strong topic overlap."""
 
-        if not _unquoted_topic_continuation_cue(message) or _quoted_record_source_command_is_data(message):
+        if _quoted_record_source_command_is_data(message):
             return [], 0
         dialogue = [
             (index, item)
@@ -21855,15 +22492,31 @@ class AgentRuntime:
         if previous_user is None:
             return [], 0
         raw_ids = self._message_attachment_ids(previous_user)
-        if not raw_ids:
+        assistant_ids, uploader_overrides = self._message_reply_attachment_lineage(previous_assistant)
+        if not raw_ids or raw_ids != assistant_ids:
             return [], 0
-        hydrated = self._hydrate_conversation_document_ids(
+        hydrated = self._restore_authorized_attachment_lineage(
             raw_ids,
+            uploader_overrides,
             tenant_id=tenant_id,
             person_id=person_id,
         )
-        if not hydrated:
-            return [], 0
+        if len(hydrated) != len(raw_ids):
+            # The immediately preceding user/assistant lineage already proved
+            # the exact expected set.  Deletion, quarantine or revoked access is
+            # therefore an unresolved file, not permission to fall through to
+            # an ambient/latest catalog candidate.
+            return [], len(raw_ids)
+        # A direct output transformation with a singular anaphora is a closed
+        # continuation of this exact immediately preceding file.  It does not
+        # consult latest/catalog/ambient rows, and the effect still passes the
+        # ordinary file-creation authority below.
+        if file_turn_authority(message).proved("file_create") and re.search(
+            r"\b(?:его|е[её]|это)\b",
+            _record_source_command_text(message),
+            re.IGNORECASE,
+        ):
+            return hydrated, len(hydrated)
         body_matches = [
             item
             for item in hydrated
@@ -22517,6 +23170,99 @@ class AgentRuntime:
             return [], 0
         return hydrated, 1
 
+    def _restore_recent_used_upload_set(
+        self,
+        history: list[dict[str, Any]],
+        *,
+        expected: int,
+        tenant_id: str,
+        person_id: str,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Last N conversation uploads whose adjacent answer used the same ids.
+
+        This is the referent of ``эти два файла``.  Global Raw chronology and
+        unconsumed uploads are deliberately absent; every selected id is then
+        re-authorized as one all-or-none set.
+        """
+
+        bounded_expected = max(1, min(int(expected), _CONVERSATION_ATTACHMENT_MAX_FILES))
+        dialogue = [item for item in history if str(item.get("role") or "") in {"user", "assistant"}]
+        used_upload_ids: list[str] = []
+        uploader_overrides: dict[str, str] = {}
+        legacy_upload_chronology = False
+        for index in range(len(dialogue) - 1):
+            user_row, assistant_row = dialogue[index], dialogue[index + 1]
+            if (
+                str(user_row.get("role") or "") != "user"
+                or str(assistant_row.get("role") or "") != "assistant"
+            ):
+                continue
+            uploaded = self._message_uploaded_attachment_ids(user_row)
+            if not uploaded or not self._message_used_attachment(assistant_row):
+                continue
+            used, pair_uploaders = self._message_reply_attachment_lineage(assistant_row)
+            if used != uploaded:
+                continue
+            for raw_id in uploaded:
+                if raw_id in used_upload_ids:
+                    used_upload_ids.remove(raw_id)
+                used_upload_ids.append(raw_id)
+                if raw_id in pair_uploaders:
+                    uploader_overrides[raw_id] = pair_uploaders[raw_id]
+        selected_ids = used_upload_ids[-bounded_expected:]
+        if len(selected_ids) != bounded_expected:
+            if any(str(item.get("role") or "") == "assistant" for item in dialogue):
+                # Once this history contains assistant rows, their persisted
+                # used-lineage is the sole authority.  Do not mix one valid
+                # modern pair with a later unconsumed upload to manufacture the
+                # requested set.
+                return [], bounded_expected
+            legacy_upload_chronology = True
+            # Rows written before assistant attachment-lineage persistence may
+            # contain only the user's upload chronology.  Preserve that exact
+            # conversation-local order as a compatibility contour; it still
+            # cannot consult the owner catalog, a latest-file fallback, or a
+            # different conversation.  Reauthorization below intentionally
+            # keeps the readable owned subset while ``expected`` retains the
+            # requested cardinality, so an unavailable/foreign slot is visible
+            # as partial rather than backfilled from ambient state.
+            legacy_upload_ids: list[str] = []
+            for item in dialogue:
+                if str(item.get("role") or "") != "user":
+                    continue
+                for raw_id in self._message_uploaded_attachment_ids(item):
+                    if raw_id in legacy_upload_ids:
+                        legacy_upload_ids.remove(raw_id)
+                    legacy_upload_ids.append(raw_id)
+            selected_ids = legacy_upload_ids[-bounded_expected:]
+            if len(selected_ids) != bounded_expected:
+                return [], bounded_expected
+        selected_uploaders = {
+            raw_id: uploader_overrides[raw_id] for raw_id in selected_ids if raw_id in uploader_overrides
+        }
+        if not legacy_upload_chronology:
+            hydrated = self._restore_authorized_attachment_lineage(
+                selected_ids,
+                selected_uploaders,
+                tenant_id=tenant_id,
+                person_id=person_id,
+            )
+            return (
+                (hydrated, bounded_expected) if len(hydrated) == bounded_expected else ([], bounded_expected)
+            )
+        hydrated: list[dict[str, Any]] = []
+        for raw_id in selected_ids:
+            uploaded_by = str(selected_uploaders.get(raw_id) or person_id)
+            attachment = self._owned_file_attachment(
+                raw_id,
+                tenant_id=tenant_id,
+                person_id=uploaded_by,
+            )
+            if attachment is None:
+                continue
+            hydrated.append(attachment)
+        return hydrated, bounded_expected
+
     def _restore_conversation_attachments(
         self,
         message: str,
@@ -22579,7 +23325,12 @@ class AgentRuntime:
                 and not file_turn_authority(message).proved("web")
                 and not _attachment_navigation_filename_mentions(message)
                 and not _quoted_record_source_command_is_data(message)
-                and _unquoted_topic_continuation_cue(message)
+                and (
+                    _unquoted_topic_continuation_cue(message)
+                    or bool(_attachment_topic_terms(message))
+                    and not file_turn_authority(message).has_effect()
+                    or file_turn_authority(message).proved("file_create")
+                )
             ):
                 topic_attachments, topic_expected = self._restore_recent_active_topic_continuation(
                     message,
@@ -22604,6 +23355,20 @@ class AgentRuntime:
                 or _ATTACHMENT_SEARCH_RESULT_REFERENCE.search(_record_source_command_text(message))
             ):
                 return [], 0
+            active_multi_count = _multi_attachment_open_task_count(message)
+            if (
+                already_supplied_count <= 0
+                and active_multi_count is not None
+                and _requests_active_multi_attachment_set(message)
+            ):
+                if not allow_file_read:
+                    return [], active_multi_count
+                return self._restore_recent_used_upload_set(
+                    recent,
+                    expected=active_multi_count,
+                    tenant_id=tenant_id,
+                    person_id=person_id,
+                )
             if _ATTACHMENT_SEARCH_RESULT_REFERENCE.search(_record_source_command_text(message)):
                 if not allow_file_read:
                     return [], 1
@@ -22632,7 +23397,7 @@ class AgentRuntime:
                 if not allow_file_read:
                     return [], 1
                 lineage_ids, uploader_overrides = self._message_reply_attachment_lineage(previous_assistant)
-                if uploader_overrides:
+                if lineage_ids:
                     if len(lineage_ids) > 1 and not (
                         re.search(
                             r"\b(?:в|из|по|про)\s+них\b",
@@ -22740,6 +23505,8 @@ class AgentRuntime:
         if not clean_message:
             raise ValueError("message is required")
         file_turn = file_turn_authority(clean_message)
+        filename_inventory_request = _filename_inventory_request(clean_message)
+        filename_clue_request = _filename_clue_request(clean_message)
         adjacent_overview_request = _adjacent_attachment_overview_request(clean_message)
         overview_model_used = False
         person_effect_message, _ = _file_effect_projection(clean_message, file_turn, "person")
@@ -22804,6 +23571,7 @@ class AgentRuntime:
             if file_turn.proved("person")
             else None
         )
+        exact_uploader_file_request = _named_uploader_exact_file_request(clean_message)
         prior_web_status, prior_web_sources, prior_web_scope = (
             _latest_assistant_web_projection(prior_history)
             if _PRIOR_WEB_SOURCE_FOLLOWUP.fullmatch(clean_message)
@@ -22981,13 +23749,43 @@ class AgentRuntime:
                 or reply_assistant_reference
                 or attachment_reference_kind
                 or explicit_citation_selector_requested
+                or filename_inventory_request is not None
+                or filename_clue_request is not None
                 or _multi_attachment_open_task_count(clean_message) is not None
                 or _requests_all_attachment_set(clean_message)
             )
         )
         file_access_denied = bool(not may_read_files and explicit_private_file_request)
+        filename_inventory_answer = (
+            self._filename_inventory_answer(
+                filename_inventory_request,
+                tenant_id=tenant_id,
+                person_id=person_id,
+            )
+            if may_read_files and workspace_inbox_request is None
+            else ""
+        )
+        filename_clue_selection = (
+            self._select_filename_clue(
+                filename_clue_request,
+                tenant_id=tenant_id,
+                person_id=person_id,
+            )
+            if may_read_files
+            and workspace_inbox_request is None
+            and not quoted_attachment_reference
+            and not reply_assistant_reference
+            else _FilenameClueSelection()
+        )
+        filename_clue_answer = filename_clue_selection.answer
         named_person_corpus = self._select_named_person_corpus(
             None if workspace_inbox_request is not None else named_person_aggregation_scope,
+            actor=actor,
+        )
+        exact_uploader_file = self._select_exact_uploader_file(
+            None
+            if workspace_inbox_request is not None or not may_read_files
+            else exact_uploader_file_request,
             actor=actor,
         )
         # Capability revocation takes effect on every turn. Ownership and an
@@ -23106,6 +23904,7 @@ class AgentRuntime:
         )
         current_prior_selector = bool(
             supplied_attachment_count
+            and not synthetic_document_notice
             and (
                 _ATTACHMENT_IMPLICIT_CURRENT_COMPARISON.search(selector_command)
                 or (
@@ -23168,8 +23967,21 @@ class AgentRuntime:
             )
         restored_attachments: list[dict[str, Any]]
         citation_selector_applied = False
-        if quoted_file_command_is_data:
+        if filename_inventory_request is not None or quoted_file_command_is_data:
             restored_attachments, restored_attachment_expected_count = [], 0
+        elif filename_clue_selection.applies:
+            # Candidate discovery inspected only the body-free filename catalog;
+            # a unique winner crossed one exact name+Raw re-authorization above.
+            # Ambiguity/miss is a structural terminal and never falls through to
+            # latest, content search, KO retrieval or a semantic reranker.
+            restored_attachments = list(filename_clue_selection.attachments)
+            restored_attachment_expected_count = filename_clue_selection.expected_count
+        elif exact_uploader_file.applies:
+            # A named uploader plus one exact/uniquely fuzzy filename is a
+            # stronger selector than the caller's catalog or semantic memory.
+            # It is already tenant/uploader-authorized and remains all-or-none.
+            restored_attachments = list(exact_uploader_file.attachments)
+            restored_attachment_expected_count = exact_uploader_file.expected_count
         elif named_person_corpus.applies:
             # This set was selected by exact uploader before any body read and
             # every id was re-authorized against the current Raw/Inbox verdict.
@@ -23223,7 +24035,11 @@ class AgentRuntime:
                     person_id=person_id,
                     replay_source_message_id=replay_source_message_id,
                     allow_file_read=may_read_files,
-                    already_supplied_count=(0 if current_catalog_selector else supplied_attachment_count),
+                    # A selector which replaces the current carrier has no
+                    # supplied side.  A current+prior comparison does: passing
+                    # zero there makes the exact prior-name branch prepend the
+                    # latest historical upload as a third, ambient file.
+                    already_supplied_count=(0 if selector_replaces_current else supplied_attachment_count),
                     additional_raw_ids=(current_attachment_ids if current_catalog_selector else ()),
                 )
                 if (
@@ -23304,6 +24120,8 @@ class AgentRuntime:
             archived_source_query
             and workspace_inbox_request is None
             and not named_person_corpus.applies
+            and not exact_uploader_file.applies
+            and not filename_clue_selection.applies
             and supplied_attachment_count == 0
             and not attachments
             and not replay_had_attachments
@@ -23324,6 +24142,9 @@ class AgentRuntime:
             or replay_had_attachments
             or restored_attachment_expected_count
             or named_person_corpus.applies
+            or exact_uploader_file.applies
+            or filename_inventory_request is not None
+            or filename_clue_selection.applies
             # A corpus source lookup can expose the same private bytes in a
             # fresh conversation without a restorable attachment pointer.  Mark
             # the user row before execution so a crash cannot reopen outbound
@@ -23496,8 +24317,12 @@ class AgentRuntime:
             if raw_id:
                 active_raw_ids.add(raw_id)
             active_attachment_set.append(item)
-        attachment_authority_tenant = named_person_corpus.tenant_id or tenant_id
-        attachment_authority_person = named_person_corpus.person_id or person_id
+        attachment_authority_tenant = (
+            exact_uploader_file.tenant_id or named_person_corpus.tenant_id or tenant_id
+        )
+        attachment_authority_person = (
+            exact_uploader_file.person_id or named_person_corpus.person_id or person_id
+        )
         verified_reply_attachment_uploaders: dict[str, str] = {}
         if may_read_files and active_attachment_set and workspace_inbox_request is None:
             # The Raw row selected above is the SQLite authority; prove that its
@@ -23941,6 +24766,18 @@ class AgentRuntime:
         # the response pipeline for metadata compatibility, but do not turn
         # private lineage into a code-owned refusal.
         private_web_search_blocked = False
+        implicit_topic_attachment_read = bool(
+            restored_attachment_expected_count
+            and not supplied_attachment_count
+            and not attachment_reference_kind
+            and not replay_source_message_id
+            and not named_person_corpus.applies
+            and not exact_uploader_file.applies
+            and not filename_inventory_request
+            and not filename_clue_answer
+            and not file_turn.has_effect()
+            and _attachment_topic_terms(clean_message)
+        )
         current_attachment_local = bool(
             not foreign_private_request
             and not dangerous_instruction_request
@@ -23948,7 +24785,9 @@ class AgentRuntime:
             and not private_web_search_blocked
             and (
                 workspace_inbox_resolution.attachment is not None
+                or bool(exact_uploader_file.applies and active_attachment_set)
                 or bool(named_person_corpus.applies and active_attachment_set)
+                or implicit_topic_attachment_read
                 or _current_attachment_can_skip_archive(
                     clean_message,
                     supplied_attachment_count=attachment_expected_count,
@@ -23967,7 +24806,9 @@ class AgentRuntime:
         file_voice = file_turn.proved("voice")
         file_create = file_turn.proved("file_create")
         file_effect = file_turn.has_tool_effect()
-        file_source_only = bool(file_turn.source_only() and not quoted_file_command_is_data)
+        file_source_only = bool(
+            (file_turn.source_only() or implicit_topic_attachment_read) and not quoted_file_command_is_data
+        )
         hierarchical_attachment_turn = bool(
             whole_document_needs_hierarchy
             # The authenticated hierarchy proves coverage over parser-owned
@@ -24398,6 +25239,21 @@ class AgentRuntime:
                 remainder_known=True,
                 current_attachment_present=bool(supplied_attachment_count),
             )
+        elif filename_inventory_answer or filename_clue_answer:
+            # Filename inventory/ambiguity is a complete metadata-only SQL
+            # projection. It never hydrates bodies or turns N matches into N
+            # attachments; unique clue selection has no structural answer and
+            # continues below with its one exactly re-authorized file.
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                interaction_mode=interaction_mode,
+                structural_answer=filename_inventory_answer or filename_clue_answer,
+                open_remainder="",
+                remainder_known=True,
+            )
         elif synthetic_upload_receipt_answer:
             # Registration, disk integrity and extraction are already known.
             # Bounded overview stays on this structural terminal; the next
@@ -24598,7 +25454,11 @@ class AgentRuntime:
                 search_query=clean_message,
                 outward_verdict=("человек", None),
             )
-        elif authenticated_attachment_scope and current_attachment_local and file_turn.proved("local_read"):
+        elif (
+            authenticated_attachment_scope
+            and current_attachment_local
+            and (file_turn.proved("local_read") or implicit_topic_attachment_read)
+        ):
             # The deterministic file contour already chose and verified the
             # complete source set. Skip intake learning, archive/KO retrieval,
             # graph expansion and semantic arbiters even when one independent
@@ -24877,10 +25737,11 @@ class AgentRuntime:
             # expose any schema (including web, reminder, file or voice), even
             # though the closed structural remainder also skips generation.
             visible_tools = []
-        if named_person_corpus.applies:
+        if named_person_corpus.applies or exact_uploader_file.applies:
             # The corpus is already chosen and re-authorized.  In particular,
             # tenant-wide collect_files/memory_search must not get a second
-            # chance to broaden it after exact uploader selection.
+            # chance to broaden it after exact uploader selection.  The same
+            # holds for the singular exact/fuzzy filename selector.
             visible_tools = []
         if archived_source_lookup_turn and not any(
             str((tool.get("function") or {}).get("name") or tool.get("name") or "") == "source_search"
@@ -25706,6 +26567,7 @@ class AgentRuntime:
             # turn searched the web.
             and response.get("_office_exact_owned") is not True
             and not attachment_web_literal_grounded
+            and (not attachment_evidence or file_turn.proved("web"))
             and not web_evidence_used
             and (
                 web_evidence_status in {"failed", "empty"}
@@ -26955,6 +27817,18 @@ class AgentRuntime:
             # accepted final body and its code-owned companions.
             response["file_clips"] = list(structural_file_clips)
             response["voice_clip"] = None
+        redacted_content = redact_friday_api_tokens(content)
+        if redacted_content != content:
+            # This boundary precedes every late output carrier.  Agentic files
+            # and audio may already contain the rejected model bytes, so keep
+            # only independently code-owned structural files and allow an
+            # explicitly requested derived file to be rebuilt below from the
+            # exact redacted chat body.
+            content = redacted_content
+            response["content"] = content
+            response["file_clips"] = list(structural_file_clips)
+            response["voice_clip"] = None
+            LOGGER.warning("credential-output: Friday API token removed before output carriers")
         # Файл собирается ПОСЛЕ проверки и возможного исправления: иначе в
         # документ уходил текст, который автопроверка забраковала, а человеку
         # ответ пришёл бы уже исправленным — файл и реплика разошлись бы.
@@ -27287,6 +28161,17 @@ class AgentRuntime:
             # ветку про СВОЙ архив, где эта сводка отвечает по существу.
             personal_background_offered=context.user_model_offered,
         )
+        # Idempotent assertion after citation/source cleanup.  The first pass is
+        # intentionally before make_file/speak; no later text owner may
+        # reintroduce a structurally valid Friday credential.
+        redacted_content = redact_friday_api_tokens(content)
+        if redacted_content != content:
+            content = redacted_content
+            response["content"] = content
+            response["file_clips"] = list(structural_file_clips)
+            response["voice_clip"] = None
+            LOGGER.warning("credential-output: Friday API token removed at final assertion")
+
         # Deterministic companion to the LLM judge: does the sentence carrying [K#]
         # share vocabulary with the object it cites? Advisory — it never edits the
         # answer, the citations or the grounding verdict.
@@ -29383,6 +30268,16 @@ class AgentRuntime:
             await self._prefetch_the_web_if_asked(
                 message, actor, tools, messages, tools_used, tool_evidence, web_notice, context
             )
+        if _web_source_class_on_speech(turn_auth.speech):
+            # The deterministic prefetch carried the source class separately
+            # from the arbiter-rewritten query.  Do not offer a second,
+            # unconstrained model-selected web path that could silently drop it.
+            tools[:] = [
+                tool
+                for tool in tools
+                if str((tool.get("function") or {}).get("name") or tool.get("name") or "")
+                not in _WEB_TOOL_NAMES
+            ]
         if context.isolated_outbound_turn:
             # The prefetch above is the sole authorised outbound effect.  A
             # model-native call could otherwise derive a second query from its
@@ -30057,10 +30952,14 @@ class AgentRuntime:
                         )
                         if outbound_notice:
                             web_notice.append(outbound_notice)
+                    requested_source_class = ""
+                    if isinstance(call_arguments, Mapping):
+                        requested_source_class = str(call_arguments.get("source_class") or "")
                     web_status, web_sources, web_payload = _project_web_tool_result(
                         call.name,
                         tool_result.data,
                         transport_success=tool_result.success,
+                        source_class=requested_source_class,
                     )
                     self._record_web_projection(context, web_status, web_sources)
                     if web_status not in {"sourced", "partial"} or not web_sources:
@@ -31925,6 +32824,9 @@ class AgentRuntime:
         инструментов: содержимое либо уже есть в ответе, либо запрашивается
         прямым «дай текст документа». Формат берётся из просьбы человека.
         """
+        answer = redact_friday_api_tokens(answer)
+        if literal_source_text is not None:
+            literal_source_text = redact_friday_api_tokens(literal_source_text)
         # Сообщение о сбое телом документа быть не может, но и отказываться рано:
         # инструменты в этом ходе могли отработать, и основания есть. Замерено:
         # чаще всего срывается сам протокол вызова («bare tool-call markup»), а
@@ -32067,6 +32969,10 @@ class AgentRuntime:
                 text = str(filled.get("content") or "")
                 if text.strip():
                     clean = _strip_tool_call_markup(text) or text
+                    # This second model pass is itself a late output owner. Do
+                    # not let it reintroduce a valid Friday credential after the
+                    # accepted chat body crossed the pre-carrier boundary.
+                    clean = redact_friday_api_tokens(clean)
                     late_archive_guarded = bool(
                         context is not None
                         and context.answer_mode == "general_conversation"
@@ -32144,6 +33050,7 @@ class AgentRuntime:
         который человек всё равно бы прочитал, формат — из его же просьбы. Хуже,
         чем если бы модель разметила блоки сама, но несравнимо лучше обещания.
         """
+        answer = redact_friday_api_tokens(answer)
         kind = _file_kind_from_request(request)
         requested_filename, requested_filename_supported = _requested_output_filename_stem(
             request,
@@ -34456,10 +35363,12 @@ class AgentRuntime:
             if not asked_outright:
                 return  # вопрос не про внешний мир — интернет тут ни при чём
             query = self.web_query_from(web_message)
+        source_class = _web_source_class_on_speech(turn_auth.speech)
+        web_arguments: dict[str, Any] = {"query": query, "max_sources": 3}
+        if source_class:
+            web_arguments["source_class"] = source_class
         try:
-            result = await self.kernel.execute(
-                "web_research", {"query": query, "max_sources": 3}, actor=actor
-            )
+            result = await self.kernel.execute("web_research", web_arguments, actor=actor)
         except Exception as exc:  # noqa: BLE001 — предварительный поиск не должен ронять ход
             LOGGER.warning("Prefetch web search failed (%s)", type(exc).__name__)
             tools_used.append("web_research")
@@ -34484,6 +35393,7 @@ class AgentRuntime:
             "web_research",
             result.data,
             transport_success=result.success,
+            source_class=source_class,
         )
         rendered = ""
         if web_status in {"sourced", "partial"} and web_sources and web_payload is not None:
@@ -34510,7 +35420,7 @@ class AgentRuntime:
         # и возразить, а не узнать через месяц. Строка живёт ровно один ответ.
         outbound_notice = _web_tool_execution_notice(
             "web_research",
-            {"query": query},
+            web_arguments,
             outbound_result_data,
         )
         if outbound_notice:

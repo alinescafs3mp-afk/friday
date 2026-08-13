@@ -546,8 +546,18 @@ class MaintenanceMixin(StorageShared):
             "unverified": len(broken),
         }
 
-    def list_backups(self) -> list[dict[str, Any]]:
+    def list_backups(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+        """Return newest valid manifests, optionally stopping after a bounded page.
+
+        The overview needs five cards, not a parse of every retained manifest.  A
+        caller which omits ``limit`` keeps the complete operator-facing inventory.
+        Invalid manifests do not consume the limit: it bounds returned, usable
+        entries rather than filenames inspected.
+        """
         ensure_private_directory(self.settings.backups_dir)
+        wanted = None if limit is None else max(0, int(limit))
+        if wanted == 0:
+            return []
         results: list[dict[str, Any]] = []
         for manifest_path in sorted(self.settings.backups_dir.glob("*.manifest.json"), reverse=True):
             try:
@@ -568,6 +578,8 @@ class MaintenanceMixin(StorageShared):
                 data["path"] = str(database_path)
                 data["manifest_path"] = str(manifest_path)
                 results.append(data)
+                if wanted is not None and len(results) >= wanted:
+                    break
             except (OSError, json.JSONDecodeError, KeyError, TypeError):
                 continue
         return results

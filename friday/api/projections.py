@@ -23,6 +23,7 @@ from typing import Any
 
 from friday.generated_files import generated_file_descriptor
 from friday.raw_metadata import bounded_raw_file_metadata
+from friday.telemetry.logging import redact_friday_api_tokens
 
 _INGESTION_ACTIONS = frozenset({"promote", "review", "transient", "unknown"})
 _INGESTION_CATEGORIES = frozenset(
@@ -253,6 +254,11 @@ def public_conversation_message(
     """Publish message text and envelope, never its internal metadata blob."""
 
     public = {key: row[key] for key in ("role", "content", "created_at") if key in row}
+    if "content" in public:
+        # Historical rows remain an exact audit trail, but credentials emitted
+        # before the runtime boundary existed must not be republished by chat or
+        # admin transcript APIs.
+        public["content"] = redact_friday_api_tokens(public["content"])
     message_id = row.get("id")
     if is_public_opaque_id(message_id, "msg"):
         public["id"] = message_id

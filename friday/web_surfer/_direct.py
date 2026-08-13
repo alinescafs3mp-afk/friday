@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from xml.etree import ElementTree
 
@@ -68,6 +68,21 @@ _CRYPTO: dict[str, tuple[str, ...]] = {
 #: Когда «завтра» — это завтра. Прогноз просят на день, а не на час.
 _ASKS_TOMORROW = re.compile(r"\bзавтра\w*|\btomorrow\b", re.IGNORECASE)
 _ASKS_DAY_AFTER = re.compile(r"послезавтра", re.IGNORECASE)
+_ASKS_TODAY = re.compile(
+    r"\bсегодня\w*|\bсейчас\b|\bтекущ\w*\s+(?:день|сутк)\w*|\btoday\b|\bnow\b",
+    re.IGNORECASE,
+)
+_UNSUPPORTED_WEATHER_DAY = re.compile(
+    r"\b(?:понедельник|вторник|сред|четверг|пятниц|суббот|воскресен)\w*\b|"
+    r"\b(?:январ|феврал|март|апрел|ма[йяе]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*\b|"
+    r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b|\b\d{4}-\d{2}-\d{2}\b|"
+    r"\b(?:через\s+\d+\s+(?:дн|сут)|на\s+\d+\s+(?:дн|сут)|"
+    r"следующ\w*\s+недел|выходн|будн)\w*\b|"
+    r"\b(?:утр|вечер|ноч|дн[её]м|час)\w*\b|"
+    r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    r"weekend|next\s+week|morning|afternoon|evening|night)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -139,6 +154,35 @@ def _wanted_place(query: str) -> str:
     return place
 
 
+def _weather_day_request(query: str) -> tuple[int | None, bool]:
+    """Return ``(offset, explicit)`` for the daily source contract.
+
+    The direct provider exposes only daily rows.  Calendar dates, weekdays and
+    parts of day need a separate resolver/hourly product; answering them with a
+    convenient nearby daily row would be fabricated precision.
+    """
+
+    if _UNSUPPORTED_WEATHER_DAY.search(query):
+        return None, True
+    if _ASKS_DAY_AFTER.search(query):
+        return 2, True
+    if _ASKS_TOMORROW.search(query):
+        return 1, True
+    if _ASKS_TODAY.search(query):
+        return 0, True
+    return None, False
+
+
+def _provider_date(value: Any) -> date | None:
+    text = str(value or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}(?:T|$)", text):
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
 async def _currency_rates(client: httpx.AsyncClient, codes: list[str]) -> DirectAnswer | None:
     """Официальный курс ЦБ РФ. XML в windows-1251, поэтому читаются байты."""
     response = await client.get(
@@ -198,6 +242,9 @@ def _place_forms(place: str) -> list[str]:
 
 
 async def _weather(client: httpx.AsyncClient, place: str, query: str) -> DirectAnswer | None:
+    wanted_offset, explicit_day = _weather_day_request(query)
+    if explicit_day and wanted_offset is None:
+        return None
     hits: list[dict[str, Any]] = []
     for candidate in _place_forms(place):
         geo = await client.get(
@@ -234,35 +281,85 @@ async def _weather(client: httpx.AsyncClient, place: str, query: str) -> DirectA
     days = list(daily.get("time") or [])
     if not days:
         return None
-    # Какой именно день спрашивают: «завтра» — второй в списке, «послезавтра» — третий.
-    wanted = 0
-    if _ASKS_DAY_AFTER.search(query):
-        wanted = 2
-    elif _ASKS_TOMORROW.search(query):
-        wanted = 1
-    wanted = min(wanted, len(days) - 1)
 
-    def _at(key: str, index: int) -> Any:
-        values = daily.get(key) or []
-        return values[index] if index < len(values) else None
+    current = payload.get("current") or {}
+    provider_today = _provider_date(current.get("time"))
+    parsed_days = [_provider_date(value) for value in days]
+    if provider_today is None or any(item is None for item in parsed_days):
+        return None
+    dated_indices: dict[date, int] = {}
+    for index, row_date in enumerate(parsed_days):
+        assert row_date is not None
+        if row_date in dated_indices:
+            return None
+        dated_indices[row_date] = index
+
+    if explicit_day:
+        assert wanted_offset is not None
+        target_date = provider_today + timedelta(days=wanted_offset)
+        wanted_index = dated_indices.get(target_date)
+        if wanted_index is None:
+            # Never clamp to the nearest/last row.  Absence of the requested
+            # provider date means this direct source has no answer.
+            return None
+        indices = [wanted_index]
+    else:
+        target_date = None
+        indices = list(range(len(days)))
+
+    def _at(key: str, index: int) -> int | float | None:
+        values = daily.get(key)
+        if not isinstance(values, list) or index >= len(values):
+            return None
+        value = values[index]
+        return value if isinstance(value, int | float) and not isinstance(value, bool) else None
 
     lines = [f"Прогноз погоды: {name}."]
-    current = payload.get("current") or {}
-    if wanted == 0 and current.get("temperature_2m") is not None:
+    show_current = not explicit_day or wanted_offset == 0
+    current_temperature = current.get("temperature_2m")
+    if (
+        show_current
+        and isinstance(current_temperature, int | float)
+        and not isinstance(current_temperature, bool)
+    ):
+        lines.append(f"Сейчас: {current_temperature}°C, ветер {current.get('wind_speed_10m', '—')} км/ч.")
+    # An explicit day is a source constraint, not a preference.  Supplying
+    # today's values beside a request for tomorrow invited synthesis to answer
+    # the easier current observation (and even mix in a climate average).  Give
+    # the model only the requested forecast row; broad weather questions retain
+    # the short multi-day outlook.
+    emitted_rows = 0
+    for index in indices:
+        values = {
+            key: _at(key, index)
+            for key in (
+                "temperature_2m_min",
+                "temperature_2m_max",
+                "precipitation_sum",
+                "wind_speed_10m_max",
+            )
+        }
+        if any(value is None for value in values.values()):
+            if explicit_day:
+                return None
+            continue
+        row_date = parsed_days[index]
+        assert row_date is not None
+        offset = (row_date - provider_today).days
+        marker = {0: "сегодня", 1: "завтра", 2: "послезавтра"}.get(offset, "")
+        label = f"{row_date.isoformat()}{f' ({marker})' if marker else ''}"
         lines.append(
-            f"Сейчас: {current['temperature_2m']}°C, ветер {current.get('wind_speed_10m', '—')} км/ч."
+            f"{label}: от {values['temperature_2m_min']}°C до {values['temperature_2m_max']}°C, "
+            f"осадки {values['precipitation_sum']} мм, ветер до "
+            f"{values['wind_speed_10m_max']} км/ч."
         )
-    for index in range(len(days)):
-        marker = {0: "сегодня", 1: "завтра", 2: "послезавтра"}.get(index, "")
-        label = f"{days[index]}{f' ({marker})' if marker else ''}"
-        lines.append(
-            f"{label}: от {_at('temperature_2m_min', index)}°C до {_at('temperature_2m_max', index)}°C, "
-            f"осадки {_at('precipitation_sum', index)} мм, ветер до "
-            f"{_at('wind_speed_10m_max', index)} км/ч."
-        )
+        emitted_rows += 1
+    if emitted_rows == 0:
+        return None
     lines.append("Источник: Open-Meteo, данные национальных метеослужб.")
+    title_suffix = f" — {target_date.isoformat()}" if target_date is not None else ""
     return DirectAnswer(
-        title=f"Погода: {name}",
+        title=f"Погода: {name}{title_suffix}",
         url=f"https://open-meteo.com/en/docs#latitude={latitude}&longitude={longitude}",
         text="\n".join(lines),
         source="open-meteo",

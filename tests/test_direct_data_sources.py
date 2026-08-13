@@ -33,7 +33,7 @@ _CBR_XML = """<?xml version="1.0" encoding="windows-1251"?>
 
 _GEO = {"results": [{"name": "Москва", "latitude": 55.75, "longitude": 37.62, "country_code": "RU"}]}
 _FORECAST = {
-    "current": {"temperature_2m": 24.1, "wind_speed_10m": 3.4},
+    "current": {"time": "2026-08-02T12:00", "temperature_2m": 24.1, "wind_speed_10m": 3.4},
     "daily": {
         "time": ["2026-08-02", "2026-08-03", "2026-08-04"],
         "temperature_2m_max": [30.7, 24.5, 25.1],
@@ -101,7 +101,44 @@ async def test_the_forecast_names_the_day_that_was_asked_for():
     assert "Москва" in text
     assert "2026-08-03 (завтра)" in text
     assert "24.5" in text and "16.9" in text
+    assert "Сейчас:" not in text
+    assert "2026-08-02 (сегодня)" not in text
+    assert "2026-08-04 (послезавтра)" not in text
     assert "Open-Meteo" in text
+
+
+@pytest.mark.anyio
+async def test_the_forecast_fails_closed_when_the_requested_provider_date_is_absent():
+    missing_tomorrow = {
+        **_FORECAST,
+        "daily": {
+            **_FORECAST["daily"],
+            "time": ["2026-08-02", "2026-08-04", "2026-08-05"],
+        },
+    }
+
+    def _missing_day(request: httpx.Request) -> httpx.Response:
+        if "api.open-meteo" in request.url.host:
+            return httpx.Response(200, json=missing_tomorrow)
+        return _router(request)
+
+    async with _client(_missing_day) as client:
+        sources = await direct_answers("какая завтра погода в Москве?", client)
+    assert sources == []
+
+
+@pytest.mark.anyio
+async def test_an_unsupported_weather_day_does_not_substitute_today():
+    called: list[str] = []
+
+    def _watching(request: httpx.Request) -> httpx.Response:
+        called.append(request.url.host)
+        return _router(request)
+
+    async with _client(_watching) as client:
+        sources = await direct_answers("какая погода в Москве в следующий понедельник?", client)
+    assert sources == []
+    assert called == []
 
 
 @pytest.mark.anyio

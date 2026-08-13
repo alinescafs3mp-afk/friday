@@ -18,7 +18,7 @@ import re
 import socket
 import urllib.parse
 import urllib.robotparser
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -227,6 +227,46 @@ _ASKS_FOR_FOREIGN_SOURCES = re.compile(
 # a typo into an unfiltered (and therefore misleading) search.
 SEARCH_FRESHNESS_VALUES = ("", "day", "week", "month", "year")
 SEARCH_DOMAIN_LIST_MAX = 10
+SEARCH_SOURCE_CLASS_VALUES = ("", "foreign")
+
+
+def normalize_search_source_class(value: str) -> str:
+    """Return one closed, code-owned source class or reject the request.
+
+    ``foreign`` is deliberately a DNS-level promise: Russian country domains
+    and the Russian Wikipedia language host are excluded after every provider,
+    rather than merely asking a ranking API for international results.
+    """
+
+    if not isinstance(value, str):
+        raise ValueError("source_class must be a string")
+    normalized = value.strip().casefold()
+    if normalized not in SEARCH_SOURCE_CLASS_VALUES:
+        raise ValueError("unsupported source_class")
+    return normalized
+
+
+_RUSSIAN_SOURCE_SUFFIXES = (".ru", ".su", ".xn--p1ai", ".xn--p1acf")
+
+
+def web_source_matches_class(url: str, source_class: str) -> bool:
+    """Whether a public URL satisfies a closed source-class constraint."""
+
+    normalized = normalize_search_source_class(source_class)
+    if not normalized:
+        return True
+    host = _host_of(url).casefold().rstrip(".")
+    if not host:
+        return False
+    try:
+        host = host.encode("idna").decode("ascii")
+    except UnicodeError:
+        return False
+    return not (
+        host == "ru"
+        or host.startswith("ru.")
+        or any(host.endswith(suffix) for suffix in _RUSSIAN_SOURCE_SUFFIXES)
+    )
 
 
 def _closed_codes(values: str) -> frozenset[str]:
@@ -1116,6 +1156,7 @@ class WebSurfer:
         exclude_domains: Sequence[str] = (),
         lang: str = "",
         region: str = "",
+        source_class: str = "",
     ) -> list[SearchResult]:
         site, include_domains, exclude_domains, freshness, lang, region = normalize_search_filters(
             site=site,
@@ -1126,6 +1167,7 @@ class WebSurfer:
             region=region,
         )
         query = " ".join(str(query or "").split()).strip()
+        source_class = normalize_search_source_class(source_class)
         if not query:
             return []
         limit = max(1, min(int(max_results), 20))
@@ -1133,7 +1175,7 @@ class WebSurfer:
         # same provider for bounded headroom so a few forbidden rows do not
         # needlessly fan the private query out to the next company.  Never relax
         # the filter merely to fill the requested number of slots.
-        provider_limit = min(20, limit * 2) if include_domains or exclude_domains else limit
+        provider_limit = min(20, limit * 2) if include_domains or exclude_domains or source_class else limit
         results: list[SearchResult] = []
 
         refused: list[str] = []
@@ -1150,6 +1192,8 @@ class WebSurfer:
             chain_options["lang"] = lang
         if region:
             chain_options["region"] = region
+        if source_class:
+            chain_options["source_class"] = source_class
         for name, provider in self._provider_chain(query, provider_limit, **chain_options):
             try:
                 batch = await provider()
@@ -1183,6 +1227,15 @@ class WebSurfer:
                         exclude_domains=exclude_domains,
                     )
                 ]
+            if source_class:
+                unfiltered_count = len(batch)
+                batch = [item for item in batch if web_source_matches_class(item.url, source_class)]
+                if unfiltered_count and not batch:
+                    # A RU-only batch is not an answer to a foreign-source
+                    # request.  Keep walking the provider chain; never relax the
+                    # source class merely to return something.
+                    LOGGER.info("Search provider %s returned no %s sources", name, source_class)
+                    continue
             wikipedia_targets = (site,) if site else include_domains
             wikipedia_only = bool(wikipedia_targets) and all(
                 domain == "wikipedia.org" or domain in _WIKIPEDIA_LANGUAGE_HOST.values()
@@ -1318,6 +1371,7 @@ class WebSurfer:
         exclude_domains: Sequence[str] = (),
         lang: str = "",
         region: str = "",
+        source_class: str = "",
     ) -> list[SearchResult]:
         """Последнее звено цепочки: энциклопедия вместо пустоты.
 
@@ -1359,9 +1413,11 @@ class WebSurfer:
             region=region,
             languages=frozenset(_WIKIPEDIA_LANGUAGE_HOST),
         )
+        source_class = normalize_search_source_class(source_class)
         effective_includes = (site,) if site else include_domains
         languages = []
-        for language in (lang,) if lang else ("ru", "en"):
+        default_languages = ("en",) if source_class == "foreign" else ("ru", "en")
+        for language in (lang,) if lang else default_languages:
             host = _WIKIPEDIA_LANGUAGE_HOST[language]
             if effective_includes and not any(
                 _host_matches_domain(host, domain) for domain in effective_includes
@@ -1433,6 +1489,7 @@ class WebSurfer:
         exclude_domains: Sequence[str] = (),
         lang: str = "",
         region: str = "",
+        source_class: str = "",
     ) -> list[tuple[str, Callable[[], Awaitable[list[SearchResult]]]]]:
         """Провайдеры в порядке замеренной надёжности.
 
@@ -1456,6 +1513,7 @@ class WebSurfer:
         а этого хватает, когда Яндекс отказал ненадолго. Настоящий резерв —
         ключ Brave/Tavily/Serper: ветки готовы, нужен только ключ.
         """
+        source_class = normalize_search_source_class(source_class)
         chain: list[tuple[str, Callable[[], Awaitable[list[SearchResult]]]]] = []
         provider_options: dict[str, Any] = {"site": site, "freshness": freshness}
         if include_domains:
@@ -1469,11 +1527,16 @@ class WebSurfer:
 
         def call(
             provider: Callable[..., Awaitable[list[SearchResult]]],
+            *,
+            source_aware: bool = False,
         ) -> Callable[[], Awaitable[list[SearchResult]]]:
-            return lambda: provider(query, limit, **provider_options)
+            options = dict(provider_options)
+            if source_aware and source_class:
+                options["source_class"] = source_class
+            return lambda: provider(query, limit, **options)
 
         if self.settings.yandex_search_api_key:
-            chain.append(("yandex", call(self._search_yandex)))
+            chain.append(("yandex", call(self._search_yandex, source_aware=True)))
         if self.settings.brave_search_api_key:
             chain.append(("brave", call(self._search_brave)))
         if self.settings.tavily_api_key:
@@ -1484,7 +1547,7 @@ class WebSurfer:
         chain.append(("duckduckgo", call(self._search_duckduckgo_html)))
         # Последним — энциклопедия: она отвечает не на всё, но отвечает ВСЕГДА,
         # тогда как бесплатные HTML-провайдеры при серии запросов дают 1-2 из 20.
-        chain.append(("wikipedia", call(self._search_wikipedia)))
+        chain.append(("wikipedia", call(self._search_wikipedia, source_aware=True)))
         return chain
 
     async def _search_brave_html(
@@ -1552,7 +1615,7 @@ class WebSurfer:
             raise ProviderRefusedError("brave-html answered without result markup")
         return results
 
-    def _yandex_segment(self, query: str) -> str:
+    def _yandex_segment(self, query: str, *, source_class: str = "") -> str:
         """Какой сегмент спрашивать: русский или международный.
 
         Жёсткий `SEARCH_TYPE_RU` был не про язык индекса — русский сегмент
@@ -1561,15 +1624,16 @@ class WebSurfer:
         новости не из ру сегмента есть за сегодня и вчера?» — выдача пришла из
         lenta.ru и rbc.ru, то есть ровно то, о чём просили НЕ давать.
 
-        Правило простое и проверяемое: просят зарубежное или пишут не
-        кириллицей — международный сегмент. Настройка `yandex_search_type`
-        по-прежнему главнее: если владелец задал сегмент явно, спорить не с чем.
+        Правило простое и проверяемое: явная просьба о зарубежных источниках
+        относится к текущему запросу и потому сильнее общего регионального
+        default. Для остальных запросов сохраняется настроенный сегмент.
         """
+        source_class = normalize_search_source_class(source_class)
+        if source_class == "foreign" or _ASKS_FOR_FOREIGN_SOURCES.search(query):
+            return "SEARCH_TYPE_COM"
         configured = str(self.settings.yandex_search_type or "").strip()
         if configured:
             return configured
-        if _ASKS_FOR_FOREIGN_SOURCES.search(query):
-            return "SEARCH_TYPE_COM"
         letters = [character for character in query if character.isalpha()]
         if letters and not any(
             "а" <= character.casefold() <= "я" or character == "ё" for character in letters
@@ -1589,6 +1653,7 @@ class WebSurfer:
         exclude_domains: Sequence[str] = (),
         lang: str = "",
         region: str = "",
+        source_class: str = "",
     ) -> list[SearchResult]:
         """Яндекс Search API v2 — синхронный поиск, ответ приходит XML-ом в base64.
 
@@ -1612,7 +1677,9 @@ class WebSurfer:
             freshness=freshness,
             lang=lang,
         )
-        search_type = _YANDEX_REGION_TO_SEARCH_TYPE.get(region) or self._yandex_segment(query)
+        search_type = _YANDEX_REGION_TO_SEARCH_TYPE.get(region) or self._yandex_segment(
+            query, source_class=source_class
+        )
         client = await self._get_client()
         response = await client.post(
             "https://searchapi.api.cloud.yandex.net/v2/web/search",
@@ -2138,13 +2205,29 @@ class WebSurfer:
                 error=f"fetch_failed:{type(exc).__name__}",
             )
 
-    async def research(self, query: str, *, max_sources: int = _DEFAULT_MAX_SOURCES) -> dict[str, Any]:
+    async def research(
+        self,
+        query: str,
+        *,
+        max_sources: int = _DEFAULT_MAX_SOURCES,
+        source_class: str = "",
+    ) -> dict[str, Any]:
+        source_class = normalize_search_source_class(source_class)
         source_limit = max(1, min(int(max_sources), 8))
         loop = asyncio.get_running_loop()
         started_at = loop.time()
         try:
             async with asyncio.timeout(_RESEARCH_TOTAL_BUDGET):
-                results = await self.search(query, max_results=source_limit * 2)
+                if source_class:
+                    results = await self.search(
+                        query,
+                        max_results=source_limit * 2,
+                        source_class=source_class,
+                    )
+                else:
+                    # Preserve the legacy override seam used by small local
+                    # adapters and deterministic research harnesses.
+                    results = await self.search(query, max_results=source_limit * 2)
         except TimeoutError:
             return {
                 "query": query,
@@ -2201,6 +2284,16 @@ class WebSurfer:
             direct = await direct_answers(query, await self._get_client())
         except Exception as exc:  # noqa: BLE001 — прямой источник не должен ронять исследование
             LOGGER.warning("Прямые источники данных не ответили (%s)", type(exc).__name__)
+        if source_class:
+            # Direct adapters bypass ``search``.  Apply the same DNS contract
+            # before their fact rows join the report (for example a rewritten
+            # query must not add a CBR .ru quote to a foreign-news turn).
+            direct = [
+                item
+                for item in direct
+                if isinstance(item, Mapping)
+                and web_source_matches_class(str(item.get("url") or ""), source_class)
+            ]
 
         selected = results[:source_limit]
         tasks = [asyncio.create_task(self.fetch(result.url, max_length=20_000)) for result in selected]
@@ -2237,6 +2330,11 @@ class WebSurfer:
             item["search_title"] = search_result.title
             item["snippet"] = search_result.snippet
             item["source"] = search_result.source
+            if source_class and not web_source_matches_class(str(item.get("url") or ""), source_class):
+                # ``fetch`` follows safe public redirects; the final host must
+                # independently satisfy the source class proved for this turn.
+                failed_sources += 1
+                continue
             sources.append(item)
 
         # «Читаемый» — это страница, из которой ЧТО-ТО извлеклось. HTML-ветка
@@ -2303,6 +2401,9 @@ class WebSurfer:
                 item["search_title"] = search_result.title
                 item["snippet"] = search_result.snippet
                 item["source"] = search_result.source
+                if source_class and not web_source_matches_class(str(item.get("url") or ""), source_class):
+                    failed_sources += 1
+                    continue
                 sources.append(item)
             timed_out_sources += len(extra_pending)
             readable_sources = sum(

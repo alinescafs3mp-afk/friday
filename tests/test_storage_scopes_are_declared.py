@@ -67,6 +67,7 @@ PERSON_SCOPED = {
     "get_conversation",
     "get_conversation_messages",
     "get_message",
+    "list_chat_thread",
     "list_conversations",
     "set_conversation_archived",
     "set_conversation_mode",
@@ -141,7 +142,12 @@ APPROVAL_TENANT_WITH_A_SEPARATE_PERSON = {
 # разделом служит person, для classification — tenant.
 # 241 → 242: count_visible_raw_objects считает приватно-доступный tenant-корпус;
 # отдельной личности человека у общей базы здесь нет.
-EXPECTED_USER_ID_METHODS = 242
+# 242 → 252: the ten owned-file catalog/alias/search readers added after the
+# previous pin all take the shared archive tenant as ``user_id``; uploader or
+# person authority is carried separately and rechecked by those methods.
+# 252 → 253: list_chat_thread is the bounded person-level admin transcript;
+# its user_id is the principal, never the shared archive tenant.
+EXPECTED_USER_ID_METHODS = 253
 
 
 def _methods_taking_user_id() -> set[str]:

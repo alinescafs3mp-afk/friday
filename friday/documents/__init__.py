@@ -51,6 +51,12 @@ LOGGER = logging.getLogger(__name__)
 #: Чем заменяется собственный credential, найденный в тексте документа.
 #: Замена ВИДНА: молчаливая подмена читалась бы как свойство документа.
 SECRET_PLACEHOLDER = "[секрет удалён]"
+# API tokens minted by Friday are ``jrc_`` plus the unpadded URL-safe base64
+# returned by ``secrets.token_urlsafe(32)`` (43 characters today).  Match a
+# small lower-bound range rather than one exact length so a harmless change in
+# the entropy size cannot reopen the disclosure.  Short words such as
+# ``jrc_example`` remain ordinary document text.
+_FRIDAY_API_TOKEN = re.compile(r"(?<![A-Za-z0-9_-])jrc_[A-Za-z0-9_-]{40,}")
 
 
 def _own_secret_values() -> tuple[str, ...]:
@@ -67,8 +73,14 @@ def _own_secret_values() -> tuple[str, ...]:
 
 
 def _redact_own_secrets(text: str, secrets: Sequence[str]) -> tuple[str, int]:
-    """Убрать из текста собственные credential, сосчитав, сколько раз пришлось."""
-    if not text or not secrets:
+    """Убрать из текста credential, сосчитав каждую замену.
+
+    Exact values cover this instance's environment.  The structural Friday
+    token shape also covers a token uploaded by another user or restored from
+    an archive: the extractor cannot know that value in advance, but it is no
+    safer to index or quote it.
+    """
+    if not text:
         return text, 0
     removed = 0
     for secret in secrets:
@@ -76,6 +88,8 @@ def _redact_own_secrets(text: str, secrets: Sequence[str]) -> tuple[str, int]:
             continue
         removed += text.count(secret)
         text = text.replace(secret, SECRET_PLACEHOLDER)
+    text, shaped_removed = _FRIDAY_API_TOKEN.subn(SECRET_PLACEHOLDER, text)
+    removed += shaped_removed
     return text, removed
 
 

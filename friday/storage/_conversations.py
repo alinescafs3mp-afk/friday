@@ -326,7 +326,7 @@ class ConversationsMixin(StorageShared):
         """
         rows = self.execute(
             """
-            WITH last_message AS (
+            WITH ranked_messages AS (
                 SELECT m.user_id,
                        m.content,
                        m.role,
@@ -334,6 +334,31 @@ class ConversationsMixin(StorageShared):
                        m.conversation_id,
                        ROW_NUMBER() OVER (PARTITION BY m.user_id ORDER BY m.created_at DESC) AS rn
                 FROM messages m
+            ),
+            last_message AS (
+                SELECT user_id, content, role, created_at, conversation_id
+                  FROM ranked_messages
+                 WHERE rn=1
+            ),
+            message_counts AS (
+                SELECT user_id, COUNT(*) AS message_count
+                  FROM messages
+                 GROUP BY user_id
+            ),
+            raw_counts AS (
+                SELECT CASE
+                         WHEN json_valid(metadata_json)
+                          AND json_type(metadata_json,'$.uploaded_by')='text'
+                         THEN json_extract(metadata_json,'$.uploaded_by')
+                         ELSE ''
+                       END AS uploaded_by,
+                       COUNT(*) AS arrival_count,
+                       SUM(CASE
+                             WHEN content_type='file' AND deleted_at IS NULL THEN 1
+                             ELSE 0
+                           END) AS file_count
+                  FROM raw_objects
+                 GROUP BY uploaded_by
             )
             SELECT u.id AS user_id,
                    u.display_name,
@@ -345,15 +370,13 @@ class ConversationsMixin(StorageShared):
                    lm.role AS last_role,
                    lm.created_at AS last_at,
                    lm.conversation_id AS last_conversation_id,
-                   (SELECT COUNT(*) FROM messages WHERE user_id=u.id) AS message_count,
-                   (SELECT COUNT(*) FROM raw_objects
-                     WHERE json_extract(metadata_json,'$.uploaded_by') = u.id
-                       AND content_type='file' AND deleted_at IS NULL) AS file_count
+                   COALESCE(mc.message_count, 0) AS message_count,
+                   COALESCE(rc.file_count, 0) AS file_count
             FROM users u
-            LEFT JOIN last_message lm ON lm.user_id = u.id AND lm.rn = 1
-            WHERE lm.created_at IS NOT NULL
-               OR (SELECT COUNT(*) FROM raw_objects
-                    WHERE json_extract(metadata_json,'$.uploaded_by') = u.id) > 0
+            LEFT JOIN last_message lm ON lm.user_id=u.id
+            LEFT JOIN message_counts mc ON mc.user_id=u.id
+            LEFT JOIN raw_counts rc ON rc.uploaded_by=u.id
+            WHERE COALESCE(mc.message_count, 0)>0 OR COALESCE(rc.arrival_count, 0)>0
             ORDER BY COALESCE(lm.created_at, u.created_at) DESC
             LIMIT ?
             """,
@@ -385,13 +408,63 @@ class ConversationsMixin(StorageShared):
         """
         row = self.execute(
             """
+            WITH message_users AS (
+                SELECT user_id FROM messages GROUP BY user_id
+            ),
+            raw_users AS (
+                SELECT CASE
+                         WHEN json_valid(metadata_json)
+                          AND json_type(metadata_json,'$.uploaded_by')='text'
+                         THEN json_extract(metadata_json,'$.uploaded_by')
+                         ELSE ''
+                       END AS uploaded_by
+                  FROM raw_objects
+                 GROUP BY uploaded_by
+            )
             SELECT COUNT(*) AS n FROM users u
-            WHERE (SELECT COUNT(*) FROM messages WHERE user_id=u.id) > 0
-               OR (SELECT COUNT(*) FROM raw_objects
-                    WHERE json_extract(metadata_json,'$.uploaded_by') = u.id) > 0
+            LEFT JOIN message_users mu ON mu.user_id=u.id
+            LEFT JOIN raw_users ru ON ru.uploaded_by=u.id
+            WHERE mu.user_id IS NOT NULL OR ru.uploaded_by IS NOT NULL
             """
         ).fetchone()
         return int((row["n"] if row else 0) or 0)
+
+    def list_chat_thread(self, user_id: str, *, limit: int = 500) -> dict[str, Any]:
+        """One bounded chronological tail across all of a person's conversations.
+
+        The admin messenger is a person-level view.  Building it by first listing
+        conversations and then issuing one request per conversation made a click a
+        serialized HTTP waterfall and silently omitted every conversation after the
+        fifth.  This query chooses the newest messages globally in one snapshot,
+        reports the full total honestly, and only then restores chronological order.
+        Internal rowids and the window counter never leave storage.
+        """
+
+        window = max(1, min(int(limit), 1000))
+        rows = self.execute(
+            """
+            WITH newest AS (
+                SELECT m.*,
+                       m.rowid AS _message_rowid,
+                       COUNT(*) OVER () AS _thread_total
+                  FROM messages m
+                 WHERE m.user_id=?
+                 ORDER BY m.created_at DESC, m.rowid DESC
+                 LIMIT ?
+            )
+            SELECT * FROM newest
+             ORDER BY created_at ASC, _message_rowid ASC
+            """,
+            (user_id, window),
+        ).fetchall()
+        total = int(rows[0]["_thread_total"] or 0) if rows else 0
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item.pop("_message_rowid", None)
+            item.pop("_thread_total", None)
+            items.append(item)
+        return {"items": items, "total": total, "limit": window}
 
     def chat_feed_cursor(self) -> dict[str, Any]:
         """Отпечаток ленты переписки: изменилось ли что-нибудь.

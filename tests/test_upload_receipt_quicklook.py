@@ -616,7 +616,9 @@ async def test_registered_xlsx_upload_and_adjacent_overview(settings, storage) -
     _assert_public_file_metrics(receipt, expected=1)
     assert len(spy.calls) == 1
     assert spy.calls[0].get("tools") == []
+    assert spy.calls[0].get("max_tokens") == 900
     prompt = _prompt_blob(spy)
+    assert "не более 2200 знаков" in prompt
     assert _XLSX_INTRO in prompt
     assert _XLSX_PERSON in prompt
     assert _DECOY_HISTORY not in prompt
@@ -667,6 +669,26 @@ async def test_registered_xlsx_upload_and_adjacent_overview(settings, storage) -
     assert hostile_filename_receipt["voice"] is None
     assert hostile_filename_receipt["tools_used"] == []
     assert len(voice_spy.calls) == 1
+
+    # A backend-authored filename is inert data.  In particular, words inside
+    # ``ВОТ ЭТОТ ФАЙЛ.docx`` cannot fabricate a current+prior comparison and
+    # inflate one uploaded Raw into an expected set of two.
+    count_spy = _OverviewSpy()
+    count_runtime = AgentRuntime(configured, storage, llm=count_spy)  # type: ignore[arg-type]
+    inert_name_receipt = await _upload_turn(
+        count_runtime,
+        [{"raw_object_id": xlsx_id}],
+        filename="ВОТ ЭТОТ ФАЙЛ.docx",
+    )
+    _assert_public_file_metrics(inert_name_receipt, expected=1)
+    assert inert_name_receipt["restored_attachment_count"] == 0
+    inert_rows = storage.get_conversation_messages(
+        str(inert_name_receipt["conversation_id"]),
+        user_id="alice",
+    )
+    inert_user = next(item for item in inert_rows if item.get("role") == "user")
+    inert_metadata = json.loads(str(inert_user.get("metadata_json") or "{}"))
+    assert inert_metadata["attachment_count"] == 1
 
     empty_conv = storage.create_conversation("alice", title="overview-empty")
     empty_spy = _OverviewSpy()

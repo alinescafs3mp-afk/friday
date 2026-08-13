@@ -21,7 +21,7 @@ from friday.storage.models import (
 
 
 @pytest.mark.asyncio
-async def test_overview_and_database_diagnostics_count_only_public_graph_rows(settings, storage):
+async def test_overview_and_database_diagnostics_count_only_public_graph_rows(settings, storage, monkeypatch):
     from friday.admin_api._overview import overview
     from friday.knowledge_graph import KnowledgeGraph
     from friday.permissions import ActorContext, AuthorizationService
@@ -175,6 +175,15 @@ async def test_overview_and_database_diagnostics_count_only_public_graph_rows(se
             )()
             self.state = type("RS", (), {"actor": actor})()
 
+    # Full diagnostics remains an explicit operator action.  The landing page is
+    # forbidden from invoking it: on a real corpus it checks the whole database
+    # and decodes every historical knowledge snapshot.
+    database = storage.diagnostics()
+
+    def refuse_full_diagnostics():
+        raise AssertionError("the overview ran full database diagnostics")
+
+    monkeypatch.setattr(storage, "diagnostics", refuse_full_diagnostics)
     result = await overview(_Request())
     expected_zero = {"inbox", "relations", "relation_candidates", "feedback", "feedback_state"}
     assert result["counts"]["entities"] == 1
@@ -182,7 +191,9 @@ async def test_overview_and_database_diagnostics_count_only_public_graph_rows(se
     assert result["counts"]["knowledge_objects"] == 1
     assert result["pending_inbox"] == 0
     assert {key: result["counts"][key] for key in expected_zero} == {key: 0 for key in expected_zero}
-    database = result["database"]
+    assert result["database"]["integrity_check"] == "not_run"
+    assert result["database"]["ok"] is None
+    assert "counts" not in result["database"]
     assert database["counts"]["entities"] == 1
     assert database["counts"]["raw_objects"] == 1
     assert database["counts"]["knowledge_objects"] == 1

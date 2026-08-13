@@ -24,7 +24,7 @@ import dataclasses
 import httpx
 import pytest
 
-from friday.web_surfer import AllProvidersRefusedError, ProviderRefusedError, WebSurfer
+from friday.web_surfer import AllProvidersRefusedError, ProviderRefusedError, SearchResult, WebSurfer
 
 _YANDEX_XML = """<?xml version="1.0" encoding="utf-8"?>
 <yandexsearch version="1.0"><response><results><grouping><group><doc id="X">
@@ -292,6 +292,7 @@ async def test_the_encyclopedia_introduces_itself_honestly(settings):
         ("курс доллара", "SEARCH_TYPE_RU"),
         ("какие новости не из ру сегмента", "SEARCH_TYPE_COM"),
         ("зарубежные СМИ о выборах", "SEARCH_TYPE_COM"),
+        ("мировые новости за сегодня", "SEARCH_TYPE_COM"),
         ("что пишут иностранные источники", "SEARCH_TYPE_COM"),
         ("Raft consensus algorithm paper", "SEARCH_TYPE_COM"),
         ("新能源汽车 销量 2026", "SEARCH_TYPE_COM"),
@@ -310,12 +311,69 @@ def test_the_segment_follows_the_question_not_a_constant(settings, query, expect
     assert surfer._yandex_segment(query) == expected  # noqa: SLF001
 
 
-def test_an_explicit_setting_still_wins(settings):
-    """Владелец задал сегмент явно — спорить не с чем."""
+def test_a_query_explicitly_asking_for_foreign_sources_overrides_the_regional_default(settings):
+    """A generic regional default must not invert an explicit source class."""
     import dataclasses
 
     surfer = WebSurfer(dataclasses.replace(settings, yandex_search_type="SEARCH_TYPE_TR"))
-    assert surfer._yandex_segment("какие новости не из ру сегмента") == "SEARCH_TYPE_TR"  # noqa: SLF001
+    assert surfer._yandex_segment("какие новости не из ру сегмента") == "SEARCH_TYPE_COM"  # noqa: SLF001
+    assert surfer._yandex_segment("новости Турции") == "SEARCH_TYPE_TR"  # noqa: SLF001
+
+
+def test_a_code_owned_foreign_class_survives_a_rewritten_query(settings):
+    """The arbiter may remove every lexical cue; authority travels separately."""
+
+    surfer = WebSurfer(dataclasses.replace(settings, yandex_search_type="SEARCH_TYPE_RU"))
+    assert (
+        surfer._yandex_segment(  # noqa: SLF001
+            "elections latest developments",
+            source_class="foreign",
+        )
+        == "SEARCH_TYPE_COM"
+    )
+
+
+@pytest.mark.anyio
+async def test_a_ru_only_batch_is_not_a_foreign_source_answer(settings):
+    class _ForeignBatchHarness(WebSurfer):
+        def __init__(self):
+            super().__init__(settings)
+            self.seen: list[str] = []
+
+        def _provider_chain(self, query, limit, **kwargs):  # noqa: ANN001, ARG002
+            async def ru_only():
+                self.seen.append("ru")
+                return [
+                    SearchResult(
+                        title="Russian batch",
+                        url="https://news.synthetic.ru/item",
+                        snippet="local",
+                        source="first",
+                    )
+                ]
+
+            async def foreign():
+                self.seen.append("foreign")
+                return [
+                    SearchResult(
+                        title="Foreign batch",
+                        url="https://news.synthetic.example.com/item",
+                        snippet="world",
+                        source="second",
+                    )
+                ]
+
+            return [("first", ru_only), ("second", foreign)]
+
+    surfer = _ForeignBatchHarness()
+    results = await surfer.search(
+        "rewritten query without source words",
+        max_results=1,
+        source_class="foreign",
+    )
+
+    assert surfer.seen == ["ru", "foreign"]
+    assert [item.url for item in results] == ["https://news.synthetic.example.com/item"]
 
 
 def test_the_arbiter_is_told_to_translate_a_foreign_request():

@@ -74,7 +74,7 @@ const setApp=(gen,html)=>{if(gen===renderGen)document.getElementById('app').inne
 function errorView(e,gen){setApp(gen,`<div class="card error"><b>Не удалось загрузить раздел</b><div>${esc(e.message)}</div></div>`)}
 async function refresh(){renderNav();const fn=renderers[state.view];if(!fn)return;const gen=++renderGen;document.getElementById('app').innerHTML='<div class="card"><div class="empty">Загрузка…</div></div>';try{await fn(gen)}catch(e){errorView(e,gen)}}
 const renderers={};
-renderers.dashboard=async gen=>{const data=await api('/api/admin/overview');const c=data.counts||{};const tips=Array.isArray(data.bootstrap_suggestions)?data.bootstrap_suggestions:[];const tipsBlock=tips.length?`<div class="notice"><b>База знаний пока пуста. С чего начать:</b><ul class="tips">${tips.map(t=>`<li>${esc(t)}</li>`).join('')}</ul></div>`:'';setApp(gen,`${tipsBlock}<div class="grid stats">${[['Знаний',c.knowledge_objects],['Сущностей',c.entities],['Inbox',data.pending_inbox],['Пользователей',c.users],['Диалогов',c.conversations],['Сообщений',c.messages]].map(([l,v])=>`<div class="card stat"><div class="value">${Number(v||0).toLocaleString('ru')}</div><div class="label">${l}</div></div>`).join('')}</div><div class="grid two"><section class="card"><h2>Состояние хранилища</h2><div class="kv"><div>Целостность</div><div><span class="badge ${data.database?.ok?'ok':'bad'}">${esc(data.database?.integrity_check)}</span></div><div>Схема</div><div>${esc(data.database?.schema_version)}</div><div>Размер БД</div><div>${Number(data.database?.database_size_bytes||0).toLocaleString('ru')} байт</div><div>FTS5</div><div>${data.database?.fts_available?'включён':'недоступен'}</div></div></section><section class="card"><h2>Последние резервные копии</h2>${(data.backups||[]).length?data.backups.map(b=>`<div class="toolbar"><span class="badge ok">${esc(b.integrity_check)}</span><span class="mono">${esc(b.database)}</span><span class="grow"></span><span class="muted">${fmtDate(b.created_at)}</span></div>`).join(''):empty('Резервных копий пока нет')}</section></div>`)};
+renderers.dashboard=async gen=>{const data=await api('/api/admin/overview');const c=data.counts||{};const tips=Array.isArray(data.bootstrap_suggestions)?data.bootstrap_suggestions:[];const tipsBlock=tips.length?`<div class="notice"><b>База знаний пока пуста. С чего начать:</b><ul class="tips">${tips.map(t=>`<li>${esc(t)}</li>`).join('')}</ul></div>`:'';const integrity=data.database?.integrity_check==='not_run'?'не запускалась здесь':String(data.database?.integrity_check||'неизвестно');const integrityClass=data.database?.ok===true?'ok':data.database?.ok===false?'bad':'warn';setApp(gen,`${tipsBlock}<div class="grid stats">${[['Знаний',c.knowledge_objects],['Сущностей',c.entities],['Inbox',data.pending_inbox],['Пользователей',c.users],['Диалогов',c.conversations],['Сообщений',c.messages]].map(([l,v])=>`<div class="card stat"><div class="value">${Number(v||0).toLocaleString('ru')}</div><div class="label">${l}</div></div>`).join('')}</div><div class="grid two"><section class="card"><h2>Состояние хранилища</h2><div class="kv"><div>Целостность</div><div><span class="badge ${integrityClass}">${esc(integrity)}</span></div><div>Схема</div><div>${esc(data.database?.schema_version)}</div><div>Размер БД</div><div>${Number(data.database?.database_size_bytes||0).toLocaleString('ru')} байт</div><div>FTS5</div><div>${data.database?.fts_available?'включён':'недоступен'}</div></div><p class="muted">Полная проверка целостности запускается во вкладке «Диагностика», а не при каждом открытии обзора.</p></section><section class="card"><h2>Последние резервные копии</h2>${(data.backups||[]).length?data.backups.map(b=>`<div class="toolbar"><span class="badge ok">${esc(b.integrity_check)}</span><span class="mono">${esc(b.database)}</span><span class="grow"></span><span class="muted">${fmtDate(b.created_at)}</span></div>`).join(''):empty('Резервных копий пока нет')}</section></div>`)};
 actions.groupInbox=async axis=>{state.inboxAxis=axis;await refresh()};
 actions.dismissGroup=async(key,status)=>{const g=state.inboxGroups.find(x=>x.key===key);if(!g){toast('Группа не найдена',true);return}
   const verb=status==='ignored'?'игнорировать':'архивировать';
@@ -93,7 +93,7 @@ renderers.chats = async gen => {
     const when = p.last_at ? fmtDate(p.last_at) : '—';
     const who = p.last_role === 'assistant' ? 'Пятница' : (p.display_name || p.user_id);
     const preview = String(p.last_content || '').replace(/\s+/g, ' ').slice(0, 90);
-    return `<button class="chat-row ${active === p.user_id ? 'active' : ''}" ${call('openChat', p.user_id)}>
+    return `<button class="chat-row ${active === p.user_id ? 'active' : ''}" data-chat-person="${esc(p.user_id)}" ${call('openChat', p.user_id)}>
       <div class="chat-top"><b>${esc(p.display_name || p.user_id)}</b>
         <span class="muted">${esc(when)}</span></div>
       <div class="chat-preview"><span class="muted">${esc(who)}:</span> ${esc(preview)}</div>
@@ -123,7 +123,12 @@ renderers.chats = async gen => {
 
 async function openChat(userId) {
   state.chatPerson = userId;
-  await refresh();
+  document.querySelectorAll('.chat-row').forEach(row => {
+    row.classList.toggle('active', row.dataset.chatPerson === userId);
+  });
+  const box = document.getElementById('chatThread');
+  if (box) box.innerHTML = '<div class="empty">Загружаю переписку…</div>';
+  await loadChatThread(userId);
 }
 
 // Живая переписка: вкладка обновляется сама, как обычный мессенджер.
@@ -185,20 +190,16 @@ async function refreshChatsQuietly() {
   if (fresh) fresh.scrollTop = wasAtBottom ? fresh.scrollHeight : keptTop;
 }
 
-// Переписка человека: все его разговоры одной лентой, старые сверху — так же,
-// как её видит он сам в Telegram.
+// Последний ограниченный хвост всех разговоров человека одной лентой. Один
+// person-level запрос заменяет каскад «список разговоров + пять историй».
 async function loadChatThread(userId) {
   const person = (state.chatFeed || []).find(p => p.user_id === userId) || {};
   const box = document.getElementById('chatThread');
   if (!box) return;
   try {
-    const convs = await api(`/api/admin/conversations?user_id=${q(userId)}&include_archived=true&limit=20`);
-    const items = [];
-    for (const conv of (convs.items || []).slice(0, 5)) {
-      const page = await api(`/api/admin/conversations/${q(conv.id)}/messages?user_id=${q(userId)}&limit=200`);
-      for (const message of page.items || []) items.push({ ...message, conversation_title: conv.title });
-    }
-    items.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+    const page = await api(`/api/admin/chats/${q(userId)}/messages?limit=500`);
+    if (state.chatPerson !== userId) return;
+    const items = page.items || [];
     state.chatMessages = items;
     const bubbles = items.map(m => {
       const mine = m.role === 'assistant';
@@ -209,8 +210,10 @@ async function loadChatThread(userId) {
       </div>`;
     }).join('');
     const canReply = Boolean(person.chat_id);
+    const total = Number(page.total || 0);
+    const countLabel = total > items.length ? `последние ${items.length} из ${total}` : `${items.length} сообщений`;
     box.innerHTML = `<div class="toolbar"><h2 class="grow">${esc(person.display_name || userId)}</h2>
-        <span class="badge">${items.length} сообщений</span></div>
+        <span class="badge">${esc(countLabel)}</span></div>
       <div class="thread">${bubbles || empty('Сообщений нет')}</div>
       ${canReply
         ? `<div class="reply-box"><textarea id="replyText" class="field" rows="3"

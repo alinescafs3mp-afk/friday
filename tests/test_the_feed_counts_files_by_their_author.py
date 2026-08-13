@@ -81,6 +81,51 @@ def test_the_count_is_not_the_page_length(feed):
     assert feed.count_chat_feed() >= 2, "счёт повторяет длину страницы"
 
 
+def test_the_feed_plan_aggregates_once_instead_of_rescanning_per_person(feed):
+    """The live archive made each correlated JSON scan cost seconds."""
+
+    statements: list[str] = []
+    feed.conn.set_trace_callback(statements.append)
+    try:
+        feed.list_chat_feed(limit=50)
+        feed.count_chat_feed()
+    finally:
+        feed.conn.set_trace_callback(None)
+
+    listing = next(sql for sql in statements if "WITH ranked_messages AS" in sql)
+    counting = next(sql for sql in statements if "WITH message_users AS" in sql)
+    for sql in (listing, counting):
+        plan = feed.execute(f"EXPLAIN QUERY PLAN {sql}").fetchall()
+        details = "\n".join(str(row["detail"]) for row in plan)
+        assert "CORRELATED" not in details, details
+
+
+def test_one_bounded_thread_spans_conversations_and_reports_the_full_total(feed):
+    first = feed.create_conversation("person-a", title="первый")
+    second = feed.create_conversation("person-a", title="второй")
+    for conversation, content in (
+        (first, "один"),
+        (second, "два"),
+        (first, "три"),
+        (second, "четыре"),
+        (first, "пять"),
+    ):
+        feed.store_message(
+            conversation["id"],
+            "person-a",
+            "user",
+            content,
+            metadata={"internal_only": "must-not-reach-admin"},
+        )
+
+    page = feed.list_chat_thread("person-a", limit=3)
+
+    assert page["total"] == 5
+    assert page["limit"] == 3
+    assert [item["content"] for item in page["items"]] == ["три", "четыре", "пять"]
+    assert all("_thread_total" not in item and "_message_rowid" not in item for item in page["items"])
+
+
 @pytest.mark.asyncio
 async def test_the_route_hands_both_numbers_to_the_page(feed, settings):
     """Потребитель — СТРАНИЦА админки: проверяется ответ маршрута, а не запрос.
@@ -102,8 +147,63 @@ async def test_the_route_hands_both_numbers_to_the_page(feed, settings):
             )()
             self.state = type("RS", (), {"actor": actor, "client_ip": "", "request_id": ""})()
 
+    token = "jrc_" + "FeedPreview9_-" * 4
+    conversation = feed.create_conversation("person-a", title="credential preview")
+    feed.store_message(conversation["id"], "person-a", "assistant", f"preview {token}")
+
     answer = await chat_feed(_Request(), limit=100)
 
     assert answer["files_without_an_author"] == 2
     assert answer["count"] >= 2
     assert answer["shown"] == len(answer["items"])
+    person = next(item for item in answer["items"] if item["user_id"] == "person-a")
+    assert token not in person["last_content"]
+    assert "[redacted:token]" in person["last_content"]
+
+
+@pytest.mark.asyncio
+async def test_the_person_thread_route_is_one_public_bounded_projection(feed, settings):
+    from friday.admin_api._conversations import chat_thread
+    from friday.permissions import ActorContext, AuthorizationService
+
+    conversation = feed.create_conversation("person-a", title="маршрут")
+    for index in range(6):
+        feed.store_message(
+            conversation["id"],
+            "person-a",
+            "assistant" if index % 2 else "user",
+            f"сообщение {index}",
+            metadata={"private_path": "/private/never-publish"},
+        )
+
+    auth = AuthorizationService(feed)
+    actor = ActorContext(user_id=TENANT, preset_key="owner", source="api")
+
+    class _Request:
+        def __init__(self) -> None:
+            self.app = type(
+                "App",
+                (),
+                {"state": type("S", (), {"storage": feed, "auth_service": auth, "settings": settings})()},
+            )()
+            self.state = type(
+                "RS",
+                (),
+                {"actor": actor, "client_ip": "", "request_id": "", "audit_ip": ""},
+            )()
+
+    answer = await chat_thread("person-a", _Request(), limit=4)
+
+    assert answer["total"] >= 6
+    assert answer["count"] == 4
+    assert answer["limit"] == 4
+    assert [item["content"] for item in answer["items"]] == [
+        "сообщение 2",
+        "сообщение 3",
+        "сообщение 4",
+        "сообщение 5",
+    ]
+    assert all("metadata_json" not in item for item in answer["items"])
+    assert "/private/never-publish" not in str(answer)
+    audits = feed.execute("SELECT action FROM audit_log WHERE action='admin.messages.read'").fetchall()
+    assert len(audits) == 1, "one person-level read must produce exactly one audit event"

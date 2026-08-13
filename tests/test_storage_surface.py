@@ -172,7 +172,9 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # receives an immutable alias to the canonical Raw Object.
 # 357 → 358: one exact-uploader corpus selector keeps received/document time
 # roles distinct and returns totals separately from its bounded page.
-EXPECTED_MEMBER_COUNT = 358
+# 359 → 360: the admin messenger reads one bounded chronological tail per
+# person instead of issuing one request for each of five conversations.
+EXPECTED_MEMBER_COUNT = 360
 EXPECTED_SIGNATURES: dict[str, str] = {
     "bind_owned_file_source_ref_alias": "(self, user_id: 'str', uploaded_by: 'str', source_ref: 'str', raw_object_id: 'str') -> 'bool'",
     "find_owned_files_by_filename": "(self, user_id: 'str', uploaded_by: 'str', filename: 'str') -> 'list[dict[str, Any]]'",
@@ -329,7 +331,8 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "link_knowledge_entity": "(self, user_id: 'str', knowledge_object_id: 'str', entity_id: 'str', *, status: 'str' = 'accepted', confidence: 'float' = 1.0, evidence: 'dict[str, Any] | None' = None, reviewed_by: 'str | None' = None) -> 'dict[str, Any]'",
     "list_api_tokens": "(self, user_id: 'str | None' = None, *, include_revoked: 'bool' = False) -> 'list[dict[str, Any]]'",
     "list_audit_log": "(self, user_id: 'str | None' = None, *, limit: 'int' = 100, offset: 'int' = 0, before: 'str | None' = None) -> 'list[dict[str, Any]]'",
-    "list_backups": "(self) -> 'list[dict[str, Any]]'",
+    "list_backups": "(self, *, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
+    "list_chat_thread": "(self, user_id: 'str', *, limit: 'int' = 500) -> 'dict[str, Any]'",
     "list_container_entities": "(self, user_id: 'str', types: 'tuple[str, ...]') -> 'list[dict[str, Any]]'",
     "list_conversations": "(self, user_id: 'str', *, include_archived: 'bool' = False, limit: 'int' = 200, offset: 'int' = 0) -> 'list[dict[str, Any]]'",
     "list_custom_presets": "(self) -> 'list[dict[str, Any]]'",

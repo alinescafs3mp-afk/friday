@@ -20,6 +20,17 @@ def test_redact_text_covers_common_credential_shapes():
     assert "user:password" not in rendered
 
 
+def test_redact_text_covers_a_foreign_friday_api_token_but_not_short_labels():
+    token = "jrc_" + "Ab0_-xYz9" * 4 + "QrsTuvw"
+
+    rendered = redact_text(f"received {token}; labels jrc_demo jrc_short_test_word")
+
+    assert token not in rendered
+    assert "[redacted:token]" in rendered
+    assert "jrc_demo" in rendered
+    assert "jrc_short_test_word" in rendered
+
+
 def test_formatter_redacts_telegram_token_in_urls_and_tracebacks():
     token = "123456789:ABCdef_secret-value"
     formatter = SecretRedactingFormatter((token,))

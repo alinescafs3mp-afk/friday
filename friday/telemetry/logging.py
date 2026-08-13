@@ -29,6 +29,12 @@ _ASSIGNMENT = re.compile(
 _URL_USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)([^/@\s]+)@")
 _PRIVATE_KEY = re.compile(r"(?is)-----BEGIN [^-\r\n]*PRIVATE KEY-----.*?-----END [^-\r\n]*PRIVATE KEY-----")
 _KNOWN_TOKEN = re.compile(r"(?i)\b(sk-[A-Za-z0-9_-]{12,})")
+# Friday API credentials are minted as ``jrc_`` followed by 43 URL-safe
+# characters.  Logs often contain a foreign/user token which is not present in
+# this process environment, so exact-value filtering alone cannot protect it.
+# Keep the lower bound high enough that ordinary labels such as ``jrc_demo``
+# are not mistaken for credentials.
+_FRIDAY_API_TOKEN = re.compile(r"(?<![A-Za-z0-9_-])jrc_[A-Za-z0-9_-]{40,}")
 # A Telegram bot token lives in the URL PATH — `api.telegram.org/bot<id>:<secret>/…`
 # — so it is not an assignment, not userinfo and not a `sk-` key: none of the
 # patterns above see it. Every httpx error quotes the failing URL, which is how
@@ -86,6 +92,12 @@ _SAFE_EXCEPTION_KINDS = frozenset(
 )
 
 
+def redact_friday_api_tokens(value: Any) -> str:
+    """Remove structurally valid Friday API tokens from an outward string."""
+
+    return _FRIDAY_API_TOKEN.sub("[redacted:token]", str(value))
+
+
 def redact_text(value: Any) -> str:
     """Redact common credential forms without trying to infer arbitrary data."""
 
@@ -94,6 +106,7 @@ def redact_text(value: Any) -> str:
     text = _AUTH_VALUE.sub(r"\1[redacted]", text)
     text = _PRIVATE_KEY.sub("[redacted:private-key]", text)
     text = _KNOWN_TOKEN.sub("[redacted:token]", text)
+    text = redact_friday_api_tokens(text)
     text = _TELEGRAM_BOT_TOKEN.sub(r"\1[redacted:token]", text)
     return _ASSIGNMENT.sub(r"\1\2[redacted]", text)
 
