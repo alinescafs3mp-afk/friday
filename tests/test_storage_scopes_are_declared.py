@@ -67,6 +67,7 @@ PERSON_SCOPED = {
     "get_conversation",
     "get_conversation_messages",
     "get_message",
+    "idempotency_mark_effect_possible",
     "list_chat_thread",
     "list_conversations",
     "set_conversation_archived",
@@ -147,7 +148,10 @@ APPROVAL_TENANT_WITH_A_SEPARATE_PERSON = {
 # person authority is carried separately and rechecked by those methods.
 # 252 → 253: list_chat_thread is the bounded person-level admin transcript;
 # its user_id is the principal, never the shared archive tenant.
-EXPECTED_USER_ID_METHODS = 253
+# 253 → 254: idempotency_mark_effect_possible fences one person's transport
+# request before a possible side effect; sharing it at tenant scope would let
+# another participant poison or replay that person's operation key.
+EXPECTED_USER_ID_METHODS = 254
 
 
 def _methods_taking_user_id() -> set[str]:

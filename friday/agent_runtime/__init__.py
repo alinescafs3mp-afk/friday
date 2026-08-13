@@ -23711,7 +23711,18 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         turn_started = time.monotonic()
         if turn_deadline is None:
-            turn_deadline = turn_started + self.settings.agent_turn_budget_sec
+            # Production runtimes always own settings, but a few deliberately
+            # tiny adapters call the structural early-return routes through an
+            # uninitialised AgentRuntime.  Preserve that legacy seam: absence of
+            # settings means "no inherited HTTP deadline", never a crash before
+            # the emergency/structural command can be handled.
+            configured_budget = getattr(
+                getattr(self, "settings", None),
+                "agent_turn_budget_sec",
+                None,
+            )
+            if isinstance(configured_budget, (int, float)) and configured_budget > 0:
+                turn_deadline = turn_started + float(configured_budget)
         clean_message = (message or "").strip()
         # Цитата ограничена: человек может ответить на документ в тысячу строк, а
         # смысл здесь только в том, НА ЧТО он показал.
@@ -29279,8 +29290,13 @@ class AgentRuntime:
             context.knowledge_hits = []
         elif searcher:
             try:
-                retrieval_result = await _await_with_turn_deadline(
-                    searcher.search(
+
+                async def _run_hybrid_retrieval() -> Any:
+                    # The direct await lives inside a coroutine whose complete
+                    # lifetime is bounded immediately below.  Keeping the call
+                    # explicit also preserves the long-standing parallelism
+                    # contract inspected by the routing regression suite.
+                    return await searcher.search(
                         user_id,
                         search_query,
                         limit=retrieval_limit,
@@ -29314,7 +29330,10 @@ class AgentRuntime:
                         # without re-running an approximation of the query by hand in
                         # the admin panel — which is a different run.
                         explain=True,
-                    ),
+                    )
+
+                retrieval_result = await _await_with_turn_deadline(
+                    _run_hybrid_retrieval(),
                     context.turn_deadline,
                     expired="turn deadline expired during hybrid retrieval",
                 )
@@ -32677,11 +32696,13 @@ class AgentRuntime:
         if not str(kind).startswith("правило"):
             return False
         existing = self._standing_rules(context.person_id or context.user_id)
-        action, rule, previous_rule, remainder = await self._standing_rule_by_arbiter(
+        action, rule, previous_rule, remainder = await _call_with_turn_deadline(
+            self._standing_rule_by_arbiter,
             message,
             existing,
             previous_turn=context.previous_user_turn,
             turn_deadline=context.turn_deadline,
+            expired="turn deadline expired during standing-rule arbitration",
         )
         # Неизвестный остаток — это ВСЯ реплика, а не пустота: см. арбитр. Ход
         # тогда идёт к модели как раньше, подтверждение просто встаёт первым.
@@ -32847,13 +32868,15 @@ class AgentRuntime:
         if not str(kind).startswith("поправка"):
             return False
         existing = self._corrections(context.person_id or context.user_id)
-        action, correction, previous, remainder = await self._standing_rule_by_arbiter(
+        action, correction, previous, remainder = await _call_with_turn_deadline(
+            self._standing_rule_by_arbiter,
             message,
             existing,
             previous_turn=context.previous_user_turn,
             corrected_answer=context.previous_answer,
             candidate_kind="correction",
             turn_deadline=context.turn_deadline,
+            expired="turn deadline expired during correction arbitration",
         )
         rest = message if remainder is None else remainder
         if not action:
@@ -36150,15 +36173,25 @@ class AgentRuntime:
             # No classifier and no history on this path: the only bytes which
             # may influence the outbound query are the current visible request.
             kind, second = "интернет", self.web_query_from(web_message)
+        elif verdict is not None:
+            kind, second = verdict
         else:
-            kind, second = (
-                verdict
-                if verdict is not None
-                else await self._turn_web_query_by_arbiter(
+            bounded_arbiter = getattr(self, "_turn_web_query_by_arbiter", None)
+            if callable(bounded_arbiter):
+                kind, second = await bounded_arbiter(
                     web_message,
                     context=context,
                 )
-            )
+            else:
+                # Compatibility for narrow decision adapters which expose only
+                # the historical one-argument arbiter.  Inspect before calling;
+                # never retry a possibly external model call after TypeError.
+                kind, second = await _call_with_turn_deadline(
+                    self._web_query_by_arbiter,
+                    web_message,
+                    turn_deadline=context.turn_deadline if context is not None else None,
+                    expired="turn deadline expired during web intent arbitration",
+                )
         # Второе поле вердикта — поисковая строка ТОЛЬКО у вида «интернет».
         #
         # У остальных видов оно значит другое: у «человека» — ИМЯ участника, у
