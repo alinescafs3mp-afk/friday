@@ -103,21 +103,22 @@ services:
       --dtype auto
       --quantization modelopt_mixed
       ${FRIDAY_QWEN_ENFORCE_EAGER:-}
-      --max-model-len 32768
-      --gpu-memory-utilization 0.78
+      --max-model-len 40960
+      --gpu-memory-utilization 0.80
       --kv-cache-dtype fp8
       --tokenizer-mode auto
       --safetensors-load-strategy prefetch
       --enable-prefix-caching
-      --max-num-seqs 1
-      ${FRIDAY_QWEN_EXTRA_ARGS:-}
-      --no-language-model-only
-      --mm-processor-cache-gb 4.0
-      --max-num-batched-tokens 4096
-      --limit-mm-per-prompt '{"image":4,"video":0}'
+      --max-num-seqs 6
+      --max-num-batched-tokens 8192
       --reasoning-parser qwen3
       --tool-call-parser qwen3_coder
       --enable-auto-tool-choice
+      --speculative-config '{"method":"mtp","num_speculative_tokens":1}'
+      ${FRIDAY_QWEN_EXTRA_ARGS:-}
+      --no-language-model-only
+      --mm-processor-cache-gb 4.0
+      --limit-mm-per-prompt '{"image":4,"video":0}'
       --host 0.0.0.0
       --port 8001
     environment:

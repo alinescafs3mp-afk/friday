@@ -15,20 +15,22 @@ def test_primary_vllm_profile_is_pinned_to_expected_operational_values(settings)
     profile = settings.profile
     assert profile.model_dir_name == "qwen3.6-27b-nvfp4-nvidia"
     assert settings.model_dir == settings.model_root / "qwen3.6-27b-nvfp4-nvidia"
-    assert profile.max_model_len == 32768
-    assert profile.gpu_memory_utilization == 0.78
+    assert profile.max_model_len == 40960
+    assert profile.gpu_memory_utilization == 0.80
     assert profile.kv_cache_dtype == "fp8"
-    assert profile.max_num_seqs == 1
+    assert profile.max_num_seqs == 6
+    assert profile.document_map_max_concurrency == 1
     assert profile.tokenizer_mode == "auto"
     assert profile.quantization == "modelopt_mixed"
     assert profile.vision_capable is True
     assert profile.vllm_extra_args.language_model_only is False
     assert profile.vllm_extra_args.skip_mm_profiling is False
     assert profile.vllm_extra_args.mm_processor_cache_gb == 4.0
-    assert profile.vllm_extra_args.max_num_batched_tokens == 4096
+    assert profile.vllm_extra_args.max_num_batched_tokens == 8192
     assert profile.vllm_extra_args.limit_mm_per_prompt == '{"image":4,"video":0}'
     assert profile.vllm_extra_args.reasoning_parser == "qwen3"
     assert profile.vllm_extra_args.tool_call_parser == "qwen3_coder"
+    assert profile.vllm_extra_args.speculative_config == '{"method":"mtp","num_speculative_tokens":1}'
 
 
 def test_telegram_queue_persists_offset_deduplicates_and_survives_reopen(tmp_path):

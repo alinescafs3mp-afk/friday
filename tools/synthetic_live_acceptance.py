@@ -16,19 +16,26 @@ contains only synthetic case IDs, closed failure codes, hashes and counters.
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
+import asyncio
+import contextlib
 import hashlib
 import json
 import os
+import queue
 import re
 import secrets
+import signal
 import stat
 import sys
 import threading
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
+
+import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -49,6 +56,23 @@ SUITE_CASE_COUNTS = {"p06": 40, "focused": 120, "all": 160}
 SUMMARY_SCHEMA = "friday.synthetic-live-battery.pre-release.v1"
 P06_SCHEMA = "friday.synthetic-live-battery.p06-final.v1"
 FOCUSED_SCHEMA = "friday.synthetic-live-battery.focused-final.v1"
+MODEL_READINESS_BUDGET_SEC = 30.0
+MODEL_READINESS_METRICS_TIMEOUT_SEC = 2.0
+MODEL_READINESS_GENERATION_TIMEOUT_SEC = 20.0
+MODEL_READINESS_QUIET_SEC = 1.0
+MODEL_READINESS_CONCURRENCY = 4
+MODEL_READINESS_METRICS_MAX_BYTES = 2 * 1024 * 1024
+MODEL_READINESS_GENERATION_MAX_BYTES = 256 * 1024
+_VLLM_LOAD_METRICS = {
+    "vllm:num_requests_running": "running",
+    "vllm_num_requests_running": "running",
+    "vllm:num_requests_waiting": "waiting",
+    "vllm_num_requests_waiting": "waiting",
+}
+_PROMETHEUS_SAMPLE = re.compile(
+    r"^(?P<name>[A-Za-z_:][A-Za-z0-9_:]*)(?:\{.*\})?\s+"
+    r"(?P<value>[^\s]+)(?:\s+[0-9]+)?\s*$"
+)
 
 
 @dataclass(frozen=True)
@@ -76,6 +100,338 @@ class ExecutionResult:
     @property
     def candidate_identity(self) -> bool:
         return bool(self.candidate_pre_sha256 == self.candidate_sealed_sha256 == self.candidate_post_sha256)
+
+
+@dataclass(frozen=True)
+class ModelReadinessResult:
+    queue_state: str
+    metrics_samples: int
+    probes_requested: int
+    probes_completed: int
+    maximum_latency_ms: int
+
+    @property
+    def probes_clear(self) -> bool:
+        return bool(
+            self.probes_requested == self.probes_completed == MODEL_READINESS_CONCURRENCY
+            and type(self.maximum_latency_ms) is int
+            and 0 <= self.maximum_latency_ms <= round(MODEL_READINESS_BUDGET_SEC * 1000)
+        )
+
+    @property
+    def dispatch_clear(self) -> bool:
+        return bool((self.queue_state, self.metrics_samples) == ("clear", 3) and self.probes_clear)
+
+
+@dataclass(frozen=True)
+class ModelLoadSample:
+    running: float
+    waiting: float
+    process_start_time_seconds: float
+
+
+async def _read_bounded_response(response: httpx.Response, *, maximum_bytes: int) -> bytes:
+    """Read a readiness response without retaining an unbounded remote body."""
+
+    chunks: list[bytes] = []
+    observed = 0
+    async for chunk in response.aiter_bytes():
+        observed += len(chunk)
+        if observed > maximum_bytes:
+            raise battery.BatteryContractError("model_readiness_response_too_large")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _vllm_load(body: bytes) -> ModelLoadSample | None:
+    """Return load plus metric epoch, or ``None`` for non-vLLM metrics."""
+
+    observed: dict[str, list[float]] = {"running": [], "waiting": []}
+    process_starts: list[float] = []
+    try:
+        text = body.decode("utf-8")
+    except UnicodeError:
+        return None
+    for line in text.splitlines():
+        match = _PROMETHEUS_SAMPLE.fullmatch(line.strip())
+        if match is None:
+            continue
+        name = match.group("name")
+        kind = _VLLM_LOAD_METRICS.get(name)
+        if kind is None and name != "process_start_time_seconds":
+            continue
+        try:
+            value = float(match.group("value"))
+        except ValueError:
+            raise battery.BatteryContractError("model_readiness_metrics_invalid") from None
+        if not (value >= 0.0 and value < float("inf")):
+            raise battery.BatteryContractError("model_readiness_metrics_invalid")
+        if kind is None:
+            process_starts.append(value)
+        else:
+            observed[kind].append(value)
+    if not observed["running"] and not observed["waiting"]:
+        return None
+    if not observed["running"] or not observed["waiting"] or len(process_starts) != 1:
+        raise battery.BatteryContractError("model_readiness_metrics_incomplete")
+    return ModelLoadSample(
+        running=sum(observed["running"]),
+        waiting=sum(observed["waiting"]),
+        process_start_time_seconds=process_starts[0],
+    )
+
+
+def _bounded_http_timeout(deadline: float, *, ceiling: float) -> httpx.Timeout:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise battery.BatteryContractError("model_readiness_deadline_exhausted")
+    bounded = min(ceiling, remaining)
+    return httpx.Timeout(bounded, connect=min(2.0, bounded))
+
+
+async def _async_model_readiness_barrier(
+    environment: Mapping[str, str],
+    *,
+    transport: httpx.AsyncBaseTransport | None,
+    sleeper: Callable[[float], None] | None,
+    require_authoritative_metrics: bool,
+) -> ModelReadinessResult:
+    """Fail closed unless the configured model sustains four cheap probes.
+
+    vLLM exposes queue gauges at ``/metrics``.  When both gauges are present we
+    require a stable empty queue before the probes and an empty queue after them.
+    Other OpenAI-compatible servers can be diagnosed through four simultaneous,
+    bounded generations, but their queue state is explicitly ``unknown`` rather
+    than being presented as clear.  The official acceptance caller requires
+    authoritative metrics and therefore sends no probes when those are absent.
+    Only a fixed synthetic prompt is sent, and neither metrics nor response
+    bodies leave this function.
+    """
+
+    endpoint = battery._configured_model_endpoint_urls(environment)["model"]
+    parsed = urlsplit(endpoint)
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise battery.BatteryContractError("model_readiness_endpoint_invalid")
+    model = battery._environment_setting(environment, "FRIDAY_LLM_MODEL", "dispatcher").strip()
+    if not model:
+        raise battery.BatteryContractError("model_readiness_model_missing")
+    api_key = battery._environment_setting(environment, "FRIDAY_LLM_API_KEY").strip()
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    metrics_url = urlunsplit((parsed.scheme, parsed.netloc, "/metrics", "", ""))
+    generation_url = f"{endpoint.rstrip('/')}/chat/completions"
+    deadline = time.monotonic() + MODEL_READINESS_BUDGET_SEC
+
+    async def sample_load(client: httpx.AsyncClient) -> ModelLoadSample | None:
+        try:
+            async with client.stream(
+                "GET",
+                metrics_url,
+                timeout=_bounded_http_timeout(
+                    deadline,
+                    ceiling=MODEL_READINESS_METRICS_TIMEOUT_SEC,
+                ),
+            ) as response:
+                if response.status_code != 200:
+                    return None
+                return _vllm_load(
+                    await _read_bounded_response(
+                        response,
+                        maximum_bytes=MODEL_READINESS_METRICS_MAX_BYTES,
+                    )
+                )
+        except battery.BatteryContractError:
+            raise
+        except Exception:  # noqa: BLE001 - URL, token and remote body must not escape
+            return None
+
+    def require_idle(
+        load: ModelLoadSample | None,
+        *,
+        metrics_required: bool,
+        expected_epoch: float | None = None,
+    ) -> bool:
+        if load is None:
+            if metrics_required:
+                raise battery.BatteryContractError("model_readiness_metrics_lost")
+            return False
+        if expected_epoch is not None and load.process_start_time_seconds != expected_epoch:
+            raise battery.BatteryContractError("model_readiness_metrics_epoch_changed")
+        if load.running != 0.0 or load.waiting != 0.0:
+            raise battery.BatteryContractError("model_readiness_model_busy")
+        return True
+
+    async def quiet_interval() -> None:
+        if sleeper is None:
+            await asyncio.sleep(MODEL_READINESS_QUIET_SEC)
+        else:
+            sleeper(MODEL_READINESS_QUIET_SEC)
+
+    try:
+        async with httpx.AsyncClient(
+            headers=headers,
+            trust_env=False,
+            follow_redirects=False,
+            transport=transport,
+        ) as client:
+            first_sample = await sample_load(client)
+            metrics_observed = require_idle(first_sample, metrics_required=False)
+            metrics_samples = 1 if metrics_observed else 0
+            metrics_epoch = first_sample.process_start_time_seconds if first_sample is not None else None
+            if not metrics_observed and require_authoritative_metrics:
+                return ModelReadinessResult(
+                    queue_state="unknown",
+                    metrics_samples=0,
+                    probes_requested=MODEL_READINESS_CONCURRENCY,
+                    probes_completed=0,
+                    maximum_latency_ms=0,
+                )
+            if metrics_observed:
+                await quiet_interval()
+                require_idle(
+                    await sample_load(client),
+                    metrics_required=True,
+                    expected_epoch=metrics_epoch,
+                )
+                metrics_samples += 1
+
+            payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": "ok"}],
+                "max_tokens": 1,
+                "temperature": 0,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }
+            launch = asyncio.Event()
+            all_ready = asyncio.Event()
+            ready_count = 0
+
+            async def generation_probe() -> int:
+                nonlocal ready_count
+                ready_count += 1
+                if ready_count == MODEL_READINESS_CONCURRENCY:
+                    all_ready.set()
+                await launch.wait()
+                started = time.monotonic()
+                async with client.stream(
+                    "POST",
+                    generation_url,
+                    json=payload,
+                    timeout=_bounded_http_timeout(
+                        deadline,
+                        ceiling=MODEL_READINESS_GENERATION_TIMEOUT_SEC,
+                    ),
+                ) as response:
+                    if response.status_code != 200:
+                        raise battery.BatteryContractError("model_readiness_generation_failed")
+                    response_body = await _read_bounded_response(
+                        response,
+                        maximum_bytes=MODEL_READINESS_GENERATION_MAX_BYTES,
+                    )
+                try:
+                    generated = json.loads(response_body)
+                except (UnicodeError, json.JSONDecodeError):
+                    raise battery.BatteryContractError("model_readiness_generation_invalid") from None
+                if not isinstance(generated, Mapping) or not isinstance(generated.get("choices"), list):
+                    raise battery.BatteryContractError("model_readiness_generation_invalid")
+                if not generated["choices"]:
+                    raise battery.BatteryContractError("model_readiness_generation_invalid")
+                first_choice = generated["choices"][0]
+                if not isinstance(first_choice, Mapping) or not isinstance(
+                    first_choice.get("message"), Mapping
+                ):
+                    raise battery.BatteryContractError("model_readiness_generation_invalid")
+                return max(0, round((time.monotonic() - started) * 1000))
+
+            tasks = [
+                asyncio.create_task(generation_probe(), name=f"model-readiness-{index}")
+                for index in range(MODEL_READINESS_CONCURRENCY)
+            ]
+            try:
+                ready_budget = min(2.0, deadline - time.monotonic())
+                if ready_budget <= 0:
+                    raise battery.BatteryContractError("model_readiness_deadline_exhausted")
+                try:
+                    await asyncio.wait_for(all_ready.wait(), timeout=ready_budget)
+                except TimeoutError:
+                    raise battery.BatteryContractError("model_readiness_concurrency_failed") from None
+                launch.set()
+                completion_budget = deadline - time.monotonic()
+                if completion_budget <= 0:
+                    raise battery.BatteryContractError("model_readiness_deadline_exhausted")
+                try:
+                    latencies = list(
+                        await asyncio.wait_for(
+                            asyncio.gather(*tasks),
+                            timeout=completion_budget,
+                        )
+                    )
+                except TimeoutError:
+                    raise battery.BatteryContractError("model_readiness_deadline_exhausted") from None
+            finally:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+            if len(latencies) != MODEL_READINESS_CONCURRENCY:
+                raise battery.BatteryContractError("model_readiness_concurrency_failed")
+
+            if metrics_observed:
+                await quiet_interval()
+                require_idle(
+                    await sample_load(client),
+                    metrics_required=True,
+                    expected_epoch=metrics_epoch,
+                )
+                metrics_samples += 1
+    except battery.BatteryContractError:
+        raise
+    except Exception:  # noqa: BLE001 - expose only a closed failure code
+        raise battery.BatteryContractError("model_readiness_probe_failed") from None
+    if time.monotonic() > deadline:
+        raise battery.BatteryContractError("model_readiness_deadline_exhausted")
+    return ModelReadinessResult(
+        queue_state="clear" if metrics_observed else "unknown",
+        metrics_samples=metrics_samples,
+        probes_requested=MODEL_READINESS_CONCURRENCY,
+        probes_completed=len(latencies),
+        maximum_latency_ms=max(latencies),
+    )
+
+
+def _model_readiness_barrier(
+    environment: Mapping[str, str],
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+    sleeper: Callable[[float], None] | None = None,
+    require_authoritative_metrics: bool = True,
+) -> ModelReadinessResult:
+    """Run the asynchronous readiness barrier under one absolute local bound."""
+
+    async def bounded() -> ModelReadinessResult:
+        try:
+            return await asyncio.wait_for(
+                _async_model_readiness_barrier(
+                    environment,
+                    transport=transport,
+                    sleeper=sleeper,
+                    require_authoritative_metrics=require_authoritative_metrics,
+                ),
+                timeout=MODEL_READINESS_BUDGET_SEC,
+            )
+        except TimeoutError:
+            raise battery.BatteryContractError("model_readiness_deadline_exhausted") from None
+
+    try:
+        return asyncio.run(bounded())
+    except battery.BatteryContractError:
+        raise
+    except Exception:  # noqa: BLE001 - expose no URL, token or remote detail
+        raise battery.BatteryContractError("model_readiness_probe_failed") from None
 
 
 def _sha256_text(value: str) -> str:
@@ -236,6 +592,234 @@ def _make_private_directory(path: Path) -> None:
     battery._require_private_directory(path)
 
 
+WORKER_TEARDOWN_WAIT_SEC = 10.0
+WORKER_THREAD_TEARDOWN_WAIT_SEC = 15.0
+TEARDOWN_HARD_EXIT_CODE = 70
+
+
+class _AcceptanceTerminationRequested(BaseException):
+    """Private control flow raised by the scoped SIGTERM handler."""
+
+
+class _TerminationSignalGuard:
+    """Translate SIGTERM into unwindable control flow and ignore repeats."""
+
+    def __init__(self) -> None:
+        self._previous: Any = None
+        self._terminating = False
+
+    def __enter__(self) -> _TerminationSignalGuard:
+        if threading.current_thread() is not threading.main_thread():
+            raise battery.BatteryContractError("acceptance_signal_guard_unavailable")
+        self._previous = signal.getsignal(signal.SIGTERM)
+
+        def terminate(_signum: int, _frame: Any) -> None:
+            if self._terminating:
+                return
+            self._terminating = True
+            raise _AcceptanceTerminationRequested()
+
+        signal.signal(signal.SIGTERM, terminate)
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        del exc_type, exc, traceback
+        signal.signal(signal.SIGTERM, self._previous)
+
+
+def _hard_exit_after_incomplete_teardown() -> None:
+    """Never release the lifecycle lock while a cancellation-hostile worker lives."""
+
+    os._exit(TEARDOWN_HARD_EXIT_CODE)  # noqa: SLF001 - deliberate fail-closed process exit
+
+
+def _acceptance_lock_path() -> Path:
+    """Return one operator-home lock shared by every immutable release tree."""
+
+    from friday.config import default_home
+
+    operator_home = Path(os.path.abspath(default_home().expanduser()))
+    return operator_home / "runtime" / "locks" / "synthetic-live-acceptance.lock"
+
+
+def _open_acceptance_lock_directory(path: Path) -> int:
+    """Open ``<operator-home>/runtime/locks`` without following a path symlink."""
+
+    locks = path.parent
+    runtime = locks.parent
+    operator_home = runtime.parent
+    if locks.name != "locks" or runtime.name != "runtime" or not path.name:
+        raise battery.BatteryContractError("acceptance_lock_unavailable")
+    directory_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    directory_flags |= getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        home_descriptor = os.open(operator_home, directory_flags)
+    except OSError:
+        raise battery.BatteryContractError("acceptance_lock_unavailable") from None
+    try:
+        home = os.fstat(home_descriptor)
+        if not stat.S_ISDIR(home.st_mode) or home.st_uid != os.getuid():
+            raise battery.BatteryContractError("acceptance_lock_unavailable")
+        with contextlib.suppress(FileExistsError):
+            os.mkdir("runtime", 0o700, dir_fd=home_descriptor)
+        runtime_descriptor = os.open("runtime", directory_flags, dir_fd=home_descriptor)
+    except OSError:
+        raise battery.BatteryContractError("acceptance_lock_unavailable") from None
+    finally:
+        os.close(home_descriptor)
+    try:
+        runtime_metadata = os.fstat(runtime_descriptor)
+        if not stat.S_ISDIR(runtime_metadata.st_mode) or runtime_metadata.st_uid != os.getuid():
+            raise battery.BatteryContractError("acceptance_lock_unavailable")
+        with contextlib.suppress(FileExistsError):
+            os.mkdir("locks", 0o700, dir_fd=runtime_descriptor)
+        locks_descriptor = os.open("locks", directory_flags, dir_fd=runtime_descriptor)
+    except OSError:
+        raise battery.BatteryContractError("acceptance_lock_unavailable") from None
+    finally:
+        os.close(runtime_descriptor)
+    metadata = os.fstat(locks_descriptor)
+    if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid():
+        os.close(locks_descriptor)
+        raise battery.BatteryContractError("acceptance_lock_unavailable")
+    os.fchmod(locks_descriptor, 0o700)
+    return locks_descriptor
+
+
+class _ExclusiveAcceptanceRun:
+    """One fail-fast host lock spanning readiness, dispatch and teardown."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._descriptor: int | None = None
+
+    def __enter__(self) -> _ExclusiveAcceptanceRun:
+        import fcntl
+
+        battery._assert_ignored_or_external(self.path)
+        directory_descriptor = _open_acceptance_lock_directory(self.path)
+        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(self.path.name, flags, 0o600, dir_fd=directory_descriptor)
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid() or metadata.st_nlink != 1:
+                raise OSError("acceptance lock identity invalid")
+            os.fchmod(descriptor, 0o600)
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            if "descriptor" in locals():
+                os.close(descriptor)
+            raise battery.BatteryContractError("acceptance_run_already_active") from None
+        except OSError:
+            if "descriptor" in locals():
+                os.close(descriptor)
+            raise battery.BatteryContractError("acceptance_lock_unavailable") from None
+        finally:
+            os.close(directory_descriptor)
+        self._descriptor = descriptor
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        import fcntl
+
+        del exc_type, exc, traceback
+        descriptor = self._descriptor
+        self._descriptor = None
+        if descriptor is None:
+            return
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
+
+
+class _TrackedSubprocessModule:
+    """Delegate subprocess APIs while interposing on isolated worker Popen calls."""
+
+    def __init__(self, module: Any, registry: _WorkerProcessRegistry) -> None:
+        self._module = module
+        self.Popen = registry.popen  # noqa: N815 - mirrors subprocess' public class name
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._module, name)
+
+
+class _WorkerProcessRegistry:
+    """Close the Popen-registration race and reap every active worker group."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._module: Any = None
+        self._proxy: _TrackedSubprocessModule | None = None
+        self._processes: dict[int, Any] = {}
+        self._stopping = False
+
+    def __enter__(self) -> _WorkerProcessRegistry:
+        self._module = battery.subprocess
+        self._proxy = _TrackedSubprocessModule(self._module, self)
+        battery.subprocess = self._proxy
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        del exc, traceback
+        if exc_type is not None:
+            self.stop_and_reap()
+        if self._proxy is not None and battery.subprocess is self._proxy:
+            battery.subprocess = self._module
+        self._proxy = None
+
+    def popen(self, *args: Any, **kwargs: Any) -> Any:
+        """Create and register one new-session worker atomically against teardown."""
+
+        if kwargs.get("start_new_session") is not True:
+            return self._module.Popen(*args, **kwargs)
+        with self._lock:
+            if self._stopping:
+                raise battery.BatteryContractError("acceptance_worker_dispatch_stopped")
+            process = self._module.Popen(*args, **kwargs)
+            pid = int(getattr(process, "pid", 0) or 0)
+            if pid <= 1:
+                with contextlib.suppress(Exception):
+                    process.kill()
+                with contextlib.suppress(Exception):
+                    process.wait(timeout=WORKER_TEARDOWN_WAIT_SEC)
+                raise battery.BatteryContractError("acceptance_worker_pid_invalid")
+            self._processes[pid] = process
+            return process
+
+    def stop_and_reap(self) -> bool:
+        """Prevent later spawns, SIGKILL active process groups, then wait each child."""
+
+        with self._lock:
+            self._stopping = True
+            active = tuple(
+                (pid, process) for pid, process in self._processes.items() if process.poll() is None
+            )
+        clear = True
+        for pid, _process in active:
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except OSError:
+                clear = False
+        deadline = time.monotonic() + WORKER_TEARDOWN_WAIT_SEC
+        for _pid, process in active:
+            try:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    clear = False
+                    continue
+                process.wait(timeout=remaining)
+            except Exception:  # noqa: BLE001 - teardown must preserve the initiating BaseException
+                clear = False
+                with contextlib.suppress(Exception):
+                    process.kill()
+                with contextlib.suppress(Exception):
+                    process.wait(timeout=max(0.0, min(1.0, deadline - time.monotonic())))
+        return clear and all(process.poll() is not None for _pid, process in active)
+
+
 def _preseal_passes(
     suite: str,
     run_root: Path,
@@ -288,9 +872,14 @@ def _execute_sealed(
     sealed: Sequence[SealedPass],
     *,
     concurrency: int,
+    model_environment: Mapping[str, str],
 ) -> ExecutionResult:
     if type(concurrency) is not int or not (1 <= concurrency <= battery.MAX_CONCURRENCY):
         raise battery.BatteryContractError("concurrency_out_of_range")
+    if not isinstance(model_environment, Mapping) or any(
+        not isinstance(key, str) or not isinstance(value, str) for key, value in model_environment.items()
+    ):
+        raise battery.BatteryContractError("model_environment_invalid")
     candidate_files = battery._candidate_source_paths(instrument_path=RUNNER_PATH)
     if RUNNER_RELATIVE_PATH not in candidate_files:
         raise battery.BatteryContractError("acceptance_runner_not_candidate_bound")
@@ -300,7 +889,7 @@ def _execute_sealed(
     dispatches = {item.context.pass_id: 0 for item in sealed}
     dispatch_lock = threading.Lock()
     with battery.SubprocessPassExecutor(
-        battery._inherit_model_environment(),
+        dict(model_environment),
         instrument_path=RUNNER_PATH,
     ) as executor:
         candidate_sealed = str(executor._candidate_source_sha256)
@@ -326,12 +915,76 @@ def _execute_sealed(
                 code = "pass_result_invalid"
             return item.key, dict(value), code
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
-            futures = [pool.submit(execute_one, item) for item in sealed]
-            for future in concurrent.futures.as_completed(futures):
-                key, value, code = future.result()
-                results[key] = value
-                worker_codes[key] = code
+        work: queue.Queue[SealedPass | None] = queue.Queue()
+        completed: queue.Queue[tuple[str, Any]] = queue.Queue()
+        stop = threading.Event()
+        worker_count = min(concurrency, len(sealed))
+        for item in sealed:
+            work.put(item)
+        for _index in range(worker_count):
+            work.put(None)
+
+        def worker() -> None:
+            while not stop.is_set():
+                item = work.get()
+                if item is None or stop.is_set():
+                    return
+                try:
+                    completed.put(("result", execute_one(item)))
+                except BaseException as exc:  # noqa: BLE001 - propagate after process-group teardown
+                    stop.set()
+                    completed.put(("error", exc))
+                    return
+
+        threads = [
+            threading.Thread(
+                target=worker,
+                name=f"acceptance-pass-{index}",
+                daemon=True,
+            )
+            for index in range(worker_count)
+        ]
+        with _WorkerProcessRegistry() as registry:
+            for thread in threads:
+                thread.start()
+            try:
+                for _index in range(len(sealed)):
+                    kind, payload = completed.get()
+                    if kind == "error":
+                        raise payload
+                    key, value, code = payload
+                    results[key] = value
+                    worker_codes[key] = code
+            except BaseException:
+                stop.set()
+                previous_sigint: Any = None
+                previous_sigterm: Any = None
+                can_mask_signals = threading.current_thread() is threading.main_thread()
+                if can_mask_signals:
+                    previous_sigint = signal.signal(signal.SIGINT, signal.SIG_IGN)
+                    previous_sigterm = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+                try:
+                    processes_clear = registry.stop_and_reap()
+                    deadline = time.monotonic() + WORKER_THREAD_TEARDOWN_WAIT_SEC
+                    for thread in threads:
+                        thread.join(timeout=max(0.0, deadline - time.monotonic()))
+                finally:
+                    if can_mask_signals:
+                        signal.signal(signal.SIGTERM, previous_sigterm)
+                        signal.signal(signal.SIGINT, previous_sigint)
+                if not processes_clear or any(thread.is_alive() for thread in threads):
+                    _hard_exit_after_incomplete_teardown()
+                    raise battery.BatteryContractError("acceptance_worker_teardown_incomplete") from None
+                raise
+            else:
+                deadline = time.monotonic() + WORKER_THREAD_TEARDOWN_WAIT_SEC
+                for thread in threads:
+                    thread.join(timeout=max(0.0, deadline - time.monotonic()))
+                if any(thread.is_alive() for thread in threads):
+                    stop.set()
+                    registry.stop_and_reap()
+                    _hard_exit_after_incomplete_teardown()
+                    raise battery.BatteryContractError("acceptance_worker_teardown_incomplete")
         executor._assert_candidate_unchanged()
     candidate_post_files = battery._candidate_source_paths(instrument_path=RUNNER_PATH)
     candidate_post = battery._candidate_source_digest(relative_paths=candidate_post_files)
@@ -607,10 +1260,38 @@ def run_acceptance(
     concurrency: int,
     artifact_id: str,
 ) -> tuple[int, dict[str, Any]]:
+    """Run one suite under the host-wide readiness/worker lifecycle lock."""
+
+    if not re.fullmatch(r"PRE-RELEASE-(?:ALL|P06|FOCUSED)-[0-9a-f]{16}", artifact_id):
+        raise battery.BatteryContractError("artifact_id_invalid")
+    _suite_keys(suite)
+    if type(concurrency) is not int or not (1 <= concurrency <= battery.MAX_CONCURRENCY):
+        raise battery.BatteryContractError("concurrency_out_of_range")
+    if suite == "all" and concurrency != MODEL_READINESS_CONCURRENCY:
+        raise battery.BatteryContractError("acceptance_execution_concurrency_invalid")
+    with _TerminationSignalGuard(), _ExclusiveAcceptanceRun(_acceptance_lock_path()):
+        return _run_acceptance_locked(
+            suite,
+            run_directory=run_directory,
+            concurrency=concurrency,
+            artifact_id=artifact_id,
+        )
+
+
+def _run_acceptance_locked(
+    suite: str,
+    *,
+    run_directory: Path,
+    concurrency: int,
+    artifact_id: str,
+) -> tuple[int, dict[str, Any]]:
     """Run one sealed suite and return only a closed aggregate."""
 
     if not re.fullmatch(r"PRE-RELEASE-(?:ALL|P06|FOCUSED)-[0-9a-f]{16}", artifact_id):
         raise battery.BatteryContractError("artifact_id_invalid")
+    execution_concurrency_exact = concurrency == MODEL_READINESS_CONCURRENCY
+    if suite == "all" and not execution_concurrency_exact:
+        raise battery.BatteryContractError("acceptance_execution_concurrency_invalid")
     manifests = _load_manifests()
     inventory_for_suite(suite)
     battery._assert_ignored_or_external(run_directory)
@@ -619,7 +1300,19 @@ def run_acceptance(
     _make_private_directory(run_directory)
     battery._preflight_private_filesystem(run_directory)
     sealed = _preseal_passes(suite, run_directory, manifests)
-    execution = _execute_sealed(sealed, concurrency=concurrency)
+    model_environment = battery._inherit_model_environment()
+    readiness = _model_readiness_barrier(
+        model_environment,
+        require_authoritative_metrics=suite == "all",
+    )
+    readiness_required_clear = readiness.dispatch_clear if suite == "all" else readiness.probes_clear
+    if not readiness_required_clear:
+        raise battery.BatteryContractError("model_readiness_result_invalid")
+    execution = _execute_sealed(
+        sealed,
+        concurrency=concurrency,
+        model_environment=model_environment,
+    )
     pass_rows_by_id = {item.context.pass_id: _summarize_pass(item, execution) for item in sealed}
     pass_rows = [pass_rows_by_id[item.context.pass_id] for item in sealed]
     suite_summaries: dict[str, dict[str, Any]] = {}
@@ -661,6 +1354,8 @@ def run_acceptance(
         and execution.candidate_identity
         and runtime_consistent
         and dispatches_exact
+        and (suite != "all" or execution_concurrency_exact)
+        and readiness_required_clear
         and _private_tree(run_directory)
     )
     summary = {
@@ -674,6 +1369,15 @@ def run_acceptance(
         "failed": failed,
         "suite_status": {name: str(value.get("status") or "red") for name, value in suite_summaries.items()},
         "dispatches_exact_once": dispatches_exact,
+        "model_readiness_dispatch_clear": readiness.dispatch_clear,
+        "model_readiness_probes_clear": readiness.probes_clear,
+        "model_readiness_queue_state": readiness.queue_state,
+        "model_readiness_metrics_samples": readiness.metrics_samples,
+        "model_readiness_concurrency": readiness.probes_requested,
+        "model_readiness_probes_completed": readiness.probes_completed,
+        "model_readiness_maximum_latency_ms": readiness.maximum_latency_ms,
+        "execution_concurrency": concurrency,
+        "execution_concurrency_exact": execution_concurrency_exact,
         "privacy_evidence_private": _private_tree(run_directory),
         "candidate_digest_identity": execution.candidate_identity,
         "candidate_pre_sha256": execution.candidate_pre_sha256,

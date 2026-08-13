@@ -13,10 +13,11 @@ def test_qwen36_dense_profile_matches_the_multimodal_dispatcher_command(monkeypa
     assert profile.model_dir_name == "qwen3.6-27b-nvfp4-nvidia"
     assert settings.llm_model == "dispatcher"
     assert settings.model_dir == settings.model_root / profile.model_dir_name
-    assert profile.max_model_len == 32768
-    assert profile.gpu_memory_utilization == 0.78
+    assert profile.max_model_len == 40960
+    assert profile.gpu_memory_utilization == 0.80
     assert profile.kv_cache_dtype == "fp8"
-    assert profile.max_num_seqs == 1
+    assert profile.max_num_seqs == 6
+    assert profile.document_map_max_concurrency == 1
     assert profile.quantization == "modelopt_mixed"
     assert profile.tokenizer_mode == "auto"
     assert profile.vision_capable is True
@@ -27,10 +28,11 @@ def test_qwen36_dense_profile_matches_the_multimodal_dispatcher_command(monkeypa
     assert extra.skip_mm_profiling is False
     assert extra.mm_processor_cache_gb == 4.0
     assert extra.limit_mm_per_prompt == '{"image":4,"video":0}'
-    assert extra.max_num_batched_tokens == 4096
+    assert extra.max_num_batched_tokens == 8192
     assert extra.reasoning_parser == "qwen3"
     assert extra.tool_call_parser == "qwen3_coder"
     assert extra.enable_auto_tool_choice is True
+    assert extra.speculative_config == '{"method":"mtp","num_speculative_tokens":1}'
 
 
 def test_qwen36_dense_profile_exposes_quantization_and_vision():
@@ -38,6 +40,8 @@ def test_qwen36_dense_profile_exposes_quantization_and_vision():
 
     assert public["quantization"] == "modelopt_mixed"
     assert public["vision_capable"] is True
+    assert public["max_num_seqs"] == 6
+    assert public["document_map_max_concurrency"] == 1
     assert public["vllm_image"] == (
         "vllm/vllm-openai@sha256:2238154357f576523db1df2866cbf591734d70db8f6d50b9a7897f3c60e18940"
     )
@@ -50,3 +54,4 @@ def test_dense_aligned_profile_is_the_only_recommended_default(monkeypatch, tmp_
     assert load_settings().profile is PROFILES["qwen36-27b-nvfp4-nvidia"]
     assert PROFILES["qwen36-27b-nvfp4-nvidia"].default_recommended is True
     assert PROFILES["qwen36-vl"].default_recommended is False
+    assert PROFILES["qwen36-vl"].document_map_max_concurrency == 3

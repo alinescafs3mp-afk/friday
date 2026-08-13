@@ -30177,16 +30177,15 @@ class AgentRuntime:
 
         foreground_slots = max(1, int(self.settings.llm_foreground_slots))
         # Leave one configured foreground slot available to unrelated chat
-        # turns, but never submit more document generations than the selected
-        # runtime profile can execute at once.  In particular, max_num_seqs=1
-        # must remain a genuinely serial plan instead of several HTTP requests
-        # contending for the same model sequence and one shared deadline.
+        # turns.  Document-map fan-out is deliberately independent of vLLM's
+        # max_num_seqs: scheduler capacity also serves unrelated turns and is
+        # not permission for one large file to multiply expensive generations.
         map_parallelism = max(
             1,
             min(
                 3,
                 max(1, foreground_slots - 1),
-                max(1, int(self.settings.profile.max_num_seqs)),
+                max(1, int(self.settings.profile.document_map_max_concurrency)),
             ),
         )
         map_chunk_chars = _attachment_hierarchy_map_chunk_chars(

@@ -440,7 +440,7 @@ async def test_parallel_map_is_bounded_and_reassembles_out_of_order_tails(
         replace(
             settings,
             llm_foreground_slots=4,
-            profile=replace(settings.profile, max_num_seqs=3),
+            profile=replace(settings.profile, document_map_max_concurrency=3),
         ),
         storage,
         llm=llm,
@@ -471,7 +471,7 @@ async def test_parallel_map_is_bounded_and_reassembles_out_of_order_tails(
 
 
 @pytest.mark.asyncio
-async def test_a_306k_hierarchy_respects_single_sequence_profile_and_input_budget(
+async def test_a_306k_hierarchy_respects_document_map_cap_and_input_budget(
     settings: Any,
     storage: Any,
 ) -> None:
@@ -486,6 +486,8 @@ async def test_a_306k_hierarchy_respects_single_sequence_profile_and_input_budge
     runtime = AgentRuntime(  # type: ignore[arg-type]
         replace(settings, llm_foreground_slots=4), storage, llm=llm
     )
+    assert settings.profile.max_num_seqs == 6
+    assert settings.profile.document_map_max_concurrency == 1
     context = AgentContext(
         conversation_id="synthetic-dynamic-306k-map",
         user_id="synthetic-dynamic-306k-owner",
@@ -714,7 +716,7 @@ async def test_parallel_map_failure_stays_partial_and_cannot_pass(
         replace(
             settings,
             llm_foreground_slots=4,
-            profile=replace(settings.profile, max_num_seqs=3),
+            profile=replace(settings.profile, document_map_max_concurrency=3),
         ),
         storage,
         monkeypatch,
@@ -1690,7 +1692,7 @@ async def test_hierarchy_uses_one_unrenewed_prepass_deadline(
         replace(
             settings,
             llm_foreground_slots=4,
-            profile=replace(settings.profile, max_num_seqs=3),
+            profile=replace(settings.profile, document_map_max_concurrency=3),
         ),
         storage,
         monkeypatch,

@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 import stat
 import sys
 import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -117,12 +120,431 @@ def test_every_selected_pass_is_dispatched_once_without_retry(
     monkeypatch.setattr(battery, "_inherit_model_environment", lambda: {})
     monkeypatch.setattr(battery, "SubprocessPassExecutor", FakeExecutor)
 
-    result = acceptance._execute_sealed(sealed, concurrency=2)
+    result = acceptance._execute_sealed(sealed, concurrency=2, model_environment={})
 
     assert calls == {item.context.pass_id: 1 for item in sealed}
     assert result.dispatches == {item.context.pass_id: 1 for item in sealed}
     assert result.worker_codes == {item.key: "pass_worker_error" for item in sealed}
     assert result.candidate_identity is True
+
+
+def _readiness_environment() -> dict[str, str]:
+    return {
+        "FRIDAY_LLM_BASE_URL": "http://127.0.0.1:8001/v1",
+        "FRIDAY_EMBEDDINGS_BASE_URL": "http://127.0.0.1:8002/v1",
+        "FRIDAY_RERANK_BASE_URL": "http://127.0.0.1:8003/v1",
+        "FRIDAY_LLM_MODEL": "dispatcher",
+        "FRIDAY_LLM_API_KEY": "synthetic-readiness-key",
+    }
+
+
+def _vllm_metrics(*, running: int = 0, waiting: int = 0, epoch: int = 1_700_000_000) -> str:
+    return (
+        f"process_start_time_seconds {epoch}\n"
+        f"vllm:num_requests_running {running}\n"
+        f"vllm:num_requests_waiting {waiting}\n"
+    )
+
+
+def test_readiness_barrier_uses_authenticated_one_token_probe_without_metrics() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/metrics":
+            return httpx.Response(404)
+        assert request.url.path == "/v1/chat/completions"
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    result = acceptance._model_readiness_barrier(
+        _readiness_environment(),
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _seconds: None,
+        require_authoritative_metrics=False,
+    )
+
+    assert result.queue_state == "unknown"
+    assert result.metrics_samples == 0
+    assert result.probes_requested == result.probes_completed == 4
+    assert type(result.maximum_latency_ms) is int and result.maximum_latency_ms >= 0
+    assert result.probes_clear is True
+    assert result.dispatch_clear is False
+    assert [request.method for request in requests] == ["GET", "POST", "POST", "POST", "POST"]
+    assert all(request.headers["authorization"] == "Bearer synthetic-readiness-key" for request in requests)
+    for request in requests[1:]:
+        assert json.loads(request.content) == {
+            "model": "dispatcher",
+            "messages": [{"role": "user", "content": "ok"}],
+            "max_tokens": 1,
+            "temperature": 0,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+
+
+def test_official_readiness_refuses_unknown_queue_without_sending_probes() -> None:
+    methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        if request.method != "GET":
+            raise AssertionError("official gate must not add work to an unknown queue")
+        return httpx.Response(404)
+
+    result = acceptance._model_readiness_barrier(
+        _readiness_environment(),
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _seconds: None,
+    )
+
+    assert result.queue_state == "unknown"
+    assert result.probes_requested == 4
+    assert result.probes_completed == 0
+    assert result.probes_clear is False
+    assert result.dispatch_clear is False
+    assert methods == ["GET"]
+
+
+def test_readiness_barrier_refuses_a_busy_vllm_before_generation() -> None:
+    methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        return httpx.Response(
+            200,
+            text=_vllm_metrics(running=1, waiting=2),
+        )
+
+    with pytest.raises(battery.BatteryContractError, match="model_readiness_model_busy"):
+        acceptance._model_readiness_barrier(
+            _readiness_environment(),
+            transport=httpx.MockTransport(handler),
+            sleeper=lambda _seconds: None,
+            require_authoritative_metrics=False,
+        )
+
+    assert methods == ["GET"]
+
+
+def test_readiness_barrier_accepts_only_a_quiet_vllm_probe_cycle() -> None:
+    methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                text=(
+                    "# HELP vllm:num_requests_running Number of requests in model execution.\n"
+                    "process_start_time_seconds 1700000000\n"
+                    'vllm:num_requests_running{model_name="dispatcher"} 0.0\n'
+                    'vllm:num_requests_waiting{model_name="dispatcher"} 0.0\n'
+                ),
+            )
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    result = acceptance._model_readiness_barrier(
+        _readiness_environment(),
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _seconds: None,
+    )
+
+    assert result.queue_state == "clear"
+    assert result.metrics_samples == 3
+    assert result.probes_requested == result.probes_completed == 4
+    assert result.probes_clear is True
+    assert result.dispatch_clear is True
+    assert methods[:2] == ["GET", "GET"]
+    assert methods[2:6] == ["POST"] * 4
+    assert methods[6:] == ["GET"]
+
+
+def test_readiness_barrier_requires_vllm_to_stay_idle_after_probe() -> None:
+    metric_samples = iter(
+        [
+            _vllm_metrics(),
+            _vllm_metrics(),
+            _vllm_metrics(waiting=1),
+        ]
+    )
+    methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        if request.method == "GET":
+            return httpx.Response(200, text=next(metric_samples))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    with pytest.raises(battery.BatteryContractError, match="model_readiness_model_busy"):
+        acceptance._model_readiness_barrier(
+            _readiness_environment(),
+            transport=httpx.MockTransport(handler),
+            sleeper=lambda _seconds: None,
+        )
+
+    assert methods[:2] == ["GET", "GET"]
+    assert methods[2:6] == ["POST"] * 4
+    assert methods[6:] == ["GET"]
+
+
+@pytest.mark.parametrize(
+    ("epochs", "expected_methods"),
+    [
+        ([10, 11], ["GET", "GET"]),
+        ([10, 10, 11], ["GET", "GET", "POST", "POST", "POST", "POST", "GET"]),
+    ],
+)
+def test_readiness_barrier_rejects_a_metrics_epoch_change(
+    epochs: list[int],
+    expected_methods: list[str],
+) -> None:
+    metric_samples = iter([_vllm_metrics(epoch=epoch) for epoch in epochs])
+    methods: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        methods.append(request.method)
+        if request.method == "GET":
+            return httpx.Response(200, text=next(metric_samples))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    with pytest.raises(battery.BatteryContractError, match="model_readiness_metrics_epoch_changed"):
+        acceptance._model_readiness_barrier(
+            _readiness_environment(),
+            transport=httpx.MockTransport(handler),
+            sleeper=lambda _seconds: None,
+        )
+
+    assert methods == expected_methods
+
+
+def test_readiness_barrier_really_starts_four_probes_concurrently() -> None:
+    class ConcurrentTransport(httpx.AsyncBaseTransport):
+        def __init__(self) -> None:
+            self.active = 0
+            self.maximum_active = 0
+            self.release: asyncio.Event | None = None
+
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            if request.method == "GET":
+                return httpx.Response(404)
+            if self.release is None:
+                self.release = asyncio.Event()
+            self.active += 1
+            self.maximum_active = max(self.maximum_active, self.active)
+            if self.active == acceptance.MODEL_READINESS_CONCURRENCY:
+                self.release.set()
+            await asyncio.wait_for(self.release.wait(), timeout=1)
+            self.active -= 1
+            return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    transport = ConcurrentTransport()
+    result = acceptance._model_readiness_barrier(
+        _readiness_environment(),
+        transport=transport,
+        sleeper=lambda _seconds: None,
+        require_authoritative_metrics=False,
+    )
+
+    assert result.queue_state == "unknown"
+    assert result.probes_clear is True
+    assert result.dispatch_clear is False
+    assert transport.maximum_active == 4
+    assert transport.active == 0
+
+
+def test_readiness_deadline_cancels_and_drains_hanging_probes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class HangingTransport(httpx.AsyncBaseTransport):
+        def __init__(self) -> None:
+            self.active = 0
+            self.cancelled = 0
+
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            if request.method == "GET":
+                return httpx.Response(404)
+            self.active += 1
+            try:
+                await asyncio.Event().wait()
+                raise AssertionError("unreachable")
+            except asyncio.CancelledError:
+                self.cancelled += 1
+                raise
+            finally:
+                self.active -= 1
+
+    monkeypatch.setattr(acceptance, "MODEL_READINESS_BUDGET_SEC", 0.05)
+    monkeypatch.setattr(acceptance, "MODEL_READINESS_GENERATION_TIMEOUT_SEC", 0.05)
+    transport = HangingTransport()
+    started = time.monotonic()
+
+    with pytest.raises(battery.BatteryContractError, match="model_readiness_deadline_exhausted"):
+        acceptance._model_readiness_barrier(
+            _readiness_environment(),
+            transport=transport,
+            sleeper=lambda _seconds: None,
+            require_authoritative_metrics=False,
+        )
+
+    assert time.monotonic() - started < 1.0
+    assert transport.cancelled == 4
+    assert transport.active == 0
+
+
+def test_readiness_barrier_sanitizes_remote_failures() -> None:
+    secret = "remote-body-with-private-token"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(404)
+        raise RuntimeError(secret)
+
+    with pytest.raises(battery.BatteryContractError) as failure:
+        acceptance._model_readiness_barrier(
+            _readiness_environment(),
+            transport=httpx.MockTransport(handler),
+            sleeper=lambda _seconds: None,
+            require_authoritative_metrics=False,
+        )
+
+    assert str(failure.value) == "model_readiness_probe_failed"
+    assert secret not in str(failure.value)
+
+
+def test_readiness_failure_prevents_acceptance_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_root = tmp_path / "acceptance"
+    dispatched = False
+
+    def unknown(_environment: Any, **_kwargs: Any) -> acceptance.ModelReadinessResult:
+        return acceptance.ModelReadinessResult(
+            queue_state="unknown",
+            metrics_samples=0,
+            probes_requested=4,
+            probes_completed=0,
+            maximum_latency_ms=0,
+        )
+
+    def refuse_dispatch(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal dispatched
+        dispatched = True
+        raise AssertionError("readiness failure must precede dispatch")
+
+    monkeypatch.setattr(battery, "_assert_ignored_or_external", lambda _path: None)
+    monkeypatch.setattr(
+        acceptance,
+        "_acceptance_lock_path",
+        lambda: tmp_path / "runtime" / "locks" / "acceptance.lock",
+    )
+    monkeypatch.setattr(battery, "_inherit_model_environment", _readiness_environment)
+    monkeypatch.setattr(acceptance, "_model_readiness_barrier", unknown)
+    monkeypatch.setattr(acceptance, "_execute_sealed", refuse_dispatch)
+
+    with pytest.raises(battery.BatteryContractError, match="model_readiness_result_invalid"):
+        acceptance.run_acceptance(
+            "p06",
+            run_directory=run_root,
+            concurrency=4,
+            artifact_id="PRE-RELEASE-P06-0123456789abcdef",
+        )
+
+    assert dispatched is False
+
+
+def test_official_all_acceptance_refuses_reduced_execution_concurrency(tmp_path: Path) -> None:
+    with pytest.raises(
+        battery.BatteryContractError,
+        match="acceptance_execution_concurrency_invalid",
+    ):
+        acceptance.run_acceptance(
+            "all",
+            run_directory=tmp_path / "must-not-be-created",
+            concurrency=3,
+            artifact_id="PRE-RELEASE-ALL-0123456789abcdef",
+        )
+
+    assert not (tmp_path / "must-not-be-created").exists()
+
+
+def test_sanitized_summary_binds_probe_and_execution_concurrency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_root = tmp_path / "acceptance"
+    runtime_digest = "a" * 64
+    candidate_digest = "b" * 64
+
+    def fake_execution(
+        sealed: Any,
+        *,
+        concurrency: int,
+        model_environment: dict[str, str],
+    ) -> acceptance.ExecutionResult:
+        assert concurrency == 4
+        assert model_environment == _readiness_environment()
+        return acceptance.ExecutionResult(
+            results={},
+            worker_codes={item.key: "" for item in sealed},
+            dispatches={item.context.pass_id: 1 for item in sealed},
+            candidate_files=(acceptance.RUNNER_RELATIVE_PATH,),
+            candidate_pre_sha256=candidate_digest,
+            candidate_sealed_sha256=candidate_digest,
+            candidate_post_sha256=candidate_digest,
+        )
+
+    def fake_pass_row(item: Any, _execution: Any) -> dict[str, Any]:
+        return {
+            "pass_id": item.context.pass_id,
+            "cases": 20,
+            "passed": 20,
+            "failed": 0,
+            "all_gates_exact": True,
+            "runtime_sha256": runtime_digest,
+        }
+
+    monkeypatch.setattr(battery, "_assert_ignored_or_external", lambda _path: None)
+    monkeypatch.setattr(
+        acceptance,
+        "_acceptance_lock_path",
+        lambda: tmp_path / "runtime" / "locks" / "acceptance.lock",
+    )
+    monkeypatch.setattr(battery, "_inherit_model_environment", _readiness_environment)
+    monkeypatch.setattr(
+        acceptance,
+        "_model_readiness_barrier",
+        lambda _environment, **_kwargs: acceptance.ModelReadinessResult(
+            queue_state="unknown",
+            metrics_samples=0,
+            probes_requested=4,
+            probes_completed=4,
+            maximum_latency_ms=123,
+        ),
+    )
+    monkeypatch.setattr(acceptance, "_execute_sealed", fake_execution)
+    monkeypatch.setattr(acceptance, "_summarize_pass", fake_pass_row)
+    monkeypatch.setattr(
+        acceptance,
+        "_p06_summary",
+        lambda *_args, **_kwargs: {"status": "green"},
+    )
+
+    code, summary = acceptance.run_acceptance(
+        "p06",
+        run_directory=run_root,
+        concurrency=4,
+        artifact_id="PRE-RELEASE-P06-0123456789abcdef",
+    )
+
+    assert code == 0
+    assert summary["status"] == "green"
+    assert summary["model_readiness_queue_state"] == "unknown"
+    assert summary["model_readiness_dispatch_clear"] is False
+    assert summary["model_readiness_concurrency"] == 4
+    assert summary["model_readiness_probes_completed"] == 4
+    assert summary["model_readiness_probes_clear"] is True
+    assert summary["execution_concurrency"] == 4
+    assert summary["execution_concurrency_exact"] is True
 
 
 def _closed_reconciliation(kind: str) -> dict[str, Any]:

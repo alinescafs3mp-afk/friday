@@ -228,19 +228,29 @@ VRAM обнаружился при старте, а не на первом по�
 
 | Параметр | Значение |
 |---|---:|
-| model | `models/qwen3.6-27b-nvfp4-nvidia` |
+| model | `/models/qwen3.6-27b-nvfp4-nvidia` |
 | served model name | `dispatcher` |
-| max model length | `32768` |
+| dtype | `auto` |
+| max model length | `40960` |
 | quantization | `modelopt_mixed` |
-| GPU memory utilization | `0.78` |
+| GPU memory utilization | `0.80` |
 | KV cache dtype | `fp8` |
-| max sequences | `1` |
-| max batched tokens | `4096` |
+| max sequences | `6` |
+| max batched tokens | `8192` |
 | tokenizer mode | `auto` |
+| safetensors load strategy | `prefetch` |
+| speculative decoding | `MTP`, `1` token |
 | multimodal limits | `image=4`, `video=0` |
 | prefix caching | включён |
 | MM profiling | включён |
 | MM processor cache | `4.0 GiB` |
+| reasoning parser | `qwen3` |
+| tool-call parser | `qwen3_coder`, auto choice включён |
+
+Шесть scheduler sequences описывают пропускную способность общего endpoint, а не
+fan-out одной задачи. Иерархическое чтение документа имеет отдельный явный
+потолок `document_map_max_concurrency=1`: синхронизация профиля не превращает
+одну загрузку в три параллельные длинные генерации.
 
 Поля `FRIDAY_QWEN_ENFORCE_EAGER` и `FRIDAY_QWEN_EXTRA_ARGS` оставлены для
 аварийной диагностики конкретного GPU. Quantization закреплён прямо в команде:

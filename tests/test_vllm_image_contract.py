@@ -17,7 +17,10 @@ def _load_patcher():
 def test_multimodal_dispatcher_is_pinned_to_the_dense_modelopt_runtime():
     compose = Path("docker-compose.yml").read_text(encoding="utf-8")
     dispatcher_block = compose.split("  dispatcher:", 1)[1].split("\n  backend:", 1)[0]
-    assert "vllm/vllm-openai@sha256:2238154357" in dispatcher_block
+    assert (
+        "vllm/vllm-openai@sha256:2238154357f576523db1df2866cbf591734d70db8f6d50b9a7897f3c60e18940"
+        in dispatcher_block
+    )
     assert "--model /models/qwen3.6-27b-nvfp4-nvidia" in dispatcher_block
     assert "--quantization modelopt_mixed" in dispatcher_block
     assert "--no-language-model-only" in dispatcher_block
@@ -29,10 +32,18 @@ def test_multimodal_dispatcher_is_pinned_to_the_dense_modelopt_runtime():
         "FRIDAY_EMBEDDINGS_BASE_URL: ${FRIDAY_DOCKER_EMBEDDINGS_BASE_URL:-http://dispatcher:8001/v1}"
     ) in compose
     assert "http://127.0.0.1:${FRIDAY_API_PORT:-8000}/api/health" in compose
-    assert "--max-model-len 32768" in compose
-    assert "--gpu-memory-utilization 0.78" in compose
-    assert "--max-num-seqs 1" in compose
-    assert "--max-num-batched-tokens 4096" in compose
+    assert "--max-model-len 40960" in compose
+    assert "--gpu-memory-utilization 0.80" in compose
+    assert "--kv-cache-dtype fp8" in compose
+    assert "--max-num-seqs 6" in compose
+    assert "--max-num-batched-tokens 8192" in compose
+    assert '--speculative-config \'{"method":"mtp","num_speculative_tokens":1}\'' in compose
+    assert "--tokenizer-mode auto" in compose
+    assert "--safetensors-load-strategy prefetch" in compose
+    assert "--enable-prefix-caching" in compose
+    assert "--reasoning-parser qwen3" in compose
+    assert "--tool-call-parser qwen3_coder" in compose
+    assert "--enable-auto-tool-choice" in compose
 
 
 def test_every_bootstrap_surface_selects_the_multimodal_dense_profile():

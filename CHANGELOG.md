@@ -1,5 +1,17 @@
 ## 0.202.0 — 2026-08-13
 
+### Профиль dispatcher совпадает с живым запуском
+
+Закреплённые декларации синхронизированы с фактическим Docker argv единственного
+здорового dispatcher на порту 8001: контекст 40960, доля GPU 0.80, FP8 KV,
+шесть scheduler sequences, batch 8192 и MTP с одним speculative token. Digest
+образа, ModelOpt mixed quantization, parsers, prefix caching, multimodal limits
+и safetensors prefetch остаются зафиксированы явно.
+
+Пропускная способность vLLM больше не управляет fan-out иерархического чтения
+файла. Для document map оставлен отдельный безопасный потолок 1, поэтому рост
+`max_num_seqs` с 1 до 6 не запускает три тяжёлых leaf-запроса от одной загрузки.
+
 ### Один дедлайн на весь ход
 
 Один абсолютный monotonic deadline теперь начинается при приёме

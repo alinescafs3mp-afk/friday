@@ -253,6 +253,10 @@ class RuntimeProfile:
     gpu_memory_utilization: float
     kv_cache_dtype: str
     max_num_seqs: int
+    # Document hierarchy fan-out is an application workload limit, not a copy
+    # of vLLM's scheduler capacity.  Keep it explicit so increasing endpoint
+    # throughput cannot silently multiply long document-map generations.
+    document_map_max_concurrency: int
     cpu_offload_gb: float
     kv_offloading_gb: int
     vllm_extra_args: VllmExtraArgs = field(default_factory=VllmExtraArgs)
@@ -306,6 +310,7 @@ PROFILES: dict[str, RuntimeProfile] = {
         gpu_memory_utilization=0.90,
         kv_cache_dtype="fp8",
         max_num_seqs=16,
+        document_map_max_concurrency=3,
         cpu_offload_gb=0,
         kv_offloading_gb=0,
         tokenizer_mode="auto",
@@ -343,16 +348,15 @@ PROFILES["qwen36-27b-nvfp4-nvidia"] = RuntimeProfile(
     eager_mode=False,
     max_steps=24,
     temperature=0.25,
-    max_model_len=32768,
-    # Leave physical headroom for the co-resident embeddings and reranker
-    # services.  At 0.82 the complete Windows/WSL stack entered Unified-Memory
-    # paging during a normal Friday prefill even though vLLM stayed healthy.
-    # With the multimodal encoder profiled and the sidecars already resident,
-    # 0.76 exposed 1.28 GiB of KV cache versus the 1.29 GiB required for one
-    # full 32K request.  0.78 restores a bounded startup margin.
-    gpu_memory_utilization=0.78,
+    max_model_len=40960,
+    # Exact values attested from the sole healthy remote container publishing
+    # the Friday dispatcher port.  Document map fan-out remains independently
+    # capped below; scheduler capacity is not permission to launch six costly
+    # hierarchy leaves from one user turn.
+    gpu_memory_utilization=0.80,
     kv_cache_dtype="fp8",
-    max_num_seqs=1,
+    max_num_seqs=6,
+    document_map_max_concurrency=1,
     cpu_offload_gb=0,
     kv_offloading_gb=0,
     tokenizer_mode="auto",
@@ -363,11 +367,12 @@ PROFILES["qwen36-27b-nvfp4-nvidia"] = RuntimeProfile(
     vllm_extra_args=VllmExtraArgs(
         language_model_only=False,
         mm_processor_cache_gb=4.0,
-        max_num_batched_tokens=4096,
+        max_num_batched_tokens=8192,
         reasoning_parser="qwen3",
         tool_call_parser="qwen3_coder",
         enable_auto_tool_choice=True,
         limit_mm_per_prompt='{"image":4,"video":0}',
+        speculative_config='{"method":"mtp","num_speculative_tokens":1}',
     ),
     certification="pending_multimodal_smoke",
     interactive_certified=False,
@@ -375,8 +380,8 @@ PROFILES["qwen36-27b-nvfp4-nvidia"] = RuntimeProfile(
     research_only=False,
     readiness_deadline_sec=900.0,
     certification_reason=(
-        "Text path verified on the deployed Blackwell host at 32K with FP8 KV; "
-        "multimodal boot and image smoke must pass after the operator starts the revised dispatcher."
+        "Live dispatcher launch attested at 40K with FP8 KV and MTP1; "
+        "multimodal boot and image smoke remain required for certification."
     ),
     menu_visible=True,
     requires_experimental_opt_in=False,
@@ -396,6 +401,7 @@ def profile_public_dict(profile: RuntimeProfile) -> dict[str, object]:
         "gpu_memory_utilization": profile.gpu_memory_utilization,
         "kv_cache_dtype": profile.kv_cache_dtype,
         "max_num_seqs": profile.max_num_seqs,
+        "document_map_max_concurrency": profile.document_map_max_concurrency,
         "tokenizer_mode": profile.tokenizer_mode,
         "quantization": profile.quantization,
         "vllm_image": profile.vllm_image,
