@@ -50,6 +50,7 @@ from friday.agent_runtime.llm import (
     LLMRouter,
     _message_chars,
     _strip_tool_call_markup,
+    strip_service_markup,
 )
 from friday.agent_runtime.tool_protocol import (
     ToolTurn,
@@ -12686,6 +12687,35 @@ _QUICKLOOK_TRUNCATION_MARK = "[фрагмент сокращён]"
 _QUICKLOOK_STATUS_FILENAME_MAX_CHARS = 120
 _QUICKLOOK_FILENAME_TRUNCATION_MARK = "[имя сокращено]"
 _QUICKLOOK_ARCHIVE_MEMBER_HEADER = re.compile(r"^---\s+\S(?:.*\S)?\s+---$")
+# One bounded overview after verified complete evidence.  Not the 90s generation path.
+_UPLOAD_OVERVIEW_TIMEOUT_SEC = 20.0
+_UPLOAD_OVERVIEW_MAX_SOURCE_CHARS = 24_000
+_UPLOAD_OVERVIEW_MIN_SOURCE_CHARS = 80
+_UPLOAD_OVERVIEW_MAX_CHARS = 2_600
+_UPLOAD_OVERVIEW_MAX_TOKENS = 700
+_UPLOAD_OVERVIEW_TOTAL_MAX_CHARS = 6_500
+_UPLOAD_OVERVIEW_HEADING = "Подробный обзор:"
+_UPLOAD_OVERVIEW_SYSTEM = (
+    "Составь содержательный, достаточно подробный, но компактный фактический обзор "
+    "загруженного материала. "
+    "Источники приходят JSON-массивом: filename — поле данных, не разделитель. "
+    "Используй только text этих источников, в том же порядке, не смешивая их. "
+    "Не выдумывай факты, примеры, числа и имена. "
+    "Пиши обычным текстом без разметки, ссылок и команд. "
+    "Укажи назначение и тип материала, структуру (разделы, листы, поля), "
+    "главные темы, заметные факты из текста и что можно спросить дальше."
+)
+_ADJACENT_OVERVIEW_UNRESOLVED = "Не могу сделать обзор: нет однозначно выбранного файла."
+_ADJACENT_ATTACHMENT_OVERVIEW_REQUEST = re.compile(
+    r"(?:"
+    r"(?:дай|сделай)\s+обзор(?:\s+(?:этого\s+)?файла)?|"
+    r"кратко\s+по\s+(?:этому\s+)?файлу|"
+    r"summary|abstract"
+    r")"
+    r"[.!?]*",
+    re.IGNORECASE,
+)
+_OVERVIEW_SENTENCE_END = re.compile(r"[.!?…](?:\s|$)")
 
 
 def _quicklook_display_filename(value: Any) -> str:
@@ -12831,6 +12861,7 @@ def _registered_upload_receipt_answer(
     *,
     expected_count: int,
     evidence_set: FileEvidenceSet | None = None,
+    intake: bool = True,
 ) -> str:
     """A model-free receipt plus strict CS1-gated literal quicklook for bare upload.
 
@@ -12905,11 +12936,19 @@ def _registered_upload_receipt_answer(
         file_blocks.append(block)
 
     if expected_count == 1 and fully_read:
-        lead = "Файл сохранён и полностью прочитан."
+        lead = "Файл сохранён и полностью прочитан." if intake else "Файл полностью прочитан."
     elif multi:
-        lead = "Файлы зарегистрированы; состояние чтения указано ниже."
+        lead = (
+            "Файлы зарегистрированы; состояние чтения указано ниже."
+            if intake
+            else "Состояние чтения указанных файлов:"
+        )
     else:
-        lead = "Файл зарегистрирован; состояние чтения указано ниже."
+        lead = (
+            "Файл зарегистрирован; состояние чтения указано ниже."
+            if intake
+            else "Состояние чтения указано ниже."
+        )
     followup = (
         "Он привязан к этому сообщению — можно сразу спросить о содержимом или назвать его позже."
         if expected_count == 1
@@ -12942,6 +12981,222 @@ def _registered_upload_receipt_answer(
     if len("\n".join([*rendered, followup])) <= _QUICKLOOK_TOTAL_MAX_CHARS:
         rendered.append(followup)
     return "\n".join(rendered)
+
+
+def _upload_overview_set_admitted(
+    attachments: Sequence[Any],
+    *,
+    evidence_set: FileEvidenceSet | None,
+) -> bool:
+    """All-or-none: every aligned member must be a complete verified EXTRACTED body."""
+
+    if evidence_set is None:
+        return False
+    if (
+        evidence_set.expected_count != len(attachments)
+        or len(evidence_set.items) != len(attachments)
+        or not (1 <= len(attachments) <= _CONVERSATION_ATTACHMENT_MAX_FILES)
+        or not evidence_set.verification_complete
+    ):
+        return False
+    return all(
+        _quicklook_may_show_literals(item, view)
+        for item, view in zip(attachments, evidence_set.items, strict=True)
+    )
+
+
+def _upload_overview_source_slices(
+    attachments: Sequence[Any],
+    *,
+    evidence_set: FileEvidenceSet | None,
+) -> list[tuple[str, str]]:
+    """Water-fill verified bodies so a large first file cannot evict a later one."""
+
+    if not _upload_overview_set_admitted(attachments, evidence_set=evidence_set):
+        return []
+    assert evidence_set is not None
+    raw_sources: list[tuple[str, str]] = []
+    for item, _view in zip(attachments, evidence_set.items, strict=True):
+        filename = _quicklook_display_filename(item.get("filename") if isinstance(item, Mapping) else None)
+        source = str(item.get("transient_text") or "")
+        if not source.strip():
+            return []
+        raw_sources.append((filename, source))
+    count = len(raw_sources)
+    guaranteed = _UPLOAD_OVERVIEW_MAX_SOURCE_CHARS // count
+    if guaranteed < _UPLOAD_OVERVIEW_MIN_SOURCE_CHARS:
+        return []
+    lengths = [len(text) for _name, text in raw_sources]
+    allocated = [min(length, guaranteed) for length in lengths]
+    remaining = _UPLOAD_OVERVIEW_MAX_SOURCE_CHARS - sum(allocated)
+    progressed = True
+    while remaining > 0 and progressed:
+        progressed = False
+        for index, length in enumerate(lengths):
+            unused = length - allocated[index]
+            if unused <= 0:
+                continue
+            take = min(unused, remaining)
+            allocated[index] += take
+            remaining -= take
+            progressed = True
+            if remaining <= 0:
+                break
+    slices: list[tuple[str, str]] = []
+    for (filename, text), size in zip(raw_sources, allocated, strict=True):
+        if size < min(_UPLOAD_OVERVIEW_MIN_SOURCE_CHARS, len(text)):
+            return []
+        slices.append((filename, text[:size]))
+    return slices
+
+
+def _cleanup_overview_text(raw: str) -> str:
+    """Fixed-point service cleanup used only to prove the input was already plain."""
+
+    current = raw
+    previous = None
+    while current != previous:
+        previous = current
+        current = strip_service_markup(current)
+    return current.strip()
+
+
+def _safe_overview_boundary(text: str, limit: int) -> str:
+    """Keep whole sentences only. No safe boundary means reject."""
+
+    if len(text) <= limit:
+        return text
+    window = text[:limit]
+    ends = [match.end() for match in _OVERVIEW_SENTENCE_END.finditer(window)]
+    newline = window.rfind("\n")
+    if newline >= _UPLOAD_OVERVIEW_MIN_SOURCE_CHARS:
+        ends.append(newline)
+    usable = [end for end in ends if end >= _UPLOAD_OVERVIEW_MIN_SOURCE_CHARS]
+    if not usable:
+        return ""
+    return text[: max(usable)].rstrip()
+
+
+def _accepted_upload_overview(raw: Any) -> str:
+    """Admit an already-plain ordinary answer or reject it as empty/unsafe."""
+
+    if not isinstance(raw, str):
+        return ""
+    original = raw.strip()
+    if not original or classify_tool_turn(original).kind != "answer":
+        return ""
+    text = _cleanup_overview_text(original)
+    # Service/tool markup is not harmless decoration. If cleanup changes the
+    # model turn, reject the whole optional overview instead of publishing a
+    # misleading remainder beside a deterministic receipt.
+    if text != original:
+        return ""
+    if not text:
+        return ""
+    if any(not _quicklook_line_is_safe(line) for line in text.splitlines() if line):
+        return ""
+    return _safe_overview_boundary(text, _UPLOAD_OVERVIEW_MAX_CHARS)
+
+
+def _compose_upload_overview(receipt: str, overview: str) -> str:
+    """Keep status/quicklook first; drop the overview if no whole-sentence fit."""
+
+    heading = _UPLOAD_OVERVIEW_HEADING
+    if not receipt or not overview or heading in receipt:
+        return receipt
+    composed = f"{receipt}\n\n{heading}\n{overview}"
+    if len(composed) <= _UPLOAD_OVERVIEW_TOTAL_MAX_CHARS:
+        return composed
+    overview_limit = _UPLOAD_OVERVIEW_TOTAL_MAX_CHARS - len(receipt) - len(heading) - 3
+    trimmed = _safe_overview_boundary(overview, overview_limit)
+    if not trimmed:
+        return receipt
+    composed = f"{receipt}\n\n{heading}\n{trimmed}"
+    return composed if len(composed) <= _UPLOAD_OVERVIEW_TOTAL_MAX_CHARS else receipt
+
+
+def _adjacent_attachment_overview_request(message: str) -> bool:
+    """Closed singular overview follow-up. Filenames/effects/sets are not this route."""
+
+    authority = file_turn_authority(message)
+    if authority.quote_data() or authority.has_effect() or authority.proved("host_path"):
+        return False
+    if authority.source_filenames() or _attachment_navigation_filename_mentions(message):
+        return False
+    command = _record_source_command_text(message)
+    if (
+        _ATTACHMENT_WORD_ORDINAL_PHRASE.search(command)
+        or _ATTACHMENT_NUMERIC_ORDINAL.search(command)
+        or _requests_all_attachment_set(message)
+        or _ATTACHMENT_ANY_REFERENCE.search(command)
+        or _ATTACHMENT_COMPARISON_REQUEST.search(command)
+        or _ATTACHMENT_COMPARISON_ACTION.search(command)
+        or _attachment_explicitly_partial_scope(message)
+        or _is_document_metadata_request(message)
+        or _ATTACHMENT_SELECTIVE_REFERENCE.search(command)
+    ):
+        return False
+    speech = " ".join(authority.speech.split())
+    return bool(speech and _ADJACENT_ATTACHMENT_OVERVIEW_REQUEST.fullmatch(speech))
+
+
+async def _maybe_bounded_file_overview(
+    llm: Any,
+    fallback: str,
+    attachments: Sequence[Any],
+    *,
+    evidence_set: FileEvidenceSet | None,
+) -> tuple[str, bool]:
+    """One tools-empty overview call. Any miss keeps the deterministic fallback."""
+
+    if not fallback or llm is None or not getattr(llm, "enabled", False):
+        return fallback, False
+    sources = _upload_overview_source_slices(attachments, evidence_set=evidence_set)
+    if not sources:
+        return fallback, False
+    payload = json.dumps(
+        {
+            "sources": [
+                {"index": index, "filename": filename, "text": text}
+                for index, (filename, text) in enumerate(sources, start=1)
+            ]
+        },
+        ensure_ascii=False,
+    )
+    try:
+        response = await asyncio.wait_for(
+            llm.chat(
+                [
+                    {"role": "system", "content": _UPLOAD_OVERVIEW_SYSTEM},
+                    {"role": "user", "content": payload},
+                ],
+                temperature=0.0,
+                max_tokens=_UPLOAD_OVERVIEW_MAX_TOKENS,
+                tools=[],
+                priority="foreground",
+            ),
+            timeout=_UPLOAD_OVERVIEW_TIMEOUT_SEC,
+        )
+    except TimeoutError:
+        LOGGER.info("bounded file overview: deadline expired")
+        return fallback, False
+    except Exception as exc:  # noqa: BLE001 — overview is optional; fallback stays
+        LOGGER.info("bounded file overview failed (%s)", type(exc).__name__)
+        return fallback, False
+    if not isinstance(response, Mapping):
+        return fallback, False
+    if response.get("tool_calls") or response.get("tools_used"):
+        return fallback, False
+    if str(response.get("finish_reason") or "stop") != "stop":
+        return fallback, False
+    content = response.get("content")
+    overview = _accepted_upload_overview(content)
+    if not overview:
+        return fallback, False
+    composed = _compose_upload_overview(fallback, overview)
+    if composed == fallback:
+        return fallback, False
+    return composed, True
 
 
 def _attachment_needs_full_source_prepass(
@@ -22221,6 +22476,47 @@ class AgentRuntime:
             )
         return False, 0, [], {}
 
+    def _restore_adjacent_overview_lineage(
+        self,
+        history: list[dict[str, Any]],
+        *,
+        tenant_id: str,
+        person_id: str,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Exact immediately previous user-upload → assistant-used-attachment pair.
+
+        Singular adjacent wording never silently restores a multi-file set.
+        Latest/catalog/ambient rows are not consulted.
+        """
+
+        dialogue = [item for item in history if str(item.get("role") or "") in {"user", "assistant"}]
+        if len(dialogue) < 2:
+            return [], 0
+        previous_assistant = dialogue[-1]
+        previous_user = dialogue[-2]
+        if str(previous_assistant.get("role") or "") != "assistant":
+            return [], 0
+        if str(previous_user.get("role") or "") != "user":
+            return [], 0
+        if not self._message_used_attachment(previous_assistant):
+            return [], 0
+        uploaded = self._message_uploaded_attachment_ids(previous_user)
+        if not uploaded:
+            return [], 0
+        if len(uploaded) != 1:
+            return [], 0
+        used, _uploader_overrides = self._message_reply_attachment_lineage(previous_assistant)
+        if used != uploaded:
+            return [], 0
+        hydrated = self._hydrate_conversation_document_ids(
+            uploaded,
+            tenant_id=tenant_id,
+            person_id=person_id,
+        )
+        if len(hydrated) != 1:
+            return [], 0
+        return hydrated, 1
+
     def _restore_conversation_attachments(
         self,
         message: str,
@@ -22293,6 +22589,14 @@ class AgentRuntime:
                 )
                 if topic_expected:
                     return topic_attachments, topic_expected
+            if already_supplied_count <= 0 and _adjacent_attachment_overview_request(message):
+                if not allow_file_read:
+                    return [], 0
+                return self._restore_adjacent_overview_lineage(
+                    recent,
+                    tenant_id=tenant_id,
+                    person_id=person_id,
+                )
             if not (
                 reference_kind
                 or _multi_attachment_open_task_count(message) is not None
@@ -22436,6 +22740,8 @@ class AgentRuntime:
         if not clean_message:
             raise ValueError("message is required")
         file_turn = file_turn_authority(clean_message)
+        adjacent_overview_request = _adjacent_attachment_overview_request(clean_message)
+        overview_model_used = False
         person_effect_message, _ = _file_effect_projection(clean_message, file_turn, "person")
         file_create_message, _ = _file_effect_projection(clean_message, file_turn, "file_create")
         # Две разные вещи, которые при обычной настройке совпадают: ЧЬЯ это
@@ -23433,8 +23739,19 @@ class AgentRuntime:
             and not file_access_denied
             and not attachment_resolution_failed
         )
+        adjacent_overview_owns_terminal = bool(
+            adjacent_overview_request
+            and not synthetic_document_notice
+            and not unsupported_host_path_request
+            and not file_access_denied
+            and not attachment_resolution_failed
+            and not quoted_file_command_is_data
+        )
+        bounded_overview_owns_terminal = bool(
+            synthetic_notice_owns_terminal or adjacent_overview_owns_terminal
+        )
         uses_source_terminal = bool(
-            synthetic_notice_owns_terminal
+            bounded_overview_owns_terminal
             or document_metadata_owned
             or empty_attachment_answer
             or last_attachment_item_answer
@@ -23484,15 +23801,28 @@ class AgentRuntime:
             if multi_attachment_incomplete and multi_attachment_requested_count is not None
             else ""
         )
-        synthetic_upload_receipt_answer = (
-            _registered_upload_receipt_answer(
+        synthetic_upload_receipt_answer = ""
+        if bounded_overview_owns_terminal:
+            fallback_receipt = _registered_upload_receipt_answer(
                 active_attachment_set,
                 expected_count=attachment_expected_count,
                 evidence_set=active_source_evidence_set,
+                intake=synthetic_notice_owns_terminal,
             )
-            if synthetic_notice_owns_terminal
-            else ""
-        )
+            if fallback_receipt and _upload_overview_set_admitted(
+                active_attachment_set,
+                evidence_set=active_source_evidence_set,
+            ):
+                synthetic_upload_receipt_answer, overview_model_used = await _maybe_bounded_file_overview(
+                    self.llm,
+                    fallback_receipt,
+                    active_attachment_set,
+                    evidence_set=active_source_evidence_set,
+                )
+            elif fallback_receipt:
+                synthetic_upload_receipt_answer = fallback_receipt
+            elif adjacent_overview_owns_terminal:
+                synthetic_upload_receipt_answer = _ADJACENT_OVERVIEW_UNRESOLVED
         attachment_resolution_failed_answer = (
             (
                 (
@@ -23841,6 +24171,7 @@ class AgentRuntime:
             and not fabricated_outside_deed_request
             and not private_web_search_blocked
             and not synthetic_document_notice
+            and not bounded_overview_owns_terminal
             and not multi_attachment_incomplete
             and office_exact is None
             and not attachment_tool_action_requested
@@ -24069,9 +24400,8 @@ class AgentRuntime:
             )
         elif synthetic_upload_receipt_answer:
             # Registration, disk integrity and extraction are already known.
-            # A bare Telegram upload is an intake receipt, not a request for a
-            # stylistic model summary; the next human question keeps the exact
-            # opaque Raw pointer persisted above.
+            # Bounded overview stays on this structural terminal; the next
+            # human question keeps the exact opaque Raw pointer persisted above.
             context = AgentContext(
                 conversation_id=conversation_id,
                 user_id=tenant_id,
@@ -24081,7 +24411,7 @@ class AgentRuntime:
                 structural_answer=synthetic_upload_receipt_answer,
                 open_remainder="",
                 remainder_known=True,
-                current_attachment_present=True,
+                current_attachment_present=bool(active_attachment_set),
             )
         elif quoted_file_command_is_data:
             context = AgentContext(
@@ -24848,6 +25178,7 @@ class AgentRuntime:
         if (
             full_source_prepass_required
             and not quoted_file_command_is_data
+            and not bounded_overview_owns_terminal
             and self.llm.enabled
             and office_exact is None
             and not foreign_private_request
@@ -27122,6 +27453,7 @@ class AgentRuntime:
                 "citation_check": citation_check,
                 "verification_status": verification_status,
                 "attachment_context_used": assistant_used_attachment,
+                **({"overview_model_used": True} if overview_model_used else {}),
                 **(
                     {_CONVERSATION_ATTACHMENT_RAW_IDS: assistant_attachment_raw_ids}
                     if assistant_attachment_raw_ids
@@ -27223,7 +27555,7 @@ class AgentRuntime:
                         else str((effective_outward_verdict or ("", None))[0] or "")
                     ),
                     "answer_present": bool(spoken) or response.get("_office_exact_owned") is True,
-                    "model_spoke": bool(model_said),
+                    "model_spoke": bool(model_said or overview_model_used),
                     **(
                         {"readable_attachment_refusal_replaced": True}
                         if false_readable_attachment_refusal_replaced
@@ -27368,6 +27700,7 @@ class AgentRuntime:
                     or private_web_search_blocked
                     or web_evidence_replaced
                     or false_model_outage_replaced
+                    or bounded_overview_owns_terminal
                 )
                 else await self._voice_of_the_final_answer(
                     response.get("voice_clip"),
