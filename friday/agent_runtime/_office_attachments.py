@@ -823,9 +823,82 @@ def build_office_prompt_bundle(
     )
 
 
+_BALANCED_QUOTED_TEXT = re.compile(r"«[^»\n]*»|“[^”\n]*”|„[^“\n]*“|\"[^\"\n]*\"|'[^'\n]*'")
+
+
+def file_authority_speech(message: str) -> str:
+    """Current speech outside balanced quoted spans.
+
+    Shared projection contract for every Office intent helper. Quoted text is
+    never current-command authority; callers may still read the original
+    surface for literals after an unquoted action has been proved.
+    """
+
+    return " ".join(_BALANCED_QUOTED_TEXT.sub(" ", str(message or "")).split())
+
+
 def _clean_question(question: str) -> str:
     text = " ".join(str(question or "").casefold().split())
     return re.sub(r"^[\W_]+|[\W_]+$", "", text, flags=re.UNICODE).strip()
+
+
+_COUNT_PEOPLE_IMPERATIVE = re.compile(
+    rf"\b(?:посчита|пересчита)\w*.{{0,50}}\b{_PEOPLE_NOUN}\b",
+    re.IGNORECASE,
+)
+
+
+def _office_action_present(text: str) -> bool:
+    """True when this already-unquoted surface names an Office count/list action."""
+
+    cleaned = _clean_question(text)
+    if not cleaned:
+        return False
+    return bool(
+        _closed_office_request_kind(cleaned)
+        or _raw_office_request_kind(cleaned)
+        or _COUNT_PEOPLE.search(cleaned)
+        or _COUNT_PEOPLE_IMPERATIVE.search(cleaned)
+        or _COUNT_RECORDS.search(cleaned)
+        or _LIST_PEOPLE.search(cleaned)
+        or _LIST_RECORDS.search(cleaned)
+        or _RECHECK_WHOLE_FILE.search(cleaned)
+    )
+
+
+def _office_unquoted_candidate(question: str) -> bool:
+    """Positive unquoted Office target or action. kind_override cannot create this."""
+
+    if quoted_office_command_is_data(question):
+        return False
+    speech = file_authority_speech(question)
+    if not speech:
+        return False
+    if _office_action_present(speech):
+        return True
+    text = _office_intent_text(question)
+    return bool(text and office_attachment_targeted(question) and _office_action_present(text))
+
+
+def quoted_office_command_is_data(question: str) -> bool:
+    """True when the Office action exists only inside balanced quotes."""
+
+    if _office_action_present(file_authority_speech(question)):
+        return False
+    visible = str(question or "")
+    return any(
+        _office_action_present(span.group(0)[1:-1])
+        for span in _BALANCED_QUOTED_TEXT.finditer(visible)
+        if len(span.group(0)) >= 2
+    )
+
+
+def _office_intent_text(question: str) -> str:
+    """Authority speech for Office intent, or empty when the action is quoted."""
+
+    if quoted_office_command_is_data(question):
+        return ""
+    return _clean_question(file_authority_speech(question))
 
 
 def _closed_office_request_kind(question: str) -> str:
@@ -925,7 +998,7 @@ def _closed_office_request_kind(question: str) -> str:
 def office_attachment_targeted(question: str) -> bool:
     """Whether the utterance actually points at the active attachment."""
 
-    text = _clean_question(question)
+    text = _office_intent_text(question)
     return bool(
         text
         and (
@@ -939,7 +1012,7 @@ def office_attachment_targeted(question: str) -> bool:
 def office_exhaustive_scope(question: str) -> bool:
     """Whether whole-set Office postconditions apply to this semantic scope."""
 
-    text = _clean_question(question)
+    text = _office_intent_text(question)
     return bool(
         text
         and office_attachment_targeted(text)
@@ -980,14 +1053,15 @@ def _raw_office_request_kind(text: str) -> str:
 def office_exact_request_detected(question: str) -> bool:
     """Targeted exact intent, including a compound turn the model must handle."""
 
-    text = _clean_question(question)
+    text = _office_intent_text(question)
+    if not text:
+        return False
     if "?" not in text and _DECLARATIVE_ATTACHMENT_PROSE.search(text):
         return False
     if office_request_kind(text):
         return True
     return bool(
-        text
-        and not _NON_TABULAR_ROW_SCOPE.search(text)
+        not _NON_TABULAR_ROW_SCOPE.search(text)
         and not _LOCAL_ATTACHMENT_SCOPE.search(text)
         and office_attachment_targeted(text)
         and (
@@ -1007,7 +1081,9 @@ def office_exact_request_detected(question: str) -> bool:
 def office_request_kind(question: str) -> str:
     """Closed whole-file intent used only when an Office attachment is active."""
 
-    text = _clean_question(question)
+    text = _office_intent_text(question)
+    if not text:
+        return ""
     if (
         _NON_TABULAR_ROW_SCOPE.search(text)
         or _LOCAL_ATTACHMENT_SCOPE.search(text)
@@ -1199,7 +1275,7 @@ def office_arbiter_applies(question: str, attachments: list[dict[str, Any]] | No
     арбитр ответил бы про таблицу, которой нет, и вызов был бы потрачен зря на
     каждом ходе с любым файлом.
     """
-    text = _clean_question(question)
+    text = _office_intent_text(question)
     if not text or office_request_kind(question):
         return False
     active_items = [item for item in attachments or [] if isinstance(item, Mapping)]
@@ -1226,6 +1302,8 @@ def code_owned_office_answer(
     определяется структурой, а не моделью.
     """
 
+    if not _office_unquoted_candidate(question):
+        return None
     kind = kind_override if kind_override in OFFICE_INTENT_KINDS else office_request_kind(question)
     if not kind:
         return None
@@ -1358,12 +1436,15 @@ __all__ = [
     "bounded_raw_file_metadata",
     "build_office_prompt_bundle",
     "code_owned_office_answer",
+    "file_authority_speech",
     "is_trusted_office_attachment",
     "looks_like_office_attachment",
+    "office_arbiter_applies",
     "office_attachment_targeted",
     "office_exact_request_detected",
     "office_exhaustive_scope",
     "office_request_kind",
+    "quoted_office_command_is_data",
     "trusted_office_attachment",
     "validate_exact_id_selection",
     "validate_runtime_office_index",

@@ -26,9 +26,11 @@ from friday.agent_runtime._office_attachments import (
     OFFICE_INTENT_ARBITER_SYSTEM,
     OFFICE_PROMPT_PREFIX,
     OFFICE_STRUCTURE_KEY,
+    _office_action_present,
     bounded_raw_file_metadata,
     build_office_prompt_bundle,
     code_owned_office_answer,
+    file_authority_speech,
     is_trusted_office_attachment,
     looks_like_office_attachment,
     office_arbiter_applies,
@@ -772,6 +774,10 @@ def _file_source_complete_signal(
         return item.get("_source_text_complete") is True
     if item.get("_office_structured") is True:
         return item.get("_office_index_complete") is True and item.get("_office_prompt_complete") is True
+    if is_trusted_office_attachment(item):
+        index = item.get(OFFICE_STRUCTURE_KEY)
+        if isinstance(index, Mapping) and index.get("complete") is True:
+            return True
     return _attachment_source_complete(item)
 
 
@@ -7123,10 +7129,11 @@ def _named_person_aggregation_scope(
 ) -> _NamedPersonAggregationScope | None:
     """Closed current/prior scope for one named-user content aggregation."""
 
+    if not file_turn_authority(message).proved("person"):
+        return None
     visible = _classification_text(message)
-    if not _named_person_query_from(visible) and _attachment_filename_mentions(
-        _attachment_selector_message(visible)
-    ):
+    speech = file_authority_speech(visible)
+    if not _named_person_query_from(visible) and file_turn_authority(message).source_filenames():
         # An exact input filename is a stronger source selector than the
         # personless all-upload corpus heuristic.  In particular, the generic
         # time grammar can read ``с ... и ...`` as an explicit range and the
@@ -7135,19 +7142,19 @@ def _named_person_aggregation_scope(
         # attachment resolver own what remains before either heuristic can turn
         # a file read/comparison into a bogus date-range clarification.
         return None
-    if _attachment_temporal_read_clause(visible) and not _named_person_query_from(visible):
+    if _attachment_temporal_read_clause(speech) and not _named_person_query_from(visible):
         # ``обобщи документ и покажи, что происходило вчера`` contains a
         # document task and a separate owner-timeline clock.  The latter must
         # not be reinterpreted as the arrival window of an implicit all-time
         # self corpus; the current authenticated attachment remains the source.
         return None
     direct = bool(
-        _NAMED_PERSON_AGGREGATION_ACTION.search(visible) and _NAMED_PERSON_AGGREGATION_SUBJECT.search(visible)
+        _NAMED_PERSON_AGGREGATION_ACTION.search(speech) and _NAMED_PERSON_AGGREGATION_SUBJECT.search(speech)
     )
     inherited = False
     base = visible
     if not direct:
-        if not _NAMED_PERSON_SCOPE_ONLY.fullmatch(visible):
+        if not _NAMED_PERSON_SCOPE_ONLY.fullmatch(speech):
             return None
         prior_user = next(
             (
@@ -7158,8 +7165,8 @@ def _named_person_aggregation_scope(
             "",
         )
         if not (
-            _NAMED_PERSON_AGGREGATION_ACTION.search(prior_user)
-            and _NAMED_PERSON_AGGREGATION_SUBJECT.search(prior_user)
+            _NAMED_PERSON_AGGREGATION_ACTION.search(file_authority_speech(prior_user))
+            and _NAMED_PERSON_AGGREGATION_SUBJECT.search(file_authority_speech(prior_user))
         ):
             return None
         base = prior_user
@@ -7789,6 +7796,81 @@ def _exact_reminder_remainder(text: str, *, core_end: int) -> str:
     return " ".join(match.group("rest").split())[:600] if match else ""
 
 
+_FILE_EFFECT_REQUEST_HEAD = rf"(?:{_TAG_REMAINDER_REQUEST_HEAD}|{_WEB_REQUEST_VERB})"
+_FILE_EFFECT_CLAUSE_SPLIT = re.compile(
+    rf"[.!?;]+|\s+{_TAG_REMAINDER_CONNECTOR}\s+(?={_FILE_EFFECT_REQUEST_HEAD}\b)",
+    re.IGNORECASE,
+)
+
+
+def _split_file_effect_clauses(message: str) -> list[str]:
+    """Split independent effects while quoted commands remain inert data."""
+
+    visible = _classification_text(message)
+    # A non-word, non-space placeholder keeps offsets without letting the
+    # split regex's leading ``\s+`` consume the quote itself.
+    masked = _QUOTED_TEXT.sub(lambda match: "\ufffc" * len(match.group(0)), visible)
+    clauses: list[str] = []
+    cursor = 0
+    for boundary in _FILE_EFFECT_CLAUSE_SPLIT.finditer(masked):
+        if clause := visible[cursor : boundary.start()].strip(" ,"):
+            clauses.append(clause)
+        cursor = boundary.end()
+    if clause := visible[cursor:].strip(" ,"):
+        clauses.append(clause)
+    return clauses or ([visible] if visible else [])
+
+
+def _file_effect_projection(
+    message: str,
+    authority: FileTurnAuthority,
+    effect: str,
+) -> tuple[str, str | None]:
+    """Return one proved effect clause and the untouched local remainder."""
+
+    if not authority.proved("local_read") or not authority.proved(effect):
+        return message, None
+    clauses = _split_file_effect_clauses(authority.classified)
+    effect_positions = [
+        position for position, clause in enumerate(clauses) if file_turn_authority(clause).proved(effect)
+    ]
+    if len(effect_positions) == 1 and len(clauses) > 1:
+        effect_position = effect_positions[0]
+        remainder_clauses = [clause for position, clause in enumerate(clauses) if position != effect_position]
+        if remainder_clauses and any(
+            file_turn_authority(clause).proved("local_read") for clause in remainder_clauses
+        ):
+            return clauses[effect_position], " ".join(remainder_clauses)[:600]
+    # Ambiguous grammar may reduce precision, never authority: neither an
+    # arbiter nor an effect provider receives neighbouring quoted bytes.
+    return authority.speech, authority.classified[:600]
+
+
+def _reminder_effect_projection(
+    message: str,
+    authority: FileTurnAuthority | None = None,
+) -> tuple[str, str | None]:
+    """Separate one proved reminder clause from a local-file remainder.
+
+    Reminder parameters are effect arguments, so they may only come from the
+    reminder's own unquoted clause.  In particular, the sole quoted value in a
+    neighbouring file lookup is lookup data, not the reminder body.  The
+    clause splitter is position-preserving around quotes; the untouched other
+    clauses are returned as a code-owned remainder so their literals survive.
+
+    ``None`` means that no exact compound split was proved.  In that case a
+    local-file reminder classifier sees only unquoted authority speech and the
+    original turn remains the conservative remainder.  This can repeat a
+    settled phrase in model context, but cannot schedule a second reminder
+    because the schema is removed after the single kernel call.
+    """
+
+    turn = authority or file_turn_authority(message)
+    if not turn.proved("local_read") or not turn.proved("reminder"):
+        return message, None
+    return _file_effect_projection(message, turn, "reminder")
+
+
 def _exact_absolute_reminder_request(message: str) -> tuple[str, str, str] | None:
     """Parse an explicit, one-body reminder without asking a classifier.
 
@@ -8020,6 +8102,26 @@ _ATTACHMENT_BOTH_REFERENCE = re.compile(
     rf"\b{_ATTACHMENT_REFERENCE_NOUN}\b[^.!?\n]{{0,80}}\b(?:оба|обе|обоих|обеих|both)\b",
     re.IGNORECASE,
 )
+_INTRA_FILE_RECORD_NOUN = (
+    r"(?:пункт(?:а|е|у|ом|ы|ов|ам|ами|ах)?|"
+    r"строк(?:а|и|е|у|ой|ою|ам|ами|ах)?|"
+    r"запис(?:ь|и|ью|ей|ям|ями|ях)|"
+    r"элемент(?:а|е|у|ом|ы|ов|ам|ами|ах)?|"
+    r"позици(?:я|и|ю|ей|й|ям|ями|ях))"
+)
+_INTRA_FILE_RECORD_SET_REQUEST = re.compile(
+    r"\b(?P<count>\d{1,2}|оба|обе|обоих|обеих|both|два|две|двух|три|тр[её]х|тр[её]м|"
+    r"четыре|четыр[её]х|пять|шесть|семь|восемь|девять)\s+"
+    r"(?:(?:нумерованн|маркированн|списочн|указанн|эти|данн)\w*\s+){0,3}"
+    rf"{_INTRA_FILE_RECORD_NOUN}\b",
+    re.IGNORECASE,
+)
+_LOCAL_BOTH_SOURCE_PAIR = re.compile(
+    rf"\b(?:оба|обе|обоих|обеих|both)\s+"
+    r"(?:(?:последн|недавн|загруженн|присланн|прикрепл[её]нн|приложенн|эти)\w*\s+){0,3}"
+    rf"(?:{_ATTACHMENT_REFERENCE_NOUN}|files?|documents?|attachments?|tables?|spreadsheets?)\b",
+    re.IGNORECASE,
+)
 _ATTACHMENT_ALL_REFERENCE = re.compile(
     rf"\b(?:вс[её]|всех|all)\b[^.!?\n]{{0,80}}{_ATTACHMENT_REFERENCE_NOUN}\b|"
     rf"\b{_ATTACHMENT_REFERENCE_NOUN}\b[^.!?\n]{{0,80}}\b(?:вс[её]|всех|all)\b",
@@ -8157,7 +8259,7 @@ def _attachment_requested_record_positions(message: str) -> tuple[int, ...]:
     """Return a small, ordered set of code-owned row ordinals from the request."""
 
     positions: list[int] = []
-    for match in _ATTACHMENT_RECORD_POSITION.finditer(message):
+    for match in _ATTACHMENT_RECORD_POSITION.finditer(_record_source_command_text(message)):
         raw = next((value for value in match.groupdict().values() if value), "")
         try:
             position = int(raw)
@@ -8282,11 +8384,174 @@ def _attachment_count_value(raw: str) -> int | None:
         return None
 
 
+def _record_source_command_text(message: str) -> str:
+    """Authority surface: current speech outside balanced quoted spans.
+
+    Every non-literal file action, source/cardinality selector, restoration cue,
+    task kind, scope and terminal owner is proved only here. Quoted spans stay
+    on the original message as field, value, search or identity literals after
+    an independent unquoted grammar has admitted that use.
+    """
+
+    return file_authority_speech(_classification_text(message))
+
+
+def _current_speech_negates_information_request(message: str) -> bool:
+    """True when the current visible clause is an explicit don't-name order.
+
+    Quoted text stays data: the start-anchored gate runs on the unquoted
+    current-speech projection.
+    """
+
+    return bool(_NEGATED_INFORMATION_REQUEST.search(_record_source_command_text(message)))
+
+
+def _record_or_source_set_command(message: str) -> bool:
+    """True when this surface names a record-set or source-set command."""
+
+    text = _record_source_command_text(message)
+    return bool(
+        _INTRA_FILE_RECORD_SET_REQUEST.search(text)
+        or _LOCAL_BOTH_SOURCE_PAIR.search(text)
+        or _multi_attachment_open_task_count(message) is not None
+        or _requests_all_attachment_set(message)
+        or (_attachment_count_range_side(message) and _MULTI_ATTACHMENT_COMPARISON_COUNT.search(text))
+        or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(text)
+        or _ATTACHMENT_NUMERIC_ORDINAL.search(text)
+        or _ATTACHMENT_SELECTIVE_REFERENCE.search(text)
+        or _ATTACHMENT_SEARCH_RESULT_REFERENCE.search(text)
+        or _RECENT_UPLOAD_ATTACHMENT_REFERENCE.search(text)
+        or _DEICTIC_SAME_FILE_TOPIC.search(text)
+        or _DEICTIC_CURRENT_ATTACHMENT_REFERENCE.search(text)
+        or _DEICTIC_ATTACHMENT_CONTINUATION.search(text)
+        or _ATTACHMENT_LAST_ITEM_REQUEST.search(text)
+        or _EXPLICIT_ATTACHMENT_REFERENCE.search(text)
+        or _INDIRECT_ATTACHMENT_TOPIC_REFERENCE.search(text)
+        or _ATTACHMENT_RECORD_POSITION.search(text)
+        or _DOCUMENT_METADATA_OTHER_TARGET.search(text)
+        or _ATTACHMENT_ANY_REFERENCE.search(text)
+        or _is_document_metadata_request(message)
+    )
+
+
+def _file_route_action_command(message: str) -> bool:
+    """True when this surface names a file ACTION, not a mere source pointer."""
+
+    text = _record_source_command_text(message)
+    if not text:
+        return False
+    return bool(
+        _ATTACHMENT_LAST_ITEM_REQUEST.search(text)
+        or _INTRA_FILE_RECORD_SET_REQUEST.search(text)
+        or _ATTACHMENT_RECORD_POSITION.search(text)
+        or _ATTACHMENT_SUMMARY_REQUEST.search(text)
+        or _ATTACHMENT_ABSTRACT_REQUEST.search(text)
+        or _ATTACHMENT_COMPARISON_ACTION.search(text)
+        or _ATTACHMENT_COMPARISON_REQUEST.search(text)
+        or _ATTACHMENT_BODY_LOOKUP_ACTION.search(text)
+        or _ATTACHMENT_QUERY_REQUEST.search(text)
+        or _is_document_metadata_request(message)
+        or office_request_kind(message)
+        or office_exact_request_detected(message)
+        or _DEICTIC_SAME_FILE_TOPIC.search(text)
+        or re.search(
+            r"\b(?:прочит\w*|посмотр\w*)\s+"
+            r"(?:(?:этот|эту|это|данный|данную|данное|текущий|текущую)\s+)?"
+            r"(?:его|е[её]|файл|документ|вложени)\w*\b|"
+            r"\b(?:что|кто)\s+там\b|"
+            r"^\s*содержим",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _independent_source_set_request(message: str) -> bool:
+    """Unquoted source-set command that is itself the request, not a pointer."""
+
+    text = _record_source_command_text(message)
+    return bool(
+        _LOCAL_BOTH_SOURCE_PAIR.search(text)
+        or _multi_attachment_open_task_count(message) is not None
+        or _requests_all_attachment_set(message)
+        or (_attachment_count_range_side(message) and _MULTI_ATTACHMENT_COMPARISON_COUNT.search(text))
+        or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(text)
+        or _ATTACHMENT_NUMERIC_ORDINAL.search(text)
+        or _ATTACHMENT_SELECTIVE_REFERENCE.search(text)
+        or _ATTACHMENT_SEARCH_RESULT_REFERENCE.search(text)
+        or _RECENT_UPLOAD_ATTACHMENT_REFERENCE.search(text)
+        or _DOCUMENT_METADATA_OTHER_TARGET.search(text)
+        or _ATTACHMENT_ANY_REFERENCE.search(text)
+    )
+
+
+def _file_operation_in_span(inner: str) -> bool:
+    """Quoted inner text is a file action or source/record command."""
+
+    return bool(
+        _file_route_action_command(inner)
+        or _independent_source_set_request(inner)
+        or _record_or_source_set_command(inner)
+        or _office_action_present(inner)
+    )
+
+
+def _quoted_record_source_command_is_data(message: str) -> bool:
+    """True when the only file operation lives inside balanced quotes.
+
+    A bare unquoted pointer such as ``Этот файл.`` does not authorize an
+    action written only inside a quote. An independently actionable
+    unquoted request stays live even when its literal target is quoted.
+    """
+
+    if _file_route_action_command(message) or _independent_source_set_request(message):
+        return False
+    visible = _classification_text(message)
+    return any(
+        _file_operation_in_span(span.group(0)[1:-1])
+        for span in _QUOTED_TEXT.finditer(visible)
+        if len(span.group(0)) >= 2
+    )
+
+
+_RECORD_SET_NEGATED_ANSWER = "Пункты этого файла по этому запросу называть не буду."
+_QUOTED_RECORD_SOURCE_IS_DATA = "Цитата не является текущим запросом к пунктам или файлам."
+
+
+def _intra_file_record_set_phrase_count(message: str) -> int | None:
+    """Closed record-set cardinality, ignoring current-speech negation."""
+
+    text = _record_source_command_text(message)
+    matched = _INTRA_FILE_RECORD_SET_REQUEST.search(text)
+    if matched is None:
+        return None
+    return _attachment_count_value(matched.group("count"))
+
+
+def _intra_file_record_set_count(message: str) -> int | None:
+    """Record cardinality inside one selected file, not a file-source count."""
+
+    if _current_speech_negates_information_request(message):
+        return None
+    return _intra_file_record_set_phrase_count(message)
+
+
+def _requests_both_attachment_sources(message: str) -> bool:
+    """True when any local оба/обе + file-carrier pair exists.
+
+    Each count+noun pair is classified on its own. ``оба пункта`` is a record
+    count; ``обоих файлах`` is a source count. An explicit local source pair
+    wins and keeps all-or-none multi-file selection active.
+    """
+
+    text = _record_source_command_text(message)
+    return _LOCAL_BOTH_SOURCE_PAIR.search(text) is not None
+
+
 def _multi_attachment_summary_count(message: str) -> int | None:
     """Return the explicit bounded set size for a multi-file summary request."""
 
-    text = " ".join(str(message or "").split())
-    text = re.sub(r"[«“\"][^»”\"]{0,500}[»”\"]", " ", text)
+    text = _record_source_command_text(message)
     if re.search(
         r"\bне\s+(?:(?:надо|нужно|стоит)\s+)?"
         r"(?:обобщ|суммариз|резюмир|перескаж|состав|подготов|сдела|напиш|сформулир)\w*\b",
@@ -8322,22 +8587,27 @@ _ALL_ATTACHMENT_SET_REQUEST = re.compile(
 
 
 def _multi_attachment_open_task_count(message: str) -> int | None:
-    """Explicit file-set size for a summary or comparison request."""
+    """Explicit file-set size for a summary, comparison, or both-sources request."""
 
     summary = _multi_attachment_summary_count(message)
     if summary is not None:
         return summary
-    text = " ".join(str(message or "").split())
-    if not _ATTACHMENT_COMPARISON_REQUEST.search(text):
-        return None
-    matched = _MULTI_ATTACHMENT_COMPARISON_COUNT.search(text)
-    return _attachment_count_value(matched.group("count")) if matched is not None else None
+    text = _record_source_command_text(message)
+    if _ATTACHMENT_COMPARISON_REQUEST.search(text):
+        matched = _MULTI_ATTACHMENT_COMPARISON_COUNT.search(text)
+        if matched is not None:
+            return _attachment_count_value(matched.group("count"))
+    if _requests_both_attachment_sources(message):
+        return 2
+    return None
 
 
 def _requests_all_attachment_set(message: str) -> bool:
-    """Whether an open task explicitly names every file in the active episode."""
+    """Whether current unquoted speech names every file in the active episode."""
 
-    text = " ".join(str(message or "").split())
+    text = _record_source_command_text(message)
+    if _ATTACHMENT_ALL_REFERENCE.search(text):
+        return True
     return bool(
         _ALL_ATTACHMENT_SET_REQUEST.search(text)
         and (
@@ -8499,42 +8769,43 @@ def _document_metadata_request_scope(
     """Classify one explicit document-properties request without body-query drift."""
 
     text = " ".join(str(message or "").split())[:2_000]
-    if not text or _NEGATED_DOCUMENT_METADATA_ACTION.search(text):
+    command = _record_source_command_text(message)
+    if not text or _NEGATED_DOCUMENT_METADATA_ACTION.search(command):
         return ""
     direct_details = bool(
-        _DOCUMENT_DETAIL_DIRECT_REQUEST.search(text)
+        _DOCUMENT_DETAIL_DIRECT_REQUEST.search(command)
         and (
             selected_document
-            or re.search(rf"\b{_ATTACHMENT_REFERENCE_NOUN}\b", text, re.IGNORECASE)
+            or re.search(rf"\b{_ATTACHMENT_REFERENCE_NOUN}\b", command, re.IGNORECASE)
             or _ATTACHMENT_FILENAME_REFERENCE.search(text)
         )
     )
     if direct_details:
         return "details"
     positive_surface = bool(
-        _DOCUMENT_METADATA_ACTION.search(text)
-        or _DOCUMENT_METADATA_NATURAL_QUESTION.search(text)
+        _DOCUMENT_METADATA_ACTION.search(command)
+        or _DOCUMENT_METADATA_NATURAL_QUESTION.search(command)
         or _DOCUMENT_METADATA_FILENAME_TARGET.search(text)
         or (
             selected_document
-            and re.search(r"\b(?:какие|каковы|what)\s+(?:метаданн\w*|metadata)\b", text, re.IGNORECASE)
+            and re.search(r"\b(?:какие|каковы|what)\s+(?:метаданн\w*|metadata)\b", command, re.IGNORECASE)
         )
-        or (selected_document and _DOCUMENT_METADATA_SELECTED_SHORTHAND.fullmatch(text))
+        or (selected_document and command and _DOCUMENT_METADATA_SELECTED_SHORTHAND.fullmatch(command))
     )
-    if not _DOCUMENT_METADATA_NOUN.search(text) or not positive_surface:
+    if not _DOCUMENT_METADATA_NOUN.search(command) or not positive_surface:
         return ""
-    if selected_document and re.search(r"\b(?:метаданн\w*|metadata)\b", text, re.IGNORECASE):
+    if selected_document and re.search(r"\b(?:метаданн\w*|metadata)\b", command, re.IGNORECASE):
         matched = True
     else:
         matched = bool(
-            _DOCUMENT_METADATA_LOCAL_TARGET.search(text)
+            _DOCUMENT_METADATA_LOCAL_TARGET.search(command)
             or _DOCUMENT_METADATA_FILENAME_TARGET.search(text)
-            or _DOCUMENT_METADATA_NATURAL_QUESTION.search(text)
+            or _DOCUMENT_METADATA_NATURAL_QUESTION.search(command)
         )
     if not matched:
         return ""
-    technical_scope = bool(_DOCUMENT_TECHNICAL_METADATA_SCOPE.search(text))
-    details_scope = bool(re.search(r"\bреквизит\w*\b", text, re.IGNORECASE))
+    technical_scope = bool(_DOCUMENT_TECHNICAL_METADATA_SCOPE.search(command))
+    details_scope = bool(re.search(r"\bреквизит\w*\b", command, re.IGNORECASE))
     if technical_scope and details_scope:
         return "both"
     if technical_scope:
@@ -9319,48 +9590,54 @@ def _attachment_reference_kind(message: str) -> str:
     text = " ".join(str(message or "").split())
     if not text:
         return ""
-    if _ATTACHMENT_HOST_PATH_REFERENCE.search(text):
+    command = _record_source_command_text(message)
+    if file_turn_authority(message).proved("host_path"):
         # A path is a source discriminator, never permission to substitute a
         # recent registered upload.  The caller returns a code-owned path
         # refusal (or the separately validated MCP-inbox route).
         return ""
-    if _is_document_metadata_request(text):
+    if _is_document_metadata_request(message):
         return "explicit"
-    if _NON_ATTACHMENT_REFERENCE.search(text):
+    if _NON_ATTACHMENT_REFERENCE.search(command):
         return ""
-    if _RECENT_UPLOAD_ATTACHMENT_REFERENCE.search(text):
+    if _RECENT_UPLOAD_ATTACHMENT_REFERENCE.search(command):
         return "recent_upload"
     # Resolve a strong immediate continuation before the broader explicit noun
     # patterns.  ``что внутри этого файла`` and the common ``этотф айл`` typo
     # point at the active file; they do not ask the catalog for a newer row.
+    # Quoted ``этого файла`` / record-source commands are data, not authority.
     if (
-        _DEICTIC_SAME_FILE_TOPIC.search(text)
-        or _DEICTIC_CURRENT_ATTACHMENT_REFERENCE.search(text)
-        or _DEICTIC_ATTACHMENT_CONTINUATION.search(text)
-        or _ATTACHMENT_LAST_ITEM_REQUEST.search(text)
+        _DEICTIC_SAME_FILE_TOPIC.search(command)
+        or _DEICTIC_CURRENT_ATTACHMENT_REFERENCE.search(command)
+        or _DEICTIC_ATTACHMENT_CONTINUATION.search(command)
+        or _ATTACHMENT_LAST_ITEM_REQUEST.search(command)
+        or (
+            _intra_file_record_set_count(message) is not None
+            and not _requests_both_attachment_sources(message)
+        )
     ) and not (
-        _ATTACHMENT_FILENAME_REFERENCE.search(text)
-        or _ATTACHMENT_COMPARISON_ACTION.search(text)
-        or _DOCUMENT_METADATA_OTHER_TARGET.search(text)
-        or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(text)
-        or _ATTACHMENT_NUMERIC_ORDINAL.search(text)
+        _attachment_navigation_filename_mentions(message)
+        or _ATTACHMENT_COMPARISON_ACTION.search(command)
+        or _DOCUMENT_METADATA_OTHER_TARGET.search(command)
+        or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(command)
+        or _ATTACHMENT_NUMERIC_ORDINAL.search(command)
     ):
         return "deictic"
-    if _EXPLICIT_ATTACHMENT_REFERENCE.search(text):
+    if _EXPLICIT_ATTACHMENT_REFERENCE.search(command):
         return "explicit"
-    if _ATTACHMENT_FILENAME_REFERENCE.search(text):
+    if _attachment_navigation_filename_mentions(message) or _descriptive_filename_selector(message):
         return "explicit"
     if (
-        _ATTACHMENT_WORD_ORDINAL_PHRASE.search(text)
-        or _ATTACHMENT_NUMERIC_ORDINAL.search(text)
-        or _ATTACHMENT_BOTH_REFERENCE.search(text)
+        _ATTACHMENT_WORD_ORDINAL_PHRASE.search(command)
+        or _ATTACHMENT_NUMERIC_ORDINAL.search(command)
+        or _requests_both_attachment_sources(message)
     ):
         return "explicit"
-    if _ATTACHMENT_ALL_REFERENCE.search(text) or _ATTACHMENT_SELECTIVE_REFERENCE.search(text):
+    if _requests_all_attachment_set(message) or _ATTACHMENT_SELECTIVE_REFERENCE.search(command):
         return "explicit"
-    if _INDIRECT_ATTACHMENT_TOPIC_REFERENCE.search(text):
+    if _INDIRECT_ATTACHMENT_TOPIC_REFERENCE.search(command):
         return "indirect"
-    if _ATTACHMENT_RECORD_POSITION.search(text):
+    if _ATTACHMENT_RECORD_POSITION.search(command):
         # “Что на 288 позиции?” names no standalone public subject; immediately
         # after a file-backed answer it is a bounded pointer into that same
         # ordered source.  The restored-attachment caller still requires that
@@ -9368,7 +9645,7 @@ def _attachment_reference_kind(message: str) -> str:
         return "deictic"
     # A bare «ещё?» is a common continuation after an incomplete list.  Keep
     # this deliberately narrow; «а ещё расскажи о погоде» is a new question.
-    if re.fullmatch(r"(?:а\s+)?ещ[её][?!. ]*", text, flags=re.IGNORECASE):
+    if re.fullmatch(r"(?:а\s+)?ещ[её][?!. ]*", command, flags=re.IGNORECASE):
         return "deictic"
     # A noun by itself is a reference; an imperative such as «создай документ
     # Word» is not.  This keeps terse Telegram follow-ups without restoring a
@@ -9391,22 +9668,25 @@ def _is_closed_historical_direct_read_follow_up(message: str) -> bool:
     text = " ".join(str(message or "").split())
     if not text:
         return False
+    command = _record_source_command_text(message)
     if (
-        _ATTACHMENT_COMPARISON_ACTION.search(text)
-        or _ATTACHMENT_ALL_REFERENCE.search(text)
-        or _requests_all_attachment_set(text)
-        or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(text)
-        or _ATTACHMENT_NUMERIC_ORDINAL.search(text)
-        or _ATTACHMENT_BOTH_REFERENCE.search(text)
-        or _DOCUMENT_METADATA_OTHER_TARGET.search(text)
+        _ATTACHMENT_COMPARISON_ACTION.search(command)
+        or _requests_all_attachment_set(message)
+        or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(command)
+        or _ATTACHMENT_NUMERIC_ORDINAL.search(command)
+        or _ATTACHMENT_SELECTIVE_REFERENCE.search(command)
+        or _ATTACHMENT_SEARCH_RESULT_REFERENCE.search(command)
+        or _requests_both_attachment_sources(message)
+        or _DOCUMENT_METADATA_OTHER_TARGET.search(command)
         or _ATTACHMENT_FILENAME_REFERENCE.search(text)
     ):
         return False
-    kind = _attachment_reference_kind(text)
+    kind = _attachment_reference_kind(message)
     if kind == "deictic":
         return True
     return bool(
-        _is_document_metadata_request(text) or _is_document_metadata_request(text, selected_document=True)
+        _is_document_metadata_request(message)
+        or _is_document_metadata_request(message, selected_document=True)
     )
 
 
@@ -9609,6 +9889,33 @@ def _attachment_filename_mentions(message: str) -> tuple[str, ...]:
     ]
     found.sort(key=lambda item: item[0])
     return tuple(dict.fromkeys(name for _offset, name in found if name))
+
+
+def _quoted_filename_is_query_literal(message: str, match: re.Match[str]) -> bool:
+    """True when a quoted filename-shaped span is lookup data, not a source."""
+
+    authority = _record_source_command_text(message)
+    if _ATTACHMENT_COMPARISON_ACTION.search(authority):
+        return False
+    if not _ATTACHMENT_BODY_LOOKUP_ACTION.search(authority):
+        return False
+    prefix = str(message or "")[: match.start()]
+    if re.search(r"(?:строк|фраз|слов|текст|подстрок)\w*\s*$", prefix, flags=re.IGNORECASE):
+        return True
+    return bool(
+        re.search(
+            r"\b(?:в|из|по)\s+(?:этом|данном|текущем)\s+(?:файл|документ)",
+            authority,
+            flags=re.IGNORECASE,
+        )
+        or _DEICTIC_CURRENT_ATTACHMENT_REFERENCE.search(authority)
+    )
+
+
+def _attachment_navigation_filename_mentions(message: str) -> tuple[str, ...]:
+    """Filename identities admitted by unquoted navigation, not query literals."""
+
+    return file_turn_authority(message).source_filenames()
 
 
 def _attachment_filename_reference_matches(message: str) -> list[re.Match[str]]:
@@ -10446,11 +10753,12 @@ def _workspace_reply_attachment_selector_message(message: str) -> str:
 
 
 def _attachment_count_range_side(message: str) -> str:
-    """`first N` / `last N`, ignoring ordinal-looking filename text."""
+    """`first N` / `last N` on unquoted speech, ignoring filename text."""
 
-    chars = list(str(message or ""))
+    surface = _record_source_command_text(message)
+    chars = list(surface)
     for matcher in (_ATTACHMENT_QUOTED_FILENAME_REFERENCE, _ATTACHMENT_BARE_FILENAME_REFERENCE):
-        for match in matcher.finditer(str(message or "")):
+        for match in matcher.finditer(surface):
             chars[match.start() : match.end()] = " " * (match.end() - match.start())
     folded = _normalized_attachment_selector("".join(chars))
     if re.search(r"\b(?:перв|first)\w*\b", folded):
@@ -10468,9 +10776,10 @@ def _attachment_requested_catalog_indices(
 ) -> tuple[tuple[int, ...], int]:
     """Resolve bounded file ordinals against stable upload chronology."""
 
-    selector_chars = list(str(message or ""))
+    surface = _record_source_command_text(message)
+    selector_chars = list(surface)
     for matcher in (_ATTACHMENT_QUOTED_FILENAME_REFERENCE, _ATTACHMENT_BARE_FILENAME_REFERENCE):
-        for match in matcher.finditer(str(message or "")):
+        for match in matcher.finditer(surface):
             selector_chars[match.start() : match.end()] = " " * (match.end() - match.start())
     selector_text = "".join(selector_chars)
     if total <= 0:
@@ -10553,10 +10862,30 @@ def _attachment_reference_terms(message: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys([*quoted, *words]))[:12]
 
 
+def _unquoted_topic_continuation_cue(message: str) -> bool:
+    """Independent unquoted continuation or source cue for topic restoration."""
+
+    text = _record_source_command_text(message)
+    return bool(
+        text
+        and (
+            _DEICTIC_SAME_FILE_TOPIC.search(text)
+            or _DEICTIC_CURRENT_ATTACHMENT_REFERENCE.search(text)
+            or _DEICTIC_ATTACHMENT_CONTINUATION.search(text)
+            or _ATTACHMENT_LAST_ITEM_REQUEST.search(text)
+            or _EXPLICIT_ATTACHMENT_REFERENCE.search(text)
+            or _file_route_action_command(message)
+            or _independent_source_set_request(message)
+        )
+    )
+
+
 def _attachment_topic_terms(message: str) -> tuple[str, ...]:
     """Meaningful morphological hints for one positive active-file continuation."""
 
-    folded = _normalized_attachment_selector(_classification_text(message))
+    include_quoted = _unquoted_topic_continuation_cue(message)
+    surface = _classification_text(message) if include_quoted else _record_source_command_text(message)
+    folded = _normalized_attachment_selector(surface)
     terms: list[str] = []
     for matched in re.finditer(r"[^\W_]{5,}", folded):
         token = matched.group(0)
@@ -10722,9 +11051,18 @@ def _filename_clue_ids(
 def _descriptive_filename_selector(message: str) -> bool:
     """Whether an explicit file phrase carries a plausible filename clue."""
 
+    command = _record_source_command_text(message)
+    named_cue = bool(
+        _EXPLICIT_DESCRIPTIVE_FILENAME_CUE.search(command)
+        or re.search(
+            rf"\b{_ATTACHMENT_REFERENCE_NOUN}\b\s+"
+            r"(?:с|со|про|о|об|под\s+названи\w*|именуем\w*|назван\w*)",
+            command,
+            flags=re.IGNORECASE,
+        )
+    )
     return bool(
-        (_EXPLICIT_ATTACHMENT_REFERENCE.search(message) or _EXPLICIT_DESCRIPTIVE_FILENAME_CUE.search(message))
-        and _filename_clue_terms(message)
+        (_EXPLICIT_ATTACHMENT_REFERENCE.search(command) or named_cue) and _filename_clue_terms(message)
     )
 
 
@@ -10762,13 +11100,14 @@ def _requires_complete_attachment_evidence(question: str, answer: str) -> bool:
 
     question_text = str(question or "")
     answer_text = str(answer or "")
+    question_command = _record_source_command_text(question_text)
     question_is_explicitly_partial = _attachment_explicitly_partial_scope(question_text)
     answer_is_explicitly_partial = bool(_ANSWER_EXPLICITLY_PARTIAL_ATTACHMENT.search(answer_text))
     return bool(
-        _REQUIRES_COMPLETE_ATTACHMENT_EVIDENCE.search(question_text)
-        or _ATTACHMENT_RECORD_POSITION.search(question_text)
+        _REQUIRES_COMPLETE_ATTACHMENT_EVIDENCE.search(question_command)
+        or _ATTACHMENT_RECORD_POSITION.search(question_command)
         or _attachment_whole_document_task(question_text, file_count=2)
-        or (_ATTACHMENT_SUMMARY_REQUEST.search(question_text) and not question_is_explicitly_partial)
+        or (_ATTACHMENT_SUMMARY_REQUEST.search(question_command) and not question_is_explicitly_partial)
         or (
             not answer_is_explicitly_partial
             and (
@@ -11096,20 +11435,20 @@ _ATTACHMENT_DOCUMENT_GLOBAL_DEPENDENCY = re.compile(
 def _attachment_explicitly_partial_scope(message: str) -> bool:
     """Closed lexical proof that the person deliberately requested a subset."""
 
-    visible = _classification_text(message)
+    command = _record_source_command_text(message)
     return bool(
-        _ANSWER_EXPLICITLY_PARTIAL_ATTACHMENT.search(visible)
-        or _ATTACHMENT_PARTIAL_SCOPE_REQUEST.search(visible)
+        _ANSWER_EXPLICITLY_PARTIAL_ATTACHMENT.search(command)
+        or _ATTACHMENT_PARTIAL_SCOPE_REQUEST.search(command)
     )
 
 
 def _attachment_query_requires_global_context(message: str) -> bool:
     """A local target must also be transformed by a document-wide rule."""
 
-    visible = _classification_text(message)
+    command = _record_source_command_text(message)
     return bool(
-        _ATTACHMENT_COMPOSITE_TRANSFORMATION.search(visible)
-        and _ATTACHMENT_DOCUMENT_GLOBAL_DEPENDENCY.search(visible)
+        _ATTACHMENT_COMPOSITE_TRANSFORMATION.search(command)
+        and _ATTACHMENT_DOCUMENT_GLOBAL_DEPENDENCY.search(command)
     )
 
 
@@ -11127,9 +11466,12 @@ def _attachment_body_query_surface(message: str, *, selector_resolved: bool = Fa
     if not selector_resolved:
         return " ".join(projected.split())
 
+    auth = file_turn_authority(message)
     chars = list(projected)
-    for matched in _attachment_filename_reference_matches(projected):
-        chars[matched.start() : matched.end()] = " " * (matched.end() - matched.start())
+    for loc in auth.locators:
+        if loc.role != "source_identity" or loc.end > len(chars):
+            continue
+        chars[loc.start : loc.end] = " " * (loc.end - loc.start)
     projected = "".join(chars)
 
     # Descriptive filename selectors do not necessarily carry an extension:
@@ -11174,37 +11516,38 @@ def _normalise_attachment_query_term(candidate: str, *, explicit: bool = False) 
 def _attachment_query_terms(message: str) -> tuple[str, ...]:
     """Bounded lexical targets from the visible request, without a model."""
 
-    visible = _classification_text(message)
-    explicitly_partial = _attachment_explicitly_partial_scope(visible)
+    command = _record_source_command_text(message)
+    visible = file_turn_authority(message).body_surface()
+    explicitly_partial = _attachment_explicitly_partial_scope(message)
     if (
-        _ATTACHMENT_SEARCH_RESULT_REFERENCE.search(visible)
-        or (_ATTACHMENT_SUMMARY_REQUEST.search(visible) or _ATTACHMENT_ABSTRACT_REQUEST.search(visible))
+        _ATTACHMENT_SEARCH_RESULT_REFERENCE.search(command)
+        or (_ATTACHMENT_SUMMARY_REQUEST.search(command) or _ATTACHMENT_ABSTRACT_REQUEST.search(command))
         and not explicitly_partial
-        or _is_direct_file_request(visible)
+        or _is_direct_file_request(command)
     ):
         return ()
     closed_question = re.search(
         r"(?:\b(?:кто|где|кем|како(?:й|е|го)|какая|какие|какова|каково|каковы|сколько)\b|"
         r"\bчто\s+(?:за|сказано|указано|написано)\b)",
-        visible,
+        command,
         re.IGNORECASE,
     )
     lookup_action = re.search(
         r"\b(?:проверь|провер|посмотр|перечисл|укаж|покаж|вывед|подскаж|скаж|сообщ|уточн|"
         r"определ|извлек|достан|locate|extract)\w*\b",
-        visible,
+        command,
         re.IGNORECASE,
     )
     explicit_search = re.search(
         r"\b(?:найд|поищ|поиск|отыщ|отыск|извлек|достан|find|search|look\s+up|locate|extract)\w*\b",
-        visible,
+        command,
         re.IGNORECASE,
     )
     field_cue = re.search(
         r"\b(?:должност|позици|рол|значени|строк|endpoint|узел|node|фамил|"
         r"командир|начальник|руководител|ответственн|заведующ|директор|"
         r"position|role|value|code|title|surname)\w*\b",
-        visible,
+        command,
         re.IGNORECASE,
     )
     quoted = [" ".join(value.split()) for value in _ATTACHMENT_QUERY_QUOTED.findall(visible)]
@@ -11239,13 +11582,16 @@ def _attachment_query_terms(message: str) -> tuple[str, ...]:
     strong_anchors = _attachment_query_anchors(message, tuple(terms))
     document_reference = re.search(
         rf"\b(?:{_ARCHIVED_SOURCE_CARRIER_WORD}|текст|text)\w*\b",
-        visible,
+        command,
         re.IGNORECASE,
+    )
+    unquoted_lookup = bool(
+        explicit_search or lookup_action or closed_question or command.rstrip().endswith("?")
     )
     lookup_signal = bool(
         explicit_search
-        or (field_cue and (closed_question or lookup_action or visible.rstrip().endswith("?")))
-        or (strong_anchors and document_reference)
+        or (field_cue and unquoted_lookup)
+        or (strong_anchors and document_reference and unquoted_lookup)
     )
     if not lookup_signal:
         return ()
@@ -11260,10 +11606,10 @@ def _attachment_whole_document_task(message: str, *, file_count: int = 0) -> str
     whole: summary, interpretation/critique, and comparison of a file set.
     """
 
-    visible = _classification_text(message)
-    if not visible or _attachment_explicitly_partial_scope(visible):
+    command = _record_source_command_text(message)
+    if not command or _attachment_explicitly_partial_scope(message):
         return ""
-    if _attachment_query_requires_global_context(visible):
+    if _attachment_query_requires_global_context(message):
         # A lexical window can prove the named target, but it cannot prove the
         # rule/formula elsewhere in the file which the user asked us to apply.
         # Classify this bounded composite form as analysis so the authenticated
@@ -11272,13 +11618,13 @@ def _attachment_whole_document_task(message: str, *, file_count: int = 0) -> str
         return "analysis"
     # A named literal/field query is not made global merely because it also says
     # "compare".  The query projector has stronger, more exact source authority.
-    if _attachment_query_terms(visible):
+    if _attachment_query_terms(message):
         return ""
-    if _ATTACHMENT_SUMMARY_REQUEST.search(visible):
+    if _ATTACHMENT_SUMMARY_REQUEST.search(command):
         return "summary"
-    if _ATTACHMENT_ABSTRACT_REQUEST.search(visible):
+    if _ATTACHMENT_ABSTRACT_REQUEST.search(command):
         return "analysis"
-    if file_count >= 2 and _ATTACHMENT_COMPARISON_REQUEST.search(visible):
+    if file_count >= 2 and _ATTACHMENT_COMPARISON_REQUEST.search(command):
         return "comparison"
     return ""
 
@@ -11295,7 +11641,7 @@ def _attachment_query_anchors(message: str, terms: tuple[str, ...]) -> tuple[str
 
     if not terms:
         return ()
-    visible = _classification_text(message)
+    visible = file_turn_authority(message).body_surface()
     anchors: list[str] = []
 
     def source_qualifier(matched: re.Match[str]) -> bool:
@@ -11602,7 +11948,7 @@ def _archived_source_search_query(message: str) -> str:
     if (
         not authority_text
         or _is_small_talk(authority_text)
-        or asks_for_the_web(visible)
+        or asks_for_the_web(authority_text)
         or _CURRENT_SOURCE_CARRIER.search(visible)
         or _NEGATED_ARCHIVED_SOURCE_LOOKUP.search(authority_text)
         or _META_ARCHIVED_SOURCE_LOOKUP.search(authority_text)
@@ -11615,11 +11961,11 @@ def _archived_source_search_query(message: str) -> str:
         or _COUNT_INTENT_CUE.search(visible)
         or _REQUIRES_COMPLETE_ATTACHMENT_EVIDENCE.search(visible)
         or _WEB_EXHAUSTIVE_CLAIM.search(visible)
-        or _ATTACHMENT_SUMMARY_REQUEST.search(visible)
+        or _ATTACHMENT_SUMMARY_REQUEST.search(authority_text)
         or _ATTACHMENT_COMPARISON_REQUEST.search(visible)
         or _is_direct_file_request(visible)
-        or _ASKS_FOR_VOICE.search(visible)
-        or _ASKS_FOR_A_REMINDER.search(visible)
+        or _ASKS_FOR_VOICE.search(authority_text)
+        or _ASKS_FOR_A_REMINDER.search(authority_text)
     ):
         return ""
     action = _ARCHIVED_SOURCE_LOOKUP_ACTION.search(request_text)
@@ -12167,6 +12513,46 @@ def _attachment_has_verifiable_content(item: Mapping[str, Any]) -> bool:
 
 
 _LIST_ITEM_LINE = re.compile(r"^\s*(?:(?:\d{1,9}|[A-Za-zА-Яа-яЁё])\s*[.)]|[-–—•*])\s+\S")
+_INLINE_LIST_MARK = re.compile(r"(?:^|(?<=\s))((?:\d{1,9}|[A-Za-zА-Яа-яЁё])\s*[.)])\s+(?=\S)")
+_INLINE_LIST_TRAILING_LABEL = re.compile(r"\s+(?=[A-ZА-ЯЁ][A-Za-zА-Яа-яЁё]{2,20}:\s+\S)")
+
+
+def _list_item_records(source: str) -> list[str]:
+    """Split numbered/bulleted records from line-oriented or wrapped extractor text."""
+
+    logical_lines = str(source or "").splitlines()
+    records: list[str] = []
+    index = 0
+    while index < len(logical_lines):
+        if not _LIST_ITEM_LINE.match(logical_lines[index]):
+            index += 1
+            continue
+        record_lines = [logical_lines[index].lstrip()]
+        index += 1
+        while index < len(logical_lines):
+            line = logical_lines[index]
+            if not line.strip() or not line[:1].isspace() or _LIST_ITEM_LINE.match(line):
+                break
+            record_lines.append(line)
+            index += 1
+        literal = "\n".join(record_lines).strip()
+        if literal and literal in source:
+            records.append(literal)
+    if records and not (len(records) == 1 and len(_INLINE_LIST_MARK.findall(records[0])) >= 2):
+        return records
+    marks = list(_INLINE_LIST_MARK.finditer(source))
+    if len(marks) < 2:
+        return []
+    inline: list[str] = []
+    for position, mark in enumerate(marks):
+        start = mark.start()
+        end = marks[position + 1].start() if position + 1 < len(marks) else len(source)
+        literal = source[start:end].strip()
+        if position == len(marks) - 1:
+            literal = _INLINE_LIST_TRAILING_LABEL.split(literal, maxsplit=1)[0].strip()
+        if literal and literal in source:
+            inline.append(literal)
+    return inline
 
 
 def _attachment_display_filename(value: Any) -> str:
@@ -12191,7 +12577,7 @@ def _last_attachment_item_answer(
     literal is bounded and copied unchanged from the canonical extractor text.
     """
 
-    if not _ATTACHMENT_LAST_ITEM_REQUEST.search(_classification_text(message)):
+    if not _ATTACHMENT_LAST_ITEM_REQUEST.search(_record_source_command_text(message)):
         return ""
     if (
         evidence_set is None
@@ -12243,6 +12629,51 @@ def _last_attachment_item_answer(
         return "Последний пункт определить надёжно не удалось: структура выбранного файла неоднозначна."
     filename = _attachment_display_filename(item.get("filename"))
     return f"Последний пункт в «{filename}»:\n{literal}"
+
+
+def _attachment_record_set_answer(
+    message: str,
+    attachments: Sequence[Mapping[str, Any]],
+    *,
+    evidence_set: FileEvidenceSet | None = None,
+) -> str:
+    """Return the requested numbered/list records from one complete source."""
+
+    if _requests_both_attachment_sources(message):
+        return ""
+    requested = _intra_file_record_set_phrase_count(message)
+    if requested is None or requested <= 0:
+        return ""
+    if _current_speech_negates_information_request(message):
+        return _RECORD_SET_NEGATED_ANSWER
+    if (
+        evidence_set is None
+        or evidence_set.expected_count != 1
+        or len(evidence_set.items) != 1
+        or len(attachments) != 1
+    ):
+        return "Не удалось однозначно определить один файл для запроса о пунктах. Укажите точное имя файла."
+    item = attachments[0]
+    view = evidence_set.items[0]
+    if not (
+        (isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item))
+        and _carrier_matches_evidence_view(item, view)
+        and view.registration == FileRegistrationKind.VALID
+        and view.disk_verified
+        and view.body_kind == FileBodyKind.EXTRACTED
+        and view.source_readable
+        and view.source_complete
+        and view.verification_eligible
+    ):
+        return (
+            "Запрошенные пункты определить надёжно не удалось: полный текст "
+            "выбранного файла сейчас недоступен."
+        )
+    source = str(item.get("transient_text") or "")
+    records = _list_item_records(source)
+    if len(records) != requested:
+        return "Запрошенные пункты определить надёжно не удалось: структура выбранного файла неоднозначна."
+    return "\n".join(records)
 
 
 # Bare-upload quicklook budgets (deterministic extractive preview only).
@@ -13423,8 +13854,8 @@ def _project_attachments_for_request(
     """
 
     body_query = _attachment_body_query_surface(message, selector_resolved=selector_resolved)
-    terms = _attachment_query_terms(body_query)
-    required_anchors = _attachment_query_anchors(body_query, terms)
+    terms = _attachment_query_terms(message)
+    required_anchors = _attachment_query_anchors(message, terms)
     field_prefixes = _attachment_query_field_prefixes(body_query)
     sources = [item for item in (attachments or []) if isinstance(item, dict)][
         :_CONVERSATION_ATTACHMENT_MAX_FILES
@@ -13433,7 +13864,7 @@ def _project_attachments_for_request(
     whole_document_task = (
         "summary"
         if synthetic_document_notice and sources
-        else _attachment_whole_document_task(body_query, file_count=len(sources))
+        else _attachment_whole_document_task(message, file_count=len(sources))
     )
     exact_complete_source_request = bool(
         not synthetic_document_notice
@@ -13798,6 +14229,9 @@ def _bounded_attachment_projection(
                     "_office_index_complete": view["index_complete"],
                     "_office_prompt_complete": view["prompt_complete"],
                     "_office_exact_view": view,
+                    "_source_text_complete": (
+                        view["index_complete"] is True and view["prompt_complete"] is True
+                    ),
                     # The legacy flag can mean only that the 24k transient
                     # preview was clipped.  This path received the full private
                     # source; native/index completeness is carried by the two
@@ -15163,6 +15597,23 @@ def _direct_file_request_uses_the_web(message: str) -> bool:
     return bool(visible and _is_direct_file_request(visible) and _DIRECT_FILE_WEB_SOURCE.search(visible))
 
 
+def _web_action_on_speech(speech: str) -> bool:
+    """Web request proved on an already-unquoted surface."""
+
+    visible = " ".join(str(speech or "").split())
+    if not visible:
+        return False
+    fresh_public_news = bool(
+        _ASKS_FOR_FRESH_PUBLIC_NEWS.fullmatch(visible) and not _FRESH_PUBLIC_NEWS_LOCAL_SCOPE.search(visible)
+    )
+    return bool(
+        _ASKS_FOR_THE_WEB.search(visible)
+        or _ASKS_FOR_THE_WEB_AFTER_COORDINATOR.search(visible)
+        or fresh_public_news
+        or (_is_direct_file_request(visible) and _DIRECT_FILE_WEB_SOURCE.search(visible))
+    )
+
+
 def asks_for_the_web(message: str) -> bool:
     """Человек прямым текстом попросил посмотреть в интернете.
 
@@ -15197,7 +15648,7 @@ _ATTACHMENT_EXPLICIT_COMPUTE_TOOL_ACTION = re.compile(
 def _attachment_requests_archive_tool(message: str) -> bool:
     """Whether a closed archive-wide read must keep its authorised tool route."""
 
-    visible = _classification_text(message)
+    visible = _record_source_command_text(message)
     count_intent = _fast_archive_count_intent(_archive_count_projection(visible))
     return bool(
         count_intent is not None
@@ -15337,7 +15788,7 @@ def _attachment_temporal_read_clause(message: str) -> str:
     authority to read the owner's timeline.
     """
 
-    visible = temporal_routing_text(_classification_text(message))
+    visible = temporal_routing_text(_record_source_command_text(message))
     fragments = _split_tag_request_clauses(visible)
     if not _ATTACHMENT_SUMMARY_REQUEST.search(visible):
         # A question about a date *inside* the selected file remains a local
@@ -15362,30 +15813,7 @@ def _attachment_temporal_read_clause(message: str) -> str:
 def _attachment_requests_a_tool_action(message: str) -> bool:
     """Keep compound file+effect requests on the ordinary tool loop."""
 
-    visible = _classification_text(message)
-    unquoted = _QUOTED_TEXT.sub(" ", visible)
-    return bool(
-        asks_for_the_web(visible)
-        or _ASKS_FOR_A_REMINDER.search(visible)
-        or _is_direct_file_request(visible)
-        or _ASKS_FOR_VOICE.search(visible)
-        or _attachment_requests_archive_tool(visible)
-        or _attachment_temporal_read_clause(visible)
-        or _ATTACHMENT_EXPLICIT_COMPUTE_TOOL_ACTION.search(unquoted)
-        or re.search(
-            r"\b(?:постав|назнач)\w*[^.!?\n]{0,40}\b(?:задач|мисси)\w*\b|"
-            r"\b(?:set|assign|create)\w*[^.!?\n]{0,40}\b(?:task|mission)\w*\b",
-            unquoted,
-            re.IGNORECASE,
-        )
-        or re.search(
-            r"\b(?:сохрани|запомни|запиши|добавь|создай|удали|измени|"
-            r"отправь|перешли|опубликуй|save|remember|store|add|create|"
-            r"delete|update|send|publish)(?:те|\w*)?\b",
-            visible,
-            re.IGNORECASE,
-        )
-    )
+    return file_turn_authority(message).has_tool_effect()
 
 
 def _supported_direct_attachment_file_only_request(message: str) -> bool:
@@ -15397,26 +15825,416 @@ def _supported_direct_attachment_file_only_request(message: str) -> bool:
     effect or archive/outbound channel keeps the ordinary agentic route.
     """
 
-    visible = " ".join(_classification_text(message).split())
-    if not visible or not _is_direct_file_request(visible):
+    auth = file_turn_authority(message)
+    if not auth.proved("file_create"):
         return False
+    visible = " ".join(_classification_text(message).split())
     kind = _file_kind_from_request(visible)
     output_stem, output_supported = _requested_output_filename_stem(visible, kind=kind)
     if not output_supported or not output_stem:
         return False
     return not (
-        _workspace_create_channel_mentioned(message)
-        or asks_for_the_web(visible)
-        or _ASKS_FOR_A_REMINDER.search(visible)
-        or _ASKS_FOR_VOICE.search(visible)
-        or _attachment_requests_archive_tool(visible)
-        or _attachment_temporal_read_clause(visible)
-        or _ATTACHMENT_EXPLICIT_COMPUTE_TOOL_ACTION.search(_QUOTED_TEXT.sub(" ", visible))
-        or _ASKS_ABOUT_PERSONAL_STORAGE.search(visible)
-        or _ABOUT_MY_OWN_STUFF.search(visible)
-        or _ATTACHMENT_CROSS_CONTEXT_REQUEST.search(visible)
-        or _DIRECT_ATTACHMENT_FILE_OTHER_EFFECT.search(visible)
+        auth.proved("web", "reminder", "voice", "archive", "temporal")
+        or _workspace_create_channel_mentioned(message)
+        or _ASKS_ABOUT_PERSONAL_STORAGE.search(auth.speech)
+        or _ABOUT_MY_OWN_STUFF.search(auth.speech)
+        or _ATTACHMENT_CROSS_CONTEXT_REQUEST.search(auth.speech)
+        or _DIRECT_ATTACHMENT_FILE_OTHER_EFFECT.search(auth.speech)
     )
+
+
+_FILE_TURN_EFFECTS = frozenset(
+    {
+        "web",
+        "reminder",
+        "voice",
+        "archive",
+        "person",
+        "mutation",
+        "workspace",
+        "temporal",
+        "file_create",
+    }
+)
+_FILE_TURN_TOOL_EFFECTS = _FILE_TURN_EFFECTS - {"person"}
+_FILE_TURN_EFFECT_TOOL_NAMES: dict[str, frozenset[str]] = {
+    "web": frozenset({"web_search", "web_fetch", "web_research"}),
+    "reminder": frozenset({"remind"}),
+    "voice": frozenset({"speak"}),
+    "file_create": frozenset({"make_file"}),
+    "temporal": frozenset({"what_happened", "upcoming"}),
+    # This proof is deliberately only the code-owned whole-archive count/tag
+    # route.  Person, timeline and source search have independent proofs below;
+    # a quoted literal may not smuggle those capabilities into a count turn.
+    "archive": frozenset({"kg_stats", "list_tags"}),
+    "person": frozenset({"message_search", "user_activity", "user_knowledge_search"}),
+    "workspace": frozenset({"workspace_create"}),
+}
+_FILE_MEMORY_WRITE_ACTION = re.compile(
+    r"\b(?:сохрани|запомни|запиши|добавь|remember|store|save)\w*\b"
+    r"[^.!?\n]{0,96}\b(?:содержан|текст|материал|информац|данн|факт|"
+    r"памят|баз\w*\s+знан|это|его|е[её]|их|content|text|material|"
+    r"information|data|fact|memory|knowledge|this|it)\w*\b|"
+    r"\b(?:в|into|to)\s+(?:мою\s+)?(?:памят|баз\w*\s+знан|memory|knowledge)\w*\b",
+    re.IGNORECASE,
+)
+_FILE_ENTITY_CREATE_ACTION = re.compile(
+    r"\b(?:созда|добав|завед|create|add)\w*\b[^.!?\n]{0,64}"
+    r"\b(?:сущност|объект\w*\s+граф|entity|graph\s+entity)\w*\b",
+    re.IGNORECASE,
+)
+_FILE_ENTITY_LINK_ACTION = re.compile(
+    r"\b(?:свяж|связа|соедини|link|connect)\w*\b[^.!?\n]{0,64}"
+    r"\b(?:сущност|объект|entity|entities|graph)\w*\b|"
+    r"\b(?:созда|добав|create|add)\w*\b[^.!?\n]{0,40}\b(?:связ|relation|link)\w*\b",
+    re.IGNORECASE,
+)
+_FILE_RELATION_END_ACTION = re.compile(
+    r"\b(?:заверш|закрой|прекрат|end|close|terminate)\w*\b"
+    r"[^.!?\n]{0,48}\b(?:связ|отношени|relation|link)\w*\b",
+    re.IGNORECASE,
+)
+_FILE_MISSION_ACTION = re.compile(
+    r"\b(?:постав|назнач|созда|предлож|set|assign|create|propose)\w*\b"
+    r"[^.!?\n]{0,48}\b(?:задач|мисси|task|mission)\w*\b",
+    re.IGNORECASE,
+)
+_SOURCE_IDENTITY_LEAD = re.compile(
+    r"(?:"
+    r"(?:в|из|по|про|с|со)\s+(?:этом\s+|этой\s+|данном\s+|данной\s+|текущем\s+|текущей\s+)?"
+    r"(?:файл|документ|вложен|таблиц)\w*$|"
+    r"(?:этот|эта|это|данные|данный|данная|текущий|текущая|текущее)\s+"
+    r"(?:файл|документ|вложен|таблиц)\w*\s+(?:с|со)$|"
+    r"(?:файл|документ|вложен|таблиц)\w*$|"
+    r"(?:с|со)$|"
+    r"(?:названи|имени|названн|именуем|title|named|called|titled)\w*$|"
+    r"(?:метаданн|свойств|реквизит)\w*(?:\s+(?:файл|документ)\w*)?$"
+    r")",
+    re.IGNORECASE,
+)
+_HOST_PATH_READ_LEAD = re.compile(
+    r"(?:прочит|открой|открыть|посмотр|покаж|найд|поищ|извлек|проанализ|"
+    r"read|open|inspect|show|find|search|extract|analy[sz]e)\w*$",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class _FileLocatorSpan:
+    start: int
+    end: int
+    value: str
+    role: str
+    kind: str
+
+
+@dataclass(frozen=True)
+class FileTurnAuthority:
+    """One immutable file-turn proof: unquoted actions and typed locator roles."""
+
+    original: str
+    classified: str
+    speech: str
+    quotes: tuple[tuple[int, int, str], ...]
+    locators: tuple[_FileLocatorSpan, ...]
+    actions: frozenset[str]
+
+    def proved(self, *names: str) -> bool:
+        return bool(self.actions.intersection(names))
+
+    def quote_data(self) -> bool:
+        return "quote_data" in self.actions
+
+    def has_effect(self) -> bool:
+        return bool(self.actions & _FILE_TURN_EFFECTS)
+
+    def has_tool_effect(self) -> bool:
+        return bool(self.actions & _FILE_TURN_TOOL_EFFECTS)
+
+    def source_only(self) -> bool:
+        return "local_read" in self.actions and not self.has_effect()
+
+    def source_filenames(self) -> tuple[str, ...]:
+        seen: list[str] = []
+        for span in self.locators:
+            if span.role == "source_identity" and span.kind == "filename" and span.value not in seen:
+                seen.append(span.value)
+        return tuple(seen)
+
+    def source_selector_surface(self) -> str:
+        """Unquoted speech plus only locators proved to identify a source.
+
+        The catalog has a second, exact-known-name scan for filenames with
+        spaces.  Feeding that scan the original turn would re-admit a quoted
+        body literal such as ``«report.pdf»`` after this authority object had
+        already classified it as lookup data.  Preserve positions while
+        masking every quote, then restore only typed source-identity spans.
+        """
+
+        chars = list(self.classified)
+        for start, end, _inner in self.quotes:
+            if 0 <= start <= end <= len(chars):
+                chars[start:end] = [" "] * (end - start)
+        for span in self.locators:
+            if span.role != "source_identity" or not (0 <= span.start <= span.end <= len(chars)):
+                continue
+            chars[span.start : span.end] = self.classified[span.start : span.end]
+        return " ".join("".join(chars).split())
+
+    def body_surface(self) -> str:
+        chars = list(self.classified)
+        for span in self.locators:
+            if span.role != "source_identity" or span.end > len(chars):
+                continue
+            chars[span.start : span.end] = [" "] * (span.end - span.start)
+        return " ".join("".join(chars).split())
+
+    def task_envelope(self) -> str:
+        source_spans = tuple(span for span in self.locators if span.role == "source_identity")
+        literals = [
+            inner
+            for start, end, inner in self.quotes
+            if inner.strip() and not any(start <= span.start and span.end <= end for span in source_spans)
+        ]
+        parts = [f"TASK: {self.speech}".strip()]
+        if literals:
+            parts.append("LITERALS: " + " | ".join(literals[:12]))
+        return "\n".join(part for part in parts if part)
+
+
+def _quoted_span_is_body_literal(classified: str, start: int) -> bool:
+    authority = file_authority_speech(classified)
+    if _ATTACHMENT_COMPARISON_ACTION.search(authority):
+        return False
+    if not _ATTACHMENT_BODY_LOOKUP_ACTION.search(authority):
+        return False
+    prefix = classified[:start]
+    if re.search(r"(?:строк|фраз|слов|текст|подстрок)\w*\s*$", prefix, flags=re.IGNORECASE):
+        return True
+    return bool(
+        re.search(
+            r"\b(?:в|из|по)\s+(?:этом|данном|текущем)\s+(?:файл|документ)",
+            authority,
+            flags=re.IGNORECASE,
+        )
+        or _DEICTIC_CURRENT_ATTACHMENT_REFERENCE.search(authority)
+    )
+
+
+def _mutation_action_on_speech(speech: str) -> bool:
+    return bool(
+        _ATTACHMENT_EXPLICIT_COMPUTE_TOOL_ACTION.search(speech)
+        or re.search(
+            r"\b(?:постав|назнач)\w*[^.!?\n]{0,40}\b(?:задач|мисси)\w*\b|"
+            r"\b(?:set|assign|create)\w*[^.!?\n]{0,40}\b(?:task|mission)\w*\b",
+            speech,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:сохрани|запомни|запиши|добавь|создай|удали|измени|"
+            r"отправь|перешли|опубликуй|save|remember|store|add|create|"
+            r"delete|update|send|publish)(?:те|\w*)?\b",
+            speech,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _person_action_on_speech(speech: str) -> bool:
+    return bool(
+        (
+            _NAMED_PERSON_AGGREGATION_ACTION.search(speech)
+            and _NAMED_PERSON_AGGREGATION_SUBJECT.search(speech)
+            and _named_person_query_from(speech)
+        )
+        or _PERSON_DOCUMENT_INVENTORY.search(speech)
+        or _ASKS_WHAT_A_PERSON_WROTE.search(speech)
+    )
+
+
+def _locator_role(
+    classified: str,
+    speech: str,
+    start: int,
+    end: int,
+    *,
+    quoted: bool,
+    kind: str,
+    match: re.Match[str] | None = None,
+) -> str:
+    prefix_speech = file_authority_speech(classified[:start]).rstrip(" «\"'“„")
+    if (
+        kind == "filename"
+        and match is not None
+        and _attachment_filename_match_is_output(classified, start, end)
+        and (_is_direct_file_request(speech) or _mutation_action_on_speech(speech))
+    ):
+        return "output_literal"
+    if quoted and (
+        (kind == "filename" and match is not None and _quoted_filename_is_query_literal(classified, match))
+        or _quoted_span_is_body_literal(classified, start)
+    ):
+        return "body_literal"
+    if quoted and _SOURCE_IDENTITY_LEAD.search(prefix_speech):
+        return "source_identity"
+    if kind == "host_path":
+        if _ATTACHMENT_HOST_PATH_READ_ACTION.search(speech) and (
+            _SOURCE_IDENTITY_LEAD.search(prefix_speech) or _HOST_PATH_READ_LEAD.search(prefix_speech)
+        ):
+            return "source_identity"
+        if not quoted and _ATTACHMENT_HOST_PATH_READ_ACTION.search(speech):
+            return "source_identity"
+        return "inert"
+    if not quoted:
+        return "source_identity"
+    return "inert"
+
+
+def _file_locator_spans(classified: str, speech: str) -> tuple[_FileLocatorSpan, ...]:
+    spans: list[_FileLocatorSpan] = []
+    for match in _attachment_filename_reference_matches(classified):
+        start, end = match.start(), match.end()
+        quoted = any(
+            quote.start() <= start and end <= quote.end() for quote in _QUOTED_TEXT.finditer(classified)
+        )
+        spans.append(
+            _FileLocatorSpan(
+                start=start,
+                end=end,
+                value=_normalized_attachment_selector(match.group("filename")),
+                role=_locator_role(
+                    classified, speech, start, end, quoted=quoted, kind="filename", match=match
+                ),
+                kind="filename",
+            )
+        )
+    path_guard = re.sub(r"\bhttps?://[^\s\r\n]+", " ", classified, flags=re.IGNORECASE)
+    for match in _ATTACHMENT_HOST_PATH_REFERENCE.finditer(path_guard):
+        start, end = match.start(), match.end()
+        if any(item.start <= start < item.end or item.start < end <= item.end for item in spans):
+            continue
+        quoted = any(
+            quote.start() <= start and end <= quote.end() for quote in _QUOTED_TEXT.finditer(classified)
+        )
+        spans.append(
+            _FileLocatorSpan(
+                start=start,
+                end=end,
+                value=match.group(0),
+                role=_locator_role(classified, speech, start, end, quoted=quoted, kind="host_path"),
+                kind="host_path",
+            )
+        )
+    spans.sort(key=lambda item: item.start)
+    return tuple(spans)
+
+
+def file_turn_authority(message: str) -> FileTurnAuthority:
+    """Single file-turn calculation: unquoted proofs and exact locator roles."""
+
+    classified = _classification_text(message)
+    speech = file_authority_speech(classified)
+    quotes = tuple(
+        (match.start(), match.end(), match.group(0)[1:-1])
+        for match in _QUOTED_TEXT.finditer(classified)
+        if len(match.group(0)) >= 2
+    )
+    locators = _file_locator_spans(classified, speech)
+    actions: set[str] = set()
+    source_identity_navigation = bool(
+        any(item.role == "source_identity" for item in locators)
+        and (
+            _EXPLICIT_ATTACHMENT_REFERENCE.search(speech)
+            or _ATTACHMENT_COMPARISON_ACTION.search(speech)
+            or _DOCUMENT_METADATA_NOUN.search(speech)
+        )
+    )
+    deictic_content_navigation = bool(
+        (
+            _EXPLICIT_ATTACHMENT_REFERENCE.search(speech)
+            or _DEICTIC_SAME_FILE_TOPIC.search(speech)
+            or _DEICTIC_ATTACHMENT_CONTINUATION.search(speech)
+        )
+        and _ATTACHMENT_READ_ONLY_ACTION.search(speech)
+    )
+    if (
+        _file_route_action_command(message)
+        or _independent_source_set_request(message)
+        or source_identity_navigation
+        or deictic_content_navigation
+    ):
+        actions.add("local_read")
+    if _web_action_on_speech(speech):
+        actions.add("web")
+    if _ASKS_FOR_A_REMINDER.search(speech):
+        actions.add("reminder")
+    if _ASKS_FOR_VOICE.search(speech):
+        actions.add("voice")
+    if _attachment_requests_archive_tool(speech):
+        actions.add("archive")
+    if _person_action_on_speech(speech):
+        actions.add("person")
+    if _mutation_action_on_speech(speech):
+        actions.add("mutation")
+    if _explicit_workspace_create_intent(message) is not None:
+        actions.add("workspace")
+    if _attachment_temporal_read_clause(speech):
+        actions.add("temporal")
+    if _is_direct_file_request(speech):
+        actions.add("file_create")
+    if any(item.kind == "host_path" and item.role == "source_identity" for item in locators):
+        actions.add("host_path")
+    if _ORDERS_SILENCE.match(speech):
+        actions.add("silence")
+    if _quoted_record_source_command_is_data(message):
+        actions.add("quote_data")
+    return FileTurnAuthority(
+        original=str(message or ""),
+        classified=classified,
+        speech=speech,
+        quotes=quotes,
+        locators=locators,
+        actions=frozenset(actions),
+    )
+
+
+def _file_turn_capability_tools(
+    tools: Sequence[dict[str, Any]],
+    authority: FileTurnAuthority,
+) -> list[dict[str, Any]]:
+    """Expose only effect families independently proved on a local-file turn.
+
+    Tool schemas are capabilities. A genuine web clause may keep the model in
+    the agentic route, but it is not authority for a quoted reminder, voice or
+    mutation literal to become executable. Non-file turns retain the ordinary
+    broad model/tool contract.
+    """
+
+    if not authority.proved("local_read"):
+        return list(tools)
+    allowed: set[str] = set()
+    for effect, names in _FILE_TURN_EFFECT_TOOL_NAMES.items():
+        if authority.proved(effect):
+            allowed.update(names)
+    if authority.proved("mutation"):
+        speech = authority.speech
+        if _ATTACHMENT_EXPLICIT_COMPUTE_TOOL_ACTION.search(speech):
+            allowed.add("code_run")
+        if _FILE_MEMORY_WRITE_ACTION.search(speech):
+            allowed.add("memory_save")
+        if _FILE_ENTITY_CREATE_ACTION.search(speech):
+            allowed.add("entity_create")
+        if _FILE_ENTITY_LINK_ACTION.search(speech):
+            allowed.add("entity_link")
+        if _FILE_RELATION_END_ACTION.search(speech):
+            allowed.add("relation_end")
+        if _FILE_MISSION_ACTION.search(speech):
+            allowed.add("mission_propose")
+    return [
+        tool
+        for tool in tools
+        if str((tool.get("function") or {}).get("name") or tool.get("name") or "") in allowed
+    ]
 
 
 def _current_attachment_can_skip_archive(
@@ -15449,11 +16267,19 @@ def _current_attachment_can_skip_archive(
         return True
     if _supported_direct_attachment_file_only_request(text):
         return True
+    authority = file_turn_authority(message)
+    speech = authority.speech
+    # A compound effect does not revoke the already proved local source.  Keep
+    # archive/graph/person retrieval isolated, then expose only the effect's
+    # own schemas below.  Reopening general context here let quoted body text
+    # masquerade as a personal-archive query before the capability filter ran.
+    if authority.proved("local_read"):
+        return True
     return not (
-        _attachment_requests_a_tool_action(text)
-        or _ABOUT_MY_OWN_STUFF.search(text)
-        or _ASKS_ABOUT_PERSONAL_STORAGE.search(text)
-        or _ATTACHMENT_CROSS_CONTEXT_REQUEST.search(text)
+        authority.has_tool_effect()
+        or _ABOUT_MY_OWN_STUFF.search(speech)
+        or _ASKS_ABOUT_PERSONAL_STORAGE.search(speech)
+        or _ATTACHMENT_CROSS_CONTEXT_REQUEST.search(speech)
     )
 
 
@@ -18205,7 +19031,7 @@ _OUTSIDE_DEED_RECOVERY_SYSTEM = (
 def _text_shape_guidance_for(message: str) -> str:
     """A static near-turn reminder for explicit text-composition contracts."""
 
-    candidate = _classification_text(message)
+    candidate = file_turn_authority(message).speech
     if not (_TEXT_SHAPE_COMPOSITION_REQUEST.search(candidate) and _EXPLICIT_TEXT_SHAPE.search(candidate)):
         return ""
     return _TEXT_SHAPE_GUIDANCE
@@ -18322,6 +19148,12 @@ class AgentContext:
     #: history, learned personal context and tool schemas are withheld so the
     #: bounded document envelope can use the model window directly.
     focused_attachment_turn: bool = False
+    #: A verified local file remains the sole semantic context even when one
+    #: independently proved effect keeps the agentic loop. Unlike
+    #: ``focused_attachment_turn`` this does not suppress the effect prefetch;
+    #: it only withholds ambient account/profile/rules/corrections from model
+    #: messages and gives the local source the larger bounded window.
+    isolated_local_file_turn: bool = False
     #: A closed formatting contract belongs only to the current user message.
     #: Earlier dialogue and dynamically fetched personal preferences must not
     #: change the requested byte shape or leak into its bounded regeneration.
@@ -20364,10 +21196,14 @@ class AgentRuntime:
         elif len(citations) == 1:
             selected_ids = list(citations.values())
         elif (
-            re.search(r"\b(?:в|из|по|про)\s+них\b", message, re.IGNORECASE)
-            or _ATTACHMENT_ALL_REFERENCE.search(message)
-            or _ATTACHMENT_BOTH_REFERENCE.search(message)
-            or _ATTACHMENT_COMPARISON_ACTION.search(message)
+            re.search(
+                r"\b(?:в|из|по|про)\s+них\b",
+                _record_source_command_text(message),
+                re.IGNORECASE,
+            )
+            or _requests_all_attachment_set(message)
+            or _requests_both_attachment_sources(message)
+            or _ATTACHMENT_COMPARISON_ACTION.search(_record_source_command_text(message))
         ):
             selected_ids = list(dict.fromkeys(citations.values()))
         else:
@@ -20428,12 +21264,14 @@ class AgentRuntime:
 
         if total <= 0:
             return [], 1
-        if _ATTACHMENT_ALL_REFERENCE.search(message):
+        if _requests_all_attachment_set(message):
             return list(range(total)), 0
-        if _ATTACHMENT_BOTH_REFERENCE.search(message):
+        if _requests_both_attachment_sources(message):
             return (list(range(2)), 0) if total == 2 else ([], 2)
 
-        folded = _normalized_attachment_selector(message)
+        folded = _normalized_attachment_selector(_record_source_command_text(message))
+        if not folded:
+            return [], 0
         indices: list[int] = []
         invalid = 0
 
@@ -20737,6 +21575,8 @@ class AgentRuntime:
     ) -> tuple[list[dict[str, Any]], int]:
         """Carry the immediately preceding active file on strong topic overlap."""
 
+        if not _unquoted_topic_continuation_cue(message) or _quoted_record_source_command_is_data(message):
+            return [], 0
         dialogue = [
             (index, item)
             for index, item in enumerate(history)
@@ -20799,16 +21639,16 @@ class AgentRuntime:
     ) -> tuple[list[dict[str, Any]], int]:
         """Resolve names, ordinals, sets and indirect clues without newest-file fallback."""
 
-        requests_all = bool(
-            _requests_all_attachment_set(message) or _ATTACHMENT_ALL_REFERENCE.search(message)
-        )
+        turn_authority = file_turn_authority(message)
+        requests_all = _requests_all_attachment_set(message)
+        command = _record_source_command_text(message)
         deictic_record_request = bool(
-            reference_kind == "deictic" and _ATTACHMENT_LAST_ITEM_REQUEST.search(message)
+            reference_kind == "deictic" and _ATTACHMENT_LAST_ITEM_REQUEST.search(command)
         )
         descriptive_filename_selector = bool(
             reference_kind != "deictic" and _descriptive_filename_selector(message)
         )
-        parsed_filename_mentions = _attachment_filename_mentions(message)
+        parsed_filename_mentions = turn_authority.source_filenames()
         generic_archived_content_lookup = bool(
             _archived_source_search_query(message)
             and not parsed_filename_mentions
@@ -20850,13 +21690,13 @@ class AgentRuntime:
             include_owned_archive=bool(
                 parsed_filename_mentions
                 or descriptive_filename_selector
-                or _DOCUMENT_METADATA_OTHER_TARGET.search(message)
-                or (_ATTACHMENT_SELECTIVE_REFERENCE.search(message) and not deictic_record_request)
+                or _DOCUMENT_METADATA_OTHER_TARGET.search(command)
+                or (_ATTACHMENT_SELECTIVE_REFERENCE.search(command) and not deictic_record_request)
                 or reference_kind == "indirect"
                 or requests_all
-                or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(message)
-                or _ATTACHMENT_NUMERIC_ORDINAL.search(message)
-                or _ATTACHMENT_BOTH_REFERENCE.search(message)
+                or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(command)
+                or _ATTACHMENT_NUMERIC_ORDINAL.search(command)
+                or _requests_both_attachment_sources(message)
                 or _multi_attachment_open_task_count(message) is not None
             ),
         )
@@ -20880,9 +21720,9 @@ class AgentRuntime:
             strict_exact_miss = bool(
                 parsed_filename_mentions
                 and (
-                    _EXPLICIT_ATTACHMENT_REFERENCE.search(message)
-                    or _ATTACHMENT_COMPARISON_ACTION.search(message)
-                    or _ATTACHMENT_SELECTIVE_REFERENCE.search(message)
+                    _EXPLICIT_ATTACHMENT_REFERENCE.search(command)
+                    or _ATTACHMENT_COMPARISON_ACTION.search(command)
+                    or _ATTACHMENT_SELECTIVE_REFERENCE.search(command)
                     or _attachment_filename_has_private_lead(message)
                 )
             )
@@ -20909,14 +21749,14 @@ class AgentRuntime:
                 latest_expected = max(latest_expected, len(active_ids))
                 break
 
-        if _DOCUMENT_METADATA_OTHER_TARGET.search(message) and already_supplied_count <= 0:
+        if _DOCUMENT_METADATA_OTHER_TARGET.search(command) and already_supplied_count <= 0:
             # “Another document” is relative to a current carrier.  Without one,
             # choosing the newest archive row invents the referent; ask for an
             # exact name instead.  A newly attached file never reaches this
             # branch and remains the current pointer.
             return [], 2
 
-        folded = _normalized_attachment_selector(message)
+        folded = _normalized_attachment_selector(turn_authority.source_selector_surface())
         name_groups: dict[str, list[str]] = {}
         for item in catalog:
             name = _normalized_attachment_selector(item["filename"])
@@ -20987,9 +21827,9 @@ class AgentRuntime:
         multi_count = _multi_attachment_open_task_count(message)
         range_side = _attachment_count_range_side(message) if multi_count is not None else ""
         strict_filename_context = bool(
-            _EXPLICIT_ATTACHMENT_REFERENCE.search(message)
-            or _ATTACHMENT_COMPARISON_ACTION.search(message)
-            or _ATTACHMENT_SELECTIVE_REFERENCE.search(message)
+            _EXPLICIT_ATTACHMENT_REFERENCE.search(command)
+            or _ATTACHMENT_COMPARISON_ACTION.search(command)
+            or _ATTACHMENT_SELECTIVE_REFERENCE.search(command)
             or _attachment_filename_has_private_lead(message)
         )
         if unresolved and (strict_filename_context or known_mentions):
@@ -21011,6 +21851,18 @@ class AgentRuntime:
             )
         if selected_indices:
             selected_ids = [catalog_ids[index] for index in sorted(selected_indices)]
+            if (
+                already_supplied_count <= 0
+                and latest_ids
+                and (
+                    _ATTACHMENT_IMPLICIT_CURRENT_COMPARISON.search(command)
+                    or (
+                        re.search(r"\b(?:этот|текущ)\w*\b", command, flags=re.IGNORECASE)
+                        and re.search(r"\b(?:и|вместе\s+с)\b", command, flags=re.IGNORECASE)
+                    )
+                )
+            ):
+                selected_ids = list(dict.fromkeys([*latest_ids, *selected_ids]))
             hydrated = (
                 self._hydrate_explicit_filename_direct_read(
                     exact_direct_read_authority,
@@ -21033,7 +21885,7 @@ class AgentRuntime:
             # also says file/upload/compare.
             return [], max(1, len(requested_names)) if strict_filename_context else 0
 
-        if _ATTACHMENT_BOTH_REFERENCE.search(message):
+        if _requests_both_attachment_sources(message):
             if already_supplied_count:
                 expected = max(0, 2 - already_supplied_count)
                 selected_ids = latest_ids[-expected:] if expected else []
@@ -21105,9 +21957,9 @@ class AgentRuntime:
         terms = _attachment_reference_terms(message)
         selective = bool(
             descriptive_filename_selector
-            or (_ATTACHMENT_SELECTIVE_REFERENCE.search(message) and not deictic_record_request)
-            or (_ATTACHMENT_COMPARISON_ACTION.search(message) and len(catalog) > 1)
-            or (reference_kind == "indirect" and _INDIRECT_ATTACHMENT_TOPIC_REFERENCE.search(message))
+            or (_ATTACHMENT_SELECTIVE_REFERENCE.search(command) and not deictic_record_request)
+            or (_ATTACHMENT_COMPARISON_ACTION.search(command) and len(catalog) > 1)
+            or (reference_kind == "indirect" and _INDIRECT_ATTACHMENT_TOPIC_REFERENCE.search(command))
         )
         if terms and selective:
             filename_hit_ids = [
@@ -21193,7 +22045,7 @@ class AgentRuntime:
                 winners = [item for score, item in scored if score == best]
                 if len(winners) == 1:
                     return winners, 1
-                if _ATTACHMENT_ANY_REFERENCE.search(message):
+                if _ATTACHMENT_ANY_REFERENCE.search(command):
                     # Explicit “любой” authorises a stable code-owned tie-break.
                     # Catalog order is oldest→newest, so choose the newest
                     # equally matching owned row; the model never selects ids.
@@ -21209,7 +22061,7 @@ class AgentRuntime:
                 return [], len(winners)
             return ([], 0) if reference_kind == "indirect" else ([], 1)
 
-        if _ATTACHMENT_COMPARISON_ACTION.search(message) and len(catalog) > 1:
+        if _ATTACHMENT_COMPARISON_ACTION.search(command) and len(catalog) > 1:
             selected_ids = latest_ids if len(latest_ids) > 1 else catalog_ids
             expected = len(selected_ids)
             return (
@@ -21408,6 +22260,8 @@ class AgentRuntime:
             else:
                 return [], 0
         else:
+            if _quoted_record_source_command_is_data(message):
+                return [], 0
             if allow_file_read and _is_closed_historical_direct_read_follow_up(message):
                 recovered, recovered_expected = self._restore_neighboring_exact_filename_direct_read(
                     recent,
@@ -21426,8 +22280,10 @@ class AgentRuntime:
             if (
                 not reference_kind
                 and allow_file_read
-                and not asks_for_the_web(message)
-                and not _ATTACHMENT_FILENAME_REFERENCE.search(message)
+                and not file_turn_authority(message).proved("web")
+                and not _attachment_navigation_filename_mentions(message)
+                and not _quoted_record_source_command_is_data(message)
+                and _unquoted_topic_continuation_cue(message)
             ):
                 topic_attachments, topic_expected = self._restore_recent_active_topic_continuation(
                     message,
@@ -21441,11 +22297,10 @@ class AgentRuntime:
                 reference_kind
                 or _multi_attachment_open_task_count(message) is not None
                 or _requests_all_attachment_set(message)
-                or _ATTACHMENT_ALL_REFERENCE.search(message)
-                or _ATTACHMENT_SEARCH_RESULT_REFERENCE.search(message)
+                or _ATTACHMENT_SEARCH_RESULT_REFERENCE.search(_record_source_command_text(message))
             ):
                 return [], 0
-            if _ATTACHMENT_SEARCH_RESULT_REFERENCE.search(message):
+            if _ATTACHMENT_SEARCH_RESULT_REFERENCE.search(_record_source_command_text(message)):
                 if not allow_file_read:
                     return [], 1
                 return self._restore_source_search_result_attachments(
@@ -21475,10 +22330,14 @@ class AgentRuntime:
                 lineage_ids, uploader_overrides = self._message_reply_attachment_lineage(previous_assistant)
                 if uploader_overrides:
                     if len(lineage_ids) > 1 and not (
-                        re.search(r"\b(?:в|из|по|про)\s+них\b", message, re.IGNORECASE)
-                        or _ATTACHMENT_ALL_REFERENCE.search(message)
-                        or _ATTACHMENT_BOTH_REFERENCE.search(message)
-                        or _ATTACHMENT_COMPARISON_ACTION.search(message)
+                        re.search(
+                            r"\b(?:в|из|по|про)\s+них\b",
+                            _record_source_command_text(message),
+                            re.IGNORECASE,
+                        )
+                        or _requests_all_attachment_set(message)
+                        or _requests_both_attachment_sources(message)
+                        or _ATTACHMENT_COMPARISON_ACTION.search(_record_source_command_text(message))
                     ):
                         return [], len(lineage_ids)
                     restored_shared = self._restore_authorized_attachment_lineage(
@@ -21501,18 +22360,20 @@ class AgentRuntime:
             if not allow_file_read:
                 return [], 1
             catalog_selector = bool(
-                _ATTACHMENT_FILENAME_REFERENCE.search(message)
+                _attachment_navigation_filename_mentions(message)
                 or _descriptive_filename_selector(message)
-                or _DOCUMENT_METADATA_OTHER_TARGET.search(message)
-                or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(message)
-                or _ATTACHMENT_NUMERIC_ORDINAL.search(message)
-                or _ATTACHMENT_BOTH_REFERENCE.search(message)
-                or _ATTACHMENT_ALL_REFERENCE.search(message)
-                or _ATTACHMENT_SELECTIVE_REFERENCE.search(message)
-                or _ATTACHMENT_COMPARISON_REQUEST.search(message)
+                or _DOCUMENT_METADATA_OTHER_TARGET.search(_record_source_command_text(message))
+                or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(_record_source_command_text(message))
+                or _ATTACHMENT_NUMERIC_ORDINAL.search(_record_source_command_text(message))
+                or _requests_both_attachment_sources(message)
+                or _ATTACHMENT_SELECTIVE_REFERENCE.search(_record_source_command_text(message))
+                or _ATTACHMENT_COMPARISON_REQUEST.search(_record_source_command_text(message))
                 or _multi_attachment_open_task_count(message) is not None
                 or _requests_all_attachment_set(message)
-                or (reference_kind == "indirect" and _INDIRECT_ATTACHMENT_TOPIC_REFERENCE.search(message))
+                or (
+                    reference_kind == "indirect"
+                    and _INDIRECT_ATTACHMENT_TOPIC_REFERENCE.search(_record_source_command_text(message))
+                )
             )
             resolution_history = history if catalog_selector else recent
             if not catalog_selector and not any(
@@ -21574,6 +22435,9 @@ class AgentRuntime:
         reply_quote = str(reply_to or "").strip()[:1000]
         if not clean_message:
             raise ValueError("message is required")
+        file_turn = file_turn_authority(clean_message)
+        person_effect_message, _ = _file_effect_projection(clean_message, file_turn, "person")
+        file_create_message, _ = _file_effect_projection(clean_message, file_turn, "file_create")
         # Две разные вещи, которые при обычной настройке совпадают: ЧЬЯ это
         # переписка и В КАКОМ архиве искать. В общем архиве арендатор у всех
         # один — иначе люди не видели бы документы друг друга, — а переписка
@@ -21611,16 +22475,28 @@ class AgentRuntime:
             user_id=user_id,
             limit=20,
         )
-        person_inventory_followup = _person_document_inventory_followup(
-            clean_message,
-            [item for item in prior_history if isinstance(item, dict)],
+        person_inventory_followup = (
+            _person_document_inventory_followup(
+                person_effect_message,
+                [item for item in prior_history if isinstance(item, dict)],
+            )
+            if file_turn.proved("person")
+            else None
         )
         person_inventory_turn = bool(
-            _PERSON_DOCUMENT_INVENTORY.search(clean_message) or person_inventory_followup is not None
+            file_turn.proved("person")
+            and (
+                _PERSON_DOCUMENT_INVENTORY.search(file_authority_speech(person_effect_message))
+                or person_inventory_followup is not None
+            )
         )
-        named_person_aggregation_scope = _named_person_aggregation_scope(
-            clean_message,
-            [item for item in prior_history if isinstance(item, dict)],
+        named_person_aggregation_scope = (
+            _named_person_aggregation_scope(
+                person_effect_message,
+                [item for item in prior_history if isinstance(item, dict)],
+            )
+            if file_turn.proved("person")
+            else None
         )
         prior_web_status, prior_web_sources, prior_web_scope = (
             _latest_assistant_web_projection(prior_history)
@@ -21665,15 +22541,16 @@ class AgentRuntime:
         )
         document_metadata_requested = bool(document_metadata_scope)
         document_metadata_file_requested = False
-        if document_metadata_requested and _is_direct_file_request(clean_message):
-            metadata_file_kind = _file_kind_from_request(clean_message)
+        if document_metadata_requested and file_turn.proved("file_create"):
+            metadata_file_kind = _file_kind_from_request(file_create_message)
             _, metadata_output_supported = _requested_output_filename_stem(
-                clean_message,
+                file_create_message,
                 kind=metadata_file_kind,
             )
             document_metadata_file_requested = metadata_output_supported
         document_metadata_other_requested = bool(
-            document_metadata_requested and _DOCUMENT_METADATA_OTHER_TARGET.search(clean_message)
+            document_metadata_requested
+            and _DOCUMENT_METADATA_OTHER_TARGET.search(_record_source_command_text(clean_message))
         )
         clean_workspace_channel_requested = _workspace_create_channel_request(clean_message)
         clean_workspace_intent = _explicit_workspace_create_intent(clean_message)
@@ -21711,14 +22588,7 @@ class AgentRuntime:
             workspace_inbox_request is not None
             and (supplied_attachment_count or quoted_attachment_reference or reply_assistant_reference)
         )
-        visible_file_surface = _classification_text(clean_message)
-        # Web URLs are outbound source locators, not host filesystem paths. Do
-        # not let their slash/traversal-looking suffixes steal the web route.
-        path_guard_surface = re.sub(r"\bhttps?://[^\s\r\n]+", " ", visible_file_surface, flags=re.IGNORECASE)
-        unsupported_host_path_request = bool(
-            _ATTACHMENT_HOST_PATH_REFERENCE.search(path_guard_surface)
-            and _ATTACHMENT_HOST_PATH_READ_ACTION.search(path_guard_surface)
-        )
+        unsupported_host_path_request = file_turn.proved("host_path")
         attachment_selector_message = (
             "" if workspace_inbox_request is not None else _attachment_selector_message(clean_message)
         )
@@ -21727,13 +22597,14 @@ class AgentRuntime:
             if workspace_inbox_request is not None
             else _attachment_reference_kind(attachment_selector_message)
         )
+        quoted_file_command_is_data = file_turn.quote_data()
         # A stop order is the emergency path: after conversation ownership and
         # the sticky private-lineage state are known, it must not depend on the
         # execution kernel, file authorization, attachment restoration, search,
         # arbiters or the model.  Keep only structural attachment facts on the
         # user row.  In particular, caller-supplied Raw Object ids are neither
         # trusted nor persisted without the normal authorization/ownership path.
-        if _ORDERS_SILENCE.match(clean_message):
+        if file_turn.proved("silence"):
             stop_private_context_lineage = bool(
                 inherited_private_context_lineage or supplied_attachment_count
             )
@@ -21911,15 +22782,14 @@ class AgentRuntime:
         # that, regenerate of «кто ещё там?» would bind to the duplicate text
         # row, find no attachment marker and silently answer without the file.
         multi_attachment_requested_count = _multi_attachment_open_task_count(clean_message)
-        all_attachment_set_requested = bool(
-            _requests_all_attachment_set(clean_message) or _ATTACHMENT_ALL_REFERENCE.search(clean_message)
-        )
-        filename_mentions = _attachment_filename_mentions(attachment_selector_message)
+        all_attachment_set_requested = _requests_all_attachment_set(clean_message)
+        filename_mentions = _attachment_navigation_filename_mentions(attachment_selector_message)
         filename_targets_existing_attachment = bool(filename_mentions)
+        selector_command = _record_source_command_text(attachment_selector_message)
         hard_attachment_selector = bool(
-            _ATTACHMENT_WORD_ORDINAL_PHRASE.search(attachment_selector_message)
-            or _ATTACHMENT_NUMERIC_ORDINAL.search(attachment_selector_message)
-            or _ATTACHMENT_SELECTIVE_REFERENCE.search(attachment_selector_message)
+            _ATTACHMENT_WORD_ORDINAL_PHRASE.search(selector_command)
+            or _ATTACHMENT_NUMERIC_ORDINAL.search(selector_command)
+            or _ATTACHMENT_SELECTIVE_REFERENCE.search(selector_command)
             or filename_targets_existing_attachment
         )
         descriptive_filename_selector = _descriptive_filename_selector(clean_message)
@@ -21931,18 +22801,18 @@ class AgentRuntime:
         current_prior_selector = bool(
             supplied_attachment_count
             and (
-                _ATTACHMENT_IMPLICIT_CURRENT_COMPARISON.search(clean_message)
+                _ATTACHMENT_IMPLICIT_CURRENT_COMPARISON.search(selector_command)
                 or (
-                    re.search(r"\b(?:этот|текущ)\w*\b", clean_message, re.IGNORECASE)
-                    and re.search(r"\b(?:и|вместе\s+с)\b", clean_message, re.IGNORECASE)
+                    re.search(r"\b(?:этот|текущ)\w*\b", selector_command, re.IGNORECASE)
+                    and re.search(r"\b(?:и|вместе\s+с)\b", selector_command, re.IGNORECASE)
                 )
             )
             and (
-                _attachment_filename_mentions(attachment_selector_message)
-                or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(attachment_selector_message)
-                or _ATTACHMENT_NUMERIC_ORDINAL.search(attachment_selector_message)
-                or _ATTACHMENT_BOTH_REFERENCE.search(attachment_selector_message)
-                or _ATTACHMENT_SELECTIVE_REFERENCE.search(attachment_selector_message)
+                _attachment_navigation_filename_mentions(attachment_selector_message)
+                or _ATTACHMENT_WORD_ORDINAL_PHRASE.search(selector_command)
+                or _ATTACHMENT_NUMERIC_ORDINAL.search(selector_command)
+                or _requests_both_attachment_sources(attachment_selector_message)
+                or _ATTACHMENT_SELECTIVE_REFERENCE.search(selector_command)
             )
         )
         restore_prior_for_current_multi = bool(
@@ -21992,7 +22862,9 @@ class AgentRuntime:
             )
         restored_attachments: list[dict[str, Any]]
         citation_selector_applied = False
-        if named_person_corpus.applies:
+        if quoted_file_command_is_data:
+            restored_attachments, restored_attachment_expected_count = [], 0
+        elif named_person_corpus.applies:
             # This set was selected by exact uploader before any body read and
             # every id was re-authorized against the current Raw/Inbox verdict.
             # It replaces ambient conversation restoration; otherwise a named
@@ -22297,7 +23169,9 @@ class AgentRuntime:
         # set references may add resolved earlier files; without any reference,
         # ordinary questions still receive no ambient old attachment text.
         active_candidates = (
-            [workspace_inbox_resolution.attachment]
+            []
+            if quoted_file_command_is_data
+            else [workspace_inbox_resolution.attachment]
             if workspace_inbox_resolution.attachment is not None
             else []
             if workspace_inbox_request is not None
@@ -22406,7 +23280,9 @@ class AgentRuntime:
                 continue
             active_attachment_set[position] = _withhold_nonverifiable_attachment(item)
         attachment_expected_count = (
-            1
+            0
+            if quoted_file_command_is_data
+            else 1
             if workspace_inbox_resolution.attachment is not None
             else 0
             if workspace_inbox_request is not None
@@ -22441,7 +23317,7 @@ class AgentRuntime:
         )
         whole_document_task = (
             ""
-            if document_metadata_owned
+            if document_metadata_owned or quoted_file_command_is_data
             else (
                 "summary"
                 if synthetic_document_notice and active_attachment_set
@@ -22468,11 +23344,13 @@ class AgentRuntime:
                 )
             )
         )
-        if document_metadata_owned:
+        if document_metadata_owned or quoted_file_command_is_data:
             # Metadata is a header-only read.  Do not project body text, OCR a
             # scan, build a hierarchy, retrieve ambient context or hand any
             # document value to a model merely to print an allowlisted header.
             # Source evidence stays on active_attachment_set / source set.
+            # Quote-only file instructions likewise cannot authorize a semantic
+            # read, projection or later hierarchy/prepass.
             attachments = []
             attachment_request_projection = AttachmentRequestProjection()
             projected_evidence_set = None
@@ -22494,18 +23372,32 @@ class AgentRuntime:
                 and any(
                     _historical_direct_read_authority_of(item) is not None
                     or _explicit_filename_direct_read_authority_of(item) is not None
-                    for item in attachments
+                    for item in active_attachment_set
                 )
             ):
                 # Projected historical/exact-name carriers must reauth and prove
-                # registered bytes again; authority on the projected object is
-                # the only ignored grant this consumer may use.
-                attachments = await self._verify_registered_file_attachments(
-                    attachments,
-                    tenant_id=attachment_authority_tenant,
-                    person_id=attachment_authority_person,
-                    require_projected_direct_read_authority=True,
-                )
+                # registered bytes again.  Strictness is positionally inherited
+                # from the already-authorized source carrier: this both rejects
+                # a projection that lost or changed its typed Raw authority and
+                # keeps ordinary current siblings in a mixed set readable.
+                reverified: list[dict[str, Any]] = []
+                for position, item in enumerate(attachments):
+                    source = (
+                        active_attachment_set[position] if position < len(active_attachment_set) else None
+                    )
+                    require_direct = bool(
+                        source is None
+                        or _historical_direct_read_authority_of(source) is not None
+                        or _explicit_filename_direct_read_authority_of(source) is not None
+                    )
+                    verified_item = await self._verify_registered_file_attachments(
+                        [item],
+                        tenant_id=attachment_authority_tenant,
+                        person_id=attachment_authority_person,
+                        require_projected_direct_read_authority=require_direct,
+                    )
+                    reverified.extend(verified_item)
+                attachments = reverified
             projected_evidence_set = _file_evidence_set_from_attachments(
                 attachments,
                 expected_count=attachment_expected_count,
@@ -22517,11 +23409,24 @@ class AgentRuntime:
                 active_attachment_set,
                 evidence_set=active_source_evidence_set,
             )
-            if not unsupported_host_path_request
+            if not quoted_file_command_is_data
+            and not unsupported_host_path_request
             and not file_access_denied
             and not attachment_resolution_failed
             else ""
         )
+        if not last_attachment_item_answer:
+            last_attachment_item_answer = (
+                _attachment_record_set_answer(
+                    clean_message,
+                    active_attachment_set,
+                    evidence_set=active_source_evidence_set,
+                )
+                if not unsupported_host_path_request
+                and not file_access_denied
+                and not attachment_resolution_failed
+                else ""
+            )
         synthetic_notice_owns_terminal = bool(
             synthetic_document_notice
             and not unsupported_host_path_request
@@ -22728,6 +23633,11 @@ class AgentRuntime:
                 for item in active_attachment_set
             )
         )
+        file_web = file_turn.proved("web")
+        file_voice = file_turn.proved("voice")
+        file_create = file_turn.proved("file_create")
+        file_effect = file_turn.has_tool_effect()
+        file_source_only = bool(file_turn.source_only() and not quoted_file_command_is_data)
         hierarchical_attachment_turn = bool(
             whole_document_needs_hierarchy
             # The authenticated hierarchy proves coverage over parser-owned
@@ -22740,30 +23650,36 @@ class AgentRuntime:
             and current_attachment_local
             and authenticated_attachment_scope
             and not attachment_query_closed_answer
-            and not asks_for_the_web(clean_message)
+            and not file_web
         )
         focused_attachment_turn = bool(
             current_attachment_local
             and authenticated_attachment_scope
             and not attachment_query_closed_answer
-            and not asks_for_the_web(clean_message)
+            and not file_web
             and (
                 hierarchical_attachment_turn
                 or (
-                    not _ASKS_FOR_VOICE.search(clean_message)
-                    and not _is_direct_file_request(clean_message)
+                    not file_voice
+                    and not file_create
                     and (
                         attachment_request_projection.applied
-                        or bool(_ATTACHMENT_SUMMARY_REQUEST.search(clean_message))
+                        or bool(_ATTACHMENT_SUMMARY_REQUEST.search(file_turn.speech))
                         or bool(whole_document_task)
                         or synthetic_document_notice
+                        or (file_source_only and active_attachment_set)
                     )
                 )
             )
         )
-        attachment_tool_action_requested = bool(
-            not synthetic_document_notice and _attachment_requests_a_tool_action(clean_message)
-        )
+        attachment_tool_action_requested = bool(not synthetic_document_notice and file_effect)
+        if (
+            file_source_only
+            and authenticated_attachment_scope
+            and current_attachment_local
+            and active_attachment_set
+        ):
+            focused_attachment_turn = True
         pure_file_read_turn = bool(
             authenticated_attachment_scope
             and attachment_context_complete
@@ -22780,9 +23696,9 @@ class AgentRuntime:
             and not synthetic_document_notice
             and not document_metadata_owned
             and not attachment_tool_action_requested
-            and not asks_for_the_web(clean_message)
-            and not _ASKS_FOR_VOICE.search(clean_message)
-            and not _is_direct_file_request(clean_message)
+            and not file_web
+            and not file_voice
+            and not file_create
             and clean_workspace_intent is None
             and not clean_workspace_channel_requested
         )
@@ -22799,10 +23715,10 @@ class AgentRuntime:
             and not attachment_query_closed_answer
             and authenticated_attachment_scope
             and attachment_context_complete
-            and _supported_direct_attachment_file_only_request(clean_message)
+            and _supported_direct_attachment_file_only_request(file_create_message)
         )
         direct_exact_file_field_contract = (
-            _direct_exact_file_field_contract(clean_message)
+            _direct_exact_file_field_contract(file_create_message)
             if direct_attachment_file_projection_turn
             else None
         )
@@ -22870,7 +23786,8 @@ class AgentRuntime:
         office_exact = (
             None
             if (
-                document_metadata_owned
+                quoted_file_command_is_data
+                or document_metadata_owned
                 or foreign_private_request
                 or dangerous_instruction_request
                 or fabricated_outside_deed_request
@@ -22880,7 +23797,8 @@ class AgentRuntime:
             else code_owned_office_answer(clean_message, attachments)
         )
         office_exact_needs_full_source = bool(
-            office_exact_request_detected(clean_message)
+            not quoted_file_command_is_data
+            and office_exact_request_detected(clean_message)
             and (office_exact is None or str(office_exact.get("status") or "") != VERDICT_PASSED)
             and authenticated_attachment_scope
             and active_attachment_set
@@ -22893,7 +23811,8 @@ class AgentRuntime:
             )
         )
         full_source_prepass_required = bool(
-            not document_metadata_owned
+            not quoted_file_command_is_data
+            and not document_metadata_owned
             and advisory_body_count == 0
             and (
                 office_exact_needs_full_source
@@ -22915,7 +23834,8 @@ class AgentRuntime:
             # full-source prepass or ask for the already supplied file again.
             office_exact = None
         if (
-            not foreign_private_request
+            not quoted_file_command_is_data
+            and not foreign_private_request
             and not document_metadata_owned
             and not dangerous_instruction_request
             and not fabricated_outside_deed_request
@@ -22923,8 +23843,6 @@ class AgentRuntime:
             and not synthetic_document_notice
             and not multi_attachment_incomplete
             and office_exact is None
-            and not full_source_prepass_required
-            and not pure_file_read_turn
             and not attachment_tool_action_requested
             and office_arbiter_applies(clean_message, attachments)
         ):
@@ -22939,7 +23857,7 @@ class AgentRuntime:
             # офисное вложение с полной структурой. Медиана вызова 0.18 с.
             try:
                 arbitrated = await asyncio.wait_for(
-                    self._office_intent_arbiter(clean_message),
+                    self._office_intent_arbiter(file_turn.speech),
                     timeout=(
                         _ATTACHMENT_OPTIONAL_STAGE_TIMEOUT_SEC
                         if attachment_expected_count
@@ -22970,7 +23888,7 @@ class AgentRuntime:
         # narrow context at the routing boundary instead; actual current
         # carriers remain excluded explicitly.
         preparse_shape_isolated = bool(
-            owns_closed_text_shape(clean_message)
+            owns_closed_text_shape(file_turn.speech)
             and not foreign_private_request
             and not dangerous_instruction_request
             and not fabricated_outside_deed_request
@@ -22993,10 +23911,10 @@ class AgentRuntime:
             and not reply_quote
             and not synthetic_document_notice
             and not latest_prior_used_attachment_for_shape
-            and not asks_for_the_web(clean_message)
-            and not _is_direct_file_request(clean_message)
+            and not file_web
+            and not file_create
             and not answer_with_voice
-            and not _ASKS_FOR_VOICE.search(clean_message)
+            and not file_voice
         )
         if foreign_private_request:
             # The request itself crosses an account boundary.  Do not search a
@@ -23164,6 +24082,18 @@ class AgentRuntime:
                 open_remainder="",
                 remainder_known=True,
                 current_attachment_present=True,
+            )
+        elif quoted_file_command_is_data:
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                interaction_mode=interaction_mode,
+                structural_answer=_QUOTED_RECORD_SOURCE_IS_DATA,
+                open_remainder="",
+                remainder_known=True,
+                current_attachment_present=False,
             )
         elif last_attachment_item_answer:
             context = AgentContext(
@@ -23338,11 +24268,14 @@ class AgentRuntime:
                 search_query=clean_message,
                 outward_verdict=("человек", None),
             )
-        elif pure_file_read_turn:
+        elif authenticated_attachment_scope and current_attachment_local and file_turn.proved("local_read"):
             # The deterministic file contour already chose and verified the
             # complete source set. Skip intake learning, archive/KO retrieval,
-            # graph expansion and semantic arbiters. The only optional model
-            # step left is free-form synthesis over these exact local bytes.
+            # graph expansion and semantic arbiters even when one independent
+            # effect is also proved. The agentic loop below receives only that
+            # effect family's schemas and its own projected clause; reopening
+            # general context here would let a neighbouring quoted literal
+            # drive archive/person/outward routing before the schema filter.
             context = AgentContext(
                 conversation_id=conversation_id,
                 user_id=tenant_id,
@@ -23350,9 +24283,10 @@ class AgentRuntime:
                 conversation_history=[],
                 ingestion={},
                 interaction_mode=interaction_mode,
-                search_query=attachment_task_message,
+                search_query=file_turn.task_envelope(),
                 current_attachment_present=True,
-                focused_attachment_turn=True,
+                focused_attachment_turn=pure_file_read_turn,
+                isolated_local_file_turn=True,
             )
         elif (
             empty_attachment_answer
@@ -23566,6 +24500,13 @@ class AgentRuntime:
             )
             else []
         )
+        visible_tools = _file_turn_capability_tools(visible_tools, file_turn)
+        if (
+            file_source_only
+            and (attachment_expected_count or supplied_attachment_count or active_attachment_set)
+            and not quoted_file_command_is_data
+        ):
+            visible_tools = []
         if workspace_channel_data_only:
             # A pasted/quoted MCP command is user data, not effect authority.
             # The broad direct-file classifier sees Markdown's rendered text;
@@ -23623,9 +24564,7 @@ class AgentRuntime:
             context.open_remainder = ""
             context.remainder_known = True
             visible_tools = []
-        if _is_direct_file_request(clean_message) and (
-            asks_for_the_web(clean_message) or topic.startswith("интернет")
-        ):
+        if file_create and (file_web or topic.startswith("интернет")):
             # A newly composed file is a projection of the FINAL accepted body,
             # not an independent mid-loop generation on a WEB-derived turn.
             # Deferring make_file to the late builder lets URL reconciliation,
@@ -23670,7 +24609,11 @@ class AgentRuntime:
             (attachment_private_turn or private_context_lineage) and not isolated_outbound_turn
         )
         restricted_outbound_turn = bool(topic.startswith("человек") or private_outbound_restricted)
-        web_intent_authorized = bool(asks_for_the_web(clean_message) or topic.startswith("интернет"))
+        web_intent_authorized = bool(
+            file_web
+            if file_turn.proved("local_read")
+            else asks_for_the_web(clean_message) or topic.startswith("интернет")
+        )
         outbound_blocked = bool(restricted_outbound_turn and not web_intent_authorized)
         if restricted_outbound_turn:
             # A local person/file turn is not authority to disclose its private
@@ -23707,7 +24650,7 @@ class AgentRuntime:
         inventory_preflight_shape = bool(not focused_attachment_turn and person_inventory_turn)
         if inventory_preflight_shape:
             await self._prefetch_person_activity(
-                clean_message,
+                person_effect_message,
                 actor,
                 visible_tools,
                 [],
@@ -23810,7 +24753,7 @@ class AgentRuntime:
             and not context.successful_reminders
             and context.late_make_file_attempts == 0
             and not answer_with_voice
-            and not _ASKS_FOR_VOICE.search(clean_message)
+            and not file_voice
         )
         # A closed self-contained composition contract belongs to the current
         # message. Ambient history, dropped retrieval traces, feedback counters
@@ -23819,7 +24762,7 @@ class AgentRuntime:
         # attachment, source lookup, effect, web/person route) remain hard
         # blockers. The original context is retained for persistence and every
         # late truth guard.
-        parsed_shape_contract = regenerable_text_shape_contract(shape_request)
+        parsed_shape_contract = regenerable_text_shape_contract(file_turn_authority(shape_request).speech)
         shape_generation_isolated = bool(parsed_shape_contract is not None and shape_input_carriers_empty)
         shape_contract = parsed_shape_contract if shape_generation_isolated else None
         shape_route_isolated = bool(preparse_shape_isolated or shape_generation_isolated)
@@ -23904,6 +24847,7 @@ class AgentRuntime:
             visible_tools = []
         if (
             full_source_prepass_required
+            and not quoted_file_command_is_data
             and self.llm.enabled
             and office_exact is None
             and not foreign_private_request
@@ -23918,7 +24862,7 @@ class AgentRuntime:
         ):
             bundle, prepass_complete = await self._build_attachment_hierarchy_bundle(
                 context,
-                shape_request,
+                file_turn.task_envelope() if file_turn.proved("local_read") else shape_request,
                 [item for item in active_attachment_set if isinstance(item, dict)],
                 task_kind=whole_document_task or "request",
             )
@@ -24059,7 +25003,7 @@ class AgentRuntime:
         ):
             response = await self._hierarchical_attachment_response(
                 context,
-                asked_of_model,
+                file_turn.task_envelope() if file_turn.proved("local_read") else asked_of_model,
                 [item for item in active_attachment_set if isinstance(item, dict)],
                 task_kind=whole_document_task,
                 bundle=context.attachment_hierarchy_bundle,
@@ -24379,7 +25323,7 @@ class AgentRuntime:
             attachment_evidence
             and response.get("_office_exact_owned") is not True
             and not web_evidence_used
-            and not asks_for_the_web(clean_message)
+            and not file_web
             and (
                 _MODEL_PLAIN_WEB_URL.search(content)
                 or _MODEL_ANY_DOMAIN_OR_IP.search(content)
@@ -24434,7 +25378,7 @@ class AgentRuntime:
             and not web_evidence_used
             and (
                 web_evidence_status in {"failed", "empty"}
-                or asks_for_the_web(clean_message)
+                or file_web
                 or _claims_current_answer_came_from_the_web(content)
                 or bool(_MODEL_EXPLICIT_WEB_PROVENANCE_CLAIM.search(content))
                 or bool(
@@ -24772,7 +25716,7 @@ class AgentRuntime:
         ]
         reminder_delivery_scheduled = _has_scheduled_reminder_delivery(context.successful_reminders)
         read_only_timeline_file_report = bool(
-            not _is_direct_file_request(clean_message)
+            not file_create
             and any(
                 isinstance(entry, Mapping) and str(entry.get("tool") or "") == "what_happened"
                 for entry in (response.get("tool_evidence") or [])
@@ -25210,7 +26154,11 @@ class AgentRuntime:
         # unresolved remainder to the model.  Judge and repair that same task;
         # asking them to re-fulfil the complete original request makes a correct
         # remainder answer look incomplete and can duplicate a completed deed.
-        verification_question = str(asked_of_model or clean_message).strip()
+        verification_question = (
+            file_turn.task_envelope()
+            if file_turn.proved("local_read")
+            else str(asked_of_model or clean_message).strip()
+        )
         context.attachment_secondary_deadline = (
             time.monotonic() + _ATTACHMENT_SECONDARY_BUDGET_SEC if attachment_evidence else None
         )
@@ -25307,6 +26255,7 @@ class AgentRuntime:
         if (
             attachment_expected_count
             and not attachment_verification_complete
+            and response.get("_office_exact_owned") is not True
             and (
                 bool(whole_document_task)
                 or _requires_complete_attachment_evidence(verification_question, model_said)
@@ -25492,6 +26441,7 @@ class AgentRuntime:
         if (
             attachment_expected_count
             and not attachment_verification_complete
+            and response.get("_office_exact_owned") is not True
             and (
                 bool(whole_document_task)
                 or _requires_complete_attachment_evidence(verification_question, model_said)
@@ -25687,7 +26637,7 @@ class AgentRuntime:
         # formatting, Telegram and attachment-reading prompts are often labelled
         # ``файл`` by the broad arbiter even though the person never requested a
         # new file.  A late effect therefore needs its own lexical authority.
-        asked_for_a_file = _is_direct_file_request(clean_message)
+        asked_for_a_file = file_create
         # Сборка присланных файлов («собери за 10, 13 и 25 число») здесь НЕ
         # запускается: она стоит раньше, в агентском цикле, чтобы модель говорила
         # о собранном, а не гадала. Сюда доходит только «сочини документ», и оно
@@ -25753,7 +26703,7 @@ class AgentRuntime:
                     late_file_content = f"{content}\n\n" + "\n\n".join(web_file_companions)
             late_attempts_before = context.late_make_file_attempts
             made = await self._file_for_a_request_that_wanted_one(
-                clean_message,
+                file_create_message,
                 late_file_content,
                 actor,
                 # A hierarchical document turn deliberately keeps its map
@@ -26429,7 +27379,7 @@ class AgentRuntime:
                     # голосовое, когда ему неудобно печатать; отвечать ему стеной
                     # текста — предлагать читать там, где он выбрал слушать. Текст
                     # приходит рядом, как и раньше, так что ничего не теряется.
-                    asked_for_voice=(answer_with_voice or bool(_ASKS_FOR_VOICE.search(clean_message))),
+                    asked_for_voice=(answer_with_voice or file_voice),
                     file_descriptors=[
                         str(item.get("filename") or "")
                         for item in (response.get("file_clips") or [])
@@ -28087,7 +29037,16 @@ class AgentRuntime:
                 "file_clips": [],
                 "_structural_file_count": 0,
             }
-        if outward_tool_is_allowed("web_research") and not source_lookup_owned:
+        turn_auth = file_turn_authority(message)
+        person_message, _ = _file_effect_projection(message, turn_auth, "person")
+        temporal_message, _ = _file_effect_projection(message, turn_auth, "temporal")
+        archive_message, _ = _file_effect_projection(message, turn_auth, "archive")
+        file_create_message, _ = _file_effect_projection(message, turn_auth, "file_create")
+        if (
+            outward_tool_is_allowed("web_research")
+            and not source_lookup_owned
+            and not (turn_auth.proved("local_read") and not turn_auth.proved("web"))
+        ):
             await self._prefetch_the_web_if_asked(
                 message, actor, tools, messages, tools_used, tool_evidence, web_notice, context
             )
@@ -28107,11 +29066,13 @@ class AgentRuntime:
         # ВЛАДЕЛЬЦА, она приходила первой, и модель отвечала «вчера ты активно
         # работал с базой». Вопрос был про другого человека.
         about_a_person = False
-        if not source_lookup_owned and not (
-            context.isolated_outbound_turn or context.focused_attachment_turn
+        if (
+            not source_lookup_owned
+            and not (context.isolated_outbound_turn or context.focused_attachment_turn)
+            and not (turn_auth.proved("local_read") and not turn_auth.proved("person"))
         ):
             about_a_person = await self._prefetch_person_activity(
-                message, actor, tools, messages, tools_used, tool_evidence, context
+                person_message, actor, tools, messages, tools_used, tool_evidence, context
             )
         if about_a_person and context.structural_answer and context.remainder_known:
             # Exact person/day document inventory is fully code-owned.  Once it
@@ -28128,9 +29089,11 @@ class AgentRuntime:
                 "_structural_file_count": 0,
             }
         if not source_lookup_owned and not about_a_person:
-            if not (context.isolated_outbound_turn or context.focused_attachment_turn):
+            if not (context.isolated_outbound_turn or context.focused_attachment_turn) and not (
+                turn_auth.proved("local_read") and not turn_auth.proved("temporal")
+            ):
                 await self._prefetch_the_timeline_if_asked(
-                    message, actor, tools, messages, tools_used, tool_evidence, context
+                    temporal_message, actor, tools, messages, tools_used, tool_evidence, context
                 )
         elif about_a_person:
             # A settled question about another participant must not leave the
@@ -28144,11 +29107,13 @@ class AgentRuntime:
                 if str((tool.get("function") or {}).get("name") or tool.get("name") or "")
                 not in {"what_happened", "upcoming"}
             ]
-        if not source_lookup_owned and not (
-            context.isolated_outbound_turn or context.focused_attachment_turn
+        if (
+            not source_lookup_owned
+            and not (context.isolated_outbound_turn or context.focused_attachment_turn)
+            and not (turn_auth.proved("local_read") and not turn_auth.proved("archive"))
         ):
             await self._prefetch_archive_numbers(
-                message,
+                archive_message,
                 actor,
                 tools,
                 messages,
@@ -28173,9 +29138,20 @@ class AgentRuntime:
         # Вторым следствием того же порядка было предупреждение «ответ не
         # опирается ни на одну запись вашей базы»: сборка не попадала в
         # основания хода, и выглядело это как ответ из ниоткуда.
-        if not source_lookup_owned and not context.isolated_outbound_turn:
+        if (
+            not source_lookup_owned
+            and not context.isolated_outbound_turn
+            and not (turn_auth.proved("local_read") and not turn_auth.proved("archive"))
+        ):
             await self._prefetch_the_archive_if_asked(
-                context, actor, messages, tools_used, tool_evidence, file_clips, tools, message=message
+                context,
+                actor,
+                messages,
+                tools_used,
+                tool_evidence,
+                file_clips,
+                tools,
+                message=archive_message,
             )
         # Эти вложения созданы проверяемым структурным действием ДО речи
         # модели. Дальнейшие make_file добавляются в тот же транспортный список,
@@ -28192,15 +29168,21 @@ class AgentRuntime:
         # вернуть напоминанию уже решённую половину: его арбитр честно назвал бы
         # остатком просьбу об архиве, и она поехала бы к модели вторым путём.
         # Пока сборка остатка НЕ считала, верно было обратное — потому и различие.
-        if not source_lookup_owned and not context.isolated_outbound_turn:
+        if (
+            not source_lookup_owned
+            and not context.isolated_outbound_turn
+            and not (turn_auth.proved("local_read") and not turn_auth.proved("reminder"))
+        ):
+            reminder_message = context.open_remainder if context.remainder_known else message
             await self._prefetch_a_reminder_if_asked(
-                context.open_remainder if context.remainder_known else message,
+                reminder_message,
                 context,
                 actor,
                 tools,
                 messages,
                 tools_used,
                 tool_evidence,
+                authority=file_turn_authority(reminder_message),
             )
         # Предварительный вызов что-то СДЕЛАЛ и уже сказал об этом человеку.
         #
@@ -28546,7 +29528,7 @@ class AgentRuntime:
                 context.answer_mode == "general_conversation"
                 and not context.asked_for_an_archive
                 and not str((context.outward_verdict or ("", None))[0] or "").startswith(("архив", "человек"))
-                and not _ASKS_ABOUT_PERSONAL_STORAGE.search(message)
+                and not _ASKS_ABOUT_PERSONAL_STORAGE.search(turn_auth.speech)
             )
             for call, openai_call in zip(selected_calls, openai_calls, strict=True):
                 if not outward_tool_is_allowed(call.name):
@@ -28572,9 +29554,9 @@ class AgentRuntime:
                     deferred_body = ""
                     if (
                         call.name == "make_file"
-                        and _is_direct_file_request(message)
+                        and _is_direct_file_request(file_create_message)
                         and (
-                            asks_for_the_web(message)
+                            turn_auth.proved("web")
                             or str((context.outward_verdict or ("", None))[0] or "").startswith("интернет")
                             or context.web_evidence_status in {"sourced", "partial"}
                         )
@@ -28607,9 +29589,9 @@ class AgentRuntime:
                     else:
                         carrier_allowed = False
                 elif call.name == "make_file" and isinstance(call.arguments, Mapping):
-                    requested_kind = _file_kind_from_request(message)
+                    requested_kind = _file_kind_from_request(file_create_message)
                     requested_filename, requested_filename_supported = _requested_output_filename_stem(
-                        message, kind=requested_kind
+                        file_create_message, kind=requested_kind
                     )
                     model_kind = str(call.arguments.get("kind") or "").casefold()
                     if not requested_filename_supported or (
@@ -30235,6 +31217,8 @@ class AgentRuntime:
         messages: list[dict[str, Any]],
         tools_used: list[str],
         tool_evidence: list[dict[str, str]],
+        *,
+        authority: FileTurnAuthority | None = None,
     ) -> bool:
         """Просили напомнить — ставим напоминание, не спрашивая модель.
 
@@ -30256,7 +31240,9 @@ class AgentRuntime:
         завтра в 10 про совещание» надо развести на «что» и «когда», и никакой
         шаблон этого не сделает — человек говорит как придётся.
         """
-        if _requests_to_fabricate_outside_deed(message):
+        turn_authority = authority or file_turn_authority(message)
+        reminder_message, forced_remainder = _reminder_effect_projection(message, turn_authority)
+        if _requests_to_fabricate_outside_deed(turn_authority.speech):
             # A request to falsely report an already completed external action
             # is not latent permission to create any local effect.  In
             # particular, the reminder classifier once interpreted an external
@@ -30273,13 +31259,13 @@ class AgentRuntime:
             context.open_remainder = ""
             context.remainder_known = True
             return False
-        exact_request = _exact_absolute_reminder_request(message)
+        exact_request = _exact_absolute_reminder_request(reminder_message)
         # A broad semantic verdict such as ``действие`` is not effect
         # authority.  It covers external orders, device operations, files and
         # many other requests; using it alone once dispatched ``remind`` for a
         # request to lie about an external vehicle.  Only a closed exact form or
         # visible reminder speech may reach the reminder-specific classifier.
-        if exact_request is None and not _ASKS_FOR_A_REMINDER.search(message):
+        if exact_request is None and not turn_authority.proved("reminder"):
             # The same authority boundary must reach the main model.  Merely
             # skipping the deterministic classifier while leaving ``remind``
             # in its schema still permits a hidden effectful tool call for an
@@ -30329,7 +31315,7 @@ class AgentRuntime:
                                 "Только JSON, без пояснений."
                             ),
                         },
-                        {"role": "user", "content": message[:400]},
+                        {"role": "user", "content": reminder_message[:400]},
                     ],
                     tools=[],
                     temperature=0.0,
@@ -30355,7 +31341,11 @@ class AgentRuntime:
             # сделано, и лишняя фраза модели поверх факта безобидна — а потерянный
             # рядом заданный вопрос нет.
             rest_of_it = parsed.get("остаток")
-            rest = " ".join(str(rest_of_it).split())[:600] if isinstance(rest_of_it, str) else message
+            rest = (
+                " ".join(str(rest_of_it).split())[:600] if isinstance(rest_of_it, str) else reminder_message
+            )
+        if forced_remainder is not None:
+            rest = forced_remainder
         if not what or not when:
             # Без обеих половин напоминание бессмысленно: «напомнить неизвестно о
             # чём» и «напомнить когда-нибудь» одинаково бесполезны. Пусть решает
@@ -30889,6 +31879,7 @@ class AgentRuntime:
             not query
             or context.isolated_outbound_turn
             or context.focused_attachment_turn
+            or context.isolated_local_file_turn
             or context.current_attachment_present
             or bool(context.reply_quote)
             or bool(attachments)
@@ -33005,13 +33996,20 @@ class AgentRuntime:
         замере модель то звала поиск, то отвечала из памяти на тот же вопрос.
         """
         notice = notice if notice is not None else []
-        asked_outright = asks_for_the_web(message)
+        turn_auth = file_turn_authority(message)
+        if turn_auth.proved("local_read") and not turn_auth.proved("web"):
+            return
+        web_message, _local_remainder = _file_effect_projection(message, turn_auth, "web")
+        asked_outright = asks_for_the_web(web_message)
         # Просьба поставить напоминание наружу не уходит НИКОГДА, даже если
         # человек упомянул в ней слово «найди». Замерено: «Напомни мне в среду
         # созвон с подрядчиком» ушло в поисковик строкой «созвон с подрядчиком
         # среда» — и напоминание не поставилось, и дело человека вместе с днём
         # недели оказалось в чужом поисковике.
-        if _ASKS_FOR_A_REMINDER.search(message) or _exact_absolute_reminder_request(message) is not None:
+        if not turn_auth.proved("local_read") and (
+            _ASKS_FOR_A_REMINDER.search(web_message)
+            or _exact_absolute_reminder_request(web_message) is not None
+        ):
             return
         # Вопросительная форма условием больше не является — здесь по той же
         # причине, что и у арбитра. Владелец 2026-08-03: «некоторые будут её
@@ -33022,7 +34020,7 @@ class AgentRuntime:
         # шести. Вердикт арбитра «интернет» — достаточное основание: он и есть
         # понимание того, что человек спросил про внешний мир.
         verdict = context.outward_verdict if context is not None else None
-        looks_like_a_request = _might_be_a_question(message) or str(
+        looks_like_a_request = _might_be_a_question(web_message) or str(
             (verdict or ("", None))[0] or ""
         ).startswith("интернет")
         if not asked_outright and not looks_like_a_request:
@@ -33056,7 +34054,7 @@ class AgentRuntime:
         # search the web still wins; otherwise check this before asking the
         # arbiter, whose misclassification once sent an employee surname to a
         # public provider without adding any evidence to the answer.
-        if not asked_outright and await self._mentions_someone_from_the_archive(message, actor):
+        if not asked_outright and await self._mentions_someone_from_the_archive(web_message, actor):
             return
         # «Что было 26 июля в 15 часов» — вопрос о собственной ленте, и время в нём
         # названо прямо. Арбитр на такой вопрос отвечал «интернет» (замерено), а
@@ -33064,8 +34062,8 @@ class AgentRuntime:
         # вместо архива. Здесь решает не модель, а структура вопроса.
         if (
             not asked_outright
-            and _ASKS_WHAT_HAPPENED.search(message)
-            and (period_from_question(message) or moment_from_question(message))
+            and _ASKS_WHAT_HAPPENED.search(web_message)
+            and (period_from_question(web_message) or moment_from_question(web_message))
         ):
             return
         if not any(
@@ -33085,9 +34083,9 @@ class AgentRuntime:
         if context is not None and context.isolated_outbound_turn and asked_outright:
             # No classifier and no history on this path: the only bytes which
             # may influence the outbound query are the current visible request.
-            kind, second = "интернет", self.web_query_from(message)
+            kind, second = "интернет", self.web_query_from(web_message)
         else:
-            kind, second = verdict if verdict is not None else await self._web_query_by_arbiter(message)
+            kind, second = verdict if verdict is not None else await self._web_query_by_arbiter(web_message)
         # Второе поле вердикта — поисковая строка ТОЛЬКО у вида «интернет».
         #
         # У остальных видов оно значит другое: у «человека» — ИМЯ участника, у
@@ -33124,7 +34122,7 @@ class AgentRuntime:
         if not query:
             if not asked_outright:
                 return  # вопрос не про внешний мир — интернет тут ни при чём
-            query = self.web_query_from(message)
+            query = self.web_query_from(web_message)
         try:
             result = await self.kernel.execute(
                 "web_research", {"query": query, "max_sources": 3}, actor=actor
@@ -33375,6 +34373,7 @@ class AgentRuntime:
             not context.isolated_outbound_turn
             and not context.isolated_shape_turn
             and not context.focused_attachment_turn
+            and not context.isolated_local_file_turn
         ):
             if context.kb_size == 0:
                 messages.append({"role": "system", "content": EMPTY_KB_GUIDANCE})
@@ -33557,6 +34556,7 @@ class AgentRuntime:
             None
             if context.isolated_outbound_turn
             or context.focused_attachment_turn
+            or context.isolated_local_file_turn
             or context.isolated_shape_turn
             else self._user_model_payload(context.user_id)
         )
@@ -33574,6 +34574,7 @@ class AgentRuntime:
             ""
             if context.isolated_outbound_turn
             or context.focused_attachment_turn
+            or context.isolated_local_file_turn
             or context.isolated_shape_turn
             else self._custom_instructions(context.user_id)
         )
@@ -33586,6 +34587,7 @@ class AgentRuntime:
             []
             if context.isolated_outbound_turn
             or context.focused_attachment_turn
+            or context.isolated_local_file_turn
             or context.isolated_shape_turn
             else context.standing_rules or self._standing_rules(context.person_id or context.user_id)
         )
@@ -33597,6 +34599,7 @@ class AgentRuntime:
             []
             if context.isolated_outbound_turn
             or context.focused_attachment_turn
+            or context.isolated_local_file_turn
             or context.isolated_shape_turn
             else context.corrections or self._corrections(context.person_id or context.user_id)
         )
@@ -33874,7 +34877,7 @@ class AgentRuntime:
             transient_excerpts: list[str] = []
             remaining = (
                 _FOCUSED_ATTACHMENT_CONTEXT_CHARS
-                if context.focused_attachment_turn
+                if context.focused_attachment_turn or context.isolated_local_file_turn
                 else _ATTACHMENT_CONTEXT_CHARS
             )
             for item in projected_attachments:

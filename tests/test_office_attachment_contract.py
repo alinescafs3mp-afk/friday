@@ -24,20 +24,26 @@ from openpyxl import Workbook
 
 import friday.agent_runtime as agent_runtime_module
 from friday.agent_runtime import (
+    _QUOTED_RECORD_SOURCE_IS_DATA,
     AgentContext,
     AgentRuntime,
     _attachment_evidence_chunks,
     _bounded_attachment_projection,
 )
 from friday.agent_runtime._office_attachments import (
+    OFFICE_INTENT_KINDS,
     OFFICE_PROMPT_PREFIX,
     OFFICE_STRUCTURE_KEY,
     RAW_FILE_METADATA_MAX_BYTES,
     bounded_raw_file_metadata,
     build_office_prompt_bundle,
     code_owned_office_answer,
+    office_arbiter_applies,
+    office_attachment_targeted,
     office_exact_request_detected,
+    office_exhaustive_scope,
     office_request_kind,
+    quoted_office_command_is_data,
     trusted_office_attachment,
     validate_exact_id_selection,
     validate_runtime_office_index,
@@ -832,6 +838,124 @@ async def test_exact_current_turn_bypasses_model_and_legacy_preview_flag(
     assert result["verification_status"] == "passed"
     assert result["verified"] is True
     assert result["attachment_coverage_complete"] is True
+
+    quoted_count = "«Сколько человек в этом файле?»"
+    quoted_list = "«Перечисли всех людей из этого файла»"
+    mixed_pointer = "Этот файл. «Сколько человек в этом файле?»"
+    for quoted_office in (quoted_count, quoted_list, mixed_pointer):
+        assert quoted_office_command_is_data(quoted_office) is True
+        assert office_request_kind(quoted_office) == ""
+        assert office_exact_request_detected(quoted_office) is False
+        assert office_attachment_targeted(quoted_office) is False
+        assert office_exhaustive_scope(quoted_office) is False
+        assert office_arbiter_applies(quoted_office, [attachment]) is False
+        assert code_owned_office_answer(quoted_office, [attachment]) is None
+    assert office_request_kind("Сколько человек в этом файле?") == "count_people"
+    assert office_exact_request_detected("Сколько человек в этом файле?") is True
+
+    async def forbidden_office_arbiter(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("quote-only Office request invoked the arbiter")
+
+    async def forbidden_hierarchy(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("quote-only Office request built a hierarchy")
+
+    monkeypatch.setattr(runtime, "_office_intent_arbiter", forbidden_office_arbiter)
+    monkeypatch.setattr(runtime, "_build_attachment_hierarchy_bundle", forbidden_hierarchy)
+
+    renderer_calls: list[str] = []
+    real_renderer = agent_runtime_module.code_owned_office_answer
+
+    def spy_renderer(question, attachments, *, kind_override=""):  # noqa: ANN001
+        renderer_calls.append(str(question))
+        return real_renderer(question, attachments, kind_override=kind_override)
+
+    monkeypatch.setattr(agent_runtime_module, "code_owned_office_answer", spy_renderer)
+    renderer_before = len(renderer_calls)
+    people_quote = "«Посчитай людей»"
+    people_mixed = "Этот файл. «Посчитай людей»"
+    assert quoted_office_command_is_data(people_quote) is True
+    assert quoted_office_command_is_data(people_mixed) is True
+    for kind in OFFICE_INTENT_KINDS:
+        assert code_owned_office_answer(quoted_count, [attachment], kind_override=kind) is None
+        assert code_owned_office_answer("Этот файл.", [attachment], kind_override=kind) is None
+        assert code_owned_office_answer("Какая погода?", [attachment], kind_override=kind) is None
+        assert code_owned_office_answer(people_quote, [attachment], kind_override=kind) is None
+        assert code_owned_office_answer(people_mixed, [attachment], kind_override=kind) is None
+    assert renderer_calls[renderer_before:] == []
+
+    for quoted_office in (quoted_count, quoted_list, mixed_pointer, people_quote, people_mixed):
+        quoted_result = await runtime.chat(
+            "alice",
+            quoted_office,
+            actor=auth.actor_for_user("alice", source="test"),
+            attachments=[attachment],
+            enable_tools=True,
+        )
+        folded = quoted_result["message"].casefold()
+        encoded = json.dumps(quoted_result, ensure_ascii=False)
+        assert quoted_result["message"] == _QUOTED_RECORD_SOURCE_IS_DATA
+        assert quoted_result.get("tools_used") == []
+        assert quoted_result["attachment_context_expected_count"] == 0
+        assert quoted_result["attachment_context_readable_count"] == 0
+        assert quoted_result["attachment_coverage_complete"] is False
+        assert quoted_result["attachment_verification_complete"] is False
+        assert "16" not in quoted_result["message"]
+        assert "синтетик" not in folded
+        assert "synthetic-person" not in folded
+        assert "человек" not in folded or "цитата" in folded
+        for person in (
+            "SYNTHETIC-PERSON-01",
+            "SYNTHETIC-PERSON-02",
+            "SYNTHETIC-PERSON-16",
+        ):
+            assert person not in quoted_result["message"]
+            assert person not in encoded
+    assert renderer_calls[renderer_before:] == []
+
+    class _OfficeArbiterLLM:
+        enabled = True
+        model = "office-arbiter-capture"
+        total_budget_sec = 30.0
+
+        def __init__(self) -> None:
+            self.questions: list[str] = []
+
+        async def chat(self, messages, **kwargs):  # noqa: ANN001
+            del kwargs
+            user = next(str(item.get("content") or "") for item in messages if item.get("role") == "user")
+            self.questions.append(user)
+            system = next(str(item.get("content") or "") for item in messages if item.get("role") == "system")
+            if "арбитр" in system.casefold() or "kind" in system:
+                assert "«" not in user
+                assert "посчитай людей" in user.casefold()
+                return {"content": '{"kind": "count_people"}'}
+            raise AssertionError("unexpected Office model call")
+
+    arbiter_llm = _OfficeArbiterLLM()
+    arbiter_runtime = AgentRuntime(
+        replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=arbiter_llm,
+    )
+    monkeypatch.setattr(arbiter_runtime, "_prepare_context", _simple_context)
+    semantic = "Посчитай людей в этом файле"
+    semantic_projection = _bounded_attachment_projection([attachment])
+    assert quoted_office_command_is_data(semantic) is False
+    assert office_request_kind(semantic) == ""
+    assert office_arbiter_applies(semantic, semantic_projection) is True
+    semantic_result = await arbiter_runtime.chat(
+        "alice",
+        semantic,
+        actor=auth.actor_for_user("alice", source="test"),
+        attachments=[attachment],
+        enable_tools=True,
+    )
+    assert arbiter_llm.questions
+    assert all("«" not in question for question in arbiter_llm.questions)
+    assert "16" in semantic_result["message"]
+    assert semantic_result["verification_status"] == "passed"
 
 
 @pytest.mark.asyncio
