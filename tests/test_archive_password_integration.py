@@ -475,6 +475,83 @@ async def test_replied_archive_password_is_ephemeral_and_current_media_wins_pend
         assert "reply_document_source_ref" not in current_payload
         assert bridge._inbox.archive_password_challenge(5001, 1001) is None  # noqa: SLF001
 
+        # The precedence must be structural, not an accident of a prose caption
+        # being rejected by the standalone-password grammar. `report2` is a
+        # valid legacy standalone credential shape; current media still wins.
+        bridge._inbox.remember_archive_password_challenge(  # noqa: SLF001
+            5001,
+            1001,
+            archive,
+            safe_query="Открой старый архив",
+            original_message_id=4499,
+        )
+        password_shaped_document = {
+            "update_id": 4510,
+            "message": {
+                "message_id": 4510,
+                "chat": {"id": 5001},
+                "from": {"id": 1001},
+                "caption": "report2",
+                "document": {
+                    "file_id": "new-current-password-shaped",
+                    "file_unique_id": "new-current-password-shaped-unique",
+                    "file_name": "new-current-password-shaped.odt",
+                    "mime_type": "application/vnd.oasis.opendocument.text",
+                    "file_size": 457,
+                },
+            },
+        }
+        safe_password_shaped = bridge._sanitize_update_before_store(  # noqa: SLF001
+            password_shaped_document
+        )
+        assert "friday_archive_password_followup" not in safe_password_shaped
+        await bridge._process_update(  # noqa: SLF001
+            object(), object(), safe_password_shaped, cached_response=None
+        )
+        password_shaped_payload = backend_payloads.pop()
+        assert password_shaped_payload["document"]["filename"] == "new-current-password-shaped.odt"
+        assert password_shaped_payload["message"] == "report2"
+        assert "archive_password" not in password_shaped_payload
+        assert bridge._inbox.archive_password_challenge(5001, 1001) is None  # noqa: SLF001
+
+        # A wrong retry may refresh expiry/query, but never drifts the durable
+        # origin from the archive request to the credential message itself.
+        bridge._inbox.remember_archive_password_challenge(  # noqa: SLF001
+            5001,
+            1001,
+            archive,
+            safe_query="Открой старый архив",
+            original_message_id=4499,
+        )
+
+        async def invalid_backend(_client, _method, _path, payload, _user, _chat):  # noqa: ANN001
+            backend_payloads.append(dict(payload))
+            return {
+                "message": "Пароль не подошёл",
+                "message_format": "plain",
+                "archive_password_invalid": True,
+            }
+
+        monkeypatch.setattr(bridge, "_backend_json", invalid_backend)
+        invalid_retry = {
+            "update_id": 4511,
+            "message": {
+                "message_id": 4511,
+                "chat": {"id": 5001},
+                "from": {"id": 1001},
+                "text": "wrong2",
+            },
+        }
+        safe_invalid = bridge._sanitize_update_before_store(invalid_retry)  # noqa: SLF001
+        assert safe_invalid["friday_archive_password_followup"] is True
+        await bridge._process_update(object(), object(), safe_invalid, cached_response=None)  # noqa: SLF001
+        invalid_payload = backend_payloads.pop()
+        assert invalid_payload["archive_password"] == "wrong2"
+        refreshed = bridge._inbox.archive_password_challenge(5001, 1001)  # noqa: SLF001
+        assert refreshed is not None
+        assert refreshed["original_message_id"] == 4499
+        monkeypatch.setattr(bridge, "_backend_json", backend)
+
         # Ordinary prose after a challenge is an ordinary turn and cancels the
         # stale challenge; it is never retried as a guessed password.
         bridge._inbox.remember_archive_password_challenge(  # noqa: SLF001
