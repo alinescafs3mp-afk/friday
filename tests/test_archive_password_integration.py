@@ -367,6 +367,222 @@ async def test_bridge_followup_redownloads_without_ever_queuing_password(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_replied_archive_password_is_ephemeral_and_current_media_wins_pending(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    bridge = _bridge(tmp_path)
+    backend_payloads: list[dict] = []
+
+    async def prepare(_telegram, message, _update):  # noqa: ANN001
+        if "document" not in message:
+            return None
+        descriptor = message["document"]
+        return {
+            "filename": descriptor["file_name"],
+            "mime_type": descriptor["mime_type"],
+            "content_base64": "TkVXLUZJTEU=",
+            "source_ref": f"telegram-file:{descriptor['file_id']}",
+            "media_kind": "document",
+        }
+
+    async def backend(_client, method, path, payload, _user, _chat):  # noqa: ANN001
+        assert method == "POST" and path == "/api/chat"
+        backend_payloads.append(dict(payload))
+        return {"message": "ok", "message_format": "plain"}
+
+    async def send(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(bridge, "_prepare_document", prepare)
+    monkeypatch.setattr(bridge, "_backend_json", backend)
+    monkeypatch.setattr(bridge, "_send_message", send)
+
+    archive = {
+        "file_id": "old-pending-archive",
+        "file_unique_id": "old-pending-unique",
+        "file_name": "old-protected.zip",
+        "mime_type": "application/zip",
+        "file_size": 123,
+    }
+    try:
+        # A password written in the caption of the exact archive being replied
+        # to is credential data, not quoted chat content.  It reaches this one
+        # request, while both the durable update and backend reply quote are
+        # scrubbed before either can retain it.
+        replied_archive = {
+            "update_id": 4501,
+            "message": {
+                "message_id": 4501,
+                "chat": {"id": 5001},
+                "from": {"id": 1001},
+                "text": "Что внутри этого архива?",
+                "reply_to_message": {
+                    "message_id": 4499,
+                    "caption": f"пароль: {_PASSWORD}",
+                    "caption_entities": [{"type": "bold", "offset": 0, "length": 6}],
+                    "document": dict(archive),
+                },
+            },
+        }
+        safe_reply = bridge._sanitize_update_before_store(replied_archive)  # noqa: SLF001
+        assert safe_reply["message"]["reply_to_message"]["caption"] == ""
+        assert "caption_entities" not in safe_reply["message"]["reply_to_message"]
+        assert bridge._inbox.store(safe_reply) is True  # noqa: SLF001
+        await bridge._process_update(object(), object(), safe_reply, cached_response=None)  # noqa: SLF001
+        replied_payload = backend_payloads.pop()
+        assert replied_payload["archive_password"] == _PASSWORD
+        assert replied_payload["reply_document_source_ref"] == "telegram-file:old-pending-archive"
+        # The password is a separate request-local field, so exclude it before
+        # checking the public/message-shaped portion of the payload.
+        scrubbed_payload = dict(replied_payload)
+        assert scrubbed_payload.pop("archive_password") == _PASSWORD
+        assert _PASSWORD not in json.dumps(scrubbed_payload, ensure_ascii=False)
+        assert _PASSWORD not in "\n".join(bridge._inbox._conn.iterdump())  # noqa: SLF001
+
+        # An older pending archive must never replace a newly attached ordinary
+        # document merely because that new document has a caption.
+        bridge._inbox.remember_archive_password_challenge(  # noqa: SLF001
+            5001,
+            1001,
+            archive,
+            safe_query="Открой старый архив",
+            original_message_id=4499,
+        )
+        new_document = {
+            "update_id": 4502,
+            "message": {
+                "message_id": 4502,
+                "chat": {"id": 5001},
+                "from": {"id": 1001},
+                "caption": "Кратко по новому файлу",
+                "document": {
+                    "file_id": "new-current-odt",
+                    "file_unique_id": "new-current-unique",
+                    "file_name": "new-current.odt",
+                    "mime_type": "application/vnd.oasis.opendocument.text",
+                    "file_size": 456,
+                },
+            },
+        }
+        safe_new = bridge._sanitize_update_before_store(new_document)  # noqa: SLF001
+        assert "friday_archive_password_followup" not in safe_new
+        await bridge._process_update(object(), object(), safe_new, cached_response=None)  # noqa: SLF001
+        current_payload = backend_payloads.pop()
+        assert current_payload["document"]["filename"] == "new-current.odt"
+        assert current_payload["message"] == "Кратко по новому файлу"
+        assert "archive_password" not in current_payload
+        assert "reply_document_source_ref" not in current_payload
+        assert bridge._inbox.archive_password_challenge(5001, 1001) is None  # noqa: SLF001
+
+        # Ordinary prose after a challenge is an ordinary turn and cancels the
+        # stale challenge; it is never retried as a guessed password.
+        bridge._inbox.remember_archive_password_challenge(  # noqa: SLF001
+            5001,
+            1001,
+            archive,
+            safe_query="Открой старый архив",
+            original_message_id=4499,
+        )
+        ordinary = {
+            "update_id": 4503,
+            "message": {
+                "message_id": 4503,
+                "chat": {"id": 5001},
+                "from": {"id": 1001},
+                "text": "Почему архив не открылся?",
+            },
+        }
+        safe_ordinary = bridge._sanitize_update_before_store(ordinary)  # noqa: SLF001
+        assert "friday_archive_password_followup" not in safe_ordinary
+        await bridge._process_update(object(), object(), safe_ordinary, cached_response=None)  # noqa: SLF001
+        ordinary_payload = backend_payloads.pop()
+        assert ordinary_payload["message"] == "Почему архив не открылся?"
+        assert "document" not in ordinary_payload
+        assert "archive_password" not in ordinary_payload
+        assert "reply_document_source_ref" not in ordinary_payload
+        assert bridge._inbox.archive_password_challenge(5001, 1001) is None  # noqa: SLF001
+    finally:
+        bridge._archive_passwords.clear()  # noqa: SLF001
+        bridge._inbox.close()  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_password_only_replied_message_unlocks_exact_pending_archive(tmp_path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    backend_payloads: list[dict] = []
+    archive = {
+        "file_id": "pending-password-reply-archive",
+        "file_unique_id": "pending-password-reply-unique",
+        "file_name": "pending-protected.zip",
+        "mime_type": "application/zip",
+        "file_size": 123,
+    }
+
+    async def prepare(_telegram, message, _update):  # noqa: ANN001
+        descriptor = message["document"]
+        return {
+            "filename": descriptor["file_name"],
+            "mime_type": descriptor["mime_type"],
+            "content_base64": "UEs=",
+            "source_ref": f"telegram-file:{descriptor['file_id']}",
+            "media_kind": "document",
+        }
+
+    async def backend(_client, _method, _path, payload, _user, _chat):  # noqa: ANN001
+        backend_payloads.append(dict(payload))
+        return {"message": "Архив прочитан", "message_format": "plain"}
+
+    async def send(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(bridge, "_prepare_document", prepare)
+    monkeypatch.setattr(bridge, "_backend_json", backend)
+    monkeypatch.setattr(bridge, "_send_message", send)
+
+    try:
+        bridge._inbox.remember_archive_password_challenge(  # noqa: SLF001
+            5001,
+            1001,
+            archive,
+            safe_query="Открой архив",
+            original_message_id=4600,
+        )
+        followup = {
+            "update_id": 4602,
+            "message": {
+                "message_id": 4602,
+                "chat": {"id": 5001},
+                "from": {"id": 1001},
+                "text": "Это пароль",
+                "reply_to_message": {
+                    "message_id": 4601,
+                    "text": _PASSWORD,
+                    "entities": [{"type": "code", "offset": 0, "length": len(_PASSWORD)}],
+                },
+            },
+        }
+        safe = bridge._sanitize_update_before_store(followup)  # noqa: SLF001
+        assert safe["friday_archive_password_followup"] is True
+        assert safe["message"]["reply_to_message"]["text"] == ""
+        assert "entities" not in safe["message"]["reply_to_message"]
+        assert bridge._inbox.store(safe) is True  # noqa: SLF001
+        await bridge._process_update(object(), object(), safe, cached_response=None)  # noqa: SLF001
+
+        assert len(backend_payloads) == 1
+        assert backend_payloads[0]["archive_password"] == _PASSWORD
+        assert backend_payloads[0]["document"]["filename"] == "pending-protected.zip"
+        scrubbed_payload = dict(backend_payloads[0])
+        assert scrubbed_payload.pop("archive_password") == _PASSWORD
+        assert _PASSWORD not in json.dumps(scrubbed_payload, ensure_ascii=False)
+        assert _PASSWORD not in "\n".join(bridge._inbox._conn.iterdump())  # noqa: SLF001
+        assert bridge._inbox.archive_password_challenge(5001, 1001) is None  # noqa: SLF001
+    finally:
+        bridge._archive_passwords.clear()  # noqa: SLF001
+        bridge._inbox.close()  # noqa: SLF001
+
+
+@pytest.mark.asyncio
 async def test_password_never_enters_failure_row_or_log(tmp_path, monkeypatch, caplog) -> None:
     bridge = _bridge(tmp_path)
     safe = bridge._sanitize_update_before_store(  # noqa: SLF001

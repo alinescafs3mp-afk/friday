@@ -339,6 +339,10 @@ class CommandsMixin(BridgeShared):
         elif (
             update.get("friday_archive_password_supplied") is True
             and self._archive_document_descriptor(message) is None
+            and (
+                not isinstance(message.get("reply_to_message"), dict)
+                or self._archive_document_descriptor(message["reply_to_message"]) is None
+            )
             and pending_archive is None
         ):
             await self._send_message(
@@ -1454,7 +1458,15 @@ class CommandsMixin(BridgeShared):
                     int(external_user_id),
                     challenge_descriptor,
                     safe_query=text,
-                    original_message_id=int(message.get("message_id") or 0),
+                    # An invalid retry must not move the challenge origin to the
+                    # password message.  Keeping the original request stable is
+                    # what lets later replies and diagnostics identify the same
+                    # archive rather than a chain of failed credentials.
+                    original_message_id=(
+                        int(pending_archive.get("original_message_id") or 0)
+                        if pending_archive is not None and password_followup
+                        else int(message.get("message_id") or 0)
+                    ),
                 )
             elif archive_descriptor is not None or pending_archive is not None:
                 self._inbox.clear_archive_password_challenge(chat_id, int(external_user_id))
