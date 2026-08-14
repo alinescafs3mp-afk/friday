@@ -157,7 +157,11 @@ def test_the_picture_settles_on_its_own_instead_of_standing_still(live_admin):
         assert first != second, "картина не двинулась ни на пиксель: цикл кадров не запущен"
 
         # И засыпает: жечь кадры на устоявшемся графе значит греть ноутбук зря.
-        page.wait_for_timeout(3000)
+        # Остывание занимает ровно 260 КАДРОВ, а не фиксированное настенное
+        # время: под параллельными браузерами три секунды могут вместить меньше
+        # кадров. Ждём авторитетный признак остановленного цикла.
+        _settle(page)
+        assert not page.evaluate("() => state.graphFrame"), "цикл кадров не уснул"
         third = page.evaluate(
             "() => [...document.querySelectorAll('#graphSvg .gnode circle')]"
             ".map(c => c.getAttribute('cx') + ',' + c.getAttribute('cy')).join('|')"
