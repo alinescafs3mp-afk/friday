@@ -73,7 +73,12 @@ def workspace_server_definition(settings: FridaySettings) -> MCPServerDefinition
         ),
         allowed_tools=_SERVER_TOOLS,
         cwd=settings.home,
-        environment={"PYTHONPATH": str(release_root)},
+        environment={
+            "PYTHONPATH": str(release_root),
+            # The child imports the immutable release by path.  Keep that
+            # release byte-clean even when the parent checkout is writable.
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
         startup_timeout_sec=settings.mcp_startup_timeout_sec,
         call_timeout_sec=settings.mcp_call_timeout_sec,
     )

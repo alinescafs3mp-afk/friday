@@ -70,6 +70,7 @@ def test_workspace_child_imports_the_active_release_not_its_cwd(settings, tmp_pa
         mcp_workspace_outbox_dir=tmp_path / "outbox",
     )
     definition = workspace_server_definition(configured)
+    assert definition.environment["PYTHONDONTWRITEBYTECODE"] == "1"
     decoy = tmp_path / "friday"
     decoy.mkdir()
     (decoy / "__init__.py").write_text("raise RuntimeError('cwd decoy imported')\n", encoding="utf-8")
@@ -239,9 +240,10 @@ async def test_fixed_stdio_tools_use_kernel_auth_and_exact_exchange_bytes(settin
 
     definition = workspace_server_definition(configured)
     assert definition.args[:2] == ("-P", "-m")
-    assert definition.environment["PYTHONPATH"] == str(
-        Path(workspace_server_definition.__code__.co_filename).resolve().parents[2]
-    )
+    assert definition.environment == {
+        "PYTHONPATH": str(Path(workspace_server_definition.__code__.co_filename).resolve().parents[2]),
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
     manager = MCPClientManager([definition])
     await manager.start()
     try:
