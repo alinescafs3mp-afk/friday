@@ -150,6 +150,31 @@ Each run contains ten unique end-to-end document scenarios:
     number/date/grif/signatory, then a document-derived export/MCP action keeps
     provenance.
 
+Before the first case, the worker must fail closed unless the exact runtime
+profile is `qwen36-27b-nvfp4-nvidia` and its independent
+`document_map_max_concurrency` is exactly `1`.  Model-generation evidence is
+content-free and comes from runtime call boundaries, not prompt inspection:
+direct attachment synthesis, hierarchy plan, MAP leaf, REDUCE, hierarchy-final
+synthesis and verifier.  Every model call records started/completed/failed/
+cancelled; MAP additionally records the plan cardinality, current active calls
+and peak active calls.  A missing counter or missing hierarchy cardinality is a
+failed case, never an inferred zero.
+
+The release generation budgets for the two routing canaries are exact:
+
+| Case | Direct | Hierarchy | MAP | REDUCE | Final | Verifier | Total model calls |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| D06 small fit-first | 1 | 0 | 0 | 0 | 0 | 0 | 1 |
+| D08 larger than context | 0 | 1 complete plan | `planned = started = completed > 0`, peak active `1` | 0 | 1 | 1 | `MAP planned + 2` |
+
+For both cases every failed, cancelled and unclassified model generation is
+exactly zero, all started calls complete, and no call beyond the declared
+budget is allowed.  D08 uses a non-repetitive synthetic source so the exact-RLE
+fast path cannot replace the required MAP proof.  A verifier rejection followed
+by repair/re-verification is therefore a red run even if the eventual prose is
+acceptable: the immutable candidate did not meet the declared clean-call
+envelope.
+
 Every live battery execution must be fresh, not a replay of canned bytes.  The
 controller generates a new unpredictable run id; both runs and all ten cases
 derive distinct filenames, source refs, document facts, control markers and

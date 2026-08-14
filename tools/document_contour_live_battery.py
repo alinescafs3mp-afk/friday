@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import contextvars
 import hashlib
 import html
 import io
@@ -61,6 +62,29 @@ WORKER_SCHEMA = "friday.document-contour-live-battery.worker.v1"
 REPORT_SCHEMA = "friday.document-contour-live-battery.report.v1"
 _RUN_ID_ENV = "FRIDAY_DOCUMENT_BATTERY_RUN_ID"
 _RUN_ID_RE = re.compile(r"[0-9a-f]{64}")
+_RELEASE_PROFILE = "qwen36-27b-nvfp4-nvidia"
+
+_GENERATION_STAGES = (
+    "direct_synthesis",
+    "map",
+    "reduce",
+    "final_synthesis",
+    "verifier",
+    "unclassified",
+)
+_GENERATION_OUTCOMES = ("started", "completed", "failures", "cancellations")
+_GENERATION_TELEMETRY_KEYS = (
+    "llm_chat_attempts",
+    "generation_telemetry_missing",
+    "hierarchy_calls",
+    "hierarchy_complete",
+    "hierarchy_failures",
+    "hierarchy_cancellations",
+    "map_planned",
+    "map_active",
+    "map_peak_active",
+    *(f"{stage}_{outcome}" for stage in _GENERATION_STAGES for outcome in _GENERATION_OUTCOMES),
+)
 
 
 @dataclass(frozen=True)
@@ -834,12 +858,17 @@ def _docx_non_title_lines(payload: bytes) -> tuple[str, ...]:
 
 
 class LiveProbes:
-    """Content-free counters plus the last closed source-search projection."""
+    """Content-free counters plus the last closed source-search projection.
+
+    Generation stages come from runtime call boundaries, never prompt text.  A
+    ``ContextVar`` keeps concurrent hierarchy leaves correctly attributed while
+    the raw LLM wrapper owns the exact started/completed/failure lifecycle.
+    """
 
     def __init__(self, app: Any) -> None:
         self.app = app
         self.counts = {
-            "llm_chat_attempts": 0,
+            **{key: 0 for key in _GENERATION_TELEMETRY_KEYS},
             "embedding_calls": 0,
             "embedding_successes": 0,
             "reranker_calls": 0,
@@ -848,8 +877,6 @@ class LiveProbes:
             "reranker_http": 0,
             "source_search_calls": 0,
             "source_search_successes": 0,
-            "hierarchy_calls": 0,
-            "hierarchy_complete": 0,
             "late_make_file_attempts": 0,
             "workspace_create_kernel_attempts": 0,
             "workspace_create_kernel": 0,
@@ -859,6 +886,10 @@ class LiveProbes:
         }
         self.last_source_search: dict[str, Any] = {}
         self._restore: list[Callable[[], None]] = []
+        self._generation_stage: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+            f"friday_document_generation_stage_{id(self)}",
+            default=None,
+        )
 
     def snapshot(self) -> dict[str, int]:
         return dict(self.counts)
@@ -868,6 +899,21 @@ class LiveProbes:
 
     def install(self) -> None:
         import httpx
+
+        agent = self.app.state.agent
+        llm: Any = getattr(agent, "llm", None)
+        original_llm_chat = getattr(llm, "chat", None)
+        stage_boundaries = (
+            "_attachment_primary_chat",
+            "_reduce_attachment_map_records",
+            "_build_attachment_hierarchy_bundle",
+            "_hierarchical_attachment_response",
+            "_verify_response",
+        )
+        if not callable(original_llm_chat) or any(
+            not callable(getattr(agent, name, None)) for name in stage_boundaries
+        ):
+            raise BatteryFailure("generation_stage_telemetry_unavailable")
 
         embeddings = self.app.state.embeddings
         original_embed = embeddings.embed
@@ -964,29 +1010,121 @@ class LiveProbes:
         kernel.execute = execute
         self._restore.append(lambda: setattr(kernel, "execute", original_execute))
 
-        agent = self.app.state.agent
-        llm: Any = getattr(agent, "llm", None)
-        original_llm_chat = getattr(llm, "chat", None)
-        if callable(original_llm_chat):
+        async def llm_chat(*args: Any, **kwargs: Any):
+            stage = self._generation_stage.get() or "unclassified"
+            if stage not in _GENERATION_STAGES:  # pragma: no cover - private invariant
+                stage = "unclassified"
+            self.counts["llm_chat_attempts"] += 1
+            self.counts[f"{stage}_started"] += 1
+            if stage == "map":
+                self.counts["map_active"] += 1
+                self.counts["map_peak_active"] = max(
+                    self.counts["map_peak_active"],
+                    self.counts["map_active"],
+                )
+            try:
+                result = await original_llm_chat(*args, **kwargs)
+            except asyncio.CancelledError:
+                self.counts[f"{stage}_cancellations"] += 1
+                raise
+            except BaseException:
+                self.counts[f"{stage}_failures"] += 1
+                raise
+            else:
+                self.counts[f"{stage}_completed"] += 1
+                return result
+            finally:
+                if stage == "map":
+                    self.counts["map_active"] -= 1
 
-            async def llm_chat(*args: Any, **kwargs: Any):
-                self.counts["llm_chat_attempts"] += 1
-                return await original_llm_chat(*args, **kwargs)
+        llm.chat = llm_chat
+        self._restore.append(lambda: setattr(llm, "chat", original_llm_chat))
 
-            llm.chat = llm_chat
-            self._restore.append(lambda: setattr(llm, "chat", original_llm_chat))
+        original_primary = agent._attachment_primary_chat
+
+        async def primary(*args: Any, **kwargs: Any):
+            token: contextvars.Token[str | None] | None = None
+            if self._generation_stage.get() is None:
+                token = self._generation_stage.set("direct_synthesis")
+            try:
+                return await original_primary(*args, **kwargs)
+            finally:
+                if token is not None:
+                    self._generation_stage.reset(token)
+
+        agent._attachment_primary_chat = primary
+        self._restore.append(lambda: setattr(agent, "_attachment_primary_chat", original_primary))
+
+        original_reduce = agent._reduce_attachment_map_records
+
+        async def reduce(*args: Any, **kwargs: Any):
+            token = self._generation_stage.set("reduce")
+            try:
+                return await original_reduce(*args, **kwargs)
+            finally:
+                self._generation_stage.reset(token)
+
+        agent._reduce_attachment_map_records = reduce
+        self._restore.append(lambda: setattr(agent, "_reduce_attachment_map_records", original_reduce))
 
         original_hierarchy = agent._build_attachment_hierarchy_bundle
 
         async def hierarchy(*args: Any, **kwargs: Any):
             self.counts["hierarchy_calls"] += 1
-            result = await original_hierarchy(*args, **kwargs)
-            if isinstance(result, tuple) and len(result) == 2 and result[1] is True:
-                self.counts["hierarchy_complete"] += 1
-            return result
+            token = self._generation_stage.set("map")
+            try:
+                result = await original_hierarchy(*args, **kwargs)
+            except asyncio.CancelledError:
+                self.counts["hierarchy_cancellations"] += 1
+                raise
+            except BaseException:
+                self.counts["hierarchy_failures"] += 1
+                raise
+            else:
+                bundle = result[0] if isinstance(result, tuple) and len(result) == 2 else None
+                raw_planned = (
+                    bundle.get("chunks_planned")
+                    if isinstance(bundle, Mapping)
+                    else getattr(bundle, "chunks_planned", None)
+                )
+                if type(raw_planned) is int and raw_planned >= 0:
+                    self.counts["map_planned"] += raw_planned
+                else:
+                    self.counts["generation_telemetry_missing"] += 1
+                if isinstance(result, tuple) and len(result) == 2 and result[1] is True:
+                    self.counts["hierarchy_complete"] += 1
+                return result
+            finally:
+                self._generation_stage.reset(token)
 
         agent._build_attachment_hierarchy_bundle = hierarchy
         self._restore.append(lambda: setattr(agent, "_build_attachment_hierarchy_bundle", original_hierarchy))
+
+        original_hierarchical_response = agent._hierarchical_attachment_response
+
+        async def hierarchical_response(*args: Any, **kwargs: Any):
+            token = self._generation_stage.set("final_synthesis")
+            try:
+                return await original_hierarchical_response(*args, **kwargs)
+            finally:
+                self._generation_stage.reset(token)
+
+        agent._hierarchical_attachment_response = hierarchical_response
+        self._restore.append(
+            lambda: setattr(agent, "_hierarchical_attachment_response", original_hierarchical_response)
+        )
+
+        original_verify = agent._verify_response
+
+        async def verify(*args: Any, **kwargs: Any):
+            token = self._generation_stage.set("verifier")
+            try:
+                return await original_verify(*args, **kwargs)
+            finally:
+                self._generation_stage.reset(token)
+
+        agent._verify_response = verify
+        self._restore.append(lambda: setattr(agent, "_verify_response", original_verify))
 
         original_late_make_file = agent._file_for_a_request_that_wanted_one
 
@@ -1266,6 +1404,101 @@ class Harness:
             "checks": {key: bool(value) for key, value in checks.items()},
             "counters": {key: int(value) for key, value in (counters or {}).items()},
         }
+
+
+def _generation_budget_checks(
+    counters: Mapping[str, int],
+    *,
+    direct_synthesis: int,
+    hierarchy: int,
+    map_required: bool,
+    reduce: int,
+    final_synthesis: int,
+    verifier: int,
+) -> dict[str, bool]:
+    """Validate one route's exact content-free model-generation envelope.
+
+    Missing, boolean, negative or non-integer telemetry is invalid rather than
+    being interpreted as zero.  MAP cardinality is supplied by the canonical
+    hierarchy bundle and therefore may vary with the runtime's safe chunk
+    width; all other stages have a fixed release budget.
+    """
+
+    telemetry_complete = all(
+        key in counters and type(counters[key]) is int and counters[key] >= 0
+        for key in _GENERATION_TELEMETRY_KEYS
+    )
+    values = {key: int(counters[key]) if telemetry_complete else -1 for key in _GENERATION_TELEMETRY_KEYS}
+
+    def exact_stage(stage: str, expected: int) -> bool:
+        return bool(
+            telemetry_complete
+            and values[f"{stage}_started"] == expected
+            and values[f"{stage}_completed"] == expected
+            and values[f"{stage}_failures"] == 0
+            and values[f"{stage}_cancellations"] == 0
+        )
+
+    planned = values["map_planned"]
+    map_budget_exact = bool(
+        telemetry_complete
+        and values["map_active"] == 0
+        and values["map_failures"] == 0
+        and values["map_cancellations"] == 0
+        and (
+            planned > 0 and values["map_started"] == planned and values["map_completed"] == planned
+            if map_required
+            else planned == 0 and values["map_started"] == 0 and values["map_completed"] == 0
+        )
+    )
+    map_peak_exact = bool(telemetry_complete and values["map_peak_active"] == (1 if map_required else 0))
+    expected_total = (
+        direct_synthesis
+        + (planned if map_required and planned >= 0 else 0)
+        + reduce
+        + final_synthesis
+        + verifier
+    )
+    classified_started = sum(values[f"{stage}_started"] for stage in _GENERATION_STAGES[:-1])
+    no_failures = bool(
+        telemetry_complete
+        and values["hierarchy_failures"] == 0
+        and all(values[f"{stage}_failures"] == 0 for stage in _GENERATION_STAGES)
+    )
+    no_cancellations = bool(
+        telemetry_complete
+        and values["hierarchy_cancellations"] == 0
+        and all(values[f"{stage}_cancellations"] == 0 for stage in _GENERATION_STAGES)
+    )
+    no_unclassified = exact_stage("unclassified", 0)
+    total_exact = bool(
+        telemetry_complete
+        and no_unclassified
+        and values["llm_chat_attempts"] == expected_total
+        and classified_started == expected_total
+    )
+    return {
+        "generation_telemetry_complete": bool(
+            telemetry_complete and values["generation_telemetry_missing"] == 0
+        ),
+        "hierarchy_budget_exact": bool(
+            telemetry_complete
+            and values["hierarchy_calls"] == hierarchy
+            and values["hierarchy_complete"] == hierarchy
+            and values["hierarchy_failures"] == 0
+            and values["hierarchy_cancellations"] == 0
+        ),
+        "map_budget_exact": map_budget_exact,
+        "map_peak_exact": map_peak_exact,
+        "direct_synthesis_budget_exact": exact_stage("direct_synthesis", direct_synthesis),
+        "reduce_budget_exact": exact_stage("reduce", reduce),
+        "final_synthesis_budget_exact": exact_stage("final_synthesis", final_synthesis),
+        "verifier_budget_exact": exact_stage("verifier", verifier),
+        "generation_failures_zero": no_failures,
+        "generation_cancellations_zero": no_cancellations,
+        "unclassified_generations_zero": no_unclassified,
+        "generation_no_excess": total_exact,
+    }
 
 
 def _case_01(h: Harness) -> dict[str, Any]:
@@ -1683,6 +1916,15 @@ def _case_06(h: Harness) -> dict[str, Any]:
         "fit_first_no_hierarchy": delta["hierarchy_calls"] == 0,
         "attachment_owned": metadata.get("attachment_context_used") is True,
         "no_deed_guard": metadata.get("fabricated_outside_deed_request") is not True,
+        **_generation_budget_checks(
+            delta,
+            direct_synthesis=1,
+            hierarchy=0,
+            map_required=False,
+            reduce=0,
+            final_synthesis=0,
+            verifier=0,
+        ),
     }
     return h.case_result("D06", started, checks, delta)
 
@@ -1723,10 +1965,23 @@ def _case_08(h: Harness) -> dict[str, Any]:
         _marker(h, "LONG-TAIL"),
     )
     fixture_scope = _marker(h, "LONG-SCOPE")
-    filler = f"Синтетический нейтральный абзац описывает порядок учёта и проверки в выборке {fixture_scope}. "
+
+    def filler(start: int, stop: int) -> str:
+        # Unique ordinals deliberately defeat the exact-RLE fast path.  D08 is
+        # the release proof for real MAP leaves, not merely for a hierarchy
+        # wrapper whose complete repetitive source happened to need zero model
+        # map calls.
+        return "".join(
+            (
+                f"Синтетическая нейтральная запись {index:04d} описывает порядок "
+                f"учёта и проверки в выборке {fixture_scope}.\n"
+            )
+            for index in range(start, stop)
+        )
+
     parts = [f"Начало документа. Контрольный код {markers[0]}.\n"]
-    parts.append((filler * 1500) + f"\nСередина документа. Контрольный код {markers[1]}.\n")
-    parts.append((filler * 1500) + f"\nКонец документа. Контрольный код {markers[2]}.\n")
+    parts.append(filler(0, 1500) + f"Середина документа. Контрольный код {markers[1]}.\n")
+    parts.append(filler(1500, 3000) + f"Конец документа. Контрольный код {markers[2]}.\n")
     payload = "".join(parts).encode("utf-8")
     before = h.probes.snapshot()
     answer = h.chat(
@@ -1744,8 +1999,6 @@ def _case_08(h: Harness) -> dict[str, Any]:
     checks = {
         "fixture_larger_than_model_context": len(payload.decode("utf-8"))
         > int(h.settings.profile.max_model_len) * 4,
-        "hierarchy_used": delta["hierarchy_calls"] >= 1,
-        "hierarchy_complete": delta["hierarchy_complete"] >= 1,
         "answer_head_middle_tail": _contains_all(str(answer.get("message") or ""), markers),
         "parser_source_complete": not any(
             extraction.get(key) is True
@@ -1755,6 +2008,15 @@ def _case_08(h: Harness) -> dict[str, Any]:
                 "parse_pages_truncated",
                 "source_truncated_for_parse",
             )
+        ),
+        **_generation_budget_checks(
+            delta,
+            direct_synthesis=0,
+            hierarchy=1,
+            map_required=True,
+            reduce=0,
+            final_synthesis=1,
+            verifier=1,
         ),
     }
     return h.case_result("D08", started, checks, delta)
@@ -2101,6 +2363,12 @@ _CASE_RUNNERS: tuple[Callable[[Harness], dict[str, Any]], ...] = (
 
 
 def _assert_worker_settings(settings: Any, run_dir: Path, *, require_mcp: bool) -> None:
+    profile = getattr(settings, "profile", None)
+    if str(getattr(profile, "name", "") or "") != _RELEASE_PROFILE:
+        raise BatteryFailure("release_profile_mismatch")
+    map_concurrency = getattr(profile, "document_map_max_concurrency", None)
+    if type(map_concurrency) is not int or map_concurrency != 1:
+        raise BatteryFailure("document_map_concurrency_not_one")
     for path in (
         settings.home,
         settings.data_dir,

@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -332,34 +333,65 @@ def test_controller_source_env_defaults_to_its_env_without_forwarding_it(tmp_pat
     assert str(source_env.resolve()) not in environment.values()
 
 
-def test_live_probes_fail_closed_on_any_ordinary_web_tool_attempt() -> None:
-    runner = _module()
+class _ProbeLLM:
+    enabled = True
 
-    async def embed(texts, **kwargs):
+    def __init__(self, *, delay: float = 0.0) -> None:
+        self.delay = delay
+
+    async def chat(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+        await asyncio.sleep(self.delay)
+        return {"content": "ok"}
+
+
+class _ProbeAgent:
+    def __init__(self, llm: _ProbeLLM, *, planned: int = 0, overlap: bool = False) -> None:
+        self.llm = llm
+        self.planned = planned
+        self.overlap = overlap
+
+    async def _attachment_primary_chat(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+        return await self.llm.chat([])
+
+    async def _reduce_attachment_map_records(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+        return ([], True)
+
+    async def _build_attachment_hierarchy_bundle(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+        calls = [self.llm.chat([]) for _index in range(self.planned)]
+        if self.overlap:
+            await asyncio.gather(*calls)
+        else:
+            for call in calls:
+                await call
+        return (SimpleNamespace(chunks_planned=self.planned), True)
+
+    async def _hierarchical_attachment_response(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+        return await self._attachment_primary_chat()
+
+    async def _verify_response(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+        return await self.llm.chat([])
+
+    @staticmethod
+    async def _file_for_a_request_that_wanted_one(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        return None
+
+
+def _probe_app(*, planned: int = 0, overlap: bool = False, delay: float = 0.0):
+    async def embed(texts, **kwargs):  # noqa: ANN001
         del kwargs
         return [[1.0] for _text in texts]
 
-    async def execute(_name, _arguments, **kwargs):
+    async def execute(_name, _arguments, **kwargs):  # noqa: ANN001
         del kwargs
         return SimpleNamespace(success=True, data={})
 
-    async def hierarchy(*args, **kwargs):
-        del args, kwargs
-        return ({"bounded": True}, True)
-
-    async def late_make_file(*args, **kwargs):
-        del args, kwargs
-        return None
-
-    app = SimpleNamespace(
+    llm = _ProbeLLM(delay=delay)
+    return SimpleNamespace(
         state=SimpleNamespace(
             embeddings=SimpleNamespace(embed=embed),
             hybrid_searcher=SimpleNamespace(_reranker=None),
             kernel=SimpleNamespace(execute=execute),
-            agent=SimpleNamespace(
-                _build_attachment_hierarchy_bundle=hierarchy,
-                _file_for_a_request_that_wanted_one=late_make_file,
-            ),
+            agent=_ProbeAgent(llm, planned=planned, overlap=overlap),
             settings=SimpleNamespace(
                 embeddings_base_url="http://127.0.0.1:8102/v1",
                 rerank_base_url="http://127.0.0.1:8103",
@@ -367,6 +399,43 @@ def test_live_probes_fail_closed_on_any_ordinary_web_tool_attempt() -> None:
             mcp=None,
         )
     )
+
+
+def _closed_generation_counts(
+    runner,
+    *,
+    direct: int,
+    hierarchy: int,
+    map_calls: int,
+    reduce: int,
+    final: int,
+    verifier: int,
+):
+    counts = {key: 0 for key in runner._GENERATION_TELEMETRY_KEYS}
+    counts.update(
+        {
+            "hierarchy_calls": hierarchy,
+            "hierarchy_complete": hierarchy,
+            "map_planned": map_calls,
+            "map_peak_active": int(map_calls > 0),
+        }
+    )
+    for stage, value in (
+        ("direct_synthesis", direct),
+        ("map", map_calls),
+        ("reduce", reduce),
+        ("final_synthesis", final),
+        ("verifier", verifier),
+    ):
+        counts[f"{stage}_started"] = value
+        counts[f"{stage}_completed"] = value
+    counts["llm_chat_attempts"] = direct + map_calls + reduce + final + verifier
+    return counts
+
+
+def test_live_probes_fail_closed_on_any_ordinary_web_tool_attempt() -> None:
+    runner = _module()
+    app = _probe_app()
     probes = runner.LiveProbes(app)
     probes.install()
     try:
@@ -374,12 +443,307 @@ def test_live_probes_fail_closed_on_any_ordinary_web_tool_attempt() -> None:
             asyncio.run(app.state.kernel.execute("web_fetch", {"url": "https://example.test"}))
         assert probes.counts["forbidden_web_calls"] == 1
         built = asyncio.run(app.state.agent._build_attachment_hierarchy_bundle())
-        assert built == ({"bounded": True}, True)
+        assert built[1] is True
+        assert built[0].chunks_planned == 0
         assert probes.counts["hierarchy_calls"] == 1
         assert probes.counts["hierarchy_complete"] == 1
+        assert probes.counts["map_planned"] == 0
         assert probes.counts["llm_chat_attempts"] == 0
     finally:
         probes.close()
+
+
+def test_live_probes_fail_closed_when_an_authoritative_stage_boundary_is_missing() -> None:
+    runner = _module()
+    app = _probe_app()
+    app.state.agent._verify_response = None
+
+    with pytest.raises(runner.BatteryFailure, match="generation_stage_telemetry_unavailable"):
+        runner.LiveProbes(app).install()
+
+
+def test_sequential_map_telemetry_has_one_active_leaf_and_satisfies_dynamic_plan() -> None:
+    runner = _module()
+    app = _probe_app(planned=3, overlap=False)
+    probes = runner.LiveProbes(app)
+    probes.install()
+    try:
+        before = probes.snapshot()
+        asyncio.run(app.state.agent._build_attachment_hierarchy_bundle())
+        delta = probes.delta(before)
+        checks = runner._generation_budget_checks(
+            delta,
+            direct_synthesis=0,
+            hierarchy=1,
+            map_required=True,
+            reduce=0,
+            final_synthesis=0,
+            verifier=0,
+        )
+
+        assert delta["map_planned"] == 3
+        assert delta["map_started"] == delta["map_completed"] == 3
+        assert delta["map_peak_active"] == 1
+        assert all(checks.values()), checks
+    finally:
+        probes.close()
+
+
+def test_overlapping_map_calls_report_peak_two_and_fail_the_release_budget() -> None:
+    runner = _module()
+    app = _probe_app(planned=2, overlap=True, delay=0.001)
+    probes = runner.LiveProbes(app)
+    probes.install()
+    try:
+        before = probes.snapshot()
+        asyncio.run(app.state.agent._build_attachment_hierarchy_bundle())
+        delta = probes.delta(before)
+        checks = runner._generation_budget_checks(
+            delta,
+            direct_synthesis=0,
+            hierarchy=1,
+            map_required=True,
+            reduce=0,
+            final_synthesis=0,
+            verifier=0,
+        )
+
+        assert delta["map_started"] == delta["map_completed"] == 2
+        assert delta["map_peak_active"] == 2
+        assert checks["map_budget_exact"] is True
+        assert checks["map_peak_exact"] is False
+    finally:
+        probes.close()
+
+
+def test_direct_final_and_verifier_are_classified_by_runtime_boundaries() -> None:
+    runner = _module()
+    app = _probe_app()
+    probes = runner.LiveProbes(app)
+    probes.install()
+    try:
+        asyncio.run(app.state.agent._attachment_primary_chat())
+        asyncio.run(app.state.agent._hierarchical_attachment_response())
+        asyncio.run(app.state.agent._verify_response())
+
+        assert probes.counts["direct_synthesis_started"] == 1
+        assert probes.counts["final_synthesis_started"] == 1
+        assert probes.counts["verifier_started"] == 1
+        assert probes.counts["unclassified_started"] == 0
+    finally:
+        probes.close()
+
+
+@pytest.mark.parametrize(
+    ("route", "mutation", "expected_failed_check"),
+    (
+        ("D06", "direct_missing", "direct_synthesis_budget_exact"),
+        ("D06", "direct_extra", "direct_synthesis_budget_exact"),
+        ("D08", "final_missing", "final_synthesis_budget_exact"),
+        ("D08", "final_extra", "final_synthesis_budget_exact"),
+        ("D08", "verifier_missing", "verifier_budget_exact"),
+        ("D08", "verifier_extra", "verifier_budget_exact"),
+        ("D08", "reduce_extra", "reduce_budget_exact"),
+        ("D08", "hierarchy_repeated", "hierarchy_budget_exact"),
+        ("D08", "planned_clipped", "map_budget_exact"),
+        ("D08", "counter_missing", "generation_telemetry_complete"),
+        ("D08", "map_failure", "generation_failures_zero"),
+        ("D08", "map_cancellation", "generation_cancellations_zero"),
+        ("D08", "unclassified_extra", "unclassified_generations_zero"),
+        ("D08", "total_excess", "generation_no_excess"),
+    ),
+)
+def test_generation_budget_mutations_fail_closed(route, mutation, expected_failed_check) -> None:
+    runner = _module()
+    d06 = route == "D06"
+    counts = _closed_generation_counts(
+        runner,
+        direct=1 if d06 else 0,
+        hierarchy=0 if d06 else 1,
+        map_calls=0 if d06 else 2,
+        reduce=0,
+        final=0 if d06 else 1,
+        verifier=0 if d06 else 1,
+    )
+    stage_mutations = {
+        "direct_missing": ("direct_synthesis", 0),
+        "direct_extra": ("direct_synthesis", 2),
+        "final_missing": ("final_synthesis", 0),
+        "final_extra": ("final_synthesis", 2),
+        "verifier_missing": ("verifier", 0),
+        "verifier_extra": ("verifier", 2),
+        "reduce_extra": ("reduce", 1),
+    }
+    if mutation in stage_mutations:
+        stage, value = stage_mutations[mutation]
+        old = counts[f"{stage}_started"]
+        counts[f"{stage}_started"] = value
+        counts[f"{stage}_completed"] = value
+        counts["llm_chat_attempts"] += value - old
+    elif mutation == "hierarchy_repeated":
+        counts["hierarchy_calls"] = 2
+        counts["hierarchy_complete"] = 2
+    elif mutation == "planned_clipped":
+        counts["map_planned"] = 1
+    elif mutation == "counter_missing":
+        counts.pop("map_completed")
+    elif mutation == "map_failure":
+        counts["map_completed"] -= 1
+        counts["map_failures"] = 1
+    elif mutation == "map_cancellation":
+        counts["map_completed"] -= 1
+        counts["map_cancellations"] = 1
+    elif mutation == "unclassified_extra":
+        counts["unclassified_started"] = 1
+        counts["unclassified_completed"] = 1
+        counts["llm_chat_attempts"] += 1
+    elif mutation == "total_excess":
+        counts["llm_chat_attempts"] += 1
+    checks = runner._generation_budget_checks(
+        counts,
+        direct_synthesis=1 if d06 else 0,
+        hierarchy=0 if d06 else 1,
+        map_required=not d06,
+        reduce=0,
+        final_synthesis=0 if d06 else 1,
+        verifier=0 if d06 else 1,
+    )
+
+    assert checks[expected_failed_check] is False
+    assert not all(checks.values())
+
+
+def test_d06_and_d08_apply_exact_stage_budgets_and_d08_fixture_is_not_rle() -> None:
+    runner = _module()
+
+    class FakeProbes:
+        def __init__(self, counts) -> None:  # noqa: ANN001
+            self.counts = counts
+
+        @staticmethod
+        def snapshot():
+            return {}
+
+        def delta(self, _before):  # noqa: ANN001
+            return dict(self.counts)
+
+    class FakeHarness:
+        run_index = 1
+
+        def __init__(self, case_id: str, counts) -> None:  # noqa: ANN001
+            self.case_id = case_id
+            self.probes = FakeProbes(counts)
+            self.settings = SimpleNamespace(profile=SimpleNamespace(max_model_len=40_960))
+            self.payload = b""
+
+        @staticmethod
+        def document(filename, mime_type, content, source_ref):  # noqa: ANN001
+            return {
+                "filename": filename,
+                "mime_type": mime_type,
+                "content_base64": base64.b64encode(content).decode("ascii"),
+                "source_ref": source_ref,
+            }
+
+        def chat(self, case_id, _message, *, document, **_kwargs):  # noqa: ANN001
+            self.payload = base64.b64decode(document["content_base64"])
+            markers = (
+                ("SMALL-ALPHA-1", "SMALL-BETA-1", "SMALL-GAMMA-1")
+                if case_id == "D06"
+                else ("LONG-HEAD-1", "LONG-MIDDLE-1", "LONG-TAIL-1")
+            )
+            return {
+                "message": " ".join(markers),
+                "file_ingestion": {"extraction": {}},
+            }
+
+        @staticmethod
+        def message_row(_answer):  # noqa: ANN001
+            return {
+                "metadata_json": {
+                    "attachment_context_used": True,
+                    "fabricated_outside_deed_request": False,
+                }
+            }
+
+        @staticmethod
+        def case_result(case_id, _started, checks, counters=None):  # noqa: ANN001
+            failed = [name for name, value in checks.items() if value is not True]
+            return {
+                "case_id": case_id,
+                "status": "failed" if failed else "passed",
+                "failure_codes": failed,
+                "checks": dict(checks),
+                "counters": dict(counters or {}),
+            }
+
+    d06_counts = _closed_generation_counts(
+        runner,
+        direct=1,
+        hierarchy=0,
+        map_calls=0,
+        reduce=0,
+        final=0,
+        verifier=0,
+    )
+    d06 = FakeHarness("D06", d06_counts)
+    d06_result = runner._case_06(d06)
+    assert d06_result["status"] == "passed", d06_result
+
+    d08_counts = _closed_generation_counts(
+        runner,
+        direct=0,
+        hierarchy=1,
+        map_calls=2,
+        reduce=0,
+        final=1,
+        verifier=1,
+    )
+    d08 = FakeHarness("D08", d08_counts)
+    d08_result = runner._case_08(d08)
+    assert d08_result["status"] == "passed", d08_result
+    lines = d08.payload.decode("utf-8").splitlines()
+    filler_lines = [line for line in lines if line.startswith("Синтетическая нейтральная запись")]
+    assert len(filler_lines) == len(set(filler_lines)) == 3_000
+    assert len(d08.payload.decode("utf-8")) > 40_960 * 4
+
+
+@pytest.mark.parametrize("cap", (2, 3))
+def test_worker_settings_refuse_document_map_fanout_above_one(tmp_path, cap) -> None:
+    runner = _module()
+    from friday.config import load_settings
+
+    base = load_settings(runner._RELEASE_PROFILE)
+    settings, case_dir, _evidence = runner._settings_for_case(base, tmp_path / "run", "D06")
+    settings = replace(
+        settings,
+        profile=replace(settings.profile, document_map_max_concurrency=cap),
+        workers_enabled=False,
+        code_execution_enabled=False,
+        web_daily_quota=0,
+        llm_enabled=True,
+        embeddings_enabled=True,
+        embeddings_model="embedding-model",
+        rerank_top=1,
+        rerank_base_url="http://127.0.0.1:8103",
+        rerank_model="reranker-model",
+        mcp_enabled=True,
+    )
+
+    with pytest.raises(runner.BatteryFailure, match="document_map_concurrency_not_one"):
+        runner._assert_worker_settings(settings, case_dir, require_mcp=True)
+
+
+def test_worker_settings_refuse_any_other_named_profile(tmp_path) -> None:
+    runner = _module()
+    from friday.config import load_settings
+
+    base = load_settings(runner._RELEASE_PROFILE)
+    settings, case_dir, _evidence = runner._settings_for_case(base, tmp_path / "run", "D06")
+    settings = replace(settings, profile=replace(settings.profile, name="qwen36-vl"))
+
+    with pytest.raises(runner.BatteryFailure, match="release_profile_mismatch"):
+        runner._assert_worker_settings(settings, case_dir, require_mcp=True)
 
 
 @pytest.mark.parametrize(

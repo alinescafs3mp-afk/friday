@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
+import select
 import signal
 import stat
+import subprocess
 import sys
 import threading
 import time
@@ -20,24 +23,254 @@ import synthetic_live_acceptance as acceptance  # noqa: E402
 import synthetic_live_battery as battery  # noqa: E402
 
 
-def test_operator_home_lock_is_release_independent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from friday import config
+@pytest.fixture
+def isolated_acceptance_anchor(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    protocol = f"friday.synthetic-live-acceptance.unit.{os.getpid()}.{tmp_path.name}"
+    monkeypatch.setattr(acceptance, "_ACCEPTANCE_LOCK_PROTOCOL", protocol.encode("ascii"))
 
-    operator_home = tmp_path / "operator-home"
-    monkeypatch.setattr(config, "default_home", lambda: operator_home)
 
+def test_uid_host_lock_is_home_and_release_independent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     first_root = tmp_path / "runtime" / "releases" / "candidate-a"
     second_root = tmp_path / "runtime" / "releases" / "candidate-b"
+    monkeypatch.setenv("FRIDAY_HOME", str(tmp_path / "home-a"))
+    monkeypatch.setenv("HOME", str(tmp_path / "account-a"))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "xdg-a"))
     monkeypatch.setattr(acceptance, "ROOT", first_root)
     first = acceptance._acceptance_lock_path()
+    first_anchor = acceptance._acceptance_anchor_address()
+    monkeypatch.setenv("FRIDAY_HOME", str(tmp_path / "home-b"))
+    monkeypatch.setenv("HOME", str(tmp_path / "account-b"))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "xdg-b"))
     monkeypatch.setattr(acceptance, "ROOT", second_root)
     second = acceptance._acceptance_lock_path()
+    second_anchor = acceptance._acceptance_anchor_address()
 
     assert first == second
-    assert first == operator_home / "runtime" / "locks" / "synthetic-live-acceptance.lock"
+    assert first_anchor == second_anchor
+    assert first_anchor.startswith(b"\0friday.synthetic-live-acceptance.")
+    assert first == (
+        Path("/tmp")
+        / f"friday-synthetic-live-acceptance-{os.getuid()}"
+        / "runtime"
+        / "locks"
+        / "synthetic-live-acceptance.lock"
+    )
 
 
-def test_exclusive_lock_fails_fast_and_is_reusable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+_LOCK_SUBPROCESS = r"""
+import os
+import signal
+import sys
+from pathlib import Path
+
+repository = Path(os.environ["ACCEPTANCE_TEST_REPOSITORY"])
+sys.path.insert(0, str(repository / "tools"))
+import synthetic_live_acceptance as acceptance
+import synthetic_live_battery as battery
+
+release_root = Path(os.environ["ACCEPTANCE_TEST_RELEASE_ROOT"])
+acceptance.ROOT = release_root
+battery.ROOT = release_root
+acceptance._ACCEPTANCE_LOCK_HOST_ROOT = Path(os.environ["ACCEPTANCE_TEST_LOCK_HOST_ROOT"])
+acceptance._ACCEPTANCE_LOCK_PROTOCOL = os.environ["ACCEPTANCE_TEST_LOCK_PROTOCOL"].encode("ascii")
+mode = sys.argv[1]
+lock_path = acceptance._acceptance_lock_path()
+
+class AbortRun(BaseException):
+    pass
+
+try:
+    with acceptance._TerminationSignalGuard(), acceptance._ExclusiveAcceptanceRun(lock_path):
+        print(f"LOCKED\t{lock_path}", flush=True)
+        if mode == "hold":
+            sys.stdin.buffer.read(1)
+        elif mode == "exception":
+            raise RuntimeError("expected")
+        elif mode == "baseexception":
+            raise AbortRun()
+        elif mode == "sigterm":
+            os.kill(os.getpid(), signal.SIGTERM)
+        elif mode != "normal":
+            raise AssertionError(f"unknown mode: {mode}")
+except battery.BatteryContractError as exc:
+    if str(exc) == "acceptance_run_already_active":
+        print(f"BUSY\t{lock_path}", flush=True)
+        raise SystemExit(23)
+    raise
+except RuntimeError:
+    if mode != "exception":
+        raise
+except AbortRun:
+    if mode != "baseexception":
+        raise
+except acceptance._AcceptanceTerminationRequested:
+    if mode != "sigterm":
+        raise
+"""
+
+
+def _lock_process_environment(
+    *,
+    home: Path,
+    release_root: Path,
+    host_root: Path,
+    protocol: str,
+) -> dict[str, str]:
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "ACCEPTANCE_TEST_LOCK_HOST_ROOT": str(host_root),
+            "ACCEPTANCE_TEST_LOCK_PROTOCOL": protocol,
+            "ACCEPTANCE_TEST_RELEASE_ROOT": str(release_root),
+            "ACCEPTANCE_TEST_REPOSITORY": str(ROOT),
+            "FRIDAY_HOME": str(home),
+            "HOME": str(home),
+            "XDG_RUNTIME_DIR": str(home / "xdg"),
+        }
+    )
+    return environment
+
+
+def _run_lock_process(
+    mode: str,
+    *,
+    home: Path,
+    release_root: Path,
+    host_root: Path,
+    protocol: str,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 - exact interpreter and code-owned test program
+        [sys.executable, "-c", _LOCK_SUBPROCESS, mode],
+        cwd=release_root,
+        env=_lock_process_environment(
+            home=home,
+            release_root=release_root,
+            host_root=host_root,
+            protocol=protocol,
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10.0,
+    )
+
+
+def test_process_lock_serializes_isolated_homes_and_survives_every_unwind(tmp_path: Path) -> None:
+    first_home = tmp_path / "home-a"
+    second_home = tmp_path / "home-b"
+    first_release = tmp_path / "releases" / "candidate-a"
+    second_release = tmp_path / "releases" / "candidate-b"
+    host_root = tmp_path / "host-lock-root"
+    protocol = f"friday.synthetic-live-acceptance.test.{os.getpid()}.{tmp_path.name}"
+    for directory in (
+        first_home,
+        first_home / "xdg",
+        second_home,
+        second_home / "xdg",
+        first_release,
+        second_release,
+        host_root,
+    ):
+        directory.mkdir(parents=True, mode=0o700)
+        directory.chmod(0o700)
+
+    holder = subprocess.Popen(  # noqa: S603 - exact interpreter and code-owned test program
+        [sys.executable, "-c", _LOCK_SUBPROCESS, "hold"],
+        cwd=first_release,
+        env=_lock_process_environment(
+            home=first_home,
+            release_root=first_release,
+            host_root=host_root,
+            protocol=protocol,
+        ),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        readable, _, _ = select.select([holder.stdout], [], [], 10.0)
+        assert readable, "holder did not acquire the acceptance lock"
+        holder_line = holder.stdout.readline().strip()
+        assert holder_line.startswith("LOCKED\t")
+
+        started = time.monotonic()
+        contender = _run_lock_process(
+            "normal",
+            home=second_home,
+            release_root=second_release,
+            host_root=host_root,
+            protocol=protocol,
+        )
+        assert time.monotonic() - started < 2.0
+        assert contender.returncode == 23, contender.stderr
+        assert contender.stdout == holder_line.replace("LOCKED\t", "BUSY\t") + "\n"
+
+        lock_path = Path(holder_line.partition("\t")[2])
+        assert lock_path.is_relative_to(host_root)
+        held_inode_path = lock_path.with_name("synthetic-live-acceptance.held")
+        lock_path.rename(held_inode_path)
+        replacement_canary = b"replacement-must-remain-untouched"
+        descriptor = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(descriptor, replacement_canary)
+        finally:
+            os.close(descriptor)
+        replacement = _run_lock_process(
+            "normal",
+            home=second_home,
+            release_root=second_release,
+            host_root=host_root,
+            protocol=protocol,
+        )
+        assert replacement.returncode == 23, replacement.stderr
+        assert lock_path.read_bytes() == replacement_canary
+    finally:
+        if holder.poll() is None and holder.stdin is not None:
+            try:
+                holder.stdin.write("x")
+                holder.stdin.close()
+            except BrokenPipeError:
+                pass
+        try:
+            holder.wait(timeout=10.0)
+        except subprocess.TimeoutExpired:
+            holder.kill()
+            holder.wait(timeout=10.0)
+    assert holder.returncode == 0
+    assert held_inode_path.is_file()
+
+    for mode in ("normal", "exception", "baseexception", "sigterm"):
+        unwound = _run_lock_process(
+            mode,
+            home=first_home,
+            release_root=first_release,
+            host_root=host_root,
+            protocol=protocol,
+        )
+        assert unwound.returncode == 0, unwound.stderr
+        assert unwound.stdout.startswith("LOCKED\t")
+        reusable = _run_lock_process(
+            "normal",
+            home=second_home,
+            release_root=second_release,
+            host_root=host_root,
+            protocol=protocol,
+        )
+        assert reusable.returncode == 0, reusable.stderr
+        assert reusable.stdout == unwound.stdout
+
+
+def test_exclusive_lock_fails_fast_and_is_reusable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    isolated_acceptance_anchor: None,
+) -> None:
+    del isolated_acceptance_anchor
     lock_path = tmp_path / "runtime" / "locks" / "acceptance.lock"
     monkeypatch.setattr(battery, "_assert_ignored_or_external", lambda _path: None)
 
@@ -55,7 +288,94 @@ def test_exclusive_lock_fails_fast_and_is_reusable(monkeypatch: pytest.MonkeyPat
         assert stat.S_IMODE(lock_path.parent.stat().st_mode) == 0o700
 
 
-def test_run_lock_covers_the_entire_locked_body(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_exclusive_lock_rejects_preexisting_non_private_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    lock_path = tmp_path / "runtime" / "locks" / "acceptance.lock"
+    lock_path.parent.mkdir(parents=True, mode=0o700)
+    lock_path.parent.chmod(0o750)
+    monkeypatch.setattr(battery, "_assert_ignored_or_external", lambda _path: None)
+
+    class FakeAnchor:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    anchor = FakeAnchor()
+    monkeypatch.setattr(acceptance, "_open_acceptance_anchor", lambda: anchor)
+
+    with (
+        pytest.raises(battery.BatteryContractError, match="acceptance_lock_unavailable"),
+        acceptance._ExclusiveAcceptanceRun(lock_path),
+    ):
+        raise AssertionError("an unsafe lock directory must never be repaired and entered")
+
+    assert stat.S_IMODE(lock_path.parent.stat().st_mode) == 0o750
+    assert not lock_path.exists()
+    assert anchor.closed is True
+
+
+def test_kernel_anchor_failure_precedes_every_filesystem_side_effect(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    lock_path = tmp_path / "runtime" / "locks" / "acceptance.lock"
+    filesystem_preflight_called = False
+
+    def refuse_anchor() -> None:
+        raise battery.BatteryContractError("acceptance_lock_unavailable")
+
+    def observe_filesystem_preflight(_path: Path) -> None:
+        nonlocal filesystem_preflight_called
+        filesystem_preflight_called = True
+
+    monkeypatch.setattr(acceptance, "_open_acceptance_anchor", refuse_anchor)
+    monkeypatch.setattr(battery, "_assert_ignored_or_external", observe_filesystem_preflight)
+
+    with (
+        pytest.raises(battery.BatteryContractError, match="acceptance_lock_unavailable"),
+        acceptance._ExclusiveAcceptanceRun(lock_path),
+    ):
+        raise AssertionError("a missing kernel anchor must never downgrade to the file lock")
+
+    assert filesystem_preflight_called is False
+    assert not lock_path.parent.parent.exists()
+
+
+def test_file_lock_is_released_before_the_kernel_anchor(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    lock_path = tmp_path / "runtime" / "locks" / "acceptance.lock"
+    observed: list[str] = []
+    monkeypatch.setattr(battery, "_assert_ignored_or_external", lambda _path: None)
+
+    class AnchorProbe:
+        def close(self) -> None:
+            descriptor = os.open(lock_path, os.O_RDWR)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                observed.append("file_released_before_anchor")
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
+
+    monkeypatch.setattr(acceptance, "_open_acceptance_anchor", AnchorProbe)
+
+    with acceptance._ExclusiveAcceptanceRun(lock_path):
+        observed.append("body")
+
+    assert observed == ["body", "file_released_before_anchor"]
+
+
+def test_run_lock_covers_the_entire_locked_body(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    isolated_acceptance_anchor: None,
+) -> None:
+    del isolated_acceptance_anchor
     lock_path = tmp_path / "runtime" / "locks" / "acceptance.lock"
     observed = False
 
@@ -90,7 +410,9 @@ def test_run_lock_covers_the_entire_locked_body(monkeypatch: pytest.MonkeyPatch,
 def test_sigterm_unwinds_the_locked_run_and_restores_the_handler(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    isolated_acceptance_anchor: None,
 ) -> None:
+    del isolated_acceptance_anchor
     lock_path = tmp_path / "runtime" / "locks" / "acceptance.lock"
     previous = signal.getsignal(signal.SIGTERM)
 

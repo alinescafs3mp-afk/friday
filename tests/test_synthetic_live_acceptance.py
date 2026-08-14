@@ -30,6 +30,13 @@ def _private_root(path: Path) -> Path:
     return path
 
 
+def _isolate_acceptance_lock_protocol(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # Fake unit runs must neither contend with real host acceptance nor with a
+    # different xdist worker.  Production keeps its fixed protocol constant.
+    protocol = f"friday.synthetic-live-acceptance.unit.{os.getpid()}.{tmp_path.name}"
+    monkeypatch.setattr(acceptance, "_ACCEPTANCE_LOCK_PROTOCOL", protocol.encode("ascii"))
+
+
 def test_pre_release_inventory_is_exact_unique_and_candidate_bound() -> None:
     focused = acceptance.inventory_for_suite("focused")
     p06 = acceptance.inventory_for_suite("p06")
@@ -130,12 +137,94 @@ def test_every_selected_pass_is_dispatched_once_without_retry(
 
 def _readiness_environment() -> dict[str, str]:
     return {
+        "FRIDAY_PROFILE": "qwen36-27b-nvfp4-nvidia",
         "FRIDAY_LLM_BASE_URL": "http://127.0.0.1:8001/v1",
         "FRIDAY_EMBEDDINGS_BASE_URL": "http://127.0.0.1:8002/v1",
         "FRIDAY_RERANK_BASE_URL": "http://127.0.0.1:8003/v1",
         "FRIDAY_LLM_MODEL": "dispatcher",
         "FRIDAY_LLM_API_KEY": "synthetic-readiness-key",
     }
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {
+            "FRIDAY_PROFILE": "qwen36-27b-nvfp4-nvidia",
+            "FRIDAY_LLM_MODEL": "dispatcher",
+        },
+        {
+            "JERICHO_PROFILE": "qwen36-27b-nvfp4-nvidia",
+            "JERICHO_LLM_MODEL": "dispatcher",
+        },
+        {
+            "FRIDAY_PROFILE": " qwen36-27b-nvfp4-nvidia ",
+            "JERICHO_PROFILE": "qwen36-27b-nvfp4-nvidia",
+            "FRIDAY_LLM_MODEL": "dispatcher ",
+            "JERICHO_LLM_MODEL": "dispatcher",
+        },
+    ],
+)
+def test_acceptance_requires_the_exact_frozen_dispatcher_environment(
+    environment: dict[str, str],
+) -> None:
+    acceptance._assert_frozen_dispatcher_environment(environment)
+
+
+@pytest.mark.parametrize(
+    ("environment", "code"),
+    [
+        ({"FRIDAY_LLM_MODEL": "dispatcher"}, "acceptance_profile_missing"),
+        (
+            {"FRIDAY_PROFILE": "", "FRIDAY_LLM_MODEL": "dispatcher"},
+            "acceptance_profile_missing",
+        ),
+        (
+            {"FRIDAY_PROFILE": "qwen36-vl", "FRIDAY_LLM_MODEL": "dispatcher"},
+            "acceptance_profile_mismatch",
+        ),
+        (
+            {
+                "FRIDAY_PROFILE": "qwen36-27b-nvfp4-nvidia",
+                "JERICHO_PROFILE": "qwen36-vl",
+                "FRIDAY_LLM_MODEL": "dispatcher",
+            },
+            "acceptance_profile_alias_conflict",
+        ),
+        (
+            {"FRIDAY_PROFILE": "qwen36-27b-nvfp4-nvidia"},
+            "acceptance_model_missing",
+        ),
+        (
+            {
+                "FRIDAY_PROFILE": "qwen36-27b-nvfp4-nvidia",
+                "FRIDAY_LLM_MODEL": "",
+            },
+            "acceptance_model_missing",
+        ),
+        (
+            {
+                "FRIDAY_PROFILE": "qwen36-27b-nvfp4-nvidia",
+                "FRIDAY_LLM_MODEL": "Dispatcher",
+            },
+            "acceptance_model_mismatch",
+        ),
+        (
+            {
+                "FRIDAY_PROFILE": "qwen36-27b-nvfp4-nvidia",
+                "FRIDAY_LLM_MODEL": "dispatcher",
+                "JERICHO_LLM_MODEL": "another-model",
+            },
+            "acceptance_model_alias_conflict",
+        ),
+    ],
+)
+def test_acceptance_dispatcher_environment_fails_closed(
+    environment: dict[str, str],
+    code: str,
+) -> None:
+    with pytest.raises(battery.BatteryContractError, match=rf"^{code}$"):
+        acceptance._assert_frozen_dispatcher_environment(environment)
 
 
 def _vllm_metrics(*, running: int = 0, waiting: int = 0, epoch: int = 1_700_000_000) -> str:
@@ -414,6 +503,7 @@ def test_readiness_failure_prevents_acceptance_dispatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _isolate_acceptance_lock_protocol(monkeypatch, tmp_path)
     run_root = tmp_path / "acceptance"
     dispatched = False
 
@@ -452,7 +542,54 @@ def test_readiness_failure_prevents_acceptance_dispatch(
     assert dispatched is False
 
 
-def test_official_all_acceptance_refuses_reduced_execution_concurrency(tmp_path: Path) -> None:
+def test_invalid_dispatcher_profile_precedes_readiness_and_every_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _isolate_acceptance_lock_protocol(monkeypatch, tmp_path)
+    run_root = tmp_path / "must-not-be-created"
+    readiness_called = False
+    dispatch_called = False
+
+    def refuse_readiness(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal readiness_called
+        readiness_called = True
+        raise AssertionError("profile mismatch must precede readiness")
+
+    def refuse_dispatch(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal dispatch_called
+        dispatch_called = True
+        raise AssertionError("profile mismatch must precede dispatch")
+
+    environment = _readiness_environment()
+    environment["FRIDAY_PROFILE"] = "qwen36-vl"
+    monkeypatch.setattr(
+        acceptance,
+        "_acceptance_lock_path",
+        lambda: tmp_path / "runtime" / "locks" / "acceptance.lock",
+    )
+    monkeypatch.setattr(battery, "_inherit_model_environment", lambda: environment)
+    monkeypatch.setattr(acceptance, "_model_readiness_barrier", refuse_readiness)
+    monkeypatch.setattr(acceptance, "_execute_sealed", refuse_dispatch)
+
+    with pytest.raises(battery.BatteryContractError, match="^acceptance_profile_mismatch$"):
+        acceptance.run_acceptance(
+            "all",
+            run_directory=run_root,
+            concurrency=4,
+            artifact_id="PRE-RELEASE-ALL-0123456789abcdef",
+        )
+
+    assert readiness_called is False
+    assert dispatch_called is False
+    assert run_root.exists() is False
+
+
+def test_official_all_acceptance_refuses_reduced_execution_concurrency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _isolate_acceptance_lock_protocol(monkeypatch, tmp_path)
     with pytest.raises(
         battery.BatteryContractError,
         match="acceptance_execution_concurrency_invalid",
@@ -471,6 +608,7 @@ def test_sanitized_summary_binds_probe_and_execution_concurrency(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _isolate_acceptance_lock_protocol(monkeypatch, tmp_path)
     run_root = tmp_path / "acceptance"
     runtime_digest = "a" * 64
     candidate_digest = "b" * 64
@@ -700,7 +838,11 @@ def test_acceptance_audit_only_does_not_select_or_read_env_file(
     def refuse(_path: Path) -> None:
         raise AssertionError("audit-only must not select an environment file")
 
+    def refuse_model_contract(_environment: Any) -> None:
+        raise AssertionError("audit-only must not inspect the live model contract")
+
     monkeypatch.setattr(battery, "_select_live_env_file", refuse)
+    monkeypatch.setattr(acceptance, "_assert_frozen_dispatcher_environment", refuse_model_contract)
 
     assert acceptance.main(["--suite", "all", "--audit-only", "--env-file", str(private_path)]) == 0
     output = capsys.readouterr().out

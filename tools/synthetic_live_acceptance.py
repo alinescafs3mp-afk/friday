@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import errno
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ import queue
 import re
 import secrets
 import signal
+import socket
 import stat
 import sys
 import threading
@@ -63,6 +65,8 @@ MODEL_READINESS_QUIET_SEC = 1.0
 MODEL_READINESS_CONCURRENCY = 4
 MODEL_READINESS_METRICS_MAX_BYTES = 2 * 1024 * 1024
 MODEL_READINESS_GENERATION_MAX_BYTES = 256 * 1024
+REQUIRED_ACCEPTANCE_PROFILE = "qwen36-27b-nvfp4-nvidia"
+REQUIRED_ACCEPTANCE_MODEL = "dispatcher"
 _VLLM_LOAD_METRICS = {
     "vllm:num_requests_running": "running",
     "vllm_num_requests_running": "running",
@@ -128,6 +132,46 @@ class ModelLoadSample:
     running: float
     waiting: float
     process_start_time_seconds: float
+
+
+def _assert_required_acceptance_setting(
+    environment: Mapping[str, str],
+    *,
+    friday_name: str,
+    required: str,
+    code_prefix: str,
+) -> None:
+    """Require one exact launch value without hiding a legacy-alias conflict."""
+
+    legacy_name = "JERICHO_" + friday_name.removeprefix("FRIDAY_")
+    friday_present = friday_name in environment
+    legacy_present = legacy_name in environment
+    friday_value = str(environment.get(friday_name, "")).strip()
+    legacy_value = str(environment.get(legacy_name, "")).strip()
+    if friday_present and legacy_present and friday_value != legacy_value:
+        raise battery.BatteryContractError(f"{code_prefix}_alias_conflict")
+    value = friday_value if friday_present else legacy_value
+    if not (friday_present or legacy_present) or not value:
+        raise battery.BatteryContractError(f"{code_prefix}_missing")
+    if value != required:
+        raise battery.BatteryContractError(f"{code_prefix}_mismatch")
+
+
+def _assert_frozen_dispatcher_environment(environment: Mapping[str, str]) -> None:
+    """Bind every live acceptance slice to the attested dispatcher profile."""
+
+    _assert_required_acceptance_setting(
+        environment,
+        friday_name="FRIDAY_PROFILE",
+        required=REQUIRED_ACCEPTANCE_PROFILE,
+        code_prefix="acceptance_profile",
+    )
+    _assert_required_acceptance_setting(
+        environment,
+        friday_name="FRIDAY_LLM_MODEL",
+        required=REQUIRED_ACCEPTANCE_MODEL,
+        code_prefix="acceptance_model",
+    )
 
 
 async def _read_bounded_response(response: httpx.Response, *, maximum_bytes: int) -> bytes:
@@ -595,6 +639,9 @@ def _make_private_directory(path: Path) -> None:
 WORKER_TEARDOWN_WAIT_SEC = 10.0
 WORKER_THREAD_TEARDOWN_WAIT_SEC = 15.0
 TEARDOWN_HARD_EXIT_CODE = 70
+_ACCEPTANCE_LOCK_HOST_ROOT = Path("/tmp")
+_ACCEPTANCE_LOCK_NAMESPACE = "friday-synthetic-live-acceptance"
+_ACCEPTANCE_LOCK_PROTOCOL = b"friday.synthetic-live-acceptance\0v2"
 
 
 class _AcceptanceTerminationRequested(BaseException):
@@ -634,16 +681,91 @@ def _hard_exit_after_incomplete_teardown() -> None:
 
 
 def _acceptance_lock_path() -> Path:
-    """Return one operator-home lock shared by every immutable release tree."""
+    """Return one code-owned host lock for the current operating-system UID.
 
-    from friday.config import default_home
+    ``FRIDAY_HOME`` is deliberately absent from this identity.  Live acceptance
+    commonly gives every immutable candidate its own isolated home, while all of
+    those candidates still control the same host resources and must serialize.
+    The hard-coded ``/tmp`` namespace is host-local; the UID component keeps
+    unrelated operating-system accounts independent.
+    """
 
-    operator_home = Path(os.path.abspath(default_home().expanduser()))
-    return operator_home / "runtime" / "locks" / "synthetic-live-acceptance.lock"
+    lock_home = _ACCEPTANCE_LOCK_HOST_ROOT / f"{_ACCEPTANCE_LOCK_NAMESPACE}-{os.getuid()}"
+    return lock_home / "runtime" / "locks" / "synthetic-live-acceptance.lock"
+
+
+def _acceptance_anchor_address() -> bytes:
+    """Return one path-free Linux abstract-socket identity for this UID."""
+
+    identity = _ACCEPTANCE_LOCK_PROTOCOL + b"\0uid=" + str(os.getuid()).encode("ascii")
+    digest = hashlib.sha256(identity).hexdigest().encode("ascii")
+    return b"\0friday.synthetic-live-acceptance." + digest
+
+
+def _open_acceptance_anchor() -> socket.socket:
+    """Acquire the non-replaceable kernel anchor before touching the lock file."""
+
+    anchor: socket.socket | None = None
+    try:
+        anchor = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        anchor.set_inheritable(False)
+        if anchor.get_inheritable():
+            raise OSError("acceptance anchor remained inheritable")
+        anchor.bind(_acceptance_anchor_address())
+    except OSError as exc:
+        if anchor is not None:
+            anchor.close()
+        code = (
+            "acceptance_run_already_active"
+            if exc.errno == errno.EADDRINUSE
+            else "acceptance_lock_unavailable"
+        )
+        raise battery.BatteryContractError(code) from None
+    except Exception:
+        if anchor is not None:
+            anchor.close()
+        raise battery.BatteryContractError("acceptance_lock_unavailable") from None
+    except BaseException:
+        if anchor is not None:
+            anchor.close()
+        raise
+    return anchor
+
+
+def _open_code_owned_lock_home(operator_home: Path, directory_flags: int) -> int:
+    """Create/open the UID namespace beneath a trusted host-local sticky root."""
+
+    expected_home = _ACCEPTANCE_LOCK_HOST_ROOT / f"{_ACCEPTANCE_LOCK_NAMESPACE}-{os.getuid()}"
+    if operator_home != expected_home:
+        return os.open(operator_home, directory_flags)
+
+    try:
+        host_descriptor = os.open(_ACCEPTANCE_LOCK_HOST_ROOT, directory_flags)
+    except OSError:
+        raise battery.BatteryContractError("acceptance_lock_unavailable") from None
+    try:
+        host = os.fstat(host_descriptor)
+        host_mode = stat.S_IMODE(host.st_mode)
+        trusted_system_root = host.st_uid == 0 and bool(host_mode & stat.S_ISVTX)
+        trusted_private_root = host.st_uid == os.getuid() and host_mode == 0o700
+        if not stat.S_ISDIR(host.st_mode) or not (trusted_system_root or trusted_private_root):
+            raise battery.BatteryContractError("acceptance_lock_unavailable")
+        with contextlib.suppress(FileExistsError):
+            os.mkdir(operator_home.name, 0o700, dir_fd=host_descriptor)
+        home_descriptor = os.open(operator_home.name, directory_flags, dir_fd=host_descriptor)
+    except OSError:
+        raise battery.BatteryContractError("acceptance_lock_unavailable") from None
+    finally:
+        os.close(host_descriptor)
+    home = os.fstat(home_descriptor)
+    if not stat.S_ISDIR(home.st_mode) or home.st_uid != os.getuid() or stat.S_IMODE(home.st_mode) != 0o700:
+        os.close(home_descriptor)
+        raise battery.BatteryContractError("acceptance_lock_unavailable")
+    return home_descriptor
 
 
 def _open_acceptance_lock_directory(path: Path) -> int:
-    """Open ``<operator-home>/runtime/locks`` without following a path symlink."""
+    """Open the private UID lock directory without following path symlinks."""
 
     locks = path.parent
     runtime = locks.parent
@@ -653,7 +775,7 @@ def _open_acceptance_lock_directory(path: Path) -> int:
     directory_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
     directory_flags |= getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        home_descriptor = os.open(operator_home, directory_flags)
+        home_descriptor = _open_code_owned_lock_home(operator_home, directory_flags)
     except OSError:
         raise battery.BatteryContractError("acceptance_lock_unavailable") from None
     try:
@@ -669,7 +791,11 @@ def _open_acceptance_lock_directory(path: Path) -> int:
         os.close(home_descriptor)
     try:
         runtime_metadata = os.fstat(runtime_descriptor)
-        if not stat.S_ISDIR(runtime_metadata.st_mode) or runtime_metadata.st_uid != os.getuid():
+        if (
+            not stat.S_ISDIR(runtime_metadata.st_mode)
+            or runtime_metadata.st_uid != os.getuid()
+            or stat.S_IMODE(runtime_metadata.st_mode) != 0o700
+        ):
             raise battery.BatteryContractError("acceptance_lock_unavailable")
         with contextlib.suppress(FileExistsError):
             os.mkdir("locks", 0o700, dir_fd=runtime_descriptor)
@@ -679,10 +805,13 @@ def _open_acceptance_lock_directory(path: Path) -> int:
     finally:
         os.close(runtime_descriptor)
     metadata = os.fstat(locks_descriptor)
-    if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid():
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
         os.close(locks_descriptor)
         raise battery.BatteryContractError("acceptance_lock_unavailable")
-    os.fchmod(locks_descriptor, 0o700)
     return locks_descriptor
 
 
@@ -692,31 +821,65 @@ class _ExclusiveAcceptanceRun:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._descriptor: int | None = None
+        self._anchor: socket.socket | None = None
 
     def __enter__(self) -> _ExclusiveAcceptanceRun:
         import fcntl
 
-        battery._assert_ignored_or_external(self.path)
-        directory_descriptor = _open_acceptance_lock_directory(self.path)
-        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        anchor = _open_acceptance_anchor()
+        descriptor: int | None = None
         try:
-            descriptor = os.open(self.path.name, flags, 0o600, dir_fd=directory_descriptor)
-            metadata = os.fstat(descriptor)
-            if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid() or metadata.st_nlink != 1:
-                raise OSError("acceptance lock identity invalid")
-            os.fchmod(descriptor, 0o600)
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            battery._assert_ignored_or_external(self.path)
+            directory_descriptor = _open_acceptance_lock_directory(self.path)
+            flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+            try:
+                descriptor = os.open(self.path.name, flags, 0o600, dir_fd=directory_descriptor)
+                metadata = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_uid != os.getuid()
+                    or metadata.st_nlink != 1
+                ):
+                    raise OSError("acceptance lock identity invalid")
+                os.fchmod(descriptor, 0o600)
+                metadata = os.fstat(descriptor)
+                if stat.S_IMODE(metadata.st_mode) != 0o600:
+                    raise OSError("acceptance lock mode invalid")
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                path_metadata = os.stat(
+                    self.path.name,
+                    dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
+                if not stat.S_ISREG(path_metadata.st_mode) or (
+                    path_metadata.st_dev,
+                    path_metadata.st_ino,
+                ) != (metadata.st_dev, metadata.st_ino):
+                    raise OSError("acceptance lock path identity changed")
+            finally:
+                os.close(directory_descriptor)
         except BlockingIOError:
-            if "descriptor" in locals():
+            if descriptor is not None:
                 os.close(descriptor)
+            anchor.close()
             raise battery.BatteryContractError("acceptance_run_already_active") from None
-        except OSError:
-            if "descriptor" in locals():
+        except battery.BatteryContractError:
+            if descriptor is not None:
                 os.close(descriptor)
+            anchor.close()
+            raise
+        except OSError:
+            if descriptor is not None:
+                os.close(descriptor)
+            anchor.close()
             raise battery.BatteryContractError("acceptance_lock_unavailable") from None
-        finally:
-            os.close(directory_descriptor)
+        except BaseException:
+            if descriptor is not None:
+                os.close(descriptor)
+            anchor.close()
+            raise
         self._descriptor = descriptor
+        self._anchor = anchor
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
@@ -724,13 +887,18 @@ class _ExclusiveAcceptanceRun:
 
         del exc_type, exc, traceback
         descriptor = self._descriptor
+        anchor = self._anchor
         self._descriptor = None
-        if descriptor is None:
-            return
+        self._anchor = None
         try:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            if descriptor is not None:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                finally:
+                    os.close(descriptor)
         finally:
-            os.close(descriptor)
+            if anchor is not None:
+                anchor.close()
 
 
 class _TrackedSubprocessModule:
@@ -1302,13 +1470,14 @@ def _run_acceptance_locked(
         raise battery.BatteryContractError("acceptance_execution_concurrency_invalid")
     manifests = _load_manifests()
     inventory_for_suite(suite)
+    model_environment = battery._inherit_model_environment()
+    _assert_frozen_dispatcher_environment(model_environment)
     battery._assert_ignored_or_external(run_directory)
     if run_directory.exists():
         raise battery.BatteryContractError("run_directory_already_exists")
     _make_private_directory(run_directory)
     battery._preflight_private_filesystem(run_directory)
     sealed = _preseal_passes(suite, run_directory, manifests)
-    model_environment = battery._inherit_model_environment()
     readiness = _model_readiness_barrier(
         model_environment,
         require_authoritative_metrics=suite == "all",
