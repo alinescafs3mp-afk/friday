@@ -205,13 +205,22 @@ def test_a_person_question_wins_over_the_owners_own_timeline() -> None:
     ответ получался про его собственную активность.
     """
     import inspect
+    from datetime import date
 
-    from friday.agent_runtime import AgentRuntime
+    from friday.agent_runtime import (
+        AgentRuntime,
+        _closed_pure_past_timeline_intent,
+        file_turn_authority,
+    )
+
+    message = "Чем занимался Yato вчера?"
+    authority = file_turn_authority(message)
+    assert authority.proved("person")
+    assert _closed_pure_past_timeline_intent(message, today=date(2026, 8, 14)) is None
 
     source = inspect.getsource(AgentRuntime._agentic_loop)
-    person_at = source.index("_prefetch_person_activity(")
-    timeline_at = source.index("_prefetch_the_timeline_if_asked(")
+    ordinary_lane = source[source.index("# Про ЧЕЛОВЕКА") :]
+    person_at = ordinary_lane.index("_prefetch_person_activity(")
+    timeline_at = ordinary_lane.index("_prefetch_the_timeline_if_asked(")
     assert person_at < timeline_at, "лента владельца снова отвечает раньше вопроса о человеке"
-    assert "if not source_lookup_owned and not about_a_person:" in source, (
-        "лента поднимается даже когда вопрос был про человека"
-    )
+    assert "and not about_a_person:" in ordinary_lane, "лента поднимается даже когда вопрос был про человека"

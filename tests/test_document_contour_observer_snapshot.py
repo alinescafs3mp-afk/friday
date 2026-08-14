@@ -238,7 +238,7 @@ def test_http_snapshot_is_owner_only_and_numeric_loopback_only(settings):
     with TestClient(remote_app, client=("203.0.113.9", 9000)) as remote:
         response = remote.get("/api/admin/document-contour-observer-snapshot", headers=headers)
         assert response.status_code == 403
-        assert response.json() == {"detail": "Release barrier inspection is host-local only"}
+        assert response.json() == {"detail": "Проверка барьера релиза доступна только локально на сервере"}
 
 
 def test_delegated_diagnostics_capability_is_not_owner_authority(settings, storage):
@@ -318,7 +318,7 @@ def test_queue_path_replaced_after_validation_cannot_publish_zero(settings, stor
         backend.release()
     assert swapped is True
     assert raised.value.status_code == 503
-    assert raised.value.detail == "Release barrier snapshot unavailable"
+    assert raised.value.detail == "Снимок барьера релиза недоступен"
 
 
 def test_queue_aba_restore_is_detected_even_though_the_original_inode_returns(

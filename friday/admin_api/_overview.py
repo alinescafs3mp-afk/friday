@@ -227,16 +227,19 @@ async def document_contour_observer_snapshot(request: Request) -> dict[str, Any]
 def _document_contour_observer_snapshot_sync(request: Request) -> dict[str, Any]:
     actor = _require(request, "admin.diagnostics")
     if not actor.is_owner:
-        raise HTTPException(status_code=403, detail="Only the owner may inspect the release barrier")
+        raise HTTPException(status_code=403, detail="Проверять барьер релиза может только владелец")
     peer = str(getattr(getattr(request, "client", None), "host", "") or "")
     try:
         local_peer = ipaddress.ip_address(peer).is_loopback
     except ValueError:
         local_peer = False
     if not local_peer:
-        raise HTTPException(status_code=403, detail="Release barrier inspection is host-local only")
+        raise HTTPException(
+            status_code=403,
+            detail="Проверка барьера релиза доступна только локально на сервере",
+        )
     state = _services(request)
     try:
         return collect_document_contour_observer_snapshot(state.settings, state.storage)
     except Exception as exc:  # noqa: BLE001 - every snapshot uncertainty is a closed 503
-        raise HTTPException(status_code=503, detail="Release barrier snapshot unavailable") from exc
+        raise HTTPException(status_code=503, detail="Снимок барьера релиза недоступен") from exc
