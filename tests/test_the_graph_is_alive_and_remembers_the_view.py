@@ -161,7 +161,13 @@ def test_the_picture_settles_on_its_own_instead_of_standing_still(live_admin):
         # время: под параллельными браузерами три секунды могут вместить меньше
         # кадров. Ждём авторитетный признак остановленного цикла.
         _settle(page)
-        assert not page.evaluate("() => state.graphFrame"), "цикл кадров не уснул"
+        settled = page.evaluate(
+            "() => ({active: Boolean(state.graphFrame), "
+            "frame: state.graphSim ? state.graphSim.frame : -1, "
+            "coolingFrames: FridayGraphLayout.COOLING_FRAMES})"
+        )
+        assert not settled["active"], "цикл кадров не уснул"
+        assert settled["frame"] >= settled["coolingFrames"], f"цикл уснул раньше полного остывания: {settled}"
         third = page.evaluate(
             "() => [...document.querySelectorAll('#graphSvg .gnode circle')]"
             ".map(c => c.getAttribute('cx') + ',' + c.getAttribute('cy')).join('|')"
