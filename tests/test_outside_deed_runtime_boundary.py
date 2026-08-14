@@ -140,7 +140,7 @@ async def test_a_bare_upload_summary_keeps_a_truthful_state_from_its_source(
     source_text: str,
     truthful_summary: str,
 ) -> None:
-    """Bare notice is zero-model; a truthful source summary is a follow-up, not a self-deed."""
+    """A trusted bare upload is reviewed; a sourced state is not Friday's own deed."""
 
     assert Path(settings.database_path).is_relative_to(tmp_path)
     runtime = _runtime(settings, storage, monkeypatch)
@@ -151,40 +151,13 @@ async def test_a_bare_upload_summary_keeps_a_truthful_state_from_its_source(
         source_text=source_text,
     )
 
-    async def forbidden_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
-        del args, kwargs
-        raise AssertionError("bare upload notice prepared general context")
-
-    async def forbidden_generate(*args, **kwargs):  # noqa: ANN002, ANN003
-        del args, kwargs
-        raise AssertionError("bare upload notice called the model")
-
-    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
-    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
-    receipt = await runtime.chat(
-        "alice",
-        "Загружен документ: synthetic-source-status.txt",
-        actor=_actor(),
-        attachments=[attachment],
-        enable_tools=False,
-        synthetic_document_notice=True,
-    )
-    assert receipt["tools_used"] == []
-    assert receipt["message"] != truthful_summary
-    assert receipt["message_format"] == "plain"
-    assert "зарегистрирован" in receipt["message"]
-    assert "байты на диске проверены" in receipt["message"]
-    assert f"› {source_text.splitlines()[0]}" in receipt["message"]
-    assert f"› {source_text.splitlines()[1]}" in receipt["message"]
-    receipt_meta = json.loads(
-        str(storage.get_message(str(receipt["message_id"]), "alice")["metadata_json"] or "{}")
-    )
-    receipt_guards = receipt_meta.get("structural", {}).get("output_guards", {})
-    assert receipt_guards.get("outside_deed_replaced") is not True
-    assert receipt_guards.get("supported_deed_replaced") is not True
-
+    prepared_messages: list[str] = []
     shown_sources: list[str] = []
     shown_evidence = []
+
+    async def prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
+        prepared_messages.append(str(message))
+        return await _simple_context(user_id, message, conversation_id, **kwargs)
 
     async def generate(context, message, attachments):  # noqa: ANN001
         del context, message
@@ -192,17 +165,18 @@ async def test_a_bare_upload_summary_keeps_a_truthful_state_from_its_source(
         shown_evidence.extend(_file_evidence_view_of(item) for item in attachments)
         return {"content": truthful_summary, "tools_used": [], "_model_generated": True}
 
-    monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
     monkeypatch.setattr(runtime, "_generate_response", generate)
-    reply = await runtime.chat(
+    review = await runtime.chat(
         "alice",
-        "Кратко перескажи этот файл.",
+        "Загружен документ: synthetic-source-status.txt",
         actor=_actor(),
-        conversation_id=receipt["conversation_id"],
-        attachments=[],
+        attachments=[attachment],
         enable_tools=False,
+        synthetic_document_notice=True,
     )
 
+    assert prepared_messages == ["Загружен документ: synthetic-source-status.txt"]
     assert shown_sources == [source_text]
     assert len(shown_evidence) == 1
     evidence = shown_evidence[0]
@@ -212,8 +186,10 @@ async def test_a_bare_upload_summary_keeps_a_truthful_state_from_its_source(
     assert evidence.source_readable is True
     assert evidence.source_complete is True
     assert evidence.verification_eligible is True
-    assert reply["message"] == truthful_summary
-    stored = storage.get_message(str(reply["message_id"]), "alice")
+    assert review["message"] == truthful_summary
+    assert review["tools_used"] == []
+    assert "Быстрый обзор" not in review["message"]
+    stored = storage.get_message(str(review["message_id"]), "alice")
     metadata = json.loads(str(stored["metadata_json"] or "{}"))
     output_guards = metadata["structural"].get("output_guards", {})
     assert output_guards.get("outside_deed_replaced") is not True
@@ -238,7 +214,7 @@ async def test_a_bare_upload_does_not_hide_an_active_model_deed(
     blocked_answer: str,
     guard_name: str,
 ) -> None:
-    """Bare notice never synthesizes; unsupported deeds are blocked on explicit follow-up."""
+    """A bare-upload review cannot turn untrusted file text into a completed deed."""
 
     assert Path(settings.database_path).is_relative_to(tmp_path)
     runtime = _runtime(settings, storage, monkeypatch)
@@ -250,17 +226,21 @@ async def test_a_bare_upload_does_not_hide_an_active_model_deed(
         source_text=source_text,
     )
 
-    async def forbidden_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
-        del args, kwargs
-        raise AssertionError("bare upload notice prepared general context")
+    prepared_messages: list[str] = []
+    shown_evidence = []
 
-    async def forbidden_generate(*args, **kwargs):  # noqa: ANN002, ANN003
-        del args, kwargs
-        raise AssertionError("bare upload notice called the model")
+    async def prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
+        prepared_messages.append(str(message))
+        return await _simple_context(user_id, message, conversation_id, **kwargs)
 
-    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
-    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
-    receipt = await runtime.chat(
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message
+        shown_evidence.extend(_file_evidence_view_of(item) for item in attachments)
+        return {"content": model_claim, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    review = await runtime.chat(
         "alice",
         "Загружен документ: synthetic-active-deed.txt",
         actor=_actor(),
@@ -268,31 +248,8 @@ async def test_a_bare_upload_does_not_hide_an_active_model_deed(
         enable_tools=False,
         synthetic_document_notice=True,
     )
-    assert receipt["tools_used"] == []
-    assert receipt["message"] != blocked_answer
-    assert receipt["message"] != model_claim
-    assert "зарегистрирован" in receipt["message"]
-    assert "байты на диске проверены" in receipt["message"]
-    assert f"› {source_text}" in receipt["message"]
 
-    shown_evidence = []
-
-    async def generate(context, message, attachments):  # noqa: ANN001
-        del context, message
-        shown_evidence.extend(_file_evidence_view_of(item) for item in attachments)
-        return {"content": model_claim, "tools_used": [], "_model_generated": True}
-
-    monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
-    monkeypatch.setattr(runtime, "_generate_response", generate)
-    reply = await runtime.chat(
-        "alice",
-        "Кратко перескажи этот файл.",
-        actor=_actor(),
-        conversation_id=receipt["conversation_id"],
-        attachments=[],
-        enable_tools=False,
-    )
-
+    assert prepared_messages == ["Загружен документ: synthetic-active-deed.txt"]
     assert len(shown_evidence) == 1
     evidence = shown_evidence[0]
     assert evidence is not None
@@ -301,8 +258,10 @@ async def test_a_bare_upload_does_not_hide_an_active_model_deed(
     assert evidence.source_readable is True
     assert evidence.source_complete is True
     assert evidence.verification_eligible is True
-    assert reply["message"] == blocked_answer
-    stored = storage.get_message(str(reply["message_id"]), "alice")
+    assert review["message"] == blocked_answer
+    assert review["message"] != model_claim
+    assert review["tools_used"] == []
+    stored = storage.get_message(str(review["message_id"]), "alice")
     metadata = json.loads(str(stored["metadata_json"] or "{}"))
     assert metadata["structural"]["output_guards"][guard_name] is True
 

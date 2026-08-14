@@ -23,12 +23,14 @@ from friday.agent_runtime import (
     _attachment_evidence_chunks,
     _attachment_filename_mentions,
     _attachment_selector_message,
+    _historical_direct_read_attachment,
     _is_document_metadata_request,
     _requested_output_filename_stem,
     _supported_direct_attachment_file_only_request,
 )
 from friday.execution_kernel import ToolResult
 from friday.permissions import ActorContext
+from friday.server import _current_turn_file_attachment
 from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
 
 
@@ -45,19 +47,33 @@ def _pending_file(
     storage.ensure_user(tenant_id)
     if uploader != tenant_id:
         storage.ensure_user(uploader)
+    raw_id = new_id("raw")
+    body = text.encode("utf-8")
+    supplied_metadata = dict(extra_metadata or {})
+    relative_path = str(supplied_metadata.get("stored_path") or f"{tenant_id}/{raw_id}.bin")
+    stored_path = storage.settings.files_dir / relative_path
+    stored_path.parent.mkdir(parents=True, exist_ok=True)
+    if not stored_path.is_file():
+        stored_path.write_bytes(body)
+    registered_body = stored_path.read_bytes()
+    digest = hashlib.sha256(registered_body).hexdigest()
     raw = RawObject(
-        id=new_id("raw"),
+        id=raw_id,
         user_id=tenant_id,
         source="upload",
         source_ref=new_id("source"),
         raw_content=text,
         content_type="file",
+        content_hash=digest,
         metadata_json={
             "filename": filename,
             "uploaded_by": uploader,
             "extraction_success": extraction_success,
             "text_extraction_success": extraction_success,
-            **(extra_metadata or {}),
+            **supplied_metadata,
+            "stored_path": relative_path,
+            "sha256": digest,
+            "size_bytes": len(registered_body),
         },
     )
     storage.store_raw_object(raw)
@@ -95,14 +111,47 @@ def _record_upload(storage, conversation_id: str, user_id: str, raw: RawObject, 
     )
 
 
-def _current_attachment(raw: RawObject) -> dict[str, object]:
+def _current_attachment(storage, raw: RawObject) -> dict[str, object]:  # noqa: ANN001
     metadata = raw.metadata_json if isinstance(raw.metadata_json, dict) else {}
-    return {
-        "raw_object_id": raw.id,
-        "filename": str(metadata.get("filename") or "attachment"),
-        "transient_text": raw.raw_content,
-        "extraction_success": True,
-    }
+    stored = storage.get_raw_object(raw.id, raw.user_id)
+    assert isinstance(stored, dict)
+    return _current_turn_file_attachment(
+        filename=str(metadata.get("filename") or "attachment"),
+        file_ingestion={
+            "raw_object_id": raw.id,
+            "extraction": {
+                "success": True,
+                "text_success": True,
+                "chars": len(raw.raw_content),
+            },
+        },
+        raw=stored,
+        storage=storage,
+    )
+
+
+def _transient_attachment(*, filename: str, text: str) -> dict[str, object]:
+    """Build the process-private no-save carrier produced by the API boundary."""
+
+    return _current_turn_file_attachment(
+        filename=filename,
+        file_ingestion={
+            "extraction": {
+                "success": True,
+                "text_success": True,
+                "chars": len(text),
+            }
+        },
+        raw={
+            "raw_content": text,
+            "metadata_json": {
+                "filename": filename,
+                "uploaded_by": "alice",
+                "extraction_success": True,
+                "text_extraction_success": True,
+            },
+        },
+    )
 
 
 def _patch_attachment_generation(runtime, monkeypatch):  # noqa: ANN001
@@ -304,13 +353,20 @@ async def test_reply_to_assistant_selects_that_answers_file_and_records_safe_lin
 
     monkeypatch.setattr(runtime, "_prepare_context", forbidden)
     monkeypatch.setattr(runtime, "_generate_response", forbidden)
-    message = "покажи метаданные его"
+    selected_pointer = _historical_direct_read_attachment(
+        selected.id,
+        tenant_id="alice",
+        uploaded_by="alice",
+        selector_kind="assistant_lineage",
+    )
+    assert selected_pointer is not None
+    message = "покажи метаданные документа из ответа"
     result = await runtime.chat(
         "alice",
         message,
         actor=ActorContext(user_id="alice", preset_key="owner", source="telegram-bridge"),
         conversation_id=conversation["id"],
-        attachments=[{"raw_object_id": selected.id}],
+        attachments=[selected_pointer],
         enable_tools=True,
         reply_assistant_reference=True,
     )
@@ -369,12 +425,22 @@ async def test_exact_reply_body_query_uses_structural_pointer_without_runner_ide
     )
     seen = _patch_attachment_generation(runtime, monkeypatch)
 
+    selector_kind = (
+        "assistant_lineage" if reference_kwargs.get("reply_assistant_reference") else "telegram_reply"
+    )
+    pointer = _historical_direct_read_attachment(
+        target.id,
+        tenant_id="alice",
+        uploaded_by="alice",
+        selector_kind=selector_kind,
+    )
+    assert pointer is not None
     result = await runtime.chat(
         "alice",
         message,
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
         conversation_id=conversation["id"],
-        attachments=[{"raw_object_id": target.id}],
+        attachments=[pointer],
         enable_tools=False,
         **reference_kwargs,
     )
@@ -421,7 +487,7 @@ async def test_unresolved_reply_to_assistant_never_drifts_to_latest_upload(
 
     monkeypatch.setattr(runtime, "_prepare_context", forbidden)
     monkeypatch.setattr(runtime, "_generate_response", forbidden)
-    message = "покажи метаданные его"
+    message = "покажи метаданные документа из ответа"
     result = await runtime.chat(
         "alice",
         message,
@@ -562,7 +628,7 @@ async def test_same_turn_odt_metadata_request_selects_the_only_current_upload(
         "покажи метаданные по этому файлу",
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
         conversation_id=conversation["id"],
-        attachments=[_current_attachment(raw)],
+        attachments=[_current_attachment(storage, raw)],
         enable_tools=True,
     )
 
@@ -614,7 +680,7 @@ async def test_metadata_of_another_document_uses_a_newly_attached_current_pointe
         "Покажи метаданные другого документа",
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
         conversation_id=conversation["id"],
-        attachments=[_current_attachment(current)],
+        attachments=[_current_attachment(storage, current)],
         enable_tools=True,
     )
 
@@ -788,9 +854,60 @@ async def test_plain_caller_attachment_cannot_mint_code_owned_document_metadata(
         enable_tools=True,
     )
 
-    assert "не удалось определить доступный выбранный документ" in result["message"].casefold()
+    assert "источник стал недоступен или изменился" in result["message"].casefold()
     assert "FORGED" not in result["message"]
     assert result["tools_used"] == []
+    assert result["attachment_authority_changed_before_publication"] is True
+    assert result["attachment_context_available"] is False
+
+
+@pytest.mark.asyncio
+async def test_registered_metadata_request_with_wrong_byte_digest_fails_closed(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    raw = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "DIGEST-MISMATCH-PRIVATE-BODY",
+        filename="digest-mismatch.odt",
+        extra_metadata={"title": "DIGEST-MISMATCH-PRIVATE-TITLE"},
+    )
+    stored = storage.get_raw_object(raw.id, "alice")
+    assert isinstance(stored, dict)
+    metadata = json.loads(str(stored["metadata_json"]))
+    metadata["sha256"] = "0" * 64
+    storage.execute(
+        "UPDATE raw_objects SET metadata_json=? WHERE id=?",
+        (json.dumps(metadata, ensure_ascii=False, sort_keys=True), raw.id),
+    )
+    storage.commit()
+    runtime = AgentRuntime(settings, storage, llm=_EnabledButUnusedLLM())
+
+    async def forbidden(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("a digest-mismatched source reached a model/context seam")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden)
+    monkeypatch.setattr(runtime, "_generate_response", forbidden)
+    result = await runtime.chat(
+        "alice",
+        "Покажи метаданные этого документа",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        attachments=[{"raw_object_id": raw.id}],
+        quoted_attachment_reference=True,
+        enable_tools=True,
+    )
+
+    assert "источник стал недоступен или изменился" in result["message"].casefold()
+    assert result["attachment_authority_changed_before_publication"] is True
+    assert result["attachment_context_expected_count"] == 1
+    assert result["attachment_context_readable_count"] == 0
+    serialized = json.dumps(result, ensure_ascii=False)
+    assert raw.id not in serialized
+    assert "DIGEST-MISMATCH" not in serialized
 
 
 @pytest.mark.asyncio
@@ -905,13 +1022,7 @@ async def test_pending_file_continues_only_when_the_same_conversation_points_bac
         "не сохраняй, только посмотри файл",
         actor=actor,
         conversation_id=opened["conversation_id"],
-        attachments=[
-            {
-                "filename": "one-turn.txt",
-                "transient_text": "ONE-TURN-ONLY",
-                "extraction_success": True,
-            }
-        ],
+        attachments=[_transient_attachment(filename="one-turn.txt", text="ONE-TURN-ONLY")],
         enable_tools=False,
     )
     after_transient = await runtime.chat(
@@ -991,7 +1102,7 @@ def test_shared_tenant_attachment_requires_the_exact_uploader(settings, storage)
     )
 
     assert restored == [], "a shared-archive colleague received another uploader's pending file"
-    assert expected == 1, "the structural missing-file count must remain audible without exposing it"
+    assert expected == 0, "a foreign uploader must not create an observable file cardinality"
 
 
 def test_only_budgeted_history_can_restore_an_attachment(settings, storage):
@@ -1660,7 +1771,7 @@ async def test_current_file_can_be_compared_with_one_exact_named_prior_file(
         query,
         actor=actor,
         conversation_id=conversation["id"],
-        attachments=[_current_attachment(gamma)],
+        attachments=[_current_attachment(storage, gamma)],
         enable_tools=False,
     )
 
@@ -1731,7 +1842,7 @@ async def test_complete_selector_does_not_add_an_unrequested_current_file(
         query,
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
         conversation_id=conversation["id"],
-        attachments=[_current_attachment(current)],
+        attachments=[_current_attachment(storage, current)],
         enable_tools=False,
     )
 
@@ -1791,7 +1902,7 @@ async def test_explicit_name_replaces_an_unrequested_current_attachment(
         query,
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
         conversation_id=conversation["id"],
-        attachments=[_current_attachment(current)],
+        attachments=[_current_attachment(storage, current)],
         enable_tools=False,
     )
 
@@ -1846,7 +1957,7 @@ async def test_uploaded_current_file_stays_in_catalog_when_prior_file_is_the_act
         "Что в report.pdf?",
         actor=actor,
         conversation_id=conversation["id"],
-        attachments=[_current_attachment(current)],
+        attachments=[_current_attachment(storage, current)],
         enable_tools=False,
     )
     selected_current = await runtime.chat(
@@ -2420,7 +2531,10 @@ async def test_two_current_files_satisfy_both_without_adding_a_prior_file(
         "Сравни оба файла",
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
         conversation_id=conversation["id"],
-        attachments=[_current_attachment(current_one), _current_attachment(current_two)],
+        attachments=[
+            _current_attachment(storage, current_one),
+            _current_attachment(storage, current_two),
+        ],
         enable_tools=False,
     )
 

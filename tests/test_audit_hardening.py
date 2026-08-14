@@ -72,7 +72,9 @@ def _seed_addressable_objects(storage, user_id: str) -> dict[str, str]:
     # `content_type == "file"` and resolves `stored_path` under `files_dir`.
     stored = pathlib.Path(storage.settings.files_dir) / user_id / "проба.txt"
     stored.parent.mkdir(parents=True, exist_ok=True)
-    stored.write_text("байты", encoding="utf-8")
+    body = "байты".encode()
+    stored.write_bytes(body)
+    digest = hashlib.sha256(body).hexdigest()
     upload = RawObject(
         id=new_id("raw"),
         user_id=user_id,
@@ -80,10 +82,13 @@ def _seed_addressable_objects(storage, user_id: str) -> dict[str, str]:
         source_ref=new_id("src"),
         raw_content="байты",
         content_type="file",
-        content_hash=hashlib.sha256(b"file-probe").hexdigest(),
-        # Absolute: `_safe_runtime_file` resolves the candidate on its own, so a
-        # relative path would resolve against the CWD and fall outside files_dir.
-        metadata_json={"filename": "проба.txt", "stored_path": str(stored)},
+        content_hash=digest,
+        metadata_json={
+            "filename": "проба.txt",
+            "stored_path": f"{user_id}/проба.txt",
+            "sha256": digest,
+            "size_bytes": len(body),
+        },
     )
     storage.store_raw_object(upload)
 

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from time import perf_counter
+import tracemalloc
 
 import pytest
 
@@ -1206,15 +1206,16 @@ def test_large_document_first_unit_uses_incremental_blob_io(storage):
         )
     statements: list[str] = []
     storage.conn.set_trace_callback(statements.append)
-    started = perf_counter()
+    tracemalloc.start()
     try:
         report = storage.backfill_entity_mentions("alice", max_documents=1, max_seconds=0.01, max_links=10)
+        _current_bytes, peak_bytes = tracemalloc.get_traced_memory()
     finally:
+        tracemalloc.stop()
         storage.conn.set_trace_callback(None)
-    elapsed = perf_counter() - started
 
     assert report["budget_reason"] == "max_seconds"
-    assert elapsed < 0.05, f"one cooperative unit read the 50 MB body: {elapsed:.4f}s"
+    assert peak_bytes < 2_000_000, f"one cooperative unit materialised {peak_bytes:,} Python bytes"
     assert not any("SELECT COUNT(*)" in statement.upper() for statement in statements)
     assert not any("SELECT K.CONTENT" in statement.upper() for statement in statements)
 

@@ -584,6 +584,58 @@ def test_shared_tenant_authorship_blocks_without_touching_either_account(
         assert storage.get_raw_object(raw.id, tenant) is not None
 
 
+def test_file_source_alias_account_axes_are_counted_once_and_deleted_without_raw(storage) -> None:
+    actor = "local:file-alias-delete-admin"
+    target = "local:file-alias-delete-target"
+    survivor = "local:file-alias-delete-survivor"
+    storage.ensure_user(actor, preset_key="admin")
+    storage.ensure_user(target)
+    storage.ensure_user(survivor)
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id=survivor,
+        source="upload",
+        source_ref="telegram-update:surviving-canonical-file",
+        raw_content="[File: survivor.txt]",
+        content_type="file",
+        metadata_json={"filename": "survivor.txt", "uploaded_by": survivor},
+    )
+    storage.store_raw_object(raw)
+    now = utc_now()
+    with storage.transaction() as conn:
+        conn.executemany(
+            """INSERT INTO file_source_aliases(
+                   user_id,uploaded_by,source_ref,raw_object_id,created_at
+               ) VALUES(?,?,?,?,?)""",
+            (
+                (target, target, "telegram-file:TARGET-BOTH-AXES", raw.id, now),
+                (survivor, target, "telegram-file:TARGET-UPLOADER-AXIS", raw.id, now),
+                (survivor, survivor, "telegram-file:SURVIVOR-ALIAS", raw.id, now),
+            ),
+        )
+    storage.update_user(target, status="disabled")
+
+    plan = _verified_plan(storage, target)
+
+    assert plan["ready"] is True, plan
+    assert plan["counts"]["file_source_aliases"] == 2
+    outcome = delete_account(
+        storage,
+        target,
+        expected_fingerprint=plan["fingerprint"],
+        actor_user_id=actor,
+        quiescence_verified=True,
+    )
+
+    assert outcome["deleted"]["file_source_aliases"] == 2
+    assert outcome["deleted_rows"] == plan["planned_delete_rows"]
+    assert storage.get_raw_object(raw.id, survivor) is not None
+    survivor_aliases = storage.execute(
+        "SELECT user_id,uploaded_by,source_ref FROM file_source_aliases ORDER BY source_ref"
+    ).fetchall()
+    assert [tuple(row) for row in survivor_aliases] == [(survivor, survivor, "telegram-file:SURVIVOR-ALIAS")]
+
+
 def test_cross_account_identity_attribution_blocks_without_revoking_neighbour(storage) -> None:
     target = "local:identity-link-author"
     neighbour = "local:identity-link-owner"

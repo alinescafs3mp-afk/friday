@@ -68,7 +68,7 @@ class _ConversationReplayRouter:
 
 
 @pytest.mark.asyncio
-async def test_a_model_archive_stub_on_radio_ack_is_replaced_with_the_ack(
+async def test_a_model_archive_stub_on_non_closed_conversation_is_replaced_with_an_ack(
     settings,
     storage,
 ) -> None:
@@ -81,7 +81,10 @@ async def test_a_model_archive_stub_on_radio_ack_is_replaced_with_the_ack(
         kernel=_NoToolsKernel(),
     )
 
-    reply = await runtime.chat("alice", "Приём", actor=_actor())
+    # ``Так`` is deliberately outside the closed zero-model vocabulary. This
+    # keeps the legacy model-output guard tested independently from the radio
+    # fast path, where claiming that a model answer was replaced would be false.
+    reply = await runtime.chat("alice", "Так", actor=_actor())
 
     folded = reply["message"].casefold()
     assert "баз" not in folded
@@ -90,6 +93,7 @@ async def test_a_model_archive_stub_on_radio_ack_is_replaced_with_the_ack(
     stored = storage.get_message(str(reply["message_id"]), "alice")
     metadata = json.loads(str(stored["metadata_json"] or "{}"))
     assert metadata["structural"]["output_guards"]["conversational_archive_fallback_replaced"] is True
+    assert router.calls == 2
 
 
 @pytest.mark.asyncio

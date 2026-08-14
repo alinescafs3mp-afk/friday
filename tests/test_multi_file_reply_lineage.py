@@ -138,6 +138,7 @@ def test_mixed_uploader_two_file_reply_regenerate_and_closed_failures(
     canary_b = "EXACT-JBL-B-CANARY-7Q9"
     canary_a = "EXACT-OWNER-A-CANARY-4M2"
     decoy_canary = "AMBIENT-DECOY-CANARY-DO-NOT-READ"
+    ignored_canary = "IGNORED-FILE-CANARY"
 
     with TestClient(app) as client:
         canonical_chat = app.state.agent.chat
@@ -207,7 +208,7 @@ def test_mixed_uploader_two_file_reply_regenerate_and_closed_failures(
             external_user="1001",
             uploader=owner,
             label="OWNER-IGNORED",
-            body="IGNORED-FILE-CANARY",
+            body=ignored_canary,
         )
         raw_private = _upload_text_file(
             client,
@@ -331,7 +332,9 @@ def test_mixed_uploader_two_file_reply_regenerate_and_closed_failures(
         assert follow_up_payload["restored_attachment_count"] == 2
 
         assert len(ordered_model.payloads) == 3
-        assert disk_reads == [(raw_b, jbl), (raw_a, owner)] * 3
+        # The first native-reply publication performs an additional exact
+        # re-read before committing its derived answer.
+        assert disk_reads == [(raw_b, jbl), (raw_a, owner)] * 4
 
         rows = storage.get_conversation_messages(
             conversation["id"],
@@ -340,10 +343,18 @@ def test_mixed_uploader_two_file_reply_regenerate_and_closed_failures(
         )
         generated = rows[-6:]
         assert [row["role"] for row in generated] == ["user", "assistant"] * 3
-        for row in generated:
+        expected_uploader_maps = [
+            {raw_b: jbl},
+            {raw_b: jbl, raw_a: owner},
+            {raw_b: jbl},
+            {raw_b: jbl},
+            {raw_b: jbl},
+            {raw_b: jbl},
+        ]
+        for row, expected_uploaders in zip(generated, expected_uploader_maps, strict=True):
             metadata = _metadata(row)
             assert metadata["conversation_attachment_raw_ids"] == [raw_b, raw_a]
-            assert metadata["conversation_attachment_uploaders"] == {raw_b: jbl}
+            assert metadata["conversation_attachment_uploaders"] == expected_uploaders
             assert "conversation_uploaded_raw_ids" not in metadata
             if row["role"] == "assistant":
                 assert metadata["attachment_context_used"] is True
@@ -365,6 +376,7 @@ def test_mixed_uploader_two_file_reply_regenerate_and_closed_failures(
             encoded = json.dumps(public_payload, ensure_ascii=False)
             for raw_id in (raw_b, raw_a, raw_decoy):
                 assert raw_id not in encoded
+            assert owner not in encoded and jbl not in encoded
             assert "conversation_attachment_raw_ids" not in encoded
             assert "conversation_attachment_uploaders" not in encoded
 
@@ -438,6 +450,85 @@ def test_mixed_uploader_two_file_reply_regenerate_and_closed_failures(
             )
         )
 
+        # A native reply to one exact assistant lineage is a typed historical
+        # direct-read authority, including for an ignored Inbox member. Ambient
+        # and implicit restoration still exclude that member.
+        ignored_source = storage.store_message(
+            conversation["id"],
+            owner,
+            "assistant",
+            "Exact ignored lineage",
+            metadata={
+                "attachment_context_used": True,
+                "conversation_attachment_raw_ids": [raw_a, raw_ignored],
+            },
+        )
+
+        class IgnoredLineageModel:
+            enabled = True
+            model = "exact-ignored-assistant-lineage"
+            total_budget_sec = 5.0
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def chat(self, messages, **_kwargs):
+                projected = json.dumps(messages, ensure_ascii=False)
+                self.calls += 1
+                assert canary_a in projected and ignored_canary in projected
+                assert projected.index(canary_a) < projected.index(ignored_canary)
+                assert canary_b not in projected and decoy_canary not in projected
+                return {
+                    "content": f"Exact ignored lineage: {canary_a}; {ignored_canary}.",
+                    "tool_calls": None,
+                    "_queue_wait_sec": 0.0,
+                }
+
+        ignored_model = IgnoredLineageModel()
+        app.state.agent.llm = ignored_model
+        disk_reads.clear()
+        ignored = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Обобщи оба файла из процитированного ответа.",
+                "source_ref": "telegram-update:exact-ignored-multi-lineage",
+                "telegram_message_id": 11_003,
+                "telegram_user": {"id": 1001, "first_name": "Owner"},
+                "reply_source_message_id": str(ignored_source["id"]),
+                "attachments": [{"raw_object_id": raw_decoy}],
+            },
+            user="1001",
+        )
+        assert ignored.status_code == 200, ignored.text
+        ignored_payload = ignored.json()
+        ignored_text = str(ignored_payload.get("message") or "")
+        assert canary_a in ignored_text and ignored_canary in ignored_text
+        assert canary_b not in ignored_text and decoy_canary not in ignored_text
+        assert ignored_payload["attachment_context_expected_count"] == 2
+        assert ignored_payload["attachment_context_readable_count"] == 2
+        assert ignored_payload["attachment_coverage_complete"] is True
+        assert ignored_payload["attachment_verification_complete"] is True
+        assert ignored_model.calls == 1
+        assert disk_reads == [(raw_a, owner), (raw_ignored, owner)] * 2
+        ignored_history = _bridge_call(
+            client,
+            scoped,
+            "GET",
+            f"/api/conversations/{conversation['id']}/messages",
+            user="1001",
+        )
+        assert ignored_history.status_code == 200, ignored_history.text
+        for public_payload in (ignored_payload, ignored_history.json()):
+            encoded = json.dumps(public_payload, ensure_ascii=False)
+            for raw_id in (raw_a, raw_b, raw_ignored, raw_decoy):
+                assert raw_id not in encoded
+            assert owner not in encoded and jbl not in encoded
+            assert "conversation_attachment_raw_ids" not in encoded
+            assert "conversation_attachment_uploaders" not in encoded
+
         class NeverModel:
             enabled = True
             model = "never-on-closed-multi-lineage"
@@ -481,14 +572,6 @@ def test_mixed_uploader_two_file_reply_regenerate_and_closed_failures(
                 {
                     "attachment_context_used": True,
                     "conversation_attachment_raw_ids": [raw_a, raw_deleted],
-                },
-                False,
-            ),
-            (
-                "ignored-member",
-                {
-                    "attachment_context_used": True,
-                    "conversation_attachment_raw_ids": [raw_a, raw_ignored],
                 },
                 False,
             ),

@@ -824,6 +824,11 @@ def build_office_prompt_bundle(
 
 
 _BALANCED_QUOTED_TEXT = re.compile(r"«[^»\n]*»|“[^”\n]*”|„[^“\n]*“|\"[^\"\n]*\"|'[^'\n]*'")
+_FILENAME_NAVIGATION_PREFIX = re.compile(
+    r"^(?:файл|документ|таблица)\s+"
+    r"[^\s,:;!?\"'«»“”„/\\]{1,255}\s*[:,]\s*",
+    re.IGNORECASE,
+)
 
 
 def file_authority_speech(message: str) -> str:
@@ -874,10 +879,14 @@ def _office_unquoted_candidate(question: str) -> bool:
     speech = file_authority_speech(question)
     if not speech:
         return False
-    if _office_action_present(speech):
+    if _office_action_present(speech) or _OFFICE_ARBITER_EXHAUSTIVE_REQUEST.search(speech):
         return True
     text = _office_intent_text(question)
-    return bool(text and office_attachment_targeted(question) and _office_action_present(text))
+    return bool(
+        text
+        and office_attachment_targeted(question)
+        and (_office_action_present(text) or _OFFICE_ARBITER_EXHAUSTIVE_REQUEST.search(text))
+    )
 
 
 def quoted_office_command_is_data(question: str) -> bool:
@@ -899,6 +908,12 @@ def _office_intent_text(question: str) -> str:
     if quoted_office_command_is_data(question):
         return ""
     return _clean_question(file_authority_speech(question))
+
+
+def _without_filename_navigation_prefix(text: str) -> str:
+    """Remove one closed filename label, never an arbitrary prose prefix."""
+
+    return _FILENAME_NAVIGATION_PREFIX.sub("", text, count=1).strip()
 
 
 def _closed_office_request_kind(question: str) -> str:
@@ -1090,7 +1105,7 @@ def office_request_kind(question: str) -> str:
         or _SEMANTIC_FILTER.search(text)
     ):
         return ""
-    return _closed_office_request_kind(text)
+    return _closed_office_request_kind(_without_filename_navigation_prefix(text))
 
 
 def validate_exact_id_selection(
@@ -1252,6 +1267,19 @@ OFFICE_INTENT_ARBITER_SYSTEM = (
 )
 
 
+_OFFICE_ARBITER_EXHAUSTIVE_REQUEST = re.compile(
+    rf"(?:"
+    rf"\b(?:посчита|пересчита|перечисл|покаж|назов|вывед|распиш)\w*\b"
+    rf"[^.!?\n]{{0,80}}\b(?:вс[еёхяю]*|полн\w*|спис\w*|переч\w*|состав\w*|"
+    rf"{_PEOPLE_NOUN}|{_RECORD_NOUN})\b|"
+    rf"\b(?:вс[еёхяю]*|полн\w*|спис\w*|переч\w*|состав\w*|"
+    rf"{_PEOPLE_NOUN}|{_RECORD_NOUN})\b[^.!?\n]{{0,80}}"
+    rf"\b(?:посчита|пересчита|перечисл|покаж|назов|вывед|распиш)\w*\b"
+    rf")",
+    re.IGNORECASE,
+)
+
+
 def parse_office_intent(raw: Any) -> str:
     """Вид ответа из реплики арбитра. Всё непонятное — пусто, а не догадка."""
     text = str(raw or "")
@@ -1277,6 +1305,16 @@ def office_arbiter_applies(question: str, attachments: list[dict[str, Any]] | No
     """
     text = _office_intent_text(question)
     if not text or office_request_kind(question):
+        return False
+    # This classifier exists only for whole-table count/list wording which the
+    # closed parser does not yet recognise.  Merely pointing at an Office file
+    # is not enough: production sent ordinary questions such as “о чём речь в
+    # этом файле?” through this optional model call before the actual review.
+    # The wasted classifier took 30–60 seconds and, after a timed-out upload
+    # preview, compounded the remote GPU queue.  Require an explicit exhaustive
+    # count/list speech act; every normal summary, critique, lookup and review
+    # proceeds directly to the file answer.
+    if not (_office_action_present(text) or _OFFICE_ARBITER_EXHAUSTIVE_REQUEST.search(text)):
         return False
     active_items = [item for item in attachments or [] if isinstance(item, Mapping)]
     office_items = [item for item in active_items if looks_like_office_attachment(item)]

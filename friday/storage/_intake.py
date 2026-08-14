@@ -1221,7 +1221,9 @@ class IntakeMixin(StorageShared):
             parameters.append(str(uploaded_by))
         try:
             content_projection = (
-                ", r.raw_content AS _raw_content, r.metadata_json AS _raw_metadata" if include_content else ""
+                ", r.content_hash, r.raw_content AS _raw_content, r.metadata_json AS _raw_metadata"
+                if include_content
+                else ""
             )
             rows = self.execute(
                 f"""SELECT r.id, r.source, r.source_ref, r.content_type, r.received_at

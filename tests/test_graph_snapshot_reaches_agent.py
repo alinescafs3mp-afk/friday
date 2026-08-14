@@ -1294,10 +1294,11 @@ async def test_historical_tool_snapshot_becomes_the_durable_boundary_without_gra
     monkeypatch.setattr(runtime, "_prepare_context", prepare)
     result = await runtime.chat(
         "alice",
-        "Проверь сохранённый исторический снимок",
+        "Исследуй связи сущности Atlas в графе знаний на 4 августа 2026 года",
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
     )
 
+    assert result["tools_used"] == ["memory_search"]
     assert prepared[0].graph_context["known_at"] == NORMALIZED_KNOWN_AT
     messages = storage.get_conversation_messages(result["conversation_id"], user_id="alice", limit=20)
     assistant = next(item for item in reversed(messages) if item["role"] == "assistant")
@@ -2196,10 +2197,11 @@ async def test_as_of_only_tool_snapshot_becomes_durable_graph_as_of(
     monkeypatch.setattr(runtime, "_prepare_context", prepare)
     result = await runtime.chat(
         "alice",
-        "Проверь valid-time снимок",
+        "Исследуй связи сущности Atlas в графе знаний на 1 января 2024 года",
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
     )
 
+    assert result["tools_used"] == ["memory_search"]
     assert prepared[0].graph_context["as_of"] == "2024-01-01"
     assert prepared[0].graph_context["temporal_basis"] == "valid_time"
     assert result["context"]["graph_as_of"] == "2024-01-01"

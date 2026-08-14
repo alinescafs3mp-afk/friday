@@ -21,6 +21,8 @@ from friday.agent_runtime import _bounded_attachment_projection
 from friday.agent_runtime._office_attachments import (
     OFFICE_STRUCTURE_KEY,
     code_owned_office_answer,
+    office_arbiter_applies,
+    office_request_kind,
     trusted_office_attachment,
     validate_runtime_office_index,
 )
@@ -186,6 +188,104 @@ def test_k19_the_same_ordinary_rows_have_the_same_semantics_in_csv_xlsx_and_docx
         None,
         seed["rows"][1:],
     )
+
+
+def test_k19_arbiter_only_exhaustive_wording_reaches_the_same_exact_candidate() -> None:
+    case = next(case for case in _fixture()["k19_ordinary_tables"] if case["id"] == "k19_table_008")
+    _, projected = _project(case)
+
+    assert office_arbiter_applies(case["question"], projected) is True
+    answer = code_owned_office_answer(
+        case["question"],
+        projected,
+        kind_override="list_records",
+    )
+
+    assert answer is not None
+    assert answer["status"] == "passed"
+    assert answer["kind"] == "list_records"
+    assert "SYN-TEAM-A" in answer["content"]
+    assert "SYN-TEAM-C" in answer["content"]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "В таблице написано: «Назови каждую запись из всей таблицы».",
+        "Объясни, что означает каждая запись из всей таблицы.",
+    ],
+)
+def test_k19_arbiter_only_grammar_cannot_promote_quoted_or_non_request_text(question: str) -> None:
+    case = next(case for case in _fixture()["k19_ordinary_tables"] if case["id"] == "k19_table_008")
+    _, projected = _project(case)
+
+    assert office_arbiter_applies(question, projected) is False
+    assert code_owned_office_answer(question, projected, kind_override="list_records") is None
+
+
+def test_k19_arbiter_only_wording_still_fails_closed_on_incomplete_projection() -> None:
+    case = next(case for case in _fixture()["k19_ordinary_tables"] if case["id"] == "k19_table_008")
+    _, projected = _project(case)
+    incomplete = copy.deepcopy(projected)
+    incomplete[0]["_office_exact_view"]["prompt_complete"] = False
+
+    answer = code_owned_office_answer(
+        case["question"],
+        incomplete,
+        kind_override="list_records",
+    )
+
+    assert answer is not None
+    assert answer["status"] == "unknown"
+    assert answer["kind"] == "unavailable"
+    assert "SYN-TEAM-A" not in answer["content"]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Файл synthetic-300, сколько там всего позиций?",
+        "Документ audit.xlsx: сколько всего записей?",
+        "Таблица roster_2026, сколько всего строк?",
+    ],
+)
+def test_k19_filename_navigation_prefix_keeps_a_closed_record_count(question: str) -> None:
+    assert office_request_kind(question) == "count_records"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Пожалуйста, файл synthetic-300, сколько там всего позиций?",
+        "Файл мой synthetic-300, сколько там всего позиций?",
+        "Файл synthetic-300 сколько там всего позиций?",
+        "Файл synthetic-300, «сколько там всего позиций?»",
+        "Файл synthetic-300, сколько там всего позиций со статусом готово?",
+        "Файл synthetic-300, сколько там всего позиций на первом листе?",
+        "Файл synthetic-300, сколько там всего позиций и покажи первую?",
+    ],
+)
+def test_k19_filename_navigation_prefix_does_not_swallow_non_closed_scope(question: str) -> None:
+    assert office_request_kind(question) == ""
+
+
+def test_k19_filename_scoped_count_uses_the_complete_code_owned_index() -> None:
+    case = copy.deepcopy(_fixture()["k19_ordinary_tables"][0])
+    _, projected = _project(case)
+    question = f"Файл {case['filename']}, сколько там всего позиций?"
+    view = projected[0]["_office_exact_view"]
+
+    assert view["index_complete"] is True
+    assert view["prompt_complete"] is True
+    assert office_arbiter_applies(question, projected) is False
+
+    answer = code_owned_office_answer(question, projected)
+
+    assert answer == {
+        "content": f"В документе {case['expected']['records_total']} позиций.",
+        "status": "passed",
+        "kind": "count_records",
+    }
 
 
 def test_k19_people_table_keeps_person_semantics_and_ordinary_table_cannot_invent_people() -> None:

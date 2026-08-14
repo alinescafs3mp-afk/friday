@@ -18,6 +18,7 @@ from friday.agent_runtime import (
     _ATTACHMENT_QUERY_UNKNOWN,
     _FILE_EVIDENCE_ATTR,
     _OWNED_SAFE_DOCUMENT_METADATA,
+    _RAW_SOURCE_IDENTITY_KEY,
     _UNREADABLE_ATTACHMENT_ANSWER,
     AgentRuntime,
     FileBodyKind,
@@ -46,6 +47,7 @@ from friday.agent_runtime._office_attachments import (
 from friday.documents import DocumentExtractor
 from friday.execution_kernel import ExecutionKernel
 from friday.permissions import ActorContext, AuthorizationService
+from friday.source_identity import authorized_file_snapshot_token, raw_source_identity_sha256
 from friday.storage.models import RawObject, new_id
 
 
@@ -366,15 +368,17 @@ def test_file_evidence_set_is_sole_file_state_authority(monkeypatch, settings, s
         filename="cs2-quicklook.txt",
         text="QUICKLOOK-LITERAL-CS2 first line of the registered upload.",
     )
-    quicklook = _chat(
-        closed_chat,
+    full_review_model = _SilentLLM()
+    full_review = _chat(
+        _runtime(settings, storage, full_review_model),
         "Загружен документ: cs2-quicklook.txt",
         attachments=[_OwnedAttachment({"raw_object_id": ql_raw.id})],
         synthetic_document_notice=True,
     )
-    _assert_complete_metrics(quicklook)
-    assert quicklook.get("tools_used") == []
-    assert "QUICKLOOK-LITERAL-CS2" in quicklook["message"]
+    _assert_complete_metrics(full_review)
+    assert full_review.get("tools_used") == []
+    assert full_review_model.calls == 1
+    assert full_review["message"] == "CS2-SILENT"
 
     nosave = _stamp_valid(
         _OwnedAttachment(
@@ -904,46 +908,70 @@ def test_file_evidence_set_is_sole_file_state_authority(monkeypatch, settings, s
     assert _file_evidence_view_of(historical).body_kind == FileBodyKind.PROJECTED
     assert _file_evidence_view_of(historical).projection_empty_no_match is True
 
+    metadata_raw_id = "raw_metadatametadatametadatametada01"
+    metadata_bytes = b"abc"
+    metadata_sha256 = hashlib.sha256(metadata_bytes).hexdigest()
+    metadata_raw_projection = {
+        "id": metadata_raw_id,
+        "source": "upload",
+        "source_ref": "cs2:legacy-metadata",
+        "content_type": "file",
+        "received_at": "2026-08-14T00:00:00+00:00",
+        "content_hash": metadata_sha256,
+        "_raw_content": "DISK-VERIFIED-BODY",
+        "_raw_metadata": "{}",
+    }
+    metadata_identity = raw_source_identity_sha256(metadata_raw_projection)
+    metadata_snapshot_token = authorized_file_snapshot_token(
+        metadata_raw_projection,
+        content_sha256=metadata_sha256,
+    )
+    assert metadata_snapshot_token is not None
+
     original_view = _build_file_evidence_view(
         _OwnedAttachment(
             {
-                "raw_object_id": "raw_metadatametadatametadatametada01",
+                "raw_object_id": metadata_raw_id,
                 "filename": "legacy.doc",
                 "transient_text": "DISK-VERIFIED-BODY",
                 "extraction_success": True,
                 "verification_eligible": True,
                 "_registered_file_record": "valid",
                 "_registered_file_bytes_verified": True,
+                _RAW_SOURCE_IDENTITY_KEY: metadata_identity,
             }
         )
     )
     assert original_view is not None
     stamped = _OwnedAttachment(
         {
-            "raw_object_id": "raw_metadatametadatametadatametada01",
+            "raw_object_id": metadata_raw_id,
             "filename": "legacy.doc",
             "transient_text": "DISK-VERIFIED-BODY",
             "extraction_success": True,
             "verification_eligible": True,
             "_registered_file_record": "valid",
             "_registered_file_bytes_verified": True,
+            _RAW_SOURCE_IDENTITY_KEY: metadata_identity,
         }
     )
     _stamp_file_evidence(stamped, original_view)
     unstamped_canonical = _OwnedAttachment(
         {
-            "raw_object_id": "raw_metadatametadatametadatametada01",
+            "raw_object_id": metadata_raw_id,
             "filename": "legacy.doc",
             "transient_text": "DISK-VERIFIED-BODY",
             "extraction_success": True,
             "_registered_file_record": "valid",
+            _RAW_SOURCE_IDENTITY_KEY: metadata_identity,
         }
     )
 
     class _Authorized:
-        content = b"abc"
+        content = metadata_bytes
         filename = "legacy.doc"
         mime_type = "application/msword"
+        snapshot_token = metadata_snapshot_token
 
     async def inspect_headers(*_args, **_kwargs):
         return {"_document_metadata": {"format": "odt", "title": "Hydrated-Title"}}

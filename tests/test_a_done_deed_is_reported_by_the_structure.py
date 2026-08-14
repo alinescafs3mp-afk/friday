@@ -21,7 +21,8 @@ import asyncio
 import json
 
 from friday.agent_runtime import AgentContext, AgentRuntime
-from friday.permissions import ActorContext
+from friday.execution_kernel import ToolSpec
+from friday.permissions import AuthorizationService
 
 PROMISES_THE_FUTURE = "Хорошо, сейчас поставлю тебе напоминание про отчёт на пятницу."
 
@@ -29,14 +30,39 @@ PROMISES_THE_FUTURE = "Хорошо, сейчас поставлю тебе на
 class _Kernel:
     """Ядро, у которого `remind` срабатывает, — как на живой системе."""
 
-    def __init__(self) -> None:
+    def __init__(self, storage) -> None:  # noqa: ANN001
         self.calls: list[tuple[str, dict]] = []
+        self.authorization = AuthorizationService(storage)
 
     def get_tool_definitions(self, actor, topic=""):  # noqa: ANN001, ARG002
         return [
             {"type": "function", "function": {"name": "remind", "description": "напомнить"}},
             {"type": "function", "function": {"name": "memory_search", "description": "искать"}},
+            {"type": "function", "function": {"name": "make_file", "description": "создать файл"}},
+            {
+                "type": "function",
+                "function": {"name": "collect_files", "description": "собрать исходные файлы"},
+            },
         ]
+
+    @staticmethod
+    def get_tool(name: str) -> ToolSpec | None:
+        contract = {
+            "remind": ("kg.write", "mutate"),
+            "memory_search": ("search.use", "observe"),
+            "make_file": ("knowledge.read", "observe"),
+            "collect_files": ("knowledge.read", "observe"),
+        }.get(name)
+        if contract is None:
+            return None
+        security_id, risk = contract
+        return ToolSpec(
+            name=name,
+            description=f"synthetic faithful {name}",
+            parameters={"type": "object"},
+            security_id=security_id,
+            risk=risk,
+        )
 
     async def execute(self, tool: str, params: dict, actor=None):  # noqa: ANN001, ARG002
         self.calls.append((tool, params))
@@ -114,10 +140,10 @@ class _Hostile:
 
 def _answer(settings, storage, llm: _Hostile, message: str) -> tuple[str, _Kernel]:
     storage.ensure_user("alice", preset_key="owner")
-    kernel = _Kernel()
+    kernel = _Kernel(storage)
     agent = AgentRuntime(settings, storage, kernel=kernel)
     agent.llm = llm
-    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+    actor = kernel.authorization.actor_for_user("alice", source="test")
     result = asyncio.run(agent.chat("alice", message, actor=actor))
     return str(result.get("message") or ""), kernel
 
@@ -173,7 +199,7 @@ def test_a_model_invoked_reminder_survives_a_terminal_model_failure(settings, st
             raise RuntimeError("synthetic terminal transport failure")
 
     storage.ensure_user("alice", preset_key="owner")
-    kernel = _Kernel()
+    kernel = _Kernel(storage)
     llm = _ToolThenDead()
     runtime = AgentRuntime(settings, storage, llm=llm, kernel=kernel)
     context = AgentContext(
@@ -182,7 +208,7 @@ def test_a_model_invoked_reminder_survives_a_terminal_model_failure(settings, st
         person_id="alice",
         answer_mode="general_conversation",
     )
-    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+    actor = kernel.authorization.actor_for_user("alice", source="test")
     result = asyncio.run(
         runtime._agentic_loop(  # noqa: SLF001
             context,
@@ -257,13 +283,13 @@ def test_a_reminder_beside_an_archive_is_not_swallowed(settings, storage) -> Non
             return _Result()
 
     storage.ensure_user("alice", preset_key="owner")
-    kernel = _Packs()
+    kernel = _Packs(storage)
     agent = AgentRuntime(settings, storage, kernel=kernel)
     # Остаток после сборки архива — именно просьба напомнить: так ответил бы и
     # настоящий арбитр. Пустая строка здесь означала бы «человек больше ничего не
     # просил», и тест проверял бы не тот случай.
     agent.llm = _Both(rest="напомни про отчёт в пятницу")
-    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+    actor = kernel.authorization.actor_for_user("alice", source="test")
 
     result = asyncio.run(
         agent.chat(
@@ -322,10 +348,10 @@ def test_a_question_beside_an_archive_still_reaches_the_model(settings, storage)
             return _Result()
 
     storage.ensure_user("alice", preset_key="owner")
-    agent = AgentRuntime(settings, storage, kernel=_Packs())
+    agent = AgentRuntime(settings, storage, kernel=_Packs(storage))
     llm = _Files(rest="что там по проекту", final="По проекту всё идёт по плану.")
     agent.llm = llm
-    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+    actor = agent.kernel.authorization.actor_for_user("alice", source="test")
 
     result = asyncio.run(
         agent.chat("alice", "собери документы за 26 число, и что там по проекту", actor=actor)
@@ -371,10 +397,10 @@ def test_a_pure_archive_request_needs_no_model(settings, storage) -> None:
             return _Result()
 
     storage.ensure_user("alice", preset_key="owner")
-    agent = AgentRuntime(settings, storage, kernel=_Packs())
+    agent = AgentRuntime(settings, storage, kernel=_Packs(storage))
     llm = _Files(rest="", final="Сейчас соберу документы за 26 число.")
     agent.llm = llm
-    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+    actor = agent.kernel.authorization.actor_for_user("alice", source="test")
 
     result = asyncio.run(agent.chat("alice", "собери документы за 26 число", actor=actor))
 
@@ -416,10 +442,10 @@ def test_an_unparsed_remainder_keeps_the_turn_for_the_model(settings, storage) -
             return _Result()
 
     storage.ensure_user("alice", preset_key="owner")
-    agent = AgentRuntime(settings, storage, kernel=_Packs())
+    agent = AgentRuntime(settings, storage, kernel=_Packs(storage))
     llm = _Files(garbled=True, final="По проекту всё идёт по плану.")
     agent.llm = llm
-    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+    actor = agent.kernel.authorization.actor_for_user("alice", source="test")
 
     result = asyncio.run(
         agent.chat("alice", "собери документы за 26 число, и что там по проекту", actor=actor)

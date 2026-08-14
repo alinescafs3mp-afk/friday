@@ -22,8 +22,10 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import inspect
+import textwrap
 
 import pytest
 
@@ -118,5 +120,17 @@ def test_the_verdict_is_checked_before_anything_else() -> None:
 def test_the_context_reaches_the_prefetch() -> None:
     """Проверяется подключённое: боевой цикл передаёт вердикт, а не зовёт вслепую."""
     loop = inspect.getsource(AgentRuntime._agentic_loop)
-    at = loop.index("_prefetch_the_timeline_if_asked(")
-    assert "context" in loop[at : at + 200], "вердикт до ленты не доезжает"
+    tree = ast.parse(textwrap.dedent(loop))
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "_prefetch_the_timeline_if_asked"
+    ]
+    assert calls, "боевой цикл больше не вызывает предварительную ленту"
+    assert any(
+        isinstance(argument, ast.Name) and argument.id == "context"
+        for call in calls
+        for argument in call.args
+    ), "вердикт до ленты не доезжает"

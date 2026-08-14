@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import zipfile
 from datetime import date
@@ -70,6 +71,7 @@ def _put_file(
     target = settings.files_dir / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(body)
+    digest = hashlib.sha256(body).hexdigest()
     raw = RawObject(
         id=f"raw-{name}-{when}",
         user_id=user,
@@ -77,10 +79,12 @@ def _put_file(
         source_ref=name,
         raw_content="текст документа",
         content_type="file",
+        content_hash=digest,
         metadata_json={
             "filename": name,
             "stored_path": relative,
             "size_bytes": len(body),
+            "sha256": digest,
             "mime_type": mime_type,
             **({"media_kind": media_kind} if media_kind else {}),
         },

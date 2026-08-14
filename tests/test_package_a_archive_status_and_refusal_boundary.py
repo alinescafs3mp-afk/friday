@@ -391,8 +391,16 @@ async def test_k17_status_only_discards_carriers_and_cannot_reach_the_late_build
 
     late_builder_calls = 0
 
-    async def build(request, answer, actor, *, evidence=None, context=None):  # noqa: ANN001
-        del request, answer, actor, evidence, context
+    async def build(  # noqa: ANN001
+        request,
+        answer,
+        actor,
+        *,
+        evidence=None,
+        context=None,
+        literal_source_text=None,
+    ):
+        del request, answer, actor, evidence, context, literal_source_text
         nonlocal late_builder_calls
         late_builder_calls += 1
         raise AssertionError("the archive-status fallback reached the file builder")
@@ -447,8 +455,16 @@ async def test_k17_still_guards_a_general_answer_requested_as_a_file(
 
     built_from: list[str] = []
 
-    async def build(request, answer, actor, *, evidence=None, context=None):  # noqa: ANN001
-        del request, actor, evidence, context
+    async def build(  # noqa: ANN001
+        request,
+        answer,
+        actor,
+        *,
+        evidence=None,
+        context=None,
+        literal_source_text=None,
+    ):
+        del request, actor, evidence, context, literal_source_text
         built_from.append(answer)
         return {
             "kind": "document",
@@ -847,8 +863,16 @@ async def test_k11_repair_is_augmented_and_a_bare_refusal_never_reaches_the_late
 
     late_builder_calls = 0
 
-    async def build(request, answer, actor, *, evidence=None, context=None):  # noqa: ANN001
-        del request, answer, actor, evidence, context
+    async def build(  # noqa: ANN001
+        request,
+        answer,
+        actor,
+        *,
+        evidence=None,
+        context=None,
+        literal_source_text=None,
+    ):
+        del request, answer, actor, evidence, context, literal_source_text
         nonlocal late_builder_calls
         late_builder_calls += 1
         return {
@@ -1131,8 +1155,16 @@ async def test_k11_does_not_rewrite_the_structural_model_outage_message(
 
     late_builder_calls = 0
 
-    async def build(request, answer, actor, *, evidence=None, context=None):  # noqa: ANN001
-        del request, answer, actor, evidence, context
+    async def build(  # noqa: ANN001
+        request,
+        answer,
+        actor,
+        *,
+        evidence=None,
+        context=None,
+        literal_source_text=None,
+    ):
+        del request, answer, actor, evidence, context, literal_source_text
         nonlocal late_builder_calls
         late_builder_calls += 1
         raise AssertionError("model outage reached the late file builder")
@@ -1178,8 +1210,16 @@ async def test_k11_explicit_local_file_alternative_allows_the_late_builder(
 
     built_from: list[str] = []
 
-    async def build(request, answer, actor, *, evidence=None, context=None):  # noqa: ANN001
-        del request, actor, evidence, context
+    async def build(  # noqa: ANN001
+        request,
+        answer,
+        actor,
+        *,
+        evidence=None,
+        context=None,
+        literal_source_text=None,
+    ):
+        del request, actor, evidence, context, literal_source_text
         built_from.append(answer)
         return {
             "kind": "document",

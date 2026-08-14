@@ -52,12 +52,18 @@ def test_the_sanitiser_runs_where_the_answer_is_formed():
     """
     import inspect
 
-    from friday import agent_runtime
+    from friday.agent_runtime import AgentRuntime
 
-    source = inspect.getsource(agent_runtime)
-    answer_branch = source[source.index('elif turn.kind == "answer":') :][:600]
-    assert "_strip_tool_call_markup(turn.text)" in answer_branch, (
+    source = inspect.getsource(AgentRuntime._agentic_loop)  # noqa: SLF001
+    start = source.index('elif turn.kind == "answer":')
+    end = source.index('if turn.kind == "protocol_error" or not calls:', start)
+    answer_branch = source[start:end]
+    assert "clean_answer = _strip_tool_call_markup(turn.text)" in answer_branch, (
         "финальный ответ отдаётся человеку без очистки служебных маркеров"
+    )
+    assert "accepted_answer = context.deferred_web_file_body or clean_answer" in answer_branch
+    assert '"content": accepted_answer' in answer_branch, (
+        "очищенный ответ вычисляется, но человеку отдаётся исходная строка"
     )
 
 

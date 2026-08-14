@@ -53,12 +53,22 @@ def _seed_database(settings: Any) -> tuple[Path, str, str]:
         db.executemany(
             """INSERT INTO users(
                    id,source,external_id,preset_key,status,created_at,updated_at,last_seen_at
-               ) VALUES(?,?,?,?,?,?,?,?)""",
+            ) VALUES(?,?,?,?,?,?,?,?)""",
             [
+                (tenant, "local", "", "owner", "active", now, now, now),
                 (owner, "local", "", "owner", "active", now, now, now),
                 ("telegram-exact", "telegram", "101", "user", "active", now, now, now),
                 ("telegram-ambiguous", "telegram", "202", "user", "active", now, now, now),
                 ("telegram-other", "telegram", "303", "user", "active", now, now, now),
+            ],
+        )
+        db.executemany(
+            """INSERT INTO conversations(id,user_id,created_at,updated_at)
+               VALUES(?,?,?,?)""",
+            [
+                ("conv-exact", "telegram-exact", now, now),
+                ("conv-ambiguous", "telegram-ambiguous", now, now),
+                ("conv-other", "telegram-other", now, now),
             ],
         )
         db.executemany(

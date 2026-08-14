@@ -8,6 +8,7 @@ contract and fail on every unexpected call.
 from __future__ import annotations
 
 import copy
+import hashlib
 import io
 import json
 from dataclasses import replace
@@ -44,12 +45,37 @@ from friday.agent_runtime._office_attachments import (
 from friday.documents import DocumentExtractor
 from friday.execution_kernel import ToolResult
 from friday.permissions import ActorContext
+from friday.server import _current_turn_file_attachment
 from friday.storage.models import RawObject, new_id
 from friday.telegram_bridge._markup import to_telegram_html
 
 
 def _actor() -> ActorContext:
     return ActorContext(user_id="alice", preset_key="owner", source="test")
+
+
+def _transient_attachment(*, filename: str, text: str) -> dict[str, Any]:
+    """Project current no-save bytes through the server-owned carrier."""
+
+    return _current_turn_file_attachment(
+        filename=filename,
+        file_ingestion={
+            "extraction": {
+                "success": True,
+                "text_success": True,
+                "chars": len(text),
+            }
+        },
+        raw={
+            "raw_content": text,
+            "metadata_json": {
+                "filename": filename,
+                "uploaded_by": "alice",
+                "extraction_success": True,
+                "text_extraction_success": True,
+            },
+        },
+    )
 
 
 class _AllowAll:
@@ -614,12 +640,10 @@ async def test_a_repair_cannot_reintroduce_a_false_model_outage_at_the_final_bou
         "Что указано в приложенном документе?",
         actor=_actor(),
         attachments=[
-            {
-                "filename": "synthetic.txt",
-                "transient_text": "Проверяемый синтетический факт.",
-                "extraction_success": True,
-                "verification_eligible": True,
-            }
+            _transient_attachment(
+                filename="synthetic.txt",
+                text="Проверяемый синтетический факт.",
+            )
         ],
         enable_tools=False,
     )
@@ -680,7 +704,7 @@ async def test_bare_docx_summary_is_not_misclassified_as_an_exact_inventory(
     monkeypatch,
     incomplete: bool,
 ) -> None:
-    """Bare notice is a zero-model receipt; only an explicit summary is model-bearing."""
+    """A bare readable upload gets the ordinary attachment review, not a receipt."""
 
     storage.ensure_user("alice", preset_key="owner")
     runtime = AgentRuntime(
@@ -693,32 +717,6 @@ async def test_bare_docx_summary_is_not_misclassified_as_an_exact_inventory(
         "Сводка документа: указаны две позиции — Alpha и Beta. "
         "Это полный обзор всех двух позиций в прочитанной структуре."
     )
-
-    async def forbidden_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
-        del args, kwargs
-        raise AssertionError("bare upload notice entered general context preparation")
-
-    async def forbidden_generate(*args, **kwargs):  # noqa: ANN002, ANN003
-        del args, kwargs
-        raise AssertionError("bare upload notice called the model")
-
-    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
-    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
-    receipt = await runtime.chat(
-        "alice",
-        "Загружен документ: synthetic-summary.docx",
-        actor=_actor(),
-        attachments=[attachment],
-        enable_tools=False,
-        synthetic_document_notice=True,
-    )
-    assert receipt["tools_used"] == []
-    assert receipt["message_format"] == "plain"
-    assert receipt["message"] != draft
-    assert receipt["message"] != OFFICE_EXACT_UNAVAILABLE_MESSAGE
-    assert "пришлите" not in receipt["message"].casefold()
-    # Deterministic status/quicklook only — no free-form model inventory.
-    assert "зарегистрирован" in receipt["message"].casefold() or "файл" in receipt["message"].casefold()
 
     generate_calls = {"n": 0}
 
@@ -738,33 +736,25 @@ async def test_bare_docx_summary_is_not_misclassified_as_an_exact_inventory(
         return {"content": draft, "tools_used": [], "_model_generated": True}
 
     monkeypatch.setattr(runtime, "_generate_response", generate)
-
-    # Explicit content request may use the ordinary local path; prepare stays off
-    # for pure-file, but if prepare is hit it must not invent archive evidence.
-    async def local_prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
-        del message, kwargs
-        return AgentContext(
-            conversation_id=conversation_id,
-            user_id=user_id,
-            person_id=user_id,
-            conversation_history=[],
-        )
-
-    monkeypatch.setattr(runtime, "_prepare_context", local_prepare)
     reply = await runtime.chat(
         "alice",
-        "Кратко перескажи этот файл.",
+        "Загружен документ: synthetic-summary.docx",
         actor=_actor(),
-        conversation_id=receipt["conversation_id"],
         attachments=[attachment],
         enable_tools=False,
+        synthetic_document_notice=True,
     )
 
     assert generate_calls["n"] == 1
     assert reply["message"] == draft
     assert reply["message"] != OFFICE_EXACT_UNAVAILABLE_MESSAGE
     assert "пришлите" not in reply["message"].casefold()
+    assert reply["message_format"] == "markdown"
+    assert reply["tools_used"] == []
     assert reply["attachment_context_readable_count"] == 1
+    # The bounded Office index may be incomplete while the fully extracted
+    # source text still fits the ordinary review prompt. Coverage here is the
+    # authenticated source body, not exact-Office inventory completeness.
     assert reply["attachment_coverage_complete"] is True
     assert reply["verification_status"] != "unknown"
 
@@ -1181,12 +1171,10 @@ async def test_attachment_source_word_cannot_erase_the_model_answer(
         "Повтори контрольный код из источника процитированного ответа.",
         actor=_actor(),
         attachments=[
-            {
-                "filename": "older-source.odt",
-                "transient_text": "Контрольный код: LINEAGE-TARGET-1.",
-                "extraction_success": True,
-                "verification_eligible": True,
-            }
+            _transient_attachment(
+                filename="older-source.odt",
+                text="Контрольный код: LINEAGE-TARGET-1.",
+            )
         ],
         enable_tools=False,
         quoted_attachment_reference=True,
@@ -1230,12 +1218,10 @@ async def test_exact_attachment_url_survives_the_final_guard_beside_a_document_s
         "Покажи источник документа и точный endpoint.",
         actor=_actor(),
         attachments=[
-            {
-                "filename": "source.odt",
-                "transient_text": f"Источник документа: D02; endpoint: {exact}",
-                "extraction_success": True,
-                "verification_eligible": True,
-            }
+            _transient_attachment(
+                filename="source.odt",
+                text=f"Источник документа: D02; endpoint: {exact}",
+            )
         ],
         enable_tools=False,
     )
@@ -1273,14 +1259,7 @@ async def test_same_clause_attachment_fact_survives_url_reconciliation_and_final
         "alice",
         "Покажи источник документа, точный endpoint и контрольный код.",
         actor=_actor(),
-        attachments=[
-            {
-                "filename": "source.odt",
-                "transient_text": grounded,
-                "extraction_success": True,
-                "verification_eligible": True,
-            }
-        ],
+        attachments=[_transient_attachment(filename="source.odt", text=grounded)],
         enable_tools=False,
     )
 
@@ -1327,12 +1306,10 @@ async def test_explicit_online_claim_without_a_url_reaches_the_web_hard_guard(
         "Повтори контрольный код из приложенного документа.",
         actor=_actor(),
         attachments=[
-            {
-                "filename": "source.odt",
-                "transient_text": "Контрольный код: LINEAGE-TARGET-1.",
-                "extraction_success": True,
-                "verification_eligible": True,
-            }
+            _transient_attachment(
+                filename="source.odt",
+                text="Контрольный код: LINEAGE-TARGET-1.",
+            )
         ],
         enable_tools=False,
     )
@@ -1374,12 +1351,10 @@ async def test_unsupported_web_clause_cannot_reach_the_final_attachment_answer(
         "Повтори контрольный код из приложенного документа.",
         actor=_actor(),
         attachments=[
-            {
-                "filename": "source.odt",
-                "transient_text": "Контрольный код: LEGITIMATE-42.",
-                "extraction_success": True,
-                "verification_eligible": True,
-            }
+            _transient_attachment(
+                filename="source.odt",
+                text="Контрольный код: LEGITIMATE-42.",
+            )
         ],
         enable_tools=False,
     )
@@ -1699,33 +1674,52 @@ def _stored_file(
     storage.ensure_user(tenant)
     if uploader != tenant:
         storage.ensure_user(uploader)
+    raw_id = new_id("raw")
+    body = text.encode("utf-8")
+    digest = hashlib.sha256(body).hexdigest()
+    relative = f"{tenant}/{digest[:2]}/{raw_id}.txt"
+    stored = storage.settings.files_dir / relative
+    stored.parent.mkdir(parents=True, exist_ok=True)
+    stored.write_bytes(body)
     raw = RawObject(
-        id=new_id("raw"),
+        id=raw_id,
         user_id=tenant,
         source="upload",
         source_ref=new_id("source"),
         raw_content=text,
         content_type="file",
+        content_hash=digest,
         metadata_json={
             "filename": filename,
             "uploaded_by": uploader,
             "extraction_success": True,
             "text_extraction_success": True,
+            "stored_path": relative,
+            "sha256": digest,
+            "size_bytes": len(body),
         },
     )
     storage.store_raw_object(raw)
     return raw
 
 
-def _current_attachment(raw: RawObject) -> dict[str, Any]:
+def _current_attachment(storage, raw: RawObject) -> dict[str, Any]:  # noqa: ANN001
     metadata = raw.metadata_json if isinstance(raw.metadata_json, dict) else {}
-    return {
-        "raw_object_id": raw.id,
-        "filename": str(metadata.get("filename") or "attachment"),
-        "transient_text": raw.raw_content,
-        "extraction_success": True,
-        "empty_text": not bool(raw.raw_content),
-    }
+    stored = storage.get_raw_object(raw.id, raw.user_id)
+    assert isinstance(stored, dict)
+    return _current_turn_file_attachment(
+        filename=str(metadata.get("filename") or "attachment"),
+        file_ingestion={
+            "raw_object_id": raw.id,
+            "extraction": {
+                "success": True,
+                "text_success": True,
+                "chars": len(raw.raw_content),
+            },
+        },
+        raw=stored,
+        storage=storage,
+    )
 
 
 def _patch_attachment_synthesis(runtime, monkeypatch):  # noqa: ANN001
@@ -1762,7 +1756,7 @@ async def test_three_separate_upload_turns_restore_one_exact_complete_active_set
             f"Это документ {index}",
             actor=_actor(),
             conversation_id=conversation_id,
-            attachments=[_current_attachment(raw)],
+            attachments=[_current_attachment(storage, raw)],
             enable_tools=False,
         )
         conversation_id = str(uploaded["conversation_id"])
@@ -1807,7 +1801,7 @@ async def test_current_third_upload_caption_combines_it_with_two_prior_upload_or
             f"Файл {index}",
             actor=_actor(),
             conversation_id=conversation_id,
-            attachments=[_current_attachment(raw)],
+            attachments=[_current_attachment(storage, raw)],
             enable_tools=False,
         )
         conversation_id = str(uploaded["conversation_id"])
@@ -1817,7 +1811,7 @@ async def test_current_third_upload_caption_combines_it_with_two_prior_upload_or
         "Сделай общую сводку по трём последним документам",
         actor=_actor(),
         conversation_id=conversation_id,
-        attachments=[_current_attachment(files[2])],
+        attachments=[_current_attachment(storage, files[2])],
         enable_tools=False,
     )
 
@@ -1849,7 +1843,7 @@ async def test_an_authoritatively_empty_document_is_an_available_set_member(
             f"Материал {index}",
             actor=_actor(),
             conversation_id=conversation_id,
-            attachments=[_current_attachment(raw)],
+            attachments=[_current_attachment(storage, raw)],
             enable_tools=False,
         )
         conversation_id = str(uploaded["conversation_id"])
@@ -1888,7 +1882,7 @@ async def test_explicit_four_file_summary_with_only_three_uploads_is_honestly_in
             f"Загрузка {index}",
             actor=_actor(),
             conversation_id=conversation_id,
-            attachments=[_current_attachment(raw)],
+            attachments=[_current_attachment(storage, raw)],
             enable_tools=False,
         )
         conversation_id = str(uploaded["conversation_id"])
@@ -1904,8 +1898,11 @@ async def test_explicit_four_file_summary_with_only_three_uploads_is_honestly_in
 
     assert len(seen) == generated_before, "the model was asked to fill a missing fourth file"
     assert summary["attachment_context_expected_count"] == 4
-    assert summary["attachment_context_readable_count"] == 3
-    assert "3 из 4" in summary["message"]
+    # Evidence publication is all-or-none: three rows were restored, but none
+    # may be presented as the requested four-file set or reach synthesis.
+    assert summary["restored_attachment_count"] == 3
+    assert summary["attachment_context_readable_count"] == 0
+    assert "0 из 4" in summary["message"]
     assert "неизвест" in summary["message"].casefold()
 
 

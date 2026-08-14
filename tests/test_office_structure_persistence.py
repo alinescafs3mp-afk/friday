@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import zipfile
 from types import SimpleNamespace
 from typing import Any
 
@@ -86,6 +87,15 @@ def _docx_bytes(
     document.core_properties.comments = package_note
     output = io.BytesIO()
     document.save(output)
+    return output.getvalue()
+
+
+def _docx_with_archive_comment(content: bytes, comment: str) -> bytes:
+    """Change container identity without changing Office body or metadata."""
+
+    output = io.BytesIO(content)
+    with zipfile.ZipFile(output, mode="a") as archive:
+        archive.comment = comment.encode("ascii")
     return output.getvalue()
 
 
@@ -338,10 +348,11 @@ async def test_cross_format_text_match_does_not_depend_on_upload_order(
 @pytest.mark.anyio
 async def test_equivalent_valid_office_indexes_keep_the_existing_text_dedup(settings, storage):
     pipeline = _pipeline(settings, storage)
+    canonical = _docx_bytes(interleaved=True)
     first = await pipeline.ingest_file(
         "alice",
         None,
-        _docx_bytes(interleaved=True, package_note="package-a"),
+        _docx_with_archive_comment(canonical, "container-a"),
         filename="roster-a.docx",
         source_ref="office:equivalent:a",
         force_review=True,
@@ -350,7 +361,7 @@ async def test_equivalent_valid_office_indexes_keep_the_existing_text_dedup(sett
     second = await pipeline.ingest_file(
         "alice",
         None,
-        _docx_bytes(interleaved=True, package_note="package-b"),
+        _docx_with_archive_comment(canonical, "container-b"),
         filename="roster-b.docx",
         source_ref="office:equivalent:b",
         force_review=True,

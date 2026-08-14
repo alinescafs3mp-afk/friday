@@ -13,6 +13,7 @@ import copy
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -25,7 +26,6 @@ from friday.agent_runtime import (
     AttachmentRequestProjection,
     _bounded_attachment_projection,
     _multi_attachment_open_task_count,
-    _OwnedAttachment,
     _project_attachments_for_request,
     _projected_source_is_readable,
     _source_windows,
@@ -55,8 +55,6 @@ QUERY_METADATA_KEYS = {
     "attachment_query_files_scanned",
     "attachment_query_files_matched",
 }
-CHUNK_PREFIX = "FRIDAY_ATTACHMENT_CHUNK_DATA"
-MAP_PREFIX = "FRIDAY_ATTACHMENT_MAP_DATA"
 
 
 @dataclass(frozen=True)
@@ -164,6 +162,30 @@ def _current_owned_attachment(
     )
 
 
+def _transient_owned_attachment(*, filename: str, text: str) -> dict[str, Any]:
+    """Build the process-stamped same-turn carrier used by the API boundary."""
+
+    return _current_turn_file_attachment(
+        filename=filename,
+        file_ingestion={
+            "extraction": {
+                "success": True,
+                "text_success": True,
+                "chars": len(text),
+            }
+        },
+        raw={
+            "raw_content": text,
+            "metadata_json": {
+                "filename": filename,
+                "uploaded_by": OWNER,
+                "extraction_success": True,
+                "text_extraction_success": True,
+            },
+        },
+    )
+
+
 def _canonical_owned_attachment(settings: Any, storage: Any, raw: RawObject) -> dict[str, Any]:
     attachment = AgentRuntime(settings, storage)._owned_file_attachment(  # noqa: SLF001
         raw.id,
@@ -196,6 +218,12 @@ class _RecordingKernel:
             }
             for name in ACTION_NAMES
         ]
+
+    @staticmethod
+    def get_tool(name: str) -> Any:
+        if name == "web_research":
+            return SimpleNamespace(risk="mutate", security_id="web.research")
+        return None
 
     async def execute(self, name: str, arguments: Any, *, actor: Any = None) -> Any:
         del actor
@@ -289,43 +317,6 @@ def _is_hierarchy_stage(call: Mapping[str, Any]) -> bool:
             ("FRIDAY_ATTACHMENT_CHUNK_DATA", "FRIDAY_ATTACHMENT_REDUCE_DATA")
         )
         for item in call["messages"]
-    )
-
-
-def _hierarchy_chunk_payloads(llm: _DocumentLLM) -> list[dict[str, Any]]:
-    return [
-        json.loads(str(item.get("content") or "").split("\n", 1)[1])
-        for call in llm.calls
-        for item in call["messages"]
-        if str(item.get("content") or "").startswith(CHUNK_PREFIX)
-    ]
-
-
-def _assert_full_sources_reached_the_hierarchy(llm: _DocumentLLM, sources: list[_Source]) -> None:
-    payloads = _hierarchy_chunk_payloads(llm)
-    assert payloads
-    for file_index, source in enumerate(sources, start=1):
-        selected = sorted(
-            (item for item in payloads if int(item["file_index"]) == file_index),
-            key=lambda item: int(item["chunk_index"]),
-        )
-        cursor = 0
-        for item in selected:
-            assert item["filename"] == source.filename
-            assert int(item["start"]) == cursor
-            end = int(item["end"])
-            assert str(item["text"]) == source.text[cursor:end]
-            cursor = end
-        assert cursor == len(source.text)
-        assert HEAD_CANARY in "".join(str(item["text"]) for item in selected)
-        assert TAIL_CANARY in "".join(str(item["text"]) for item in selected)
-
-
-def _map_evidence(messages: list[dict[str, Any]]) -> str:
-    return next(
-        str(item.get("content") or "")
-        for item in messages
-        if str(item.get("content") or "").startswith(MAP_PREFIX)
     )
 
 
@@ -437,13 +428,9 @@ def _assert_no_action_or_web_carrier(
         for call in main_calls
         for tool in (call["kwargs"].get("tools") or [])
     }
-    # Attachment data cannot execute a schema by appearing in source text.  The
-    # current same-tenant contract nevertheless keeps authorised local tools and
-    # the public web family available to the model; only code/data outbound
-    # channels remain absent.
-    assert {"code_run", "data_query"}.isdisjoint(offered)
-    if main_calls:
-        assert {"web_search", "web_research", "web_fetch"} <= offered
+    # A local file query without explicit web intent is isolated: source text
+    # cannot make any action or outbound schema available to the model.
+    assert set(ACTION_NAMES).isdisjoint(offered)
     assert kernel.executed == []
     assert kernel.web_prefetch_attempts == 0
     assert result.get("tools_used") == []
@@ -601,9 +588,12 @@ async def test_owned_current_and_restored_target_after_70k_reaches_synthesis_and
     verifier_calls = [call for call in llm.calls if _is_verifier_call(call)]
     assert len(synthesis_calls) == len(verifier_calls) == len(evidence) == 1
     evidence_blob = _evidence_blob(evidence[0])
-    _assert_full_sources_reached_the_hierarchy(llm, [source])
-    assert _map_evidence(synthesis_calls[0]["messages"]) == evidence_blob
-    assert _map_evidence(verifier_calls[0]["messages"]) == evidence_blob
+    _assert_same_private_windows(
+        expected,
+        synthesis_blob=_messages_blob(synthesis_calls[0]["messages"]),
+        evidence_blob=evidence_blob,
+        verifier_blob=_messages_blob(verifier_calls[0]["messages"]),
+    )
     assert "SYNTHETIC-ORBIT-NODE" in evidence_blob
     assert "INDIGO-COMET" in result["message"]
     assert result["verification_status"] == "passed"
@@ -754,21 +744,13 @@ def test_multi_file_field_labels_are_body_targets_but_format_names_are_source_qu
     first_value = "SYNTHETIC-FIRST-FIELD-VALUE"
     second_value = "SYNTHETIC-SECOND-FIELD-VALUE"
     attachments = [
-        _OwnedAttachment(
-            {
-                "filename": "first-source.odt",
-                "transient_text": f"Контрольное поле: {first_value}\n",
-                "extraction_success": True,
-                "verification_eligible": True,
-            }
+        _transient_owned_attachment(
+            filename="first-source.odt",
+            text=f"Контрольное поле: {first_value}\n",
         ),
-        _OwnedAttachment(
-            {
-                "filename": "second-source.txt",
-                "transient_text": f"Контрольное поле B: {second_value}\n",
-                "extraction_success": True,
-                "verification_eligible": True,
-            }
+        _transient_owned_attachment(
+            filename="second-source.txt",
+            text=f"Контрольное поле B: {second_value}\n",
         ),
     ]
 
@@ -778,9 +760,12 @@ def test_multi_file_field_labels_are_body_targets_but_format_names_are_source_qu
         attachments,
     )
 
-    assert state.status == "matched"
-    assert state.scan_complete is True
-    assert state.files_scanned == state.files_matched == 2
+    # The complete two-file corpus fits the focused prompt, so there is no
+    # reason to replace it with query windows.  Format words remain source
+    # qualifiers rather than required body anchors.
+    assert state.status == "not_applicable"
+    assert state.scan_complete is False
+    assert state.files_scanned == state.files_matched == 0
     assert first_value in str(projected[0]["transient_text"])
     assert second_value in str(projected[1]["transient_text"])
     assert _multi_attachment_open_task_count("Сравни два приложенных файла.") == 2
@@ -790,13 +775,9 @@ def test_multi_file_field_labels_are_body_targets_but_format_names_are_source_qu
     quoted_stopword, stopword_state = _project_attachments_for_request(
         "Какое значение указано после «Должность» в документе ODT?",
         [
-            _OwnedAttachment(
-                {
-                    "filename": "roles.odt",
-                    "transient_text": "Должность: инженер\n",
-                    "extraction_success": True,
-                    "verification_eligible": True,
-                }
+            _transient_owned_attachment(
+                filename="roles.odt",
+                text="Должность: инженер\n",
             )
         ],
     )
@@ -808,13 +789,9 @@ def test_multi_file_field_labels_are_body_targets_but_format_names_are_source_qu
     _wrong_record, wrong_record_state = _project_attachments_for_request(
         "Найди «Контрольное поле» для CASE-404 в документе ODT.",
         [
-            _OwnedAttachment(
-                {
-                    "filename": "cases.odt",
-                    "transient_text": "Контрольное поле: OTHER\n",
-                    "extraction_success": True,
-                    "verification_eligible": True,
-                }
+            _transient_owned_attachment(
+                filename="cases.odt",
+                text="Контрольное поле: OTHER\n",
             )
         ],
     )
@@ -882,7 +859,7 @@ async def test_matching_prompt_injection_is_inert_and_has_no_action_schema(
     question = "Найди в документе «SYNTHETIC-INJECTION-NODE» и сообщи значение."
     llm = _DocumentLLM("Значение SYNTHETIC-INJECTION-NODE: JADE-LANTERN.")
     canonical = _canonical_owned_attachment(settings, storage, raw)
-    _projected, state, _expected = _projection_windows(question, [canonical], [source])
+    _projected, state, expected = _projection_windows(question, [canonical], [source])
     assert state.status == "matched" and state.matches == 1
 
     result, kernel, evidence = await _run_owned_turn(
@@ -908,12 +885,17 @@ async def test_matching_prompt_injection_is_inert_and_has_no_action_schema(
     )
     assert injection not in synthesis_system
     assert injection not in verifier_system
-    _assert_full_sources_reached_the_hierarchy(llm, [source])
     evidence_blob = _evidence_blob(evidence[0])
-    assert _map_evidence(synthesis["messages"]) == evidence_blob
-    assert _map_evidence(verifier["messages"]) == evidence_blob
+    window = expected[0]
+    synthesis_blob = _messages_blob(synthesis["messages"])
+    verifier_blob = _messages_blob(verifier["messages"])
+    for carrier in (synthesis_blob, evidence_blob, verifier_blob):
+        assert window.filename in carrier
+        assert str(window.start) in carrier and str(window.end) in carrier
+        assert "SYNTHETIC-INJECTION-NODE value is JADE-LANTERN" in carrier
+        assert HEAD_CANARY not in carrier and TAIL_CANARY not in carrier
     assert "SYNTHETIC-INJECTION-NODE" in evidence_blob
-    assert "ESCAPE" not in evidence_blob
+    assert "ESCAPE" in evidence_blob, "the inert literal was silently rewritten"
     assert "JADE-LANTERN" in result["message"]
     assert "ESCAPE" not in result["message"]
     _assert_no_action_or_web_carrier(result, llm, kernel)
@@ -925,28 +907,29 @@ async def test_three_owned_long_files_receive_distributed_matching_windows(
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    labels = ("ALPHA", "BETA", "GAMMA")
     sources = [
         _long_source(
             f"synthetic-distributed-{index}.txt",
             [
                 (
                     71_000 + index * 2_000,
-                    f"SYNTHETIC-DISTRIBUTED-NODE-{index} has value DISTRIBUTED-VALUE-{index}.",
+                    f"SYNTHETIC-DISTRIBUTED-NODE-{label} has value DISTRIBUTED-VALUE-{label}.",
                 )
             ],
         )
-        for index in range(1, 4)
+        for index, label in enumerate(labels, start=1)
     ]
     raws = [_store_owned_file(storage, source) for source in sources]
     attachments = [
         _current_owned_attachment(storage, raw, source) for raw, source in zip(raws, sources, strict=True)
     ]
     question = (
-        "Найди в документах «SYNTHETIC-DISTRIBUTED-NODE-1», "
-        "«SYNTHETIC-DISTRIBUTED-NODE-2» и «SYNTHETIC-DISTRIBUTED-NODE-3» "
+        "Найди в приложенных документах маркеры SYNTHETIC-DISTRIBUTED-NODE-ALPHA, "
+        "SYNTHETIC-DISTRIBUTED-NODE-BETA и SYNTHETIC-DISTRIBUTED-NODE-GAMMA "
         "и перечисли все совпадения."
     )
-    answer = "; ".join(f"DISTRIBUTED-VALUE-{index}" for index in range(1, 4))
+    answer = "; ".join(f"DISTRIBUTED-VALUE-{label}" for label in labels)
     llm = _DocumentLLM(answer)
     canonical = [_canonical_owned_attachment(settings, storage, raw) for raw in raws]
     projected, state, expected = _projection_windows(question, canonical, sources)
@@ -962,18 +945,25 @@ async def test_three_owned_long_files_receive_distributed_matching_windows(
         llm=llm,
     )
 
-    synthesis = next(
+    synthesis_calls = [
         call
         for call in llm.calls
         if not _is_verifier_call(call) and not _is_repair_call(call) and not _is_hierarchy_stage(call)
-    )
-    verifier = next(call for call in llm.calls if _is_verifier_call(call))
-    _assert_full_sources_reached_the_hierarchy(llm, sources)
+    ]
+    assert len(synthesis_calls) == 1, result
+    synthesis = synthesis_calls[0]
+    verifier_calls = [call for call in llm.calls if _is_verifier_call(call)]
+    assert len(verifier_calls) == 1, result
+    verifier = verifier_calls[0]
     evidence_blob = _evidence_blob(evidence[0])
-    assert _map_evidence(synthesis["messages"]) == evidence_blob
-    assert _map_evidence(verifier["messages"]) == evidence_blob
-    assert all(f"DISTRIBUTED-VALUE-{index}" in evidence_blob for index in range(1, 4))
-    assert all(f"DISTRIBUTED-VALUE-{index}" in result["message"] for index in range(1, 4))
+    _assert_same_private_windows(
+        expected,
+        synthesis_blob=_messages_blob(synthesis["messages"]),
+        evidence_blob=evidence_blob,
+        verifier_blob=_messages_blob(verifier["messages"]),
+    )
+    assert all(f"DISTRIBUTED-VALUE-{label}" in evidence_blob for label in labels)
+    assert all(f"DISTRIBUTED-VALUE-{label}" in result["message"] for label in labels)
     _assert_no_action_or_web_carrier(result, llm, kernel)
     metadata = _assistant_query_metadata(storage, result["conversation_id"])
     assert metadata["attachment_query_files_scanned"] == 3

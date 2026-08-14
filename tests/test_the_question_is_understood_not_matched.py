@@ -105,21 +105,19 @@ class _FakeLLM:
         return {"content": self.content}
 
 
-def _runtime_with(content: str) -> tuple[AgentRuntime, _FakeLLM]:
-    from friday.config import load_settings
-
+def _runtime_with(content: str, settings) -> tuple[AgentRuntime, _FakeLLM]:
     runtime = AgentRuntime.__new__(AgentRuntime)
     llm = _FakeLLM(content)
     runtime.llm = llm
     # Настройки нужны по-настоящему: арбитру передаётся сегодняшняя дата (иначе
     # он составляет запросы с годом из своего обучения — замерено на недельном
     # прогоне, «drones ... 2024» в 2026 году).
-    runtime.settings = load_settings()
+    runtime.settings = settings
     return runtime, llm
 
 
-def test_the_arbiter_returns_a_query_only_for_the_outside_world():
-    runtime, _ = _runtime_with('{"вид": "интернет", "запрос": "курс биткоина сегодня"}')
+def test_the_arbiter_returns_a_query_only_for_the_outside_world(settings):
+    runtime, _ = _runtime_with('{"вид": "интернет", "запрос": "курс биткоина сегодня"}', settings)
     # Возвращается пара «вид, запрос»: вид нужен, чтобы отличить «ответ надо
     # искать» от «ответ модель знает сама».
     assert asyncio.run(runtime._web_query_by_arbiter("а что там по биткоину?"))[1] == (  # noqa: SLF001
@@ -127,11 +125,11 @@ def test_the_arbiter_returns_a_query_only_for_the_outside_world():
     )
 
     for verdict in ("архив", "материал", "другое"):
-        runtime, _ = _runtime_with(f'{{"вид": "{verdict}", "запрос": "приказ 214"}}')
+        runtime, _ = _runtime_with(f'{{"вид": "{verdict}", "запрос": "приказ 214"}}', settings)
         assert asyncio.run(runtime._web_query_by_arbiter("найди приказ 214"))[1] is None  # noqa: SLF001
 
 
-def test_the_query_is_capped_so_a_mistake_stays_cheap():
+def test_the_query_is_capped_so_a_mistake_stays_cheap(settings):
     """Мутация: снять потолок — тест краснеет.
 
     Потолок здесь не косметика. Если арбитр ошибётся и примет присланный документ
@@ -139,16 +137,16 @@ def test_the_query_is_capped_so_a_mistake_stays_cheap():
     только хеш запроса, и восстановить «что именно ушло» иначе нельзя.
     """
     long_query = " ".join(f"слово{i}" for i in range(40))
-    runtime, _ = _runtime_with(f'{{"вид": "интернет", "запрос": "{long_query}"}}')
+    runtime, _ = _runtime_with(f'{{"вид": "интернет", "запрос": "{long_query}"}}', settings)
     _, query = asyncio.run(runtime._web_query_by_arbiter("что это?"))  # noqa: SLF001
     assert query is not None
     assert len(query.split()) <= 14
     assert len(query) <= 140
 
 
-def test_a_broken_verdict_does_not_send_anything_anywhere():
+def test_a_broken_verdict_does_not_send_anything_anywhere(settings):
     for content in ("", "не знаю", "{сломанный json", '{"вид": "интернет", "запрос": ""}'):
-        runtime, _ = _runtime_with(content)
+        runtime, _ = _runtime_with(content, settings)
         assert asyncio.run(runtime._web_query_by_arbiter("что это?"))[1] is None  # noqa: SLF001
 
 
@@ -161,12 +159,18 @@ def test_the_prefetch_actually_asks_the_arbiter():
     import inspect
 
     source = inspect.getsource(AgentRuntime._prefetch_the_web_if_asked)  # noqa: SLF001
-    assert "_web_query_by_arbiter(message)" in source, (
+    decision = " ".join(source[source.index("kind: str") :].split())
+    assert "self._web_query_by_arbiter, web_message," in decision, (
         "предварительный поиск не спрашивает арбитра — понимания не будет"
     )
-    assert "_might_be_a_question(message)" in source, "предфильтр не подключён"
+    guard = " ".join(source[: source.index("kind: str")].split())
+    assert "looks_like_a_request = _might_be_a_question(web_message)" in guard, (
+        "предфильтр не подключён к проверенной проекции сообщения"
+    )
     # Явная просьба остаётся исполненной, даже если арбитр её не признал.
-    assert "web_query_from(message)" in source, "при отказе арбитра прямая просьба человека теряется"
+    assert "query = self.web_query_from(web_message)" in decision, (
+        "при отказе арбитра прямая просьба человека теряется"
+    )
 
 
 def test_a_question_about_the_timeline_never_goes_to_a_search_engine():
@@ -180,14 +184,14 @@ def test_a_question_about_the_timeline_never_goes_to_a_search_engine():
     import inspect
 
     source = inspect.getsource(AgentRuntime._prefetch_the_web_if_asked)  # noqa: SLF001
-    guard = source[: source.index("_web_query_by_arbiter(message)")]
-    assert "_ASKS_WHAT_HAPPENED.search(message)" in guard, (
+    guard = " ".join(source[: source.index("kind: str")].split())
+    assert "_ASKS_WHAT_HAPPENED.search(web_message)" in guard, (
         "вопрос о ленте доходит до арбитра раньше, чем его перехватит структура"
     )
-    assert "moment_from_question(message)" in guard
+    assert "moment_from_question(web_message)" in guard
 
 
-def test_a_failed_search_is_not_passed_off_as_results():
+def test_a_failed_search_is_not_passed_off_as_results(settings):
     """Мутация: убрать ветку `not result.success` — тест краснеет.
 
     Замерено при живом прогоне: когда поиск срывался, в контекст модели уходило
@@ -210,7 +214,7 @@ def test_a_failed_search_is_not_passed_off_as_results():
         async def execute(self, name, arguments, *, actor):  # noqa: ANN001, ARG002
             return _Failed()
 
-    runtime, _ = _runtime_with('{"вид": "интернет", "запрос": "курс евро"}')
+    runtime, _ = _runtime_with('{"вид": "интернет", "запрос": "курс евро"}', settings)
     runtime.kernel = _Kernel()
     messages: list[dict] = []
     asyncio.run(
@@ -258,8 +262,8 @@ def test_a_name_from_the_archive_never_leaves_for_a_search_engine():
     import inspect
 
     source = inspect.getsource(AgentRuntime._prefetch_the_web_if_asked)  # noqa: SLF001
-    guard = source[: source.index("_web_query_by_arbiter(message)")]
-    assert "_mentions_someone_from_the_archive(message, actor)" in guard, (
+    guard = " ".join(source[: source.index("kind: str")].split())
+    assert "self._mentions_someone_from_the_archive, web_message, actor," in guard, (
         "имя человека из архива доходит до арбитра и уходит в поисковик"
     )
     assert "not asked_outright" in guard, (
@@ -331,7 +335,7 @@ def test_a_person_found_in_the_graph_stops_the_search():
     )
 
 
-def test_a_settled_fact_is_answered_from_memory_not_the_web():
+def test_a_settled_fact_is_answered_from_memory_not_the_web(settings):
     """Мутация: убрать вид «знание» — тест краснеет.
 
     Владелец: «кто был вторым президентом США» и «кто был первым президентом
@@ -342,7 +346,7 @@ def test_a_settled_fact_is_answered_from_memory_not_the_web():
     6.6–13.9 с и верно (Джон Адамс, Ельцин, 1 сентября 1939, 29 дней), а погода
     и курс по-прежнему идут в сеть за 23–26 с.
     """
-    runtime, _ = _runtime_with('{"вид": "знание", "запрос": ""}')
+    runtime, _ = _runtime_with('{"вид": "знание", "запрос": ""}', settings)
     kind, query = asyncio.run(runtime._web_query_by_arbiter("кто был вторым президентом США?"))  # noqa: SLF001
     assert kind.startswith("знание")
     assert query is None, "по устоявшемуся факту поиск не нужен"
@@ -364,9 +368,9 @@ def test_the_answer_from_memory_says_so_out_loud():
     assert 'kind.startswith("знание") and not asked_outright' in source
 
 
-def test_a_changing_fact_still_goes_to_the_web():
+def test_a_changing_fact_still_goes_to_the_web(settings):
     """Контроль: «сейчас», «сегодня», «сколько стоит» — только из сети."""
-    runtime, _ = _runtime_with('{"вид": "интернет", "запрос": "курс доллара сегодня"}')
+    runtime, _ = _runtime_with('{"вид": "интернет", "запрос": "курс доллара сегодня"}', settings)
     kind, query = asyncio.run(runtime._web_query_by_arbiter("какой сейчас курс доллара?"))  # noqa: SLF001
     assert "интернет" in kind
     assert query == "курс доллара сегодня"

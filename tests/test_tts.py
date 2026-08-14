@@ -628,8 +628,12 @@ def test_the_voice_request_is_read_from_the_person_s_message():
 
     from friday.agent_runtime import AgentRuntime
 
-    source = inspect.getsource(AgentRuntime.chat)
-    assert "_ASKS_FOR_VOICE.search(clean_message)" in source, "просьба озвучить не доходит до сборки ответа"
+    source = " ".join(inspect.getsource(AgentRuntime.chat).split())
+    assert 'file_voice = file_turn.proved("voice")' in source, (
+        "просьба озвучить не проходит проверку полномочий текущего сообщения"
+    )
     # И голосовой вопрос сам по себе — просьба ответить голосом: человек
     # записывает голосовое, когда ему неудобно печатать.
-    assert "answer_with_voice or" in source, "на голосовое отвечают только текстом"
+    assert "asked_for_voice=(answer_with_voice or file_voice)" in source, (
+        "голосовая реплика или разрешённая просьба озвучить не доходят до синтеза"
+    )

@@ -42,7 +42,7 @@ from friday.agent_runtime import (
 from friday.execution_kernel import ToolResult
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
-from friday.permissions import ActorContext
+from friday.permissions import ActorContext, AuthorizationService
 from friday.storage.models import InboxStatus, KnowledgeObject, new_id
 
 
@@ -94,7 +94,7 @@ def _actor() -> ActorContext:
 
 
 @pytest.mark.asyncio
-async def test_registered_upload_receipt_and_two_file_read_use_only_selected_disk_sources(
+async def test_registered_upload_review_and_two_file_read_use_only_selected_disk_sources(
     settings,
     storage,
     monkeypatch,
@@ -126,48 +126,6 @@ async def test_registered_upload_receipt_and_two_file_read_use_only_selected_dis
     second_id = str(second["raw_object_id"])
     runtime = AgentRuntime(configured, storage, llm=_NoDirectLLM())
 
-    async def forbidden_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
-        del args, kwargs
-        raise AssertionError("pure file contour entered general context preparation")
-
-    async def forbidden_generate(*args, **kwargs):  # noqa: ANN002, ANN003
-        del args, kwargs
-        raise AssertionError("bare upload receipt called the model")
-
-    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
-    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
-    receipt = await runtime.chat(
-        "alice",
-        "Загружен документ: route-north-aug12.txt",
-        actor=_actor(),
-        attachments=[{"raw_object_id": first_id}],
-        synthetic_document_notice=True,
-    )
-    assert "зарегистрирован" in receipt["message"]
-    assert "байты на диске проверены" in receipt["message"]
-    assert "содержимое извлечено полностью" in receipt["message"]
-    assert "Быстрый обзор содержимого" in receipt["message"]
-    assert f"› {first_text.splitlines()[0]}" in receipt["message"]
-    assert f"› {first_text.splitlines()[1]}" in receipt["message"]
-    # Literals are exact substrings of the registered Raw body.
-    for line in first_text.splitlines():
-        if f"› {line}" in receipt["message"]:
-            assert line in first_text
-    assert receipt["message_format"] == "plain"
-    assert receipt["tools_used"] == []
-    assert "…" not in receipt["message"]
-    # Regenerate of synthetic intake must reproduce the same deterministic text.
-    regenerated = await runtime.chat(
-        "alice",
-        "Загружен документ: route-north-aug12.txt",
-        actor=_actor(),
-        attachments=[{"raw_object_id": first_id}],
-        synthetic_document_notice=True,
-    )
-    assert regenerated["message"] == receipt["message"]
-    assert regenerated["message_format"] == "plain"
-    assert regenerated["tools_used"] == []
-
     generation_calls: list[list[dict]] = []
 
     async def generate(context, message, attachments):  # noqa: ANN001
@@ -175,6 +133,14 @@ async def test_registered_upload_receipt_and_two_file_read_use_only_selected_dis
         snapshot = [dict(item) for item in attachments]
         generation_calls.append(snapshot)
         visible = "\n".join(str(item.get("transient_text") or "") for item in snapshot)
+        if message.startswith("Загружен документ:"):
+            assert len(snapshot) == 1
+            assert first_text in visible
+            assert second_text not in visible
+            return {
+                "content": "Подробное ревью: северный маршрут подтверждён содержимым файла.",
+                "tools_used": [],
+            }
         if len(snapshot) == 1:
             assert first_text in visible
             assert second_text not in visible
@@ -184,6 +150,29 @@ async def test_registered_upload_receipt_and_two_file_read_use_only_selected_dis
         return {"content": "Сравнение построено только по двум выбранным маршрутам.", "tools_used": []}
 
     monkeypatch.setattr(runtime, "_generate_response", generate)
+    receipt = await runtime.chat(
+        "alice",
+        "Загружен документ: route-north-aug12.txt",
+        actor=_actor(),
+        attachments=[{"raw_object_id": first_id}],
+        synthetic_document_notice=True,
+    )
+    assert receipt["message"] == "Подробное ревью: северный маршрут подтверждён содержимым файла."
+    assert "Быстрый обзор" not in receipt["message"]
+    assert receipt["message_format"] == "markdown"
+    assert receipt["tools_used"] == []
+    # Replaying the same upload performs the same normal review; it does not
+    # switch back to a deterministic quicklook terminal.
+    regenerated = await runtime.chat(
+        "alice",
+        "Загружен документ: route-north-aug12.txt",
+        actor=_actor(),
+        attachments=[{"raw_object_id": first_id}],
+        synthetic_document_notice=True,
+    )
+    assert regenerated["message"] == receipt["message"]
+    assert regenerated["message_format"] == "markdown"
+    assert regenerated["tools_used"] == []
     followup = await runtime.chat(
         "alice",
         "Что внутри этого файла?",
@@ -204,9 +193,7 @@ async def test_registered_upload_receipt_and_two_file_read_use_only_selected_dis
     assert compared["tools_used"] == []
     assert compared["attachment_context_expected_count"] == 2
     assert compared["attachment_context_readable_count"] == 2
-    assert compared["attachment_query_status"] == "matched"
-    assert compared["attachment_query_files_matched"] == 2
-    assert [len(call) for call in generation_calls] == [1, 2]
+    assert [len(call) for call in generation_calls] == [1, 1, 1, 2]
 
 
 @pytest.mark.asyncio
@@ -2274,7 +2261,7 @@ async def test_explicit_mcp_inbox_read_never_substitutes_same_named_upload(
     target = "Поле X: FILE-CORE-MCP-TARGET-AUG12\n" + ("Контекст MCP. " * 450)
 
     class _WorkspaceKernel:
-        authorization = None
+        authorization: AuthorizationService
 
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict]] = []
@@ -2374,6 +2361,7 @@ async def test_explicit_mcp_inbox_read_never_substitutes_same_named_upload(
             return {"content": "Значение поля X — FILE-CORE-MCP-TARGET-AUG12."}
 
     kernel = _WorkspaceKernel()
+    kernel.authorization = AuthorizationService(storage)
     runtime = AgentRuntime(configured, storage, llm=_WorkspaceAnswerLLM(), kernel=kernel)  # type: ignore[arg-type]
 
     async def forbidden_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
@@ -2396,9 +2384,10 @@ async def test_explicit_mcp_inbox_read_never_substitutes_same_named_upload(
     )
 
     assert result["message"] == "Значение поля X — FILE-CORE-MCP-TARGET-AUG12."
-    assert result["tools_used"] == ["workspace_list", "workspace_read"]
+    assert result["tools_used"] == ["workspace_list", "workspace_read", "workspace_read"]
     assert [name for name, _arguments in kernel.calls] == [
         "workspace_list",
+        "workspace_read",
         "workspace_read",
         "workspace_read",
     ]
@@ -2416,8 +2405,12 @@ async def test_explicit_mcp_inbox_read_never_substitutes_same_named_upload(
         conversation_id=result["conversation_id"],
     )
     assert followup["message"] == "Значение поля X — FILE-CORE-MCP-TARGET-AUG12."
-    assert followup["tools_used"] == ["workspace_read"]
-    assert [name for name, _arguments in kernel.calls] == ["workspace_read", "workspace_read"]
+    assert followup["tools_used"] == ["workspace_read", "workspace_read"]
+    assert [name for name, _arguments in kernel.calls] == [
+        "workspace_read",
+        "workspace_read",
+        "workspace_read",
+    ]
     assert len(seen_prompts) == 2
 
     for unsafe_request in (

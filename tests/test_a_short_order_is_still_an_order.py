@@ -118,5 +118,9 @@ def test_every_named_tool_exists() -> None:
         "make_file",
         "collect_files",
         "mission_propose",
+        "workspace_create",
+        "workspace_list",
+        "workspace_read",
+        "workspace_search",
     }
     assert ExecutionKernel._RELEVANT_TOOLS["действие"] <= known

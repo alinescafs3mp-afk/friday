@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+import friday.agent_runtime as agent_runtime_module
 from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
@@ -510,6 +511,144 @@ async def test_old_visual_raw_is_read_again_with_current_vision_for_every_attach
     persisted = storage.get_raw_object(raw.id, OWNER)
     assert persisted is not None
     assert VISION_TEXT not in str(persisted["raw_content"])
+
+
+@pytest.mark.asyncio
+async def test_transient_visual_recovery_cache_never_crosses_a_chat_turn(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw, original_bytes = _store_stale_visual_file(
+        settings,
+        storage,
+        mime_type="image/jpeg",
+    )
+    auth = AuthorizationService(storage)
+    kernel = ExecutionKernel(auth, settings)
+    vision = _TransientVisionProbe(succeeds=True)
+    kernel.ingestion = vision
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_HostileScanModel(),
+        kernel=kernel,
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
+
+    async def synthesize(
+        context: AgentContext,
+        message: str,
+        attachments: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        del context, message
+        assert VISION_TEXT in str((attachments or [{}])[0].get("transient_text") or "")
+        return {"content": VISION_TEXT, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", synthesize)
+    filename = str(raw.metadata_json["filename"])
+    for _ in range(2):
+        result = await runtime.chat(
+            OWNER,
+            f"Что указано в {filename}?",
+            actor=auth.actor_for_user(OWNER, source="test"),
+            attachments=[{"raw_object_id": raw.id, "filename": filename}],
+            enable_tools=False,
+        )
+        assert VISION_TEXT in result["message"]
+
+    # Each turn performs one current parser read; only the redundant projected
+    # reauth inside that same turn may reuse it.
+    assert [call["file_content"] for call in vision.calls] == [original_bytes, original_bytes]
+
+
+@pytest.mark.asyncio
+async def test_transient_visual_recovery_cache_misses_after_exact_source_change(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw, original_bytes = _store_stale_visual_file(
+        settings,
+        storage,
+        mime_type="image/jpeg",
+    )
+    replacement_bytes = b"synthetic-stale-visual-bytes:image/jpeg:replacement"
+    replacement_sha256 = hashlib.sha256(replacement_bytes).hexdigest()
+    replacement_relative = f"{OWNER}/{replacement_sha256[:2]}/{replacement_sha256}.bin"
+    replacement_target = settings.files_dir / replacement_relative
+    replacement_target.parent.mkdir(parents=True, exist_ok=True)
+    replacement_target.write_bytes(replacement_bytes)
+
+    auth = AuthorizationService(storage)
+    kernel = ExecutionKernel(auth, settings)
+    vision = _TransientVisionProbe(succeeds=True)
+    kernel.ingestion = vision
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_HostileScanModel(),
+        kernel=kernel,
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
+
+    async def synthesize(
+        context: AgentContext,
+        message: str,
+        attachments: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        del context, message
+        assert VISION_TEXT in str((attachments or [{}])[0].get("transient_text") or "")
+        return {"content": VISION_TEXT, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", synthesize)
+    canonical_project = agent_runtime_module._projected_attachment_from_source
+    source_changed = False
+
+    def project_then_replace_registered_source(source: Any, fields: Any) -> Any:
+        nonlocal source_changed
+        projected = canonical_project(source, fields)
+        if not source_changed and source.get("_runtime_file_reparsed") is True:
+            metadata = dict(raw.metadata_json)
+            metadata.update(
+                {
+                    "stored_path": replacement_relative,
+                    "sha256": replacement_sha256,
+                    "size_bytes": len(replacement_bytes),
+                }
+            )
+            with storage.transaction() as connection:
+                cursor = connection.execute(
+                    "UPDATE raw_objects SET content_hash=?, metadata_json=? WHERE id=?",
+                    (
+                        replacement_sha256,
+                        json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                        raw.id,
+                    ),
+                )
+                assert cursor.rowcount == 1
+            source_changed = True
+        return projected
+
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "_projected_attachment_from_source",
+        project_then_replace_registered_source,
+    )
+    filename = str(raw.metadata_json["filename"])
+    result = await runtime.chat(
+        OWNER,
+        f"Что указано в {filename}?",
+        actor=auth.actor_for_user(OWNER, source="test"),
+        attachments=[{"raw_object_id": raw.id, "filename": filename}],
+        enable_tools=False,
+    )
+
+    assert source_changed is True
+    assert [call["file_content"] for call in vision.calls] == [original_bytes, replacement_bytes]
+    assert VISION_TEXT not in result["message"]
+    assert result["attachment_authority_changed_before_publication"] is True
+    assert result["verification"]["issues"] == ["attachment_authority_changed_before_publication"]
 
 
 @pytest.mark.asyncio

@@ -2403,8 +2403,16 @@ async def test_early_web_file_is_discarded_and_rebuilt_from_final_body_with_comp
 
     rebuilt_inputs: list[str] = []
 
-    async def rebuild(request, answer, actor, *, evidence=None, context=None):  # noqa: ANN001
-        del request, actor, evidence
+    async def rebuild(  # noqa: ANN001
+        request,
+        answer,
+        actor,
+        *,
+        evidence=None,
+        context=None,
+        literal_source_text=None,
+    ):
+        del request, actor, evidence, literal_source_text
         rebuilt_inputs.append(answer)
         assert context is not None
         context.late_make_file_attempts += 1

@@ -10,6 +10,7 @@ import uuid
 import zipfile
 from collections.abc import Mapping
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -209,23 +210,44 @@ def _stored_reply_file(
     namespaced=True,
     extra_metadata: dict | None = None,
     content: str | None = None,
+    registered: bool = False,
 ):
     base_ref = f"telegram-file:{label}"
     namespace = hashlib.sha256(uploader.encode("utf-8")).hexdigest()[:24]
     raw_content = content if content is not None else f"content {label}"
+    raw_id = new_id("raw")
+    digest = hashlib.sha256(raw_content.encode()).hexdigest()
+    metadata = {
+        "filename": f"{label}.docx",
+        "uploaded_by": uploader,
+        **(extra_metadata or {}),
+    }
+    if registered:
+        body = raw_content.encode("utf-8")
+        relative = f"{tenant}/{digest[:2]}/{raw_id}.bin"
+        stored = storage.settings.files_dir / relative
+        stored.parent.mkdir(parents=True, exist_ok=True)
+        stored.write_bytes(body)
+        metadata.update(
+            {
+                "mime_type": "text/plain",
+                "extraction_success": True,
+                "text_extraction_success": True,
+                "extraction_chars": len(raw_content),
+                "stored_path": relative,
+                "sha256": digest,
+                "size_bytes": len(body),
+            }
+        )
     raw = RawObject(
-        id=new_id("raw"),
+        id=raw_id,
         user_id=tenant,
         source="upload",
         source_ref=f"uploader:{namespace}:{base_ref}" if namespaced else base_ref,
         raw_content=raw_content,
         content_type="file",
-        content_hash=hashlib.sha256(raw_content.encode()).hexdigest(),
-        metadata_json={
-            "filename": f"{label}.docx",
-            "uploaded_by": uploader,
-            **(extra_metadata or {}),
-        },
+        content_hash=digest,
+        metadata_json=metadata,
     )
     storage.store_raw_object(raw)
     storage.store_inbox_item(
@@ -415,6 +437,7 @@ def test_server_reply_to_assistant_metadata_is_end_to_end_and_publicly_redacted(
             uploader,
             "SELECTED-ANSWER-FILE",
             extra_metadata={"title": "Selected answer synthetic title"},
+            registered=True,
         )
         newer = _stored_reply_file(
             storage,
@@ -422,6 +445,7 @@ def test_server_reply_to_assistant_metadata_is_end_to_end_and_publicly_redacted(
             uploader,
             "NEWER-DECOY-FILE",
             extra_metadata={"title": "Newer decoy synthetic title"},
+            registered=True,
         )
         conversation = storage.create_conversation(uploader, title="assistant reply e2e")
         source_answer = storage.store_message(
@@ -650,6 +674,7 @@ def test_exact_d10_three_turn_api_keeps_reply_source_and_forces_only_workspace_e
         app.state.agent.llm = llm
         kernel = app.state.agent.kernel
         base_definitions = kernel.get_tool_definitions
+        base_get_tool = kernel.get_tool
         base_execute = kernel.execute
 
         def definitions(actor, topic=None):  # noqa: ANN001
@@ -669,7 +694,13 @@ def test_exact_d10_three_turn_api_keeps_reply_source_and_forces_only_workspace_e
                 return ToolResult(name, True, data={"created": True})
             return await base_execute(name, arguments, actor=actor)
 
+        def get_tool(name):  # noqa: ANN001
+            if name == "workspace_create":
+                return SimpleNamespace(risk="mutate", security_id="mcp.files.create")
+            return base_get_tool(name)
+
         monkeypatch.setattr(kernel, "get_tool_definitions", definitions)
+        monkeypatch.setattr(kernel, "get_tool", get_tool)
         monkeypatch.setattr(kernel, "execute", execute)
         monkeypatch.setattr(app.state.agent, "_prepare_context", prepare)
 
@@ -854,6 +885,7 @@ def _assert_exact_workspace_direct_effect_with_disabled_llm(
         app.state.agent.llm = llm
         kernel = app.state.agent.kernel
         base_definitions = kernel.get_tool_definitions
+        base_get_tool = kernel.get_tool
 
         def definitions(actor, topic=None):  # noqa: ANN001
             result = list(base_definitions(actor, topic=topic))
@@ -870,7 +902,13 @@ def _assert_exact_workspace_direct_effect_with_disabled_llm(
             executed.append((str(name), dict(arguments)))
             return ToolResult(str(name), True, data={"created": True})
 
+        def get_tool(name):  # noqa: ANN001
+            if name == "workspace_create":
+                return SimpleNamespace(risk="mutate", security_id="mcp.files.create")
+            return base_get_tool(name)
+
         monkeypatch.setattr(kernel, "get_tool_definitions", definitions)
+        monkeypatch.setattr(kernel, "get_tool", get_tool)
         monkeypatch.setattr(kernel, "execute", execute)
         me = _bridge_call(client, scoped, "GET", "/api/me", user="1001")
         assert me.status_code == 200, me.text
@@ -1427,7 +1465,9 @@ def test_owner_structural_reply_reads_active_shared_uploaders_registered_file(
         assert reply_payload["attachment_context_readable_count"] == 1
         assert reply_payload["attachment_coverage_complete"] is True
         assert reply_payload["attachment_verification_complete"] is True
-        assert disk_read_people == [sender]
+        # Initial verification and the final publication guard each re-read the
+        # exact same registered bytes under the original uploader identity.
+        assert disk_read_people == [sender, sender]
 
         follow_up = _bridge_call(
             client,
@@ -1448,7 +1488,7 @@ def test_owner_structural_reply_reads_active_shared_uploaders_registered_file(
         assert follow_up_payload["attachment_coverage_complete"] is True
         assert follow_up_payload["attachment_verification_complete"] is True
         assert follow_up_payload["restored_attachment_count"] == 1
-        assert disk_read_people == [sender, sender]
+        assert disk_read_people == [sender, sender, sender]
 
         history = app.state.storage.get_conversation_messages(
             str(reply_payload["conversation_id"]),
@@ -1463,7 +1503,7 @@ def test_owner_structural_reply_reads_active_shared_uploaders_registered_file(
         )
         assert denied == []
         assert denied_expected == 1
-        assert disk_read_people == [sender, sender]
+        assert disk_read_people == [sender, sender, sender]
 
         forged = _bridge_call(
             client,
@@ -1481,7 +1521,7 @@ def test_owner_structural_reply_reads_active_shared_uploaders_registered_file(
         )
         assert forged.status_code == 200, forged.text
         assert forged.json()["attachment_context_readable_count"] == 0
-        assert disk_read_people == [sender, sender]
+        assert disk_read_people == [sender, sender, sender]
 
 
 def test_content_dedup_binds_fresh_telegram_ref_to_canonical_odt_for_reply_metadata(

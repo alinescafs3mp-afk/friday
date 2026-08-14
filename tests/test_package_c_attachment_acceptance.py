@@ -70,15 +70,20 @@ def _people_attachment(*, incomplete: bool = False, role_width: int = 0) -> dict
         index["complete"] = False
         index["coverage"]["reasons"] = ["text_budget"]
         assert validate_runtime_office_index(index, result.text) == index
-    return trusted_office_attachment(
-        {
-            "filename": case["filename"],
-            "transient_text": result.text,
-            "extraction_success": True,
-            "verification_eligible": True,
-            OFFICE_STRUCTURE_KEY: index,
-        }
-    )
+    attachment = {
+        "filename": case["filename"],
+        "transient_text": result.text,
+        "extraction_success": True,
+        "verification_eligible": True,
+        OFFICE_STRUCTURE_KEY: index,
+    }
+    if incomplete:
+        # `text_budget` means the extractor stopped before the source tail.  An
+        # index-only mutation paired with an otherwise complete text carrier is
+        # internally contradictory and the full-fit projector correctly treats
+        # those bytes as complete.  Model the real parser contract instead.
+        attachment["text_truncated"] = True
+    return trusted_office_attachment(attachment)
 
 
 class _NeverCalledLLM:

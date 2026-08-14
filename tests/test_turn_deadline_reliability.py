@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import hashlib
 import inspect
 import textwrap
 import threading
@@ -27,6 +28,7 @@ from friday.agent_runtime import (
 from friday.execution_kernel import ToolResult, ToolSpec
 from friday.permissions import ActorContext
 from friday.server import create_app
+from friday.source_identity import authorized_file_snapshot_token, raw_source_identity_sha256
 
 
 class _DisabledModel:
@@ -927,7 +929,23 @@ async def test_legacy_file_inspection_receives_and_obeys_the_same_turn_deadline(
     )
     runtime.kernel = SimpleNamespace(ingestion=SimpleNamespace(inspect_file_transient=hanging_inspection))
 
+    body = b"body"
+    body_sha256 = hashlib.sha256(body).hexdigest()
+
+    def raw_projection(raw_id: str) -> dict[str, str]:
+        return {
+            "id": raw_id,
+            "source": "upload",
+            "source_ref": f"deadline:{raw_id}",
+            "content_type": "file",
+            "received_at": "2026-08-14T00:00:00+00:00",
+            "content_hash": body_sha256,
+            "_raw_content": "",
+            "_raw_metadata": "{}",
+        }
+
     def canonical(raw_id: str, **_kwargs):
+        raw = raw_projection(raw_id)
         return agent_runtime_module._OwnedAttachment(  # noqa: SLF001
             {
                 "raw_object_id": raw_id,
@@ -936,18 +954,30 @@ async def test_legacy_file_inspection_receives_and_obeys_the_same_turn_deadline(
                 "transient_text": "",
                 "extraction_success": False,
                 "_registered_file_record": "valid",
+                agent_runtime_module._RAW_SOURCE_IDENTITY_KEY: raw_source_identity_sha256(raw),  # noqa: SLF001
             }
+        )
+
+    def authorized(*args, **_kwargs):  # noqa: ANN002, ANN003
+        del _kwargs
+        raw_id = str(args[2])
+        token = authorized_file_snapshot_token(
+            raw_projection(raw_id),
+            content_sha256=body_sha256,
+        )
+        assert token is not None
+        return SimpleNamespace(
+            content=body,
+            filename="legacy.doc",
+            mime_type="application/msword",
+            snapshot_token=token,
         )
 
     runtime._owned_file_attachment = canonical  # type: ignore[method-assign]  # noqa: SLF001
     monkeypatch.setattr(
         agent_runtime_module,
         "read_authorized_file",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            content=b"body",
-            filename="legacy.doc",
-            mime_type="application/msword",
-        ),
+        authorized,
     )
     items = [canonical("raw_inspect_one"), canonical("raw_inspect_two")]
     deadline = time.monotonic() + 0.03

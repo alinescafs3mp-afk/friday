@@ -183,21 +183,32 @@ async def test_mime_only_archive_challenges_before_dedup_and_persists_exact_byte
         llm=_NoArchiveQuicklookLLM(),
     )
 
-    async def forbidden_runtime_path(*args, **kwargs):  # noqa: ANN002, ANN003
-        del args, kwargs
-        raise AssertionError("archive bare-upload quicklook entered a model/context seam")
+    review_calls: list[list[dict]] = []
 
-    monkeypatch.setattr(runtime, "_prepare_context", forbidden_runtime_path)
-    monkeypatch.setattr(runtime, "_generate_response", forbidden_runtime_path)
+    async def full_review(context, message, attachments):  # noqa: ANN001
+        del context, message
+        snapshot = [dict(item) for item in attachments or []]
+        review_calls.append(snapshot)
+        body = "\n".join(str(item.get("transient_text") or "") for item in snapshot)
+        assert "ARCHIVE-INTEGRATION-MARKER" in body
+        return {
+            "content": "**Подробное ревью**\n\nАрхив содержит ARCHIVE-INTEGRATION-MARKER.",
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    monkeypatch.setattr(runtime, "_generate_response", full_review)
     receipt = await runtime.chat(
         "alice",
         "Загружен документ: protected.bin",
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
         attachments=[{"raw_object_id": str(unlocked["raw_object_id"])}],
         synthetic_document_notice=True,
+        enable_tools=False,
     )
-    assert "› ARCHIVE-INTEGRATION-MARKER" in receipt["message"]
-    assert receipt["message_format"] == "plain"
+    assert len(review_calls) == 1
+    assert "ARCHIVE-INTEGRATION-MARKER" in receipt["message"]
+    assert receipt["message_format"] == "markdown"
     assert receipt["attachment_context_expected_count"] == 1
     assert receipt["attachment_context_readable_count"] == 1
     assert receipt["attachment_coverage_complete"] is True

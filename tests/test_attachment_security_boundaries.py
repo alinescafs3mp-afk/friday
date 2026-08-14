@@ -12,9 +12,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import gc
+import hashlib
 import json
 import re
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -49,24 +51,97 @@ def _stored_file(
     owner = uploader or tenant_id
     if owner != tenant_id:
         storage.ensure_user(owner)
+    raw_id = new_id("raw")
+    body = text.encode("utf-8")
+    digest = hashlib.sha256(body).hexdigest()
+    relative_path = f"{tenant_id}/{digest[:2]}/{raw_id}.bin"
+    stored_path = storage.settings.files_dir / relative_path
+    stored_path.parent.mkdir(parents=True, exist_ok=True)
+    stored_path.write_bytes(body)
     raw_metadata = {
         "filename": filename,
         "uploaded_by": owner,
         "extraction_success": True,
         "text_extraction_success": True,
         **(metadata or {}),
+        "stored_path": relative_path,
+        "sha256": digest,
+        "size_bytes": len(body),
     }
     raw = RawObject(
-        id=new_id("raw"),
+        id=raw_id,
         user_id=tenant_id,
         source="synthetic-upload",
         source_ref=new_id("source"),
         raw_content=text,
         content_type="file",
+        content_hash=digest,
         metadata_json=raw_metadata,
     )
     storage.store_raw_object(raw)
     return raw
+
+
+def _transient_attachment(
+    *,
+    filename: str,
+    text: str,
+    advisory_kind: str = "",
+    **extraction_state: Any,
+) -> dict[str, Any]:
+    """Build the process-owned no-save carrier used by same-turn tests."""
+
+    extraction: dict[str, Any] = {
+        "success": True,
+        "text_success": True,
+        "chars": len(text),
+        **extraction_state,
+    }
+    ingestion: dict[str, Any] = {"extraction": extraction}
+    metadata: dict[str, Any] = {
+        "filename": filename,
+        "uploaded_by": "alice",
+        "extraction_success": True,
+        "text_extraction_success": True,
+        **extraction_state,
+    }
+    if advisory_kind == "vision":
+        extraction["vision"] = True
+        metadata["vision_review_required"] = True
+    elif advisory_kind == "voice":
+        ingestion["transcript_text"] = text
+        metadata["transcription"] = text
+    elif advisory_kind:
+        raise AssertionError(advisory_kind)
+    return _current_turn_file_attachment(
+        filename=filename,
+        file_ingestion=ingestion,
+        raw={"raw_content": text, "metadata_json": metadata},
+    )
+
+
+def _stored_current_attachment(
+    storage,
+    raw: RawObject,
+    **extraction_state: Any,
+) -> dict[str, Any]:  # noqa: ANN001
+    stored = storage.get_raw_object(raw.id, raw.user_id)
+    assert isinstance(stored, dict)
+    metadata = raw.metadata_json if isinstance(raw.metadata_json, dict) else {}
+    return _current_turn_file_attachment(
+        filename=str(metadata.get("filename") or "attachment"),
+        file_ingestion={
+            "raw_object_id": raw.id,
+            "extraction": {
+                "success": True,
+                "text_success": True,
+                "chars": len(raw.raw_content),
+                **extraction_state,
+            },
+        },
+        raw=stored,
+        storage=storage,
+    )
 
 
 class _UnusedEnabledLLM:
@@ -139,6 +214,19 @@ class _LocalAttachmentToolKernel:
             )
         ]
 
+    @staticmethod
+    def get_tool(name: str):  # noqa: ANN205
+        contracts = {
+            "memory_save": ("mutate", "knowledge.create"),
+            "entity_create": ("mutate", "kg.write"),
+            "remind": ("mutate", "kg.write"),
+            "web_search": ("observe", "web.search"),
+            "web_research": ("mutate", "web.research"),
+            "web_fetch": ("observe", "web.fetch"),
+        }
+        contract = contracts.get(name)
+        return SimpleNamespace(risk=contract[0], security_id=contract[1]) if contract else None
+
     async def execute(self, name, arguments, *, actor=None):  # pragma: no cover - loop is patched
         del name, arguments, actor
         raise AssertionError("routing test unexpectedly executed a tool")
@@ -163,19 +251,19 @@ def _patch_simple_turn(monkeypatch, runtime: AgentRuntime, seen: list[list[dict[
 
 
 @pytest.mark.asyncio
-async def test_current_attachment_bounds_optional_routing_without_losing_history_or_local_tools(
+async def test_current_attachment_bounds_optional_routing_and_isolates_history_and_tools(
     settings,
     storage,
     monkeypatch,
 ):
-    """A slow routing hint may disappear; the user's capabilities may not.
+    """A slow routing hint may disappear without broadening the private turn.
 
     The live document delay was two optional classifiers ahead of the answer.
     A supplied attachment makes the short-caption small-talk question
     unnecessary.  The broader intent arbiter may still run, but it must use the
     attachment-specific optional-stage budget and fail open.  In either case the
-    ordinary bounded conversation history and every authorised local capability
-    still reach the primary answer path.
+    a pure current-file read isolates old conversation text and action schemas
+    while preserving the authenticated attachment.
     """
 
     storage.ensure_user("alice", preset_key="owner")
@@ -183,10 +271,11 @@ async def test_current_attachment_bounds_optional_routing_without_losing_history
     storage.store_message(conversation["id"], "alice", "user", "PRIOR-QUESTION-SENTINEL")
     storage.store_message(conversation["id"], "alice", "assistant", "PRIOR-ANSWER-SENTINEL")
     auth = AuthorizationService(storage)
+    llm = _AttachmentAnswerLLM("Синтетический ответ по текущему файлу.")
     runtime = AgentRuntime(
         replace(settings, verify_answers=False),
         storage,
-        llm=_UnusedEnabledLLM(),
+        llm=llm,
         kernel=_LocalAttachmentToolKernel(auth),  # type: ignore[arg-type]
     )
     monkeypatch.setattr(
@@ -199,7 +288,6 @@ async def test_current_attachment_bounds_optional_routing_without_losing_history
     small_talk_calls = 0
     outward_calls = 0
     outward_cancelled = False
-    captured: dict[str, Any] = {}
 
     async def forbidden_small_talk(*args, **kwargs):
         nonlocal small_talk_calls
@@ -216,26 +304,8 @@ async def test_current_attachment_bounds_optional_routing_without_losing_history
         finally:
             outward_cancelled = True
 
-    async def capture_primary(
-        context,
-        message,
-        actor,
-        tools,
-        attachments,
-        *,
-        outbound_allowed=True,
-        outbound_tool_allowlist=None,
-    ):
-        del message, actor, outbound_allowed, outbound_tool_allowlist
-        captured["history"] = [dict(item) for item in context.conversation_history]
-        captured["focused"] = context.focused_attachment_turn
-        captured["tool_names"] = {str((tool.get("function") or {}).get("name") or "") for tool in tools}
-        captured["attachments"] = [dict(item) for item in (attachments or [])]
-        return {"content": "Синтетический ответ по текущему файлу.", "tools_used": []}
-
     monkeypatch.setattr(runtime, "_is_small_talk_by_arbiter", forbidden_small_talk)
     monkeypatch.setattr(runtime, "_web_query_by_arbiter", hanging_outward)
-    monkeypatch.setattr(runtime, "_agentic_loop", capture_primary)
 
     result = await asyncio.wait_for(
         runtime.chat(
@@ -244,13 +314,9 @@ async def test_current_attachment_bounds_optional_routing_without_losing_history
             actor=auth.actor_for_user("alice", source="test"),
             conversation_id=conversation["id"],
             attachments=[
-                agent_runtime_module._OwnedAttachment(
-                    {
-                        "filename": "current.txt",
-                        "transient_text": "CURRENT-ATTACHMENT-SENTINEL",
-                        "extraction_success": True,
-                        "verification_eligible": True,
-                    }
+                _transient_attachment(
+                    filename="current.txt",
+                    text="CURRENT-ATTACHMENT-SENTINEL",
                 )
             ],
             enable_tools=True,
@@ -262,16 +328,15 @@ async def test_current_attachment_bounds_optional_routing_without_losing_history
     assert small_talk_calls == 0, "a current file cannot be mistaken for short small-talk"
     assert outward_calls in {0, 1}
     assert outward_calls == 0 or outward_cancelled, "timed-out optional work was left running"
-    assert captured["focused"] is True
-    assert any("PRIOR-QUESTION-SENTINEL" in str(item.get("content") or "") for item in captured["history"])
-    assert any("PRIOR-ANSWER-SENTINEL" in str(item.get("content") or "") for item in captured["history"])
-    assert "memory_save" in captured["tool_names"]
-    assert "entity_create" in captured["tool_names"]
-    assert "remind" in captured["tool_names"]
-    assert "web_search" in captured["tool_names"]
-    assert "web_research" in captured["tool_names"]
-    assert "web_fetch" in captured["tool_names"]
-    assert captured["attachments"][0]["transient_text"] == "CURRENT-ATTACHMENT-SENTINEL"
+    assert len(llm.calls) == 1
+    prompt = "\n".join(str(item.get("content") or "") for item in llm.calls[0]["messages"])
+    assert "PRIOR-QUESTION-SENTINEL" not in prompt
+    assert "PRIOR-ANSWER-SENTINEL" not in prompt
+    assert "CURRENT-ATTACHMENT-SENTINEL" in prompt
+    assert llm.calls[0]["kwargs"].get("tools") in (None, [])
+    assert result["attachment_context_available"] is True
+    assert result["attachment_context_expected_count"] == 1
+    assert result["attachment_context_readable_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -337,12 +402,10 @@ async def test_office_intent_arbiter_uses_the_attachment_optional_stage_budget(
             "посчитай людей",
             actor=auth.actor_for_user("alice", source="test"),
             attachments=[
-                {
-                    "filename": "synthetic.xlsx",
-                    "transient_text": "SYNTHETIC-OFFICE-BODY",
-                    "extraction_success": True,
-                    "verification_eligible": True,
-                }
+                _transient_attachment(
+                    filename="synthetic.xlsx",
+                    text="SYNTHETIC-OFFICE-BODY",
+                )
             ],
             enable_tools=False,
         ),
@@ -415,12 +478,13 @@ async def test_generated_upload_notice_filename_has_no_tool_or_classifier_author
         enable_tools=True,
     )
 
-    # Bare intake is a code-owned receipt: zero model, zero tools, zero classifiers.
+    # An unregistered caller mapping cannot become review evidence: zero model,
+    # zero tools, zero classifiers, and no forged body in the refusal.
     assert llm.calls == []
     assert result["tools_used"] == []
     assert result["files"] == []
     assert result["context"]["llm_failed"] is False
-    assert result["message_format"] == "plain"
+    assert "SYNTHETIC-UPLOAD-BODY" not in result["message"]
     assert "PRIOR-UPLOAD-QUESTION-SENTINEL" not in result["message"]
     assert "PRIOR-UPLOAD-ANSWER-SENTINEL" not in result["message"]
     assert "SYNTHETIC-UPLOAD-BODY" not in result["message"]
@@ -441,6 +505,13 @@ async def test_readable_attachment_model_failure_distinguishes_complete_partial_
         "alice",
         "TRUSTED-DURABLE-CONTENT",
         filename="trusted.txt",
+    )
+    partial_raw = _stored_file(
+        storage,
+        "alice",
+        "TRUSTED-DURABLE-CONTENT",
+        filename="trusted-partial.txt",
+        metadata={"text_truncated": True},
     )
     runtime = AgentRuntime(
         replace(settings, verify_answers=False),
@@ -469,27 +540,24 @@ async def test_readable_attachment_model_failure_distinguishes_complete_partial_
     monkeypatch.setattr(runtime, "_prepare_context", simple_context)
     monkeypatch.setattr(runtime, "_generate_response", failed_primary)
 
-    common = {
-        "filename": "trusted.txt",
-        "raw_object_id": raw.id,
-        "persisted": True,
-        "current_turn_only": True,
-        "transient_text": "TRUSTED-DURABLE-CONTENT",
-        "extraction_success": True,
-        "verification_eligible": True,
-    }
+    complete_attachment = _stored_current_attachment(storage, raw)
+    partial_attachment = _stored_current_attachment(
+        storage,
+        partial_raw,
+        text_truncated=True,
+    )
     complete = await runtime.chat(
         "alice",
         "объясни вложение",
         actor=auth.actor_for_user("alice", source="test"),
-        attachments=[common],
+        attachments=[complete_attachment],
         enable_tools=False,
     )
     partial = await runtime.chat(
         "alice",
         "объясни вложение",
         actor=auth.actor_for_user("alice", source="test"),
-        attachments=[{**common, "text_truncated": True}],
+        attachments=[partial_attachment],
         enable_tools=False,
     )
     forged = await runtime.chat(
@@ -498,10 +566,11 @@ async def test_readable_attachment_model_failure_distinguishes_complete_partial_
         actor=auth.actor_for_user("alice", source="test"),
         attachments=[
             {
-                **common,
                 "filename": "caller-flag.txt",
                 "raw_object_id": "raw_missing_caller_claim",
                 "transient_text": "CALLER-SUPPLIED-READABLE-CONTENT",
+                "extraction_success": True,
+                "verification_eligible": True,
             }
         ],
         enable_tools=False,
@@ -519,9 +588,10 @@ async def test_readable_attachment_model_failure_distinguishes_complete_partial_
     assert any(marker in partial_text for marker in ("не полностью", "часть", "фрагмент"))
     assert partial["attachment_coverage_complete"] is False
 
-    assert "модель не сформировала ответ" in forged_text
+    assert "источник стал недоступен или изменился" in forged_text
     assert "повторно загружать" not in forged_text
-    assert forged["attachment_context_available"] is True
+    assert forged["attachment_context_available"] is False
+    assert forged["attachment_authority_changed_before_publication"] is True
     forged_rows = storage.get_conversation_messages(forged["conversation_id"], user_id="alice")
     forged_user_metadata = json.loads(forged_rows[0]["metadata_json"] or "{}")
     assert "conversation_attachment_raw_ids" not in forged_user_metadata
@@ -589,7 +659,8 @@ async def test_attachment_verifier_repair_and_reverify_share_one_secondary_deadl
     real_wait_for = asyncio.wait_for
 
     async def capture_wait_for(awaitable, timeout):
-        observed_timeouts.append(float(timeout))
+        if float(timeout) <= 0.12:
+            observed_timeouts.append(float(timeout))
         return await awaitable
 
     async def simple_context(user_id, message, conversation_id, **kwargs):
@@ -619,12 +690,10 @@ async def test_attachment_verifier_repair_and_reverify_share_one_secondary_deadl
             "объясни вложение подробно",
             actor=auth.actor_for_user("alice", source="test"),
             attachments=[
-                {
-                    "filename": "secondary.txt",
-                    "transient_text": "SYNTHETIC-SECONDARY-EVIDENCE",
-                    "extraction_success": True,
-                    "verification_eligible": True,
-                }
+                _transient_attachment(
+                    filename="secondary.txt",
+                    text="SYNTHETIC-SECONDARY-EVIDENCE",
+                )
             ],
             enable_tools=False,
         )
@@ -679,12 +748,10 @@ async def test_cancelling_an_attachment_turn_cancels_the_inflight_primary_model(
             "объясни вложение",
             actor=auth.actor_for_user("alice", source="test"),
             attachments=[
-                {
-                    "filename": "cancel.txt",
-                    "transient_text": "CANCELLATION-SENTINEL",
-                    "extraction_success": True,
-                    "verification_eligible": True,
-                }
+                _transient_attachment(
+                    filename="cancel.txt",
+                    text="CANCELLATION-SENTINEL",
+                )
             ],
             enable_tools=False,
         )
@@ -1021,7 +1088,8 @@ async def test_attachment_late_file_filler_uses_primary_remainder_without_file_e
             return ToolResult(name, True, attachment={"filename": "unexpected.docx"})
 
     async def record_wait_for(awaitable, timeout):
-        observed_timeouts.append(float(timeout))
+        if float(timeout) <= cap:
+            observed_timeouts.append(float(timeout))
         return await real_wait_for(awaitable, timeout)
 
     async def simple_context(user_id, message, conversation_id, **kwargs):
@@ -1053,12 +1121,10 @@ async def test_attachment_late_file_filler_uses_primary_remainder_without_file_e
             "оформи по текущему вложению документ Word",
             actor=auth.actor_for_user("alice", source="test"),
             attachments=[
-                {
-                    "filename": "late-file-source.txt",
-                    "transient_text": "SYNTHETIC-LATE-FILE-EVIDENCE",
-                    "extraction_success": True,
-                    "verification_eligible": True,
-                }
+                _transient_attachment(
+                    filename="late-file-source.txt",
+                    text="SYNTHETIC-LATE-FILE-EVIDENCE",
+                )
             ],
             enable_tools=False,
         )
@@ -1091,12 +1157,10 @@ async def test_attachment_clean_salvage_uses_open_remainder_without_repeating_st
     remainder = "Сделай короткую сводку по таблице."
     structural = "Напоминание поставлено: «отчёт», срок — завтра."
     summary = "Краткая сводка: Север — 120, Юг — 80; Север лидирует."
-    attachment = {
-        "filename": "synthetic-sales.txt",
-        "transient_text": "Продажи по регионам: Север — 120; Юг — 80.",
-        "extraction_success": True,
-        "verification_eligible": True,
-    }
+    attachment = _transient_attachment(
+        filename="synthetic-sales.txt",
+        text="Продажи по регионам: Север — 120; Юг — 80.",
+    )
 
     class SalvageSequenceLLM:
         enabled = True
@@ -1149,8 +1213,10 @@ async def test_attachment_clean_salvage_uses_open_remainder_without_repeating_st
         messages,
         tools_used,
         tool_evidence,
+        *,
+        authority=None,
     ):
-        del actor
+        del actor, authority
         assert message == original
         tools[:] = [tool for tool in tools if str((tool.get("function") or {}).get("name") or "") != "remind"]
         tools_used.append("remind")
@@ -1394,7 +1460,7 @@ async def test_revoked_files_read_hides_same_turn_and_restored_raw_text(
         enable_tools=False,
     )
 
-    assert seen == [[], []]
+    assert seen == [], "a revoked source must close before model/context generation"
     assert same_turn["attachment_context_available"] is False
     assert restored["attachment_context_available"] is False
     assert restored["restored_attachment_count"] == 0
@@ -1440,7 +1506,7 @@ async def test_unreadable_attachment_cannot_support_a_complete_count_claim(
         enable_tools=False,
     )
 
-    assert seen == [[]]
+    assert seen == [], "an unreadable exhaustive request must close before the model"
     assert result["attachment_context_expected_count"] == 1
     assert result["attachment_context_readable_count"] == 0
     assert result["attachment_context_available"] is False
@@ -1782,11 +1848,10 @@ async def test_partial_two_file_restore_is_not_reported_as_available(
         enable_tools=False,
     )
 
-    assert len(seen) == 1 and len(seen[0]) == 1
-    assert seen[0][0]["raw_object_id"] == readable.id
+    assert seen == [], "an incomplete requested set must close before the model"
     assert result["restored_attachment_count"] == 1
     assert result["attachment_context_expected_count"] == 2
-    assert result["attachment_context_readable_count"] == 1
+    assert result["attachment_context_readable_count"] == 0
     assert result["attachment_context_available"] is False
 
 
@@ -1945,11 +2010,15 @@ def test_explicitly_partial_summary_question_does_not_require_complete_attachmen
 
 
 @pytest.mark.parametrize(
-    "message",
-    ["Что внутри файла?", "Покажи содержимое файла.", "О чём документ?"],
+    ("message", "expected"),
+    [
+        ("Что внутри файла?", "deictic"),
+        ("Покажи содержимое файла.", "explicit"),
+        ("О чём документ?", "explicit"),
+    ],
 )
-def test_explicit_content_followups_are_file_references(message: str) -> None:
-    assert _attachment_reference_kind(message) == "explicit"
+def test_explicit_content_followups_are_file_references(message: str, expected: str) -> None:
+    assert _attachment_reference_kind(message) == expected
 
 
 @pytest.mark.parametrize("message", ["Что на 288 позиции?", "А что в строке номер 47?"])
@@ -2002,13 +2071,11 @@ async def test_incomplete_attachment_cannot_turn_an_all_or_count_answer_verified
         "сколько всего позиций в файле? перечисли все",
         actor=auth.actor_for_user("alice", source="test"),
         attachments=[
-            {
-                "filename": "incomplete.txt",
-                "transient_text": "POSITION-1\nPOSITION-2\nPOSITION-3",
-                "extraction_success": True,
-                "verification_eligible": True,
+            _transient_attachment(
+                filename="incomplete.txt",
+                text="POSITION-1\nPOSITION-2\nPOSITION-3",
                 **coverage_flag,
-            }
+            )
         ],
         enable_tools=False,
     )
@@ -2069,13 +2136,11 @@ async def test_incomplete_attachment_rejects_answer_only_exhaustiveness_claims(
         "Кто указан в документе?",
         actor=auth.actor_for_user("alice", source="test"),
         attachments=[
-            {
-                "filename": "incomplete.txt",
-                "transient_text": "Иван\nПётр\nАнна",
-                "extraction_success": True,
-                "verification_eligible": True,
-                "text_truncated": True,
-            }
+            _transient_attachment(
+                filename="incomplete.txt",
+                text="Иван\nПётр\nАнна",
+                text_truncated=True,
+            )
         ],
         enable_tools=False,
     )
@@ -2130,19 +2195,18 @@ async def test_repair_cannot_introduce_a_verified_count_from_incomplete_attachme
         "Кто указан в документе?",
         actor=auth.actor_for_user("alice", source="test"),
         attachments=[
-            {
-                "filename": "incomplete.txt",
-                "transient_text": "Иван\nПётр\nАнна",
-                "extraction_success": True,
-                "verification_eligible": True,
-                "text_truncated": True,
-            }
+            _transient_attachment(
+                filename="incomplete.txt",
+                text="Иван\nПётр\nАнна",
+                text_truncated=True,
+            )
         ],
         enable_tools=False,
     )
 
     assert verification_calls == 2
-    assert result["message"] == "В документе 3 позиции."
+    assert result["message"].startswith("Не весь исходный материал")
+    assert result["message"].endswith("В документе 3 позиции.")
     assert result["attachment_verification_complete"] is False
     assert result["verification_status"] == "unknown"
     assert result["verified"] is False
@@ -2207,13 +2271,11 @@ async def test_advisory_vision_and_voice_reach_synthesis_but_never_verification(
         f"Загружен документ: advisory-{kind}.bin" if synthetic_notice else "что в этом файле?",
         actor=auth.actor_for_user("alice", source="test"),
         attachments=[
-            {
-                "filename": f"advisory-{kind}.bin",
-                "transient_text": advisory_text,
-                "extraction_success": True,
-                "advisory_only": True,
-                "verification_eligible": False,
-            }
+            _transient_attachment(
+                filename=f"advisory-{kind}.bin",
+                text=advisory_text,
+                advisory_kind=kind,
+            )
         ],
         enable_tools=False,
         synthetic_document_notice=synthetic_notice,
@@ -2249,7 +2311,7 @@ async def test_long_advisory_ocr_stays_in_synthesis_instead_of_empty_hierarchy(
     body_chars,
     expects_partial,
 ):
-    """Bare notice is status-only for advisory OCR; explicit Q keeps synthesis, not hierarchy."""
+    """Bare and explicit advisory reviews synthesize once without false certification."""
 
     head = "ADVISORY-LONG-OCR-HEAD\n"
     tail = "\nADVISORY-LONG-OCR-TAIL"
@@ -2272,40 +2334,7 @@ async def test_long_advisory_ocr_stays_in_synthesis_instead_of_empty_hierarchy(
         }
     )
 
-    async def forbidden_prepare(*args, **kwargs):
-        del args, kwargs
-        raise AssertionError("bare upload notice entered general context preparation")
-
-    async def forbidden_generate(*args, **kwargs):
-        del args, kwargs
-        raise AssertionError("bare upload notice called the model")
-
-    async def forbidden_hierarchy(*args, **kwargs):
-        del args, kwargs
-        raise AssertionError("advisory OCR entered the verifiable hierarchy")
-
-    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
-    monkeypatch.setattr(runtime, "_generate_response", forbidden_generate)
-    monkeypatch.setattr(runtime, "_build_attachment_hierarchy_bundle", forbidden_hierarchy)
-    monkeypatch.setattr(runtime, "_hierarchical_attachment_response", forbidden_hierarchy)
-    receipt = await runtime.chat(
-        "alice",
-        "Загружен документ: synthetic-long-scan.pdf",
-        actor=auth.actor_for_user("alice", source="test"),
-        attachments=[attachment],
-        enable_tools=False,
-        synthetic_document_notice=True,
-    )
-    # Bare advisory: status/warning only — no model, no OCR literals in the receipt.
-    assert receipt["tools_used"] == []
-    assert receipt["message_format"] == "plain"
-    assert head.strip() not in receipt["message"]
-    assert tail.strip() not in receipt["message"]
-    assert "› " not in receipt["message"]
-    assert receipt["attachment_verification_complete"] is False
-    assert receipt["verified"] is False
-
-    shown: list[dict[str, Any]] = []
+    shown: list[list[dict[str, Any]]] = []
 
     async def prepare(user_id, message, conversation_id, **kwargs):
         del message, kwargs
@@ -2318,15 +2347,43 @@ async def test_long_advisory_ocr_stays_in_synthesis_instead_of_empty_hierarchy(
 
     async def generate(context, message, attachments):
         del context, message
-        shown.extend(list(attachments or []))
+        shown.append(list(attachments or []))
         return {
-            "content": "Распознанный материал передан в синтез.",
+            "content": "## Подробное ревью\n\nРаспознанный материал передан в синтез.",
             "tools_used": [],
             "_model_generated": True,
         }
 
+    async def forbidden_hierarchy(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("advisory OCR entered the verifiable hierarchy")
+
     monkeypatch.setattr(runtime, "_prepare_context", prepare)
     monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_build_attachment_hierarchy_bundle", forbidden_hierarchy)
+    monkeypatch.setattr(runtime, "_hierarchical_attachment_response", forbidden_hierarchy)
+    receipt = await runtime.chat(
+        "alice",
+        "Загружен документ: synthetic-long-scan.pdf",
+        actor=auth.actor_for_user("alice", source="test"),
+        attachments=[attachment],
+        enable_tools=False,
+        synthetic_document_notice=True,
+    )
+    # Bare advisory is a real review now, but advisory OCR can never be certified.
+    assert len(shown) == 1
+    bare_projected_text = str(shown[0][0].get("transient_text") or "")
+    assert head.strip() in bare_projected_text
+    assert (tail.strip() in bare_projected_text) is not expects_partial
+    assert receipt["tools_used"] == []
+    assert receipt["message_format"] == "markdown"
+    assert "Подробное ревью" in receipt["message"]
+    assert receipt["attachment_context_available"] is True
+    assert receipt["attachment_coverage_complete"] is not expects_partial
+    assert receipt["attachment_verification_complete"] is False
+    assert receipt["verification_status"] == "unknown"
+    assert receipt["verified"] is False
+
     result = await runtime.chat(
         "alice",
         "что в этом файле?",
@@ -2336,8 +2393,8 @@ async def test_long_advisory_ocr_stays_in_synthesis_instead_of_empty_hierarchy(
         enable_tools=False,
     )
 
-    assert len(shown) == 1
-    projected_text = str(shown[0].get("transient_text") or "")
+    assert len(shown) == 2
+    projected_text = str(shown[1][0].get("transient_text") or "")
     assert head.strip() in projected_text
     assert (tail.strip() in projected_text) is not expects_partial
     assert result["attachment_context_available"] is True
@@ -2410,12 +2467,12 @@ async def test_advisory_private_turn_sanitizes_raw_verifier_issues_everywhere(
     serialized_result = json.dumps(result, ensure_ascii=False)
     assert raw_issue not in serialized_result
     assert private_text not in serialized_result
-    assert result["verification"]["issues"] == ["attachment_verification_unavailable"]
+    assert result["verification"]["issues"] == ["attachment_authority_changed_before_publication"]
     rows = storage.get_conversation_messages(result["conversation_id"], user_id="alice")
     assistant_metadata = str(rows[-1].get("metadata_json") or "")
     assert raw_issue not in assistant_metadata
     assert private_text not in assistant_metadata
-    assert "attachment_verification_unavailable" in assistant_metadata
+    assert "attachment_authority_changed_before_publication" in assistant_metadata
 
 
 class _RepairCaptureLLM:
@@ -2611,6 +2668,16 @@ class _OutboundRecordingKernel:
             )
         ]
 
+    @staticmethod
+    def get_tool(name: str):  # noqa: ANN205
+        contracts = {
+            "web_search": ("observe", "web.search"),
+            "web_fetch": ("observe", "web.fetch"),
+            "web_research": ("mutate", "web.research"),
+        }
+        contract = contracts.get(name)
+        return SimpleNamespace(risk=contract[0], security_id=contract[1]) if contract is not None else None
+
     async def execute(self, name, arguments, *, actor=None):
         del arguments, actor
         self.executed.append(name)
@@ -2633,33 +2700,20 @@ async def test_private_attachment_allows_only_web_family_outbound_calls(
         llm=llm,
         kernel=kernel,  # type: ignore[arg-type]
     )
-    prepare_private_lineage: list[bool] = []
-
-    async def prepare(user_id, message, conversation_id, **kwargs):
-        del message
-        prepare_private_lineage.append(bool(kwargs.get("private_context_lineage")))
-        return AgentContext(
-            conversation_id=conversation_id,
-            user_id=user_id,
-            person_id=user_id,
-            outward_verdict=("интернет", None),
-        )
 
     async def no_prefetch(*args, **kwargs):
         del args, kwargs
 
-    monkeypatch.setattr(runtime, "_prepare_context", prepare)
     monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", no_prefetch)
     result = await runtime.chat(
         "alice",
         "найди в интернете указанный во вложении адрес",
         actor=auth.actor_for_user("alice", source="test"),
         attachments=[
-            {
-                "filename": "private.txt",
-                "transient_text": "PRIVATE-FILE-SENTINEL",
-                "extraction_success": True,
-            }
+            _transient_attachment(
+                filename="private.txt",
+                text="PRIVATE-FILE-SENTINEL",
+            )
         ],
         enable_tools=True,
     )
@@ -2671,7 +2725,12 @@ async def test_private_attachment_allows_only_web_family_outbound_calls(
     assert result["tools_used"] == ["web_search", "web_fetch", "code_run", "data_query"]
     assert llm.second_round_tool_text.count("Внешний сетевой инструмент недоступен") == 2
     assert not result.get("web_query_notice")
-    assert prepare_private_lineage == [True]
+    assert result["attachment_context_available"] is True
+    assert result["attachment_context_expected_count"] == 1
+    assert result["attachment_context_readable_count"] == 1
+    rows = storage.get_conversation_messages(result["conversation_id"], user_id="alice")
+    persisted = [json.loads(str(row.get("metadata_json") or "{}")) for row in rows]
+    assert persisted and all(item.get("private_context_lineage") is True for item in persisted)
 
 
 @pytest.mark.asyncio
@@ -2690,18 +2749,6 @@ async def test_focused_attachment_without_web_intent_blocks_model_selected_outbo
         llm=llm,
         kernel=kernel,  # type: ignore[arg-type]
     )
-    prepared: list[AgentContext] = []
-
-    async def prepare(user_id, message, conversation_id, **kwargs):
-        del message, kwargs
-        context = AgentContext(
-            conversation_id=conversation_id,
-            user_id=user_id,
-            person_id=user_id,
-            current_attachment_present=True,
-        )
-        prepared.append(context)
-        return context
 
     async def no_web_prefetch(*args, **kwargs):
         del args, kwargs
@@ -2710,7 +2757,6 @@ async def test_focused_attachment_without_web_intent_blocks_model_selected_outbo
         del args, kwargs
         raise AssertionError("focused attachment broadened into person/timeline activity")
 
-    monkeypatch.setattr(runtime, "_prepare_context", prepare)
     monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", no_web_prefetch)
     monkeypatch.setattr(runtime, "_prefetch_person_activity", forbidden_private_prefetch)
     monkeypatch.setattr(runtime, "_prefetch_the_timeline_if_asked", forbidden_private_prefetch)
@@ -2719,26 +2765,28 @@ async def test_focused_attachment_without_web_intent_blocks_model_selected_outbo
         "Обобщи текущий документ.",
         actor=auth.actor_for_user("alice", source="test"),
         attachments=[
-            agent_runtime_module._OwnedAttachment(
-                {
-                    "filename": "private.txt",
-                    "transient_text": "PRIVATE-FILE-SENTINEL",
-                    "extraction_success": True,
-                    "verification_eligible": True,
-                }
+            _transient_attachment(
+                filename="private.txt",
+                text="PRIVATE-FILE-SENTINEL",
             )
         ],
         enable_tools=True,
     )
 
-    assert prepared and prepared[0].focused_attachment_turn is True
+    assert result["attachment_context_available"] is True
+    assert result["attachment_context_expected_count"] == 1
+    assert result["attachment_context_readable_count"] == 1
+    rows = storage.get_conversation_messages(result["conversation_id"], user_id="alice")
+    persisted = [json.loads(str(row.get("metadata_json") or "{}")) for row in rows]
+    assert persisted and all(item.get("private_context_lineage") is True for item in persisted)
     assert all(
         not {"web_search", "web_research", "web_fetch", "code_run", "data_query"} & names
         for names in llm.offered_names
     )
     assert kernel.executed == []
-    assert result["tools_used"] == ["web_search", "web_fetch", "code_run", "data_query"]
-    assert llm.second_round_tool_text.count("Внешний сетевой инструмент недоступен") == 4
+    assert result["tools_used"] == []
+    assert llm.calls == 1
+    assert llm.second_round_tool_text == ""
 
 
 @pytest.mark.asyncio

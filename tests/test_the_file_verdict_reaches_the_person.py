@@ -325,12 +325,68 @@ def test_an_empty_document_says_there_was_nothing_in_it(pipeline):
     """
     result = _ingest(pipeline, _docx([]), "empty.docx", "")
     assert result["extraction"]["success"] is True, "разбор должен был пройти без ошибки"
+    assert result["extraction"]["text_success"] is False, (
+        "пустой результат — не ошибка парсера, но и не извлечённый текст"
+    )
     assert result["extraction"]["chars"] == 0
     assert result["promoted"] is False
     line = _file_fate_line(result)
     assert "Текста в файле не оказалось" in line
     # Это НЕ то же самое, что «разобрать не удалось»: там файл нечитаем вовсе.
     assert "Текст извлечь не удалось" not in line
+
+
+@pytest.mark.parametrize(
+    ("receipt", "expected"),
+    [
+        (
+            {
+                "queued_for_review": True,
+                "extraction": {
+                    "success": False,
+                    "text_success": False,
+                    "chars": 0,
+                    "error": "parser failed with jrc_DO_NOT_EXPOSE_THIS_CREDENTIAL_123456",
+                },
+            },
+            "Текст извлечь не удалось",
+        ),
+        (
+            {
+                "queued_for_review": True,
+                "extraction": {
+                    "success": False,
+                    "text_success": False,
+                    "chars": 0,
+                    "unsupported_format": True,
+                },
+            },
+            "Такой формат я пока не читаю",
+        ),
+        (
+            {
+                "queued_for_review": True,
+                "extraction": {
+                    "success": True,
+                    "text_success": False,
+                    "chars": 0,
+                    "parse_deadline_reached": True,
+                },
+            },
+            "Разбор остановлен по сроку",
+        ),
+    ],
+    ids=("parser-failure", "unsupported", "deadline-before-text"),
+)
+def test_empty_verdict_does_not_absorb_failure_unsupported_or_partial_receipts(
+    receipt: dict, expected: str
+) -> None:
+    """Zero characters alone must not erase a stronger failure or loss fact."""
+    line = _file_fate_line(receipt)
+
+    assert expected in line
+    assert "Текста в файле не оказалось" not in line
+    assert "jrc_DO_NOT_EXPOSE_THIS_CREDENTIAL_123456" not in line
 
 
 def test_a_document_whose_text_lives_in_the_header_is_no_longer_empty(pipeline):

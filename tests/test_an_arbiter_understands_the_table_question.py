@@ -86,6 +86,22 @@ def test_a_question_the_regexes_already_catch_needs_no_call() -> None:
 
 
 @pytest.mark.parametrize(
+    "question",
+    [
+        "О чём речь в этом файле?",
+        "Дай подробный обзор файла",
+        "Что скажешь про этот документ?",
+        "Проанализируй документ и укажи риски",
+        "Какие выводы следуют из этой таблицы?",
+    ],
+)
+def test_an_ordinary_file_review_never_pays_for_the_exact_table_arbiter(question: str) -> None:
+    """A review is one synthesis task, not a count/list classifier plus review."""
+
+    assert office_arbiter_applies(question, [_office_attachment()]) is False
+
+
+@pytest.mark.parametrize(
     ("reply", "expected"),
     [
         ('{"kind": "count_people"}', "count_people"),

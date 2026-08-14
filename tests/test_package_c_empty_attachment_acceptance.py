@@ -8,16 +8,20 @@ must not ask a model which may mistake absence of file text for an empty archive
 from __future__ import annotations
 
 import base64
+import hashlib
+import io
 import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
+from docx import Document
 from fastapi.testclient import TestClient
 
 from friday.agent_runtime import AgentContext, AgentRuntime, _what_is_missing_from_this_attachment
 from friday.documents import DocumentResult
+from friday.file_delivery import REGISTERED_VALID, classify_file_registration
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.permissions import ActorContext
@@ -32,30 +36,84 @@ def _fixture() -> dict[str, Any]:
     return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 
 
-def _empty_current_attachment(case: dict[str, Any]) -> dict[str, Any]:
+def _empty_current_attachment(
+    case: dict[str, Any],
+    *,
+    storage=None,  # noqa: ANN001
+    filename: str | None = None,
+    no_save: bool = False,
+) -> dict[str, Any]:
+    projected_filename = filename or str(case["filename"])
     replay = case["source"] == "idempotent_replay"
+    raw_id = "" if no_save else f"raw_{case['id']}"
+    raw: dict[str, Any] = {
+        "raw_content": "",
+        "metadata_json": {
+            "filename": projected_filename,
+            "uploaded_by": "synthetic-user",
+            "extraction_success": True,
+            "text_extraction_success": False,
+        },
+    }
+    if storage is not None:
+        storage.ensure_user("synthetic-user", preset_key="owner")
+        if str(case.get("format") or "").casefold() == "docx":
+            document = Document()
+            output = io.BytesIO()
+            document.save(output)
+            source_bytes = output.getvalue()
+            mime_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        else:
+            source_bytes = b""
+            mime_type = "text/csv" if str(case.get("format") or "").casefold() == "csv" else "text/plain"
+        digest = hashlib.sha256(source_bytes).hexdigest()
+        suffix = str(case.get("format") or "bin").casefold()
+        relative = f"synthetic-user/{digest[:2]}/{digest}-{case['id']}.{suffix}"
+        stored = storage.settings.files_dir / relative
+        stored.parent.mkdir(parents=True, exist_ok=True)
+        stored.write_bytes(source_bytes)
+        raw_metadata = {
+            **raw["metadata_json"],
+            "mime_type": mime_type,
+            "extraction_chars": 0,
+            "stored_path": relative,
+            "sha256": digest,
+            "size_bytes": len(source_bytes),
+        }
+        stored_raw = RawObject(
+            id=new_id("raw"),
+            user_id="synthetic-user",
+            source="synthetic-package-c-current",
+            source_ref=new_id("source"),
+            raw_content="",
+            content_type="file",
+            content_hash=digest,
+            metadata_json=raw_metadata,
+        )
+        storage.store_raw_object(stored_raw)
+        raw_id = stored_raw.id
+        durable_raw = storage.get_raw_object(stored_raw.id, "synthetic-user")
+        assert isinstance(durable_raw, dict)
+        verdict = classify_file_registration(
+            raw_metadata, content_hash=str(durable_raw.get("content_hash") or "")
+        )
+        assert verdict.state == REGISTERED_VALID, verdict
+        raw = durable_raw
     ingestion: dict[str, Any] = {
-        "raw_object_id": f"raw_{case['id']}",
+        "raw_object_id": raw_id,
         **({"idempotent_replay": True} if replay else {}),
     }
     if not replay:
         ingestion["extraction"] = {
             "success": True,
-            "text_success": True,
+            "text_success": False,
             "chars": 0,
         }
     return _current_turn_file_attachment(
-        filename=case["filename"],
+        filename=projected_filename,
         file_ingestion=ingestion,
-        raw={
-            "raw_content": "",
-            "metadata_json": {
-                "filename": case["filename"],
-                "uploaded_by": "synthetic-user",
-                "extraction_success": True,
-                "text_extraction_success": True,
-            },
-        },
+        raw=raw,
+        storage=storage,
     )
 
 
@@ -109,7 +167,12 @@ def test_k07_restored_empty_extraction_keeps_the_same_explicit_success_state(set
     _assert_successful_empty(_stored_empty_attachment(case, settings, storage))
 
 
-def _control_attachment(case: dict[str, Any]) -> dict[str, Any]:
+def _control_attachment(  # noqa: ANN001
+    case: dict[str, Any],
+    *,
+    storage=None,
+    no_save: bool = False,
+) -> dict[str, Any]:
     kind = case["control_type"]
     extraction: dict[str, Any] = {"success": False, "text_success": False, "chars": 0}
     metadata: dict[str, Any] = {
@@ -136,13 +199,32 @@ def _control_attachment(case: dict[str, Any]) -> dict[str, Any]:
         metadata.update(extraction_success=True, text_extraction_success=True)
     else:  # pragma: no cover - fixture control enum is frozen
         raise AssertionError(kind)
+    raw_id = "" if no_save else f"raw_{case['id']}"
+    raw: dict[str, Any] = {"raw_content": raw_content, "metadata_json": metadata}
+    if storage is not None:
+        storage.ensure_user("synthetic-user", preset_key="owner")
+        stored_raw = RawObject(
+            id=new_id("raw"),
+            user_id="synthetic-user",
+            source="synthetic-package-c-control",
+            source_ref=new_id("source"),
+            raw_content=raw_content,
+            content_type="file",
+            metadata_json=dict(metadata),
+        )
+        storage.store_raw_object(stored_raw)
+        raw_id = stored_raw.id
+        durable_raw = storage.get_raw_object(stored_raw.id, "synthetic-user")
+        assert isinstance(durable_raw, dict)
+        raw = durable_raw
     return _current_turn_file_attachment(
         filename=case["filename"],
         file_ingestion={
-            "raw_object_id": f"raw_{case['id']}",
+            "raw_object_id": raw_id,
             "extraction": extraction,
         },
-        raw={"raw_content": raw_content, "metadata_json": metadata},
+        raw=raw,
+        storage=storage,
     )
 
 
@@ -210,7 +292,7 @@ async def test_k07_runtime_answers_a_successfully_empty_file_without_model_or_ar
     attachment = (
         _stored_empty_attachment(case, settings, storage)
         if case["source"] == "restored_conversation"
-        else _empty_current_attachment(case)
+        else _empty_current_attachment(case, storage=storage)
     )
     _assert_successful_empty(attachment)
 
@@ -258,9 +340,11 @@ async def test_k07_four_supplied_files_cannot_be_declared_empty_from_the_first_t
     empty_case = _fixture()["k07_empty_cases"][0]
     empty_attachments = []
     for index in range(3):
-        attachment = dict(_empty_current_attachment(empty_case))
-        attachment["filename"] = f"synthetic-empty-{index}.txt"
-        attachment["raw_object_id"] = f"raw_synthetic_empty_{index}"
+        attachment = _empty_current_attachment(
+            empty_case,
+            filename=f"synthetic-empty-{index}.txt",
+            no_save=True,
+        )
         empty_attachments.append(attachment)
     nonempty_case = next(case for case in _fixture()["k07_controls"] if case["control_type"] == "nonempty")
 
@@ -268,7 +352,7 @@ async def test_k07_four_supplied_files_cannot_be_declared_empty_from_the_first_t
         "synthetic-user",
         "Что находится во всех четырёх приложенных файлах?",
         actor=ActorContext(user_id="synthetic-user", preset_key="owner", source="test"),
-        attachments=[*empty_attachments, _control_attachment(nonempty_case)],
+        attachments=[*empty_attachments, _control_attachment(nonempty_case, no_save=True)],
         enable_tools=False,
     )
 
@@ -285,18 +369,30 @@ async def test_k07_restored_unread_tail_never_becomes_a_proven_empty_file(
     monkeypatch,
 ) -> None:
     storage.ensure_user("synthetic-user", preset_key="owner")
+    text = "SYNTHETIC-READABLE-PREFIX"
+    body = text.encode("utf-8")
+    digest = hashlib.sha256(body).hexdigest()
+    relative = f"synthetic-user/{digest[:2]}/{digest}-{signal}.bin"
+    stored = settings.files_dir / relative
+    stored.parent.mkdir(parents=True, exist_ok=True)
+    stored.write_bytes(body)
     raw = RawObject(
         id=new_id("raw"),
         user_id="synthetic-user",
         source="synthetic-package-c-unread-tail",
         source_ref=f"synthetic:restored:{signal}",
-        raw_content="",
+        raw_content=text,
         content_type="file",
+        content_hash=digest,
         metadata_json={
             "filename": f"synthetic-{signal}.bin",
             "uploaded_by": "synthetic-user",
             "extraction_success": True,
             "text_extraction_success": True,
+            "extraction_chars": len(text),
+            "stored_path": relative,
+            "sha256": digest,
+            "size_bytes": len(body),
             signal: True,
         },
     )

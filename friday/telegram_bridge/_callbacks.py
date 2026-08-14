@@ -261,17 +261,18 @@ def _file_fate_line(file_ingestion: Any) -> str:
     ):
         if key not in extraction and key in file_ingestion:
             extraction[key] = file_ingestion[key]
-    text_missing = (
-        file_ingestion.get("extraction_success") is False
-        or extraction.get("success") is False
-        or extraction.get("text_success") is False
+    parser_failed = file_ingestion.get("extraction_success") is False or extraction.get("success") is False
+    parser_succeeded = file_ingestion.get("extraction_success") is True or extraction.get("success") is True
+    # `text_success=False` answers whether any text came out, not whether the
+    # parser failed.  A genuinely empty DOCX therefore has the truthful shape
+    # `success=True, text_success=False, chars=0`.  Treat it as empty only when
+    # parse success (or the public projection's explicit `empty_text`) proves
+    # that state; an explicit parser failure wins over contradictory metadata.
+    explicitly_empty = file_ingestion.get("empty_text") is True
+    nothing_came_out = not parser_failed and (
+        explicitly_empty or (parser_succeeded and extraction.get("chars") == 0)
     )
-    # Разбор без ошибки — ещё не текст. Пустой .txt и .docx, где всё написанное
-    # лежит в колонтитуле, приходят с `success=True` и нулём знаков: человеку
-    # говорили просто «ждёт разбора», и он не знал, что содержимого не видно.
-    nothing_came_out = bool(file_ingestion.get("empty_text")) or (
-        not text_missing and extraction.get("chars") == 0
-    )
+    text_missing = parser_failed or (extraction.get("text_success") is False and not nothing_came_out)
     partial = bool(extraction.get("parse_deadline_reached"))
     # Текст не поместился в потолок: принято начало, остальное отброшено.
     over_the_cap = bool(extraction.get("text_truncated"))
@@ -341,8 +342,6 @@ def _file_fate_line(file_ingestion: Any) -> str:
             " Документ длиннее, чем помещается целиком, — принято начало;"
             " по концу файла спрашивать бесполезно."
         )
-    elif nothing_came_out:
-        warning = " Текста в файле не оказалось — разбор прошёл, а содержимого нет."
     elif partial:
         # Успех и полнота — разные вещи: разбор, оборванный по сроку, приходит
         # с `success=True` и частичным текстом. Флаг для этого случая писался
@@ -352,6 +351,8 @@ def _file_fate_line(file_ingestion: Any) -> str:
         warning = f" Разбор остановлен по сроку — принято только начало.{read}"
     elif source_clipped:
         warning = " Файл длиннее, чем берёт разбор, — прочитано его начало."
+    elif nothing_came_out:
+        warning = " Текста в файле не оказалось — разбор прошёл, а содержимого нет."
 
     if file_ingestion.get("action") == "transient":
         return f"{_FILE_TRANSIENT_STATUS}{warning}"

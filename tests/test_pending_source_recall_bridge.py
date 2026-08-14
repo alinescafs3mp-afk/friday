@@ -27,6 +27,7 @@ from friday.agent_runtime import (
 )
 from friday.execution_kernel import ExecutionKernel, ToolResult
 from friday.permissions import ActorContext, AuthorizationService
+from friday.server import _current_turn_file_attachment
 from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
 
 OWNER = "synthetic-source-recall-owner"
@@ -414,20 +415,9 @@ async def test_first_found_file_followup_uses_exact_source_search_provenance_or_
     storage.store_message(
         conversation["id"],
         OWNER,
-        "user",
-        "старый файл A",
-        metadata={
-            "had_attachments": True,
-            "attachment_count": 1,
-            "conversation_attachment_raw_ids": [decoy_id],
-        },
-    )
-    storage.store_message(
-        conversation["id"],
-        OWNER,
         "assistant",
-        "Старый файл принят.",
-        metadata={"attachment_context_used": True},
+        "Старый поиск нашёл файл A.",
+        metadata={"source_search_result_raw_ids": [decoy_id]},
     )
     source_request = "Найди в ранее загруженном источнике должность Иванова"
     found = await runtime.chat(
@@ -716,19 +706,33 @@ async def test_partial_readable_attachment_keeps_the_incomplete_coverage_issue(
     monkeypatch.setattr(runtime, "_prepare_context", prepare)
     monkeypatch.setattr(runtime, "_generate_response", generate)
     monkeypatch.setattr(runtime, "_verify_response", unknown_verifier)
+    partial_text = "SYNTHETIC-PARTIAL-READABLE-BODY"
+    partial_attachment = _current_turn_file_attachment(
+        filename="partial.txt",
+        file_ingestion={
+            "extraction": {
+                "success": True,
+                "text_success": True,
+                "chars": len(partial_text),
+                "text_truncated": True,
+            }
+        },
+        raw={
+            "raw_content": partial_text,
+            "metadata_json": {
+                "filename": "partial.txt",
+                "uploaded_by": OWNER,
+                "extraction_success": True,
+                "text_extraction_success": True,
+                "text_truncated": True,
+            },
+        },
+    )
     reply = await runtime.chat(
         OWNER,
         "Что сказано в этом файле?",
         actor=_actor(),
-        attachments=[
-            {
-                "filename": "partial.txt",
-                "transient_text": "SYNTHETIC-PARTIAL-READABLE-BODY",
-                "extraction_success": True,
-                "verification_eligible": True,
-                "text_truncated": True,
-            }
-        ],
+        attachments=[partial_attachment],
         enable_tools=False,
     )
 
@@ -950,11 +954,16 @@ async def test_source_status_is_canonicalized_before_pending_disclosure(
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _store_source(
+        storage,
+        user_id=OWNER,
+        text="Иванов\nДолжность: инженер",
+        status=InboxStatus.PENDING,
+        filename="mixed-case-pending-status.txt",
+    )
     llm = _SourceModel("Должность Иванова — инженер.")
     runtime, kernel = _runtime(settings, storage, monkeypatch, llm=llm)
-    payload = _synthetic_source_payload()
-    payload["results"][0]["review_status"] = " PENDING "
-    payload["results"][0]["anchor_context_terms"] = 1
+    production_execute = kernel.execute
 
     async def mixed_case_execute(
         name: str,
@@ -962,9 +971,16 @@ async def test_source_status_is_canonicalized_before_pending_disclosure(
         *,
         actor: Any = None,
     ) -> ToolResult:
-        del actor
-        kernel.calls.append((name, dict(arguments)))
-        return ToolResult(tool_name=name, success=True, data=payload)
+        result = await production_execute(name, arguments, actor=actor)
+        assert result.success and isinstance(result.data, dict)
+        rows = result.data.get("results")
+        assert isinstance(rows, list) and len(rows) == 1
+        assert isinstance(rows[0], dict)
+        # The process-private stamp came from the production same-row helper;
+        # mutating only this public presentation field exercises canonicalization
+        # without constructing or copying an authority carrier in the test.
+        rows[0]["review_status"] = " PENDING "
+        return result
 
     monkeypatch.setattr(kernel, "execute", mixed_case_execute)
     reply = await runtime.chat(OWNER, REQUEST, actor=_actor())
@@ -973,6 +989,42 @@ async def test_source_status_is_canonicalized_before_pending_disclosure(
     assert '"review_status": "pending"' in evidence
     assert '"knowledge_state": "pending_source_not_promoted"' in evidence
     assert "ожидает проверки в Inbox" in reply["message"]
+
+
+@pytest.mark.asyncio
+async def test_plain_source_search_dict_has_no_private_snapshot_authority(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canary = "PLAIN-SOURCE-PAGE-MUST-NOT-REACH-MODEL-814"
+    _store_source(
+        storage,
+        user_id=OWNER,
+        text=f"Иванов\nДолжность: инженер\n{canary}",
+        status=InboxStatus.PENDING,
+        filename="plain-page-has-no-authority.txt",
+    )
+    runtime, kernel = _runtime(settings, storage, monkeypatch, llm=_NeverModel())
+    production_execute = kernel.execute
+
+    async def strip_private_carrier(
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        actor: Any = None,
+    ) -> ToolResult:
+        result = await production_execute(name, arguments, actor=actor)
+        assert result.success and isinstance(result.data, dict)
+        return ToolResult(tool_name=name, success=True, data=dict(result.data))
+
+    monkeypatch.setattr(kernel, "execute", strip_private_carrier)
+    reply = await runtime.chat(OWNER, REQUEST, actor=_actor())
+
+    assert kernel.calls == [("source_search", {"query": "иванов", "focus": "иванов должност", "limit": 10})]
+    assert reply["tools_used"] == ["source_search"]
+    assert "не завершился с проверяемым результатом" in reply["message"]
+    assert canary not in json.dumps(reply, ensure_ascii=False)
 
 
 @pytest.mark.parametrize(

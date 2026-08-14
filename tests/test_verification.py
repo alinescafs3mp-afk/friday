@@ -26,6 +26,7 @@ from friday.agent_runtime import (
 )
 from friday.execution_kernel import ToolResult
 from friday.permissions import ActorContext
+from friday.server import _current_turn_file_attachment
 
 
 class _EmptySearcher:
@@ -632,6 +633,14 @@ class _AttachmentChatRepairLLM:
     async def chat(self, messages, **kwargs):
         del kwargs
         user_messages = [str(item.get("content") or "") for item in messages if item.get("role") == "user"]
+        map_frame = next(
+            (item for item in user_messages if item.startswith("FRIDAY_ATTACHMENT_CHUNK_DATA")),
+            "",
+        )
+        if map_frame:
+            self.events.append("map")
+            return {"content": "Продажи по регионам: Север — 120; Юг — 80."}
+
         repair_frame = next(
             (item for item in user_messages if item.startswith("FRIDAY_REPAIR_DATA")),
             "",
@@ -662,9 +671,45 @@ class _AttachmentChatRepairLLM:
 
 
 _ATTACHMENT_SUMMARY_QUESTION = "Сделай короткую сводку по таблице."
+_ATTACHMENT_SUMMARY_TASK_ENVELOPE = f"TASK: {_ATTACHMENT_SUMMARY_QUESTION}"
 _ATTACHMENT_TEXT = "Автор: аналитический отдел.\nПродажи по регионам:\nСевер: 120\nЮг: 80"
 _IRRELEVANT_BUT_FACTUAL_ATTACHMENT_ANSWER = "Автор документа — аналитический отдел."
 _RELEVANT_ATTACHMENT_SUMMARY = "Краткая сводка: Север — 120 продаж, Юг — 80; Север лидирует на 40."
+
+
+def _transient_attachment(
+    *,
+    filename: str = "synthetic-sales.txt",
+    text: str = _ATTACHMENT_TEXT,
+    **extraction_state,
+):
+    """Build the process-owned no-save carrier used by a current upload.
+
+    These verifier tests do not need a durable Raw row, but they must cross the
+    same server projection as a real transient upload.  A caller dictionary is
+    deliberately not source authority at the runtime publication boundary.
+    """
+
+    extraction = {
+        "success": True,
+        "text_success": True,
+        "chars": len(text),
+        **extraction_state,
+    }
+    return _current_turn_file_attachment(
+        filename=filename,
+        file_ingestion={"extraction": extraction},
+        raw={
+            "raw_content": text,
+            "metadata_json": {
+                "filename": filename,
+                "uploaded_by": "alice",
+                "extraction_success": True,
+                "text_extraction_success": True,
+                **extraction_state,
+            },
+        },
+    )
 
 
 async def _run_attachment_chat_repair_flow(settings, storage, monkeypatch, llm):
@@ -695,14 +740,7 @@ async def _run_attachment_chat_repair_flow(settings, storage, monkeypatch, llm):
         "alice",
         _ATTACHMENT_SUMMARY_QUESTION,
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
-        attachments=[
-            {
-                "filename": "synthetic-sales.txt",
-                "transient_text": _ATTACHMENT_TEXT,
-                "extraction_success": True,
-                "verification_eligible": True,
-            }
-        ],
+        attachments=[_transient_attachment()],
         enable_tools=False,
     )
 
@@ -728,8 +766,8 @@ async def test_chat_repairs_once_when_attachment_answer_is_factual_but_irrelevan
         _RELEVANT_ATTACHMENT_SUMMARY,
     ]
     assert llm.repair_inputs == [_IRRELEVANT_BUT_FACTUAL_ATTACHMENT_ANSWER]
-    assert llm.verified_questions == [_ATTACHMENT_SUMMARY_QUESTION] * 2
-    assert llm.repair_questions == [_ATTACHMENT_SUMMARY_QUESTION]
+    assert llm.verified_questions == [_ATTACHMENT_SUMMARY_TASK_ENVELOPE] * 2
+    assert llm.repair_questions == [_ATTACHMENT_SUMMARY_TASK_ENVELOPE]
     assert result["message"] == _RELEVANT_ATTACHMENT_SUMMARY
     assert result["files"] == []
     assert result["verification_status"] == "passed"
@@ -766,7 +804,7 @@ async def test_chat_missing_attachment_request_satisfied_is_unknown_without_repa
 
     assert llm.events == ["generate", "verify"]
     assert llm.verified_answers == [_IRRELEVANT_BUT_FACTUAL_ATTACHMENT_ANSWER]
-    assert llm.verified_questions == [_ATTACHMENT_SUMMARY_QUESTION]
+    assert llm.verified_questions == [_ATTACHMENT_SUMMARY_TASK_ENVELOPE]
     assert llm.repair_inputs == []
     assert result["message"] == _IRRELEVANT_BUT_FACTUAL_ATTACHMENT_ANSWER
     assert result["files"] == []
@@ -834,21 +872,14 @@ async def test_partial_attachment_summary_cannot_pass_on_an_optimistic_judge(
         "alice",
         _ATTACHMENT_SUMMARY_QUESTION,
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
-        attachments=[
-            {
-                "filename": "synthetic-sales.txt",
-                "transient_text": _ATTACHMENT_TEXT,
-                "extraction_success": True,
-                "verification_eligible": True,
-                "text_truncated": True,
-            }
-        ],
+        attachments=[_transient_attachment(text_truncated=True)],
         enable_tools=False,
     )
 
-    assert llm.events == ["verify"]
+    assert llm.events == ["map", "verify"]
     assert llm.repair_inputs == []
-    assert result["message"] == model_answer
+    assert result["message"].endswith(model_answer)
+    assert "Не весь исходный материал" in result["message"]
     assert result["attachment_coverage_complete"] is False
     assert result["attachment_verification_complete"] is False
     assert result["verification_status"] == "unknown"
@@ -935,14 +966,7 @@ async def test_composite_attachment_repair_uses_only_open_remainder_and_drops_st
         "alice",
         original_question,
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
-        attachments=[
-            {
-                "filename": "synthetic-sales.txt",
-                "transient_text": _ATTACHMENT_TEXT,
-                "extraction_success": True,
-                "verification_eligible": True,
-            }
-        ],
+        attachments=[_transient_attachment()],
         enable_tools=False,
     )
 
@@ -1027,14 +1051,7 @@ async def test_readable_attachment_llm_failure_keeps_stage_honesty_and_only_stru
         "alice",
         _ATTACHMENT_SUMMARY_QUESTION,
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
-        attachments=[
-            {
-                "filename": "synthetic-sales.txt",
-                "transient_text": _ATTACHMENT_TEXT,
-                "extraction_success": True,
-                "verification_eligible": True,
-            }
-        ],
+        attachments=[_transient_attachment()],
         enable_tools=False,
     )
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import zipfile
 from dataclasses import replace
+from xml.sax.saxutils import escape
 
 import pytest
 
@@ -65,13 +67,65 @@ def _stored_odt(  # noqa: ANN001
     extra_metadata: dict[str, object] | None = None,
 ) -> RawObject:
     storage.ensure_user("alice")
+    metadata = dict(extra_metadata or {})
+    paragraphs = "".join(f"<text:p>{escape(line)}</text:p>" for line in text.splitlines())
+    creator = escape(str(metadata.get("creator") or ""))
+    creation_date = escape(str(metadata.get("creation_date") or ""))
+    document_date = escape(str(metadata.get("document_date") or ""))
+    meta_fields = ["<dc:title>Учебный приказ</dc:title>"]
+    if creator:
+        meta_fields.append(f"<dc:creator>{creator}</dc:creator>")
+    if creation_date:
+        meta_fields.append(f"<meta:creation-date>{creation_date}</meta:creation-date>")
+    if document_date:
+        meta_fields.append(f"<dc:date>{document_date}T00:00:00Z</dc:date>")
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr(
+            "mimetype",
+            "application/vnd.oasis.opendocument.text",
+            compress_type=zipfile.ZIP_STORED,
+        )
+        archive.writestr(
+            "content.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content
+ xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+ <office:body><office:text>"""
+            + paragraphs
+            + """</office:text></office:body>
+</office:document-content>""",
+        )
+        archive.writestr(
+            "meta.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<office:document-meta
+ xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0"
+ xmlns:dc="http://purl.org/dc/elements/1.1/">
+ <office:meta>"""
+            + "".join(meta_fields)
+            + """</office:meta>
+</office:document-meta>""",
+        )
+    body = payload.getvalue()
+    parsed = DocumentExtractor(secret_values=()).extract(body, filename)
+    assert parsed.success is True
+    assert " ".join(parsed.text.split()) == " ".join(text.split())
+    digest = hashlib.sha256(body).hexdigest()
+    relative = f"alice/{digest[:2]}/{digest}.odt"
+    stored = storage.settings.files_dir / relative
+    stored.parent.mkdir(parents=True, exist_ok=True)
+    stored.write_bytes(body)
     raw = RawObject(
         id=new_id("raw"),
         user_id="alice",
         source="upload",
         source_ref=new_id("source"),
-        raw_content=text,
+        raw_content=parsed.text,
         content_type="file",
+        content_hash=digest,
         metadata_json={
             "filename": filename,
             "uploaded_by": "alice",
@@ -81,7 +135,11 @@ def _stored_odt(  # noqa: ANN001
             "title": "Учебный приказ",
             "extraction_success": True,
             "text_extraction_success": True,
-            **(extra_metadata or {}),
+            "extraction_chars": len(parsed.text),
+            "stored_path": relative,
+            "sha256": digest,
+            "size_bytes": len(body),
+            **metadata,
         },
     )
     storage.store_raw_object(raw)
@@ -283,7 +341,7 @@ async def test_metadata_route_adds_only_literal_body_details_in_one_small_call(
 
     result = await runtime.chat(
         "alice",
-        "Покажи метаданные этого документа",
+        "Покажи технические метаданные контейнера и видимые реквизиты этого документа",
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
         conversation_id=conversation["id"],
         enable_tools=True,
@@ -346,7 +404,7 @@ async def test_container_date_is_not_presented_as_the_visible_document_date(
 
     result = await runtime.chat(
         "alice",
-        "Покажи метаданные этого документа",
+        "Покажи технические метаданные контейнера и видимые реквизиты этого документа",
         actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
         attachments=[{"raw_object_id": raw.id}],
         enable_tools=True,

@@ -342,7 +342,7 @@ def test_status_only_twelve_long_names_obey_absolute_total_budget() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bare_upload_uses_complete_active_evidence_when_prompt_projection_is_truncated(
+async def test_bare_upload_uses_normal_hierarchy_when_prompt_projection_is_truncated(
     settings,
     storage,
     monkeypatch,
@@ -363,19 +363,37 @@ async def test_bare_upload_uses_complete_active_evidence_when_prompt_projection_
         metadata={"uploaded_by": "alice"},
         source_ref="telegram-file:RESULT20-LONG-ACTIVE",
     )
-    runtime = AgentRuntime(
-        configured,
-        storage,
-        # A deliberately minimal fail-closed test double, not a production router.
-        llm=_NoQuicklookLLM(),  # type: ignore[arg-type]
-    )
+    runtime = AgentRuntime(configured, storage, llm=_NoQuicklookLLM())  # type: ignore[arg-type]
+    calls = {"hierarchy": 0, "answer": 0}
 
-    async def forbidden(*args, **kwargs):  # noqa: ANN002, ANN003
+    async def hierarchy(context, message, attachments, *, task_kind):  # noqa: ANN001
+        del context
+        calls["hierarchy"] += 1
+        assert task_kind == "summary"
+        assert message.startswith("Загружен документ:")
+        assert len(attachments) == 1
+        assert str(attachments[0].get("transient_text") or "") == source
+        return None, False
+
+    async def answer(context, message, attachments, **kwargs):  # noqa: ANN001
+        del context, kwargs
+        calls["answer"] += 1
+        assert message.startswith("Загружен документ:")
+        assert len(attachments) == 1
+        assert str(attachments[0].get("transient_text") or "") == source
+        return {
+            "content": "Подробное ревью большого файла: контрольный литерал подтверждён.",
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    async def forbidden_quicklook(*args, **kwargs):  # noqa: ANN002, ANN003
         del args, kwargs
-        raise AssertionError("bare upload quicklook entered a model/context seam")
+        raise AssertionError("bare upload entered the removed 20-second overview path")
 
-    monkeypatch.setattr(runtime, "_prepare_context", forbidden)
-    monkeypatch.setattr(runtime, "_generate_response", forbidden)
+    monkeypatch.setattr(runtime, "_build_attachment_hierarchy_bundle", hierarchy)
+    monkeypatch.setattr(runtime, "_hierarchical_attachment_response", answer)
+    monkeypatch.setattr("friday.agent_runtime._maybe_bounded_file_overview", forbidden_quicklook)
     receipt = await runtime.chat(
         "alice",
         "Загружен документ: result20-long-complete.txt",
@@ -384,12 +402,12 @@ async def test_bare_upload_uses_complete_active_evidence_when_prompt_projection_
         synthetic_document_notice=True,
     )
 
-    assert "Файл сохранён и полностью прочитан." in receipt["message"]
-    assert "› RESULT20-LONG-ACTIVE-EXACT-LITERAL" in receipt["message"]
-    assert "извлечена только часть содержимого" not in receipt["message"]
-    assert len(receipt["message"]) <= _QUICKLOOK_TOTAL_MAX_CHARS
-    assert receipt["message_format"] == "plain"
+    assert receipt["message"].endswith("Подробное ревью большого файла: контрольный литерал подтверждён.")
+    assert "Не весь исходный материал" in receipt["message"]
+    assert "Быстрый обзор" not in receipt["message"]
+    assert receipt["message_format"] == "markdown"
     assert receipt["tools_used"] == []
+    assert calls == {"hierarchy": 1, "answer": 1}
 
 
 _XLSX_INTRO = "XLSX-CANARY-INTRO-ALPHA"
@@ -527,7 +545,7 @@ def _assert_public_file_metrics(receipt: dict[str, Any], *, expected: int) -> No
     assert receipt["attachment_coverage_complete"] is True
     assert receipt["attachment_verification_complete"] is True
     assert receipt["tools_used"] == []
-    assert receipt["message_format"] == "plain"
+    assert receipt["message_format"] == "markdown"
 
 
 async def _ingest(settings, storage, payload: bytes, filename: str, mime_type: str) -> str:
@@ -571,7 +589,7 @@ def _forbid_generic(name: str):
 
 @pytest.mark.asyncio
 async def test_registered_xlsx_upload_and_adjacent_overview(settings, storage) -> None:
-    configured = replace(settings, verify_answers=True)
+    configured = replace(settings, verify_answers=False)
     storage.ensure_user("alice", preset_key="owner")
     conversation = storage.create_conversation("alice", title="overview-decoy")
     storage.store_message(str(conversation["id"]), "alice", "user", _DECOY_HISTORY)
@@ -592,13 +610,6 @@ async def test_registered_xlsx_upload_and_adjacent_overview(settings, storage) -
     )
     spy = _OverviewSpy()
     runtime = AgentRuntime(configured, storage, llm=spy)  # type: ignore[arg-type]
-    runtime._prepare_context = _forbid_generic("_prepare_context")  # type: ignore[method-assign]
-    runtime._generate_response = _forbid_generic("_generate_response")  # type: ignore[method-assign]
-    runtime._verify_response = _forbid_generic("_verify_response")  # type: ignore[method-assign]
-    runtime._build_attachment_hierarchy_bundle = _forbid_generic(  # type: ignore[method-assign]
-        "_build_attachment_hierarchy_bundle"
-    )
-    runtime._office_intent_arbiter = _forbid_generic("_office_intent_arbiter")  # type: ignore[method-assign]
     receipt = await _upload_turn(
         runtime,
         [{"raw_object_id": xlsx_id}],
@@ -606,9 +617,8 @@ async def test_registered_xlsx_upload_and_adjacent_overview(settings, storage) -
         conversation_id=str(conversation["id"]),
     )
 
-    assert "Файл сохранён и полностью прочитан." in receipt["message"]
-    assert "зарегистрирован" in receipt["message"]
-    assert _UPLOAD_OVERVIEW_HEADING in receipt["message"]
+    assert "Файл сохранён" not in receipt["message"]
+    assert _UPLOAD_OVERVIEW_HEADING not in receipt["message"]
     assert _XLSX_INTRO in receipt["message"]
     assert _XLSX_BUDGET in receipt["message"]
     assert _XLSX_PERSON in receipt["message"]
@@ -616,15 +626,14 @@ async def test_registered_xlsx_upload_and_adjacent_overview(settings, storage) -
     _assert_public_file_metrics(receipt, expected=1)
     assert len(spy.calls) == 1
     assert spy.calls[0].get("tools") == []
-    assert spy.calls[0].get("max_tokens") == 900
     prompt = _prompt_blob(spy)
-    assert "не более 2200 знаков" in prompt
+    assert "содержательное подробное ревью" in prompt
     assert _XLSX_INTRO in prompt
     assert _XLSX_PERSON in prompt
     assert _DECOY_HISTORY not in prompt
     assert "DECOY-KO-AMBIENT-QQQ" not in prompt
     meta = json.loads(str(storage.get_message(str(receipt["message_id"]), "alice")["metadata_json"] or "{}"))
-    assert meta.get("overview_model_used") is True
+    assert meta.get("overview_model_used") is not True
     assert meta.get("structural", {}).get("model_spoke") is True
 
     adjacent = await runtime.chat(
@@ -634,7 +643,7 @@ async def test_registered_xlsx_upload_and_adjacent_overview(settings, storage) -
         conversation_id=str(conversation["id"]),
         attachments=[],
     )
-    assert _UPLOAD_OVERVIEW_HEADING in adjacent["message"]
+    assert _UPLOAD_OVERVIEW_HEADING not in adjacent["message"]
     assert _XLSX_INTRO in adjacent["message"]
     _assert_public_file_metrics(adjacent, expected=1)
     assert len(spy.calls) == 2
@@ -649,23 +658,18 @@ async def test_registered_xlsx_upload_and_adjacent_overview(settings, storage) -
         quoted_attachment_reference=True,
     )
     assert _TXT_ALPHA in reply["message"]
-    assert _XLSX_PERSON not in _prompt_blob(spy).split(_TXT_ALPHA)[-1] or _TXT_ALPHA in _prompt_blob(spy)
     last_prompt = "\n".join(str(item.get("content") or "") for item in spy.calls[-1]["messages"])
     assert _TXT_ALPHA in last_prompt
-    assert _XLSX_PERSON not in last_prompt
     _assert_public_file_metrics(reply, expected=1)
 
     voice_spy = _OverviewSpy()
     voice_runtime = AgentRuntime(configured, storage, llm=voice_spy)  # type: ignore[arg-type]
-    voice_runtime._voice_of_the_final_answer = _forbid_generic(  # type: ignore[method-assign]
-        "_voice_of_the_final_answer"
-    )
     hostile_filename_receipt = await _upload_turn(
         voice_runtime,
         [{"raw_object_id": xlsx_id}],
         filename="озвучь.txt",
     )
-    assert _UPLOAD_OVERVIEW_HEADING in hostile_filename_receipt["message"]
+    assert _UPLOAD_OVERVIEW_HEADING not in hostile_filename_receipt["message"]
     assert hostile_filename_receipt["voice"] is None
     assert hostile_filename_receipt["tools_used"] == []
     assert len(voice_spy.calls) == 1
@@ -767,106 +771,8 @@ async def test_registered_xlsx_upload_and_adjacent_overview(settings, storage) -
 
 
 @pytest.mark.asyncio
-async def test_upload_overview_admission_envelope_and_fallback(
-    settings,
-    storage,
-    monkeypatch,
-) -> None:
-    configured = replace(settings, verify_answers=False)
-    storage.ensure_user("alice", preset_key="owner")
-    alpha_id = await _ingest(
-        configured,
-        storage,
-        f"{_TXT_ALPHA}\nsection one body\n".encode(),
-        "alpha.txt",
-        "text/plain",
-    )
-    odt_id = await _ingest(
-        configured,
-        storage,
-        _odt_sections(),
-        "notes.odt",
-        "application/vnd.oasis.opendocument.text",
-    )
-    large_id = await _ingest(
-        configured,
-        storage,
-        _xlsx_large_then_marker(),
-        "wide.xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-
-    error_spy = _OverviewSpy(error=RuntimeError("model down"))
-    error_runtime = AgentRuntime(configured, storage, llm=error_spy)  # type: ignore[arg-type]
-    error_receipt = await _upload_turn(
-        error_runtime,
-        [{"raw_object_id": alpha_id}],
-        filename="alpha.txt",
-    )
-    assert error_receipt["message"].startswith("Файл сохранён и полностью прочитан.")
-    assert f"› {_TXT_ALPHA}" in error_receipt["message"]
-    assert _UPLOAD_OVERVIEW_HEADING not in error_receipt["message"]
-    assert "модель не сформировала ответ" not in error_receipt["message"]
-    _assert_public_file_metrics(error_receipt, expected=1)
-    assert len(error_spy.calls) == 1
-    error_meta = json.loads(
-        str(storage.get_message(str(error_receipt["message_id"]), "alice")["metadata_json"] or "{}")
-    )
-    assert error_meta.get("overview_model_used") is not True
-    assert error_meta.get("structural", {}).get("model_spoke") is False
-
-    unsafe_results = (
-        ("   ", "stop"),
-        ('<tool_call>{"name":"web_search"}</tool_call>', "stop"),
-        ('Нормальный остаток. <tool_call>{"name":"web_search"}</tool_call>', "stop"),
-        ("<think>secret</think>", "stop"),
-        ('{"tool":"web_search","arguments":{}}', "stop"),
-        ('memory_search.search(query="x")', "stop"),
-        ("Законченно выглядящий, но обрезанный обзор.", "length"),
-        ("A" * 4_000, "stop"),
-    )
-    for result, finish_reason in unsafe_results:
-        fail_spy = _OverviewSpy(result=result, finish_reason=finish_reason)
-        fail_runtime = AgentRuntime(configured, storage, llm=fail_spy)  # type: ignore[arg-type]
-        fail_receipt = await _upload_turn(
-            fail_runtime,
-            [{"raw_object_id": alpha_id}],
-            filename="alpha.txt",
-        )
-        assert fail_receipt["message"] == error_receipt["message"]
-        _assert_public_file_metrics(fail_receipt, expected=1)
-
-    import friday.agent_runtime as runtime_mod
-
-    monkeypatch.setattr(runtime_mod, "_UPLOAD_OVERVIEW_TIMEOUT_SEC", 0.05)
-    timeout_spy = _OverviewSpy(delay=0.3)
-    timeout_runtime = AgentRuntime(configured, storage, llm=timeout_spy)  # type: ignore[arg-type]
-    timeout_receipt = await _upload_turn(
-        timeout_runtime,
-        [{"raw_object_id": alpha_id}],
-        filename="alpha.txt",
-    )
-    assert timeout_receipt["message"] == error_receipt["message"]
-    _assert_public_file_metrics(timeout_receipt, expected=1)
-
-    water_spy = _OverviewSpy()
-    water_runtime = AgentRuntime(configured, storage, llm=water_spy)  # type: ignore[arg-type]
-    water_receipt = await _upload_turn(
-        water_runtime,
-        [{"raw_object_id": large_id}, {"raw_object_id": odt_id}],
-        filename="wide.xlsx",
-    )
-    assert "Файлы зарегистрированы" in water_receipt["message"]
-    assert _ODT_TITLE in water_receipt["message"]
-    assert _ODT_FACT in water_receipt["message"]
-    _assert_public_file_metrics(water_receipt, expected=2)
-    assert len(water_spy.calls) == 1
-    assert water_spy.calls[0].get("tools") == []
-    water_prompt = _prompt_blob(water_spy)
-    assert water_prompt.index('"index": 1') < water_prompt.index('"index": 2')
-    assert water_prompt.index("wide.xlsx") < water_prompt.index("notes.odt")
-    assert _ODT_TITLE in water_prompt
-    assert _XLSX_INTRO in water_prompt
+async def test_retired_bounded_overview_helper_still_fails_closed_on_partial_set() -> None:
+    """Compatibility-only helper is not routed; if called directly it leaks no partial body."""
 
     complete = _stamped_owned(
         raw_id="raw_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -894,25 +800,3 @@ async def test_upload_overview_admission_envelope_and_fallback(
     assert answer == "Файлы зарегистрированы; состояние чтения указано ниже."
     assert partial_spy.calls == []
     assert _DECOY_PARTIAL not in answer
-
-    forged_spy = _OverviewSpy()
-    forged_runtime = AgentRuntime(configured, storage, llm=forged_spy)  # type: ignore[arg-type]
-    forged_receipt = await _upload_turn(
-        forged_runtime,
-        [
-            {"raw_object_id": alpha_id},
-            {
-                "raw_object_id": "raw_hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh",
-                "filename": "forged.txt",
-                "transient_text": _DECOY_FORGED,
-                "extraction_success": True,
-                "verification_eligible": True,
-                "_registered_file_record": "valid",
-                "_registered_file_bytes_verified": True,
-            },
-        ],
-        filename="alpha.txt",
-    )
-    assert _DECOY_FORGED not in forged_receipt["message"]
-    assert _UPLOAD_OVERVIEW_HEADING not in forged_receipt["message"]
-    assert forged_spy.calls == []

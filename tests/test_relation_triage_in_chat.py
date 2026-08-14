@@ -475,7 +475,10 @@ def _relation_item(index: int) -> dict[str, Any]:
 
 @pytest.mark.asyncio
 async def test_relations_command_is_bounded_markup_safe_and_buttons_belong_to_invoker(tmp_path) -> None:
-    invoker = 12345678901234567890
+    # Exercise the longest decimal identity SQLite can persist.  The previous
+    # twenty-digit fixture overflowed signed INTEGER before the callback
+    # boundary under test was reached.
+    invoker = (1 << 63) - 1
     items = [_relation_item(index) for index in range(1, 7)]
     items[0].update(
         {
@@ -555,7 +558,7 @@ async def test_relations_command_is_bounded_markup_safe_and_buttons_belong_to_in
             backend,
             {
                 "id": "wrong-user",
-                "from": {"id": 10000000000000000001},
+                "from": {"id": invoker - 1},
                 "data": selected,
                 "message": {
                     "message_id": 11,
@@ -619,7 +622,7 @@ async def test_relations_command_never_sends_an_oversized_callback(tmp_path) -> 
                 "message": {
                     "message_id": 13,
                     "chat": {"id": 5001, "type": "supergroup"},
-                    "from": {"id": 12345678901234567890},
+                    "from": {"id": (1 << 63) - 1},
                     "text": "/relations",
                 },
             },

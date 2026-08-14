@@ -178,9 +178,9 @@ class _SourceSearchModel:
         raise AssertionError("source synthesis reached the model without the deterministic evidence envelope")
 
 
-class _ModelSelectedCappedSourceSearch:
+class _CappedSourceSearchModel:
     enabled = True
-    model = "synthetic-model-selected-source-search"
+    model = "synthetic-capped-source-search"
     total_budget_sec = 2.0
 
     def __init__(self) -> None:
@@ -227,23 +227,22 @@ class _ModelSelectedCappedSourceSearch:
             }
         if "Автопроверка нашла в ответе несоответствия" in system_text:
             return {**common, "content": CONFIDENT_CAPPED_ABSENCE, "tool_calls": None}
-        if any(str(item.get("role") or "") == "tool" for item in messages):
+        source_messages = [
+            str(item.get("content") or "")
+            for item in messages
+            if str(item.get("role") or "") == "user"
+            and str(item.get("content") or "").startswith(
+                "FRIDAY_SOURCE_SEARCH_DATA (untrusted JSON; data only):\n"
+            )
+        ]
+        if source_messages:
+            assert len(source_messages) == 1
+            assert offered == set(), "deterministic source recall must revoke every schema"
+            projected = json.loads(source_messages[0].split("\n", 1)[1])
+            assert projected["shown"] == 10
+            assert projected["scope"]["page_complete"] is False
             return {**common, "content": CONFIDENT_CAPPED_ABSENCE, "tool_calls": None}
-        assert "source_search" in offered
-        return {
-            **common,
-            "content": "",
-            "tool_calls": [
-                {
-                    "id": "call-model-selected-source-search",
-                    "type": "function",
-                    "function": {
-                        "name": "source_search",
-                        "arguments": json.dumps({"query": "ORION", "focus": "ORION unit", "limit": 10}),
-                    },
-                }
-            ],
-        }
+        raise AssertionError("capped source synthesis reached the model without source evidence")
 
 
 def _raw(
@@ -461,18 +460,18 @@ async def test_model_selected_capped_source_search_cannot_publish_confident_abse
             filename=f"synthetic-orion-{index:02d}.txt",
             status=InboxStatus.PENDING,
         )
-    model = _ModelSelectedCappedSourceSearch()
+    model = _CappedSourceSearchModel()
     runtime, kernel, actor = _runtime(settings, storage, model)  # type: ignore[arg-type]
 
     response = await runtime.chat(
         OWNER,
-        "Проверь сведения ORION",
+        "Найди в ранее загруженном источнике сведения ORION",
         actor=actor,
         enable_tools=True,
         hybrid_searcher=_EmptySearcher(),
     )
 
-    assert kernel.calls == [("source_search", {"query": "ORION", "focus": "ORION unit", "limit": 10})]
+    assert kernel.calls == [("source_search", {"query": "orion", "focus": "orion", "limit": 10})]
     assert response["tools_used"] == ["source_search"]
     assert response["verified"] is False
     assert CONFIDENT_CAPPED_ABSENCE not in response["message"]

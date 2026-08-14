@@ -52,6 +52,7 @@ from friday.raw_metadata import bounded_raw_file_metadata
 from friday.reminder_schedule import reminder_clock, reminder_clock_description, reminder_when_text
 from friday.reports import SUPPORTED_KINDS, render, spec_from_payload
 from friday.retrieval import _public_graph_context, best_snippet, is_relational_query
+from friday.source_identity import private_source_search_page, raw_source_snapshot
 from friday.storage._core import iso_date
 from friday.storage._oversight import ANALYSES
 from friday.storage.models import (
@@ -5000,6 +5001,7 @@ class ExecutionKernel:
             min(_TOOL_EXCERPT_CHARS * 2, 4_800 // max(1, len(selected_rows))),
         )
         results: list[dict[str, Any]] = []
+        result_snapshots = []
         for (
             _full_focus,
             _matched_terms,
@@ -5011,6 +5013,7 @@ class ExecutionKernel:
             raw_id = str(ranked_row.get("id") or "").strip()
             if not raw_id:
                 continue
+            source_snapshot = raw_source_snapshot(ranked_row)
             # The full text is projected by the same verdict-filtered SELECT as
             # this page.  A second get_raw_object() would create a race in which
             # the reviewer could mark the row ignored between the search and the
@@ -5092,6 +5095,8 @@ class ExecutionKernel:
                     }
                 )
             results.append(item)
+            if source_snapshot is not None and source_snapshot.raw_id == raw_id:
+                result_snapshots.append(source_snapshot)
         emitted_full_focus = bool(
             explicit_focus
             and focus_terms
@@ -5145,7 +5150,8 @@ class ExecutionKernel:
                 ),
             },
         }
-        return _bound_source_search_payload(payload)
+        bounded_payload = _bound_source_search_payload(payload)
+        return private_source_search_page(bounded_payload, result_snapshots)
 
     async def _message_search(
         self,

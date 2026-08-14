@@ -95,6 +95,15 @@ _DELETE_SCOPES: tuple[_Scope, ...] = (
     _Scope("feedback", "feedback", "user_id=?"),
     _Scope("missions", "missions", "user_id=?"),
     _Scope("knowledge_objects", "knowledge_objects", "user_id=?"),
+    # A transport alias is a disposable authority pointer, not the shared Raw
+    # Object itself.  Both account axes are ON DELETE CASCADE in schema 33, but
+    # delete it explicitly before Raw/users so preflight and result accounting
+    # include the exact row once even when both columns name the target.
+    _Scope(
+        "file_source_aliases",
+        "file_source_aliases",
+        "user_id=? OR uploaded_by=?",
+    ),
     _Scope("raw_objects", "raw_objects", "user_id=?"),
     _Scope("entities", "entities", "user_id=?"),
     _Scope("user_identities", "user_identities", "user_id=?"),
@@ -128,6 +137,10 @@ _KNOWN_USER_SCOPES = frozenset(
         # them from the surviving base rows after the account cascade.
         ("private_entity_material_derivative_cache", "user_id"),
         ("private_entity_material_derivative_work", "user_id"),
+        # Schema 33's alias row is owned through either account axis.  The
+        # compound delete scope above is authoritative for both columns.
+        ("file_source_aliases", "user_id"),
+        ("file_source_aliases", "uploaded_by"),
     }
 )
 
@@ -148,6 +161,9 @@ _KNOWN_ACTOR_REFERENCE_SCOPES = frozenset(
         ("data_sources", "created_by"),
         ("action_approvals", "requested_by"),
         ("action_approvals", "decided_by"),
+        # Also an ownership axis in _DELETE_SCOPES; name it here because the
+        # schema auditor classifies every ``*_by`` column as an actor reference.
+        ("file_source_aliases", "uploaded_by"),
         # These end in ``_by`` but point to another relation, not an actor.
         ("relations", "superseded_by"),
         ("relation_revisions", "superseded_by"),

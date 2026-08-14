@@ -1,7 +1,7 @@
 """Ordered multi-citation file flow: explicit [K#] labels + native reply fan-out.
 
 Independent of deictic/filename/catalog/latest restoration. Mixed uploaders
-use the accepted sparse lineage scheme; closed failures are all-or-none.
+keep exact internal lineage by row role; closed failures are all-or-none.
 """
 
 from __future__ import annotations
@@ -300,15 +300,19 @@ def test_explicit_citation_order_mixed_uploaders_and_public_privacy(
         assert payload["attachment_coverage_complete"] is True
         assert payload["attachment_verification_complete"] is True
         assert len(ordered_model.payloads) == 1
-        assert disk_reads == [(raw_b, jbl), (raw_a, owner)]
+        assert disk_reads == [(raw_b, jbl), (raw_a, owner)] * 2
 
         rows = storage.get_conversation_messages(conversation["id"], user_id=owner, limit=50)
         generated = [row for row in rows if row["role"] in {"user", "assistant"}][-2:]
         assert [row["role"] for row in generated] == ["user", "assistant"]
-        for row in generated:
+        expected_uploader_maps = [
+            {raw_b: jbl},
+            {raw_b: jbl, raw_a: owner},
+        ]
+        for row, expected_uploaders in zip(generated, expected_uploader_maps, strict=True):
             meta = _metadata(row)
             assert meta.get("conversation_attachment_raw_ids") == [raw_b, raw_a]
-            assert meta.get("conversation_attachment_uploaders") == {raw_b: jbl}
+            assert meta.get("conversation_attachment_uploaders") == expected_uploaders
 
         history = _bridge_call(
             client,
@@ -322,6 +326,7 @@ def test_explicit_citation_order_mixed_uploaders_and_public_privacy(
             encoded = json.dumps(public_payload, ensure_ascii=False)
             for raw_id in (raw_a, raw_b, raw_c):
                 assert raw_id not in encoded
+            assert owner not in encoded and jbl not in encoded
             assert "conversation_attachment_raw_ids" not in encoded
             assert "conversation_attachment_uploaders" not in encoded
             assert ko_a not in encoded and ko_b not in encoded
@@ -444,7 +449,7 @@ def test_native_reply_uses_exact_assistant_citation_row_not_newer_decoy(
         assert decoy_canary not in str(payload.get("message") or "")
         assert payload["attachment_context_expected_count"] == 2
         assert payload["attachment_context_readable_count"] == 2
-        assert disk_reads == [(raw_b, jbl), (raw_a, owner)]
+        assert disk_reads == [(raw_b, jbl), (raw_a, owner)] * 2
         assert len(model.payloads) == 1
 
         # Reply without labels: emitted order only (K1 then K2 → A then B).
@@ -491,7 +496,7 @@ def test_native_reply_uses_exact_assistant_citation_row_not_newer_decoy(
         bare_payload = bare_reply.json()
         assert decoy_canary not in str(bare_payload.get("message") or "")
         assert bare_payload["attachment_context_readable_count"] == 2
-        assert disk_reads == [(raw_a, owner), (raw_b, jbl)]
+        assert disk_reads == [(raw_a, owner), (raw_b, jbl)] * 2
         assert len(emit_model.payloads) == 1
 
 
@@ -675,7 +680,10 @@ def test_multi_citation_closed_failure_matrix(
         )
         storage.commit()
 
-        # 4) ignored Raw (JBL member ignored)
+        # 4) An exact explicit citation remains a typed direct-read authority
+        # even when the cited Inbox row is ignored. This exception is confined
+        # to the exact K1/K2 selector; ambient/latest restoration still excludes
+        # ignored material.
         storage.execute(
             "UPDATE inbox SET status='ignored' WHERE user_id=? AND raw_object_id=?",
             (tenant, raw_b),
@@ -689,6 +697,29 @@ def test_multi_citation_closed_failure_matrix(
             metadata={"knowledge_citations": {"K1": ko_a, "K2": ko_b}},
         )
         disk_reads.clear()
+
+        class IgnoredCitationModel:
+            enabled = True
+            model = "explicit-ignored-citation"
+            total_budget_sec = 5.0
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def chat(self, messages, **_kwargs):
+                projected = json.dumps(messages, ensure_ascii=False)
+                self.calls += 1
+                assert canary_a in projected and canary_b in projected
+                assert projected.index(canary_a) < projected.index(canary_b)
+                assert decoy_canary not in projected
+                return {
+                    "content": f"Exact ignored citations: {canary_a}; {canary_b}.",
+                    "tool_calls": None,
+                    "_queue_wait_sec": 0.0,
+                }
+
+        ignored_model = IgnoredCitationModel()
+        app.state.agent.llm = ignored_model
         ignored = _bridge_call(
             client,
             scoped,
@@ -702,7 +733,22 @@ def test_multi_citation_closed_failure_matrix(
             },
             user="1001",
         )
-        assert_closed(ignored)
+        assert ignored.status_code == 200, ignored.text
+        ignored_payload = ignored.json()
+        ignored_text = str(ignored_payload.get("message") or "")
+        assert canary_a in ignored_text and canary_b in ignored_text
+        assert decoy_canary not in ignored_text
+        assert ignored_payload["attachment_context_expected_count"] == 2
+        assert ignored_payload["attachment_context_readable_count"] == 2
+        assert ignored_payload["attachment_coverage_complete"] is True
+        assert ignored_payload["attachment_verification_complete"] is True
+        assert ignored_model.calls == 1
+        assert disk_reads == [(raw_a, owner), (raw_b, jbl)] * 2
+        ignored_public = json.dumps(ignored_payload, ensure_ascii=False)
+        assert raw_a not in ignored_public and raw_b not in ignored_public and raw_decoy not in ignored_public
+        assert "conversation_attachment_raw_ids" not in ignored_public
+        assert "conversation_attachment_uploaders" not in ignored_public
+        app.state.agent.llm = never_model
         storage.execute(
             "UPDATE inbox SET status='classified' WHERE user_id=? AND raw_object_id=?",
             (tenant, raw_b),

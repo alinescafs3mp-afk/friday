@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from friday.source_identity import AuthorizedFileSnapshotToken, authorized_file_snapshot_token
 from friday.storage._privacy import _not_private_raw_dependency
 
 _READ_CHUNK_BYTES = 1024 * 1024
@@ -66,6 +67,7 @@ class AuthorizedFileBytes:
     filename: str
     mime_type: str
     content: bytes
+    snapshot_token: AuthorizedFileSnapshotToken | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,7 +231,9 @@ def read_authorized_file_in_transaction(
         (str(raw_id), str(user_id), str(person_id)) if person_id is not None else (str(raw_id), str(user_id))
     )
     row = conn.execute(
-        f"""SELECT r.id, r.user_id, r.source_ref, r.metadata_json, r.content_hash
+        f"""SELECT r.id, r.user_id, r.source, r.source_ref, r.content_type,
+                   r.received_at, r.content_hash, r.raw_content AS _raw_content,
+                   r.metadata_json, r.metadata_json AS _raw_metadata
               FROM raw_objects r
              WHERE r.id=? AND r.user_id=? AND r.content_type='file'
                {deleted_clause}{person_clause}
@@ -360,6 +364,10 @@ def _read_authorized_row(
         filename=filename,
         mime_type=mime_type,
         content=content,
+        snapshot_token=authorized_file_snapshot_token(
+            dict(row),
+            content_sha256=expected_digest,
+        ),
     )
 
 

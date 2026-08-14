@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from friday.execution_kernel import ExecutionKernel
@@ -43,7 +45,9 @@ def _put(settings, storage, user: str, *, name: str, when: str, deleted: str | N
     relative = f"{user}/{name}"
     target = settings.files_dir / relative
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b"codex" * 20)
+    body = b"codex" * 20
+    target.write_bytes(body)
+    digest = hashlib.sha256(body).hexdigest()
     raw = RawObject(
         id=f"raw-{user}-{name}",
         user_id=user,
@@ -51,7 +55,13 @@ def _put(settings, storage, user: str, *, name: str, when: str, deleted: str | N
         source_ref=name,
         raw_content="текст",
         content_type="file",
-        metadata_json={"filename": name, "stored_path": relative, "size_bytes": 100},
+        content_hash=digest,
+        metadata_json={
+            "filename": name,
+            "stored_path": relative,
+            "sha256": digest,
+            "size_bytes": len(body),
+        },
         received_at=when,
         created_at=when,
         deleted_at=deleted,

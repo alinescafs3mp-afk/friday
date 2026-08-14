@@ -16,10 +16,35 @@
 from __future__ import annotations
 
 import inspect
+import json
+from dataclasses import replace
+from typing import Any
 
 import pytest
 
 from friday.agent_runtime import AgentRuntime, _is_small_talk
+from friday.execution_kernel import ExecutionKernel
+from friday.permissions import AuthorizationService
+
+
+class _ForbiddenSmallTalkModel:
+    enabled = True
+    model = "forbidden-small-talk-model"
+    total_budget_sec = 1.0
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+        del messages, kwargs
+        self.calls += 1
+        raise AssertionError("closed radio check reached the GPU/model route")
+
+
+class _ForbiddenSmallTalkSearcher:
+    async def search(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        del args, kwargs
+        raise AssertionError("closed radio check reached archive retrieval")
 
 
 @pytest.mark.parametrize("greeting", ["привет", "Доброе утро", "спасибо", "Спасибо!", "пока"])
@@ -59,8 +84,46 @@ def test_the_turn_hides_tools_on_small_talk_only_by_the_list() -> None:
     """Проверяется подключённое: в боевом ходе стоит список, а не вердикт."""
     source = inspect.getsource(AgentRuntime.chat)
     marker = "visible_tools = ("
-    decision = source[source.index(marker) : source.index("if self.llm.enabled and visible_tools")]
+    decision = source[
+        source.index(marker) : source.index("source_search_preflight_authorized =", source.index(marker))
+    ]
     assert "_is_small_talk(clean_message)" in decision, "инструменты снова уходят на каждое «привет»"
     assert "context.small_talk" not in decision, (
         "решение опирается на вердикт арбитра — цена его ошибки здесь несделанное дело"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_radio_check_is_persisted_without_model_search_or_tools(settings, storage) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    authorization = AuthorizationService(storage)
+    router = _ForbiddenSmallTalkModel()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=True),
+        storage,
+        llm=router,
+        kernel=ExecutionKernel(authorization, settings),
+    )
+
+    response = await runtime.chat(
+        "alice",
+        "на связи?",
+        actor=authorization.actor_for_user("alice", source="test"),
+        enable_tools=True,
+        hybrid_searcher=_ForbiddenSmallTalkSearcher(),
+    )
+
+    assert response["message"] == "На связи."
+    assert response["tools_used"] == []
+    assert response["context"]["knowledge_hits"] == 0
+    stored = storage.get_message(str(response["message_id"]), "alice")
+    assert stored is not None
+    assert stored["content"] == "На связи."
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    structural = metadata["structural"]
+    assert structural["answer_present"] is True
+    assert structural["model_spoke"] is False
+    assert structural["small_talk_owned"] is True
+    assert structural["remainder_known"] is True
+    assert not structural.get("output_guards", {}).get("conversational_archive_fallback_replaced")
+    assert router.calls == 0

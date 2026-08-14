@@ -60,6 +60,11 @@ _FLATTENED_LIST_LABEL = re.compile(
     r"__[^_\n]{1,80}[:;—–-]__|__[^_\n]{1,80}__[ \t]*[:;—–-]"
     r")(?:[ \t]+|$)"
 )
+_FLATTENED_BOLD_SECTION = re.compile(
+    r"\*\*(?!\s)([^*\n]{1,80})(?<!\s)\*\*|"
+    r"__(?!\s)([^_\n]{1,80})(?<!\s)__"
+)
+_FLATTENED_NUMBERED_BOLD_ITEM = re.compile(r"(?<!\S)(?P<number>\d{1,3})[.)][ \t]+(?=(?:\*\*|__)(?!\s))")
 # Markdown quote markers have to become Telegram's supported blockquote tag;
 # leaving ``>`` as escaped prose preserves bytes but loses the requested shape.
 _ESCAPED_QUOTE = re.compile(r"^&gt;[ \t]?(.*)$", re.MULTILINE)
@@ -124,6 +129,7 @@ def _restore_flattened_bullets(source: str) -> str:
         indent = line[: len(line) - len(line.lstrip())]
         siblings = _INLINE_BULLET.split(line)
         item_bodies = [sibling.strip() for sibling in siblings[1:]]
+        strict_labelled_preamble = _FLATTENED_LIST_LABEL.fullmatch(stripped) is not None
         has_markdown_label = any(_FLATTENED_LIST_LABEL.match(body) is not None for body in item_bodies)
         has_prose_item = any(
             len(re.findall(r"[^\W\d_]+", body, flags=re.UNICODE)) >= 2
@@ -133,12 +139,116 @@ def _restore_flattened_bullets(source: str) -> str:
         # Balanced emphasis by itself is not list evidence: ``**5** * 3 * 2``
         # is an ordinary product.  A punctuation-led preamble may introduce
         # ordinary sentence items; an emphasis-led one needs an explicit
-        # Markdown label unless its items are themselves closed prose.
-        if not has_markdown_label and not (punctuation_closed and has_prose_item):
+        # Markdown label unless its items are themselves closed prose.  An
+        # exact labelled preamble is sufficient only with three shaped markers;
+        # that repeated form covers terse list items without opening a generic
+        # prose/colon reflow rule.
+        terse_labelled_list = strict_labelled_preamble and len(inline_markers) >= 3
+        if not has_markdown_label and not (
+            (punctuation_closed or emphasis_closed) and has_prose_item or terse_labelled_list
+        ):
             restored.append(line)
             continue
         restored.append(siblings[0].rstrip())
         restored.extend(f"{indent}* {sibling}" for sibling in siblings[1:])
+    return "\n".join(restored)
+
+
+def _restore_flattened_numbered_items(source: str) -> str:
+    """Put a repeated ``N. **label**`` sequence back on intact list lines.
+
+    The boundary belongs before the number, never between ``N.`` and its bold
+    label.  Requiring at least three consecutive ordinals avoids treating a
+    pair of inline version references as a list.  A labelled section following
+    the final item is separated only when the prior item is sentence-closed.
+    """
+
+    restored: list[str] = []
+    for line in source.split("\n"):
+        matches = list(_FLATTENED_NUMBERED_BOLD_ITEM.finditer(line))
+        numbers = [int(match.group("number")) for match in matches]
+        if len(matches) < 3 or any(
+            current != previous + 1 for previous, current in zip(numbers, numbers[1:], strict=False)
+        ):
+            restored.append(line)
+            continue
+        preamble = line[: matches[0].start()].rstrip()
+        if preamble and not preamble.endswith((".", ":", ";", "!", "?", "…")):
+            restored.append(line)
+            continue
+
+        pieces: list[str] = []
+        if preamble:
+            pieces.append(preamble)
+        for index, match in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(line)
+            pieces.append(line[match.start() : end].strip())
+
+        tail = pieces[-1]
+        tail_labels = list(_FLATTENED_BOLD_SECTION.finditer(tail))
+        if len(tail_labels) >= 2:
+            trailing = tail_labels[-1]
+            label = str(trailing.group(1) or trailing.group(2) or "")
+            before = tail[: trailing.start()].rstrip()
+            if label.rstrip().endswith((":", ";", "—", "–", "-")) and before.endswith((".", "!", "?", "…")):
+                pieces[-1] = before
+                pieces.append("\n" + tail[trailing.start() :].lstrip())
+        restored.append("\n".join(piece for piece in pieces if piece))
+    return "\n".join(restored)
+
+
+def _restore_flattened_bold_sections(source: str) -> str:
+    """Restore section breaks lost by a model without rewriting its words.
+
+    A live file review arrived as one 831-character physical line containing
+    eight bold section labels.  Telegram rendered the emphasis correctly, but
+    the result was still an unreadable wall of text.  This is narrower than a
+    prose formatter: at least three same-line bold spans are required, and a
+    break is inserted only where the next span directly follows the previous
+    label or a closed sentence.  Ordinary inline emphasis therefore remains
+    byte-for-byte text apart from the existing Markdown-to-HTML conversion.
+    """
+
+    restored: list[str] = []
+    for line in source.split("\n"):
+        # Section repair runs before links are rendered.  Protect the entire
+        # syntactically identifiable label, including a malformed/unclosed URL:
+        # link validation may leave that literal untouched, but reflow must not
+        # first insert a newline into its Markdown grammar.
+        link_label_spans = [(match.start(1), match.end(1)) for match in _LINK_START.finditer(line)]
+        matches = [
+            match
+            for match in _FLATTENED_BOLD_SECTION.finditer(line)
+            if not any(
+                label_start <= match.start() and match.end() <= label_end
+                for label_start, label_end in link_label_spans
+            )
+        ]
+        if len(matches) < 3:
+            restored.append(line)
+            continue
+
+        break_starts: list[int] = []
+        previous = matches[0]
+        for match in matches[1:]:
+            gap = line[previous.end() : match.start()]
+            prefix = line[: match.start()].rstrip()
+            if not gap.strip() or prefix.endswith((".", "!", "?", ":", ";", "…")):
+                break_starts.append(match.start())
+            previous = match
+        # One accidental boundary among several inline emphases is still prose.
+        # A flattened section layout has repeated evidence of the same loss.
+        if len(break_starts) < 2:
+            restored.append(line)
+            continue
+
+        cursor = 0
+        pieces: list[str] = []
+        for start in break_starts:
+            pieces.append(line[cursor:start].rstrip())
+            cursor = start
+        pieces.append(line[cursor:])
+        restored.append("\n\n".join(piece for piece in pieces if piece))
     return "\n".join(restored)
 
 
@@ -264,6 +374,8 @@ def to_telegram_html(text: str) -> str:
     # A flattened model list is still Markdown intent. Restore its physical
     # lines before the ordinary bullet renderer turns the markers into ``•``.
     source = _restore_flattened_bullets(source)
+    source = _restore_flattened_numbered_items(source)
+    source = _restore_flattened_bold_sections(source)
 
     # 1. Таблицы вне исходного кода превращаются в fenced blocks. Вынимаем и
     # эти новые блоки перед HTML/Markdown-преобразованиями ниже.

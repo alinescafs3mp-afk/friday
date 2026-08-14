@@ -69,8 +69,21 @@ class _Storage:
     def __init__(self, users: list[dict]) -> None:
         self._users = users
 
-    def list_users(self, limit: int = 5000):  # noqa: ANN001, ARG002
-        return self._users
+    def execute(self, sql: str, params: tuple[int, ...] = ()):  # noqa: ANN001
+        """Serve the bounded directory query used by person resolution.
+
+        The production resolver deliberately takes one sentinel row past its
+        fuzzy-match ceiling from a single SQL snapshot.  This fake mirrors that
+        contract instead of retaining the older ``list_users`` shortcut.
+        """
+        assert "FROM users" in sql
+        assert params == (5001,)
+
+        class _Rows:
+            def fetchall(inner_self):  # noqa: ANN202, N805
+                return list(self._users[: params[0]])
+
+        return _Rows()
 
 
 def _runtime(users: list[dict], rendered: str = "Активность: 3 документа."):
@@ -178,7 +191,11 @@ def test_a_participant_name_never_goes_to_a_search_engine() -> None:
     from friday.agent_runtime import AgentRuntime
 
     source = inspect.getsource(AgentRuntime._prefetch_the_web_if_asked)
-    assert "_ASKS_WHAT_A_PERSON_WROTE.search(message)" in source, "имя участника снова уходит в поиск"
+    guard = " ".join(source[: source.index("kind: str")].split())
+    assert "self._mentions_someone_from_the_archive, web_message, actor," in guard, (
+        "имя участника снова уходит в поиск"
+    )
+    assert "if local_person: return" in guard, "результат локальной проверки имени больше не закрывает поиск"
 
 
 def test_a_person_question_wins_over_the_owners_own_timeline() -> None:

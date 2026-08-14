@@ -62,8 +62,16 @@ class _Kernel:
 class _Storage:
     """Учёток нет вовсе: значит имя в вопросе опознать не удастся."""
 
-    def list_users(self, limit: int = 5000):  # noqa: ANN001, ARG002
-        return []
+    def execute(self, sql: str, params: tuple[int, ...] = ()):  # noqa: ANN001
+        assert "FROM users" in sql
+        assert params == (5001,)
+
+        class _Rows:
+            @staticmethod
+            def fetchall() -> list[dict]:
+                return []
+
+        return _Rows()
 
 
 def _runtime(rendered: str = "", success: bool = True):

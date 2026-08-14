@@ -108,6 +108,12 @@ class _SyntheticWebKernel:
     def get_tool_definitions(self, actor, topic=""):  # noqa: ANN001, ARG002
         return [_tool("web_research")]
 
+    @staticmethod
+    def get_tool(name: str) -> Any:
+        if name == "web_research":
+            return SimpleNamespace(risk="mutate", security_id="web.research")
+        return None
+
     async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
         assert tool == "web_research"
         self.calls.append((str(tool), dict(params)))
@@ -444,8 +450,8 @@ async def test_three_complete_bare_docx_summaries_survive_then_news_keeps_histor
         response = await _upload_notice(runtime, document, conversation_id=conversation_id)
         conversation_id = str(response["conversation_id"])
 
-        assert response["message"].endswith(expected_summaries[document.marker])
-        assert "Подробный обзор" in response["message"]
+        assert response["message"] == expected_summaries[document.marker]
+        assert "Быстрый обзор" not in response["message"]
         assert response["message"] != OFFICE_EXACT_UNAVAILABLE_MESSAGE
         assert response["tools_used"] == []
         assert response["attachment_context_expected_count"] == 1
@@ -683,7 +689,7 @@ async def test_news_inside_a_current_document_is_local_not_a_web_request(
     request = "Покажи новости в документе за прошедшие сутки."
     assert asks_for_the_web(request) is False
     document = _store_generic_text(settings, storage)
-    answer = "По данным из интернета, в документе есть одна синтетическая локальная запись."
+    answer = "В документе есть одна синтетическая локальная запись за прошедшие сутки."
     model = _ScriptedModel({document.marker: answer})
     kernel = _SyntheticWebKernel()
     runtime = AgentRuntime(

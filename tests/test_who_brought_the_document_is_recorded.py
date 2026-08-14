@@ -7,7 +7,7 @@
 
 Сделано две вещи, и вторая важнее первой.
 
-ПЕРВОЕ: все восемь дорог приёма пишут `uploaded_by` — Telegram, HTTP, URL,
+ПЕРВОЕ: все девять дорог приёма пишут `uploaded_by` — Telegram, HTTP, URL,
 веб-исследование и оба импорта. Аутентифицированные дороги пишут `actor.own_id`;
 неаутентифицированный CLI принимает явное значение либо сохраняет JSON `null`.
 Ключ единый, чтобы надзор не гадал, где искать, а tenant не изображал человека.
@@ -131,6 +131,7 @@ EXPECTED_INGEST_CALLS = [
     ),
     ("friday/organs/importer/__init__.py", "_router.run_import", "ingest_text", "actor.own_id"),
     ("friday/server.py", "create_app.chat", "ingest_file", "actor.own_id"),
+    ("friday/server.py", "create_app.chat", "ingest_file", "actor.own_id"),
     ("friday/server.py", "create_app.chat", "ingest_text", "actor.own_id"),
 ]
 
@@ -141,31 +142,388 @@ class _IngestCallVisitor(ast.NodeVisitor):
     def __init__(self, path: Path) -> None:
         self.path = path
         self.scope: list[str] = []
+        self.dict_bindings: list[dict[str, ast.AST]] = []
         self.found: list[tuple[str, str, str, str]] = []
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802 - ast API
+        if self.dict_bindings:
+            # A nested executable scope may retain and later mutate a local
+            # mapping through a closure-like reference.  This inventory is not
+            # a points-to analyser, so withdraw the outer proof conservatively.
+            self._bindings.clear()
         self.scope.append(node.name)
         self.generic_visit(node)
         self.scope.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:  # noqa: N802
+        if self.dict_bindings:
+            self._bindings.clear()
         self.scope.append(node.name)
+        self.dict_bindings.append({})
         self.generic_visit(node)
+        self.dict_bindings.pop()
         self.scope.pop()
 
     visit_AsyncFunctionDef = visit_FunctionDef
+
+    @property
+    def _bindings(self) -> dict[str, ast.AST]:
+        return self.dict_bindings[-1] if self.dict_bindings else {}
+
+    @staticmethod
+    def _target_root_name(node: ast.AST) -> str:
+        while isinstance(node, (ast.Attribute, ast.Subscript)):
+            node = node.value
+        return node.id if isinstance(node, ast.Name) else ""
+
+    @classmethod
+    def _target_names(cls, node: ast.AST) -> set[str]:
+        if isinstance(node, ast.Name):
+            return {node.id}
+        if isinstance(node, ast.Starred):
+            return cls._target_names(node.value)
+        if isinstance(node, (ast.Tuple, ast.List)):
+            names: set[str] = set()
+            for item in node.elts:
+                names.update(cls._target_names(item))
+            return names
+        root = cls._target_root_name(node)
+        return {root} if root else set()
+
+    @staticmethod
+    def _same_expression(left: ast.AST, right: ast.AST) -> bool:
+        return ast.dump(left, include_attributes=False) == ast.dump(right, include_attributes=False)
+
+    def _merge_bindings(self, *branches: dict[str, ast.AST]) -> dict[str, ast.AST]:
+        if not branches:
+            return {}
+        common = dict(branches[0])
+        for branch in branches[1:]:
+            common = {
+                name: value
+                for name, value in common.items()
+                if name in branch and self._same_expression(value, branch[name])
+            }
+        return common
+
+    def _visit_branch(
+        self,
+        statements: list[ast.stmt],
+        initial: dict[str, ast.AST],
+    ) -> dict[str, ast.AST]:
+        self.dict_bindings[-1] = dict(initial)
+        for statement in statements:
+            self.visit(statement)
+        return dict(self._bindings)
+
+    def _invalidate_references(self, node: ast.AST | None) -> None:
+        if not self.dict_bindings or node is None:
+            return
+        referenced = {item.id for item in ast.walk(node) if isinstance(item, ast.Name)}
+        for name in referenced & self._bindings.keys():
+            self._bindings.pop(name, None)
+
+    def _assign_target(self, target: ast.AST, value: ast.AST | None) -> None:
+        if not self.dict_bindings:
+            return
+        if isinstance(target, ast.Name):
+            if isinstance(value, ast.Dict):
+                self._bindings[target.id] = value
+            else:
+                self._bindings.pop(target.id, None)
+            return
+        if isinstance(target, ast.Starred):
+            self._assign_target(target.value, None)
+            return
+        if isinstance(target, (ast.Tuple, ast.List)):
+            for item in target.elts:
+                self._assign_target(item, None)
+            return
+        root = self._target_root_name(target)
+        if root:
+            self._bindings.pop(root, None)
+
+    def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802 - ast API
+        # A literal binding is evidence only until that exact local is replaced,
+        # aliased or mutated.  Keeping an earlier literal after ``meta = make()``
+        # made this inventory green while the real uploader was unknowable.
+        referenced = {
+            item.id for item in ast.walk(node.value) if isinstance(item, ast.Name)
+        } & self._bindings.keys()
+        self.visit(node.value)
+        for target in node.targets:
+            self._assign_target(target, node.value)
+        assigned_names = {target.id for target in node.targets if isinstance(target, ast.Name)}
+        if isinstance(node.value, ast.Dict) and len(node.targets) > 1:
+            # ``left = right = {...}`` creates two mutable aliases.  A later
+            # write through either name cannot be attributed to just that name
+            # by this local syntactic proof, so neither remains trusted.
+            for name in assigned_names:
+                self._bindings.pop(name, None)
+        for name in referenced - assigned_names:
+            self._bindings.pop(name, None)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802 - ast API
+        referenced = (
+            {item.id for item in ast.walk(node.value) if isinstance(item, ast.Name)} & self._bindings.keys()
+            if node.value is not None
+            else set()
+        )
+        if node.value is not None:
+            self.visit(node.value)
+        self._assign_target(node.target, node.value)
+        assigned_name = node.target.id if isinstance(node.target, ast.Name) else ""
+        for name in referenced - {assigned_name}:
+            self._bindings.pop(name, None)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:  # noqa: N802 - ast API
+        self.visit(node.value)
+        self._assign_target(node.target, None)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:  # noqa: N802 - ast API
+        referenced = {
+            item.id for item in ast.walk(node.value) if isinstance(item, ast.Name)
+        } & self._bindings.keys()
+        self.visit(node.value)
+        self._assign_target(node.target, node.value)
+        if referenced:
+            # ``alias := metadata`` exposes the same mutable object through a
+            # second name.  Without a full points-to analysis the only honest
+            # static verdict is to withdraw both proofs.
+            for name in referenced:
+                self._bindings.pop(name, None)
+            if isinstance(node.target, ast.Name):
+                self._bindings.pop(node.target.id, None)
+
+    def visit_Delete(self, node: ast.Delete) -> None:  # noqa: N802 - ast API
+        for target in node.targets:
+            self._assign_target(target, None)
+        self.generic_visit(node)
+
+    def visit_Import(self, node: ast.Import) -> None:  # noqa: N802 - ast API
+        for alias in node.names:
+            bound = alias.asname or alias.name.split(".", maxsplit=1)[0]
+            self._bindings.pop(bound, None)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802 - ast API
+        for alias in node.names:
+            self._bindings.pop(alias.asname or alias.name, None)
+
+    def _visit_with(self, node: ast.With | ast.AsyncWith) -> None:
+        for item in node.items:
+            self.visit(item.context_expr)
+            if item.optional_vars is not None:
+                self._assign_target(item.optional_vars, None)
+        for statement in node.body:
+            self.visit(statement)
+        # ``__exit__`` / ``__aexit__`` may suppress an exception raised before
+        # a later syntactic restore.  No final body state is a safe proof for
+        # code that follows the context manager.
+        self._bindings.clear()
+
+    def visit_With(self, node: ast.With) -> None:  # noqa: N802 - ast API
+        self._visit_with(node)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:  # noqa: N802 - ast API
+        self._visit_with(node)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802 - ast API
+        self._invalidate_references(node.body)
+        self.generic_visit(node)
+
+    def visit_Return(self, node: ast.Return) -> None:  # noqa: N802 - ast API
+        self._invalidate_references(node.value)
+        self.generic_visit(node)
+
+    def visit_Yield(self, node: ast.Yield) -> None:  # noqa: N802 - ast API
+        self._invalidate_references(node.value)
+        self.generic_visit(node)
+
+    visit_YieldFrom = visit_Yield
+
+    def visit_If(self, node: ast.If) -> None:  # noqa: N802 - ast API
+        self.visit(node.test)
+        if not self.dict_bindings:
+            return
+        initial = dict(self._bindings)
+        body = self._visit_branch(node.body, initial)
+        otherwise = self._visit_branch(node.orelse, initial)
+        self.dict_bindings[-1] = self._merge_bindings(body, otherwise)
+
+    def visit_Match(self, node: ast.Match) -> None:  # noqa: N802 - ast API
+        self.visit(node.subject)
+        if not self.dict_bindings:
+            return
+        initial = dict(self._bindings)
+        branches = [initial]
+        for case in node.cases:
+            self.dict_bindings[-1] = dict(initial)
+            for pattern in ast.walk(case.pattern):
+                if isinstance(pattern, (ast.MatchAs, ast.MatchStar)) and pattern.name:
+                    self._bindings.pop(pattern.name, None)
+                elif isinstance(pattern, ast.MatchMapping) and pattern.rest:
+                    self._bindings.pop(pattern.rest, None)
+            if case.guard is not None:
+                self.visit(case.guard)
+            branches.append(self._visit_branch(case.body, self._bindings))
+        self.dict_bindings[-1] = self._merge_bindings(*branches)
+
+    def _visit_loop(self, node: ast.For | ast.AsyncFor | ast.While) -> None:
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            self.visit(node.iter)
+        else:
+            self.visit(node.test)
+        if not self.dict_bindings:
+            return
+        initial = dict(self._bindings)
+        self.dict_bindings[-1] = dict(initial)
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            self._assign_target(node.target, None)
+        body = self._visit_branch(node.body, self._bindings)
+        otherwise = self._visit_branch(node.orelse, self._merge_bindings(initial, body))
+        # A loop may execute zero times, break before ``else``, or finish it.
+        self.dict_bindings[-1] = self._merge_bindings(initial, body, otherwise)
+        if any(isinstance(item, (ast.Break, ast.Continue)) for item in ast.walk(ast.Module(body=node.body))):
+            # A break/continue may bypass a later restore in the same body.  A
+            # linear AST walk cannot identify the actual exit-state safely.
+            self._bindings.clear()
+
+    def visit_For(self, node: ast.For) -> None:  # noqa: N802 - ast API
+        self._visit_loop(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:  # noqa: N802 - ast API
+        self._visit_loop(node)
+
+    def visit_While(self, node: ast.While) -> None:  # noqa: N802 - ast API
+        self._visit_loop(node)
+
+    def visit_Try(self, node: ast.Try) -> None:  # noqa: N802 - ast API
+        if not self.dict_bindings:
+            return
+        initial = dict(self._bindings)
+        body = self._visit_branch(node.body, initial)
+        completed = self._visit_branch(node.orelse, body)
+        exits = [completed]
+        for handler in node.handlers:
+            if handler.type is not None:
+                self.visit(handler.type)
+            self.dict_bindings[-1] = {}
+            if handler.name:
+                self._bindings.pop(handler.name, None)
+            exits.append(self._visit_branch(handler.body, self._bindings))
+        merged = self._merge_bindings(*exits)
+        self.dict_bindings[-1] = self._visit_branch(node.finalbody, merged)
+
+    visit_TryStar = visit_Try
+
+    def _visit_comprehension(
+        self,
+        generators: list[ast.comprehension],
+        outputs: tuple[ast.AST, ...],
+    ) -> None:
+        if not self.dict_bindings:
+            return
+        initial = dict(self._bindings)
+        preserved_shadowed: dict[str, ast.AST] = {}
+        self.dict_bindings[-1] = dict(initial)
+        for generator in generators:
+            self.visit(generator.iter)
+            for root in self._target_names(generator.target):
+                if root in self._bindings:
+                    preserved_shadowed[root] = self._bindings[root]
+            self._assign_target(generator.target, None)
+            for condition in generator.ifs:
+                self.visit(condition)
+        for output in outputs:
+            self.visit(output)
+        # Comprehension targets are inner-scope locals in Python 3.  Restore
+        # only proofs that survived evaluation of the corresponding iterable;
+        # mutations of other captured mappings remain withdrawn.
+        self._bindings.update(preserved_shadowed)
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:  # noqa: N802 - ast API
+        self._visit_comprehension(node.generators, (node.elt,))
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:  # noqa: N802 - ast API
+        self._visit_comprehension(node.generators, (node.elt,))
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:  # noqa: N802 - ast API
+        if not self.dict_bindings:
+            return
+        first, *deferred_generators = node.generators
+        # Python evaluates only the outermost iterable at generator creation.
+        # Preserve any invalidation caused there; everything else is deferred.
+        self.visit(first.iter)
+        surviving_outer = dict(self._bindings)
+        # The generator body runs later, after arbitrary rebinding in the
+        # enclosing scope.  Only literals written directly at the eventual
+        # ingestion call remain self-proving; captured mutable locals do not.
+        self.dict_bindings[-1] = {}
+        self._assign_target(first.target, None)
+        for condition in first.ifs:
+            self.visit(condition)
+        for generator in deferred_generators:
+            self.visit(generator.iter)
+            self._assign_target(generator.target, None)
+            for condition in generator.ifs:
+                self.visit(condition)
+        self.visit(node.elt)
+        self.dict_bindings[-1] = surviving_outer
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:  # noqa: N802 - ast API
+        self._visit_comprehension(node.generators, (node.key, node.value))
+
+    def _uploader_expression(self, metadata: ast.AST | None) -> str:
+        if isinstance(metadata, ast.Name):
+            for bindings in reversed(self.dict_bindings):
+                if metadata.id in bindings:
+                    return self._uploader_expression(bindings[metadata.id])
+            return "<metadata is not a literal or locally bound dict>"
+        if not isinstance(metadata, ast.Dict):
+            return "<metadata is not a literal or locally bound dict>"
+
+        def may_override_uploader(value: ast.AST) -> bool:
+            if isinstance(value, ast.IfExp):
+                return may_override_uploader(value.body) or may_override_uploader(value.orelse)
+            if not isinstance(value, ast.Dict):
+                return True
+            for nested_key, nested_value in zip(value.keys, value.values, strict=True):
+                if nested_key is None:
+                    if may_override_uploader(nested_value):
+                        return True
+                    continue
+                if not isinstance(nested_key, ast.Constant):
+                    return True
+                if nested_key.value == "uploaded_by":
+                    return True
+            return False
+
+        uploader: ast.AST | None = None
+        for key, value in zip(metadata.keys, metadata.values, strict=True):
+            # An unpack or computed key before the explicit key is harmless:
+            # Python's later literal wins.  After it, the runtime value could
+            # be replaced and is no longer statically closed.
+            if key is None:
+                if uploader is not None and may_override_uploader(value):
+                    return "<metadata is not a literal or locally bound dict>"
+                continue
+            if not isinstance(key, ast.Constant):
+                if uploader is not None:
+                    return "<metadata is not a literal or locally bound dict>"
+                continue
+            if isinstance(key, ast.Constant) and key.value == "uploaded_by":
+                if uploader is not None:
+                    return "<metadata is not a literal or locally bound dict>"
+                uploader = value
+        if uploader is not None:
+            return ast.unparse(uploader)
+        return "<uploaded_by is missing>"
 
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802 - ast API
         name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
         if name in {"ingest_text", "ingest_file"}:
             metadata = next((item.value for item in node.keywords if item.arg == "metadata"), None)
-            uploader = "<metadata is not a literal dict>"
-            if isinstance(metadata, ast.Dict):
-                uploader = "<uploaded_by is missing>"
-                for key, value in zip(metadata.keys, metadata.values, strict=True):
-                    if isinstance(key, ast.Constant) and key.value == "uploaded_by":
-                        uploader = ast.unparse(value)
-                        break
+            uploader = self._uploader_expression(metadata)
             self.found.append(
                 (
                     str(self.path.relative_to(ROOT)),
@@ -174,6 +532,17 @@ class _IngestCallVisitor(ast.NodeVisitor):
                     uploader,
                 )
             )
+        # Any call may retain or mutate a dictionary passed to it.  The uploader
+        # is recorded above at the ingestion boundary itself; after that point a
+        # reused binding must be proved again instead of inheriting stale syntax.
+        if isinstance(node.func, ast.Attribute):
+            root = self._target_root_name(node.func.value)
+            if root:
+                self._bindings.pop(root, None)
+        for argument in node.args:
+            self._invalidate_references(argument)
+        for keyword in node.keywords:
+            self._invalidate_references(keyword.value)
         self.generic_visit(node)
 
 
@@ -189,7 +558,7 @@ def _ingest_calls_with_uploaders() -> list[tuple[str, str, str, str]]:
 def test_every_intake_road_records_the_uploader() -> None:
     """Полный переучёт вызовов, а не поиск слова по нескольким модулям.
 
-    Прежний тест был зелёным, когда четыре из восьми дорог не писали автора:
+    Прежний тест был зелёным, когда четыре из восьми тогдашних дорог не писали автора:
     достаточно было встретить `uploaded_by` где-нибудь в том же модуле. Здесь
     новая дорога, перенос вызова или неверный `actor.user_id` меняют точную
     матрицу и требуют осознанного решения.
@@ -199,6 +568,189 @@ def test_every_intake_road_records_the_uploader() -> None:
     выдуманный из арендатора человек.
     """
     assert _ingest_calls_with_uploaders() == sorted(EXPECTED_INGEST_CALLS)
+
+
+def _synthetic_ingest_uploader(source: str) -> str:
+    visitor = _IngestCallVisitor(ROOT / "synthetic_ingest_inventory.py")
+    visitor.visit(ast.parse(source))
+    assert len(visitor.found) == 1
+    return visitor.found[0][-1]
+
+
+def test_ingest_inventory_accepts_an_unchanged_local_literal() -> None:
+    assert (
+        _synthetic_ingest_uploader(
+            """
+def road(actor, pipeline):
+    metadata = {"uploaded_by": actor.own_id}
+    pipeline.ingest_file(metadata=metadata)
+"""
+        )
+        == "actor.own_id"
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "metadata = build_metadata(actor.own_id)",
+        "metadata['uploaded_by'] = actor.user_id",
+        "alias = metadata",
+        'metadata = alias = {"uploaded_by": actor.own_id}\n    alias["uploaded_by"] = actor.user_id',
+        'metadata = holder.value = {"uploaded_by": actor.own_id}\n    holder.value["uploaded_by"] = actor.user_id',
+        '(alias := metadata)\n    alias["uploaded_by"] = actor.user_id',
+        "if actor.source:\n        metadata = build_metadata(actor.own_id)",
+        'for item in actor.sources:\n        metadata = {"uploaded_by": actor.user_id}',
+    ],
+    ids=[
+        "replacement",
+        "subscript-mutation",
+        "mutable-alias",
+        "chained-mutable-alias",
+        "chained-attribute-alias",
+        "walrus-mutable-alias",
+        "conditional-replacement",
+        "zero-iteration-loop",
+    ],
+)
+def test_ingest_inventory_rejects_a_stale_literal_after_mutation(mutation: str) -> None:
+    source = f"""\
+def road(actor, pipeline):
+    metadata = {{"uploaded_by": actor.own_id}}
+    {mutation}
+    pipeline.ingest_file(metadata=metadata)
+"""
+
+    assert _synthetic_ingest_uploader(source) == "<metadata is not a literal or locally bound dict>"
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        '{"uploaded_by": actor.own_id, "uploaded_by": actor.user_id}',
+        '{"uploaded_by": actor.own_id, **{"uploaded_by": actor.user_id}}',
+    ],
+    ids=["duplicate-key", "later-unpack"],
+)
+def test_ingest_inventory_rejects_a_literal_with_an_overridable_uploader(literal: str) -> None:
+    source = f"""\
+def road(actor, pipeline):
+    metadata = {literal}
+    pipeline.ingest_file(metadata=metadata)
+"""
+
+    assert _synthetic_ingest_uploader(source) == "<metadata is not a literal or locally bound dict>"
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "[pipeline.ingest_file(metadata=metadata) for metadata in sources]",
+        "{pipeline.ingest_file(metadata=metadata) for metadata in sources}",
+        "(pipeline.ingest_file(metadata=metadata) for metadata in sources)",
+        "{str(index): pipeline.ingest_file(metadata=metadata) for index, metadata in enumerate(sources)}",
+    ],
+    ids=["list", "set", "generator", "dict"],
+)
+def test_ingest_inventory_respects_comprehension_target_shadowing(expression: str) -> None:
+    source = f"""\
+def road(actor, pipeline, sources):
+    metadata = {{"uploaded_by": actor.own_id}}
+    {expression}
+"""
+
+    assert _synthetic_ingest_uploader(source) == "<metadata is not a literal or locally bound dict>"
+
+
+def test_ingest_inventory_does_not_freeze_a_lazy_generator_capture() -> None:
+    source = """\
+def road(actor, pipeline, sources):
+    metadata = {"uploaded_by": actor.own_id}
+    work = (pipeline.ingest_file(metadata=metadata) for _ in sources)
+    metadata = build_metadata(actor.user_id)
+    list(work)
+"""
+
+    assert _synthetic_ingest_uploader(source) == "<metadata is not a literal or locally bound dict>"
+
+
+@pytest.mark.parametrize(
+    "iterable",
+    ["retain_or_mutate(metadata)", 'metadata.pop("uploaded_by")'],
+    ids=["argument-escape", "method-mutation"],
+)
+def test_ingest_inventory_keeps_eager_generator_iterable_side_effects(iterable: str) -> None:
+    source = f"""\
+def road(actor, pipeline):
+    metadata = {{"uploaded_by": actor.own_id}}
+    (item for item in {iterable})
+    pipeline.ingest_file(metadata=metadata)
+"""
+
+    assert _synthetic_ingest_uploader(source) == "<metadata is not a literal or locally bound dict>"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        """try:
+        raise RuntimeError
+    except RuntimeError as metadata:
+        pipeline.ingest_file(metadata=metadata)""",
+        """with manager() as metadata:
+        pipeline.ingest_file(metadata=metadata)""",
+        """match source:
+        case {"metadata": metadata}:
+            pipeline.ingest_file(metadata=metadata)""",
+        """import json as metadata
+    pipeline.ingest_file(metadata=metadata)""",
+    ],
+    ids=["except-target", "with-target", "match-capture", "import-alias"],
+)
+def test_ingest_inventory_rejects_control_flow_rebinding(body: str) -> None:
+    source = f"""\
+def road(actor, pipeline, source, manager):
+    metadata = {{"uploaded_by": actor.own_id}}
+    {body}
+"""
+
+    assert _synthetic_ingest_uploader(source) == "<metadata is not a literal or locally bound dict>"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        """for item in sources:
+        metadata = build_metadata(actor.user_id)
+        break
+        metadata = {"uploaded_by": actor.own_id}
+    pipeline.ingest_file(metadata=metadata)""",
+        """for item in sources:
+        metadata = build_metadata(actor.user_id)
+        continue
+        metadata = {"uploaded_by": actor.own_id}
+    pipeline.ingest_file(metadata=metadata)""",
+        """try:
+        metadata = build_metadata(actor.user_id)
+        risky()
+    except RuntimeError:
+        pipeline.ingest_file(metadata=metadata)""",
+        """with manager():
+        metadata = build_metadata(actor.user_id)
+        risky()
+        metadata = {"uploaded_by": actor.own_id}
+    pipeline.ingest_file(metadata=metadata)""",
+    ],
+    ids=["break-skips-restore", "continue-skips-restore", "try-prefix", "suppressed-with-prefix"],
+)
+def test_ingest_inventory_rejects_ambiguous_control_flow_exit_state(body: str) -> None:
+    source = f"""\
+def road(actor, pipeline, sources, manager, risky):
+    metadata = {{"uploaded_by": actor.own_id}}
+    {body}
+"""
+
+    assert _synthetic_ingest_uploader(source) == "<metadata is not a literal or locally bound dict>"
 
 
 def _raw_metadata(storage, raw_id: str, user_id: str) -> dict:

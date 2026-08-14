@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 
 import pytest
@@ -19,6 +20,7 @@ from friday.agent_runtime import (
     strip_unasked_archive_status,
 )
 from friday.permissions import ActorContext
+from friday.storage.models import RawObject, new_id
 
 
 @pytest.mark.parametrize(
@@ -386,18 +388,43 @@ async def test_k17_preserves_a_status_grounded_in_current_attachment_evidence(
 
     monkeypatch.setattr(runtime, "_prepare_context", prepare)
     monkeypatch.setattr(runtime, "_generate_response", generate)
-    attachments = (
-        [
-            {
+    attachments = []
+    if has_attachment:
+        text = "Синтетический документ не содержит искомого ответа."
+        body = text.encode("utf-8")
+        digest = hashlib.sha256(body).hexdigest()
+        relative = f"alice/{digest[:2]}/{digest}.txt"
+        stored = settings.files_dir / relative
+        stored.parent.mkdir(parents=True, exist_ok=True)
+        stored.write_bytes(body)
+        raw = RawObject(
+            id=new_id("raw"),
+            user_id="alice",
+            source="synthetic-package-a-current",
+            source_ref=new_id("source"),
+            raw_content=text,
+            content_type="file",
+            content_hash=digest,
+            metadata_json={
                 "filename": "synthetic-current-turn.txt",
-                "transient_text": "Синтетический документ не содержит искомого ответа.",
+                "uploaded_by": "alice",
+                "mime_type": "text/plain",
                 "extraction_success": True,
-                "verification_eligible": True,
-            }
-        ]
-        if has_attachment
-        else []
-    )
+                "text_extraction_success": True,
+                "extraction_chars": len(text),
+                "stored_path": relative,
+                "sha256": digest,
+                "size_bytes": len(body),
+            },
+        )
+        storage.store_raw_object(raw)
+        attachment = runtime._owned_file_attachment(  # noqa: SLF001
+            raw.id,
+            tenant_id="alice",
+            person_id="alice",
+        )
+        assert attachment is not None
+        attachments = [attachment]
 
     result = await runtime.chat(
         "alice",

@@ -378,6 +378,15 @@ async def test_named_uploader_approximate_filename_chat_reads_only_registered_up
     assert result["attachment_coverage_complete"] is True
     assert result["attachment_verification_complete"] is True
 
+    missing = await runtime.chat(
+        actor.own_id,
+        "GBL присылал тебе файл field-report-7969-fianl.odt, найди CASE-404",
+        actor=actor,
+        enable_tools=True,
+    )
+    assert len(seen) == 1, "a residual body lookup was erased with named-uploader navigation"
+    assert "совпадение по запросу не найдено" in missing["message"]
+
 
 @pytest.mark.asyncio
 async def test_filename_substring_inventory_lists_names_without_hydrating_bodies(
@@ -497,10 +506,13 @@ async def test_two_term_approximate_filename_question_reads_the_unique_registere
         del context, message
         snapshot = [dict(item) for item in attachments or []]
         seen.append(snapshot)
-        body = "\n".join(str(item.get("transient_text") or "") for item in snapshot)
-        assert "Цветков Никита Андреевич" in body
-        assert "609416" in body
-        assert "AMBIENT-SAME-PERSON-DECOY" not in body
+        model_visible = "\n".join(
+            str(item.get("_office_prompt_serialized") or item.get("transient_text") or "")
+            for item in snapshot
+        )
+        assert "Цветков Никита Андреевич" in model_visible
+        assert "609416" in model_visible
+        assert "AMBIENT-SAME-PERSON-DECOY" not in model_visible
         return {"content": "Да, Цветков Никита Андреевич и автомат №609416 указаны.", "tools_used": []}
 
     monkeypatch.setattr(runtime, "_prepare_context", forbidden)
@@ -985,16 +997,12 @@ async def test_complete_named_person_corpus_owns_only_passive_historical_file_st
         ["OMEGA-915", "SIGMA-482", "KAPPA-731"],
         ["OMEGA-915", "SIGMA-482", "KAPPA-731"],
     ]
-    assert len(verifier_evidence) == 1
-    joined_evidence = "\n".join(verifier_evidence[0])
-    assert joined_evidence.index("OMEGA-915") < joined_evidence.index("SIGMA-482")
-    assert joined_evidence.index("SIGMA-482") < joined_evidence.index("KAPPA-731")
-    assert "OUTSIDE-WINDOW-004" not in joined_evidence
+    assert verifier_evidence == []
     assert _UNCONFIRMED_SUPPORTED_DEED not in passive["message"]
     assert "Исторические файлы сохранены" in passive["message"]
     assert passive["message"].index("OMEGA-915") < passive["message"].index("SIGMA-482")
     assert passive["message"].index("SIGMA-482") < passive["message"].index("KAPPA-731")
     assert "OUTSIDE-WINDOW-004" not in passive["message"]
-    assert passive["verification_status"] == "passed"
+    assert passive["verification_status"] == "skipped"
     assert _UNCONFIRMED_SUPPORTED_DEED in active["message"]
     assert "Я создала и прикрепила" not in active["message"]

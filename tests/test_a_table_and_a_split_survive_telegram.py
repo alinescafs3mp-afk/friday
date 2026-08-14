@@ -49,6 +49,78 @@ def test_the_text_around_a_table_is_untouched():
     assert rendered.rstrip().endswith("Дальше текст.")
 
 
+def test_a_flattened_file_review_recovers_its_bold_sections() -> None:
+    source = (
+        "Короткое вступление. **Назначение** Документ описывает процесс. "
+        "**Ключевые факты** Указаны сроки и ответственные. "
+        "**Риски** Один срок уже близко. "
+        "**Вывод:** Нужна проверка статуса."
+    )
+
+    rendered = to_telegram_html(source)
+
+    assert rendered.count("\n\n<b>") == 3
+    assert "<b>Назначение</b>" in rendered
+    assert "<b>Ключевые факты</b>" in rendered
+    assert "<b>Риски</b>" in rendered
+    assert "<b>Вывод:</b>" in rendered
+
+
+def test_a_flattened_numbered_review_keeps_each_number_with_its_label() -> None:
+    source = (
+        "Ввод: 1. **Альфа** — текст. 2. **Бета** — текст. "
+        "3. **Гамма** — текст. **Особенности:** "
+        "*   Первый пункт. *   Второй пункт. *   Третий пункт."
+    )
+
+    rendered = to_telegram_html(source)
+
+    assert rendered == (
+        "Ввод:\n"
+        "1. <b>Альфа</b> — текст.\n"
+        "2. <b>Бета</b> — текст.\n"
+        "3. <b>Гамма</b> — текст.\n\n"
+        "<b>Особенности:</b>\n"
+        "• Первый пункт.\n"
+        "• Второй пункт.\n"
+        "• Третий пункт."
+    )
+    assert "1.\n<b>" not in rendered
+    assert "2.\n<b>" not in rendered
+    assert "3.\n<b>" not in rendered
+
+
+def test_two_inline_numbered_emphases_are_not_reflowed() -> None:
+    source = "Версии 1. **Альфа** и 2. **Бета**."
+
+    rendered = to_telegram_html(source)
+
+    assert "\n" not in rendered
+    assert rendered == "Версии 1. <b>Альфа</b> и 2. <b>Бета</b>."
+
+
+def test_three_ordinary_inline_emphases_are_not_turned_into_sections() -> None:
+    source = "Это **важно**, но **не срочно**, и **совершенно безопасно**."
+
+    rendered = to_telegram_html(source)
+
+    assert "\n" not in rendered
+    assert rendered == "Это <b>важно</b>, но <b>не срочно</b>, и <b>совершенно безопасно</b>."
+
+
+def test_bold_markdown_link_labels_are_not_reflowed() -> None:
+    source = (
+        "[**Первый**](https://example.invalid/1). "
+        "[**Второй**](https://example.invalid/2). "
+        "[**Третий**](https://example.invalid/3)."
+    )
+
+    rendered = to_telegram_html(source)
+
+    assert "\n" not in rendered
+    assert rendered.count("<a href=") == 3
+
+
 def test_a_single_line_with_pipes_is_not_a_table():
     """Одна строка с палками — предложение, а не таблица.
 

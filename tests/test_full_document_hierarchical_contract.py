@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 import json
 from dataclasses import replace
@@ -639,7 +640,7 @@ async def test_escape_dense_hierarchy_replans_contiguous_leaves_to_serialized_bu
 
     payloads = _chunk_payloads(llm)
     _assert_exact_coverage(payloads, [("escape-dense.jsonl", source)])
-    assert len(payloads) > 6
+    assert 1 < len(payloads) <= agent_runtime_module._ATTACHMENT_MAP_MAX_CHUNKS
     assert all(
         sum(agent_runtime_module._message_chars(item) for item in call["messages"])
         <= agent_runtime_module._attachment_map_input_char_budget(settings.profile.max_model_len)
@@ -902,6 +903,7 @@ async def test_a_300_row_xlsx_exposes_record_288_even_when_office_prompt_stops_n
     ]
     assert final_evidence["ordered_row_matches_capped"] is False
     assert result["message"] == "На 288-й позиции находится ROW-288-SENTINEL."
+    assert "Не весь исходный материал" not in result["message"]
     assert result["attachment_coverage_complete"] is True
     assert result["attachment_verification_complete"] is True
 
@@ -941,14 +943,11 @@ async def test_incomplete_office_prompt_counts_all_300_rows_without_requesting_a
     )
     assert all("ordered_rows" not in payload for payload in payloads)
     synthesis, verification = _canonical_map_blocks(llm)
-    if question.startswith("Сколько"):
-        # The simple cardinality is rendered from the code-owned ordered carrier.
-        assert (synthesis, verification) == ([], [])
-    else:
-        # A filename-scoped phrasing follows the complete hierarchy fallback;
-        # synthesis and judge receive the same canonical full-source map.
-        assert synthesis == verification and synthesis
+    # Both phrasings are rendered from the code-owned ordered carrier.  A
+    # filename qualifier must not turn an exact cardinality into a model task.
+    assert (synthesis, verification) == ([], [])
     assert result["message"] == "В документе 300 позиций."
+    assert "Не весь исходный материал" not in result["message"]
     assert "пришл" not in result["message"].casefold()
     assert result["attachment_coverage_complete"] is True
     assert result["attachment_verification_complete"] is True
@@ -1048,7 +1047,7 @@ async def test_compound_full_source_prepass_keeps_the_ordinary_agentic_tool_rout
     _assert_exact_coverage(_chunk_payloads(llm), [("tool-route-100k.txt", source)])
     assert captured, result
     assert isinstance(captured["bundle"], agent_runtime_module._AttachmentHierarchyBundle)
-    assert captured["focused"] is False
+    assert captured["focused"] is True
     assert captured["tools"] == expected_tools
     assert result["attachment_coverage_complete"] is True
 
@@ -1252,7 +1251,8 @@ async def test_pure_whole_document_summary_uses_the_direct_no_tool_route(
 
     _assert_exact_coverage(_chunk_payloads(llm), [("direct-route-100k.txt", source)])
     _assert_no_action_surface(llm)
-    assert result["message"].startswith("Прямой итог")
+    assert result["message"] == "Прямой итог учитывает DIRECT_HEAD, DIRECT_MIDDLE и DIRECT_TAIL."
+    assert "Не весь исходный материал" not in result["message"]
     assert result["attachment_coverage_complete"] is True
 
 
@@ -1443,6 +1443,7 @@ async def test_requested_single_paragraph_hierarchy_report_is_still_delivered_as
     )
 
     assert result["message"] == answer
+    assert "Не весь исходный материал" not in result["message"]
     assert result["attachment_coverage_complete"] is True
     assert result["verification_status"] == "passed"
     assert len(result["files"]) == 1
@@ -1493,6 +1494,7 @@ async def test_late_file_builder_receives_the_same_canonical_hierarchy_evidence(
     synthesis, verification = _canonical_map_blocks(llm)
     assert synthesis == verification and len(synthesis) == 1
     assert captured["answer"] == result["message"] == answer
+    assert "Не весь исходный материал" not in result["message"]
     assert captured["evidence"] == [{"tool": "attachment", "output": synthesis[0]}]
     assert result["files"][0]["filename"] == "canonical.docx"
 
@@ -1645,8 +1647,12 @@ async def test_map_fanout_cap_marks_uncovered_source_unknown(
 ) -> None:
     """A finite model-call envelope must never masquerade as full coverage."""
 
-    monkeypatch.setattr(agent_runtime_module, "_ATTACHMENT_MAP_MAX_CHUNKS", 3)
-    source = "CAP_HEAD\n" + "c" * 79_970 + "\nCAP_TAIL"
+    monkeypatch.setattr(agent_runtime_module, "_ATTACHMENT_MAP_MAX_CHUNKS", 1)
+    head = "CAP_HEAD\n"
+    tail = "\nCAP_TAIL"
+    middle_chars = 306_179 - len(head) - len(tail)
+    non_repeating = "".join(f"{index:08x}" for index in range(40_000))
+    source = head + non_repeating[:middle_chars] + tail
     llm = _HierarchyLLM("Частичная сводка, которую оптимистичный судья готов принять.")
 
     result = await _run(
@@ -1659,12 +1665,12 @@ async def test_map_fanout_cap_marks_uncovered_source_unknown(
     )
 
     chunk_payloads = _chunk_payloads(llm)
-    assert len(chunk_payloads) == 3
+    assert 0 < len(chunk_payloads) <= 1
     assert sum(len(str(item["text"])) for item in chunk_payloads) < len(source)
     synthesis, verification = _canonical_map_blocks(llm)
     assert synthesis == verification and len(synthesis) == 1
     coverage = _payload(synthesis[0], MAP_PREFIX)["coverage"]
-    assert coverage["chunks_total"] > coverage["chunks_planned"] == 3
+    assert coverage["chunks_total"] > coverage["chunks_planned"] == len(chunk_payloads)
     assert coverage["source_chars_total"] == len(source)
     assert coverage["source_chars_planned"] < len(source)
     assert coverage["source_chars_uncovered"] > 0
@@ -1742,10 +1748,11 @@ async def test_full_source_prepass_and_reduction_leave_a_fresh_answer_deadline(
 
     assert bundle.records_available is True
     assert complete is True
-    assert any(
-        str(item.get("content") or "").startswith(REDUCE_PREFIX)
-        for call in llm.calls
-        for item in call["messages"]
+    _assert_exact_coverage(_chunk_payloads(llm), [("prepass-deadline-100k.txt", source)])
+    bundle_payload = _payload(bundle.evidence, MAP_PREFIX)
+    assert (
+        len(json.dumps(bundle_payload["records"], ensure_ascii=False, sort_keys=True))
+        <= agent_runtime_module._ATTACHMENT_MAP_FINAL_EVIDENCE_CHARS
     )
     assert context.attachment_prepass_deadline is not None
     assert context.attachment_primary_deadline is None
@@ -1787,7 +1794,9 @@ async def test_exhausted_reduce_envelope_fails_closed_without_extra_model_calls(
         llm=llm,
     )
 
-    assert len(_chunk_payloads(llm)) == 5
+    payloads = _chunk_payloads(llm)
+    assert payloads
+    _assert_exact_coverage(payloads, [("reduce-envelope.txt", source)])
     assert not any(
         str(item.get("content") or "").startswith(REDUCE_PREFIX)
         for call in llm.calls
@@ -1867,18 +1876,29 @@ async def test_all_uploaded_files_maps_the_complete_self_corpus_newest_first(
     newest_first_sources = list(reversed(sources))
     conversation_id: str | None = None
     for index, (filename, text) in enumerate(sources, start=1):
+        raw_id = new_id("raw")
+        body = text.encode("utf-8")
+        digest = hashlib.sha256(body).hexdigest()
+        relative_path = f"{owner}/{digest[:2]}/{raw_id}.txt"
+        stored_path = settings.files_dir / relative_path
+        stored_path.parent.mkdir(parents=True, exist_ok=True)
+        stored_path.write_bytes(body)
         raw = RawObject(
-            id=new_id("raw"),
+            id=raw_id,
             user_id=owner,
             source="synthetic-upload",
             source_ref=new_id("source"),
             raw_content=text,
             content_type="file",
+            content_hash=digest,
             metadata_json={
                 "filename": filename,
                 "uploaded_by": owner,
                 "extraction_success": True,
                 "text_extraction_success": True,
+                "stored_path": relative_path,
+                "sha256": digest,
+                "size_bytes": len(body),
             },
         )
         storage.store_raw_object(raw)
@@ -1887,17 +1907,7 @@ async def test_all_uploaded_files_maps_the_complete_self_corpus_newest_first(
             f"Это документ {index}",
             actor=auth.actor_for_user(owner, source="test"),
             conversation_id=conversation_id,
-            attachments=[
-                _OwnedAttachment(
-                    {
-                        "raw_object_id": raw.id,
-                        "filename": filename,
-                        "transient_text": text,
-                        "extraction_success": True,
-                        "verification_eligible": True,
-                    }
-                )
-            ],
+            attachments=[{"raw_object_id": raw.id}],
             enable_tools=False,
         )
         conversation_id = str(uploaded["conversation_id"])
@@ -1905,7 +1915,7 @@ async def test_all_uploaded_files_maps_the_complete_self_corpus_newest_first(
     before_final_calls = len(llm.calls)
     result = await runtime.chat(
         owner,
-        "Сравни все загруженные файлы целиком.",
+        "Сравни целиком все мои файлы, которые я загружал.",
         actor=auth.actor_for_user(owner, source="test"),
         conversation_id=conversation_id,
         attachments=[],
@@ -1925,7 +1935,7 @@ async def test_all_uploaded_files_maps_the_complete_self_corpus_newest_first(
     before_repeat_calls = len(llm.calls)
     repeated = await runtime.chat(
         owner,
-        "Теперь обобщи все загруженные файлы целиком.",
+        "Теперь обобщи целиком все мои файлы, которые я загружал.",
         actor=auth.actor_for_user(owner, source="test"),
         conversation_id=conversation_id,
         attachments=[],

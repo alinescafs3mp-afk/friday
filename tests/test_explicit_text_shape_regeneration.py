@@ -10,7 +10,13 @@ import pytest
 
 import friday.agent_runtime as runtime_module
 import friday.text_shape as text_shape_module
-from friday.agent_runtime import AgentContext, AgentRuntime
+from friday.agent_runtime import (
+    AgentContext,
+    AgentRuntime,
+    _attachment_reference_kind,
+    _intra_file_record_set_count,
+    file_turn_authority,
+)
 from friday.permissions import ActorContext
 from friday.telegram_bridge import TelegramBridge
 from friday.text_shape import (
@@ -36,6 +42,17 @@ QUOTE_COLLAPSED_DRAFT = "> “Short quote.” Explanation QUOTE-GAP-43. Control:
 QUOTE_EXACT_DRAFT = "> “Short quote.”\nExplanation QUOTE-GAP-43. Control: CHECK-43."
 QUOTE_COLLAPSED = "> “Short quote.” Explanation QUOTE-GAP-43."
 QUOTE_EXACT = "> “Short quote.”\nExplanation QUOTE-GAP-43."
+
+
+def test_an_answer_list_shape_is_not_a_private_file_reference() -> None:
+    assert _intra_file_record_set_count(RU_ITEM_LIST) is None
+    assert _attachment_reference_kind(RU_ITEM_LIST) == ""
+    assert not file_turn_authority(RU_ITEM_LIST).proved("local_read")
+
+    # Genuine current-file record selectors retain the fail-closed file route.
+    assert _intra_file_record_set_count("оба пункта") == 2
+    assert _attachment_reference_kind("оба пункта") == "deictic"
+    assert file_turn_authority("две строки этого файла").proved("local_read")
 
 
 @pytest.mark.parametrize(

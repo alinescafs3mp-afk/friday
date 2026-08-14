@@ -54,6 +54,7 @@ EXPECTED_ASYNC = frozenset(
     {
         "_extract_visual_batch",
         "_extract_visual_document",
+        "_reread_visual_asset_text",
         "_transcribe_audio",
         "advise_inbox_item",
         "ingest_file",
@@ -101,8 +102,9 @@ def test_public_names_stay_importable() -> None:
     )
 
 
-EXPECTED_MEMBER_COUNT = 45
+EXPECTED_MEMBER_COUNT = 48
 EXPECTED_SIGNATURES: dict[str, str] = {
+    "_accept_semantic_duplicate_for_replay": "(self, user_id: 'str', existing: 'dict[str, Any]') -> 'dict[str, Any]'",
     "_apply_feedback_calibration": "(self, user_id: 'str', assessment: 'PromotionAssessment') -> 'PromotionAssessment'",
     "_commit_staged_file": "(self, target: 'Path', staged: 'Path | None', digest: 'str') -> 'Path'",
     "_create_promoted_ko": "(self, inbox_id: 'str', user_id: 'str', item: 'dict[str, Any]', reviewer: 'str', *, title: 'str | None', summary: 'str | None', knowledge_kind: 'str | None', importance: 'float | None', metadata: 'dict[str, Any] | None', tags: 'list[str] | None') -> 'str | None'",
@@ -115,11 +117,16 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "_extract_visual_document": "(self, file_content: 'bytes', *, filename: 'str', mime_type: 'str') -> 'dict[str, Any] | None'",
     "_file_sha256": "(path: 'Path') -> 'str'",
     "_file_target": "(self, user_id: 'str', digest: 'str', filename: 'str') -> 'Path'",
+    "_fresh_twin": "(self, user_id: 'str', source: 'str', candidate_type: 'str', digest: 'str', metadata: 'dict[str, Any] | None') -> 'dict[str, Any] | None'",
     "_link_entities": "(self, user_id: 'str', ko_id: 'str', raw_id: 'str', entity_candidates: 'list[dict[str, Any]]') -> 'tuple[list[dict[str, Any]], list[dict[str, Any]]]'",
+    "_prepare_existing_file_for_replay": "(self, user_id: 'str', existing: 'dict[str, Any]', file_content: 'bytes', digest: 'str', filename: 'str', *, conn: 'Any | None' = None) -> 'dict[str, Any]'",
     "_promote_raw": "(self, *, raw: 'RawObject', content: 'str', assessment: 'PromotionAssessment', enrichment: 'KnowledgeEnrichment', force_pending: 'bool' = False) -> 'dict[str, Any]'",
     "_record_event_times": "(self, user_id: 'str', content: 'str', graph_links: 'list[dict[str, Any]]') -> 'None'",
+    "_replay_of": "(self, existing: 'dict[str, Any]', user_id: 'str', candidate_type: 'str') -> 'dict[str, Any]'",
     "_replay_file_source": "(self, user_id: 'str', existing_raw: 'dict[str, Any]') -> 'dict[str, Any]'",
     "_replay_text_source": "(self, user_id: 'str', existing_raw: 'dict[str, Any]') -> 'dict[str, Any]'",
+    "_reread_visual_asset_text": "(self, asset: 'VisualAsset', *, asset_id: 'str') -> 'str'",
+    "_revive_reviewed_ko": "(self, inbox_id: 'str', user_id: 'str', item: 'dict[str, Any]', reviewer: 'str') -> 'str | None'",
     "_safe_component": "(value: 'str') -> 'str'",
     "_sanitize_filename": "(filename: 'str') -> 'str'",
     "_stage_file": "(self, user_id: 'str', content: 'bytes', digest: 'str', filename: 'str') -> 'tuple[Path, Path | None]'",
@@ -144,6 +151,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "queue_research_candidate": "(self, user_id: 'str', content: 'str', *, source_ref: 'str', metadata: 'dict[str, Any] | None' = None) -> 'dict[str, Any]'",
     "reenrich_knowledge": "(self, user_id: 'str', knowledge_object_id: 'str', *, apply: 'bool' = False, reviewed_by: 'str | None' = None) -> 'dict[str, Any]'",
     "return_knowledge_to_inbox": "(self, user_id: 'str', knowledge_object_id: 'str', *, reviewed_by: 'str', reason: 'str' = 'legacy quality review') -> 'dict[str, Any]'",
+    "review_required": "(self, *, force_review: 'bool', explicit_intent: 'bool') -> 'bool'",
     "scan_legacy_low_quality": "(self, user_id: 'str', *, limit: 'int' = 250, threshold: 'float' = 0.48) -> 'list[dict[str, Any]]'",
     "scan_legacy_quality_page": "(self, user_id: 'str', *, limit: 'int' = 250, offset: 'int' = 0, threshold: 'float' = 0.55, include_archived: 'bool' = False) -> 'tuple[list[dict[str, Any]], int]'",
     "scan_legacy_quality": "(self, user_id: 'str', *, limit: 'int' = 250, threshold: 'float' = 0.55, include_archived: 'bool' = False) -> 'list[dict[str, Any]]'",
