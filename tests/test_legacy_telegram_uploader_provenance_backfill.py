@@ -169,6 +169,24 @@ def _claim(tmp_path: Path, plan) -> Path:
     return claim_path
 
 
+def _json_scalar_tokens(value: object) -> set[str]:
+    """Return semantic JSON keys/values without matching substrings in hashes."""
+
+    if isinstance(value, dict):
+        tokens = {str(key) for key in value}
+        for item in value.values():
+            tokens.update(_json_scalar_tokens(item))
+        return tokens
+    if isinstance(value, (list, tuple)):
+        tokens: set[str] = set()
+        for item in value:
+            tokens.update(_json_scalar_tokens(item))
+        return tokens
+    if value is None:
+        return set()
+    return {str(value)}
+
+
 def test_exact_owner_and_jbl_mapping_accepted(settings, storage) -> None:
     tenant = LEGACY_OWNER_USER_ID
     storage.ensure_user(tenant, preset_key="owner")
@@ -425,7 +443,11 @@ def test_plan_sha_changes_when_session_conversation_evidence_changes(settings, s
     public_text = json.dumps(public, ensure_ascii=True, sort_keys=True)
     assert "tg-exact" not in public_text
     assert "conv-exact" not in public_text
-    assert "101" not in public_text
+    assert "101" not in _json_scalar_tokens(public)
+    # Opaque tags may contain the decimal sequence by chance; a real public
+    # identifier key or value must still be inventoried as private.
+    assert "101" not in _json_scalar_tokens({"raw_tag": "fd831c101747bc42"})
+    assert "101" in _json_scalar_tokens({"chat_id": "101"})
     for cand in plan_b.candidates:
         assert cand.raw_id not in public_text
         assert cand.conversation_id not in public_text
@@ -610,7 +632,7 @@ def test_plan_mutation_changes_sha_and_public_report_is_private(settings, storag
     assert raw_b not in public_text
     assert "tg-exact" not in public_text
     assert "tg-jbl" not in public_text
-    assert "101" not in public_text
+    assert "101" not in _json_scalar_tokens(public)
     assert "doc.bin" not in public_text
     for cand in plan_b.candidates:
         assert cand.raw_id not in public_text
