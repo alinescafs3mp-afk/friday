@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "fixtures": [
+    {"name": "schema-13.sqlite3.gz", "sha256": "0eae23fcea8d18d1a42e439fd45935e971ed87542fc511cea07122e975d1a3e4"},
+    {"name": "schema-14.sqlite3.gz", "sha256": "3ea0d75db957351e8d6869f59d62e5ebe83a6e43f687d31c0cfe9bcc650e261e"},
+    {"name": "schema-15.sqlite3.gz", "sha256": "313a81876931b50da9be60067921c002375f3b9e87169353d7103ad174352610"},
+    {"name": "schema-16.sqlite3.gz", "sha256": "a57876c54c41f2a9a907d7a3c64575bb09c9632edfacc9b9304c37074a690775"},
+    {"name": "schema-17.sqlite3.gz", "sha256": "5dbc9658ee7c64952eecef9dc5e9dfb3f23ada92cf80862135c6bf3d04530a99"},
+    {"name": "schema-18.sqlite3.gz", "sha256": "47c98d7966a0c77fbe1b0632253a818615f20e9b012ae2a3099a0da0155d2181"},
+    {"name": "schema-19.sqlite3.gz", "sha256": "89b57a8ebfdf81fc6969769bc62056393335a0c8094573edd7965e8c397bae09"},
+    {"name": "schema-20.sqlite3.gz", "sha256": "64a9f2a4d974c22c3b15a86523ce02653d658ca7eb5795e1e4be7ea4b2a00fe9"},
+    {"name": "schema-21.sqlite3.gz", "sha256": "c2ffb9cca4daa063a0ea4a5c17ec1c44eef3edbca07399ea88445db00f351d4d"},
+    {"name": "schema-22.sqlite3.gz", "sha256": "5fef3bcef7ba7341142b93fbbeed99449de60a2878bc58f2bfe8f1db1c67ceeb"},
+    {"name": "schema-23.sqlite3.gz", "sha256": "6285d70db6a1bbbd9dd972053048a67d276834f9c36227fe82d5f1c0e77b561d"},
+    {"name": "schema-24.sqlite3.gz", "sha256": "56fc002ac176ccbf7263c66987c1d1fd8755dd5f92b708d724f5a21c0500fd1f"},
+    {"name": "schema-25.sqlite3.gz", "sha256": "8148fa44201fc92e5a2256cf71a4d06b90d313048131cdb032fa5cab27c321ac"},
+    {"name": "schema-26.sqlite3.gz", "sha256": "fe07359b02406f27e74494867d0eb9bcc28de151b16f9b362861bd2383dddf4f"},
+    {"name": "schema-27.sqlite3.gz", "sha256": "4a32287d5fe2497445ca4a4305eb5bfc3bc8f3c4696163ed97668786fe62c840"},
+    {"name": "schema-28.sqlite3.gz", "sha256": "01689b1f345e3ecc4517e9098f2e157fedf908daa4e8d859987afc525ab55103"},
+    {"name": "schema-29.sqlite3.gz", "sha256": "a06e137418634aaf137214312025681eac7dbecb2890c1c5431338a94f138fde"},
+    {"name": "schema-30.sqlite3.gz", "sha256": "973158be3e5cf5908a5cac299d194014d63b2ff62c357633e295b97c33b5dfcf"},
+    {"name": "schema-31.sqlite3.gz", "sha256": "5331cffbdd8bcb137d4a1416276e2e908f31d8754f0f2857bbca0129de891e69"},
+    {"name": "schema-32.sqlite3.gz", "sha256": "69fe7f05410df18abace6c98a5d15f1f2cfbc95018c2a9df4ae808586f520459"},
+    {"name": "schema-33.sqlite3.gz", "sha256": "e67f84b42154f4cd2c90fb95d2a5caf98e41ebe9ea2202ffc94002febeb3f6d9"}
+  ]
+}

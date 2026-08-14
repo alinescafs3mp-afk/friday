@@ -428,17 +428,21 @@ Runtime-каталоги и секреты исключены из Git и из �
 
 ```bash
 .venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
-.venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e ".[dev]"
+.venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e ".[dev,vectors]"
 .venv/bin/python -m playwright install chromium
 .venv/bin/python tools/quality_gate.py
 jericho doctor
 ```
 
-`tools/quality_gate.py` — единая проверка репозитория: сначала static checks, затем
-не-браузерный pytest и отдельная UI-фаза. UI требует запускаемого Playwright
-Chromium; отсутствующий браузер и любой skipped UI-тест считаются ошибкой. Для
-локальной итерации есть `--phase static`, `--phase tests` и `--phase ui`, но перед
-пушем выполняется полная команда без `--phase`.
+`tools/quality_gate.py` — единая проверка репозитория: обязательный preflight
+Python 3.14.4, Node 22.23.2, NumPy 2.5.1, Playwright 1.61.0, установленного
+Chromium revision 1228 и официального UnRAR 7.20, затем static checks,
+не-браузерный pytest и отдельная UI-фаза. Любой skipped-тест в обеих pytest-фазах
+считается ошибкой; точные nodeid в JUnit должны совпасть с полной коллекцией.
+UI по умолчанию использует 12 workers — по одному на каждый UI-модуль; `-n 0`
+включается через `--ui-workers 1`. Для локальной итерации есть `--phase static`,
+`--phase tests` и `--phase ui`; toolchain preflight обязателен и для частичной
+команды, а перед пушем выполняется полная команда без `--phase`.
 
 Рекурсивная синтетическая live-приёмка имеет отдельный воспроизводимый контракт:
 tracked pre-release runner одним снимком проверяет P06 A+B **40/40** и focused

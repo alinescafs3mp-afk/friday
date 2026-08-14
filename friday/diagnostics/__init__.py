@@ -10,6 +10,8 @@ import os
 import socket
 import sqlite3
 import ssl
+import stat
+import sys
 import time
 import urllib.request
 from contextlib import suppress
@@ -682,6 +684,308 @@ def _bridge_queue_status_without_live_open(path: Path) -> dict[str, Any]:
         return _bridge_queue_status(path)
     finally:
         boundary.release()
+
+
+_DOCUMENT_CONTOUR_OBSERVER_SCHEMA = "friday.document-contour-observer-snapshot.v1"
+_DOCUMENT_CONTOUR_GUARDED_QUEUE_SCHEMA = "friday.document-contour-guarded-bridge-queue.v1"
+
+
+def _private_directory_identity(status: os.stat_result) -> tuple[int, ...]:
+    mode = stat.S_IMODE(status.st_mode)
+    if not stat.S_ISDIR(status.st_mode) or status.st_uid != os.geteuid() or mode & 0o077:
+        raise RuntimeError("observer queue directory is not private")
+    return (
+        int(status.st_dev),
+        int(status.st_ino),
+        int(status.st_uid),
+        mode,
+        int(status.st_mtime_ns),
+        int(status.st_ctime_ns),
+    )
+
+
+def _private_regular_identity(status: os.stat_result) -> tuple[int, ...]:
+    mode = stat.S_IMODE(status.st_mode)
+    if (
+        not stat.S_ISREG(status.st_mode)
+        or status.st_uid != os.geteuid()
+        or status.st_nlink != 1
+        or mode & 0o077
+    ):
+        raise RuntimeError("observer queue file is not private")
+    return (
+        int(status.st_dev),
+        int(status.st_ino),
+        int(status.st_uid),
+        mode,
+        int(status.st_nlink),
+        int(status.st_size),
+        int(status.st_mtime_ns),
+        int(status.st_ctime_ns),
+    )
+
+
+class _PinnedBridgeQueue:
+    """Descriptor-bound stopped queue plus identities needed for revalidation."""
+
+    def __init__(self, path: Path) -> None:
+        if not sys.platform.startswith("linux") or not path.is_absolute():
+            raise RuntimeError("descriptor-bound observer queue is unsupported")
+        directory_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        directory_flags |= getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        self.path = path
+        self.parent_descriptor = os.open(path.parent, directory_flags)
+        self.file_descriptor = -1
+        try:
+            file_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+            self.file_descriptor = os.open(path.name, file_flags, dir_fd=self.parent_descriptor)
+            self.file_identity = _private_regular_identity(os.fstat(self.file_descriptor))
+            lexical_file = _private_regular_identity(
+                os.stat(path.name, dir_fd=self.parent_descriptor, follow_symlinks=False)
+            )
+            if lexical_file != self.file_identity:
+                raise RuntimeError("observer queue identity changed during open")
+            self._require_no_sidecars()
+            # Capture directory timestamps only after the lease file and both
+            # descriptors exist.  Rename/create/delete (including an ABA
+            # restore) changes this identity and therefore closes the result.
+            self.parent_identity = _private_directory_identity(os.fstat(self.parent_descriptor))
+            lexical_parent = _private_directory_identity(os.stat(path.parent, follow_symlinks=False))
+            if lexical_parent != self.parent_identity:
+                raise RuntimeError("observer queue directory identity changed")
+        except BaseException:
+            self.close()
+            raise
+
+    def _require_no_sidecars(self) -> None:
+        for suffix in ("-wal", "-shm", "-journal"):
+            try:
+                os.stat(
+                    f"{self.path.name}{suffix}",
+                    dir_fd=self.parent_descriptor,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                continue
+            raise RuntimeError("observer queue is not a checkpointed stopped database")
+
+    def revalidate(self) -> None:
+        if self.file_descriptor < 0 or self.parent_descriptor < 0:
+            raise RuntimeError("observer queue descriptors are closed")
+        if _private_directory_identity(os.fstat(self.parent_descriptor)) != self.parent_identity:
+            raise RuntimeError("observer queue directory changed")
+        if (
+            _private_directory_identity(os.stat(self.path.parent, follow_symlinks=False))
+            != self.parent_identity
+        ):
+            raise RuntimeError("observer queue directory entry changed")
+        if _private_regular_identity(os.fstat(self.file_descriptor)) != self.file_identity:
+            raise RuntimeError("observer queue file changed")
+        if (
+            _private_regular_identity(
+                os.stat(
+                    self.path.name,
+                    dir_fd=self.parent_descriptor,
+                    follow_symlinks=False,
+                )
+            )
+            != self.file_identity
+        ):
+            raise RuntimeError("observer queue entry changed")
+        self._require_no_sidecars()
+
+    def close(self) -> None:
+        file_descriptor = getattr(self, "file_descriptor", -1)
+        parent_descriptor = getattr(self, "parent_descriptor", -1)
+        self.file_descriptor = -1
+        self.parent_descriptor = -1
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
+        if parent_descriptor >= 0:
+            os.close(parent_descriptor)
+
+
+def _bridge_queue_counts_only(queue: _PinnedBridgeQueue) -> dict[str, Any]:
+    """Read status aggregates from the exact descriptor-bound stopped queue."""
+
+    queue.revalidate()
+    descriptor_path = f"/proc/self/fd/{queue.file_descriptor}"
+    if _private_regular_identity(os.stat(descriptor_path)) != queue.file_identity:
+        raise RuntimeError("observer descriptor projection changed")
+    uri = f"file:{descriptor_path}?mode=ro&immutable=1"
+    conn = sqlite3.connect(uri, uri=True, timeout=2)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA query_only=ON")
+        tables = {
+            str(row["name"])
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+        if "updates" not in tables:
+            raise RuntimeError("observer queue schema is missing")
+        counts = {
+            str(row["status"]): int(row["n"])
+            for row in conn.execute("SELECT status, COUNT(*) AS n FROM updates GROUP BY status").fetchall()
+        }
+    finally:
+        conn.close()
+    if not set(counts) <= {"pending", "dead_letter"}:
+        raise RuntimeError("observer queue contains an unknown state")
+    queue.revalidate()
+    return {
+        "state": "present",
+        "pending": int(counts.get("pending", 0)),
+        "dead_letter": int(counts.get("dead_letter", 0)),
+    }
+
+
+def _held_lease_file_identity(boundary: ProcessLease, path: Path) -> tuple[int, ...]:
+    lexical = _private_regular_identity(os.stat(path, follow_symlinks=False))
+    if boundary.held_file_identity != lexical[:2]:
+        raise RuntimeError("observer bridge lease file identity changed")
+    return lexical
+
+
+def _require_lease_file_identity(path: Path, expected: tuple[int, ...]) -> None:
+    if _private_regular_identity(os.stat(path, follow_symlinks=False)) != expected:
+        raise RuntimeError("observer bridge lease file changed")
+
+
+def _physical_outbound_pending(storage: FridayStorage) -> int:
+    row = storage.execute(
+        "SELECT COUNT(*) AS count FROM outbound_notifications WHERE status='pending'"
+    ).fetchone()
+    return int(row["count"] if row else 0)
+
+
+def collect_document_contour_guarded_bridge_queue_snapshot(
+    settings: FridaySettings,
+    boundary: ProcessLease,
+) -> dict[str, Any]:
+    """Read content-free queue aggregates while the caller retains the bridge lease.
+
+    The live operator uses this between the two document-contour workers.  It
+    deliberately does not acquire or release the supplied boundary: successful
+    return means the caller still owns the exact process-private guard, so the
+    stopped queue cannot change through the supported bridge lifecycle before
+    the observer response is published.
+    """
+
+    queue_path = settings.state_dir / "telegram-inbox.sqlite3"
+    bridge_lease_path = queue_path.with_name(f"{queue_path.name}.lock")
+    protocol = "friday.telegram-bridge.v1"
+    if (
+        os.path.normcase(os.path.abspath(boundary.path))
+        != os.path.normcase(os.path.abspath(bridge_lease_path))
+        or boundary.protocol != protocol
+    ):
+        raise RuntimeError("observer bridge guard identity is invalid")
+    if not boundary.acquired or not process_owns_lease(bridge_lease_path, protocol=protocol):
+        raise RuntimeError("observer bridge guard is not held by this process")
+
+    lease_identity = _held_lease_file_identity(boundary, bridge_lease_path)
+    pinned: _PinnedBridgeQueue | None = None
+    try:
+        pinned = _PinnedBridgeQueue(queue_path)
+        queue = _bridge_queue_counts_only(pinned)
+        pinned.revalidate()
+        _require_lease_file_identity(bridge_lease_path, lease_identity)
+    finally:
+        if pinned is not None:
+            pinned.close()
+
+    if not boundary.acquired or not process_owns_lease(bridge_lease_path, protocol=protocol):
+        raise RuntimeError("observer bridge guard ownership changed")
+    _require_lease_file_identity(bridge_lease_path, lease_identity)
+    return {
+        "schema": _DOCUMENT_CONTOUR_GUARDED_QUEUE_SCHEMA,
+        "bridge_guard_held": True,
+        "bridge_queue_state": str(queue["state"]),
+        "inbound_pending": queue["pending"],
+        "dead_letter": queue["dead_letter"],
+    }
+
+
+def collect_document_contour_observer_snapshot(
+    settings: FridaySettings,
+    storage: FridayStorage,
+) -> dict[str, Any]:
+    """Build the owner-only, content-free inter-run observer projection.
+
+    Unlike the public diagnostics count, ``physical_outbound_pending`` includes
+    quarantined/private pending rows.  That stronger physical invariant is
+    required only for a stopped-bridge release barrier and must not change the
+    privacy semantics of the ordinary delegated diagnostics surface.
+    """
+
+    backend_lease_path = settings.state_dir / "backend.lock"
+    if not process_owns_lease(backend_lease_path, protocol="friday.backend.v1"):
+        raise RuntimeError("observer snapshot requires the live backend lease")
+
+    physical_outbound_pending = _physical_outbound_pending(storage)
+
+    queue_path = settings.state_dir / "telegram-inbox.sqlite3"
+    bridge_lease_path = queue_path.with_name(f"{queue_path.name}.lock")
+    boundary = ProcessLease(bridge_lease_path, protocol="friday.telegram-bridge.v1")
+    try:
+        boundary.acquire()
+    except (OSError, RuntimeLeaseError):
+        contender = inspect_process_lease(
+            bridge_lease_path,
+            protocol="friday.telegram-bridge.v1",
+        )
+        active = contender.get("active") is True or contender.get("state") == "active_hint"
+        state = (
+            "active_uninspected"
+            if active and contender.get("protocol_matches") is not False
+            else "lease_unavailable"
+        )
+        if _physical_outbound_pending(storage) != physical_outbound_pending:
+            raise RuntimeError("physical outbound queue changed during observer snapshot") from None
+        return {
+            "schema": _DOCUMENT_CONTOUR_OBSERVER_SCHEMA,
+            "backend_pid": os.getpid(),
+            "backend_lease_owned": True,
+            "physical_outbound_pending": physical_outbound_pending,
+            "bridge_queue_state": state,
+            "bridge_lease_acquired_for_snapshot": False,
+            "bridge_lease_released": False,
+            "inbound_pending": None,
+            "dead_letter": None,
+        }
+
+    pinned: _PinnedBridgeQueue | None = None
+    released = False
+    try:
+        lease_identity = _held_lease_file_identity(boundary, bridge_lease_path)
+        pinned = _PinnedBridgeQueue(queue_path)
+        queue = _bridge_queue_counts_only(pinned)
+        pinned.revalidate()
+        _require_lease_file_identity(bridge_lease_path, lease_identity)
+        # Keep both queue descriptors live across release, then prove neither
+        # their entries nor the advisory file changed before publishing true.
+        boundary.release()
+        released = True
+        pinned.revalidate()
+        _require_lease_file_identity(bridge_lease_path, lease_identity)
+    finally:
+        if pinned is not None:
+            pinned.close()
+        if not released and boundary.acquired:
+            boundary.release()
+    if _physical_outbound_pending(storage) != physical_outbound_pending:
+        raise RuntimeError("physical outbound queue changed during observer snapshot")
+    return {
+        "schema": _DOCUMENT_CONTOUR_OBSERVER_SCHEMA,
+        "backend_pid": os.getpid(),
+        "backend_lease_owned": True,
+        "physical_outbound_pending": physical_outbound_pending,
+        "bridge_queue_state": str(queue["state"]),
+        "bridge_lease_acquired_for_snapshot": True,
+        "bridge_lease_released": True,
+        "inbound_pending": queue["pending"],
+        "dead_letter": queue["dead_letter"],
+    }
 
 
 # Bound the auth-failure scan: only a threshold comparison is needed, and a
@@ -1861,4 +2165,8 @@ def _collect_diagnostics_under_boundary(
     return result
 
 
-__all__ = ["collect_diagnostics"]
+__all__ = [
+    "collect_diagnostics",
+    "collect_document_contour_guarded_bridge_queue_snapshot",
+    "collect_document_contour_observer_snapshot",
+]

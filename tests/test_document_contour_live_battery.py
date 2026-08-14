@@ -7,13 +7,17 @@ import base64
 import importlib.util
 import io
 import json
+import logging
 import os
 import shutil
 import subprocess
 import sys
+import threading
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -28,6 +32,10 @@ def _module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _signal_current_thread(runner, selected_signal) -> None:  # noqa: ANN001
+    runner.signal.pthread_kill(threading.get_ident(), selected_signal)
 
 
 def test_manifest_is_exactly_ten_unique_document_scenarios() -> None:
@@ -147,11 +155,16 @@ def test_offline_self_test_never_imports_server_or_uses_production_database(monk
     assert os.environ["FRIDAY_DATABASE_PATH"] == "/sentinel/production.sqlite3"
 
 
-def test_worker_environment_is_closed_and_every_mutable_path_is_under_run_root(tmp_path) -> None:
+def test_worker_environment_is_closed_and_every_mutable_path_is_under_run_root(
+    tmp_path,
+    monkeypatch,
+) -> None:
     runner = _module()
     run_dir = tmp_path / "isolated"
     run_dir.mkdir(mode=0o700)
     chats = tuple(9911000 + index for index in range(1, 12))
+    monkeypatch.setenv("PATH", "/private/substituted-bin")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/private/substituted-loader")
 
     environment = runner.build_worker_environment(run_dir, owner_chats=chats)
 
@@ -164,6 +177,8 @@ def test_worker_environment_is_closed_and_every_mutable_path_is_under_run_root(t
     assert environment["FRIDAY_MCP_ENABLED"] == "1"
     assert environment["FRIDAY_TELEGRAM_OWNER_CHAT_IDS"].split(",") == [str(value) for value in chats[:-1]]
     assert environment["FRIDAY_TELEGRAM_ALLOWED_CHAT_IDS"].split(",") == [str(value) for value in chats]
+    assert "PATH" not in environment
+    assert "LD_LIBRARY_PATH" not in environment
 
 
 def test_every_case_has_a_distinct_database_and_private_state_root(tmp_path) -> None:
@@ -331,6 +346,133 @@ def test_controller_source_env_defaults_to_its_env_without_forwarding_it(tmp_pat
     assert environment["FRIDAY_LLM_MODEL"] == "local-model"
     assert environment["FRIDAY_ENV_FILE"] != str(source_env.resolve())
     assert str(source_env.resolve()) not in environment.values()
+
+
+def _complete_operator_model_environment(runner) -> dict[str, str]:
+    values = {key: f"operator-{index}" for index, key in enumerate(sorted(runner._MODEL_ENV_ALLOWLIST))}
+    values.update(
+        {
+            "FRIDAY_LLM_BASE_URL": "http://127.0.0.1:8101/v1",
+            "FRIDAY_EMBEDDINGS_BASE_URL": "http://127.0.0.1:8102/v1",
+            "FRIDAY_RERANK_BASE_URL": "http://127.0.0.1:8103/v1",
+        }
+    )
+    return values
+
+
+def test_operator_model_env_only_uses_complete_inherited_allowlist_without_file_probe(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runner = _module()
+    inherited = _complete_operator_model_environment(runner)
+    for key in runner._MODEL_ENV_ALLOWLIST:
+        monkeypatch.delenv(key, raising=False)
+    for key, value in inherited.items():
+        monkeypatch.setenv(key, value)
+    sentinel = tmp_path / "must-not-be-read.env"
+    monkeypatch.setenv("FRIDAY_ENV_FILE", str(sentinel))
+    monkeypatch.setattr(
+        runner,
+        "_load_env_file_values",
+        lambda _path: pytest.fail("operator mode must not read an env file"),
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(mode=0o700)
+
+    environment = runner.build_worker_environment(
+        run_dir,
+        owner_chats=tuple(9911000 + index for index in range(1, 12)),
+        operator_model_env_only=True,
+    )
+
+    assert {key: environment[key] for key in runner._MODEL_ENV_ALLOWLIST} == inherited
+    assert str(sentinel) not in environment.values()
+
+
+def test_operator_model_env_only_fails_closed_on_missing_key_without_file_fallback(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runner = _module()
+    inherited = _complete_operator_model_environment(runner)
+    missing = sorted(runner._MODEL_ENV_ALLOWLIST)[0]
+    for key in runner._MODEL_ENV_ALLOWLIST:
+        monkeypatch.delenv(key, raising=False)
+    for key, value in inherited.items():
+        if key != missing:
+            monkeypatch.setenv(key, value)
+    monkeypatch.setattr(
+        runner,
+        "_load_env_file_values",
+        lambda _path: pytest.fail("missing inherited state must not fall back to a file"),
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(mode=0o700)
+
+    with pytest.raises(runner.BatteryFailure, match="operator_model_env_only_incomplete"):
+        runner.build_worker_environment(
+            run_dir,
+            owner_chats=tuple(9911000 + index for index in range(1, 12)),
+            operator_model_env_only=True,
+        )
+
+
+def test_operator_model_env_only_rejects_a_source_path_without_probing_it(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runner = _module()
+    monkeypatch.setattr(
+        runner,
+        "_load_env_file_values",
+        lambda _path: pytest.fail("conflicting source path must not be probed"),
+    )
+    run_dir = tmp_path / "run"
+    run_dir.mkdir(mode=0o700)
+
+    with pytest.raises(
+        runner.BatteryFailure,
+        match="operator_model_env_only_source_env_file_conflict",
+    ):
+        runner.build_worker_environment(
+            run_dir,
+            owner_chats=tuple(9911000 + index for index in range(1, 12)),
+            source_env_file=tmp_path / "operator.env",
+            operator_model_env_only=True,
+        )
+
+
+def test_operator_model_env_only_controller_bypasses_all_source_env_resolution(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runner = _module()
+    monkeypatch.setattr(runner, "_validate_live_gate", lambda _commit, _stopped: "a" * 40)
+    monkeypatch.setattr(
+        runner,
+        "_controller_source_env_file",
+        lambda _value: pytest.fail("operator mode must bypass source env resolution"),
+    )
+    monkeypatch.setenv("FRIDAY_ENV_FILE", str(tmp_path / "ambient.env"))
+    base = {
+        "freeze_commit": "a" * 40,
+        "bridge_stopped": True,
+        "operator_model_env_only": True,
+        "inter_run_barrier_dir": "",
+    }
+
+    with pytest.raises(
+        runner.BatteryFailure,
+        match="operator_model_env_only_source_env_file_conflict",
+    ):
+        runner.run_controller(SimpleNamespace(**base, source_env_file="explicit.env"))
+    with pytest.raises(runner.BatteryFailure, match="inter_run_barrier_dir_required"):
+        runner.run_controller(SimpleNamespace(**base, source_env_file=""))
+
+    parser = runner.build_parser()
+    assert parser.parse_args([]).operator_model_env_only is False
+    assert parser.parse_args(["--operator-model-env-only"]).operator_model_env_only is True
 
 
 class _ProbeLLM:
@@ -709,10 +851,12 @@ def test_d06_and_d08_apply_exact_stage_budgets_and_d08_fixture_is_not_rle() -> N
 
 
 @pytest.mark.parametrize("cap", (2, 3))
-def test_worker_settings_refuse_document_map_fanout_above_one(tmp_path, cap) -> None:
+def test_worker_settings_refuse_document_map_fanout_above_one(tmp_path, monkeypatch, cap) -> None:
     runner = _module()
     from friday.config import load_settings
 
+    monkeypatch.setenv("FRIDAY_ENV_FILE", "/dev/null")
+    monkeypatch.setenv("FRIDAY_DATABASE_PATH", str(tmp_path / "scratch.sqlite3"))
     base = load_settings(runner._RELEASE_PROFILE)
     settings, case_dir, _evidence = runner._settings_for_case(base, tmp_path / "run", "D06")
     settings = replace(
@@ -734,10 +878,12 @@ def test_worker_settings_refuse_document_map_fanout_above_one(tmp_path, cap) -> 
         runner._assert_worker_settings(settings, case_dir, require_mcp=True)
 
 
-def test_worker_settings_refuse_any_other_named_profile(tmp_path) -> None:
+def test_worker_settings_refuse_any_other_named_profile(tmp_path, monkeypatch) -> None:
     runner = _module()
     from friday.config import load_settings
 
+    monkeypatch.setenv("FRIDAY_ENV_FILE", "/dev/null")
+    monkeypatch.setenv("FRIDAY_DATABASE_PATH", str(tmp_path / "scratch.sqlite3"))
     base = load_settings(runner._RELEASE_PROFILE)
     settings, case_dir, _evidence = runner._settings_for_case(base, tmp_path / "run", "D06")
     settings = replace(settings, profile=replace(settings.profile, name="qwen36-vl"))
@@ -772,11 +918,93 @@ def test_live_gate_refuses_a_dirty_tree_even_when_commit_matches(monkeypatch) ->
         runner._validate_live_gate(commit, True)
 
 
+def test_runner_git_uses_absolute_binary_and_drops_ambient_loader_and_repository_controls(
+    monkeypatch,
+) -> None:
+    runner = _module()
+    monkeypatch.setenv("PATH", "/private/substituted-bin")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/private/substituted-loader")
+    monkeypatch.setenv("GIT_DIR", "/private/alternate.git")
+    monkeypatch.setenv("HTTPS_PROXY", "http://private-proxy.invalid")
+    observed: dict[str, Any] = {}
+
+    def run(command, **kwargs):
+        observed["command"] = list(command)
+        observed["environment"] = dict(kwargs["env"])
+        return subprocess.CompletedProcess(command, 0, stdout="a" * 40 + "\n", stderr="")
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+
+    assert runner._git_output("rev-parse", "HEAD") == "a" * 40
+    assert observed["command"][:3] == [
+        runner._GIT_BINARY,
+        "-c",
+        "core.fsmonitor=false",
+    ]
+    environment = observed["environment"]
+    for forbidden in ("PATH", "LD_LIBRARY_PATH", "GIT_DIR", "HTTPS_PROXY"):
+        assert forbidden not in environment
+    assert environment["GIT_CONFIG_GLOBAL"] == "/dev/null"
+    assert environment["GIT_CONFIG_NOSYSTEM"] == "1"
+
+
+def _closed_worker_outcome(runner, run_id: str, run_index: int, *, status: str = "passed", **changes):
+    payload = {
+        "schema": runner.WORKER_SCHEMA,
+        "run_index": run_index,
+        "run_id_hash": runner._run_id_hash(run_id),
+        "status": status,
+        "failure_codes": [] if status == "passed" else ["synthetic_failure"],
+        "lifecycle_teardown_clear": True,
+        "lifecycle_failure_codes": [],
+        "cases": [],
+    }
+    payload_changes = changes.pop("payload", {})
+    for key, value in payload_changes.items():
+        if value is None:
+            payload.pop(key, None)
+        else:
+            payload[key] = value
+    defaults = {
+        "stdout": json.dumps(payload).encode("utf-8"),
+        "returncode": 0,
+        "worker_reaped": True,
+        "process_group_clear_initial": True,
+        "process_group_clear": True,
+        "timed_out": False,
+        "cleanup_failure_codes": (),
+    }
+    defaults.update(changes)
+    return runner.WorkerProcessOutcome(**defaults)
+
+
+def _clear_observer_projection(runner, request):
+    response = {
+        "schema": runner.OBSERVER_RESPONSE_SCHEMA,
+        "commit": request["commit"],
+        "run_id_hash": request["run_id_hash"],
+        "run_index": request["run_index"],
+        "run_receipt_sha256": request["run_receipt_sha256"],
+        "worker_report_sha256": request["worker_report_sha256"],
+        "challenge": request["challenge"],
+        "status": "passed",
+        "bridge_stopped": True,
+        "bridge_operator_guard_held": True,
+        "backend_healthy": True,
+        "backend_unchanged": True,
+        "outbound_pending_zero": True,
+        "inbound_pending_zero": True,
+        "dead_letter_zero": True,
+        "dispatcher_unchanged": True,
+    }
+    return runner._validate_observer_response(response, request)
+
+
 @pytest.mark.parametrize(
     ("worker_statuses", "expected_calls", "expected_status"),
     ((["failed", "passed"], 1, "failed"), (["passed", "passed"], 2, "passed")),
 )
-def test_controller_stops_a_failed_streak_but_runs_two_clean_workers(
+def test_controller_orders_worker1_receipt_observer_worker2_exactly(
     tmp_path,
     monkeypatch,
     worker_statuses,
@@ -787,32 +1015,44 @@ def test_controller_stops_a_failed_streak_but_runs_two_clean_workers(
     statuses = iter(worker_statuses)
     calls = 0
     worker_run_ids: list[str] = []
+    ordering: list[str] = []
+    observer_challenges: list[str] = []
 
-    def run_worker(*args, **kwargs):
+    def run_worker(command, *, environment, private_log, controller_signal_handlers):
         nonlocal calls
-        del args
+        del private_log
+        assert controller_signal_handlers is not None
         calls += 1
-        run_id = kwargs["env"][runner._RUN_ID_ENV]
+        run_index = int(command[-1])
+        run_id = environment[runner._RUN_ID_ENV]
         worker_run_ids.append(run_id)
         status = next(statuses)
-        payload = {
-            "schema": runner.WORKER_SCHEMA,
-            "run_index": calls,
-            "run_id_hash": runner._run_id_hash(run_id),
-            "status": status,
-            "failure_codes": [] if status == "passed" else ["synthetic_failure"],
-            "cases": [],
-        }
-        return SimpleNamespace(stdout=json.dumps(payload).encode("utf-8"), returncode=0)
+        ordering.append(f"worker-{run_index}")
+        return _closed_worker_outcome(runner, run_id, run_index, status=status)
+
+    def observer(barrier_dir, request):
+        ordering.append("observer")
+        observer_challenges.append(request["challenge"])
+        receipt = runner._read_pinned_private_json(barrier_dir, "run-1-receipt.json")
+        assert receipt["teardown_clear"] is True
+        assert receipt["run_index"] == request["run_index"] == 1
+        assert receipt["worker_report_sha256"] == request["worker_report_sha256"]
+        return _clear_observer_projection(runner, request), "b" * 64
 
     monkeypatch.setattr(runner, "_validate_live_gate", lambda *_args: "a" * 40)
     monkeypatch.setattr(runner, "_controller_source_env_file", lambda _value: None)
-    monkeypatch.setattr(runner.subprocess, "run", run_worker)
+    monkeypatch.setattr(runner, "_run_worker_process", run_worker)
+    monkeypatch.setattr(runner, "_await_inter_run_observer", observer)
     report_path = tmp_path / "closed-report.json"
+    barrier_parent = tmp_path / "barrier-parent"
+    barrier_parent.mkdir(mode=0o700)
+    barrier_dir = barrier_parent / "barrier"
+    barrier_dir.mkdir(mode=0o700)
     args = SimpleNamespace(
         freeze_commit="a" * 40,
         bridge_stopped=True,
         source_env_file="",
+        inter_run_barrier_dir=str(barrier_dir),
         keep_private_run_dir=False,
         report=str(report_path),
     )
@@ -825,7 +1065,1431 @@ def test_controller_stops_a_failed_streak_but_runs_two_clean_workers(
     assert report["status"] == expected_status
     assert report["run_id_hash"] == runner._run_id_hash(worker_run_ids[0])
     assert worker_run_ids[0] not in json.dumps(report)
+    assert all(challenge not in json.dumps(report) for challenge in observer_challenges)
     assert json.loads(report_path.read_text(encoding="utf-8"))["status"] == expected_status
+    assert ordering == (["worker-1"] if expected_calls == 1 else ["worker-1", "observer", "worker-2"])
+    assert (barrier_dir / "run-1-receipt.json").is_file()
+    assert (barrier_dir / "run-2-receipt.json").is_file() is (expected_calls == 2)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "orphan_reaped_after_term",
+        "process_group_still_alive",
+        "missing_lifecycle_teardown",
+        "false_lifecycle_teardown",
+        "mcp_close_timeout_warning",
+        "false_persisted_teardown",
+        "missing_persisted_receipt",
+        "observer_exception",
+        "receipt_changed_by_observer",
+        "backend_mismatch",
+        "queue_mismatch",
+    ),
+)
+def test_every_inter_run_teardown_or_observer_red_prevents_worker2(
+    tmp_path,
+    monkeypatch,
+    mutation,
+) -> None:
+    runner = _module()
+    calls: list[int] = []
+
+    def run_worker(command, *, environment, private_log, controller_signal_handlers):
+        del private_log
+        assert controller_signal_handlers is not None
+        run_index = int(command[-1])
+        calls.append(run_index)
+        changes = {}
+        if mutation == "orphan_reaped_after_term":
+            changes = {
+                "process_group_clear_initial": False,
+                "cleanup_failure_codes": (
+                    "worker_group_term_sent",
+                    "worker_process_group_survived",
+                ),
+            }
+        elif mutation == "process_group_still_alive":
+            changes = {
+                "process_group_clear_initial": False,
+                "process_group_clear": False,
+                "cleanup_failure_codes": (
+                    "worker_group_kill_sent",
+                    "worker_group_term_sent",
+                    "worker_process_group_not_clear",
+                    "worker_process_group_survived",
+                ),
+            }
+        elif mutation == "missing_lifecycle_teardown":
+            changes = {
+                "payload": {
+                    "lifecycle_teardown_clear": None,
+                    "lifecycle_failure_codes": None,
+                }
+            }
+        elif mutation == "false_lifecycle_teardown":
+            changes = {"payload": {"lifecycle_teardown_clear": False}}
+        elif mutation == "mcp_close_timeout_warning":
+            changes = {
+                "payload": {
+                    "lifecycle_teardown_clear": False,
+                    "lifecycle_failure_codes": ["mcp_cleanup_timeout_warning"],
+                }
+            }
+        return _closed_worker_outcome(
+            runner,
+            environment[runner._RUN_ID_ENV],
+            run_index,
+            **changes,
+        )
+
+    def observer(_barrier_dir, _request):
+        if mutation == "observer_exception":
+            raise RuntimeError("private observer detail")
+        if mutation == "receipt_changed_by_observer":
+            receipt_path = _barrier_dir / "run-1-receipt.json"
+            receipt = runner._read_pinned_private_json(_barrier_dir, receipt_path.name)
+            receipt["worker_report_sha256"] = "0" * 64
+            replacement = _barrier_dir / ".replacement.tmp"
+            replacement.write_bytes(runner._canonical_json(receipt) + b"\n")
+            replacement.chmod(0o600)
+            os.replace(replacement, receipt_path)
+        if mutation == "backend_mismatch":
+            raise runner.BatteryFailure("inter_run_observer_backend_unchanged_failed")
+        if mutation == "queue_mismatch":
+            raise runner.BatteryFailure("inter_run_observer_outbound_pending_zero_failed")
+        return _clear_observer_projection(runner, _request), "c" * 64
+
+    monkeypatch.setattr(runner, "_validate_live_gate", lambda *_args: "a" * 40)
+    monkeypatch.setattr(runner, "_controller_source_env_file", lambda _value: None)
+    monkeypatch.setattr(runner, "_run_worker_process", run_worker)
+    monkeypatch.setattr(runner, "_await_inter_run_observer", observer)
+    if mutation == "false_persisted_teardown":
+        original_build_receipt = runner._build_run_receipt
+
+        def false_receipt(**kwargs):
+            return {**original_build_receipt(**kwargs), "teardown_clear": False}
+
+        monkeypatch.setattr(runner, "_build_run_receipt", false_receipt)
+    elif mutation == "missing_persisted_receipt":
+        monkeypatch.setattr(
+            runner,
+            "_persist_run_receipt",
+            lambda barrier_dir, _payload: (barrier_dir / "missing.json", "f" * 64),
+        )
+    barrier_dir = tmp_path / "barrier"
+    barrier_dir.mkdir(mode=0o700)
+    args = SimpleNamespace(
+        freeze_commit="a" * 40,
+        bridge_stopped=True,
+        source_env_file="",
+        inter_run_barrier_dir=str(barrier_dir),
+        keep_private_run_dir=False,
+        report="",
+    )
+
+    report = runner.run_controller(args)
+
+    assert calls == [1]
+    assert report["status"] == "failed"
+    assert report["runs_completed"] == 1
+    assert not (barrier_dir / "run-2-receipt.json").exists()
+
+
+def test_controller_baseexception_never_starts_a_following_worker(tmp_path, monkeypatch) -> None:
+    runner = _module()
+    calls = 0
+
+    def interrupted_worker(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise runner.ControllerSignal(int(runner.signal.SIGTERM))
+
+    monkeypatch.setattr(runner, "_validate_live_gate", lambda *_args: "a" * 40)
+    monkeypatch.setattr(runner, "_controller_source_env_file", lambda _value: None)
+    monkeypatch.setattr(runner, "_run_worker_process", interrupted_worker)
+    barrier_dir = tmp_path / "barrier"
+    barrier_dir.mkdir(mode=0o700)
+    args = SimpleNamespace(
+        freeze_commit="a" * 40,
+        bridge_stopped=True,
+        source_env_file="",
+        inter_run_barrier_dir=str(barrier_dir),
+        keep_private_run_dir=False,
+        report="",
+    )
+
+    with pytest.raises(runner.ControllerSignal):
+        runner.run_controller(args)
+
+    assert calls == 1
+    assert not (barrier_dir / "run-2-receipt.json").exists()
+
+
+def test_controller_never_starts_worker2_after_barrier_directory_replacement(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runner = _module()
+    calls: list[int] = []
+    barrier_dir = tmp_path / "barrier"
+    barrier_dir.mkdir(mode=0o700)
+
+    def run_worker(command, *, environment, private_log, controller_signal_handlers):
+        del private_log
+        assert controller_signal_handlers is not None
+        run_index = int(command[-1])
+        calls.append(run_index)
+        return _closed_worker_outcome(
+            runner,
+            environment[runner._RUN_ID_ENV],
+            run_index,
+        )
+
+    def replace_barrier(_barrier, request):
+        moved = tmp_path / "moved-barrier"
+        barrier_dir.rename(moved)
+        barrier_dir.mkdir(mode=0o700)
+        return _clear_observer_projection(runner, request), "b" * 64
+
+    monkeypatch.setattr(runner, "_validate_live_gate", lambda *_args: "a" * 40)
+    monkeypatch.setattr(runner, "_controller_source_env_file", lambda _value: None)
+    monkeypatch.setattr(runner, "_run_worker_process", run_worker)
+    monkeypatch.setattr(runner, "_await_inter_run_observer", replace_barrier)
+    args = SimpleNamespace(
+        freeze_commit="a" * 40,
+        bridge_stopped=True,
+        source_env_file="",
+        inter_run_barrier_dir=str(barrier_dir),
+        keep_private_run_dir=False,
+        report="",
+    )
+
+    with pytest.raises(runner.BatteryFailure, match="inter_run_barrier_dir_changed"):
+        runner.run_controller(args)
+
+    assert calls == [1]
+    assert not (barrier_dir / "run-2-receipt.json").exists()
+
+
+def test_fast_exit_leader_with_term_ignoring_descendant_gets_one_kill(monkeypatch) -> None:
+    runner = _module()
+    group_alive = True
+    delivered: list[int] = []
+
+    class FastLeader:
+        pid = 445561
+        returncode = 0
+        calls = 0
+
+        @classmethod
+        def communicate(cls, *, timeout):
+            del timeout
+            cls.calls += 1
+            assert cls.calls == 1
+            return b"{}", None
+
+        @staticmethod
+        def poll():
+            return 0
+
+    def killpg(process_group, selected_signal):
+        nonlocal group_alive
+        assert process_group == FastLeader.pid
+        if selected_signal == 0:
+            if not group_alive:
+                raise ProcessLookupError
+            return
+        delivered.append(selected_signal)
+        # Model a descendant that ignores TERM even though its leader is reaped.
+        if selected_signal == runner.signal.SIGKILL:
+            group_alive = False
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *_args, **_kwargs: FastLeader())
+    monkeypatch.setattr(runner.os, "killpg", killpg)
+    monkeypatch.setattr(runner, "PROCESS_GROUP_EXIT_GRACE_SEC", 0.0)
+    monkeypatch.setattr(runner, "PROCESS_GROUP_TERM_GRACE_SEC", 0.0)
+    monkeypatch.setattr(runner, "PROCESS_GROUP_KILL_GRACE_SEC", 0.0)
+
+    outcome = runner._run_worker_process(
+        [sys.executable, str(RUNNER), "--worker", "--run-index", "1"],
+        environment={},
+        private_log=io.BytesIO(),
+    )
+
+    assert delivered == [runner.signal.SIGTERM, runner.signal.SIGKILL]
+    assert FastLeader.calls == 1
+    assert outcome.worker_reaped is True
+    assert outcome.process_group_clear_initial is False
+    assert outcome.process_group_clear is True
+    assert outcome.cleanup_failure_codes == (
+        "worker_group_kill_sent",
+        "worker_group_term_sent",
+        "worker_process_group_survived",
+    )
+
+
+def test_signal_during_first_post_communicate_group_audit_still_cleans(monkeypatch) -> None:
+    runner = _module()
+    group_alive = True
+    audits = 0
+    delivered: list[int] = []
+
+    class ReapedLeader:
+        pid = 445562
+        returncode = 0
+
+        @staticmethod
+        def communicate(*, timeout):
+            del timeout
+            return b"{}", None
+
+        @staticmethod
+        def poll():
+            return 0
+
+    def killpg(process_group, selected_signal):
+        nonlocal group_alive
+        assert process_group == ReapedLeader.pid
+        if selected_signal == 0:
+            if not group_alive:
+                raise ProcessLookupError
+            return
+        delivered.append(selected_signal)
+        if selected_signal == runner.signal.SIGTERM:
+            group_alive = False
+
+    def audited_wait(process_group, _timeout):
+        nonlocal audits
+        assert process_group == ReapedLeader.pid
+        audits += 1
+        if audits == 1:
+            raise runner.ControllerSignal(int(runner.signal.SIGTERM))
+        return not group_alive
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *_args, **_kwargs: ReapedLeader())
+    monkeypatch.setattr(runner.os, "killpg", killpg)
+    monkeypatch.setattr(runner, "_wait_process_group_clear", audited_wait)
+
+    with pytest.raises(runner.ControllerSignal) as captured:
+        runner._run_worker_process(
+            [sys.executable, str(RUNNER), "--worker", "--run-index", "1"],
+            environment={},
+            private_log=io.BytesIO(),
+        )
+
+    assert audits == 3  # interrupted initial audit, TERM wait, mandatory final audit
+    assert delivered == [runner.signal.SIGTERM]
+    assert captured.value.worker_cleanup_clear is True
+    assert captured.value.worker_cleanup_failure_codes == ("worker_group_term_sent",)
+
+
+def test_repeat_signal_is_masked_until_cleanup_and_first_signal_wins(monkeypatch) -> None:
+    runner = _module()
+    group_alive = True
+
+    class InterruptedLeader:
+        pid = 445563
+        returncode = 0
+        calls = 0
+
+        @classmethod
+        def communicate(cls, *, timeout):
+            del timeout
+            cls.calls += 1
+            if cls.calls == 1:
+                _signal_current_thread(runner, runner.signal.SIGINT)
+                raise AssertionError("SIGINT handler did not interrupt communicate")
+            return b"", None
+
+        @staticmethod
+        def poll():
+            return 0
+
+    def killpg(process_group, selected_signal):
+        nonlocal group_alive
+        assert process_group == InterruptedLeader.pid
+        if selected_signal == 0:
+            if not group_alive:
+                raise ProcessLookupError
+            return
+        if selected_signal == runner.signal.SIGTERM:
+            # This repeat is pending, not delivered, until the complete cleanup
+            # sequence and final group audit have finished.
+            current = frozenset(runner.signal.pthread_sigmask(runner.signal.SIG_BLOCK, ()))
+            assert set(runner._CONTROLLER_SIGNALS) <= current
+            group_alive = False
+            _signal_current_thread(runner, runner.signal.SIGTERM)
+
+    monkeypatch.setattr(
+        runner.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: InterruptedLeader(),
+    )
+    monkeypatch.setattr(runner.os, "killpg", killpg)
+    controller_signals = runner._install_controller_signal_handlers()
+    try:
+        runner._activate_controller_signal_handlers(controller_signals)
+        with pytest.raises(runner.ControllerSignal) as captured:
+            runner._run_worker_process(
+                [sys.executable, str(RUNNER), "--worker", "--run-index", "1"],
+                environment={},
+                private_log=io.BytesIO(),
+                controller_signal_handlers=controller_signals,
+            )
+    finally:
+        runner._finalize_controller_signal_handlers(controller_signals, lambda: None)
+
+    assert controller_signals.first_signal == runner.signal.SIGINT
+    assert captured.value.signal_number == runner.signal.SIGINT
+    assert captured.value.worker_cleanup_clear is True
+    assert captured.value.worker_cleanup_failure_codes == ("worker_group_term_sent",)
+
+
+def test_controller_finalizer_masks_repeat_signal_and_restores_handlers() -> None:
+    runner = _module()
+    original_handlers = {
+        selected: runner.signal.getsignal(selected) for selected in runner._CONTROLLER_SIGNALS
+    }
+    cleanup_masks: list[frozenset[object]] = []
+    controller_signals = runner._install_controller_signal_handlers()
+
+    def cleanup() -> None:
+        current = frozenset(runner.signal.pthread_sigmask(runner.signal.SIG_BLOCK, ()))
+        cleanup_masks.append(current)
+        _signal_current_thread(runner, runner.signal.SIGTERM)
+
+    runner._activate_controller_signal_handlers(controller_signals)
+    with pytest.raises(runner.ControllerSignal) as captured:
+        try:
+            _signal_current_thread(runner, runner.signal.SIGINT)
+        finally:
+            runner._finalize_controller_signal_handlers(controller_signals, cleanup)
+
+    assert set(runner._CONTROLLER_SIGNALS) <= cleanup_masks[0]
+    assert controller_signals.first_signal == runner.signal.SIGINT
+    assert captured.value.signal_number == runner.signal.SIGINT
+    assert {
+        selected: runner.signal.getsignal(selected) for selected in runner._CONTROLLER_SIGNALS
+    } == original_handlers
+
+
+def test_pending_repeat_drain_is_nonblocking_if_another_thread_consumed_it(monkeypatch) -> None:
+    runner = _module()
+    timed_waits: list[tuple[frozenset[object], float]] = []
+    monkeypatch.setattr(
+        runner.signal,
+        "sigpending",
+        lambda: frozenset((runner.signal.SIGTERM,)),
+    )
+
+    def consumed_elsewhere(pending, timeout):
+        timed_waits.append((frozenset(pending), timeout))
+        return None
+
+    monkeypatch.setattr(runner.signal, "sigtimedwait", consumed_elsewhere)
+
+    assert runner._drain_pending_controller_signals() is True
+
+    assert timed_waits == [(frozenset((runner.signal.SIGTERM,)), 0)]
+
+
+def test_pending_repeat_drain_is_bounded_under_continuous_replenishment(monkeypatch) -> None:
+    runner = _module()
+    timed_waits: list[tuple[frozenset[object], float]] = []
+    monkeypatch.setattr(
+        runner.signal,
+        "sigpending",
+        lambda: frozenset((runner.signal.SIGTERM,)),
+    )
+
+    def replenished(pending, timeout):
+        timed_waits.append((frozenset(pending), timeout))
+        return runner.signal.SIGTERM
+
+    monkeypatch.setattr(runner.signal, "sigtimedwait", replenished)
+
+    assert runner._drain_pending_controller_signals() is False
+    assert len(timed_waits) == runner._MAX_PENDING_CONTROLLER_SIGNAL_DRAINS
+    assert all(item == (frozenset((runner.signal.SIGTERM,)), 0) for item in timed_waits)
+
+
+def test_controller_owns_signals_even_when_operator_spawn_mask_is_inherited() -> None:
+    runner = _module()
+    original_mask = frozenset(
+        runner.signal.pthread_sigmask(runner.signal.SIG_BLOCK, runner._CONTROLLER_SIGNALS)
+    )
+    controller_signals = None
+    try:
+        controller_signals = runner._install_controller_signal_handlers()
+        assert not set(runner._CONTROLLER_SIGNALS).intersection(controller_signals.previous_mask)
+
+        runner._activate_controller_signal_handlers(controller_signals)
+        active_mask = frozenset(runner.signal.pthread_sigmask(runner.signal.SIG_BLOCK, ()))
+        assert not set(runner._CONTROLLER_SIGNALS).intersection(active_mask)
+
+        runner._finalize_controller_signal_handlers(controller_signals, lambda: None)
+        controller_signals = None
+        final_mask = frozenset(runner.signal.pthread_sigmask(runner.signal.SIG_BLOCK, ()))
+        assert not set(runner._CONTROLLER_SIGNALS).intersection(final_mask)
+    finally:
+        if controller_signals is not None:
+            runner._finalize_controller_signal_handlers(controller_signals, lambda: None)
+        runner.signal.pthread_sigmask(runner.signal.SIG_SETMASK, original_mask)
+
+
+def test_spawn_binding_window_is_masked_and_cleanup_uses_bound_pgid(monkeypatch) -> None:
+    runner = _module()
+    group_alive = True
+    cleanup_targets: list[int] = []
+    spawn_masks: list[frozenset[object]] = []
+
+    class BoundLeader:
+        pid = 445564
+        returncode = 0
+
+        @staticmethod
+        def communicate(*, timeout):
+            del timeout
+            return b"", None
+
+        @staticmethod
+        def poll():
+            return 0
+
+    def popen(*_args, **_kwargs):
+        current = frozenset(runner.signal.pthread_sigmask(runner.signal.SIG_BLOCK, ()))
+        spawn_masks.append(current)
+        assert set(runner._CONTROLLER_SIGNALS) <= current
+        # Pending delivery occurs only after _run_worker_process has stored both
+        # the process handle and its exact PGID.
+        _signal_current_thread(runner, runner.signal.SIGTERM)
+        return BoundLeader()
+
+    def killpg(process_group, selected_signal):
+        nonlocal group_alive
+        assert process_group == BoundLeader.pid
+        if selected_signal == 0:
+            if not group_alive:
+                raise ProcessLookupError
+            return
+        cleanup_targets.append(process_group)
+        if selected_signal == runner.signal.SIGTERM:
+            group_alive = False
+
+    monkeypatch.setattr(runner.subprocess, "Popen", popen)
+    monkeypatch.setattr(runner.os, "killpg", killpg)
+    controller_signals = runner._install_controller_signal_handlers()
+    try:
+        runner._activate_controller_signal_handlers(controller_signals)
+        with pytest.raises(runner.ControllerSignal) as captured:
+            runner._run_worker_process(
+                [sys.executable, str(RUNNER), "--worker", "--run-index", "1"],
+                environment={},
+                private_log=io.BytesIO(),
+                controller_signal_handlers=controller_signals,
+            )
+    finally:
+        runner._finalize_controller_signal_handlers(controller_signals, lambda: None)
+
+    assert spawn_masks
+    assert cleanup_targets == [BoundLeader.pid]
+    assert captured.value.signal_number == runner.signal.SIGTERM
+    assert captured.value.worker_cleanup_clear is True
+
+
+def test_false_final_cleanup_audit_is_attached_to_signal_and_never_green(monkeypatch) -> None:
+    runner = _module()
+
+    class InterruptedLeader:
+        pid = 445565
+        returncode = 0
+        calls = 0
+
+        @classmethod
+        def communicate(cls, *, timeout):
+            del timeout
+            cls.calls += 1
+            if cls.calls == 1:
+                raise runner.ControllerSignal(int(runner.signal.SIGTERM))
+            return b"", None
+
+        @staticmethod
+        def poll():
+            return 0
+
+    def killpg(process_group, selected_signal):
+        assert process_group == InterruptedLeader.pid
+        # The synthetic group survives TERM, KILL and the mandatory final audit.
+        return None
+
+    monkeypatch.setattr(
+        runner.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: InterruptedLeader(),
+    )
+    monkeypatch.setattr(runner.os, "killpg", killpg)
+    monkeypatch.setattr(runner, "PROCESS_GROUP_TERM_GRACE_SEC", 0.0)
+    monkeypatch.setattr(runner, "PROCESS_GROUP_KILL_GRACE_SEC", 0.0)
+
+    with pytest.raises(runner.ControllerSignal) as captured:
+        runner._run_worker_process(
+            [sys.executable, str(RUNNER), "--worker", "--run-index", "1"],
+            environment={},
+            private_log=io.BytesIO(),
+        )
+
+    assert captured.value.worker_cleanup_clear is False
+    assert captured.value.worker_cleanup_failure_codes == (
+        "worker_group_kill_sent",
+        "worker_group_term_sent",
+        "worker_process_group_not_clear",
+    )
+
+
+def test_late_first_signal_after_cleanup_preserves_false_audit_and_closed_main_code(
+    monkeypatch,
+    capsys,
+) -> None:
+    runner = _module()
+    group_alive = True
+    delivered: list[int] = []
+    signal_injected = False
+
+    class ReapedLeader:
+        pid = 445566
+        returncode = 0
+
+        @staticmethod
+        def communicate(*, timeout):
+            del timeout
+            return b"{}", None
+
+        @staticmethod
+        def poll():
+            return 0
+
+    def killpg(process_group, selected_signal):
+        assert process_group == ReapedLeader.pid
+        if selected_signal == 0:
+            if not group_alive:
+                raise ProcessLookupError
+            return
+        delivered.append(selected_signal)
+        # Model a group whose final audit remains false after the one KILL.
+
+    original_cleanup = runner._cleanup_bound_worker
+
+    class PostCleanupSignalOutcome:
+        def __init__(self, outcome):
+            self._outcome = outcome
+
+        @property
+        def stdout(self):
+            nonlocal signal_injected
+            assert self._outcome.worker_reaped is True
+            assert self._outcome.process_group_clear is False
+            signal_injected = True
+            # This is a real process-directed signal injected only after the
+            # complete production cleanup returned and before its projection.
+            _signal_current_thread(runner, runner.signal.SIGTERM)
+            return self._outcome.stdout
+
+        @property
+        def worker_reaped(self):
+            return self._outcome.worker_reaped
+
+        @property
+        def process_group_clear(self):
+            return self._outcome.process_group_clear
+
+        @property
+        def cleanup_failure_codes(self):
+            return self._outcome.cleanup_failure_codes
+
+        @property
+        def deferred_baseexception(self):
+            return self._outcome.deferred_baseexception
+
+    def cleanup_with_late_signal(process, process_group):
+        return PostCleanupSignalOutcome(original_cleanup(process, process_group))
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *_args, **_kwargs: ReapedLeader())
+    monkeypatch.setattr(runner.os, "killpg", killpg)
+    monkeypatch.setattr(runner, "_cleanup_bound_worker", cleanup_with_late_signal)
+    monkeypatch.setattr(runner, "PROCESS_GROUP_EXIT_GRACE_SEC", 0.0)
+    monkeypatch.setattr(runner, "PROCESS_GROUP_TERM_GRACE_SEC", 0.0)
+    monkeypatch.setattr(runner, "PROCESS_GROUP_KILL_GRACE_SEC", 0.0)
+    controller_signals = runner._install_controller_signal_handlers()
+    try:
+        runner._activate_controller_signal_handlers(controller_signals)
+        with pytest.raises(runner.ControllerSignal) as captured:
+            runner._run_worker_process(
+                [sys.executable, str(RUNNER), "--worker", "--run-index", "1"],
+                environment={},
+                private_log=io.BytesIO(),
+                controller_signal_handlers=controller_signals,
+            )
+    finally:
+        runner._finalize_controller_signal_handlers(controller_signals, lambda: None)
+
+    assert signal_injected is True
+    assert delivered == [runner.signal.SIGTERM, runner.signal.SIGKILL]
+    assert ReapedLeader.poll() == 0  # no real subprocess or survivor escaped the regression
+    assert captured.value.signal_number == runner.signal.SIGTERM
+    assert captured.value.worker_cleanup_clear is False
+    assert "worker_process_group_not_clear" in captured.value.worker_cleanup_failure_codes
+
+    def replay_signal(_args):
+        raise captured.value
+
+    monkeypatch.setattr(runner, "run_controller", replay_signal)
+    assert runner.main(["--run-live"]) == 128 + int(runner.signal.SIGTERM)
+    assert capsys.readouterr().err == "controller_signal_worker_cleanup_not_clear\n"
+
+
+def test_signal_delivered_after_worker_return_reuses_the_bound_false_audit(monkeypatch) -> None:
+    runner = _module()
+
+    class ReapedLeader:
+        pid = 445567
+        returncode = 0
+
+        @staticmethod
+        def communicate(*, timeout):
+            del timeout
+            return b"{}", None
+
+        @staticmethod
+        def poll():
+            return 0
+
+    def persistent_group(process_group, selected_signal):
+        assert process_group == ReapedLeader.pid
+        del selected_signal
+
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *_args, **_kwargs: ReapedLeader())
+    monkeypatch.setattr(runner.os, "killpg", persistent_group)
+    monkeypatch.setattr(runner, "PROCESS_GROUP_EXIT_GRACE_SEC", 0.0)
+    monkeypatch.setattr(runner, "PROCESS_GROUP_TERM_GRACE_SEC", 0.0)
+    monkeypatch.setattr(runner, "PROCESS_GROUP_KILL_GRACE_SEC", 0.0)
+    controller_signals = runner._install_controller_signal_handlers()
+    try:
+        runner._activate_controller_signal_handlers(controller_signals)
+        outcome = runner._run_worker_process(
+            [sys.executable, str(RUNNER), "--worker", "--run-index", "1"],
+            environment={},
+            private_log=io.BytesIO(),
+            controller_signal_handlers=controller_signals,
+        )
+        assert outcome.process_group_clear is False
+
+        with pytest.raises(runner.ControllerSignal) as captured:
+            _signal_current_thread(runner, runner.signal.SIGTERM)
+    finally:
+        runner._finalize_controller_signal_handlers(controller_signals, lambda: None)
+
+    assert captured.value.worker_cleanup_clear is False
+    assert "worker_process_group_not_clear" in captured.value.worker_cleanup_failure_codes
+
+
+def test_worker_first_action_unblocks_inherited_int_and_term_mask() -> None:
+    runner = _module()
+    original_mask = frozenset(
+        runner.signal.pthread_sigmask(runner.signal.SIG_BLOCK, runner._CONTROLLER_SIGNALS)
+    )
+    try:
+        inherited = frozenset(runner.signal.pthread_sigmask(runner.signal.SIG_BLOCK, ()))
+        assert set(runner._CONTROLLER_SIGNALS) <= inherited
+
+        runner._unblock_worker_control_signals()
+
+        worker_mask = frozenset(runner.signal.pthread_sigmask(runner.signal.SIG_BLOCK, ()))
+        assert set(runner._CONTROLLER_SIGNALS).isdisjoint(worker_mask)
+    finally:
+        runner.signal.pthread_sigmask(runner.signal.SIG_SETMASK, original_mask)
+
+
+def test_worker_main_calls_unblock_before_worker_setup(monkeypatch, capsys) -> None:
+    runner = _module()
+    ordering: list[str] = []
+
+    monkeypatch.setattr(
+        runner,
+        "_unblock_worker_control_signals",
+        lambda: ordering.append("unblock"),
+    )
+
+    def execute_worker(run_index):
+        assert run_index == 1
+        assert ordering == ["unblock"]
+        ordering.append("execute")
+        return {
+            "schema": runner.WORKER_SCHEMA,
+            "run_index": 1,
+            "status": "failed",
+            "failure_codes": ["offline_test"],
+            "lifecycle_teardown_clear": True,
+            "lifecycle_failure_codes": [],
+            "cases": [],
+        }
+
+    monkeypatch.setattr(runner, "execute_worker", execute_worker)
+
+    assert runner._worker_main(SimpleNamespace(run_index=1)) == 1
+    assert ordering == ["unblock", "execute"]
+    assert json.loads(capsys.readouterr().out)["status"] == "failed"
+
+
+def test_main_returns_signal_exit_code_and_reports_closed_cleanup_failure(
+    monkeypatch,
+    capsys,
+) -> None:
+    runner = _module()
+
+    def interrupted(_args):
+        exc = runner.ControllerSignal(int(runner.signal.SIGTERM))
+        exc.worker_cleanup_clear = False
+        exc.worker_cleanup_failure_codes = ("worker_process_group_not_clear",)
+        raise exc
+
+    monkeypatch.setattr(runner, "run_controller", interrupted)
+
+    assert runner.main(["--run-live"]) == 128 + int(runner.signal.SIGTERM)
+    assert capsys.readouterr().err == "controller_signal_worker_cleanup_not_clear\n"
+
+
+def test_barrier_receipts_are_atomic_private_regular_files_and_response_is_bound(tmp_path) -> None:
+    runner = _module()
+    barrier_dir = tmp_path / "barrier"
+    barrier_dir.mkdir(mode=0o700)
+    prepared = runner._PinnedBarrierDirectory.open(barrier_dir)
+    request = runner._observer_request(
+        commit="a" * 40,
+        run_hash="b" * 64,
+        receipt_sha256="c" * 64,
+        worker_report_sha256="d" * 64,
+        challenge="e" * 64,
+    )
+    response = {
+        "schema": runner.OBSERVER_RESPONSE_SCHEMA,
+        "commit": request["commit"],
+        "run_id_hash": request["run_id_hash"],
+        "run_index": request["run_index"],
+        "run_receipt_sha256": request["run_receipt_sha256"],
+        "worker_report_sha256": request["worker_report_sha256"],
+        "challenge": request["challenge"],
+        "status": "passed",
+        "bridge_stopped": True,
+        "bridge_operator_guard_held": True,
+        "backend_healthy": True,
+        "backend_unchanged": True,
+        "outbound_pending_zero": True,
+        "inbound_pending_zero": True,
+        "dead_letter_zero": True,
+        "dispatcher_unchanged": True,
+    }
+    response_path = prepared / "run-1-observer.json"
+    try:
+        runner._atomic_pinned_private_write(
+            prepared,
+            response_path.name,
+            runner._canonical_json(response) + b"\n",
+        )
+
+        projection, response_sha256 = runner._await_inter_run_observer(prepared, request)
+
+        assert projection["status"] == "passed"
+        assert len(response_sha256) == 64
+        for path in (
+            prepared / "run-1-observer-request.json",
+            response_path,
+        ):
+            metadata = os.lstat(path)
+            assert metadata.st_nlink == 1
+            assert metadata.st_uid == os.getuid()
+            assert metadata.st_mode & 0o777 == 0o600
+            assert path.is_file() and not path.is_symlink()
+        assert not list(barrier_dir.glob(".*.tmp"))
+    finally:
+        prepared.close()
+
+
+def test_pinned_barrier_publish_is_create_only_and_preserves_existing_bytes(tmp_path) -> None:
+    runner = _module()
+    barrier_dir = tmp_path / "barrier"
+    barrier_dir.mkdir(mode=0o700)
+    prepared = runner._PinnedBarrierDirectory.open(barrier_dir)
+    try:
+        name = "run-1-receipt.json"
+        existing = runner._canonical_json({"existing": True}) + b"\n"
+        runner._atomic_pinned_private_write(prepared, name, existing)
+
+        with pytest.raises(runner.BatteryFailure, match="inter_run_barrier_file_exists"):
+            runner._atomic_pinned_private_write(
+                prepared,
+                name,
+                runner._canonical_json({"replacement": True}) + b"\n",
+            )
+
+        assert (barrier_dir / name).read_bytes() == existing
+        assert not list(barrier_dir.glob(".*.tmp"))
+    finally:
+        prepared.close()
+
+
+def test_pinned_barrier_publish_never_exposes_a_multi_link_target(tmp_path, monkeypatch) -> None:
+    runner = _module()
+    barrier_dir = tmp_path / "barrier"
+    barrier_dir.mkdir(mode=0o700)
+    prepared = runner._PinnedBarrierDirectory.open(barrier_dir)
+    original = runner._rename_noreplace
+    observed: list[tuple[int, int]] = []
+
+    def observe(source_dir, source_name, target_dir, target_name):
+        source_before = os.stat(source_name, dir_fd=source_dir, follow_symlinks=False)
+        with pytest.raises(FileNotFoundError):
+            os.stat(target_name, dir_fd=target_dir, follow_symlinks=False)
+        original(source_dir, source_name, target_dir, target_name)
+        target_after = os.stat(target_name, dir_fd=target_dir, follow_symlinks=False)
+        with pytest.raises(FileNotFoundError):
+            os.stat(source_name, dir_fd=source_dir, follow_symlinks=False)
+        observed.append((source_before.st_nlink, target_after.st_nlink))
+
+    monkeypatch.setattr(runner, "_rename_noreplace", observe)
+    try:
+        runner._atomic_pinned_private_write(
+            prepared,
+            "run-1-receipt.json",
+            runner._canonical_json({"status": "passed"}) + b"\n",
+        )
+    finally:
+        prepared.close()
+
+    assert observed == [(1, 1)]
+
+
+@pytest.mark.parametrize("replacement_mode", (0o700, 0o755))
+def test_pinned_barrier_open_rejects_replacement_after_initial_validation(
+    tmp_path,
+    monkeypatch,
+    replacement_mode,
+) -> None:
+    runner = _module()
+    parent = tmp_path / "private-parent"
+    parent.mkdir(mode=0o700)
+    barrier_dir = parent / "barrier"
+    barrier_dir.mkdir(mode=0o700)
+    original = runner._validated_private_barrier_path
+
+    def replace_after_validation(value):
+        validated = original(value)
+        barrier_dir.rename(parent / "validated-away")
+        barrier_dir.mkdir(mode=replacement_mode)
+        barrier_dir.chmod(replacement_mode)
+        return validated
+
+    monkeypatch.setattr(runner, "_validated_private_barrier_path", replace_after_validation)
+
+    with pytest.raises(runner.BatteryFailure, match="inter_run_barrier_dir_changed"):
+        runner._PinnedBarrierDirectory.open(barrier_dir)
+
+
+def test_pinned_barrier_parent_is_private_and_quiescent_by_contract(tmp_path) -> None:
+    runner = _module()
+    public_parent = tmp_path / "public-parent"
+    public_parent.mkdir(mode=0o755)
+    public_parent.chmod(0o755)
+    public_barrier = public_parent / "barrier"
+    public_barrier.mkdir(mode=0o700)
+
+    with pytest.raises(runner.BatteryFailure, match="inter_run_barrier_dir_invalid"):
+        runner._PinnedBarrierDirectory.open(public_barrier)
+
+    private_parent = tmp_path / "private-parent"
+    private_parent.mkdir(mode=0o700)
+    barrier_dir = private_parent / "barrier"
+    barrier_dir.mkdir(mode=0o700)
+    prepared = runner._PinnedBarrierDirectory.open(barrier_dir)
+    try:
+        (private_parent / "unexpected-sibling").write_text("x", encoding="utf-8")
+        with pytest.raises(runner.BatteryFailure, match="inter_run_barrier_dir_changed"):
+            prepared.revalidate()
+    finally:
+        prepared.close()
+
+    assert "dedicated, quiescent" in runner.build_parser().format_help()
+
+
+def test_private_worker_log_binds_and_closes_fd_before_pending_signal_delivery(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runner = _module()
+    captured: list[int] = []
+    original_open = runner.os.open
+    controller_signals = runner._install_controller_signal_handlers()
+
+    def signal_after_open(*args, **kwargs):
+        descriptor = original_open(*args, **kwargs)
+        captured.append(descriptor)
+        _signal_current_thread(runner, runner.signal.SIGTERM)
+        return descriptor
+
+    monkeypatch.setattr(runner.os, "open", signal_after_open)
+    try:
+        runner._activate_controller_signal_handlers(controller_signals)
+        with (
+            pytest.raises(runner.ControllerSignal),
+            runner._private_worker_log(tmp_path / "private-worker.log"),
+        ):
+            pytest.fail("the interrupted ownership handoff must not enter the body")
+    finally:
+        runner._finalize_controller_signal_handlers(controller_signals, lambda: None)
+
+    assert len(captured) == 1
+    with pytest.raises(OSError) as closed:
+        os.fstat(captured[0])
+    assert closed.value.errno == 9
+
+
+def test_pinned_barrier_rejects_noncanonical_json_and_directory_replacement(tmp_path) -> None:
+    runner = _module()
+    barrier_dir = tmp_path / "barrier"
+    barrier_dir.mkdir(mode=0o700)
+    prepared = runner._PinnedBarrierDirectory.open(barrier_dir)
+    try:
+        name = "run-1-observer.json"
+        runner._atomic_pinned_private_write(prepared, name, b'{"status": "passed"}\n')
+        with pytest.raises(runner.BatteryFailure, match="inter_run_barrier_file_invalid"):
+            runner._read_pinned_private_json(prepared, name)
+
+        moved = tmp_path / "moved-barrier"
+        barrier_dir.rename(moved)
+        barrier_dir.mkdir(mode=0o700)
+        with pytest.raises(runner.BatteryFailure, match="inter_run_barrier_dir_changed"):
+            prepared.revalidate()
+        with pytest.raises(runner.BatteryFailure, match="inter_run_barrier_dir_changed"):
+            runner._atomic_pinned_private_write(
+                prepared,
+                "run-2-receipt.json",
+                runner._canonical_json({"status": "passed"}) + b"\n",
+            )
+    finally:
+        prepared.close()
+
+
+def test_pinned_barrier_detects_swap_away_and_same_inode_restore(tmp_path) -> None:
+    runner = _module()
+    barrier_dir = tmp_path / "barrier"
+    barrier_dir.mkdir(mode=0o700)
+    prepared = runner._PinnedBarrierDirectory.open(barrier_dir)
+    try:
+        moved = tmp_path / "moved-barrier"
+        barrier_dir.rename(moved)
+        moved.rename(barrier_dir)
+
+        with pytest.raises(runner.BatteryFailure, match="inter_run_barrier_dir_changed"):
+            prepared.revalidate()
+    finally:
+        prepared.close()
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    (
+        ("run_index", 2),
+        ("run_receipt_sha256", "0" * 64),
+        ("worker_report_sha256", "1" * 64),
+        ("challenge", "2" * 64),
+    ),
+)
+def test_observer_cannot_substitute_run_or_report_binding(field, replacement) -> None:
+    runner = _module()
+    request = runner._observer_request(
+        commit="a" * 40,
+        run_hash="b" * 64,
+        receipt_sha256="c" * 64,
+        worker_report_sha256="d" * 64,
+        challenge="e" * 64,
+    )
+    response = {
+        "schema": runner.OBSERVER_RESPONSE_SCHEMA,
+        "commit": request["commit"],
+        "run_id_hash": request["run_id_hash"],
+        "run_index": request["run_index"],
+        "run_receipt_sha256": request["run_receipt_sha256"],
+        "worker_report_sha256": request["worker_report_sha256"],
+        "challenge": request["challenge"],
+        "status": "passed",
+        "bridge_stopped": True,
+        "bridge_operator_guard_held": True,
+        "backend_healthy": True,
+        "backend_unchanged": True,
+        "outbound_pending_zero": True,
+        "inbound_pending_zero": True,
+        "dead_letter_zero": True,
+        "dispatcher_unchanged": True,
+    }
+    response[field] = replacement
+
+    with pytest.raises(runner.BatteryFailure, match="inter_run_observer_binding_mismatch"):
+        runner._validate_observer_response(response, request)
+
+
+def test_observer_requires_v2_operator_guard_semantics() -> None:
+    runner = _module()
+    request = runner._observer_request(
+        commit="a" * 40,
+        run_hash="b" * 64,
+        receipt_sha256="c" * 64,
+        worker_report_sha256="d" * 64,
+        challenge="e" * 64,
+    )
+    response = {
+        "schema": "friday.document-contour-live-battery.observer-response.v1",
+        "commit": request["commit"],
+        "run_id_hash": request["run_id_hash"],
+        "run_index": request["run_index"],
+        "run_receipt_sha256": request["run_receipt_sha256"],
+        "worker_report_sha256": request["worker_report_sha256"],
+        "challenge": request["challenge"],
+        "status": "passed",
+        "bridge_stopped": True,
+        "bridge_lease_free": True,
+        "backend_healthy": True,
+        "backend_unchanged": True,
+        "outbound_pending_zero": True,
+        "inbound_pending_zero": True,
+        "dead_letter_zero": True,
+        "dispatcher_unchanged": True,
+    }
+
+    with pytest.raises(runner.BatteryFailure, match="inter_run_observer_response_invalid"):
+        runner._validate_observer_response(response, request)
+
+    response["schema"] = runner.OBSERVER_RESPONSE_SCHEMA
+    response["bridge_operator_guard_held"] = response.pop("bridge_lease_free")
+    response["bridge_operator_guard_held"] = False
+    with pytest.raises(
+        runner.BatteryFailure,
+        match="inter_run_observer_bridge_operator_guard_held_failed",
+    ):
+        runner._validate_observer_response(response, request)
+
+
+def test_barrier_rejects_symlink_or_nonprivate_files(tmp_path) -> None:
+    runner = _module()
+    target = tmp_path / "target.json"
+    target.write_text("{}", encoding="utf-8")
+    target.chmod(0o600)
+    barrier_dir = tmp_path / "barrier"
+    barrier_dir.mkdir(mode=0o700)
+    prepared = runner._PinnedBarrierDirectory.open(barrier_dir)
+    try:
+        response = barrier_dir / "run-1-observer.json"
+        response.symlink_to(target)
+
+        with pytest.raises(runner.BatteryFailure, match="inter_run_barrier_file_invalid"):
+            runner._read_pinned_private_json(prepared, response.name)
+    finally:
+        prepared.close()
+
+
+def test_barrier_directory_must_be_empty_owner_only_0700_and_not_a_symlink(tmp_path) -> None:
+    runner = _module()
+    nonprivate = tmp_path / "nonprivate"
+    nonprivate.mkdir(mode=0o700)
+    nonprivate.chmod(0o755)
+    with pytest.raises(runner.BatteryFailure, match="inter_run_barrier_dir_invalid"):
+        runner._require_private_barrier_dir(nonprivate)
+
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    linked = tmp_path / "linked"
+    linked.symlink_to(private, target_is_directory=True)
+    with pytest.raises(runner.BatteryFailure, match="inter_run_barrier_dir_invalid"):
+        runner._require_private_barrier_dir(linked)
+
+    (private / "stale").write_text("stale", encoding="utf-8")
+    with pytest.raises(runner.BatteryFailure, match="inter_run_barrier_dir_not_empty"):
+        runner._require_private_barrier_dir(private)
+
+
+@pytest.mark.parametrize("controller_exit", ("normal", "exception", "baseexception"))
+def test_controller_closes_every_bound_private_descriptor_on_all_exit_classes(
+    tmp_path,
+    monkeypatch,
+    controller_exit,
+) -> None:
+    runner = _module()
+    pinned_descriptors: list[int] = []
+    transient_descriptors: list[int] = []
+    log_descriptors: list[int] = []
+    private_roots: list[Path] = []
+    original_open = runner._PinnedBarrierDirectory.open
+    original_owned_descriptor = runner._owned_os_descriptor
+    original_log = runner._private_worker_log
+    original_mkdtemp = runner.tempfile.mkdtemp
+
+    def capture_open(cls, value, *, owner=None):
+        del cls
+        prepared = original_open(value, owner=owner)
+        pinned_descriptors.extend((prepared.parent_descriptor, prepared.descriptor))
+        return prepared
+
+    @contextmanager
+    def capture_log(path):
+        with original_log(path) as stream:
+            log_descriptors.append(stream.fileno())
+            yield stream
+
+    @contextmanager
+    def capture_owned_descriptor(*args, **kwargs):
+        with original_owned_descriptor(*args, **kwargs) as descriptor:
+            transient_descriptors.append(descriptor)
+            yield descriptor
+
+    def capture_mkdtemp(*args, **kwargs):
+        path = Path(original_mkdtemp(*args, **kwargs))
+        private_roots.append(path)
+        return str(path)
+
+    def run_worker(command, *, environment, private_log, controller_signal_handlers):
+        del private_log
+        assert controller_signal_handlers is not None
+        if controller_exit == "exception":
+            raise RuntimeError("private worker failure")
+        if controller_exit == "baseexception":
+            raise runner.ControllerSignal(int(runner.signal.SIGTERM))
+        run_index = int(command[-1])
+        return _closed_worker_outcome(
+            runner,
+            environment[runner._RUN_ID_ENV],
+            run_index,
+            status="failed",
+        )
+
+    monkeypatch.setattr(runner, "_validate_live_gate", lambda *_args: "a" * 40)
+    monkeypatch.setattr(runner, "_controller_source_env_file", lambda _value: None)
+    monkeypatch.setattr(runner._PinnedBarrierDirectory, "open", classmethod(capture_open))
+    monkeypatch.setattr(runner, "_owned_os_descriptor", capture_owned_descriptor)
+    monkeypatch.setattr(runner, "_private_worker_log", capture_log)
+    monkeypatch.setattr(runner.tempfile, "mkdtemp", capture_mkdtemp)
+    monkeypatch.setattr(runner, "_run_worker_process", run_worker)
+    parent = tmp_path / "private-parent"
+    parent.mkdir(mode=0o700)
+    barrier_dir = parent / "barrier"
+    barrier_dir.mkdir(mode=0o700)
+    args = SimpleNamespace(
+        freeze_commit="a" * 40,
+        bridge_stopped=True,
+        source_env_file="",
+        inter_run_barrier_dir=str(barrier_dir),
+        keep_private_run_dir=False,
+        report="",
+    )
+
+    if controller_exit == "baseexception":
+        with pytest.raises(runner.ControllerSignal):
+            runner.run_controller(args)
+    else:
+        report = runner.run_controller(args)
+        assert report["status"] == "failed"
+
+    assert len(pinned_descriptors) == 2
+    assert len(log_descriptors) == 1
+    if controller_exit == "baseexception":
+        assert transient_descriptors == []
+    else:
+        assert transient_descriptors
+    for descriptor in (*pinned_descriptors, *transient_descriptors, *log_descriptors):
+        with pytest.raises(OSError) as closed:
+            os.fstat(descriptor)
+        assert closed.value.errno == 9
+    assert len(private_roots) == 1
+    assert not private_roots[0].exists()
+
+
+def test_controller_setup_owner_closes_pinned_fds_if_return_handoff_is_interrupted(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runner = _module()
+    captured: list[int] = []
+    original_open = runner._PinnedBarrierDirectory.open
+
+    def interrupted_open(cls, value, *, owner=None):
+        del cls
+        prepared = original_open(value, owner=owner)
+        captured.extend((prepared.parent_descriptor, prepared.descriptor))
+        raise runner.ControllerSignal(int(runner.signal.SIGTERM))
+
+    monkeypatch.setattr(runner, "_validate_live_gate", lambda *_args: "a" * 40)
+    monkeypatch.setattr(runner, "_controller_source_env_file", lambda _value: None)
+    monkeypatch.setattr(runner._PinnedBarrierDirectory, "open", classmethod(interrupted_open))
+    parent = tmp_path / "private-parent"
+    parent.mkdir(mode=0o700)
+    barrier_dir = parent / "barrier"
+    barrier_dir.mkdir(mode=0o700)
+    args = SimpleNamespace(
+        freeze_commit="a" * 40,
+        bridge_stopped=True,
+        source_env_file="",
+        inter_run_barrier_dir=str(barrier_dir),
+        keep_private_run_dir=False,
+        report="",
+    )
+
+    with pytest.raises(runner.ControllerSignal):
+        runner.run_controller(args)
+
+    assert len(captured) == 2
+    for descriptor in captured:
+        with pytest.raises(OSError) as closed:
+            os.fstat(descriptor)
+        assert closed.value.errno == 9
+
+
+def test_pending_setup_signal_is_delivered_only_inside_cleanup_protected_contour(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runner = _module()
+    captured_descriptors: list[int] = []
+    captured_roots: list[Path] = []
+    original_open = runner._PinnedBarrierDirectory.open
+    original_mkdtemp = runner.tempfile.mkdtemp
+
+    def capture_open(cls, value, *, owner=None):
+        del cls
+        prepared = original_open(value, owner=owner)
+        captured_descriptors.extend((prepared.parent_descriptor, prepared.descriptor))
+        return prepared
+
+    def signal_after_mkdtemp(*args, **kwargs):
+        private_root = Path(original_mkdtemp(*args, **kwargs))
+        captured_roots.append(private_root)
+        _signal_current_thread(runner, runner.signal.SIGTERM)
+        return str(private_root)
+
+    monkeypatch.setattr(runner, "_validate_live_gate", lambda *_args: "a" * 40)
+    monkeypatch.setattr(runner, "_controller_source_env_file", lambda _value: None)
+    monkeypatch.setattr(runner._PinnedBarrierDirectory, "open", classmethod(capture_open))
+    monkeypatch.setattr(runner.tempfile, "mkdtemp", signal_after_mkdtemp)
+    parent = tmp_path / "private-parent"
+    parent.mkdir(mode=0o700)
+    barrier_dir = parent / "barrier"
+    barrier_dir.mkdir(mode=0o700)
+    args = SimpleNamespace(
+        freeze_commit="a" * 40,
+        bridge_stopped=True,
+        source_env_file="",
+        inter_run_barrier_dir=str(barrier_dir),
+        keep_private_run_dir=False,
+        report="",
+    )
+
+    with pytest.raises(runner.ControllerSignal) as captured:
+        runner.run_controller(args)
+
+    assert captured.value.signal_number == runner.signal.SIGTERM
+    assert len(captured_descriptors) == 2
+    for descriptor in captured_descriptors:
+        with pytest.raises(OSError) as closed:
+            os.fstat(descriptor)
+        assert closed.value.errno == 9
+    assert len(captured_roots) == 1
+    assert not captured_roots[0].exists()
+
+
+@pytest.mark.parametrize("failure_kind", ("exception", "baseexception"))
+def test_pre_activation_setup_failure_restores_normalized_controller_signal_mask(
+    tmp_path,
+    monkeypatch,
+    failure_kind,
+) -> None:
+    runner = _module()
+    original_handlers = {
+        selected: runner.signal.getsignal(selected) for selected in runner._CONTROLLER_SIGNALS
+    }
+    original_mask = frozenset(
+        runner.signal.pthread_sigmask(runner.signal.SIG_BLOCK, runner._CONTROLLER_SIGNALS)
+    )
+
+    def fail_before_activation(cls, _value, *, owner=None):
+        del cls, owner
+        if failure_kind == "exception":
+            raise runner.BatteryFailure("synthetic_setup_failure")
+        raise runner.ControllerSignal(int(runner.signal.SIGTERM))
+
+    monkeypatch.setattr(runner, "_validate_live_gate", lambda *_args: "a" * 40)
+    monkeypatch.setattr(runner, "_controller_source_env_file", lambda _value: None)
+    monkeypatch.setattr(
+        runner._PinnedBarrierDirectory,
+        "open",
+        classmethod(fail_before_activation),
+    )
+    parent = tmp_path / "private-parent"
+    parent.mkdir(mode=0o700)
+    barrier_dir = parent / "barrier"
+    barrier_dir.mkdir(mode=0o700)
+    args = SimpleNamespace(
+        freeze_commit="a" * 40,
+        bridge_stopped=True,
+        source_env_file="",
+        inter_run_barrier_dir=str(barrier_dir),
+        keep_private_run_dir=False,
+        report="",
+    )
+
+    expected = runner.BatteryFailure if failure_kind == "exception" else runner.ControllerSignal
+    try:
+        with pytest.raises(expected):
+            runner.run_controller(args)
+
+        final_mask = frozenset(runner.signal.pthread_sigmask(runner.signal.SIG_BLOCK, ()))
+        assert not set(runner._CONTROLLER_SIGNALS).intersection(final_mask)
+        assert {
+            selected: runner.signal.getsignal(selected) for selected in runner._CONTROLLER_SIGNALS
+        } == original_handlers
+    finally:
+        runner.signal.pthread_sigmask(runner.signal.SIG_SETMASK, original_mask)
+
+
+def test_lifecycle_audit_projects_close_warning_and_exception_to_closed_codes(
+    monkeypatch,
+) -> None:
+    runner = _module()
+    import friday.mcp_runtime.client as mcp_client
+
+    async def broken_close(*_args, **_kwargs):
+        raise RuntimeError("private close detail")
+
+    monkeypatch.setattr(mcp_client, "_bounded_stack_close", broken_close)
+    audit = runner.LifecycleAudit()
+    audit.install()
+    try:
+        logging_record = logging.LogRecord(
+            "friday.mcp_runtime.client",
+            30,
+            __file__,
+            1,
+            "MCP server %s cleanup exceeded %.0fs",
+            ("workspace", 5.0),
+            None,
+        )
+        audit._handler.emit(logging_record)
+        with pytest.raises(RuntimeError, match="private close detail"):
+            asyncio.run(mcp_client._bounded_stack_close(None, alias="workspace"))
+    finally:
+        audit.close()
+
+    assert audit.closed_failure_codes() == (
+        "mcp_cleanup_exception",
+        "mcp_cleanup_timeout_warning",
+    )
 
 
 def test_d02_offline_oracle_closes_newer_deleted_and_foreign_controls() -> None:

@@ -368,13 +368,26 @@ async def test_false_completed_deed_is_still_replaced_instead_of_prefixed(
     storage,
     monkeypatch,
 ) -> None:
+    class _SchemaAdvertisingKernel(_NoToolKernel):
+        def get_tool_definitions(self, actor, topic=""):  # noqa: ANN001, ARG002
+            return [
+                {
+                    "type": "function",
+                    "function": {"name": "memory_search", "parameters": {"type": "object"}},
+                },
+                {
+                    "type": "function",
+                    "function": {"name": "web_research", "parameters": {"type": "object"}},
+                },
+            ]
+
     storage.ensure_user("alice", preset_key="owner")
     router = _OneAnswerRouter("Я уже оформила и оплатила заказ в интернет-магазине.")
     runtime = AgentRuntime(
         replace(settings, verify_answers=False),
         storage,
         llm=router,
-        kernel=_NoToolKernel(),
+        kernel=_SchemaAdvertisingKernel(),  # type: ignore[arg-type]
     )
     monkeypatch.setattr(runtime, "_prepare_context", _clean_context)
 
@@ -384,12 +397,53 @@ async def test_false_completed_deed_is_still_replaced_instead_of_prefixed(
         actor=_actor(),
     )
 
-    assert len(router.calls) == 1
+    assert len(router.calls) == 2
+    assert all(not call["kwargs"].get("tools") for call in router.calls)
+    assert router.calls[1]["kwargs"].get("tools") == []
+    assert any(
+        "FRIDAY_CONFIRMATION_RECOVERY_DATA" in str(item.get("content") or "")
+        for item in router.calls[1]["messages"]
+    )
     assert reply["message"] == _CANNOT_ACT_OUTSIDE
     metadata = _stored_metadata(storage, reply)
     assert metadata["structural"]["model_spoke"] is False
     assert metadata["structural"]["output_guards"]["outside_deed_replaced"] is True
+    assert metadata["structural"]["output_guards"]["unverified_outside_confirmation_recovery"] == {
+        "attempted": True,
+        "accepted": False,
+    }
     assert "unverified_outside_confirmation_prefixed" not in metadata["structural"]["output_guards"]
+
+
+@pytest.mark.asyncio
+async def test_non_confirmation_answer_does_not_enter_confirmation_retry(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    answer = "Для проверки понадобятся номер заказа и доступ к личному кабинету."
+    router = _OneAnswerRouter(answer)
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=router,  # type: ignore[arg-type]
+        kernel=_NoToolKernel(),  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _clean_context)
+
+    reply = await runtime.chat(
+        "alice",
+        "Какие сведения нужны, чтобы самостоятельно проверить статус заказа?",
+        actor=_actor(),
+    )
+
+    assert len(router.calls) == 1
+    assert not router.calls[0]["kwargs"].get("tools")
+    assert reply["message"] == answer
+    metadata = _stored_metadata(storage, reply)
+    assert metadata["structural"]["model_spoke"] is True
+    assert "output_guards" not in metadata["structural"]
 
 
 @pytest.mark.asyncio

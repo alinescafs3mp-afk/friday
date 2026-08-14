@@ -123,9 +123,8 @@ asyncio_mode = "auto"
 [tool.mypy]
 
 # Voice and vector acceleration are deliberately optional, lazy imports.  The
-# canonical CI environment installs only ``.[dev]`` so static analysis must treat
-# those declared module boundaries as unavailable rather than forcing heavyweight
-# runtime extras into every development install.
+# canonical CI environment installs ``.[dev,vectors]``; voice remains optional,
+# and these lazy-import boundaries stay permissive for core-only installations.
 [[tool.mypy.overrides]]
 module = ["av", "faster_whisper", "numpy", "piper", "piper.*"]
 ignore_missing_imports = true

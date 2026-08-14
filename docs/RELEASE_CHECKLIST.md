@@ -10,22 +10,27 @@
 
 ```bash
 .venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
-.venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e ".[dev]"
+.venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e ".[dev,vectors]"
 .venv/bin/python -m playwright install chromium
 .venv/bin/python tools/quality_gate.py
 ```
 
-Гейт всегда идёт тремя фазами: `static` (Ruff, mypy, Bandit HIGH и `node --check`),
-`tests` (не-браузерный pytest) и `ui` (Playwright). UI-модули отделены от общего
-pytest, чтобы их process-wide серверы не пересекались; preflight должен запустить
-реальный Chromium, а JUnit-отчёт с любым skipped UI-тестом делает гейт красным.
-`--phase static|tests|ui` предназначен только для локальной итерации и не заменяет
-полный запуск перед выпуском.
+Перед любой выбранной фазой гейт обязательно аттестует Python 3.14.4,
+Node 22.23.2, NumPy 2.5.1, Playwright 1.61.0, установленный Chromium revision
+1228 и официальный бинарник UnRAR 7.20. Затем полный запуск идёт тремя фазами:
+`static` (Ruff, mypy, Bandit HIGH и `node --check`), `tests` (не-браузерный
+pytest) и `ui` (Playwright). UI-модули отделены от общего pytest, чтобы их
+process-wide серверы не пересекались; по умолчанию им выделяется 12 workers —
+по одному на модуль (`--ui-workers 1` задаёт настоящий serial `-n 0`). JUnit
+обеих pytest-фаз сверяется по точным nodeid с полной коллекцией, и любой
+failed/error/skipped-тест в любой фазе делает гейт красным. Параметры
+`--phase static`, `--phase tests` и `--phase ui` предназначены только для локальной
+итерации и не заменяют полный запуск перед выпуском.
 
 Обязательные условия:
 
 - канонический гейт завершился с кодом 0;
-- нет failed tests и нет skipped UI-тестов;
+- нет failed/error/skipped-тестов ни в non-UI, ни в UI-фазе;
 - Ruff/mypy clean;
 - Bandit HIGH = 0; каждый MEDIUM/LOW отдельно рассмотрен и объяснён в release evidence;
 - `git diff --check` clean;

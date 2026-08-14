@@ -56,14 +56,14 @@ MANIFEST_PATHS = {
 }
 # The audit refuses any byte change to either synthetic corpus.
 FROZEN_MANIFEST_SHA256 = {
-    "A": "76c67ff2fd2ccb1cc0c0c325a0b5bace65bbf14e423769a485d8100061dae099",
+    "A": "c6078722df007fcc9427591a3418c1833d5c7ce6b17787674b959a36bc5c610d",
     "B": "db6f82e075237694fd28d3d75e9dad5c6afc2d01d6c92a37e79fb3da5e23dee0",
 }
 # Canonical-content hashes bind the in-memory mappings passed to ``run_battery``
 # to the same frozen corpora.  The raw hashes above alone cannot detect a caller
 # pairing altered JSON with the expected digest string.
 FROZEN_MANIFEST_CONTENT_SHA256 = {
-    "A": "ef5f2eda2e424cfe821446b2c6560617de223b0a6f7987c62c4ee4e4232b7d08",
+    "A": "8ecac3cc0e9393961c5490e185b25bbc5f6d8e31db4eace4880542b9fa01d5d2",
     "B": "4bca33f32e7c8ceec18c6eb8bc313ef0ad08145de05d1a22216bb66a0436443e",
 }
 

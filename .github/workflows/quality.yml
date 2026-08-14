@@ -25,21 +25,31 @@ jobs:
       - name: Set up Python 3.14
         uses: actions/setup-python@v5
         with:
-          python-version: "3.14"
+          python-version: "3.14.4"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.23.2"
 
       - name: Create development environment
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install --upgrade --constraint requirements-dev.lock pip setuptools wheel
-          .venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e ".[dev]"
+          .venv/bin/python -m pip install --no-build-isolation --constraint requirements.lock --constraint requirements-dev.lock -e ".[dev,vectors]"
 
       - name: Install Playwright Chromium
         run: .venv/bin/python -m playwright install --with-deps chromium
+
+      - name: Install pinned UnRAR
+        run: |
+          curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+            --output /tmp/rarlinux-x64-720.tar.gz \
+            https://www.rarlab.com/rar/rarlinux-x64-720.tar.gz
+          echo "d3e7fba3272385b1d0255ee332a1e8c1a6779bb5a5ff9d4d8ac2be846e49ca46  /tmp/rarlinux-x64-720.tar.gz" \
+            | sha256sum --check --strict
+          tar -xzf /tmp/rarlinux-x64-720.tar.gz -C /tmp rar/unrar
+          sudo install -o root -g root -m 0755 /tmp/rar/unrar /usr/local/bin/unrar
 
       - name: Run canonical quality gate
         run: .venv/bin/python tools/quality_gate.py

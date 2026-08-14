@@ -47,6 +47,7 @@ def _dev_and_build_requirements() -> list[Requirement]:
     data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
     requirements = [
         *data["project"]["optional-dependencies"]["dev"],
+        *data["project"]["optional-dependencies"]["vectors"],
         *data["build-system"]["requires"],
     ]
     return [Requirement(requirement) for requirement in requirements]

@@ -17,15 +17,19 @@ import argparse
 import asyncio
 import base64
 import contextvars
+import ctypes
+import errno
 import hashlib
 import html
 import io
 import ipaddress
 import json
+import logging
 import os
 import re
 import secrets
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -34,9 +38,10 @@ import time
 import unicodedata
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,9 +65,40 @@ WORKER_TIMEOUT_SEC = 1_800
 SCHEMA = "friday.document-contour-live-battery.v1"
 WORKER_SCHEMA = "friday.document-contour-live-battery.worker.v1"
 REPORT_SCHEMA = "friday.document-contour-live-battery.report.v1"
+RUN_RECEIPT_SCHEMA = "friday.document-contour-live-battery.run-receipt.v1"
+OBSERVER_REQUEST_SCHEMA = "friday.document-contour-live-battery.observer-request.v1"
+OBSERVER_RESPONSE_SCHEMA = "friday.document-contour-live-battery.observer-response.v2"
 _RUN_ID_ENV = "FRIDAY_DOCUMENT_BATTERY_RUN_ID"
 _RUN_ID_RE = re.compile(r"[0-9a-f]{64}")
 _RELEASE_PROFILE = "qwen36-27b-nvfp4-nvidia"
+INTER_RUN_OBSERVER_TIMEOUT_SEC = 180.0
+PROCESS_GROUP_EXIT_GRACE_SEC = 2.0
+PROCESS_GROUP_TERM_GRACE_SEC = 5.0
+PROCESS_GROUP_KILL_GRACE_SEC = 5.0
+_CONTROLLER_SIGNALS = (signal.SIGINT, signal.SIGTERM)
+_MAX_PENDING_CONTROLLER_SIGNAL_DRAINS = 8
+_RENAME_NOREPLACE = 1
+_GIT_BINARY = "/usr/bin/git"
+
+_LIFECYCLE_FAILURE_CODES = frozenset(
+    {
+        "mcp_cleanup_exception",
+        "mcp_cleanup_timeout_warning",
+        "server_shutdown_stranded_warning",
+    }
+)
+_PROCESS_CLEANUP_FAILURE_CODES = frozenset(
+    {
+        "worker_group_kill_sent",
+        "worker_group_term_sent",
+        "worker_cleanup_exception",
+        "worker_leader_not_reaped",
+        "worker_process_exception",
+        "worker_process_group_not_clear",
+        "worker_process_group_survived",
+        "worker_timeout",
+    }
+)
 
 _GENERATION_STAGES = (
     "direct_synthesis",
@@ -126,6 +162,36 @@ class CaseIdentity:
         if not key or not 1 <= count <= 2:
             raise BatteryFailure("prompt_variant_contract_invalid")
         return int(self.token("prompt-variant:" + key, length=8), 16) % count
+
+
+@dataclass(frozen=True)
+class WorkerProcessOutcome:
+    stdout: bytes
+    returncode: int
+    worker_reaped: bool
+    process_group_clear_initial: bool
+    process_group_clear: bool
+    timed_out: bool
+    cleanup_failure_codes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class WorkerCleanupOutcome:
+    stdout: bytes
+    worker_reaped: bool
+    process_group_clear: bool
+    cleanup_failure_codes: tuple[str, ...]
+    deferred_baseexception: BaseException | None = field(default=None, repr=False)
+
+
+@dataclass
+class ControllerSignalHandlers:
+    previous: dict[int, Any]
+    previous_mask: frozenset[Any]
+    activated: bool = False
+    first_signal: int | None = None
+    worker_cleanup_clear: bool | None = None
+    worker_cleanup_failure_codes: tuple[str, ...] = ()
 
 
 SCENARIOS: tuple[Scenario, ...] = (
@@ -250,11 +316,8 @@ _PROCESS_ENV_ALLOWLIST = frozenset(
     {
         "LANG",
         "LC_ALL",
-        "LD_LIBRARY_PATH",
-        "PATH",
         "SSL_CERT_DIR",
         "SSL_CERT_FILE",
-        "VIRTUAL_ENV",
     }
 )
 _SCRATCH_PATHS = {
@@ -330,23 +393,480 @@ class BatteryFailure(RuntimeError):
     """Closed-code battery failure; its message must never contain source text."""
 
 
+class ControllerSignal(BaseException):
+    """Catchable SIGINT/SIGTERM projection used only to unwind worker cleanup."""
+
+    def __init__(self, signal_number: int) -> None:
+        super().__init__(signal_number)
+        self.signal_number = signal_number
+        self.worker_cleanup_clear: bool | None = None
+        self.worker_cleanup_failure_codes: tuple[str, ...] = ()
+
+
 def _private_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     path.chmod(0o700)
     return path
 
 
+@contextmanager
+def _owned_os_descriptor(
+    path: str | os.PathLike[str],
+    flags: int,
+    mode: int | None = None,
+    *,
+    dir_fd: int | None = None,
+):
+    """Open and retain one fd before pending controller signals are delivered."""
+
+    descriptor = -1
+    try:
+        previous_mask = _block_controller_signals()
+        try:
+            open_kwargs = {} if dir_fd is None else {"dir_fd": dir_fd}
+            if mode is None:
+                descriptor = os.open(path, flags, **open_kwargs)
+            else:
+                descriptor = os.open(path, flags, mode, **open_kwargs)
+        finally:
+            # If unmasking delivers ControllerSignal, descriptor has already
+            # been stored and the outer finally closes it during the unwind.
+            _restore_signal_mask(previous_mask)
+        yield descriptor
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def _private_write(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    with _owned_os_descriptor(path, flags, 0o600) as descriptor:
+        os.fchmod(descriptor, 0o600)
         view = memoryview(data)
         while view:
             written = os.write(descriptor, view)
             view = view[written:]
+
+
+def _validated_private_barrier_path(
+    path: Path,
+) -> tuple[Path, tuple[int, ...], tuple[int, int, int, int]]:
+    """Capture the lexical parent+barrier identities before either is opened."""
+
+    lexical = Path(os.path.abspath(path.expanduser()))
+    try:
+        parent_metadata = os.lstat(lexical.parent)
+        metadata = os.lstat(lexical)
+    except OSError as exc:
+        raise BatteryFailure("inter_run_barrier_dir_invalid") from exc
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+        or metadata.st_uid != os.getuid()
+        or lexical.resolve() != lexical
+    ):
+        raise BatteryFailure("inter_run_barrier_dir_invalid")
+    parent_identity = _parent_directory_identity(parent_metadata)
+    if parent_identity[2] != os.getuid() or parent_identity[3] != 0o700:
+        raise BatteryFailure("inter_run_barrier_dir_invalid")
+    return lexical, parent_identity, _directory_identity(metadata)
+
+
+def _require_private_barrier_dir(path: Path) -> Path:
+    """Validate a single-use barrier below a dedicated owner-only parent."""
+
+    lexical, _parent_identity, _identity = _validated_private_barrier_path(path)
+    try:
+        if any(lexical.iterdir()):
+            raise BatteryFailure("inter_run_barrier_dir_not_empty")
+    except OSError as exc:
+        raise BatteryFailure("inter_run_barrier_dir_invalid") from exc
+    return lexical
+
+
+def _directory_identity(metadata: os.stat_result) -> tuple[int, int, int, int]:
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise BatteryFailure("inter_run_barrier_dir_invalid")
+    return (
+        int(metadata.st_dev),
+        int(metadata.st_ino),
+        int(metadata.st_uid),
+        stat.S_IMODE(metadata.st_mode),
+    )
+
+
+def _parent_directory_identity(metadata: os.stat_result) -> tuple[int, ...]:
+    return (
+        *_directory_identity(metadata),
+        int(metadata.st_mtime_ns),
+        int(metadata.st_ctime_ns),
+    )
+
+
+@dataclass
+class _PinnedBarrierDirectory:
+    """Open parent+barrier descriptors retained for the controller lifetime."""
+
+    path: Path
+    parent_descriptor: int
+    descriptor: int
+    parent_identity: tuple[int, ...]
+    identity: tuple[int, int, int, int]
+
+    @classmethod
+    def open(
+        cls,
+        value: Path,
+        *,
+        owner: list[_PinnedBarrierDirectory] | None = None,
+    ) -> _PinnedBarrierDirectory:
+        path, expected_parent_identity, expected_identity = _validated_private_barrier_path(value)
+        directory_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        directory_flags |= getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        parent_descriptor = -1
+        descriptor = -1
+        pinned: _PinnedBarrierDirectory | None = None
+        try:
+            parent_descriptor = os.open(path.parent, directory_flags)
+            parent_identity = _parent_directory_identity(os.fstat(parent_descriptor))
+            if parent_identity != expected_parent_identity:
+                raise BatteryFailure("inter_run_barrier_dir_changed")
+            descriptor = os.open(path.name, directory_flags, dir_fd=parent_descriptor)
+            identity = _directory_identity(os.fstat(descriptor))
+            if identity != expected_identity:
+                raise BatteryFailure("inter_run_barrier_dir_changed")
+            pinned = cls(
+                path=path,
+                parent_descriptor=parent_descriptor,
+                descriptor=descriptor,
+                parent_identity=parent_identity,
+                identity=identity,
+            )
+            pinned.revalidate()
+            if os.listdir(descriptor):
+                raise BatteryFailure("inter_run_barrier_dir_not_empty")
+            if owner is not None:
+                # Bind ownership before returning.  A BaseException between
+                # RETURN_VALUE and the caller's STORE_FAST can then still be
+                # closed by the controller's already-bound owner list.
+                owner.append(pinned)
+            return pinned
+        except BaseException:
+            if pinned is not None:
+                pinned.close()
+            else:
+                if descriptor >= 0:
+                    os.close(descriptor)
+                if parent_descriptor >= 0:
+                    os.close(parent_descriptor)
+            raise
+
+    def __truediv__(self, name: str) -> Path:
+        return self.path / name
+
+    def revalidate(self) -> None:
+        if self.parent_descriptor < 0 or self.descriptor < 0:
+            raise BatteryFailure("inter_run_barrier_dir_invalid")
+        try:
+            if _parent_directory_identity(os.fstat(self.parent_descriptor)) != self.parent_identity:
+                raise BatteryFailure("inter_run_barrier_dir_changed")
+            if (
+                _parent_directory_identity(os.stat(self.path.parent, follow_symlinks=False))
+                != self.parent_identity
+            ):
+                raise BatteryFailure("inter_run_barrier_dir_changed")
+            if _directory_identity(os.fstat(self.descriptor)) != self.identity:
+                raise BatteryFailure("inter_run_barrier_dir_changed")
+            if (
+                _directory_identity(
+                    os.stat(
+                        self.path.name,
+                        dir_fd=self.parent_descriptor,
+                        follow_symlinks=False,
+                    )
+                )
+                != self.identity
+                or self.path.resolve() != self.path
+            ):
+                raise BatteryFailure("inter_run_barrier_dir_changed")
+        except BatteryFailure:
+            raise
+        except OSError as exc:
+            raise BatteryFailure("inter_run_barrier_dir_changed") from exc
+
+    def close(self) -> None:
+        descriptor = self.descriptor
+        parent_descriptor = self.parent_descriptor
+        self.descriptor = -1
+        self.parent_descriptor = -1
+        first_error: OSError | None = None
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError as exc:
+                first_error = exc
+        if parent_descriptor >= 0:
+            try:
+                os.close(parent_descriptor)
+            except OSError as exc:
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
+
+
+@contextmanager
+def _private_worker_log(path: Path):
+    """Open one private log without a raw-fd ownership-transfer window."""
+
+    descriptor = -1
+    stream = None
+    try:
+        previous_mask = _block_controller_signals()
+        try:
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(path, flags, 0o600)
+            os.fchmod(descriptor, 0o600)
+            stream = os.fdopen(descriptor, "wb")
+            descriptor = -1
+        finally:
+            # A pending controller signal is delivered only after either the
+            # raw fd or its stream owner is bound in this frame.  The outer
+            # finally then closes that bound owner during the unwind.
+            _restore_signal_mask(previous_mask)
+        yield stream
     finally:
-        os.close(descriptor)
-    path.chmod(0o600)
+        if stream is not None:
+            stream.close()
+        elif descriptor >= 0:
+            os.close(descriptor)
+
+
+def _validate_private_regular_file(path: Path, metadata: os.stat_result) -> None:
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_nlink != 1
+        or metadata.st_uid != os.getuid()
+    ):
+        raise BatteryFailure("inter_run_barrier_file_invalid")
+
+
+def _private_file_identity(metadata: os.stat_result) -> tuple[int, ...]:
+    _validate_private_regular_file(Path("."), metadata)
+    return (
+        int(metadata.st_dev),
+        int(metadata.st_ino),
+        int(metadata.st_uid),
+        stat.S_IMODE(metadata.st_mode),
+        int(metadata.st_nlink),
+        int(metadata.st_size),
+        int(metadata.st_mtime_ns),
+        int(metadata.st_ctime_ns),
+    )
+
+
+def _validate_barrier_name(name: str) -> str:
+    if not name or Path(name).name != name or name in {".", ".."}:
+        raise BatteryFailure("inter_run_barrier_file_invalid")
+    return name
+
+
+def _rename_noreplace(
+    source_dir: int,
+    source_name: str,
+    target_dir: int,
+    target_name: str,
+) -> None:
+    """Atomically publish one Linux-local file without replacing a target."""
+
+    try:
+        source = os.fsencode(source_name)
+        target = os.fsencode(target_name)
+    except (TypeError, UnicodeError) as exc:
+        raise BatteryFailure("inter_run_barrier_write_failed") from exc
+    if not source or not target or b"/" in source or b"/" in target:
+        raise BatteryFailure("inter_run_barrier_write_failed")
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        renameat2 = libc.renameat2
+    except (AttributeError, OSError) as exc:
+        raise BatteryFailure("inter_run_barrier_atomic_publish_unsupported") from exc
+    renameat2.argtypes = (
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    )
+    renameat2.restype = ctypes.c_int
+    if renameat2(source_dir, source, target_dir, target, _RENAME_NOREPLACE) == 0:
+        return
+    error_number = ctypes.get_errno()
+    if error_number == errno.EEXIST:
+        raise BatteryFailure("inter_run_barrier_file_exists")
+    if error_number in {errno.ENOSYS, errno.EINVAL, errno.ENOTSUP}:
+        raise BatteryFailure("inter_run_barrier_atomic_publish_unsupported")
+    raise OSError(error_number, os.strerror(error_number), target_name)
+
+
+def _atomic_pinned_private_write(
+    barrier: _PinnedBarrierDirectory,
+    name: str,
+    data: bytes,
+) -> Path:
+    """Publish one create-only private file through the held directory fd."""
+
+    name = _validate_barrier_name(name)
+    barrier.revalidate()
+    temporary = f".{name}.{secrets.token_hex(12)}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        with _owned_os_descriptor(
+            temporary,
+            flags,
+            0o600,
+            dir_fd=barrier.descriptor,
+        ) as descriptor:
+            os.fchmod(descriptor, 0o600)
+            view = memoryview(data)
+            while view:
+                written = os.write(descriptor, view)
+                view = view[written:]
+            os.fsync(descriptor)
+        _rename_noreplace(
+            barrier.descriptor,
+            temporary,
+            barrier.descriptor,
+            name,
+        )
+        os.fsync(barrier.descriptor)
+        metadata = os.stat(name, dir_fd=barrier.descriptor, follow_symlinks=False)
+        _validate_private_regular_file(barrier.path / name, metadata)
+        barrier.revalidate()
+        return barrier.path / name
+    except BatteryFailure:
+        raise
+    except OSError as exc:
+        raise BatteryFailure("inter_run_barrier_write_failed") from exc
+    finally:
+        with suppress(FileNotFoundError):
+            os.unlink(temporary, dir_fd=barrier.descriptor)
+
+
+def _read_pinned_private_json(
+    barrier: _PinnedBarrierDirectory,
+    name: str,
+    *,
+    max_bytes: int = 16_384,
+) -> dict[str, Any]:
+    """Read one stable owner-only file relative to the held barrier fd."""
+
+    name = _validate_barrier_name(name)
+    barrier.revalidate()
+    try:
+        before = os.stat(name, dir_fd=barrier.descriptor, follow_symlinks=False)
+        before_identity = _private_file_identity(before)
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        with _owned_os_descriptor(name, flags, dir_fd=barrier.descriptor) as descriptor:
+            opened = os.fstat(descriptor)
+            opened_identity = _private_file_identity(opened)
+            if opened_identity != before_identity:
+                raise BatteryFailure("inter_run_barrier_file_changed")
+            if opened.st_size <= 0 or opened.st_size > max_bytes:
+                raise BatteryFailure("inter_run_barrier_file_invalid")
+            chunks: list[bytes] = []
+            remaining = max_bytes + 1
+            while remaining > 0:
+                chunk = os.read(descriptor, min(remaining, 65_536))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            after = os.fstat(descriptor)
+            if (
+                _private_file_identity(after) != opened_identity
+                or sum(len(chunk) for chunk in chunks) != opened.st_size
+            ):
+                raise BatteryFailure("inter_run_barrier_file_changed")
+        lexical_after = os.stat(name, dir_fd=barrier.descriptor, follow_symlinks=False)
+        if _private_file_identity(lexical_after) != opened_identity:
+            raise BatteryFailure("inter_run_barrier_file_changed")
+        barrier.revalidate()
+        raw = b"".join(chunks)
+        parsed = json.loads(raw.decode("utf-8"))
+    except BatteryFailure:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise BatteryFailure("inter_run_barrier_file_invalid") from exc
+    if not isinstance(parsed, dict):
+        raise BatteryFailure("inter_run_barrier_file_invalid")
+    if raw != _canonical_json(parsed) + b"\n":
+        raise BatteryFailure("inter_run_barrier_file_invalid")
+    return parsed
+
+
+class _LifecycleLogHandler(logging.Handler):
+    """Project only authoritative shutdown warnings into closed event codes."""
+
+    def __init__(self, failure_codes: set[str]) -> None:
+        super().__init__(level=logging.WARNING)
+        self.failure_codes = failure_codes
+
+    def emit(self, record: logging.LogRecord) -> None:
+        template = str(record.msg or "")
+        if record.name == "friday.mcp_runtime.client" and template.startswith(
+            "MCP server %s cleanup exceeded"
+        ):
+            self.failure_codes.add("mcp_cleanup_timeout_warning")
+        elif record.name == "friday.server" and template.startswith("Shutting down with %s still executing"):
+            self.failure_codes.add("server_shutdown_stranded_warning")
+
+
+class LifecycleAudit:
+    """Observe lifecycle boundaries without retaining log messages or payloads."""
+
+    def __init__(self) -> None:
+        self.failure_codes: set[str] = set()
+        self._handler = _LifecycleLogHandler(self.failure_codes)
+        self._original_mcp_close: Callable[..., Any] | None = None
+
+    def install(self) -> None:
+        import friday.mcp_runtime.client as mcp_client
+
+        if self._original_mcp_close is not None:
+            raise BatteryFailure("lifecycle_audit_already_installed")
+        original = mcp_client._bounded_stack_close
+        self._original_mcp_close = original
+
+        async def audited_mcp_close(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return await original(*args, **kwargs)
+            except BaseException:
+                self.failure_codes.add("mcp_cleanup_exception")
+                raise
+
+        mcp_client._bounded_stack_close = audited_mcp_close
+        logging.getLogger("friday.mcp_runtime.client").addHandler(self._handler)
+        logging.getLogger("friday.server").addHandler(self._handler)
+
+    def close(self) -> None:
+        import friday.mcp_runtime.client as mcp_client
+
+        logging.getLogger("friday.mcp_runtime.client").removeHandler(self._handler)
+        logging.getLogger("friday.server").removeHandler(self._handler)
+        if self._original_mcp_close is not None:
+            mcp_client._bounded_stack_close = self._original_mcp_close
+            self._original_mcp_close = None
+
+    def closed_failure_codes(self) -> tuple[str, ...]:
+        return tuple(sorted(code for code in self.failure_codes if code in _LIFECYCLE_FAILURE_CODES))
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -484,15 +1004,23 @@ def build_worker_environment(
     owner_chats: Sequence[int],
     source_env_file: Path | None = None,
     run_id: str | None = None,
+    operator_model_env_only: bool = False,
 ) -> dict[str, str]:
     run_dir = run_dir.resolve()
     if run_dir == Path(run_dir.anchor) or not run_dir.is_dir():
         raise BatteryFailure("unsafe_run_directory")
-    source_path = source_env_file.resolve() if source_env_file is not None else ROOT / ".env.local"
-    source = _load_env_file_values(source_path)
-    for key in _MODEL_ENV_ALLOWLIST:
-        if key in os.environ:
-            source[key] = os.environ[key]
+    if operator_model_env_only:
+        if source_env_file is not None:
+            raise BatteryFailure("operator_model_env_only_source_env_file_conflict")
+        if _MODEL_ENV_ALLOWLIST.difference(os.environ):
+            raise BatteryFailure("operator_model_env_only_incomplete")
+        source = {key: os.environ[key] for key in _MODEL_ENV_ALLOWLIST}
+    else:
+        source_path = source_env_file.resolve() if source_env_file is not None else ROOT / ".env.local"
+        source = _load_env_file_values(source_path)
+        for key in _MODEL_ENV_ALLOWLIST:
+            if key in os.environ:
+                source[key] = os.environ[key]
     for key in _LOCAL_SIDECAR_URL_KEYS:
         if value := source.get(key):
             _require_local_sidecar_url(key, value)
@@ -716,14 +1244,14 @@ def _scan_fixture_font(text: str, font_path: Path, *, max_width: int) -> Any:
 
     if font_path.is_file():
         for size in range(_SCAN_FIXTURE_FONT_SIZE, 11, -1):
-            font = ImageFont.truetype(str(font_path), size)
-            left, _top, right, _bottom = font.getbbox(text)
+            candidate_font = ImageFont.truetype(str(font_path), size)
+            left, _top, right, _bottom = candidate_font.getbbox(text)
             if right - left <= max_width:
-                return font
-    font = ImageFont.load_default()
-    left, _top, right, _bottom = font.getbbox(text)
+                return candidate_font
+    fallback_font = ImageFont.load_default()
+    left, _top, right, _bottom = fallback_font.getbbox(text)
     if right - left <= max_width:
-        return font
+        return fallback_font
     raise BatteryFailure("scan_fixture_text_does_not_fit")
 
 
@@ -1149,7 +1677,7 @@ class LiveProbes:
                 self.counts["reranker_http"] += 1
             return await original_send(client, request, *args, **kwargs)
 
-        httpx.AsyncClient.send = send
+        cast(Any, httpx.AsyncClient).send = send
         self._restore.append(lambda: setattr(httpx.AsyncClient, "send", original_send))
 
         manager = getattr(self.app.state, "mcp", None)
@@ -2452,6 +2980,8 @@ def execute_worker(run_index: int) -> dict[str, Any]:
     problems = [item for item in validate_settings(base_settings) if not item.startswith("warning:")]
     if problems:
         raise BatteryFailure("isolated_settings_invalid")
+    lifecycle_audit = LifecycleAudit()
+    lifecycle_audit.install()
     from friday.server import create_app
 
     results: list[dict[str, Any]] = []
@@ -2527,6 +3057,9 @@ def execute_worker(run_index: int) -> dict[str, Any]:
             )
         result["fresh_database"] = True
         results.append(result)
+    lifecycle_audit.close()
+    lifecycle_failure_codes = lifecycle_audit.closed_failure_codes()
+    lifecycle_teardown_clear = not lifecycle_failure_codes
     _private_write(
         evidence_path,
         _canonical_json(
@@ -2535,6 +3068,8 @@ def execute_worker(run_index: int) -> dict[str, Any]:
                 "run_index": run_index,
                 "run_id_hash": run_hash,
                 "fresh_database_per_case": True,
+                "lifecycle_teardown_clear": lifecycle_teardown_clear,
+                "lifecycle_failure_codes": list(lifecycle_failure_codes),
                 "closed_results": results,
             }
         ),
@@ -2543,7 +3078,14 @@ def execute_worker(run_index: int) -> dict[str, Any]:
         "schema": WORKER_SCHEMA,
         "run_index": run_index,
         "run_id_hash": run_hash,
-        "status": "passed" if all(item["status"] == "passed" for item in results) else "failed",
+        "status": (
+            "passed"
+            if lifecycle_teardown_clear and all(item["status"] == "passed" for item in results)
+            else "failed"
+        ),
+        "failure_codes": list(lifecycle_failure_codes),
+        "lifecycle_teardown_clear": lifecycle_teardown_clear,
+        "lifecycle_failure_codes": list(lifecycle_failure_codes),
         "duration_ms": round((time.monotonic() - started) * 1000),
         "cases": results,
     }
@@ -2551,6 +3093,10 @@ def execute_worker(run_index: int) -> dict[str, Any]:
 
 def _worker_main(args: argparse.Namespace) -> int:
     try:
+        # The controller blocks its control-signal set across Popen and PGID
+        # binding.  POSIX children inherit that mask, so undo it before any
+        # worker setup; a TERM pending since spawn is delivered here.
+        _unblock_worker_control_signals()
         result = execute_worker(int(args.run_index))
     except Exception as exc:  # noqa: BLE001 - emit a closed code only
         result = {
@@ -2558,18 +3104,400 @@ def _worker_main(args: argparse.Namespace) -> int:
             "run_index": int(args.run_index),
             "status": "failed",
             "failure_codes": [f"worker_exception_{type(exc).__name__}"],
+            "lifecycle_teardown_clear": False,
+            "lifecycle_failure_codes": [],
             "cases": [],
         }
     sys.stdout.buffer.write(_canonical_json(result) + b"\n")
     return 0 if result.get("status") == "passed" else 1
 
 
+def _require_posix_signal_lifecycle() -> None:
+    if (
+        os.name != "posix"
+        or not hasattr(os, "killpg")
+        or not hasattr(signal, "pthread_sigmask")
+        or not hasattr(signal, "SIG_BLOCK")
+        or not hasattr(signal, "SIG_SETMASK")
+        or not hasattr(signal, "SIG_UNBLOCK")
+        or not hasattr(signal, "sigpending")
+        or not hasattr(signal, "sigtimedwait")
+    ):
+        raise BatteryFailure("worker_process_groups_unsupported")
+
+
+def _block_controller_signals() -> frozenset[Any]:
+    """Block INT+TERM together and return the calling thread's old mask."""
+
+    _require_posix_signal_lifecycle()
+    return frozenset(signal.pthread_sigmask(signal.SIG_BLOCK, _CONTROLLER_SIGNALS))
+
+
+def _restore_signal_mask(previous: frozenset[Any]) -> None:
+    _require_posix_signal_lifecycle()
+    signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+
+
+def _unblock_worker_control_signals() -> None:
+    """First worker action after exec: reverse the mask inherited at spawn."""
+
+    _require_posix_signal_lifecycle()
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, _CONTROLLER_SIGNALS)
+
+
+def _drain_pending_controller_signals() -> bool:
+    """Consume a bounded number of repeat signals while the set is blocked."""
+
+    _require_posix_signal_lifecycle()
+    targets = frozenset(_CONTROLLER_SIGNALS)
+    for _attempt in range(_MAX_PENDING_CONTROLLER_SIGNAL_DRAINS):
+        pending = targets.intersection(signal.sigpending())
+        if not pending:
+            return True
+        # Another runtime thread may consume a process-pending signal between
+        # sigpending() and the wait.  A zero-timeout consume keeps finalization
+        # bounded while still draining every signal that remains pending here.
+        if signal.sigtimedwait(pending, 0) is None:
+            return True
+    return not bool(targets.intersection(signal.sigpending()))
+
+
+def _process_group_exists(process_group: int) -> bool:
+    _require_posix_signal_lifecycle()
+    try:
+        os.killpg(process_group, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError as exc:
+        return exc.errno != errno.ESRCH
+    return True
+
+
+def _wait_process_group_clear(process_group: int, timeout_sec: float) -> bool:
+    deadline = time.monotonic() + max(0.0, timeout_sec)
+    while _process_group_exists(process_group):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
+def _signal_process_group(process_group: int, selected_signal: int) -> bool:
+    if not _process_group_exists(process_group):
+        return False
+    try:
+        os.killpg(process_group, selected_signal)
+    except ProcessLookupError:
+        return False
+    except OSError as exc:
+        if exc.errno == errno.ESRCH:
+            return False
+        raise BatteryFailure("worker_process_group_signal_failed") from exc
+    return True
+
+
+def _cleanup_bound_worker(
+    process: subprocess.Popen[bytes],
+    process_group: int,
+) -> WorkerCleanupOutcome:
+    """Run one bounded TERM/wait/KILL/reap/final-audit sequence.
+
+    Group cleanup is deliberately independent of the leader state: an exited
+    leader may have left a TERM-ignoring descendant in its session.  The caller
+    blocks both controller signals before entering this function.  Every phase
+    is best-effort so even an unexpected BaseException cannot skip the final
+    group audit; the first such BaseException is returned for truthful unwind.
+    """
+
+    cleanup_codes: set[str] = set()
+    deferred: BaseException | None = None
+    stdout = b""
+
+    def record_cleanup_exception(exc: BaseException) -> None:
+        nonlocal deferred
+        cleanup_codes.add("worker_cleanup_exception")
+        if not isinstance(exc, Exception) and deferred is None:
+            deferred = exc
+
+    term_sent = False
+    try:
+        term_sent = _signal_process_group(process_group, signal.SIGTERM)
+    except BaseException as exc:  # cleanup must continue through final audit
+        record_cleanup_exception(exc)
+    if term_sent:
+        cleanup_codes.add("worker_group_term_sent")
+
+    clear_after_term = False
+    try:
+        clear_after_term = _wait_process_group_clear(
+            process_group,
+            PROCESS_GROUP_TERM_GRACE_SEC,
+        )
+    except BaseException as exc:  # cleanup must still attempt KILL
+        record_cleanup_exception(exc)
+
+    if not clear_after_term:
+        kill_sent = False
+        try:
+            kill_sent = _signal_process_group(process_group, signal.SIGKILL)
+        except BaseException as exc:  # reap and final audit are still mandatory
+            record_cleanup_exception(exc)
+        if kill_sent:
+            cleanup_codes.add("worker_group_kill_sent")
+
+    worker_reaped = False
+    try:
+        worker_reaped = process.poll() is not None
+    except BaseException as exc:
+        record_cleanup_exception(exc)
+
+    if not worker_reaped:
+        try:
+            stdout, _stderr = process.communicate(timeout=PROCESS_GROUP_KILL_GRACE_SEC)
+            worker_reaped = process.poll() is not None
+        except subprocess.TimeoutExpired:
+            cleanup_codes.add("worker_leader_not_reaped")
+        except BaseException as exc:  # final group audit must still execute
+            record_cleanup_exception(exc)
+            try:
+                worker_reaped = process.poll() is not None
+            except BaseException as poll_exc:
+                record_cleanup_exception(poll_exc)
+    if not worker_reaped:
+        cleanup_codes.add("worker_leader_not_reaped")
+
+    process_group_clear = False
+    try:
+        process_group_clear = _wait_process_group_clear(
+            process_group,
+            PROCESS_GROUP_KILL_GRACE_SEC,
+        )
+    except BaseException as exc:
+        record_cleanup_exception(exc)
+    if not process_group_clear:
+        cleanup_codes.add("worker_process_group_not_clear")
+
+    return WorkerCleanupOutcome(
+        stdout=stdout,
+        worker_reaped=worker_reaped,
+        process_group_clear=process_group_clear,
+        cleanup_failure_codes=tuple(sorted(cleanup_codes)),
+        deferred_baseexception=deferred,
+    )
+
+
+def _run_worker_process(
+    command: Sequence[str],
+    *,
+    environment: Mapping[str, str],
+    private_log: Any,
+    controller_signal_handlers: ControllerSignalHandlers | None = None,
+) -> WorkerProcessOutcome:
+    """Run one worker under a single fail-closed spawn-to-audit lifecycle."""
+
+    _require_posix_signal_lifecycle()
+    if controller_signal_handlers is not None:
+        initial_mask = _block_controller_signals()
+        try:
+            # Until a bound final audit proves otherwise, a signal at any later
+            # Python delivery boundary must report worker cleanup as uncertain.
+            controller_signal_handlers.worker_cleanup_clear = False
+            controller_signal_handlers.worker_cleanup_failure_codes = ("worker_process_group_not_clear",)
+        finally:
+            _restore_signal_mask(initial_mask)
+    process: subprocess.Popen[bytes] | None = None
+    process_group: int | None = None
+    timed_out = False
+    cleanup_codes: set[str] = set()
+    stdout = b""
+    worker_reaped = False
+    process_group_clear_initial = False
+    process_group_clear = False
+    cleanup_required = False
+    primary: BaseException | None = None
+    primary_traceback: Any = None
+    cleanup_outcome: WorkerCleanupOutcome | None = None
+    lifecycle_pending = True
+    cleanup_started = False
+    cleanup_mask: frozenset[Any] | None = None
+
+    def capture_primary(exc: BaseException) -> None:
+        nonlocal primary, primary_traceback
+        if primary is None or (
+            isinstance(exc, ControllerSignal) and not isinstance(primary, ControllerSignal)
+        ):
+            primary = exc
+            primary_traceback = exc.__traceback__
+
+    # A signal may be raised at any Python boundary, including immediately
+    # before the first cleanup-mask syscall.  Retrying only that not-yet-started
+    # cleanup phase under the mask set by the signal handler closes this last
+    # window without ever spawning twice or running two cleanup sequences.
+    while True:
+        try:
+            if lifecycle_pending:
+                lifecycle_pending = False
+                # Blocking the complete set in one syscall closes both the
+                # Popen return and process-handle/PGID binding windows.  The
+                # hidden worker explicitly unblocks the inherited mask first.
+                spawn_mask = _block_controller_signals()
+                try:
+                    process = subprocess.Popen(  # noqa: S603 - fixed candidate-local argv
+                        list(command),
+                        cwd=ROOT,
+                        env=dict(environment),
+                        stdout=subprocess.PIPE,
+                        stderr=private_log,
+                        start_new_session=True,
+                        restore_signals=True,
+                    )
+                    process_group = int(process.pid)
+                finally:
+                    _restore_signal_mask(spawn_mask)
+
+                try:
+                    stdout, _stderr = process.communicate(timeout=WORKER_TIMEOUT_SEC)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    cleanup_required = True
+                    cleanup_codes.add("worker_timeout")
+                else:
+                    worker_reaped = process.poll() is not None
+                    # A signal here must enter the same bounded cleanup.
+                    process_group_clear_initial = _wait_process_group_clear(
+                        process_group,
+                        PROCESS_GROUP_EXIT_GRACE_SEC,
+                    )
+                    process_group_clear = process_group_clear_initial
+                    if not process_group_clear_initial:
+                        cleanup_codes.add("worker_process_group_survived")
+                        cleanup_required = True
+                    if not worker_reaped:
+                        cleanup_required = True
+
+            if process is not None and process_group is not None and cleanup_required:
+                # Repeat INT/TERM delivery is deferred as one atomic set until
+                # TERM/wait/KILL/reap/final-audit has completely finished.
+                cleanup_mask = _block_controller_signals()
+                cleanup_started = True
+                cleanup_outcome = _cleanup_bound_worker(process, process_group)
+            break
+        except BaseException as exc:
+            capture_primary(exc)
+            cleanup_required = process is not None
+            if isinstance(exc, Exception):
+                cleanup_codes.add(
+                    "worker_cleanup_exception" if cleanup_started else "worker_process_exception"
+                )
+            if process is not None and process_group is not None and not cleanup_started:
+                continue
+            break
+
+    if process is None or process_group is None:
+        if primary is not None:
+            raise primary.with_traceback(primary_traceback)
+        raise BatteryFailure("worker_process_spawn_failed")
+
+    cleanup_codes_tuple: tuple[str, ...] = ()
+
+    def attach_cleanup_projection(exc: ControllerSignal) -> None:
+        exc.worker_cleanup_clear = bool(worker_reaped and process_group_clear)
+        exc.worker_cleanup_failure_codes = cleanup_codes_tuple
+
+    try:
+        # Keep INT+TERM blocked until the final audit has been projected into
+        # immutable local truth and, for an existing signal, attached to the
+        # public exception.  Restoring the mask before this block created a
+        # deterministic late-first-signal window that could discard RED.
+        if cleanup_outcome is not None:
+            if cleanup_outcome.stdout:
+                stdout = cleanup_outcome.stdout
+            worker_reaped = cleanup_outcome.worker_reaped
+            process_group_clear = cleanup_outcome.process_group_clear
+            cleanup_codes.update(cleanup_outcome.cleanup_failure_codes)
+            if primary is None and cleanup_outcome.deferred_baseexception is not None:
+                primary = cleanup_outcome.deferred_baseexception
+                primary_traceback = primary.__traceback__
+
+        if not worker_reaped:
+            cleanup_codes.add("worker_leader_not_reaped")
+        if not process_group_clear:
+            cleanup_codes.add("worker_process_group_not_clear")
+
+        cleanup_codes_tuple = tuple(sorted(cleanup_codes))
+        if controller_signal_handlers is not None:
+            controller_signal_handlers.worker_cleanup_clear = bool(worker_reaped and process_group_clear)
+            controller_signal_handlers.worker_cleanup_failure_codes = cleanup_codes_tuple
+        if (
+            cleanup_mask is not None
+            and controller_signal_handlers is not None
+            and not isinstance(primary, ControllerSignal)
+        ):
+            pending = frozenset(_CONTROLLER_SIGNALS).intersection(signal.sigpending())
+            if pending:
+                selected_signal = int(signal.sigwait(pending))
+                if controller_signal_handlers.first_signal is None:
+                    controller_signal_handlers.first_signal = selected_signal
+                primary = ControllerSignal(int(controller_signal_handlers.first_signal))
+                primary_traceback = primary.__traceback__
+        if isinstance(primary, ControllerSignal):
+            attach_cleanup_projection(primary)
+
+        bound_outcome = WorkerProcessOutcome(
+            stdout=stdout,
+            returncode=int(process.returncode if process.returncode is not None else -1),
+            worker_reaped=worker_reaped,
+            process_group_clear_initial=process_group_clear_initial,
+            process_group_clear=process_group_clear,
+            timed_out=timed_out,
+            cleanup_failure_codes=cleanup_codes_tuple,
+        )
+    except BaseException:
+        if cleanup_mask is not None:
+            mask_to_restore = cleanup_mask
+            cleanup_mask = None
+            _restore_signal_mask(mask_to_restore)
+        raise
+
+    try:
+        if cleanup_mask is not None:
+            mask_to_restore = cleanup_mask
+            cleanup_mask = None
+            _restore_signal_mask(mask_to_restore)
+        if isinstance(primary, ControllerSignal):
+            raise primary.with_traceback(primary_traceback)
+        if primary is not None and not isinstance(primary, Exception):
+            if not worker_reaped or not process_group_clear:
+                raise BatteryFailure("worker_process_group_not_clear") from primary
+            raise primary.with_traceback(primary_traceback)
+        return bound_outcome
+    except ControllerSignal as exc:
+        # Covers a first signal delivered by mask restoration or at any point
+        # through the bound return.  Its public projection can no longer be
+        # default/empty after a false final audit.
+        attach_cleanup_projection(exc)
+        raise
+
+
 def _git_output(*args: str) -> str:
+    environment = {key: value for key, value in os.environ.items() if key in {"LANG", "LC_ALL"}}
+    environment.update(
+        {
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_PAGER": "cat",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
+    )
     completed = subprocess.run(
-        ["git", *args],
+        [_GIT_BINARY, "-c", "core.fsmonitor=false", *args],
         cwd=ROOT,
         check=True,
         capture_output=True,
+        env=environment,
         text=True,
         timeout=20,
     )
@@ -2600,16 +3528,392 @@ def _controller_source_env_file(value: str) -> Path | None:
     return path
 
 
+def _worker_lifecycle_projection(report: Mapping[str, Any]) -> tuple[bool, bool, tuple[str, ...]]:
+    raw_clear = report.get("lifecycle_teardown_clear")
+    raw_codes = report.get("lifecycle_failure_codes")
+    if type(raw_clear) is not bool or not isinstance(raw_codes, list):
+        return False, False, ()
+    codes = tuple(raw_codes)
+    if (
+        any(not isinstance(code, str) or code not in _LIFECYCLE_FAILURE_CODES for code in codes)
+        or len(codes) != len(set(codes))
+        or list(codes) != sorted(codes)
+        or (raw_clear and codes)
+    ):
+        return False, False, ()
+    return True, bool(raw_clear), codes
+
+
+def _mark_run_failed(report: dict[str, Any], code: str) -> None:
+    report["status"] = "failed"
+    raw_codes = report.get("failure_codes")
+    codes = [item for item in raw_codes if isinstance(item, str)] if isinstance(raw_codes, list) else []
+    if code not in codes:
+        codes.append(code)
+    report["failure_codes"] = sorted(codes)
+
+
+def _build_run_receipt(
+    *,
+    commit: str,
+    run_hash: str,
+    run_index: int,
+    report: Mapping[str, Any],
+    worker_report_sha256: str,
+) -> dict[str, Any]:
+    teardown = report.get("teardown")
+    if not isinstance(teardown, Mapping):
+        raise BatteryFailure("run_teardown_receipt_missing")
+    return {
+        "schema": RUN_RECEIPT_SCHEMA,
+        "commit": commit,
+        "run_id_hash": run_hash,
+        "run_index": run_index,
+        "worker_report_sha256": worker_report_sha256,
+        "worker_status": str(report.get("status") or "failed"),
+        "worker_exit_code": int(teardown.get("worker_exit_code", -1)),
+        "worker_reaped": teardown.get("worker_reaped") is True,
+        "process_group_clear_initial": teardown.get("process_group_clear_initial") is True,
+        "process_group_clear": teardown.get("process_group_clear") is True,
+        "process_cleanup_failure_codes": list(teardown.get("process_cleanup_failure_codes") or []),
+        "lifecycle_contract_clear": teardown.get("lifecycle_contract_clear") is True,
+        "lifecycle_teardown_clear": teardown.get("lifecycle_teardown_clear") is True,
+        "lifecycle_failure_codes": list(teardown.get("lifecycle_failure_codes") or []),
+        "teardown_clear": teardown.get("teardown_clear") is True,
+    }
+
+
+def _persist_run_receipt(
+    barrier_dir: _PinnedBarrierDirectory,
+    payload: Mapping[str, Any],
+) -> tuple[Path, str]:
+    exact_keys = {
+        "schema",
+        "commit",
+        "run_id_hash",
+        "run_index",
+        "worker_report_sha256",
+        "worker_status",
+        "worker_exit_code",
+        "worker_reaped",
+        "process_group_clear_initial",
+        "process_group_clear",
+        "process_cleanup_failure_codes",
+        "lifecycle_contract_clear",
+        "lifecycle_teardown_clear",
+        "lifecycle_failure_codes",
+        "teardown_clear",
+    }
+    if set(payload) != exact_keys or payload.get("schema") != RUN_RECEIPT_SCHEMA:
+        raise BatteryFailure("run_teardown_receipt_invalid")
+    run_index = int(payload.get("run_index") or 0)
+    if not 1 <= run_index <= RUNS:
+        raise BatteryFailure("run_teardown_receipt_invalid")
+    process_codes = payload.get("process_cleanup_failure_codes")
+    lifecycle_codes = payload.get("lifecycle_failure_codes")
+    if (
+        not isinstance(payload.get("commit"), str)
+        or re.fullmatch(r"[0-9a-f]{40}", str(payload.get("commit") or "")) is None
+        or re.fullmatch(r"[0-9a-f]{64}", str(payload.get("run_id_hash") or "")) is None
+        or re.fullmatch(r"[0-9a-f]{64}", str(payload.get("worker_report_sha256") or "")) is None
+        or payload.get("worker_status") not in {"passed", "failed"}
+        or type(payload.get("worker_exit_code")) is not int
+        or any(
+            type(payload.get(key)) is not bool
+            for key in (
+                "worker_reaped",
+                "process_group_clear_initial",
+                "process_group_clear",
+                "lifecycle_contract_clear",
+                "lifecycle_teardown_clear",
+                "teardown_clear",
+            )
+        )
+        or not isinstance(process_codes, list)
+        or process_codes != sorted(set(process_codes))
+        or any(code not in _PROCESS_CLEANUP_FAILURE_CODES for code in process_codes)
+        or not isinstance(lifecycle_codes, list)
+        or lifecycle_codes != sorted(set(lifecycle_codes))
+        or any(code not in _LIFECYCLE_FAILURE_CODES for code in lifecycle_codes)
+    ):
+        raise BatteryFailure("run_teardown_receipt_invalid")
+    expected_teardown_clear = bool(
+        payload["worker_exit_code"] == 0
+        and payload["worker_reaped"]
+        and payload["process_group_clear_initial"]
+        and payload["process_group_clear"]
+        and not process_codes
+        and payload["lifecycle_contract_clear"]
+        and payload["lifecycle_teardown_clear"]
+        and not lifecycle_codes
+    )
+    if payload.get("teardown_clear") is not expected_teardown_clear:
+        raise BatteryFailure("run_teardown_receipt_inconsistent")
+    name = f"run-{run_index}-receipt.json"
+    encoded = _canonical_json(dict(payload)) + b"\n"
+    path = _atomic_pinned_private_write(barrier_dir, name, encoded)
+    if _read_pinned_private_json(barrier_dir, name) != dict(payload):
+        raise BatteryFailure("run_teardown_receipt_changed")
+    return path, _sha256(encoded)
+
+
+def _observer_request(
+    *,
+    commit: str,
+    run_hash: str,
+    receipt_sha256: str,
+    worker_report_sha256: str,
+    challenge: str,
+) -> dict[str, Any]:
+    return {
+        "schema": OBSERVER_REQUEST_SCHEMA,
+        "commit": commit,
+        "run_id_hash": run_hash,
+        "run_index": 1,
+        "run_receipt_sha256": receipt_sha256,
+        "worker_report_sha256": worker_report_sha256,
+        "challenge": challenge,
+    }
+
+
+def _validate_observer_response(
+    response: Mapping[str, Any],
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    boolean_fields = (
+        "bridge_stopped",
+        "bridge_operator_guard_held",
+        "backend_healthy",
+        "backend_unchanged",
+        "outbound_pending_zero",
+        "inbound_pending_zero",
+        "dead_letter_zero",
+        "dispatcher_unchanged",
+    )
+    exact_keys = {
+        "schema",
+        "commit",
+        "run_id_hash",
+        "run_index",
+        "run_receipt_sha256",
+        "worker_report_sha256",
+        "challenge",
+        "status",
+        *boolean_fields,
+    }
+    if set(response) != exact_keys:
+        raise BatteryFailure("inter_run_observer_response_invalid")
+    for key in (
+        "commit",
+        "run_id_hash",
+        "run_index",
+        "run_receipt_sha256",
+        "worker_report_sha256",
+        "challenge",
+    ):
+        if response.get(key) != request.get(key):
+            raise BatteryFailure("inter_run_observer_binding_mismatch")
+    if response.get("schema") != OBSERVER_RESPONSE_SCHEMA or response.get("status") != "passed":
+        raise BatteryFailure("inter_run_observer_not_clear")
+    for key in boolean_fields:
+        if response.get(key) is not True:
+            raise BatteryFailure(f"inter_run_observer_{key}_failed")
+    return {
+        "schema": OBSERVER_RESPONSE_SCHEMA,
+        "status": "passed",
+        "run_index": 1,
+        "run_receipt_sha256": str(request["run_receipt_sha256"]),
+        "worker_report_sha256": str(request["worker_report_sha256"]),
+        **{key: True for key in boolean_fields},
+    }
+
+
+def _await_inter_run_observer(
+    barrier_dir: _PinnedBarrierDirectory,
+    request: Mapping[str, Any],
+) -> tuple[dict[str, Any], str]:
+    request_name = "run-1-observer-request.json"
+    response_name = "run-1-observer.json"
+    request_bytes = _canonical_json(dict(request)) + b"\n"
+    _atomic_pinned_private_write(barrier_dir, request_name, request_bytes)
+    if _read_pinned_private_json(barrier_dir, request_name) != dict(request):
+        raise BatteryFailure("inter_run_observer_request_changed")
+    deadline = time.monotonic() + INTER_RUN_OBSERVER_TIMEOUT_SEC
+    while True:
+        barrier_dir.revalidate()
+        try:
+            response_metadata = os.stat(
+                response_name,
+                dir_fd=barrier_dir.descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            if time.monotonic() >= deadline:
+                raise BatteryFailure("inter_run_observer_timeout") from None
+            time.sleep(0.05)
+            continue
+        _validate_private_regular_file(barrier_dir.path / response_name, response_metadata)
+        response = _read_pinned_private_json(barrier_dir, response_name)
+        projection = _validate_observer_response(response, request)
+        encoded_response = _canonical_json(response) + b"\n"
+        return projection, _sha256(encoded_response)
+
+
+def _install_controller_signal_handlers() -> ControllerSignalHandlers:
+    """Install both handlers while their complete signal set is blocked.
+
+    The returned state is deliberately handed to the caller *before* the old
+    mask is restored.  This closes the same return/STORE_FAST interruption
+    window that the worker spawn lifecycle closes for Popen and its PGID.
+    """
+
+    inherited_mask = _block_controller_signals()
+    # A parent operator may block INT+TERM across Popen and child-handle
+    # binding.  That mask is a spawn transport detail, not controller policy:
+    # once both handlers are installed this process must explicitly own and
+    # receive its control signals.  Preserve every unrelated inherited mask.
+    previous_mask = frozenset(item for item in inherited_mask if item not in _CONTROLLER_SIGNALS)
+    state = ControllerSignalHandlers(previous={}, previous_mask=previous_mask)
+
+    def interrupt(signal_number: int, _frame: Any) -> None:
+        # The first signal owns the unwind.  A repeat is consumed without
+        # raising another BaseException; explicit lifecycle masks still keep it
+        # out of cleanup, and the original exception cannot be replaced.
+        if state.first_signal is not None:
+            return
+        state.first_signal = signal_number
+        _block_controller_signals()
+        projected = ControllerSignal(state.first_signal)
+        projected.worker_cleanup_clear = state.worker_cleanup_clear
+        projected.worker_cleanup_failure_codes = state.worker_cleanup_failure_codes
+        raise projected
+
+    try:
+        for selected in _CONTROLLER_SIGNALS:
+            state.previous[selected] = signal.getsignal(selected)
+            signal.signal(selected, interrupt)
+    except BaseException:
+        for stored_signal, handler in state.previous.items():
+            signal.signal(stored_signal, handler)
+        _restore_signal_mask(previous_mask)
+        raise
+    return state
+
+
+def _activate_controller_signal_handlers(state: ControllerSignalHandlers) -> None:
+    """Unmask only after the caller has bound the installed-handler state."""
+
+    # Record the transition before unmasking.  If a pending signal raises from
+    # pthread_sigmask, finalization must treat this as an activated contour.
+    state.activated = True
+    _restore_signal_mask(state.previous_mask)
+
+
+def _finalize_controller_signal_handlers(
+    state: ControllerSignalHandlers,
+    cleanup: Callable[[], None],
+) -> None:
+    """Run controller cleanup with INT+TERM blocked, then restore dispositions."""
+
+    previous_mask = _block_controller_signals()
+    restore_mask = previous_mask if state.activated else state.previous_mask
+    try:
+        cleanup()
+    finally:
+        if state.first_signal is None:
+            # No controller signal is being preserved.  Restore the caller's
+            # dispositions under the full blocked set, then deliver anything
+            # that arrived during cleanup according to those dispositions.
+            try:
+                for selected, handler in state.previous.items():
+                    signal.signal(selected, handler)
+            finally:
+                try:
+                    _restore_signal_mask(restore_mask)
+                finally:
+                    state.activated = False
+        else:
+            # A first controller signal is already the active unwind reason.
+            # Drain only repeats synchronously while the complete set remains
+            # blocked.  This avoids both a live sequential-disposition window
+            # and Python's pending-signal/SIG_IGN race.
+            try:
+                _drain_pending_controller_signals()
+                for selected, handler in state.previous.items():
+                    signal.signal(selected, handler)
+            finally:
+                try:
+                    _drain_pending_controller_signals()
+                finally:
+                    try:
+                        _restore_signal_mask(state.previous_mask)
+                    finally:
+                        state.activated = False
+
+
 def run_controller(args: argparse.Namespace) -> dict[str, Any]:
     commit = _validate_live_gate(str(args.freeze_commit or ""), bool(args.bridge_stopped))
-    source_env_file = _controller_source_env_file(str(args.source_env_file or ""))
+    operator_model_env_only = bool(getattr(args, "operator_model_env_only", False))
+    explicit_source_env = str(args.source_env_file or "").strip()
+    if operator_model_env_only:
+        if explicit_source_env:
+            raise BatteryFailure("operator_model_env_only_source_env_file_conflict")
+        source_env_file = None
+    else:
+        source_env_file = _controller_source_env_file(explicit_source_env)
+    barrier_value = str(getattr(args, "inter_run_barrier_dir", "") or "").strip()
+    if not barrier_value:
+        raise BatteryFailure("inter_run_barrier_dir_required")
     run_id = _new_run_id()
     run_hash = _run_id_hash(run_id)
-    private_root = Path(tempfile.mkdtemp(prefix="friday-document-live-battery-")).resolve()
-    private_root.chmod(0o700)
-    reports: list[dict[str, Any]] = []
+    controller_signals = _install_controller_signal_handlers()
+    owned_barriers: list[_PinnedBarrierDirectory] = []
+    barrier_dir: _PinnedBarrierDirectory | None = None
+    private_root: Path | None = None
+
+    def close_owned_barriers() -> None:
+        for owned in reversed(owned_barriers):
+            owned.close()
+
+    def cleanup_failed_setup() -> None:
+        if private_root is not None:
+            shutil.rmtree(private_root, ignore_errors=True)
+        close_owned_barriers()
+
     try:
+        barrier_dir = _PinnedBarrierDirectory.open(
+            Path(barrier_value),
+            owner=owned_barriers,
+        )
+        private_root = Path(tempfile.mkdtemp(prefix="friday-document-live-battery-")).resolve()
+        private_root.chmod(0o700)
+    except BaseException:
+        _finalize_controller_signal_handlers(
+            controller_signals,
+            cleanup_failed_setup,
+        )
+        raise
+    assert private_root is not None
+    assert barrier_dir is not None
+    reports: list[dict[str, Any]] = []
+    run_receipts: list[dict[str, Any]] = []
+    controller_failure_codes: list[str] = []
+    observer_projection: dict[str, Any] = {"status": "not_run"}
+    observer_response_sha256 = ""
+
+    def cleanup_controller_resources() -> None:
+        if not args.keep_private_run_dir:
+            shutil.rmtree(private_root, ignore_errors=True)
+        close_owned_barriers()
+
+    try:
+        # Keep INT+TERM blocked through every setup ownership transfer and
+        # until this cleanup-protected contour is active.  A pending signal is
+        # delivered here, where both the pinned directory and private root are
+        # already bound for unconditional cleanup.
+        _activate_controller_signal_handlers(controller_signals)
         for run_index in range(1, RUNS + 1):
+            barrier_dir.revalidate()
             run_token = _run_token(run_id, run_index, "state-path")
             run_dir = _private_dir(private_root / f"run-{run_index}-{run_token}")
             owner_chats = _run_owner_chats(run_id, run_index)
@@ -2618,27 +3922,35 @@ def run_controller(args: argparse.Namespace) -> dict[str, Any]:
                 owner_chats=owner_chats,
                 source_env_file=source_env_file,
                 run_id=run_id,
+                operator_model_env_only=operator_model_env_only,
             )
             log_path = run_dir / "private-worker.log"
-            log_descriptor = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(log_descriptor, "wb") as log:
-                completed = subprocess.run(
-                    [
-                        sys.executable,
-                        str(Path(__file__).resolve()),
-                        "--worker",
-                        "--run-index",
-                        str(run_index),
-                    ],
-                    cwd=ROOT,
-                    env=environment,
-                    stdout=subprocess.PIPE,
-                    stderr=log,
-                    timeout=WORKER_TIMEOUT_SEC,
-                    check=False,
-                )
+            with _private_worker_log(log_path) as log:
+                try:
+                    outcome = _run_worker_process(
+                        [
+                            sys.executable,
+                            str(Path(__file__).resolve()),
+                            "--worker",
+                            "--run-index",
+                            str(run_index),
+                        ],
+                        environment=environment,
+                        private_log=log,
+                        controller_signal_handlers=controller_signals,
+                    )
+                except Exception:  # noqa: BLE001 - closed controller code only
+                    outcome = WorkerProcessOutcome(
+                        stdout=b"",
+                        returncode=-1,
+                        worker_reaped=False,
+                        process_group_clear_initial=False,
+                        process_group_clear=False,
+                        timed_out=False,
+                        cleanup_failure_codes=("worker_process_group_not_clear",),
+                    )
             try:
-                report = json.loads(completed.stdout.decode("utf-8"))
+                report = json.loads(outcome.stdout.decode("utf-8"))
             except (UnicodeError, json.JSONDecodeError):
                 report = {
                     "schema": WORKER_SCHEMA,
@@ -2647,11 +3959,20 @@ def run_controller(args: argparse.Namespace) -> dict[str, Any]:
                     "failure_codes": ["worker_output_invalid"],
                     "cases": [],
                 }
-            if (
-                report.get("schema") != WORKER_SCHEMA
-                or report.get("run_index") != run_index
-                or report.get("run_id_hash") != run_hash
-            ):
+            if not isinstance(report, dict):
+                report = {
+                    "schema": WORKER_SCHEMA,
+                    "run_index": run_index,
+                    "status": "failed",
+                    "failure_codes": ["worker_output_invalid"],
+                    "cases": [],
+                }
+            report_identity_clear = bool(
+                report.get("schema") == WORKER_SCHEMA
+                and report.get("run_index") == run_index
+                and report.get("run_id_hash") == run_hash
+            )
+            if not report_identity_clear:
                 report = {
                     "schema": WORKER_SCHEMA,
                     "run_index": run_index,
@@ -2660,11 +3981,109 @@ def run_controller(args: argparse.Namespace) -> dict[str, Any]:
                     "failure_codes": ["worker_identity_mismatch"],
                     "cases": [],
                 }
+            lifecycle_contract_clear, lifecycle_teardown_clear, lifecycle_codes = (
+                _worker_lifecycle_projection(report)
+            )
+            raw_cleanup_codes = tuple(outcome.cleanup_failure_codes)
+            process_cleanup_codes = (
+                raw_cleanup_codes
+                if (
+                    len(raw_cleanup_codes) == len(set(raw_cleanup_codes))
+                    and list(raw_cleanup_codes) == sorted(raw_cleanup_codes)
+                    and all(code in _PROCESS_CLEANUP_FAILURE_CODES for code in raw_cleanup_codes)
+                )
+                else ("worker_process_group_not_clear",)
+            )
+            teardown_clear = bool(
+                report_identity_clear
+                and outcome.returncode == 0
+                and outcome.worker_reaped
+                and outcome.process_group_clear_initial
+                and outcome.process_group_clear
+                and not outcome.timed_out
+                and not process_cleanup_codes
+                and lifecycle_contract_clear
+                and lifecycle_teardown_clear
+                and not lifecycle_codes
+            )
+            report["teardown"] = {
+                "worker_report_identity_clear": report_identity_clear,
+                "worker_exit_code": int(outcome.returncode),
+                "worker_reaped": bool(outcome.worker_reaped),
+                "process_group_clear_initial": bool(outcome.process_group_clear_initial),
+                "process_group_clear": bool(outcome.process_group_clear),
+                "process_cleanup_failure_codes": list(process_cleanup_codes),
+                "lifecycle_contract_clear": lifecycle_contract_clear,
+                "lifecycle_teardown_clear": lifecycle_teardown_clear,
+                "lifecycle_failure_codes": list(lifecycle_codes),
+                "teardown_clear": teardown_clear,
+            }
+            if outcome.returncode != 0:
+                _mark_run_failed(report, "worker_exit_nonzero")
+            if process_cleanup_codes:
+                _mark_run_failed(report, "worker_process_teardown_failed")
+            if not lifecycle_contract_clear:
+                _mark_run_failed(report, "worker_lifecycle_contract_invalid")
+            elif not lifecycle_teardown_clear or lifecycle_codes:
+                _mark_run_failed(report, "worker_lifecycle_teardown_failed")
+            if not teardown_clear:
+                _mark_run_failed(report, "worker_teardown_not_clear")
             reports.append(report)
-            if report.get("status") != "passed":
+
+            worker_report_sha256 = _sha256(_canonical_json(report))
+            receipt_payload = _build_run_receipt(
+                commit=commit,
+                run_hash=run_hash,
+                run_index=run_index,
+                report=report,
+                worker_report_sha256=worker_report_sha256,
+            )
+            try:
+                receipt_path, receipt_sha256 = _persist_run_receipt(barrier_dir, receipt_payload)
+                if _read_pinned_private_json(barrier_dir, receipt_path.name) != receipt_payload:
+                    raise BatteryFailure("run_teardown_receipt_changed")
+            except Exception:  # noqa: BLE001 - never start another worker after receipt uncertainty
+                _mark_run_failed(report, "run_teardown_receipt_failed")
+                controller_failure_codes.append("run_teardown_receipt_failed")
+                break
+            run_receipts.append(
+                {
+                    "run_index": run_index,
+                    "sha256": receipt_sha256,
+                    "worker_report_sha256": worker_report_sha256,
+                    "teardown_clear": teardown_clear,
+                }
+            )
+            if report.get("status") != "passed" or not teardown_clear:
                 # A failed first streak must be fixed on a new frozen commit;
                 # spending another full live run cannot turn it into 2/2.
                 break
+            if run_index == 1:
+                challenge = _new_run_id()
+                request = _observer_request(
+                    commit=commit,
+                    run_hash=run_hash,
+                    receipt_sha256=receipt_sha256,
+                    worker_report_sha256=worker_report_sha256,
+                    challenge=challenge,
+                )
+                try:
+                    observer_projection, observer_response_sha256 = _await_inter_run_observer(
+                        barrier_dir,
+                        request,
+                    )
+                    barrier_dir.revalidate()
+                    if _read_pinned_private_json(barrier_dir, receipt_path.name) != receipt_payload:
+                        raise BatteryFailure("run_teardown_receipt_changed")
+                except BatteryFailure as exc:
+                    controller_failure_codes.append(str(exc))
+                    observer_projection = {"status": "failed"}
+                    break
+                except Exception:  # noqa: BLE001 - observer implementation stays private
+                    controller_failure_codes.append("inter_run_observer_exception")
+                    observer_projection = {"status": "failed"}
+                    break
+        barrier_dir.revalidate()
         aggregate = {
             "schema": REPORT_SCHEMA,
             "commit": commit,
@@ -2672,22 +4091,42 @@ def run_controller(args: argparse.Namespace) -> dict[str, Any]:
             "runs_expected": RUNS,
             "runs_completed": len(reports),
             "cases_expected_per_run": CASES,
+            "failure_codes": sorted(set(controller_failure_codes)),
             "status": (
                 "passed"
-                if len(reports) == RUNS and all(item.get("status") == "passed" for item in reports)
+                if (
+                    len(reports) == RUNS
+                    and not controller_failure_codes
+                    and observer_projection.get("status") == "passed"
+                    and all(
+                        item.get("status") == "passed"
+                        and isinstance(item.get("teardown"), Mapping)
+                        and item["teardown"].get("teardown_clear") is True
+                        for item in reports
+                    )
+                )
                 else "failed"
             ),
+            "run_receipts": run_receipts,
+            "inter_run_observer": {
+                **observer_projection,
+                **({"response_sha256": observer_response_sha256} if observer_response_sha256 else {}),
+            },
             "runs": reports,
         }
         if args.keep_private_run_dir:
             aggregate["private_run_dir"] = str(private_root)
+        barrier_dir.revalidate()
         if args.report:
             report_path = Path(args.report).expanduser().resolve()
             _private_write(report_path, _canonical_json(aggregate) + b"\n")
+        barrier_dir.revalidate()
         return aggregate
     finally:
-        if not args.keep_private_run_dir:
-            shutil.rmtree(private_root, ignore_errors=True)
+        _finalize_controller_signal_handlers(
+            controller_signals,
+            cleanup_controller_resources,
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2704,9 +4143,26 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--operator-model-env-only",
+        action="store_true",
+        help=(
+            "require the complete allowlisted model environment from this controller "
+            "and do not read a source env file"
+        ),
+    )
+    parser.add_argument(
         "--bridge-stopped",
         action="store_true",
         help="operator assertion that the production Telegram bridge is stopped",
+    )
+    parser.add_argument(
+        "--inter-run-barrier-dir",
+        default="",
+        help=(
+            "pre-created empty owner-only directory below a dedicated, quiescent "
+            "owner-only parent for sanitized run receipts and the external "
+            "between-run service/queue attestation"
+        ),
     )
     parser.add_argument("--report", default="", help="optional closed aggregate JSON path")
     parser.add_argument(
@@ -2728,7 +4184,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if not args.run_live:
         raise SystemExit("Refusing live execution: use --run-live after code freeze and bridge stop")
-    report = run_controller(args)
+    try:
+        report = run_controller(args)
+    except ControllerSignal as exc:
+        if exc.worker_cleanup_clear is False:
+            sys.stderr.write("controller_signal_worker_cleanup_not_clear\n")
+        return 128 + int(exc.signal_number)
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     return 0 if report.get("status") == "passed" else 1
 

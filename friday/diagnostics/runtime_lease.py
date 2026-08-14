@@ -165,6 +165,22 @@ class ProcessLease:
         with self._mutex:
             return self._descriptor is not None
 
+    @property
+    def held_file_identity(self) -> tuple[int, int] | None:
+        """Device/inode of the exact advisory file held by this lease.
+
+        The abstract socket is the split-brain boundary on Linux, while the
+        advisory descriptor remains part of the public operational evidence.
+        Callers that publish a lease-backed snapshot can compare this identity
+        with the lexical lock entry and fail closed if it was replaced.
+        """
+
+        with self._mutex:
+            if self._descriptor is None:
+                return None
+            status = os.fstat(self._descriptor)
+            return int(status.st_dev), int(status.st_ino)
+
     def acquire(self) -> None:
         with self._mutex:
             if self._descriptor is not None:
