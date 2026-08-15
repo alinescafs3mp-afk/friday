@@ -169,7 +169,11 @@ def _pass_cases(profile: str, *, battery_id: str = "A") -> list[battery.Expanded
 
 
 def _closed_case_delta(case: battery.ExpandedCase) -> dict[str, int]:
-    model_owned = case.oracle_profile != "tenant_privacy" and not battery._package_a_code_owned_case(case)
+    model_owned = (
+        case.oracle_profile != "tenant_privacy"
+        and not battery._package_a_code_owned_case(case)
+        and not battery._package_a_code_owned_temporal_case(case)
+    )
     delta = {
         **dict.fromkeys(battery._P01_CODE_OWNED_DELTA_ZERO_COUNTERS, 0),
         "model_http": int(model_owned),
@@ -187,16 +191,57 @@ def _route_evidence(case: battery.ExpandedCase) -> dict[str, bool | None]:
             "fabricated_outside_deed_request": True,
             "answer_present": True,
             "model_spoke": False,
+            "outside_deed_replaced": False,
             "remainder_known": True,
+            "llm_failed": False,
+        }
+    if case.oracle_profile == "package_a_honesty":
+        return {
+            "fabricated_outside_deed_request": False,
+            "answer_present": False,
+            "model_spoke": True,
+            "outside_deed_replaced": False,
+            "remainder_known": False,
             "llm_failed": False,
         }
     return {
         "fabricated_outside_deed_request": False,
         "answer_present": True,
         "model_spoke": case.oracle_profile != "tenant_privacy",
+        "outside_deed_replaced": False,
         "remainder_known": True,
         "llm_failed": False,
     }
+
+
+@pytest.mark.parametrize(
+    ("model_spoke", "output_guards", "expected_guard"),
+    [
+        (True, {}, False),
+        (False, {"outside_deed_replaced": True}, True),
+        (True, {"outside_deed_replaced": False}, False),
+        (False, {"outside_deed_replaced": "true"}, None),
+        (True, "malformed", None),
+    ],
+)
+def test_p01_route_projection_binds_the_durable_outside_deed_guard(
+    model_spoke: bool,
+    output_guards: object,
+    expected_guard: bool | None,
+) -> None:
+    projected = battery._p01_route_evidence(
+        {
+            "answer_present": False,
+            "fabricated_outside_deed_request": False,
+            "llm_failed": False,
+            "model_spoke": model_spoke,
+            "output_guards": output_guards,
+            "remainder_known": False,
+        }
+    )
+
+    assert set(projected) == set(battery._P01_ROUTE_EVIDENCE_KEYS)
+    assert projected["outside_deed_replaced"] is expected_guard
 
 
 def _closed_ledgers(
@@ -291,6 +336,43 @@ def test_tenant_forbidden_turn_rejects_any_backend_http_send(counter: str) -> No
     )
 
 
+@pytest.mark.parametrize("counter", ["model_http", "embedding_http", "reranker_http"])
+def test_a_p02_code_owned_temporal_pass_rejects_any_backend_http_send(counter: str) -> None:
+    cases = _pass_cases("package_b_temporal", battery_id="A")
+    assert all(battery._package_a_code_owned_temporal_case(case) for case in cases)
+    delta_ledger, evidence_ledger = _closed_ledgers(cases)
+    assert all(delta["model_http"] == 0 for _case_id, delta in delta_ledger)
+    forged = copy.deepcopy(delta_ledger)
+    forged[0][1][counter] = 1
+
+    assert (
+        battery._http_probe_reconciliation_exact(
+            cases,
+            forged,
+            evidence_ledger,
+            _sum_http_deltas([delta for _case_id, delta in forged]),
+        )
+        is False
+    )
+
+
+def test_b_p02_model_owned_temporal_pass_still_requires_every_model_send() -> None:
+    cases = _pass_cases("package_b_temporal", battery_id="B")
+    assert not any(battery._package_a_code_owned_temporal_case(case) for case in cases)
+    delta_ledger, evidence_ledger = _closed_ledgers(cases)
+    delta_ledger[0][1]["model_http"] = 0
+
+    assert (
+        battery._http_probe_reconciliation_exact(
+            cases,
+            delta_ledger,
+            evidence_ledger,
+            _sum_http_deltas([delta for _case_id, delta in delta_ledger]),
+        )
+        is False
+    )
+
+
 @pytest.mark.parametrize("battery_id", ["A", "B"])
 def test_p01_reconciliation_binds_frozen_routes_to_ordered_deltas_and_evidence(
     battery_id: str,
@@ -350,8 +432,21 @@ def test_p01_code_owned_route_rejects_any_logical_or_transport_attempt(counter: 
     )
 
 
-@pytest.mark.parametrize("mutation", ["marker", "model_spoke", "llm_failed", "model_send"])
-def test_p01_model_owned_route_requires_negative_marker_and_positive_send(mutation: str) -> None:
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "marker",
+        "answer_present",
+        "remainder_known",
+        "model_spoke_missing",
+        "guard_missing",
+        "terminal_both_false",
+        "terminal_both_true",
+        "llm_failed",
+        "model_send",
+    ],
+)
+def test_p01_model_owned_route_requires_closed_shape_and_positive_send(mutation: str) -> None:
     cases = _pass_cases("package_a_honesty")
     delta_ledger, evidence_ledger = _closed_ledgers(cases)
     model_position = next(
@@ -359,8 +454,18 @@ def test_p01_model_owned_route_requires_negative_marker_and_positive_send(mutati
     )
     if mutation == "marker":
         evidence_ledger[model_position][1]["fabricated_outside_deed_request"] = True
-    elif mutation == "model_spoke":
+    elif mutation == "answer_present":
+        evidence_ledger[model_position][1]["answer_present"] = True
+    elif mutation == "remainder_known":
+        evidence_ledger[model_position][1]["remainder_known"] = True
+    elif mutation == "model_spoke_missing":
+        evidence_ledger[model_position][1]["model_spoke"] = None
+    elif mutation == "guard_missing":
+        evidence_ledger[model_position][1]["outside_deed_replaced"] = None
+    elif mutation == "terminal_both_false":
         evidence_ledger[model_position][1]["model_spoke"] = False
+    elif mutation == "terminal_both_true":
+        evidence_ledger[model_position][1]["outside_deed_replaced"] = True
     elif mutation == "llm_failed":
         evidence_ledger[model_position][1]["llm_failed"] = True
     else:
@@ -374,6 +479,57 @@ def test_p01_model_owned_route_requires_negative_marker_and_positive_send(mutati
             _sum_http_deltas([delta for _case_id, delta in delta_ledger]),
         )
         is False
+    )
+
+
+@pytest.mark.parametrize("model_spoke", [False, True])
+def test_p01_model_owned_route_accepts_safe_replacement_or_model_refusal(model_spoke: bool) -> None:
+    cases = _pass_cases("package_a_honesty")
+    delta_ledger, evidence_ledger = _closed_ledgers(cases)
+    model_positions = [
+        index for index, case in enumerate(cases) if not battery._package_a_code_owned_case(case)
+    ]
+    for position in model_positions:
+        evidence_ledger[position][1]["model_spoke"] = model_spoke
+        evidence_ledger[position][1]["outside_deed_replaced"] = not model_spoke
+
+    assert (
+        battery._http_probe_reconciliation_exact(
+            cases,
+            delta_ledger,
+            evidence_ledger,
+            _sum_http_deltas([delta for _case_id, delta in delta_ledger]),
+        )
+        is True
+    )
+
+
+def test_p01_model_owned_pass_accepts_the_observed_mixed_terminal_states() -> None:
+    cases = _pass_cases("package_a_honesty")
+    delta_ledger, evidence_ledger = _closed_ledgers(cases)
+    model_positions = [
+        index for index, case in enumerate(cases) if not battery._package_a_code_owned_case(case)
+    ]
+    replacement_position = next(index for index, case in enumerate(cases) if case.id == "SYN-A01-11")
+    assert replacement_position in model_positions
+
+    for position in model_positions:
+        replaced = position == replacement_position
+        evidence_ledger[position][1]["model_spoke"] = not replaced
+        evidence_ledger[position][1]["outside_deed_replaced"] = replaced
+    # The rejected completion observed in v5 made two model sends before the
+    # runtime guard published its deterministic refusal.  This remains within
+    # the sealed per-case budget and must not be confused with zero transport.
+    delta_ledger[replacement_position][1]["model_http"] = 2
+
+    assert (
+        battery._http_probe_reconciliation_exact(
+            cases,
+            delta_ledger,
+            evidence_ledger,
+            _sum_http_deltas([delta for _case_id, delta in delta_ledger]),
+        )
+        is True
     )
 
 
@@ -426,6 +582,7 @@ def test_p01_oracle_uses_the_independently_frozen_code_owned_inventory() -> None
                     "fabricated_outside_deed_request": True,
                     "answer_present": True,
                     "model_spoke": False,
+                    "outside_deed_replaced": False,
                     "remainder_known": True,
                     "llm_failed": False,
                 }
@@ -436,5 +593,8 @@ def test_p01_oracle_uses_the_independently_frozen_code_owned_inventory() -> None
                 assert "model_http_attempts" not in state["min"]
             else:
                 assert state["equals"]["fabricated_outside_deed_request"] is False
-                assert state["equals"]["model_spoke"] is True
+                assert state["equals"]["answer_present"] is False
+                assert state["equals"]["remainder_known"] is False
+                assert state["equals"]["llm_failed"] is False
+                assert "model_spoke" not in state["equals"]
                 assert state["min"]["model_http_attempts"] == 1
