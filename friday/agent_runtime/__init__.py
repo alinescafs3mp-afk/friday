@@ -9576,13 +9576,25 @@ def _intra_file_record_set_phrase_count(message: str) -> int | None:
     # as ``оба пункта`` and ``две строки этого файла`` retain their semantics.
     prefix = text[: matched.start()]
     self_contained_output_shape = bool(re.search(r"\b(?:спис|ответ)\w*\s+из\s*$", prefix, re.IGNORECASE))
+    self_contained_line_shape = bool(
+        re.match(
+            r"\A\s*(?:(?:пожалуйста|please)\s*[,—-]?\s*)?"
+            r"(?:верн|напиш|дай|дайте|подготов|сформир|состав|оформ)\w*\s+"
+            r"(?:\d{1,2}|одн\w*|дв\w*|тр[её]\w*|четыр\w*|пят\w*|"
+            r"шест\w*|сем\w*|восем\w*|девят\w*)\s+"
+            r"(?:(?:коротк|обычн|нейтральн|отдельн|безопасн)\w*\s+){0,4}"
+            r"(?:строк|фраз|предложени)\w*\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
     independently_names_file = bool(
         _EXPLICIT_ATTACHMENT_REFERENCE.search(text)
         or _DEICTIC_CURRENT_ATTACHMENT_REFERENCE.search(text)
         or _RECENT_UPLOAD_ATTACHMENT_REFERENCE.search(text)
         or _ATTACHMENT_FILENAME_REFERENCE.search(_classification_text(message))
     )
-    if self_contained_output_shape and not independently_names_file:
+    if (self_contained_output_shape or self_contained_line_shape) and not independently_names_file:
         return None
     return _attachment_count_value(matched.group("count"))
 

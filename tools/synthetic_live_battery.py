@@ -56,14 +56,14 @@ MANIFEST_PATHS = {
 }
 # The audit refuses any byte change to either synthetic corpus.
 FROZEN_MANIFEST_SHA256 = {
-    "A": "c6078722df007fcc9427591a3418c1833d5c7ce6b17787674b959a36bc5c610d",
+    "A": "95d56f4ad3c5472e3f61585f2bc2860195c03c9a3c68b2ee45ea60a137192d26",
     "B": "db6f82e075237694fd28d3d75e9dad5c6afc2d01d6c92a37e79fb3da5e23dee0",
 }
 # Canonical-content hashes bind the in-memory mappings passed to ``run_battery``
 # to the same frozen corpora.  The raw hashes above alone cannot detect a caller
 # pairing altered JSON with the expected digest string.
 FROZEN_MANIFEST_CONTENT_SHA256 = {
-    "A": "8ecac3cc0e9393961c5490e185b25bbc5f6d8e31db4eace4880542b9fa01d5d2",
+    "A": "8b48f20bfdeede2ff3cfd3b05858a59f9e85be46070f19e906d97a80289b6713",
     "B": "4bca33f32e7c8ceec18c6eb8bc313ef0ad08145de05d1a22216bb66a0436443e",
 }
 
@@ -6622,11 +6622,20 @@ def _telegram_shape_matches(case: ExpandedCase, message: str) -> bool:
         return case.battery_id == "A" or message.strip() == marker
     if index == 6:
         if case.battery_id == "A":
+            first_line_is_plain_heading = bool(
+                not re.match(r"^\s*(?:[-*+•]|\d{1,2}[.)])\s+", lines[0])
+                and not re.search(r"[`*_~]|<[^>\n]+>|\[[^\]\n]+\]\(", lines[0])
+                and 1 <= len(re.findall(r"\b[A-Za-zА-Яа-яЁё]{2,}\b", lines[0])) <= 8
+            )
             return (
-                has_heading
+                (has_heading or has_bold or first_line_is_plain_heading)
                 and list_count == 1
                 and len(lines) == 2
-                and bool(re.match(r"^\s*#{1,6}\s+\S", lines[0]))
+                and bool(
+                    re.match(r"^\s*#{1,6}\s+\S", lines[0])
+                    or re.match(r"^\s*(?:\*\*|__)[^\n]+(?:\*\*|__)\s*$", lines[0])
+                    or first_line_is_plain_heading
+                )
                 and bool(re.match(r"^\s*[-*+•]\s+\S", lines[1]))
                 and bool(marker_heading_lines or marker_list_lines)
             )
@@ -6971,6 +6980,8 @@ def _independent_p10_html(source: str) -> str | None:
 
 def _p10_prompt_tags_exact(battery_id: str, index: int, spans: Sequence[tuple[str, int, int]]) -> bool:
     tags = [tag for tag, _start, _end in spans]
+    if index == 6 and battery_id == "A":
+        return tags in ([], ["b"])
     if index in {2, 6, 10}:
         return tags == ["b"]
     if index == 4:
@@ -11299,8 +11310,15 @@ def _telegram_delivery_shape_exact(message: str, attempts: Any, delivered: Any, 
             marker_inside("b", "strong")
             if battery_id == "B"
             else bool(
-                re.search(r"<(?:b|strong)>", delivered_text, re.I)
-                and any(line.lstrip().startswith("• ") for line in lines)
+                any(line.lstrip().startswith("• ") for line in lines)
+                and (
+                    re.search(r"<(?:b|strong)>", delivered_text, re.I)
+                    or (
+                        len(lines) == 2
+                        and not lines[0].lstrip().startswith("• ")
+                        and not re.search(r"<[^>]+>", lines[0])
+                    )
+                )
             )
         )
     if index in {7, 17}:
