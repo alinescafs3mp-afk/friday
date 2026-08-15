@@ -694,6 +694,16 @@ _A09_04_SERVICE_AND_PRIOR_RUN_RELATION = (
     r"предыдущих\s+(?:прогонов|запусков)\s+(?:и|или)\s+других\s+сервисов)"
     r"\.?\s*\Z"
 )
+_A09_04_PREDICTABLE_CONDITIONS_RELATION = (
+    r"\A"
+    r"\s*(?:изолированное\s+тестовое\s+окружение|изолированная\s+тестовая\s+среда)"
+    r"\s+(?:гарантирует|обеспечивает),?\s+что\s+"
+    r"(?:проверки\s+выполняются|проверка\s+выполняется)"
+    r"\s+в\s+предсказуемых\s+условиях\s+без\s+влияния\s+(?:"
+    r"внешних\s+факторов\s+(?:и|или)\s+других\s+процессов|"
+    r"других\s+процессов\s+(?:и|или)\s+внешних\s+факторов)"
+    r"\.?\s*\Z"
+)
 _A09_08_AFFIRMATIVE_SCOPE = (
     r"\A"
     rf"(?![\s\S]*{_A09_AFFIRMATIVE_CLAIM_BLOCKER})"
@@ -4883,6 +4893,7 @@ def _a09_04_relation_is_exact(message: str) -> bool:
     live_infrastructure_relation = bool(
         re.search(_A09_04_LIVE_INFRASTRUCTURE_RELATION, folded, re.IGNORECASE)
         or re.search(_A09_04_SERVICE_AND_PRIOR_RUN_RELATION, folded, re.IGNORECASE)
+        or re.search(_A09_04_PREDICTABLE_CONDITIONS_RELATION, folded, re.IGNORECASE)
     )
     if ":" not in message and re.search(r"\bзавис\w*\s+только\s+от\b", folded, re.IGNORECASE):
         return live_infrastructure_relation or _a09_04_affirmative_fallback_relation(message)
