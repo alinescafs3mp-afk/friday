@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -146,6 +147,66 @@ def _readiness_environment() -> dict[str, str]:
     }
 
 
+_EXPECTED_READINESS_CLASSIFIER_INPUTS = (
+    "Найди актуальное расписание TEST-001",
+    "Что написано в синтетическом акте TEST-002?",
+    "Что писал участник Альфа TEST-003?",
+    "Напомни завтра проверить TEST-004",
+)
+_EXPECTED_READINESS_CLASSIFIER_SYSTEM_SHA256 = (
+    "b2a2ae7bf36e8beac9831a2b446443b6d8770998a0e76574ba8d450ce910b1ee"
+)
+_VALID_READINESS_CLASSIFIER_OUTPUTS = {
+    "Найди актуальное расписание TEST-001": {
+        "вид": "интернет",
+        "запрос": "актуальное расписание TEST-001",
+        "кто": "",
+        "дни": [],
+        "правило": "",
+    },
+    "Что написано в синтетическом акте TEST-002?": {
+        "вид": "архив",
+        "запрос": "",
+        "кто": "",
+        "дни": [],
+        "правило": "",
+    },
+    "Что писал участник Альфа TEST-003?": {
+        "вид": "человек",
+        "запрос": "",
+        "кто": "Альфа TEST-003",
+        "дни": [],
+        "правило": "",
+    },
+    "Напомни завтра проверить TEST-004": {
+        "вид": "действие",
+        "запрос": "",
+        "кто": "",
+        "дни": [],
+        "правило": "",
+    },
+}
+
+
+def _readiness_classifier_response(verdict: dict[str, Any]) -> httpx.Response:
+    content = json.dumps(
+        verdict,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+
+def _expected_readiness_classifier_response(request: httpx.Request) -> httpx.Response:
+    payload = json.loads(request.content)
+    user_input = payload["messages"][1]["content"]
+    return _readiness_classifier_response(_VALID_READINESS_CLASSIFIER_OUTPUTS[user_input])
+
+
+def _readiness_generation_envelope(content: str) -> dict[str, Any]:
+    return {"choices": [{"message": {"content": content}}]}
+
+
 @pytest.mark.parametrize(
     "environment",
     [
@@ -235,19 +296,66 @@ def _vllm_metrics(*, running: int = 0, waiting: int = 0, epoch: int = 1_700_000_
     )
 
 
-def test_readiness_barrier_uses_authenticated_one_token_probe_without_metrics() -> None:
-    requests: list[httpx.Request] = []
+def test_readiness_runs_four_production_shaped_classifier_probes_concurrently() -> None:
+    class ClassifierTransport(httpx.AsyncBaseTransport):
+        def __init__(self) -> None:
+            self.active = 0
+            self.maximum_active = 0
+            self.release = asyncio.Event()
+            self.requests: list[httpx.Request] = []
+            self.user_inputs: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        if request.url.path == "/metrics":
-            return httpx.Response(404)
-        assert request.url.path == "/v1/chat/completions"
-        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            self.requests.append(request)
+            if request.url.path == "/metrics":
+                return httpx.Response(404)
 
+            assert request.url.path == "/v1/chat/completions"
+            payload = json.loads(request.content)
+            assert set(payload) == {
+                "model",
+                "messages",
+                "max_tokens",
+                "temperature",
+                "stream",
+                "chat_template_kwargs",
+            }
+            assert payload["model"] == "dispatcher"
+            assert payload["max_tokens"] == 256
+            assert payload["temperature"] == 0.0
+            assert payload["stream"] is False
+            assert payload["chat_template_kwargs"] == {"enable_thinking": False}
+            assert "tools" not in payload and "tool_choice" not in payload
+
+            messages = payload["messages"]
+            assert [message["role"] for message in messages] == ["system", "user"]
+            assert all(set(message) == {"role", "content"} for message in messages)
+            system_prompt = messages[0]["content"]
+            user_input = messages[1]["content"]
+            assert 6_700 <= len(system_prompt) <= 7_000
+            assert system_prompt.startswith("Реши, что от тебя хотят, и верни ОДНУ строку JSON:")
+            assert system_prompt.endswith("Никаких пояснений, только JSON.")
+            assert (
+                hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()
+                == _EXPECTED_READINESS_CLASSIFIER_SYSTEM_SHA256
+            )
+            assert user_input in _EXPECTED_READINESS_CLASSIFIER_INPUTS
+            self.user_inputs.append(user_input)
+
+            self.active += 1
+            self.maximum_active = max(self.maximum_active, self.active)
+            if self.active == 4:
+                self.release.set()
+            try:
+                await asyncio.wait_for(self.release.wait(), timeout=1.0)
+                return _readiness_classifier_response(_VALID_READINESS_CLASSIFIER_OUTPUTS[user_input])
+            finally:
+                self.active -= 1
+
+    transport = ClassifierTransport()
     result = acceptance._model_readiness_barrier(
         _readiness_environment(),
-        transport=httpx.MockTransport(handler),
+        transport=transport,
         sleeper=lambda _seconds: None,
         require_authoritative_metrics=False,
     )
@@ -258,16 +366,182 @@ def test_readiness_barrier_uses_authenticated_one_token_probe_without_metrics() 
     assert type(result.maximum_latency_ms) is int and result.maximum_latency_ms >= 0
     assert result.probes_clear is True
     assert result.dispatch_clear is False
-    assert [request.method for request in requests] == ["GET", "POST", "POST", "POST", "POST"]
-    assert all(request.headers["authorization"] == "Bearer synthetic-readiness-key" for request in requests)
-    for request in requests[1:]:
-        assert json.loads(request.content) == {
-            "model": "dispatcher",
-            "messages": [{"role": "user", "content": "ok"}],
-            "max_tokens": 1,
-            "temperature": 0,
-            "chat_template_kwargs": {"enable_thinking": False},
-        }
+    assert transport.maximum_active == 4
+    assert transport.active == 0
+    assert sorted(transport.user_inputs) == sorted(_EXPECTED_READINESS_CLASSIFIER_INPUTS)
+    assert [request.method for request in transport.requests].count("GET") == 1
+    assert [request.method for request in transport.requests].count("POST") == 4
+    assert all(
+        request.headers["authorization"] == "Bearer synthetic-readiness-key" for request in transport.requests
+    )
+
+
+def test_readiness_rejects_one_valid_but_wrong_classifier_kind_for_all_probes() -> None:
+    same_wrong_verdict = {
+        "вид": "другое",
+        "запрос": "",
+        "кто": "",
+        "дни": [],
+        "правило": "",
+    }
+    seen_inputs: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(404)
+        payload = json.loads(request.content)
+        seen_inputs.append(payload["messages"][1]["content"])
+        return _readiness_classifier_response(same_wrong_verdict)
+
+    with pytest.raises(
+        battery.BatteryContractError,
+        match="^model_readiness_generation_invalid$",
+    ):
+        acceptance._model_readiness_barrier(
+            _readiness_environment(),
+            transport=httpx.MockTransport(handler),
+            sleeper=lambda _seconds: None,
+            require_authoritative_metrics=False,
+        )
+
+    assert sorted(seen_inputs) == sorted(_EXPECTED_READINESS_CLASSIFIER_INPUTS)
+
+
+def test_readiness_rejects_duplicate_classifier_json_keys() -> None:
+    duplicate_kind = (
+        '{"вид":"интернет","вид":"интернет",'
+        '"запрос":"актуальное расписание TEST-001",'
+        '"кто":"","дни":[],"правило":""}'
+    )
+    response = json.dumps(
+        {"choices": [{"message": {"content": duplicate_kind}}]},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    assert (
+        acceptance._usable_model_readiness_classifier_response(
+            response,
+            expected_kind="интернет",
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize(
+    "response_json",
+    [
+        {"choices": []},
+        _readiness_generation_envelope("not JSON"),
+        _readiness_generation_envelope(
+            json.dumps(
+                {"вид": "другое", "запрос": "", "кто": "", "дни": []},
+                ensure_ascii=False,
+            )
+        ),
+        _readiness_generation_envelope(
+            json.dumps(
+                {
+                    "вид": "другое",
+                    "запрос": "",
+                    "кто": "",
+                    "дни": [],
+                    "правило": "",
+                    "лишнее": False,
+                },
+                ensure_ascii=False,
+            )
+        ),
+        _readiness_generation_envelope(
+            json.dumps(
+                {"вид": "неизвестно", "запрос": "", "кто": "", "дни": [], "правило": ""},
+                ensure_ascii=False,
+            )
+        ),
+        _readiness_generation_envelope(
+            json.dumps(
+                {"вид": "интернет", "запрос": "", "кто": "", "дни": [], "правило": ""},
+                ensure_ascii=False,
+            )
+        ),
+        _readiness_generation_envelope(
+            json.dumps(
+                {
+                    "вид": "архив",
+                    "запрос": "",
+                    "кто": "",
+                    "дни": "завтра",
+                    "правило": "",
+                },
+                ensure_ascii=False,
+            )
+        ),
+    ],
+    ids=(
+        "empty-choices",
+        "malformed-content",
+        "missing-field",
+        "extra-field",
+        "unknown-kind",
+        "internet-without-query",
+        "wrong-field-type",
+    ),
+)
+def test_readiness_rejects_malformed_or_out_of_schema_http_200(
+    response_json: dict[str, Any],
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(404)
+        return httpx.Response(200, json=response_json)
+
+    with pytest.raises(
+        battery.BatteryContractError,
+        match="^model_readiness_generation_invalid$",
+    ):
+        acceptance._model_readiness_barrier(
+            _readiness_environment(),
+            transport=httpx.MockTransport(handler),
+            sleeper=lambda _seconds: None,
+            require_authoritative_metrics=False,
+        )
+
+
+def test_readiness_rejects_a_malformed_http_200_envelope() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(404)
+        return httpx.Response(200, content=b"{not-json")
+
+    with pytest.raises(
+        battery.BatteryContractError,
+        match="^model_readiness_generation_invalid$",
+    ):
+        acceptance._model_readiness_barrier(
+            _readiness_environment(),
+            transport=httpx.MockTransport(handler),
+            sleeper=lambda _seconds: None,
+            require_authoritative_metrics=False,
+        )
+
+
+@pytest.mark.parametrize("status_code", [201, 204, 503])
+def test_readiness_requires_exact_http_200(status_code: int) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(404)
+        return httpx.Response(status_code, json={})
+
+    with pytest.raises(
+        battery.BatteryContractError,
+        match="^model_readiness_generation_failed$",
+    ):
+        acceptance._model_readiness_barrier(
+            _readiness_environment(),
+            transport=httpx.MockTransport(handler),
+            sleeper=lambda _seconds: None,
+            require_authoritative_metrics=False,
+        )
 
 
 def test_official_readiness_refuses_unknown_queue_without_sending_probes() -> None:
@@ -329,7 +603,7 @@ def test_readiness_barrier_accepts_only_a_quiet_vllm_probe_cycle() -> None:
                     'vllm:num_requests_waiting{model_name="dispatcher"} 0.0\n'
                 ),
             )
-        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+        return _expected_readiness_classifier_response(request)
 
     result = acceptance._model_readiness_barrier(
         _readiness_environment(),
@@ -347,12 +621,16 @@ def test_readiness_barrier_accepts_only_a_quiet_vllm_probe_cycle() -> None:
     assert methods[6:] == ["GET"]
 
 
-def test_readiness_barrier_requires_vllm_to_stay_idle_after_probe() -> None:
+@pytest.mark.parametrize(("running", "waiting"), [(1, 0), (0, 1)])
+def test_readiness_barrier_requires_vllm_to_stay_idle_after_probe(
+    running: int,
+    waiting: int,
+) -> None:
     metric_samples = iter(
         [
             _vllm_metrics(),
             _vllm_metrics(),
-            _vllm_metrics(waiting=1),
+            _vllm_metrics(running=running, waiting=waiting),
         ]
     )
     methods: list[str] = []
@@ -361,7 +639,7 @@ def test_readiness_barrier_requires_vllm_to_stay_idle_after_probe() -> None:
         methods.append(request.method)
         if request.method == "GET":
             return httpx.Response(200, text=next(metric_samples))
-        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+        return _expected_readiness_classifier_response(request)
 
     with pytest.raises(battery.BatteryContractError, match="model_readiness_model_busy"):
         acceptance._model_readiness_barrier(
@@ -393,7 +671,7 @@ def test_readiness_barrier_rejects_a_metrics_epoch_change(
         methods.append(request.method)
         if request.method == "GET":
             return httpx.Response(200, text=next(metric_samples))
-        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+        return _expected_readiness_classifier_response(request)
 
     with pytest.raises(battery.BatteryContractError, match="model_readiness_metrics_epoch_changed"):
         acceptance._model_readiness_barrier(
@@ -410,20 +688,20 @@ def test_readiness_barrier_really_starts_four_probes_concurrently() -> None:
         def __init__(self) -> None:
             self.active = 0
             self.maximum_active = 0
-            self.release: asyncio.Event | None = None
+            self.release = asyncio.Event()
 
         async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
             if request.method == "GET":
                 return httpx.Response(404)
-            if self.release is None:
-                self.release = asyncio.Event()
             self.active += 1
             self.maximum_active = max(self.maximum_active, self.active)
-            if self.active == acceptance.MODEL_READINESS_CONCURRENCY:
+            if self.active == 4:
                 self.release.set()
-            await asyncio.wait_for(self.release.wait(), timeout=1)
-            self.active -= 1
-            return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+            try:
+                await asyncio.wait_for(self.release.wait(), timeout=1)
+                return _expected_readiness_classifier_response(request)
+            finally:
+                self.active -= 1
 
     transport = ConcurrentTransport()
     result = acceptance._model_readiness_barrier(
@@ -537,6 +815,46 @@ def test_readiness_failure_prevents_acceptance_dispatch(
             run_directory=run_root,
             concurrency=4,
             artifact_id="PRE-RELEASE-P06-0123456789abcdef",
+        )
+
+    assert dispatched is False
+
+
+def test_readiness_timeout_is_closed_before_any_acceptance_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _isolate_acceptance_lock_protocol(monkeypatch, tmp_path)
+    run_root = tmp_path / "acceptance"
+    dispatched = False
+
+    def timed_out(*_args: Any, **_kwargs: Any) -> acceptance.ModelReadinessResult:
+        raise battery.BatteryContractError("model_readiness_deadline_exhausted")
+
+    def refuse_dispatch(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal dispatched
+        dispatched = True
+        raise AssertionError("a readiness timeout must precede worker dispatch")
+
+    monkeypatch.setattr(battery, "_assert_ignored_or_external", lambda _path: None)
+    monkeypatch.setattr(
+        acceptance,
+        "_acceptance_lock_path",
+        lambda: tmp_path / "runtime" / "locks" / "acceptance.lock",
+    )
+    monkeypatch.setattr(battery, "_inherit_model_environment", _readiness_environment)
+    monkeypatch.setattr(acceptance, "_model_readiness_barrier", timed_out)
+    monkeypatch.setattr(acceptance, "_execute_sealed", refuse_dispatch)
+
+    with pytest.raises(
+        battery.BatteryContractError,
+        match="^model_readiness_deadline_exhausted$",
+    ):
+        acceptance.run_acceptance(
+            "all",
+            run_directory=run_root,
+            concurrency=4,
+            artifact_id="PRE-RELEASE-ALL-0123456789abcdef",
         )
 
     assert dispatched is False

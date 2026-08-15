@@ -58,6 +58,13 @@ SUITE_CASE_COUNTS = {"p06": 40, "focused": 120, "all": 160}
 SUMMARY_SCHEMA = "friday.synthetic-live-battery.pre-release.v1"
 P06_SCHEMA = "friday.synthetic-live-battery.p06-final.v1"
 FOCUSED_SCHEMA = "friday.synthetic-live-battery.focused-final.v1"
+# Four production-sized classifier requests have to finish together.  Twenty
+# seconds per request is intentionally much tighter than the ordinary 240-second
+# foreground answer timeout: a dispatcher which cannot close this bounded JSON
+# under representative four-way load is not ready to start an immutable battery.
+# The 30-second aggregate leaves room for two one-second quiet intervals and
+# three bounded metrics reads without turning readiness into another long model
+# call of its own.
 MODEL_READINESS_BUDGET_SEC = 30.0
 MODEL_READINESS_METRICS_TIMEOUT_SEC = 2.0
 MODEL_READINESS_GENERATION_TIMEOUT_SEC = 20.0
@@ -65,6 +72,146 @@ MODEL_READINESS_QUIET_SEC = 1.0
 MODEL_READINESS_CONCURRENCY = 4
 MODEL_READINESS_METRICS_MAX_BYTES = 2 * 1024 * 1024
 MODEL_READINESS_GENERATION_MAX_BYTES = 256 * 1024
+MODEL_READINESS_CLASSIFIER_USER_MESSAGES = (
+    "Найди актуальное расписание TEST-001",
+    "Что написано в синтетическом акте TEST-002?",
+    "Что писал участник Альфа TEST-003?",
+    "Напомни завтра проверить TEST-004",
+)
+MODEL_READINESS_CLASSIFIER_EXPECTED_KINDS = (
+    "интернет",
+    "архив",
+    "человек",
+    "действие",
+)
+MODEL_READINESS_CLASSIFIER_KINDS = frozenset(
+    {
+        "архив",
+        "быт",
+        "действие",
+        "другое",
+        "знание",
+        "интернет",
+        "материал",
+        "поправка",
+        "правило",
+        "файл",
+        "человек",
+    }
+)
+MODEL_READINESS_CLASSIFIER_KEYS = frozenset({"вид", "запрос", "кто", "дни", "правило"})
+
+# This prompt is acceptance-owned and contains only synthetic examples.  It is
+# deliberately the same two-message, approximately 6.9k-character workload as
+# AgentRuntime._web_query_by_arbiter, but is fixed so a readiness run cannot
+# collect conversation history, today's host state, or any private corpus text.
+MODEL_READINESS_CLASSIFIER_SYSTEM_PROMPT = "\n".join(
+    (
+        "Реши, что от тебя хотят, и верни ОДНУ строку JSON: "
+        '{"вид": "интернет|знание|архив|человек|файл|действие|быт|правило|'
+        'поправка|материал|другое", "запрос": "строка для поисковика", '
+        '"кто": "имя человека", "дни": ["число или дата"], '
+        '"правило": "как себя вести впредь"}.',
+        "действие — просят СДЕЛАТЬ что-то в системе, а не рассказать: «напомни завтра», "
+        "«сохрани это», «озвучь», «поставь задачу», «добавь организацию», «запиши, что…». "
+        "Это поручение, и оно требует действия, даже если сказано в два слова.",
+        "человек — спрашивают про ПЕРЕПИСКУ И ДЕЙСТВИЯ в этой системе: что писал, "
+        "спрашивал, присылал или делал участник, о чём был разговор, что говорилось раньше. "
+        "«что писал участник Альфа», «чем занимался участник Бета», «активность участника "
+        "Гамма», «о чём мы вчера говорили», «покажи начало нашей переписки», «что я тебе "
+        "писал про поверку», «процитируй моё первое сообщение», а также короткое продолжение "
+        "такого вопроса — «а участник Бета?», «а участник Альфа», «а он что?». Имя клади в "
+        "поле «кто»; если спрашивают про СВОИ сообщения или про общий разговор, поле «кто» "
+        "оставь пустым.",
+        "Различай по тому, ГДЕ лежит ответ: разговоры и сообщения — это «человек», а "
+        "документы, файлы и записи — «архив». «О чём был наш разговор про поверку» — "
+        "человек; «что написано в акте поверки» — архив.",
+        "Если вместо имени местоимение («а он что?», «а она?»), возьми ПОСЛЕДНЕГО названного "
+        "человека из предыдущих реплик, а не первого.",
+        "файл — просят СОБРАТЬ документ: «сделай справку в word», «оформи отчёт», «собери это "
+        "в таблицу», «пришли файлом», «сделай из этого документ». Не путать с «покажи "
+        "документ» — это архив.",
+        "Если просят собрать ПРИСЛАННЫЕ файлы за какие-то дни («собери документы за 10, 13 "
+        "и 25 число», «скинь архивом всё за вчера», «выгрузи файлы за 29 июля»), это тоже "
+        '«файл», и дни перечисли в поле «дни» списком: ["10","13","25"] или '
+        '["2099-01-29"]. Три числа — это три дня, а не отрезок между ними. Если про дни '
+        "речи нет, поле «дни» оставь пустым.",
+        "интернет — ответ мог ИЗМЕНИТЬСЯ с тех пор, как ты училась: новости, погода, курсы, "
+        "цены, «кто сейчас», «сколько стоит», расписания, свежие версии, состояние дел на "
+        "сегодня.",
+        "знание — ответ не меняется И его не надо ВСПОМИНАТЬ: объяснения, определения, "
+        "принципы, «что такое консенсус Raft», «чем отличается лизинг от аренды», «расскажи "
+        "что-нибудь познавательное», а также вычислимое — «сколько дней в феврале 2096», "
+        "«какой день недели 9 мая 2099».",
+        "Сюда же — просьба о СУЖДЕНИИ или совете: «как думаешь», «стоит ли», «посоветуй», "
+        "«твоё мнение», «что лучше выбрать». В интернете нет ответа на вопрос, что лучше для "
+        "ЭТОГО человека; отвечай сама и честно скажи, что это твоё мнение, а не найденный "
+        "факт.",
+        "ВАЖНО: конкретный факт-справка — имя, дата, число, порядковый номер, название («кто "
+        "был вторым президентом синтетической страны», «когда родился испытатель Альфа», "
+        "«какая высота тестовой вершины», «столица страны Бета») — это «интернет», даже если "
+        "он никогда не изменится. На проверочном стенде модель иногда уверенно отвечала "
+        "неверным именем. Проверить такое стоит секунды, а ошибка выглядит как твёрдое "
+        "знание.",
+        "Оборот «что там по…», «как там с…», «что по…», «как обстоят дела с…» о деле, "
+        "документе, задаче или рабочей теме — это АРХИВ: человек спрашивает о состоянии "
+        "своего дела, а не о факте из внешнего мира. Отличай от «что нового в мире» и «что "
+        "там в новостях» — вот это интернет.",
+        "архив — спрашивают о личных МАТЕРИАЛАХ: «что у меня по…», «найди приказ», «сколько "
+        "документов», «покажи акт», а также любой вопрос о том, что происходило в названный "
+        "день или час («что было 26 июля в 15 часов», «чем занимались вчера»). Про САМИ "
+        "РАЗГОВОРЫ — это «человек», а не «архив».",
+        "материал — это не вопрос, а присланный текст: документ, приказ, письмо, пересланное "
+        "сообщение, заметка на сохранение.",
+        "быт — про обычную жизнь, а не про работу и не про архив: еда, сон, самочувствие, "
+        "погода за окном, отдых, досуг, личные предпочтения («хочу супчика», «чай или кофе», "
+        "«устал», «что посмотреть вечером»). Тут не нужны ни документы, ни поиск — просто "
+        "поговори по-человечески.",
+        "правило — человек говорит, КАК ТЕБЕ СЕБЯ ВЕСТИ впредь, а не спрашивает и не "
+        "поручает разовое дело: «обращайся ко мне по имени-отчеству», «отвечай короче», «не "
+        "называй меня так», «говори эту фразу только в ответ на благодарность», «больше не "
+        "здоровайся каждый раз», «всегда пиши дату рядом с цифрами». Сюда же — ОТМЕНА "
+        "раньше сказанного: «забудь, что я просил про…», «можно снова так делать». Сам текст "
+        "указания положи в поле «правило» одной фразой, как запомнишь его для себя.",
+        "Только ПРЯМОЕ указание ТЕБЕ является этим видом. Рассказ о чужом регламенте, "
+        "инструкции или правиле организации — материал, а не правило твоего поведения: "
+        "«Регламент требует указывать дату», «В инструкции сказано: всегда указывать дату», "
+        "«Правило отдела: отчёты подписывает руководитель» — это «материал».",
+        "Отличай от разового: «ответь покороче» про ЭТОТ ответ — это не правило, а «отвечай "
+        "мне покороче» — правило. Сомневаешься, разовое это или впредь, — выбирай НЕ "
+        "правило.",
+        "Указание часто высказывают ВОПРОСОМ или упрёком, и это тоже правило: «ты зачем "
+        "каждый раз говоришь мне…», «сколько можно повторять одно и то же», «почему ты всё "
+        "время здороваешься», «тебе обязательно писать так длинно». Признак — недовольство "
+        "ПОВТОРЯЮЩИМСЯ поведением, а не вопрос о факте. В поле «правило» положи то, чего "
+        "человек хочет впредь, своими словами.",
+        "Не путай с вопросом о переписке: «сколько раз я просил» и «сколько можно повторять» "
+        "— это правило (человеку надоело), а «что я тебе писал про поверку» — это «человек» "
+        "(он спрашивает содержание).",
+        "поправка — человек исправляет СКАЗАННОЕ ТОБОЙ: «нет, не 27 июля, а 27 ноября», "
+        "«неверно, он испытатель», «это уже не так — договор закрыли в мае», «ты путаешь, "
+        "это другой отдел». Признак — человек утверждает, что верно, взамен того, что ты "
+        "сказала.",
+        "В поле «правило» положи поправку ОДНОЙ фразой и так, чтобы она была понятна сама по "
+        "себе, без предыдущей реплики: не «нет, 27 ноября», а «Синтетический праздник — 27 "
+        "ноября, а не 27 июля».",
+        "Отличай от указания о поведении: «не называй меня так» — правило, «меня зовут не "
+        "Альфа, а Бета» — поправка. Отличай и от нового вопроса: «а когда тестовый праздник?» "
+        "— не поправка, там ничего не исправляют.",
+        "другое — разговор, просьба сделать что-то в системе.",
+        "Поле «запрос» заполняй только для вида «интернет»: коротко, до десяти слов, как "
+        "человек набрал бы в поисковой строке.",
+        "Сейчас 2099-01-01 12:00 (четверг), часовой пояс UTC. Считай относительные даты от "
+        "этого синтетического момента. Не полагайся на память о текущей дате.",
+        "Если в запрос просится год — бери ТЕКУЩИЙ, а не тот, что помнишь.",
+        "ЯЗЫК ЗАПРОСА выбирай по тому, где лежит ответ. Просят зарубежные, иностранные, "
+        "мировые источники или новости не из рунета — пиши запрос ПО-АНГЛИЙСКИ: русская "
+        "формулировка приводит на русские сайты, чем бы ни был задан регион поиска. "
+        "Спрашивают про синтетические страны Альфа, Бета или Гамма — пиши на языке страны, "
+        "если знаешь его. В остальных случаях — на языке человека.",
+        "Никаких пояснений, только JSON.",
+    )
+)
 REQUIRED_ACCEPTANCE_PROFILE = "qwen36-27b-nvfp4-nvidia"
 REQUIRED_ACCEPTANCE_MODEL = "dispatcher"
 _VLLM_LOAD_METRICS = {
@@ -233,6 +380,129 @@ def _bounded_http_timeout(deadline: float, *, ceiling: float) -> httpx.Timeout:
     return httpx.Timeout(bounded, connect=min(2.0, bounded))
 
 
+def _model_readiness_classifier_payloads(model: str) -> tuple[dict[str, Any], ...]:
+    """Build four fixed, production-shaped classifier requests without private input."""
+
+    if not (
+        len(MODEL_READINESS_CLASSIFIER_USER_MESSAGES)
+        == len(MODEL_READINESS_CLASSIFIER_EXPECTED_KINDS)
+        == MODEL_READINESS_CONCURRENCY
+    ):
+        raise battery.BatteryContractError("model_readiness_probe_inventory_invalid")
+    return tuple(
+        {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": MODEL_READINESS_CLASSIFIER_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 256,
+            "stream": False,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        for user_message in MODEL_READINESS_CLASSIFIER_USER_MESSAGES
+    )
+
+
+def _normalized_classifier_field(value: Any, *, maximum_chars: int) -> str | None:
+    """Return one already-normalized bounded classifier field, else ``None``."""
+
+    if type(value) is not str:
+        return None
+    normalized = " ".join(value.split())
+    if value != normalized or len(value) > maximum_chars:
+        return None
+    return value
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Build one JSON object while rejecting keys hidden by last-value wins."""
+
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate classifier JSON key")
+        value[key] = item
+    return value
+
+
+def _usable_model_readiness_classifier_response(
+    response_body: bytes,
+    *,
+    expected_kind: str,
+) -> bool:
+    """Accept only one complete OpenAI response carrying the closed classifier schema.
+
+    AgentRuntime is intentionally tolerant when serving a person: it can recover a
+    JSON object from surrounding prose and ignores irrelevant classifier fields.
+    The pre-release gate is stricter.  It proves that, under four-way load, the
+    configured dispatcher can obey the actual closed-output instruction without
+    relying on that recovery path.  This projection retains no generated content.
+    """
+
+    try:
+        generated = json.loads(response_body)
+    except (UnicodeError, json.JSONDecodeError):
+        return False
+    if not isinstance(generated, Mapping):
+        return False
+    choices = generated.get("choices")
+    if type(choices) is not list or len(choices) != 1:
+        return False
+    first_choice = choices[0]
+    if not isinstance(first_choice, Mapping):
+        return False
+    finish_reason = first_choice.get("finish_reason")
+    if finish_reason is not None and finish_reason != "stop":
+        return False
+    message = first_choice.get("message")
+    if not isinstance(message, Mapping):
+        return False
+    tool_calls = message.get("tool_calls")
+    if tool_calls not in (None, []):
+        return False
+    content = message.get("content")
+    if type(content) is not str or not content or len(content) > 2_048:
+        return False
+    try:
+        verdict = json.loads(content, object_pairs_hook=_reject_duplicate_json_keys)
+    except (ValueError, TypeError):
+        return False
+    if type(verdict) is not dict or set(verdict) != MODEL_READINESS_CLASSIFIER_KEYS:
+        return False
+
+    kind = verdict.get("вид")
+    query = _normalized_classifier_field(verdict.get("запрос"), maximum_chars=140)
+    who = _normalized_classifier_field(verdict.get("кто"), maximum_chars=80)
+    rule = _normalized_classifier_field(verdict.get("правило"), maximum_chars=200)
+    raw_days = verdict.get("дни")
+    if (
+        type(kind) is not str
+        or kind not in MODEL_READINESS_CLASSIFIER_KINDS
+        or kind != expected_kind
+        or query is None
+        or who is None
+        or rule is None
+        or type(raw_days) is not list
+        or len(raw_days) > 12
+    ):
+        return False
+    days = [_normalized_classifier_field(day, maximum_chars=12) for day in raw_days]
+    if any(day is None or not day for day in days):
+        return False
+    if kind == "интернет" and (not query or len(query.split()) > 14):
+        return False
+    if kind in {"правило", "поправка"} and not rule:
+        return False
+    return bool(
+        (kind == "интернет" or not query)
+        and (kind == "человек" or not who)
+        and (kind == "файл" or not days)
+        and (kind in {"правило", "поправка"} or not rule)
+    )
+
+
 async def _async_model_readiness_barrier(
     environment: Mapping[str, str],
     *,
@@ -240,16 +510,17 @@ async def _async_model_readiness_barrier(
     sleeper: Callable[[float], None] | None,
     require_authoritative_metrics: bool,
 ) -> ModelReadinessResult:
-    """Fail closed unless the configured model sustains four cheap probes.
+    """Fail closed unless the configured model sustains four real classifiers.
 
     vLLM exposes queue gauges at ``/metrics``.  When both gauges are present we
     require a stable empty queue before the probes and an empty queue after them.
-    Other OpenAI-compatible servers can be diagnosed through four simultaneous,
-    bounded generations, but their queue state is explicitly ``unknown`` rather
-    than being presented as clear.  The official acceptance caller requires
-    authoritative metrics and therefore sends no probes when those are absent.
-    Only a fixed synthetic prompt is sent, and neither metrics nor response
-    bodies leave this function.
+    Four simultaneous, production-shaped outward-intent classifiers then have to
+    return HTTP 200 and one usable closed JSON verdict each.  Other
+    OpenAI-compatible servers can be diagnosed through the generations, but their
+    queue state is explicitly ``unknown`` rather than being presented as clear.
+    The official acceptance caller requires authoritative metrics and therefore
+    sends no probes when those are absent.  Only fixed synthetic prompts are sent,
+    and neither metrics nor response bodies leave this function.
     """
 
     endpoint = battery._configured_model_endpoint_urls(environment)["model"]
@@ -343,57 +614,67 @@ async def _async_model_readiness_barrier(
                 )
                 metrics_samples += 1
 
-            payload = {
-                "model": model,
-                "messages": [{"role": "user", "content": "ok"}],
-                "max_tokens": 1,
-                "temperature": 0,
-                "chat_template_kwargs": {"enable_thinking": False},
-            }
+            payloads = _model_readiness_classifier_payloads(model)
             launch = asyncio.Event()
             all_ready = asyncio.Event()
             ready_count = 0
 
-            async def generation_probe() -> int:
+            async def generation_probe(payload: Mapping[str, Any], *, expected_kind: str) -> int:
                 nonlocal ready_count
                 ready_count += 1
                 if ready_count == MODEL_READINESS_CONCURRENCY:
                     all_ready.set()
                 await launch.wait()
+                # Give every released task a scheduling turn before the first
+                # socket await.  The launch remains a true four-request wave;
+                # an async transport can (and the unit contract does) hold all
+                # four request bodies concurrently.
+                await asyncio.sleep(0)
                 started = time.monotonic()
-                async with client.stream(
-                    "POST",
-                    generation_url,
-                    json=payload,
-                    timeout=_bounded_http_timeout(
-                        deadline,
-                        ceiling=MODEL_READINESS_GENERATION_TIMEOUT_SEC,
-                    ),
-                ) as response:
-                    if response.status_code != 200:
-                        raise battery.BatteryContractError("model_readiness_generation_failed")
-                    response_body = await _read_bounded_response(
-                        response,
-                        maximum_bytes=MODEL_READINESS_GENERATION_MAX_BYTES,
-                    )
+                probe_deadline = min(
+                    deadline,
+                    started + MODEL_READINESS_GENERATION_TIMEOUT_SEC,
+                )
+
+                async def one_request() -> None:
+                    async with client.stream(
+                        "POST",
+                        generation_url,
+                        json=payload,
+                        timeout=_bounded_http_timeout(
+                            probe_deadline,
+                            ceiling=MODEL_READINESS_GENERATION_TIMEOUT_SEC,
+                        ),
+                    ) as response:
+                        if response.status_code != 200:
+                            raise battery.BatteryContractError("model_readiness_generation_failed")
+                        response_body = await _read_bounded_response(
+                            response,
+                            maximum_bytes=MODEL_READINESS_GENERATION_MAX_BYTES,
+                        )
+                    if not _usable_model_readiness_classifier_response(
+                        response_body,
+                        expected_kind=expected_kind,
+                    ):
+                        raise battery.BatteryContractError("model_readiness_generation_invalid")
+
+                probe_budget = probe_deadline - time.monotonic()
+                if probe_budget <= 0:
+                    raise battery.BatteryContractError("model_readiness_deadline_exhausted")
                 try:
-                    generated = json.loads(response_body)
-                except (UnicodeError, json.JSONDecodeError):
-                    raise battery.BatteryContractError("model_readiness_generation_invalid") from None
-                if not isinstance(generated, Mapping) or not isinstance(generated.get("choices"), list):
-                    raise battery.BatteryContractError("model_readiness_generation_invalid")
-                if not generated["choices"]:
-                    raise battery.BatteryContractError("model_readiness_generation_invalid")
-                first_choice = generated["choices"][0]
-                if not isinstance(first_choice, Mapping) or not isinstance(
-                    first_choice.get("message"), Mapping
-                ):
-                    raise battery.BatteryContractError("model_readiness_generation_invalid")
+                    await asyncio.wait_for(one_request(), timeout=probe_budget)
+                except TimeoutError:
+                    raise battery.BatteryContractError("model_readiness_deadline_exhausted") from None
                 return max(0, round((time.monotonic() - started) * 1000))
 
             tasks = [
-                asyncio.create_task(generation_probe(), name=f"model-readiness-{index}")
-                for index in range(MODEL_READINESS_CONCURRENCY)
+                asyncio.create_task(
+                    generation_probe(payload, expected_kind=expected_kind),
+                    name=f"model-readiness-{index}",
+                )
+                for index, (payload, expected_kind) in enumerate(
+                    zip(payloads, MODEL_READINESS_CLASSIFIER_EXPECTED_KINDS, strict=True)
+                )
             ]
             try:
                 ready_budget = min(2.0, deadline - time.monotonic())
