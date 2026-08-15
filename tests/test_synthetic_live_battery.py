@@ -327,6 +327,23 @@ def test_every_case_has_closed_structural_content_and_state_oracles() -> None:
         assert f"«{marker}»" in case.question
 
 
+def test_only_package_a_temporal_pass_is_code_owned() -> None:
+    a_case = _cases("A", 2)[0]
+    b_case = _cases("B", 2)[0]
+
+    a_state = battery.oracle_for_case(a_case)["state"]
+    b_state = battery.oracle_for_case(b_case)["state"]
+
+    assert a_state["equals"]["model_spoke"] is False
+    assert a_state["equals"]["model_router_calls"] == 0
+    assert a_state["equals"]["model_http_attempts"] == 0
+    assert "model_http_attempts" not in a_state["min"]
+    assert "model_spoke" not in b_state["equals"]
+    assert "model_router_calls" not in b_state["equals"]
+    assert "model_http_attempts" not in b_state["equals"]
+    assert b_state["min"]["model_http_attempts"] == 1
+
+
 def test_document_counts_are_frozen_non_monotonic_unique_and_derived_from_bytes() -> None:
     document_cases = [*_cases("A", 3), *_cases("B", 3)]
     counts = [battery._expected_document_row_count(case) for case in document_cases]
@@ -2766,6 +2783,81 @@ def test_dense_isolation_boundary_accepts_coordinated_external_noun_phrases(
     assert battery._a09_04_affirmative_fallback_relation(message) is True
     failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
     assert "content_semantic_group_missing" not in failures
+
+
+def test_live_isolation_response_is_one_owned_relation() -> None:
+    message = (
+        "Изолированное тестовое окружение предотвращает взаимное влияние тестов и "
+        "гарантирует, что результаты проверок зависят только от кода, а не от "
+        "состояния общей инфраструктуры."
+    )
+    case = _cases("A", 9)[3]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_04_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_semantic_group_missing" not in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "Изолированное тестовое окружение предотвращает взаимное влияние тестов и "
+            "гарантирует, что результаты проверок зависят только от состояния общей "
+            "инфраструктуры, а не от кода."
+        ),
+        (
+            "Неизолированное тестовое окружение предотвращает взаимное влияние тестов и "
+            "гарантирует, что результаты проверок зависят только от кода, а не от "
+            "состояния общей инфраструктуры."
+        ),
+        (
+            "Изолированное тестовое окружение, возможно, предотвращает взаимное влияние "
+            "тестов и гарантирует, что результаты проверок зависят только от кода, а не "
+            "от состояния общей инфраструктуры."
+        ),
+        (
+            "Изолированное тестовое окружение может предотвращать взаимное влияние тестов "
+            "и гарантировать, что результаты проверок зависят только от кода, а не от "
+            "состояния общей инфраструктуры."
+        ),
+        (
+            "Изолированное тестовое окружение предотвращает взаимное влияние тестов, но "
+            "всё равно результаты проверок зависят от состояния общей инфраструктуры."
+        ),
+        "Изолированное тестовое окружение предотвращает взаимное влияние тестов.",
+        (
+            "Изолированное тестовое окружение предотвращает взаимное влияние тестов и "
+            "гарантирует, что результаты проверок зависят только от кодекса, а не от "
+            "состояния общей инфраструктуры."
+        ),
+        (
+            "Изолированное тестовое окружение предотвращает взаимное влияние тестировщиков и "
+            "гарантирует, что результаты проверок зависят только от кода, а не от "
+            "состояния общей инфраструктуры."
+        ),
+        (
+            "Изолированное тестовое окружение предотвращает взаимное влияние тестов и "
+            "гарантирует, что результаты проверяющих зависят только от кода, а не от "
+            "состояния общей инфраструктуры."
+        ),
+        (
+            "Изолированное тестовое окружение предотвращает взаимное влияние тестов и "
+            "гарантирует, что результаты проверок зависят только от кода, а не от "
+            "состояния общей инфраструктурщика."
+        ),
+    ],
+)
+def test_live_isolation_wording_keeps_direction_and_certainty_closed(message: str) -> None:
+    case = _cases("A", 9)[3]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_04_relation_is_exact(message) is False
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_semantic_group_missing" in failures
 
 
 @pytest.mark.parametrize(

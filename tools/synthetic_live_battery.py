@@ -671,6 +671,16 @@ _A09_04_AFFIRMATIVE_SCOPE = (
     rf"{_A09_04_ENSURES_STABLE_RESULT}))"
     r"[^.!?\n]{1,480}\.?\s*\Z"
 )
+_A09_04_LIVE_INFRASTRUCTURE_RELATION = (
+    r"\A"
+    rf"(?![\s\S]*{_A09_AFFIRMATIVE_CLAIM_BLOCKER})"
+    r"\s*(?:изолированное\s+тестовое\s+окружение|изолированная\s+тестовая\s+среда)"
+    r"\s+(?:предотвращает|исключает)\s+взаимное\s+влияние\s+тестов"
+    r"\s+и\s+(?:гарантирует|обеспечивает),?\s+что\s+"
+    r"(?:результаты\s+проверок\s+зависят|результат\s+проверки\s+зависит)"
+    r"\s+только\s+от\s+кода,?\s+а\s+не\s+от\s+состояния\s+общей\s+инфраструктуры"
+    r"\.?\s*\Z"
+)
 _A09_08_AFFIRMATIVE_SCOPE = (
     r"\A"
     rf"(?![\s\S]*{_A09_AFFIRMATIVE_CLAIM_BLOCKER})"
@@ -4857,10 +4867,14 @@ _A09_14_NO_INFLUENCE_VERB = r"\bне\s+влия(?:ет|ют|л(?:а|о|и)?|ть
 
 def _a09_04_relation_is_exact(message: str) -> bool:
     folded = message.casefold()
+    live_infrastructure_relation = bool(
+        re.search(_A09_04_LIVE_INFRASTRUCTURE_RELATION, folded, re.IGNORECASE)
+    )
     if ":" not in message and re.search(r"\bзавис\w*\s+только\s+от\b", folded, re.IGNORECASE):
-        return _a09_04_affirmative_fallback_relation(message)
+        return live_infrastructure_relation or _a09_04_affirmative_fallback_relation(message)
     return bool(
-        re.search(_A09_04_AFFIRMATIVE_SCOPE, folded, re.IGNORECASE)
+        live_infrastructure_relation
+        or re.search(_A09_04_AFFIRMATIVE_SCOPE, folded, re.IGNORECASE)
         or _a09_04_affirmative_fallback_relation(message)
     )
 
@@ -5008,6 +5022,14 @@ def _package_a_code_owned_case(case: ExpandedCase) -> bool:
         case.oracle_profile == "package_a_honesty"
         and case.pass_index == 1
         and case.question_index in _PACKAGE_A_CODE_OWNED_QUESTION_INDICES.get(case.battery_id, frozenset())
+    )
+
+
+def _package_a_code_owned_temporal_case(case: ExpandedCase) -> bool:
+    """Return the one temporal pass whose answer is rendered without a model."""
+
+    return bool(
+        case.battery_id == "A" and case.pass_index == 2 and case.oracle_profile == "package_b_temporal"
     )
 
 
@@ -5598,6 +5620,14 @@ def oracle_for_case(case: ExpandedCase) -> dict[str, Any]:
         content["contains_all"] = [_marker(case, "TIME")]
         content["exact_time_marker"] = _marker(case, "TIME")
         state_equals["expected_tool"] = "what_happened"
+        if _package_a_code_owned_temporal_case(case):
+            state_equals.update(
+                {
+                    "model_spoke": False,
+                    "model_router_calls": 0,
+                    "model_http_attempts": 0,
+                }
+            )
     elif profile == "package_c_exact_documents":
         content["standalone_integer"] = _expected_document_row_count(case)
         state_equals.update(
@@ -5835,7 +5865,11 @@ def oracle_for_case(case: ExpandedCase) -> dict[str, Any]:
             "other_http_attempts": 0,
         }
     )
-    if profile != "tenant_privacy" and not _package_a_code_owned_case(case):
+    if (
+        profile != "tenant_privacy"
+        and not _package_a_code_owned_case(case)
+        and not _package_a_code_owned_temporal_case(case)
+    ):
         state_min["model_http_attempts"] = 1
     max_model_calls, max_local_connections = _PROFILE_ATTEMPT_LIMITS[profile]
     max_model_http, max_embedding_http, max_reranker_http = _PROFILE_HTTP_SEND_LIMITS[profile]

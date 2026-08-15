@@ -2711,6 +2711,61 @@ def _temporal_payload_is_coherent(
     return bool(days == expected_days and isinstance(note, str) and bool(note.strip()) is (total == 0))
 
 
+def _render_closed_past_timeline(data: Mapping[str, Any]) -> str:
+    """Render one already-validated past-timeline page without model paraphrase.
+
+    A closed, context-free timeline question has no open semantic work once
+    ``what_happened`` has returned a coherent page for the exact interval.  A
+    second model pass can only weaken that evidence: it may omit an opaque
+    event value, invent a replacement, or make a truthful passive phrase look
+    like an unsupported deed.  Keep the verified values visibly quoted and
+    bounded, and leave compound/non-closed timeline turns on their established
+    synthesis route.
+    """
+
+    events = data.get("events")
+    shown = data.get("shown")
+    total = data.get("total")
+    if (
+        not isinstance(events, list)
+        or not isinstance(shown, int)
+        or isinstance(shown, bool)
+        or shown != len(events)
+        or not isinstance(total, Mapping)
+        or not isinstance(total.get("total"), int)
+        or isinstance(total.get("total"), bool)
+        or int(total["total"]) < shown
+    ):
+        return ""
+    total_count = int(total["total"])
+    if shown == 0:
+        return "В проверенной личной ленте за указанный интервал событий нет." if total_count == 0 else ""
+
+    rows: list[str] = []
+    for event in events:
+        if not isinstance(event, Mapping):
+            return ""
+        moment = " ".join(str(event.get("at") or "").split())[:80]
+        value = next(
+            (
+                " ".join(str(event.get(field) or "").split())
+                for field in ("text", "summary", "title")
+                if str(event.get(field) or "").strip()
+            ),
+            "",
+        )[:240]
+        if not moment or not value:
+            return ""
+        rows.append(f"- {moment} — {json.dumps(value, ensure_ascii=False)}")
+    return "\n".join(
+        (
+            "Проверенная личная лента за указанный интервал:",
+            *rows,
+            f"Показано событий: {shown} из {total_count}.",
+        )
+    )
+
+
 _ASKS_FOR_A_FILE = re.compile(
     r"(?:^|\W)(?:"
     r"в\s+word|в\s+ворде?|\bdocx\b|"
@@ -39009,6 +39064,19 @@ class AgentRuntime:
 
         if len(tool_evidence) < _MAX_TOOL_EVIDENCE:
             tool_evidence.append({"tool": tool_name, "output": str(rendered)})
+        if context is not None and context.closed_past_timeline_turn and tool_name == "what_happened":
+            closed_answer = _render_closed_past_timeline(result_data)
+            if closed_answer:
+                context.structural_answer = "\n\n".join(
+                    part for part in (context.structural_answer, closed_answer) if part
+                )
+                # Selection of this lane already proved one complete
+                # context-free speech act.  Calling the generic remainder
+                # arbiter here would reintroduce the very model variability the
+                # structural answer removes.
+                context.remainder_known = True
+                context.open_remainder = ""
+                return
         direction_text = "происходило" if intent.direction == "past" else "запланировано"
         messages.append(
             {

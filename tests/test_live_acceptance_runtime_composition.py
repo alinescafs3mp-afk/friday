@@ -19,6 +19,7 @@ from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     _closed_pure_past_timeline_intent,
+    _render_closed_past_timeline,
     file_turn_authority,
 )
 from friday.execution_kernel import ToolResult
@@ -83,7 +84,7 @@ class _TimelineKernel:
                     {
                         "at": f"2024-05-{day:02d}T12:00:00",
                         "kind": "message",
-                        "summary": marker,
+                        "text": marker,
                     }
                 ],
                 "total": {"messages": 1, "documents": 0, "total": 1},
@@ -175,13 +176,107 @@ async def test_every_manifest_a_temporal_turn_prefetches_exactly_once_before_opt
         "limit": 40,
     }
     assert kernel.calls == [("what_happened", expected_args)]
-    assert len(router.calls) == 1
-    assert reply["message"] == f"SYN-TIME-A02-{day:02d}"
+    assert router.calls == []
+    assert reply["message"].startswith("Проверенная личная лента за указанный интервал:\n")
+    assert reply["message"].count(f"SYN-TIME-A02-{day:02d}") == 1
+    assert reply["message"].endswith("Показано событий: 1 из 1.")
     assert reply["tools_used"] == ["what_happened"]
     metadata = _stored_metadata(storage, reply)
     assert metadata["tools_used"] == ["what_happened"]
-    assert metadata["structural"]["model_spoke"] is True
+    assert metadata["structural"]["model_spoke"] is False
     assert metadata["structural"]["llm_failed"] is False
+
+
+@pytest.mark.asyncio
+async def test_closed_timeline_quotes_a_passive_deed_fact_without_output_guard_replacement(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    kernel = _TimelineKernel()
+    original_execute = kernel.execute
+
+    async def execute_with_passive_fact(tool: str, params: dict[str, Any], actor=None):  # noqa: ANN001
+        result = await original_execute(tool, params, actor=actor)
+        result.data["events"][0]["text"] = "Оплата выполнена, заказ оформлен."
+        return result
+
+    kernel.execute = execute_with_passive_fact  # type: ignore[method-assign]
+    router = _TimelineAnswerRouter()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False, local_timezone="Europe/Moscow"),
+        storage,
+        llm=router,  # type: ignore[arg-type]
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    runtime._local_today = lambda: FIXED_TODAY  # type: ignore[method-assign]  # noqa: SLF001
+    runtime._local_now = lambda: FIXED_NOW  # type: ignore[method-assign]  # noqa: SLF001
+    monkeypatch.setattr(runtime, "_prepare_context", _forbidden_optional_stage)
+    monkeypatch.setattr(runtime, "_office_intent_arbiter", _forbidden_optional_stage)
+    for name in (
+        "_prefetch_archived_source_if_asked",
+        "_prefetch_the_web_if_asked",
+        "_prefetch_person_activity",
+        "_prefetch_archive_numbers",
+        "_prefetch_the_archive_if_asked",
+        "_prefetch_a_reminder_if_asked",
+    ):
+        monkeypatch.setattr(runtime, name, _forbidden_optional_stage)
+
+    reply = await runtime.chat("alice", P02_QUESTIONS[0], actor=_actor())
+
+    assert router.calls == []
+    assert "Оплата выполнена, заказ оформлен." in reply["message"]
+    assert reply["message"] != _CANNOT_ACT_OUTSIDE
+    metadata = _stored_metadata(storage, reply)
+    assert metadata["structural"]["model_spoke"] is False
+
+
+def test_closed_timeline_renderer_is_exact_and_fails_closed_on_missing_rows() -> None:
+    data = {
+        "shown": 1,
+        "events": [
+            {
+                "at": "2024-05-09 12:00",
+                "kind": "message",
+                "text": "SYN-TIME-A02-09",
+            }
+        ],
+        "total": {"messages": 1, "documents": 0, "total": 1},
+    }
+
+    rendered = _render_closed_past_timeline(data)
+
+    assert rendered == (
+        "Проверенная личная лента за указанный интервал:\n"
+        '- 2024-05-09 12:00 — "SYN-TIME-A02-09"\n'
+        "Показано событий: 1 из 1."
+    )
+    assert _render_closed_past_timeline({**data, "events": [{"at": "2024-05-09 12:00"}]}) == ""
+    assert _render_closed_past_timeline({**data, "shown": 0, "events": []}) == ""
+
+    empty = {
+        "shown": 0,
+        "events": [],
+        "total": {"messages": 0, "documents": 0, "total": 0},
+    }
+    assert _render_closed_past_timeline(empty) == (
+        "В проверенной личной ленте за указанный интервал событий нет."
+    )
+
+    sampled = {
+        "shown": 2,
+        "events": [
+            {"at": "2024-05-09 12:00", "text": "первая запись"},
+            {"at": "2024-05-09 13:00", "title": "вторая запись"},
+        ],
+        "total": {"messages": 2, "documents": 1, "total": 3},
+    }
+    sampled_text = _render_closed_past_timeline(sampled)
+    assert sampled_text.count("первая запись") == 1
+    assert sampled_text.count("вторая запись") == 1
+    assert sampled_text.endswith("Показано событий: 2 из 3.")
 
 
 @pytest.mark.asyncio
