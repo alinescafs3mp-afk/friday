@@ -1070,6 +1070,54 @@ def test_controller_orders_worker1_receipt_observer_worker2_exactly(
     assert ordering == (["worker-1"] if expected_calls == 1 else ["worker-1", "observer", "worker-2"])
     assert (barrier_dir / "run-1-receipt.json").is_file()
     assert (barrier_dir / "run-2-receipt.json").is_file() is (expected_calls == 2)
+    failure_summary = barrier_dir / "run-1-failure-summary.json"
+    assert failure_summary.is_file() is (expected_calls == 1)
+    if expected_calls == 1:
+        closed = json.loads(failure_summary.read_text(encoding="utf-8"))
+        assert closed == {
+            "schema": runner.FAILURE_SUMMARY_SCHEMA,
+            "commit": "a" * 40,
+            "run_id_hash": runner._run_id_hash(worker_run_ids[0]),
+            "run_index": 1,
+            "worker_report_sha256": report["run_receipts"][0]["worker_report_sha256"],
+            "worker_failure_codes": ["synthetic_failure"],
+            "failed_cases": [],
+        }
+
+
+def test_failure_summary_projects_only_closed_case_diagnostics() -> None:
+    runner = _module()
+    payload = runner._build_failure_summary(
+        commit="a" * 40,
+        run_hash="b" * 64,
+        run_index=1,
+        worker_report_sha256="c" * 64,
+        report={
+            "failure_codes": ["worker_exit_nonzero", "private detail must not escape"],
+            "cases": [
+                {
+                    "case_id": "D06",
+                    "status": "failed",
+                    "failure_codes": ["D06_answer_target", "private detail must not escape"],
+                    "checks": {"answer_target": False, "safe": True, "private detail": False},
+                    "counters": {"llm_chat_attempts": 1, "secret": "value", "negative": -1},
+                },
+                {"case_id": "D07", "status": "passed", "failure_codes": []},
+            ],
+        },
+    )
+
+    assert payload["worker_failure_codes"] == ["worker_exit_nonzero"]
+    assert payload["failed_cases"] == [
+        {
+            "case_id": "D06",
+            "failure_codes": ["D06_answer_target"],
+            "failed_checks": ["answer_target"],
+            "counters": {"llm_chat_attempts": 1},
+        }
+    ]
+    assert "private detail" not in json.dumps(payload)
+    assert "value" not in json.dumps(payload)
 
 
 @pytest.mark.parametrize(

@@ -66,6 +66,7 @@ SCHEMA = "friday.document-contour-live-battery.v1"
 WORKER_SCHEMA = "friday.document-contour-live-battery.worker.v1"
 REPORT_SCHEMA = "friday.document-contour-live-battery.report.v1"
 RUN_RECEIPT_SCHEMA = "friday.document-contour-live-battery.run-receipt.v1"
+FAILURE_SUMMARY_SCHEMA = "friday.document-contour-live-battery.failure-summary.v1"
 OBSERVER_REQUEST_SCHEMA = "friday.document-contour-live-battery.observer-request.v1"
 OBSERVER_RESPONSE_SCHEMA = "friday.document-contour-live-battery.observer-response.v2"
 _RUN_ID_ENV = "FRIDAY_DOCUMENT_BATTERY_RUN_ID"
@@ -3657,6 +3658,106 @@ def _persist_run_receipt(
     return path, _sha256(encoded)
 
 
+def _closed_failure_tokens(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return sorted(
+        {
+            token
+            for token in value
+            if isinstance(token, str) and re.fullmatch(r"[A-Za-z0-9_]{1,128}", token) is not None
+        }
+    )
+
+
+def _build_failure_summary(
+    *,
+    commit: str,
+    run_hash: str,
+    run_index: int,
+    report: Mapping[str, Any],
+    worker_report_sha256: str,
+) -> dict[str, Any]:
+    failed_cases: list[dict[str, Any]] = []
+    raw_cases = report.get("cases")
+    if isinstance(raw_cases, list):
+        for raw_case in raw_cases:
+            if not isinstance(raw_case, Mapping) or raw_case.get("status") != "failed":
+                continue
+            case_id = str(raw_case.get("case_id") or "")
+            if case_id not in {f"D{index:02d}" for index in range(1, CASES + 1)}:
+                continue
+            raw_checks = raw_case.get("checks")
+            failed_checks = (
+                sorted(
+                    key
+                    for key, value in raw_checks.items()
+                    if isinstance(key, str)
+                    and re.fullmatch(r"[A-Za-z0-9_]{1,128}", key) is not None
+                    and value is False
+                )
+                if isinstance(raw_checks, Mapping)
+                else []
+            )
+            raw_counters = raw_case.get("counters")
+            counters = (
+                {
+                    key: value
+                    for key, value in sorted(raw_counters.items())
+                    if isinstance(key, str)
+                    and re.fullmatch(r"[A-Za-z0-9_]{1,128}", key) is not None
+                    and type(value) is int
+                    and value >= 0
+                }
+                if isinstance(raw_counters, Mapping)
+                else {}
+            )
+            failed_cases.append(
+                {
+                    "case_id": case_id,
+                    "failure_codes": _closed_failure_tokens(raw_case.get("failure_codes")),
+                    "failed_checks": failed_checks,
+                    "counters": counters,
+                }
+            )
+    return {
+        "schema": FAILURE_SUMMARY_SCHEMA,
+        "commit": commit,
+        "run_id_hash": run_hash,
+        "run_index": run_index,
+        "worker_report_sha256": worker_report_sha256,
+        "worker_failure_codes": _closed_failure_tokens(report.get("failure_codes")),
+        "failed_cases": sorted(failed_cases, key=lambda item: item["case_id"]),
+    }
+
+
+def _persist_failure_summary(
+    barrier_dir: _PinnedBarrierDirectory,
+    payload: Mapping[str, Any],
+) -> None:
+    run_index = int(payload.get("run_index") or 0)
+    if (
+        set(payload)
+        != {
+            "schema",
+            "commit",
+            "run_id_hash",
+            "run_index",
+            "worker_report_sha256",
+            "worker_failure_codes",
+            "failed_cases",
+        }
+        or payload.get("schema") != FAILURE_SUMMARY_SCHEMA
+        or not 1 <= run_index <= RUNS
+    ):
+        raise BatteryFailure("failure_summary_invalid")
+    name = f"run-{run_index}-failure-summary.json"
+    encoded = _canonical_json(dict(payload)) + b"\n"
+    _atomic_pinned_private_write(barrier_dir, name, encoded)
+    if _read_pinned_private_json(barrier_dir, name) != dict(payload):
+        raise BatteryFailure("failure_summary_changed")
+
+
 def _observer_request(
     *,
     commit: str,
@@ -4057,6 +4158,19 @@ def run_controller(args: argparse.Namespace) -> dict[str, Any]:
             if report.get("status") != "passed" or not teardown_clear:
                 # A failed first streak must be fixed on a new frozen commit;
                 # spending another full live run cannot turn it into 2/2.
+                try:
+                    _persist_failure_summary(
+                        barrier_dir,
+                        _build_failure_summary(
+                            commit=commit,
+                            run_hash=run_hash,
+                            run_index=run_index,
+                            report=report,
+                            worker_report_sha256=worker_report_sha256,
+                        ),
+                    )
+                except Exception:  # noqa: BLE001 - the run is already terminal RED
+                    controller_failure_codes.append("failure_summary_write_failed")
                 break
             if run_index == 1:
                 challenge = _new_run_id()
