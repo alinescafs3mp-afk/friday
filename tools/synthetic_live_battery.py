@@ -745,7 +745,9 @@ _A09_06_RESILIENCE_RELATION = (
     r"\A"
     r"\s*проверка\s+(?:отказоустойчивости|отказоказоустойчивости)\s+нужна,\s+"
     r"чтобы\s+убедиться:\s+если\s+(?:часть|компонент)\s+системы\s+"
-    r"(?:сломается(?:\s+или\s+перестанет\s+отвечать)?|"
+    r"(?:сломается(?:\s+\((?:сервер|сеть|база\s+данных|хранилище|процесс)"
+    r"(?:,\s+(?:сервер|сеть|база\s+данных|хранилище|процесс)){1,4}\))?"
+    r"(?:\s+или\s+перестанет\s+отвечать)?|"
     r"перестанет\s+отвечать(?:\s+или\s+сломается)?|откажет),\s+"
     r"(?:вся\s+система|остальная\s+часть|вс[её]\s+остальное)\s+"
     r"продолжит\s+работать"
@@ -4935,6 +4937,21 @@ _A09_14_OWNED_FRESH_DATABASE_RELATION = (
     r"[^.!?\n]{0,32}"
     rf"{_A09_14_PREVENT_RESIDUE_INFLUENCE}"
 )
+_A09_14_PRIOR_TEST_RESULT_RELATION = (
+    r"\b(?:предотврат|исключ|устран)\w*"
+    r"(?![^.!?\n]{0,96}\b(?:не|ни)\s+(?:влияни|воздейств)\w*)"
+    r"[^.!?\n]{0,32}\b(?:влияни|воздейств)\w*\s+"
+    r"\b(?:предыдущ|прошл|ранн)\w*\s+(?:тест|прогон|запуск)\w*"
+    r"[^.!?\n]{0,32}\b(?:текущ|следующ)\w*\s+"
+    r"(?:результат|тест|прогон|запуск)\w*"
+)
+_A09_14_LIVE_FRESH_DATABASE_RELATION = (
+    r"\A\s*"
+    rf"{_A09_14_EACH_RUN_NEW_DATABASE}[^.!?\n]{{0,32}}"
+    r"\b(?:чтобы|для\s+того\s+чтобы)\b[^.!?\n]{0,32}"
+    rf"(?:{_A09_14_PREVENT_RESIDUE_INFLUENCE}|{_A09_14_PRIOR_TEST_RESULT_RELATION})"
+    r"\.[\s\S]{0,720}\Z"
+)
 _A09_14_AFFIRMATIVE_FRESH_DATABASE = (
     r"\A"
     rf"(?![\s\S]*{_A09_AFFIRMATIVE_CLAIM_BLOCKER})"
@@ -4972,7 +4989,53 @@ def _a09_04_relation_is_exact(message: str) -> bool:
 
 
 def _a09_06_relation_is_exact(message: str) -> bool:
-    return re.search(_A09_06_RESILIENCE_RELATION, message.casefold(), re.IGNORECASE) is not None
+    folded = message.casefold()
+    if re.search(_A09_06_RESILIENCE_RELATION, folded, re.IGNORECASE):
+        return True
+    if "(" in message or ")" in message:
+        return False
+    if re.search(_A09_AFFIRMATIVE_CLAIM_BLOCKER, folded, re.IGNORECASE) or re.search(
+        r"\A\s*(?:фраза|цитата|отч[её]т)\w*\s*:|"
+        r"\b(?:возможно|вероятно|якобы|хотя|несмотря|однако|может|могут)\b|"
+        r"\b(?:остальн\w*\s+(?:част|компонент)\w*|вс[её]\s+остальн\w*)"
+        r"[^.!?\n]{0,48}\b(?:не\s+продолж|перестан)\w*\s+работ\w*|"
+        r"\bпользовател\w*(?![^.!?\n]{0,16}\bне\b)"
+        r"[^.!?\n]{0,32}\bпотеря\w*\s+данн\w*|"
+        r"\bпользовател\w*[^.!?\n]{0,48}(?<!не\s)столкнут\w*\s+с\s+пол\w*"
+        r"\s+(?:крах|отказ|паралич)\w*|"
+        r"\bпол\w*\s+(?:крах|отказ|паралич)\w*\s+(?:тест|отч[её]т|пользовател)\w*",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    resilience = re.search(r"\b(?:отказоустойчивост|устойчивост\w*\s+к\s+отказ)\w*", folded)
+    component_failure = re.search(
+        r"(?:\b(?:част|компонент)\w*\s+систем\w*[^.!?\n]{0,48}"
+        r"\b(?:слом|откаж|сбо|перестан\w*\s+отвеча|стан\w*\s+недоступ)\w*|"
+        r"\b(?:сбо|отказ|поломк)\w*[^.!?\n]{0,24}"
+        r"\b(?:част|компонент)\w*\s+систем\w*)",
+        folded,
+        re.IGNORECASE,
+    )
+    remaining_works = re.search(
+        r"\b(?:остальн\w*\s+(?:част|компонент)\w*|вс[её]\s+остальн\w*|"
+        r"систем\w*\s+в\s+целом)\b[^.!?\n]{0,48}\bпродолж\w*\s+работ\w*",
+        folded,
+        re.IGNORECASE,
+    )
+    user_outcome = re.search(
+        r"\bпользовател\w*[^.!?\n]{0,48}(?:"
+        r"\bне\s+потеря\w*\s+данн\w*|"
+        r"\bне\s+столкнут\w*\s+с\s+пол\w*\s+(?:крах|отказ|паралич)\w*)",
+        folded,
+        re.IGNORECASE,
+    )
+    return (
+        resilience is not None
+        and component_failure is not None
+        and remaining_works is not None
+        and user_outcome is not None
+    )
 
 
 def _a09_12_relation_is_exact(message: str) -> bool:
@@ -4980,6 +5043,85 @@ def _a09_12_relation_is_exact(message: str) -> bool:
     return bool(
         re.search(_A09_12_AFFIRMATIVE_ERROR_AVOIDANCE, folded, re.IGNORECASE)
         or _a09_12_affirmative_fallback_relation(message)
+    )
+
+
+def _a09_14_relation_is_exact(message: str) -> bool:
+    folded = message.casefold()
+    if re.search(_A09_14_AFFIRMATIVE_FRESH_DATABASE, folded, re.IGNORECASE):
+        return True
+    if not re.search(_A09_14_LIVE_FRESH_DATABASE_RELATION, folded, re.IGNORECASE):
+        return False
+    tokens = _p09_words(message)
+    if any(
+        token in {"возможно", "вероятно", "может", "могут", "якобы", "хотя", "несмотря", "однако"}
+        for token in tokens
+    ) or re.search(
+        r"\b(?:не|ни)\s+(?:предотврат|исключ|устран|нов|независ)\w*|"
+        r"\b(?:не\s+нов|стар|прежн)\w*[^.!?\n]{0,24}\b(?:баз|database|хранилищ)\w*|"
+        r"\b(?:та|одна)\s+же\s+баз\w*|"
+        r"\A\s*(?:фраза|цитата|отч[её]т)\w*\s*:",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    return not bool(
+        re.search(
+            r"\b(?:остат|след|состояни)\w*[^.!?\n]{0,32}"
+            r"\b(?:по-прежнему\s+)?(?:продолжа\w*\s+)?"
+            r"(?:влия|искажа|перенос|сохраня|накаплива|просачива)\w*|"
+            r"\b(?:данн|остат|след|состояни)\w*"
+            r"(?![^.!?\n]{0,48}\bне\s+[«„\"']?"
+            r"(?:влия|искажа|перенос|сохраня|накаплива|просачива)\w*)"
+            r"[^.!?\n]{0,48}\b"
+            r"(?:влия|искажа|перенос|сохраня|накаплива|просачива)\w*",
+            folded,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _a09_18_relation_is_exact(message: str) -> bool:
+    folded = message.casefold()
+    if re.search(_A09_18_FAIL_CLOSED_STATE_RELATION, folded, re.IGNORECASE):
+        return True
+    if not re.search(r"\A\s*fail-closed\s*[—–:-]\s*это\b", folded, re.IGNORECASE):
+        return False
+    if re.search(_A09_AFFIRMATIVE_CLAIM_BLOCKER, folded, re.IGNORECASE) or re.search(
+        r"\bfail-open\b|\b(?:возмож|вероят|может|могут|якобы)\w*\b|"
+        r"\bповедени\w*\s+внешн\w*\s+систем\w*|\bвс[её]\s+равно\b|"
+        r"\b(?:друг|отдельн)\w*\s+систем\w*|"
+        r"\b(?:не|ни)\s+(?:переход|возвраща|блокир|останавл|закрыва|отключа|"
+        r"запреща|отказыва)\w*|"
+        r"\b(?:открыт|небезопасн)\w*\s+состояни\w*|"
+        r"\b(?:разреша|продолжа|выполня)\w*[^.!?\n]{0,32}"
+        r"\b(?:опасн|действ|операц|доступ|процесс)\w*",
+        folded,
+        re.IGNORECASE,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"\A\s*fail-closed\s*[—–:-]\s*это\s+"
+            r"(?:поведени|принцип|режим)\w*\s+систем\w*,"
+            r"[^.!?\n]{0,80}\b(?:сбо|ошиб|отказ|неопредел)\w*|"
+            r"\A\s*fail-closed\s*[—–:-]\s*это\s+"
+            r"(?:поведени|принцип|режим)\w*\s+систем\w*,"
+            r"[^.!?\n]{0,80}\bпотер\w*\s+(?:питани|связ)\w*",
+            folded,
+            re.IGNORECASE,
+        )
+        and re.search(
+            r"\b(?:она|систем\w*)[^.!?\n]{0,32}(?:"
+            r"(?:переход|возвраща)\w*\s+в\s+"
+            r"(?:безопасн|закрыт|заблокирован|отключ[её]нн)\w*"
+            r"(?:\s*,?\s*(?:безопасн|закрыт|заблокирован|отключ[её]нн)\w*)?"
+            r"\s+состояни\w*|"
+            r"(?:блокир|останавл|закрыва|отключа|запреща|отказыва)\w*"
+            r"[^.!?\n]{0,48}(?:действ|операц|доступ|процесс|соединени|механизм)\w*)",
+            folded,
+            re.IGNORECASE,
+        )
     )
 
 
@@ -5887,7 +6029,7 @@ def oracle_for_case(case: ExpandedCase) -> dict[str, Any]:
                 content["contains_any"] = ["изолир", "изоляц"]
                 content["semantic_profile"] = "a09_04"
             elif fallback_key == ("A", 6):
-                content["contains_any"] = ["часть системы", "компонент системы"]
+                content["contains_any"] = ["част", "компонент"]
                 content["semantic_profile"] = "a09_06"
             elif fallback_key == ("A", 8):
                 content["contains_any"] = [
@@ -5908,6 +6050,12 @@ def oracle_for_case(case: ExpandedCase) -> dict[str, Any]:
             elif fallback_key == ("A", 12):
                 content["contains_any"] = list(semantic_groups[0])
                 content["semantic_profile"] = "a09_12"
+            elif fallback_key == ("A", 14):
+                content["contains_any"] = ["баз", "database", "хранилищ"]
+                content["semantic_profile"] = "a09_14"
+            elif fallback_key == ("A", 18):
+                content["contains_any"] = ["fail-closed", "неопредел", "ошиб", "сбо"]
+                content["semantic_profile"] = "a09_18"
             else:
                 content["contains_any"] = list(semantic_groups[0])
             if not content["semantic_profile"]:
@@ -7213,6 +7361,8 @@ def evaluate_case(case: ExpandedCase, record: Mapping[str, Any], *, latency_ms: 
         "a09_08": _a09_08_relation_is_exact,
         "a09_10": _a09_10_relation_is_exact,
         "a09_12": _a09_12_relation_is_exact,
+        "a09_14": _a09_14_relation_is_exact,
+        "a09_18": _a09_18_relation_is_exact,
     }.get(semantic_profile)
     semantic_missing = (
         not semantic_profile_exact(message)

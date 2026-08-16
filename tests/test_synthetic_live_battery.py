@@ -112,6 +112,16 @@ def _satisfying_record(case: battery.ExpandedCase) -> dict[str, Any]:
                 )
             elif (case.battery_id, case.question_index) == ("A", 12):
                 message = "Фиксация часового пояса гарантирует повторяемые результаты тестовых запусков."
+            elif (case.battery_id, case.question_index) == ("A", 14):
+                message = (
+                    "Каждый тестовый проход получает новую базу данных, чтобы предотвратить "
+                    "влияние остатков прошлого запуска. Это обеспечивает повторяемый итог."
+                )
+            elif (case.battery_id, case.question_index) == ("A", 18):
+                message = (
+                    "Fail-closed — это поведение системы, при которой при сбое она "
+                    "переходит в безопасное закрытое состояние."
+                )
             else:
                 semantic = [str(group[0]) for group in content["semantic_groups"]]
                 message = " ".join(semantic) + " помогает сделать локальную проверку надёжной."
@@ -3069,6 +3079,69 @@ def test_live_resilience_relation_accepts_remaining_system_without_data_clause()
     assert "content_semantic_group_missing" not in failures
 
 
+def test_live_resilience_relation_accepts_bounded_component_examples() -> None:
+    message = (
+        "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается "
+        "(сервер, сеть, база данных), остальная часть продолжит работать, а пользователи "
+        "не потеряют данные и не столкнутся с полным крахом сервиса."
+    )
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_required_alternative_missing" not in failures
+    assert "content_semantic_group_missing" not in failures
+
+
+def test_live_resilience_relation_accepts_structural_paraphrase() -> None:
+    message = (
+        "Проверка устойчивости к отказам подтверждает, что при отказе компонента системы "
+        "остальные компоненты продолжат работать, а пользователи не потеряют данные."
+    )
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_required_alternative_missing" not in failures
+    assert "content_semantic_group_missing" not in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается "
+            "(пользователь, отчёт), остальная часть продолжит работать, а пользователи не "
+            "потеряют данные и не столкнутся с полным крахом сервиса."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается "
+            "(сервер, сеть, база данных), остальная часть перестанет работать, а пользователи "
+            "не потеряют данные и не столкнутся с полным крахом сервиса."
+        ),
+        (
+            "Проверка отказоустойчивости может быть нужна, чтобы убедиться: если часть системы "
+            "сломается (сервер, сеть, база данных), остальная часть продолжит работать, а "
+            "пользователи не потеряют данные и не столкнутся с полным крахом сервиса."
+        ),
+    ],
+)
+def test_live_resilience_component_examples_reject_role_and_polarity_mutations(
+    message: str,
+) -> None:
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_relation_is_exact(message) is False
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_semantic_group_missing" in failures
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -3112,6 +3185,7 @@ def test_live_fail_closed_state_relation_is_owned() -> None:
     record = _satisfying_record(case)
     record["response"]["message"] = message
 
+    assert battery._a09_18_relation_is_exact(message) is True
     failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
     assert "content_required_alternative_missing" not in failures
     assert "content_semantic_group_missing" not in failures
@@ -3144,6 +3218,14 @@ def test_live_fail_closed_state_relation_is_owned() -> None:
             "Fail-closed — это поведение системы, при которой при сбое она автоматически "
             "переходит в закрытое состояние, но операция всё равно выполняется."
         ),
+        (
+            "Fail-closed — это поведение системы, при которой при сбое она не переходит "
+            "в безопасное состояние."
+        ),
+        (
+            "Fail-closed — это поведение системы, описанное в справке. При сбое сервер "
+            "пишет лог, а отдельная система переходит в безопасное состояние."
+        ),
     ],
 )
 def test_live_fail_closed_state_relation_rejects_mutations(message: str) -> None:
@@ -3151,8 +3233,36 @@ def test_live_fail_closed_state_relation_rejects_mutations(message: str) -> None
     record = _satisfying_record(case)
     record["response"]["message"] = message
 
+    assert battery._a09_18_relation_is_exact(message) is False
     failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
     assert "content_semantic_group_missing" in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "Fail-closed — это поведение системы, при которой в случае сбоя или ошибки она "
+            "переходит в безопасное состояние, блокируя дальнейшие действия (например, "
+            "закрывая соединение или отключая механизм), чтобы предотвратить потенциальный "
+            "ущерб или некорректную работу."
+        ),
+        (
+            "Fail-closed — это поведение системы, при которой при отказе или потере связи "
+            "она переходит в безопасное, закрытое состояние (например, блокирует доступ или "
+            "останавливает процесс), чтобы предотвратить потенциально опасные действия."
+        ),
+    ],
+)
+def test_live_fail_closed_structural_relation_accepts_safe_paraphrases(message: str) -> None:
+    case = _cases("A", 9)[17]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_18_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_required_alternative_missing" not in failures
+    assert "content_semantic_group_missing" not in failures
 
 
 @pytest.mark.parametrize(
@@ -5207,6 +5317,24 @@ def test_fresh_database_explanation_accepts_owned_residue_prevention(message: st
     assert "content_semantic_group_missing" not in failures
 
 
+def test_fresh_database_explanation_accepts_structural_live_paraphrase() -> None:
+    message = (
+        "Каждый тестовый проход получает новую базу, чтобы исключить влияние предыдущих "
+        "тестов на текущие результаты. Это гарантирует, что тесты независимы друг от друга: "
+        "данные, созданные или изменённые в одном тесте, не «просачиваются» в другой. "
+        "Благодаря этому ошибки легче локализовать, а результаты тестирования становятся "
+        "воспроизводимыми и предсказуемыми."
+    )
+    case = _cases("A", 9)[13]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_14_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_required_alternative_missing" not in failures
+    assert "content_semantic_group_missing" not in failures
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -5251,6 +5379,50 @@ def test_fresh_database_explanation_remains_relation_bound(message: str) -> None
 
     failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
 
+    assert "content_semantic_group_missing" in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "Каждый тестовый проход может получать новую базу, чтобы исключить влияние "
+            "предыдущих тестов на текущие результаты. Результат остаётся неопределённым."
+        ),
+        (
+            "Каждый тестовый проход получает новую базу, чтобы исключить влияние текущих "
+            "результатов на предыдущие тесты. Это меняет историю запусков."
+        ),
+        (
+            "Каждый тестовый проход получает старую базу, чтобы исключить влияние предыдущих "
+            "тестов на текущие результаты."
+        ),
+        (
+            "Каждый тестовый проход получает новую базу, чтобы не исключить влияние предыдущих "
+            "тестов на текущие результаты."
+        ),
+        (
+            "Каждый тестовый проход получает новую базу, чтобы исключить влияние предыдущих "
+            "тестов на текущие результаты. Остатки продолжают влиять на следующий тест."
+        ),
+        (
+            "Фраза: «Каждый тестовый проход получает новую базу, чтобы исключить влияние "
+            "предыдущих тестов на текущие результаты»."
+        ),
+        (
+            "Каждый тестовый проход выполняется, а сервер получает новую базу, чтобы исключить "
+            "влияние предыдущих тестов на текущие результаты."
+        ),
+        ("Каждый тестовый проход получает новую базу, чтобы исключить упоминание предыдущих тестов."),
+    ],
+)
+def test_fresh_database_structural_live_relation_rejects_mutations(message: str) -> None:
+    case = _cases("A", 9)[13]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_14_relation_is_exact(message) is False
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
     assert "content_semantic_group_missing" in failures
 
 
