@@ -439,6 +439,69 @@ def test_readiness_rejects_duplicate_classifier_json_keys() -> None:
 
 
 @pytest.mark.parametrize(
+    ("content", "expected_kind"),
+    [
+        (
+            '```json\n{"вид":"интернет","запрос":"  актуальное расписание TEST-001  ",'
+            '"кто":"не используется","дни":["завтра"],"лишнее":true}\n```',
+            "интернет",
+        ),
+        (
+            'Ответ: {"вид":"архив","запрос":"акт TEST-002","кто":"не используется","дни":"не используется"}.',
+            "архив",
+        ),
+        (
+            '{"вид":"человек: переписка","кто":"  Альфа TEST-003  ","запрос":"не используется","лишнее":1}',
+            "человек",
+        ),
+        (
+            '{"вид":"действие","дни":["завтра"],"запрос":"проверить TEST-004","лишнее":"ignored"}',
+            "действие",
+        ),
+    ],
+)
+def test_readiness_accepts_the_same_harmless_shape_variance_as_runtime(
+    content: str,
+    expected_kind: str,
+) -> None:
+    body = json.dumps(
+        _readiness_generation_envelope(content),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode()
+
+    assert acceptance._usable_model_readiness_classifier_response(
+        body,
+        expected_kind=expected_kind,
+    )
+
+
+@pytest.mark.parametrize(
+    ("content", "expected_kind"),
+    [
+        ('{"вид":"интернет","запрос":"   "}', "интернет"),
+        ('{"вид":"человек","кто":"   "}', "человек"),
+        ('{"вид":"другое","запрос":"TEST-004"}', "действие"),
+        ('{"вид":"архив"} {"вид":"архив"}', "архив"),
+    ],
+)
+def test_runtime_compatible_readiness_still_rejects_unusable_semantics(
+    content: str,
+    expected_kind: str,
+) -> None:
+    body = json.dumps(
+        _readiness_generation_envelope(content),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode()
+
+    assert not acceptance._usable_model_readiness_classifier_response(
+        body,
+        expected_kind=expected_kind,
+    )
+
+
+@pytest.mark.parametrize(
     "response_json",
     [
         {"choices": []},

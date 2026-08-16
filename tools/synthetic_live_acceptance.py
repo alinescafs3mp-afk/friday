@@ -406,17 +406,6 @@ def _model_readiness_classifier_payloads(model: str) -> tuple[dict[str, Any], ..
     )
 
 
-def _normalized_classifier_field(value: Any, *, maximum_chars: int) -> str | None:
-    """Return one already-normalized bounded classifier field, else ``None``."""
-
-    if type(value) is not str:
-        return None
-    normalized = " ".join(value.split())
-    if value != normalized or len(value) > maximum_chars:
-        return None
-    return value
-
-
 def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     """Build one JSON object while rejecting keys hidden by last-value wins."""
 
@@ -433,13 +422,14 @@ def _usable_model_readiness_classifier_response(
     *,
     expected_kind: str,
 ) -> bool:
-    """Accept only one complete OpenAI response carrying the closed classifier schema.
+    """Accept one response that the production arbiter can actually consume.
 
-    AgentRuntime is intentionally tolerant when serving a person: it can recover a
-    JSON object from surrounding prose and ignores irrelevant classifier fields.
-    The pre-release gate is stricter.  It proves that, under four-way load, the
-    configured dispatcher can obey the actual closed-output instruction without
-    relying on that recovery path.  This projection retains no generated content.
+    Readiness is an availability gate, not a second and stricter intent parser.
+    AgentRuntime extracts the JSON object from harmless prose/fences, normalizes
+    the selected field and ignores fields irrelevant to the selected kind.  The
+    readiness projection mirrors that boundary while retaining the stricter HTTP
+    envelope, size, tool-call, duplicate-key and expected-kind checks.  No model
+    content leaves this function.
     """
 
     try:
@@ -466,42 +456,34 @@ def _usable_model_readiness_classifier_response(
     content = message.get("content")
     if type(content) is not str or not content or len(content) > 2_048:
         return False
+    start, end = content.find("{"), content.rfind("}")
+    if start < 0 or end <= start:
+        return False
     try:
-        verdict = json.loads(content, object_pairs_hook=_reject_duplicate_json_keys)
+        verdict = json.loads(
+            content[start : end + 1],
+            object_pairs_hook=_reject_duplicate_json_keys,
+        )
     except (ValueError, TypeError):
         return False
-    if type(verdict) is not dict or set(verdict) != MODEL_READINESS_CLASSIFIER_KEYS:
+    if type(verdict) is not dict:
         return False
 
-    kind = verdict.get("вид")
-    query = _normalized_classifier_field(verdict.get("запрос"), maximum_chars=140)
-    who = _normalized_classifier_field(verdict.get("кто"), maximum_chars=80)
-    rule = _normalized_classifier_field(verdict.get("правило"), maximum_chars=200)
-    raw_days = verdict.get("дни")
-    if (
-        type(kind) is not str
-        or kind not in MODEL_READINESS_CLASSIFIER_KINDS
-        or kind != expected_kind
-        or query is None
-        or who is None
-        or rule is None
-        or type(raw_days) is not list
-        or len(raw_days) > 12
+    raw_kind = verdict.get("вид")
+    if type(raw_kind) is not str:
+        return False
+    kind = " ".join(raw_kind.split()).casefold()
+    if not kind.startswith(expected_kind) or not any(
+        kind.startswith(allowed) for allowed in MODEL_READINESS_CLASSIFIER_KINDS
     ):
         return False
-    days = [_normalized_classifier_field(day, maximum_chars=12) for day in raw_days]
-    if any(day is None or not day for day in days):
-        return False
-    if kind == "интернет" and (not query or len(query.split()) > 14):
-        return False
-    if kind in {"правило", "поправка"} and not rule:
-        return False
-    return bool(
-        (kind == "интернет" or not query)
-        and (kind == "человек" or not who)
-        and (kind == "файл" or not days)
-        and (kind in {"правило", "поправка"} or not rule)
-    )
+    if expected_kind == "интернет":
+        query = verdict.get("запрос")
+        return type(query) is str and bool(" ".join(query.split()))
+    if expected_kind == "человек":
+        who = verdict.get("кто")
+        return type(who) is str and bool(" ".join(who.split()))
+    return True
 
 
 async def _async_model_readiness_barrier(
