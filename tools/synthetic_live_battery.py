@@ -741,6 +741,18 @@ _A09_04_DATABASE_PROTECTION_RELATION = (
     r"повреждений\s+(?:и|или)\s+изменений)"
     r"\.?\s*\Z"
 )
+_A09_04_RESULT_DEPENDS_ON_CODE_RELATION = (
+    r"\A"
+    rf"(?![\s\S]*{_A09_AFFIRMATIVE_CLAIM_BLOCKER})"
+    r"\s*(?:изолированное\s+тестовое\s+окружение|изолированная\s+тестовая\s+среда)"
+    r"\s+(?:предотвращает|исключает)\s+взаимное\s+влияние,?\s+"
+    r"(?:(?:тестов|проверок|экспериментов)\s+)?и\s+"
+    r"(?:гарантирует|обеспечивает),?\s+что\s+"
+    r"(?:результаты(?:\s+проверок)?\s+зависят|"
+    r"(?:результат|итог|ответ)(?:\s+(?:проверки|теста|прогона))?\s+зависит)"
+    r"\s+только\s+от\s+(?:(?:проверяемого|тестируемого|тестового)\s+)?кода"
+    r"\.?\s*\Z"
+)
 _A09_06_RESILIENCE_RELATION = (
     r"\A"
     r"\s*проверка\s+(?:отказоустойчивости|отказоказоустойчивости)\s+нужна,\s+"
@@ -4952,6 +4964,19 @@ _A09_14_LIVE_FRESH_DATABASE_RELATION = (
     rf"(?:{_A09_14_PREVENT_RESIDUE_INFLUENCE}|{_A09_14_PRIOR_TEST_RESULT_RELATION})"
     r"\.[\s\S]{0,720}\Z"
 )
+_A09_14_SEPARATE_RUN_DATABASE_RELATION = (
+    r"\A\s*чтобы\s+"
+    rf"\bкажд\w*[^.!?\n]{{0,24}}\b{_A09_14_RUN_SCOPE}"
+    r"(?![^.!?\n]{0,48}\b(?:сервер|сервис|процесс|агент|систем|клиент)\w*)"
+    r"(?![^.!?\n]{0,64}\bне\b[^.!?\n]{0,16}\b(?:независим|изолир)\w*)"
+    r"[^.!?\n]{0,64}\b(?:независим|изолир)\w*[^.!?\n]{0,80}\.\s*"
+    rf"[^.!?\n]{{0,32}}{_A09_14_NEW_DATABASE}[^.!?\n]{{0,160}}"
+    r"\b(?:результат|итог|тест|проверка)\w*[^.!?\n]{0,24}"
+    r"\bне\s+завис\w*\s+от\s+"
+    r"(?:данн|состояни|изменени|результат)\w*[^.!?\n]{0,64}"
+    r"\b(?:предыдущ|прошл|ранн)\w*\s+"
+    rf"{_A09_14_RUN_SCOPE}[^.!?\n]{{0,160}}\.?\s*\Z"
+)
 _A09_14_AFFIRMATIVE_FRESH_DATABASE = (
     r"\A"
     rf"(?![\s\S]*{_A09_AFFIRMATIVE_CLAIM_BLOCKER})"
@@ -4978,6 +5003,7 @@ def _a09_04_relation_is_exact(message: str) -> bool:
         or re.search(_A09_04_NONINFLUENCE_AND_INDEPENDENCE_RELATION, folded, re.IGNORECASE)
         or re.search(_A09_04_SYSTEM_AND_PROCESS_RELATION, folded, re.IGNORECASE)
         or re.search(_A09_04_DATABASE_PROTECTION_RELATION, folded, re.IGNORECASE)
+        or re.search(_A09_04_RESULT_DEPENDS_ON_CODE_RELATION, folded, re.IGNORECASE)
     )
     if ":" not in message and re.search(r"\bзавис\w*\s+только\s+от\b", folded, re.IGNORECASE):
         return live_infrastructure_relation or _a09_04_affirmative_fallback_relation(message)
@@ -5018,15 +5044,18 @@ def _a09_06_relation_is_exact(message: str) -> bool:
         re.IGNORECASE,
     )
     remaining_works = re.search(
-        r"\b(?:остальн\w*\s+(?:част|компонент)\w*|вс[её]\s+остальн\w*|"
-        r"систем\w*\s+в\s+целом)\b[^.!?\n]{0,48}\bпродолж\w*\s+работ\w*",
+        r"(?:\b(?:остальн\w*\s+(?:част|компонент)\w*|вс[её]\s+остальн\w*|"
+        r"систем\w*\s+в\s+целом)\b[^.!?\n]{0,48}\bпродолж\w*\s+работ\w*|"
+        r"\b(?:остальное|остальные)\s+продолж\w*\s+работ\w*)",
         folded,
         re.IGNORECASE,
     )
     user_outcome = re.search(
         r"\bпользовател\w*[^.!?\n]{0,48}(?:"
         r"\bне\s+потеря\w*\s+данн\w*|"
-        r"\bне\s+столкнут\w*\s+с\s+пол\w*\s+(?:крах|отказ|паралич)\w*)",
+        r"\bне\s+столкнут\w*\s+с\s+пол\w*\s+(?:крах|отказ|паралич)\w*)|"
+        r"\b(?:данн\w*[^.!?\n]{0,24}\bне\s+(?:буд\w*\s+)?потеря\w*|"
+        r"не\s+(?:буд\w*\s+)?потеря\w*[^.!?\n]{0,24}\bданн\w*)",
         folded,
         re.IGNORECASE,
     )
@@ -5050,7 +5079,10 @@ def _a09_14_relation_is_exact(message: str) -> bool:
     folded = message.casefold()
     if re.search(_A09_14_AFFIRMATIVE_FRESH_DATABASE, folded, re.IGNORECASE):
         return True
-    if not re.search(_A09_14_LIVE_FRESH_DATABASE_RELATION, folded, re.IGNORECASE):
+    if not (
+        re.search(_A09_14_LIVE_FRESH_DATABASE_RELATION, folded, re.IGNORECASE)
+        or re.search(_A09_14_SEPARATE_RUN_DATABASE_RELATION, folded, re.IGNORECASE)
+    ):
         return False
     tokens = _p09_words(message)
     if any(
@@ -5100,29 +5132,27 @@ def _a09_18_relation_is_exact(message: str) -> bool:
         re.IGNORECASE,
     ):
         return False
-    return bool(
-        re.search(
-            r"\A\s*fail-closed\s*[—–:-]\s*это\s+"
-            r"(?:поведени|принцип|режим)\w*\s+систем\w*,"
-            r"[^.!?\n]{0,80}\b(?:сбо|ошиб|отказ|неопредел)\w*|"
-            r"\A\s*fail-closed\s*[—–:-]\s*это\s+"
-            r"(?:поведени|принцип|режим)\w*\s+систем\w*,"
-            r"[^.!?\n]{0,80}\bпотер\w*\s+(?:питани|связ)\w*",
-            folded,
-            re.IGNORECASE,
-        )
-        and re.search(
-            r"\b(?:она|систем\w*)[^.!?\n]{0,32}(?:"
-            r"(?:переход|возвраща)\w*\s+в\s+"
-            r"(?:безопасн|закрыт|заблокирован|отключ[её]нн)\w*"
-            r"(?:\s*,?\s*(?:безопасн|закрыт|заблокирован|отключ[её]нн)\w*)?"
-            r"\s+состояни\w*|"
-            r"(?:блокир|останавл|закрыва|отключа|запреща|отказыва)\w*"
-            r"[^.!?\n]{0,48}(?:действ|операц|доступ|процесс|соединени|механизм)\w*)",
-            folded,
-            re.IGNORECASE,
-        )
+    trigger_relation = re.search(
+        r"\A\s*fail-closed\s*[—–:-]\s*это\s+"
+        r"(?:поведени|принцип|режим)\w*\s+систем\w*,"
+        r"[^.!?\n]{0,80}\b(?:сбо|ошиб|отказ|неопредел)\w*|"
+        r"\A\s*fail-closed\s*[—–:-]\s*это\s+"
+        r"(?:поведени|принцип|режим)\w*\s+систем\w*,"
+        r"[^.!?\n]{0,80}\bпотер\w*\s+(?:питани|связ)\w*",
+        folded,
+        re.IGNORECASE,
     )
+    safe_terminal = re.search(
+        r"(?:\b(?:переход|возвраща|оказыва)\w*\s+в\s+"
+        r"(?:безопасн|закрыт|заблокирован|отключ[её]нн)\w*"
+        r"(?:\s*,?\s*(?:безопасн|закрыт|заблокирован|отключ[её]нн)\w*)?"
+        r"\s+состояни\w*|"
+        r"(?:блокир|останавл|закрыва|отключа|запреща|отказыва)\w*"
+        r"[^.!?\n]{0,48}(?:действ|операц|доступ|процесс|соединени|механизм)\w*)",
+        folded,
+        re.IGNORECASE,
+    )
+    return trigger_relation is not None and safe_terminal is not None
 
 
 _FALLBACK_SEMANTIC_GROUPS = {

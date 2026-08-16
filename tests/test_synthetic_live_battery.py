@@ -2843,6 +2843,52 @@ def test_live_isolation_service_and_prior_run_relation_is_owned() -> None:
     assert "content_semantic_group_missing" not in failures
 
 
+def test_live_isolation_code_dependency_relation_is_owned() -> None:
+    message = (
+        "Изолированная тестовая среда исключает взаимное влияние экспериментов и "
+        "обеспечивает, что итог проверки зависит только от проверяемого кода."
+    )
+    case = _cases("A", 9)[3]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_04_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_semantic_group_missing" not in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "Неизолированная тестовая среда исключает взаимное влияние экспериментов и "
+            "обеспечивает, что итог проверки зависит только от проверяемого кода."
+        ),
+        (
+            "Изолированная тестовая среда исключает взаимное влияние экспериментаторов и "
+            "обеспечивает, что итог проверки зависит только от проверяемого кода."
+        ),
+        (
+            "Изолированная тестовая среда исключает взаимное влияние экспериментов и "
+            "обеспечивает, что итог проверки зависит только от проверяемого кодекса."
+        ),
+        (
+            "Изолированная тестовая среда исключает взаимное влияние экспериментов и "
+            "может обеспечить, что итог проверки зависит только от проверяемого кода."
+        ),
+    ],
+)
+def test_live_isolation_code_dependency_relation_rejects_mutations(message: str) -> None:
+    case = _cases("A", 9)[3]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_04_relation_is_exact(message) is False
+    assert (
+        "content_semantic_group_missing" in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -3110,6 +3156,56 @@ def test_live_resilience_relation_accepts_structural_paraphrase() -> None:
     assert "content_semantic_group_missing" not in failures
 
 
+def test_live_resilience_relation_accepts_standalone_remainder_and_data_safety() -> None:
+    message = (
+        "Проверка устойчивости к отказам подтверждает: при сбое компонента системы "
+        "остальное продолжит работать, а данные не будут потеряны."
+    )
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_required_alternative_missing" not in failures
+    assert "content_semantic_group_missing" not in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "Проверка устойчивости к отказам подтверждает: при сбое компонента системы "
+            "остальное перестанет работать, а данные не будут потеряны."
+        ),
+        (
+            "Проверка устойчивости к отказам подтверждает: при сбое компонента системы "
+            "остальное продолжит работать, а данные будут потеряны."
+        ),
+        (
+            "Проверка устойчивости к отказам подтверждает: при сбое отчёта "
+            "остальное продолжит работать, а данные не будут потеряны."
+        ),
+        (
+            "Проверка устойчивости к отказам подтверждает: при сбое компонента системы "
+            "остальные тестировщики продолжат работать, а данные не будут потеряны."
+        ),
+        (
+            "Проверка устойчивости к отказам может подтверждать: при сбое компонента системы "
+            "остальное продолжит работать, а данные не будут потеряны."
+        ),
+    ],
+)
+def test_live_resilience_standalone_remainder_rejects_mutations(message: str) -> None:
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_relation_is_exact(message) is False
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_semantic_group_missing" in failures
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -3263,6 +3359,44 @@ def test_live_fail_closed_structural_relation_accepts_safe_paraphrases(message: 
     failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
     assert "content_required_alternative_missing" not in failures
     assert "content_semantic_group_missing" not in failures
+
+
+def test_live_fail_closed_structural_relation_accepts_direct_blocking_terminal() -> None:
+    message = (
+        "Fail-closed — это принцип системы, при котором при ошибке блокируются опасные операции и доступ."
+    )
+    case = _cases("A", 9)[17]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_18_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_required_alternative_missing" not in failures
+    assert "content_semantic_group_missing" not in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "Fail-closed — это принцип системы, при котором при ошибке не блокируются "
+            "опасные операции и доступ."
+        ),
+        ("Fail-closed — это принцип системы, при котором при ошибке разрешаются опасные операции и доступ."),
+        (
+            "Fail-closed — это принцип внешней системы, при котором при ошибке "
+            "блокируются опасные операции и доступ."
+        ),
+    ],
+)
+def test_live_fail_closed_direct_blocking_terminal_rejects_mutations(message: str) -> None:
+    case = _cases("A", 9)[17]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_18_relation_is_exact(message) is False
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_semantic_group_missing" in failures
 
 
 @pytest.mark.parametrize(
@@ -5333,6 +5467,62 @@ def test_fresh_database_explanation_accepts_structural_live_paraphrase() -> None
     failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
     assert "content_required_alternative_missing" not in failures
     assert "content_semantic_group_missing" not in failures
+
+
+def test_fresh_database_explanation_accepts_separate_run_and_database_relation() -> None:
+    message = (
+        "Чтобы каждый тестовый проход оставался независимым от окружения. "
+        "Новая база данных гарантирует, что результат проверки не зависит от "
+        "состояния прошлого запуска."
+    )
+    case = _cases("A", 9)[13]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_14_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_required_alternative_missing" not in failures
+    assert "content_semantic_group_missing" not in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "Чтобы каждый тестовый проход не оставался независимым от окружения. "
+            "Новая база данных гарантирует, что результат проверки не зависит от "
+            "состояния прошлого запуска."
+        ),
+        (
+            "Чтобы каждый тестовый проход оставался независимым от окружения. "
+            "Старая база данных гарантирует, что результат проверки не зависит от "
+            "состояния прошлого запуска."
+        ),
+        (
+            "Чтобы каждый тестовый проход оставался независимым от окружения. "
+            "Новая база данных гарантирует, что результат проверки зависит от "
+            "состояния прошлого запуска."
+        ),
+        (
+            "Чтобы каждый тестовый проход оставался независимым от окружения. "
+            "Новая база данных гарантирует, что результат проверки не зависит от "
+            "состояния следующего запуска."
+        ),
+        (
+            "Чтобы каждый тестовый проход оставался независимым от окружения, сервер. "
+            "Новая база данных гарантирует, что результат проверки не зависит от "
+            "состояния прошлого запуска."
+        ),
+    ],
+)
+def test_fresh_database_separate_relation_rejects_mutations(message: str) -> None:
+    case = _cases("A", 9)[13]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_14_relation_is_exact(message) is False
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_semantic_group_missing" in failures
 
 
 @pytest.mark.parametrize(
