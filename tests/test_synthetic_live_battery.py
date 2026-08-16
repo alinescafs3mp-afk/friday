@@ -2887,6 +2887,57 @@ def test_live_isolation_system_and_process_relation_is_owned() -> None:
     assert "content_semantic_group_missing" not in failures
 
 
+def test_live_isolation_database_protection_relation_is_owned() -> None:
+    message = (
+        "Изолированное тестовое окружение предотвращает взаимное влияние тестов и "
+        "защищает основную базу данных от случайных изменений или повреждений."
+    )
+    case = _cases("A", 9)[3]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_04_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_required_alternative_missing" not in failures
+    assert "content_semantic_group_missing" not in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "Неизолированное тестовое окружение предотвращает взаимное влияние тестов и "
+            "защищает основную базу данных от случайных изменений или повреждений."
+        ),
+        (
+            "Изолированное тестовое окружение допускает взаимное влияние тестов и "
+            "защищает основную базу данных от случайных изменений или повреждений."
+        ),
+        (
+            "Изолированное тестовое окружение предотвращает взаимное влияние тестировщиков и "
+            "защищает основную базу данных от случайных изменений или повреждений."
+        ),
+        (
+            "Изолированное тестовое окружение предотвращает взаимное влияние тестов и "
+            "повреждает основную базу данных случайными изменениями."
+        ),
+        (
+            "Изолированное тестовое окружение может предотвращать взаимное влияние тестов и "
+            "защищать основную базу данных от случайных изменений или повреждений."
+        ),
+        "Изолированное тестовое окружение предотвращает взаимное влияние тестов.",
+    ],
+)
+def test_live_isolation_database_protection_relation_rejects_mutations(message: str) -> None:
+    case = _cases("A", 9)[3]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_04_relation_is_exact(message) is False
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_semantic_group_missing" in failures
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -3000,6 +3051,108 @@ def test_live_resilience_relation_accepts_contained_service_paralysis_wording() 
     failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
     assert "content_required_alternative_missing" not in failures
     assert "content_semantic_group_missing" not in failures
+
+
+def test_live_resilience_relation_accepts_remaining_system_without_data_clause() -> None:
+    message = (
+        "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается "
+        "или перестанет отвечать, всё остальное продолжит работать, а пользователи не "
+        "столкнутся с полным крахом сервиса."
+    )
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_required_alternative_missing" not in failures
+    assert "content_semantic_group_missing" not in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается "
+            "или перестанет отвечать, всё остальное перестанет работать, а пользователи не "
+            "столкнутся с полным крахом сервиса."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается "
+            "или перестанет отвечать, всё остальное продолжит работать, а пользователи "
+            "столкнутся с полным крахом сервиса."
+        ),
+        (
+            "Проверка отказоустойчивости может быть нужна, чтобы убедиться: если часть "
+            "системы сломается или перестанет отвечать, всё остальное продолжит работать."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть сервера сломается "
+            "или перестанет отвечать, всё остальное продолжит работать."
+        ),
+        "Проверка отказоустойчивости нужна, чтобы всё остальное продолжило работать.",
+    ],
+)
+def test_live_resilience_remaining_system_relation_rejects_mutations(message: str) -> None:
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_relation_is_exact(message) is False
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_semantic_group_missing" in failures
+
+
+def test_live_fail_closed_state_relation_is_owned() -> None:
+    message = (
+        "Fail-closed — это поведение системы, при которой при сбое или потере питания "
+        "она автоматически переходит в закрытое (отключенное) состояние."
+    )
+    case = _cases("A", 9)[17]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_required_alternative_missing" not in failures
+    assert "content_semantic_group_missing" not in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "Fail-open — это поведение системы, при которой при сбое или потере питания "
+            "она автоматически переходит в закрытое состояние."
+        ),
+        (
+            "Fail-closed — это поведение системы, при которой при штатной работе она "
+            "автоматически переходит в закрытое состояние."
+        ),
+        (
+            "Fail-closed — это поведение системы, при которой при сбое она автоматически "
+            "переходит в открытое состояние."
+        ),
+        (
+            "Fail-closed — это поведение системы, при которой при сбое она может "
+            "автоматически перейти в закрытое состояние."
+        ),
+        (
+            "Fail-closed — это поведение внешней системы, при которой при сбое она "
+            "автоматически переходит в закрытое состояние."
+        ),
+        (
+            "Fail-closed — это поведение системы, при которой при сбое она автоматически "
+            "переходит в закрытое состояние, но операция всё равно выполняется."
+        ),
+    ],
+)
+def test_live_fail_closed_state_relation_rejects_mutations(message: str) -> None:
+    case = _cases("A", 9)[17]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_semantic_group_missing" in failures
 
 
 @pytest.mark.parametrize(
