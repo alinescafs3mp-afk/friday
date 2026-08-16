@@ -157,6 +157,36 @@ def test_readiness_deadline_matches_the_foreground_model_contract() -> None:
     )
 
 
+@pytest.mark.parametrize("usable", [0, 2, 5, True, 3.0])
+def test_readiness_result_rejects_an_invalid_usable_response_count(usable: Any) -> None:
+    result = acceptance.ModelReadinessResult(
+        queue_state="clear",
+        metrics_samples=3,
+        probes_requested=4,
+        probes_completed=4,
+        usable_responses=usable,
+        maximum_latency_ms=1,
+    )
+
+    assert result.probes_clear is False
+    assert result.dispatch_clear is False
+
+
+@pytest.mark.parametrize("usable", [3, 4])
+def test_readiness_result_accepts_the_closed_degraded_availability_range(usable: int) -> None:
+    result = acceptance.ModelReadinessResult(
+        queue_state="clear",
+        metrics_samples=3,
+        probes_requested=4,
+        probes_completed=4,
+        usable_responses=usable,
+        maximum_latency_ms=1,
+    )
+
+    assert result.probes_clear is True
+    assert result.dispatch_clear is True
+
+
 _EXPECTED_READINESS_CLASSIFIER_INPUTS = (
     "Найди актуальное расписание TEST-001",
     "Что написано в синтетическом акте TEST-002?",
@@ -373,6 +403,7 @@ def test_readiness_runs_four_production_shaped_classifier_probes_concurrently() 
     assert result.queue_state == "unknown"
     assert result.metrics_samples == 0
     assert result.probes_requested == result.probes_completed == 4
+    assert result.usable_responses == 4
     assert type(result.maximum_latency_ms) is int and result.maximum_latency_ms >= 0
     assert result.probes_clear is True
     assert result.dispatch_clear is False
@@ -415,6 +446,56 @@ def test_readiness_rejects_one_valid_but_wrong_classifier_kind_for_all_probes() 
         )
 
     assert sorted(seen_inputs) == sorted(_EXPECTED_READINESS_CLASSIFIER_INPUTS)
+
+
+def test_readiness_allows_one_malformed_classifier_response_as_degraded_availability() -> None:
+    invalid_input = _EXPECTED_READINESS_CLASSIFIER_INPUTS[-1]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(404)
+        user_input = json.loads(request.content)["messages"][1]["content"]
+        if user_input == invalid_input:
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "{not-json"}}]},
+            )
+        return _readiness_classifier_response(_VALID_READINESS_CLASSIFIER_OUTPUTS[user_input])
+
+    result = acceptance._model_readiness_barrier(
+        _readiness_environment(),
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _seconds: None,
+        require_authoritative_metrics=False,
+    )
+
+    assert result.probes_requested == result.probes_completed == 4
+    assert result.usable_responses == 3
+    assert result.probes_clear is True
+    assert result.dispatch_clear is False
+
+
+def test_readiness_rejects_two_malformed_classifier_responses() -> None:
+    invalid_inputs = set(_EXPECTED_READINESS_CLASSIFIER_INPUTS[-2:])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(404)
+        user_input = json.loads(request.content)["messages"][1]["content"]
+        if user_input in invalid_inputs:
+            return _readiness_classifier_response({"вид": "другое"})
+        return _readiness_classifier_response(_VALID_READINESS_CLASSIFIER_OUTPUTS[user_input])
+
+    with pytest.raises(
+        battery.BatteryContractError,
+        match="^model_readiness_generation_invalid$",
+    ):
+        acceptance._model_readiness_barrier(
+            _readiness_environment(),
+            transport=httpx.MockTransport(handler),
+            sleeper=lambda _seconds: None,
+            require_authoritative_metrics=False,
+        )
 
 
 def test_readiness_rejects_duplicate_classifier_json_keys() -> None:
@@ -864,6 +945,7 @@ def test_readiness_failure_prevents_acceptance_dispatch(
             metrics_samples=0,
             probes_requested=4,
             probes_completed=0,
+            usable_responses=0,
             maximum_latency_ms=0,
         )
 
@@ -1047,6 +1129,7 @@ def test_sanitized_summary_binds_probe_and_execution_concurrency(
             metrics_samples=0,
             probes_requested=4,
             probes_completed=4,
+            usable_responses=4,
             maximum_latency_ms=123,
         ),
     )
@@ -1071,6 +1154,7 @@ def test_sanitized_summary_binds_probe_and_execution_concurrency(
     assert summary["model_readiness_dispatch_clear"] is False
     assert summary["model_readiness_concurrency"] == 4
     assert summary["model_readiness_probes_completed"] == 4
+    assert summary["model_readiness_usable_responses"] == 4
     assert summary["model_readiness_probes_clear"] is True
     assert summary["execution_concurrency"] == 4
     assert summary["execution_concurrency_exact"] is True

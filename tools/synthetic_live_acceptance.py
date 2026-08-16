@@ -73,6 +73,7 @@ MODEL_READINESS_QUIET_SEC = 1.0
 MODEL_READINESS_CONCURRENCY = 4
 MODEL_READINESS_METRICS_MAX_BYTES = 2 * 1024 * 1024
 MODEL_READINESS_GENERATION_MAX_BYTES = 256 * 1024
+MODEL_READINESS_MIN_USABLE_RESPONSES = 3
 MODEL_READINESS_CLASSIFIER_USER_MESSAGES = (
     "Найди актуальное расписание TEST-001",
     "Что написано в синтетическом акте TEST-002?",
@@ -260,12 +261,15 @@ class ModelReadinessResult:
     metrics_samples: int
     probes_requested: int
     probes_completed: int
+    usable_responses: int
     maximum_latency_ms: int
 
     @property
     def probes_clear(self) -> bool:
         return bool(
             self.probes_requested == self.probes_completed == MODEL_READINESS_CONCURRENCY
+            and type(self.usable_responses) is int
+            and MODEL_READINESS_MIN_USABLE_RESPONSES <= self.usable_responses <= MODEL_READINESS_CONCURRENCY
             and type(self.maximum_latency_ms) is int
             and 0 <= self.maximum_latency_ms <= round(MODEL_READINESS_BUDGET_SEC * 1000)
         )
@@ -498,7 +502,10 @@ async def _async_model_readiness_barrier(
     vLLM exposes queue gauges at ``/metrics``.  When both gauges are present we
     require a stable empty queue before the probes and an empty queue after them.
     Four simultaneous, production-shaped outward-intent classifiers then have to
-    return HTTP 200 and one usable closed JSON verdict each.  Other
+    return HTTP 200, and at least three must contain a usable closed JSON verdict.
+    One malformed semantic response is degraded availability, not dispatcher
+    unavailability: the 160-case acceptance run that follows remains the semantic
+    oracle.  Two malformed responses still fail closed.  Other
     OpenAI-compatible servers can be diagnosed through the generations, but their
     queue state is explicitly ``unknown`` rather than being presented as clear.
     The official acceptance caller requires authoritative metrics and therefore
@@ -586,6 +593,7 @@ async def _async_model_readiness_barrier(
                     metrics_samples=0,
                     probes_requested=MODEL_READINESS_CONCURRENCY,
                     probes_completed=0,
+                    usable_responses=0,
                     maximum_latency_ms=0,
                 )
             if metrics_observed:
@@ -602,7 +610,11 @@ async def _async_model_readiness_barrier(
             all_ready = asyncio.Event()
             ready_count = 0
 
-            async def generation_probe(payload: Mapping[str, Any], *, expected_kind: str) -> int:
+            async def generation_probe(
+                payload: Mapping[str, Any],
+                *,
+                expected_kind: str,
+            ) -> tuple[int, bool]:
                 nonlocal ready_count
                 ready_count += 1
                 if ready_count == MODEL_READINESS_CONCURRENCY:
@@ -619,7 +631,7 @@ async def _async_model_readiness_barrier(
                     started + MODEL_READINESS_GENERATION_TIMEOUT_SEC,
                 )
 
-                async def one_request() -> None:
+                async def one_request() -> bool:
                     async with client.stream(
                         "POST",
                         generation_url,
@@ -635,20 +647,19 @@ async def _async_model_readiness_barrier(
                             response,
                             maximum_bytes=MODEL_READINESS_GENERATION_MAX_BYTES,
                         )
-                    if not _usable_model_readiness_classifier_response(
+                    return _usable_model_readiness_classifier_response(
                         response_body,
                         expected_kind=expected_kind,
-                    ):
-                        raise battery.BatteryContractError("model_readiness_generation_invalid")
+                    )
 
                 probe_budget = probe_deadline - time.monotonic()
                 if probe_budget <= 0:
                     raise battery.BatteryContractError("model_readiness_deadline_exhausted")
                 try:
-                    await asyncio.wait_for(one_request(), timeout=probe_budget)
+                    usable = await asyncio.wait_for(one_request(), timeout=probe_budget)
                 except TimeoutError:
                     raise battery.BatteryContractError("model_readiness_deadline_exhausted") from None
-                return max(0, round((time.monotonic() - started) * 1000))
+                return max(0, round((time.monotonic() - started) * 1000)), usable
 
             tasks = [
                 asyncio.create_task(
@@ -672,7 +683,7 @@ async def _async_model_readiness_barrier(
                 if completion_budget <= 0:
                     raise battery.BatteryContractError("model_readiness_deadline_exhausted")
                 try:
-                    latencies = list(
+                    completed = list(
                         await asyncio.wait_for(
                             asyncio.gather(*tasks),
                             timeout=completion_budget,
@@ -685,8 +696,12 @@ async def _async_model_readiness_barrier(
                     if not task.done():
                         task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
-            if len(latencies) != MODEL_READINESS_CONCURRENCY:
+            if len(completed) != MODEL_READINESS_CONCURRENCY:
                 raise battery.BatteryContractError("model_readiness_concurrency_failed")
+            latencies = [latency for latency, _usable in completed]
+            usable_responses = sum(usable for _latency, usable in completed)
+            if usable_responses < MODEL_READINESS_MIN_USABLE_RESPONSES:
+                raise battery.BatteryContractError("model_readiness_generation_invalid")
 
             if metrics_observed:
                 await quiet_interval()
@@ -707,6 +722,7 @@ async def _async_model_readiness_barrier(
         metrics_samples=metrics_samples,
         probes_requested=MODEL_READINESS_CONCURRENCY,
         probes_completed=len(latencies),
+        usable_responses=usable_responses,
         maximum_latency_ms=max(latencies),
     )
 
@@ -1816,6 +1832,7 @@ def _run_acceptance_locked(
         "model_readiness_metrics_samples": readiness.metrics_samples,
         "model_readiness_concurrency": readiness.probes_requested,
         "model_readiness_probes_completed": readiness.probes_completed,
+        "model_readiness_usable_responses": readiness.usable_responses,
         "model_readiness_maximum_latency_ms": readiness.maximum_latency_ms,
         "execution_concurrency": concurrency,
         "execution_concurrency_exact": execution_concurrency_exact,
