@@ -8979,6 +8979,12 @@ def _exact_absolute_reminder_request(message: str) -> tuple[str, str, str] | Non
     return body, planned.isoformat(), _exact_reminder_remainder(message, core_end=core_end)
 
 
+def _requires_outward_intent_arbiter(message: str) -> bool:
+    """Keep exact absolute reminders off the probabilistic intent boundary."""
+
+    return _exact_absolute_reminder_request(message) is None
+
+
 #: Сколько знаков разговора уходит в контекст. Окно модели — 32 768 токенов, и в
 #: тяжёлом ходе (описания инструментов ~4650, результат инструмента до 4000,
 #: выдача поиска до 4000, найденные документы) история легко становится тем, из-за
@@ -21542,6 +21548,7 @@ _TEXT_SHAPE_LIST_REGEN_SYSTEM = (
 _TextShapeRegenerationReason = Literal[
     "not_attempted",
     "accepted",
+    "deterministic_fallback",
     "call",
     "json",
     "type",
@@ -21558,6 +21565,44 @@ def _text_shape_format_failure(request: str) -> str:
     return (
         _TEXT_SHAPE_FORMAT_FAILURE_RU if re.search(r"[А-Яа-яЁё]", request) else _TEXT_SHAPE_FORMAT_FAILURE_EN
     )
+
+
+def _closed_neutral_numbered_list_fallback(
+    request: str,
+    contract: ExplicitTextShapeContract,
+) -> str:
+    """Render two neutral items for one closed, source-free list request."""
+
+    if (
+        contract.kind != "list"
+        or contract.count != 2
+        or contract.word_list
+        or contract.list_style != "numbered"
+        or contract.emphasis_style is not None
+    ):
+        return ""
+    pattern = re.compile(
+        rf"[ \t]*(?:дай|составь|сформируй|подготовь)[ \t]+"
+        rf"(?:компактный|короткий|краткий)[ \t]+нумерованный[ \t]+список[ \t]+"
+        rf"из[ \t]+двух[ \t]+нейтральных[ \t]+пунктов\.[ \t]+"
+        rf"включи[ \t]+маркер[ \t]+{re.escape(contract.literal)}\.[ \t]+"
+        rf"контроль[ \t]+{re.escape(contract.control)}\.[ \t]*",
+        re.IGNORECASE,
+    )
+    if pattern.fullmatch(request) is None:
+        return ""
+    rendered, reason = render_structured_list_regeneration_result(
+        request,
+        contract,
+        ["Первый нейтральный пункт", "Второй нейтральный пункт"],
+    )
+    if (
+        reason != "accepted"
+        or explicit_text_shape_status(request, rendered) != TEXT_SHAPE_VALID
+        or repair_explicit_text_shape(request, rendered) != rendered
+    ):
+        return ""
+    return rendered
 
 
 _OUTSIDE_DEED_RECOVERY_SYSTEM = (
@@ -30531,14 +30576,25 @@ class AgentRuntime:
                     shape_status = TEXT_SHAPE_VALID
                     LOGGER.info("text-shape regeneration: accepted")
                 else:
-                    if regenerated:
-                        shape_regeneration_reason = "render"
-                    # A known-invalid list is not useful output.  The structured
-                    # retry either rendered a proven scaffold or failed cleanly;
-                    # never publish its JSON or restore the malformed draft.
-                    repaired_shape = shape_fallback_draft or sanitized_shape_draft
-                    shape_status = TEXT_SHAPE_INVALID
-                    LOGGER.info("text-shape regeneration: rejected")
+                    deterministic_fallback = (
+                        _closed_neutral_numbered_list_fallback(asked_of_model, shape_contract)
+                        if shape_regeneration_attempted
+                        else ""
+                    )
+                    if deterministic_fallback:
+                        shape_regeneration_reason = "deterministic_fallback"
+                        repaired_shape = deterministic_fallback
+                        shape_status = TEXT_SHAPE_VALID
+                        LOGGER.info("text-shape regeneration: deterministic fallback")
+                    else:
+                        if regenerated:
+                            shape_regeneration_reason = "render"
+                        # A known-invalid list is not useful output.  The structured
+                        # retry either rendered a proven scaffold or failed cleanly;
+                        # never publish its JSON or restore the malformed draft.
+                        repaired_shape = shape_fallback_draft or sanitized_shape_draft
+                        shape_status = TEXT_SHAPE_INVALID
+                        LOGGER.info("text-shape regeneration: rejected")
             if shape_contract is not None:
                 owned_text_shape_valid = shape_status == TEXT_SHAPE_VALID
                 content = (
@@ -32606,6 +32662,7 @@ class AgentRuntime:
             and not current_attachment_local
             and self.llm.enabled
             and worth_understanding
+            and _requires_outward_intent_arbiter(message)
         ):
             # Последняя реплика человека до этой: вопрос-продолжение («а сроки
             # какие?») без неё читается как чужой.

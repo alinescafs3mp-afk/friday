@@ -74,6 +74,16 @@ MODEL_READINESS_CONCURRENCY = 4
 MODEL_READINESS_METRICS_MAX_BYTES = 2 * 1024 * 1024
 MODEL_READINESS_GENERATION_MAX_BYTES = 256 * 1024
 MODEL_READINESS_MIN_USABLE_RESPONSES = 3
+MODEL_HEAVY_PASS_CONCURRENCY = 2
+_MODEL_HEAVY_PASS_PROFILES = frozenset(
+    {
+        "package_a_honesty",
+        "k03_tag_inventory",
+        "tools_and_fallback",
+        "telegram_fake_transport",
+    }
+)
+_MODEL_LANE_ACQUIRE_POLL_SEC = 0.1
 MODEL_READINESS_CLASSIFIER_USER_MESSAGES = (
     "Найди актуальное расписание TEST-001",
     "Что написано в синтетическом акте TEST-002?",
@@ -1336,6 +1346,13 @@ def _execute_sealed(
     worker_codes: dict[tuple[str, int], str] = {}
     dispatches = {item.context.pass_id: 0 for item in sealed}
     dispatch_lock = threading.Lock()
+    model_lane = threading.BoundedSemaphore(MODEL_HEAVY_PASS_CONCURRENCY)
+    pass_profiles: dict[tuple[str, int], str] = {}
+    for item in sealed:
+        profiles = {case.oracle_profile for case in item.cases}
+        if len(profiles) != 1:
+            raise battery.BatteryContractError("acceptance_pass_profile_invalid")
+        pass_profiles[item.key] = next(iter(profiles))
     with battery.SubprocessPassExecutor(
         dict(model_environment),
         instrument_path=RUNNER_PATH,
@@ -1377,12 +1394,23 @@ def _execute_sealed(
                 item = work.get()
                 if item is None or stop.is_set():
                     return
+                model_lane_acquired = False
                 try:
+                    if pass_profiles[item.key] in _MODEL_HEAVY_PASS_PROFILES:
+                        while not stop.is_set():
+                            model_lane_acquired = model_lane.acquire(timeout=_MODEL_LANE_ACQUIRE_POLL_SEC)
+                            if model_lane_acquired:
+                                break
+                        if not model_lane_acquired:
+                            return
                     completed.put(("result", execute_one(item)))
                 except BaseException as exc:  # noqa: BLE001 - propagate after process-group teardown
                     stop.set()
                     completed.put(("error", exc))
                     return
+                finally:
+                    if model_lane_acquired:
+                        model_lane.release()
 
         threads = [
             threading.Thread(

@@ -120,7 +120,10 @@ _PROFILE_ATTEMPT_LIMITS = {
     "k12_markdown_transport": (12, 96),
     "tenant_privacy": (16, 128),
     "attachment_same_turn": (16, 160),
-    "reminder_creation": (16, 128),
+    # An exact absolute reminder is parsed and executed by the deterministic
+    # effect path.  It must not spend a model call merely to rediscover the
+    # already-proven outward intent.
+    "reminder_creation": (0, 128),
     "tools_and_fallback": (16, 128),
     "telegram_fake_transport": (12, 96),
 }
@@ -157,6 +160,7 @@ _P01_ROUTE_EVIDENCE_KEYS = (
     "answer_present",
     "model_spoke",
     "outside_deed_replaced",
+    "supported_deed_replaced",
     "remainder_known",
     "llm_failed",
 )
@@ -5800,6 +5804,9 @@ def oracle_for_case(case: ExpandedCase) -> dict[str, Any]:
                 "reminder_delta": 1,
                 "reminder_body_exact": True,
                 "reminder_due_exact": True,
+                "model_spoke": False,
+                "model_router_calls": 0,
+                "model_http_attempts": 0,
             }
         )
     elif profile == "tools_and_fallback":
@@ -5929,6 +5936,7 @@ def oracle_for_case(case: ExpandedCase) -> dict[str, Any]:
     )
     if (
         profile != "tenant_privacy"
+        and profile != "reminder_creation"
         and not _package_a_code_owned_case(case)
         and not _package_a_code_owned_temporal_case(case)
     ):
@@ -8665,6 +8673,11 @@ def _http_probe_reconciliation_exact(
         return False
     if profile == "tenant_privacy":
         return all(int(delta[key]) == 0 for delta in deltas for key in attempt_keys)
+    if profile == "reminder_creation":
+        # The frozen reminder grammar owns only the model boundary.  Local
+        # embedding/reranking work remains within the ordinary sealed limits,
+        # but an outward-intent model send is always a routing regression.
+        return all(int(delta["model_http"]) == 0 for delta in deltas)
     temporal_routes = [_package_a_code_owned_temporal_case(case) for case in cases]
     if all(temporal_routes):
         # A-P02 is rendered entirely from the frozen synthetic timeline.  Its
@@ -8682,6 +8695,7 @@ def _http_probe_reconciliation_exact(
         "answer_present": True,
         "model_spoke": False,
         "outside_deed_replaced": False,
+        "supported_deed_replaced": False,
         "remainder_known": True,
         "llm_failed": False,
     }
@@ -8698,15 +8712,25 @@ def _http_probe_reconciliation_exact(
             # A model-owned prompt may publish either the accepted model
             # refusal (``model_spoke=True``) or the deterministic safety
             # replacement after a real but rejected model answer
-            # (``model_spoke=False``).  The two durable terminal facts must be
-            # an XOR, and both are valid only with the exact non-structural
-            # route shape plus a positive transport ledger.
+            # (``model_spoke=False``).  Exactly one of accepted model speech,
+            # an outside-deed replacement, or a supported-deed replacement is
+            # the durable terminal fact; every branch still requires the same
+            # non-structural route shape and a positive transport ledger.
             if (
                 evidence["fabricated_outside_deed_request"] is not False
                 or evidence["answer_present"] is not False
                 or type(evidence["model_spoke"]) is not bool
                 or type(evidence["outside_deed_replaced"]) is not bool
-                or evidence["model_spoke"] is evidence["outside_deed_replaced"]
+                or type(evidence["supported_deed_replaced"]) is not bool
+                or sum(
+                    int(evidence[key])
+                    for key in (
+                        "model_spoke",
+                        "outside_deed_replaced",
+                        "supported_deed_replaced",
+                    )
+                )
+                != 1
                 or evidence["remainder_known"] is not False
                 or evidence["llm_failed"] is not False
                 or int(delta["model_http"]) < 1
@@ -10609,11 +10633,17 @@ def _p01_route_evidence(structural: Mapping[str, Any]) -> dict[str, Any]:
 
     output_guards = structural.get("output_guards")
     outside_deed_replaced: bool | None = False
+    supported_deed_replaced: bool | None = False
     if isinstance(output_guards, Mapping):
         raw_outside_deed_replaced = output_guards.get("outside_deed_replaced", False)
         outside_deed_replaced = raw_outside_deed_replaced if type(raw_outside_deed_replaced) is bool else None
+        raw_supported_deed_replaced = output_guards.get("supported_deed_replaced", False)
+        supported_deed_replaced = (
+            raw_supported_deed_replaced if type(raw_supported_deed_replaced) is bool else None
+        )
     elif output_guards is not None:
         outside_deed_replaced = None
+        supported_deed_replaced = None
 
     return {
         # Older model-owned messages legitimately omit this positive-only
@@ -10622,6 +10652,7 @@ def _p01_route_evidence(structural: Mapping[str, Any]) -> dict[str, Any]:
         "answer_present": structural.get("answer_present"),
         "model_spoke": structural.get("model_spoke"),
         "outside_deed_replaced": outside_deed_replaced,
+        "supported_deed_replaced": supported_deed_replaced,
         "remainder_known": structural.get("remainder_known"),
         "llm_failed": structural.get("llm_failed"),
     }

@@ -136,6 +136,87 @@ def test_every_selected_pass_is_dispatched_once_without_retry(
     assert result.candidate_identity is True
 
 
+def test_four_workers_never_run_more_than_two_model_heavy_passes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_root = _private_root(tmp_path / "acceptance-model-lane")
+    sealed = acceptance._preseal_passes("all", run_root, acceptance._load_manifests())
+    candidate_files = (
+        "tools/synthetic_live_acceptance.py",
+        "tools/synthetic_live_battery.py",
+    )
+    candidate_digest = "b" * 64
+    release_heavy = threading.Event()
+    two_heavy = threading.Event()
+    lock = threading.Lock()
+    active_heavy = 0
+    maximum_heavy = 0
+    started_heavy: list[str] = []
+
+    class FakeExecutor:
+        def __init__(self, environment: dict[str, str], *, instrument_path: Path) -> None:
+            assert environment == {}
+            assert instrument_path == acceptance.RUNNER_PATH
+            self._candidate_files = candidate_files
+            self._candidate_source_sha256 = candidate_digest
+
+        def __enter__(self) -> FakeExecutor:
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def _assert_candidate_unchanged(self) -> None:
+            return None
+
+        def __call__(self, _manifest: Any, _pass_spec: Any, cases: Any, context: Any) -> Any:
+            nonlocal active_heavy, maximum_heavy
+            profile = cases[0].oracle_profile
+            if profile in acceptance._MODEL_HEAVY_PASS_PROFILES:
+                with lock:
+                    active_heavy += 1
+                    maximum_heavy = max(maximum_heavy, active_heavy)
+                    started_heavy.append(context.pass_id)
+                    if active_heavy == acceptance.MODEL_HEAVY_PASS_CONCURRENCY:
+                        two_heavy.set()
+                try:
+                    assert release_heavy.wait(timeout=5.0)
+                finally:
+                    with lock:
+                        active_heavy -= 1
+            return battery._pass_failure(cases, "pass_worker_error")
+
+    monkeypatch.setattr(battery, "_candidate_source_paths", lambda **_kwargs: candidate_files)
+    monkeypatch.setattr(battery, "_candidate_source_digest", lambda **_kwargs: candidate_digest)
+    monkeypatch.setattr(battery, "SubprocessPassExecutor", FakeExecutor)
+
+    results: list[acceptance.ExecutionResult] = []
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            results.append(acceptance._execute_sealed(sealed, concurrency=4, model_environment={}))
+        except BaseException as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    assert two_heavy.wait(timeout=5.0)
+    time.sleep(acceptance._MODEL_LANE_ACQUIRE_POLL_SEC * 2)
+    with lock:
+        assert maximum_heavy == acceptance.MODEL_HEAVY_PASS_CONCURRENCY
+        assert len(started_heavy) == acceptance.MODEL_HEAVY_PASS_CONCURRENCY
+    release_heavy.set()
+    thread.join(timeout=10.0)
+
+    assert not thread.is_alive()
+    assert errors == []
+    assert len(results) == 1
+    assert results[0].dispatches == {item.context.pass_id: 1 for item in sealed}
+    assert maximum_heavy == acceptance.MODEL_HEAVY_PASS_CONCURRENCY
+
+
 def _readiness_environment() -> dict[str, str]:
     return {
         "FRIDAY_PROFILE": "qwen36-27b-nvfp4-nvidia",

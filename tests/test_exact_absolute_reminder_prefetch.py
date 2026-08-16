@@ -13,6 +13,7 @@ from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     _exact_absolute_reminder_request,
+    _requires_outward_intent_arbiter,
 )
 from friday.execution_kernel import ExecutionKernel
 from friday.ingestion import IngestionPipeline
@@ -126,6 +127,7 @@ def test_every_frozen_exact_reminder_is_created_without_classifier_variance(
     assert [item["tool"] for item in evidence] == ["remind"]
     assert context.remainder_known is True and context.open_remainder == ""
     assert context.structural_answer.count(marker) == 1
+    assert _requires_outward_intent_arbiter(question) is False
 
 
 @pytest.mark.parametrize(
@@ -151,6 +153,7 @@ def test_every_frozen_exact_reminder_is_created_without_classifier_variance(
 )
 def test_adversarial_non_requests_never_take_the_deterministic_effect_path(message: str) -> None:
     assert _exact_absolute_reminder_request(message) is None
+    assert _requires_outward_intent_arbiter(message) is True
     runtime = _runtime(classifier_payload='{"напоминание": "нет", "что": "", "когда": "", "остаток": ""}')
 
     done, context, tools, used, evidence = _prefetch(runtime, message)

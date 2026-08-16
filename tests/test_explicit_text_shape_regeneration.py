@@ -14,6 +14,7 @@ from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     _attachment_reference_kind,
+    _closed_neutral_numbered_list_fallback,
     _intra_file_record_set_count,
     file_turn_authority,
 )
@@ -35,6 +36,10 @@ RU_SENTENCE = "Напиши ответ одним предложением. Вк
 RU_BOLD_PHRASE = (
     "Сформируй одну короткую фразу с жирным Markdown-выделением для транспортного теста. "
     "Включи маркер SYN-TELEGRAM-A10-02. Контроль SYN-A10-02."
+)
+RU_NEUTRAL_NUMBERED_LIST = (
+    "Дай компактный нумерованный список из двух нейтральных пунктов. "
+    "Включи маркер SYN-TELEGRAM-A10-03. Контроль SYN-A10-03."
 )
 STRUCTURED_ITEMS = '["First item", "Second item"]'
 STRUCTURED_LIST = "- First item MARK-SEG-20\n- Second item"
@@ -187,6 +192,37 @@ def test_structured_retry_renders_semantics_and_inserts_literal_in_code() -> Non
     assert rendered == ("1. Первый нейтральный пункт MARK-SEG-20\n2. Второй нейтральный пункт")
     assert explicit_text_shape_status(request, rendered) == TEXT_SHAPE_VALID
     assert repair_explicit_text_shape(request, rendered) == rendered
+
+
+def test_closed_neutral_numbered_list_has_one_deterministic_safe_fallback() -> None:
+    contract = regenerable_text_shape_contract(RU_NEUTRAL_NUMBERED_LIST)
+    assert contract is not None
+
+    rendered = _closed_neutral_numbered_list_fallback(
+        RU_NEUTRAL_NUMBERED_LIST,
+        contract,
+    )
+
+    assert rendered == ("1. Первый нейтральный пункт SYN-TELEGRAM-A10-03\n2. Второй нейтральный пункт")
+    assert explicit_text_shape_status(RU_NEUTRAL_NUMBERED_LIST, rendered) == TEXT_SHAPE_VALID
+
+
+@pytest.mark.parametrize(
+    "mutated",
+    [
+        RU_NEUTRAL_NUMBERED_LIST.replace("нейтральных", "важных"),
+        RU_NEUTRAL_NUMBERED_LIST.replace("двух", "трёх"),
+        RU_NEUTRAL_NUMBERED_LIST.replace("нумерованный", "маркированный"),
+        RU_NEUTRAL_NUMBERED_LIST.replace("компактный", "условный"),
+        RU_NEUTRAL_NUMBERED_LIST.replace("Дай", "Если получится, дай"),
+        RU_NEUTRAL_NUMBERED_LIST.replace("список", "список по данным файла"),
+    ],
+)
+def test_closed_neutral_numbered_fallback_rejects_semantic_mutations(mutated: str) -> None:
+    contract = regenerable_text_shape_contract(RU_NEUTRAL_NUMBERED_LIST)
+    assert contract is not None
+
+    assert _closed_neutral_numbered_list_fallback(mutated, contract) == ""
 
 
 @pytest.mark.parametrize(
@@ -1032,6 +1068,38 @@ async def test_chat_regenerates_once_without_exposing_tool_schemas_and_audits_ac
     messages = storage.get_conversation_messages(str(result["conversation_id"]), user_id="alice")
     assert [item["role"] for item in messages] == ["user", "assistant"]
     assert all(item["content"] != original for item in messages if item["role"] == "assistant")
+
+
+@pytest.mark.asyncio
+async def test_closed_neutral_numbered_list_falls_back_after_one_failed_retry(
+    settings: object,
+    storage: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    router = _SequenceRouter(
+        [
+            {"content": "Malformed first draft."},
+            {"content": "not json"},
+        ]
+    )
+
+    result, metadata = await _run_chat_with_invalid_shape(
+        settings=settings,
+        storage=storage,
+        monkeypatch=monkeypatch,
+        router=router,
+        message=RU_NEUTRAL_NUMBERED_LIST,
+    )
+
+    assert result["message"] == (
+        "1. Первый нейтральный пункт SYN-TELEGRAM-A10-03\n2. Второй нейтральный пункт"
+    )
+    assert result["tools_used"] == []
+    assert len(router.calls) == 2
+    assert result["exact_text_shape_owned"] is True
+    assert metadata["exact_text_shape_owned"] is True
+    assert metadata["text_shape_regeneration"] == {"accepted": False, "attempted": True}
+    assert metadata["text_shape_regeneration_reason"] == "deterministic_fallback"
 
 
 @pytest.mark.asyncio

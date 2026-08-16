@@ -350,6 +350,18 @@ def test_only_package_a_temporal_pass_is_code_owned() -> None:
     assert b_state["min"]["model_http_attempts"] == 1
 
 
+def test_exact_reminder_oracle_owns_the_model_boundary() -> None:
+    case = _cases("A", 8)[0]
+    state = battery.oracle_for_case(case)["state"]
+
+    assert state["equals"]["model_spoke"] is False
+    assert state["equals"]["model_router_calls"] == 0
+    assert state["equals"]["model_http_attempts"] == 0
+    assert state["max"]["model_router_calls"] == 0
+    assert state["max"]["model_http_attempts"] == 0
+    assert "model_http_attempts" not in state["min"]
+
+
 def test_document_counts_are_frozen_non_monotonic_unique_and_derived_from_bytes() -> None:
     document_cases = [*_cases("A", 3), *_cases("B", 3)]
     counts = [battery._expected_document_row_count(case) for case in document_cases]
