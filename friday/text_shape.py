@@ -39,6 +39,7 @@ class ExplicitTextShapeContract:
     count: int | None = None
     word_list: bool = False
     list_style: Literal["bullet", "numbered"] | None = None
+    emphasis_style: Literal["bold"] | None = None
 
 
 _DIRECT_COMPOSITION = re.compile(
@@ -504,6 +505,20 @@ _REGENERABLE_EN_SENTENCE_PREFIX = re.compile(
     rf"[ \t]*\.[ \t]+",
     re.IGNORECASE,
 )
+_REGENERABLE_RU_BOLD_PHRASE_PREFIX = re.compile(
+    r"(?:сформируй|составь|напиши|верни|дай|подготовь)(?:те)?[ \t]+"
+    r"одну[ \t]+(?:короткую|лаконичную)[ \t]+фразу[ \t]+"
+    r"с[ \t]+(?:жирным|полужирным)[ \t]+(?:markdown|маркдаун)-выделением"
+    r"(?:[ \t]+для[ \t]+транспортного[ \t]+теста)?[ \t]*\.[ \t]+",
+    re.IGNORECASE,
+)
+_REGENERABLE_EN_BOLD_PHRASE_PREFIX = re.compile(
+    r"(?:write|compose|create|provide|return)[ \t]+"
+    r"(?:one|a[ \t]+single)[ \t]+(?:short|concise)[ \t]+phrase[ \t]+"
+    r"with[ \t]+bold[ \t]+markdown[ \t]+emphasis"
+    r"(?:[ \t]+for[ \t]+a[ \t]+transport[ \t]+test)?[ \t]*\.[ \t]+",
+    re.IGNORECASE,
+)
 
 
 def _inside_reported_quote(text: str, position: int) -> bool:
@@ -806,6 +821,25 @@ def _closed_single_sentence_regeneration_prefix(prefix: str) -> bool:
     )
 
 
+def _closed_bold_phrase_regeneration_prefix(prefix: str) -> bool:
+    """Recognise one whole-line Markdown-bold phrase contract."""
+
+    if (
+        not prefix
+        or len(prefix) > 320
+        or "\n" in prefix
+        or "\r" in prefix
+        or prefix.count(".") != 1
+        or not re.fullmatch(r"[^.!?;]{1,300}\.[ \t]+", prefix)
+        or _REGENERABLE_SHAPE_UNSAFE_CUE.search(prefix)
+    ):
+        return False
+    return bool(
+        _REGENERABLE_RU_BOLD_PHRASE_PREFIX.fullmatch(prefix)
+        or _REGENERABLE_EN_BOLD_PHRASE_PREFIX.fullmatch(prefix)
+    )
+
+
 def regenerable_text_shape_contract(request: str) -> ExplicitTextShapeContract | None:
     """Parse only whole, unconditional contracts safe for one model retry.
 
@@ -888,11 +922,16 @@ def regenerable_text_shape_contract(request: str) -> ExplicitTextShapeContract |
             word_list=_is_word_list(request),
             list_style="numbered" if numbered_style else "bullet",
         )
-    if _closed_single_sentence_regeneration_prefix(prefix):
+    bold_phrase = _closed_bold_phrase_regeneration_prefix(prefix)
+    plain_sentence = _closed_single_sentence_regeneration_prefix(prefix)
+    if plain_sentence and _requested_emphasis_styles(prefix):
+        return None
+    if bold_phrase or plain_sentence:
         return ExplicitTextShapeContract(
             kind="single_sentence",
             literal=literal,
             control=control,
+            emphasis_style="bold" if bold_phrase else None,
         )
     return None
 
@@ -1064,17 +1103,25 @@ def _exact_regenerable_list_is_valid(contract: ExplicitTextShapeContract, answer
 
 
 def _exact_regenerable_sentence_is_valid(contract: ExplicitTextShapeContract, answer: str) -> bool:
+    body = answer
+    if contract.emphasis_style == "bold":
+        emphasis = _SIMPLE_EMPHASIS.fullmatch(answer)
+        if emphasis is None or emphasis.group("bold_star") is None:
+            return False
+        body = str(emphasis.group("bold_star_text") or "")
+        if not body or _has_unresolved_emphasis_marker(body):
+            return False
+    elif _SIMPLE_EMPHASIS.search(answer) or _has_unresolved_emphasis_marker(answer):
+        return False
     if (
         "\n" in answer
         or "\r" in answer
         or answer.strip() != answer
-        or len(_TERMINAL_SENTENCE_BOUNDARY.findall(answer)) > 1
+        or len(_TERMINAL_SENTENCE_BOUNDARY.findall(body)) > 1
         or _answer_refuses_exact_literal(answer, contract.literal)
         or _REGENERABLE_ANSWER_REFUSAL_CUE.search(answer)
         or any(character in answer for character in '`<>~[]«»“”"')
         or _MARKDOWN_LINK.search(answer)
-        or _SIMPLE_EMPHASIS.search(answer)
-        or _has_unresolved_emphasis_marker(answer)
         or _ANSWER_QUOTED_FRAGMENT.search(answer)
         or re.search(r"https?://|\bwww\.", answer, re.IGNORECASE)
         or re.match(r"\s*(?:#{1,6}\s|>\s|[-+*•]\s|\d{1,2}[.)]\s|\|)", answer)
@@ -1083,7 +1130,7 @@ def _exact_regenerable_sentence_is_valid(contract: ExplicitTextShapeContract, an
     without_identifiers = re.sub(
         rf"(?<![\w-]){re.escape(contract.literal)}(?![\w-])",
         " ",
-        answer,
+        body,
     )
     return re.search(r"[A-Za-zА-Яа-яЁё]{2,}", without_identifiers) is not None
 

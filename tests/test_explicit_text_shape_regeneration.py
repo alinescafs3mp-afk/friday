@@ -32,6 +32,10 @@ from friday.text_shape import (
 RU_WORD_LIST = "Составь список из трёх слов. Включи маркер MARK-SEG-12. Контроль CTRL-12."
 RU_ITEM_LIST = "Оформи список из двух пунктов. Включи маркер MARK-SEG-20. Контроль CTRL-20."
 RU_SENTENCE = "Напиши ответ одним предложением. Включи маркер MARK-SEG-14. Контроль CTRL-14."
+RU_BOLD_PHRASE = (
+    "Сформируй одну короткую фразу с жирным Markdown-выделением для транспортного теста. "
+    "Включи маркер SYN-TELEGRAM-A10-02. Контроль SYN-A10-02."
+)
 STRUCTURED_ITEMS = '["First item", "Second item"]'
 STRUCTURED_LIST = "- First item MARK-SEG-20\n- Second item"
 FORMAT_FAILURE_RU = "Не удалось сформировать ответ в запрошенном формате."
@@ -107,6 +111,66 @@ def test_closed_regeneration_contract_accepts_only_complete_valid_shapes(
     assert contract.kind == kind
     assert contract.count == count
     assert explicit_text_shape_status(user_text, answer) == TEXT_SHAPE_VALID
+
+
+def test_closed_bold_phrase_contract_owns_the_full_transport_shape() -> None:
+    contract = regenerable_text_shape_contract(RU_BOLD_PHRASE)
+
+    assert contract is not None
+    assert contract.kind == "single_sentence"
+    assert contract.emphasis_style == "bold"
+    assert (
+        explicit_text_shape_status(
+            RU_BOLD_PHRASE,
+            "**Короткая транспортная фраза SYN-TELEGRAM-A10-02.**",
+        )
+        == TEXT_SHAPE_VALID
+    )
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Короткая транспортная фраза SYN-TELEGRAM-A10-02.",
+        "*Короткая транспортная фраза SYN-TELEGRAM-A10-02.*",
+        "__Короткая транспортная фраза SYN-TELEGRAM-A10-02.__",
+        "**Короткая транспортная фраза SYN-TELELEGRAM-A10-02.**",
+        "**Короткая транспортная фраза SYN-TELEGRAM-A10-02 SYN-TELEGRAM-A10-02.**",
+        "**Короткая транспортная фраза SYN-TELEGRAM-A10-02.** снаружи",
+        "снаружи **Короткая транспортная фраза SYN-TELEGRAM-A10-02.**",
+        "****Короткая транспортная фраза SYN-TELEGRAM-A10-02.****",
+        "**Короткая транспортная фраза SYN-TELEGRAM-A10-02.**\nлишняя строка",
+        "**Отказываюсь включать SYN-TELEGRAM-A10-02.**",
+    ],
+)
+def test_closed_bold_phrase_contract_rejects_marker_and_emphasis_mutations(answer: str) -> None:
+    assert regenerable_text_shape_contract(RU_BOLD_PHRASE) is not None
+    assert explicit_text_shape_status(RU_BOLD_PHRASE, answer) == TEXT_SHAPE_INVALID
+
+
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        (
+            "Если получится, сформируй одну короткую фразу с жирным Markdown-выделением для "
+            "транспортного теста. Включи маркер SYN-TELEGRAM-A10-02. Контроль SYN-A10-02."
+        ),
+        (
+            "Сформируй одну короткую фразу без жирного Markdown-выделения для транспортного "
+            "теста. Включи маркер SYN-TELEGRAM-A10-02. Контроль SYN-A10-02."
+        ),
+        (
+            "Сформируй одну короткую фразу с жирным Markdown-выделением по данным файла. "
+            "Включи маркер SYN-TELEGRAM-A10-02. Контроль SYN-A10-02."
+        ),
+        (
+            "Сформируй две короткие фразы с жирным Markdown-выделением для транспортного теста. "
+            "Включи маркер SYN-TELEGRAM-A10-02. Контроль SYN-A10-02."
+        ),
+    ],
+)
+def test_bold_phrase_regeneration_authority_stays_fail_closed(user_text: str) -> None:
+    assert regenerable_text_shape_contract(user_text) is None
 
 
 def test_structured_retry_renders_semantics_and_inserts_literal_in_code() -> None:
@@ -968,6 +1032,40 @@ async def test_chat_regenerates_once_without_exposing_tool_schemas_and_audits_ac
     messages = storage.get_conversation_messages(str(result["conversation_id"]), user_id="alice")
     assert [item["role"] for item in messages] == ["user", "assistant"]
     assert all(item["content"] != original for item in messages if item["role"] == "assistant")
+
+
+@pytest.mark.asyncio
+async def test_chat_regenerates_a_misspelled_bold_transport_marker_once(
+    settings: object,
+    storage: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    malformed = "**привет SYN-TELELEGRAM-A10-02**"
+    corrected = "**Привет SYN-TELEGRAM-A10-02.**"
+    router = _SequenceRouter([{"content": malformed}, {"content": corrected}])
+
+    result, metadata = await _run_chat_with_invalid_shape(
+        settings=settings,
+        storage=storage,
+        monkeypatch=monkeypatch,
+        router=router,
+        message=RU_BOLD_PHRASE,
+    )
+
+    assert result["message"] == corrected
+    assert len(router.calls) == 2
+    assert result["exact_text_shape_owned"] is True
+    assert metadata["exact_text_shape_owned"] is True
+    assert metadata["text_shape_regeneration"] == {"accepted": True, "attempted": True}
+    assert metadata["text_shape_regeneration_reason"] == "accepted"
+    payload = json.loads(router.calls[1][0][1]["content"].partition("\n")[2])
+    assert payload["code_contract"] == {
+        "count": None,
+        "emphasis_style": "bold",
+        "kind": "single_sentence",
+        "literal": "SYN-TELEGRAM-A10-02",
+        "word_list": False,
+    }
 
 
 @pytest.mark.asyncio

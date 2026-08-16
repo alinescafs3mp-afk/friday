@@ -97,6 +97,12 @@ def _satisfying_record(case: battery.ExpandedCase) -> dict[str, Any]:
         if case.oracle_profile == "tools_and_fallback" and case.question_index % 2 == 0:
             if (case.battery_id, case.question_index) == ("A", 4):
                 message = "Изолированное окружение исключает внешнее влияние и стабилизирует результат."
+            elif (case.battery_id, case.question_index) == ("A", 6):
+                message = (
+                    "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы "
+                    "сломается или перестанет отвечать, вся система продолжит работать, а "
+                    "пользователи не потеряют данные и не столкнутся с полным крахом."
+                )
             elif (case.battery_id, case.question_index) == ("A", 8):
                 message = "Зафиксируйте seed, чтобы каждый запуск давал идентичный результат."
             elif (case.battery_id, case.question_index) == ("A", 10):
@@ -2836,6 +2842,123 @@ def test_live_isolation_predictable_conditions_relation_is_owned(message: str) -
     assert battery._a09_04_relation_is_exact(message) is True
     failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
     assert "content_semantic_group_missing" not in failures
+
+
+def test_live_isolation_noninfluence_and_independence_relation_is_owned() -> None:
+    message = (
+        "Изолированное тестовое окружение гарантирует, что проверки выполняются в "
+        "предсказуемых условиях, не влияя на другие системы и не завися от внешних изменений."
+    )
+    case = _cases("A", 9)[3]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_04_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_required_alternative_missing" not in failures
+    assert "content_semantic_group_missing" not in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "Изолированное тестовое окружение гарантирует, что проверки выполняются в "
+            "предсказуемых условиях, влияя на другие системы и не завися от внешних изменений."
+        ),
+        (
+            "Изолированное тестовое окружение гарантирует, что проверки выполняются в "
+            "предсказуемых условиях, не влияя на другие системы и завися от внешних изменений."
+        ),
+        (
+            "Изолированное тестовое окружение может гарантировать, что проверки выполняются в "
+            "предсказуемых условиях, не влияя на другие системы и не завися от внешних изменений."
+        ),
+        (
+            "Неизолированное тестовое окружение гарантирует, что проверки выполняются в "
+            "предсказуемых условиях, не влияя на другие системы и не завися от внешних изменений."
+        ),
+        (
+            "Изолированное тестовое окружение гарантирует, что серверы выполняются в "
+            "предсказуемых условиях, не влияя на другие системы и не завися от внешних изменений."
+        ),
+        (
+            "Изолированное тестовое окружение гарантирует, что проверки выполняются в "
+            "предсказуемых условиях, не влияя на другие системы."
+        ),
+    ],
+)
+def test_live_isolation_noninfluence_relation_rejects_role_and_polarity_mutations(
+    message: str,
+) -> None:
+    case = _cases("A", 9)[3]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_04_relation_is_exact(message) is False
+    assert (
+        "content_semantic_group_missing" in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
+
+
+def test_live_resilience_relation_accepts_the_guarded_model_wording() -> None:
+    message = (
+        "Проверка отказоказоустойчивости нужна, чтобы убедиться: если часть системы "
+        "сломается или перестанет отвечать, вся система продолжит работать, а пользователи "
+        "не потеряют данные и не столкнутся с полным крахом."
+    )
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_required_alternative_missing" not in failures
+    assert "content_semantic_group_missing" not in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы "
+            "сломается или перестанет отвечать, вся система перестанет работать, а пользователи "
+            "не потеряют данные и не столкнутся с полным крахом."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы "
+            "сломается или перестанет отвечать, вся система продолжит работать, а пользователи "
+            "потеряют данные и не столкнутся с полным крахом."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: вся система продолжит "
+            "работать, а пользователи не потеряют данные и не столкнутся с полным крахом."
+        ),
+        (
+            "Проверка отказоустойчивости может быть нужна, чтобы убедиться: если часть системы "
+            "сломается или перестанет отвечать, вся система продолжит работать, а пользователи "
+            "не потеряют данные и не столкнутся с полным крахом."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть сервера "
+            "сломается или перестанет отвечать, вся система продолжит работать, а пользователи "
+            "не потеряют данные и не столкнутся с полным крахом."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы "
+            "сломается или перестанет отвечать, вся система продолжит работать."
+        ),
+    ],
+)
+def test_live_resilience_relation_rejects_missing_or_reversed_guarantees(message: str) -> None:
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_relation_is_exact(message) is False
+    assert (
+        "content_semantic_group_missing" in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
 
 
 @pytest.mark.parametrize(

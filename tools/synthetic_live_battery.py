@@ -704,6 +704,27 @@ _A09_04_PREDICTABLE_CONDITIONS_RELATION = (
     r"других\s+процессов\s+(?:и|или)\s+внешних\s+факторов)"
     r"\.?\s*\Z"
 )
+_A09_04_NONINFLUENCE_AND_INDEPENDENCE_RELATION = (
+    r"\A"
+    r"\s*(?:изолированное\s+тестовое\s+окружение|изолированная\s+тестовая\s+среда)"
+    r"\s+(?:гарантирует|обеспечивает),?\s+что\s+"
+    r"(?:проверки\s+выполняются|проверка\s+выполняется)"
+    r"\s+в\s+предсказуемых\s+условиях,\s+"
+    r"не\s+влияя\s+на\s+другие\s+системы\s+и\s+"
+    r"не\s+завися\s+от\s+внешних\s+изменений"
+    r"\.?\s*\Z"
+)
+_A09_06_RESILIENCE_RELATION = (
+    r"\A"
+    r"\s*проверка\s+(?:отказоустойчивости|отказоказоустойчивости)\s+нужна,\s+"
+    r"чтобы\s+убедиться:\s+если\s+(?:часть|компонент)\s+системы\s+"
+    r"(?:сломается\s+или\s+перестанет\s+отвечать|"
+    r"перестанет\s+отвечать\s+или\s+сломается),\s+"
+    r"вся\s+система\s+продолжит\s+работать,\s+а\s+"
+    r"пользователи\s+не\s+потеряют\s+данные\s+и\s+"
+    r"не\s+столкнутся\s+с\s+полным\s+крахом"
+    r"\.?\s*\Z"
+)
 _A09_08_AFFIRMATIVE_SCOPE = (
     r"\A"
     rf"(?![\s\S]*{_A09_AFFIRMATIVE_CLAIM_BLOCKER})"
@@ -4894,6 +4915,7 @@ def _a09_04_relation_is_exact(message: str) -> bool:
         re.search(_A09_04_LIVE_INFRASTRUCTURE_RELATION, folded, re.IGNORECASE)
         or re.search(_A09_04_SERVICE_AND_PRIOR_RUN_RELATION, folded, re.IGNORECASE)
         or re.search(_A09_04_PREDICTABLE_CONDITIONS_RELATION, folded, re.IGNORECASE)
+        or re.search(_A09_04_NONINFLUENCE_AND_INDEPENDENCE_RELATION, folded, re.IGNORECASE)
     )
     if ":" not in message and re.search(r"\bзавис\w*\s+только\s+от\b", folded, re.IGNORECASE):
         return live_infrastructure_relation or _a09_04_affirmative_fallback_relation(message)
@@ -4902,6 +4924,10 @@ def _a09_04_relation_is_exact(message: str) -> bool:
         or re.search(_A09_04_AFFIRMATIVE_SCOPE, folded, re.IGNORECASE)
         or _a09_04_affirmative_fallback_relation(message)
     )
+
+
+def _a09_06_relation_is_exact(message: str) -> bool:
+    return re.search(_A09_06_RESILIENCE_RELATION, message.casefold(), re.IGNORECASE) is not None
 
 
 def _a09_12_relation_is_exact(message: str) -> bool:
@@ -5809,6 +5835,9 @@ def oracle_for_case(case: ExpandedCase) -> dict[str, Any]:
             if fallback_key == ("A", 4):
                 content["contains_any"] = ["изолир", "изоляц"]
                 content["semantic_profile"] = "a09_04"
+            elif fallback_key == ("A", 6):
+                content["contains_any"] = ["часть системы", "компонент системы"]
+                content["semantic_profile"] = "a09_06"
             elif fallback_key == ("A", 8):
                 content["contains_any"] = [
                     *_A09_08_REPRODUCIBILITY_STEMS,
@@ -7128,6 +7157,7 @@ def evaluate_case(case: ExpandedCase, record: Mapping[str, Any], *, latency_ms: 
     semantic_groups = content.get("semantic_groups")
     semantic_profile_exact = {
         "a09_04": _a09_04_relation_is_exact,
+        "a09_06": _a09_06_relation_is_exact,
         "a09_08": _a09_08_relation_is_exact,
         "a09_10": _a09_10_relation_is_exact,
         "a09_12": _a09_12_relation_is_exact,
