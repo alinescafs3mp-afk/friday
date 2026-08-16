@@ -147,6 +147,16 @@ def _readiness_environment() -> dict[str, str]:
     }
 
 
+def test_readiness_deadline_matches_the_foreground_model_contract() -> None:
+    assert acceptance.MODEL_READINESS_GENERATION_TIMEOUT_SEC == 240.0
+    assert acceptance.MODEL_READINESS_BUDGET_SEC == 255.0
+    assert acceptance.MODEL_READINESS_BUDGET_SEC >= (
+        acceptance.MODEL_READINESS_GENERATION_TIMEOUT_SEC
+        + 2 * acceptance.MODEL_READINESS_QUIET_SEC
+        + 3 * acceptance.MODEL_READINESS_METRICS_TIMEOUT_SEC
+    )
+
+
 _EXPECTED_READINESS_CLASSIFIER_INPUTS = (
     "Найди актуальное расписание TEST-001",
     "Что написано в синтетическом акте TEST-002?",
