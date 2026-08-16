@@ -2871,6 +2871,63 @@ def test_live_isolation_noninfluence_and_independence_relation_is_owned() -> Non
     assert "content_semantic_group_missing" not in failures
 
 
+def test_live_isolation_system_and_process_relation_is_owned() -> None:
+    message = (
+        "Изолированное тестовое окружение предотвращает взаимное влияние тестов и "
+        "гарантирует, что результаты зависят только от проверяемого кода, а не от "
+        "состояния системы или других процессов."
+    )
+    case = _cases("A", 9)[3]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_04_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_required_alternative_missing" not in failures
+    assert "content_semantic_group_missing" not in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "Изолированное тестовое окружение предотвращает взаимное влияние тестов и "
+            "гарантирует, что результаты зависят только от проверяемого кодекса, а не от "
+            "состояния системы или других процессов."
+        ),
+        (
+            "Изолированное тестовое окружение предотвращает взаимное влияние тестов и "
+            "гарантирует, что результаты зависят только от проверяемого кода, а от "
+            "состояния системы или других процессов."
+        ),
+        (
+            "Изолированное тестовое окружение предотвращает взаимное влияние тестов и "
+            "может гарантировать, что результаты зависят только от проверяемого кода, а не от "
+            "состояния системы или других процессов."
+        ),
+        (
+            "Неизолированное тестовое окружение предотвращает взаимное влияние тестов и "
+            "гарантирует, что результаты зависят только от проверяемого кода, а не от "
+            "состояния системы или других процессов."
+        ),
+        (
+            "Изолированное тестовое окружение предотвращает взаимное влияние тестов и "
+            "гарантирует, что результаты зависят только от проверяемого кода, а не от "
+            "состояния серверов или других программ."
+        ),
+    ],
+)
+def test_live_isolation_system_and_process_relation_rejects_mutations(message: str) -> None:
+    case = _cases("A", 9)[3]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_04_relation_is_exact(message) is False
+    assert (
+        "content_semantic_group_missing" in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
+
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -2927,6 +2984,63 @@ def test_live_resilience_relation_accepts_the_guarded_model_wording() -> None:
     failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
     assert "content_required_alternative_missing" not in failures
     assert "content_semantic_group_missing" not in failures
+
+
+def test_live_resilience_relation_accepts_contained_service_paralysis_wording() -> None:
+    message = (
+        "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается "
+        "или перестанет отвечать, остальная часть продолжит работать, а пользователи не "
+        "потеряют данные и не столкнутся с полным параличом сервиса."
+    )
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_relation_is_exact(message) is True
+    failures = battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    assert "content_required_alternative_missing" not in failures
+    assert "content_semantic_group_missing" not in failures
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается "
+            "или перестанет отвечать, остальная часть перестанет работать, а пользователи не "
+            "потеряют данные и не столкнутся с полным параличом сервиса."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается "
+            "или перестанет отвечать, остальная часть продолжит работать, а пользователи "
+            "потеряют данные и не столкнутся с полным параличом сервиса."
+        ),
+        (
+            "Проверка отказоустойчивости может быть нужна, чтобы убедиться: если часть системы "
+            "сломается или перестанет отвечать, остальная часть продолжит работать, а "
+            "пользователи не потеряют данные и не столкнутся с полным параличом сервиса."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть сервера сломается "
+            "или перестанет отвечать, остальная часть продолжит работать, а пользователи не "
+            "потеряют данные и не столкнутся с полным параличом сервиса."
+        ),
+        (
+            "Проверка отказоустойчивости нужна, чтобы убедиться: если часть системы сломается "
+            "или перестанет отвечать, остальная часть продолжит работать, а пользователи не "
+            "потеряют данные и не столкнутся с полным параличом теста."
+        ),
+    ],
+)
+def test_live_resilience_contained_service_wording_rejects_mutations(message: str) -> None:
+    case = _cases("A", 9)[5]
+    record = _satisfying_record(case)
+    record["response"]["message"] = message
+
+    assert battery._a09_06_relation_is_exact(message) is False
+    assert (
+        "content_semantic_group_missing" in battery.evaluate_case(case, record, latency_ms=1)["failure_codes"]
+    )
 
 
 @pytest.mark.parametrize(

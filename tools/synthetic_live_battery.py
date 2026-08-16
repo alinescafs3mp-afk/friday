@@ -718,15 +718,26 @@ _A09_04_NONINFLUENCE_AND_INDEPENDENCE_RELATION = (
     r"не\s+завися\s+от\s+внешних\s+изменений"
     r"\.?\s*\Z"
 )
+_A09_04_SYSTEM_AND_PROCESS_RELATION = (
+    r"\A"
+    rf"(?![\s\S]*{_A09_AFFIRMATIVE_CLAIM_BLOCKER})"
+    r"\s*(?:изолированное\s+тестовое\s+окружение|изолированная\s+тестовая\s+среда)"
+    r"\s+(?:предотвращает|исключает)\s+взаимное\s+влияние\s+тестов"
+    r"\s+и\s+(?:гарантирует|обеспечивает),?\s+что\s+"
+    r"(?:результаты\s+зависят|результат\s+зависит)"
+    r"\s+только\s+от\s+(?:проверяемого|тестируемого|тестового)\s+кода,?\s+"
+    r"а\s+не\s+от\s+состояния\s+системы\s+(?:и|или)\s+других\s+процессов"
+    r"\.?\s*\Z"
+)
 _A09_06_RESILIENCE_RELATION = (
     r"\A"
     r"\s*проверка\s+(?:отказоустойчивости|отказоказоустойчивости)\s+нужна,\s+"
     r"чтобы\s+убедиться:\s+если\s+(?:часть|компонент)\s+системы\s+"
     r"(?:сломается\s+или\s+перестанет\s+отвечать|"
     r"перестанет\s+отвечать\s+или\s+сломается),\s+"
-    r"вся\s+система\s+продолжит\s+работать,\s+а\s+"
+    r"(?:вся\s+система|остальная\s+часть)\s+продолжит\s+работать,\s+а\s+"
     r"пользователи\s+не\s+потеряют\s+данные\s+и\s+"
-    r"не\s+столкнутся\s+с\s+полным\s+крахом"
+    r"не\s+столкнутся\s+с\s+полным\s+(?:крахом|параличом\s+сервиса)"
     r"\.?\s*\Z"
 )
 _A09_08_AFFIRMATIVE_SCOPE = (
@@ -4920,6 +4931,7 @@ def _a09_04_relation_is_exact(message: str) -> bool:
         or re.search(_A09_04_SERVICE_AND_PRIOR_RUN_RELATION, folded, re.IGNORECASE)
         or re.search(_A09_04_PREDICTABLE_CONDITIONS_RELATION, folded, re.IGNORECASE)
         or re.search(_A09_04_NONINFLUENCE_AND_INDEPENDENCE_RELATION, folded, re.IGNORECASE)
+        or re.search(_A09_04_SYSTEM_AND_PROCESS_RELATION, folded, re.IGNORECASE)
     )
     if ":" not in message and re.search(r"\bзавис\w*\s+только\s+от\b", folded, re.IGNORECASE):
         return live_infrastructure_relation or _a09_04_affirmative_fallback_relation(message)
