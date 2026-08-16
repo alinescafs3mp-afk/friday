@@ -74,7 +74,12 @@ MODEL_READINESS_CONCURRENCY = 4
 MODEL_READINESS_METRICS_MAX_BYTES = 2 * 1024 * 1024
 MODEL_READINESS_GENERATION_MAX_BYTES = 256 * 1024
 MODEL_READINESS_MIN_USABLE_RESPONSES = 3
-MODEL_HEAVY_PASS_CONCURRENCY = 2
+# The remote dispatcher is intentionally saturated by a single long-context
+# acceptance pass.  A second heavy pass can leave an otherwise tiny request
+# queued beyond the production 240-second read deadline, poisoning the rest of
+# that worker through the normal silent-endpoint cooldown.  Keep the public
+# executor at four workers, but serialize only the four model-heavy profiles.
+MODEL_HEAVY_PASS_CONCURRENCY = 1
 _MODEL_HEAVY_PASS_PROFILES = frozenset(
     {
         "package_a_honesty",

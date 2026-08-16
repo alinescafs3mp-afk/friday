@@ -136,7 +136,7 @@ def test_every_selected_pass_is_dispatched_once_without_retry(
     assert result.candidate_identity is True
 
 
-def test_four_workers_never_run_more_than_two_model_heavy_passes(
+def test_four_workers_serialize_model_heavy_passes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -148,7 +148,7 @@ def test_four_workers_never_run_more_than_two_model_heavy_passes(
     )
     candidate_digest = "b" * 64
     release_heavy = threading.Event()
-    two_heavy = threading.Event()
+    lane_full = threading.Event()
     lock = threading.Lock()
     active_heavy = 0
     maximum_heavy = 0
@@ -179,7 +179,7 @@ def test_four_workers_never_run_more_than_two_model_heavy_passes(
                     maximum_heavy = max(maximum_heavy, active_heavy)
                     started_heavy.append(context.pass_id)
                     if active_heavy == acceptance.MODEL_HEAVY_PASS_CONCURRENCY:
-                        two_heavy.set()
+                        lane_full.set()
                 try:
                     assert release_heavy.wait(timeout=5.0)
                 finally:
@@ -202,7 +202,8 @@ def test_four_workers_never_run_more_than_two_model_heavy_passes(
 
     thread = threading.Thread(target=run)
     thread.start()
-    assert two_heavy.wait(timeout=5.0)
+    assert acceptance.MODEL_HEAVY_PASS_CONCURRENCY == 1
+    assert lane_full.wait(timeout=5.0)
     time.sleep(acceptance._MODEL_LANE_ACQUIRE_POLL_SEC * 2)
     with lock:
         assert maximum_heavy == acceptance.MODEL_HEAVY_PASS_CONCURRENCY
