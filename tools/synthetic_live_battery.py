@@ -4994,6 +4994,386 @@ _A09_14_AFFIRMATIVE_FRESH_DATABASE = (
 _A09_14_NO_INFLUENCE_VERB = r"\bне\s+влия(?:ет|ют|л(?:а|о|и)?|ть)\b"
 
 
+def _a09_04_relation_graph(message: str) -> bool:
+    """Prove the isolation cause and controlled-code consequence by roles."""
+
+    if not _p09_surface_is_closed(message) or not re.fullmatch(r"[^.!?\n]+\.?", message):
+        return False
+    folded = message.casefold()
+    tokens = _p09_words(message)
+    if (
+        len(tokens) > 80
+        or _p09_non_authoritative(tokens)
+        or re.search(_A09_AFFIRMATIVE_CLAIM_BLOCKER, folded, re.IGNORECASE)
+        or re.search(
+            r"\b(?:неизолир|неизоляц)\w*|"
+            r"\b(?:тестировщик|экспериментатор|оркестратор|робот|оператор)\w*|"
+            r"\b(?:неправд|утверждени\w*\s+неправд)\w*",
+            folded,
+        )
+        or not re.match(rf"\s*{_A09_04_ISOLATED_SUBJECT}\b", folded, re.IGNORECASE)
+    ):
+        return False
+    prevent = _p09_first(tokens, ("исключ", "предотвращ", "устран"))
+    mutual = _p09_first(tokens, ("взаим",), after=prevent if prevent is not None else len(tokens))
+    influence = _p09_first(
+        tokens, ("влиян", "воздейств"), after=mutual if mutual is not None else len(tokens)
+    )
+    guarantee = _p09_first(
+        tokens,
+        ("гарантир", "обеспеч"),
+        after=influence if influence is not None else len(tokens),
+    )
+    result = _p09_first(
+        tokens,
+        ("результат", "итог", "ответ"),
+        after=guarantee if guarantee is not None else len(tokens),
+    )
+    dependency = _p09_first(tokens, ("завис",), after=result if result is not None else len(tokens))
+    only = next(
+        (
+            index
+            for index in range((dependency if dependency is not None else len(tokens)) + 1, len(tokens))
+            if tokens[index] == "только"
+        ),
+        None,
+    )
+    code = next(
+        (
+            index
+            for index in range((only if only is not None else len(tokens)) + 1, len(tokens))
+            if tokens[index] in {"код", "кода", "коду", "кодом", "коде"}
+        ),
+        None,
+    )
+    ordered = (prevent, mutual, influence, guarantee, result, dependency, only, code)
+    if any(index is None for index in ordered):
+        return False
+    assert prevent is not None
+    assert mutual is not None
+    assert influence is not None
+    assert guarantee is not None
+    assert result is not None
+    assert dependency is not None
+    assert only is not None
+    assert code is not None
+    role_indexes = (prevent, mutual, influence, guarantee, result, dependency, only, code)
+    if any(right <= left for left, right in zip(role_indexes, role_indexes[1:], strict=False)):
+        return False
+    gap_limits = (4, 3, 5, 6, 4, 3, 4)
+    if any(
+        right - left - 1 > limit
+        for left, right, limit in zip(role_indexes[:-1], role_indexes[1:], gap_limits, strict=True)
+    ):
+        return False
+    if any(
+        token.startswith("код") and token not in {"код", "кода", "коду", "кодом", "коде"} for token in tokens
+    ):
+        return False
+    if not any(
+        _p09_has_stem(token, ("тест", "проверк", "эксперимент"))
+        for token in tokens[influence + 1 : guarantee]
+    ):
+        return False
+    if any(
+        _p09_has_stem(token, ("оркестратор", "робот", "оператор", "сервер", "сервис", "инфраструктур"))
+        for token in tokens[influence + 1 : guarantee]
+    ):
+        return False
+    if any(
+        _p09_has_stem(token, ("проверяющ", "тестировщик", "экспериментатор"))
+        for token in tokens[result + 1 : dependency]
+    ):
+        return False
+    external_indexes = [
+        index
+        for index in range(code + 1, len(tokens))
+        if _p09_has_stem(
+            tokens[index],
+            ("состояни", "внешн", "соседн", "инфраструктур", "систем", "сервис", "процесс"),
+        )
+    ]
+    if external_indexes:
+        first_external = external_indexes[0]
+        if "не" not in tokens[code + 1 : first_external] or "от" not in tokens[code + 1 : first_external]:
+            return False
+        valid_infrastructure_forms = {
+            "инфраструктура",
+            "инфраструктуры",
+            "инфраструктуре",
+            "инфраструктуру",
+            "инфраструктурой",
+            "инфраструктур",
+        }
+        if any(
+            token.startswith("инфраструктур") and token not in valid_infrastructure_forms for token in tokens
+        ):
+            return False
+    negations = [index for index, token in enumerate(tokens) if token in {"не", "ни", "без"}]
+    for index in negations:
+        licensed = bool(
+            tokens[index] == "не"
+            and index > role_indexes[-1]
+            and "от" in tokens[index + 1 : index + 3]
+            and any(
+                _p09_has_stem(
+                    token, ("состояни", "внешн", "соседн", "инфраструктур", "систем", "сервис", "процесс")
+                )
+                for token in tokens[index + 1 : index + 7]
+            )
+        )
+        if not licensed:
+            return False
+    return True
+
+
+def _a09_06_relation_graph(message: str) -> bool:
+    """Prove failure containment plus a negated harmful user outcome."""
+
+    if not _p09_surface_is_closed(message) or not _p09_parentheses_are_balanced(message):
+        return False
+    folded = message.casefold()
+    tokens = _p09_words(message)
+    if (
+        len(tokens) > 96
+        # A component failure is naturally introduced with ``if`` and the
+        # protected outcome may name a service, so the profile-wide P09
+        # blacklist is too coarse here.  Reject only non-authoritative roles
+        # that cannot belong to this causal relation.
+        or any(
+            token
+            in {
+                "возможно",
+                "вероятно",
+                "якобы",
+                "хотя",
+                "несмотря",
+                "однако",
+                "почти",
+                "может",
+                "могут",
+                "вряд",
+            }
+            for token in tokens
+        )
+        or _p09_has_comparative_hedge(tokens)
+        or any(
+            _p09_has_stem(
+                token,
+                (
+                    "гипотет",
+                    "гипотез",
+                    "теоретич",
+                    "неверн",
+                    "ложн",
+                    "ошибоч",
+                    "бесполез",
+                    "миф",
+                    "документац",
+                    "инструкц",
+                    "отчёт",
+                    "отчет",
+                    "команд",
+                    "групп",
+                    "модул",
+                    "спецификац",
+                    "утвержда",
+                    "описыва",
+                    "тестировщик",
+                ),
+            )
+            for token in tokens
+        )
+        or re.search(_A09_AFFIRMATIVE_CLAIM_BLOCKER, folded, re.IGNORECASE)
+        or re.search(r"\b(?:не|ни)\s+(?:отказоустойчив|устойчив)\w*", folded)
+    ):
+        return False
+    parenthetical = _p09_parenthetical_word_indices(message)
+    if any(
+        _p09_has_stem(
+            tokens[index],
+            ("пользовател", "отчёт", "отчет", "документ", "цитат", "тестировщик"),
+        )
+        for index in parenthetical
+    ):
+        return False
+    resilience = _p09_first(tokens, ("отказоустойчив", "устойчив"))
+    component = _p09_first(
+        tokens, ("част", "компонент"), after=resilience if resilience is not None else len(tokens)
+    )
+    system = _p09_first(tokens, ("систем",), after=(component - 1) if component is not None else len(tokens))
+    if resilience is None or component is None or system is None or system - component > 3:
+        return False
+    failure_candidates = [
+        index
+        for index, token in enumerate(tokens)
+        if _p09_has_stem(token, ("сбо", "отказ", "слом", "полом", "недоступ", "перестан"))
+        and component - 4 <= index <= system + 6
+    ]
+    if not failure_candidates:
+        return False
+    failure = max(failure_candidates)
+    continuation = _p09_first(tokens, ("продолж",), after=failure)
+    operation = _p09_first(
+        tokens, ("работ", "функционир"), after=continuation if continuation is not None else len(tokens)
+    )
+    if (
+        continuation is None
+        or operation is None
+        or continuation - failure > 8
+        or operation - continuation > 3
+    ):
+        return False
+    commas = _p09_top_level_punctuation_after_words(message, ",")
+    if not any(failure <= boundary < continuation for boundary in commas):
+        return False
+    loss = _p09_first(tokens, ("потер",), after=operation)
+    crash = _p09_first(tokens, ("крах", "паралич"), after=operation)
+    data_safe = bool(
+        loss is not None
+        and any(_p09_has_stem(token, ("данн",)) for token in tokens[max(operation, loss - 4) : loss + 5])
+        and any(token in {"не", "без"} for token in tokens[max(operation, loss - 3) : loss])
+    )
+    crash_safe = bool(
+        crash is not None
+        and any(token == "не" for token in tokens[max(operation, crash - 6) : crash])
+        and any(_p09_has_stem(token, ("пользовател",)) for token in tokens[operation:crash])
+    )
+    if not (data_safe or crash_safe):
+        return False
+    if loss is not None and not data_safe:
+        return False
+    if crash is not None and not crash_safe:
+        return False
+    if crash is not None and any(
+        _p09_has_stem(token, ("тест", "отчёт", "отчет", "документ"))
+        for token in tokens[crash + 1 : crash + 5]
+    ):
+        return False
+    if any(
+        _p09_has_stem(tokens[index], ("перестан",))
+        and index > failure
+        and _p09_first(tokens, ("работ", "функционир"), after=index) is not None
+        for index in range(failure + 1, len(tokens))
+    ):
+        return False
+    licensed_negations = {
+        index
+        for index, token in enumerate(tokens)
+        if token in {"не", "без"}
+        and (
+            (loss is not None and loss - 3 <= index < loss)
+            or (crash is not None and crash - 6 <= index < crash)
+        )
+    }
+    return all(
+        token not in {"не", "ни", "без"} or index in licensed_negations for index, token in enumerate(tokens)
+    )
+
+
+def _a09_14_relation_graph(message: str) -> bool:
+    """Prove per-run fresh-database ownership and prior-state independence."""
+
+    if not _p09_surface_is_closed(message):
+        return False
+    folded = message.casefold()
+    tokens = _p09_words(message)
+    if (
+        len(tokens) > 128
+        or _p09_non_authoritative(tokens)
+        or re.search(_A09_AFFIRMATIVE_CLAIM_BLOCKER, folded, re.IGNORECASE)
+        or re.search(r"\b(?:неизолир|неизоляц)\w*", folded)
+        or re.search(r"\bне\b[^.!?\n]{0,32}\bнезавис\w*", folded)
+        or re.search(r"\b(?:не\s+нов|стар|прежн)\w*[^.!?\n]{0,24}\b(?:баз|database|хранилищ)\w*", folded)
+        or re.search(r"\b(?:та|одна)\s+же\s+баз\w*", folded)
+    ):
+        return False
+    each = _p09_first(tokens, ("кажд",))
+    run = _p09_first(
+        tokens, ("тест", "прогон", "запуск", "проход"), after=each if each is not None else len(tokens)
+    )
+    new_database = re.search(_A09_14_NEW_DATABASE, folded, re.IGNORECASE)
+    if each is None or run is None or run - each > 3 or new_database is None:
+        return False
+    new_index = _p09_first(tokens, ("нов",), after=run)
+    database = _p09_first(
+        tokens, ("баз", "database", "хранилищ"), after=new_index if new_index is not None else len(tokens)
+    )
+    if new_index is None or database is None or database - new_index > 2:
+        return False
+    if any(
+        _p09_has_stem(token, ("сервер", "сервис", "процесс", "агент", "систем", "клиент"))
+        for token in tokens[run + 1 : database]
+    ):
+        return False
+    current = _p09_first(tokens, ("текущ",))
+    previous = _p09_first(tokens, ("предыдущ", "прошл", "ранн"), after=database)
+    if current is not None and previous is not None and current < previous:
+        return False
+    result = _p09_first(tokens, ("результат", "итог", "тест", "проверк"), after=database)
+    dependency = _p09_first(tokens, ("завис", "независ"), after=result if result is not None else len(tokens))
+    direct_independence = False
+    if result is not None and dependency is not None and dependency - result <= 5:
+        dependency_prefix = tokens[max(result, dependency - 2) : dependency]
+        positive_dependency = (
+            tokens[dependency].startswith("независ") and "не" not in dependency_prefix
+        ) or (not tokens[dependency].startswith("независ") and "не" in dependency_prefix)
+        prior = _p09_first(tokens, ("предыдущ", "прошл", "ранн"), after=dependency)
+        prior_run = _p09_first(
+            tokens,
+            ("тест", "прогон", "запуск", "проход"),
+            after=prior if prior is not None else len(tokens),
+        )
+        direct_independence = bool(
+            positive_dependency
+            and prior is not None
+            and prior_run is not None
+            and prior - dependency <= 12
+            and prior_run - prior <= 3
+        )
+    prevention = _p09_first(tokens, ("исключ", "предотвращ", "устран", "избег"), after=database)
+    influence = _p09_first(
+        tokens, ("влиян", "воздейств"), after=prevention if prevention is not None else len(tokens)
+    )
+    prior = _p09_first(
+        tokens, ("предыдущ", "прошл", "ранн"), after=influence if influence is not None else len(tokens)
+    )
+    prior_run = _p09_first(
+        tokens,
+        ("тест", "прогон", "запуск", "проход"),
+        after=prior if prior is not None else len(tokens),
+    )
+    prevention_relation = bool(
+        prevention is not None
+        and influence is not None
+        and prior is not None
+        and prior_run is not None
+        and influence - prevention <= 5
+        and prior - influence <= 10
+        and prior_run - prior <= 3
+    )
+    if prevention is not None and any(
+        token in {"не", "ни"} for token in tokens[max(database, prevention - 2) : influence]
+    ):
+        return False
+    if not (direct_independence or prevention_relation):
+        return False
+    return not bool(
+        re.search(
+            r"\b(?:остат|след|состояни)\w*[^.!?\n]{0,32}"
+            r"\b(?:по-прежнему\s+)?(?:продолжа\w*\s+)?"
+            r"(?:влия|искажа|перенос|сохраня|накаплива|просачива)\w*|"
+            r"\b(?:данн|остат|след|состояни)\w*"
+            r"(?![^.!?\n]{0,48}\bне\s+[«„\"']?"
+            r"(?:влия|искажа|перенос|сохраня|накаплива|просачива)\w*)"
+            r"[^.!?\n]{0,48}\b"
+            r"(?:влия|искажа|перенос|сохраня|накаплива|просачива)\w*",
+            folded,
+            re.IGNORECASE,
+        )
+    )
+
+
 def _a09_04_relation_is_exact(message: str) -> bool:
     folded = message.casefold()
     live_infrastructure_relation = bool(
@@ -5006,9 +5386,14 @@ def _a09_04_relation_is_exact(message: str) -> bool:
         or re.search(_A09_04_RESULT_DEPENDS_ON_CODE_RELATION, folded, re.IGNORECASE)
     )
     if ":" not in message and re.search(r"\bзавис\w*\s+только\s+от\b", folded, re.IGNORECASE):
-        return live_infrastructure_relation or _a09_04_affirmative_fallback_relation(message)
+        return (
+            live_infrastructure_relation
+            or _a09_04_relation_graph(message)
+            or _a09_04_affirmative_fallback_relation(message)
+        )
     return bool(
         live_infrastructure_relation
+        or _a09_04_relation_graph(message)
         or re.search(_A09_04_AFFIRMATIVE_SCOPE, folded, re.IGNORECASE)
         or _a09_04_affirmative_fallback_relation(message)
     )
@@ -5017,6 +5402,8 @@ def _a09_04_relation_is_exact(message: str) -> bool:
 def _a09_06_relation_is_exact(message: str) -> bool:
     folded = message.casefold()
     if re.search(_A09_06_RESILIENCE_RELATION, folded, re.IGNORECASE):
+        return True
+    if _a09_06_relation_graph(message):
         return True
     if "(" in message or ")" in message:
         return False
@@ -5078,6 +5465,8 @@ def _a09_12_relation_is_exact(message: str) -> bool:
 def _a09_14_relation_is_exact(message: str) -> bool:
     folded = message.casefold()
     if re.search(_A09_14_AFFIRMATIVE_FRESH_DATABASE, folded, re.IGNORECASE):
+        return True
+    if _a09_14_relation_graph(message):
         return True
     if not (
         re.search(_A09_14_LIVE_FRESH_DATABASE_RELATION, folded, re.IGNORECASE)
