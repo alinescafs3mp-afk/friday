@@ -608,6 +608,9 @@ async def test_current_odt_metadata_and_followup_use_the_registered_file_contour
     assert _multi_attachment_open_task_count("Сравни два документа") == 2
     assert _multi_attachment_open_task_count("Сравни два файла") == 2
     assert _multi_attachment_open_task_count("Обобщи три вложения") == 3
+    assert _multi_attachment_open_task_count("Дай мне в одном сообщении информацию про эти два скана") == 2
+    assert _multi_attachment_open_task_count("these two documents") == 2
+    assert _multi_attachment_open_task_count("эти два сервера") is None
     assert _multi_attachment_summary_count("Обобщи три вложения") == 3
     assert _requests_all_attachment_set("Все файлы") is True
     assert _attachment_count_range_side("первые два файла") == "first"
@@ -618,6 +621,7 @@ async def test_current_odt_metadata_and_followup_use_the_registered_file_contour
     assert _multi_attachment_open_task_count("«Сравни оба файла»") is None
     assert _multi_attachment_summary_count("«Обобщи три вложения»") is None
     assert _multi_attachment_open_task_count("«Обобщи три вложения»") is None
+    assert _multi_attachment_open_task_count("«эти два скана»") is None
     assert _requests_all_attachment_set("«Все файлы»") is False
     assert _attachment_count_range_side("«первые два файла»") == ""
     assert _multi_attachment_open_task_count("«первые два файла»") is None

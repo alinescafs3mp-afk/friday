@@ -1502,6 +1502,51 @@ def test_document_catalog_excludes_voice_and_wrong_uploader(settings, storage):
     assert "FOREIGN-DOCUMENT" not in json.dumps(restored, ensure_ascii=False)
 
 
+@pytest.mark.asyncio
+async def test_current_two_file_turn_never_expands_all_to_the_archive(
+    settings,
+    storage,
+    monkeypatch,
+):
+    """The supplied all-these-files batch never expands to every owned Raw row."""
+
+    old = _pending_file(storage, "alice", "alice", "OLD-ARCHIVE-BODY", filename="old.txt")
+    first = _pending_file(storage, "alice", "alice", "FIRST-SCAN-BODY", filename="scan-one.txt")
+    second = _pending_file(storage, "alice", "alice", "SECOND-SCAN-BODY", filename="scan-two.txt")
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", old, "old upload")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+
+    await runtime.chat(
+        "alice",
+        "Обобщи все эти файлы одним ответом",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[_current_attachment(storage, first), _current_attachment(storage, second)],
+        enable_tools=False,
+    )
+    await runtime.chat(
+        "alice",
+        "Дай мне в одном сообщении информацию про эти два скана",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert [[item["raw_object_id"] for item in attachments] for _message, attachments in seen] == [
+        [first.id, second.id],
+        [first.id, second.id],
+    ]
+    assert "OLD-ARCHIVE-BODY" not in json.dumps(seen, ensure_ascii=False)
+
+
 @pytest.mark.parametrize("lifecycle", ["ignored", "deleted"])
 def test_owned_file_attachment_rejects_non_searchable_lifecycle(
     settings,

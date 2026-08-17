@@ -132,6 +132,7 @@ EXPECTED_INGEST_CALLS = [
     ("friday/organs/importer/__init__.py", "_router.run_import", "ingest_text", "actor.own_id"),
     ("friday/server.py", "create_app.chat", "ingest_file", "actor.own_id"),
     ("friday/server.py", "create_app.chat", "ingest_file", "actor.own_id"),
+    ("friday/server.py", "create_app.chat", "ingest_file", "actor.own_id"),
     ("friday/server.py", "create_app.chat", "ingest_text", "actor.own_id"),
 ]
 

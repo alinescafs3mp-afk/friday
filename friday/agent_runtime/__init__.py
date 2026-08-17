@@ -9401,8 +9401,8 @@ _ATTACHMENT_TOPIC_REVIEW_REQUEST = re.compile(
 _ATTACHMENT_COMPARISON_REQUEST = re.compile(
     r"(?:"
     r"\b(?:сравн|сопостав|свер|различ|отлич|разниц)\w*\b[^.!?\n]{0,120}"
-    r"\b(?:файл|документ|текст|вложен|таблиц)\w*\b|"
-    r"\b(?:файл|документ|текст|вложен|таблиц)\w*\b[^.!?\n]{0,120}"
+    r"\b(?:файл|документ|текст|вложен|таблиц|скан)\w*\b|"
+    r"\b(?:файл|документ|текст|вложен|таблиц|скан)\w*\b[^.!?\n]{0,120}"
     r"\b(?:между\s+собой|сравн|сопостав|различ|отлич)\w*\b|"
     r"\b(?:compare|contrast)\b[^.!?\n]{0,120}\b(?:files?|documents?|texts?|attachments?)\b|"
     r"\b(?:differences?|similarities)\b[^.!?\n]{0,120}\b(?:files?|documents?|texts?)\b"
@@ -9439,7 +9439,7 @@ _MULTI_ATTACHMENT_SUMMARY_COUNT = re.compile(
     r"(?P<count>\d{1,2}|оба|обе|обоих|обеих|both|два|две|двух|три|тр[её]х|тр[её]м|"
     r"четыре|четыр[её]х|пять|шесть|семь|восемь|девять)\s+"
     r"(?:(?:последн|недавн|загруженн|присланн|прикрепл[её]нн|приложенн|эти)\w*\s+){0,3}"
-    r"(?:файл|документ|вложен|таблиц)\w*\b",
+    r"(?:файл|документ|вложен|таблиц|скан)\w*\b",
     re.IGNORECASE,
 )
 _MULTI_ATTACHMENT_HISTORY_MAX_AGE = timedelta(hours=12)
@@ -9472,22 +9472,30 @@ def _attachment_count_value(raw: str) -> int | None:
         "обоих": 2,
         "обеих": 2,
         "both": 2,
+        "two": 2,
         "два": 2,
         "две": 2,
         "двух": 2,
         "три": 3,
+        "three": 3,
         "трех": 3,
         "трёх": 3,
         "трем": 3,
         "трём": 3,
         "четыре": 4,
+        "four": 4,
         "четырех": 4,
         "четырёх": 4,
         "пять": 5,
+        "five": 5,
         "шесть": 6,
+        "six": 6,
         "семь": 7,
+        "seven": 7,
         "восемь": 8,
+        "eight": 8,
         "девять": 9,
+        "nine": 9,
     }
     folded = str(raw or "").casefold()
     try:
@@ -9719,13 +9727,13 @@ _MULTI_ATTACHMENT_COMPARISON_COUNT = re.compile(
     r"\b(?P<count>\d{1,2}|оба|обе|обоих|обеих|both|два|две|двух|три|тр[её]х|тр[её]м|"
     r"четыре|четыр[её]х|пять|шесть|семь|восемь|девять)\s+"
     r"(?:(?:последн|недавн|загруженн|присланн|прикрепл[её]нн|приложенн|эти)\w*\s+){0,3}"
-    r"(?:файл|документ|вложен|таблиц)\w*\b",
+    r"(?:файл|документ|вложен|таблиц|скан)\w*\b",
     re.IGNORECASE,
 )
 _ALL_ATTACHMENT_SET_REQUEST = re.compile(
     r"(?:"
     r"\bвс(?:е|ё|ех)\s+(?:(?:последн|недавн|загруженн|присланн|прикрепл[её]нн|приложенн|эти)\w*\s+){0,3}"
-    r"(?:файл|документ|вложен|таблиц)\w*\b|"
+    r"(?:файл|документ|вложен|таблиц|скан)\w*\b|"
     r"\ball\s+(?:(?:recent|uploaded|attached|these)\s+){0,3}"
     r"(?:files?|documents?|attachments?)\b"
     r")",
@@ -9740,6 +9748,13 @@ def _multi_attachment_open_task_count(message: str) -> int | None:
     if summary is not None:
         return summary
     text = _record_source_command_text(message)
+    active = _ACTIVE_MULTI_ATTACHMENT_SET.search(text)
+    if active is not None:
+        active_count = _attachment_count_value(
+            str(active.group("count_ru") or active.group("count_en") or "")
+        )
+        if active_count is not None:
+            return active_count
     if _ATTACHMENT_COMPARISON_REQUEST.search(text):
         matched = _MULTI_ATTACHMENT_COMPARISON_COUNT.search(text)
         if matched is not None:
@@ -9750,10 +9765,10 @@ def _multi_attachment_open_task_count(message: str) -> int | None:
 
 
 _ACTIVE_MULTI_ATTACHMENT_SET = re.compile(
-    r"\bэт\w*\s+(?:\d{1,2}|два|две|двух|три|тр[её]х|четыре|четыр[её]х|"
+    r"\bэт\w*\s+(?P<count_ru>\d{1,2}|два|две|двух|три|тр[её]х|четыре|четыр[её]х|"
     r"пять|шесть|семь|восемь|девять)\s+"
-    r"(?:файл|документ|вложен|таблиц)\w*\b|"
-    r"\b(?:these|those)\s+(?:two|three|four|five|six|seven|eight|nine|\d{1,2})\s+"
+    r"(?:файл|документ|вложен|таблиц|скан)\w*\b|"
+    r"\b(?:these|those)\s+(?P<count_en>two|three|four|five|six|seven|eight|nine|\d{1,2})\s+"
     r"(?:files?|documents?|attachments?)\b",
     re.IGNORECASE,
 )
@@ -26914,8 +26929,7 @@ class AgentRuntime:
         restore_prior_for_current_multi = bool(
             supplied_attachment_count
             and (
-                all_attachment_set_requested
-                or current_prior_selector
+                current_prior_selector
                 or (
                     multi_attachment_requested_count is not None
                     and supplied_attachment_count < multi_attachment_requested_count

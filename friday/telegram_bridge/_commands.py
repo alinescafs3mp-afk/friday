@@ -52,6 +52,9 @@ def _response_text_format(response: dict[str, Any]) -> str:
     return "plain" if response.get("message_format") == "plain" else "markdown"
 
 
+_ALBUM_CACHE_MESSAGE_IDS = "_friday_album_message_ids"
+
+
 _MONTHS_RU = {
     "янв": 1,
     "фев": 2,
@@ -277,6 +280,14 @@ class CommandsMixin(BridgeShared):
         message = update.get("message")
         if not isinstance(message, dict):
             return
+        album_value = update.get("friday_media_group_messages")
+        album_messages: list[dict[str, Any]] = (
+            [dict(item) for item in album_value if isinstance(item, dict)]
+            if isinstance(album_value, list)
+            else []
+        )
+        if album_value is not None and not album_messages:
+            raise PermanentUpdateError("Telegram album has no usable parts")
         chat_value = message.get("chat")
         user_value = message.get("from")
         chat: dict[str, Any] = chat_value if isinstance(chat_value, dict) else {}
@@ -1293,19 +1304,28 @@ class CommandsMixin(BridgeShared):
             force_knowledge = True
 
         if cached_response is not None:
+            response_to_send = cached_response
+            if album_messages:
+                expected_album_ids = [int(item.get("message_id") or 0) for item in album_messages]
+                if cached_response.get(_ALBUM_CACHE_MESSAGE_IDS) != expected_album_ids:
+                    raise PermanentUpdateError(
+                        "Cached Telegram response does not belong to the complete album"
+                    )
+                response_to_send = dict(cached_response)
+                response_to_send.pop(_ALBUM_CACHE_MESSAGE_IDS, None)
             await self._send_message(
                 telegram,
                 chat_id,
-                self._format_response_message(cached_response),
-                reply_markup=self._response_reply_markup(cached_response, external_user_id=external_user_id),
-                text_format=_response_text_format(cached_response),
+                self._format_response_message(response_to_send),
+                reply_markup=self._response_reply_markup(response_to_send, external_user_id=external_user_id),
+                text_format=_response_text_format(response_to_send),
                 # Повтор после обрыва: куски, уже дошедшие до человека, не уходят
                 # второй раз. Текст тот же самый — он взят из кеша, не из модели.
                 resume_key=int(update["update_id"]),
-                reply_source_message_id=str(cached_response.get("message_id") or ""),
+                reply_source_message_id=str(response_to_send.get("message_id") or ""),
             )
-            await self._deliver_voice_reply(telegram, chat_id, cached_response)
-            await self._deliver_generated_files(telegram, chat_id, cached_response)
+            await self._deliver_voice_reply(telegram, chat_id, response_to_send)
+            await self._deliver_generated_files(telegram, chat_id, response_to_send)
             return
 
         # Forwarded-message provenance travels with the ingested content.
@@ -1319,7 +1339,14 @@ class CommandsMixin(BridgeShared):
                 force_knowledge = True
 
         try:
-            document = await self._prepare_document(telegram, message, update)
+            prepared_documents: list[dict[str, Any]] = []
+            for media_message in album_messages or [message]:
+                prepared = await self._prepare_document(telegram, media_message, update)
+                if prepared is not None:
+                    media_message_id = media_message.get("message_id")
+                    if isinstance(media_message_id, int) and not isinstance(media_message_id, bool):
+                        prepared["telegram_message_id"] = media_message_id
+                    prepared_documents.append(prepared)
         except MediaTooLargeError as exc:
             await register_backend_user()
             # The exception text names the ACTUAL ceiling (Telegram's 20 MB or the
@@ -1332,7 +1359,21 @@ class CommandsMixin(BridgeShared):
             )
             return
 
-        if not text and not document:
+        if album_messages and len(prepared_documents) != len(album_messages):
+            raise PermanentUpdateError("Telegram album contains unsupported media")
+        if album_messages and any(
+            self._archive_document_descriptor(media_message) is not None for media_message in album_messages
+        ):
+            await self._send_message(
+                telegram,
+                chat_id,
+                "Архивы нужно присылать по одному: так пароль и результат относятся к точному файлу.",
+            )
+            return
+        documents = prepared_documents if album_messages else []
+        document = prepared_documents[0] if prepared_documents and not album_messages else None
+
+        if not text and not document and not documents:
             await register_backend_user()
             label = self._unsupported_label(message)
             if label:
@@ -1364,7 +1405,9 @@ class CommandsMixin(BridgeShared):
             payload["reply_source_message_id"] = reply_source_message_id
         if forward:
             payload["forward"] = forward
-        if document:
+        if documents:
+            payload["documents"] = documents
+        elif document:
             payload["document"] = document
         else:
             # A reply to an earlier supported file is a pointer, not a new upload.
@@ -1401,7 +1444,7 @@ class CommandsMixin(BridgeShared):
                 str(chat_id),
             )
             if response.get("reply_media_recovery_required") is True:
-                if document is not None or not isinstance(replied_to, dict):
+                if document is not None or documents or not isinstance(replied_to, dict):
                     raise PermanentUpdateError("Backend requested invalid reply media recovery")
                 try:
                     recovered_document = await self._prepare_document(
@@ -1470,7 +1513,12 @@ class CommandsMixin(BridgeShared):
                 )
             elif archive_descriptor is not None or pending_archive is not None:
                 self._inbox.clear_archive_password_challenge(chat_id, int(external_user_id))
-            self._inbox.cache_backend_response(int(update["update_id"]), response)
+            response_to_cache = dict(response)
+            if album_messages:
+                response_to_cache[_ALBUM_CACHE_MESSAGE_IDS] = [
+                    int(item.get("message_id") or 0) for item in album_messages
+                ]
+            self._inbox.cache_backend_response(int(update["update_id"]), response_to_cache)
         finally:
             typing_task.cancel()
             await asyncio.gather(typing_task, return_exceptions=True)

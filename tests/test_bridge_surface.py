@@ -315,7 +315,7 @@ EXPECTED_COMMANDS = {
 # раздачу (`_dispatch_ready_updates`), один ход (`_run_update`) и ожидание
 # полёта (`_await_inflight_updates`). Число здесь стоит затем, чтобы поверхность
 # моста нельзя было расширить молча.
-EXPECTED_BRIDGE_COUNT = 83
+EXPECTED_BRIDGE_COUNT = 85
 EXPECTED_BRIDGE: dict[str, str] = {
     "_album_caption": "(self, message: 'dict[str, Any]') -> 'str'",
     "_archive_document_descriptor": "(message: 'dict[str, Any]') -> 'dict[str, Any] | None'",
@@ -328,6 +328,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_clear_inline_markup": "(self, client: 'httpx.AsyncClient', chat_id: 'int', message_id: 'int') -> 'None'",
     "_describe_merge_entity": "(entity: 'dict[str, Any]') -> 'str'",
     "_await_inflight_updates": "(self) -> 'None'",
+    "_collect_media_group": "(self, anchor_row: 'dict[str, Any]', anchor_update: 'dict[str, Any]') -> 'tuple[dict[str, Any], list[dict[str, Any]]]'",
     "_dispatch_ready_updates": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'int'",
     "_drain_inbox": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'None'",
     "_document_more_markup": "(document: 'Any', document_id: 'str', offset: 'int') -> 'dict[str, Any] | None'",
@@ -344,6 +345,7 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_get_updates": "(self, client: 'httpx.AsyncClient') -> 'list[dict[str, Any]]'",
     "_journal_transition": "(self, backend: 'httpx.AsyncClient', loop_name: 'str', *, failing: 'bool', error: 'BaseException | None' = None) -> 'None'",
     "_log_loop_failure": "(self, loop_name: 'str', error: 'BaseException') -> 'None'",
+    "_media_group_id": "(update: 'dict[str, Any]') -> 'str'",
     "_notify_backend_recovered": "(self, telegram: 'httpx.AsyncClient') -> 'None'",
     "_notify_dead_letter": "(self, telegram: 'httpx.AsyncClient', update: 'dict[str, Any]', *, permanent: 'bool') -> 'None'",
     "_outbound_loop": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient') -> 'None'",
@@ -412,6 +414,7 @@ EXPECTED_INBOX: dict[str, str] = {
     "archive_password_challenge": "(self, chat_id: 'int', user_id: 'int') -> 'dict[str, Any] | None'",
     "cache_backend_response": "(self, update_id: 'int', response: 'dict[str, Any]') -> 'None'",
     "close": "(self) -> 'None'",
+    "contiguous_pending_rows": "(self, ordering_key: 'str', anchor_update_id: 'int', *, limit: 'int') -> 'list[dict[str, Any]]'",
     "answer_chunks_sent": "(self, update_id: 'int') -> 'int'",
     "dead_letters": "(self, *, limit: 'int' = 100) -> 'list[dict[str, Any]]'",
     "delivered_notification_ids": "(self) -> 'set[str]'",
@@ -420,6 +423,7 @@ EXPECTED_INBOX: dict[str, str] = {
     "get_offset": "(self) -> 'int'",
     "is_registered_chat": "(self, chat_id: 'int') -> 'bool'",
     "mark_dead_letter": "(self, update_id: 'int', error: 'str') -> 'None'",
+    "mark_dead_letter_many": "(self, update_ids: 'list[int]', error: 'str') -> 'None'",
     "mark_failure": "(self, update_id: 'int', error: 'str') -> 'bool'",
     "pending": "(self, *, now: 'float | None' = None, limit: 'int' = 20) -> 'list[dict[str, Any]]'",
     "record_answer_chunks_sent": "(self, update_id: 'int', count: 'int') -> 'None'",
@@ -435,6 +439,7 @@ EXPECTED_INBOX: dict[str, str] = {
     "outbound_reply_source_message_id": ("(self, chat_id: 'int', telegram_message_id: 'int') -> 'str'"),
     "remember_registered_chat": "(self, chat_id: 'int') -> 'None'",
     "remove": "(self, update_id: 'int') -> 'None'",
+    "remove_many": "(self, update_ids: 'list[int]') -> 'None'",
     "clear_archive_password_challenge": "(self, chat_id: 'int', user_id: 'int') -> 'None'",
     "set_offset": "(self, offset: 'int') -> 'None'",
     "stats": "(self) -> 'dict[str, int]'",

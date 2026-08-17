@@ -441,6 +441,16 @@ _VOICE_QUESTION_MAX_SEC = 180.0
 # inside the model's existing attachment budget; it is never copied into the API
 # response, message metadata, or a second durable object.
 _CURRENT_TURN_ATTACHMENT_CHARS = 24_000
+_DOCUMENT_TURN_MAX_FILES = 10
+_DOCUMENT_TURN_ARCHIVE_SUFFIXES = (".7z", ".rar", ".zip")
+_DOCUMENT_TURN_ARCHIVE_MIME_TYPES = frozenset(
+    {
+        "application/vnd.rar",
+        "application/x-7z-compressed",
+        "application/x-rar-compressed",
+        "application/zip",
+    }
+)
 
 
 def _strip_archive_password_directives(text: str) -> tuple[str, str | None]:
@@ -458,12 +468,20 @@ def _take_archive_password(body: dict[str, Any]) -> str | None:
 
     raw_password = body.pop("archive_password", None)
     document = body.get("document")
-    if isinstance(document, dict):
-        nested = document.pop("archive_password", None)
+    documents_value = body.get("documents")
+    document_carriers = (
+        [document]
+        if isinstance(document, dict)
+        else [item for item in documents_value if isinstance(item, dict)]
+        if isinstance(documents_value, list)
+        else []
+    )
+    for carrier in document_carriers:
+        nested = carrier.pop("archive_password", None)
         if raw_password is None:
             raw_password = nested
 
-    if isinstance(document, dict):
+    if document_carriers:
         for field in ("message", "caption"):
             raw_text = body.get(field)
             if not isinstance(raw_text, str):
@@ -878,6 +896,8 @@ def _chat_request_fingerprint(
     attachments: list[dict[str, Any]],
     document: dict[str, Any] | None,
     document_digest: str,
+    documents: list[dict[str, Any]] | None = None,
+    document_digests: list[str] | None = None,
     reply_source_message_id: str = "",
 ) -> str:
     """Bind an idempotency key to the request that actually produced it.
@@ -917,6 +937,19 @@ def _chat_request_fingerprint(
         "attachments": attachments,
         "document": document_fingerprint,
     }
+    if documents:
+        digests = document_digests or []
+        canonical["documents"] = [
+            {
+                "filename": str(item.get("filename") or "telegram-file.bin"),
+                "mime_type": str(item.get("mime_type") or "application/octet-stream"),
+                "source_ref": str(item.get("source_ref") or "").strip()[:500],
+                "file_unique_id": str(item.get("file_unique_id") or "")[:480],
+                "telegram_message_id": item.get("telegram_message_id"),
+                "content_sha256": digests[index] if index < len(digests) else "",
+            }
+            for index, item in enumerate(documents)
+        ]
     encoded = json.dumps(
         canonical,
         ensure_ascii=False,
@@ -2373,6 +2406,23 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         )
         document_value = body.get("document")
         document: dict[str, Any] | None = document_value if isinstance(document_value, dict) else None
+        documents_value = body.get("documents")
+        if documents_value is not None:
+            if not isinstance(documents_value, list):
+                raise HTTPException(status_code=400, detail="documents must be a list")
+            if document_value is not None:
+                raise HTTPException(status_code=400, detail="document and documents are mutually exclusive")
+            if not (1 <= len(documents_value) <= _DOCUMENT_TURN_MAX_FILES):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"documents must contain 1..{_DOCUMENT_TURN_MAX_FILES} files",
+                )
+            if any(not isinstance(item, dict) for item in documents_value):
+                raise HTTPException(status_code=400, detail="every documents item must be an object")
+        document_batch: list[dict[str, Any]] = (
+            [dict(item) for item in documents_value] if isinstance(documents_value, list) else []
+        )
+        incoming_documents = document_batch or ([document] if document is not None else [])
         recovery_value = body.get("reply_document_recovery")
         recovery_supplied = "reply_document_recovery" in body
         reply_document_recovery: dict[str, Any] | None = (
@@ -2380,7 +2430,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         )
         raw_reply_source_message_id = body.pop("reply_source_message_id", None)
         reply_assistant_pointer_present = bool(
-            actor.source == "telegram-bridge" and document is None and raw_reply_source_message_id is not None
+            actor.source == "telegram-bridge"
+            and not incoming_documents
+            and raw_reply_source_message_id is not None
         )
         reply_source_message_id = ""
         if reply_assistant_pointer_present and isinstance(raw_reply_source_message_id, str):
@@ -2393,7 +2445,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 reply_source_message_id = candidate_message_id
         reply_pointer_present = bool(
             actor.source == "telegram-bridge"
-            and document is None
+            and not incoming_documents
             and not reply_assistant_pointer_present
             and any(
                 key in body
@@ -2434,17 +2486,22 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 reply_document_unique_ref = f"telegram-unique:{unique_id}"
         forward_value = body.get("forward")
         forward_meta: dict[str, Any] = forward_value if isinstance(forward_value, dict) else {}
-        file_content: bytes | None = None
-        document_digest = ""
-        if document:
-            encoded = str(document.get("content_base64") or "")
+        decoded_document_contents: list[bytes] = []
+        document_digests: list[str] = []
+        for incoming_document in incoming_documents:
+            encoded = str(incoming_document.get("content_base64") or "")
             try:
-                file_content = base64.b64decode(encoded, validate=True)
+                decoded = base64.b64decode(encoded, validate=True)
             except (ValueError, binascii.Error) as exc:
                 raise HTTPException(status_code=400, detail="Invalid document base64") from exc
-            if len(file_content) > settings.max_upload_bytes:
+            if len(decoded) > settings.max_upload_bytes:
                 raise HTTPException(status_code=413, detail="File is too large")
-            document_digest = hashlib.sha256(file_content).hexdigest()
+            decoded_document_contents.append(decoded)
+            document_digests.append(hashlib.sha256(decoded).hexdigest())
+        if sum(len(content) for content in decoded_document_contents) > settings.max_upload_bytes:
+            raise HTTPException(status_code=413, detail="Document turn is too large")
+        file_content: bytes | None = decoded_document_contents[0] if document is not None else None
+        document_digest = document_digests[0] if document is not None else ""
         source_ref = str(body.get("source_ref") or "").strip()[:500]
         if not source_ref and document:
             source_ref = str(document.get("source_ref") or "").strip()[:500]
@@ -2453,7 +2510,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             source_ref = (
                 f"telegram:{getattr(request.state, 'bridge_chat_id', '')}:{message_id}" if message_id else ""
             )
-        if not message and not document:
+        if not message and not incoming_documents:
             raise HTTPException(status_code=400, detail="message or document is required")
         if len(message) > settings.max_extracted_text_chars:
             raise HTTPException(status_code=413, detail="Message is too long")
@@ -2481,6 +2538,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 attachments=attachments,
                 document=document,
                 document_digest=document_digest,
+                documents=document_batch,
+                document_digests=document_digests if document_batch else None,
                 reply_source_message_id=reply_source_message_id,
             )
             claim = state.storage.idempotency_claim(
@@ -2551,6 +2610,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
 
         try:
             file_ingestion = None
+            file_ingestions: list[dict[str, Any]] = []
             conversation_id = str(body.get("conversation_id") or "").strip() or None
             channel_chat_id = getattr(request.state, "bridge_chat_id", None)
             if actor.source == "telegram-bridge" and channel_chat_id:
@@ -2721,7 +2781,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
 
             if recovery_supplied and (
                 not reply_pointer_present
-                or document is not None
+                or incoming_documents
                 or reply_document_recovery is None
                 or not reply_document_source_ref
                 or not reply_document_message_ref
@@ -2883,6 +2943,142 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     attachments.append(minted)
             elif recovery_supplied and reply_resolution_status == TELEGRAM_REPLY_BLOCKED:
                 raise HTTPException(status_code=409, detail="Reply media recovery is blocked")
+            if document_batch:
+                state.auth_service.require(actor, "files.upload")
+                if explicit_no_save:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="A no-save request must contain exactly one document",
+                    )
+                if archive_password is not None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="An archive password must target exactly one document",
+                    )
+                # Validate the *whole* declared set before the first file can
+                # persist.  A bad second item must not leave a successful first
+                # Raw behind while the overall turn is rejected.
+                for batch_document in document_batch:
+                    candidate_filename = str(batch_document.get("filename") or "telegram-file.bin")
+                    candidate_mime = str(batch_document.get("mime_type") or "application/octet-stream")
+                    candidate_kind = str(batch_document.get("media_kind") or "")
+                    if candidate_kind in {"audio", "voice"} or candidate_mime.casefold().startswith("audio/"):
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Audio and voice files must be sent as separate turns",
+                        )
+                    if candidate_filename.casefold().endswith(
+                        _DOCUMENT_TURN_ARCHIVE_SUFFIXES
+                    ) or candidate_mime.split(";", 1)[0].strip().casefold() in (
+                        _DOCUMENT_TURN_ARCHIVE_MIME_TYPES
+                    ):
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Archives must be sent as separate turns",
+                        )
+                speaker = state.storage.get_user(actor.own_id) or {}
+                speaker_meta = _json_load(speaker.get("metadata_json"), {})
+                language_code = str((speaker_meta or {}).get("language_code") or "").strip()
+                for index, (batch_document, batch_content) in enumerate(
+                    zip(document_batch, decoded_document_contents, strict=True),
+                    start=1,
+                ):
+                    filename = str(batch_document.get("filename") or f"telegram-file-{index}.bin")
+                    mime_type = str(batch_document.get("mime_type") or "application/octet-stream")
+                    media_kind = str(batch_document.get("media_kind") or "")
+                    item_source_ref = str(batch_document.get("source_ref") or "").strip()[:500]
+                    if not item_source_ref and source_ref:
+                        item_source_ref = f"{source_ref}:document:{index}"[:500]
+                    ensure_effect_fence()
+                    batch_ingestion = await state.ingestion.ingest_file(
+                        actor.user_id,
+                        None,
+                        batch_content,
+                        filename=filename,
+                        mime_type=mime_type,
+                        media_kind=media_kind,
+                        metadata={
+                            "channel": actor.source,
+                            "chat_id": getattr(request.state, "bridge_chat_id", ""),
+                            **({"media_kind": media_kind} if media_kind else {}),
+                            **({"language_code": language_code} if language_code else {}),
+                            **(
+                                {"duration_sec": batch_document["duration"]}
+                                if isinstance(batch_document.get("duration"), int)
+                                else {}
+                            ),
+                            **({"forward": forward_meta} if forward_meta else {}),
+                            # Keep this final and literal: no dynamic metadata
+                            # expansion may replace the authenticated uploader.
+                            "uploaded_by": actor.own_id,
+                        },
+                        source_ref=item_source_ref,
+                        turn_deadline=_turn_deadline,
+                    )
+                    if _archive_password_challenge(batch_ingestion) is not None:
+                        # Archives were rejected before the first persistent
+                        # seam.  Reaching a challenge now means the declared
+                        # type lied; never publish a partial multi-file turn.
+                        raise IdempotencyConflictError(
+                            "A document in the batch requires isolated archive handling"
+                        )
+                    raw_id = str(batch_ingestion.get("raw_object_id") or "")
+                    if raw_id and actor.source == "telegram-bridge":
+                        batch_transport_aliases: list[str] = []
+                        upload_message_id = batch_document.get("telegram_message_id")
+                        if (
+                            isinstance(upload_message_id, int)
+                            and not isinstance(upload_message_id, bool)
+                            and 0 < upload_message_id <= (2**63 - 1)
+                        ):
+                            authenticated_chat_id = str(getattr(request.state, "bridge_chat_id", "") or "")
+                            batch_transport_aliases.append(
+                                f"telegram-message:{int(authenticated_chat_id)}:{upload_message_id}"
+                            )
+                        upload_unique_id = batch_document.get("file_unique_id")
+                        if isinstance(upload_unique_id, str) and (
+                            upload_unique_id
+                            and upload_unique_id == upload_unique_id.strip()
+                            and len(upload_unique_id) <= 480
+                            and all(char.isascii() and 33 <= ord(char) <= 126 for char in upload_unique_id)
+                        ):
+                            batch_transport_aliases.append(f"telegram-unique:{upload_unique_id}")
+                        if batch_transport_aliases:
+                            try:
+                                bound = await run_blocking(
+                                    bind_owned_telegram_reply_aliases,
+                                    state.storage,
+                                    actor.user_id,
+                                    actor.own_id,
+                                    raw_id,
+                                    tuple(batch_transport_aliases),
+                                )
+                            except SourceReferenceConflictError as exc:
+                                raise IdempotencyConflictError(
+                                    "Telegram reply identity is unavailable for this upload"
+                                ) from exc
+                            if not bound:
+                                raise IdempotencyConflictError(
+                                    "Telegram reply identity could not be authorized"
+                                )
+                    current_turn_raw = (
+                        await run_blocking(state.storage.get_raw_object, raw_id, actor.user_id)
+                        if raw_id and state.auth_service.authorize(actor, "files.read").allowed
+                        else None
+                    )
+                    attachments.append(
+                        _current_turn_file_attachment(
+                            filename=filename,
+                            file_ingestion=batch_ingestion,
+                            raw=current_turn_raw,
+                            storage=state.storage,
+                        )
+                    )
+                    file_ingestions.append(batch_ingestion)
+                if not message:
+                    message = f"Загружено документов: {len(file_ingestions)}"
+                    file_already_ingested = True
+                    synthetic_document_notice = True
             if document:
                 state.auth_service.require(actor, "files.upload")
                 if file_content is None:  # pragma: no cover - narrowed by document validation above
@@ -3316,6 +3512,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             result["ingestion"] = ingestion_result
             if file_ingestion:
                 result["file_ingestion"] = file_ingestion
+            if file_ingestions:
+                result["file_ingestions"] = file_ingestions
             public_result = _public_chat_for_actor(
                 result,
                 storage=state.storage,

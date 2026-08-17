@@ -448,6 +448,23 @@ def public_chat_ingestion(
             if isinstance(file_ingestion, Mapping)
             else None
         )
+    if "file_ingestions" in public:
+        file_ingestions = public.get("file_ingestions")
+        public["file_ingestions"] = (
+            [
+                public_ingestion_receipt(
+                    item,
+                    file=True,
+                    storage=storage,
+                    resource_user_id=resource_user_id,
+                    resource_owner_id=resource_owner_id,
+                )
+                for item in file_ingestions[:16]
+                if isinstance(item, Mapping)
+            ]
+            if isinstance(file_ingestions, list)
+            else []
+        )
     files = public.get("files")
     if isinstance(files, list):
         public["files"] = _project_generated_response_files(

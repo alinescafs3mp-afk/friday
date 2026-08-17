@@ -52,6 +52,9 @@ from friday.telegram_bridge._queue import _UpdateInbox
 _POLL_WATCHDOG_INTERVAL_SEC = 15.0
 _POLL_WATCHDOG_STALE_SEC = max(180.0, POLL_TIMEOUT + BACKOFF_MAX + 60.0)
 _TRANSITION_JOURNAL_TIMEOUT_SEC = 5.0
+_ALBUM_SETTLE_SEC = 1.0
+_ALBUM_MAX_WAIT_SEC = 5.0
+_ALBUM_MAX_ITEMS = 10
 _ARCHIVE_DOCUMENT_SUFFIXES = (".zip", ".rar", ".7z")
 _ARCHIVE_DOCUMENT_MIME_TYPES = frozenset(
     {
@@ -74,6 +77,14 @@ _PRESENTATION_PASSWORD_QUOTES = {
     "‘": "’",
     "„": "“",
 }
+
+
+class _AlbumPermanentError(PermanentUpdateError):
+    """An invalid group plus every durable row that belongs to it."""
+
+    def __init__(self, message: str, rows: list[dict[str, Any]]) -> None:
+        super().__init__(message)
+        self.update_ids = [int(row["update_id"]) for row in rows]
 
 
 def _message_text_field(message: dict[str, Any]) -> tuple[str, str]:
@@ -925,15 +936,19 @@ class TransportMixin(BridgeShared):
         update_id = int(row["update_id"])
         ordering_key = str(row["ordering_key"])
         update: dict[str, Any] = {}
+        owned_update_ids = [update_id]
         cancelled = False
         try:
             update = json.loads(row["payload_json"])
+            update, album_rows = await self._collect_media_group(row, update)
+            owned_update_ids = [int(item["update_id"]) for item in album_rows]
             cached = json.loads(row["backend_response_json"]) if row.get("backend_response_json") else None
             await self._process_update(telegram, backend, update, cached_response=cached)
-            self._inbox.remove(update_id)
+            self._inbox.remove_many(owned_update_ids)
         except PermanentUpdateError as exc:
+            owned_update_ids = list(dict.fromkeys(getattr(exc, "update_ids", owned_update_ids)))
             LOGGER.warning("Quarantining invalid Telegram update (%s)", type(exc).__name__)
-            self._inbox.mark_dead_letter(update_id, type(exc).__name__)
+            self._inbox.mark_dead_letter_many(owned_update_ids, type(exc).__name__)
             # MediaTooLargeError already told the user; others left them in
             # silence — a rejected message must never just vanish.
             if not isinstance(exc, MediaTooLargeError):
@@ -947,10 +962,12 @@ class TransportMixin(BridgeShared):
             LOGGER.warning("Telegram update deferred (%s)", type(exc).__name__)
             dead_lettered = self._inbox.mark_failure(update_id, type(exc).__name__)
             if dead_lettered:
+                self._inbox.mark_dead_letter_many(owned_update_ids, type(exc).__name__)
                 LOGGER.error("Telegram update exhausted its retry budget")
                 await self._notify_dead_letter(telegram, update, permanent=False)
         finally:
-            self._archive_passwords.pop(update_id, None)
+            for owned_update_id in owned_update_ids:
+                self._archive_passwords.pop(owned_update_id, None)
             # Чат освобождается ЗДЕСЬ, а не в чужом обходе: только эта задача
             # знает, что её работа кончилась, и только отсюда следующая строка
             # того же чата может уйти в работу немедленно.
@@ -960,6 +977,96 @@ class TransportMixin(BridgeShared):
             # базу вместо того, чтобы дать процессу спокойно завершиться.
             if not cancelled:
                 self._dispatch_ready_updates(telegram, backend)
+
+    @staticmethod
+    def _media_group_id(update: dict[str, Any]) -> str:
+        message = update.get("message")
+        if not isinstance(message, dict):
+            return ""
+        group_id = str(message.get("media_group_id") or "")
+        if not group_id:
+            return ""
+        if len(group_id) > 128 or not group_id.isascii():
+            raise PermanentUpdateError("Telegram media group id is invalid")
+        return group_id
+
+    async def _collect_media_group(
+        self,
+        anchor_row: dict[str, Any],
+        anchor_update: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Turn one Telegram album into one durable backend turn.
+
+        Telegram provides a shared group id but no final-item marker, and a
+        group may straddle two long-poll responses.  Keep the chat's FIFO slot
+        while waiting for a short quiet period; polling remains live and stores
+        later parts.  Only a contiguous, same-chat/same-sender group is owned.
+        """
+
+        group_id = self._media_group_id(anchor_update)
+        if not group_id:
+            return anchor_update, [anchor_row]
+        deadline = time.monotonic() + _ALBUM_MAX_WAIT_SEC
+        rows: list[dict[str, Any]] = [anchor_row]
+        while True:
+            candidates = self._inbox.contiguous_pending_rows(
+                str(anchor_row["ordering_key"]),
+                int(anchor_row["update_id"]),
+                limit=BATCH_SIZE * 2,
+            )
+            grouped: list[dict[str, Any]] = []
+            for candidate in candidates:
+                try:
+                    candidate_update = json.loads(candidate["payload_json"])
+                except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                    raise PermanentUpdateError("Telegram album row is invalid") from exc
+                if self._media_group_id(candidate_update) != group_id:
+                    break
+                grouped.append(candidate)
+            rows = grouped or [anchor_row]
+            if len(rows) > _ALBUM_MAX_ITEMS:
+                raise _AlbumPermanentError("Telegram media group is too large", rows)
+            newest_created_at = max(float(item.get("created_at") or 0.0) for item in rows)
+            quiet_remaining = _ALBUM_SETTLE_SEC - max(0.0, time.time() - newest_created_at)
+            remaining = deadline - time.monotonic()
+            if quiet_remaining <= 0 or remaining <= 0:
+                break
+            await asyncio.sleep(min(quiet_remaining, remaining))
+
+        messages: list[dict[str, Any]] = []
+        captions: list[str] = []
+        chat_user_identity: tuple[str, str] | None = None
+        for candidate in rows:
+            candidate_update = json.loads(candidate["payload_json"])
+            if candidate.get("backend_response_json") and int(candidate["update_id"]) != int(
+                anchor_row["update_id"]
+            ):
+                raise _AlbumPermanentError("Telegram album was partially processed", rows)
+            message = candidate_update.get("message")
+            if not isinstance(message, dict):
+                raise _AlbumPermanentError("Telegram album part has no message", rows)
+            chat = message.get("chat")
+            sender = message.get("from")
+            identity = (
+                str(chat.get("id") or "") if isinstance(chat, dict) else "",
+                str(sender.get("id") or "") if isinstance(sender, dict) else "",
+            )
+            if not all(identity) or (chat_user_identity is not None and identity != chat_user_identity):
+                raise _AlbumPermanentError("Telegram album identity changed", rows)
+            chat_user_identity = identity
+            messages.append(dict(message))
+            caption = str(message.get("caption") or "").strip()
+            if caption and caption not in captions:
+                captions.append(caption)
+        if len(captions) > 1:
+            raise _AlbumPermanentError("Telegram album has conflicting captions", rows)
+        combined = copy.deepcopy(anchor_update)
+        combined_message = dict(messages[0])
+        if captions:
+            combined_message["caption"] = captions[0]
+        combined["message"] = combined_message
+        combined["friday_media_group_messages"] = messages
+        return combined, rows
 
     async def _await_inflight_updates(self) -> None:
         """Дождаться работы в полёте. Брошенная задача — обновление, снятое с

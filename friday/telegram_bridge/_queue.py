@@ -594,6 +594,35 @@ class _UpdateInbox:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def contiguous_pending_rows(
+        self,
+        ordering_key: str,
+        anchor_update_id: int,
+        *,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Return the pending FIFO suffix beginning at one exact update.
+
+        Telegram media groups have no explicit terminal item.  The transport
+        therefore observes the short, contiguous suffix for the same chat and
+        decides where the group ends from the durable payloads.  This method
+        deliberately does not skip a row: a normal chat message is a hard
+        boundary, so a reused/malformed ``media_group_id`` can never gather
+        unrelated later uploads into one turn.
+        """
+
+        rows = self._conn.execute(
+            """SELECT * FROM updates
+               WHERE status='pending' AND ordering_key=? AND update_id>=?
+               ORDER BY update_id ASC LIMIT ?""",
+            (
+                str(ordering_key),
+                int(anchor_update_id),
+                max(1, min(int(limit), BATCH_SIZE * 2)),
+            ),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def mark_failure(self, update_id: int, error: str) -> bool:
         row = self._conn.execute(
             "SELECT attempts FROM updates WHERE update_id=?",
@@ -631,6 +660,20 @@ class _UpdateInbox:
                    next_attempt_at=0, failed_at=?
                WHERE update_id=?""",
             (error[:500], failed_at, failed_at, update_id),
+        )
+        self._conn.commit()
+
+    def mark_dead_letter_many(self, update_ids: list[int], error: str) -> None:
+        cleaned = list(dict.fromkeys(int(value) for value in update_ids))
+        if not cleaned:
+            return
+        failed_at = time.time()
+        self._conn.executemany(
+            """UPDATE updates
+               SET status='dead_letter', last_error=?, last_attempt_at=?,
+                   next_attempt_at=0, failed_at=?
+               WHERE update_id=?""",
+            [(error[:500], failed_at, failed_at, update_id) for update_id in cleaned],
         )
         self._conn.commit()
 
@@ -686,4 +729,14 @@ class _UpdateInbox:
 
     def remove(self, update_id: int) -> None:
         self._conn.execute("DELETE FROM updates WHERE update_id=?", (update_id,))
+        self._conn.commit()
+
+    def remove_many(self, update_ids: list[int]) -> None:
+        cleaned = list(dict.fromkeys(int(value) for value in update_ids))
+        if not cleaned:
+            return
+        self._conn.executemany(
+            "DELETE FROM updates WHERE update_id=?",
+            [(update_id,) for update_id in cleaned],
+        )
         self._conn.commit()
