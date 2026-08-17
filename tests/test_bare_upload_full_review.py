@@ -202,7 +202,7 @@ async def test_token_capped_review_is_published_only_through_a_complete_sentence
     )
     assert "Незавершённый хвост" not in result["message"]
     assert len(model.calls) == 1
-    assert model.calls[0]["max_tokens"] == _ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS == 900
+    assert model.calls[0]["max_tokens"] == _ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS == 2_048
     prompt = "\n".join(str(item.get("content") or "") for item in model.calls[0]["messages"])
     assert "не более чем в 2200 знаков" in prompt
     assert "Обязательно заверши последнюю фразу" in prompt

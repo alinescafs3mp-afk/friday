@@ -425,6 +425,7 @@ class LLMRouter:
     """Routes foreground/background requests to an OpenAI-compatible vLLM API."""
 
     supports_absolute_deadline = True
+    supports_scoped_silent_cooldown = True
 
     def __init__(self, settings: FridaySettings) -> None:
         self.settings = settings
@@ -528,6 +529,7 @@ class LLMRouter:
         reject_repeated_token_degeneration: bool = True,
         allow_retries: bool = True,
         absolute_deadline: float | None = None,
+        open_silent_cooldown: bool = True,
     ) -> dict[str, Any]:
         if not self.enabled:
             raise LLMUnavailableError("LLM is disabled")
@@ -583,6 +585,7 @@ class LLMRouter:
                     reject_repeated_token_degeneration=reject_repeated_token_degeneration,
                     allow_retries=allow_retries,
                     absolute_deadline=absolute_deadline,
+                    open_silent_cooldown=open_silent_cooldown,
                 )
             except BaseException:
                 # A full ReadTimeout replaces the sentinel with a fresh finite
@@ -668,6 +671,7 @@ class LLMRouter:
         reject_repeated_token_degeneration: bool = True,
         allow_retries: bool = True,
         absolute_deadline: float | None = None,
+        open_silent_cooldown: bool = True,
     ) -> dict[str, Any]:
         payload = self._prepare_payload(messages, temperature, max_tokens, tools, tool_choice)
         last_error: Exception | None = None
@@ -866,7 +870,7 @@ class LLMRouter:
                 LOGGER.warning("LLM degeneration: retrying once with a bounded recovery payload")
             except LLMDeadlineError as exc:
                 last_error = exc
-                if exc.phase == "submitted":
+                if exc.phase == "submitted" and open_silent_cooldown:
                     self._silent_until = time.monotonic() + SILENT_ENDPOINT_COOLDOWN_SEC
                 raise
             except httpx.HTTPStatusError as exc:
@@ -892,7 +896,8 @@ class LLMRouter:
                 # две секунды нередко попадает в поднявшийся сервер. Поэтому
                 # разделены именно эти два случая, а не «сеть» целиком.
                 last_error = exc
-                self._silent_until = time.monotonic() + SILENT_ENDPOINT_COOLDOWN_SEC
+                if open_silent_cooldown:
+                    self._silent_until = time.monotonic() + SILENT_ENDPOINT_COOLDOWN_SEC
                 LOGGER.warning(
                     "LLM read timeout after %.0fs; not retrying a silent endpoint", self.timeout_sec
                 )

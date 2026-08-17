@@ -84,6 +84,62 @@ def _synthetic_300_row_xlsx(*, multiline_before_target: bool = False) -> dict[st
     )
 
 
+def _synthetic_large_schedule_xlsx(*, version: str) -> dict[str, Any]:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "SCHEDULE"
+    sheet.append(["№", "Должность", "Звание", "ФИО", "План"])
+    for position in range(1, 181):
+        marker = version if position == 144 else "COMMON"
+        sheet.append(
+            [
+                position,
+                f"Должность {position}",
+                "рядовой",
+                f"Сотрудник {position:03d}",
+                f"{marker}-PLAN-{position:03d}-" + ("график " * 55),
+            ]
+        )
+    stream = io.BytesIO()
+    workbook.save(stream)
+    workbook.close()
+    extracted = DocumentExtractor().extract(stream.getvalue(), f"schedule-{version}.xlsx")
+    assert extracted.success is True and isinstance(extracted.office_structure_index, dict)
+    assert len(extracted.text) > 72_000
+    return trusted_office_attachment(
+        {
+            "filename": f"schedule-{version}.xlsx",
+            "transient_text": extracted.text,
+            "extraction_success": True,
+            "verification_eligible": True,
+            OFFICE_STRUCTURE_KEY: extracted.office_structure_index,
+        }
+    )
+
+
+def _synthetic_compact_schedule_xlsx(*, version: str) -> dict[str, Any]:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "SCHEDULE"
+    sheet.append(["№", "Должность", "Звание", "ФИО", "План"])
+    sheet.append([1, "Оператор A | B", "рядовой", "Сотрудник 001", version])
+    sheet.append([2, "Оператор C", "рядовой", "Сотрудник 002", "COMMON"])
+    stream = io.BytesIO()
+    workbook.save(stream)
+    workbook.close()
+    extracted = DocumentExtractor().extract(stream.getvalue(), f"compact-{version}.xlsx")
+    assert extracted.success is True and isinstance(extracted.office_structure_index, dict)
+    return trusted_office_attachment(
+        {
+            "filename": f"compact-{version}.xlsx",
+            "transient_text": extracted.text,
+            "extraction_success": True,
+            "verification_eligible": True,
+            OFFICE_STRUCTURE_KEY: extracted.office_structure_index,
+        }
+    )
+
+
 @pytest.mark.parametrize("loss_flag", ["extraction_truncated", "rows_truncated"])
 def test_generic_extractor_loss_is_never_complete_attachment_evidence(loss_flag: str) -> None:
     assert not _attachment_source_complete(
@@ -731,7 +787,12 @@ async def test_parallel_map_failure_stays_partial_and_cannot_pass(
     assert synthesis == verification and len(synthesis) == 1
     coverage = _payload(synthesis[0], MAP_PREFIX)["coverage"]
     assert llm.max_active_maps == 3
-    assert coverage["failed_chunks"] == [{"chunk_index": 3, "file_index": 1}]
+    assert coverage["failed_chunks"] == [
+        {"chunk_index": 3, "file_index": 1},
+        {"chunk_index": 4, "file_index": 1},
+        {"chunk_index": 5, "file_index": 1},
+    ]
+    assert coverage["chunks_mapped"] == 2
     assert coverage["map_complete"] is False
     assert coverage["complete"] is False
     assert result["attachment_coverage_complete"] is False
@@ -1390,6 +1451,72 @@ async def test_two_30k_files_are_compared_from_both_complete_sources(
 
 
 @pytest.mark.asyncio
+async def test_large_spreadsheet_versions_use_one_full_scan_delta_synthesis(
+    settings: Any,
+    storage: Any,
+) -> None:
+    first = _synthetic_large_schedule_xlsx(version="V1")
+    second = _synthetic_large_schedule_xlsx(version="V2")
+    llm = _HierarchyLLM("Версии отличаются планом сотрудника 144: V1 против V2.")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=llm,
+    )
+    context = AgentContext(
+        conversation_id="synthetic-tabular-delta",
+        user_id="synthetic-tabular-owner",
+        person_id="synthetic-tabular-owner",
+        current_attachment_present=True,
+    )
+
+    bundle, complete = await runtime._build_attachment_hierarchy_bundle(  # noqa: SLF001
+        context,
+        "Сравни оба графика целиком и укажи различия.",
+        [first, second],
+        task_kind="comparison",
+    )
+
+    assert llm.calls == [], "tabular full scan unexpectedly started leaf generations"
+    assert bundle.evidence.startswith(agent_runtime_module._ATTACHMENT_TABULAR_PROFILE_PREFIX)
+    payload = _payload(bundle.evidence, agent_runtime_module._ATTACHMENT_TABULAR_PROFILE_PREFIX)
+    assert payload["encoding"] == "full-scan-tabular-profile-v1"
+    assert payload["coverage"] == {
+        "aggregate_counts_complete": True,
+        "complete": True,
+        "details_complete": True,
+        "files_readable": 2,
+        "files_total": 2,
+        "source_chars_total": len(str(first["transient_text"])) + len(str(second["transient_text"])),
+        "source_complete": True,
+        "source_lines_total": len(str(first["transient_text"]).splitlines())
+        + len(str(second["transient_text"]).splitlines()),
+    }
+    comparison = payload["comparisons_to_reference"][0]
+    assert comparison["added_records_count"] == 0
+    assert comparison["removed_records_count"] == 0
+    assert comparison["changed_records_count"] == 1
+    assert comparison["details_complete"] is True
+    assert comparison["changed_records"][0]["record_key"] == "сотрудник 144"
+    assert complete is bundle.map_complete is True
+
+    response = await runtime._hierarchical_attachment_response(  # noqa: SLF001
+        context,
+        "Сравни оба графика целиком и укажи различия.",
+        [first, second],
+        task_kind="comparison",
+        bundle=bundle,
+        hierarchy_complete=complete,
+    )
+    assert response["content"] == "Версии отличаются планом сотрудника 144: V1 против V2."
+    assert len(llm.calls) == 1
+    assert llm.calls[0]["kwargs"]["max_tokens"] == 2_048
+    assert _chunk_payloads(llm) == []
+    assert agent_runtime_module._ATTACHMENT_TABULAR_PROFILE_PREFIX in _blob(llm.calls[0]["messages"])
+    assert "Не ищи и не предлагай искать эти данные в интернете" in _blob(llm.calls[0]["messages"])
+
+
+@pytest.mark.asyncio
 async def test_three_30k_files_keep_identity_order_and_all_source_tails(
     settings: Any,
     storage: Any,
@@ -1419,6 +1546,42 @@ async def test_three_30k_files_keep_identity_order_and_all_source_tails(
     assert result["attachment_coverage_complete"] is True
     assert result["verification_status"] == "passed"
     _assert_no_action_surface(llm)
+
+
+@pytest.mark.asyncio
+async def test_complete_office_index_keeps_embedded_pipe_inside_one_cell(
+    settings: Any,
+    storage: Any,
+) -> None:
+    first = _synthetic_compact_schedule_xlsx(version="V1")
+    second = _synthetic_compact_schedule_xlsx(version="V2")
+    llm = _HierarchyLLM("Изменился только план сотрудника 001.")
+    runtime = AgentRuntime(replace(settings, verify_answers=False), storage, llm=llm)
+    context = AgentContext(
+        conversation_id="synthetic-tabular-pipe",
+        user_id="synthetic-tabular-owner",
+        person_id="synthetic-tabular-owner",
+        current_attachment_present=True,
+    )
+
+    bundle, complete = await runtime._build_attachment_hierarchy_bundle(  # noqa: SLF001
+        context,
+        "Сравни две таблицы целиком.",
+        [first, second],
+        task_kind="comparison",
+    )
+
+    assert complete is True
+    assert llm.calls == []
+    payload = _payload(bundle.evidence, agent_runtime_module._ATTACHMENT_TABULAR_PROFILE_PREFIX)
+    comparison = payload["comparisons_to_reference"][0]
+    assert comparison["changed_records_count"] == 1
+    assert comparison["changed_records"][0] == {
+        "columns": [[5, "V1", "V2"]],
+        "current_line": 2,
+        "record_key": "сотрудник 001",
+        "reference_line": 2,
+    }
 
 
 @pytest.mark.asyncio
@@ -1715,6 +1878,38 @@ async def test_hierarchy_uses_one_unrenewed_prepass_deadline(
     assert result["verification_status"] == "unknown"
     assert result["verified"] is False
     assert "загруз" not in result["message"].casefold()
+
+
+@pytest.mark.asyncio
+async def test_one_slow_serial_leaf_stops_every_queued_document_map(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(agent_runtime_module, "_ATTACHMENT_MAP_CALL_TIMEOUT_SEC", 0.01)
+    source = "SERIAL_HEAD\n" + "s" * 99_970 + "\nSERIAL_TAIL"
+    llm = _SlowMapLLM("must not become a final answer")
+    runtime = AgentRuntime(settings, storage, llm=llm)
+    context = AgentContext(
+        conversation_id="synthetic-serial-fail-fast",
+        user_id="synthetic-serial-owner",
+        person_id="synthetic-serial-owner",
+        current_attachment_present=True,
+    )
+
+    bundle, complete = await runtime._build_attachment_hierarchy_bundle(  # noqa: SLF001
+        context,
+        "Обобщи весь документ.",
+        [_owned("serial-timeout.txt", source)],
+        task_kind="summary",
+    )
+
+    assert bundle.chunks_total >= 2
+    assert llm.map_starts == 1
+    assert llm.map_cancellations == 1
+    assert _chunk_payloads(llm) == []
+    assert bundle.chunks_mapped == 0
+    assert bundle.map_complete is complete is False
 
 
 @pytest.mark.asyncio

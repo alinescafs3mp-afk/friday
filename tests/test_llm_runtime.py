@@ -386,6 +386,58 @@ async def test_absolute_deadline_bounds_submitted_request_and_closes_client(
 
 
 @pytest.mark.asyncio
+async def test_scoped_document_deadline_does_not_poison_the_next_user_turn(
+    settings,
+    monkeypatch,
+) -> None:
+    posts = 0
+    first_cancelled = False
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **_kwargs):
+            nonlocal posts, first_cancelled
+            posts += 1
+            if posts == 1:
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    first_cancelled = True
+                    raise
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json={
+                    "choices": [{"message": {"content": "next turn is healthy"}, "finish_reason": "stop"}],
+                    "usage": {},
+                },
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: _Client())
+    router = LLMRouter(replace(settings, llm_enabled=True))
+
+    with pytest.raises(LLMDeadlineError) as raised:
+        await router.chat(
+            [{"role": "user", "content": "bounded document stage"}],
+            absolute_deadline=time.monotonic() + 0.03,
+            allow_retries=False,
+            open_silent_cooldown=False,
+        )
+
+    assert raised.value.phase == "submitted"
+    assert first_cancelled is True
+    assert router._silent_until == 0.0  # noqa: SLF001
+    recovered = await router.chat([{"role": "user", "content": "independent next turn"}])
+    assert recovered["content"] == "next turn is healthy"
+    assert posts == 2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("failure_kind", ("http_503", "transport"))
 async def test_retry_opt_out_sends_one_post_and_never_backs_off(
     settings,
