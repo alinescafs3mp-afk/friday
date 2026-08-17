@@ -684,6 +684,58 @@ def _private_owned_attachment_copy(
     return cast(_OwnedAttachment, _retain_file_evidence_stamp(source, carrier))
 
 
+_ATTACHMENT_RESTRICTIVE_TRUE_FIELDS = (
+    "text_truncated",
+    "extraction_truncated",
+    "rows_truncated",
+    "archive_truncated",
+    "source_truncated_for_parse",
+    "parse_deadline_reached",
+    "parse_pages_truncated",
+    "advisory_only",
+)
+_ATTACHMENT_RESTRICTIVE_STATE_FIELDS = (
+    *_ATTACHMENT_RESTRICTIVE_TRUE_FIELDS,
+    "extraction_success",
+    "verification_eligible",
+    "parse_pages_read",
+    "parse_total_pages",
+)
+_RUNTIME_PARSER_RESTRICTION_KEY = "_runtime_parser_restriction_applied"
+
+
+def _narrow_attachment_parser_state(
+    canonical: Mapping[str, Any],
+    restriction: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Carry only fail-closed parser facts across a canonical re-read."""
+
+    narrowed = dict(canonical)
+    for flag in _ATTACHMENT_RESTRICTIVE_TRUE_FIELDS:
+        if restriction.get(flag) is True:
+            narrowed[flag] = True
+    if restriction.get("extraction_success") is False:
+        narrowed["extraction_success"] = False
+    if restriction.get("verification_eligible") is False:
+        narrowed["verification_eligible"] = False
+    for field_name in ("parse_pages_read", "parse_total_pages"):
+        value = restriction.get(field_name)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            narrowed[field_name] = value
+    return narrowed
+
+
+def _mark_narrowed_parser_state(
+    canonical: Mapping[str, Any],
+    narrowed: dict[str, Any],
+) -> dict[str, Any]:
+    """Mark a restriction derived inside the authenticated carrier chain."""
+
+    if any(canonical.get(field) != narrowed.get(field) for field in _ATTACHMENT_RESTRICTIVE_STATE_FIELDS):
+        narrowed[_RUNTIME_PARSER_RESTRICTION_KEY] = True
+    return narrowed
+
+
 def _mark_attachment_snapshot_rejected(item: Any) -> Any:
     """Mark a private carrier whose same-read source pin changed during work."""
 
@@ -7938,11 +7990,22 @@ _PERSON_DOCUMENT_TEMPORAL_CUE = re.compile(
     r"последн\w*|прошл\w*|текущ\w*|эт\w*\s+(?:дн|недел|месяц|год)\w*|"
     r"дн(?:я|ей|ём|ем)|сут\w*|недел\w*|месяц\w*|год\w*|квартал\w*|полугод\w*)\b|"
     r"\b(?:19|20)\d{2}\b|"
-    r"\b\d{1,4}[./-]\d{1,2}(?:[./-]\d{1,4})?\b",
+    r"\b\d{1,4}[./-]\d{1,2}(?:[./-]\d{1,4})?\b|"
+    r"\b(?:[1-9]|[12]\d|3[01])(?:-?(?:го|е))?\s+числ(?:а|о|е)\b",
     re.IGNORECASE,
 )
 _PERSON_DOCUMENT_ALL_TIME_SCOPE = re.compile(
     r"\b(?:за\s+)?(?:вс[её]\s+время|весь\s+период)\b",
+    re.IGNORECASE,
+)
+_PERSON_DOCUMENT_LATEST_SCOPE = re.compile(
+    r"\bпоследн(?:ие|их|ий|яя|юю)\b"
+    r"(?:\s+(?P<count>[1-9]|[1-4]\d|50))?\s+"
+    r"(?:файл|документ|вложени|материал)\w*\b",
+    re.IGNORECASE,
+)
+_PERSON_DOCUMENT_BARE_DAY = re.compile(
+    r"\b(?P<day>[1-9]|[12]\d|3[01])(?:-?(?:го|е))?\s+числ(?:а|о|е)\b",
     re.IGNORECASE,
 )
 _PERSON_DOCUMENT_COMPLETENESS_FOLLOWUP = re.compile(
@@ -8004,6 +8067,42 @@ _PERSON_ACTIVITY_UNRESOLVED = (
     "Не удалось однозначно определить участника, поэтому его активность не "
     "проверена. Итог неизвестен; утверждать, что файлов или сообщений не было, нельзя."
 )
+
+
+def _person_document_latest_count(message: str) -> int | None:
+    """Return the explicit/default bounded size of a latest-files inventory."""
+
+    matched = _PERSON_DOCUMENT_LATEST_SCOPE.search(_classification_text(message))
+    if matched is None:
+        return None
+    raw_count = str(matched.group("count") or "").strip()
+    return max(1, min(int(raw_count), 50)) if raw_count else 10
+
+
+def _person_document_bare_day(message: str, *, today: date) -> date | None:
+    """Resolve one ``13 числа`` to the latest such local calendar day.
+
+    This shorthand is admitted only inside the exact document-inventory route.
+    General timeline parsing remains deliberately stricter.  The latest-past
+    rule matches the existing collection contract: on 3 August, ``25 числа``
+    means 25 July rather than a future empty day.
+    """
+
+    visible = _classification_text(message)
+    matches = list(_PERSON_DOCUMENT_BARE_DAY.finditer(visible))
+    if len(matches) != 1:
+        return None
+    number = int(matches[0].group("day"))
+    year, month = today.year, today.month
+    if number > today.day:
+        month -= 1
+        if month == 0:
+            month, year = 12, year - 1
+    try:
+        return date(year, month, number)
+    except ValueError:
+        return None
+
 
 # A content aggregation over one participant's uploaded corpus.  This is not
 # the inventory route above (which lists names/counts) and not ``collect_files``
@@ -8590,6 +8689,7 @@ def _render_body_free_person_document_inventory(
     *,
     person: str,
     repeated_completeness_check: bool,
+    latest_count: int | None = None,
 ) -> str:
     """Render an uploader-scoped filename catalog without hydrating any body."""
 
@@ -8598,6 +8698,19 @@ def _render_body_free_person_document_inventory(
     filenames = [
         " ".join(str(row.get("filename") or "").split())[:260] or "(имя файла не указано)" for row in rows
     ]
+    if latest_count is not None:
+        selected = list(reversed(filenames[-max(1, min(int(latest_count), 50)) :]))
+        lines = [
+            f"{prefix}Последние подтверждённые файлы от {who} "
+            f"(новые первыми): {len(selected)} из {len(filenames)}."
+        ]
+        lines.extend(
+            f"{index}. {_quicklook_display_filename(filename)}" for index, filename in enumerate(selected, 1)
+        )
+        lines.append(
+            "Материалы без достоверной отметки загрузившего в этот перечень не приписываются никому."
+        )
+        return "\n".join(lines)
     lines = [f"{prefix}За всё время файлов с подтверждённой отметкой загрузившего {who}: {len(filenames)}."]
     shown = filenames[:50]
     lines.extend(
@@ -13642,6 +13755,69 @@ def _archived_source_search_focus(message: str, query: str) -> str:
             if len(fields) >= 4:
                 break
     return " ".join([anchor, *fields])[:240]
+
+
+_CONTEXTUAL_LOCAL_SOURCE_FOLLOWUP = re.compile(
+    r"\s*(?:"
+    r"(?:в|среди)\s+(?:моих\s+)?(?:файл|документ|материал)\w*\s+"
+    r"(?:поищ|найд|посмотр|проверь)\w*\s+(?:информаци|сведени|данн)\w*|"
+    r"(?:поищ|найд|посмотр|проверь)\w*\s+(?:информаци|сведени|данн)\w*\s+"
+    r"(?:в|среди)\s+(?:моих\s+)?(?:файл|документ|материал)\w*|"
+    r"(?:поищ|найд|посмотр|проверь)\w*\s+(?:информаци|сведени|данн)\w*\s+"
+    r"локальн\w*\s+(?:в|среди)\s+(?:моих\s+)?(?:файл|документ|материал)\w*"
+    r")\s*,?\s*локальн\w*\s*[.!?]*\s*",
+    re.IGNORECASE,
+)
+_CONTEXTUAL_PREVIOUS_PERSON_LOOKUP = re.compile(
+    r"\s*(?:пожалуйста[, ]+)?(?:найд|поищ|посмотр|проверь)\w*"
+    r"[^.!?\n]{0,48}\b(?:информаци|сведени|данн)\w*\s+"
+    r"(?:по|про|об?|обо)\s+"
+    r"(?P<person>[А-ЯЁ][А-ЯЁа-яё-]{2,}(?:\s+[А-ЯЁ][А-ЯЁа-яё-]{2,}){0,2})"
+    r"\s*[.!?]*\s*",
+    re.IGNORECASE,
+)
+
+
+def _contextual_archived_source_search(
+    message: str,
+    history: Sequence[Mapping[str, Any]],
+) -> tuple[str, str]:
+    """Carry one immediately preceding named subject into a local-file retry.
+
+    The live failure was a two-turn correction: ``найди информацию по Имени``
+    followed by ``в файлах поищи информацию, локально``.  The second turn has
+    source authority but intentionally omits the subject.  Admit only this
+    closed shape, only across the adjacent ``user -> assistant`` pair, and copy
+    only a capitalised person phrase from the prior user's own words.  Assistant
+    prose, retrieval hits and older history never become search terms.
+    """
+
+    current = _classification_text(message)
+    if len(current) > 180 or _CONTEXTUAL_LOCAL_SOURCE_FOLLOWUP.fullmatch(current) is None:
+        return "", ""
+    rows = [row for row in history if isinstance(row, Mapping)]
+    if len(rows) < 2 or str(rows[-1].get("role") or "") != "assistant":
+        return "", ""
+    previous = rows[-2]
+    if str(previous.get("role") or "") != "user":
+        return "", ""
+    prior_text = _classification_text(str(previous.get("content") or ""))
+    if len(prior_text) > 240 or asks_for_the_web(prior_text):
+        return "", ""
+    matched = _CONTEXTUAL_PREVIOUS_PERSON_LOOKUP.fullmatch(prior_text)
+    if matched is None:
+        return "", ""
+    person = " ".join(str(matched.group("person") or "").split())
+    if not person or any(not token[:1].isupper() for token in person.split()):
+        return "", ""
+    name_terms = [term for token in person.split() if (term := _normalise_attachment_query_term(token))]
+    if not name_terms:
+        return "", ""
+    surname = name_terms[-1]
+    if not re.fullmatch(r"[а-яё]{4,}(?:ов|ев|ёв|ин|ын|ск|цк|ский|цкий)", surname):
+        return "", ""
+    focus = " ".join(dict.fromkeys([surname, *name_terms]))[:240]
+    return surname[:240], focus
 
 
 def _source_search_normalized_token(value: str) -> str:
@@ -18922,6 +19098,55 @@ def _readable_attachment_model_failure(
     return lead + tail
 
 
+def _advisory_attachment_literal_salvage(
+    attachments: Sequence[Mapping[str, Any]] | None,
+    *,
+    expected_count: int,
+) -> str:
+    """Return bounded OCR text when auto-summary generation falsely refuses it.
+
+    OCR is advisory and cannot certify its own facts, but it is still useful
+    text owned by the current authenticated upload.  If a bare upload's answer
+    model denies a file which the parser has just read, publishing the labelled
+    transcription is strictly more useful than another model retry or a fake
+    web-outage answer.  Fenced chunks keep file text literal in Telegram.
+    """
+
+    admitted: list[tuple[str, str]] = []
+    for item in attachments or ():
+        if not isinstance(item, Mapping) or item.get("advisory_only") is not True:
+            continue
+        if not _attachment_has_readable_content(item):
+            continue
+        body = str(item.get("transient_text") or "").strip()
+        if not body or _is_file_provenance_stub(body):
+            continue
+        filename = _attachment_display_filename(item.get("filename") or item.get("name") or "скан")
+        admitted.append((filename, body))
+    if not admitted or len(admitted) != expected_count:
+        return ""
+
+    remaining = 24_000
+    sections: list[str] = [
+        "Модель не сформировала надёжное обобщение, поэтому ниже — распознанный текст без интерпретации."
+    ]
+    for filename, body in admitted:
+        if remaining <= 0:
+            break
+        selected = body[:remaining]
+        remaining -= len(selected)
+        escaped = selected.replace("```", "` ` `")
+        blocks = [escaped[offset : offset + 2_400] for offset in range(0, len(escaped), 2_400)]
+        sections.append(
+            "\n\n".join([f"**{filename}:**", *(f"```text\n{block}\n```" for block in blocks if block)])
+        )
+    if sum(len(body) for _filename, body in admitted) > 24_000:
+        sections.append(
+            "Показаны первые 24 000 знаков распознанного текста; остальная часть не опубликована."
+        )
+    return "\n\n".join(section for section in sections if section)
+
+
 _DANGEROUS_EXPLOSIVE_TARGET = re.compile(
     r"(?:\b(?:гексоген\w*|взрывчатк\w*|бомб\w*|детонатор\w*|"
     r"explosiv\w*|bomb\w*|detonator\w*|rdx|ied)\b|"
@@ -22942,8 +23167,13 @@ class AgentRuntime:
                     OFFICE_STRUCTURE_KEY,
                     _OWNED_SAFE_DOCUMENT_METADATA,
                 )
+                stable_source = (
+                    _narrow_attachment_parser_state(current, item)
+                    if item.get(_RUNTIME_PARSER_RESTRICTION_KEY) is True
+                    else current
+                )
                 if any(
-                    current.get(name) != item.get(name)
+                    stable_source.get(name) != item.get(name)
                     for name in stable_fields
                     if not (
                         name == _OWNED_SAFE_DOCUMENT_METADATA
@@ -24277,7 +24507,10 @@ class AgentRuntime:
                 # migration/backfill owns those records; pretending that a disk
                 # verification happened here would be worse than carrying the
                 # explicit false marker.
-                legacy = dict(canonical)
+                legacy = _mark_narrowed_parser_state(
+                    canonical,
+                    _narrow_attachment_parser_state(canonical, item),
+                )
                 legacy["_registered_file_bytes_verified"] = False
                 hydrated.append(_private_owned_attachment_copy(legacy, source=canonical))
                 continue
@@ -24344,8 +24577,17 @@ class AgentRuntime:
             canonical = _retain_historical_direct_read_authority(item, canonical)
             canonical = _retain_explicit_filename_direct_read(item, canonical)
 
-            verified = dict(canonical)
+            verified = _mark_narrowed_parser_state(
+                canonical,
+                _narrow_attachment_parser_state(canonical, item),
+            )
             verified["_registered_file_bytes_verified"] = True
+            # Re-opening the durable Raw row proves bytes and ownership; it
+            # must never erase a more restrictive outcome reported by the
+            # parser which handled this same current upload.  In particular,
+            # OCR/transcription stays advisory after registered-byte reauth.
+            # Only fail-closed state is inherited here—never caller text or a
+            # success/completeness upgrade.
             body = str(canonical.get("transient_text") or "")
             if body.strip() or canonical.get("empty_text") is True:
                 hydrated.append(_private_owned_attachment_copy(verified, source=canonical))
@@ -26518,6 +26760,15 @@ class AgentRuntime:
             user_id=user_id,
             limit=20,
         )
+        direct_archived_source_query = _archived_source_search_query(clean_message)
+        contextual_source_query, contextual_source_focus = (
+            _contextual_archived_source_search(
+                clean_message,
+                [item for item in prior_history if isinstance(item, Mapping)],
+            )
+            if not direct_archived_source_query
+            else ("", "")
+        )
         person_inventory_followup = _person_document_inventory_followup(
             person_effect_message,
             [item for item in prior_history if isinstance(item, dict)],
@@ -26972,7 +27223,12 @@ class AgentRuntime:
             )
         restored_attachments: list[dict[str, Any]]
         citation_selector_applied = False
-        if person_inventory_turn or filename_inventory_request is not None or quoted_file_command_is_data:
+        if (
+            person_inventory_turn
+            or filename_inventory_request is not None
+            or quoted_file_command_is_data
+            or contextual_source_query
+        ):
             # A named-uploader inventory is a code-owned body-free/system read.
             # It must not inherit the last file merely because the immediately
             # preceding turn happened to use one: that stale carrier previously
@@ -27131,8 +27387,12 @@ class AgentRuntime:
             and not reply_assistant_reference
         )
         isolated_outbound_turn = simple_public_news_turn
-        archived_source_query = _archived_source_search_query(clean_message)
-        archived_source_focus = _archived_source_search_focus(clean_message, archived_source_query)
+        archived_source_query = direct_archived_source_query or contextual_source_query
+        archived_source_focus = (
+            _archived_source_search_focus(clean_message, archived_source_query)
+            if not contextual_source_query
+            else contextual_source_focus
+        )
         archived_source_lookup_turn = bool(
             archived_source_query
             and workspace_inbox_request is None
@@ -29607,7 +29867,33 @@ class AgentRuntime:
                 if hierarchy_notice not in context.structural_answer:
                     context.structural_answer = f"{context.structural_answer}\n\n{hierarchy_notice}".strip()
 
-        if response.get("llm_failed") and attachment_readable_count:
+        if (
+            response.get("llm_failed")
+            and synthetic_document_notice
+            and advisory_body_count
+            and (
+                failed_advisory_literal := _advisory_attachment_literal_salvage(
+                    attachments,
+                    expected_count=attachment_expected_count,
+                )
+            )
+        ):
+            # The OCR stage succeeded; only the single bounded summary call
+            # failed.  Preserve that operational failure flag, but publish the
+            # authenticated literal instead of asking the model again or
+            # misreporting the scan as unreadable.
+            response["content"] = failed_advisory_literal
+            response["file_clips"] = []
+            response["voice_clip"] = None
+            response["knowledge_object_ids"] = []
+            response["_model_generated"] = False
+            response["_advisory_attachment_literal_owned"] = True
+            response["_attachment_model_failure_salvaged"] = True
+        if (
+            response.get("llm_failed")
+            and attachment_readable_count
+            and response.get("_advisory_attachment_literal_owned") is not True
+        ):
             # Parsing and generation are different stages.  The live XLSX was
             # fully extracted, yet a 240-second model timeout produced a request
             # to upload it again.  Replace only the failed model prose with a
@@ -29687,6 +29973,23 @@ class AgentRuntime:
             and attachment_readable_count > 0
             and _is_false_readable_attachment_refusal(content)
         )
+        if readable_attachment_refusal and synthetic_document_notice and advisory_body_count:
+            literal_salvage = _advisory_attachment_literal_salvage(
+                attachments,
+                expected_count=attachment_expected_count,
+            )
+            if literal_salvage:
+                content = literal_salvage
+                response["content"] = content
+                response["file_clips"] = []
+                response["voice_clip"] = None
+                response["knowledge_object_ids"] = []
+                response["_model_generated"] = False
+                response["_advisory_attachment_literal_owned"] = True
+                response["_readable_attachment_refusal_replaced"] = True
+                false_readable_attachment_refusal_replaced = True
+                readable_attachment_refusal = False
+                LOGGER.warning("attachment: false scan refusal replaced with literal OCR")
         if readable_attachment_refusal:
             # The parser, not the answering model, owns file availability.  Give
             # one bounded retry an attachment-only context so stale dialogue
@@ -29872,6 +30175,7 @@ class AgentRuntime:
             # Markdown-shaped text; that is file data, not a claim that this
             # turn searched the web.
             and response.get("_office_exact_owned") is not True
+            and response.get("_advisory_attachment_literal_owned") is not True
             and not attachment_web_literal_grounded
             and not web_evidence_used
             and (
@@ -30681,6 +30985,7 @@ class AgentRuntime:
             if response.get("_office_exact_owned") is True
             or response.get("_unreadable_attachment_owned") is True
             or response.get("_attachment_model_failure_owned") is True
+            or response.get("_advisory_attachment_literal_owned") is True
             or response.get("_workspace_create_owned") is True
             or response.get("_direct_exact_file_body_owned") is True
             or response.get("_small_talk_owned") is True
@@ -37805,10 +38110,14 @@ class AgentRuntime:
         }
         authorization = getattr(self.kernel, "authorization", None)
         inventory_day_text = _classification_text(day_source)
+        latest_inventory_count = (
+            _person_document_latest_count(inventory_day_text) if document_inventory else None
+        )
         body_free_all_time_inventory = bool(
             document_inventory
             and (
-                _PERSON_DOCUMENT_ALL_TIME_SCOPE.search(inventory_day_text)
+                latest_inventory_count is not None
+                or _PERSON_DOCUMENT_ALL_TIME_SCOPE.search(inventory_day_text)
                 or (
                     lexical_time_window_kind(
                         inventory_day_text,
@@ -37908,7 +38217,9 @@ class AgentRuntime:
             )
         if document_inventory:
             day_window: tuple[str | None, str | None, str, bool] | None = (
-                (None, None, "всё время", True)
+                (None, None, "последние", True)
+                if latest_inventory_count is not None
+                else (None, None, "всё время", True)
                 if _PERSON_DOCUMENT_ALL_TIME_SCOPE.search(_classification_text(day_source))
                 else self._closed_document_day_window(day_source)
             )
@@ -37936,7 +38247,7 @@ class AgentRuntime:
                 LOGGER.info("person-document-inventory: closed day not resolved")
                 return settle_inventory_unknown("границы дня не определены")
             since, until, requested_day, day_complete = day_window
-            if requested_day == "всё время" and since is None and until is None:
+            if requested_day in {"всё время", "последние"} and since is None and until is None:
                 # An all-time filename inventory needs neither Raw bodies nor a
                 # model-visible oversight schema.  Resolve the active account
                 # above, check the read policy explicitly, then use the bounded
@@ -37975,6 +38286,7 @@ class AgentRuntime:
                     [row for row in catalog if isinstance(row, Mapping)],
                     person=chosen.display_name or chosen.username or chosen.user_id,
                     repeated_completeness_check=repeated_document_check,
+                    latest_count=latest_inventory_count,
                 )
                 LOGGER.info("person-document-inventory: body-free code-owned answer, %d chars", len(answer))
                 if context is not None:
@@ -38750,19 +39062,22 @@ class AgentRuntime:
         """
 
         visible = _classification_text(message)
-        if lexical_time_window_kind(visible, today=self._local_today()) != "single_day":
-            return None
-        window = build_time_window(
-            visible,
-            TimeIntent("past", "single_day"),
-            today=self._local_today(),
-        )
-        if window is None:
-            return None
-        try:
-            selected_day = date.fromisoformat(window.since[:10])
-        except (TypeError, ValueError):
-            return None
+        local_today = self._local_today()
+        selected_day = _person_document_bare_day(visible, today=local_today)
+        if selected_day is None:
+            if lexical_time_window_kind(visible, today=local_today) != "single_day":
+                return None
+            window = build_time_window(
+                visible,
+                TimeIntent("past", "single_day"),
+                today=local_today,
+            )
+            if window is None:
+                return None
+            try:
+                selected_day = date.fromisoformat(window.since[:10])
+            except (TypeError, ValueError):
+                return None
         zone_name = str(getattr(getattr(self, "settings", None), "local_timezone", "") or "").strip()
         try:
             zone = ZoneInfo(zone_name) if zone_name else datetime.now().astimezone().tzinfo

@@ -21,6 +21,7 @@ from friday.agent_runtime import (
     AgentRuntime,
     _archived_source_search_focus,
     _archived_source_search_query,
+    _contextual_archived_source_search,
     _project_source_search_result,
     _source_excerpt_has_focus_term,
     _source_excerpt_has_query_term,
@@ -896,6 +897,79 @@ def test_non_source_and_current_carrier_requests_do_not_claim_the_bridge(message
 )
 def test_source_query_is_a_bounded_target_from_the_current_message(message: str, query: str) -> None:
     assert _archived_source_search_query(message) == query
+
+
+def test_adjacent_local_file_retry_inherits_only_the_prior_users_named_subject() -> None:
+    history = [
+        {"role": "user", "content": "Найди информацию по Ринату Ямалиеву"},
+        {"role": "assistant", "content": "В подтверждённых знаниях совпадений нет."},
+    ]
+
+    assert _contextual_archived_source_search(
+        "В файлах поищи информацию, локально",
+        history,
+    ) == ("ямалиев", "ямалиев ринат")
+
+
+@pytest.mark.parametrize(
+    "history",
+    [
+        [{"role": "user", "content": "Найди информацию по Ринату Ямалиеву"}],
+        [
+            {"role": "user", "content": "Расскажи новости про Рината Ямалиева"},
+            {"role": "assistant", "content": "Ответ."},
+        ],
+        [
+            {"role": "user", "content": "Найди информацию по проекту Альфа"},
+            {"role": "assistant", "content": "Ответ."},
+        ],
+    ],
+)
+def test_local_file_retry_never_inherits_an_unsettled_or_non_person_subject(
+    history: list[dict[str, str]],
+) -> None:
+    assert _contextual_archived_source_search("В файлах поищи информацию, локально", history) == ("", "")
+
+
+@pytest.mark.asyncio
+async def test_live_two_turn_local_file_wording_executes_one_source_search(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _store_source(
+        storage,
+        user_id=OWNER,
+        text="Ринат Ямалиев указан как инженер синтетического участка.",
+        status=InboxStatus.PENDING,
+        filename="synthetic-staffing.pdf",
+    )
+    llm = _SourceModel("В локальном файле Ринат Ямалиев указан как инженер.")
+    runtime, kernel = _runtime(settings, storage, monkeypatch, llm=llm)
+    conversation = storage.create_conversation(OWNER, title="synthetic contextual source search")
+    storage.store_message(
+        str(conversation["id"]),
+        OWNER,
+        "user",
+        "Найди информацию по Ринату Ямалиеву",
+    )
+    storage.store_message(
+        str(conversation["id"]),
+        OWNER,
+        "assistant",
+        "В подтверждённых знаниях совпадений нет.",
+    )
+
+    reply = await runtime.chat(
+        OWNER,
+        "В файлах поищи информацию, локально",
+        actor=_actor(),
+        conversation_id=str(conversation["id"]),
+    )
+
+    assert kernel.calls == [("source_search", {"query": "ямалиев", "focus": "ямалиев ринат", "limit": 10})]
+    assert "Ринат Ямалиев" in reply["message"]
+    assert reply["tools_used"] == ["source_search"]
 
 
 def test_colloquial_staff_file_lookup_keeps_the_unit_and_role_as_focus() -> None:

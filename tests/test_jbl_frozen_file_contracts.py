@@ -504,6 +504,100 @@ def test_today_inventory_window_stops_at_local_now(settings, storage, monkeypatc
     assert complete is False
 
 
+def test_bare_day_of_month_inventory_resolves_the_latest_past_local_day(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    runtime = AgentRuntime(settings, storage)
+    fixed = datetime(2026, 8, 17, 16, 25, 54)
+    monkeypatch.setattr(runtime, "_local_now", lambda: fixed)
+    monkeypatch.setattr(runtime, "_local_today", lambda: fixed.date())
+
+    since, until, label, complete = runtime._closed_document_day_window(  # noqa: SLF001
+        "Какие я документы 13 числа скидывал?"
+    )
+
+    assert since.startswith("2026-08-12T21:00:00")
+    assert until.startswith("2026-08-13T20:59:59.999999")
+    assert label == "2026-08-13"
+    assert complete is True
+
+
+@pytest.mark.asyncio
+async def test_live_wording_for_my_files_on_the_thirteenth_never_widens_to_all_time(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner", display_name="Owner")
+    kernel = _InventoryKernel(person_name="Owner")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_NeverModel(),
+        kernel=kernel,
+    )
+    fixed = datetime(2026, 8, 17, 16, 25, 54)
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_retrieval)
+    monkeypatch.setattr(runtime, "_local_now", lambda: fixed)
+    monkeypatch.setattr(runtime, "_local_today", lambda: fixed.date())
+
+    reply = await runtime.chat(
+        "alice",
+        "Какие я документы 13 числа скидывал?",
+        actor=_actor(),
+    )
+
+    assert len(kernel.calls) == 1
+    assert kernel.calls[0]["since"].startswith("2026-08-12T21:00:00")
+    assert kernel.calls[0]["until"].startswith("2026-08-13T20:59:59.999999")
+    assert "за всё время" not in reply["message"].casefold()
+    assert "2026-08-13" in reply["message"]
+
+
+@pytest.mark.asyncio
+async def test_latest_named_uploader_files_are_newest_first_without_a_day_parser(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner", display_name="Owner")
+    storage.ensure_user("jbl", preset_key="user", display_name="JBL")
+    kernel = _InventoryKernel()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_NeverModel(),
+        kernel=kernel,
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_retrieval)
+    catalog_calls: list[tuple[str, str, int]] = []
+
+    def body_free_catalog(user_id: str, uploaded_by: str, *, limit: int = 5_000):  # noqa: ANN202
+        catalog_calls.append((user_id, uploaded_by, limit))
+        return [
+            {"id": "raw_old", "filename": "old.pdf", "content_type": "file"},
+            {"id": "raw_middle", "filename": "middle.pdf", "content_type": "file"},
+            {"id": "raw_new", "filename": "new.pdf", "content_type": "file"},
+        ]
+
+    monkeypatch.setattr(storage, "list_owned_file_catalog", body_free_catalog)
+
+    reply = await runtime.chat(
+        "alice",
+        "Какие последние файлы присылал JBL?",
+        actor=_actor(),
+    )
+
+    assert kernel.calls == []
+    assert catalog_calls == [("jbl", "jbl", 5_001)]
+    assert "границы дня" not in reply["message"].casefold()
+    assert "новые первыми" in reply["message"].casefold()
+    assert reply["message"].index("new.pdf") < reply["message"].index("middle.pdf")
+    assert reply["message"].index("middle.pdf") < reply["message"].index("old.pdf")
+
+
 class _NoToolsKernel:
     authorization = _AllowAll()
 

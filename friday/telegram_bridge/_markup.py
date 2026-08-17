@@ -65,6 +65,12 @@ _FLATTENED_BOLD_SECTION = re.compile(
     r"__(?!\s)([^_\n]{1,80})(?<!\s)__"
 )
 _FLATTENED_NUMBERED_BOLD_ITEM = re.compile(r"(?<!\S)(?P<number>\d{1,3})[.)][ \t]+(?=(?:\*\*|__)(?!\s))")
+_FLATTENED_NUMBERED_HEADING = re.compile(r"(?<!\S)#{1,6}[ \t]+(?P<number>\d{1,3})[.)][ \t]+")
+_FLATTENED_NUMBERED_SECTION = re.compile(r"^\*\*\d{1,3}[.)]\*\*[ \t]+(?=\S)")
+_FLATTENED_BOLD_FIELD = re.compile(
+    r"(?:\*\*(?!\s)[^*\n]{1,80}[:;](?<!\s)\*\*|"
+    r"__(?!\s)[^_\n]{1,80}[:;](?<!\s)__)(?=[ \t]+\S)"
+)
 # Markdown quote markers have to become Telegram's supported blockquote tag;
 # leaving ``>`` as escaped prose preserves bytes but loses the requested shape.
 _ESCAPED_QUOTE = re.compile(r"^&gt;[ \t]?(.*)$", re.MULTILINE)
@@ -77,6 +83,59 @@ _PLACEHOLDER = "\x00code{}\x00"
 _INLINE_PLACEHOLDER = "\x00inline{}\x00"
 _LINK_PLACEHOLDER = "\x00link{}\x00"
 _STASHED_CODE = re.compile(r"\x00code[0-9]+\x00")
+
+
+def _restore_flattened_numbered_headings(source: str) -> str:
+    """Restore repeated numbered Markdown sections on one physical line.
+
+    A model occasionally emits an otherwise valid long review as one line:
+    ``... ### 1. First ... ### 2. Second ... ### 3. Third``.  The lost line
+    boundaries make every heading marker literal in Telegram.  Three
+    consecutive ordinals are strong structural evidence, unlike an isolated
+    inline ``###`` example.  Only the ordinal is made bold because the lost
+    boundary between a short heading and its following prose cannot be
+    reconstructed without guessing.
+    """
+
+    restored: list[str] = []
+    for line in source.split("\n"):
+        matches = list(_FLATTENED_NUMBERED_HEADING.finditer(line))
+        numbers = [int(match.group("number")) for match in matches]
+        if len(matches) < 3 or any(
+            current != previous + 1 for previous, current in zip(numbers, numbers[1:], strict=False)
+        ):
+            restored.append(line)
+            continue
+        preamble = line[: matches[0].start()].rstrip()
+        if preamble and not preamble.endswith((".", ":", ";", "!", "?", "…")):
+            restored.append(line)
+            continue
+        pieces = [preamble] if preamble else []
+        for index, match in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(line)
+            body = line[match.end() : end].strip()
+            pieces.append(f"**{match.group('number')}.** {body}".rstrip())
+        restored.append("\n\n".join(piece for piece in pieces if piece))
+    return "\n".join(restored)
+
+
+def _restore_flattened_bold_fields(source: str) -> str:
+    """Put a repeated one-line ``**Field:** value`` header on separate lines."""
+
+    restored: list[str] = []
+    for line in source.split("\n"):
+        fields = list(_FLATTENED_BOLD_FIELD.finditer(line))
+        if len(fields) < 3:
+            restored.append(line)
+            continue
+        cursor = 0
+        pieces: list[str] = []
+        for field in fields[1:]:
+            pieces.append(line[cursor : field.start()].rstrip())
+            cursor = field.start()
+        pieces.append(line[cursor:])
+        restored.append("\n".join(piece for piece in pieces if piece))
+    return "\n".join(restored)
 
 
 def _restore_flattened_bullets(source: str) -> str:
@@ -123,7 +182,8 @@ def _restore_flattened_bullets(source: str) -> str:
             and stripped.count("__") >= 2
             and stripped.count("__") % 2 == 0
         )
-        if not stripped or not (punctuation_closed or emphasis_closed):
+        numbered_section = _FLATTENED_NUMBERED_SECTION.match(stripped) is not None
+        if not stripped or not (punctuation_closed or emphasis_closed or numbered_section):
             restored.append(line)
             continue
         indent = line[: len(line) - len(line.lstrip())]
@@ -145,7 +205,11 @@ def _restore_flattened_bullets(source: str) -> str:
         # prose/colon reflow rule.
         terse_labelled_list = strict_labelled_preamble and len(inline_markers) >= 3
         if not has_markdown_label and not (
-            (punctuation_closed or emphasis_closed) and has_prose_item or terse_labelled_list
+            (punctuation_closed or emphasis_closed or numbered_section)
+            and has_prose_item
+            or terse_labelled_list
+            or numbered_section
+            and has_markdown_label
         ):
             restored.append(line)
             continue
@@ -373,8 +437,10 @@ def to_telegram_html(text: str) -> str:
 
     # A flattened model list is still Markdown intent. Restore its physical
     # lines before the ordinary bullet renderer turns the markers into ``•``.
+    source = _restore_flattened_numbered_headings(source)
     source = _restore_flattened_bullets(source)
     source = _restore_flattened_numbered_items(source)
+    source = _restore_flattened_bold_fields(source)
     source = _restore_flattened_bold_sections(source)
 
     # 1. Таблицы вне исходного кода превращаются в fenced blocks. Вынимаем и

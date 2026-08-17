@@ -57,6 +57,34 @@ def test_flattened_unpunctuated_bullets_after_bold_label_become_list() -> None:
     assert to_telegram_html(source) == ("<b>Особенности:</b>\n• Первый пункт\n• Второй пункт\n• Третий пункт")
 
 
+def test_live_shaped_flattened_review_restores_fields_sections_and_bullets() -> None:
+    source = (
+        "**Документ:** synthetic.pdf **Дата:** `17.08.2026` **Класс:** внутренний. "
+        "Ниже краткое ревью. ### 1. Назначение и структура Описание раздела: "
+        "*   Первый пункт. *   Второй пункт. *   Третий пункт. "
+        "### 2. Ключевые данные *   **Роль:** инженер. *   **Код:** SYN-42. "
+        "### 3. Вывод *   **Итог:** проверка завершена. *   **Риск:** отсутствует."
+    )
+
+    rendered = to_telegram_html(source)
+
+    assert "###" not in rendered
+    assert "*   " not in rendered
+    assert rendered.startswith(
+        "<b>Документ:</b> synthetic.pdf\n<b>Дата:</b> <code>17.08.2026</code>\n"
+        "<b>Класс:</b> внутренний. Ниже краткое ревью."
+    )
+    assert "\n\n<b>1.</b> Назначение и структура Описание раздела:\n• Первый пункт." in rendered
+    assert "\n\n<b>2.</b> Ключевые данные\n• <b>Роль:</b> инженер." in rendered
+    assert "\n\n<b>3.</b> Вывод\n• <b>Итог:</b> проверка завершена." in rendered
+
+
+def test_two_inline_heading_examples_are_not_reflowed_as_a_document() -> None:
+    source = "Синтаксис: ### 1. Первый пример и ### 2. Второй пример."
+
+    assert to_telegram_html(source) == source
+
+
 @pytest.mark.parametrize(
     ("source", "rendered"),
     (

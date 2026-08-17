@@ -108,6 +108,36 @@ class _AlwaysFalsePdfRefusalModel:
         return {"content": "Я не могу открыть PDF. Загрузите файл ещё раз."}
 
 
+class _FalseAdvisoryScanRefusalModel:
+    enabled = True
+    model = "synthetic-advisory-refusal-model"
+    total_budget_sec = 30.0
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, messages: Any, **kwargs: Any) -> dict[str, Any]:
+        del messages, kwargs
+        self.calls += 1
+        if self.calls > 1:
+            raise AssertionError("an advisory scan refusal started another model attempt")
+        return {"content": "Я не могу открыть PDF. Загрузите файл ещё раз."}
+
+
+class _FailedAdvisoryScanSummaryModel:
+    enabled = True
+    model = "synthetic-advisory-timeout-model"
+    total_budget_sec = 30.0
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, messages: Any, **kwargs: Any) -> dict[str, Any]:
+        del messages, kwargs
+        self.calls += 1
+        raise TimeoutError("synthetic advisory summary deadline")
+
+
 async def _simple_context(
     user_id: str,
     message: str,
@@ -418,6 +448,159 @@ async def test_readable_pdf_false_refusal_gets_one_tool_free_grounded_retry(
     assert result["tools_used"] == []
     assert result["attachment_context_available"] is True
     assert result["attachment_context_readable_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_bare_advisory_pdf_upload_salvages_literal_ocr_without_a_second_model_or_web_claim(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = _stored_file(
+        storage,
+        filename="synthetic-advisory.pdf",
+        body=ADVISORY_SENTINEL,
+        mime_type="application/pdf",
+        extraction_success=True,
+    )
+    model = _FalseAdvisoryScanRefusalModel()
+    auth = AuthorizationService(storage)
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=model,
+        kernel=ExecutionKernel(auth, settings),
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
+
+    result = await runtime.chat(
+        OWNER,
+        "Загружен документ: synthetic-advisory.pdf",
+        actor=auth.actor_for_user(OWNER, source="test"),
+        attachments=[
+            {
+                "raw_object_id": raw.id,
+                "filename": "synthetic-advisory.pdf",
+                "transient_text": ADVISORY_SENTINEL,
+                "extraction_success": True,
+                "advisory_only": True,
+                "verification_eligible": False,
+            }
+        ],
+        enable_tools=False,
+        synthetic_document_notice=True,
+    )
+
+    assert model.calls == 1
+    assert ADVISORY_SENTINEL in result["message"]
+    assert "распознанный текст без интерпретации" in result["message"]
+    assert "интернет-выдачу" not in result["message"]
+    assert "загрузите файл" not in result["message"].casefold()
+    stored = storage.get_message(str(result["message_id"]), OWNER)
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    assert metadata["structural"].get("output_guards", {}).get("web_evidence_replaced") is not True
+
+
+@pytest.mark.asyncio
+async def test_failed_advisory_summary_returns_literal_ocr_without_retry(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = _stored_file(
+        storage,
+        filename="synthetic-timeout-scan.pdf",
+        body=ADVISORY_SENTINEL,
+        mime_type="application/pdf",
+        extraction_success=True,
+    )
+    model = _FailedAdvisoryScanSummaryModel()
+    auth = AuthorizationService(storage)
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=model,
+        kernel=ExecutionKernel(auth, settings),
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
+
+    result = await runtime.chat(
+        OWNER,
+        "Загружен документ: synthetic-timeout-scan.pdf",
+        actor=auth.actor_for_user(OWNER, source="test"),
+        attachments=[
+            {
+                "raw_object_id": raw.id,
+                "filename": "synthetic-timeout-scan.pdf",
+                "transient_text": ADVISORY_SENTINEL,
+                "extraction_success": True,
+                "advisory_only": True,
+                "verification_eligible": False,
+            }
+        ],
+        enable_tools=False,
+        synthetic_document_notice=True,
+    )
+
+    assert model.calls == 1
+    assert ADVISORY_SENTINEL in result["message"]
+    assert "распознанный текст без интерпретации" in result["message"]
+    assert "повторите запрос позже" not in result["message"].casefold()
+    assert "загрузите файл" not in result["message"].casefold()
+
+
+@pytest.mark.asyncio
+async def test_two_advisory_scans_are_returned_together_after_one_failed_summary(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bodies = [f"{ADVISORY_SENTINEL}-ONE", f"{ADVISORY_SENTINEL}-TWO"]
+    raws = [
+        _stored_file(
+            storage,
+            filename=f"scan-{index}.pdf",
+            body=body,
+            mime_type="application/pdf",
+            extraction_success=True,
+        )
+        for index, body in enumerate(bodies, 1)
+    ]
+    model = _FalseAdvisoryScanRefusalModel()
+    auth = AuthorizationService(storage)
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=model,
+        kernel=ExecutionKernel(auth, settings),
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
+
+    result = await runtime.chat(
+        OWNER,
+        "Загружены документы: scan-1.pdf, scan-2.pdf",
+        actor=auth.actor_for_user(OWNER, source="test"),
+        attachments=[
+            {
+                "raw_object_id": raw.id,
+                "filename": f"scan-{index}.pdf",
+                "transient_text": body,
+                "extraction_success": True,
+                "advisory_only": True,
+                "verification_eligible": False,
+            }
+            for index, (raw, body) in enumerate(zip(raws, bodies, strict=True), 1)
+        ],
+        enable_tools=False,
+        synthetic_document_notice=True,
+    )
+
+    assert model.calls == 1
+    assert all(body in result["message"] for body in bodies)
+    assert result["message"].count("распознанный текст без интерпретации") == 1
+    assert result["message"].index("scan-1.pdf") < result["message"].index("scan-2.pdf")
+    assert result["attachment_context_expected_count"] == 2
+    assert result["attachment_context_readable_count"] == 2
 
 
 @pytest.mark.asyncio
