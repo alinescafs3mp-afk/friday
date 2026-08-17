@@ -563,6 +563,95 @@ async def test_successful_web_evidence_keeps_the_answer_and_persists_provenance(
     assert "output_guards" not in metadata["structural"]
 
 
+def test_web_reconciliation_removes_empty_source_carrier_and_false_attachment_origin() -> None:
+    observed = (
+        "В доступных материалах (обзоры chistnebo.ru, storagereview.com и ai-manual.ru) "
+        "упоминаются только габариты. Подтвердить характеристики данными из вложения невозможно."
+    )
+
+    reconciled, changed = _strip_model_authored_web_urls(
+        observed,
+        attachment_source_owned=False,
+    )
+
+    assert changed is True
+    assert reconciled == (
+        "В доступных материалах упоминаются только габариты. "
+        "Подтвердить характеристики данными из найденных источников невозможно."
+    )
+    assert "обзоры, и" not in reconciled
+    assert "вложен" not in reconciled.casefold()
+
+
+@pytest.mark.asyncio
+async def test_web_turn_without_a_file_cannot_claim_its_sources_are_an_attachment(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_NeverRouter(),
+        kernel=_NoToolKernel(),
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _clean_context)
+    source_url = "https://safe.synthetic.example.com/review"
+
+    async def generated(context, *args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        context.web_evidence_status = "sourced"
+        context.web_sources = [{"title": "Hardware review", "url": source_url}]
+        return {
+            "content": (
+                "В обзоре safe.synthetic.example.com указан размер устройства. "
+                "Точных данных по шуму во вложении нет."
+            ),
+            "tools_used": ["web_research"],
+            "tool_evidence": [{"tool": "web_research", "output": "Размер устройства указан."}],
+        }
+
+    monkeypatch.setattr(runtime, "_generate_response", generated)
+    reply = await runtime.chat(
+        "alice",
+        "Что известно о шуме устройства?",
+        actor=_actor(),
+    )
+
+    assert reply["message"] == (
+        "В обзоре указан размер устройства. Точных данных по шуму в найденных источниках нет."
+    )
+    assert reply["web_sources"] == [{"title": "Hardware review", "url": source_url}]
+    assert reply["attachment_context_expected_count"] == 0
+
+
+def test_real_attachment_wording_is_preserved_when_the_file_is_owned() -> None:
+    answer = "Точных данных во вложении нет."
+    reconciled, changed = _strip_model_authored_web_urls(
+        answer,
+        attachment_source_owned=True,
+    )
+
+    assert reconciled == answer
+    assert changed is False
+
+
+def test_web_reconciliation_does_not_rewrite_unrelated_file_or_review_prose() -> None:
+    answer = (
+        "Обзоры техники и испытания расходятся. "
+        "Значение берётся из файла конфигурации, а не из найденных источников."
+    )
+
+    reconciled, changed = _strip_model_authored_web_urls(
+        answer,
+        attachment_source_owned=False,
+    )
+
+    assert reconciled == answer
+    assert changed is False
+
+
 _UNACCEPTED_WEB_REPORTS = [
     pytest.param(
         {

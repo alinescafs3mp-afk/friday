@@ -430,6 +430,14 @@ class LLMRouter:
         self.settings = settings
         self._foreground_sem = asyncio.Semaphore(max(1, int(settings.llm_foreground_slots)))
         self._background_sem = asyncio.Semaphore(1)
+        # The sentinel used to submit an independent one-token generation every
+        # minute even while a person's answer was already running.  On the
+        # production hybrid model that probe competed for the same GPU and could
+        # itself time out, producing a false outage alert while making the real
+        # answer slower.  These process-local observations let the watchdog
+        # treat real foreground traffic as the health signal it already is.
+        self._foreground_in_flight = 0
+        self._last_foreground_success_monotonic = 0.0
         # Помним отказ эндпоинта от инструментов, чтобы не платить за него каждый раз.
         self._tools_refused = False
         # Monotonic deadline after a proven full read timeout.  Fast transport
@@ -488,6 +496,26 @@ class LLMRouter:
     def estimate_messages_tokens(self, messages: list[dict[str, Any]]) -> int:
         return max(1, sum(_message_chars(message) for message in messages) // CHARS_PER_TOKEN)
 
+    def generation_watchdog_activity(
+        self,
+        *,
+        recent_success_sec: float,
+    ) -> tuple[bool, bool]:
+        """Return ``(active, recently_succeeded)`` without starting generation.
+
+        This is deliberately an observation, not a health verdict.  The
+        sentinel may avoid a competing synthetic request while foreground work
+        is active, and may reuse a recent successful real response.  If neither
+        fact holds, it still performs its independent generation probe.
+        """
+
+        now = time.monotonic()
+        last_success = self._last_foreground_success_monotonic
+        recently_succeeded = bool(
+            last_success > 0.0 and now - last_success <= max(0.0, float(recent_success_sec))
+        )
+        return self._foreground_in_flight > 0, recently_succeeded
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -504,6 +532,9 @@ class LLMRouter:
         if not self.enabled:
             raise LLMUnavailableError("LLM is disabled")
 
+        foreground_activity_owned = priority == "foreground"
+        if foreground_activity_owned:
+            self._foreground_in_flight += 1
         sem = self._foreground_sem if priority == "foreground" else self._background_sem
         queue_started = time.monotonic()
         acquired = False
@@ -563,7 +594,11 @@ class LLMRouter:
         finally:
             if acquired:
                 sem.release()
+            if foreground_activity_owned:
+                self._foreground_in_flight = max(0, self._foreground_in_flight - 1)
         result["_queue_wait_sec"] = queue_wait_sec
+        if foreground_activity_owned:
+            self._last_foreground_success_monotonic = time.monotonic()
         return result
 
     def _prepare_payload(

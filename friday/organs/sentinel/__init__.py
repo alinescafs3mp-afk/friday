@@ -65,6 +65,12 @@ _WAKES_THE_OWNER = {"llm_not_generating", "start_llm_runtime"}
 _GENERATION_PROBE_TIMEOUT_SEC = 25.0
 _GENERATION_AWAIT_TIMEOUT_SEC = 30.0
 _GENERATION_WORKER_TIMEOUT_SEC = 35.0
+# A completed real answer is stronger evidence than another synthetic token.
+# Two watchdog intervals cover scheduling jitter without hiding a genuinely
+# idle endpoint indefinitely.  Active foreground work also suppresses the
+# competing probe; the request's own bounded transport and owner notification
+# remain the authority if that work fails.
+_GENERATION_RECENT_FOREGROUND_SEC = 120.0
 _GENERATION_STATE_KEY = "sentinel:generation_watchdog"
 _GENERATION_STATE_VERSION = 1
 
@@ -272,6 +278,22 @@ async def watch_generation(ctx: ServiceContext) -> None:
     # the one-token probe when its result cannot leave this process.
     if not settings.telegram_effective_allowed_chat_ids:
         return
+    activity = getattr(ctx.llm, "generation_watchdog_activity", None)
+    if callable(activity):
+        try:
+            foreground_active, recent_success = activity(recent_success_sec=_GENERATION_RECENT_FOREGROUND_SEC)
+        except Exception as exc:  # noqa: BLE001 — uncertainty falls back to the probe
+            LOGGER.warning(
+                "sentinel: cannot observe foreground model activity (%s)",
+                type(exc).__name__,
+            )
+        else:
+            if recent_success:
+                _mark_generation_healthy(ctx)
+                return
+            if foreground_active:
+                LOGGER.debug("sentinel: foreground generation is active; probe deferred")
+                return
     try:
         # urllib's socket timeout normally returns first.  The coroutine-level
         # deadline is a second, independent boundary for a peer which keeps the

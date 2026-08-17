@@ -17532,6 +17532,7 @@ def _strip_model_authored_web_urls(
     answer: str,
     *,
     requested_fact_targets: frozenset[str] = frozenset(),
+    attachment_source_owned: bool = True,
 ) -> tuple[str, bool]:
     """Remove model-authored provenance, preserving exact requested address facts."""
 
@@ -17576,6 +17577,17 @@ def _strip_model_authored_web_urls(
     lines: list[str] = []
     for line in stripped.splitlines():
         clean = re.sub(r"\(\s*\)", "", line)
+        # Removing three model-authored domains from ``(обзоры X, Y и Z)``
+        # used to leave the user-visible fragment ``(обзоры, и )``.  The exact
+        # source ledger is rendered independently by Telegram; a now-empty
+        # generic carrier label has no remaining information and is removed.
+        clean = re.sub(
+            r"\(\s*(?:обзор\w*|источник\w*|сайт\w*|reviews?|sources?|sites?)"
+            r"(?:\s*[,;:/|+-]\s*)*(?:и|and)?\s*\)",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        )
         clean = re.sub(r"\s+(?:[-—–]\s*)+(?=[,.;:!?]|$)", "", clean)
         clean = re.sub(r"\b(?:на|с|at|on|from)\s*(?=[,.;:!?]|$)", "", clean, flags=re.IGNORECASE)
         clean = re.sub(r"[ \t]+([,.;:!?])", r"\1", re.sub(r"[ \t]{2,}", " ", clean)).rstrip()
@@ -17585,6 +17597,74 @@ def _strip_model_authored_web_urls(
             continue
         lines.append(clean)
     result = "\n".join(lines).strip()
+    if not attachment_source_owned:
+        # A public web turn with zero authenticated file evidence must not
+        # relabel the web ledger as an attachment.  This was observed verbatim
+        # in production: a hardware answer with three web sources concluded
+        # that the numbers could not be confirmed "данными из вложения", even
+        # though the turn carried no file.  Rewrite only closed provenance
+        # carriers; ordinary mentions such as "configuration file" are outside
+        # these patterns and remain untouched.
+        data_from_attachment = re.compile(
+            r"\b(?P<kind>данными|сведениями|информацией)\s+из\s+"
+            r"(?:(?:этого|данного|предоставленного|приложенного|прикрепл[её]нного)\s+)?"
+            r"(?:вложения|приложенного\s+файла|прикрепл[её]нного\s+файла)\b",
+            re.IGNORECASE,
+        )
+
+        def data_source(match: re.Match[str]) -> str:
+            kind = str(match.group("kind") or "данными")
+            return f"{kind} из найденных источников"
+
+        result = data_from_attachment.sub(data_source, result)
+        result = re.sub(
+            r"\b(?:в|во)\s+(?:(?:этом|данном|предоставленном|приложенном|"
+            r"прикрепл[её]нном)\s+)?вложении\b",
+            "в найденных источниках",
+            result,
+            flags=re.IGNORECASE,
+        )
+        result = re.sub(
+            r"\bиз\s+(?:(?:этого|данного|предоставленного|приложенного|"
+            r"прикрепл[её]нного)\s+)?вложения\b",
+            "из найденных источников",
+            result,
+            flags=re.IGNORECASE,
+        )
+
+        def transferred_file_source(match: re.Match[str]) -> str:
+            return (
+                "из найденных источников"
+                if match.group(0).casefold().startswith("из ")
+                else "в найденных источниках"
+            )
+
+        result = re.sub(
+            r"\b(?:в|из)\s+(?:предоставленн\w*|приложенн\w*|прикрепл[её]нн\w*)\s+"
+            r"файл(?:е|а)\b",
+            transferred_file_source,
+            result,
+            flags=re.IGNORECASE,
+        )
+        result = re.sub(
+            r"\b(?P<kind>data|information|details)\s+from\s+(?:the\s+)?"
+            r"(?:(?:attached|provided)\s+)?(?:attachment|attached\s+file)\b",
+            lambda match: f"{match.group('kind')} from the retrieved sources",
+            result,
+            flags=re.IGNORECASE,
+        )
+        result = re.sub(
+            r"\b(?P<prep>in|from)\s+(?:the\s+)?(?:attached|provided)\s+"
+            r"(?:attachment|file)\b",
+            lambda match: (
+                "from the retrieved sources"
+                if match.group("prep").casefold() == "from"
+                else "in the retrieved sources"
+            ),
+            result,
+            flags=re.IGNORECASE,
+        )
+        result = re.sub(r"[ \t]{2,}", " ", result).strip()
     return result, result != original.strip()
 
 
@@ -30621,11 +30701,13 @@ class AgentRuntime:
             clean_message,
             response.get("tool_evidence"),
         )
+        web_attachment_source_owned = bool(attachment_expected_count or attachment_evidence)
         model_web_urls_removed = False
         if web_evidence_used and not web_evidence_replaced:
             content, model_web_urls_removed = _strip_model_authored_web_urls(
                 content,
                 requested_fact_targets=requested_web_fact_targets,
+                attachment_source_owned=web_attachment_source_owned,
             )
             if model_web_urls_removed:
                 # The model is not a source-ledger authority.  Accepted URLs are
@@ -31695,6 +31777,7 @@ class AgentRuntime:
                     repaired_model_said, repaired_web_urls_removed = _strip_model_authored_web_urls(
                         repaired_model_said,
                         requested_fact_targets=requested_web_fact_targets,
+                        attachment_source_owned=web_attachment_source_owned,
                     )
                     if repaired_web_urls_removed:
                         # Repair is another model generation and has no more
@@ -31979,6 +32062,7 @@ class AgentRuntime:
             reconciled_file_content, pre_file_web_urls_removed = _strip_model_authored_web_urls(
                 pre_file_model_content,
                 requested_fact_targets=requested_web_fact_targets,
+                attachment_source_owned=web_attachment_source_owned,
             )
             if pre_file_web_urls_removed:
                 reconciled_file_content = (
@@ -32211,6 +32295,7 @@ class AgentRuntime:
             final_web_content, final_web_urls_removed = _strip_model_authored_web_urls(
                 final_model_content,
                 requested_fact_targets=requested_web_fact_targets,
+                attachment_source_owned=web_attachment_source_owned,
             )
             if final_web_urls_removed:
                 # This is a final fail-clean boundary for any later body owner

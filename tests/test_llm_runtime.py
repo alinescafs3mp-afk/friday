@@ -81,6 +81,48 @@ def test_qwen_payload_disables_model_thinking_and_has_one_system(settings):
     assert payload["messages"][0]["role"] == "system"
 
 
+@pytest.mark.asyncio
+async def test_foreground_activity_is_a_watchdog_signal_without_an_extra_request(
+    settings,
+    monkeypatch,
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def blocked_chat(*_args, **_kwargs):
+        entered.set()
+        await release.wait()
+        return {"content": "healthy"}
+
+    router = LLMRouter(replace(settings, llm_enabled=True))
+    monkeypatch.setattr(router, "_chat_impl", blocked_chat)
+    task = asyncio.create_task(router.chat([{"role": "user", "content": "hello"}]))
+    await entered.wait()
+
+    assert router.generation_watchdog_activity(recent_success_sec=120.0) == (True, False)
+
+    release.set()
+    assert (await task)["content"] == "healthy"
+    assert router.generation_watchdog_activity(recent_success_sec=120.0) == (False, True)
+
+
+@pytest.mark.asyncio
+async def test_failed_foreground_call_is_not_reused_as_watchdog_health(
+    settings,
+    monkeypatch,
+) -> None:
+    async def failed_chat(*_args, **_kwargs):
+        raise RuntimeError("synthetic failure")
+
+    router = LLMRouter(replace(settings, llm_enabled=True))
+    monkeypatch.setattr(router, "_chat_impl", failed_chat)
+
+    with pytest.raises(RuntimeError, match="synthetic failure"):
+        await router.chat([{"role": "user", "content": "hello"}])
+
+    assert router.generation_watchdog_activity(recent_success_sec=120.0) == (False, False)
+
+
 def test_exact_tool_choice_is_emitted_only_for_an_effectively_offered_schema(settings):
     router = LLMRouter(replace(settings, llm_enabled=True))
     schema = {

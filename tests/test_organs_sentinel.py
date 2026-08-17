@@ -19,6 +19,7 @@ from friday.organs import ServiceContext, build_registry
 from friday.organs.sentinel import (
     _GENERATION_AWAIT_TIMEOUT_SEC,
     _GENERATION_PROBE_TIMEOUT_SEC,
+    _GENERATION_RECENT_FOREGROUND_SEC,
     SentinelOrgan,
     _format_alert,
     scan_health,
@@ -330,6 +331,85 @@ async def test_generation_watchdog_is_silent_for_a_working_model(storage, monkey
 
     await watch_generation(ServiceContext(settings=settings, storage=storage, kg=None, ingestion=None))
 
+    assert storage.list_pending_notifications(limit=100) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("activity", "marks_healthy"),
+    [
+        ((True, False), False),
+        ((False, True), True),
+    ],
+)
+async def test_generation_watchdog_reuses_real_foreground_activity_without_a_competing_probe(
+    storage,
+    monkeypatch,
+    activity: tuple[bool, bool],
+    marks_healthy: bool,
+) -> None:
+    import friday.organs.sentinel as sentinel
+
+    settings = replace(_sentinel_settings(), sentinel_check_llm=True, llm_enabled=True)
+    _seed_telegram_user(storage, "5001", preset_key="owner")
+    observed_windows: list[float] = []
+    probes = 0
+
+    class _Router:
+        def generation_watchdog_activity(self, *, recent_success_sec: float):
+            observed_windows.append(recent_success_sec)
+            return activity
+
+    def forbidden_probe(*_args, **_kwargs):
+        nonlocal probes
+        probes += 1
+        raise AssertionError("a real foreground signal must suppress the synthetic probe")
+
+    healthy_marks = 0
+
+    def record_healthy(_ctx):
+        nonlocal healthy_marks
+        healthy_marks += 1
+
+    monkeypatch.setattr(sentinel, "_llm_generates", forbidden_probe)
+    monkeypatch.setattr(sentinel, "_mark_generation_healthy", record_healthy)
+    await watch_generation(
+        ServiceContext(settings=settings, storage=storage, kg=None, ingestion=None, llm=_Router())
+    )
+
+    assert observed_windows == [_GENERATION_RECENT_FOREGROUND_SEC]
+    assert probes == 0
+    assert healthy_marks == int(marks_healthy)
+    assert storage.list_pending_notifications(limit=100) == []
+
+
+@pytest.mark.asyncio
+async def test_generation_watchdog_falls_back_to_probe_when_activity_observation_fails(
+    storage,
+    monkeypatch,
+) -> None:
+    import friday.organs.sentinel as sentinel
+
+    settings = replace(_sentinel_settings(), sentinel_check_llm=True, llm_enabled=True)
+    _seed_telegram_user(storage, "5001", preset_key="owner")
+    probes = 0
+
+    class _BrokenRouter:
+        def generation_watchdog_activity(self, *, recent_success_sec: float):
+            del recent_success_sec
+            raise RuntimeError("synthetic observation failure")
+
+    def healthy_probe(*_args, **_kwargs):
+        nonlocal probes
+        probes += 1
+        return {"generates": True, "seconds": 0.1}
+
+    monkeypatch.setattr(sentinel, "_llm_generates", healthy_probe)
+    await watch_generation(
+        ServiceContext(settings=settings, storage=storage, kg=None, ingestion=None, llm=_BrokenRouter())
+    )
+
+    assert probes == 1
     assert storage.list_pending_notifications(limit=100) == []
 
 
