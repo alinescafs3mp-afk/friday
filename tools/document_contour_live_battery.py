@@ -61,6 +61,8 @@ if not _friday_origin.is_relative_to(ROOT):
 
 RUNS = 2
 CASES = 10
+LIVE_CASE_IDS = ("D06", "D07", "D08")
+LIVE_CASES = len(LIVE_CASE_IDS)
 WORKER_TIMEOUT_SEC = 1_800
 SCHEMA = "friday.document-contour-live-battery.v1"
 WORKER_SCHEMA = "friday.document-contour-live-battery.worker.v1"
@@ -279,6 +281,10 @@ SCENARIOS: tuple[Scenario, ...] = (
             "a separate owner-only workspace_create reaches the real MCP server create-only",
         ),
     ),
+)
+
+LIVE_SCENARIOS: tuple[Scenario, ...] = tuple(
+    scenario for scenario in SCENARIOS if scenario.case_id in LIVE_CASE_IDS
 )
 
 
@@ -1089,6 +1095,9 @@ def offline_self_test() -> dict[str, Any]:
         raise BatteryFailure("scenario_manifest_invalid")
     if len(set(ids)) != CASES or any(not item.contract for item in SCENARIOS):
         raise BatteryFailure("scenario_contract_invalid")
+    live_ids = [item.case_id for item in LIVE_SCENARIOS]
+    if tuple(live_ids) != LIVE_CASE_IDS or len(set(live_ids)) != LIVE_CASES:
+        raise BatteryFailure("live_scenario_manifest_invalid")
     with tempfile.TemporaryDirectory(prefix="friday-document-battery-selftest-") as temporary:
         root = Path(temporary).resolve()
         root.chmod(0o700)
@@ -1168,6 +1177,8 @@ def offline_self_test() -> dict[str, Any]:
         "runs": RUNS,
         "cases_per_run": CASES,
         "scenario_ids": ids,
+        "live_cases_per_run": LIVE_CASES,
+        "live_scenario_ids": live_ids,
         "identity_count": len(identities),
         "identity_disjoint": True,
         "prompt_variants": 2,
@@ -2905,6 +2916,13 @@ _CASE_RUNNERS: tuple[Callable[[Harness], dict[str, Any]], ...] = (
     _case_10,
 )
 
+_RUNNER_BY_CASE_ID = {
+    scenario.case_id: runner for scenario, runner in zip(SCENARIOS, _CASE_RUNNERS, strict=True)
+}
+_LIVE_CASE_RUNNERS: tuple[Callable[[Harness], dict[str, Any]], ...] = tuple(
+    _RUNNER_BY_CASE_ID[scenario.case_id] for scenario in LIVE_SCENARIOS
+)
+
 
 def _assert_worker_settings(settings: Any, run_dir: Path, *, require_mcp: bool) -> None:
     profile = getattr(settings, "profile", None)
@@ -3004,7 +3022,7 @@ def execute_worker(run_index: int) -> dict[str, Any]:
 
     results: list[dict[str, Any]] = []
     started = time.monotonic()
-    for scenario, runner in zip(SCENARIOS, _CASE_RUNNERS, strict=True):
+    for scenario, runner in zip(LIVE_SCENARIOS, _LIVE_CASE_RUNNERS, strict=True):
         identity = _case_identity(run_id, run_index, scenario.case_id)
         state = case_state_paths(run_dir, scenario.case_id, identity)
         case_dir = _private_dir(state["root"])
@@ -3702,7 +3720,7 @@ def _build_failure_summary(
             if not isinstance(raw_case, Mapping) or raw_case.get("status") != "failed":
                 continue
             case_id = str(raw_case.get("case_id") or "")
-            if case_id not in {f"D{index:02d}" for index in range(1, CASES + 1)}:
+            if case_id not in LIVE_CASE_IDS:
                 continue
             raw_checks = raw_case.get("checks")
             failed_checks = (
@@ -4221,7 +4239,7 @@ def run_controller(args: argparse.Namespace) -> dict[str, Any]:
             "run_id_hash": run_hash,
             "runs_expected": RUNS,
             "runs_completed": len(reports),
-            "cases_expected_per_run": CASES,
+            "cases_expected_per_run": LIVE_CASES,
             "failure_codes": sorted(set(controller_failure_codes)),
             "status": (
                 "passed"

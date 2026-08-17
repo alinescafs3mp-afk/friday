@@ -47,6 +47,10 @@ def test_manifest_is_exactly_ten_unique_document_scenarios() -> None:
     assert [item.case_id for item in runner.SCENARIOS] == [f"D{index:02d}" for index in range(1, 11)]
     assert len(runner._CASE_RUNNERS) == 10
     assert all(item.contract for item in runner.SCENARIOS)
+    assert runner.LIVE_CASE_IDS == ("D06", "D07", "D08")
+    assert runner.LIVE_CASES == 3
+    assert [item.case_id for item in runner.LIVE_SCENARIOS] == list(runner.LIVE_CASE_IDS)
+    assert len(runner._LIVE_CASE_RUNNERS) == 3
 
 
 def test_d07_scan_fixture_roundtrip_keeps_the_complete_secret_inside_page() -> None:
@@ -158,6 +162,8 @@ def test_offline_self_test_never_imports_server_or_uses_production_database(monk
     assert report["self_test"] == "passed"
     assert report["runs"] == 2
     assert report["cases_per_run"] == 10
+    assert report["live_cases_per_run"] == 3
+    assert report["live_scenario_ids"] == ["D06", "D07", "D08"]
     assert report["identity_count"] == 40
     assert report["identity_disjoint"] is True
     assert report["prompt_variants"] == 2
@@ -3039,6 +3045,7 @@ def test_cli_self_test_is_closed_json_and_does_not_start_live_worker() -> None:
     report = json.loads(completed.stdout)
     assert report["self_test"] == "passed"
     assert report["scenario_ids"] == [f"D{index:02d}" for index in range(1, 11)]
+    assert report["live_scenario_ids"] == ["D06", "D07", "D08"]
     assert completed.stderr == ""
 
 

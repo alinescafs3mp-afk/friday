@@ -190,8 +190,14 @@ build a new immutable release candidate and restart the count.  Store only
 sanitized case IDs, timings, token/tool counters, boolean assertions, hashes and
 closed failure codes as evidence.
 
-Both runs belong to one controller invocation; D06 and D08 are routing canaries
-inside each ten-case run, not separate CLI targets.  Each worker owns a distinct
+The complete D01--D10 contract matrix belongs to the zero-skip offline gate.
+The live controller reuses that immutable evidence and runs only the three
+nondeterministic end-to-end canaries D06 (direct document synthesis), D07
+(multipage vision) and D08 (hierarchical MAP synthesis), twice in one
+invocation.  This avoids spending remote generations on deterministic storage,
+archive and export contracts already proved against the same commit.  D06 and
+D08 remain routing canaries inside each three-case run, not separate CLI
+targets.  Each worker owns a distinct
 POSIX process group.  After run 1 the controller must reap the worker and prove
 that the entire group disappeared without TERM/KILL cleanup.  A surviving
 descendant, timeout, non-zero worker exit, lifecycle/MCP close exception, MCP

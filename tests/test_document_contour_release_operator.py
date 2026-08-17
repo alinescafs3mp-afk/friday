@@ -2091,7 +2091,7 @@ def test_git_candidate_checks_ignore_ambient_repository_and_network_controls(mon
 def test_dependency_hashes_are_frozen_to_the_authorized_inputs() -> None:
     assert operator._EXPECTED_DEPENDENCY_HASHES == {
         "tools/document_contour_live_battery.py": (
-            "ddbd7c5e4a3bc40ec18c28903db5b6d69927aabda29d47db08337b4242dd3e43"
+            "018eb2a3469a58e500e8ab955a24ba322a4b5abf1a6899aad982905aad7284b7"
         ),
         "friday/diagnostics/__init__.py": (
             "86ce0798ec2666b3ebe05318fc1483042c2c9e35994f60d7f588cae47c779c06"
