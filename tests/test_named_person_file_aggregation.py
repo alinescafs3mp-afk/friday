@@ -186,6 +186,185 @@ def test_unqualified_document_period_uses_arrival_time_not_own_document_date() -
     assert scope.time_role == "received_at"
 
 
+def test_date_only_clarification_inherits_select_and_summarize_instead_of_archive(
+    settings,
+    storage,
+) -> None:
+    runtime, actor, tenant = _runtime(settings, storage)
+    for index in range(5):
+        _file(
+            storage,
+            tenant,
+            "owner",
+            f"inside-{index}.txt",
+            f"INSIDE-{index}",
+            f"2026-08-{13 + index % 2:02d}T{index + 9:02d}:00:00+00:00",
+        )
+    _file(
+        storage,
+        tenant,
+        "owner",
+        "outside.txt",
+        "OUTSIDE",
+        "2026-08-15T09:00:00+00:00",
+    )
+    task = "выбери 4 любых документа из тех, что я скидывал начиная с 13 числа и обобщи их"
+    history = [
+        {"role": "user", "content": task},
+        {
+            "role": "assistant",
+            "content": "Не удалось однозначно определить границы периода. Укажите обе даты полностью.",
+        },
+    ]
+
+    scope = _named_person_aggregation_scope("13-14 число", history)
+    selected = runtime._select_named_person_corpus(scope, actor=actor)  # noqa: SLF001
+
+    assert scope is not None and scope.inherited
+    assert scope.task_message == task
+    assert scope.time_source == "с 13 по 14"
+    assert scope.time_role == "received_at"
+    assert scope.requested_n == 4 and scope.latest_n is None
+    assert selected.complete
+    assert selected.available_total == 5
+    assert selected.expected_count == selected.selected_count == 4
+    assert all("OUTSIDE" not in str(item.get("transient_text") or "") for item in selected.attachments)
+
+
+def test_archive_correction_recovers_the_original_summary_task() -> None:
+    task = "выбери 4 любых документа из тех, что я скидывал начиная с 13 числа и обобщи их"
+    history = [
+        {"role": "user", "content": task},
+        {
+            "role": "assistant",
+            "content": "Не удалось однозначно определить границы периода. Укажите обе даты полностью.",
+        },
+        {"role": "user", "content": "13-14 число"},
+        {
+            "role": "assistant",
+            "content": "Архив собран: файл «Документы за 2026-08-13 2026-08-14.zip» приложен.",
+        },
+    ]
+
+    scope = _named_person_aggregation_scope(
+        "мне надо было не архив сделать, а обобщить",
+        history,
+    )
+
+    assert scope is not None and scope.inherited
+    assert scope.task_message == task
+    assert scope.time_source == "с 13 по 14"
+    assert scope.requested_n == 4
+
+
+@pytest.mark.asyncio
+async def test_archive_correction_full_chat_summarizes_exact_four_registered_documents(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    runtime, actor, tenant = _runtime(settings, storage)
+    configured = replace(settings, verify_answers=False)
+    runtime.settings = configured
+    runtime.llm.settings = configured
+    for index in range(5):
+        await _registered_file(
+            configured,
+            storage,
+            tenant,
+            "owner",
+            f"inside-{index}.txt",
+            f"CORRECTION-DOCUMENT-{index}",
+            f"2026-08-{13 + index % 2:02d}T{index + 9:02d}:00:00+00:00",
+        )
+    await _registered_file(
+        configured,
+        storage,
+        tenant,
+        "owner",
+        "outside.txt",
+        "OUTSIDE-DATE-MUST-NOT-ENTER",
+        "2026-08-15T09:00:00+00:00",
+    )
+    conversation = storage.create_conversation(actor.own_id)
+    task = "выбери 4 любых документа из тех, что я скидывал начиная с 13 числа и обобщи их"
+    for role, content in (
+        ("user", task),
+        ("assistant", "Не удалось однозначно определить границы периода. Укажите обе даты полностью."),
+        ("user", "13-14 число"),
+        ("assistant", "Архив собран: файл «Документы за 2026-08-13 2026-08-14.zip» приложен."),
+    ):
+        storage.store_message(str(conversation["id"]), actor.own_id, role, content)
+
+    seen: list[list[str]] = []
+
+    async def prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
+        del message, kwargs
+        return AgentContext(conversation_id=conversation_id, user_id=user_id, person_id=actor.own_id)
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context
+        assert message == task
+        seen.append([str(item.get("transient_text") or "") for item in attachments or []])
+        return {"content": "Обобщение четырёх документов.", "tools_used": [], "_model_generated": True}
+
+    async def forbidden_execute(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("correction entered a tool effect")
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime.kernel, "execute", forbidden_execute)
+    result = await runtime.chat(
+        actor.own_id,
+        "мне надо было не архив сделать, а обобщить",
+        actor=actor,
+        conversation_id=str(conversation["id"]),
+        enable_tools=True,
+    )
+
+    assert result["message"].endswith("Обобщение четырёх документов.")
+    assert "2026-08-13 — 2026-08-14" in result["message"]
+    assert len(seen) == 1 and len(seen[0]) == 4
+    assert all(body.startswith("CORRECTION-DOCUMENT-") for body in seen[0])
+    assert "OUTSIDE-DATE-MUST-NOT-ENTER" not in "\n".join(seen[0])
+
+
+@pytest.mark.asyncio
+async def test_date_only_summary_clarification_cannot_authorize_archive_creation(
+    settings,
+    storage,
+) -> None:
+    runtime, actor, _tenant = _runtime(settings, storage)
+    calls: list[str] = []
+
+    async def forbidden_execute(tool: str, params: dict[str, Any], *, actor: Any = None) -> Any:
+        del params, actor
+        calls.append(tool)
+        raise AssertionError("date-only summary clarification entered collect_files")
+
+    runtime.kernel.execute = forbidden_execute  # type: ignore[method-assign]
+    context = AgentContext(
+        conversation_id="date-summary-not-archive",
+        user_id=actor.user_id,
+        outward_verdict=("файл", "13,14"),
+    )
+
+    collected = await runtime._prefetch_the_archive_if_asked(  # noqa: SLF001
+        context,
+        actor,
+        [],
+        [],
+        [],
+        [],
+        message="13-14 число",
+    )
+
+    assert collected is False
+    assert context.asked_for_an_archive is False
+    assert calls == []
+
+
 def test_latest_two_uses_arrival_order_not_document_date(settings, storage) -> None:
     runtime, actor, tenant = _runtime(settings, storage)
     _file(

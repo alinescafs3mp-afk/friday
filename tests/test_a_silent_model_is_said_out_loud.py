@@ -274,6 +274,29 @@ def test_the_reason_comes_first_not_after_a_full_stop() -> None:
     assert "уточнить формулировку" not in text, "поломку связи всё ещё выдают за плохую формулировку"
 
 
+def test_a_timed_out_web_synthesis_never_turns_into_an_archive_only_answer() -> None:
+    text = AgentRuntime._offline_response(  # noqa: SLF001
+        _context(
+            kb_size=1537,
+            knowledge_hits=[],
+            web_evidence_status="partial",
+            web_sources=[
+                {"title": "ASUS Ascent GX10: обзор", "url": "https://example.test/review"},
+                {"title": "ASUS Ascent GX10: энергопотребление", "url": "https://example.test/power"},
+            ],
+        ),
+        unreachable=True,
+        message="Как эта модель по шуму и энергопотреблению?",
+    )
+
+    assert text.splitlines()[0].casefold().startswith("⚠️ не могу связаться")
+    assert "интернет-поиск завершён" in text.casefold()
+    assert "источников найдено: 2" in text.casefold()
+    assert "ASUS Ascent GX10: обзор" in text
+    assert "в архиве 1537" not in text.casefold()
+    assert "подходящего среди них не нашлось" not in text.casefold()
+
+
 def test_the_disabled_model_is_not_called_a_failure() -> None:
     """Выключенная модель — настройка человека, а не поломка."""
     text = AgentRuntime._offline_response(_context(kb_size=10), unreachable=False)

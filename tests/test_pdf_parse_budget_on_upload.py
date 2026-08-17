@@ -237,7 +237,8 @@ async def test_no_save_visual_attachment_uses_vision_as_ephemeral_advisory_text(
     calls = []
     visible_text = "TRANSIENT-VISION-BODY-551: synthetic scan"
 
-    async def visual_extract(file_content, *, filename, mime_type):
+    async def visual_extract(file_content, *, filename, mime_type, preferred_language=""):
+        del preferred_language
         calls.append((file_content, filename, mime_type))
         return {
             "success": True,

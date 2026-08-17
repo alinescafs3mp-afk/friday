@@ -100,6 +100,10 @@ _VISION_OCR_FALLBACK_RESERVE_SEC = 45.0
 _VISION_PAGE_MAX_PIXELS = 1_048_576
 _VISION_BATCH_MAX_PIXELS = 1_048_576
 _VISION_PDF_RENDER_BUDGET_FLOOR_SEC = 30.0
+_VISION_SUMMARY_LANGUAGES = {
+    "en": "English",
+    "ru": "Russian",
+}
 _WHISPER_INFERENCE_LOCK = threading.Lock()
 _PDF_RENDER_SOURCE_RE = re.compile(r"^pdf-page-(\d+)-(?:render|image-\d+)$", re.IGNORECASE)
 _DOCUMENT_METADATA_STRING_FIELDS = (
@@ -576,6 +580,7 @@ class FilesMixin(PipelineShared):
         assets: Sequence[VisualAsset],
         *,
         asset_offset: int,
+        summary_language: str = "",
     ) -> dict[str, Any]:
         """Run one at-most-four-image vision request and validate its advice."""
         llm = self.llm
@@ -606,6 +611,13 @@ class FilesMixin(PipelineShared):
             }
             for index, asset in enumerate(assets, start=1)
         }
+        language_name = _VISION_SUMMARY_LANGUAGES.get(summary_language, "")
+        language_instruction = (
+            f" Write title, summary, document_type, evidence.claim and warnings in {language_name}; "
+            "keep pages[].text and evidence.quote in the exact visible source language."
+            if language_name
+            else ""
+        )
         prompt_parts: list[dict[str, Any]] = [
             {
                 "type": "text",
@@ -624,8 +636,11 @@ class FilesMixin(PipelineShared):
                     "entity_type values: person, project, concept, event, organization, location, "
                     "document, other. Every factual claim and entity must point to a supplied asset "
                     "and a visible quote when possible. Never invent obscured text, silently join "
-                    "unrelated pages, or infer facts that are not visible. Preserve uncertainty and "
-                    "use empty strings/lists when evidence is insufficient."
+                    "unrelated pages, or infer facts that are not visible. Every non-empty evidence.quote "
+                    "must occur verbatim in the corresponding pages[].text; otherwise omit that evidence "
+                    "item. The summary may state only facts supported by pages[].text and evidence. "
+                    "Preserve uncertainty and use empty strings/lists when evidence is insufficient."
+                    + language_instruction
                 ),
             }
         ]
@@ -880,6 +895,7 @@ class FilesMixin(PipelineShared):
         *,
         filename: str,
         mime_type: str,
+        preferred_language: str = "",
     ) -> dict[str, Any] | None:
         """Render and OCR a bounded document in ordered, at-most-four-page batches."""
         if not self.llm or not self.llm.enabled or not self.settings.profile.vision_capable:
@@ -1058,7 +1074,11 @@ class FilesMixin(PipelineShared):
             batch_attempts += 1
             try:
                 async with asyncio.timeout(remaining):
-                    return await self._extract_visual_batch(batch_assets, asset_offset=offset)
+                    return await self._extract_visual_batch(
+                        batch_assets,
+                        asset_offset=offset,
+                        summary_language=preferred_language,
+                    )
             except TimeoutError:
                 return {"success": False, "error": "vision_deadline_reached", "_deadline": True}
 
@@ -1316,6 +1336,7 @@ class FilesMixin(PipelineShared):
             "text": text,
             "title": _bounded_text(titles[0] if titles else "", 200),
             "summary": _bounded_text("\n\n".join(summaries), 2_000),
+            "summary_language": preferred_language if preferred_language in _VISION_SUMMARY_LANGUAGES else "",
             "document_type": _bounded_text(document_types[0] if document_types else "", 80),
             "entities": entities[:30],
             "evidence": evidence[:40],
@@ -1642,6 +1663,11 @@ class FilesMixin(PipelineShared):
                     file_content,
                     filename=filename,
                     mime_type=mime_type,
+                    preferred_language=str(supplied_metadata.get("language_code") or "")
+                    .strip()
+                    .casefold()
+                    .split("-", 1)[0]
+                    .split("_", 1)[0],
                 ),
                 turn_deadline,
             )
@@ -2300,6 +2326,7 @@ class FilesMixin(PipelineShared):
         preview_chars: int = 24_000,
         archive_password: str | None = None,
         metadata_only: bool = False,
+        preferred_language: str = "",
         turn_deadline: float | None = None,
     ) -> dict[str, Any]:
         """Extract an attachment for the current turn without persisting it.
@@ -2367,6 +2394,7 @@ class FilesMixin(PipelineShared):
                     file_content,
                     filename=safe_filename,
                     mime_type=safe_mime_type,
+                    preferred_language=preferred_language,
                 ),
                 turn_deadline,
             )
@@ -2467,6 +2495,22 @@ class FilesMixin(PipelineShared):
                 and not looks_like_audio(content_type=safe_mime_type, filename=safe_filename)
             ),
         }
+        if vision is not None and vision.get("success") is True:
+            transient.update(
+                {
+                    "_advisory_vision_success": True,
+                    "_advisory_vision_summary": str(vision.get("summary") or "")[:2_000],
+                    "_advisory_vision_summary_language": str(vision.get("summary_language") or "")[:16],
+                    "_advisory_vision_confidence": vision.get("confidence"),
+                    "_advisory_vision_asset_coverage": vision.get("asset_coverage"),
+                    "_advisory_vision_grounded_evidence_count": vision.get("grounded_evidence_count"),
+                    "_advisory_vision_pages_read": vision.get("pages_read"),
+                    "_advisory_vision_pages_total": vision.get("pages_total"),
+                    "_advisory_vision_pages_truncated": vision.get("pages_truncated") is True,
+                    "_advisory_vision_deadline_reached": vision.get("deadline_reached") is True,
+                    "_advisory_vision_text_truncated": vision.get("text_truncated") is True,
+                }
+            )
         office_structure = _validated_office_structure(
             getattr(extraction, "office_structure_index", None),
             source_text,

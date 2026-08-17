@@ -98,6 +98,7 @@ class _TransientVisionProbe:
         filename: str = "",
         mime_type: str = "",
         preview_chars: int = 24_000,
+        preferred_language: str = "",
     ) -> dict[str, Any]:
         self.calls.append(
             {
@@ -105,6 +106,7 @@ class _TransientVisionProbe:
                 "filename": filename,
                 "mime_type": mime_type,
                 "preview_chars": preview_chars,
+                "preferred_language": preferred_language,
             }
         )
         text = VISION_TEXT if self.succeeds else ""

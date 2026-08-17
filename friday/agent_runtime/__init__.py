@@ -8133,6 +8133,26 @@ _NAMED_PERSON_LATEST = re.compile(
     r"(?:файл|документ|материал|вложен|сообщен)\w*\b",
     re.IGNORECASE,
 )
+_NAMED_PERSON_REQUESTED_COUNT = re.compile(
+    r"\b(?P<count>\d{1,2})\s+"
+    r"(?:(?:люб|произвольн)\w*\s+)?"
+    r"(?:файл|документ|материал|вложен|сообщен)\w*\b",
+    re.IGNORECASE,
+)
+_NAMED_PERSON_DATE_RANGE_FOLLOWUP = re.compile(
+    r"^\s*(?:с\s+)?(?P<first>\d{1,2})\s*[-–—]\s*(?P<last>\d{1,2})"
+    r"(?:\s+(?:числ|дн|дат)\w*)?\s*[?!.]*\s*$",
+    re.IGNORECASE,
+)
+_NAMED_PERSON_SUMMARY_CORRECTION = re.compile(
+    r"^\s*(?:мне\s+)?(?:надо|нужно|я\s+просил(?:а)?)\s+(?:было\s+)?"
+    r"не\s+архив(?:\s+(?:сделать|собрать))?\s*,?\s*а\s+"
+    r"(?:обобщ\w*|суммариз\w*|резюмир\w*)\s*[?!.]*\s*$",
+    re.IGNORECASE,
+)
+_NAMED_PERSON_TIME_CLARIFICATION = (
+    "Не удалось однозначно определить границы периода. Укажите обе даты полностью."
+)
 _NAMED_PERSON_RECEIVED_TIME = re.compile(
     r"\b(?:приходил|поступал|присыл|прислал|загруж|загрузил|отправл|отправил|скидыв|скинул)\w*\b",
     re.IGNORECASE,
@@ -8156,6 +8176,7 @@ class _NamedPersonAggregationScope:
     time_source: str
     time_role: Literal["received_at", "document_date", ""]
     latest_n: int | None
+    requested_n: int | None
     inherited: bool = False
 
 
@@ -8244,6 +8265,45 @@ def _named_person_aggregation_scope(
 
     visible = _classification_text(message)
     speech = file_authority_speech(visible)
+    turns = [
+        row
+        for row in history
+        if isinstance(row, Mapping) and str(row.get("role") or "") in {"user", "assistant"}
+    ]
+    followup_base = ""
+    followup_time_source = ""
+    date_followup = _NAMED_PERSON_DATE_RANGE_FOLLOWUP.fullmatch(speech)
+    if date_followup is not None and len(turns) >= 2:
+        assistant = turns[-1]
+        prior_user_turn = turns[-2]
+        if (
+            str(assistant.get("role") or "") == "assistant"
+            and str(assistant.get("content") or "").strip() == _NAMED_PERSON_TIME_CLARIFICATION
+            and str(prior_user_turn.get("role") or "") == "user"
+        ):
+            followup_base = _classification_text(str(prior_user_turn.get("content") or ""))
+            followup_time_source = f"с {date_followup.group('first')} по {date_followup.group('last')}"
+    elif _NAMED_PERSON_SUMMARY_CORRECTION.fullmatch(speech) and len(turns) >= 4:
+        task_turn, clarification, date_turn, archive_answer = turns[-4:]
+        date_text = file_authority_speech(_classification_text(str(date_turn.get("content") or "")))
+        date_match = _NAMED_PERSON_DATE_RANGE_FOLLOWUP.fullmatch(date_text)
+        if (
+            str(archive_answer.get("role") or "") == "assistant"
+            and str(archive_answer.get("content") or "").strip().startswith("Архив собран:")
+            and str(date_turn.get("role") or "") == "user"
+            and date_match is not None
+            and str(clarification.get("role") or "") == "assistant"
+            and str(clarification.get("content") or "").strip() == _NAMED_PERSON_TIME_CLARIFICATION
+            and str(task_turn.get("role") or "") == "user"
+        ):
+            followup_base = _classification_text(str(task_turn.get("content") or ""))
+            followup_time_source = f"с {date_match.group('first')} по {date_match.group('last')}"
+    if followup_base and not (
+        _NAMED_PERSON_AGGREGATION_ACTION.search(file_authority_speech(followup_base))
+        and _NAMED_PERSON_AGGREGATION_SUBJECT.search(file_authority_speech(followup_base))
+    ):
+        followup_base = ""
+        followup_time_source = ""
     person_proved = file_turn_authority(message).proved("person")
     scope_only = bool(_NAMED_PERSON_SCOPE_ONLY.fullmatch(speech))
     implicit_clocked_self_corpus = bool(
@@ -8251,7 +8311,7 @@ def _named_person_aggregation_scope(
         and _NAMED_PERSON_AGGREGATION_SUBJECT.search(speech)
         and (_NAMED_PERSON_RECEIVED_TIME.search(speech) or _NAMED_PERSON_DOCUMENT_TIME.search(speech))
     )
-    if not (person_proved or scope_only or implicit_clocked_self_corpus):
+    if not (person_proved or scope_only or implicit_clocked_self_corpus or followup_base):
         return None
     if not _named_person_query_from(visible) and file_turn_authority(message).source_filenames():
         # An exact input filename is a stronger source selector than the
@@ -8274,33 +8334,39 @@ def _named_person_aggregation_scope(
     inherited = False
     base = visible
     if not direct:
-        if not _NAMED_PERSON_SCOPE_ONLY.fullmatch(speech):
+        if followup_base:
+            base = followup_base
+            inherited = True
+        elif not _NAMED_PERSON_SCOPE_ONLY.fullmatch(speech):
             return None
-        prior_user = next(
-            (
-                _classification_text(str(row.get("content") or ""))
-                for row in reversed(history)
-                if str(row.get("role") or "") == "user"
-            ),
-            "",
-        )
-        if not (
-            _NAMED_PERSON_AGGREGATION_ACTION.search(file_authority_speech(prior_user))
-            and _NAMED_PERSON_AGGREGATION_SUBJECT.search(file_authority_speech(prior_user))
-        ):
-            return None
-        base = prior_user
-        inherited = True
+        else:
+            prior_user_text = next(
+                (
+                    _classification_text(str(row.get("content") or ""))
+                    for row in reversed(history)
+                    if str(row.get("role") or "") == "user"
+                ),
+                "",
+            )
+            if not (
+                _NAMED_PERSON_AGGREGATION_ACTION.search(file_authority_speech(prior_user_text))
+                and _NAMED_PERSON_AGGREGATION_SUBJECT.search(file_authority_speech(prior_user_text))
+            ):
+                return None
+            base = prior_user_text
+            inherited = True
 
     person_query = _named_person_query_from(visible) or _named_person_query_from(base)
     latest_match = _NAMED_PERSON_LATEST.search(visible) or _NAMED_PERSON_LATEST.search(base)
     latest_n = int(latest_match.group("count")) if latest_match else None
-    time_source = visible
+    requested_match = _NAMED_PERSON_REQUESTED_COUNT.search(base)
+    requested_n = int(requested_match.group("count")) if requested_match else None
+    time_source = followup_time_source or visible
     current_kind = lexical_time_window_kind(visible, today=date.today())
-    if inherited and current_kind is None and not latest_match:
+    if inherited and current_kind is None and not latest_match and not followup_time_source:
         time_source = base
 
-    combined_for_role = time_source
+    combined_for_role = f"{base} {time_source}" if followup_time_source else time_source
     received = bool(_NAMED_PERSON_RECEIVED_TIME.search(combined_for_role))
     document = bool(_NAMED_PERSON_DOCUMENT_TIME.search(combined_for_role))
     # In an uploader-scoped corpus, an unqualified range over files/documents
@@ -8335,6 +8401,7 @@ def _named_person_aggregation_scope(
         time_source=time_source,
         time_role=time_role,
         latest_n=latest_n,
+        requested_n=requested_n,
         inherited=inherited,
     )
 
@@ -14473,6 +14540,17 @@ _ADJACENT_ATTACHMENT_OVERVIEW_REQUEST = re.compile(
     r"[.!?]*",
     re.IGNORECASE,
 )
+_CURRENT_VISUAL_OVERVIEW_REQUEST = re.compile(
+    r"(?:а\s+)?(?:"
+    r"что\s+(?:изображено\s+)?(?:на|в)\s+(?:этом|данном)\s+"
+    r"(?:скан|скриншот|изображени|фотографи|фото)\w*|"
+    r"суть\s+(?:этого|данного)\s+(?:скан|скриншот|изображени|фотографи|фото)\w*\s+"
+    r"(?:опиши|расскажи|изложи)|"
+    r"(?:опиши|расскажи|изложи)\s+(?:суть\s+)?(?:этого|данного)\s+"
+    r"(?:скан|скриншот|изображени|фотографи|фото)\w*"
+    r")[.!?]*",
+    re.IGNORECASE,
+)
 _OVERVIEW_SENTENCE_END = re.compile(r"[.!?…](?:\s|$)")
 
 
@@ -14918,6 +14996,78 @@ def _adjacent_attachment_overview_request(message: str) -> bool:
         return False
     speech = " ".join(authority.speech.split())
     return bool(speech and _ADJACENT_ATTACHMENT_OVERVIEW_REQUEST.fullmatch(speech))
+
+
+def _current_visual_overview_request(message: str) -> bool:
+    """Exact one-current-image overview; details and effects stay on normal routing."""
+
+    authority = file_turn_authority(message)
+    if (
+        authority.quote_data()
+        or authority.has_effect()
+        or authority.proved("host_path")
+        or authority.source_filenames()
+        or _requests_all_attachment_set(message)
+        or _requests_both_attachment_sources(message)
+        or _attachment_explicitly_partial_scope(message)
+        or _is_document_metadata_request(message)
+    ):
+        return False
+    speech = " ".join(authority.speech.split())
+    return bool(speech and _CURRENT_VISUAL_OVERVIEW_REQUEST.fullmatch(speech))
+
+
+def _reusable_advisory_vision_summary(
+    attachment: Mapping[str, Any],
+    *,
+    require_registered_bytes: bool,
+) -> str:
+    """Return one complete language-matched visual summary or fail closed."""
+
+    if (
+        not isinstance(attachment, _OwnedAttachment)
+        or (require_registered_bytes and attachment.get("_registered_file_bytes_verified") is not True)
+        or attachment.get("advisory_only") is not True
+        or str(attachment.get("mime_type") or "").casefold()
+        not in {"application/pdf", "image/jpeg", "image/png", "image/webp", "image/tiff"}
+        or attachment.get("_advisory_vision_success") is not True
+        or attachment.get("_advisory_vision_deadline_reached") is True
+        or attachment.get("_advisory_vision_pages_truncated") is True
+        or attachment.get("_advisory_vision_text_truncated") is True
+    ):
+        return ""
+    try:
+        pages_read = int(attachment.get("_advisory_vision_pages_read") or 0)
+        pages_total = int(attachment.get("_advisory_vision_pages_total") or 0)
+        confidence = float(attachment.get("_advisory_vision_confidence") or 0.0)
+        coverage = float(attachment.get("_advisory_vision_asset_coverage") or 0.0)
+        grounded = int(attachment.get("_advisory_vision_grounded_evidence_count") or 0)
+    except (TypeError, ValueError, OverflowError):
+        return ""
+    if pages_read <= 0 or pages_read != pages_total or confidence < 0.5 or coverage < 0.99 or grounded <= 0:
+        return ""
+    summary = _accepted_upload_overview(attachment.get("_advisory_vision_summary"))
+    language = str(attachment.get("_advisory_vision_summary_language") or "").casefold()
+    letters = [character for character in summary if character.isalpha()]
+    if not summary or len(letters) < 20:
+        return ""
+    cyrillic = sum("а" <= character.casefold() <= "я" or character.casefold() == "ё" for character in letters)
+    latin = sum("a" <= character.casefold() <= "z" for character in letters)
+    if language == "ru" and cyrillic / len(letters) < 0.5:
+        return ""
+    if language == "en" and latin / len(letters) < 0.5:
+        return ""
+    if language not in {"ru", "en"}:
+        return ""
+    return summary
+
+
+def _advisory_vision_overview(message: str, attachment: Mapping[str, Any]) -> str:
+    """Return one already-produced visual summary for an exact overview request."""
+
+    if not _current_visual_overview_request(message):
+        return ""
+    return _reusable_advisory_vision_summary(attachment, require_registered_bytes=True)
 
 
 async def _maybe_bounded_file_overview(
@@ -22917,6 +23067,8 @@ class AgentRuntime:
         credential_redacted = transient_raw_text != raw_text
         extraction_success = metadata.get("extraction_success") is True
         advisory_only = bool(metadata.get("vision_review_required") or metadata.get("transcription"))
+        stored_vision = metadata.get("vision")
+        vision_metadata = dict(stored_vision) if isinstance(stored_vision, Mapping) else {}
         archive_truncated = metadata.get("archive_truncated") is True
         source_truncated_for_parse = metadata.get("source_truncated_for_parse") is True
         try:
@@ -23023,6 +23175,27 @@ class AgentRuntime:
             # through FileEvidenceView, never through model/API metadata.
             _RAW_SOURCE_IDENTITY_KEY: _raw_source_identity_sha256(raw),
         }
+        vision_summary = str(vision_metadata.get("summary") or "").strip()[:2_000]
+        if vision_summary:
+            result.update(
+                {
+                    "_advisory_vision_success": vision_metadata.get("success") is True,
+                    "_advisory_vision_summary": vision_summary,
+                    "_advisory_vision_summary_language": str(vision_metadata.get("summary_language") or "")[
+                        :16
+                    ],
+                    "_advisory_vision_confidence": vision_metadata.get("confidence"),
+                    "_advisory_vision_asset_coverage": vision_metadata.get("asset_coverage"),
+                    "_advisory_vision_grounded_evidence_count": vision_metadata.get(
+                        "grounded_evidence_count"
+                    ),
+                    "_advisory_vision_pages_read": vision_metadata.get("pages_read"),
+                    "_advisory_vision_pages_total": vision_metadata.get("pages_total"),
+                    "_advisory_vision_pages_truncated": vision_metadata.get("pages_truncated") is True,
+                    "_advisory_vision_deadline_reached": vision_metadata.get("deadline_reached") is True,
+                    "_advisory_vision_text_truncated": vision_metadata.get("text_truncated") is True,
+                }
+            )
         safe_document_metadata = _safe_document_metadata_projection(metadata)
         if safe_document_metadata:
             # Process-private and strictly allowlisted.  The model projector
@@ -23176,6 +23349,17 @@ class AgentRuntime:
                     "parse_total_pages",
                     "advisory_only",
                     "verification_eligible",
+                    "_advisory_vision_success",
+                    "_advisory_vision_summary",
+                    "_advisory_vision_summary_language",
+                    "_advisory_vision_confidence",
+                    "_advisory_vision_asset_coverage",
+                    "_advisory_vision_grounded_evidence_count",
+                    "_advisory_vision_pages_read",
+                    "_advisory_vision_pages_total",
+                    "_advisory_vision_pages_truncated",
+                    "_advisory_vision_deadline_reached",
+                    "_advisory_vision_text_truncated",
                     OFFICE_STRUCTURE_KEY,
                     _OWNED_SAFE_DOCUMENT_METADATA,
                 )
@@ -23696,9 +23880,10 @@ class AgentRuntime:
                 reason=window_error,
             )
         tenant = actor.user_id if actor.shared_tenant else chosen.user_id
+        requested_count = scope.latest_n if scope.latest_n is not None else scope.requested_n
         requested_page = min(
             _CONVERSATION_ATTACHMENT_MAX_FILES + 1,
-            max(1, scope.latest_n or (_CONVERSATION_ATTACHMENT_MAX_FILES + 1)),
+            max(1, requested_count or (_CONVERSATION_ATTACHMENT_MAX_FILES + 1)),
         )
         try:
             selected = self.storage.select_owned_file_corpus(
@@ -23720,7 +23905,7 @@ class AgentRuntime:
         total = max(0, int(selected.get("total") or 0)) if isinstance(selected, Mapping) else 0
         unattributed = max(0, int(selected.get("unattributed") or 0)) if isinstance(selected, Mapping) else 0
         undated = max(0, int(selected.get("undated") or 0)) if isinstance(selected, Mapping) else 0
-        expected = min(scope.latest_n, total) if scope.latest_n is not None else total
+        expected = min(requested_count, total) if requested_count is not None else total
         page = rows[: min(expected, _CONVERSATION_ATTACHMENT_MAX_FILES)]
         attachments: list[_OwnedAttachment] = []
         for row in page:
@@ -24663,6 +24848,7 @@ class AgentRuntime:
                     authorized.content,
                     filename=authorized.filename or filename,
                     mime_type=authorized.mime_type or mime_type,
+                    preferred_language="ru" if force_reinspect else "",
                     turn_deadline=turn_deadline,
                     expired="turn deadline expired during attachment recovery",
                 )
@@ -24784,6 +24970,21 @@ class AgentRuntime:
                     "_runtime_file_reparsed": True,
                 }
             )
+            for vision_field in (
+                "_advisory_vision_success",
+                "_advisory_vision_summary",
+                "_advisory_vision_summary_language",
+                "_advisory_vision_confidence",
+                "_advisory_vision_asset_coverage",
+                "_advisory_vision_grounded_evidence_count",
+                "_advisory_vision_pages_read",
+                "_advisory_vision_pages_total",
+                "_advisory_vision_pages_truncated",
+                "_advisory_vision_deadline_reached",
+                "_advisory_vision_text_truncated",
+            ):
+                if vision_field in inspected:
+                    recovered[vision_field] = inspected[vision_field]
             if source_text.strip():
                 recovered.pop("empty_text", None)
             else:
@@ -26800,13 +27001,9 @@ class AgentRuntime:
                 and _person_document_inventory_request(file_authority_speech(person_effect_message))
             )
         )
-        named_person_aggregation_scope = (
-            _named_person_aggregation_scope(
-                person_effect_message,
-                [item for item in prior_history if isinstance(item, dict)],
-            )
-            if file_turn.proved("person")
-            else None
+        named_person_aggregation_scope = _named_person_aggregation_scope(
+            person_effect_message,
+            [item for item in prior_history if isinstance(item, dict)],
         )
         exact_uploader_file_request = _named_uploader_exact_file_request(clean_message)
         prior_web_status, prior_web_sources, prior_web_scope = (
@@ -27661,7 +27858,18 @@ class AgentRuntime:
                 "turn_deadline": turn_deadline,
                 "expired": "turn deadline expired during registered attachment verification",
             }
-            if _ATTACHMENT_REREAD_REQUEST.search(_record_source_command_text(clean_message)):
+            refresh_visual_overview = bool(
+                len(active_attachment_set) == 1
+                and _current_visual_overview_request(clean_message)
+                and not _reusable_advisory_vision_summary(
+                    active_attachment_set[0],
+                    require_registered_bytes=False,
+                )
+            )
+            if (
+                _ATTACHMENT_REREAD_REQUEST.search(_record_source_command_text(clean_message))
+                or refresh_visual_overview
+            ):
                 # An explicit reread means re-run the current parser/OCR over
                 # the same reauthorized bytes, even when an older Raw row has
                 # non-empty but incomplete advisory text.  Ordinary follow-ups
@@ -29633,6 +29841,32 @@ class AgentRuntime:
         # ПОСЛЕ цикла, а не отсюда.
         settled = context.structural_answer
         asked_of_model = shape_request
+        visual_advisory_overview = ""
+        if (
+            supplied_attachment_count == 1
+            and attachment_expected_count == 1
+            and attachment_readable_count == 1
+            and len(active_attachment_set) == 1
+            and current_attachment_local
+            and authenticated_attachment_scope
+            and (focused_attachment_turn or _current_visual_overview_request(clean_message))
+            and not hierarchical_attachment_turn
+            and not file_web
+            and not file_voice
+            and not file_create
+            and not file_effect
+            and not visible_tools
+            and not document_metadata_owned
+            and not quoted_attachment_reference
+            and not reply_assistant_reference
+            and not reply_quote
+            and not replay_source_message_id
+            and not restored_attachment_expected_count
+        ):
+            visual_advisory_overview = _advisory_vision_overview(
+                clean_message,
+                active_attachment_set[0],
+            )
         response: dict[str, Any]
         if foreign_private_request or dangerous_instruction_request or private_web_search_blocked:
             # The privacy boundary owns the whole turn.  Keep this explicit
@@ -29677,6 +29911,19 @@ class AgentRuntime:
                 ),
                 "tools_used": [],
                 "_workspace_create_owned": True,
+            }
+        elif visual_advisory_overview:
+            # OCR/vision already paid for one grounded, page-complete summary
+            # while accepting this exact registered upload.  A second general
+            # model pass added 80--110 seconds in production and occasionally
+            # dropped most of the scan.  Publish the bounded advisory summary
+            # directly; the ordinary OCR warning and final Raw/disk reauth still
+            # apply.
+            response = {
+                "content": visual_advisory_overview,
+                "tools_used": [],
+                "_model_generated": False,
+                "_advisory_vision_summary_owned": True,
             }
         elif direct_attachment_exact_file_projection_turn:
             # The request names one closed, ordered four-field projection and
@@ -30144,6 +30391,7 @@ class AgentRuntime:
         if (
             attachment_evidence
             and response.get("_office_exact_owned") is not True
+            and response.get("_advisory_vision_summary_owned") is not True
             and not web_evidence_used
             and not file_web
             and (
@@ -31008,6 +31256,7 @@ class AgentRuntime:
             or response.get("_unreadable_attachment_owned") is True
             or response.get("_attachment_model_failure_owned") is True
             or response.get("_advisory_attachment_literal_owned") is True
+            or response.get("_advisory_vision_summary_owned") is True
             or response.get("_workspace_create_owned") is True
             or response.get("_direct_exact_file_body_owned") is True
             or response.get("_small_talk_owned") is True
@@ -37358,6 +37607,16 @@ class AgentRuntime:
         kind, payload = context.outward_verdict or ("", None)
         if not str(kind or "").startswith("файл") or not payload:
             return False
+        # A semantic classifier may propose file dates, but it is not authority
+        # for an irreversible archive creation.  The live regression was a
+        # date-only clarification after "выбери и обобщи": the classifier
+        # supplied a file-shaped verdict and this method silently built a ZIP.
+        # Require the current user surface itself to contain the closed archive
+        # collection order.  Context may resolve its dates, never invent its
+        # effect.
+        if message and not _ATTACHMENT_ARCHIVE_COLLECTION_ACTION.search(_record_source_command_text(message)):
+            LOGGER.info("archive-prefetch: current turn did not authorize archive creation")
+            return False
         days = [part.strip() for part in str(payload).split(",") if part.strip()]
         if not days:
             return False
@@ -41683,6 +41942,27 @@ class AgentRuntime:
             if unreachable
             else ""
         )
+        if unreachable and context.web_evidence_status in {"sourced", "partial"} and context.web_sources:
+            # The outbound work already succeeded; only the model-authored
+            # synthesis failed.  Falling through to the archive miss below
+            # made a real web search look like a local-only lookup (observed on
+            # the ASUS Ascent GX10 turn, 2026-08-17).  Preserve the bounded
+            # public provenance without inventing a product conclusion.
+            source_titles = [
+                " ".join(str(source.get("title") or "").split())[:240]
+                for source in context.web_sources[:5]
+                if isinstance(source, Mapping) and " ".join(str(source.get("title") or "").split())
+            ]
+            sources = (
+                "\n\nНайденные источники:\n" + "\n".join(f"- {title}" for title in source_titles)
+                if source_titles
+                else ""
+            )
+            return header + (
+                f"Интернет-поиск завершён, источников найдено: {len(context.web_sources[:5])}. "
+                "Модель не успела обобщить их содержимое, поэтому я не буду "
+                "подменять веб-ответ результатами поиска по личному архиву." + sources
+            )
         if context.kb_size == 0:
             return header + (
                 "Личная база знаний пока пуста. Отправьте заметку, расскажите о проекте "
