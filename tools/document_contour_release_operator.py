@@ -67,7 +67,7 @@ BATTERY_CASE_IDS = tuple(f"D{index:02d}" for index in range(1, 11))
 
 _EXPECTED_DEPENDENCY_HASHES = {
     "tools/document_contour_live_battery.py": (
-        "f630b65803e3ea92b3430675bb8905ec21132f2008175ad2aedd6226a9007c57"
+        "ddbd7c5e4a3bc40ec18c28903db5b6d69927aabda29d47db08337b4242dd3e43"
     ),
     "friday/diagnostics/__init__.py": ("86ce0798ec2666b3ebe05318fc1483042c2c9e35994f60d7f588cae47c779c06"),
     "friday/diagnostics/runtime_lease.py": (

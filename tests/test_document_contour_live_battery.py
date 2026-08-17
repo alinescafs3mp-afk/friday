@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -67,6 +68,15 @@ def test_d07_scan_fixture_roundtrip_keeps_the_complete_secret_inside_page() -> N
     images = list(reader.pages[-1].images)
     assert len(images) == 1
     page = images[0].image.convert("L")
+    # The complete five-page raster fixture fits into two production batches,
+    # both admissible in one concurrency wave.  This keeps the live canary
+    # semantic (page-five OCR) instead of repeating five oversized prompts.
+    assert page.width == runner._SCAN_FIXTURE_WIDTH
+    assert page.height == runner._SCAN_FIXTURE_HEIGHT
+    render_width = math.ceil(runner._SCAN_PDF_WIDTH * 2.5)
+    render_height = math.ceil(runner._SCAN_PDF_HEIGHT * 2.5)
+    assert render_width * render_height * 3 <= 1_048_576
+    assert render_width * render_height * 4 > 1_048_576
     marker_band = page.crop(
         (
             0,
@@ -753,7 +763,7 @@ def test_d06_and_d08_apply_semantic_generation_integrity_and_d08_fixture_is_not_
         def __init__(self, case_id: str, counts) -> None:  # noqa: ANN001
             self.case_id = case_id
             self.probes = FakeProbes(counts)
-            self.settings = SimpleNamespace(profile=SimpleNamespace(max_model_len=40_960))
+            self.settings = SimpleNamespace(profile=SimpleNamespace(max_model_len=8_192))
             self.payload = b""
 
         @staticmethod
@@ -824,8 +834,29 @@ def test_d06_and_d08_apply_semantic_generation_integrity_and_d08_fixture_is_not_
     assert d08_result["status"] == "passed", d08_result
     lines = d08.payload.decode("utf-8").splitlines()
     filler_lines = [line for line in lines if line.startswith("Синтетическая нейтральная запись")]
-    assert len(filler_lines) == len(set(filler_lines)) == 3_000
-    assert len(d08.payload.decode("utf-8")) > 40_960 * 4
+    assert len(filler_lines) == len(set(filler_lines)) == 400
+    assert len(d08.payload.decode("utf-8")) > 8_192 * 4
+
+
+def test_d08_live_case_uses_isolated_small_context_without_changing_release_profile(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runner = _module()
+    from friday.config import load_settings
+
+    monkeypatch.setenv("FRIDAY_ENV_FILE", "/dev/null")
+    monkeypatch.setenv("FRIDAY_DATABASE_PATH", str(tmp_path / "scratch.sqlite3"))
+    base = load_settings(runner._RELEASE_PROFILE)
+
+    d08, _case_dir, _evidence = runner._settings_for_case(base, tmp_path / "run", "D08")
+    d06, _case_dir, _evidence = runner._settings_for_case(base, tmp_path / "run", "D06")
+
+    assert base.profile.max_model_len == 40_960
+    assert d06.profile is base.profile
+    assert d08.profile.max_model_len == 8_192
+    assert d08.profile.name == base.profile.name
+    assert d08.profile.document_map_max_concurrency == base.profile.document_map_max_concurrency
 
 
 @pytest.mark.parametrize("cap", (2, 3))

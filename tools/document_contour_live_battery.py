@@ -1229,13 +1229,21 @@ def _xlsx_bytes(rows: Sequence[Sequence[str]]) -> bytes:
     return output.getvalue()
 
 
-_SCAN_FIXTURE_WIDTH = 1_600
-_SCAN_FIXTURE_HEIGHT = 2_200
-_SCAN_FIXTURE_TEXT_X = 110
-_SCAN_FIXTURE_RIGHT_MARGIN = 110
-_SCAN_FIXTURE_FONT_SIZE = 76
-_SCAN_SECRET_LABEL_Y = 800
-_SCAN_SECRET_VALUE_Y = 940
+# Keep the five-page scan genuinely raster-only while fitting all pages into
+# two vision batches in one concurrent wave.  The previous 1600x2200 pages
+# exceeded the batch pixel ceiling individually, turning this coverage canary
+# into five near-identical long model calls.  480x660 remains comfortably
+# readable after the PDF page scales it up, but proves page-five coverage with
+# the production batch planner rather than benchmarking the same OCR prompt.
+_SCAN_FIXTURE_WIDTH = 480
+_SCAN_FIXTURE_HEIGHT = 660
+_SCAN_FIXTURE_TEXT_X = 28
+_SCAN_FIXTURE_RIGHT_MARGIN = 28
+_SCAN_FIXTURE_FONT_SIZE = 26
+_SCAN_SECRET_LABEL_Y = 240
+_SCAN_SECRET_VALUE_Y = 292
+_SCAN_PDF_WIDTH = 200
+_SCAN_PDF_HEIGHT = 275
 
 
 def _scan_fixture_font(text: str, font_path: Path, *, max_width: int) -> Any:
@@ -1269,14 +1277,31 @@ def _scan_pdf(marker: str, *, pages: int = 5, fixture_scope: str = "") -> bytes:
     )
     secret_width = _SCAN_FIXTURE_WIDTH - _SCAN_FIXTURE_TEXT_X - _SCAN_FIXTURE_RIGHT_MARGIN
     output = io.BytesIO()
-    pdf = canvas.Canvas(output, pagesize=(800, 1100), pageCompression=1)
+    # PDFium renders ordinary PDF coordinates at 2.5x.  A 200x275 MediaBox
+    # therefore yields about 344k pixels per visible page: three pages fit the
+    # 1,048,576-pixel batch ceiling and the five-page scan becomes 3+2.
+    pdf = canvas.Canvas(
+        output,
+        pagesize=(_SCAN_PDF_WIDTH, _SCAN_PDF_HEIGHT),
+        pageCompression=1,
+    )
     for page in range(1, pages + 1):
         image = Image.new("RGB", (_SCAN_FIXTURE_WIDTH, _SCAN_FIXTURE_HEIGHT), "white")
         draw = ImageDraw.Draw(image)
-        draw.text((110, 180), f"SYNTHETIC SCAN PAGE {page}", fill="black", font=font)
-        draw.text((110, 480), f"CONTROL PAGE NUMBER {page}", fill="black", font=font)
+        draw.text((28, 54), f"SYNTHETIC SCAN PAGE {page}", fill="black", font=font)
+        draw.text((28, 138), f"CONTROL PAGE NUMBER {page}", fill="black", font=font)
         if fixture_scope:
-            draw.text((110, 650), f"FIXTURE SCOPE {fixture_scope} PAGE {page}", fill="black", font=font)
+            scope_font = _scan_fixture_font(
+                f"FIXTURE SCOPE {fixture_scope} PAGE {page}",
+                font_path,
+                max_width=secret_width,
+            )
+            draw.text(
+                (_SCAN_FIXTURE_TEXT_X, 190),
+                f"FIXTURE SCOPE {fixture_scope} PAGE {page}",
+                fill="black",
+                font=scope_font,
+            )
         if page == pages:
             draw.text(
                 (_SCAN_FIXTURE_TEXT_X, _SCAN_SECRET_LABEL_Y),
@@ -1294,7 +1319,13 @@ def _scan_pdf(marker: str, *, pages: int = 5, fixture_scope: str = "") -> bytes:
         encoded = io.BytesIO()
         image.save(encoded, format="PNG", optimize=True)
         encoded.seek(0)
-        pdf.drawImage(ImageReader(encoded), 0, 0, width=800, height=1100)
+        pdf.drawImage(
+            ImageReader(encoded),
+            0,
+            0,
+            width=_SCAN_PDF_WIDTH,
+            height=_SCAN_PDF_HEIGHT,
+        )
         pdf.showPage()
     pdf.save()
     return output.getvalue()
@@ -2496,8 +2527,13 @@ def _case_08(h: Harness) -> dict[str, Any]:
         )
 
     parts = [f"Начало документа. Контрольный код {markers[0]}.\n"]
-    parts.append(filler(0, 1500) + f"Середина документа. Контрольный код {markers[1]}.\n")
-    parts.append(filler(1500, 3000) + f"Конец документа. Контрольный код {markers[2]}.\n")
+    # D08 runs with an isolated 8K context profile.  Roughly 40K source
+    # characters therefore cross the same real hierarchy boundary while a few
+    # moderate MAP leaves replace three near-context requests.  Offline
+    # contract tests retain the production 40K thresholds and exhaustive edge
+    # matrix; this live case proves the end-to-end mechanism, not throughput.
+    parts.append(filler(0, 200) + f"Середина документа. Контрольный код {markers[1]}.\n")
+    parts.append(filler(200, 400) + f"Конец документа. Контрольный код {markers[2]}.\n")
     payload = "".join(parts).encode("utf-8")
     before = h.probes.snapshot()
     answer = h.chat(
@@ -2918,8 +2954,10 @@ def _settings_for_case(
         if key not in {"database", "evidence"}:
             _private_dir(path)
     mcp_enabled = case_id == "D10"
+    profile = replace(base.profile, max_model_len=8_192) if case_id == "D08" else base.profile
     settings = replace(
         base,
+        profile=profile,
         home=paths["root"],
         data_dir=paths["data"],
         cache_dir=paths["cache"],
