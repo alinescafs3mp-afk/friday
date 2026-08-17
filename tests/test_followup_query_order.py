@@ -178,6 +178,19 @@ def test_short_personal_file_history_question_is_self_contained(question: str) -
     assert AgentRuntime._contextualize_query(question, history) == question  # noqa: SLF001
 
 
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Какая погода завтра в Донецке?",
+        "Какой прогноз на завтра?",
+        "What is the weather tomorrow?",
+    ],
+)
+def test_short_weather_question_never_inherits_the_previous_file_command(question: str) -> None:
+    history = [{"role": "user", "content": "перечитай файл ещё раз"}]
+    assert AgentRuntime._contextualize_query(question, history) == question  # noqa: SLF001
+
+
 def test_real_follow_ups_still_get_the_context():
     """Обратная сторона: слишком строгий порог отнимет контекст у настоящих хвостов.
 

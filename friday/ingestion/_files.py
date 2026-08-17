@@ -611,6 +611,9 @@ class FilesMixin(PipelineShared):
                 "type": "text",
                 "text": (
                     "Analyze these pages/images as a document. Perform careful OCR where possible. "
+                    "A scan may be sideways or upside down even when its page metadata reports a "
+                    "normal orientation: inspect every supplied image in all four right-angle "
+                    "orientations and read it in the orientation that makes the visible text upright. "
                     "Each image is preceded by a stable asset label such as A1. Return exactly one "
                     "JSON object with keys: pages, text, title, summary, document_type, confidence, "
                     "entities, evidence, warnings. entities is an array of objects with name, "
@@ -832,7 +835,9 @@ class FilesMixin(PipelineShared):
                         "role": "system",
                         "content": (
                             "You are Friday's local document OCR extractor. Output strict JSON only. "
-                            "Transcribe visible text exactly; do not infer or complete obscured text."
+                            "Transcribe visible text exactly; do not infer or complete obscured text. "
+                            "The scan may be sideways or upside down: inspect all four right-angle "
+                            "orientations and use the one that makes the visible text upright."
                         ),
                     },
                     {

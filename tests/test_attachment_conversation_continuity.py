@@ -1129,6 +1129,139 @@ def test_only_budgeted_history_can_restore_an_attachment(settings, storage):
     assert restored == [] and expected == 0
 
 
+def test_reread_file_again_restores_only_the_previous_assistant_attachment(settings, storage):
+    raw = _pending_file(storage, "alice", "alice", "FULL-SCAN-TEXT", filename="scan.pdf")
+    runtime = AgentRuntime(settings, storage)
+    conversation = storage.create_conversation("alice")
+    storage.store_message(
+        conversation["id"],
+        "alice",
+        "user",
+        "Что в этом скане?",
+        metadata={"conversation_attachment_raw_ids": [raw.id]},
+    )
+    storage.store_message(
+        conversation["id"],
+        "alice",
+        "assistant",
+        "Краткое чтение скана.",
+        metadata={
+            "attachment_context_used": True,
+            "conversation_attachment_raw_ids": [raw.id],
+        },
+    )
+    history = storage.get_conversation_messages(conversation["id"], user_id="alice")
+
+    restored, expected = runtime._restore_conversation_attachments(  # noqa: SLF001
+        "перечитай файл ещё раз",
+        history,
+        tenant_id="alice",
+        person_id="alice",
+        allow_file_read=True,
+    )
+    unrelated, unrelated_expected = runtime._restore_conversation_attachments(  # noqa: SLF001
+        "Какая погода завтра в Донецке?",
+        history,
+        tenant_id="alice",
+        person_id="alice",
+        allow_file_read=True,
+    )
+
+    assert expected == 1
+    assert [item["raw_object_id"] for item in restored] == [raw.id]
+    assert unrelated == [] and unrelated_expected == 0
+
+
+def test_reread_file_again_without_proven_assistant_lineage_restores_nothing(settings, storage):
+    raw = _pending_file(storage, "alice", "alice", "AMBIENT-SCAN-TEXT", filename="ambient.pdf")
+    runtime = AgentRuntime(settings, storage)
+    conversation = storage.create_conversation("alice")
+    storage.store_message(
+        conversation["id"],
+        "alice",
+        "user",
+        "старый файл",
+        metadata={"conversation_attachment_raw_ids": [raw.id]},
+    )
+    storage.store_message(conversation["id"], "alice", "assistant", "Обычный ответ без файла.")
+    history = storage.get_conversation_messages(conversation["id"], user_id="alice")
+
+    restored, expected = runtime._restore_conversation_attachments(  # noqa: SLF001
+        "перечитай файл ещё раз",
+        history,
+        tenant_id="alice",
+        person_id="alice",
+        allow_file_read=True,
+    )
+
+    assert restored == [] and expected == 0
+
+
+@pytest.mark.asyncio
+async def test_reread_file_again_reinspects_verified_bytes_instead_of_reusing_sparse_ocr(
+    settings,
+    storage,
+    monkeypatch,
+):
+    raw = _pending_file(storage, "alice", "alice", "30 декабря 2025 г.", filename="scan.pdf")
+    conversation = storage.create_conversation("alice")
+    storage.store_message(
+        conversation["id"],
+        "alice",
+        "user",
+        "Что в этом скане?",
+        metadata={"conversation_attachment_raw_ids": [raw.id]},
+    )
+    storage.store_message(
+        conversation["id"],
+        "alice",
+        "assistant",
+        "Вижу только дату.",
+        metadata={
+            "attachment_context_used": True,
+            "conversation_attachment_raw_ids": [raw.id],
+        },
+    )
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    inspections: list[bytes] = []
+
+    class Inspection:
+        async def inspect_file_transient(self, content, **kwargs):  # noqa: ANN001
+            inspections.append(bytes(content))
+            assert kwargs["filename"] == "scan.pdf"
+            return {
+                "extraction_success": True,
+                "advisory_only": True,
+                "_runtime_source_text": "ПОЛНЫЙ ТЕКСТ ПОВЁРНУТОГО СКАНА",
+                "text_preview": "ПОЛНЫЙ ТЕКСТ ПОВЁРНУТОГО СКАНА",
+                "parse_pages_read": 1,
+                "parse_total_pages": 1,
+            }
+
+    runtime.kernel.ingestion = Inspection()
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    result = await runtime.chat(
+        "alice",
+        "перечитай файл ещё раз",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert result["restored_attachment_count"] == 1
+    assert len(inspections) == 1
+    assert len(seen) == 1
+    recovered = seen[0][1]
+    assert len(recovered) == 1
+    assert recovered[0]["transient_text"] == "ПОЛНЫЙ ТЕКСТ ПОВЁРНУТОГО СКАНА"
+    assert recovered[0]["advisory_only"] is True
+
+
 @pytest.mark.parametrize(
     ("query", "expected_indices"),
     [

@@ -9129,6 +9129,7 @@ _ATTACHMENT_REFERENCE_NOUN = (
     r"(?:файл(?:а|е|у|ом|ы|ов|ам|ами|ах)?|"
     r"документ(?:а|е|у|ом|ы|ов|ам|ами|ах)?|"
     r"вложен(?:ие|ия|ии|ию|ием|ий|иям|иями|иях)|"
+    r"скан(?:а|е|у|ом|ы|ов|ам|ами|ах)?|"
     r"таблиц(?:а|ы|е|у|ей|ам|ами|ах)?)"
 )
 _EXPLICIT_ATTACHMENT_REFERENCE = re.compile(
@@ -9381,8 +9382,19 @@ _NON_ATTACHMENT_REFERENCE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
-_DEICTIC_ATTACHMENT_CONTINUATION = re.compile(
+_ATTACHMENT_REREAD_PATTERN = (
     r"(?:"
+    r"\bперечит\w*\s+(?:(?:этот|тот)\s+)?"
+    r"(?:файл\w*|документ\w*|вложени\w*|скан\w*)"
+    r"(?:\s+(?:ещ[её]\s+раз|снова|заново))?\b|"
+    r"\bпрочит\w*\s+(?:(?:этот|тот)\s+)?"
+    r"(?:файл\w*|документ\w*|вложени\w*|скан\w*)\s+"
+    r"(?:ещ[её]\s+раз|снова|заново)\b"
+    r")"
+)
+_ATTACHMENT_REREAD_REQUEST = re.compile(_ATTACHMENT_REREAD_PATTERN, re.IGNORECASE)
+_DEICTIC_ATTACHMENT_CONTINUATION = re.compile(
+    rf"(?:{_ATTACHMENT_REREAD_PATTERN}|"
     r"\b(?:в|из|по|о|об|про)\s+(?:н(?:е|ё)м|ней|них|нему|не[её]|него)\b|"
     r"\b(?:ранее|до\s+этого)\s+(?:присланн\w*\s+)?данн\w*\b|"
     r"\b(?:присланн|загруженн|прикрепл[её]нн)\w*\s+данн\w*\b|"
@@ -24402,6 +24414,7 @@ class AgentRuntime:
         tenant_id: str,
         person_id: str,
         require_projected_direct_read_authority: bool = False,
+        force_reinspect: bool = False,
         turn_deadline: float | None = None,
     ) -> list[dict[str, Any]]:
         """Verify every registered source on disk and recover stale extraction.
@@ -24589,7 +24602,7 @@ class AgentRuntime:
             # Only fail-closed state is inherited here—never caller text or a
             # success/completeness upgrade.
             body = str(canonical.get("transient_text") or "")
-            if body.strip() or canonical.get("empty_text") is True:
+            if not force_reinspect and (body.strip() or canonical.get("empty_text") is True):
                 hydrated.append(_private_owned_attachment_copy(verified, source=canonical))
                 continue
             # Historical/exact-name projections deliberately cross a second
@@ -27642,13 +27655,22 @@ class AgentRuntime:
             # The Raw row selected above is the SQLite authority; prove that its
             # registered immutable bytes still exist and match before cached
             # text, metadata or a current-parser recovery can answer anything.
+            verification_kwargs: dict[str, Any] = {
+                "tenant_id": attachment_authority_tenant,
+                "person_id": attachment_authority_person,
+                "turn_deadline": turn_deadline,
+                "expired": "turn deadline expired during registered attachment verification",
+            }
+            if _ATTACHMENT_REREAD_REQUEST.search(_record_source_command_text(clean_message)):
+                # An explicit reread means re-run the current parser/OCR over
+                # the same reauthorized bytes, even when an older Raw row has
+                # non-empty but incomplete advisory text.  Ordinary follow-ups
+                # keep the cached fast path.
+                verification_kwargs["force_reinspect"] = True
             active_attachment_set = await _call_with_turn_deadline(
                 self._verify_registered_file_attachments,
                 active_attachment_set,
-                tenant_id=attachment_authority_tenant,
-                person_id=attachment_authority_person,
-                turn_deadline=turn_deadline,
-                expired="turn deadline expired during registered attachment verification",
+                **verification_kwargs,
             )
             attachment_snapshot_changed_before_admission = any(
                 _attachment_snapshot_rejected(item) for item in active_attachment_set
@@ -33560,6 +33582,17 @@ class AgentRuntime:
                 re.IGNORECASE,
             )
         )
+        # A weather question names its own subject even when it is short and
+        # starts with ``какая/какой``.  Treating it as a follow-up appended the
+        # preceding file command (observed as ``Какая погода...?\nперечитай
+        # файл ещё раз``) and polluted the web query with an unrelated source.
+        self_contained_weather = bool(
+            re.search(
+                r"\b(?:погод\w*|прогноз\w*|температур\w*|weather|forecast|temperature)\b",
+                clean,
+                re.IGNORECASE,
+            )
+        )
         # Short follow-ups such as “а когда?” need the previous user subject,
         # but we deliberately include only one turn to avoid topic drift.
         #
@@ -33576,6 +33609,7 @@ class AgentRuntime:
         # переписки (девять слов) остаётся самостоятельным.
         follow_up = bool(
             not self_contained_file_history
+            and not self_contained_weather
             and len(clean.split()) <= 6
             and len(clean) <= 90
             and (

@@ -53,6 +53,9 @@ class _PageVision:
     async def chat(self, messages, **kwargs):
         assert kwargs["temperature"] == 0.0
         content = messages[-1]["content"]
+        instruction = str(content[0].get("text") or "")
+        assert "sideways or upside down" in instruction
+        assert "all four right-angle orientations" in instruction
         descriptors = [
             str(item.get("text") or "")
             for item in content
