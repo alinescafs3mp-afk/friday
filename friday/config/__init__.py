@@ -75,6 +75,18 @@ def _choice_env(name: str, default: str, allowed: tuple[str, ...]) -> str:
     return value
 
 
+def _fail_closed_choice_env(name: str, default: str, allowed: tuple[str, ...]) -> str:
+    """Return the safe default for an unknown rollout value.
+
+    Most policy typos should stop startup.  A runtime migration switch is the
+    exception: an unknown value must preserve the proven legacy runtime rather
+    than turning a deployment typo into an outage or selecting new code.
+    """
+
+    value = (env(name) or default).strip().casefold()
+    return value if value in allowed else default
+
+
 def _int_env(name: str, default: int, *, minimum: int | None = None) -> int:
     try:
         value = int(env(name, str(default)) or default)
@@ -738,6 +750,14 @@ class FridaySettings:
     mcp_call_timeout_sec: float = 20.0
     mcp_result_chars: int = 7_000
 
+    # V12 is a reversible orchestration migration over the same storage,
+    # authorization and execution kernel. Defaults preserve the exact legacy
+    # runtime; canary routes are inert until both the mode and a handler exist.
+    router_mode: str = "legacy"
+    router_canary_routes: tuple[str, ...] = ("file_read",)
+    router_canary_user_ids: tuple[str, ...] = ()
+    router_plan_timeout_sec: float = 12.0
+
     @property
     def is_loopback_bind(self) -> bool:
         return self.api_host in {"127.0.0.1", "localhost", "::1"}
@@ -826,6 +846,12 @@ class FridaySettings:
                 "auth": bool(self.llm_api_key),
                 "verify_answers": self.verify_answers,
                 "verify_min_answer_chars": self.verify_min_answer_chars,
+            },
+            "orchestration": {
+                "mode": self.router_mode,
+                "canary_routes": list(self.router_canary_routes),
+                "canary_user_count": len(self.router_canary_user_ids),
+                "plan_timeout_sec": self.router_plan_timeout_sec,
             },
             "embeddings": {
                 "enabled": self.embeddings_enabled,
@@ -1256,6 +1282,19 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         mcp_result_chars=min(
             7_000,
             _int_env("FRIDAY_MCP_RESULT_CHARS", 7_000, minimum=1_000),
+        ),
+        router_mode=_fail_closed_choice_env(
+            "FRIDAY_ROUTER_MODE",
+            "legacy",
+            ("legacy", "shadow", "canary", "v12"),
+        ),
+        router_canary_routes=tuple(
+            item.casefold() for item in _list_env("FRIDAY_ROUTER_CANARY_ROUTES", ["file_read"])
+        ),
+        router_canary_user_ids=tuple(_list_env("FRIDAY_ROUTER_CANARY_USER_IDS")),
+        router_plan_timeout_sec=min(
+            60.0,
+            _float_env("FRIDAY_ROUTER_PLAN_TIMEOUT_SEC", 12.0, minimum=1.0),
         ),
     )
 

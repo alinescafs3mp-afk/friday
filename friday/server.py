@@ -78,6 +78,7 @@ from friday.executive import ExecutiveService
 from friday.executive.api import admin_router as missions_admin_router
 from friday.executive.api import router as missions_router
 from friday.file_delivery import AuthorizedFileReadError, FileRecordUnavailable, read_authorized_file
+from friday.file_evidence import stamp_current_turn_file_reference
 from friday.generated_files import persist_generated_response_files
 from friday.http_errors import relation_history_http_detail
 from friday.ingestion import (
@@ -93,6 +94,7 @@ from friday.office_attestation import (
     OFFICE_STRUCTURE_ATTESTATION_METADATA_KEY,
     verify_office_structure_attestation,
 )
+from friday.orchestration import OrchestrationRouter, build_orchestrated_agent
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
 from friday.permissions import (
     LEGACY_OWNER_USER_ID,
@@ -704,8 +706,8 @@ def _current_turn_file_attachment(
     )
     if office_index is not None:
         attachment[OFFICE_STRUCTURE_KEY] = office_index
-        return trusted_office_attachment(attachment)
-    return _OwnedAttachment(attachment)
+        return stamp_current_turn_file_reference(trusted_office_attachment(attachment), raw or {})
+    return stamp_current_turn_file_reference(_OwnedAttachment(attachment), raw or {})
 
 
 def _request_hostname(value: str) -> str | None:
@@ -1413,7 +1415,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             mcp_manager: MCPClientManager | None = None
             kernel = ExecutionKernel(auth_service, settings)
             kernel.bind_services(storage, graph, web_surfer, ingestion, searcher=searcher)
-            agent = AgentRuntime(settings, storage, llm, kernel)
+            legacy_agent = AgentRuntime(settings, storage, llm, kernel)
+            agent = build_orchestrated_agent(settings, legacy_agent, llm)
             executive = ExecutiveService(settings, storage, auth_service, kernel, llm, ingestion)
             kernel.bind_executive(executive)
             memory_vault = MemoryVault(
@@ -1499,6 +1502,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             try:
                 yield
             finally:
+                if isinstance(agent, OrchestrationRouter):
+                    await agent.close()
                 await workers.stop()
                 await web_surfer.close()
                 if mcp_manager is not None:

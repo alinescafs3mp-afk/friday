@@ -19,7 +19,6 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as datetime_time
 from difflib import SequenceMatcher
-from enum import Enum
 from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
 
@@ -99,6 +98,12 @@ from friday.file_delivery import (
     classify_file_registration,
     read_authorized_file,
     read_authorized_file_in_transaction,
+)
+from friday.file_evidence import (
+    FileBodyKind,
+    FileEvidenceSet,
+    FileEvidenceView,
+    FileRegistrationKind,
 )
 from friday.knowledge_graph import build_user_model, normalize_event_date
 from friday.morphology import LEXICAL_MIN_STEM_INPUT, stem
@@ -807,80 +812,6 @@ def _withhold_nonverifiable_attachment(item: Any) -> Any:
 
 class _WorkspaceInboxAttachment(dict[str, Any]):
     """Ephemeral text returned by an authorised, revalidated MCP inbox read."""
-
-
-class FileRegistrationKind(str, Enum):
-    """Process-private registration class for one attachment."""
-
-    NONE = "none"
-    LEGACY = "legacy"
-    INVALID = "invalid"
-    VALID = "valid"
-
-
-class FileBodyKind(str, Enum):
-    """Process-private body class for one attachment."""
-
-    NONE = "none"
-    EMPTY = "empty"
-    EXTRACTED = "extracted"
-    ADVISORY = "advisory"
-    PROJECTED = "projected"
-
-
-@dataclass(frozen=True, slots=True)
-class FileEvidenceView:
-    """Immutable process-private evidence after auth + byte verification.
-
-    Never serialized to SQLite or public API JSON.  Only private attachment
-    marker types may host this view; a forged public ``dict`` cannot.
-    """
-
-    raw_id: str | None
-    source_identity_sha256: str | None
-    registration: FileRegistrationKind
-    disk_verified: bool
-    workspace_relative_path: str | None
-    workspace_sha256: str | None
-    workspace_source_sha256: str | None
-    body_kind: FileBodyKind
-    source_complete: bool
-    projection_applied: bool
-    projection_empty_no_match: bool
-    source_readable: bool
-    verification_eligible: bool
-
-
-@dataclass(frozen=True, slots=True)
-class FileEvidenceSet:
-    """Closed cardinality projection over private FileEvidenceView items."""
-
-    items: tuple[FileEvidenceView, ...]
-    expected_count: int
-
-    @property
-    def source_readable_count(self) -> int:
-        return sum(1 for item in self.items if item.source_readable)
-
-    @property
-    def context_complete(self) -> bool:
-        return bool(
-            self.expected_count > 0
-            and self.expected_count <= _CONVERSATION_ATTACHMENT_MAX_FILES
-            and len(self.items) == self.expected_count
-            and self.source_readable_count == self.expected_count
-        )
-
-    @property
-    def coverage_complete(self) -> bool:
-        return bool(self.context_complete and all(item.source_complete for item in self.items))
-
-    @property
-    def verification_complete(self) -> bool:
-        return bool(
-            self.coverage_complete
-            and all(item.verification_eligible and item.source_readable for item in self.items)
-        )
 
 
 @dataclass(frozen=True, slots=True)

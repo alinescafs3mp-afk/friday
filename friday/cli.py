@@ -119,6 +119,10 @@ FRIDAY_LLM_MODEL=dispatcher
 FRIDAY_LLM_ENABLED=1
 FRIDAY_LLM_API_KEY=
 FRIDAY_VERIFY_ANSWERS=1
+FRIDAY_ROUTER_MODE=legacy
+FRIDAY_ROUTER_CANARY_ROUTES=file_read
+FRIDAY_ROUTER_CANARY_USER_IDS=
+FRIDAY_ROUTER_PLAN_TIMEOUT_SEC=12
 # Semantic search: point at a SEPARATE local OpenAI-compatible /embeddings service
 # (the chat vLLM above does not serve embeddings). Leave disabled to run on
 # lexical+FTS+graph retrieval only. EMBEDDINGS_API_KEY defaults to LLM_API_KEY.
