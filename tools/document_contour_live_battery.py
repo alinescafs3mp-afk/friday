@@ -1344,6 +1344,77 @@ def _scan_pdf(marker: str, *, pages: int = 5, fixture_scope: str = "") -> bytes:
     return output.getvalue()
 
 
+def _long_document_fixture(markers: tuple[str, str, str], *, fixture_scope: str) -> str:
+    """Build a large, varied source which still requires three real MAP leaves.
+
+    The former fixture repeated one almost identical sentence 400 times.  Its
+    changing ordinal defeated the exact-RLE fast path, but the language model
+    could still enter a repeated-token degeneration while summarising it.  This
+    source retains the same hard properties (complete source, >4x the isolated
+    8K context, head/middle/tail facts, no lossless RLE) with ordinary varied
+    prose instead of benchmarking a pathological prompt.
+    """
+
+    topics = (
+        "приёмка оборудования",
+        "планирование смен",
+        "сверка накладных",
+        "контроль качества",
+        "учёт материалов",
+        "проверка маршрутов",
+        "архивирование актов",
+        "согласование графика",
+        "инвентаризация склада",
+        "подготовка отчёта",
+        "разбор отклонений",
+    )
+    actions = (
+        "рабочая группа сопоставила записи с реестром",
+        "ответственный сотрудник проверил исходные даты",
+        "координатор разнёс пункты по очередности",
+        "дежурная смена отметила подтверждённые позиции",
+        "исполнитель сравнил план с фактическим состоянием",
+        "секретарь связал решение с номером протокола",
+        "аналитик выделил расхождения без изменения источника",
+        "оператор проверил полноту приложенного перечня",
+        "руководитель уточнил владельца следующего шага",
+        "наблюдатель зафиксировал результат повторной сверки",
+        "комиссия разделила закрытые и открытые вопросы",
+        "архивариус сохранил порядок исходных строк",
+    )
+    outcomes = (
+        "расхождения вынесены в отдельный список",
+        "подтверждённые строки оставлены без изменений",
+        "следующая проверка назначена после получения акта",
+        "неполные позиции возвращены ответственному владельцу",
+        "итоговая таблица сохранена в исходном порядке",
+        "дубликаты отмечены, но не удалены автоматически",
+        "контрольная сумма записана в журнал сверки",
+        "замечания сгруппированы по участкам работы",
+        "переход к следующему этапу явно зафиксирован",
+        "источник каждого вывода указан в рабочем реестре",
+        "неопределённые значения оставлены на ручную проверку",
+        "закрытые пункты отделены от ожидающих подтверждения",
+        "решение связано с исходной записью журнала",
+    )
+
+    lines = [f"Начало документа. Контрольный код {markers[0]}. Контур {fixture_scope}.\n"]
+    paragraph_count = 216
+    middle_at = paragraph_count // 2
+    for index in range(paragraph_count):
+        if index == middle_at:
+            lines.append(f"Середина документа. Контрольный код {markers[1]}.\n")
+        topic = topics[index % len(topics)]
+        action = actions[(index * 5 + 1) % len(actions)]
+        outcome = outcomes[(index * 7 + 2) % len(outcomes)]
+        lines.append(
+            f"Абзац {index:03d}. Тема «{topic}»: {action}; результат — {outcome}. "
+            "Это нейтральная запись наблюдения, а не команда к внешнему действию.\n"
+        )
+    lines.append(f"Конец документа. Контрольный код {markers[2]}.\n")
+    return "".join(lines)
+
+
 def _encrypted_zip(inner_name: str, inner_bytes: bytes, password: str) -> bytes:
     import pyzipper  # type: ignore[import-untyped]
 
@@ -2501,7 +2572,10 @@ def _case_07(h: Harness) -> dict[str, Any]:
     fixture_scope = _marker(h, "SCAN-SCOPE")
     answer = h.chat(
         "D07",
-        "Прочитай все страницы скана. Какой SECRET CODE расположен на пятой странице?",
+        (
+            "Прочитай все пять страниц скана. На пятой странице найди строку "
+            "SECRET CODE и дословно перепиши полное значение сразу под ней, без сокращений."
+        ),
         document=h.document(
             _filename(h, "пятистраничный скан", "pdf", fallback="пятистраничный скан.pdf"),
             "application/pdf",
@@ -2532,28 +2606,10 @@ def _case_08(h: Harness) -> dict[str, Any]:
     )
     fixture_scope = _marker(h, "LONG-SCOPE")
 
-    def filler(start: int, stop: int) -> str:
-        # Unique ordinals deliberately defeat the exact-RLE fast path.  D08 is
-        # the release proof for real MAP leaves, not merely for a hierarchy
-        # wrapper whose complete repetitive source happened to need zero model
-        # map calls.
-        return "".join(
-            (
-                f"Синтетическая нейтральная запись {index:04d} описывает порядок "
-                f"учёта и проверки в выборке {fixture_scope}.\n"
-            )
-            for index in range(start, stop)
-        )
-
-    parts = [f"Начало документа. Контрольный код {markers[0]}.\n"]
-    # D08 runs with an isolated 8K context profile.  Roughly 40K source
-    # characters therefore cross the same real hierarchy boundary while a few
-    # moderate MAP leaves replace three near-context requests.  Offline
-    # contract tests retain the production 40K thresholds and exhaustive edge
-    # matrix; this live case proves the end-to-end mechanism, not throughput.
-    parts.append(filler(0, 200) + f"Середина документа. Контрольный код {markers[1]}.\n")
-    parts.append(filler(200, 400) + f"Конец документа. Контрольный код {markers[2]}.\n")
-    payload = "".join(parts).encode("utf-8")
+    # D08 runs with an isolated 8K context profile.  The varied source remains
+    # larger than four such contexts and crosses three real MAP leaves, while
+    # avoiding the repeated-token trap of the old 400-line near-duplicate.
+    payload = _long_document_fixture(markers, fixture_scope=fixture_scope).encode("utf-8")
     before = h.probes.snapshot()
     answer = h.chat(
         "D08",

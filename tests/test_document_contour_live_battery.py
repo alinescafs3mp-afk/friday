@@ -797,6 +797,7 @@ def test_d06_and_d08_apply_semantic_generation_integrity_and_d08_fixture_is_not_
             self.probes = FakeProbes(counts)
             self.settings = SimpleNamespace(profile=SimpleNamespace(max_model_len=8_192))
             self.payload = b""
+            self.prompt = ""
 
         @staticmethod
         def document(filename, mime_type, content, source_ref):  # noqa: ANN001
@@ -807,17 +808,30 @@ def test_d06_and_d08_apply_semantic_generation_integrity_and_d08_fixture_is_not_
                 "source_ref": source_ref,
             }
 
-        def chat(self, case_id, _message, *, document, **_kwargs):  # noqa: ANN001
+        def chat(self, case_id, message, *, document, **_kwargs):  # noqa: ANN001
             self.payload = base64.b64decode(document["content_base64"])
+            self.prompt = message
             markers = (
                 ("SMALL-ALPHA-1", "SMALL-BETA-1", "SMALL-GAMMA-1")
                 if case_id == "D06"
+                else ("SCAN-PAGE-FIVE-1",)
+                if case_id == "D07"
                 else ("LONG-HEAD-1", "LONG-MIDDLE-1", "LONG-TAIL-1")
             )
-            return {
+            result = {
                 "message": " ".join(markers),
                 "file_ingestion": {"extraction": {}},
             }
+            if case_id == "D07":
+                result["file_ingestion"] = {
+                    "extraction": {
+                        "vision_pages_read": 5,
+                        "vision_pages_total": 5,
+                        "parse_pages_truncated": False,
+                    }
+                }
+                result["grounding_warning"] = "OCR требует сверки с оригиналом."
+            return result
 
         @staticmethod
         def message_row(_answer):  # noqa: ANN001
@@ -852,6 +866,12 @@ def test_d06_and_d08_apply_semantic_generation_integrity_and_d08_fixture_is_not_
     d06_result = runner._case_06(d06)
     assert d06_result["status"] == "passed", d06_result
 
+    d07 = FakeHarness("D07", {})
+    d07_result = runner._case_07(d07)
+    assert d07_result["status"] == "passed", d07_result
+    assert "все пять страниц" in d07.prompt
+    assert "дословно перепиши полное значение" in d07.prompt
+
     d08_counts = _closed_generation_counts(
         runner,
         direct=0,
@@ -864,10 +884,46 @@ def test_d06_and_d08_apply_semantic_generation_integrity_and_d08_fixture_is_not_
     d08 = FakeHarness("D08", d08_counts)
     d08_result = runner._case_08(d08)
     assert d08_result["status"] == "passed", d08_result
-    lines = d08.payload.decode("utf-8").splitlines()
-    filler_lines = [line for line in lines if line.startswith("Синтетическая нейтральная запись")]
-    assert len(filler_lines) == len(set(filler_lines)) == 400
-    assert len(d08.payload.decode("utf-8")) > 8_192 * 4
+    source = d08.payload.decode("utf-8")
+    lines = source.splitlines()
+    filler_lines = [line for line in lines if line.startswith("Абзац ")]
+    assert len(filler_lines) == len(set(filler_lines)) == 216
+    assert len({line.split(". ", 1)[1] for line in filler_lines}) == 216
+    assert len(source) > 8_192 * 4
+    assert source.index("LONG-HEAD-1") < source.index("LONG-MIDDLE-1") < source.index("LONG-TAIL-1")
+    assert source.index("LONG-MIDDLE-1") > len(source) // 3
+    assert source.index("LONG-MIDDLE-1") < len(source) * 2 // 3
+    from friday.agent_runtime import (
+        _attachment_hierarchy_map_chunk_chars,
+        _attachment_lossless_unit_rle_bundle,
+        _attachment_whole_source_plan,
+        _OwnedAttachment,
+    )
+
+    source_attachment = _OwnedAttachment(
+        {
+            "filename": "large.txt",
+            "transient_text": source,
+            "extraction_success": True,
+        }
+    )
+    chunk_chars = _attachment_hierarchy_map_chunk_chars(
+        [source_attachment],
+        max_model_len=8_192,
+        request_chars=len(d08.prompt),
+        parallelism=1,
+    )
+    chunks, *_rest = _attachment_whole_source_plan([source_attachment], chunk_chars=chunk_chars)
+    assert len(chunks) == 3
+    assert (
+        _attachment_lossless_unit_rle_bundle(
+            [source_attachment],
+            message=d08.prompt,
+            task_kind="summary",
+            max_model_len=8_192,
+        )
+        is None
+    )
 
 
 def test_d08_live_case_uses_isolated_small_context_without_changing_release_profile(
