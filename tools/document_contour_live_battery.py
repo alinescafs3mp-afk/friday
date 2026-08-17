@@ -2531,7 +2531,11 @@ def _case_06(h: Harness) -> dict[str, Any]:
     before = h.probes.snapshot()
     answer = h.chat(
         "D06",
-        "",
+        (
+            "Сделай краткую сводку материала. Затем отдельной строкой дословно перечисли "
+            "все три значения после меток «Первый факт», «Второй факт» и «Третий факт»; "
+            "не пропускай ни одно."
+        ),
         document=h.document(
             _filename(h, "малый материал", "odt", fallback="малый материал.odt"),
             "application/vnd.oasis.opendocument.text",

@@ -865,6 +865,8 @@ def test_d06_and_d08_apply_semantic_generation_integrity_and_d08_fixture_is_not_
     d06 = FakeHarness("D06", d06_counts)
     d06_result = runner._case_06(d06)
     assert d06_result["status"] == "passed", d06_result
+    assert "дословно перечисли" in d06.prompt
+    assert "не пропускай ни одно" in d06.prompt
 
     d07 = FakeHarness("D07", {})
     d07_result = runner._case_07(d07)
