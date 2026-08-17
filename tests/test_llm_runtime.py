@@ -81,6 +81,32 @@ def test_qwen_payload_disables_model_thinking_and_has_one_system(settings):
     assert payload["messages"][0]["role"] == "system"
 
 
+def test_full_context_route_refuses_the_prompt_instead_of_silently_truncating(settings) -> None:
+    router = LLMRouter(replace(settings, llm_enabled=True))
+    messages = [
+        {"role": "system", "content": "policy"},
+        {"role": "user", "content": "old" * 100_000},
+        {"role": "user", "content": "latest"},
+    ]
+
+    ordinary = router._prepare_payload(  # noqa: SLF001
+        messages,
+        temperature=0.0,
+        max_tokens=512,
+        tools=None,
+    )
+    assert ordinary["messages"] != _system_first(messages)
+
+    with pytest.raises(ValueError, match="requires full context"):
+        router._prepare_payload(  # noqa: SLF001
+            messages,
+            temperature=0.0,
+            max_tokens=512,
+            tools=None,
+            require_full_context=True,
+        )
+
+
 @pytest.mark.asyncio
 async def test_foreground_activity_is_a_watchdog_signal_without_an_extra_request(
     settings,

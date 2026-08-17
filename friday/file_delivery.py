@@ -33,7 +33,7 @@ from typing import Any
 from urllib.parse import quote
 
 from friday.source_identity import AuthorizedFileSnapshotToken, authorized_file_snapshot_token
-from friday.storage._privacy import _not_private_raw_dependency
+from friday.storage._privacy import _exact_uploader_raw_dependency, _not_private_raw_dependency
 
 _READ_CHUNK_BYTES = 1024 * 1024
 _MAX_STORED_PATH_CHARS = 16_384
@@ -222,11 +222,7 @@ def read_authorized_file_in_transaction(
     """Transaction-scoped implementation used to assemble an atomic archive."""
 
     deleted_clause = "" if include_deleted else " AND r.deleted_at IS NULL"
-    person_clause = (
-        " AND json_valid(r.metadata_json) AND COALESCE(json_extract(r.metadata_json, '$.uploaded_by'), '')=?"
-        if person_id is not None
-        else ""
-    )
+    person_clause = f" AND {_exact_uploader_raw_dependency('r')}" if person_id is not None else ""
     parameters: tuple[str, ...] = (
         (str(raw_id), str(user_id), str(person_id)) if person_id is not None else (str(raw_id), str(user_id))
     )

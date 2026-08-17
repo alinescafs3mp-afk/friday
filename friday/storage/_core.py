@@ -12,6 +12,8 @@ import secrets
 import stat
 import unicodedata
 import zlib
+from collections.abc import Callable
+from contextvars import ContextVar
 from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -70,6 +72,10 @@ _DMY_DATE_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})[./](\d{4})$")
 # Tests and clock adapters replace ``datetime`` to control wall time. Timestamp
 # parsing must remain the real stdlib implementation under that substitution.
 _TIMESTAMP_DATETIME = datetime
+_GUARDED_TRANSACTION_CONTEXT: ContextVar[tuple[object, Callable[[], None]] | None] = ContextVar(
+    "friday_guarded_transaction",
+    default=None,
+)
 
 _OLDEST_MIGRATABLE_DATABASE_SCHEMA = 13
 _REQUIRED_SCHEMA_META_COLUMNS = frozenset({"key", "value", "updated_at"})
@@ -2042,6 +2048,57 @@ def iso_date(value: Any) -> str | None:
     return f"{year:04d}-{month:02d}-{day:02d}"
 
 
+@contextmanager
+def guarded_storage_transaction(
+    storage: Any,
+    *,
+    before_commit: Callable[[], None],
+    lock_timeout_sec: float,
+) -> Iterator[sqlite3.Connection]:
+    """Own one bounded outer commit without changing FridayStorage's surface.
+
+    V12 publication needs a deadline-aware Python/SQLite writer admission and a
+    final callback immediately before the durable commit.  Keeping this as a
+    module function preserves the long-standing ``FridayStorage.transaction()``
+    signature used by legacy callers and its audited public method inventory.
+    """
+
+    if _GUARDED_TRANSACTION_CONTEXT.get() is not None:
+        raise RuntimeError("guarded transaction context is already active")
+    timeout = max(0.0, float(lock_timeout_sec))
+    lock_started = time.monotonic()
+    acquired = storage._write_lock.acquire(timeout=timeout)  # noqa: SLF001
+    if not acquired:
+        raise TimeoutError("storage writer lock deadline expired")
+    conn: sqlite3.Connection | None = None
+    old_busy_timeout: int | None = None
+    token = None
+    try:
+        conn = storage.conn
+        if conn.in_transaction:
+            raise RuntimeError("guarded transaction requires the outer commit boundary")
+        old_busy_row = conn.execute("PRAGMA busy_timeout").fetchone()
+        old_busy_timeout = int(old_busy_row[0]) if old_busy_row is not None else 10_000
+        remaining = max(0.0, timeout - (time.monotonic() - lock_started))
+        guarded_busy_timeout = max(0, min(old_busy_timeout, int(remaining * 1000)))
+        conn.execute(f"PRAGMA busy_timeout={guarded_busy_timeout}")  # nosec B608 - bounded int
+        token = _GUARDED_TRANSACTION_CONTEXT.set((storage, before_commit))
+        try:
+            with storage.transaction() as guarded_conn:
+                yield guarded_conn
+        except sqlite3.OperationalError as exc:
+            if "locked" in str(exc).casefold():
+                raise TimeoutError("storage SQLite writer deadline expired") from exc
+            raise
+    finally:
+        if token is not None:
+            _GUARDED_TRANSACTION_CONTEXT.reset(token)
+        if conn is not None and old_busy_timeout is not None:
+            with suppress(sqlite3.Error):
+                conn.execute(f"PRAGMA busy_timeout={old_busy_timeout}")  # nosec B608 - prior int
+        storage._write_lock.release()  # noqa: SLF001
+
+
 class CoreMixin(StorageShared):
     def __init__(self, settings: FridaySettings) -> None:
         self.settings = settings
@@ -3524,6 +3581,10 @@ class CoreMixin(StorageShared):
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
+        guarded_context = _GUARDED_TRANSACTION_CONTEXT.get()
+        before_commit = (
+            guarded_context[1] if guarded_context is not None and guarded_context[0] is self else None
+        )
         # Serialise writers in Python (single-writer invariant), so two threads'
         # BEGIN IMMEDIATE never contend at the SQLite level and close() can drain
         # the in-flight writer before shutting connections down. Reads never take
@@ -3533,6 +3594,11 @@ class CoreMixin(StorageShared):
         with self._write_lock:
             conn = self.conn
             nested = conn.in_transaction
+            if before_commit is not None and nested:
+                # A guarded publication must own the durable outer boundary.
+                # Running it as a savepoint could return a message id while an
+                # unrelated caller still owns (and may roll back) the commit.
+                raise RuntimeError("guarded transaction requires the outer commit boundary")
             if not nested:
                 conn.execute("BEGIN IMMEDIATE")
             context = conn.execute(
@@ -3653,6 +3719,13 @@ class CoreMixin(StorageShared):
                 if savepoint:
                     conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - generated identifier
                 if not nested:
+                    # Selected orchestration routes may own an absolute
+                    # publication deadline.  Run their code-owned guard after
+                    # every refresh/context mutation but before the single
+                    # durable commit; an exception follows the ordinary full
+                    # rollback path below.  Existing callers remain unchanged.
+                    if before_commit is not None:
+                        before_commit()
                     conn.commit()
             except BaseException:
                 # BaseException, not Exception: KeyboardInterrupt, SystemExit and

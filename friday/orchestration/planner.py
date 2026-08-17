@@ -7,6 +7,7 @@ import json
 import time
 from typing import Any, Protocol
 
+from friday.model_input_hygiene import model_messages_are_secret_free
 from friday.orchestration.contracts import TURN_PLAN_SCHEMA, TurnInput, TurnPlan
 
 _PLANNER_SYSTEM_PROMPT = f"""\
@@ -30,6 +31,7 @@ For requests to inspect, compare, summarize, OCR, or find facts in supplied file
 and request attached_files evidence. For earlier stored files, choose archive_read and archive evidence.
 For current external information, choose web_read and web evidence. Never invent a tool or source.
 """
+_MAX_ATTESTED_INPUT_UTF8_BYTES = 5_500
 
 
 class PlannerModel(Protocol):
@@ -46,6 +48,7 @@ class PlannerModel(Protocol):
         allow_retries: bool = True,
         absolute_deadline: float | None = None,
         open_silent_cooldown: bool = True,
+        require_full_context: bool = False,
     ) -> dict[str, Any]: ...
 
 
@@ -62,20 +65,27 @@ class V12Planner:
             deadline = min(deadline, turn_deadline)
         if deadline <= time.monotonic():
             raise TimeoutError("turn planning deadline has expired")
+        messages = [
+            {"role": "system", "content": _PLANNER_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    turn.model_payload(),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            },
+        ]
+        if len(json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > (
+            _MAX_ATTESTED_INPUT_UTF8_BYTES
+        ):
+            raise ValueError("planner input exceeds the attested context tier")
+        if not model_messages_are_secret_free(messages):
+            raise ValueError("planner input requires a secret projection")
         response = await asyncio.wait_for(
             self._model.chat(
-                [
-                    {"role": "system", "content": _PLANNER_SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": json.dumps(
-                            turn.model_payload(),
-                            ensure_ascii=False,
-                            sort_keys=True,
-                            separators=(",", ":"),
-                        ),
-                    },
-                ],
+                messages,
                 temperature=0.0,
                 max_tokens=512,
                 priority="background",
@@ -83,10 +93,15 @@ class V12Planner:
                 allow_retries=False,
                 absolute_deadline=deadline,
                 open_silent_cooldown=False,
+                require_full_context=True,
             ),
             timeout=max(0.001, deadline - time.monotonic()),
         )
         content = response.get("content") if isinstance(response, dict) else None
-        if not isinstance(content, str):
-            raise ValueError("planner response has no string content")
+        if (
+            not isinstance(content, str)
+            or response.get("finish_reason") != "stop"
+            or response.get("tool_calls") not in (None, [])
+        ):
+            raise ValueError("planner response is incomplete or effectful")
         return TurnPlan.parse(content)

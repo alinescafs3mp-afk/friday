@@ -12,7 +12,14 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from friday.file_evidence import CurrentTurnFileReferenceToken, current_turn_file_reference_of
-from friday.orchestration.contracts import RouteClass, RouterMode, ToolEffect, TurnInput, TurnPlan
+from friday.orchestration.contracts import (
+    EvidenceKind,
+    RouteClass,
+    RouterMode,
+    ToolEffect,
+    TurnInput,
+    TurnPlan,
+)
 from friday.orchestration.planner import PlannerModel, V12Planner
 from friday.permissions import ActorContext
 
@@ -133,6 +140,7 @@ class ReadOnlyRouteResult:
     citation_labels: tuple[str, ...]
     verified: bool
     message_format: str = "markdown"
+    interaction_mode: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.message, str) or not self.message.strip():
@@ -149,6 +157,12 @@ class ReadOnlyRouteResult:
             raise ValueError("read-only route result has an invalid message id")
         if self.message_format not in {"markdown", "plain"}:
             raise ValueError("read-only route result has an invalid message format")
+        if self.interaction_mode is not None and self.interaction_mode not in {
+            "dialogue",
+            "knowledge_work",
+            "research",
+        }:
+            raise ValueError("read-only route result has an invalid interaction mode")
         if re.fullmatch(r"[0-9a-f]{64}", self.evidence_identity_sha256) is None:
             raise ValueError("read-only route result has an invalid evidence digest")
         if not isinstance(self.citation_labels, tuple):
@@ -163,6 +177,7 @@ class ReadOnlyRouteResult:
             raise ValueError("read-only route result verified must be boolean")
 
     def response(self, *, conversation_mode: str) -> dict[str, Any]:
+        effective_mode = self.interaction_mode or conversation_mode
         return {
             "conversation_id": self.conversation_id,
             "message_id": self.message_id,
@@ -184,7 +199,7 @@ class ReadOnlyRouteResult:
             "voice": None,
             "attachments": [],
             "attachment_context_available": True,
-            "context": {"interaction_mode": conversation_mode},
+            "context": {"interaction_mode": effective_mode},
         }
 
 
@@ -230,10 +245,15 @@ def _plan_applicable(
     ):
         return False
     if plan.route is RouteClass.FILE_READ:
+        source_requests = plan.evidence_requests
         return bool(
             1 <= len(attachment_references) <= 12
             and len(attachment_references) == len(turn.attachments)
             and len({item.raw_object_id for item in attachment_references}) == len(attachment_references)
+            and len(source_requests) == 1
+            and source_requests[0].kind is EvidenceKind.ATTACHED_FILES
+            and source_requests[0].required
+            and source_requests[0].max_items >= len(attachment_references)
             and not turn.quoted_attachment_reference
             and not turn.reply_assistant_reference
             and not turn.synthetic_document_notice

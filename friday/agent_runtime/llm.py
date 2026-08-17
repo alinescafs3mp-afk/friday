@@ -530,6 +530,7 @@ class LLMRouter:
         allow_retries: bool = True,
         absolute_deadline: float | None = None,
         open_silent_cooldown: bool = True,
+        require_full_context: bool = False,
     ) -> dict[str, Any]:
         if not self.enabled:
             raise LLMUnavailableError("LLM is disabled")
@@ -586,6 +587,7 @@ class LLMRouter:
                     allow_retries=allow_retries,
                     absolute_deadline=absolute_deadline,
                     open_silent_cooldown=open_silent_cooldown,
+                    require_full_context=require_full_context,
                 )
             except BaseException:
                 # A full ReadTimeout replaces the sentinel with a fresh finite
@@ -611,6 +613,8 @@ class LLMRouter:
         max_tokens: int | None,
         tools: list[dict[str, Any]] | None,
         tool_choice: str | None = None,
+        *,
+        require_full_context: bool = False,
     ) -> dict[str, Any]:
         requested_output = max_tokens if max_tokens is not None else self.max_tokens
         requested_output = max(64, min(int(requested_output), self.settings.profile.max_model_len - 512))
@@ -628,6 +632,8 @@ class LLMRouter:
             max_output_tokens=requested_output,
             extra_prompt_chars=tool_chars,
         )
+        if require_full_context and fitted != _system_first(messages):
+            raise ValueError("Prompt requires truncation but this route requires full context")
         input_tokens = self.estimate_messages_tokens(fitted) + tool_chars // CHARS_PER_TOKEN
         available_output = self.settings.profile.max_model_len - input_tokens - _CONTEXT_SAFETY_TOKENS
         if available_output < 64:
@@ -672,8 +678,16 @@ class LLMRouter:
         allow_retries: bool = True,
         absolute_deadline: float | None = None,
         open_silent_cooldown: bool = True,
+        require_full_context: bool = False,
     ) -> dict[str, Any]:
-        payload = self._prepare_payload(messages, temperature, max_tokens, tools, tool_choice)
+        payload = self._prepare_payload(
+            messages,
+            temperature,
+            max_tokens,
+            tools,
+            tool_choice,
+            require_full_context=require_full_context,
+        )
         last_error: Exception | None = None
 
         # One budget for the whole series, not per attempt. Each attempt is allowed

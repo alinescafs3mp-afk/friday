@@ -14,7 +14,6 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import PurePath
 from types import MappingProxyType
 from typing import Any
 
@@ -22,7 +21,6 @@ TURN_PLAN_SCHEMA = "friday.turn-plan.v1"
 _MAX_MESSAGE_CHARS = 16_000
 _MAX_REPLY_CHARS = 1_000
 _MAX_ATTACHMENTS = 16
-_MAX_ATTACHMENT_NAME_CHARS = 180
 _MAX_OBJECTIVE_CHARS = 1_200
 _MAX_QUERY_CHARS = 1_200
 _MAX_TOOL_ARGUMENT_CHARS = 4_096
@@ -190,15 +188,54 @@ def _closed_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _display_filename(raw: object) -> str:
-    if not isinstance(raw, str):
-        return ""
-    # Both separators are accepted because Telegram metadata can originate on a
-    # Windows client while Friday itself runs on Linux.  Only the basename is
-    # allowed across the planning boundary.
-    leaf = PurePath(raw.replace("\\", "/")).name
-    clean = "".join(character for character in leaf if character >= " " and character != "\x7f")
-    return clean.strip().encode("utf-8", errors="replace").decode("utf-8")[:_MAX_ATTACHMENT_NAME_CHARS]
+def _planner_attachment_name(ordinal: int) -> str:
+    """Return a source-owned label; user filenames never enter planning.
+
+    A filename can contain a current credential, private path fragment or
+    another person's data.  The planner only needs cardinality, media kind and
+    extraction availability.  The authorized evidence reader restores the
+    durable filename after its own privacy check.
+    """
+
+    return f"attachment-{ordinal}"
+
+
+def _planner_media_kind(raw: object) -> str:
+    """Map caller metadata to a small source-owned planning vocabulary."""
+
+    candidate = str(raw or "").strip().casefold().split(";", 1)[0]
+    if candidate == "application/pdf":
+        return "pdf"
+    if candidate.startswith("image/"):
+        return "image"
+    if candidate.startswith("audio/"):
+        return "audio"
+    if candidate.startswith("video/"):
+        return "video"
+    if candidate.startswith("text/") or candidate in {
+        "application/json",
+        "application/toml",
+        "application/xml",
+        "application/yaml",
+    }:
+        return "text"
+    if candidate in {
+        "application/zip",
+        "application/x-7z-compressed",
+        "application/x-rar-compressed",
+        "application/gzip",
+    }:
+        return "archive"
+    if candidate.startswith("application/vnd.openxmlformats-officedocument") or candidate in {
+        "application/msword",
+        "application/vnd.ms-excel",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.oasis.opendocument.text",
+        "application/vnd.oasis.opendocument.spreadsheet",
+        "application/vnd.oasis.opendocument.presentation",
+    }:
+        return "office"
+    return "binary"
 
 
 def _safe_input_text(raw: object, maximum: int) -> tuple[str, bool]:
@@ -217,9 +254,8 @@ class AttachmentDescriptor:
 
     @classmethod
     def from_raw(cls, raw: Mapping[str, Any], *, ordinal: int) -> AttachmentDescriptor:
-        name = _display_filename(raw.get("filename") or raw.get("name") or raw.get("original_name"))
-        media, _ = _safe_input_text(raw.get("mime_type") or raw.get("content_type"), 120)
-        media = media.casefold()
+        name = _planner_attachment_name(ordinal)
+        media = _planner_media_kind(raw.get("mime_type") or raw.get("content_type"))
         size_value = raw.get("size_bytes", raw.get("size"))
         size: int | None = None
         if isinstance(size_value, int) and not isinstance(size_value, bool) and size_value >= 0:
@@ -281,10 +317,16 @@ class TurnInput:
         quoted_attachment_reference: bool,
         reply_assistant_reference: bool,
     ) -> TurnInput:
-        bounded_message, message_truncated = _safe_input_text(message, _MAX_MESSAGE_CHARS)
+        raw_attachments = list(attachments or [])
+        planner_message = message
+        if synthetic_document_notice and raw_attachments:
+            # The backend's legacy no-caption message contains the uploaded
+            # filename.  Keep legacy byte-for-byte, but never forward that
+            # synthetic private descriptor to the V12 planner.
+            planner_message = "Загружены документы." if len(raw_attachments) > 1 else "Загружен документ."
+        bounded_message, message_truncated = _safe_input_text(planner_message, _MAX_MESSAGE_CHARS)
         bounded_quote, quote_truncated = _safe_input_text(reply_to, _MAX_REPLY_CHARS)
         bounded_mode, _ = _safe_input_text(mode or "dialogue", 40)
-        raw_attachments = list(attachments or [])
         bounded_attachments = tuple(
             AttachmentDescriptor.from_raw(raw, ordinal=index)
             for index, raw in enumerate(raw_attachments[:_MAX_ATTACHMENTS], start=1)

@@ -217,7 +217,7 @@ def test_turn_input_is_bounded_and_drops_ids_and_private_paths() -> None:
         reply_assistant_reference=False,
     )
     serialized = json.dumps(turn.model_payload(), ensure_ascii=False, sort_keys=True)
-    assert turn.attachments[0].name == "scan.pdf"
+    assert turn.attachments[0].name == "attachment-1"
     assert "secret-user-id" not in serialized
     assert "secret-conversation-id" not in serialized
     assert "raw_0123456789abcdef" not in serialized
@@ -253,6 +253,29 @@ def test_turn_input_is_bounded_and_drops_ids_and_private_paths() -> None:
     json.dumps(invalid_unicode.model_payload(), ensure_ascii=False).encode("utf-8")
     assert "\ud800" not in invalid_unicode.attachments[0].media_type
     assert "\ud800" not in invalid_unicode.conversation_mode
+
+
+def test_planner_projection_neutralizes_filenames_and_synthetic_upload_message() -> None:
+    secret = "jrc_DO_NOT_FORWARD_THIS_FILENAME_CREDENTIAL_1234567890"
+    turn = TurnInput.from_chat(
+        message=f"Загружен документ: {secret}.txt",
+        actor=SimpleNamespace(is_owner=True, shared_tenant=False),
+        conversation_id=None,
+        attachments=[{"filename": f"/private/{secret}.txt", "mime_type": f"text/{secret}"}],
+        enable_tools=True,
+        synthetic_document_notice=True,
+        mode=None,
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+
+    serialized = json.dumps(turn.model_payload(), ensure_ascii=False, sort_keys=True)
+    assert turn.message == "Загружен документ."
+    assert turn.attachments[0].name == "attachment-1"
+    assert turn.attachments[0].media_type == "text"
+    assert secret not in serialized
+    assert "/private/" not in serialized
 
 
 def test_turn_plan_is_closed_and_canonical() -> None:
@@ -655,7 +678,7 @@ async def test_canary_selects_exactly_one_registered_read_only_runtime() -> None
     assert legacy.calls == []
     assert len(v12.calls) == 1
     assert v12.calls[0][2].route is RouteClass.FILE_READ
-    assert v12.calls[0][0].attachments[0].name == "scan.pdf"
+    assert v12.calls[0][0].attachments[0].name == "attachment-1"
     assert v12.calls[0][0].turn_deadline is not None
     assert router.observations[-1].selected_runtime == "v12"
     assert router.observations[-1].status == "completed"
@@ -686,7 +709,7 @@ async def test_preplanner_attachment_snapshot_cannot_be_swapped_by_the_planner()
     assert result["message"] == "v12 [A1]"
     reference = handler.prepared[0][0].attachments[0]
     assert reference.raw_object_id == "raw_0123456789abcdef"
-    assert reference.name == "scan.pdf"
+    assert reference.name == "attachment-1"
 
 
 @pytest.mark.asyncio
@@ -1015,6 +1038,38 @@ async def test_model_cannot_label_a_known_effect_as_read_to_enter_canary() -> No
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ["conversation", "max_items"])
+async def test_file_canary_requires_one_fully_satisfied_attachment_request(mutation: str) -> None:
+    payload = _plan_payload()
+    kwargs = _chat_kwargs()
+    if mutation == "conversation":
+        payload["evidence_requests"].append(
+            {"kind": "conversation", "query": "earlier context", "max_items": 2, "required": True}
+        )
+    else:
+        payload["evidence_requests"][0]["max_items"] = 1
+        kwargs["attachments"] = [
+            _current_attachment("raw_0123456789abcdef"),
+            _current_attachment("raw_fedcba9876543210"),
+        ]
+    legacy = _Runtime()
+    handler = _Handler()
+    router = OrchestrationRouter(
+        legacy,
+        _Planner(TurnPlan.parse(payload)),
+        mode="v12",
+        allowed_routes=("file_read",),
+        route_handlers={RouteClass.FILE_READ: handler},
+    )
+
+    result = await router.chat("person", "прочитай всё", **kwargs)
+
+    assert result["message"] == "legacy"
+    assert len(legacy.calls) == 1
+    assert handler.prepared == []
+
+
+@pytest.mark.asyncio
 async def test_real_planner_uses_one_bounded_schema_only_model_call() -> None:
     class _Model:
         def __init__(self) -> None:
@@ -1022,7 +1077,11 @@ async def test_real_planner_uses_one_bounded_schema_only_model_call() -> None:
 
         async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
             self.calls.append((messages, kwargs))
-            return {"content": json.dumps(_plan_payload(), ensure_ascii=False)}
+            return {
+                "content": json.dumps(_plan_payload(), ensure_ascii=False),
+                "finish_reason": "stop",
+                "tool_calls": None,
+            }
 
     model = _Model()
     planner = V12Planner(model, timeout_sec=5)
@@ -1048,9 +1107,114 @@ async def test_real_planner_uses_one_bounded_schema_only_model_call() -> None:
     assert kwargs["tools"] is None
     assert kwargs["allow_retries"] is False
     assert kwargs["max_tokens"] == 512
+    assert kwargs["require_full_context"] is True
     serialized = json.dumps(messages, ensure_ascii=False)
     assert "do-not-send" not in serialized
     assert "/private/customer" not in serialized
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"finish_reason": "length", "tool_calls": None},
+        {"finish_reason": "stop", "tool_calls": [{"name": "forbidden"}]},
+    ],
+)
+async def test_real_planner_rejects_incomplete_or_effectful_protocol_response(
+    mutation: dict[str, Any],
+) -> None:
+    class _Model:
+        async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+            del messages, kwargs
+            return {
+                "content": json.dumps(_plan_payload(), ensure_ascii=False),
+                **mutation,
+            }
+
+    planner = V12Planner(_Model(), timeout_sec=5)
+    turn = TurnInput.from_chat(
+        message="сравни",
+        actor=SimpleNamespace(is_owner=True, shared_tenant=False),
+        conversation_id=None,
+        attachments=_chat_kwargs()["attachments"],
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode=None,
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+
+    with pytest.raises(ValueError, match="incomplete or effectful"):
+        await planner.plan(turn)
+
+
+@pytest.mark.asyncio
+async def test_real_planner_rejects_unattested_context_before_the_model_call() -> None:
+    class _Model:
+        calls = 0
+
+        async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+            del messages, kwargs
+            self.calls += 1
+            raise AssertionError("oversized planner input reached the model")
+
+    model = _Model()
+    planner = V12Planner(model, timeout_sec=5)
+    turn = TurnInput.from_chat(
+        message="Ж" * 10_000,
+        actor=SimpleNamespace(is_owner=True, shared_tenant=False),
+        conversation_id=None,
+        attachments=(),
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode=None,
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+
+    with pytest.raises(ValueError, match="attested context"):
+        await planner.plan(turn)
+    assert model.calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("location", ["message", "reply_quote"])
+async def test_real_planner_never_projects_a_current_runtime_secret(
+    monkeypatch,
+    location: str,
+) -> None:
+    secret = "sk-friday-v12-planner-secret-1234567890"
+    monkeypatch.setenv("FRIDAY_API_TOKEN", secret)
+
+    class _Model:
+        calls = 0
+
+        async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+            del messages, kwargs
+            self.calls += 1
+            raise AssertionError("secret-bearing planner input reached the model")
+
+    model = _Model()
+    planner = V12Planner(model, timeout_sec=5)
+    turn = TurnInput.from_chat(
+        message=secret if location == "message" else "проверь ответ",
+        actor=SimpleNamespace(is_owner=True, shared_tenant=False),
+        conversation_id=None,
+        attachments=(),
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode=None,
+        reply_to=secret if location == "reply_quote" else None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+
+    with pytest.raises(ValueError, match="secret projection"):
+        await planner.plan(turn)
+    assert model.calls == 0
 
 
 @pytest.mark.asyncio

@@ -23,6 +23,72 @@ from friday.storage._privacy import (
 )
 
 
+def create_conversation_in_transaction(
+    conn: sqlite3.Connection,
+    user_id: str,
+    title: str = "",
+    mode: str = "dialogue",
+) -> dict[str, Any]:
+    """Create one conversation using a transaction owned by the caller."""
+
+    conversation_id = new_id("conv")
+    now = utc_now()
+    normalized_mode = normalize_conversation_mode(mode)
+    conn.execute(
+        """INSERT INTO conversations(id, user_id, title, last_message, unread_count,
+           is_pinned, is_archived, mode, created_at, updated_at)
+           VALUES(?, ?, ?, '', 0, 0, 0, ?, ?, ?)""",
+        (conversation_id, user_id, title[:200], normalized_mode, now, now),
+    )
+    row = conn.execute(
+        "SELECT * FROM conversations WHERE id=? AND user_id=?",
+        (conversation_id, user_id),
+    ).fetchone()
+    return dict(row) if row else {}
+
+
+def store_message_in_transaction(
+    conn: sqlite3.Connection,
+    conversation_id: str,
+    user_id: str,
+    role: str,
+    content: str,
+    metadata: dict[str, Any] | None = None,
+    reply_to: str | None = None,
+) -> dict[str, Any]:
+    """Store one message using a transaction owned by the caller."""
+
+    conversation = conn.execute(
+        "SELECT id FROM conversations WHERE id=? AND user_id=?",
+        (conversation_id, user_id),
+    ).fetchone()
+    if conversation is None:
+        raise ValueError("Conversation does not belong to user")
+
+    message_id = new_id("msg")
+    now = utc_now()
+    conn.execute(
+        """INSERT INTO messages(id, conversation_id, user_id, role, content,
+           metadata_json, reply_to, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            message_id,
+            conversation_id,
+            user_id,
+            role,
+            content,
+            json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
+            reply_to,
+            now,
+        ),
+    )
+    conn.execute(
+        "UPDATE conversations SET last_message=?, updated_at=? WHERE id=? AND user_id=?",
+        (content[:200], now, conversation_id, user_id),
+    )
+    row = conn.execute("SELECT * FROM messages WHERE id=? AND user_id=?", (message_id, user_id)).fetchone()
+    return dict(row) if row else {}
+
+
 class ConversationsMixin(StorageShared):
     def create_conversation(
         self,
@@ -32,17 +98,8 @@ class ConversationsMixin(StorageShared):
         mode: str = "dialogue",
     ) -> dict[str, Any]:
         self.ensure_user(user_id)
-        conversation_id = new_id("conv")
-        now = utc_now()
-        normalized_mode = normalize_conversation_mode(mode)
         with self.transaction() as conn:
-            conn.execute(
-                """INSERT INTO conversations(id, user_id, title, last_message, unread_count,
-                   is_pinned, is_archived, mode, created_at, updated_at)
-                   VALUES(?, ?, ?, '', 0, 0, 0, ?, ?, ?)""",
-                (conversation_id, user_id, title[:200], normalized_mode, now, now),
-            )
-        return self.get_conversation(conversation_id, user_id) or {}
+            return create_conversation_in_transaction(conn, user_id, title, mode)
 
     def get_conversation(self, conversation_id: str, user_id: str) -> dict[str, Any] | None:
         row = self.execute(
@@ -146,31 +203,16 @@ class ConversationsMixin(StorageShared):
     ) -> dict[str, Any]:
         if not self.get_conversation(conversation_id, user_id):
             raise ValueError("Conversation does not belong to user")
-        message_id = new_id("msg")
-        now = utc_now()
         with self.transaction() as conn:
-            conn.execute(
-                """INSERT INTO messages(id, conversation_id, user_id, role, content,
-                   metadata_json, reply_to, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    message_id,
-                    conversation_id,
-                    user_id,
-                    role,
-                    content,
-                    json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
-                    reply_to,
-                    now,
-                ),
+            return store_message_in_transaction(
+                conn,
+                conversation_id,
+                user_id,
+                role,
+                content,
+                metadata,
+                reply_to,
             )
-            conn.execute(
-                "UPDATE conversations SET last_message=?, updated_at=? WHERE id=? AND user_id=?",
-                (content[:200], now, conversation_id, user_id),
-            )
-        row = self.execute(
-            "SELECT * FROM messages WHERE id=? AND user_id=?", (message_id, user_id)
-        ).fetchone()
-        return dict(row) if row else {}
 
     def count_messages(self, conversation_id: str, *, user_id: str) -> int:
         """How many messages the conversation holds — both conditions from the listing."""
