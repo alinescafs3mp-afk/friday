@@ -354,26 +354,26 @@ def test_hierarchy_prepass_deadline_scales_by_waves_without_renewal(
 
     small_budget = agent_runtime_module._attachment_prepass_budget_sec(6, 3)
     many_budget = agent_runtime_module._attachment_prepass_budget_sec(21, 3)
-    assert small_budget == 105.0
-    assert agent_runtime_module._attachment_prepass_budget_sec(11, 3) == 135.0
+    assert small_budget == 300.0
+    assert agent_runtime_module._attachment_prepass_budget_sec(11, 3) == 420.0
     assert (
         runtime._ensure_attachment_prepass_deadline(  # noqa: SLF001
             small,
             requested_budget_sec=small_budget,
         )
-        == fixed_now + 105.0
+        == fixed_now + 300.0
     )
     first_large_deadline = runtime._ensure_attachment_prepass_deadline(  # noqa: SLF001
         many,
         requested_budget_sec=many_budget,
     )
     assert first_large_deadline is not None
-    assert fixed_now + 90.0 < first_large_deadline <= fixed_now + 150.0
-    assert agent_runtime_module._attachment_prepass_budget_sec(128, 3) == 150.0
+    assert fixed_now + 240.0 < first_large_deadline <= fixed_now + 480.0
+    assert agent_runtime_module._attachment_prepass_budget_sec(128, 3) == 480.0
     assert (
         runtime._ensure_attachment_prepass_deadline(  # noqa: SLF001
             many,
-            requested_budget_sec=150.0,
+            requested_budget_sec=480.0,
         )
         == first_large_deadline
     )
@@ -393,9 +393,9 @@ def test_hierarchy_prepass_deadline_scales_by_waves_without_renewal(
     assert (
         low_timeout_runtime._ensure_attachment_prepass_deadline(  # noqa: SLF001
             low_timeout,
-            requested_budget_sec=135.0,
+            requested_budget_sec=420.0,
         )
-        == fixed_now + 135.0
+        == fixed_now + 420.0
     )
 
 
@@ -505,14 +505,14 @@ async def test_a_306k_hierarchy_respects_document_map_cap_and_input_budget(
 
     payloads = _chunk_payloads(llm)
     _assert_exact_coverage(payloads, [("dynamic-306k.txt", source)])
-    assert len(payloads) == 3
+    assert len(payloads) == 5
     assert all(
         len(str(item["text"])) <= agent_runtime_module._ATTACHMENT_MAP_MAX_CHUNK_CHARS for item in payloads
     )
     assert llm.max_active_maps == 1
     assert context.attachment_prepass_deadline is not None
     remaining = context.attachment_prepass_deadline - agent_runtime_module.time.monotonic()
-    assert 149.0 <= remaining <= 150.0
+    assert 479.0 <= remaining <= 480.0
     assert all(
         sum(agent_runtime_module._message_chars(item) for item in call["messages"])
         <= agent_runtime_module._attachment_map_input_char_budget(settings.profile.max_model_len)
@@ -684,6 +684,7 @@ def test_dynamic_hierarchy_width_keeps_small_default_and_capacity_fail_closed(
         <= dynamic_width
         <= (agent_runtime_module._ATTACHMENT_MAP_MAX_CHUNK_CHARS)
     )
+    assert dynamic_width == 64_000
 
     monkeypatch.setattr(agent_runtime_module, "_ATTACHMENT_MAP_MAX_CHUNKS", 3)
     (

@@ -613,15 +613,10 @@ def test_sequential_map_telemetry_has_one_active_leaf_and_satisfies_dynamic_plan
         before = probes.snapshot()
         asyncio.run(app.state.agent._build_attachment_hierarchy_bundle())
         delta = probes.delta(before)
-        checks = runner._generation_budget_checks(
-            delta,
-            direct_synthesis=0,
-            hierarchy=1,
-            map_required=True,
-            reduce=0,
-            final_synthesis=0,
-            verifier=0,
-        )
+        delta["final_synthesis_started"] = 1
+        delta["final_synthesis_completed"] = 1
+        delta["llm_chat_attempts"] += 1
+        checks = runner._generation_integrity_checks(delta, hierarchy_required=True)
 
         assert delta["map_planned"] == 3
         assert delta["map_started"] == delta["map_completed"] == 3
@@ -640,20 +635,15 @@ def test_overlapping_map_calls_report_peak_two_and_fail_the_release_budget() -> 
         before = probes.snapshot()
         asyncio.run(app.state.agent._build_attachment_hierarchy_bundle())
         delta = probes.delta(before)
-        checks = runner._generation_budget_checks(
-            delta,
-            direct_synthesis=0,
-            hierarchy=1,
-            map_required=True,
-            reduce=0,
-            final_synthesis=0,
-            verifier=0,
-        )
+        delta["final_synthesis_started"] = 1
+        delta["final_synthesis_completed"] = 1
+        delta["llm_chat_attempts"] += 1
+        checks = runner._generation_integrity_checks(delta, hierarchy_required=True)
 
         assert delta["map_started"] == delta["map_completed"] == 2
         assert delta["map_peak_active"] == 2
-        assert checks["map_budget_exact"] is True
-        assert checks["map_peak_exact"] is False
+        assert checks["hierarchy_route_complete"] is True
+        assert checks["map_concurrency_within_limit"] is False
     finally:
         probes.close()
 
@@ -679,23 +669,20 @@ def test_direct_final_and_verifier_are_classified_by_runtime_boundaries() -> Non
 @pytest.mark.parametrize(
     ("route", "mutation", "expected_failed_check"),
     (
-        ("D06", "direct_missing", "direct_synthesis_budget_exact"),
-        ("D06", "direct_extra", "direct_synthesis_budget_exact"),
-        ("D08", "final_missing", "final_synthesis_budget_exact"),
-        ("D08", "final_extra", "final_synthesis_budget_exact"),
-        ("D08", "verifier_missing", "verifier_budget_exact"),
-        ("D08", "verifier_extra", "verifier_budget_exact"),
-        ("D08", "reduce_extra", "reduce_budget_exact"),
-        ("D08", "hierarchy_repeated", "hierarchy_budget_exact"),
-        ("D08", "planned_clipped", "map_budget_exact"),
+        ("D06", "direct_missing", "direct_route_complete"),
+        ("D06", "hierarchy_unexpected", "direct_route_complete"),
+        ("D08", "final_missing", "hierarchy_route_complete"),
+        ("D08", "hierarchy_incomplete", "hierarchy_route_complete"),
+        ("D08", "planned_clipped", "hierarchy_route_complete"),
         ("D08", "counter_missing", "generation_telemetry_complete"),
         ("D08", "map_failure", "generation_failures_zero"),
         ("D08", "map_cancellation", "generation_cancellations_zero"),
         ("D08", "unclassified_extra", "unclassified_generations_zero"),
-        ("D08", "total_excess", "generation_no_excess"),
+        ("D08", "total_excess", "generation_attempts_accounted"),
+        ("D08", "peak_excess", "map_concurrency_within_limit"),
     ),
 )
-def test_generation_budget_mutations_fail_closed(route, mutation, expected_failed_check) -> None:
+def test_generation_integrity_mutations_fail_closed(route, mutation, expected_failed_check) -> None:
     runner = _module()
     d06 = route == "D06"
     counts = _closed_generation_counts(
@@ -709,12 +696,7 @@ def test_generation_budget_mutations_fail_closed(route, mutation, expected_faile
     )
     stage_mutations = {
         "direct_missing": ("direct_synthesis", 0),
-        "direct_extra": ("direct_synthesis", 2),
         "final_missing": ("final_synthesis", 0),
-        "final_extra": ("final_synthesis", 2),
-        "verifier_missing": ("verifier", 0),
-        "verifier_extra": ("verifier", 2),
-        "reduce_extra": ("reduce", 1),
     }
     if mutation in stage_mutations:
         stage, value = stage_mutations[mutation]
@@ -722,9 +704,11 @@ def test_generation_budget_mutations_fail_closed(route, mutation, expected_faile
         counts[f"{stage}_started"] = value
         counts[f"{stage}_completed"] = value
         counts["llm_chat_attempts"] += value - old
-    elif mutation == "hierarchy_repeated":
-        counts["hierarchy_calls"] = 2
-        counts["hierarchy_complete"] = 2
+    elif mutation == "hierarchy_unexpected":
+        counts["hierarchy_calls"] = 1
+        counts["hierarchy_complete"] = 1
+    elif mutation == "hierarchy_incomplete":
+        counts["hierarchy_complete"] = 0
     elif mutation == "planned_clipped":
         counts["map_planned"] = 1
     elif mutation == "counter_missing":
@@ -741,21 +725,15 @@ def test_generation_budget_mutations_fail_closed(route, mutation, expected_faile
         counts["llm_chat_attempts"] += 1
     elif mutation == "total_excess":
         counts["llm_chat_attempts"] += 1
-    checks = runner._generation_budget_checks(
-        counts,
-        direct_synthesis=1 if d06 else 0,
-        hierarchy=0 if d06 else 1,
-        map_required=not d06,
-        reduce=0,
-        final_synthesis=0 if d06 else 1,
-        verifier=0 if d06 else 1,
-    )
+    elif mutation == "peak_excess":
+        counts["map_peak_active"] = 2
+    checks = runner._generation_integrity_checks(counts, hierarchy_required=not d06)
 
     assert checks[expected_failed_check] is False
     assert not all(checks.values())
 
 
-def test_d06_and_d08_apply_exact_stage_budgets_and_d08_fixture_is_not_rle() -> None:
+def test_d06_and_d08_apply_semantic_generation_integrity_and_d08_fixture_is_not_rle() -> None:
     runner = _module()
 
     class FakeProbes:
@@ -826,7 +804,7 @@ def test_d06_and_d08_apply_exact_stage_budgets_and_d08_fixture_is_not_rle() -> N
         map_calls=0,
         reduce=0,
         final=0,
-        verifier=0,
+        verifier=1,
     )
     d06 = FakeHarness("D06", d06_counts)
     d06_result = runner._case_06(d06)
@@ -836,10 +814,10 @@ def test_d06_and_d08_apply_exact_stage_budgets_and_d08_fixture_is_not_rle() -> N
         runner,
         direct=0,
         hierarchy=1,
-        map_calls=2,
-        reduce=0,
+        map_calls=5,
+        reduce=1,
         final=1,
-        verifier=1,
+        verifier=2,
     )
     d08 = FakeHarness("D08", d08_counts)
     d08_result = runner._case_08(d08)

@@ -85,7 +85,11 @@ _STRUCTURED_OFFICE_MIME_TYPES = frozenset(
 _VISION_BATCH_SIZE = 4
 _VISION_BATCH_CONCURRENCY = 2
 _VISION_PDF_MAX_PAGES = 40
-_VISION_OCR_BUDGET_SEC = 120.0
+# Five normalized scan pages require three bounded dispatcher waves.  The old
+# 120-second document clock consistently expired before page five on the
+# certified remote model; 240 seconds keeps the same finite contour while
+# covering that measured workload and leaving room in the 720-second turn.
+_VISION_OCR_BUDGET_SEC = 240.0
 _VISION_OCR_FALLBACK_RESERVE_SEC = 45.0
 # The model limit counts images, but image count alone does not bound visual
 # work.  Four individually legal 8M-pixel pages used to make one 32M-pixel
@@ -1099,7 +1103,7 @@ class FilesMixin(PipelineShared):
                 if result.get("_deadline"):
                     # A multi-page call gets only the primary share of the one
                     # common deadline.  Use the untouched tail for ordered
-                    # single-page retries; never renew the 120-second ceiling.
+                    # single-page retries; never renew the document ceiling.
                     # Results are appended only from the start of the failed
                     # batch, so a later concurrent success can never create a
                     # hole in the reported prefix.
@@ -1151,7 +1155,7 @@ class FilesMixin(PipelineShared):
         # asset's canonical ``pages[].text`` carrier.  Do not silently discard
         # the value and do not trust the first response alone.  At most one
         # discrepant asset receives one independent transcription-only reread,
-        # still inside the original 120-second document deadline.  Only quotes
+        # still inside the original document deadline.  Only quotes
         # reproduced exactly (apart from whitespace layout) enter the carrier;
         # every unresolved disagreement keeps the extraction partial/UNKNOWN.
         def quote_in_text(quote: str, text: str) -> bool:

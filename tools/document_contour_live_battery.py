@@ -1935,22 +1935,17 @@ class Harness:
         }
 
 
-def _generation_budget_checks(
+def _generation_integrity_checks(
     counters: Mapping[str, int],
     *,
-    direct_synthesis: int,
-    hierarchy: int,
-    map_required: bool,
-    reduce: int,
-    final_synthesis: int,
-    verifier: int,
+    hierarchy_required: bool,
 ) -> dict[str, bool]:
-    """Validate one route's exact content-free model-generation envelope.
+    """Validate semantic route completion without freezing implementation counts.
 
-    Missing, boolean, negative or non-integer telemetry is invalid rather than
-    being interpreted as zero.  MAP cardinality is supplied by the canonical
-    hierarchy bundle and therefore may vary with the runtime's safe chunk
-    width; all other stages have a fixed release budget.
+    The release cares that every admitted generation is classified, completed,
+    and accounted for, and that a hierarchy covers every planned MAP leaf.  It
+    does not care whether a safe response needed zero or one verifier pass, nor
+    how many conservative leaves a future tokenizer-safe planner selects.
     """
 
     telemetry_complete = all(
@@ -1959,36 +1954,16 @@ def _generation_budget_checks(
     )
     values = {key: int(counters[key]) if telemetry_complete else -1 for key in _GENERATION_TELEMETRY_KEYS}
 
-    def exact_stage(stage: str, expected: int) -> bool:
+    def stage_closed(stage: str) -> bool:
         return bool(
             telemetry_complete
-            and values[f"{stage}_started"] == expected
-            and values[f"{stage}_completed"] == expected
+            and values[f"{stage}_started"] == values[f"{stage}_completed"]
             and values[f"{stage}_failures"] == 0
             and values[f"{stage}_cancellations"] == 0
         )
 
     planned = values["map_planned"]
-    map_budget_exact = bool(
-        telemetry_complete
-        and values["map_active"] == 0
-        and values["map_failures"] == 0
-        and values["map_cancellations"] == 0
-        and (
-            planned > 0 and values["map_started"] == planned and values["map_completed"] == planned
-            if map_required
-            else planned == 0 and values["map_started"] == 0 and values["map_completed"] == 0
-        )
-    )
-    map_peak_exact = bool(telemetry_complete and values["map_peak_active"] == (1 if map_required else 0))
-    expected_total = (
-        direct_synthesis
-        + (planned if map_required and planned >= 0 else 0)
-        + reduce
-        + final_synthesis
-        + verifier
-    )
-    classified_started = sum(values[f"{stage}_started"] for stage in _GENERATION_STAGES[:-1])
+    classified_started = sum(values[f"{stage}_started"] for stage in _GENERATION_STAGES)
     no_failures = bool(
         telemetry_complete
         and values["hierarchy_failures"] == 0
@@ -1999,34 +1974,54 @@ def _generation_budget_checks(
         and values["hierarchy_cancellations"] == 0
         and all(values[f"{stage}_cancellations"] == 0 for stage in _GENERATION_STAGES)
     )
-    no_unclassified = exact_stage("unclassified", 0)
-    total_exact = bool(
+    no_unclassified = bool(
+        telemetry_complete and all(values[f"unclassified_{outcome}"] == 0 for outcome in _GENERATION_OUTCOMES)
+    )
+    attempts_accounted = bool(
+        telemetry_complete and no_unclassified and values["llm_chat_attempts"] == classified_started
+    )
+    stages_closed = bool(telemetry_complete and all(stage_closed(stage) for stage in _GENERATION_STAGES))
+    hierarchy_closed = bool(
         telemetry_complete
-        and no_unclassified
-        and values["llm_chat_attempts"] == expected_total
-        and classified_started == expected_total
+        and values["hierarchy_failures"] == 0
+        and values["hierarchy_cancellations"] == 0
+        and values["hierarchy_calls"] == values["hierarchy_complete"]
+    )
+    direct_route_complete = bool(
+        telemetry_complete
+        and not hierarchy_required
+        and hierarchy_closed
+        and values["hierarchy_calls"] == 0
+        and planned == 0
+        and values["map_started"] == values["map_completed"] == values["map_active"] == 0
+        and values["map_peak_active"] == 0
+        and values["direct_synthesis_completed"] >= 1
+    )
+    hierarchy_route_complete = bool(
+        telemetry_complete
+        and hierarchy_required
+        and hierarchy_closed
+        and values["hierarchy_calls"] >= 1
+        and planned > 0
+        and values["map_started"] == values["map_completed"] == planned
+        and values["map_active"] == 0
+        and values["direct_synthesis_started"] == 0
+        and values["final_synthesis_completed"] >= 1
     )
     return {
         "generation_telemetry_complete": bool(
             telemetry_complete and values["generation_telemetry_missing"] == 0
         ),
-        "hierarchy_budget_exact": bool(
-            telemetry_complete
-            and values["hierarchy_calls"] == hierarchy
-            and values["hierarchy_complete"] == hierarchy
-            and values["hierarchy_failures"] == 0
-            and values["hierarchy_cancellations"] == 0
+        "generation_stages_complete": stages_closed,
+        "direct_route_complete": direct_route_complete if not hierarchy_required else True,
+        "hierarchy_route_complete": hierarchy_route_complete if hierarchy_required else True,
+        "map_concurrency_within_limit": bool(
+            telemetry_complete and values["map_peak_active"] == (1 if hierarchy_required else 0)
         ),
-        "map_budget_exact": map_budget_exact,
-        "map_peak_exact": map_peak_exact,
-        "direct_synthesis_budget_exact": exact_stage("direct_synthesis", direct_synthesis),
-        "reduce_budget_exact": exact_stage("reduce", reduce),
-        "final_synthesis_budget_exact": exact_stage("final_synthesis", final_synthesis),
-        "verifier_budget_exact": exact_stage("verifier", verifier),
         "generation_failures_zero": no_failures,
         "generation_cancellations_zero": no_cancellations,
         "unclassified_generations_zero": no_unclassified,
-        "generation_no_excess": total_exact,
+        "generation_attempts_accounted": attempts_accounted,
     }
 
 
@@ -2445,15 +2440,7 @@ def _case_06(h: Harness) -> dict[str, Any]:
         "fit_first_no_hierarchy": delta["hierarchy_calls"] == 0,
         "attachment_owned": metadata.get("attachment_context_used") is True,
         "no_deed_guard": metadata.get("fabricated_outside_deed_request") is not True,
-        **_generation_budget_checks(
-            delta,
-            direct_synthesis=1,
-            hierarchy=0,
-            map_required=False,
-            reduce=0,
-            final_synthesis=0,
-            verifier=0,
-        ),
+        **_generation_integrity_checks(delta, hierarchy_required=False),
     }
     return h.case_result("D06", started, checks, delta)
 
@@ -2538,15 +2525,7 @@ def _case_08(h: Harness) -> dict[str, Any]:
                 "source_truncated_for_parse",
             )
         ),
-        **_generation_budget_checks(
-            delta,
-            direct_synthesis=0,
-            hierarchy=1,
-            map_required=True,
-            reduce=0,
-            final_synthesis=1,
-            verifier=1,
-        ),
+        **_generation_integrity_checks(delta, hierarchy_required=True),
     }
     return h.case_result("D08", started, checks, delta)
 

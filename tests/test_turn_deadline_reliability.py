@@ -583,7 +583,7 @@ async def test_agentic_loop_does_not_renew_a_deadline_spent_before_the_loop(
     assert context.turn_deadline == 200.0
 
 
-def test_absolute_turn_clock_keeps_the_narrower_attachment_stage_limits(
+def test_absolute_turn_clock_keeps_bounded_attachment_stage_limits(
     settings,
     storage,
     monkeypatch,
@@ -600,8 +600,8 @@ def test_absolute_turn_clock_keeps_the_narrower_attachment_stage_limits(
     )
     assert runtime._ensure_attachment_prepass_deadline(  # noqa: SLF001
         roomy,
-        requested_budget_sec=150.0,
-    ) == pytest.approx(150.0)
+        requested_budget_sec=480.0,
+    ) == pytest.approx(480.0)
     assert runtime._ensure_attachment_primary_deadline(roomy) == pytest.approx(90.0)  # noqa: SLF001
 
     nearly_spent = AgentContext(

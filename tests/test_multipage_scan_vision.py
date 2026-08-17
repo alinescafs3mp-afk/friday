@@ -311,6 +311,7 @@ async def test_pdf_pages_and_each_vision_request_have_independent_pixel_bounds(
     storage,
     monkeypatch,
 ) -> None:
+    assert ingestion_files._VISION_OCR_BUDGET_SEC == 240.0
     llm = _PageVision()
     pipeline = _pipeline(settings, storage, llm)
     original_render = pipeline._doc_extractor.render_pdf_pages  # noqa: SLF001

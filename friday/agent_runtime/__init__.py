@@ -173,18 +173,20 @@ _OUTSIDE_DEED_RECOVERY_MIN_REMAINING_SEC = 5.0
 _OUTSIDE_DEED_RECOVERY_MAX_TOKENS = 384
 _OUTSIDE_DEED_RECOVERY_MAX_CHARS = 4_000
 # A healthy LAN model currently answers a 15--24k synthetic document prompt in
-# under a second, but three successful live Office summaries took 60--71 seconds
-# while the endpoint was degraded.  Keep 90 seconds for final synthesis.  The
-# full-source prepass starts at the same budget and can grow to 150 seconds for
-# many bounded parallel waves.  These narrower attachment ceilings are also
+# under a second, but a live 291k-character Russian document exposed two real
+# limits: near-context leaves can exceed the tokenizer envelope even when a
+# character estimate fits, and a serial full-source map cannot share the old
+# 150-second ceiling.  Keep 90 seconds for final synthesis.  Full-source maps
+# use conservative 64k-character leaves and a bounded 240--480 second budget.
+# These attachment ceilings are also
 # clipped by the one absolute turn deadline derived from the bridge contract;
 # no later route stage gets a fresh turn clock.  Verification + repair +
 # re-verification share a separate single secondary budget below.
 _ATTACHMENT_OPTIONAL_STAGE_TIMEOUT_SEC = 5.0
 _ATTACHMENT_GENERATION_TIMEOUT_SEC = 90.0
-_ATTACHMENT_PREPASS_BASE_TIMEOUT_SEC = 90.0
-_ATTACHMENT_PREPASS_MAX_TIMEOUT_SEC = 150.0
-_ATTACHMENT_PREPASS_WAVE_BUDGET_SEC = 15.0
+_ATTACHMENT_PREPASS_BASE_TIMEOUT_SEC = 240.0
+_ATTACHMENT_PREPASS_MAX_TIMEOUT_SEC = 480.0
+_ATTACHMENT_PREPASS_WAVE_BUDGET_SEC = 60.0
 _ATTACHMENT_SECONDARY_BUDGET_SEC = 90.0
 
 
@@ -341,12 +343,13 @@ _CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES = 5_000
 _ATTACHMENT_MAP_CHUNK_CHARS = 20_000
 # Large hierarchy-only maps may use a wider leaf when the configured model
 # context can carry it.  Ordinary planners keep the 20k default above.  The
-# 64k is the lower wide-leaf target.  The exact serialized-input guard below is
-# the real upper bound: a single-sequence profile must be allowed to use more of
-# its context window instead of manufacturing several requests which can only
-# queue behind one another.
+# 64k is also the upper wide-leaf bound.  The earlier 256k ceiling let a
+# character estimate put a Cyrillic leaf too close to a 40k-token context;
+# conservative leaves cost more serial calls but keep every language inside the
+# real tokenizer envelope.  The exact serialized-input guard remains a second
+# fail-closed boundary.
 _ATTACHMENT_MAP_WIDE_CHUNK_CHARS = 64_000
-_ATTACHMENT_MAP_MAX_CHUNK_CHARS = 256_000
+_ATTACHMENT_MAP_MAX_CHUNK_CHARS = 64_000
 _ATTACHMENT_MAP_TARGET_WAVES = 2
 _ATTACHMENT_MAP_MODEL_OUTPUT_TOKENS = 500
 # The map request also carries a system instruction, JSON keys, filename,
@@ -14811,9 +14814,9 @@ def _attachment_hierarchy_map_chunk_chars(
     """Choose a model-safe hierarchy leaf width without changing other plans.
 
     Small maps retain the established 20k leaves.  Once that would require
-    more than two waves, widen only as far as both the configured model input
-    envelope and the finite hierarchy ceiling allow.  Exact serialized prompts
-    are checked again immediately before each model call.
+    more than two waves, widen only as far as the conservative 64k multilingual
+    leaf ceiling and the configured model input envelope allow.  Exact
+    serialized prompts are checked again immediately before each model call.
     """
 
     source_lengths = [
@@ -14855,12 +14858,13 @@ def _attachment_hierarchy_prepass_budget_sec(
     parallelism: int,
     serialized_input_chars: int,
 ) -> float:
-    """Budget hierarchy work by actual serialised input, within the old cap.
+    """Budget hierarchy work by actual serialised input, within one turn cap.
 
     A wave count alone underprices a few near-context-size leaves.  Convert the
     exact schema-free prompt workload into conservative 64k work units and feed
-    the larger of that count and the real leaf count into the existing bounded
-    wave policy.  This never raises the established 150-second ceiling.
+    the larger of that count and the real leaf count into the bounded wave
+    policy.  The 480-second cap still leaves 240 seconds inside the one
+    720-second turn for answer synthesis, verification, and transport overhead.
     """
 
     workload_units = (
