@@ -1106,6 +1106,55 @@ def test_bridge_service_lease_match_requires_exact_recorded_protocol(tmp_path, m
     assert runtime.pre_stop_bridge_lease_matches(BRIDGE.main_pid) is False
 
 
+def test_live_bridge_stop_uses_cooperative_sigint_and_waits_for_clean_exit() -> None:
+    runtime = object.__new__(operator.LiveRuntime)
+    runtime.bridge_unit = "friday-bridge.service"
+    commands: list[list[str]] = []
+    states = iter(
+        (
+            {
+                "ActiveState": "active",
+                "SubState": "running",
+                "MainPID": "43210",
+                "ControlPID": "0",
+            },
+            {
+                "ActiveState": "inactive",
+                "SubState": "dead",
+                "MainPID": "0",
+                "ControlPID": "0",
+            },
+        )
+    )
+    clock = iter((0.0, 0.1))
+    pauses: list[float] = []
+
+    def run_command(command, *, timeout):  # noqa: ANN001
+        assert timeout == operator.SYSTEMCTL_TIMEOUT_SEC
+        rendered = list(command)
+        commands.append(rendered)
+        return subprocess.CompletedProcess(rendered, 0, b"", b"")
+
+    runtime._run_command = run_command
+    runtime._service_state = lambda _unit: next(states)
+    runtime.monotonic = lambda: next(clock)
+    runtime.pause = pauses.append
+
+    runtime.stop_bridge()
+
+    assert commands == [
+        [
+            operator._SYSTEMCTL_BINARY,
+            "--user",
+            "kill",
+            "--kill-whom=main",
+            "--signal=SIGINT",
+            "friday-bridge.service",
+        ]
+    ]
+    assert pauses == [operator.POLL_INTERVAL_SEC]
+
+
 @pytest.mark.parametrize(
     ("body", "expected"),
     (

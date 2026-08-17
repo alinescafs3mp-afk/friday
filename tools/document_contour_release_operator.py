@@ -1742,12 +1742,52 @@ class LiveRuntime:
         return _parse_dispatcher_epoch(body)
 
     def stop_bridge(self) -> None:
+        # ``systemctl stop`` uses SIGTERM.  The deployed CLI is driven by
+        # ``asyncio.run`` which gives SIGINT a cooperative cancellation path,
+        # while an unhandled SIGTERM can terminate before SQLite closes and
+        # leave WAL/SHM sidecars.  The stopped-queue attestation intentionally
+        # rejects those sidecars.  Ask the exact main process to finish through
+        # its supported path, then require systemd to observe a clean exit.
         completed = self._run_command(
-            [_SYSTEMCTL_BINARY, "--user", "stop", self.bridge_unit],
+            [
+                _SYSTEMCTL_BINARY,
+                "--user",
+                "kill",
+                "--kill-whom=main",
+                "--signal=SIGINT",
+                self.bridge_unit,
+            ],
             timeout=SYSTEMCTL_TIMEOUT_SEC,
         )
         if completed.returncode != 0:
             raise OperatorFailure("bridge_stop_failed")
+        deadline = self.monotonic() + SERVICE_STATE_TIMEOUT_SEC
+        while True:
+            state = self._service_state(self.bridge_unit)
+            try:
+                main_pid = int(state["MainPID"])
+                control_pid = int(state["ControlPID"])
+            except (KeyError, ValueError) as exc:
+                raise OperatorFailure("bridge_state_invalid") from exc
+            if (
+                state.get("ActiveState") == "inactive"
+                and state.get("SubState") == "dead"
+                and main_pid == 0
+                and control_pid == 0
+            ):
+                return
+            if self.monotonic() >= deadline:
+                # Recovery still owns the ordinary systemd stop path.  Never
+                # leave a half-stopped bridge merely because the cooperative
+                # path failed, but do not treat that forced stop as a valid
+                # stopped-queue proof for this attempt.
+                with suppress(BaseException):
+                    self._run_command(
+                        [_SYSTEMCTL_BINARY, "--user", "stop", self.bridge_unit],
+                        timeout=SYSTEMCTL_TIMEOUT_SEC,
+                    )
+                raise OperatorFailure("bridge_stop_failed")
+            self.pause(POLL_INTERVAL_SEC)
 
     @staticmethod
     def _cgroup_empty(control_group: str) -> bool:
