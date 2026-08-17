@@ -15070,6 +15070,64 @@ def _advisory_vision_overview(message: str, attachment: Mapping[str, Any]) -> st
     return _reusable_advisory_vision_summary(attachment, require_registered_bytes=True)
 
 
+def _advisory_vision_overview_set(
+    message: str,
+    attachments: Sequence[Mapping[str, Any]],
+) -> str:
+    """Render every complete current visual summary without another model call.
+
+    Album uploads already paid for one grounded vision pass per member.  Sending
+    their text through the general summarizer again is both slower and weaker:
+    the second model may omit a member, invent web provenance, or time out.  The
+    direct route is deliberately limited to a plain whole-set summary request
+    and fails closed unless every registered member has a complete reusable
+    vision result.
+    """
+
+    if len(attachments) < 2 or len(attachments) > _CONVERSATION_ATTACHMENT_MAX_FILES:
+        return ""
+    authority = file_turn_authority(message)
+    command = _record_source_command_text(message)
+    if (
+        authority.quote_data()
+        or authority.has_effect()
+        or authority.proved("host_path")
+        or authority.source_filenames()
+        or _current_speech_negates_information_request(message)
+        or _attachment_explicitly_partial_scope(message)
+        or _is_document_metadata_request(message)
+        or _ATTACHMENT_COMPARISON_REQUEST.search(command)
+        or _attachment_query_terms(message)
+        or not _ATTACHMENT_SUMMARY_REQUEST.search(command)
+    ):
+        return ""
+
+    summaries = [
+        _reusable_advisory_vision_summary(item, require_registered_bytes=True) for item in attachments
+    ]
+    if any(not summary for summary in summaries):
+        return ""
+
+    heading = f"Сводка по файлам ({len(summaries)}):"
+    labels = [f"Файл {index}." for index in range(1, len(summaries) + 1)]
+    fixed_chars = len(heading) + sum(len(label) + 2 for label in labels) + 2 * len(labels)
+    per_summary_limit = min(
+        _UPLOAD_OVERVIEW_MAX_CHARS,
+        (_UPLOAD_OVERVIEW_TOTAL_MAX_CHARS - fixed_chars) // len(summaries),
+    )
+    if per_summary_limit < _UPLOAD_OVERVIEW_MIN_SOURCE_CHARS:
+        return ""
+
+    sections: list[str] = []
+    for label, summary in zip(labels, summaries, strict=True):
+        bounded = _safe_overview_boundary(summary, per_summary_limit)
+        if not bounded:
+            return ""
+        sections.append(f"{label}\n{bounded}")
+    rendered = f"{heading}\n\n" + "\n\n".join(sections)
+    return rendered if len(rendered) <= _UPLOAD_OVERVIEW_TOTAL_MAX_CHARS else ""
+
+
 async def _maybe_bounded_file_overview(
     llm: Any,
     fallback: str,
@@ -29866,6 +29924,29 @@ class AgentRuntime:
             visual_advisory_overview = _advisory_vision_overview(
                 clean_message,
                 active_attachment_set[0],
+            )
+        elif (
+            supplied_attachment_count >= 2
+            and supplied_attachment_count == attachment_expected_count
+            and attachment_expected_count == attachment_readable_count
+            and attachment_readable_count == len(active_attachment_set)
+            and current_attachment_local
+            and authenticated_attachment_scope
+            and not file_web
+            and not file_voice
+            and not file_create
+            and not file_effect
+            and not visible_tools
+            and not document_metadata_owned
+            and not quoted_attachment_reference
+            and not reply_assistant_reference
+            and not reply_quote
+            and not replay_source_message_id
+            and not restored_attachment_expected_count
+        ):
+            visual_advisory_overview = _advisory_vision_overview_set(
+                clean_message,
+                active_attachment_set,
             )
         response: dict[str, Any]
         if foreign_private_request or dangerous_instruction_request or private_web_search_blocked:

@@ -20,7 +20,12 @@ from typing import Any
 import pytest
 from PIL import Image
 
-from friday.agent_runtime import AgentRuntime, _advisory_vision_overview, _OwnedAttachment
+from friday.agent_runtime import (
+    AgentRuntime,
+    _advisory_vision_overview,
+    _advisory_vision_overview_set,
+    _OwnedAttachment,
+)
 from friday.config import PROFILES
 from friday.execution_kernel import ExecutionKernel
 from friday.ingestion import IngestionPipeline
@@ -87,14 +92,21 @@ class _NoSecondVisionPass:
         raise AssertionError("complete vision summary triggered a second model pass")
 
 
-def _png() -> bytes:
-    image = Image.new("RGB", (320, 200), "white")
+def _png(color: str = "white") -> bytes:
+    image = Image.new("RGB", (320, 200), color)
     data = BytesIO()
     image.save(data, format="PNG")
     return data.getvalue()
 
 
-async def _ingest_image(settings, storage, *, source_ref: str):
+async def _ingest_image(
+    settings,
+    storage,
+    *,
+    source_ref: str,
+    filename: str = "receipt.png",
+    color: str = "white",
+):
     llm = _VisionLLM()
     pipeline = IngestionPipeline(
         replace(settings, profile=PROFILES["qwen36-vl"]),
@@ -105,8 +117,8 @@ async def _ingest_image(settings, storage, *, source_ref: str):
     result = await pipeline.ingest_file(
         "alice",
         None,
-        _png(),
-        filename="receipt.png",
+        _png(color),
+        filename=filename,
         mime_type="image/png",
         metadata={"uploaded_by": "alice", "language_code": "ru"},
         source_ref=source_ref,
@@ -161,6 +173,46 @@ def test_complete_language_matched_visual_summary_can_skip_second_model_call() -
     assert _advisory_vision_overview("что на этом скане?", unverified) == ""
 
 
+def test_complete_visual_summary_set_is_closed_and_all_or_none() -> None:
+    first = _OwnedAttachment(
+        {
+            "mime_type": "image/jpeg",
+            "advisory_only": True,
+            "_registered_file_bytes_verified": True,
+            "_advisory_vision_success": True,
+            "_advisory_vision_summary": "На первом скане показан военный документ с реквизитами.",
+            "_advisory_vision_summary_language": "ru",
+            "_advisory_vision_confidence": 0.95,
+            "_advisory_vision_asset_coverage": 1.0,
+            "_advisory_vision_grounded_evidence_count": 2,
+            "_advisory_vision_pages_read": 1,
+            "_advisory_vision_pages_total": 1,
+            "_advisory_vision_pages_truncated": False,
+            "_advisory_vision_deadline_reached": False,
+            "_advisory_vision_text_truncated": False,
+        }
+    )
+    second = _OwnedAttachment(
+        {
+            **first,
+            "_advisory_vision_summary": (
+                "На втором скане показано свидетельство о регистрации транспортного средства."
+            ),
+        }
+    )
+
+    overview = _advisory_vision_overview_set("дай сводку по этим файлам", [first, second])
+    assert overview == (
+        "Сводка по файлам (2):\n\n"
+        "Файл 1.\nНа первом скане показан военный документ с реквизитами.\n\n"
+        "Файл 2.\nНа втором скане показано свидетельство о регистрации транспортного средства."
+    )
+    assert _advisory_vision_overview_set("сравни эти файлы", [first, second]) == ""
+    assert _advisory_vision_overview_set("не рассказывай про эти файлы", [first, second]) == ""
+    incomplete = _OwnedAttachment({**second, "_advisory_vision_pages_total": 2})
+    assert _advisory_vision_overview_set("дай сводку по этим файлам", [first, incomplete]) == ""
+
+
 @pytest.mark.asyncio
 async def test_complete_registered_scan_overview_publishes_without_second_model_pass(
     settings, storage
@@ -189,6 +241,64 @@ async def test_complete_registered_scan_overview_publishes_without_second_model_
     assert "Чек об оплате аренды зала для проекта Orion." in result["message"]
     assert result["attachment_verification_complete"] is False
     assert result["verified"] is False
+
+
+@pytest.mark.asyncio
+async def test_two_registered_jpegs_publish_both_vision_summaries_without_web_or_second_model(
+    settings,
+    storage,
+) -> None:
+    _first_pipeline, first = await _ingest_image(
+        settings,
+        storage,
+        source_ref="vision:two-jpegs:first",
+        filename="telegram-photo-1534.jpg",
+        color="white",
+    )
+    _second_pipeline, second = await _ingest_image(
+        settings,
+        storage,
+        source_ref="vision:two-jpegs:second",
+        filename="telegram-photo-1535.jpg",
+        color="gray",
+    )
+    assert first["raw_object_id"] != second["raw_object_id"]
+    storage.ensure_user("alice", preset_key="owner")
+    configured = replace(settings, profile=PROFILES["qwen36-vl"], verify_answers=False)
+    authorization = AuthorizationService(storage)
+    model = _NoSecondVisionPass()
+    runtime = AgentRuntime(
+        configured,
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=ExecutionKernel(authorization, configured),
+    )
+
+    result = await runtime.chat(
+        "alice",
+        "дай сводку по этим файлам",
+        actor=authorization.actor_for_user("alice", source="test"),
+        attachments=[
+            {"raw_object_id": str(first["raw_object_id"])},
+            {"raw_object_id": str(second["raw_object_id"])},
+        ],
+        enable_tools=True,
+    )
+
+    assert model.calls == 0
+    assert result["message"].count("Чек об оплате аренды зала для проекта Orion.") == 2
+    assert "Сводка по файлам (2):" in result["message"]
+    assert "не получила проверяемую интернет-выдачу" not in result["message"]
+    assert result["attachment_context_expected_count"] == 2
+    assert result["attachment_context_readable_count"] == 2
+    assert result["attachment_coverage_complete"] is True
+    row = storage.execute(
+        "SELECT metadata_json FROM messages WHERE id=?",
+        (result["message_id"],),
+    ).fetchone()
+    assert row is not None
+    metadata = json.loads(row["metadata_json"])
+    assert not metadata["structural"].get("output_guards", {}).get("web_evidence_replaced")
 
 
 @pytest.mark.asyncio
