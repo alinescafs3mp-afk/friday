@@ -614,6 +614,51 @@ def test_absolute_turn_clock_keeps_bounded_attachment_stage_limits(
 
 
 @pytest.mark.asyncio
+async def test_attachment_primary_applies_only_its_missing_output_budget(
+    settings,
+    storage,
+) -> None:
+    """The central attachment boundary caps omissions without rewriting specialists."""
+
+    class RecordingModel:
+        enabled = True
+        total_budget_sec = 30.0
+
+        def __init__(self) -> None:
+            self.kwargs: list[dict[str, Any]] = []
+
+        async def chat(self, _messages, **kwargs):  # noqa: ANN001
+            self.kwargs.append(dict(kwargs))
+            return {"content": "bounded"}
+
+    model = RecordingModel()
+    runtime = AgentRuntime(settings, storage, llm=model)
+    attachment = AgentContext(
+        conversation_id="bounded-attachment-answer",
+        user_id="alice",
+        current_attachment_present=True,
+    )
+    ordinary = AgentContext(
+        conversation_id="ordinary-answer",
+        user_id="alice",
+        current_attachment_present=False,
+    )
+
+    await runtime._attachment_primary_chat(attachment, [], tools=[])  # noqa: SLF001
+    await runtime._attachment_primary_chat(  # noqa: SLF001
+        attachment,
+        [],
+        tools=[],
+        max_tokens=900,
+    )
+    await runtime._attachment_primary_chat(ordinary, [], tools=[])  # noqa: SLF001
+
+    assert model.kwargs[0]["max_tokens"] == agent_runtime_module._ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS
+    assert model.kwargs[1]["max_tokens"] == 900
+    assert "max_tokens" not in model.kwargs[2]
+
+
+@pytest.mark.asyncio
 async def test_expiry_after_first_selected_mutator_does_not_start_its_siblings(
     settings,
     storage,

@@ -352,6 +352,14 @@ _ATTACHMENT_MAP_WIDE_CHUNK_CHARS = 64_000
 _ATTACHMENT_MAP_MAX_CHUNK_CHARS = 64_000
 _ATTACHMENT_MAP_TARGET_WAVES = 2
 _ATTACHMENT_MAP_MODEL_OUTPUT_TOKENS = 500
+# A document answer is delivered over one non-streaming request behind the
+# 90-second primary deadline.  Leaving the ordinary call at the global
+# 2,048-token default let a cancelled generation keep running remotely and
+# delay every later document stage.  Live D06/D07 probes established that 640
+# tokens carry their required answer facts while completing inside that window.
+# Explicit specialist budgets (OCR, MAP, detail extraction and verification)
+# remain authoritative and are not rewritten by this fallback.
+_ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS = 640
 # The map request also carries a system instruction, JSON keys, filename,
 # request and framing.  Reserve this independently of the separately bounded
 # request text; an exact serialized-size guard below remains the final gate.
@@ -33408,6 +33416,8 @@ class AgentRuntime:
         """Run one model await inside the attachment turn's shared primary budget."""
 
         deadline = self._ensure_attachment_primary_deadline(context) if context is not None else None
+        if context is not None and context.current_attachment_present and kwargs.get("max_tokens") is None:
+            kwargs["max_tokens"] = _ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS
         remaining = _remaining_deadline_budget(
             deadline,
             context.turn_deadline if context is not None else None,
