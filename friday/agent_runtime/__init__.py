@@ -183,7 +183,7 @@ _OUTSIDE_DEED_RECOVERY_MAX_CHARS = 4_000
 # no later route stage gets a fresh turn clock.  Verification + repair +
 # re-verification share a separate single secondary budget below.
 _ATTACHMENT_OPTIONAL_STAGE_TIMEOUT_SEC = 5.0
-_ATTACHMENT_GENERATION_TIMEOUT_SEC = 90.0
+_ATTACHMENT_GENERATION_TIMEOUT_SEC = 180.0
 _ATTACHMENT_PREPASS_BASE_TIMEOUT_SEC = 240.0
 _ATTACHMENT_PREPASS_MAX_TIMEOUT_SEC = 480.0
 _ATTACHMENT_PREPASS_WAVE_BUDGET_SEC = 60.0
@@ -33391,6 +33391,12 @@ class AgentRuntime:
             return await self.llm.chat(messages, **kwargs)
         if remaining <= 0:
             raise TimeoutError("turn model budget exhausted")
+        if getattr(self.llm, "supports_absolute_deadline", False) is True:
+            # The real router owns semaphore admission, retries and HTTP.  Give
+            # that owner the absolute request clock so it can fail before a
+            # POST or bound a submitted read precisely.  Legacy/test adapters
+            # keep the outer wait below and need not accept the new keyword.
+            return await self.llm.chat(messages, absolute_deadline=deadline, **kwargs)
         return await asyncio.wait_for(self.llm.chat(messages, **kwargs), timeout=remaining)
 
     async def _turn_bounded_chat(
@@ -33418,18 +33424,21 @@ class AgentRuntime:
         deadline = self._ensure_attachment_primary_deadline(context) if context is not None else None
         if context is not None and context.current_attachment_present and kwargs.get("max_tokens") is None:
             kwargs["max_tokens"] = _ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS
-        remaining = _remaining_deadline_budget(
-            deadline,
-            context.turn_deadline if context is not None else None,
+        if context is not None and context.current_attachment_present:
+            kwargs.setdefault("allow_retries", False)
+        effective_deadline = (
+            min(
+                item
+                for item in (
+                    deadline,
+                    context.turn_deadline if context is not None else None,
+                )
+                if item is not None
+            )
+            if deadline is not None or (context is not None and context.turn_deadline is not None)
+            else None
         )
-        if remaining is None:
-            return await self.llm.chat(messages, **kwargs)
-        if remaining <= 0:
-            raise TimeoutError("attachment primary model budget exhausted")
-        return await asyncio.wait_for(
-            self.llm.chat(messages, **kwargs),
-            timeout=remaining,
-        )
+        return await self._deadline_bounded_chat(effective_deadline, messages, **kwargs)
 
     async def _attachment_prepass_chat(
         self,
@@ -33440,15 +33449,8 @@ class AgentRuntime:
         """Run one map/reduce await without spending the answer-stage budget."""
 
         deadline = self._ensure_attachment_prepass_deadline(context)
-        remaining = _remaining_deadline_budget(deadline, context.turn_deadline)
-        if remaining is None:
-            return await self.llm.chat(messages, **kwargs)
-        if remaining <= 0:
-            raise TimeoutError("attachment prepass model budget exhausted")
-        return await asyncio.wait_for(
-            self.llm.chat(messages, **kwargs),
-            timeout=remaining,
-        )
+        effective_deadline = min(item for item in (deadline, context.turn_deadline) if item is not None)
+        return await self._deadline_bounded_chat(effective_deadline, messages, **kwargs)
 
     @staticmethod
     def _attachment_hierarchy_text(result: Any, *, max_chars: int) -> tuple[str, bool]:

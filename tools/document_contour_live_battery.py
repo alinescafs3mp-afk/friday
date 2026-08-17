@@ -115,6 +115,8 @@ _GENERATION_OUTCOMES = ("started", "completed", "failures", "cancellations")
 _GENERATION_TELEMETRY_KEYS = (
     "llm_chat_attempts",
     "generation_telemetry_missing",
+    "generation_admission_timeouts",
+    "generation_submitted_timeouts",
     "hierarchy_calls",
     "hierarchy_complete",
     "hierarchy_failures",
@@ -1582,6 +1584,8 @@ class LiveProbes:
         self._restore.append(lambda: setattr(kernel, "execute", original_execute))
 
         async def llm_chat(*args: Any, **kwargs: Any):
+            from friday.agent_runtime.llm import LLMDeadlineError
+
             stage = self._generation_stage.get() or "unclassified"
             if stage not in _GENERATION_STAGES:  # pragma: no cover - private invariant
                 stage = "unclassified"
@@ -1597,6 +1601,10 @@ class LiveProbes:
                 result = await original_llm_chat(*args, **kwargs)
             except asyncio.CancelledError:
                 self.counts[f"{stage}_cancellations"] += 1
+                raise
+            except LLMDeadlineError as exc:
+                self.counts[f"{stage}_failures"] += 1
+                self.counts[f"generation_{exc.phase}_timeouts"] += 1
                 raise
             except BaseException:
                 self.counts[f"{stage}_failures"] += 1

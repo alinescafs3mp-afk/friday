@@ -682,6 +682,32 @@ def test_direct_final_and_verifier_are_classified_by_runtime_boundaries() -> Non
         probes.close()
 
 
+@pytest.mark.parametrize("phase", ("admission", "submitted"))
+def test_live_probes_publish_only_the_content_free_deadline_phase(phase: str) -> None:
+    from friday.agent_runtime.llm import LLMDeadlineError
+
+    runner = _module()
+    app = _probe_app()
+
+    async def deadline_failure(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise LLMDeadlineError(phase)
+
+    app.state.agent.llm.chat = deadline_failure
+    probes = runner.LiveProbes(app)
+    probes.install()
+    try:
+        with pytest.raises(LLMDeadlineError) as raised:
+            asyncio.run(app.state.agent._attachment_primary_chat())
+        assert raised.value.phase == phase
+        assert probes.counts[f"generation_{phase}_timeouts"] == 1
+        assert probes.counts["direct_synthesis_started"] == 1
+        assert probes.counts["direct_synthesis_completed"] == 0
+        assert probes.counts["direct_synthesis_failures"] == 1
+        assert probes.counts["direct_synthesis_cancellations"] == 0
+    finally:
+        probes.close()
+
+
 @pytest.mark.parametrize(
     ("route", "mutation", "expected_failed_check"),
     (

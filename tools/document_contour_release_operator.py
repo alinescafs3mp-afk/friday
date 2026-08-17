@@ -67,7 +67,7 @@ BATTERY_CASE_IDS = ("D06", "D07", "D08")
 
 _EXPECTED_DEPENDENCY_HASHES = {
     "tools/document_contour_live_battery.py": (
-        "018eb2a3469a58e500e8ab955a24ba322a4b5abf1a6899aad982905aad7284b7"
+        "bc3eb76791e0b45c1ba7fffd74eee072284527928657002fe8c1762861d122fd"
     ),
     "friday/diagnostics/__init__.py": ("86ce0798ec2666b3ebe05318fc1483042c2c9e35994f60d7f588cae47c779c06"),
     "friday/diagnostics/runtime_lease.py": (

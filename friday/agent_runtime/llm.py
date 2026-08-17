@@ -46,6 +46,20 @@ _MAX_REPORTED_TOOL_NAME_CHARS = 128
 _TOOL_SCHEMA_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 
 
+class _RepeatedTokenDegenerationError(RuntimeError):
+    """A completed model response that is unusable because it loops."""
+
+
+class LLMDeadlineError(TimeoutError):
+    """A content-free deadline result from the real model router."""
+
+    def __init__(self, phase: str) -> None:
+        if phase not in {"admission", "submitted"}:
+            raise ValueError("invalid LLM deadline phase")
+        super().__init__(f"LLM {phase} deadline expired")
+        self.phase = phase
+
+
 async def _await_http_request(request: Any) -> httpx.Response:
     """Await one HTTP request and drain its cancellation before returning.
 
@@ -410,6 +424,8 @@ def strip_service_markup(content: str) -> str:
 class LLMRouter:
     """Routes foreground/background requests to an OpenAI-compatible vLLM API."""
 
+    supports_absolute_deadline = True
+
     def __init__(self, settings: FridaySettings) -> None:
         self.settings = settings
         self._foreground_sem = asyncio.Semaphore(max(1, int(settings.llm_foreground_slots)))
@@ -483,13 +499,26 @@ class LLMRouter:
         tool_choice: str | None = None,
         reject_repeated_token_degeneration: bool = True,
         allow_retries: bool = True,
+        absolute_deadline: float | None = None,
     ) -> dict[str, Any]:
         if not self.enabled:
             raise LLMUnavailableError("LLM is disabled")
 
         sem = self._foreground_sem if priority == "foreground" else self._background_sem
         queue_started = time.monotonic()
-        async with sem:
+        acquired = False
+        try:
+            if absolute_deadline is None:
+                await sem.acquire()
+            else:
+                admission_remaining = absolute_deadline - time.monotonic()
+                if admission_remaining <= 0:
+                    raise LLMDeadlineError("admission")
+                try:
+                    await asyncio.wait_for(sem.acquire(), timeout=admission_remaining)
+                except TimeoutError as exc:
+                    raise LLMDeadlineError("admission") from exc
+            acquired = True
             # How long this call waited for one of the shared slots, before it
             # ever reached the model. `total_budget_sec` (below) starts only
             # once the slot is held, so it already excludes this — a caller
@@ -522,6 +551,7 @@ class LLMRouter:
                     half_open_probe=half_open_probe,
                     reject_repeated_token_degeneration=reject_repeated_token_degeneration,
                     allow_retries=allow_retries,
+                    absolute_deadline=absolute_deadline,
                 )
             except BaseException:
                 # A full ReadTimeout replaces the sentinel with a fresh finite
@@ -530,6 +560,9 @@ class LLMRouter:
                 if half_open_probe and self._silent_until == float("inf"):
                     self._silent_until = 0.0
                 raise
+        finally:
+            if acquired:
+                sem.release()
         result["_queue_wait_sec"] = queue_wait_sec
         return result
 
@@ -599,6 +632,7 @@ class LLMRouter:
         half_open_probe: bool = False,
         reject_repeated_token_degeneration: bool = True,
         allow_retries: bool = True,
+        absolute_deadline: float | None = None,
     ) -> dict[str, Any]:
         payload = self._prepare_payload(messages, temperature, max_tokens, tools, tool_choice)
         last_error: Exception | None = None
@@ -611,9 +645,13 @@ class LLMRouter:
         # there is no request timeout on the server, and the Telegram bridge giving up
         # after 270 seconds does not cancel the handler.
         #
-        # The deadline stops a NEW attempt from starting, rather than interrupting one
-        # in flight — a request that is answering must not be killed mid-stream.
+        # One clock owns admission, retry waits and submitted HTTP work.  The
+        # submitted task is cancelled and drained at the boundary: this cannot
+        # promise a remote abort after the server accepted the request, but it
+        # does guarantee that no local model task survives the caller's budget.
         deadline = time.monotonic() + self.total_budget_sec
+        if absolute_deadline is not None:
+            deadline = min(deadline, absolute_deadline)
         # Начало отсчёта для строки замера ниже. Без неё вопрос «почему ответ
         # идёт полторы минуты» не имеет ответа: один ход человека делает
         # несколько вызовов модели, и до этого ни один из них не был измерен —
@@ -627,11 +665,39 @@ class LLMRouter:
                 LOGGER.warning("LLM endpoint became silent during retry; skipping request")
                 raise LLMUnavailableError("LLM endpoint is in silent cooldown")
 
+        async def _post_with_deadline(
+            client: httpx.AsyncClient,
+            current_payload: dict[str, Any],
+        ) -> httpx.Response:
+            request_remaining = deadline - time.monotonic()
+            if request_remaining <= 0:
+                raise LLMDeadlineError("admission")
+            try:
+                return await asyncio.wait_for(
+                    _await_http_request(
+                        client.post(f"{self.base_url}/chat/completions", json=current_payload)
+                    ),
+                    timeout=request_remaining,
+                )
+            except TimeoutError as exc:
+                # A request task existed and was awaited: this is intentionally
+                # distinct from expiring in the semaphore or retry queue before
+                # a POST.  `_await_http_request` drains its cancellation and the
+                # client context closes before this escapes.
+                raise LLMDeadlineError("submitted") from exc
+
+        async def _bounded_retry_sleep(delay: float) -> None:
+            remaining = deadline - time.monotonic()
+            if remaining <= delay:
+                raise LLMDeadlineError("admission")
+            await asyncio.sleep(delay)
+
         # Some routes have already completed an expensive or externally visible
         # stage and own a deterministic fallback.  They can opt out of transport
         # retries so one failed synthesis never starts a second generation for
         # the same accepted evidence.
         max_attempts = MAX_RETRIES if allow_retries else 1
+        degeneration_retry_used = False
         for attempt in range(max_attempts):
             if attempt and time.monotonic() >= deadline:
                 LOGGER.warning("LLM budget of %.0fs is spent; not retrying", self.total_budget_sec)
@@ -639,13 +705,17 @@ class LLMRouter:
             if attempt:
                 _ensure_retry_allowed()
             try:
-                timeout = httpx.Timeout(self.timeout_sec, connect=15.0)
+                request_remaining = deadline - time.monotonic()
+                if request_remaining <= 0:
+                    raise LLMDeadlineError("admission")
+                timeout = httpx.Timeout(
+                    min(self.timeout_sec, request_remaining),
+                    connect=min(15.0, request_remaining),
+                )
                 async with httpx.AsyncClient(
                     timeout=timeout, trust_env=False, headers=self._auth_headers()
                 ) as client:
-                    response = await _await_http_request(
-                        client.post(f"{self.base_url}/chat/completions", json=payload)
-                    )
+                    response = await _post_with_deadline(client, payload)
                     if (
                         allow_retries
                         and response.status_code == 400
@@ -679,9 +749,7 @@ class LLMRouter:
                         # schema request was in flight, so consult the shared
                         # breaker before sending the schema-less retry.
                         _ensure_retry_allowed()
-                        response = await _await_http_request(
-                            client.post(f"{self.base_url}/chat/completions", json=payload)
-                        )
+                        response = await _post_with_deadline(client, payload)
                     response.raise_for_status()
                     data = response.json()
                 choices = data.get("choices") if isinstance(data, dict) else None
@@ -706,7 +774,9 @@ class LLMRouter:
                     self._thinking_seen = True
                 if reject_repeated_token_degeneration and detect_repeated_token_degeneration(content):
                     LOGGER.warning("LLM response rejected: repeated_token_degeneration")
-                    raise RuntimeError("LLM response rejected: repeated-token degeneration detected")
+                    raise _RepeatedTokenDegenerationError(
+                        "LLM response rejected: repeated-token degeneration detected"
+                    )
                 usage_value = data.get("usage")
                 usage: dict[str, Any] = usage_value if isinstance(usage_value, dict) else {}
                 try:
@@ -743,6 +813,27 @@ class LLMRouter:
                     "_offered_tool_names": _bounded_tool_schema_names(payload.get("tools")),
                 }
 
+            except _RepeatedTokenDegenerationError as exc:
+                # The server completed the request, but the answer is not safe
+                # to publish or use as a hierarchy leaf.  One schema-identical
+                # retry is safe: no tool call/effect has been accepted yet.  A
+                # small non-zero temperature breaks deterministic token loops;
+                # the shorter retry ceiling bounds the extra inference and
+                # still leaves ample room for classifiers and compact document
+                # summaries.  Never turn this into an unbounded generic retry.
+                last_error = exc
+                if not allow_retries or degeneration_retry_used or attempt >= max_attempts - 1:
+                    raise
+                degeneration_retry_used = True
+                payload = dict(payload)
+                payload["temperature"] = max(float(payload.get("temperature") or 0.0), 0.1)
+                payload["max_tokens"] = min(int(payload.get("max_tokens") or 384), 384)
+                LOGGER.warning("LLM degeneration: retrying once with a bounded recovery payload")
+            except LLMDeadlineError as exc:
+                last_error = exc
+                if exc.phase == "submitted":
+                    self._silent_until = time.monotonic() + SILENT_ENDPOINT_COOLDOWN_SEC
+                raise
             except httpx.HTTPStatusError as exc:
                 last_error = exc
                 status = exc.response.status_code
@@ -752,7 +843,7 @@ class LLMRouter:
                 delay = retry_after if retry_after is not None else RETRY_BASE_DELAY * (2**attempt)
                 delay = min(max(0.0, delay), RETRY_MAX_DELAY)
                 LOGGER.warning("LLM HTTP %d, retrying in %.1fs (attempt %d)", status, delay, attempt + 1)
-                await asyncio.sleep(delay)
+                await _bounded_retry_sleep(delay)
             except httpx.ReadTimeout as exc:
                 # Сервер ПРИНЯЛ запрос и молчал весь таймаут — повтор не поможет.
                 #
@@ -770,14 +861,18 @@ class LLMRouter:
                 LOGGER.warning(
                     "LLM read timeout after %.0fs; not retrying a silent endpoint", self.timeout_sec
                 )
+                if absolute_deadline is not None and time.monotonic() >= absolute_deadline:
+                    raise LLMDeadlineError("submitted") from exc
                 raise
             except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
                 last_error = exc
+                if absolute_deadline is not None and time.monotonic() >= absolute_deadline:
+                    raise LLMDeadlineError("submitted") from exc
                 if attempt >= max_attempts - 1:
                     raise
                 delay = min(RETRY_BASE_DELAY * (2**attempt), RETRY_MAX_DELAY)
                 LOGGER.warning("LLM transport error, retrying in %.1fs", delay)
-                await asyncio.sleep(delay)
+                await _bounded_retry_sleep(delay)
 
         raise last_error or LLMUnavailableError("LLM request failed after all retries")
 

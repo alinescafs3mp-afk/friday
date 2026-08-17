@@ -1759,11 +1759,11 @@ async def test_full_source_prepass_and_reduction_leave_a_fresh_answer_deadline(
     assert context.attachment_primary_deadline is None
     primary_deadline = runtime._ensure_attachment_primary_deadline(context)
     assert primary_deadline is not None
-    # It is a newly created 90-second window, not the unused remainder of the
+    # It is a newly created 180-second window, not the unused remainder of the
     # longer map deadline. Its absolute timestamp may be earlier than a prepass
     # deadline which completed quickly and still has time left.
     primary_remaining = primary_deadline - agent_runtime_module.time.monotonic()
-    assert 89.0 <= primary_remaining <= 90.0
+    assert 179.0 <= primary_remaining <= 180.0
 
 
 @pytest.mark.asyncio

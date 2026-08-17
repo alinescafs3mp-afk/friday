@@ -602,7 +602,7 @@ def test_absolute_turn_clock_keeps_bounded_attachment_stage_limits(
         roomy,
         requested_budget_sec=480.0,
     ) == pytest.approx(480.0)
-    assert runtime._ensure_attachment_primary_deadline(roomy) == pytest.approx(90.0)  # noqa: SLF001
+    assert runtime._ensure_attachment_primary_deadline(roomy) == pytest.approx(180.0)  # noqa: SLF001
 
     nearly_spent = AgentContext(
         conversation_id="nearly-spent",
@@ -656,6 +656,44 @@ async def test_attachment_primary_applies_only_its_missing_output_budget(
     assert model.kwargs[0]["max_tokens"] == agent_runtime_module._ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS
     assert model.kwargs[1]["max_tokens"] == 900
     assert "max_tokens" not in model.kwargs[2]
+
+
+@pytest.mark.asyncio
+async def test_direct_attachment_route_sets_the_answer_budget_before_transport(
+    settings,
+    storage,
+) -> None:
+    """The real direct-answer branch, not only its helper, owns the ceiling."""
+
+    class RecordingModel:
+        enabled = True
+        total_budget_sec = 30.0
+
+        def __init__(self) -> None:
+            self.kwargs: list[dict[str, Any]] = []
+
+        async def chat(self, _messages, **kwargs):  # noqa: ANN001
+            self.kwargs.append(dict(kwargs))
+            return {"content": "bounded attachment answer"}
+
+    model = RecordingModel()
+    runtime = AgentRuntime(replace(settings, verify_answers=False), storage, llm=model)
+    context = AgentContext(
+        conversation_id="direct-attachment-route",
+        user_id="alice",
+        current_attachment_present=False,
+    )
+
+    result = await runtime._generate_response(  # noqa: SLF001
+        context,
+        "Загружен документ: synthetic.odt",
+        [{"filename": "synthetic.odt", "transient_text": "alpha beta gamma"}],
+    )
+
+    assert result["content"] == "bounded attachment answer"
+    assert context.current_attachment_present is True
+    assert len(model.kwargs) == 1
+    assert model.kwargs[0]["max_tokens"] == agent_runtime_module._ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS
 
 
 @pytest.mark.asyncio

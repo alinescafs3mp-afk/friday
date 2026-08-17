@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 from dataclasses import replace
 
 import httpx
 import pytest
 
-from friday.agent_runtime.llm import LLMRouter, _fit_messages_to_context, _system_first
+from friday.agent_runtime.llm import (
+    LLMDeadlineError,
+    LLMRouter,
+    _fit_messages_to_context,
+    _system_first,
+)
 
 
 def test_qwen_prompt_collapses_all_system_messages_in_order():
@@ -157,6 +164,183 @@ async def test_vision_can_accept_valid_ocr_json_with_a_long_visual_separator(
         reject_repeated_token_degeneration=False,
     )
     assert result["content"] == content
+
+
+@pytest.mark.asyncio
+async def test_repeated_generation_gets_one_bounded_internal_recovery(
+    settings,
+    monkeypatch,
+) -> None:
+    looping = "loop " * 20
+    payloads: list[dict] = []
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **kwargs):
+            payloads.append(dict(kwargs["json"]))
+            content = looping if len(payloads) == 1 else "stable recovered answer"
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json={
+                    "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                },
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: _Client())
+    router = LLMRouter(replace(settings, llm_enabled=True))
+
+    result = await router.chat(
+        [{"role": "user", "content": "bounded recovery"}],
+        temperature=0.0,
+        max_tokens=640,
+    )
+
+    assert result["content"] == "stable recovered answer"
+    assert len(payloads) == 2
+    assert payloads[0]["temperature"] == 0.0
+    assert payloads[0]["max_tokens"] == 640
+    assert payloads[1]["temperature"] == 0.1
+    assert payloads[1]["max_tokens"] == 384
+
+
+@pytest.mark.asyncio
+async def test_retry_opt_out_rejects_degeneration_after_one_post(
+    settings,
+    monkeypatch,
+) -> None:
+    posts = 0
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **_kwargs):
+            nonlocal posts
+            posts += 1
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json={
+                    "choices": [{"message": {"content": "loop " * 20}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                },
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: _Client())
+    router = LLMRouter(replace(settings, llm_enabled=True))
+
+    with pytest.raises(RuntimeError, match="repeated-token degeneration"):
+        await router.chat(
+            [{"role": "user", "content": "one-shot accepted evidence"}],
+            allow_retries=False,
+        )
+
+    assert posts == 1
+
+
+@pytest.mark.asyncio
+async def test_absolute_deadline_expires_in_queue_without_post_or_semaphore_leak(
+    settings,
+    monkeypatch,
+) -> None:
+    posts = 0
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **_kwargs):
+            nonlocal posts
+            posts += 1
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json={
+                    "choices": [{"message": {"content": "healthy"}, "finish_reason": "stop"}],
+                    "usage": {},
+                },
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: _Client())
+    router = LLMRouter(replace(settings, llm_enabled=True))
+    initial_slots = router._foreground_sem._value  # noqa: SLF001
+    for _slot in range(initial_slots):
+        await router._foreground_sem.acquire()  # noqa: SLF001
+    try:
+        with pytest.raises(LLMDeadlineError) as raised:
+            await router.chat(
+                [{"role": "user", "content": "must expire before admission"}],
+                absolute_deadline=time.monotonic() + 0.03,
+            )
+    finally:
+        for _slot in range(initial_slots):
+            router._foreground_sem.release()  # noqa: SLF001
+
+    assert raised.value.phase == "admission"
+    assert posts == 0
+    result = await router.chat([{"role": "user", "content": "permit remains usable"}])
+    assert result["content"] == "healthy"
+    assert posts == 1
+    assert router._foreground_sem._value == initial_slots  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_absolute_deadline_bounds_submitted_request_and_closes_client(
+    settings,
+    monkeypatch,
+) -> None:
+    observed: dict[str, object] = {"cancelled": False, "closed": False}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            observed["timeout"] = kwargs["timeout"]
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            observed["closed"] = True
+            return False
+
+        async def post(self, _url, **_kwargs):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                observed["cancelled"] = True
+                raise
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    router = LLMRouter(replace(settings, llm_enabled=True))
+    initial_slots = router._foreground_sem._value  # noqa: SLF001
+
+    with pytest.raises(LLMDeadlineError) as raised:
+        await router.chat(
+            [{"role": "user", "content": "submitted request must be bounded"}],
+            absolute_deadline=time.monotonic() + 0.05,
+        )
+
+    timeout = observed["timeout"]
+    assert isinstance(timeout, httpx.Timeout)
+    assert 0 < timeout.read <= 0.05
+    assert 0 < timeout.connect <= 0.05
+    assert raised.value.phase == "submitted"
+    assert observed["cancelled"] is True
+    assert observed["closed"] is True
+    assert router._foreground_sem._value == initial_slots  # noqa: SLF001
+    assert router._silent_until > time.monotonic()  # noqa: SLF001
 
 
 @pytest.mark.asyncio
