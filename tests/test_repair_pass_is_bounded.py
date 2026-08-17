@@ -26,13 +26,19 @@ class _Router:
 
     enabled = True
 
-    def __init__(self, reply: str = "Исправленный ответ, опирающийся на записи целиком.") -> None:
+    def __init__(
+        self,
+        reply: str = "Исправленный ответ, опирающийся на записи целиком.",
+        *,
+        finish_reason: str = "stop",
+    ) -> None:
         self.calls = 0
         self.reply = reply
+        self.finish_reason = finish_reason
 
     async def chat(self, messages, tools=None):  # noqa: ANN001, ARG002
         self.calls += 1
-        return {"content": self.reply}
+        return {"content": self.reply, "finish_reason": self.finish_reason}
 
 
 def _context() -> AgentContext:
@@ -97,6 +103,25 @@ async def test_a_truncated_repair_is_not_an_improvement():
         )
         == ""
     )
+
+
+@pytest.mark.anyio
+async def test_a_length_capped_repair_never_replaces_the_original_answer():
+    router = _Router(
+        reply="Первое исправление закончено. Но ключевая поправка оборвана",
+        finish_reason="length",
+    )
+    runtime = _runtime(router)
+
+    fixed = await runtime._repair_once(  # noqa: SLF001
+        "кто командир?",
+        "Командиром расчёта назначен Иванов.",
+        _context(),
+        {"status": VERDICT_FAILED, "issues": ["не тот человек"]},
+    )
+
+    assert fixed == ""
+    assert router.calls == 1
 
 
 @pytest.mark.anyio

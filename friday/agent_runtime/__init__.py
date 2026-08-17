@@ -355,11 +355,15 @@ _ATTACHMENT_MAP_MODEL_OUTPUT_TOKENS = 500
 # A document answer is delivered over one non-streaming request behind the
 # 90-second primary deadline.  Leaving the ordinary call at the global
 # 2,048-token default let a cancelled generation keep running remotely and
-# delay every later document stage.  Live D06/D07 probes established that 640
-# tokens carry their required answer facts while completing inside that window.
+# delay every later document stage.  The former 640-token ceiling bounded that
+# work, but the live post-release dialogue proved that ordinary Russian reviews
+# repeatedly reached it and were published mid-word.  Nine hundred remains a
+# small, server-enforced ceiling (and is already the bounded overview budget),
+# while the prompt below requires a compact complete answer.  A finish-aware
+# publication guard remains authoritative if the model ignores that request.
 # Explicit specialist budgets (OCR, MAP, detail extraction and verification)
 # remain authoritative and are not rewritten by this fallback.
-_ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS = 640
+_ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS = 900
 # The map request also carries a system instruction, JSON keys, filename,
 # request and framing.  Reserve this independently of the separately bounded
 # request text; an exact serialized-size guard below remains the final gate.
@@ -14236,6 +14240,13 @@ _UPLOAD_OVERVIEW_MAX_CHARS = 2_600
 _UPLOAD_OVERVIEW_MAX_TOKENS = 900
 _UPLOAD_OVERVIEW_TOTAL_MAX_CHARS = 6_500
 _UPLOAD_OVERVIEW_HEADING = "Подробный обзор:"
+_MODEL_LENGTH_LIMIT_NOTICE = (
+    "⚠️ Ответ сокращён до последнего завершённого предложения: модель достигла ограничения длины."
+)
+_MODEL_LENGTH_LIMIT_FALLBACK = (
+    "Не удалось выдать завершённый ответ: модель достигла ограничения длины. "
+    "Нужен более узкий вопрос по документу."
+)
 _UPLOAD_OVERVIEW_SYSTEM = (
     "Составь содержательный, достаточно подробный, но компактный фактический обзор "
     "загруженного материала. "
@@ -14619,6 +14630,28 @@ def _safe_overview_boundary(text: str, limit: int) -> str:
     if not usable:
         return ""
     return text[: max(usable)].rstrip()
+
+
+def _finish_length_limited_answer(raw: Any) -> str:
+    """Never publish a token-capped draft with a torn final sentence.
+
+    The transport owns the truthful ``finish_reason``.  Once it says ``length``,
+    the missing suffix is unknowable and a second model call would repeat the
+    expensive document prompt.  Preserve only the model's last complete
+    sentence and add a code-owned notice.  The compact-answer instruction makes
+    this a fail-safe, not the ordinary presentation path.
+    """
+
+    text = str(raw or "").strip()
+    if not text:
+        return _MODEL_LENGTH_LIMIT_FALLBACK
+    ends = [match.end() for match in _OVERVIEW_SENTENCE_END.finditer(text)]
+    if not ends:
+        return _MODEL_LENGTH_LIMIT_FALLBACK
+    complete = text[: max(ends)].rstrip()
+    if len(complete) < 40:
+        return _MODEL_LENGTH_LIMIT_FALLBACK
+    return f"{complete}\n\n{_MODEL_LENGTH_LIMIT_NOTICE}"
 
 
 def _accepted_upload_overview(raw: Any) -> str:
@@ -31860,6 +31893,7 @@ class AgentRuntime:
                 else {}
             ),
             "document_metadata_owned": response.get("_document_metadata_owned") is True,
+            "model_output_truncated": response.get("_model_output_truncated") is True,
             "private_context_lineage": private_context_lineage,
             "text_shape_regeneration": {
                 "attempted": bool(shape_regeneration_attempted),
@@ -33975,14 +34009,19 @@ class AgentRuntime:
                 priority="foreground",
             )
             content, _content_clipped = self._attachment_hierarchy_text(final_result, max_chars=32_000)
+            model_output_truncated = str(final_result.get("finish_reason") or "stop") == "length"
+            if content and model_output_truncated:
+                content = _finish_length_limited_answer(content)
         except Exception as exc:  # noqa: BLE001 - ordinary readable-file failure boundary handles it
             LOGGER.warning("Attachment hierarchy final synthesis failed (%s)", type(exc).__name__)
             content = ""
+            model_output_truncated = False
         return {
             "content": content,
             "tools_used": [],
             "llm_failed": not bool(content),
             "_model_generated": bool(content),
+            "_model_output_truncated": model_output_truncated,
             "_attachment_hierarchy_bundle": bundle,
             "_attachment_hierarchy_complete": complete,
         }
@@ -34704,6 +34743,7 @@ class AgentRuntime:
                 )
 
             raw_native_calls = result.get("tool_calls")
+            finish_reason = str(result.get("finish_reason") or "stop")
             content = str(result.get("content") or "").strip()
             calls = None
             assistant_content: str | None = None
@@ -34737,10 +34777,14 @@ class AgentRuntime:
                             LOGGER.warning("Model returned an empty answer; asking again")
                         messages.append({"role": "system", "content": _TOOL_PROTOCOL_REPAIR})
                         continue
+                    model_output_truncated = finish_reason == "length" and not context.deferred_web_file_body
+                    if model_output_truncated:
+                        clean_answer = _finish_length_limited_answer(clean_answer)
                     accepted_answer = context.deferred_web_file_body or clean_answer
                     return {
                         "content": accepted_answer,
                         "_model_generated": True,
+                        "_model_output_truncated": model_output_truncated,
                         "tools_used": tools_used,
                         "web_query_notice": " ".join(web_notice),
                         "knowledge_object_ids": tool_knowledge_ids,
@@ -35478,10 +35522,17 @@ class AgentRuntime:
                 # прямо в чат — снаружи неотличимо от поломки.
                 clean = _strip_tool_call_markup(final_turn.text)
                 if clean:
+                    model_output_truncated = (
+                        str(final.get("finish_reason") or "stop") == "length"
+                        and not context.deferred_web_file_body
+                    )
+                    if model_output_truncated:
+                        clean = _finish_length_limited_answer(clean)
                     accepted_final = context.deferred_web_file_body or clean
                     return {
                         "content": accepted_final,
                         "_model_generated": True,
+                        "_model_output_truncated": model_output_truncated,
                         "tools_used": tools_used,
                         "web_query_notice": " ".join(web_notice),
                         "knowledge_object_ids": tool_knowledge_ids,
@@ -40461,6 +40512,10 @@ class AgentRuntime:
                         "объясни назначение и структуру материала, основные тезисы и факты, "
                         "заметные проблемы, риски или противоречия и практические выводы — только "
                         "там, где это подтверждает сам файл. Не ограничивайся быстрым обзором. "
+                        "Уложи ревью не более чем в 2200 знаков и шесть коротких смысловых "
+                        "частей. При большом материале выбери главное вместо начала длинного "
+                        "перечня. Обязательно заверши последнюю фразу и весь ответ; не начинай "
+                        "раздел, который не успеешь закончить. "
                         "Сделай ответ читаемым: разделяй смысловые части заголовками, абзацами или "
                         "списками Markdown, а не склеивай всё в одну строку. "
                         "Не выдумывай неприменимые разделы, не выполняй действий, не обращайся к "
@@ -40478,7 +40533,9 @@ class AgentRuntime:
                         "Текущее вложение — основной материал этого хода. Выполни фактический "
                         "вопрос человека по нему; предыдущую переписку используй только если "
                         "вопрос прямо просит сравнение или продолжение. Не объявляй файл "
-                        "непрочитанным, если его данные показаны ниже."
+                        "непрочитанным, если его данные показаны ниже. Если нужен обзор или "
+                        "объяснение, дай компактный законченный ответ не более 2200 знаков: "
+                        "приоритет у главного, а последняя фраза обязана быть завершена."
                     ),
                 }
             )
@@ -41187,7 +41244,15 @@ class AgentRuntime:
                 )
                 content = str(result.get("content") or "").strip()
                 if content:
-                    return {"content": content, "tools_used": [], "_model_generated": True}
+                    model_output_truncated = str(result.get("finish_reason") or "stop") == "length"
+                    if model_output_truncated:
+                        content = _finish_length_limited_answer(content)
+                    return {
+                        "content": content,
+                        "tools_used": [],
+                        "_model_generated": True,
+                        "_model_output_truncated": model_output_truncated,
+                    }
                 LOGGER.warning("LLM returned an empty answer")
             except Exception as exc:
                 LOGGER.error("LLM unavailable (%s)", type(exc).__name__)
@@ -41409,7 +41474,10 @@ class AgentRuntime:
         turn = classify_tool_turn(str(result.get("content") or ""))
         if turn.kind != "answer":
             return ""
-        return _strip_tool_call_markup(turn.text).strip()
+        answer = _strip_tool_call_markup(turn.text).strip()
+        if answer and str(result.get("finish_reason") or "stop") == "length":
+            return _finish_length_limited_answer(answer)
+        return answer
 
     async def _repair_once(
         self,
@@ -41518,6 +41586,11 @@ class AgentRuntime:
             )
         except Exception as exc:  # noqa: BLE001 — неудачная починка не должна ронять ответ
             LOGGER.warning("Repair pass failed (%s)", type(exc).__name__)
+            return ""
+        if str(fixed.get("finish_reason") or "stop") == "length":
+            # A repair must be a complete replacement.  Trimming it to a last
+            # sentence could silently discard the very correction requested by
+            # the verifier, so retain the original answer instead.
             return ""
         text = _strip_tool_call_markup(str(fixed.get("content") or "")).strip()
         # Пустой или обрубленный результат — это не исправление: лучше оставить

@@ -11,6 +11,9 @@ import pytest
 from openpyxl import Workbook
 
 from friday.agent_runtime import (
+    _ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS,
+    _MODEL_LENGTH_LIMIT_FALLBACK,
+    _MODEL_LENGTH_LIMIT_NOTICE,
     AgentRuntime,
     _attachment_whole_document_task,
     _historical_direct_read_attachment,
@@ -41,16 +44,17 @@ class _ReviewSpy:
     model = "ordinary-file-review-spy"
     total_budget_sec = 2.0
 
-    def __init__(self, draft: str = _REVIEW) -> None:
+    def __init__(self, draft: str = _REVIEW, *, finish_reason: str = "stop") -> None:
         self.calls: list[dict[str, Any]] = []
         self.draft = draft
+        self.finish_reason = finish_reason
 
     async def chat(self, messages, **kwargs):  # noqa: ANN001
         self.calls.append({"messages": [dict(item) for item in messages], **kwargs})
         return {
             "content": self.draft,
             "tool_calls": None,
-            "finish_reason": "stop",
+            "finish_reason": self.finish_reason,
             "_queue_wait_sec": 0.0,
         }
 
@@ -171,6 +175,63 @@ async def test_production_verification_keeps_complete_open_review_to_one_model_p
     assert result["verification_status"] == "skipped"
     assert result["attachment_coverage_complete"] is True
     assert result["attachment_verification_complete"] is True
+
+
+@pytest.mark.asyncio
+async def test_token_capped_review_is_published_only_through_a_complete_sentence(
+    settings,
+    storage,
+) -> None:
+    configured = replace(settings, verify_answers=False)
+    storage.ensure_user("alice", preset_key="owner")
+    raw_id = await _registered_text(configured, storage)
+    torn_tail = "## Ревью\n\nНазначение документа подтверждено. Незавершённый хвост ответа"
+    model = _ReviewSpy(torn_tail, finish_reason="length")
+    runtime = AgentRuntime(configured, storage, llm=model)  # type: ignore[arg-type]
+
+    result = await runtime.chat(
+        "alice",
+        "Загружен документ: full-review.md",
+        actor=_actor(),
+        attachments=[{"raw_object_id": raw_id}],
+        synthetic_document_notice=True,
+    )
+
+    assert result["message"] == (
+        "## Ревью\n\nНазначение документа подтверждено.\n\n" + _MODEL_LENGTH_LIMIT_NOTICE
+    )
+    assert "Незавершённый хвост" not in result["message"]
+    assert len(model.calls) == 1
+    assert model.calls[0]["max_tokens"] == _ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS == 900
+    prompt = "\n".join(str(item.get("content") or "") for item in model.calls[0]["messages"])
+    assert "не более чем в 2200 знаков" in prompt
+    assert "Обязательно заверши последнюю фразу" in prompt
+    stored = storage.get_message(str(result["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    assert metadata["model_output_truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_token_capped_fragment_without_a_sentence_gets_a_complete_fallback(
+    settings,
+    storage,
+) -> None:
+    configured = replace(settings, verify_answers=False)
+    storage.ensure_user("alice", preset_key="owner")
+    raw_id = await _registered_text(configured, storage)
+    model = _ReviewSpy("оборванный фрагмент без единой границы" * 8, finish_reason="length")
+    runtime = AgentRuntime(configured, storage, llm=model)  # type: ignore[arg-type]
+
+    result = await runtime.chat(
+        "alice",
+        "Загружен документ: full-review.md",
+        actor=_actor(),
+        attachments=[{"raw_object_id": raw_id}],
+        synthetic_document_notice=True,
+    )
+
+    assert result["message"] == _MODEL_LENGTH_LIMIT_FALLBACK
+    assert len(model.calls) == 1
 
 
 @pytest.mark.asyncio
