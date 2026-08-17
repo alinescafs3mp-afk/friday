@@ -11,6 +11,7 @@ import pytest
 from friday.agent_runtime.llm import (
     LLMDeadlineError,
     LLMRouter,
+    LLMUnavailableError,
     _fit_messages_to_context,
     _system_first,
 )
@@ -502,3 +503,124 @@ async def test_retry_opt_out_sends_one_post_and_never_backs_off(
 
     assert len(posts) == 1
     assert sleeps == []
+
+
+@pytest.mark.asyncio
+async def test_exact_response_model_accepts_one_choice_from_configured_model(
+    settings,
+    monkeypatch,
+) -> None:
+    router = LLMRouter(replace(settings, llm_enabled=True))
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **_kwargs):
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json={
+                    "model": router.model,
+                    "choices": [
+                        {"message": {"content": "exact model"}, "finish_reason": "stop"}
+                    ],
+                    "usage": {},
+                },
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: _Client())
+
+    result = await router.chat(
+        [{"role": "user", "content": "attested request"}],
+        require_full_context=True,
+        require_exact_response_model=True,
+        allow_retries=False,
+    )
+
+    assert result["content"] == "exact model"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response_model, choices",
+    [
+        pytest.param(None, [{}], id="missing-model"),
+        pytest.param("untrusted-served-model", [{}], id="wrong-model"),
+        pytest.param(7, [{}], id="non-string-model"),
+        pytest.param("__configured__", [], id="no-choices"),
+        pytest.param("__configured__", [{}, {}], id="multiple-choices"),
+    ],
+)
+async def test_exact_response_model_rejects_identity_and_cardinality_mutations_without_leak(
+    settings,
+    monkeypatch,
+    response_model,
+    choices,
+) -> None:
+    router = LLMRouter(replace(settings, llm_enabled=True))
+    posts = 0
+    body = {"choices": choices, "usage": {}}
+    if response_model is not None:
+        body["model"] = router.model if response_model == "__configured__" else response_model
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **_kwargs):
+            nonlocal posts
+            posts += 1
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json=body,
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: _Client())
+
+    with pytest.raises(LLMUnavailableError) as raised:
+        await router.chat(
+            [{"role": "user", "content": "attested request"}],
+            require_exact_response_model=True,
+            allow_retries=False,
+        )
+
+    assert posts == 1
+    assert str(response_model) not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_exact_response_model_is_opt_in_for_legacy_callers(settings, monkeypatch) -> None:
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **_kwargs):
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json={
+                    "choices": [
+                        {"message": {"content": "legacy first"}, "finish_reason": "stop"},
+                        {"message": {"content": "legacy second"}, "finish_reason": "stop"},
+                    ],
+                    "usage": {},
+                },
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: _Client())
+    router = LLMRouter(replace(settings, llm_enabled=True))
+
+    result = await router.chat([{"role": "user", "content": "legacy request"}])
+
+    assert result["content"] == "legacy first"

@@ -531,6 +531,7 @@ class LLMRouter:
         absolute_deadline: float | None = None,
         open_silent_cooldown: bool = True,
         require_full_context: bool = False,
+        require_exact_response_model: bool = False,
     ) -> dict[str, Any]:
         if not self.enabled:
             raise LLMUnavailableError("LLM is disabled")
@@ -588,6 +589,7 @@ class LLMRouter:
                     absolute_deadline=absolute_deadline,
                     open_silent_cooldown=open_silent_cooldown,
                     require_full_context=require_full_context,
+                    require_exact_response_model=require_exact_response_model,
                 )
             except BaseException:
                 # A full ReadTimeout replaces the sentinel with a fresh finite
@@ -679,6 +681,7 @@ class LLMRouter:
         absolute_deadline: float | None = None,
         open_silent_cooldown: bool = True,
         require_full_context: bool = False,
+        require_exact_response_model: bool = False,
     ) -> dict[str, Any]:
         payload = self._prepare_payload(
             messages,
@@ -805,6 +808,22 @@ class LLMRouter:
                         response = await _post_with_deadline(client, payload)
                     response.raise_for_status()
                     data = response.json()
+                if require_exact_response_model:
+                    exact_choices = data.get("choices") if isinstance(data, dict) else None
+                    response_model = data.get("model") if isinstance(data, dict) else None
+                    if (
+                        not isinstance(response_model, str)
+                        or response_model != self.model
+                        or not isinstance(exact_choices, list)
+                        or len(exact_choices) != 1
+                    ):
+                        # This route is used only after an exact served-model
+                        # attestation.  Never consume a completion if the
+                        # response cannot be bound to that same configured
+                        # model and to one unambiguous choice.  Deliberately do
+                        # not include the returned value in the exception or a
+                        # log: an untrusted endpoint controls it.
+                        raise LLMUnavailableError("LLM response failed exact-model contract")
                 choices = data.get("choices") if isinstance(data, dict) else None
                 if not isinstance(choices, list) or not choices:
                     raise LLMUnavailableError("LLM response has no choices")
