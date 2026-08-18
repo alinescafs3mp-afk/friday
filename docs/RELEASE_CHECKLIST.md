@@ -52,6 +52,17 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - backend/bridge singleton leases;
 - backup verification, restore, safety backup и rollback.
 
+Для V12 phase-1 дополнительно:
+
+- без явных переменных configured/installed mode остаются `legacy`, routes пусты;
+- canary стартует только с `model_gate.status=canary_ready`, reason
+  `live_attestation_clear` и единственным route `file_read`;
+- синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
+  citations, без повторного legacy-вызова после выбора V12;
+- неуспешная аттестация оставляет installed mode `legacy` и пустой список routes;
+- rehearsal возврата `FRIDAY_ROUTER_MODE=legacy` не меняет и не восстанавливает
+  SQLite, а bridge запускается только после зелёного backend health.
+
 ## 3. Compatibility
 
 Создать БД предыдущей опубликованной версией, наполнить всеми основными типами данных и открыть release candidate.

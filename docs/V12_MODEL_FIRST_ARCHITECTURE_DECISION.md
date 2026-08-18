@@ -1,7 +1,8 @@
 # V12: model-first архитектура Friday — принятое направление
 
-Статус: **архитектурное направление принято владельцем; реализация ведётся в
-изолированной ветке `v12-model-first`, production по умолчанию остаётся `legacy`**.
+Статус: **архитектурное направление принято владельцем; phase-1 реализует
+безопасный shadow и аттестованный FILE_READ canary, production по умолчанию
+остаётся `legacy`**.
 
 Дата решения: 2026-08-17.
 
@@ -164,7 +165,8 @@ FRIDAY_ROUTER_MODE=legacy|shadow|canary|v12
 - `legacy`: только текущий runtime;
 - `shadow`: V12 планирует, но не публикует и не исполняет mutating/high effects;
 - `canary`: V12 включён только для разрешённых пользователей и route classes;
-- `v12`: V12 владеет ходом, legacy остаётся мгновенным rollback.
+- `v12`: V12 владеет только явно разрешёнными route classes, остальные ходы
+  остаются у legacy; allowlist сохраняет мгновенный rollback.
 
 Один ход имеет ровно одного владельца эффектов. История, SQLite и форматы файлов
 общие, поэтому rollback не требует миграции данных.
@@ -173,9 +175,13 @@ FRIDAY_ROUTER_MODE=legacy|shadow|canary|v12
 
 ```text
 friday/orchestration/contracts.py
-friday/orchestration/legacy.py
-friday/orchestration/v12.py
+friday/orchestration/router.py
+friday/orchestration/planner.py
+friday/orchestration/file_read.py
+friday/orchestration/file_read_contract.py
 friday/model_profiles.py
+friday/model_probe.py
+friday/v12_model_runtime.py
 ```
 
 ## 9. Model profile вместо доверия по числу параметров
@@ -197,10 +203,13 @@ endpoint фиксируется измеренный профиль:
 из разрешённого профиля и не допускает циклов, превышения бюджета или тихого
 изменения effect owner.
 
-Текущий phase-1 каркас регистрирует только planner/shadow. `canary` и `v12`
-остаются фактически на legacy, пока в server composition нет явно
-аттестованного model profile и code-owned route handler с pre-admission,
-EvidenceBundle, verifier и финальной reauthorization публикации.
+Phase-1 регистрирует один code-owned route handler только после live-аттестации
+точного model endpoint. Исполняемый `file_read` принимает 1–2 файла текущего
+хода только при доказанно полном UTF-8 представлении, использует один
+EvidenceBundle для synthesis/verifier и выполняет финальную reauthorization
+перед атомарной публикацией. PDF, изображения/OCR, ранее загруженные файлы,
+archive/web и effects остаются у legacy. Это первый ограниченный canary, а не
+заявление о завершённой функциональной паритетности V12.
 
 ## 10. Работа V12 на текущей 27B-модели
 

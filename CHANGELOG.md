@@ -1,3 +1,43 @@
+## 0.203.0 — 2026-08-18
+
+### Первый fail-closed V12 canary рядом с legacy
+
+Добавлен переключаемый model-first orchestrator с режимами `legacy`, `shadow`,
+`canary` и `v12`. Без явной конфигурации Friday остаётся на прежнем runtime.
+Shadow строит только закрытый `TurnPlan` в фоне, не публикует второй ответ и не
+получает effect authority. Canary ограничен allowlist пользователя и route;
+невалидный план, неподдерживаемый вход или отсутствие аттестации до выбора
+маршрута возвращают ход в legacy ровно один раз.
+
+Первым исполняемым маршрутом стал `file_read` для одного или двух файлов,
+загруженных в текущем ходе и доказанно являющихся полным UTF-8 текстом. Он
+переиспользует существующие Raw bytes, authorization и SQLite, связывает
+неизменяемый EvidenceBundle с synthesis и независимым verifier, повторно
+проверяет источник и model lease перед одной атомарной публикацией. После
+выбора V12 ошибки не запускают legacy повторно. PDF, изображения/OCR, старые
+файлы, archive/web и любые эффекты пока намеренно остаются в legacy.
+
+### Модель допускается поведением, а не именем
+
+Canary/V12 включаются только после синтетической live-аттестации точного
+dispatcher: строгие русские планы, production-shaped synthesis и verifier для
+одного/двух текстовых источников, фактические citations, 8K-контекст, точный
+served-model alias, неизменный process epoch и ограниченная cancellation/queue
+проверка. Один sealed runtime выдаёт least-privilege lease, перепроверяет epoch
+до и после каждого model call и отзывает gate при drift. Health показывает
+отдельно configured и реально установленный режим, зарегистрированные routes и
+санитизированный статус gate; неудачная аттестация оставляет точный legacy.
+
+### Общие границы вынесены без копирования продукта
+
+`TurnInput`, `TurnPlan`, immutable file evidence, verifier contract и
+transactional message publication оформлены небольшими общими модулями.
+Legacy продолжает использовать прежние data/effect plane, storage и security;
+миграции БД и преобразования истории для включения или rollback не нужны.
+Model input/result закрыты от секретов; model-visible filename/MIME и served
+alias проходят fail-closed проверку, а deadlines, backpressure, current-turn
+authority и финальная reauthorization закреплены mutation-тестами.
+
 ## 0.202.0 — 2026-08-13
 
 ### Профиль dispatcher совпадает с живым запуском

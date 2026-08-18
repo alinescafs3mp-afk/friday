@@ -221,7 +221,11 @@ pytest -q
 4. запустите `jericho doctor`;
 5. запустите backend и проверьте Admin/Telegram smoke.
 
-0.8.0 использует SQLite schema 8, как и 0.7.0: обновление не меняет авторитетные Knowledge/Graph/Inbox/Conversation records. Отсутствующие производные projections могут идемпотентно достраиваться при открытии. Любая будущая поддерживаемая schema migration выполняется одной транзакцией; неизвестная более новая schema отклоняется fail-closed.
+0.203.0 использует SQLite schema 33, как и 0.202.0: V12 phase-1 не добавляет
+миграцию и не меняет авторитетные Knowledge/Graph/Inbox/Conversation records.
+Отсутствующие производные projections могут идемпотентно достраиваться при
+открытии. Любая будущая поддерживаемая schema migration выполняется одной
+транзакцией; неизвестная более новая schema отклоняется fail-closed.
 
 Восстановление выполняется только штатной командой при остановленном backend:
 
@@ -363,3 +367,51 @@ Backend всё ещё владеет lease, отсутствует `--yes` ли�
 ## 10. Наблюдаемость и privacy
 
 Telemetry локальная и не отправляет данные наружу. Audit хранит административные изменения и tool calls. Внешний structured-log collector допустим только opt-in и не должен включать содержимое личных знаний, prompts, documents или secrets по умолчанию.
+
+## 11. V12 shadow и первый file canary
+
+Без настройки работает только прежний runtime. Переключатель обратим и не
+меняет схему БД:
+
+```dotenv
+FRIDAY_ROUTER_MODE=legacy
+FRIDAY_ROUTER_CANARY_ROUTES=file_read
+FRIDAY_ROUTER_CANARY_USER_IDS=
+FRIDAY_ROUTER_PLAN_TIMEOUT_SEC=12
+```
+
+`shadow` строит технический план в фоне, но ответ и эффекты всегда принадлежат
+legacy. `canary` требует непустой allowlist пользователя, route `file_read` и
+успешную live-аттестацию модели при старте backend. На phase-1 V12 обрабатывает
+только 1–2 полных UTF-8 файла, зарегистрированных в текущем ходе. PDF,
+изображения/OCR, архивный поиск, web и effects автоматически остаются в legacy.
+
+Минимальная owner-only конфигурация canary:
+
+```dotenv
+FRIDAY_ROUTER_MODE=canary
+FRIDAY_ROUTER_CANARY_ROUTES=file_read
+FRIDAY_ROUTER_CANARY_USER_IDS=owner
+FRIDAY_ROUTER_PLAN_TIMEOUT_SEC=12
+```
+
+Startup probe синхронный и может занять до 330 секунд. При контролируемом
+переключении сначала штатно остановите bridge, затем запустите backend и не
+возвращайте bridge до полного health-подтверждения:
+
+```text
+orchestration.configured_mode = canary
+orchestration.installed_mode = canary
+orchestration.registered_routes = [file_read]
+orchestration.model_gate.status = canary_ready
+orchestration.model_gate.reason_code = live_attestation_clear
+```
+
+Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
+требуйте `status=ok` и `version=0.203.0`.
+
+HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
+не успешный canary. Для мгновенного отката оставьте bridge остановленным,
+верните `FRIDAY_ROUTER_MODE=legacy`, перезапустите backend, подтвердите
+configured/installed `legacy` и только затем снова запустите bridge. Обычный
+rollback кода не требует восстановления SQLite.
