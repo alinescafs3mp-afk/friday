@@ -60,7 +60,11 @@ class LLMDeadlineError(TimeoutError):
         self.phase = phase
 
 
-async def _await_http_request(request: Any) -> httpx.Response:
+async def _await_http_request(
+    request: Any,
+    *,
+    request_submitted_event: asyncio.Event | None = None,
+) -> httpx.Response:
     """Await one HTTP request and drain its cancellation before returning.
 
     Cancelling the caller already propagates into ``httpx``.  Keeping the
@@ -71,7 +75,16 @@ async def _await_http_request(request: Any) -> httpx.Response:
     own generation is aborted.
     """
 
-    request_task = asyncio.create_task(request)
+    async def _submitted_request() -> httpx.Response:
+        # This runs only after admission and after the concrete HTTP coroutine
+        # has been scheduled.  The V12 cancellation probe uses the event to
+        # distinguish a real send attempt from a task waiting on the router
+        # semaphore; legacy callers leave it unset.
+        if request_submitted_event is not None:
+            request_submitted_event.set()
+        return await request
+
+    request_task = asyncio.create_task(_submitted_request())
     try:
         return await request_task
     except asyncio.CancelledError:
@@ -310,6 +323,10 @@ class LLMUnavailableError(RuntimeError):
     """
 
 
+class LLMResponseModelMismatchError(LLMUnavailableError):
+    """The server response cannot be bound to the configured model alias."""
+
+
 def _retry_after_seconds(response: httpx.Response) -> float | None:
     value = response.headers.get("retry-after", "").strip()
     if not value:
@@ -532,6 +549,7 @@ class LLMRouter:
         open_silent_cooldown: bool = True,
         require_full_context: bool = False,
         require_exact_response_model: bool = False,
+        request_submitted_event: asyncio.Event | None = None,
     ) -> dict[str, Any]:
         if not self.enabled:
             raise LLMUnavailableError("LLM is disabled")
@@ -590,6 +608,7 @@ class LLMRouter:
                     open_silent_cooldown=open_silent_cooldown,
                     require_full_context=require_full_context,
                     require_exact_response_model=require_exact_response_model,
+                    request_submitted_event=request_submitted_event,
                 )
             except BaseException:
                 # A full ReadTimeout replaces the sentinel with a fresh finite
@@ -682,6 +701,7 @@ class LLMRouter:
         open_silent_cooldown: bool = True,
         require_full_context: bool = False,
         require_exact_response_model: bool = False,
+        request_submitted_event: asyncio.Event | None = None,
     ) -> dict[str, Any]:
         payload = self._prepare_payload(
             messages,
@@ -731,7 +751,8 @@ class LLMRouter:
             try:
                 return await asyncio.wait_for(
                     _await_http_request(
-                        client.post(f"{self.base_url}/chat/completions", json=current_payload)
+                        client.post(f"{self.base_url}/chat/completions", json=current_payload),
+                        request_submitted_event=request_submitted_event,
                     ),
                     timeout=request_remaining,
                 )
@@ -808,22 +829,19 @@ class LLMRouter:
                         response = await _post_with_deadline(client, payload)
                     response.raise_for_status()
                     data = response.json()
+                response_model = data.get("model") if isinstance(data, dict) else None
                 if require_exact_response_model:
                     exact_choices = data.get("choices") if isinstance(data, dict) else None
-                    response_model = data.get("model") if isinstance(data, dict) else None
-                    if (
-                        not isinstance(response_model, str)
-                        or response_model != self.model
-                        or not isinstance(exact_choices, list)
-                        or len(exact_choices) != 1
-                    ):
+                    if not isinstance(response_model, str) or response_model != self.model:
                         # This route is used only after an exact served-model
                         # attestation.  Never consume a completion if the
                         # response cannot be bound to that same configured
                         # model and to one unambiguous choice.  Deliberately do
                         # not include the returned value in the exception or a
                         # log: an untrusted endpoint controls it.
-                        raise LLMUnavailableError("LLM response failed exact-model contract")
+                        raise LLMResponseModelMismatchError("LLM response failed exact-model contract")
+                    if not isinstance(exact_choices, list) or len(exact_choices) != 1:
+                        raise LLMUnavailableError("LLM response failed exact-choice contract")
                 choices = data.get("choices") if isinstance(data, dict) else None
                 if not isinstance(choices, list) or not choices:
                     raise LLMUnavailableError("LLM response has no choices")
@@ -873,7 +891,7 @@ class LLMRouter:
                     safe_finish_reason,
                 )
                 self._silent_until = 0.0
-                return {
+                result = {
                     "content": content,
                     "tool_calls": tool_calls,
                     "finish_reason": finish_reason,
@@ -884,6 +902,13 @@ class LLMRouter:
                     # response, never the nominal list passed into ``chat``.
                     "_offered_tool_names": _bounded_tool_schema_names(payload.get("tools")),
                 }
+                # Private transport identity for the attested V12 adapter.  Do
+                # not substitute the requested alias when the endpoint omits or
+                # malforms this field: absence must remain distinguishable from
+                # a server-confirmed exact model response.
+                if isinstance(response_model, str):
+                    result["_served_model_alias"] = response_model
+                return result
 
             except _RepeatedTokenDegenerationError as exc:
                 # The server completed the request, but the answer is not safe

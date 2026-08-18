@@ -5,9 +5,15 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from friday.model_input_hygiene import model_messages_are_secret_free
+from friday.model_profiles import (
+    ModelCapability,
+    ModelEffect,
+    ModelProfileLease,
+    ModelRequirements,
+)
 from friday.orchestration.contracts import TURN_PLAN_SCHEMA, TurnInput, TurnPlan
 
 _PLANNER_SYSTEM_PROMPT = f"""\
@@ -32,6 +38,24 @@ and request attached_files evidence. For earlier stored files, choose archive_re
 For current external information, choose web_read and web evidence. Never invent a tool or source.
 """
 _MAX_ATTESTED_INPUT_UTF8_BYTES = 5_500
+_PLANNER_REQUIREMENTS = ModelRequirements(
+    capabilities=frozenset(
+        {
+            ModelCapability.TURN_PLAN_V1,
+            ModelCapability.RU_PLANNING,
+            ModelCapability.CONTEXT_8K,
+            ModelCapability.REMOTE_CANCELLATION,
+        }
+    ),
+    required_context_tokens=8_192,
+    prepared_evidence_items=0,
+    max_tool_steps=0,
+    effect=ModelEffect.READ,
+    # The first promoted route has an independent verifier.  Requiring that
+    # capability at planning time prevents a planner-only attestation from
+    # selecting a route that the same live generation cannot verify.
+    verifier_required=True,
+)
 
 
 class PlannerModel(Protocol):
@@ -52,20 +76,58 @@ class PlannerModel(Protocol):
     ) -> dict[str, Any]: ...
 
 
+class AttestedPlannerRuntime(Protocol):
+    """Narrow authority used by CANARY/V12 planning.
+
+    SHADOW deliberately keeps using :class:`PlannerModel` directly because it
+    has no publication or tool authority.  A promoted plan must instead reuse
+    one live-generation lease through this interface.
+    """
+
+    async def acquire_lease(
+        self,
+        requirements: ModelRequirements,
+        *,
+        absolute_deadline: float,
+    ) -> ModelProfileLease | None: ...
+
+    async def complete(
+        self,
+        lease: ModelProfileLease,
+        requirements: ModelRequirements,
+        messages: list[dict[str, Any]],
+        *,
+        max_tokens: int,
+        priority: Literal["foreground", "background"],
+        absolute_deadline: float,
+    ) -> dict[str, Any]: ...
+
+
 class V12Planner:
     """Translate one normalized turn into the closed plan contract."""
 
-    def __init__(self, model: PlannerModel, *, timeout_sec: float = 12.0) -> None:
+    def __init__(
+        self,
+        model: PlannerModel,
+        *,
+        timeout_sec: float = 12.0,
+        attested_runtime: AttestedPlannerRuntime | None = None,
+    ) -> None:
         self._model = model
+        self._attested_runtime = attested_runtime
         self._timeout_sec = max(1.0, min(float(timeout_sec), 60.0))
 
-    async def plan(self, turn: TurnInput, *, turn_deadline: float | None = None) -> TurnPlan:
+    def _deadline(self, turn_deadline: float | None) -> float:
         deadline = time.monotonic() + self._timeout_sec
         if turn_deadline is not None:
             deadline = min(deadline, turn_deadline)
         if deadline <= time.monotonic():
             raise TimeoutError("turn planning deadline has expired")
-        messages = [
+        return deadline
+
+    @staticmethod
+    def _messages(turn: TurnInput) -> list[dict[str, Any]]:
+        messages: list[dict[str, Any]] = [
             {"role": "system", "content": _PLANNER_SYSTEM_PROMPT},
             {
                 "role": "user",
@@ -83,6 +145,30 @@ class V12Planner:
             raise ValueError("planner input exceeds the attested context tier")
         if not model_messages_are_secret_free(messages):
             raise ValueError("planner input requires a secret projection")
+        return messages
+
+    @staticmethod
+    def _plan_from_response(response: object) -> TurnPlan:
+        if not isinstance(response, dict):
+            raise ValueError("planner response is incomplete or effectful")
+        content = response.get("content")
+        if (
+            not isinstance(content, str)
+            or response.get("finish_reason") != "stop"
+            or response.get("tool_calls") not in (None, [])
+        ):
+            raise ValueError("planner response is incomplete or effectful")
+        return TurnPlan.parse(content)
+
+    async def plan(self, turn: TurnInput, *, turn_deadline: float | None = None) -> TurnPlan:
+        """Effect-free SHADOW/standalone planner path.
+
+        CANARY and V12 must call :meth:`plan_attested`; keeping the methods
+        separate makes an accidental raw-model promotion mechanically visible.
+        """
+
+        deadline = self._deadline(turn_deadline)
+        messages = self._messages(turn)
         response = await asyncio.wait_for(
             self._model.chat(
                 messages,
@@ -97,11 +183,36 @@ class V12Planner:
             ),
             timeout=max(0.001, deadline - time.monotonic()),
         )
-        content = response.get("content") if isinstance(response, dict) else None
-        if (
-            not isinstance(content, str)
-            or response.get("finish_reason") != "stop"
-            or response.get("tool_calls") not in (None, [])
-        ):
-            raise ValueError("planner response is incomplete or effectful")
-        return TurnPlan.parse(content)
+        return self._plan_from_response(response)
+
+    async def plan_attested(
+        self,
+        turn: TurnInput,
+        *,
+        turn_deadline: float | None = None,
+    ) -> TurnPlan:
+        """Plan only through a current, code-owned live-model authority."""
+
+        deadline = self._deadline(turn_deadline)
+        messages = self._messages(turn)
+        runtime = self._attested_runtime
+        if runtime is None:
+            raise RuntimeError("attested V12 planner runtime is unavailable")
+        lease = await runtime.acquire_lease(
+            _PLANNER_REQUIREMENTS,
+            absolute_deadline=deadline,
+        )
+        if type(lease) is not ModelProfileLease:
+            raise RuntimeError("attested V12 planner lease is unavailable")
+        response = await asyncio.wait_for(
+            runtime.complete(
+                lease,
+                _PLANNER_REQUIREMENTS,
+                messages,
+                max_tokens=512,
+                priority="background",
+                absolute_deadline=deadline,
+            ),
+            timeout=max(0.001, deadline - time.monotonic()),
+        )
+        return self._plan_from_response(response)

@@ -542,6 +542,7 @@ async def test_exact_response_model_accepts_one_choice_from_configured_model(
     )
 
     assert result["content"] == "exact model"
+    assert result["_served_model_alias"] == router.model
 
 
 @pytest.mark.asyncio
@@ -624,3 +625,4 @@ async def test_exact_response_model_is_opt_in_for_legacy_callers(settings, monke
     result = await router.chat([{"role": "user", "content": "legacy request"}])
 
     assert result["content"] == "legacy first"
+    assert "_served_model_alias" not in result

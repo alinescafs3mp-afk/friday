@@ -13,14 +13,14 @@ from typing import Any, Protocol
 
 from friday.file_evidence import CurrentTurnFileReferenceToken, current_turn_file_reference_of
 from friday.orchestration.contracts import (
-    EvidenceKind,
     RouteClass,
     RouterMode,
     ToolEffect,
     TurnInput,
     TurnPlan,
 )
-from friday.orchestration.planner import PlannerModel, V12Planner
+from friday.orchestration.file_read_contract import file_read_plan_supports_attachment_count
+from friday.orchestration.planner import AttestedPlannerRuntime, PlannerModel, V12Planner
 from friday.permissions import ActorContext
 
 LOGGER = logging.getLogger(__name__)
@@ -55,6 +55,13 @@ class ChatRuntime(Protocol):
 
 class TurnPlanner(Protocol):
     async def plan(self, turn: TurnInput, *, turn_deadline: float | None = None) -> TurnPlan: ...
+
+    async def plan_attested(
+        self,
+        turn: TurnInput,
+        *,
+        turn_deadline: float | None = None,
+    ) -> TurnPlan: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +126,14 @@ class ReadOnlyRouteHandler(Protocol):
         turn: TurnInput,
         plan: TurnPlan,
     ) -> ReadOnlyRoutePreparation | None: ...
+
+    async def preparation_is_current(
+        self,
+        request: ReadOnlyRouteRequest,
+        turn: TurnInput,
+        plan: TurnPlan,
+        preparation: ReadOnlyRoutePreparation,
+    ) -> bool: ...
 
     async def handle(
         self,
@@ -245,15 +260,11 @@ def _plan_applicable(
     ):
         return False
     if plan.route is RouteClass.FILE_READ:
-        source_requests = plan.evidence_requests
         return bool(
             1 <= len(attachment_references) <= 12
             and len(attachment_references) == len(turn.attachments)
             and len({item.raw_object_id for item in attachment_references}) == len(attachment_references)
-            and len(source_requests) == 1
-            and source_requests[0].kind is EvidenceKind.ATTACHED_FILES
-            and source_requests[0].required
-            and source_requests[0].max_items >= len(attachment_references)
+            and file_read_plan_supports_attachment_count(plan, len(attachment_references))
             and not turn.quoted_attachment_reference
             and not turn.reply_assistant_reference
             and not turn.synthetic_document_notice
@@ -386,16 +397,22 @@ class OrchestrationRouter:
             observation.elapsed_ms,
         )
 
-    async def _try_plan(self, turn: TurnInput, *, turn_deadline: float | None) -> TurnPlan | None:
+    async def _try_plan(
+        self,
+        turn: TurnInput,
+        *,
+        turn_deadline: float | None,
+        attested: bool,
+    ) -> TurnPlan | None:
         try:
             timeout = self._planner_timeout_sec
             if turn_deadline is not None:
                 timeout = min(timeout, turn_deadline - time.monotonic())
             if timeout <= 0:
                 raise TimeoutError("turn planning deadline has expired")
+            call = self._planner.plan_attested if attested else self._planner.plan
             return await asyncio.wait_for(
-                self._planner.plan(turn, turn_deadline=turn_deadline),
-                timeout=max(0.001, timeout),
+                call(turn, turn_deadline=turn_deadline), timeout=max(0.001, timeout)
             )
         except Exception as exc:
             # No prompts, filenames, exception bodies or user identifiers enter logs.
@@ -416,7 +433,7 @@ class OrchestrationRouter:
         turn_deadline: float | None,
         started: float,
     ) -> None:
-        plan = await self._try_plan(turn, turn_deadline=turn_deadline)
+        plan = await self._try_plan(turn, turn_deadline=turn_deadline, attested=False)
         self._observe(
             started=started,
             status="planned" if plan is not None else "planner_rejected",
@@ -585,7 +602,7 @@ class OrchestrationRouter:
             )
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
 
-        plan = await self._try_plan(turn, turn_deadline=turn_deadline)
+        plan = await self._try_plan(turn, turn_deadline=turn_deadline, attested=True)
         handler = self._route_handlers.get(plan.route) if plan is not None else None
         eligible = bool(
             plan is not None
@@ -630,10 +647,11 @@ class OrchestrationRouter:
             reply_assistant_message_id=reply_assistant_message_id,
             turn_deadline=handler_deadline,
         )
+        preparation_deadline = min(handler_deadline, time.monotonic() + preparation_budget)
         try:
             preparation = await asyncio.wait_for(
                 handler.prepare(request, turn, plan),
-                timeout=max(0.001, min(preparation_budget, remaining)),
+                timeout=max(0.001, preparation_deadline - time.monotonic()),
             )
         except asyncio.CancelledError:
             raise
@@ -660,6 +678,36 @@ class OrchestrationRouter:
             )
             if turn_deadline is not None and turn_deadline - time.monotonic() < legacy_reserve:
                 raise TimeoutError("legacy fallback reserve was exhausted during V12 admission")
+            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+
+        try:
+            current = await asyncio.wait_for(
+                handler.preparation_is_current(request, turn, plan, preparation),
+                timeout=max(0.001, preparation_deadline - time.monotonic()),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._observe(
+                started=started,
+                status="prepare_authority_failed",
+                plan=plan,
+                selected_runtime="legacy",
+            )
+            if turn_deadline is not None and turn_deadline - time.monotonic() < legacy_reserve:
+                raise TimeoutError(
+                    "legacy fallback reserve was exhausted during V12 authority check"
+                ) from exc
+            return await self._legacy.chat(user_id, message, **legacy_kwargs)
+        if current is not True:
+            self._observe(
+                started=started,
+                status="prepare_authority_rejected",
+                plan=plan,
+                selected_runtime="legacy",
+            )
+            if turn_deadline is not None and turn_deadline - time.monotonic() < legacy_reserve:
+                raise TimeoutError("legacy fallback reserve was exhausted during V12 authority check")
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
 
         self._observe(started=started, status="selected", plan=plan, selected_runtime="v12")
@@ -724,20 +772,27 @@ def build_orchestrated_agent(
     model: PlannerModel,
     *,
     route_handlers: Mapping[RouteClass, ReadOnlyRouteHandler] | None = None,
+    attested_runtime: AttestedPlannerRuntime | None = None,
 ) -> ChatRuntime:
     """Return legacy byte-for-byte by default; wrap only after explicit opt-in."""
 
     mode = RouterMode.fail_closed(getattr(settings, "router_mode", "legacy"))
     if mode is RouterMode.LEGACY:
         return legacy
-    planner = V12Planner(model, timeout_sec=getattr(settings, "router_plan_timeout_sec", 12.0))
+    if mode in {RouterMode.CANARY, RouterMode.V12} and attested_runtime is None:
+        return legacy
+    planner = V12Planner(
+        model,
+        timeout_sec=getattr(settings, "router_plan_timeout_sec", 12.0),
+        attested_runtime=attested_runtime,
+    )
     return OrchestrationRouter(
         legacy,
         planner,
         mode=mode,
         allowed_routes=getattr(settings, "router_canary_routes", ()),
         canary_user_ids=getattr(settings, "router_canary_user_ids", ()),
-        route_handlers=route_handlers,
+        route_handlers=route_handlers if mode in {RouterMode.CANARY, RouterMode.V12} else {},
         route_timeout_sec=getattr(settings, "agent_turn_budget_sec", 60.0),
         planner_timeout_sec=getattr(settings, "router_plan_timeout_sec", 12.0),
     )

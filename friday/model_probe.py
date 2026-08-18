@@ -36,6 +36,14 @@ from friday.orchestration.contracts import (
     TurnInput,
     TurnPlan,
 )
+from friday.orchestration.file_read_contract import (
+    V12_FILE_SYNTHESIS_SYSTEM,
+    V12_FILE_VERIFIER_SCHEMA,
+    V12_FILE_VERIFIER_SYSTEM,
+    file_read_plan_supports_attachment_count,
+    parse_file_verifier_result,
+    validate_file_synthesis_answer,
+)
 
 PLAN_CASE_TIMEOUT_SEC = 12.0
 SYNTHESIS_TIMEOUT_SEC = 60.0
@@ -121,12 +129,14 @@ class PlanProbeCase:
 class SynthesisProbeRequest:
     case_id: str
     prompt: str = field(repr=False)
+    system_prompt: str = field(repr=False)
 
 
 @dataclass(frozen=True, slots=True)
 class VerifierProbeRequest:
     case_id: str
     prompt: str = field(repr=False)
+    system_prompt: str = field(repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,18 +234,19 @@ def _turn(message: str, *attachments: AttachmentDescriptor) -> TurnInput:
 
 _PDF = _attachment(1, "probe-act.pdf", "application/pdf", extracted=True)
 _JPG_1 = _attachment(1, "probe-scan-1.jpg", "image/jpeg", extracted=False)
-_JPG_2 = _attachment(2, "probe-scan-2.jpg", "image/jpeg", extracted=False)
+_TXT_1 = _attachment(1, "probe-note-1.txt", "text/plain", extracted=True)
+_TXT_2 = _attachment(2, "probe-note-2.txt", "text/plain", extracted=True)
 
 PLAN_PROBE_CASES: tuple[PlanProbeCase, ...] = (
     PlanProbeCase(
         "file_summary",
-        _turn("Обобщи приложенный акт и укажи ключевые факты.", _PDF),
+        _turn("Обобщи приложенный текстовый документ и укажи ключевые факты.", _TXT_1),
         RouteClass.FILE_READ,
         OutputFormat.TEXT,
     ),
     PlanProbeCase(
         "file_compare",
-        _turn("Сравни эти два скана и ответь одним сообщением.", _JPG_1, _JPG_2),
+        _turn("Сравни эти два текстовых документа и ответь одним сообщением.", _TXT_1, _TXT_2),
         RouteClass.FILE_READ,
         OutputFormat.TEXT,
     ),
@@ -283,63 +294,83 @@ PLAN_PROBE_CASES: tuple[PlanProbeCase, ...] = (
     ),
 )
 
+_SYNTHESIS_INPUT = {
+    "schema": "friday.v12-file-synthesis.v1",
+    "request": "Назови код и контрольную дату проекта одним сообщением.",
+    "objective": "Сообщить два точных факта из двух приложенных источников.",
+    "output": {
+        "format": "text",
+        "language": "ru",
+        "one_message": True,
+        "require_citations": True,
+    },
+    "evidence": {
+        "schema": "friday.evidence-bundle.v1",
+        "parts": [
+            {
+                "display_name": "probe-note-1.txt",
+                "label": "A1",
+                "media_type": "text/plain",
+                "text": "Код синтетического проекта: СЕВЕР-42.",
+            },
+            {
+                "display_name": "probe-note-2.txt",
+                "label": "A2",
+                "media_type": "text/plain",
+                "text": "Контрольная дата синтетического проекта: 7 октября 2099 года.",
+            },
+        ],
+    },
+}
 SYNTHESIS_PROBE = SynthesisProbeRequest(
-    case_id="prepared_evidence_2",
-    prompt=(
-        "Используя только два источника, верни один JSON-объект без Markdown и "
-        "без дополнительных ключей. Схема: "
-        '{"claims":[{"fact":"точный факт","citation":"метка"}]}. '
-        "Включи все и только подтверждённые факты; каждой записи назначь метку "
-        "именно того источника, который подтверждает этот факт.\n"
-        "[A1] Код синтетического проекта: СЕВЕР-42.\n"
-        "[A2] Контрольная дата синтетического проекта: 7 октября 2099 года."
+    case_id="production_file_synthesis_2",
+    system_prompt=V12_FILE_SYNTHESIS_SYSTEM,
+    prompt=json.dumps(
+        _SYNTHESIS_INPUT,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
     ),
 )
-_SYNTHESIS_EXPECTED = {
-    "claims": [
-        {"fact": "Код синтетического проекта: СЕВЕР-42", "citation": "A1"},
-        {
-            "fact": "Контрольная дата синтетического проекта: 7 октября 2099 года",
-            "citation": "A2",
-        },
-    ]
-}
+_SYNTHESIS_EXPECTED = (
+    "Код синтетического проекта: СЕВЕР-42 [A1]. "
+    "Контрольная дата синтетического проекта: 7 октября 2099 года [A2]."
+)
 
 VERIFIER_PROBES: tuple[VerifierProbeRequest, ...] = (
     VerifierProbeRequest(
         case_id="verifier_case_31",
+        system_prompt=V12_FILE_VERIFIER_SYSTEM,
         prompt=(
-            "Проверь ответ только по источникам. Верни строго один JSON-объект без "
-            "Markdown и дополнительных ключей: supported (boolean), citation_labels "
-            "(массив использованных меток без повторов), unsupported_claims "
-            "(целое число неподтверждённых утверждений).\n"
-            "[A1] Код синтетического проекта: СЕВЕР-42.\n"
-            "[A2] Контрольная дата синтетического проекта: 7 октября 2099 года.\n"
-            "Ответ: Код проекта — СЕВЕР-42 [A1]. Контрольная дата — 7 октября "
-            "2099 года [A2]."
+            '{"answer":"Код синтетического проекта: СЕВЕР-42 [A1]. Контрольная дата '
+            'синтетического проекта: 7 октября 2099 года [A2].","evidence":'
+            + json.dumps(_SYNTHESIS_INPUT["evidence"], ensure_ascii=False, separators=(",", ":"))
+            + ',"request":"Назови код и контрольную дату проекта одним сообщением.",'
+            '"schema":"friday.v12-file-verification-input.v1"}'
         ),
     ),
     VerifierProbeRequest(
         case_id="verifier_case_79",
+        system_prompt=V12_FILE_VERIFIER_SYSTEM,
         prompt=(
-            "Проверь ответ только по источникам. Верни строго один JSON-объект без "
-            "Markdown и дополнительных ключей: supported (boolean), citation_labels "
-            "(массив использованных меток без повторов), unsupported_claims "
-            "(целое число неподтверждённых утверждений).\n"
-            "[A1] Код синтетического проекта: СЕВЕР-42.\n"
-            "[A2] Контрольная дата синтетического проекта: 7 октября 2099 года.\n"
-            "Ответ: Код проекта — СЕВЕР-42 [A1]. Контрольная дата — 7 октября "
-            "2099 года [A2]. Бюджет проекта — 13 миллионов рублей [A1]."
+            '{"answer":"Код синтетического проекта: СЕВЕР-42 [A1]. Контрольная дата '
+            "синтетического проекта: 7 октября 2099 года [A2]. Бюджет проекта — "
+            '13 миллионов рублей [A1].","evidence":'
+            + json.dumps(_SYNTHESIS_INPUT["evidence"], ensure_ascii=False, separators=(",", ":"))
+            + ',"request":"Назови код, контрольную дату и бюджет проекта.",'
+            '"schema":"friday.v12-file-verification-input.v1"}'
         ),
     ),
 )
 _VERIFIER_EXPECTED: Mapping[str, Mapping[str, object]] = {
     "verifier_case_31": {
+        "schema": V12_FILE_VERIFIER_SCHEMA,
         "supported": True,
         "citation_labels": ["A1", "A2"],
         "unsupported_claims": 0,
     },
     "verifier_case_79": {
+        "schema": V12_FILE_VERIFIER_SCHEMA,
         "supported": False,
         "citation_labels": ["A1", "A2"],
         "unsupported_claims": 1,
@@ -437,7 +468,7 @@ def _probe_suite_manifest() -> Mapping[str, object]:
     """Return the complete, code-owned semantics covered by the suite hash."""
 
     return {
-        "schema": "friday.qwen36-27b-v12-probe-suite.v2",
+        "schema": "friday.qwen36-27b-v12-probe-suite.v3",
         "completion_contract": {
             "max_chars": MAX_COMPLETION_CHARS,
             "finish_reason": "stop",
@@ -455,7 +486,7 @@ def _probe_suite_manifest() -> Mapping[str, object]:
         },
         "plan": {
             "validator": {
-                "version": "turn-plan-strict-json-exact-route-language-format-zero-tools.v2",
+                "version": "turn-plan-production-applicability-native-text.v3",
                 "parser": "friday.turn-plan.v1",
                 "reject_duplicate_keys": True,
             },
@@ -473,24 +504,33 @@ def _probe_suite_manifest() -> Mapping[str, object]:
             ],
         },
         "synthesis": {
-            "request": {"case_id": SYNTHESIS_PROBE.case_id, "prompt": SYNTHESIS_PROBE.prompt},
+            "request": {
+                "case_id": SYNTHESIS_PROBE.case_id,
+                "system_prompt": SYNTHESIS_PROBE.system_prompt,
+                "prompt": SYNTHESIS_PROBE.prompt,
+            },
             "validator": {
-                "version": "strict-json-exact-source-fact-map.v2",
+                "version": "production-file-prose-exact-citations.v3",
                 "expected": _SYNTHESIS_EXPECTED,
-                "reject_duplicate_keys": True,
                 "reject_extra_claims": True,
                 "reject_invalid_citation_markers": True,
             },
         },
         "verifier": {
             "validator": {
-                "version": "strict-json-positive-negative-grounding.v1",
-                "exact_keys": ["citation_labels", "supported", "unsupported_claims"],
+                "version": "production-file-verifier-schema-positive-negative.v2",
+                "exact_keys": [
+                    "citation_labels",
+                    "schema",
+                    "supported",
+                    "unsupported_claims",
+                ],
                 "reject_duplicate_keys": True,
             },
             "cases": [
                 {
                     "case_id": request.case_id,
+                    "system_prompt": request.system_prompt,
                     "prompt": request.prompt,
                     "expected": _VERIFIER_EXPECTED[request.case_id],
                 }
@@ -670,14 +710,21 @@ def _evaluate_plan(case: PlanProbeCase, response: object) -> None:
         and plan.output.language == case.expected_language
         and not plan.tool_intents
         and (case.expected_output_format is None or plan.output.format is case.expected_output_format)
+        and (
+            plan.route is not RouteClass.FILE_READ
+            or file_read_plan_supports_attachment_count(plan, len(case.turn.attachments))
+        )
     ):
         raise ModelProbeError(ModelProbeFailure.PLAN_INVALID)
 
 
 def _evaluate_synthesis(response: object) -> None:
     content = _completion_content(response, failure=ModelProbeFailure.SYNTHESIS_INVALID)
-    value = _strict_json_object(content, failure=ModelProbeFailure.SYNTHESIS_INVALID)
-    if value != _SYNTHESIS_EXPECTED:
+    try:
+        normalized = validate_file_synthesis_answer(content, ("A1", "A2"))
+    except ValueError:
+        raise ModelProbeError(ModelProbeFailure.SYNTHESIS_INVALID) from None
+    if normalized != _SYNTHESIS_EXPECTED:
         raise ModelProbeError(ModelProbeFailure.SYNTHESIS_INVALID)
 
 
@@ -710,23 +757,11 @@ def _strict_json_object(content: str, *, failure: ModelProbeFailure) -> dict[str
 
 def _evaluate_verifier(case: VerifierProbeRequest, response: object) -> None:
     content = _completion_content(response, failure=ModelProbeFailure.VERIFIER_INVALID)
-    value = _strict_json_object(content, failure=ModelProbeFailure.VERIFIER_INVALID)
-    if set(value) != {"supported", "citation_labels", "unsupported_claims"}:
-        raise ModelProbeError(ModelProbeFailure.VERIFIER_INVALID)
-    supported = value["supported"]
-    labels = value["citation_labels"]
-    unsupported = value["unsupported_claims"]
-    if not (
-        isinstance(supported, bool)
-        and isinstance(labels, list)
-        and labels == ["A1", "A2"]
-        and all(isinstance(item, str) for item in labels)
-        and len(labels) == len(set(labels))
-        and isinstance(unsupported, int)
-        and not isinstance(unsupported, bool)
-        and unsupported >= 0
-        and value == _VERIFIER_EXPECTED.get(case.case_id)
-    ):
+    try:
+        value = parse_file_verifier_result(content)
+    except ValueError:
+        raise ModelProbeError(ModelProbeFailure.VERIFIER_INVALID) from None
+    if value != _VERIFIER_EXPECTED.get(case.case_id):
         raise ModelProbeError(ModelProbeFailure.VERIFIER_INVALID)
 
 

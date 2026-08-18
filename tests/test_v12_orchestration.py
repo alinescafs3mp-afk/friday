@@ -11,6 +11,10 @@ from typing import Any
 import pytest
 
 from friday.file_evidence import stamp_current_turn_file_reference
+from friday.model_profiles import (
+    ModelProfileLease,
+    ModelRequirements,
+)
 from friday.orchestration import (
     OrchestrationRouter,
     RouteClass,
@@ -91,11 +95,13 @@ class _Handler:
         *,
         error: Exception | None = None,
         delay: float = 0.0,
+        current: bool = True,
     ) -> None:
         self.route = route
         self.label = label
         self.error = error
         self.delay = delay
+        self.current = current
         self.calls: list[tuple[ReadOnlyRouteRequest, TurnInput, TurnPlan]] = []
         self.prepared: list[tuple[ReadOnlyRouteRequest, TurnInput, TurnPlan]] = []
 
@@ -112,6 +118,16 @@ class _Handler:
             evidence_identity_sha256="1" * 64,
             private_payload=object(),
         )
+
+    async def preparation_is_current(
+        self,
+        request: ReadOnlyRouteRequest,
+        turn: TurnInput,
+        plan: TurnPlan,
+        preparation: ReadOnlyRoutePreparation,
+    ) -> bool:
+        del request, turn, plan, preparation
+        return self.current
 
     async def handle(
         self,
@@ -146,6 +162,14 @@ class _Planner:
         if self.error is not None:
             raise self.error
         return self.returned_plan
+
+    async def plan_attested(
+        self,
+        turn: TurnInput,
+        *,
+        turn_deadline: float | None = None,
+    ) -> TurnPlan:
+        return await self.plan(turn, turn_deadline=turn_deadline)
 
 
 class _CurrentTurnCarrier(dict[str, Any]):
@@ -441,6 +465,15 @@ def test_builder_returns_the_same_legacy_object_without_a_planner(settings) -> N
         )
         is legacy
     )
+    assert (
+        build_orchestrated_agent(
+            replace(settings, router_mode="canary"),
+            legacy,
+            _ModelThatMustNotBeTouched(),
+            route_handlers={RouteClass.FILE_READ: _Handler()},
+        )
+        is legacy
+    )
 
 
 def test_server_wiring_keeps_legacy_exact_and_shadow_handlerless(settings) -> None:
@@ -457,6 +490,97 @@ def test_server_wiring_keeps_legacy_exact_and_shadow_handlerless(settings) -> No
     with TestClient(shadow_app):
         assert type(shadow_app.state.agent) is OrchestrationRouter
         assert shadow_app.state.agent._route_handlers == {}  # noqa: SLF001
+
+
+def test_server_registers_file_read_only_after_live_attestation(
+    settings,
+    monkeypatch,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    import friday.server as server_module
+
+    class _AttestedRuntime:
+        def __init__(self) -> None:
+            self.attest_calls = 0
+
+        async def attest(self, *, absolute_deadline: float) -> object:
+            assert absolute_deadline > time.monotonic()
+            self.attest_calls += 1
+            return object()
+
+        def public_status(self) -> dict[str, object]:
+            return {
+                "status": "canary_ready",
+                "reason_code": "live_attestation_clear",
+                "attestation_sha256": "a" * 64,
+            }
+
+    runtime = _AttestedRuntime()
+    monkeypatch.setattr(server_module, "AttestedV12ModelRuntime", _AttestedRuntime)
+    monkeypatch.setattr(
+        server_module,
+        "create_attested_v12_model_runtime",
+        lambda _llm: runtime,
+    )
+    app = server_module.create_app(
+        replace(
+            settings,
+            router_mode="canary",
+            router_canary_routes=("file_read",),
+            router_canary_user_ids=("owner",),
+        )
+    )
+
+    with TestClient(app) as client:
+        assert type(app.state.agent) is OrchestrationRouter
+        assert tuple(app.state.agent._route_handlers) == (RouteClass.FILE_READ,)  # noqa: SLF001
+        assert runtime.attest_calls == 1
+        health = client.get("/health").json()["orchestration"]
+        assert health["configured_mode"] == "canary"
+        assert health["installed_mode"] == "canary"
+        assert health["registered_routes"] == ["file_read"]
+        assert health["model_gate"]["status"] == "canary_ready"
+
+
+def test_server_attestation_failure_is_observable_and_keeps_exact_legacy(
+    settings,
+    monkeypatch,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    import friday.server as server_module
+    from friday.agent_runtime import AgentRuntime
+
+    class _RejectedRuntime:
+        async def attest(self, *, absolute_deadline: float) -> object:
+            assert absolute_deadline > time.monotonic()
+            raise RuntimeError("private transport detail")
+
+        def public_status(self) -> dict[str, object]:
+            return {
+                "status": "revoked",
+                "reason_code": "attestation_rejected",
+                "attestation_sha256": "",
+            }
+
+    runtime = _RejectedRuntime()
+    monkeypatch.setattr(server_module, "AttestedV12ModelRuntime", _RejectedRuntime)
+    monkeypatch.setattr(
+        server_module,
+        "create_attested_v12_model_runtime",
+        lambda _llm: runtime,
+    )
+    app = server_module.create_app(replace(settings, router_mode="canary"))
+
+    with TestClient(app) as client:
+        assert type(app.state.agent) is AgentRuntime
+        health = client.get("/health").json()["orchestration"]
+        assert health["configured_mode"] == "canary"
+        assert health["installed_mode"] == "legacy"
+        assert health["registered_routes"] == []
+        assert health["model_gate"]["status"] == "revoked"
+        assert "private" not in json.dumps(health)
 
 
 def test_router_config_is_forwarded_by_every_operator_template() -> None:
@@ -682,6 +806,27 @@ async def test_canary_selects_exactly_one_registered_read_only_runtime() -> None
     assert v12.calls[0][0].turn_deadline is not None
     assert router.observations[-1].selected_runtime == "v12"
     assert router.observations[-1].status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_route_authority_loss_before_selection_falls_back_once() -> None:
+    legacy = _Runtime()
+    handler = _Handler(current=False)
+    router = OrchestrationRouter(
+        legacy,
+        _Planner(),
+        mode="v12",
+        allowed_routes=("file_read",),
+        route_handlers={RouteClass.FILE_READ: handler},
+    )
+
+    result = await router.chat("person", "сравни", **_chat_kwargs())
+
+    assert result["message"] == "legacy"
+    assert len(legacy.calls) == 1
+    assert handler.calls == []
+    assert router.observations[-1].status == "prepare_authority_rejected"
+    assert all(item.status != "selected" for item in router.observations)
 
 
 @pytest.mark.asyncio
@@ -1067,6 +1212,118 @@ async def test_file_canary_requires_one_fully_satisfied_attachment_request(mutat
     assert result["message"] == "legacy"
     assert len(legacy.calls) == 1
     assert handler.prepared == []
+
+
+def _planner_lease(requirements: ModelRequirements, authority: object) -> ModelProfileLease:
+    return ModelProfileLease(
+        profile_id="v12-planner-test:dispatcher",
+        attestation_sha256="a" * 64,
+        requirements_sha256=requirements.canonical_sha256(),
+        capabilities=requirements.capabilities,
+        required_context_tokens=requirements.required_context_tokens,
+        prepared_evidence_items=requirements.prepared_evidence_items,
+        max_tool_steps=requirements.max_tool_steps,
+        effect=requirements.effect,
+        verifier_required=requirements.verifier_required,
+        process_epoch_sha256="b" * 64,
+        _gate_authority=authority,
+        _gate_generation=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_attested_planner_never_uses_the_raw_shadow_model() -> None:
+    class _RawModel:
+        calls = 0
+
+        async def chat(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            self.calls += 1
+            raise AssertionError("CANARY planner touched the raw model")
+
+    class _AttestedRuntime:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.lease: ModelProfileLease | None = None
+
+        async def acquire_lease(
+            self,
+            requirements: ModelRequirements,
+            *,
+            absolute_deadline: float,
+        ) -> ModelProfileLease:
+            assert absolute_deadline > time.monotonic()
+            self.lease = _planner_lease(requirements, self)
+            return self.lease
+
+        async def complete(
+            self,
+            lease: ModelProfileLease,
+            requirements: ModelRequirements,
+            messages: list[dict[str, Any]],
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            assert lease is self.lease
+            assert lease.requirements_sha256 == requirements.canonical_sha256()
+            assert kwargs["priority"] == "background"
+            assert kwargs["max_tokens"] == 512
+            assert messages
+            self.calls += 1
+            return {
+                "content": json.dumps(_plan_payload(), ensure_ascii=False),
+                "finish_reason": "stop",
+                "tool_calls": [],
+            }
+
+    raw = _RawModel()
+    runtime = _AttestedRuntime()
+    planner = V12Planner(raw, timeout_sec=5, attested_runtime=runtime)
+    turn = TurnInput.from_chat(
+        message="сравни два файла",
+        actor=SimpleNamespace(is_owner=True, shared_tenant=False),
+        conversation_id=None,
+        attachments=_chat_kwargs()["attachments"],
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode="dialogue",
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+
+    plan = await planner.plan_attested(turn)
+
+    assert plan.route is RouteClass.FILE_READ
+    assert runtime.calls == 1
+    assert raw.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_attested_planner_without_runtime_fails_before_raw_model() -> None:
+    class _RawModel:
+        calls = 0
+
+        async def chat(self, *_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            self.calls += 1
+            raise AssertionError("unattested planner touched the raw model")
+
+    raw = _RawModel()
+    planner = V12Planner(raw, timeout_sec=5)
+    turn = TurnInput.from_chat(
+        message="сравни",
+        actor=SimpleNamespace(is_owner=True, shared_tenant=False),
+        conversation_id=None,
+        attachments=_chat_kwargs()["attachments"],
+        enable_tools=True,
+        synthetic_document_notice=False,
+        mode=None,
+        reply_to=None,
+        quoted_attachment_reference=False,
+        reply_assistant_reference=False,
+    )
+
+    with pytest.raises(RuntimeError, match="runtime is unavailable"):
+        await planner.plan_attested(turn)
+    assert raw.calls == 0
 
 
 @pytest.mark.asyncio

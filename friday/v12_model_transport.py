@@ -28,11 +28,12 @@ from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 import httpx
 
-from friday.agent_runtime.llm import LLMRouter
+from friday.agent_runtime.llm import LLMResponseModelMismatchError, LLMRouter
 from friday.model_probe import MAX_COMPLETION_CHARS
 from friday.v12_model_runtime import (
     MAX_METRICS_BYTES,
     AttestedV12ModelRuntime,
+    V12ServedAliasError,
     V12ServedCompletion,
 )
 
@@ -95,6 +96,8 @@ def _project_completion(result: object, *, exact_alias: str) -> V12ServedComplet
     tool_calls = result.get("tool_calls")
     usage = result.get("usage")
     served_alias = result.get("_served_model_alias")
+    if not isinstance(served_alias, str) or served_alias != exact_alias:
+        raise V12ServedAliasError()
     if (
         not isinstance(content, str)
         or not content
@@ -105,16 +108,10 @@ def _project_completion(result: object, *, exact_alias: str) -> V12ServedComplet
         or not isinstance(tool_calls, list)
         or len(tool_calls) > _MAX_TOOL_CALLS
         or not isinstance(usage, Mapping)
-        or not isinstance(served_alias, str)
-        or served_alias != exact_alias
     ):
         raise _error(V12ModelTransportFailure.COMPLETION_REJECTED)
     prompt_tokens = usage.get("prompt_tokens")
-    if (
-        isinstance(prompt_tokens, bool)
-        or not isinstance(prompt_tokens, int)
-        or prompt_tokens < 0
-    ):
+    if isinstance(prompt_tokens, bool) or not isinstance(prompt_tokens, int) or prompt_tokens < 0:
         raise _error(V12ModelTransportFailure.COMPLETION_REJECTED)
     try:
         content.encode("utf-8", errors="strict")
@@ -137,14 +134,16 @@ def _project_completion(result: object, *, exact_alias: str) -> V12ServedComplet
 class _RouterPendingCompletion:
     """One locally-owned router request used by the cancellation probe."""
 
-    __slots__ = ("_router", "_submitted_model_alias", "_task")
+    __slots__ = ("_router", "_submission_event", "_submitted_model_alias", "_task")
 
     def __init__(
         self,
         router: LLMRouter,
         task: asyncio.Task[V12ServedCompletion],
+        submission_event: asyncio.Event,
     ) -> None:
         self._router = router
+        self._submission_event = submission_event
         self._submitted_model_alias = router.model
         self._task = task
         task.add_done_callback(_consume_task)
@@ -162,6 +161,9 @@ class _RouterPendingCompletion:
 
     def is_pending(self) -> bool:
         return not self._task.done()
+
+    def submission_started(self) -> bool:
+        return self._submission_event.is_set()
 
     async def cancel_and_drain(self, *, absolute_deadline: float) -> bool:
         remaining = _remaining(absolute_deadline)
@@ -212,6 +214,7 @@ class RouterV12CompletionTransport:
         absolute_deadline: float,
         open_silent_cooldown: bool,
         require_full_context: bool,
+        _request_submission_event: asyncio.Event | None = None,
     ) -> V12ServedCompletion:
         remaining = _remaining(absolute_deadline)
         if tools not in (None, []) or tool_choice is not None:
@@ -225,14 +228,13 @@ class RouterV12CompletionTransport:
                     priority=priority,
                     tools=None,
                     tool_choice=None,
-                    reject_repeated_token_degeneration=(
-                        reject_repeated_token_degeneration
-                    ),
+                    reject_repeated_token_degeneration=(reject_repeated_token_degeneration),
                     allow_retries=allow_retries,
                     absolute_deadline=absolute_deadline,
                     open_silent_cooldown=open_silent_cooldown,
                     require_full_context=require_full_context,
                     require_exact_response_model=True,
+                    request_submitted_event=_request_submission_event,
                 )
             _remaining(absolute_deadline)
             return _project_completion(result, exact_alias=self._router.model)
@@ -240,6 +242,10 @@ class RouterV12CompletionTransport:
             raise
         except V12ModelTransportError:
             raise
+        except V12ServedAliasError:
+            raise
+        except LLMResponseModelMismatchError:
+            raise V12ServedAliasError() from None
         except TimeoutError:
             raise _error(V12ModelTransportFailure.DEADLINE_EXHAUSTED) from None
         except Exception:
@@ -256,6 +262,7 @@ class RouterV12CompletionTransport:
         require_full_context: bool,
     ) -> _RouterPendingCompletion:
         _remaining(absolute_deadline)
+        submission_event = asyncio.Event()
         try:
             task = asyncio.create_task(
                 self.chat(
@@ -270,6 +277,7 @@ class RouterV12CompletionTransport:
                     absolute_deadline=absolute_deadline,
                     open_silent_cooldown=False,
                     require_full_context=require_full_context,
+                    _request_submission_event=submission_event,
                 ),
                 name="friday-v12-cancellation-probe",
             )
@@ -277,7 +285,7 @@ class RouterV12CompletionTransport:
             raise
         except Exception:
             raise _error(V12ModelTransportFailure.COMPLETION_REJECTED) from None
-        return _RouterPendingCompletion(self._router, task)
+        return _RouterPendingCompletion(self._router, task, submission_event)
 
 
 def _metrics_url(router: LLMRouter) -> str:
@@ -302,17 +310,20 @@ def _metrics_url(router: LLMRouter) -> str:
         # Access validates malformed/out-of-range ports before any client is
         # constructed.  The original netloc keeps IPv6 brackets intact.
         _ = parsed.port
-        return urlunsplit(
-            SplitResult(parsed.scheme.casefold(), parsed.netloc, "/metrics", "", "")
-        )
+        return urlunsplit(SplitResult(parsed.scheme.casefold(), parsed.netloc, "/metrics", "", ""))
     except (TypeError, ValueError, UnicodeError):
         raise _error(V12ModelTransportFailure.COMPOSITION_REJECTED) from None
+
+
+def _models_url(router: LLMRouter) -> str:
+    parsed = urlsplit(_metrics_url(router))
+    return urlunsplit(SplitResult(parsed.scheme, parsed.netloc, "/v1/models", "", ""))
 
 
 class RouterV12MetricsTransport:
     """Bounded same-origin vLLM metrics transport."""
 
-    __slots__ = ("_http_transport", "_metrics_endpoint", "_router")
+    __slots__ = ("_http_transport", "_metrics_endpoint", "_models_endpoint", "_router")
 
     def __init__(
         self,
@@ -322,6 +333,7 @@ class RouterV12MetricsTransport:
     ) -> None:
         self._router = _require_exact_router(router)
         self._metrics_endpoint = _metrics_url(router)
+        self._models_endpoint = _models_url(router)
         self._http_transport = http_transport
 
     def __repr__(self) -> str:
@@ -331,11 +343,13 @@ class RouterV12MetricsTransport:
     def bound_router(self) -> LLMRouter:
         return self._router
 
-    async def fetch_metrics(
+    async def _fetch_bounded(
         self,
+        endpoint: str,
         *,
         maximum_bytes: int,
         absolute_deadline: float,
+        accept: str,
     ) -> bytes:
         remaining = _remaining(absolute_deadline)
         if (
@@ -351,7 +365,7 @@ class RouterV12MetricsTransport:
                 connect=min(_METRICS_CONNECT_TIMEOUT_SEC, remaining),
             )
             headers = self._router._auth_headers()  # noqa: SLF001 - exact router binding
-            headers = {**headers, "Accept": "text/plain", "Accept-Encoding": "identity"}
+            headers = {**headers, "Accept": accept, "Accept-Encoding": "identity"}
             async with asyncio.timeout(remaining):
                 async with httpx.AsyncClient(
                     timeout=timeout,
@@ -360,7 +374,7 @@ class RouterV12MetricsTransport:
                     headers=headers,
                     transport=self._http_transport,
                 ) as client:
-                    async with client.stream("GET", self._metrics_endpoint) as response:
+                    async with client.stream("GET", endpoint) as response:
                         if response.status_code != 200:
                             raise _error(V12ModelTransportFailure.METRICS_REJECTED)
                         content_encoding = response.headers.get("content-encoding", "")
@@ -371,16 +385,12 @@ class RouterV12MetricsTransport:
                             try:
                                 declared_length = int(content_length, 10)
                             except ValueError:
-                                raise _error(
-                                    V12ModelTransportFailure.METRICS_REJECTED
-                                ) from None
+                                raise _error(V12ModelTransportFailure.METRICS_REJECTED) from None
                             if declared_length < 0 or declared_length > maximum_bytes:
                                 raise _error(V12ModelTransportFailure.METRICS_REJECTED)
 
                         body = bytearray()
-                        async for chunk in response.aiter_bytes(
-                            chunk_size=_METRICS_CHUNK_BYTES
-                        ):
+                        async for chunk in response.aiter_bytes(chunk_size=_METRICS_CHUNK_BYTES):
                             if len(body) + len(chunk) > maximum_bytes:
                                 raise _error(V12ModelTransportFailure.METRICS_REJECTED)
                             body.extend(chunk)
@@ -396,6 +406,32 @@ class RouterV12MetricsTransport:
             raise _error(V12ModelTransportFailure.DEADLINE_EXHAUSTED) from None
         except Exception:
             raise _error(V12ModelTransportFailure.METRICS_REJECTED) from None
+
+    async def fetch_metrics(
+        self,
+        *,
+        maximum_bytes: int,
+        absolute_deadline: float,
+    ) -> bytes:
+        return await self._fetch_bounded(
+            self._metrics_endpoint,
+            maximum_bytes=maximum_bytes,
+            absolute_deadline=absolute_deadline,
+            accept="text/plain",
+        )
+
+    async def fetch_model_inventory(
+        self,
+        *,
+        maximum_bytes: int,
+        absolute_deadline: float,
+    ) -> bytes:
+        return await self._fetch_bounded(
+            self._models_endpoint,
+            maximum_bytes=maximum_bytes,
+            absolute_deadline=absolute_deadline,
+            accept="application/json",
+        )
 
 
 def create_attested_v12_model_runtime(

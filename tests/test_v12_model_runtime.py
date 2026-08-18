@@ -29,12 +29,14 @@ from friday.model_profiles import (
 )
 from friday.v12_model_runtime import (
     MAX_METRICS_BYTES,
+    MAX_MODEL_INVENTORY_BYTES,
     AttestedV12ModelRuntime,
     V12ModelRuntimeError,
     V12ModelRuntimeFailure,
     V12ServedCompletion,
     _derive_endpoint_binding,
     _parse_metrics,
+    _parse_model_inventory,
 )
 
 _EPOCH = "1700000000.00000001"
@@ -104,12 +106,23 @@ class _MetricsTransport:
             return self.bodies.pop(0)
         return self.bodies[0]
 
+    async def fetch_model_inventory(
+        self,
+        *,
+        maximum_bytes: int,
+        absolute_deadline: float,
+    ) -> bytes:
+        assert maximum_bytes > 0
+        assert absolute_deadline > time.monotonic()
+        return b'{"object":"list","data":[{"id":"dispatcher","object":"model"}]}'
+
 
 class _Pending:
     def __init__(self, router: LLMRouter, *, alias: str = "dispatcher") -> None:
         self._router = router
         self._alias = alias
         self.pending = True
+        self.submitted = True
         self.cancel_calls = 0
 
     @property
@@ -122,6 +135,9 @@ class _Pending:
 
     def is_pending(self) -> bool:
         return self.pending
+
+    def submission_started(self) -> bool:
+        return self.submitted
 
     async def cancel_and_drain(self, *, absolute_deadline: float) -> bool:
         assert absolute_deadline > 0
@@ -281,10 +297,38 @@ def test_metrics_parser_decimal_normalizes_epoch_and_requires_exact_gauges() -> 
     assert first == second
     assert first.process_epoch_sha256 == _EPOCH_SHA256
     assert first.running == first.waiting == 0.0
-    assert _parse_metrics(
-        _metrics(running="2.0", waiting="3", labels=False),
+    assert (
+        _parse_metrics(
+            _metrics(running="2.0", waiting="3", labels=False),
+            served_model_alias="dispatcher",
+        ).running
+        == 2.0
+    )
+
+
+def test_model_inventory_requires_one_exact_served_alias() -> None:
+    _parse_model_inventory(
+        b'{"object":"list","data":[{"id":"dispatcher","object":"model"}]}',
         served_model_alias="dispatcher",
-    ).running == 2.0
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"object":"list","data":[]}',
+        b'{"object":"list","data":[{"id":"other","object":"model"}]}',
+        b'{"object":"list","data":[{"id":"dispatcher","object":"model"},{"id":"other","object":"model"}]}',
+        b'{"object":"list","object":"list","data":[]}',
+        b'{"object":"list","data":NaN}',
+        b"x" * (MAX_MODEL_INVENTORY_BYTES + 1),
+    ],
+)
+def test_model_inventory_rejects_ambiguous_or_untrusted_identity(body: bytes) -> None:
+    with pytest.raises(V12ModelRuntimeError) as caught:
+        _parse_model_inventory(body, served_model_alias="dispatcher")
+
+    assert caught.value.code is V12ModelRuntimeFailure.SERVED_ALIAS_REJECTED
 
 
 @pytest.mark.parametrize(
@@ -420,9 +464,8 @@ async def test_runtime_can_install_only_the_complete_live_probe_result(settings)
     ]
     synthesis = V12ServedCompletion(
         content=(
-            '{"claims":[{"fact":"Код синтетического проекта: СЕВЕР-42","citation":"A1"},'
-            '{"fact":"Контрольная дата синтетического проекта: 7 октября 2099 года",'
-            '"citation":"A2"}]}'
+            "Код синтетического проекта: СЕВЕР-42 [A1]. "
+            "Контрольная дата синтетического проекта: 7 октября 2099 года [A2]."
         ),
         finish_reason="stop",
         tool_calls=(),
@@ -432,9 +475,11 @@ async def test_runtime_can_install_only_the_complete_live_probe_result(settings)
     verifier_responses = [
         V12ServedCompletion(
             content=(
-                '{"supported":true,"citation_labels":["A1","A2"],"unsupported_claims":0}'
+                '{"schema":"friday.v12-file-verifier.v1","supported":true,'
+                '"citation_labels":["A1","A2"],"unsupported_claims":0}'
                 if request is VERIFIER_PROBES[0]
-                else '{"supported":false,"citation_labels":["A1","A2"],"unsupported_claims":1}'
+                else '{"schema":"friday.v12-file-verifier.v1","supported":false,'
+                '"citation_labels":["A1","A2"],"unsupported_claims":1}'
             ),
             finish_reason="stop",
             tool_calls=(),
@@ -544,6 +589,30 @@ async def test_cancellation_rejects_completion_without_positive_server_load(sett
 
 
 @pytest.mark.asyncio
+async def test_cancellation_does_not_attribute_external_load_before_its_http_send(
+    settings,
+    monkeypatch,
+) -> None:
+    runtime, completion, metrics = _runtime(
+        settings,
+        metrics=[_metrics(), _metrics(running="1")],
+    )
+    completion.pending.submitted = False
+    monkeypatch.setattr("friday.v12_model_runtime.CANCELLATION_TIMEOUT_SEC", 0.03)
+    request = CancellationProbeRequest("not-submitted", "synthetic", 0, 1_000)
+
+    with pytest.raises(ModelProbeError) as caught:
+        await runtime.probe_client.cancel_and_drain(
+            request,
+            absolute_deadline=time.monotonic() + 1,
+        )
+
+    assert caught.value.code is ModelProbeFailure.CANCELLATION_INVALID
+    assert len(metrics.calls) == 1
+    assert completion.pending.cancel_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_acquire_validate_and_complete_recheck_epoch_without_auto_reacquire(settings) -> None:
     runtime, completion, metrics = _runtime(settings)
     _install_attestation(runtime)
@@ -580,6 +649,7 @@ async def test_acquire_validate_and_complete_recheck_epoch_without_auto_reacquir
             lease,
             requirements,
             [{"role": "user", "content": "do not reacquire"}],
+            max_tokens=128,
             absolute_deadline=deadline,
         )
     assert caught.value.code is V12ModelRuntimeFailure.LEASE_REJECTED
@@ -604,6 +674,7 @@ async def test_checked_completion_revokes_on_epoch_drift_even_after_a_model_resp
             lease,
             requirements,
             [{"role": "user", "content": "synthetic"}],
+            max_tokens=128,
             absolute_deadline=time.monotonic() + 2,
         )
 
@@ -637,6 +708,7 @@ async def test_checked_completion_rejects_alias_drift_and_sanitizes_private_fail
             lease,
             requirements,
             [{"role": "user", "content": "synthetic"}],
+            max_tokens=128,
             absolute_deadline=time.monotonic() + 2,
         )
 
@@ -645,6 +717,69 @@ async def test_checked_completion_rejects_alias_drift_and_sanitizes_private_fail
     assert private not in str(caught.value)
     assert len(metrics.calls) == 2
     assert runtime.public_status()["status"] == "revoked"
+
+
+@pytest.mark.asyncio
+async def test_checked_completion_propagates_cancellation_without_a_post_call_metrics_probe(
+    settings,
+) -> None:
+    runtime, _completion, metrics = _runtime(
+        settings,
+        metrics=[_metrics()],
+        completions=[asyncio.CancelledError()],
+    )
+    _install_attestation(runtime)
+    requirements = _requirements()
+    lease = runtime._gate.lease(requirements, process_epoch_sha256=_EPOCH_SHA256)  # noqa: SLF001
+    assert lease is not None
+
+    with pytest.raises(asyncio.CancelledError):
+        await runtime.checked_chat(
+            lease,
+            requirements,
+            [{"role": "user", "content": "synthetic"}],
+            max_tokens=128,
+            absolute_deadline=time.monotonic() + 2,
+        )
+
+    assert len(metrics.calls) == 1
+    assert runtime.public_status()["status"] == "canary_ready"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content,max_tokens",
+    [
+        ("jrc_DO_NOT_FORWARD_THIS_RUNTIME_CREDENTIAL_1234567890", 128),
+        ("X" * 6_000, 128),
+        ("synthetic", 8_000),
+    ],
+    ids=("secret", "oversized-input", "oversized-output"),
+)
+async def test_checked_completion_centrally_rejects_unsafe_or_unattested_payloads(
+    settings,
+    content: str,
+    max_tokens: int,
+) -> None:
+    runtime, completion, metrics = _runtime(settings)
+    _install_attestation(runtime)
+    requirements = _requirements()
+    lease = runtime._gate.lease(requirements, process_epoch_sha256=_EPOCH_SHA256)  # noqa: SLF001
+    assert lease is not None
+
+    with pytest.raises(V12ModelRuntimeError) as caught:
+        await runtime.complete(
+            lease,
+            requirements,
+            [{"role": "user", "content": content}],
+            max_tokens=max_tokens,
+            priority="foreground",
+            absolute_deadline=time.monotonic() + 2,
+        )
+
+    assert caught.value.code is V12ModelRuntimeFailure.COMPLETION_INVALID
+    assert completion.calls == []
+    assert len(metrics.calls) == 1
 
 
 def test_profile_remains_read_only_and_has_no_native_tool_or_vision_authority() -> None:

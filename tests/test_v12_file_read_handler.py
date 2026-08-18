@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from friday.model_profiles import ModelProfileLease, ModelRequirements
 from friday.orchestration import (
     ReadOnlyAttachmentReference,
     ReadOnlyRouteRequest,
@@ -147,9 +148,74 @@ class _Model:
         )
         self.mutate = mutate
         self.calls: list[dict[str, Any]] = []
+        self.lease: ModelProfileLease | None = None
+        self.lease_current = True
+        self.lease_checks = 0
 
-    async def chat(self, messages, **kwargs):  # noqa: ANN001
-        self.calls.append({"messages": messages, **kwargs})
+    async def acquire_lease(
+        self,
+        requirements: ModelRequirements,
+        *,
+        absolute_deadline: float,
+    ) -> ModelProfileLease | None:
+        assert absolute_deadline > time.monotonic()
+        self.lease = ModelProfileLease(
+            profile_id="v12-file-handler-test:dispatcher",
+            attestation_sha256="a" * 64,
+            requirements_sha256=requirements.canonical_sha256(),
+            capabilities=requirements.capabilities,
+            required_context_tokens=requirements.required_context_tokens,
+            prepared_evidence_items=requirements.prepared_evidence_items,
+            max_tool_steps=requirements.max_tool_steps,
+            effect=requirements.effect,
+            verifier_required=requirements.verifier_required,
+            process_epoch_sha256="b" * 64,
+            _gate_authority=self,
+            _gate_generation=1,
+        )
+        return self.lease
+
+    async def lease_is_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+        *,
+        absolute_deadline: float,
+    ) -> bool:
+        assert absolute_deadline > time.monotonic()
+        self.lease_checks += 1
+        return bool(
+            self.lease_current
+            and lease is self.lease
+            and self.lease is not None
+            and self.lease.requirements_sha256 == requirements.canonical_sha256()
+        )
+
+    async def complete(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+        messages: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        if not await self.lease_is_current(
+            lease,
+            requirements,
+            absolute_deadline=float(kwargs["absolute_deadline"]),
+        ):
+            raise RuntimeError("stale test lease")
+        self.calls.append(
+            {
+                "lease": lease,
+                "requirements_sha256": requirements.canonical_sha256(),
+                "messages": messages,
+                "tools": None,
+                "allow_retries": False,
+                "open_silent_cooldown": False,
+                "require_full_context": True,
+                **kwargs,
+            }
+        )
         if len(self.calls) == 1:
             if self.mutate is not None:
                 self.mutate()
@@ -236,6 +302,8 @@ async def test_file_handler_synthesizes_verifies_and_atomically_publishes(settin
     assert len(model.calls) == 2
     assert all(call["tools"] is None and call["allow_retries"] is False for call in model.calls)
     assert [call["max_tokens"] for call in model.calls] == [512, 256]
+    assert model.calls[0]["lease"] is model.calls[1]["lease"] is model.lease
+    assert model.calls[0]["requirements_sha256"] == model.calls[1]["requirements_sha256"]
     messages = storage.get_conversation_messages(str(conversation["id"]), user_id="alice")
     assert [(item["role"], item["content"]) for item in messages] == [
         ("user", "Что сказано в документе?"),
@@ -245,6 +313,52 @@ async def test_file_handler_synthesizes_verifies_and_atomically_publishes(settin
     assert assistant_metadata["evidence_identity_sha256"] == result.evidence_identity_sha256
     assert assistant_metadata["conversation_attachment_raw_ids"] == [reference.raw_object_id]
     assert assistant_metadata["verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_stale_file_model_lease_is_rejected_before_selection_or_publication(
+    settings,
+    storage,
+) -> None:
+    conversation = storage.create_conversation("alice")
+    reference = _register(storage, settings, text="LEASE-SOURCE", filename="lease.txt")
+    model = _Model("Источник прочитан. [A1]")
+    handler = _handler(storage, settings, model)
+    request, turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+    model.lease_current = False
+
+    assert await handler.preparation_is_current(request, turn, plan, preparation) is False
+    with pytest.raises(V12FileReadError, match="authority changed before synthesis"):
+        await handler.handle(request, turn, plan, preparation)
+
+    assert model.calls == []
+    assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
+
+
+@pytest.mark.asyncio
+async def test_epoch_loss_after_synthesis_never_reacquires_or_publishes(settings, storage) -> None:
+    conversation = storage.create_conversation("alice")
+    reference = _register(storage, settings, text="DRIFT-SOURCE", filename="drift.txt")
+    model = _Model("Источник прочитан. [A1]")
+
+    def revoke_after_synthesis() -> None:
+        model.lease_current = False
+
+    model.mutate = revoke_after_synthesis
+    handler = _handler(storage, settings, model)
+    request, turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+    original_lease = model.lease
+
+    with pytest.raises(RuntimeError, match="stale test lease"):
+        await handler.handle(request, turn, plan, preparation)
+
+    assert model.lease is original_lease
+    assert len(model.calls) == 1
+    assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
 
 
 @pytest.mark.asyncio

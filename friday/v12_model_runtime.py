@@ -31,6 +31,7 @@ from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from friday.agent_runtime.llm import LLMRouter
 from friday.config import PROFILES, FridaySettings
+from friday.model_input_hygiene import model_messages_are_secret_free
 from friday.model_probe import (
     CANCELLATION_TIMEOUT_SEC,
     LOAD_TIMEOUT_SEC,
@@ -62,12 +63,14 @@ from friday.model_profiles import (
 from friday.orchestration.planner import V12Planner
 
 MAX_METRICS_BYTES = 65_536
+MAX_MODEL_INVENTORY_BYTES = 65_536
 MAX_METRICS_LINE_CHARS = 4_096
 MAX_METRIC_COUNT = 1_000_000
 CANCELLATION_POLL_INTERVAL_SEC = 0.01
 CANCELLATION_STABLE_ZERO_OBSERVATIONS = 2
 CANCELLATION_STABLE_ZERO_INTERVAL_SEC = 0.05
 LOCAL_CANCELLATION_DRAIN_SEC = 0.05
+MAX_ATTESTED_CHAT_INPUT_UTF8_BYTES = 5_500
 
 _PROCESS_PRIVATE_SALT = secrets.token_bytes(32)
 _PROCESS_SALT_PID = os.getpid()
@@ -114,6 +117,13 @@ class V12ModelRuntimeError(RuntimeError):
         return f"{type(self).__name__}({self.code.value!r})"
 
 
+class V12ServedAliasError(V12ModelRuntimeError):
+    """Typed, content-free transport signal for served-model identity drift."""
+
+    def __init__(self) -> None:
+        super().__init__(V12ModelRuntimeFailure.SERVED_ALIAS_REJECTED)
+
+
 @dataclass(frozen=True, slots=True)
 class V12ServedCompletion:
     """Bounded projection which preserves the server-reported model alias."""
@@ -135,6 +145,8 @@ class V12PendingCompletion(Protocol):
     def submitted_model_alias(self) -> str: ...
 
     def is_pending(self) -> bool: ...
+
+    def submission_started(self) -> bool: ...
 
     async def cancel_and_drain(self, *, absolute_deadline: float) -> bool: ...
 
@@ -185,6 +197,13 @@ class V12MetricsTransport(Protocol):
     def bound_router(self) -> LLMRouter: ...
 
     async def fetch_metrics(
+        self,
+        *,
+        maximum_bytes: int,
+        absolute_deadline: float,
+    ) -> bytes: ...
+
+    async def fetch_model_inventory(
         self,
         *,
         maximum_bytes: int,
@@ -384,8 +403,7 @@ class _RuntimeSeal:
                 self.profile.served_model_alias,
             )
             is not self.profile
-            or self.router.settings.profile
-            is not PROFILES.get(self.profile.runtime_profile_name)
+            or self.router.settings.profile is not PROFILES.get(self.profile.runtime_profile_name)
             or self.router.model != self.profile.served_model_alias
             or self.router.enabled is not True
             or self.router.settings.profile.max_model_len < self.profile.max_context_tokens
@@ -471,6 +489,42 @@ def _parse_metrics(body: object, *, served_model_alias: str) -> ModelLoadSample:
     )
 
 
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate key")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(_value: str) -> None:
+    raise ValueError("invalid number")
+
+
+def _parse_model_inventory(body: object, *, served_model_alias: str) -> None:
+    """Require one exact OpenAI-compatible served-model identity."""
+
+    if type(body) is not bytes or not body or len(body) > MAX_MODEL_INVENTORY_BYTES:
+        raise _runtime_error(V12ModelRuntimeFailure.SERVED_ALIAS_REJECTED)
+    try:
+        value = json.loads(
+            body.decode("utf-8", errors="strict"),
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_json_constant,
+        )
+    except (UnicodeError, ValueError, json.JSONDecodeError):
+        raise _runtime_error(V12ModelRuntimeFailure.SERVED_ALIAS_REJECTED) from None
+    if not isinstance(value, dict) or value.get("object") != "list":
+        raise _runtime_error(V12ModelRuntimeFailure.SERVED_ALIAS_REJECTED)
+    data = value.get("data")
+    if not isinstance(data, list) or len(data) != 1:
+        raise _runtime_error(V12ModelRuntimeFailure.SERVED_ALIAS_REJECTED)
+    item = data[0]
+    if not isinstance(item, dict) or item.get("object") != "model" or item.get("id") != served_model_alias:
+        raise _runtime_error(V12ModelRuntimeFailure.SERVED_ALIAS_REJECTED)
+
+
 def _valid_projection(value: object, *, expected_alias: str) -> V12ServedCompletion:
     if type(value) is not V12ServedCompletion:
         raise _runtime_error(V12ModelRuntimeFailure.COMPLETION_INVALID)
@@ -496,6 +550,38 @@ def _valid_projection(value: object, *, expected_alias: str) -> V12ServedComplet
     except UnicodeEncodeError:
         raise _runtime_error(V12ModelRuntimeFailure.COMPLETION_INVALID) from None
     return value
+
+
+def _validate_attested_chat_input(
+    router: LLMRouter,
+    profile: V12ModelProfileSpec,
+    messages: object,
+    max_tokens: object,
+) -> None:
+    if (
+        not isinstance(messages, list)
+        or not messages
+        or isinstance(max_tokens, bool)
+        or not isinstance(max_tokens, int)
+        or max_tokens <= 0
+    ):
+        raise _runtime_error(V12ModelRuntimeFailure.COMPLETION_INVALID)
+    try:
+        encoded = json.dumps(
+            messages,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8", errors="strict")
+    except (TypeError, ValueError, UnicodeError):
+        raise _runtime_error(V12ModelRuntimeFailure.COMPLETION_INVALID) from None
+    if (
+        len(encoded) > MAX_ATTESTED_CHAT_INPUT_UTF8_BYTES
+        or not model_messages_are_secret_free(messages)
+        or router.estimate_messages_tokens(messages) + max_tokens + 256 > profile.max_context_tokens
+    ):
+        raise _runtime_error(V12ModelRuntimeFailure.COMPLETION_INVALID)
 
 
 class _PlannerBridge:
@@ -566,6 +652,25 @@ class V12ProductionProbeClient(V12ModelProbeClient):
             or _transport_router(self._metrics_transport) is not self._seal.router
         ):
             raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
+
+    async def verify_model_inventory(self, *, absolute_deadline: float) -> None:
+        self._ensure_composed()
+        inventory_deadline = min(
+            absolute_deadline,
+            time.monotonic() + LOAD_TIMEOUT_SEC,
+        )
+        body = await _bounded_await(
+            self._metrics_transport.fetch_model_inventory(
+                maximum_bytes=MAX_MODEL_INVENTORY_BYTES,
+                absolute_deadline=inventory_deadline,
+            ),
+            absolute_deadline=inventory_deadline,
+            failure=V12ModelRuntimeFailure.METRICS_CALL_FAILED,
+        )
+        _parse_model_inventory(
+            body,
+            served_model_alias=self._seal.profile.served_model_alias,
+        )
 
     async def sample_load(self, *, absolute_deadline: float) -> ModelLoadSample:
         try:
@@ -644,11 +749,15 @@ class V12ProductionProbeClient(V12ModelProbeClient):
         self,
         prompt: str,
         *,
+        system_prompt: str | None = None,
         max_tokens: int,
         absolute_deadline: float,
     ) -> ProbeCompletion:
+        messages = [{"role": "user", "content": prompt}]
+        if system_prompt is not None:
+            messages.insert(0, {"role": "system", "content": system_prompt})
         projection = await self._complete_projection(
-            [{"role": "user", "content": prompt}],
+            messages,
             temperature=0.0,
             max_tokens=max_tokens,
             priority="background",
@@ -705,6 +814,7 @@ class V12ProductionProbeClient(V12ModelProbeClient):
         try:
             return await self._prompt_completion(
                 request.prompt,
+                system_prompt=request.system_prompt,
                 max_tokens=512,
                 absolute_deadline=absolute_deadline,
             )
@@ -722,6 +832,7 @@ class V12ProductionProbeClient(V12ModelProbeClient):
         try:
             return await self._prompt_completion(
                 request.prompt,
+                system_prompt=request.system_prompt,
                 max_tokens=256,
                 absolute_deadline=absolute_deadline,
             )
@@ -751,6 +862,16 @@ class V12ProductionProbeClient(V12ModelProbeClient):
     def _pending_state(handle: V12PendingCompletion) -> bool:
         try:
             value = handle.is_pending()
+        except Exception:
+            raise _runtime_error(V12ModelRuntimeFailure.COMPLETION_INVALID) from None
+        if not isinstance(value, bool):
+            raise _runtime_error(V12ModelRuntimeFailure.COMPLETION_INVALID)
+        return value
+
+    @staticmethod
+    def _submission_started(handle: V12PendingCompletion) -> bool:
+        try:
+            value = handle.submission_started()
         except Exception:
             raise _runtime_error(V12ModelRuntimeFailure.COMPLETION_INVALID) from None
         if not isinstance(value, bool):
@@ -815,14 +936,21 @@ class V12ProductionProbeClient(V12ModelProbeClient):
             ):
                 raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
 
-            # The request is accepted only after the same endpoint moves from
-            # exact idle to a positive running/waiting count while this local
-            # request is still pending.  A task object alone is not evidence of
-            # server-side acceptance.
+            # The request is accepted only after our code-owned HTTP seam has
+            # begun the send and the same endpoint then moves from exact idle
+            # to a positive running/waiting count while this request is still
+            # pending.  A task waiting on the router semaphore is not evidence
+            # of server-side acceptance.
             positive_seen = False
             while time.monotonic() < cancellation_deadline:
                 if not self._pending_state(handle):
                     raise _runtime_error(V12ModelRuntimeFailure.COMPLETION_INVALID)
+                if not self._submission_started(handle):
+                    await self._sleep_until(
+                        time.monotonic() + CANCELLATION_POLL_INTERVAL_SEC,
+                        absolute_deadline=cancellation_deadline,
+                    )
+                    continue
                 sample = await self.sample_load(absolute_deadline=cancellation_deadline)
                 if sample.process_epoch_sha256 != baseline.process_epoch_sha256:
                     raise _runtime_error(V12ModelRuntimeFailure.EPOCH_CHANGED)
@@ -873,9 +1001,7 @@ class V12ProductionProbeClient(V12ModelProbeClient):
                         elapsed_ms = max(0, int((time.monotonic() - cancel_started) * 1_000))
                         return CancellationProbeResult(
                             phase="submitted",
-                            accepted_request_witness_sha256=(
-                                _cancellation_request_witness_sha256(request)
-                            ),
+                            accepted_request_witness_sha256=(_cancellation_request_witness_sha256(request)),
                             local_task_drained=True,
                             remote_queue_drain_ms=elapsed_ms,
                         )
@@ -911,10 +1037,7 @@ class AttestedV12ModelRuntime:
     ) -> None:
         if type(router) is not LLMRouter:
             raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
-        if (
-            v12_model_profile_for(profile.runtime_profile_name, profile.served_model_alias)
-            is not profile
-        ):
+        if v12_model_profile_for(profile.runtime_profile_name, profile.served_model_alias) is not profile:
             raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
         binding = _derive_endpoint_binding(router, profile)
         self._seal = _RuntimeSeal(router, profile, binding)
@@ -949,6 +1072,7 @@ class AttestedV12ModelRuntime:
             )
             acquired = True
             self._seal.validate()
+            await self._client.verify_model_inventory(absolute_deadline=absolute_deadline)
             attestation = await run_v12_live_probe(
                 self._seal.profile,
                 self._client,
@@ -1049,9 +1173,15 @@ class AttestedV12ModelRuntime:
             process_epoch_sha256=before_epoch,
         ):
             raise _runtime_error(V12ModelRuntimeFailure.LEASE_REJECTED)
+        _validate_attested_chat_input(
+            self._seal.router,
+            self._seal.profile,
+            messages,
+            max_tokens,
+        )
 
         projection: V12ServedCompletion | None = None
-        call_error: BaseException | None = None
+        call_error: Exception | None = None
         try:
             projection = await self._client._complete_projection(
                 messages,
@@ -1066,7 +1196,14 @@ class AttestedV12ModelRuntime:
                 open_silent_cooldown=False,
                 require_full_context=True,
             )
-        except BaseException as exc:
+        except asyncio.CancelledError:
+            # Cancellation is control flow, not a model failure.  Sampling the
+            # endpoint again here would delay cancellation and, when the same
+            # deadline is already spent, could mask it as a metrics failure.
+            raise
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
             call_error = exc
 
         after_epoch = await self._current_epoch(absolute_deadline=absolute_deadline)
@@ -1074,8 +1211,6 @@ class AttestedV12ModelRuntime:
             self._gate.revoke(ModelGateReason.EPOCH_CHANGED)
             raise _runtime_error(V12ModelRuntimeFailure.EPOCH_CHANGED)
         if call_error is not None:
-            if isinstance(call_error, asyncio.CancelledError):
-                raise call_error
             if (
                 isinstance(call_error, V12ModelRuntimeError)
                 and call_error.code is V12ModelRuntimeFailure.SERVED_ALIAS_REJECTED
@@ -1128,11 +1263,14 @@ class AttestedV12ModelRuntime:
 __all__ = [
     "AttestedV12ModelRuntime",
     "MAX_METRICS_BYTES",
+    "MAX_ATTESTED_CHAT_INPUT_UTF8_BYTES",
+    "MAX_MODEL_INVENTORY_BYTES",
     "V12CompletionTransport",
     "V12MetricsTransport",
     "V12ModelRuntimeError",
     "V12ModelRuntimeFailure",
     "V12PendingCompletion",
+    "V12ServedAliasError",
     "V12ProductionProbeClient",
     "V12ServedCompletion",
 ]

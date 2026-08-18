@@ -94,7 +94,13 @@ from friday.office_attestation import (
     OFFICE_STRUCTURE_ATTESTATION_METADATA_KEY,
     verify_office_structure_attestation,
 )
-from friday.orchestration import OrchestrationRouter, build_orchestrated_agent
+from friday.orchestration import (
+    OrchestrationRouter,
+    RouteClass,
+    RouterMode,
+    build_orchestrated_agent,
+)
+from friday.orchestration.file_read import V12FileReadHandler
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
 from friday.permissions import (
     LEGACY_OWNER_USER_ID,
@@ -133,12 +139,15 @@ from friday.storage.models import (
     new_id,
     normalize_known_at,
 )
+from friday.v12_model_runtime import AttestedV12ModelRuntime
+from friday.v12_model_transport import create_attested_v12_model_runtime
 from friday.web_surfer import WebSurfer
 from friday.workers import IntervalTask, WorkersManager
 from friday.workers._blocking import current_activity, run_blocking, wait_until_idle
 
 LOGGER = logging.getLogger(__name__)
 VERSION = __version__
+_V12_STARTUP_PROBE_BUDGET_SEC = 330.0
 _REALM_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
 # What a client-proposed correlation id may look like: long enough for a UUID or
 # a trace id, plain enough that it cannot smuggle a header or a log line.
@@ -1390,6 +1399,29 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 shared_tenant=LEGACY_OWNER_USER_ID if settings.shared_archive else "",
             )
             llm = LLMRouter(settings)
+            configured_router_mode = RouterMode.fail_closed(settings.router_mode)
+            attempted_v12_runtime: AttestedV12ModelRuntime | None = None
+            attested_v12_runtime: AttestedV12ModelRuntime | None = None
+            v12_startup_reason = "mode_does_not_require_live_attestation"
+            if configured_router_mode in {RouterMode.CANARY, RouterMode.V12}:
+                try:
+                    attempted_v12_runtime = create_attested_v12_model_runtime(llm)
+                    await attempted_v12_runtime.attest(
+                        absolute_deadline=time.monotonic() + _V12_STARTUP_PROBE_BUDGET_SEC
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    # The exception class is code-owned; its body may originate
+                    # in a transport/model and is deliberately not logged.
+                    v12_startup_reason = "live_attestation_failed"
+                    LOGGER.warning(
+                        "V12 live attestation unavailable; retaining legacy runtime (%s)",
+                        type(exc).__name__,
+                    )
+                else:
+                    attested_v12_runtime = attempted_v12_runtime
+                    v12_startup_reason = "live_attestation_clear"
             embeddings = EmbeddingBackend(settings)
             # Переранжировщик подключается, только если настроен адрес И задана
             # глубина: два условия, потому что поднять службу и забыть включить шаг —
@@ -1416,7 +1448,25 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             kernel = ExecutionKernel(auth_service, settings)
             kernel.bind_services(storage, graph, web_surfer, ingestion, searcher=searcher)
             legacy_agent = AgentRuntime(settings, storage, llm, kernel)
-            agent = build_orchestrated_agent(settings, legacy_agent, llm)
+            route_handlers = (
+                {
+                    RouteClass.FILE_READ: V12FileReadHandler(
+                        storage=storage,
+                        authorization=auth_service,
+                        settings=settings,
+                        model=attested_v12_runtime,
+                    )
+                }
+                if attested_v12_runtime is not None
+                else {}
+            )
+            agent = build_orchestrated_agent(
+                settings,
+                legacy_agent,
+                llm,
+                route_handlers=route_handlers,
+                attested_runtime=attested_v12_runtime,
+            )
             executive = ExecutiveService(settings, storage, auth_service, kernel, llm, ingestion)
             kernel.bind_executive(executive)
             memory_vault = MemoryVault(
@@ -1474,6 +1524,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.web_surfer = web_surfer
             application.state.kernel = kernel
             application.state.agent = agent
+            application.state.v12_model_runtime = attempted_v12_runtime
+            application.state.v12_startup_reason = v12_startup_reason
+            application.state.v12_registered_routes = tuple(
+                sorted(route.value for route in route_handlers)
+            )
             application.state.executive = executive
             application.state.memory_vault = memory_vault
             application.state.workers = workers
@@ -1779,12 +1834,37 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
     @application.get("/api/health", tags=["system"])
     async def health(request: Request) -> dict[str, Any]:
         storage = getattr(request.app.state, "storage", None)
+        agent = getattr(request.app.state, "agent", None)
+        runtime = getattr(request.app.state, "v12_model_runtime", None)
+        gate_status = (
+            runtime.public_status()
+            if isinstance(runtime, AttestedV12ModelRuntime)
+            else {
+                "status": "not_installed",
+                "reason_code": getattr(
+                    request.app.state,
+                    "v12_startup_reason",
+                    "application_starting",
+                ),
+            }
+        )
         return {
             "status": "ok" if storage is not None else "starting",
             "version": VERSION,
             "llm_enabled": settings.llm_enabled,
             "model": settings.llm_model,
             "profile": settings.profile.name,
+            "orchestration": {
+                "schema": "friday.v12-orchestration-health.v1",
+                "configured_mode": settings.router_mode,
+                "installed_mode": (
+                    agent.mode.value if isinstance(agent, OrchestrationRouter) else RouterMode.LEGACY.value
+                ),
+                "registered_routes": list(
+                    getattr(request.app.state, "v12_registered_routes", ())
+                ),
+                "model_gate": gate_status,
+            },
         }
 
     @application.get("/api/me", tags=["identity"])

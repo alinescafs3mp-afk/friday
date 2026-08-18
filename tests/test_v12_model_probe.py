@@ -94,18 +94,9 @@ class _Client:
         self.load_times: list[float] = []
         self.plan_overrides: dict[str, ProbeCompletion] = {}
         self.synthesis = ProbeCompletion(
-            content=json.dumps(
-                {
-                    "claims": [
-                        {"fact": "Код синтетического проекта: СЕВЕР-42", "citation": "A1"},
-                        {
-                            "fact": ("Контрольная дата синтетического проекта: 7 октября 2099 года"),
-                            "citation": "A2",
-                        },
-                    ]
-                },
-                ensure_ascii=False,
-                separators=(",", ":"),
+            content=(
+                "Код синтетического проекта: СЕВЕР-42 [A1]. "
+                "Контрольная дата синтетического проекта: 7 октября 2099 года [A2]."
             ),
             finish_reason="stop",
             tool_calls=(),
@@ -113,13 +104,19 @@ class _Client:
         )
         self.verifier: dict[str, ProbeCompletion] = {
             "verifier_case_31": ProbeCompletion(
-                content=('{"supported":true,"citation_labels":["A1","A2"],"unsupported_claims":0}'),
+                content=(
+                    '{"schema":"friday.v12-file-verifier.v1","supported":true,'
+                    '"citation_labels":["A1","A2"],"unsupported_claims":0}'
+                ),
                 finish_reason="stop",
                 tool_calls=(),
                 prompt_tokens=256,
             ),
             "verifier_case_79": ProbeCompletion(
-                content=('{"supported":false,"citation_labels":["A1","A2"],"unsupported_claims":1}'),
+                content=(
+                    '{"schema":"friday.v12-file-verifier.v1","supported":false,'
+                    '"citation_labels":["A1","A2"],"unsupported_claims":1}'
+                ),
                 finish_reason="stop",
                 tool_calls=(),
                 prompt_tokens=256,
@@ -363,6 +360,31 @@ async def test_plan_requires_exact_route_ru_language_zero_tools_and_output_shape
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ["insufficient_max_items", "extra_conversation"])
+async def test_file_plan_probe_requires_the_exact_production_applicability_shape(
+    mutation: str,
+) -> None:
+    client = _Client()
+    case = PLAN_PROBE_CASES[1]
+    payload = _plan_payload(case)
+    if mutation == "insufficient_max_items":
+        payload["evidence_requests"][0]["max_items"] = 1
+    else:
+        payload["evidence_requests"].append(
+            {"kind": "conversation", "query": "", "max_items": 1, "required": True}
+        )
+    client.plan_overrides[case.case_id] = _plan_response(
+        case,
+        content=json.dumps(payload, ensure_ascii=False),
+    )
+
+    with pytest.raises(ModelProbeError) as raised:
+        await _run(client)
+
+    assert raised.value.code is ModelProbeFailure.PLAN_INVALID
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "content",
     [
@@ -413,27 +435,41 @@ async def test_two_source_synthesis_requires_exact_source_fact_map_and_no_extra_
     [
         (
             "verifier_case_31",
-            '{"supported":false,"citation_labels":["A1","A2"],"unsupported_claims":1}',
+            '{"schema":"friday.v12-file-verifier.v1","supported":false,'
+            '"citation_labels":["A1","A2"],"unsupported_claims":1}',
         ),
         (
             "verifier_case_79",
+            '{"schema":"friday.v12-file-verifier.v1","supported":true,'
+            '"citation_labels":["A1","A2"],"unsupported_claims":0}',
+        ),
+        (
+            "verifier_case_31",
+            '{"schema":"friday.v12-file-verifier.v1","supported":true,'
+            '"citation_labels":["A2","A1"],"unsupported_claims":0}',
+        ),
+        (
+            "verifier_case_31",
+            '{"schema":"friday.v12-file-verifier.v1","supported":true,'
+            '"citation_labels":["A1","A2"],"unsupported_claims":false}',
+        ),
+        (
+            "verifier_case_31",
+            (
+                '{"schema":"friday.v12-file-verifier.v1","supported":true,"supported":false,'
+                '"citation_labels":["A1","A2"],"unsupported_claims":0}'
+            ),
+        ),
+        (
+            "verifier_case_31",
+            (
+                '{"schema":"friday.v12-file-verifier.v1","supported":true,'
+                '"citation_labels":["A1","A2"],"unsupported_claims":0,"extra":0}'
+            ),
+        ),
+        (
+            "verifier_case_31",
             '{"supported":true,"citation_labels":["A1","A2"],"unsupported_claims":0}',
-        ),
-        (
-            "verifier_case_31",
-            '{"supported":true,"citation_labels":["A2","A1"],"unsupported_claims":0}',
-        ),
-        (
-            "verifier_case_31",
-            '{"supported":true,"citation_labels":["A1","A2"],"unsupported_claims":false}',
-        ),
-        (
-            "verifier_case_31",
-            ('{"supported":true,"supported":false,"citation_labels":["A1","A2"],"unsupported_claims":0}'),
-        ),
-        (
-            "verifier_case_31",
-            ('{"supported":true,"citation_labels":["A1","A2"],"unsupported_claims":0,"extra":0}'),
         ),
     ],
 )
@@ -748,6 +784,12 @@ def test_synthetic_file_cases_use_only_bounded_descriptors() -> None:
     file_cases = [case for case in PLAN_PROBE_CASES if case.expected_route is RouteClass.FILE_READ]
 
     assert len(file_cases) == 3
+    assert [len(case.turn.attachments) for case in file_cases[:2]] == [1, 2]
+    assert all(
+        attachment.media_type == "text/plain" and attachment.extracted_text_available
+        for case in file_cases[:2]
+        for attachment in case.turn.attachments
+    )
     assert all(case.turn.attachments for case in file_cases)
     assert all(
         request.kind is EvidenceKind.ATTACHED_FILES
