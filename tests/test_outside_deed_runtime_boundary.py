@@ -8,6 +8,7 @@ document builder before it reaches the person.
 
 from __future__ import annotations
 
+import io
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -20,8 +21,10 @@ from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     FileRegistrationKind,
+    _attachment_whole_document_task,
     _claims_an_unconfirmed_supported_deed,
     _file_evidence_view_of,
+    _normalize_passive_attachment_preparation_preamble,
 )
 from friday.execution_kernel import ExecutionKernel
 from friday.ingestion import IngestionPipeline
@@ -117,6 +120,34 @@ async def _registered_text_attachment(
     return {"raw_object_id": raw_id}
 
 
+async def _registered_docx_attachment(
+    settings,
+    storage,
+    *,
+    filename: str,
+    source_text: str,
+) -> dict[str, str]:
+    """Create a real trusted DOCX Raw like the production reproduction."""
+
+    from docx import Document
+
+    document = Document()
+    document.add_heading("Структура", level=1)
+    document.add_paragraph(source_text)
+    payload = io.BytesIO()
+    document.save(payload)
+    outcome = await IngestionPipeline(settings, storage, KnowledgeGraph(storage)).ingest_file(
+        "alice",
+        None,
+        payload.getvalue(),
+        filename=filename,
+        mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        metadata={"uploaded_by": "alice"},
+        source_ref=f"test-docx:{filename}",
+    )
+    return {"raw_object_id": str(outcome["raw_object_id"])}
+
+
 @pytest.mark.parametrize(
     ("source_text", "truthful_summary"),
     [
@@ -194,6 +225,179 @@ async def test_a_bare_upload_summary_keeps_a_truthful_state_from_its_source(
     output_guards = metadata["structural"].get("output_guards", {})
     assert output_guards.get("outside_deed_replaced") is not True
     assert output_guards.get("supported_deed_replaced") is not True
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_structure_request_keeps_passive_source_summary(
+    settings,
+    storage,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """A read-only transformation describes the source, not a new file effect."""
+
+    assert Path(settings.database_path).is_relative_to(tmp_path)
+    runtime = _runtime(settings, storage, monkeypatch)
+    source_text = "Раздел один: статус проекта. Раздел два: следующие шаги."
+    attachment = await _registered_docx_attachment(
+        settings,
+        storage,
+        filename="посты+оружие.docx",
+        source_text=source_text,
+    )
+    model_answer = "Документ подготовлен в виде двух разделов: статус проекта и следующие шаги."
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message
+        assert len(attachments) == 1
+        evidence = _file_evidence_view_of(attachments[0])
+        assert evidence is not None
+        assert evidence.source_complete is True
+        assert evidence.verification_eligible is True
+        return {"content": model_answer, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Структурируй инфу пожалуйста",
+        actor=_actor(),
+        attachments=[attachment],
+        enable_tools=False,
+    )
+
+    assert reply["message"] == (
+        "Структура документа представлена в виде двух разделов: статус проекта и следующие шаги."
+    )
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    output_guards = metadata["structural"].get("output_guards", {})
+    assert output_guards.get("supported_deed_replaced") is not True
+    assert output_guards["passive_attachment_preamble_normalized"] is True
+
+
+@pytest.mark.parametrize(
+    ("model_answer", "expected"),
+    [
+        (
+            "**Документ подготовлен:** ниже приведены основные разделы и выводы.",
+            "Структура документа: ниже приведены основные разделы и выводы.",
+        ),
+        (
+            "Структурированный документ подготовлен: ниже основные разделы и выводы.",
+            "Структура документа: ниже основные разделы и выводы.",
+        ),
+    ],
+)
+def test_markdown_attachment_preparation_leads_are_normalized(
+    model_answer: str,
+    expected: str,
+) -> None:
+    assert _normalize_passive_attachment_preparation_preamble(model_answer) == (expected, True)
+
+
+@pytest.mark.parametrize(
+    ("user_message", "expected"),
+    [
+        ("Структурируй инфу пожалуйста", "summary"),
+        ("Структурируйте информацию", "summary"),
+        ("Создай структурированный документ", ""),
+        ("Структурированный документ готов", ""),
+    ],
+)
+def test_structure_request_has_a_closed_read_only_scope(user_message: str, expected: str) -> None:
+    assert _attachment_whole_document_task(user_message, file_count=1) == expected
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_structure_request_does_not_hide_an_active_file_deed(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    runtime = _runtime(settings, storage, monkeypatch)
+    attachment = await _registered_text_attachment(
+        settings,
+        storage,
+        filename="structure-active-deed.txt",
+        source_text="Нейтральное содержимое источника.",
+    )
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {"content": "Прикрепляю файл.", "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Структурируй инфу пожалуйста",
+        actor=_actor(),
+        attachments=[attachment],
+        enable_tools=False,
+    )
+
+    assert reply["message"] == _UNCONFIRMED_SUPPORTED_DEED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "unsupported_claim",
+    ["PDF готов.", "Напоминание установлено.", "Аудио готово."],
+)
+async def test_an_explicit_structure_request_does_not_hide_other_passive_deeds(
+    settings,
+    storage,
+    monkeypatch,
+    unsupported_claim: str,
+) -> None:
+    runtime = _runtime(settings, storage, monkeypatch)
+    attachment = await _registered_text_attachment(
+        settings,
+        storage,
+        filename="structure-passive-deed.txt",
+        source_text="Нейтральное содержимое источника.",
+    )
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {"content": unsupported_claim, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Структурируй инфу пожалуйста",
+        actor=_actor(),
+        attachments=[attachment],
+        enable_tools=False,
+    )
+
+    assert reply["message"] == _UNCONFIRMED_SUPPORTED_DEED
+
+
+@pytest.mark.asyncio
+async def test_a_structure_request_without_an_attachment_cannot_claim_a_prepared_document(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    runtime = _runtime(settings, storage, monkeypatch)
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {
+            "content": "Документ подготовлен в виде двух разделов: статус и следующие шаги.",
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Структурируй инфу пожалуйста",
+        actor=_actor(),
+        enable_tools=False,
+    )
+
+    assert reply["message"] == _UNCONFIRMED_SUPPORTED_DEED
 
 
 @pytest.mark.parametrize(

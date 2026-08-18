@@ -221,7 +221,7 @@ pytest -q
 4. запустите `jericho doctor`;
 5. запустите backend и проверьте Admin/Telegram smoke.
 
-0.204.1 использует SQLite schema 33, как и 0.204.0: Office summary fix не добавляет
+0.204.2 использует SQLite schema 33, как и 0.204.1: attachment summary fix не добавляет
 миграцию и не меняет авторитетные Knowledge/Graph/Inbox/Conversation records.
 Отсутствующие производные projections могут идемпотентно достраиваться при
 открытии. Любая будущая поддерживаемая schema migration выполняется одной
@@ -416,7 +416,7 @@ orchestration.model_gate.reason_code = live_attestation_clear
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.204.1`.
+требуйте `status=ok` и `version=0.204.2`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. Для мгновенного отката оставьте bridge остановленным,

@@ -6620,6 +6620,39 @@ _SUPPORTED_FILE_COMPLETION = re.compile(
     r")",
     re.IGNORECASE,
 )
+_PASSIVE_ATTACHMENT_PREPARATION_PREAMBLE = re.compile(
+    r"^\s*(?:#{1,6}\s*)?(?:\*\*|__)?(?:структурированн\w*\s+)?"
+    r"(?:файл|документ|материал)\w*\s+подготовлен\w*"
+    r"(?:\s+и\s+структурирован\w*)?(?:\*\*|__)?\s*"
+    r"(?P<link>(?:в\s+виде|как)\s+|(?:[.!:;—-]\s*))",
+    re.IGNORECASE,
+)
+
+
+def _normalize_passive_attachment_preparation_preamble(answer: str) -> tuple[str, bool]:
+    """Remove one ambiguous source-summary lead while preserving its body.
+
+    ``Документ подготовлен: ...`` is often a heading for a read-only
+    transformation, but the same words are also a claim that Friday created a
+    carrier.  The caller proves a current complete attachment and an
+    effect-free whole-document task before using this helper.  A bare claim has
+    no substantive remainder and therefore remains untouched for the ordinary
+    supported-deed guard.
+    """
+
+    original = str(answer or "")
+    match = _PASSIVE_ATTACHMENT_PREPARATION_PREAMBLE.match(original)
+    if match is None:
+        return original, False
+    remainder = re.sub(r"^(?:\*\*|__)\s*", "", original[match.end() :].strip())
+    if len(remainder) < 12:
+        return original, False
+    link = str(match.group("link") or "").strip().casefold()
+    if link in {"в виде", "как"}:
+        return f"Структура документа представлена {link} {remainder}", True
+    return f"Структура документа: {remainder}", True
+
+
 _SUPPORTED_EXTERNAL_WORKSPACE_COMPLETION = re.compile(
     r"\b(?:workspace_create|(?:mcp[\s-]+)?outbox)\b",
     re.IGNORECASE,
@@ -9516,6 +9549,8 @@ def _attachment_requested_record_positions(message: str) -> tuple[int, ...]:
 
 _ATTACHMENT_SUMMARY_REQUEST = re.compile(
     r"(?:"
+    r"\b(?:структурируй(?:те)?|структурировать)\b[^.!?\n]{0,40}"
+    r"\b(?:инфу|информаци\w*|данн\w*|сведени\w*|содержани\w*)\b|"
     r"\b(?:сдела\w*|да(?:й|йте|ть)|провед\w*|подготов\w*|состав\w*|напиш\w*|сформулир\w*)\b"
     r"[^.!?\n]{0,80}\b(?:сводк\w*|резюме|обзор\w*|ревью|вывод\w*|итог\w*)\b|"
     r"\bможно(?:\s+ли)?\b[^.!?\n]{0,40}\b(?:обзор\w*|ревью|сводк\w*|резюме)\b"
@@ -18864,6 +18899,7 @@ _DIRECT_ATTACHMENT_FILE_OTHER_EFFECT = re.compile(
 )
 
 _ATTACHMENT_READ_ONLY_ACTION = re.compile(
+    r"\b(?:структурируй(?:те)?|структурировать)\b|"
     r"\b(?:прочит|открой|открыть|посмотр|покаж|найд|поищ|извлек|"
     r"проанализ|обобщ|резюм|перескаж|сравн|перечисл|назов|посчита|"
     r"скажи|ответ|объясн|опиш|уточн|проверь|обзор|ревью|расскаж|"
@@ -31244,6 +31280,33 @@ class AgentRuntime:
             and authenticated_attachment_scope
             and not attachment_tool_action_requested
         )
+        explicit_attachment_summary_scope = bool(
+            whole_document_task in {"summary", "analysis", "comparison"}
+            and current_attachment_local
+            and authenticated_attachment_scope
+            and attachment_context_complete
+            and attachment_coverage_complete
+            and attachment_verification_complete
+            and not synthetic_document_notice
+            and workspace_inbox_request is None
+            and not attachment_tool_action_requested
+            and not file_web
+            and not file_voice
+            and not file_create
+            and clean_workspace_intent is None
+            and not clean_workspace_channel_requested
+            and not document_metadata_owned
+            and not attachment_query_closed_answer
+            and response.get("_model_generated") is True
+            and not response.get("llm_failed")
+            and not response.get("tools_used")
+            and not response.get("tool_evidence")
+            and not all_response_files
+            and not response.get("voice_clip")
+            and not response.get("knowledge_object_ids")
+            and not context.successful_reminders
+            and context.late_make_file_attempts == 0
+        )
         passive_attachment_summary_scope = bool(
             (synthetic_document_notice or named_person_passive_source_scope)
             and current_attachment_local
@@ -31259,6 +31322,15 @@ class AgentRuntime:
             and not context.successful_reminders
             and context.late_make_file_attempts == 0
         )
+        passive_attachment_preamble_normalized = False
+        if explicit_attachment_summary_scope:
+            content, passive_attachment_preamble_normalized = (
+                _normalize_passive_attachment_preparation_preamble(content)
+            )
+            if passive_attachment_preamble_normalized:
+                response["content"] = content
+                response["voice_clip"] = None
+                response["knowledge_object_ids"] = []
         requested_web_fact_targets = _requested_web_fact_targets(
             clean_message,
             response.get("tool_evidence"),
@@ -32364,6 +32436,13 @@ class AgentRuntime:
                     archive_status_guarded=archive_status_guarded,
                     passive_source_state=passive_attachment_summary_scope,
                 )
+                if explicit_attachment_summary_scope and repaired_has_model_content:
+                    repaired_model_said, repaired_preamble_normalized = (
+                        _normalize_passive_attachment_preparation_preamble(repaired_model_said)
+                    )
+                    passive_attachment_preamble_normalized = bool(
+                        passive_attachment_preamble_normalized or repaired_preamble_normalized
+                    )
                 if repaired_has_model_content and _claims_an_unconfirmed_supported_deed(
                     repaired_model_said,
                     has_file=bool(file_deed_descriptors),
@@ -33430,6 +33509,11 @@ class AgentRuntime:
                                 **({"web_evidence_replaced": True} if web_evidence_replaced else {}),
                                 **({"supported_deed_replaced": True} if supported_deed_replaced else {}),
                                 **(
+                                    {"passive_attachment_preamble_normalized": True}
+                                    if passive_attachment_preamble_normalized
+                                    else {}
+                                ),
+                                **(
                                     {"unverified_outside_confirmation_prefixed": True}
                                     if unverified_outside_confirmation_prefixed
                                     else {}
@@ -33448,6 +33532,7 @@ class AgentRuntime:
                         or false_model_outage_replaced
                         or refusal_alternative_added
                         or supported_deed_replaced
+                        or passive_attachment_preamble_normalized
                         or dangerous_output_replaced
                         or web_evidence_replaced
                         or unverified_outside_confirmation_prefixed
