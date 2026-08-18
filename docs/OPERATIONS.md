@@ -221,7 +221,7 @@ pytest -q
 4. запустите `jericho doctor`;
 5. запустите backend и проверьте Admin/Telegram smoke.
 
-0.203.0 использует SQLite schema 33, как и 0.202.0: V12 phase-1 не добавляет
+0.204.0 использует SQLite schema 33, как и 0.203.0: V12 archive slice не добавляет
 миграцию и не меняет авторитетные Knowledge/Graph/Inbox/Conversation records.
 Отсутствующие производные projections могут идемпотентно достраиваться при
 открытии. Любая будущая поддерживаемая schema migration выполняется одной
@@ -368,7 +368,7 @@ Backend всё ещё владеет lease, отсутствует `--yes` ли�
 
 Telemetry локальная и не отправляет данные наружу. Audit хранит административные изменения и tool calls. Внешний structured-log collector допустим только opt-in и не должен включать содержимое личных знаний, prompts, documents или secrets по умолчанию.
 
-## 11. V12 shadow и первый file canary
+## 11. V12 shadow и opt-in file/archive canary
 
 Без настройки работает только прежний runtime. Переключатель обратим и не
 меняет схему БД:
@@ -381,16 +381,24 @@ FRIDAY_ROUTER_PLAN_TIMEOUT_SEC=12
 ```
 
 `shadow` строит технический план в фоне, но ответ и эффекты всегда принадлежат
-legacy. `canary` требует непустой allowlist пользователя, route `file_read` и
-успешную live-аттестацию модели при старте backend. На phase-1 V12 обрабатывает
-только 1–2 полных UTF-8 файла, зарегистрированных в текущем ходе. PDF,
-изображения/OCR, архивный поиск, web и effects автоматически остаются в legacy.
+legacy. `canary` требует непустой allowlist пользователя, хотя бы один явно
+разрешённый route (`file_read` и/или `archive_read`) и успешную live-аттестацию
+профиля `v12.13` при старте backend. `file_read` обрабатывает 1–2 полных UTF-8
+файла текущего хода. `archive_read` обрабатывает только прежние полные UTF-8
+файлы самого actor: уникальное точное имя, ровно 1–2 последних файла или не
+более двух файлов за точный локальный день «сегодня / вчера / позавчера».
+
+Неоднозначный selector, явный другой пользователь, reply/replay, запрос более
+двух файлов, PDF, изображения/OCR, partial extraction, web и effects
+автоматически остаются в legacy. Авторизация выполняется до чтения body; при
+публикации selector и каждый Raw Object повторно проверяются под одним SQLite
+write barrier, а conn-scoped idempotency fence фиксируется атомарно с ответом.
 
 Минимальная owner-only конфигурация canary:
 
 ```dotenv
 FRIDAY_ROUTER_MODE=canary
-FRIDAY_ROUTER_CANARY_ROUTES=file_read
+FRIDAY_ROUTER_CANARY_ROUTES=file_read,archive_read
 FRIDAY_ROUTER_CANARY_USER_IDS=owner
 FRIDAY_ROUTER_PLAN_TIMEOUT_SEC=12
 ```
@@ -402,13 +410,13 @@ Startup probe синхронный и может занять до 330 секу�
 ```text
 orchestration.configured_mode = canary
 orchestration.installed_mode = canary
-orchestration.registered_routes = [file_read]
+orchestration.registered_routes = [archive_read, file_read]
 orchestration.model_gate.status = canary_ready
 orchestration.model_gate.reason_code = live_attestation_clear
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.203.0`.
+требуйте `status=ok` и `version=0.204.0`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. Для мгновенного отката оставьте bridge остановленным,

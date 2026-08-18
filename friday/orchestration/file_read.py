@@ -10,7 +10,11 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 from friday.evidence_bundle import EvidenceBundle
-from friday.execution_kernel import mark_request_effect_possible
+from friday.execution_kernel import (
+    confirm_staged_request_effect,
+    rollback_staged_request_effect,
+    stage_request_effect_possible_in_transaction,
+)
 from friday.file_evidence_reader import (
     FileEvidenceUnavailable,
     PreparedFileEvidence,
@@ -241,6 +245,18 @@ class V12FileReadHandler:
             interaction_mode=interaction_mode,
         )
 
+    async def _prepare_context(
+        self,
+        request: ReadOnlyRouteRequest,
+        turn: TurnInput,
+        plan: TurnPlan,
+        absolute_deadline: float,
+    ) -> _PreparedFileContext | None:
+        """Strategy seam for another read-only route over the same evidence plane."""
+
+        del turn, plan
+        return await asyncio.to_thread(self._prepare_sync, request, absolute_deadline)
+
     async def prepare(
         self,
         request: ReadOnlyRouteRequest,
@@ -250,7 +266,12 @@ class V12FileReadHandler:
         preparation_deadline = time.monotonic() + _PREPARATION_BUDGET_SEC
         if request.turn_deadline is not None:
             preparation_deadline = min(preparation_deadline, request.turn_deadline)
-        prepared = await asyncio.to_thread(self._prepare_sync, request, preparation_deadline)
+        prepared = await self._prepare_context(
+            request,
+            turn,
+            plan,
+            preparation_deadline,
+        )
         if prepared is None:
             return None
         synthesis_messages = self._synthesis_messages(turn, plan, prepared.evidence.bundle)
@@ -294,8 +315,8 @@ class V12FileReadHandler:
             private_payload=attested,
         )
 
-    @staticmethod
     def _prepared_matches(
+        self,
         plan: TurnPlan,
         preparation: ReadOnlyRoutePreparation,
     ) -> _PreparedFileTurn | None:
@@ -305,6 +326,8 @@ class V12FileReadHandler:
             or prepared._process_authority is not _PROCESS_AUTHORITY
             or not prepared_file_evidence_is_process_owned(prepared.evidence)
             or type(prepared.model_lease) is not ModelProfileLease
+            or plan.route is not self.route
+            or preparation.route is not self.route
             or preparation.plan_sha256 != plan.canonical_sha256()
             or preparation.evidence_identity_sha256 != prepared.evidence.identity_sha256
         ):
@@ -420,101 +443,118 @@ class V12FileReadHandler:
             if not model_visible_text_is_secret_free(answer):
                 raise V12FileReadError("publication output requires a secret projection")
 
-        with guarded_storage_transaction(
-            self._storage,
-            before_commit=before_commit,
-            lock_timeout_sec=max(
-                0.0,
-                deadline - time.monotonic() - _PUBLICATION_RESERVE_SEC,
-            ),
-        ) as conn:
-            if not reauthorize_prepared_file_evidence_in_transaction(
-                conn,
-                self._authorization,
-                self._settings.files_dir,
-                request.actor,
-                evidence,
-                max_bytes=self._settings.max_upload_bytes,
-            ):
-                raise V12FileReadError("file authority changed before publication")
-            _require_deadline(deadline, stage="during final reauthorization")
-            if not model_visible_text_is_secret_free(answer):
-                raise V12FileReadError("publication output requires a secret projection")
-            if not mark_request_effect_possible():
-                raise V12FileReadError("request effect fence could not be committed")
-
-            conversation_id = prepared.conversation_id
-            interaction_mode = prepared.interaction_mode
-            if conversation_id is None:
-                conversation = create_conversation_in_transaction(
+        try:
+            with guarded_storage_transaction(
+                self._storage,
+                before_commit=before_commit,
+                lock_timeout_sec=max(
+                    0.0,
+                    deadline - time.monotonic() - _PUBLICATION_RESERVE_SEC,
+                ),
+                after_commit=confirm_staged_request_effect,
+                after_rollback=rollback_staged_request_effect,
+            ) as conn:
+                if not reauthorize_prepared_file_evidence_in_transaction(
                     conn,
-                    request.actor.own_id,
-                    title=turn.message[:80],
-                    mode=interaction_mode,
-                )
-                conversation_id = str(conversation.get("id") or "")
-            else:
-                conversation_row = conn.execute(
-                    "SELECT id, mode FROM conversations WHERE id=? AND user_id=?",
-                    (conversation_id, request.actor.own_id),
-                ).fetchone()
-                if conversation_row is None:
-                    raise V12FileReadError("conversation authority changed before publication")
-                interaction_mode = normalize_conversation_mode(str(conversation_row["mode"] or "dialogue"))
+                    self._authorization,
+                    self._settings.files_dir,
+                    request.actor,
+                    evidence,
+                    max_bytes=self._settings.max_upload_bytes,
+                    storage=self._storage,
+                ):
+                    raise V12FileReadError("file authority changed before publication")
+                _require_deadline(deadline, stage="during final reauthorization")
+                if not model_visible_text_is_secret_free(answer):
+                    raise V12FileReadError("publication output requires a secret projection")
+                if not stage_request_effect_possible_in_transaction(conn):
+                    raise V12FileReadError("request effect fence could not be committed")
 
-            user_metadata = {
-                "answer_mode": "v12_file_read_request",
-                "conversation_uploaded_raw_ids": list(evidence.raw_ids),
-                "private_context_lineage": True,
-                "v12_plan_sha256": plan.canonical_sha256(),
-            }
-            _require_deadline(deadline, stage="before durable messages")
-            store_message_in_transaction(
-                conn,
-                conversation_id,
-                request.actor.own_id,
-                "user",
-                turn.message,
-                metadata=user_metadata,
-            )
-            assistant_metadata = {
-                "answer_mode": "v12_file_read",
-                "attachment_context_used": True,
-                "attachment_context_expected_count": len(evidence.raw_ids),
-                "attachment_context_readable_count": len(evidence.raw_ids),
-                "attachment_coverage_complete": True,
-                "attachment_verification_complete": True,
-                "citation_check": {
-                    "status": "verified",
-                    "checked": len(evidence.bundle.citation_labels),
-                },
-                "conversation_attachment_raw_ids": list(evidence.raw_ids),
-                "conversation_attachment_uploaders": {
-                    raw_id: evidence.person_id for raw_id in evidence.raw_ids
-                },
-                "evidence_identity_sha256": evidence.identity_sha256,
-                "interaction_mode": interaction_mode,
-                "knowledge_citations": {},
-                "private_context_lineage": True,
-                "tools_used": [],
-                "v12_plan_sha256": plan.canonical_sha256(),
-                "verification": {"status": "verified", "score": 1.0, "issues": []},
-                "verification_status": "verified",
-                "verified": True,
-            }
-            assistant = store_message_in_transaction(
-                conn,
-                conversation_id,
-                request.actor.own_id,
-                "assistant",
-                answer,
-                metadata=assistant_metadata,
-            )
-            message_id = str(assistant.get("id") or "")
-            if not re.fullmatch(r"msg_[0-9a-f]{16}", message_id):
-                raise V12FileReadError("assistant publication has no durable identity")
-            _require_deadline(deadline, stage="before transaction commit")
-            return conversation_id, message_id, interaction_mode
+                conversation_id = prepared.conversation_id
+                interaction_mode = prepared.interaction_mode
+                if conversation_id is None:
+                    conversation = create_conversation_in_transaction(
+                        conn,
+                        request.actor.own_id,
+                        title=turn.message[:80],
+                        mode=interaction_mode,
+                    )
+                    conversation_id = str(conversation.get("id") or "")
+                else:
+                    conversation_row = conn.execute(
+                        "SELECT id, mode FROM conversations WHERE id=? AND user_id=?",
+                        (conversation_id, request.actor.own_id),
+                    ).fetchone()
+                    if conversation_row is None:
+                        raise V12FileReadError("conversation authority changed before publication")
+                    interaction_mode = normalize_conversation_mode(
+                        str(conversation_row["mode"] or "dialogue")
+                    )
+
+                route_mode = f"v12_{plan.route.value}"
+                user_metadata = {
+                    "answer_mode": f"{route_mode}_request",
+                    "private_context_lineage": True,
+                    "v12_plan_sha256": plan.canonical_sha256(),
+                }
+                if evidence.historical_selection is None:
+                    user_metadata["conversation_uploaded_raw_ids"] = list(evidence.raw_ids)
+                else:
+                    user_metadata["conversation_attachment_raw_ids"] = list(evidence.raw_ids)
+                    user_metadata["conversation_attachment_uploaders"] = {
+                        raw_id: evidence.person_id for raw_id in evidence.raw_ids
+                    }
+                _require_deadline(deadline, stage="before durable messages")
+                store_message_in_transaction(
+                    conn,
+                    conversation_id,
+                    request.actor.own_id,
+                    "user",
+                    turn.message,
+                    metadata=user_metadata,
+                )
+                assistant_metadata = {
+                    "answer_mode": route_mode,
+                    "attachment_context_used": True,
+                    "attachment_context_expected_count": len(evidence.raw_ids),
+                    "attachment_context_readable_count": len(evidence.raw_ids),
+                    "attachment_coverage_complete": True,
+                    "attachment_verification_complete": True,
+                    "citation_check": {
+                        "status": "verified",
+                        "checked": len(evidence.bundle.citation_labels),
+                    },
+                    "conversation_attachment_raw_ids": list(evidence.raw_ids),
+                    "conversation_attachment_uploaders": {
+                        raw_id: evidence.person_id for raw_id in evidence.raw_ids
+                    },
+                    "evidence_identity_sha256": evidence.identity_sha256,
+                    "interaction_mode": interaction_mode,
+                    "knowledge_citations": {},
+                    "private_context_lineage": True,
+                    "tools_used": [],
+                    "v12_plan_sha256": plan.canonical_sha256(),
+                    "verification": {"status": "verified", "score": 1.0, "issues": []},
+                    "verification_status": "verified",
+                    "verified": True,
+                }
+                assistant = store_message_in_transaction(
+                    conn,
+                    conversation_id,
+                    request.actor.own_id,
+                    "assistant",
+                    answer,
+                    metadata=assistant_metadata,
+                )
+                message_id = str(assistant.get("id") or "")
+                if not re.fullmatch(r"msg_[0-9a-f]{16}", message_id):
+                    raise V12FileReadError("assistant publication has no durable identity")
+                _require_deadline(deadline, stage="before transaction commit")
+                publication = (conversation_id, message_id, interaction_mode)
+        except BaseException:
+            raise
+        confirm_staged_request_effect()
+        return publication
 
     async def handle(
         self,

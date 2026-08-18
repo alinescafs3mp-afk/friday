@@ -17,7 +17,7 @@ import time
 from collections import defaultdict, deque
 from collections.abc import AsyncIterator, Mapping
 from contextlib import ExitStack, asynccontextmanager, suppress
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -100,6 +100,7 @@ from friday.orchestration import (
     RouterMode,
     build_orchestrated_agent,
 )
+from friday.orchestration.archive_read import V12ArchiveReadHandler
 from friday.orchestration.file_read import V12FileReadHandler
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
 from friday.permissions import (
@@ -189,6 +190,31 @@ def _mark_request_effect_possible(
         lease_token,
         _idempotency_uncertain_response(),
     )
+
+
+def _mark_request_effect_possible_in_transaction(
+    conn: Any,
+    user_id: str,
+    request_key: str,
+    lease_token: str,
+) -> bool:
+    """Stage the idempotency fence on an already-owned atomic commit."""
+
+    if not request_key or not lease_token:
+        return False
+    cursor = conn.execute(
+        """UPDATE request_idempotency
+           SET response_json=?, updated_at=?
+           WHERE user_id=? AND request_key=? AND state='pending' AND lease_token=?""",
+        (
+            json.dumps(_idempotency_uncertain_response(), ensure_ascii=False, sort_keys=True),
+            datetime.now(UTC).isoformat(timespec="microseconds"),
+            user_id,
+            request_key,
+            lease_token,
+        ),
+    )
+    return cursor.rowcount == 1
 
 
 def _generated_file_persistence_eligible(result: Mapping[str, Any]) -> bool:
@@ -1448,18 +1474,32 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             kernel = ExecutionKernel(auth_service, settings)
             kernel.bind_services(storage, graph, web_surfer, ingestion, searcher=searcher)
             legacy_agent = AgentRuntime(settings, storage, llm, kernel)
-            route_handlers = (
+            available_route_handlers = (
                 {
+                    RouteClass.ARCHIVE_READ: V12ArchiveReadHandler(
+                        storage=storage,
+                        authorization=auth_service,
+                        settings=settings,
+                        model=attested_v12_runtime,
+                    ),
                     RouteClass.FILE_READ: V12FileReadHandler(
                         storage=storage,
                         authorization=auth_service,
                         settings=settings,
                         model=attested_v12_runtime,
-                    )
+                    ),
                 }
                 if attested_v12_runtime is not None
                 else {}
             )
+            enabled_route_values = {
+                str(value or "").strip().casefold() for value in settings.router_canary_routes
+            }
+            route_handlers = {
+                route: handler
+                for route, handler in available_route_handlers.items()
+                if route.value in enabled_route_values
+            }
             agent = build_orchestrated_agent(
                 settings,
                 legacy_agent,
@@ -2100,7 +2140,13 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     actor.own_id,
                     request_key,
                     lease_token,
-                )
+                ),
+                before_effect_in_transaction=functools.partial(
+                    _mark_request_effect_possible_in_transaction,
+                    user_id=actor.own_id,
+                    request_key=request_key,
+                    lease_token=lease_token,
+                ),
             )
         )
         try:
@@ -2178,7 +2224,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             return public_result
         except BaseException:
             if lease_token:
-                if request_effects is not None and request_effects.possible:
+                if request_effects is not None and (request_effects.possible or request_effects.staged):
                     state.storage.idempotency_complete(
                         actor.own_id,
                         request_key,
@@ -2675,7 +2721,13 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         actor.own_id,
                         source_ref,
                         lease_token,
-                    )
+                    ),
+                    before_effect_in_transaction=functools.partial(
+                        _mark_request_effect_possible_in_transaction,
+                        user_id=actor.own_id,
+                        request_key=source_ref,
+                        lease_token=lease_token,
+                    ),
                 )
             )
 
@@ -3607,7 +3659,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             return public_result
         except BaseException:
             if source_ref and lease_token:
-                if effect_fence_committed or (request_effects is not None and request_effects.possible):
+                if effect_fence_committed or (
+                    request_effects is not None and (request_effects.possible or request_effects.staged)
+                ):
                     state.storage.idempotency_complete(
                         actor.own_id,
                         source_ref,

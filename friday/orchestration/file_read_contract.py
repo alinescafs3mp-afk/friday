@@ -72,6 +72,27 @@ def file_read_plan_supports_attachment_count(plan: TurnPlan, attachment_count: i
     )
 
 
+def archive_read_plan_supports_selection(plan: TurnPlan, selected_count: int | None = None) -> bool:
+    """Return the exact model-owned ARCHIVE_READ shape executable by the bounded handler."""
+
+    if plan.route is not RouteClass.ARCHIVE_READ:
+        return False
+    requests = plan.evidence_requests
+    if not (
+        not plan.tool_intents
+        and len(requests) == 1
+        and requests[0].kind is EvidenceKind.ARCHIVE
+        and requests[0].required
+        and requests[0].max_items >= 2
+        and plan.output.format is OutputFormat.TEXT
+        and plan.output.language == "ru"
+        and plan.output.require_citations
+        and plan.output.one_message
+    ):
+        return False
+    return selected_count is None or 1 <= selected_count <= 2
+
+
 def build_file_synthesis_messages(
     turn: TurnInput,
     plan: TurnPlan,
@@ -227,6 +248,7 @@ __all__ = [
     "build_file_synthesis_messages",
     "build_file_verifier_messages",
     "build_file_verifier_prompt",
+    "archive_read_plan_supports_selection",
     "file_read_plan_supports_attachment_count",
     "parse_file_verifier_result",
     "require_file_verifier_clear",

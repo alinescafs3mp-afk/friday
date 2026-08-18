@@ -40,6 +40,7 @@ from friday.orchestration.file_read_contract import (
     V12_FILE_SYNTHESIS_SYSTEM,
     V12_FILE_VERIFIER_SCHEMA,
     V12_FILE_VERIFIER_SYSTEM,
+    archive_read_plan_supports_selection,
     build_file_verifier_prompt,
     file_read_plan_supports_attachment_count,
     parse_file_verifier_result,
@@ -271,7 +272,7 @@ PLAN_PROBE_CASES: tuple[PlanProbeCase, ...] = (
     ),
     PlanProbeCase(
         "archive_date",
-        _turn("Покажи документы, которые я прислал вчера."),
+        _turn("Покажи присланные вчера документы."),
         RouteClass.ARCHIVE_READ,
         OutputFormat.TEXT,
     ),
@@ -524,7 +525,7 @@ def _probe_suite_manifest() -> Mapping[str, object]:
         },
         "plan": {
             "validator": {
-                "version": "turn-plan-production-applicability-russian-text-read-zero-tools-effect-declarative.v4",
+                "version": "turn-plan-production-applicability-russian-text-read-zero-tools-effect-declarative.v5",
                 "parser": "friday.turn-plan.v1",
                 "reject_duplicate_keys": True,
             },
@@ -762,6 +763,7 @@ def _evaluate_plan(case: PlanProbeCase, response: object) -> None:
             plan.route is not RouteClass.FILE_READ
             or file_read_plan_supports_attachment_count(plan, len(case.turn.attachments))
         )
+        and (plan.route is not RouteClass.ARCHIVE_READ or archive_read_plan_supports_selection(plan, 2))
     ):
         raise ModelProbeError(ModelProbeFailure.PLAN_INVALID)
 

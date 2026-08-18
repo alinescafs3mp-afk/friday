@@ -1173,7 +1173,9 @@ class RequestEffects:
     """
 
     before_effect: Callable[[], bool]
+    before_effect_in_transaction: Callable[[Any], bool] | None = None
     possible: bool = False
+    staged: bool = False
 
 
 _REQUEST_EFFECTS: ContextVar[RequestEffects | None] = ContextVar(
@@ -1185,10 +1187,15 @@ _REQUEST_EFFECTS: ContextVar[RequestEffects | None] = ContextVar(
 @contextmanager
 def track_request_effects(
     before_effect: Callable[[], bool],
+    *,
+    before_effect_in_transaction: Callable[[Any], bool] | None = None,
 ) -> Iterator[RequestEffects]:
     """Track persistent writes for one surrounding keyed request."""
 
-    effects = RequestEffects(before_effect=before_effect)
+    effects = RequestEffects(
+        before_effect=before_effect,
+        before_effect_in_transaction=before_effect_in_transaction,
+    )
     token = _REQUEST_EFFECTS.set(effects)
     try:
         yield effects
@@ -1219,6 +1226,44 @@ def mark_request_effect_possible() -> bool:
     """
 
     return _mark_request_effect_possible()
+
+
+def stage_request_effect_possible_in_transaction(conn: Any) -> bool:
+    """Stage a keyed-request fence on the caller-owned atomic commit boundary.
+
+    V12 read routes publish their request row, assistant row and idempotency
+    fence in one SQLite transaction.  Re-entering the ordinary zero-argument
+    callback there would open a nested storage transaction and either fail or
+    separate the fence from the messages.  A tracked request must therefore
+    provide an explicit connection-scoped callback; untracked requests retain
+    the legacy no-fence behavior.
+    """
+
+    effects = _REQUEST_EFFECTS.get()
+    if effects is None or effects.possible or effects.staged:
+        return True
+    callback = effects.before_effect_in_transaction
+    if callback is None or not callback(conn):
+        return False
+    effects.staged = True
+    return True
+
+
+def confirm_staged_request_effect() -> None:
+    """Publish the process-local witness only after the outer commit succeeds."""
+
+    effects = _REQUEST_EFFECTS.get()
+    if effects is not None:
+        effects.possible = True
+        effects.staged = False
+
+
+def rollback_staged_request_effect() -> None:
+    """Clear only an uncommitted connection-scoped fence after rollback."""
+
+    effects = _REQUEST_EFFECTS.get()
+    if effects is not None and not effects.possible:
+        effects.staged = False
 
 
 def request_effect_possible() -> bool:

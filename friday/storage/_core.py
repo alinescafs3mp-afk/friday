@@ -72,7 +72,15 @@ _DMY_DATE_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})[./](\d{4})$")
 # Tests and clock adapters replace ``datetime`` to control wall time. Timestamp
 # parsing must remain the real stdlib implementation under that substitution.
 _TIMESTAMP_DATETIME = datetime
-_GUARDED_TRANSACTION_CONTEXT: ContextVar[tuple[object, Callable[[], None]] | None] = ContextVar(
+_GUARDED_TRANSACTION_CONTEXT: ContextVar[
+    tuple[
+        object,
+        Callable[[], None],
+        Callable[[], None] | None,
+        Callable[[], None] | None,
+    ]
+    | None
+] = ContextVar(
     "friday_guarded_transaction",
     default=None,
 )
@@ -2054,6 +2062,8 @@ def guarded_storage_transaction(
     *,
     before_commit: Callable[[], None],
     lock_timeout_sec: float,
+    after_commit: Callable[[], None] | None = None,
+    after_rollback: Callable[[], None] | None = None,
 ) -> Iterator[sqlite3.Connection]:
     """Own one bounded outer commit without changing FridayStorage's surface.
 
@@ -2082,7 +2092,7 @@ def guarded_storage_transaction(
         remaining = max(0.0, timeout - (time.monotonic() - lock_started))
         guarded_busy_timeout = max(0, min(old_busy_timeout, int(remaining * 1000)))
         conn.execute(f"PRAGMA busy_timeout={guarded_busy_timeout}")  # nosec B608 - bounded int
-        token = _GUARDED_TRANSACTION_CONTEXT.set((storage, before_commit))
+        token = _GUARDED_TRANSACTION_CONTEXT.set((storage, before_commit, after_commit, after_rollback))
         try:
             with storage.transaction() as guarded_conn:
                 yield guarded_conn
@@ -3585,6 +3595,12 @@ class CoreMixin(StorageShared):
         before_commit = (
             guarded_context[1] if guarded_context is not None and guarded_context[0] is self else None
         )
+        after_commit = (
+            guarded_context[2] if guarded_context is not None and guarded_context[0] is self else None
+        )
+        after_rollback = (
+            guarded_context[3] if guarded_context is not None and guarded_context[0] is self else None
+        )
         # Serialise writers in Python (single-writer invariant), so two threads'
         # BEGIN IMMEDIATE never contend at the SQLite level and close() can drain
         # the in-flight writer before shutting connections down. Reads never take
@@ -3727,6 +3743,8 @@ class CoreMixin(StorageShared):
                     if before_commit is not None:
                         before_commit()
                     conn.commit()
+                    if after_commit is not None:
+                        after_commit()
             except BaseException:
                 # BaseException, not Exception: KeyboardInterrupt, SystemExit and
                 # asyncio.CancelledError all unwind through here, and all three are
@@ -3735,7 +3753,15 @@ class CoreMixin(StorageShared):
                 # BEGIN IMMEDIATE open on this connection, and close() then committed
                 # it: an interrupted unit of work became a durable partial write.
                 if not nested:
-                    conn.rollback()
+                    if conn.in_transaction:
+                        conn.rollback()
+                        if after_rollback is not None:
+                            after_rollback()
+                    elif after_commit is not None:
+                        # A signal may land after sqlite committed but before the
+                        # next Python bytecode. Preserve the durable fence rather
+                        # than releasing a request that already published rows.
+                        after_commit()
                 elif savepoint:
                     # Keep the caller's prelude and outer implicit transaction,
                     # but remove every current/history/context write made by this

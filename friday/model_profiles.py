@@ -522,8 +522,9 @@ class V12ModelGate:
 
 
 _QWEN36_27B_PLANNER_CONTRACT_SHA256 = _version_sha256(
-    "friday.v12-planner-contract.v2",
+    "friday.v12-planner-contract.v3",
     {
+        "archive_canary": "one-required-archive-max-items-at-least-two",
         "effect_route_intents": "declarative_only",
         "initial_canary_tool_steps": 0,
         "one_publication": True,
@@ -537,10 +538,10 @@ _QWEN36_27B_PLANNER_CONTRACT_SHA256 = _version_sha256(
 # semantics—not merely a list of case names.  Keeping the digest here avoids a
 # model_profiles -> orchestration/model_probe import cycle; the probe refuses a
 # profile if its independently recomputed manifest differs by one byte.
-_QWEN36_27B_PROBE_SUITE_SHA256 = "72bd38949ced44392b4b581f80482ae8f3e01142ba6c0558f8d72e76b553b040"
+_QWEN36_27B_PROBE_SUITE_SHA256 = "03dfe8ee3a8dc4738fcba1f90b36331935b9af97f2aeb8c2b1f2c84785c79106"
 
 QWEN36_27B_V12_PROFILE = V12ModelProfileSpec(
-    profile_id="qwen36-27b-nvfp4-nvidia:dispatcher:v12.11",
+    profile_id="qwen36-27b-nvfp4-nvidia:dispatcher:v12.13",
     runtime_profile_name="qwen36-27b-nvfp4-nvidia",
     served_model_alias="dispatcher",
     planner_contract_sha256=_QWEN36_27B_PLANNER_CONTRACT_SHA256,

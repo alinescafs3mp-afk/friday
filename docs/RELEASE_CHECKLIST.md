@@ -52,13 +52,22 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - backend/bridge singleton leases;
 - backup verification, restore, safety backup и rollback.
 
-Для V12 phase-1 дополнительно:
+Для V12 file/archive slice дополнительно:
 
 - без явных переменных configured/installed mode остаются `legacy`, routes пусты;
 - canary стартует только с `model_gate.status=canary_ready`, reason
-  `live_attestation_clear` и единственным route `file_read`;
+  `live_attestation_clear`, профилем `v12.13` и явно разрешёнными routes
+  `file_read`, `archive_read`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
   citations, без повторного legacy-вызова после выбора V12;
+- `archive_read` допускает только self-owned prior exact UTF-8: уникальное точное
+  имя, ровно 1–2 последних файла либо не более двух файлов за локальные
+  «сегодня / вчера / позавчера»;
+- ambiguity, другой пользователь, reply/replay, запрос более двух файлов,
+  PDF/OCR/partial extraction уходят в legacy до чтения исторического body;
+- после подготовки архива изменение selector/source/permission отклоняет
+  публикацию при финальной exact reauthorization, а conn-scoped idempotency
+  fence и сообщение либо commit-ятся вместе, либо вместе rollback-ятся;
 - неуспешная аттестация оставляет installed mode `legacy` и пустой список routes;
 - rehearsal возврата `FRIDAY_ROUTER_MODE=legacy` не меняет и не восстанавливает
   SQLite, а bridge запускается только после зелёного backend health.
@@ -69,7 +78,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 
 Проверить:
 
-- schema version ожидаема;
+- schema version = 33;
 - counts старых строк не изменились без предусмотренной миграции;
 - `integrity_check=ok`, foreign-key violations = 0;
 - FTS/retrieval работают;

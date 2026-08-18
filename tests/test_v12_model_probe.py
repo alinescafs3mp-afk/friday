@@ -443,6 +443,31 @@ async def test_file_plan_probe_requires_the_exact_production_applicability_shape
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ["insufficient_max_items", "extra_conversation", "optional_archive"])
+async def test_archive_plan_probe_requires_the_exact_bounded_handler_shape(mutation: str) -> None:
+    client = _Client()
+    case = next(item for item in PLAN_PROBE_CASES if item.case_id == "archive_date")
+    payload = _plan_payload(case)
+    if mutation == "insufficient_max_items":
+        payload["evidence_requests"][0]["max_items"] = 1
+    elif mutation == "extra_conversation":
+        payload["evidence_requests"].append(
+            {"kind": "conversation", "query": "", "max_items": 1, "required": True}
+        )
+    else:
+        payload["evidence_requests"][0]["required"] = False
+    client.plan_overrides[case.case_id] = _plan_response(
+        case,
+        content=json.dumps(payload, ensure_ascii=False),
+    )
+
+    with pytest.raises(ModelProbeError) as raised:
+        await _run(client)
+
+    assert raised.value.code is ModelProbeFailure.PLAN_INVALID
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "content",
     [

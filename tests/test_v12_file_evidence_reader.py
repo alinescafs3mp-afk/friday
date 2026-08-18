@@ -12,6 +12,7 @@ import pytest
 from friday.file_delivery import FileRecordUnavailable, read_authorized_file_in_transaction
 from friday.file_evidence_reader import (
     FileEvidenceUnavailable,
+    historical_file_selection_token,
     prepare_current_turn_file_evidence,
     prepared_file_evidence_is_process_owned,
     reauthorize_prepared_file_evidence_in_transaction,
@@ -641,3 +642,25 @@ def test_shared_tenant_requires_the_exact_current_uploader(settings, storage) ->
             (reference,),
             max_bytes=settings.max_upload_bytes,
         )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("raw_ids", ["raw_0123456789abcdef"]),
+        ("latest_count", True),
+        ("received_since", 123),
+        ("filename", b"source.txt"),
+    ],
+)
+def test_historical_selection_token_rejects_noncanonical_runtime_types(field: str, value: object) -> None:
+    token = historical_file_selection_token(
+        tenant_id="alice",
+        uploaded_by="alice",
+        kind="latest",
+        raw_ids=("raw_0123456789abcdef",),
+        latest_count=1,
+    )
+
+    with pytest.raises(ValueError, match="historical file selector"):
+        replace(token, **{field: value})

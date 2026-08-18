@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from friday.execution_kernel import track_request_effects
 from friday.model_profiles import ModelProfileLease, ModelRequirements
 from friday.orchestration import (
     ReadOnlyAttachmentReference,
@@ -622,6 +623,97 @@ async def test_publication_refuses_an_ambient_implicit_transaction(settings, sto
         await handler.handle(request, turn, plan, preparation)
     assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
     storage.conn.rollback()
+
+
+def _tracked_fence_callbacks(storage: Any, request_key: str, lease_token: str) -> tuple[Any, Any]:
+    def ordinary() -> bool:
+        return storage.idempotency_mark_effect_possible(
+            "alice",
+            request_key,
+            lease_token,
+            {"uncertain": True},
+        )
+
+    def in_transaction(conn: Any) -> bool:
+        cursor = conn.execute(
+            """UPDATE request_idempotency SET response_json=?
+               WHERE user_id=? AND request_key=? AND state='pending' AND lease_token=?""",
+            ('{"uncertain":true}', "alice", request_key, lease_token),
+        )
+        return cursor.rowcount == 1
+
+    return ordinary, in_transaction
+
+
+@pytest.mark.asyncio
+async def test_publication_commits_idempotency_fence_and_messages_atomically(settings, storage) -> None:
+    conversation = storage.create_conversation("alice")
+    reference = _register(storage, settings, text="ATOMIC-FENCE", filename="fence.txt")
+    handler = _handler(storage, settings, _Model("Источник прочитан. [A1]"))
+    request, turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+    request_key = "v12-atomic-fence-success"
+    claim = storage.idempotency_claim("alice", request_key, request_hash="a" * 64)
+    lease_token = str(claim["lease_token"])
+    ordinary, in_transaction = _tracked_fence_callbacks(storage, request_key, lease_token)
+
+    with track_request_effects(
+        ordinary,
+        before_effect_in_transaction=in_transaction,
+    ) as effects:
+        await handler.handle(request, turn, plan, preparation)
+        assert effects.possible is True
+        assert effects.staged is False
+
+    row = storage.execute(
+        "SELECT response_json FROM request_idempotency WHERE user_id=? AND request_key=?",
+        ("alice", request_key),
+    ).fetchone()
+    assert row is not None and json.loads(row["response_json"]) == {"uncertain": True}
+    assert storage.count_messages(str(conversation["id"]), user_id="alice") == 2
+
+
+@pytest.mark.asyncio
+async def test_rolled_back_publication_clears_only_the_staged_idempotency_fence(
+    settings,
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import friday.orchestration.file_read as file_read_module
+
+    conversation = storage.create_conversation("alice")
+    reference = _register(storage, settings, text="ROLLBACK-FENCE", filename="rollback.txt")
+    handler = _handler(storage, settings, _Model("Источник прочитан. [A1]"))
+    request, turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+
+    def fail_publication(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        del args, kwargs
+        raise V12FileReadError("injected publication failure")
+
+    monkeypatch.setattr(file_read_module, "store_message_in_transaction", fail_publication)
+    request_key = "v12-atomic-fence-rollback"
+    claim = storage.idempotency_claim("alice", request_key, request_hash="b" * 64)
+    lease_token = str(claim["lease_token"])
+    ordinary, in_transaction = _tracked_fence_callbacks(storage, request_key, lease_token)
+
+    with track_request_effects(
+        ordinary,
+        before_effect_in_transaction=in_transaction,
+    ) as effects:
+        with pytest.raises(V12FileReadError, match="injected publication failure"):
+            await handler.handle(request, turn, plan, preparation)
+        assert effects.possible is False
+        assert effects.staged is False
+
+    row = storage.execute(
+        "SELECT response_json FROM request_idempotency WHERE user_id=? AND request_key=?",
+        ("alice", request_key),
+    ).fetchone()
+    assert row is not None and json.loads(row["response_json"]) == {}
+    assert storage.idempotency_release("alice", request_key, lease_token) is True
 
 
 @pytest.mark.asyncio

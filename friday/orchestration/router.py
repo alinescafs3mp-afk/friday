@@ -19,7 +19,10 @@ from friday.orchestration.contracts import (
     TurnInput,
     TurnPlan,
 )
-from friday.orchestration.file_read_contract import file_read_plan_supports_attachment_count
+from friday.orchestration.file_read_contract import (
+    archive_read_plan_supports_selection,
+    file_read_plan_supports_attachment_count,
+)
 from friday.orchestration.planner import AttestedPlannerRuntime, PlannerModel, V12Planner
 from friday.permissions import ActorContext
 
@@ -268,6 +271,16 @@ def _plan_applicable(
             and not turn.quoted_attachment_reference
             and not turn.reply_assistant_reference
             and not turn.synthetic_document_notice
+        )
+    if plan.route is RouteClass.ARCHIVE_READ:
+        return bool(
+            not turn.attachments
+            and not attachment_references
+            and archive_read_plan_supports_selection(plan)
+            and not turn.quoted_attachment_reference
+            and not turn.reply_assistant_reference
+            and not turn.synthetic_document_notice
+            and not turn.reply_quote
         )
     if plan.route is RouteClass.SMALL_TALK:
         return not (

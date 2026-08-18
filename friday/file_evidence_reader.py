@@ -1,14 +1,16 @@
-"""Fail-closed assembly of current-turn file evidence.
+"""Fail-closed assembly of current-turn and selected historical file evidence.
 
-The public request carries only opaque Raw identifiers.  This module is the
-single bridge from those identifiers to model-visible text: it reauthorizes the
-exact tenant and uploader, verifies the registered bytes under one SQLite write
-barrier, and binds the immutable Raw row to a process-owned snapshot token.
+The public request carries only opaque Raw identifiers or a process-owned exact
+historical selector.  This module is the single bridge from those references to
+model-visible text: it reauthorizes the exact tenant and uploader, verifies the
+registered bytes under one SQLite write barrier, and binds every immutable Raw
+row to a process-owned snapshot token.
 
-The first V12 canary intentionally accepts only complete native extraction.
-OCR, speech/vision output, partial parsing, historical/reply references and
-oversized documents remain legacy-owned until their separate evidence
-contracts are implemented.
+The V12 canary intentionally accepts only complete native UTF-8 extraction:
+one/two current-turn files or a bounded, exact selection of the actor's own
+previous files.  OCR, speech/vision output, partial parsing, ambiguous or
+foreign-user history, reply/replay references and oversized documents remain
+legacy-owned until their separate evidence contracts are implemented.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from friday.secret_hygiene import named_secrets
 from friday.source_identity import (
     AuthorizedFileSnapshotToken,
     authorized_file_snapshot_token_is_process_owned,
+    raw_source_identity_sha256,
 )
 from friday.storage._core import guarded_storage_transaction
 from friday.telemetry.logging import redact_friday_api_tokens
@@ -46,6 +49,7 @@ _PROVENANCE_STUB_RE = re.compile(r"\A\s*\[[A-Za-z][A-Za-z0-9_-]{0,40}:\s*", re.A
 _MAX_FILES = 12
 _MAX_PART_CHARS = 48_000
 _MAX_TOTAL_CHARS = 120_000
+_HISTORICAL_SELECTOR_KINDS = frozenset({"exact_filename", "time_window", "latest"})
 _NATIVE_TEXT_SUFFIXES = frozenset(
     {
         ".cfg",
@@ -116,8 +120,190 @@ class CurrentTurnFileReference(Protocol):
     def media_type(self) -> str: ...
 
 
+@dataclass(frozen=True, slots=True)
+class _HistoricalSourceReference:
+    """Transaction-local Raw identity created only after fresh authorization."""
+
+    ordinal: int
+    raw_object_id: str
+    source_identity_sha256: str
+    name: str = "registered-file"
+    media_type: str = "binary"
+
+
 class FileEvidenceUnavailable(Exception):
     """The current source cannot enter the strict V12 file canary."""
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalFileSelectionToken:
+    """Process-owned selector whose exact result must survive publication."""
+
+    tenant_id: str
+    uploaded_by: str
+    kind: str
+    raw_ids: tuple[str, ...]
+    filename: str
+    received_since: str | None
+    received_until: str | None
+    document_since: str | None
+    document_until: str | None
+    latest_count: int | None
+    _process_authority: object = field(repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if type(self.raw_ids) is not tuple:
+            raise ValueError("historical file selector is invalid")
+        scalar_strings = (self.tenant_id, self.uploaded_by, self.kind, self.filename, *self.raw_ids)
+        optional_strings = (
+            self.received_since,
+            self.received_until,
+            self.document_since,
+            self.document_until,
+        )
+        has_received_window = self.received_since is not None or self.received_until is not None
+        has_document_window = self.document_since is not None or self.document_until is not None
+        if (
+            self._process_authority is not _PROCESS_AUTHORITY
+            or any(type(value) is not str for value in scalar_strings)
+            or any(value is not None and type(value) is not str for value in optional_strings)
+            or (
+                self.latest_count is not None
+                and (type(self.latest_count) is not int or self.latest_count not in {1, 2})
+            )
+            or self.kind not in _HISTORICAL_SELECTOR_KINDS
+            or not self.tenant_id
+            or not self.uploaded_by
+            or not 1 <= len(self.raw_ids) <= 2
+            or len(set(self.raw_ids)) != len(self.raw_ids)
+            or any(_RAW_ID_RE.fullmatch(raw_id) is None for raw_id in self.raw_ids)
+        ):
+            raise ValueError("historical file selector is invalid")
+        if self.kind == "exact_filename":
+            if (
+                not self.filename
+                or len(self.filename) > 260
+                or any(
+                    value is not None
+                    for value in (
+                        self.received_since,
+                        self.received_until,
+                        self.document_since,
+                        self.document_until,
+                        self.latest_count,
+                    )
+                )
+            ):
+                raise ValueError("historical exact-name selector is invalid")
+        elif self.kind == "latest":
+            if (
+                self.latest_count not in {1, 2}
+                or self.filename
+                or any(
+                    value is not None
+                    for value in (
+                        self.received_since,
+                        self.received_until,
+                        self.document_since,
+                        self.document_until,
+                    )
+                )
+            ):
+                raise ValueError("historical latest selector is invalid")
+        elif self.filename or self.latest_count is not None or has_received_window == has_document_window:
+            raise ValueError("historical time selector is invalid")
+
+    def identity_sha256(self) -> str:
+        digest = hashlib.sha256()
+        for value in (
+            self.tenant_id,
+            self.uploaded_by,
+            self.kind,
+            *self.raw_ids,
+            self.filename,
+            self.received_since or "",
+            self.received_until or "",
+            self.document_since or "",
+            self.document_until or "",
+            str(self.latest_count or ""),
+        ):
+            encoded = value.encode("utf-8", errors="strict")
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+        return digest.hexdigest()
+
+
+def historical_file_selection_token(
+    *,
+    tenant_id: str,
+    uploaded_by: str,
+    kind: str,
+    raw_ids: Sequence[str],
+    filename: str = "",
+    received_since: str | None = None,
+    received_until: str | None = None,
+    document_since: str | None = None,
+    document_until: str | None = None,
+    latest_count: int | None = None,
+) -> HistoricalFileSelectionToken:
+    return HistoricalFileSelectionToken(
+        tenant_id=str(tenant_id or "").strip(),
+        uploaded_by=str(uploaded_by or "").strip(),
+        kind=str(kind or "").strip(),
+        raw_ids=tuple(str(raw_id or "").strip() for raw_id in raw_ids),
+        filename=str(filename or "").strip(),
+        received_since=received_since,
+        received_until=received_until,
+        document_since=document_since,
+        document_until=document_until,
+        latest_count=latest_count,
+        _process_authority=_PROCESS_AUTHORITY,
+    )
+
+
+def _historical_selection_is_current(storage: Any, token: HistoricalFileSelectionToken) -> bool:
+    if type(token) is not HistoricalFileSelectionToken or token._process_authority is not _PROCESS_AUTHORITY:
+        return False
+    if token.kind == "exact_filename":
+        rows = storage.find_owned_files_by_filename(
+            token.tenant_id,
+            token.uploaded_by,
+            token.filename,
+        )
+        current = tuple(str(row.get("id") or "") for row in rows) if len(rows) == 1 else ()
+        return current == token.raw_ids
+    selected = storage.select_owned_file_corpus(
+        token.tenant_id,
+        token.uploaded_by,
+        received_since=token.received_since,
+        received_until=token.received_until,
+        document_since=token.document_since,
+        document_until=token.document_until,
+        limit=3,
+        offset=0,
+    )
+    if not isinstance(selected, dict):
+        return False
+    rows = selected.get("items")
+    total = selected.get("total")
+    if (
+        not isinstance(rows, list)
+        or isinstance(total, bool)
+        or not isinstance(total, int)
+        or total <= 0
+        or selected.get("unattributed") != 0
+        or selected.get("undated") != 0
+    ):
+        return False
+    if token.kind == "latest":
+        count = min(int(token.latest_count or 0), total)
+        rows = rows[:count]
+        if len(rows) != count:
+            return False
+    elif total > 2 or selected.get("page_complete") is not True:
+        return False
+    current = tuple(str(row.get("id") or "") for row in rows if isinstance(row, dict))
+    return len(current) == len(rows) and current == token.raw_ids
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +316,7 @@ class PreparedFileEvidence:
     snapshot_tokens: tuple[AuthorizedFileSnapshotToken, ...]
     file_evidence_set: FileEvidenceSet
     bundle: EvidenceBundle
+    historical_selection: HistoricalFileSelectionToken | None
     _process_authority: object = field(repr=False, compare=False)
     _identity_sha256: str = field(init=False, repr=False, compare=False)
 
@@ -146,9 +333,25 @@ class PreparedFileEvidence:
             raise ValueError("prepared file evidence has invalid cardinality")
         if any(not authorized_file_snapshot_token_is_process_owned(token) for token in self.snapshot_tokens):
             raise ValueError("prepared file evidence has an unowned source token")
+        if self.historical_selection is not None and (
+            type(self.historical_selection) is not HistoricalFileSelectionToken
+            or self.historical_selection._process_authority is not _PROCESS_AUTHORITY
+            or self.historical_selection.tenant_id != self.tenant_id
+            or self.historical_selection.uploaded_by != self.person_id
+            or self.historical_selection.raw_ids != self.raw_ids
+        ):
+            raise ValueError("prepared historical selector disagrees with evidence")
         if not _prepared_bindings_valid(self):
             raise ValueError("prepared file evidence identities disagree")
-        object.__setattr__(self, "_identity_sha256", self.bundle.identity_sha256())
+        bundle_identity = self.bundle.identity_sha256()
+        identity = (
+            bundle_identity
+            if self.historical_selection is None
+            else hashlib.sha256(
+                f"{bundle_identity}:{self.historical_selection.identity_sha256()}".encode("ascii")
+            ).hexdigest()
+        )
+        object.__setattr__(self, "_identity_sha256", identity)
 
     @property
     def identity_sha256(self) -> str:
@@ -182,12 +385,32 @@ def _prepared_bindings_valid(value: PreparedFileEvidence) -> bool:
 
 
 def prepared_file_evidence_is_process_owned(value: Any) -> bool:
+    expected_identity = ""
+    if type(value) is PreparedFileEvidence:
+        bundle_identity = value.bundle.identity_sha256()
+        expected_identity = (
+            bundle_identity
+            if value.historical_selection is None
+            else hashlib.sha256(
+                f"{bundle_identity}:{value.historical_selection.identity_sha256()}".encode("ascii")
+            ).hexdigest()
+        )
     return bool(
         type(value) is PreparedFileEvidence
         and value._process_authority is _PROCESS_AUTHORITY
-        and value._identity_sha256 == value.bundle.identity_sha256()
+        and value._identity_sha256 == expected_identity
         and _prepared_bindings_valid(value)
         and all(authorized_file_snapshot_token_is_process_owned(token) for token in value.snapshot_tokens)
+    )
+
+
+def historical_file_selection_is_current(storage: Any, prepared: PreparedFileEvidence) -> bool:
+    """Recheck a process-owned historical selector without reading file bodies."""
+
+    return bool(
+        prepared_file_evidence_is_process_owned(prepared)
+        and prepared.historical_selection is not None
+        and _historical_selection_is_current(storage, prepared.historical_selection)
     )
 
 
@@ -206,10 +429,21 @@ def _require_file_read(
     conn: Any,
     authorization: AuthorizationService,
     actor: ActorContext,
+    *,
+    source_person_id: str,
 ) -> ActorContext:
     fresh = _fresh_actor_in_transaction(conn, actor)
+    if source_person_id != fresh.own_id:
+        source = conn.execute(
+            "SELECT status FROM users WHERE id=?",
+            (source_person_id,),
+        ).fetchone()
+        if source is None or str(source["status"] or "") != "active":
+            raise FileEvidenceUnavailable("source_principal_not_active")
     if not authorization.authorize(fresh, "files.read").allowed:
         raise FileEvidenceUnavailable("files_read_denied")
+    if source_person_id != fresh.own_id and not authorization.authorize(fresh, "admin.all_data.read").allowed:
+        raise FileEvidenceUnavailable("foreign_file_read_denied")
     return fresh
 
 
@@ -233,30 +467,14 @@ def _nonnegative_exact_int(value: Any) -> int | None:
     return value
 
 
-def _complete_native_body(
-    raw_text: str,
-    source_bytes: bytes,
+def _require_native_text_metadata(
     metadata: dict[str, Any],
     *,
     filename: str,
     mime_type: str,
-) -> tuple[FileBodyKind, str]:
-    """Return only complete extractor truth; every advisory/partial shape closes."""
+) -> None:
+    """Reject unsupported/advisory sources without reading body or registered bytes."""
 
-    try:
-        raw_text.encode("utf-8", errors="strict")
-    except UnicodeEncodeError as exc:
-        raise FileEvidenceUnavailable("body_not_utf8") from exc
-    try:
-        decoded_source = source_bytes.decode("utf-8", errors="strict")
-    except UnicodeDecodeError as exc:
-        raise FileEvidenceUnavailable("registered_bytes_are_not_exact_utf8_text") from exc
-    if (
-        any(source_bytes.startswith(magic) for magic in _BINARY_MAGICS)
-        or any(byte < 32 and byte not in {9, 10, 13} for byte in source_bytes)
-        or decoded_source != raw_text
-    ):
-        raise FileEvidenceUnavailable("registered_bytes_are_not_exact_utf8_text")
     if (
         type(metadata.get("extraction_receipt_version")) is not int
         or metadata.get("extraction_receipt_version") != 1
@@ -305,6 +523,47 @@ def _complete_native_body(
         raise FileEvidenceUnavailable("native_text_page_counters_invalid")
 
     extraction_chars = _nonnegative_exact_int(metadata.get("extraction_chars"))
+    if extraction_chars is None:
+        raise FileEvidenceUnavailable("native_extraction_length_mismatch")
+    if extraction_chars == 0:
+        raise FileEvidenceUnavailable("native_text_unavailable")
+    expected_text_digest = metadata.get("text_sha256")
+    if (
+        not isinstance(expected_text_digest, str)
+        or _SHA256_RE.fullmatch(expected_text_digest.casefold()) is None
+    ):
+        raise FileEvidenceUnavailable("native_extraction_digest_mismatch")
+    if metadata.get("text_extraction_success") is not True:
+        raise FileEvidenceUnavailable("native_text_not_attested")
+
+
+def _complete_native_body(
+    raw_text: str,
+    source_bytes: bytes,
+    metadata: dict[str, Any],
+    *,
+    filename: str,
+    mime_type: str,
+) -> tuple[FileBodyKind, str]:
+    """Return only complete extractor truth; every advisory/partial shape closes."""
+
+    _require_native_text_metadata(metadata, filename=filename, mime_type=mime_type)
+    try:
+        raw_text.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as exc:
+        raise FileEvidenceUnavailable("body_not_utf8") from exc
+    try:
+        decoded_source = source_bytes.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise FileEvidenceUnavailable("registered_bytes_are_not_exact_utf8_text") from exc
+    if (
+        any(source_bytes.startswith(magic) for magic in _BINARY_MAGICS)
+        or any(byte < 32 and byte not in {9, 10, 13} for byte in source_bytes)
+        or decoded_source != raw_text
+    ):
+        raise FileEvidenceUnavailable("registered_bytes_are_not_exact_utf8_text")
+
+    extraction_chars = _nonnegative_exact_int(metadata.get("extraction_chars"))
     if extraction_chars is None or extraction_chars != len(raw_text):
         raise FileEvidenceUnavailable("native_extraction_length_mismatch")
     expected_text_digest = metadata.get("text_sha256")
@@ -316,8 +575,6 @@ def _complete_native_body(
 
     if not raw_text.strip():
         raise FileEvidenceUnavailable("native_text_unavailable")
-    if metadata.get("text_extraction_success") is not True:
-        raise FileEvidenceUnavailable("native_text_not_attested")
     if _PROVENANCE_STUB_RE.search(raw_text):
         raise FileEvidenceUnavailable("body_is_provenance_stub")
     if _contains_current_secret(raw_text):
@@ -329,26 +586,37 @@ def _complete_native_body(
     return FileBodyKind.EXTRACTED, raw_text
 
 
-def prepare_current_turn_file_evidence(
+def _prepare_registered_file_evidence(
     storage: Any,
     authorization: AuthorizationService,
     files_root: Path,
     actor: ActorContext,
-    references: Sequence[CurrentTurnFileReference],
+    references: Sequence[CurrentTurnFileReference] | None,
     *,
+    person_id: str,
+    historical_selection: HistoricalFileSelectionToken | None,
     max_bytes: int,
     absolute_deadline: float | None = None,
 ) -> PreparedFileEvidence:
-    """Assemble one all-or-none bundle under a single authorization barrier."""
+    """Assemble one all-or-none registered bundle under one authorization barrier."""
 
-    refs = tuple(references)
-    if not 1 <= len(refs) <= _MAX_FILES:
+    if historical_selection is None:
+        refs: tuple[CurrentTurnFileReference, ...] = tuple(references or ())
+        raw_ids = tuple(str(item.raw_object_id or "") for item in refs)
+    else:
+        if references is not None:
+            raise FileEvidenceUnavailable("historical_reference_authority_invalid")
+        refs = ()
+        raw_ids = historical_selection.raw_ids
+    if not 1 <= len(raw_ids) <= _MAX_FILES:
         raise FileEvidenceUnavailable("file_count_outside_canary")
-    raw_ids = tuple(str(item.raw_object_id or "") for item in refs)
     if (
         len(set(raw_ids)) != len(raw_ids)
         or any(_RAW_ID_RE.fullmatch(raw_id) is None for raw_id in raw_ids)
-        or any(item.ordinal != index for index, item in enumerate(refs, start=1))
+        or (
+            historical_selection is None
+            and any(item.ordinal != index for index, item in enumerate(refs, start=1))
+        )
     ):
         raise FileEvidenceUnavailable("file_reference_shape_invalid")
 
@@ -358,7 +626,7 @@ def prepare_current_turn_file_evidence(
     tokens: list[AuthorizedFileSnapshotToken] = []
     total_chars = 0
     tenant_id = str(actor.user_id or "").strip()
-    person_id = str(actor.own_id or "").strip()
+    person_id = str(person_id or "").strip()
     if not tenant_id or not person_id:
         raise FileEvidenceUnavailable("actor_identity_missing")
 
@@ -377,7 +645,62 @@ def prepare_current_turn_file_evidence(
         )
     )
     with transaction_context as conn:
-        _require_file_read(conn, authorization, actor)
+        _require_file_read(
+            conn,
+            authorization,
+            actor,
+            source_person_id=person_id,
+        )
+        if historical_selection is not None and not _historical_selection_is_current(
+            storage,
+            historical_selection,
+        ):
+            raise FileEvidenceUnavailable("historical_selector_changed")
+        if historical_selection is not None:
+            # Historical selection may expose opaque ids before authorization,
+            # but neither canonical Raw bodies nor their private identities may
+            # cross into this process until the fresh principal/capability and
+            # exact selector have both been re-proved in this same transaction.
+            descriptors = storage.get_raw_object_descriptors(
+                list(raw_ids),
+                tenant_id,
+                limit=len(raw_ids),
+            )
+            if (
+                len(descriptors) != len(raw_ids)
+                or tuple(str(row.get("id") or "") for row in descriptors) != raw_ids
+            ):
+                raise FileEvidenceUnavailable("historical_source_set_changed")
+            for descriptor in descriptors:
+                metadata = bounded_raw_file_metadata(descriptor.get("metadata_json"))
+                if not metadata:
+                    raise FileEvidenceUnavailable("raw_metadata_invalid")
+                filename = str(metadata.get("filename") or "")
+                mime_type = str(metadata.get("mime_type") or "")
+                if _contains_current_secret(filename) or _contains_current_secret(mime_type):
+                    raise FileEvidenceUnavailable("source_descriptor_requires_secret_projection")
+                _require_native_text_metadata(
+                    metadata,
+                    filename=filename,
+                    mime_type=mime_type,
+                )
+            rows = storage.get_searchable_file_sources(
+                tenant_id,
+                list(raw_ids),
+                uploaded_by=person_id,
+                limit=len(raw_ids),
+                include_content=True,
+            )
+            if len(rows) != len(raw_ids) or tuple(str(row.get("id") or "") for row in rows) != raw_ids:
+                raise FileEvidenceUnavailable("historical_source_set_changed")
+            refs = tuple(
+                _HistoricalSourceReference(
+                    ordinal=index,
+                    raw_object_id=raw_id,
+                    source_identity_sha256=raw_source_identity_sha256(row),
+                )
+                for index, (raw_id, row) in enumerate(zip(raw_ids, rows, strict=True), start=1)
+            )
         for index, reference in enumerate(refs, start=1):
             require_budget()
             requested_identity = str(reference.source_identity_sha256 or "").casefold()
@@ -477,8 +800,60 @@ def prepare_current_turn_file_evidence(
             snapshot_tokens=tuple(tokens),
             file_evidence_set=evidence_set,
             bundle=bundle,
+            historical_selection=historical_selection,
             _process_authority=_PROCESS_AUTHORITY,
         )
+
+
+def prepare_current_turn_file_evidence(
+    storage: Any,
+    authorization: AuthorizationService,
+    files_root: Path,
+    actor: ActorContext,
+    references: Sequence[CurrentTurnFileReference],
+    *,
+    max_bytes: int,
+    absolute_deadline: float | None = None,
+) -> PreparedFileEvidence:
+    """Assemble current-turn evidence for the authenticated uploader."""
+
+    return _prepare_registered_file_evidence(
+        storage,
+        authorization,
+        files_root,
+        actor,
+        references,
+        person_id=str(actor.own_id or "").strip(),
+        historical_selection=None,
+        max_bytes=max_bytes,
+        absolute_deadline=absolute_deadline,
+    )
+
+
+def prepare_registered_file_evidence(
+    storage: Any,
+    authorization: AuthorizationService,
+    files_root: Path,
+    actor: ActorContext,
+    *,
+    uploaded_by: str,
+    selection: HistoricalFileSelectionToken,
+    max_bytes: int,
+    absolute_deadline: float | None = None,
+) -> PreparedFileEvidence:
+    """Assemble selected historical evidence under exact uploader authority."""
+
+    return _prepare_registered_file_evidence(
+        storage,
+        authorization,
+        files_root,
+        actor,
+        None,
+        person_id=str(uploaded_by or "").strip(),
+        historical_selection=selection,
+        max_bytes=max_bytes,
+        absolute_deadline=absolute_deadline,
+    )
 
 
 def reauthorize_prepared_file_evidence_in_transaction(
@@ -489,17 +864,26 @@ def reauthorize_prepared_file_evidence_in_transaction(
     prepared: PreparedFileEvidence,
     *,
     max_bytes: int,
+    storage: Any | None = None,
 ) -> bool:
     """Re-prove every source immediately before one assistant publication."""
 
     if (
         not prepared_file_evidence_is_process_owned(prepared)
         or prepared.tenant_id != str(actor.user_id or "").strip()
-        or prepared.person_id != str(actor.own_id or "").strip()
     ):
         return False
     try:
-        _require_file_read(conn, authorization, actor)
+        _require_file_read(
+            conn,
+            authorization,
+            actor,
+            source_person_id=prepared.person_id,
+        )
+        if prepared.historical_selection is not None and (
+            storage is None or not _historical_selection_is_current(storage, prepared.historical_selection)
+        ):
+            return False
         for raw_id, original in zip(prepared.raw_ids, prepared.snapshot_tokens, strict=True):
             current = read_authorized_file_in_transaction(
                 conn,
@@ -525,8 +909,12 @@ def reauthorize_prepared_file_evidence_in_transaction(
 
 __all__ = [
     "FileEvidenceUnavailable",
+    "HistoricalFileSelectionToken",
     "PreparedFileEvidence",
     "prepare_current_turn_file_evidence",
+    "prepare_registered_file_evidence",
+    "historical_file_selection_token",
+    "historical_file_selection_is_current",
     "prepared_file_evidence_is_process_owned",
     "reauthorize_prepared_file_evidence_in_transaction",
 ]

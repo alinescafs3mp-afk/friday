@@ -1,8 +1,8 @@
 # V12: model-first архитектура Friday — принятое направление
 
-Статус: **архитектурное направление принято владельцем; phase-1 реализует
-безопасный shadow и аттестованный FILE_READ canary, production по умолчанию
-остаётся `legacy`**.
+Статус: **архитектурное направление принято владельцем; release 0.204.0
+реализует безопасный shadow и аттестованные opt-in FILE_READ/ARCHIVE_READ
+routes, production по умолчанию остаётся `legacy`**.
 
 Дата решения: 2026-08-17.
 
@@ -178,6 +178,7 @@ friday/orchestration/contracts.py
 friday/orchestration/router.py
 friday/orchestration/planner.py
 friday/orchestration/file_read.py
+friday/orchestration/archive_read.py
 friday/orchestration/file_read_contract.py
 friday/model_profiles.py
 friday/model_probe.py
@@ -203,13 +204,20 @@ endpoint фиксируется измеренный профиль:
 из разрешённого профиля и не допускает циклов, превышения бюджета или тихого
 изменения effect owner.
 
-Phase-1 регистрирует один code-owned route handler только после live-аттестации
-точного model endpoint. Исполняемый `file_read` принимает 1–2 файла текущего
-хода только при доказанно полном UTF-8 представлении, использует один
-EvidenceBundle для synthesis/verifier и выполняет финальную reauthorization
-перед атомарной публикацией. PDF, изображения/OCR, ранее загруженные файлы,
-archive/web и effects остаются у legacy. Это первый ограниченный canary, а не
-заявление о завершённой функциональной паритетности V12.
+Release 0.204.0 регистрирует code-owned handlers только после live-аттестации
+профиля `qwen36-27b-nvfp4-nvidia:dispatcher:v12.13`. `file_read` принимает 1–2
+файла текущего хода только при доказанно полном UTF-8 представлении.
+`archive_read` принимает только ранее зарегистрированные полные UTF-8 файлы
+самого actor: один по уникальному точному имени, ровно 1–2 последних либо не
+более двух за точный локальный день «сегодня / вчера / позавчера».
+
+Модель не выбирает uploader, Raw id или временные границы. Неоднозначность,
+другой пользователь, reply/replay, выбор более двух файлов, PDF/OCR и partial
+extraction остаются у legacy. Авторизация завершается до чтения body, а точный
+selector и каждый источник повторно авторизуются перед публикацией. Evidence,
+conn-scoped idempotency fence и единственная публикация используют одну
+атомарную SQLite commit boundary. Это узкий canary, а не заявление о полной
+функциональной паритетности V12; schema остаётся 33.
 
 ## 10. Работа V12 на текущей 27B-модели
 
@@ -332,6 +340,11 @@ Browser — отдельный ограниченный процесс без am
 
 - Shared data/effect plane сохраняет существующие доказанные тесты.
 - Новый orchestrator тестируется против frozen typed contracts и fake tools.
+- Архивный selector тестируется как закрытая self-only grammar: exact filename,
+  exact latest 1–2 и today/yesterday/pozavchera; все неоднозначные и широкие
+  формы доказывают legacy fallback до чтения body.
+- Финальная exact-selector reauthorization и conn-scoped idempotency fence
+  проверяются mutation/rollback/replay тестами на общей commit boundary.
 - `shadow` сравнивает route, tool plan и evidence coverage без второго эффекта.
 - Быстрый affected gate запускается на каждой итерации.
 - Полный offline gate запускается перед canary/release, а не после каждой строки.
@@ -362,9 +375,11 @@ tool-call protocol должны быть измерены отдельно. Он
 2. V12 принимает Telegram-файл и регистрирует его до model work;
 3. без подписи создаёт подробную сводку и теги;
 4. с подписью исполняет именно инструкцию пользователя;
-5. находит ранее зарегистрированные файлы по дате, имени, uploader и tag;
+5. находит только собственные ранее зарегистрированные exact UTF-8 файлы по
+   уникальному точному имени, exact latest 1–2 или today/yesterday/pozavchera;
 6. отвечает по нескольким файлам из одного EvidenceBundle;
 7. не исполняет второй эффект в shadow/retry;
-8. текущая 27B проходит read-only canary, а ошибки плана уходят в legacy;
+8. текущая 27B с профилем `v12.13` проходит `file_read`/`archive_read` canary,
+   а ошибки плана и неподдерживаемые selector-ы уходят в legacy;
 9. rollback занимает одно изменение режима;
 10. все публикации сохраняют provenance и actor boundaries.

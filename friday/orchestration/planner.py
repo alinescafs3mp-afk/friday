@@ -29,8 +29,9 @@ effect: read|write|high. Any write/high intent requires route=effect.
 output has exactly format, language, require_citations, one_message.
 format: text|table|document. fallback: legacy|refuse.
 Every source-backed route must set require_citations=true. one_message must always be true.
-file_read uses only attached_files/conversation evidence; archive_read only archive/conversation;
-web_read only web/conversation. Read-only routes must leave tool_intents empty. An effect route may
+file_read uses only attached_files/conversation evidence. For the bounded archive_read canary use
+exactly one required archive request with max_items at least 2 and no conversation evidence;
+web_read uses only web/conversation. Read-only routes must leave tool_intents empty. An effect route may
 describe the requested write/high action declaratively in tool_intents, but never execute a protocol
 tool call. Creating a document is an effect route even when its contents came from read-only evidence.
 reason_code is a short machine label, not hidden reasoning.

@@ -2,7 +2,7 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.203.0**. Это release-candidate / 1.0-ready сборка с opt-in V12 model-first phase-1: безопасный `shadow`, аттестованный `canary` для 1–2 зарегистрированных в текущем ходе полных UTF-8 источников, помещающихся в bounded prompt, и неизменный legacy-контур для прежних файлов, PDF/изображений/OCR, archive/date/uploader, web и эффектов.
+Текущая версия: **0.204.0**. Это release-candidate / 1.0-ready сборка с opt-in V12 model-first routes `file_read` и `archive_read`: аттестованный профиль `v12.13` читает 1–2 полных UTF-8 источника текущего хода либо строго выбранные прежние файлы самого пользователя. Архивный route принимает только уникальное точное имя, ровно 1–2 последних файла или точный локальный день «сегодня / вчера / позавчера»; неоднозначность, другой пользователь, reply/replay, выбор более двух файлов, PDF/изображения/OCR и partial extraction остаются у legacy.
 
 ```text
 Telegram → подписанный durable bridge → Conversation + mode
@@ -59,6 +59,7 @@ Telegram → подписанный durable bridge → Conversation + mode
 ### Администрирование, безопасность и эксплуатация
 
 - Строгая tenant isolation действует на SQL, graph, conversations, files, feedback, Admin API и tools.
+- Opt-in V12 routes `file_read` и `archive_read` используют одни и те же fail-closed evidence-границы: архивный selector принадлежит коду и ограничен собственными файлами actor, авторизация завершается до чтения body, а перед публикацией точный selector и каждый источник повторно проверяются в той же SQLite-транзакции. Idempotency fence ставится через уже удерживаемое соединение атомарно с единственной публикацией; schema остаётся **33**.
 - В shared archive личное напоминание остаётся данными конкретного человека: durable owner marker создаётся атомарно с событием, а generic retrieval/model/graph/organs/admin исключают полное dependency closure по ID, current и authenticated historical именам/алиасам. Alias containers рекурсивно декодируются в bounded budget, а сравнение NFC → casefold → NFC закрывает иной регистр и NFD. Только точный person-scoped reminder path может вернуть и доставить запись владельцу; person export из одной snapshot отдельно разрешает его непротиворечивые marker/time/source и производные только от них, не открывая чужой или неоднозначный material.
 - Capability-based permissions используют default deny, preset-ы `owner`, `admin`, `moderator`, `user`, `guest`, custom presets и явные allow/deny overrides без обходного повышения прав.
 - В общем архиве надзор за поступлениями одного человека отделяет tenant от точного `uploaded_by`: лента, сводка, ритм, объём, темы и сравнение двух периодов считают один и тот же авторский срез. Материалы без достоверной отметки никому не приписываются и показываются отдельным числом.
