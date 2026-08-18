@@ -24,6 +24,7 @@ from friday.organs.sentinel import (
     _format_alert,
     scan_health,
     watch_generation,
+    watch_model_gate,
 )
 
 
@@ -146,6 +147,7 @@ def test_registry_includes_sentinel_worker(settings):
     workers = {worker.name: worker for worker in registry.workers(ctx)}
     assert "sentinel_watch" in workers
     assert "sentinel_generation_watch" in workers
+    assert "sentinel_model_gate_watch" in workers
 
     generation = workers["sentinel_generation_watch"]
     assert generation.run_immediately is True
@@ -153,10 +155,189 @@ def test_registry_includes_sentinel_worker(settings):
     assert generation.interval_sec + generation.timeout_sec <= 95
     assert generation.timeout_sec > _GENERATION_AWAIT_TIMEOUT_SEC
 
+    model_gate = workers["sentinel_model_gate_watch"]
+    assert model_gate.run_immediately is True
+    assert model_gate.interval_sec <= 60
+    assert model_gate.timeout_sec <= 5
 
-def test_generation_watchdog_interval_is_bounded_by_its_detection_contract(monkeypatch):
+
+@pytest.mark.asyncio
+async def test_model_gate_watchdog_alerts_once_for_one_revocation_episode(storage):
+    settings = replace(_sentinel_settings(), router_mode="canary")
+    _seed_telegram_user(storage, "5001", preset_key="owner")
+    gate = {
+        "status": "canary_ready",
+        "reason_code": "live_attestation_clear",
+        "route_outcome": "legacy_fallback",
+    }
+    ctx = ServiceContext(
+        settings=settings,
+        storage=storage,
+        kg=None,
+        ingestion=None,
+        model_gate_status=lambda: gate,
+    )
+
+    await watch_model_gate(ctx)
+    assert storage.list_pending_notifications(limit=100) == []
+
+    gate.update(
+        {
+            "status": "revoked",
+            "reason_code": "private transport detail /srv/secret/model",
+        }
+    )
+    await watch_model_gate(ctx)
+    await watch_model_gate(ctx)
+
+    pending = storage.list_pending_notifications(limit=100)
+    assert len(pending) == 1
+    assert pending[0]["chat_id"] == "5001"
+    assert pending[0]["kind"] == "sentinel"
+    assert str(pending[0]["dedup_key"]).startswith("sentinel:v12_model_gate_revoked:episode:")
+    assert "legacy-runtime" in str(pending[0]["body"])
+    assert "private" not in str(pending[0]["body"])
+    assert "/srv/secret" not in str(pending[0]["body"])
+
+
+@pytest.mark.asyncio
+async def test_model_gate_watchdog_rearms_only_after_observed_recovery(storage):
+    settings = replace(_sentinel_settings(), router_mode="canary")
+    _seed_telegram_user(storage, "5001", preset_key="owner")
+    gate = {"status": "revoked", "reason_code": "epoch_invalid"}
+    ctx = ServiceContext(
+        settings=settings,
+        storage=storage,
+        kg=None,
+        ingestion=None,
+        model_gate_status=lambda: gate,
+    )
+
+    await watch_model_gate(ctx)
+    first_key = str(storage.list_pending_notifications(limit=100)[0]["dedup_key"])
+    first_body = str(storage.list_pending_notifications(limit=100)[0]["body"])
+    gate.update({"status": "canary_ready", "reason_code": "live_attestation_clear"})
+    await watch_model_gate(ctx)
+    # A durable row may be delivered after recovery.  It must describe the
+    # observed transition, never claim that the queued state is still current.
+    assert "На момент проверки" in first_body
+    assert "проверьте текущий" in first_body
+    assert "сейчас не участвует" not in first_body
+    assert "orchestration.model_gate" in first_body
+    assert "‹путь скрыт›" not in first_body
+    gate.update({"status": "revoked", "reason_code": "epoch_changed"})
+    await watch_model_gate(ctx)
+
+    pending = storage.list_pending_notifications(limit=100)
+    assert len(pending) == 2
+    assert str(pending[1]["dedup_key"]) != first_key
+    assert "Процесс модели изменился" in str(pending[1]["body"])
+
+
+@pytest.mark.asyncio
+async def test_model_gate_watchdog_rearms_in_legacy_and_reports_observer_failure(storage):
+    settings = replace(_sentinel_settings(), router_mode="canary")
+    _seed_telegram_user(storage, "5001", preset_key="owner")
+    gate = {"status": "unavailable", "reason_code": "observer_unavailable"}
+    ctx = ServiceContext(
+        settings=settings,
+        storage=storage,
+        kg=None,
+        ingestion=None,
+        model_gate_status=lambda: gate,
+    )
+
+    await watch_model_gate(ctx)
+    assert len(storage.list_pending_notifications(limit=100)) == 1
+    await watch_model_gate(replace(ctx, settings=replace(settings, router_mode="legacy")))
+    await watch_model_gate(ctx)
+
+    pending = storage.list_pending_notifications(limit=100)
+    assert len(pending) == 2
+    assert pending[0]["dedup_key"] != pending[1]["dedup_key"]
+    assert "недоступно наблюдателю" in str(pending[1]["body"])
+    assert "не смог подтвердить состояние" in str(pending[1]["body"])
+    assert "legacy-runtime" not in str(pending[1]["body"])
+
+
+@pytest.mark.asyncio
+async def test_model_gate_recovery_rearms_without_a_notification_audience(storage):
+    settings = replace(_sentinel_settings(), router_mode="canary")
+    gate = {"status": "revoked", "reason_code": "epoch_invalid"}
+    ctx = ServiceContext(
+        settings=settings,
+        storage=storage,
+        kg=None,
+        ingestion=None,
+        model_gate_status=lambda: gate,
+    )
+
+    await watch_model_gate(ctx)
+    gate.update({"status": "canary_ready", "reason_code": "live_attestation_clear"})
+    await watch_model_gate(ctx)
+    state = json.loads(str(storage.kv_get("sentinel:v12_model_gate_watchdog")))
+    assert state == {"episode": "", "status": "ready", "version": 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sentinel_enabled", "router_mode"),
+    [(False, "canary"), (True, "legacy")],
+)
+async def test_model_gate_watchdog_is_silent_when_disabled_or_legacy(
+    storage,
+    sentinel_enabled,
+    router_mode,
+):
+    settings = replace(
+        _sentinel_settings(),
+        sentinel_enabled=sentinel_enabled,
+        router_mode=router_mode,
+    )
+    _seed_telegram_user(storage, "5001", preset_key="owner")
+
+    def must_not_observe():
+        raise AssertionError("disabled/legacy mode observed the V12 gate")
+
+    await watch_model_gate(
+        ServiceContext(
+            settings=settings,
+            storage=storage,
+            kg=None,
+            ingestion=None,
+            model_gate_status=must_not_observe,
+        )
+    )
+    assert storage.list_pending_notifications(limit=100) == []
+
+
+@pytest.mark.asyncio
+async def test_model_gate_watchdog_respects_quiet_hours(storage):
+    now_hour = datetime.now().astimezone().hour
+    settings = replace(
+        _sentinel_settings(quiet_start=now_hour, quiet_end=(now_hour + 1) % 24),
+        router_mode="canary",
+    )
+    _seed_telegram_user(storage, "5001", preset_key="owner")
+    await watch_model_gate(
+        ServiceContext(
+            settings=settings,
+            storage=storage,
+            kg=None,
+            ingestion=None,
+            model_gate_status=lambda: {
+                "status": "revoked",
+                "reason_code": "epoch_invalid",
+            },
+        )
+    )
+    assert storage.list_pending_notifications(limit=100) == []
+
+
+def test_generation_watchdog_interval_is_bounded_by_its_detection_contract(monkeypatch, tmp_path):
     from friday.config import load_settings
 
+    monkeypatch.setenv("FRIDAY_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("FRIDAY_SENTINEL_GENERATION_INTERVAL_SEC", "999")
     assert load_settings().sentinel_generation_interval_sec == 60
 

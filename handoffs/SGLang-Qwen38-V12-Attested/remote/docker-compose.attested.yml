@@ -1,0 +1,157 @@
+name: jarvis-gpt-qwen38-v12-attested
+
+services:
+  engine:
+    profiles: ["qwen38-v12-attested-go"]
+    image: ${FRIDAY_ENGINE_IMAGE_ID:?exact locally built engine image ID is required}
+    pull_policy: never
+    platform: linux/amd64
+    container_name: jarvis-gpt-sglang-qwen38-v12-attested
+    restart: "no"
+    ipc: host
+    entrypoint: ["/usr/local/bin/friday-engine-witness"]
+    command:
+      - --model-path
+      - /models/qwen3.8-27b-nvfp4-a2genesis-bfd9b312
+      - --served-model-name
+      - dispatcher
+      - --context-length
+      - "40960"
+      - --mem-fraction-static
+      - "0.90"
+      - --kv-cache-dtype
+      - fp8_e4m3
+      - --max-running-requests
+      - "6"
+      - --max-total-tokens
+      - "40960"
+      - --chunked-prefill-size
+      - "2048"
+      - --mamba-ssm-dtype
+      - bfloat16
+      - --max-mamba-cache-size
+      - "6"
+      - --disable-radix-cache
+      - --cuda-graph-backend-decode
+      - full
+      - --cuda-graph-max-bs-decode
+      - "6"
+      - --cuda-graph-bs-decode
+      - "1"
+      - "2"
+      - "3"
+      - "4"
+      - "5"
+      - "6"
+      - --cuda-graph-backend-prefill
+      - disabled
+      - --attention-backend
+      - flashinfer
+      - --reasoning-parser
+      - qwen3
+      - --tool-call-parser
+      - qwen3_coder
+      - --mm-feature-transport
+      - cpu
+      - --enable-metrics
+      - --limit-mm-data-per-request
+      - '{"image":4,"video":0,"audio":0}'
+      - --host
+      - 0.0.0.0
+      - --port
+      - "30000"
+    environment:
+      FRIDAY_EXPECTED_ENGINE_IMAGE_ID: ${FRIDAY_ENGINE_IMAGE_ID:?exact engine image ID is required}
+      FRIDAY_EXPECTED_PROXY_IMAGE_ID: ${FRIDAY_PROXY_IMAGE_ID:?exact proxy image ID is required}
+      NVIDIA_VISIBLE_DEVICES: "0"
+      CUDA_VISIBLE_DEVICES: "0"
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      CUDA_DISABLE_P2P: "1"
+      NCCL_P2P_DISABLE: "1"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HUB_ENABLE_HF_TRANSFER: "0"
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:False
+    volumes:
+      - type: volume
+        source: model-snapshot
+        target: /models/qwen3.8-27b-nvfp4-a2genesis-bfd9b312
+        read_only: true
+      - type: bind
+        source: ${JARVIS_QWEN38_ATTESTED_CACHE_HOST_PATH:-D:/jarvis/cache/sglang-qwen38-v12-attested}
+        target: /root/.cache
+      - type: volume
+        source: deployment-witness
+        target: /run/friday-witness
+    expose: ["30000"]
+    networks: [attested]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:30000/health', timeout=4)"
+      interval: 20s
+      timeout: 5s
+      retries: 45
+      start_period: 900s
+    stop_grace_period: 10m
+    security_opt: ["no-new-privileges:true"]
+    labels:
+      com.friday.deployment.profile-id: qwen38-27b-nvfp4-sglang:dispatcher:v12.14
+      com.friday.deployment.engine-image-id: ${FRIDAY_ENGINE_IMAGE_ID:?exact engine image ID is required}
+      com.friday.deployment.proxy-image-id: ${FRIDAY_PROXY_IMAGE_ID:?exact proxy image ID is required}
+
+  proxy:
+    profiles: ["qwen38-v12-attested-go"]
+    image: ${FRIDAY_PROXY_IMAGE_ID:?exact locally built proxy image ID is required}
+    pull_policy: never
+    platform: linux/amd64
+    container_name: jarvis-gpt-sglang-qwen38-v12-attested-api
+    restart: "no"
+    depends_on:
+      engine:
+        condition: service_healthy
+    environment:
+      JARVIS_LLM_API_KEY: ${JARVIS_LLM_API_KEY:?current dispatcher key must be injected in memory}
+      SGLANG_UPSTREAM: engine
+      NGINX_ENVSUBST_FILTER: ^(JARVIS_LLM_API_KEY|SGLANG_UPSTREAM)$
+    volumes:
+      - type: volume
+        source: deployment-witness
+        target: /run/friday-witness
+        read_only: true
+    expose: ["8080"]
+    networks: [attested]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    stop_grace_period: 45s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID"]
+    labels:
+      com.friday.deployment.profile-id: qwen38-27b-nvfp4-sglang:dispatcher:v12.14
+      com.friday.deployment.proxy-image-id: ${FRIDAY_PROXY_IMAGE_ID:?exact proxy image ID is required}
+      com.friday.proxy.openai-key-sha256: ${JARVIS_LLM_API_KEY_SHA256:?only the current key digest may be labeled}
+
+networks:
+  attested:
+    name: jarvis-gpt-qwen38-v12-attested-net
+    internal: true
+
+volumes:
+  model-snapshot:
+    name: jarvis-gpt-qwen38-v12-attested-model-da435c4b7556d8d5
+    external: true
+  deployment-witness:
+    name: jarvis-gpt-qwen38-v12-attested-witness

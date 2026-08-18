@@ -572,12 +572,35 @@ QWEN36_27B_V12_PROFILE = V12ModelProfileSpec(
     verifier_required=True,
 )
 
+QWEN38_27B_SGLANG_V12_PROFILE = V12ModelProfileSpec(
+    profile_id="qwen38-27b-nvfp4-sglang:dispatcher:v12.14",
+    runtime_profile_name="qwen38-27b-nvfp4-sglang",
+    served_model_alias="dispatcher",
+    # V12.14 changes the exact model/runtime pairing, not the narrow route
+    # authority.  The same byte-bound planner and live-probe contracts must pass
+    # freshly against Qwen3.8 before this profile can issue a lease.
+    planner_contract_sha256=_QWEN36_27B_PLANNER_CONTRACT_SHA256,
+    probe_suite_sha256=_QWEN36_27B_PROBE_SUITE_SHA256,
+    allowed_capabilities=QWEN36_27B_V12_PROFILE.allowed_capabilities,
+    required_capabilities=QWEN36_27B_V12_PROFILE.required_capabilities,
+    minimum_context_tokens=QWEN36_27B_V12_PROFILE.minimum_context_tokens,
+    max_context_tokens=QWEN36_27B_V12_PROFILE.max_context_tokens,
+    max_prepared_evidence_items=QWEN36_27B_V12_PROFILE.max_prepared_evidence_items,
+    max_tool_steps=QWEN36_27B_V12_PROFILE.max_tool_steps,
+    allowed_effects=QWEN36_27B_V12_PROFILE.allowed_effects,
+    verifier_required=QWEN36_27B_V12_PROFILE.verifier_required,
+)
+
 V12_MODEL_PROFILES: Mapping[tuple[str, str], V12ModelProfileSpec] = MappingProxyType(
     {
         (
             QWEN36_27B_V12_PROFILE.runtime_profile_name,
             QWEN36_27B_V12_PROFILE.served_model_alias,
-        ): QWEN36_27B_V12_PROFILE
+        ): QWEN36_27B_V12_PROFILE,
+        (
+            QWEN38_27B_SGLANG_V12_PROFILE.runtime_profile_name,
+            QWEN38_27B_SGLANG_V12_PROFILE.served_model_alias,
+        ): QWEN38_27B_SGLANG_V12_PROFILE,
     }
 )
 
@@ -601,6 +624,7 @@ __all__ = [
     "ModelProfileLease",
     "ModelRequirements",
     "QWEN36_27B_V12_PROFILE",
+    "QWEN38_27B_SGLANG_V12_PROFILE",
     "V12LiveAttestation",
     "V12ModelGate",
     "V12ModelProfileSpec",

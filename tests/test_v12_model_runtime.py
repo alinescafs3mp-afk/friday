@@ -115,6 +115,26 @@ class _MetricsTransport:
         assert absolute_deadline > time.monotonic()
         return b'{"object":"list","data":[{"id":"dispatcher","object":"model"}]}'
 
+    async def fetch_server_info(
+        self,
+        *,
+        maximum_bytes: int,
+        absolute_deadline: float,
+    ) -> bytes:
+        assert maximum_bytes > 0
+        assert absolute_deadline > time.monotonic()
+        return b"{}"
+
+    async def fetch_deployment_witness(
+        self,
+        *,
+        maximum_bytes: int,
+        absolute_deadline: float,
+    ) -> bytes:
+        assert maximum_bytes > 0
+        assert absolute_deadline > time.monotonic()
+        return b"{}"
+
 
 class _Pending:
     def __init__(self, router: LLMRouter, *, alias: str = "dispatcher") -> None:

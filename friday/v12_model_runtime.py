@@ -7,8 +7,8 @@ two narrow seams are injected here, are bound to one exact router instance, and
 are exercised without network access in the unit tests.
 
 Configuration is not an attestation.  A runtime becomes usable only after the
-code-owned live probe has passed, its process epoch is still present in vLLM's
-metrics, and the process-local gate has issued an exact least-privilege lease.
+code-owned live probe has passed, its backend-specific process epoch is still
+current, and the process-local gate has issued an exact least-privilege lease.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from typing import Any, Protocol, TypeVar
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from friday.agent_runtime.llm import LLMRouter
-from friday.config import PROFILES, FridaySettings
+from friday.config import PROFILES, FridaySettings, RuntimeProfile
 from friday.model_input_hygiene import model_messages_are_secret_free
 from friday.model_probe import (
     CANCELLATION_TIMEOUT_SEC,
@@ -52,6 +52,7 @@ from friday.model_probe import (
 )
 from friday.model_profiles import (
     QWEN36_27B_V12_PROFILE,
+    QWEN38_27B_SGLANG_V12_PROFILE,
     ModelGateReason,
     ModelProfileLease,
     ModelRequirements,
@@ -62,8 +63,12 @@ from friday.model_profiles import (
 )
 from friday.orchestration.planner import V12Planner
 
-MAX_METRICS_BYTES = 65_536
+MAX_VLLM_METRICS_BYTES = 65_536
+MAX_SGLANG_METRICS_BYTES = 131_072
+MAX_METRICS_BYTES = MAX_SGLANG_METRICS_BYTES
 MAX_MODEL_INVENTORY_BYTES = 65_536
+MAX_SERVER_INFO_BYTES = 65_536
+MAX_DEPLOYMENT_WITNESS_BYTES = 8_192
 MAX_METRICS_LINE_CHARS = 4_096
 MAX_METRIC_COUNT = 1_000_000
 CANCELLATION_POLL_INTERVAL_SEC = 0.01
@@ -81,13 +86,38 @@ _METRIC_SAMPLE_RE = re.compile(
     r"(?:\{(?P<labels>[^{}\r\n]{0,1024})\})?\s+"
     r"(?P<value>[^\s]+)(?:\s+[0-9]+)?\s*$"
 )
-_REQUIRED_METRICS = frozenset(
+_VLLM_REQUIRED_METRICS = frozenset(
     {
         "process_start_time_seconds",
         "vllm:num_requests_running",
         "vllm:num_requests_waiting",
     }
 )
+_SGLANG_REQUIRED_METRICS = frozenset(
+    {
+        "sglang:num_running_reqs",
+        "sglang:num_queue_reqs",
+    }
+)
+_LOWER_SHA256_RE = re.compile(r"[0-9a-f]{64}")
+_DEPLOYMENT_WITNESS_SCHEMA = "friday.sglang-deployment-witness.v1"
+
+
+class _MetricsAdapter(StrEnum):
+    VLLM = "vllm"
+    SGLANG_QWEN38 = "sglang_qwen38"
+
+
+@dataclass(frozen=True, slots=True)
+class _SglangServerInfoProjection:
+    random_seed: int
+
+
+@dataclass(frozen=True, slots=True)
+class _DeploymentWitnessProjection:
+    engine_random_seed: int
+    canonical_json: bytes = field(repr=False)
+    process_epoch_sha256: str
 
 
 class V12ModelRuntimeFailure(StrEnum):
@@ -191,7 +221,7 @@ class V12CompletionTransport(Protocol):
 
 
 class V12MetricsTransport(Protocol):
-    """Bounded metrics seam; the transport must derive its target from the router."""
+    """Bounded observation seam; every target derives from the exact router."""
 
     @property
     def bound_router(self) -> LLMRouter: ...
@@ -204,6 +234,20 @@ class V12MetricsTransport(Protocol):
     ) -> bytes: ...
 
     async def fetch_model_inventory(
+        self,
+        *,
+        maximum_bytes: int,
+        absolute_deadline: float,
+    ) -> bytes: ...
+
+    async def fetch_server_info(
+        self,
+        *,
+        maximum_bytes: int,
+        absolute_deadline: float,
+    ) -> bytes: ...
+
+    async def fetch_deployment_witness(
         self,
         *,
         maximum_bytes: int,
@@ -443,8 +487,28 @@ def _parse_decimal_metric(value: str, *, positive: bool, integral: bool) -> Deci
     return number
 
 
+def _metrics_adapter_for(profile: V12ModelProfileSpec) -> _MetricsAdapter:
+    runtime_profile = PROFILES.get(profile.runtime_profile_name)
+    if (
+        v12_model_profile_for(profile.runtime_profile_name, profile.served_model_alias) is not profile
+        or runtime_profile is None
+    ):
+        raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
+    if runtime_profile.inference_backend == "vllm":
+        return _MetricsAdapter.VLLM
+    if (
+        runtime_profile.inference_backend == "sglang"
+        and profile is QWEN38_27B_SGLANG_V12_PROFILE
+        and runtime_profile.sglang_extra_args is not None
+    ):
+        return _MetricsAdapter.SGLANG_QWEN38
+    raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
+
+
 def _parse_metrics(body: object, *, served_model_alias: str) -> ModelLoadSample:
-    if type(body) is not bytes or not body or len(body) > MAX_METRICS_BYTES:
+    """Parse the original exact vLLM metric contract."""
+
+    if type(body) is not bytes or not body or len(body) > MAX_VLLM_METRICS_BYTES:
         raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
     try:
         text = body.decode("utf-8", errors="strict")
@@ -459,16 +523,16 @@ def _parse_metrics(body: object, *, served_model_alias: str) -> ModelLoadSample:
             continue
         match = _METRIC_SAMPLE_RE.fullmatch(line)
         if match is None:
-            if any(line.startswith(name) for name in _REQUIRED_METRICS):
+            if any(line.startswith(name) for name in _VLLM_REQUIRED_METRICS):
                 raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
             continue
         name = match.group("name")
-        if name not in _REQUIRED_METRICS:
+        if name not in _VLLM_REQUIRED_METRICS:
             continue
         if name in observed:
             raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
         observed[name] = (match.group("labels"), match.group("value"))
-    if set(observed) != _REQUIRED_METRICS:
+    if set(observed) != _VLLM_REQUIRED_METRICS:
         raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
 
     epoch_labels, epoch_value = observed["process_start_time_seconds"]
@@ -494,6 +558,75 @@ def _parse_metrics(body: object, *, served_model_alias: str) -> ModelLoadSample:
     )
 
 
+def _parse_sglang_metrics_unsafe(
+    body: object,
+    *,
+    served_model_alias: str,
+) -> tuple[float, float]:
+    if type(body) is not bytes or not body or len(body) > MAX_SGLANG_METRICS_BYTES:
+        raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+    try:
+        text = body.decode("utf-8", errors="strict")
+    except UnicodeError:
+        raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID) from None
+
+    expected_labels = (
+        f'engine_type="unified",model_name="{served_model_alias}",moe_ep_rank="0",pp_rank="0",tp_rank="0"'
+    )
+    observed: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        if len(raw_line) > MAX_METRICS_LINE_CHARS:
+            raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = _METRIC_SAMPLE_RE.fullmatch(line)
+        if match is None:
+            if any(line.startswith(name) for name in _SGLANG_REQUIRED_METRICS):
+                raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+            continue
+        name = match.group("name")
+        if name not in _SGLANG_REQUIRED_METRICS:
+            continue
+        if name in observed or match.group("labels") != expected_labels:
+            raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+        observed[name] = match.group("value")
+    if set(observed) != _SGLANG_REQUIRED_METRICS:
+        raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+
+    running = _parse_decimal_metric(
+        observed["sglang:num_running_reqs"],
+        positive=False,
+        integral=True,
+    )
+    waiting = _parse_decimal_metric(
+        observed["sglang:num_queue_reqs"],
+        positive=False,
+        integral=True,
+    )
+    return float(int(running)), float(int(waiting))
+
+
+def _parse_sglang_metrics(
+    body: object,
+    *,
+    served_model_alias: str,
+) -> tuple[float, float]:
+    """Return only a sanitized projection; rejected raw bytes never escape."""
+
+    try:
+        projection = _parse_sglang_metrics_unsafe(
+            body,
+            served_model_alias=served_model_alias,
+        )
+    except Exception:  # noqa: BLE001 — collapse every untrusted parser failure
+        projection = None
+    body = None
+    if projection is None:
+        raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+    return projection
+
+
 def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -505,6 +638,332 @@ def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _reject_json_constant(_value: str) -> None:
     raise ValueError("invalid number")
+
+
+def _exact_json_equal(observed: object, expected: object) -> bool:
+    if type(observed) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        if not isinstance(observed, dict):
+            return False
+        return observed.keys() == expected.keys() and all(
+            _exact_json_equal(observed[key], expected_value) for key, expected_value in expected.items()
+        )
+    if isinstance(expected, list):
+        if not isinstance(observed, list):
+            return False
+        return len(observed) == len(expected) and all(
+            _exact_json_equal(observed_value, expected_value)
+            for observed_value, expected_value in zip(observed, expected, strict=True)
+        )
+    return observed == expected
+
+
+def _sglang_server_info_expected(
+    runtime_profile: RuntimeProfile,
+    *,
+    served_model_alias: str,
+) -> dict[str, object]:
+    launch = runtime_profile.sglang_extra_args
+    if launch is None:
+        raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
+    weight_version = launch.weight_version
+    if not isinstance(weight_version, str) or not weight_version:
+        raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
+    try:
+        multimodal_limit = json.loads(
+            launch.limit_mm_data_per_request,
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_json_constant,
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED) from None
+    if not isinstance(multimodal_limit, dict):
+        raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
+    return {
+        "status": "ready",
+        "version": runtime_profile.runtime_reported_version,
+        "model_path": f"/models/{runtime_profile.model_dir_name}",
+        "served_model_name": served_model_alias,
+        "context_length": runtime_profile.max_model_len,
+        "max_running_requests": runtime_profile.max_num_seqs,
+        "max_total_tokens": launch.max_total_tokens,
+        "max_total_num_tokens": launch.max_total_tokens,
+        "mem_fraction_static": launch.mem_fraction_static,
+        "kv_cache_dtype": runtime_profile.kv_cache_dtype,
+        "chunked_prefill_size": launch.chunked_prefill_size,
+        "mamba_ssm_dtype": launch.mamba_ssm_dtype,
+        "max_mamba_cache_size": launch.max_mamba_cache_size,
+        "disable_radix_cache": not launch.radix_cache_enabled,
+        "disable_cuda_graph": runtime_profile.eager_mode,
+        "cuda_graph_backend_decode": launch.cuda_graph_backend_decode,
+        "cuda_graph_max_bs_decode": launch.cuda_graph_max_bs_decode,
+        "cuda_graph_bs_decode": list(launch.cuda_graph_bs_decode),
+        "cuda_graph_backend_prefill": launch.cuda_graph_backend_prefill,
+        "attention_backend": launch.attention_backend,
+        "reasoning_parser": launch.reasoning_parser,
+        "tool_call_parser": launch.tool_call_parser,
+        "mm_feature_transport": launch.mm_feature_transport,
+        "limit_mm_data_per_request": multimodal_limit,
+        "enable_metrics": launch.metrics_enabled,
+        "weight_version": weight_version,
+        "speculative_algorithm": launch.speculative_algorithm,
+        "speculative_draft_model_path": None,
+        "speculative_num_steps": None,
+    }
+
+
+def _parse_sglang_server_info_unsafe(
+    body: object,
+    *,
+    profile: V12ModelProfileSpec,
+) -> _SglangServerInfoProjection:
+    """Validate a safe projection and return its generated engine seed.
+
+    The raw document can contain credentials.  Only the code-owned allowlist
+    below reaches the canonical projection; neither raw values nor field names
+    are retained in errors or returned state.
+    """
+
+    if type(body) is not bytes or not body or len(body) > MAX_SERVER_INFO_BYTES:
+        raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+    try:
+        value = json.loads(
+            body.decode("utf-8", errors="strict"),
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_json_constant,
+        )
+    except (UnicodeError, ValueError, json.JSONDecodeError):
+        raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID) from None
+    runtime_profile = PROFILES.get(profile.runtime_profile_name)
+    if (
+        not isinstance(value, dict)
+        or runtime_profile is None
+        or _metrics_adapter_for(profile) is not _MetricsAdapter.SGLANG_QWEN38
+    ):
+        raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+
+    expected = _sglang_server_info_expected(
+        runtime_profile,
+        served_model_alias=profile.served_model_alias,
+    )
+    for key, expected_value in expected.items():
+        if key not in value or not _exact_json_equal(value[key], expected_value):
+            raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+    random_seed = value.get("random_seed")
+    if (
+        isinstance(random_seed, bool)
+        or not isinstance(random_seed, int)
+        or random_seed < 1
+        or random_seed > (1 << 30) - 1
+    ):
+        raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+
+    return _SglangServerInfoProjection(random_seed=random_seed)
+
+
+def _parse_sglang_server_info(
+    body: object,
+    *,
+    profile: V12ModelProfileSpec,
+) -> _SglangServerInfoProjection:
+    """Expose a sanitized error without retaining the raw secret-bearing body."""
+
+    try:
+        projection = _parse_sglang_server_info_unsafe(body, profile=profile)
+    except Exception:  # noqa: BLE001 — collapse every untrusted parser failure
+        projection = None
+    body = None
+    if projection is None:
+        raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+    return projection
+
+
+def _sglang_deployment_witness_expected(
+    runtime_profile: RuntimeProfile,
+    *,
+    profile: V12ModelProfileSpec,
+) -> dict[str, str]:
+    raw_expected: dict[str, object] = {
+        "schema": _DEPLOYMENT_WITNESS_SCHEMA,
+        "profile_id": profile.profile_id,
+        "engine_image_id": runtime_profile.engine_image_id,
+        "engine_base_image_digest": runtime_profile.engine_base_image_digest,
+        "engine_base_image_id": runtime_profile.engine_base_image_id,
+        "runtime_source_revision": runtime_profile.runtime_source_revision,
+        "runtime_reported_version": runtime_profile.runtime_reported_version,
+        "model_repository": runtime_profile.model_repository,
+        "model_revision": runtime_profile.model_revision,
+        "model_snapshot_manifest_sha256": runtime_profile.model_snapshot_manifest_sha256,
+        "model_quantization": runtime_profile.model_quantization,
+        "served_model_alias": profile.served_model_alias,
+        "launch_manifest_sha256": runtime_profile.launch_manifest_sha256,
+        "proxy_image_id": runtime_profile.proxy_image_id,
+        "proxy_policy_sha256": runtime_profile.proxy_policy_sha256,
+    }
+    if any(not isinstance(value, str) or not value for value in raw_expected.values()):
+        raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
+    return {key: value for key, value in raw_expected.items() if isinstance(value, str)}
+
+
+def _parse_sglang_deployment_witness_unsafe(
+    body: object,
+    *,
+    profile: V12ModelProfileSpec,
+) -> _DeploymentWitnessProjection:
+    if type(body) is not bytes or not body or len(body) > MAX_DEPLOYMENT_WITNESS_BYTES:
+        raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+    try:
+        value = json.loads(
+            body.decode("utf-8", errors="strict"),
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_json_constant,
+        )
+    except (UnicodeError, ValueError, json.JSONDecodeError):
+        raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID) from None
+    runtime_profile = PROFILES.get(profile.runtime_profile_name)
+    if (
+        not isinstance(value, dict)
+        or runtime_profile is None
+        or _metrics_adapter_for(profile) is not _MetricsAdapter.SGLANG_QWEN38
+    ):
+        raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+
+    expected = _sglang_deployment_witness_expected(runtime_profile, profile=profile)
+    expected_keys = {*expected, "engine_start_nonce", "engine_random_seed"}
+    if set(value) != expected_keys or any(
+        value.get(key) != expected_value for key, expected_value in expected.items()
+    ):
+        raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+    engine_start_nonce = value.get("engine_start_nonce")
+    engine_random_seed = value.get("engine_random_seed")
+    if (
+        not isinstance(engine_start_nonce, str)
+        or _LOWER_SHA256_RE.fullmatch(engine_start_nonce) is None
+        or isinstance(engine_random_seed, bool)
+        or not isinstance(engine_random_seed, int)
+        or engine_random_seed < 1
+        or engine_random_seed > (1 << 30) - 1
+    ):
+        raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+
+    canonical = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return _DeploymentWitnessProjection(
+        engine_random_seed=engine_random_seed,
+        canonical_json=canonical,
+        process_epoch_sha256=hashlib.sha256(canonical).hexdigest(),
+    )
+
+
+def _parse_sglang_deployment_witness(
+    body: object,
+    *,
+    profile: V12ModelProfileSpec,
+) -> _DeploymentWitnessProjection:
+    """Expose a sanitized error without retaining a rejected witness body."""
+
+    try:
+        projection = _parse_sglang_deployment_witness_unsafe(body, profile=profile)
+    except Exception:  # noqa: BLE001 — collapse every untrusted parser failure
+        projection = None
+    body = None
+    if projection is None:
+        raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
+    return projection
+
+
+async def _sample_sglang_load_without_raw_retention(
+    metrics_transport: V12MetricsTransport,
+    *,
+    profile: V12ModelProfileSpec,
+    metrics_deadline: float,
+    absolute_deadline: float,
+) -> tuple[ModelLoadSample | None, V12ModelRuntimeFailure | None]:
+    """Observe SGLang while keeping every raw response inside a non-raising frame."""
+
+    witness_before_body: object | None = None
+    metrics_body: object | None = None
+    server_info_body: object | None = None
+    witness_after_body: object | None = None
+    try:
+        witness_before_body = await _bounded_await(
+            metrics_transport.fetch_deployment_witness(
+                maximum_bytes=MAX_DEPLOYMENT_WITNESS_BYTES,
+                absolute_deadline=metrics_deadline,
+            ),
+            absolute_deadline=metrics_deadline,
+            failure=V12ModelRuntimeFailure.METRICS_CALL_FAILED,
+        )
+        witness_before = _parse_sglang_deployment_witness(
+            witness_before_body,
+            profile=profile,
+        )
+        metrics_body = await _bounded_await(
+            metrics_transport.fetch_metrics(
+                maximum_bytes=MAX_SGLANG_METRICS_BYTES,
+                absolute_deadline=metrics_deadline,
+            ),
+            absolute_deadline=metrics_deadline,
+            failure=V12ModelRuntimeFailure.METRICS_CALL_FAILED,
+        )
+        running, waiting = _parse_sglang_metrics(
+            metrics_body,
+            served_model_alias=profile.served_model_alias,
+        )
+        server_info_body = await _bounded_await(
+            metrics_transport.fetch_server_info(
+                maximum_bytes=MAX_SERVER_INFO_BYTES,
+                absolute_deadline=metrics_deadline,
+            ),
+            absolute_deadline=metrics_deadline,
+            failure=V12ModelRuntimeFailure.METRICS_CALL_FAILED,
+        )
+        server_projection = _parse_sglang_server_info(
+            server_info_body,
+            profile=profile,
+        )
+        witness_after_body = await _bounded_await(
+            metrics_transport.fetch_deployment_witness(
+                maximum_bytes=MAX_DEPLOYMENT_WITNESS_BYTES,
+                absolute_deadline=metrics_deadline,
+            ),
+            absolute_deadline=metrics_deadline,
+            failure=V12ModelRuntimeFailure.METRICS_CALL_FAILED,
+        )
+        witness_after = _parse_sglang_deployment_witness(
+            witness_after_body,
+            profile=profile,
+        )
+        _deadline_remaining(absolute_deadline)
+        if (
+            witness_before != witness_after
+            or server_projection.random_seed != witness_before.engine_random_seed
+        ):
+            return None, V12ModelRuntimeFailure.METRICS_INVALID
+        return (
+            ModelLoadSample(
+                running=running,
+                waiting=waiting,
+                process_epoch_sha256=witness_before.process_epoch_sha256,
+            ),
+            None,
+        )
+    except asyncio.CancelledError:
+        witness_before_body = None
+        metrics_body = None
+        server_info_body = None
+        witness_after_body = None
+        raise
+    except V12ModelRuntimeError as exc:
+        return None, exc.code
+    except Exception:  # noqa: BLE001 — discard all raw transport exception graphs
+        return None, V12ModelRuntimeFailure.METRICS_CALL_FAILED
 
 
 def _parse_model_inventory(body: object, *, served_model_alias: str) -> None:
@@ -680,13 +1139,24 @@ class V12ProductionProbeClient(V12ModelProbeClient):
     async def sample_load(self, *, absolute_deadline: float) -> ModelLoadSample:
         try:
             self._ensure_composed()
+            adapter = _metrics_adapter_for(self._seal.profile)
             metrics_deadline = min(
                 absolute_deadline,
                 time.monotonic() + LOAD_TIMEOUT_SEC,
             )
+            if adapter is _MetricsAdapter.SGLANG_QWEN38:
+                sample, runtime_failure = await _sample_sglang_load_without_raw_retention(
+                    self._metrics_transport,
+                    profile=self._seal.profile,
+                    metrics_deadline=metrics_deadline,
+                    absolute_deadline=absolute_deadline,
+                )
+                if sample is None:
+                    raise _runtime_error(runtime_failure or V12ModelRuntimeFailure.METRICS_INVALID)
+                return sample
             body = await _bounded_await(
                 self._metrics_transport.fetch_metrics(
-                    maximum_bytes=MAX_METRICS_BYTES,
+                    maximum_bytes=MAX_VLLM_METRICS_BYTES,
                     absolute_deadline=metrics_deadline,
                 ),
                 absolute_deadline=metrics_deadline,
@@ -1044,6 +1514,11 @@ class AttestedV12ModelRuntime:
             raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
         if v12_model_profile_for(profile.runtime_profile_name, profile.served_model_alias) is not profile:
             raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
+        if _metrics_adapter_for(profile) is _MetricsAdapter.SGLANG_QWEN38:
+            runtime_profile = PROFILES.get(profile.runtime_profile_name)
+            if runtime_profile is None:
+                raise _runtime_error(V12ModelRuntimeFailure.COMPOSITION_REJECTED)
+            _sglang_deployment_witness_expected(runtime_profile, profile=profile)
         binding = _derive_endpoint_binding(router, profile)
         self._seal = _RuntimeSeal(router, profile, binding)
         self._seal.validate()
@@ -1267,7 +1742,11 @@ class AttestedV12ModelRuntime:
 
 __all__ = [
     "AttestedV12ModelRuntime",
+    "MAX_DEPLOYMENT_WITNESS_BYTES",
     "MAX_METRICS_BYTES",
+    "MAX_SERVER_INFO_BYTES",
+    "MAX_SGLANG_METRICS_BYTES",
+    "MAX_VLLM_METRICS_BYTES",
     "MAX_ATTESTED_CHAT_INPUT_UTF8_BYTES",
     "MAX_MODEL_INVENTORY_BYTES",
     "V12CompletionTransport",

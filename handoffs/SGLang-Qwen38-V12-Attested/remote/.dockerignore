@@ -1,0 +1,10 @@
+*
+!.dockerignore
+!Dockerfile.engine
+!Dockerfile.proxy
+!engine-witness-entrypoint.py
+!model-volume-sealer.py
+!deployment-identity.v1.json
+!qwen38-model-manifest.v1.json
+!launch-manifest.v1.json
+!default.conf.template

@@ -149,6 +149,24 @@ from friday.workers._blocking import current_activity, run_blocking, wait_until_
 LOGGER = logging.getLogger(__name__)
 VERSION = __version__
 _V12_STARTUP_PROBE_BUDGET_SEC = 330.0
+_SENTINEL_MODEL_GATE_STATUSES = frozenset({"shadow_candidate", "canary_ready", "revoked"})
+_SENTINEL_MODEL_GATE_REASONS = frozenset(
+    {
+        "awaiting_live_attestation",
+        "live_attestation_clear",
+        "attestation_rejected",
+        "epoch_invalid",
+        "epoch_changed",
+        "explicit_revocation",
+    }
+)
+_SENTINEL_MODEL_GATE_STARTUP_REASONS = frozenset(
+    {
+        "mode_does_not_require_live_attestation",
+        "live_attestation_failed",
+    }
+)
+_SENTINEL_MODEL_GATE_OBSERVER_FAILURE = "observer_unavailable"
 _REALM_RE = re.compile(r"[^a-zA-Z0-9_.-]+")
 # What a client-proposed correlation id may look like: long enough for a UUID or
 # a trace id, plain enough that it cannot smuggle a header or a log line.
@@ -1393,6 +1411,56 @@ async def _enforce_rate_limit(request: Request, actor: ActorContext) -> None:
         )
 
 
+def _bounded_model_gate_status(
+    runtime: object | None,
+    *,
+    startup_reason: str,
+) -> dict[str, object]:
+    """Expose only the two code-owned gate fields Sentinel needs.
+
+    ``public_status`` deliberately contains more useful health information, but
+    an outbound observer has a narrower trust boundary.  Never forward unknown
+    values: a runtime/transport exception, URL, epoch, or response body must not
+    become a Telegram message through this provider.
+    """
+
+    if runtime is None:
+        reason = str(startup_reason or "")
+        return {
+            "status": "not_installed",
+            "reason_code": (reason if reason in _SENTINEL_MODEL_GATE_STARTUP_REASONS else "unknown"),
+        }
+    public_status = getattr(runtime, "public_status", None)
+    if not callable(public_status):
+        return {
+            "status": "unavailable",
+            "reason_code": _SENTINEL_MODEL_GATE_OBSERVER_FAILURE,
+        }
+    try:
+        raw = public_status()
+    except Exception:  # noqa: BLE001 — the provider is fail-closed and secret-free
+        return {
+            "status": "unavailable",
+            "reason_code": _SENTINEL_MODEL_GATE_OBSERVER_FAILURE,
+        }
+    if not isinstance(raw, Mapping):
+        return {
+            "status": "unavailable",
+            "reason_code": _SENTINEL_MODEL_GATE_OBSERVER_FAILURE,
+        }
+    status = str(raw.get("status") or "")
+    reason = str(raw.get("reason_code") or "")
+    if status not in _SENTINEL_MODEL_GATE_STATUSES:
+        return {
+            "status": "unavailable",
+            "reason_code": _SENTINEL_MODEL_GATE_OBSERVER_FAILURE,
+        }
+    return {
+        "status": status,
+        "reason_code": reason if reason in _SENTINEL_MODEL_GATE_REASONS else "unknown",
+    }
+
+
 def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
     settings = settings_override or load_settings()
 
@@ -1528,6 +1596,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 ingestion=ingestion,
                 llm=llm,
                 auth=auth_service,
+                model_gate_status=functools.partial(
+                    _bounded_model_gate_status,
+                    attempted_v12_runtime,
+                    startup_reason=v12_startup_reason,
+                ),
             )
             organ_workers = [
                 IntervalTask(

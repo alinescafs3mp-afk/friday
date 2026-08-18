@@ -3640,3 +3640,50 @@
   JOIN; вернуть ID-only event JOIN; защитить чтение, но оставить агрегат либо
   распространение; перепутать владельца исходной и целевой стороны. Каждая
   обязана краснить соответствующий тест.
+
+## 84. V12 следует за аттестованным Qwen3.8/SGLang и сообщает о деградации
+
+- **Статус:** принято владельцем 2026-08-18: «вернёшь v12?»; реализация начата
+  только после фиксации baseline ниже.
+- **Что не так:** после штатной замены Qwen3.6/vLLM на Qwen3.8/SGLang V12
+  продолжил называться старым профилем и при первом чтении метрик отозвал lease.
+  Legacy сохранил ответы, поэтому Sentinel счёл модель здоровой и владелец не
+  получил уведомления о потере узких `file_read/archive_read` routes.
+- **Доказательство:** live health показывает configured/installed `canary`, но
+  gate `revoked/epoch_invalid`; первый такой fallback записан в 17:13:43.
+  SGLang `/metrics` занимает **68 058 bytes** при лимите Friday **65 536** и
+  публикует `sglang:num_running_reqs`/`sglang:num_queue_reqs`, тогда как
+  `friday/v12_model_runtime.py` принимает только vLLM names и
+  `process_start_time_seconds`. В БД после эпизода: **0** gate runtime events и
+  **0** gate notifications; обычный generation watchdog остаётся `healthy`.
+- **Сценарий отказа:** model server меняется или перезапускается → старый epoch
+  нельзя подтвердить → V12 fail-closed уходит в legacy → ответы продолжают
+  приходить, а владелец ошибочно считает canary действующим.
+- **Что предлагаю:** добавить отдельные code-owned Runtime/V12 profiles
+  `qwen38-27b-nvfp4-sglang`/`v12.14`, не ослабляя Qwen3.6. Factory выбирает
+  профиль только по точной паре runtime+alias. SGLang adapter принимает только
+  его имена и labels, сверяет `/v1/models`, exact runtime identity и 40K/6
+  contract. Process epoch берётся не из повторяемого seed, а из exact
+  per-process deployment witness: sibling engine перед каждым exec полностью
+  сверяет model snapshot, создаёт новый 256-bit nonce и связывает его с
+  image/build/launch identities; закрытый proxy публикует witness read-only и
+  пропускает только необходимый inference/health allowlist. Adapter читает
+  witness до и после metrics/server-info, требует совпадения engine seed и
+  никогда не логирует raw `/server_info`/witness. Sentinel отдельно наблюдает переход gate в
+  revoked/not-installed и ставит одно owner-only предупреждение на эпизод;
+  штатный route-level fallback уведомлением не является.
+- **Чем проверим:** live probe на одном неизменном release обязан пройти 9
+  русских plan cases, 2 synthesis, 3 verifier, границу 8192 context,
+  submitted cancellation и два quiet samples с одним epoch; health обязан дать
+  `canary_ready/live_attestation_clear`, новый profile id и ровно два routes.
+  Unit matrix отклоняет missing/duplicate/wrong-label metrics, >128 KiB body,
+  чужой runtime/alias, missing/drifted witness и seed mismatch; live gate
+  доказывает смену nonce после restart и 404 на любом management path.
+  Notification matrix: ready→revoked = 1,
+  повтор = 1, recovery→новый revoke = 2, legacy/shadow/disabled = 0; неизвестная
+  причина и endpoint/private поля не попадают в сообщение.
+- **Цена и риск:** новый model identity и metrics boundary затрагивают startup
+  probe и release configuration. Ложное принятие epoch дало бы старому lease
+  пережить перезапуск модели; ложный отказ оставит безопасный legacy. Поэтому
+  переключение разрешено только после полного zero-skip gate и live attestation,
+  с остановленным bridge на время backend cutover.

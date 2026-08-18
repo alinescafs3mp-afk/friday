@@ -74,6 +74,25 @@ _GENERATION_RECENT_FOREGROUND_SEC = 120.0
 _GENERATION_STATE_KEY = "sentinel:generation_watchdog"
 _GENERATION_STATE_VERSION = 1
 
+# The model gate is process-local and can revoke a formerly attested V12 model
+# without stopping either the API or the legacy runtime.  The ordinary health
+# scan cannot see that transition, so this observer reads one bounded in-process
+# projection.  It performs no model request and therefore stays cheap enough to
+# run at most a minute apart.
+_MODEL_GATE_ALERT_CODE = "v12_model_gate_revoked"
+_MODEL_GATE_STATE_KEY = "sentinel:v12_model_gate_watchdog"
+_MODEL_GATE_STATE_VERSION = 1
+_MODEL_GATE_WORKER_TIMEOUT_SEC = 5.0
+_MODEL_GATE_DEGRADED_STATUSES = frozenset({"revoked", "not_installed", "unavailable"})
+_MODEL_GATE_SAFE_REASONS = {
+    "attestation_rejected": "Контрольная аттестация модели отклонена",
+    "epoch_invalid": "Не удалось подтвердить идентичность процесса модели",
+    "epoch_changed": "Процесс модели изменился после аттестации",
+    "explicit_revocation": "Защитный контур отозвал допуск модели",
+    "live_attestation_failed": "Модель не прошла стартовую аттестацию",
+    "observer_unavailable": "Состояние защитного контура недоступно наблюдателю",
+}
+
 # Reading host diagnostics over HTTP needs this capability; a push carries the
 # same material, so it answers to the same gate. Otherwise the outbound channel
 # is a way *around* the permission model instead of a use of it.
@@ -207,6 +226,72 @@ def _mark_generation_healthy(ctx: ServiceContext) -> None:
         _write_generation_state(ctx, status="healthy")
 
 
+def _read_model_gate_state(ctx: ServiceContext) -> tuple[dict[str, Any], bool]:
+    empty: dict[str, Any] = {
+        "version": _MODEL_GATE_STATE_VERSION,
+        "status": "unknown",
+        "episode": "",
+    }
+    try:
+        raw = ctx.storage.kv_get(_MODEL_GATE_STATE_KEY)
+    except Exception as exc:  # noqa: BLE001 — observability cannot stop workers
+        LOGGER.error("sentinel: cannot read model-gate state (%s)", type(exc).__name__)
+        return empty, False
+    if raw is None:
+        return empty, True
+    try:
+        parsed = json.loads(str(raw))
+    except (TypeError, ValueError):
+        return empty, True
+    if not isinstance(parsed, dict):
+        return empty, True
+    status = str(parsed.get("status") or "")
+    episode = str(parsed.get("episode") or "")
+    if (
+        parsed.get("version") != _MODEL_GATE_STATE_VERSION
+        or status not in {"ready", "degraded"}
+        or (episode and (len(episode) != 32 or not all(char in "0123456789abcdef" for char in episode)))
+    ):
+        return empty, True
+    return {"version": _MODEL_GATE_STATE_VERSION, "status": status, "episode": episode}, True
+
+
+def _write_model_gate_state(ctx: ServiceContext, *, status: str, episode: str = "") -> bool:
+    try:
+        ctx.storage.kv_set(
+            _MODEL_GATE_STATE_KEY,
+            json.dumps(
+                {
+                    "version": _MODEL_GATE_STATE_VERSION,
+                    "status": status,
+                    "episode": episode,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 — fall back to daily dedup below
+        LOGGER.error("sentinel: cannot persist model-gate state (%s)", type(exc).__name__)
+        return False
+    return True
+
+
+def _open_model_gate_episode(ctx: ServiceContext) -> str:
+    state, available = _read_model_gate_state(ctx)
+    if not available:
+        return ""
+    if state["status"] == "degraded" and state["episode"]:
+        return str(state["episode"])
+    episode = uuid.uuid4().hex
+    return episode if _write_model_gate_state(ctx, status="degraded", episode=episode) else ""
+
+
+def _mark_model_gate_ready(ctx: ServiceContext) -> None:
+    state, available = _read_model_gate_state(ctx)
+    if available and state["status"] != "ready":
+        _write_model_gate_state(ctx, status="ready")
+
+
 def _alert_dedup_key(ctx: ServiceContext, action: dict[str, Any], *, day: str) -> str:
     code = str(action.get("code") or "issue")
     if code == "llm_not_generating":
@@ -214,6 +299,10 @@ def _alert_dedup_key(ctx: ServiceContext, action: dict[str, Any], *, day: str) -
         # persisted episode identity instead deduplicates only one continuous
         # outage and is shared by the fast probe and the full diagnostics scan.
         episode = _open_generation_episode(ctx)
+        if episode:
+            return f"sentinel:{code}:episode:{episode}"
+    if code == _MODEL_GATE_ALERT_CODE:
+        episode = _open_model_gate_episode(ctx)
         if episode:
             return f"sentinel:{code}:episode:{episode}"
     return f"sentinel:{code}:{day}"
@@ -340,6 +429,78 @@ async def watch_generation(ctx: ServiceContext) -> None:
     )
 
 
+async def watch_model_gate(ctx: ServiceContext) -> None:
+    """Notify the owner once per V12 gate-revocation episode.
+
+    Route-level legacy fallback is intentionally not an input.  Unsupported or
+    non-canary requests may fall back during healthy operation; only the public
+    model gate losing its attested state opens an incident.
+    """
+
+    settings = ctx.settings
+    mode = str(getattr(settings, "router_mode", "legacy") or "legacy").strip().casefold()
+    if not settings.sentinel_enabled:
+        return
+    if mode not in {"canary", "v12"}:
+        _mark_model_gate_ready(ctx)
+        return
+    provider = ctx.model_gate_status
+    if not callable(provider):
+        return
+    try:
+        snapshot = provider()
+    except Exception as exc:  # noqa: BLE001 — never expose a provider's private body
+        LOGGER.warning("sentinel: cannot observe model gate (%s)", type(exc).__name__)
+        return
+    if not isinstance(snapshot, Mapping):
+        return
+    status = str(snapshot.get("status") or "")
+    if status == "canary_ready":
+        _mark_model_gate_ready(ctx)
+        return
+    if status not in _MODEL_GATE_DEGRADED_STATUSES:
+        return
+    if not settings.telegram_effective_allowed_chat_ids:
+        return
+
+    now = local_now(settings)
+    if in_quiet_hours(now.hour, settings.quiet_hours_start, settings.quiet_hours_end):
+        return
+    # Only code-owned reason codes select text.  Unknown values are never
+    # interpolated, so a private transport/model error cannot cross this queue.
+    reason = _MODEL_GATE_SAFE_REASONS.get(
+        str(snapshot.get("reason_code") or ""),
+        "Причина не раскрыта безопасным наблюдателем",
+    )
+    if status == "unavailable":
+        title = "Sentinel не смог подтвердить состояние V12"
+        detail = (
+            f"На момент проверки Sentinel не смог подтвердить состояние V12-canary. {reason}. "
+            "Состояние могло измениться после постановки уведомления в очередь; "
+            "проверьте текущий публичный health-статус orchestration.model_gate."
+        )
+    else:
+        title = "Sentinel зафиксировал отключение V12"
+        detail = (
+            "На момент проверки Friday направляла поддерживаемые запросы через "
+            f"legacy-runtime, а V12-canary не участвовал. {reason}. "
+            "Состояние могло измениться после постановки уведомления в очередь; "
+            "проверьте текущий публичный health-статус orchestration.model_gate."
+        )
+    _enqueue_alerts(
+        ctx,
+        [
+            {
+                "code": _MODEL_GATE_ALERT_CODE,
+                "severity": "warning",
+                "title": title,
+                "detail": detail,
+            }
+        ],
+        day=now.date().isoformat(),
+    )
+
+
 async def scan_health(ctx: ServiceContext) -> None:
     settings = ctx.settings
     if not settings.sentinel_enabled:
@@ -412,6 +573,14 @@ class SentinelOrgan(Organ):
                 # have failed independently from the API process.
                 run_immediately=True,
                 timeout_sec=_GENERATION_WORKER_TIMEOUT_SEC,
+            ),
+            OrganWorker(
+                name="sentinel_model_gate_watch",
+                run=watch_model_gate,
+                interval_sec=min(60.0, float(ctx.settings.sentinel_generation_interval_sec)),
+                enabled=bool(ctx.settings.sentinel_enabled),
+                run_immediately=True,
+                timeout_sec=_MODEL_GATE_WORKER_TIMEOUT_SEC,
             ),
             OrganWorker(
                 name="sentinel_watch",

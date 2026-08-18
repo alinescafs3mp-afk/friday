@@ -6,8 +6,8 @@ small production adapter which closes those seams:
 
 * completions go through one existing :class:`LLMRouter` and require the
   server-reported response model to match exactly;
-* load samples come from the ``/metrics`` endpoint on that router's exact
-  origin, with redirects, proxy environment variables and unbounded bodies
+* load, process-info and deployment-witness samples come from bounded endpoints
+  on that router's exact origin, with redirects and proxy environment variables
   disabled; and
 * the cancellation probe owns an explicit router task which is cancelled and
   locally drained before it reports success.
@@ -30,7 +30,9 @@ import httpx
 
 from friday.agent_runtime.llm import LLMResponseModelMismatchError, LLMRouter
 from friday.model_probe import MAX_COMPLETION_CHARS
+from friday.model_profiles import v12_model_profile_for
 from friday.v12_model_runtime import (
+    MAX_DEPLOYMENT_WITNESS_BYTES,
     MAX_METRICS_BYTES,
     AttestedV12ModelRuntime,
     V12ServedAliasError,
@@ -320,10 +322,35 @@ def _models_url(router: LLMRouter) -> str:
     return urlunsplit(SplitResult(parsed.scheme, parsed.netloc, "/v1/models", "", ""))
 
 
-class RouterV12MetricsTransport:
-    """Bounded same-origin vLLM metrics transport."""
+def _server_info_url(router: LLMRouter) -> str:
+    parsed = urlsplit(_metrics_url(router))
+    return urlunsplit(SplitResult(parsed.scheme, parsed.netloc, "/server_info", "", ""))
 
-    __slots__ = ("_http_transport", "_metrics_endpoint", "_models_endpoint", "_router")
+
+def _deployment_witness_url(router: LLMRouter) -> str:
+    parsed = urlsplit(_metrics_url(router))
+    return urlunsplit(
+        SplitResult(
+            parsed.scheme,
+            parsed.netloc,
+            "/_friday/v1/deployment-witness",
+            "",
+            "",
+        )
+    )
+
+
+class RouterV12MetricsTransport:
+    """Bounded same-origin metrics, inventory and process-info transport."""
+
+    __slots__ = (
+        "_http_transport",
+        "_deployment_witness_endpoint",
+        "_metrics_endpoint",
+        "_models_endpoint",
+        "_router",
+        "_server_info_endpoint",
+    )
 
     def __init__(
         self,
@@ -334,6 +361,8 @@ class RouterV12MetricsTransport:
         self._router = _require_exact_router(router)
         self._metrics_endpoint = _metrics_url(router)
         self._models_endpoint = _models_url(router)
+        self._server_info_endpoint = _server_info_url(router)
+        self._deployment_witness_endpoint = _deployment_witness_url(router)
         self._http_transport = http_transport
 
     def __repr__(self) -> str:
@@ -433,6 +462,39 @@ class RouterV12MetricsTransport:
             accept="application/json",
         )
 
+    async def fetch_server_info(
+        self,
+        *,
+        maximum_bytes: int,
+        absolute_deadline: float,
+    ) -> bytes:
+        return await self._fetch_bounded(
+            self._server_info_endpoint,
+            maximum_bytes=maximum_bytes,
+            absolute_deadline=absolute_deadline,
+            accept="application/json",
+        )
+
+    async def fetch_deployment_witness(
+        self,
+        *,
+        maximum_bytes: int,
+        absolute_deadline: float,
+    ) -> bytes:
+        if (
+            isinstance(maximum_bytes, bool)
+            or not isinstance(maximum_bytes, int)
+            or maximum_bytes <= 0
+            or maximum_bytes > MAX_DEPLOYMENT_WITNESS_BYTES
+        ):
+            raise _error(V12ModelTransportFailure.METRICS_REJECTED)
+        return await self._fetch_bounded(
+            self._deployment_witness_endpoint,
+            maximum_bytes=maximum_bytes,
+            absolute_deadline=absolute_deadline,
+            accept="application/json",
+        )
+
 
 def create_attested_v12_model_runtime(
     router: LLMRouter,
@@ -449,6 +511,12 @@ def create_attested_v12_model_runtime(
     """
 
     exact_router = _require_exact_router(router)
+    profile = v12_model_profile_for(
+        exact_router.settings.profile.name,
+        exact_router.model,
+    )
+    if profile is None:
+        raise _error(V12ModelTransportFailure.COMPOSITION_REJECTED)
     completion = RouterV12CompletionTransport(exact_router)
     metrics = RouterV12MetricsTransport(
         exact_router,
@@ -459,6 +527,7 @@ def create_attested_v12_model_runtime(
             exact_router,
             completion,
             metrics,
+            profile=profile,
             sleeper=sleeper,
         )
     except asyncio.CancelledError:

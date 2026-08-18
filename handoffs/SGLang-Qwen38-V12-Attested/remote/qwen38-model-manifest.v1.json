@@ -1,0 +1,28 @@
+{
+  "schema": "friday.model-snapshot-manifest.v1",
+  "model_repository": "a2genesis/Qwen3.8-27B-NVFP4",
+  "model_revision": "bfd9b31207712e0850eec9da32261e8c5ee16af7",
+  "model_quantization": "W4A16_NVFP4",
+  "snapshot_directory": "qwen3.8-27b-nvfp4-a2genesis-bfd9b312",
+  "file_count": 17,
+  "total_bytes": 21952105742,
+  "files": [
+    {"path": ".gitattributes", "size": 1570, "sha256": "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930"},
+    {"path": "LICENSE", "size": 11544, "sha256": "bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a"},
+    {"path": "README.md", "size": 2039, "sha256": "2af90d7979ce9d844fa4787e9af6e3474ab859cb61cd24d2ec40d8881ccbdd36"},
+    {"path": "chat_template.jinja", "size": 8952, "sha256": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041"},
+    {"path": "config.json", "size": 88566, "sha256": "d862967ce8cf9dbc8764cb0a954b460c0f1fdaeaaf305fc5a44efe1ea6a989c6"},
+    {"path": "generation_config.json", "size": 213, "sha256": "7ae9e193dbcef99733ccf647c95ef668c35d1a80a8aa88a51ee40a9bcacf5a74"},
+    {"path": "hf_quant_config.json", "size": 54902, "sha256": "fd7200cd8bca2a8a5d777061521abf83e2deb97ab6bc2f04e7a0a3d3f8ecd5c1"},
+    {"path": "merges.txt", "size": 3353259, "sha256": "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d"},
+    {"path": "model-00001-of-00003.safetensors", "size": 9965644108, "sha256": "d8e0c0fe34d1e4b18d8bb6179a6f2e8afdbfbfe4209cff82c421a62fdc9fce1d"},
+    {"path": "model-00002-of-00003.safetensors", "size": 9985743924, "sha256": "d3c924769139318273f15e3c1e11f6756824e53b19ac21e1c2096660b62d0be1"},
+    {"path": "model-00003-of-00003.safetensors", "size": 1970286924, "sha256": "cc15219d7c2a24befb611e99a9b1e9217db0a51eac3494d98c29bdf6a2bacc33"},
+    {"path": "model.safetensors.index.json", "size": 195761, "sha256": "681bffb4ef4302e445ca476665c34a2a2d6c5c0736d9363170504c9f41c588b5"},
+    {"path": "preprocessor_config.json", "size": 390, "sha256": "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516"},
+    {"path": "tokenizer.json", "size": 19989325, "sha256": "06b9509352d2af50381ab2247e083b80d32d5c0aba91c272ca9ff729b6a0e523"},
+    {"path": "tokenizer_config.json", "size": 1121, "sha256": "e5d078b00e6c1223b32444db8c1001dc71d86ceef8ee706b5bf084c3a43a1f9c"},
+    {"path": "video_preprocessor_config.json", "size": 385, "sha256": "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13"},
+    {"path": "vocab.json", "size": 6722759, "sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003"}
+  ]
+}

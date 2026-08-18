@@ -224,18 +224,25 @@ async def test_metrics_are_same_origin_authenticated_and_bounded(settings) -> No
         maximum_bytes=1024,
         absolute_deadline=time.monotonic() + 1.0,
     )
+    witness = await transport.fetch_deployment_witness(
+        maximum_bytes=8192,
+        absolute_deadline=time.monotonic() + 1.0,
+    )
 
     assert result == body
     assert inventory == body
-    assert len(observed) == 2
+    assert witness == body
+    assert len(observed) == 3
     assert str(observed[0].url) == "http://127.0.0.1:8001/metrics"
     assert str(observed[1].url) == "http://127.0.0.1:8001/v1/models"
+    assert str(observed[2].url) == "http://127.0.0.1:8001/_friday/v1/deployment-witness"
     assert all(
         request.headers["authorization"] == "Bearer private-v12-key"
         and request.headers["accept-encoding"] == "identity"
         for request in observed
     )
     assert observed[1].headers["accept"] == "application/json"
+    assert observed[2].headers["accept"] == "application/json"
     assert transport.bound_router is router
 
 
@@ -283,6 +290,30 @@ async def test_metrics_reject_declared_or_streamed_oversize(settings) -> None:
             absolute_deadline=time.monotonic() + 1.0,
         )
     assert captured.value.code is V12ModelTransportFailure.METRICS_REJECTED
+
+
+@pytest.mark.asyncio
+async def test_deployment_witness_transport_has_hard_8k_bound(settings) -> None:
+    router = _router(settings)
+    calls = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, content=b"unreachable")
+
+    transport = RouterV12MetricsTransport(
+        router,
+        http_transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(V12ModelTransportError) as captured:
+        await transport.fetch_deployment_witness(
+            maximum_bytes=8_193,
+            absolute_deadline=time.monotonic() + 1.0,
+        )
+
+    assert captured.value.code is V12ModelTransportFailure.METRICS_REJECTED
+    assert calls == 0
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,698 @@
+[CmdletBinding()]
+param(
+    [switch]$Execute,
+    [switch]$PreflightOnly
+)
+
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+. (Join-Path $PSScriptRoot 'AttestedBundle.Common.ps1')
+
+if ($Execute -and $PreflightOnly) {
+    throw 'Choose either -Execute or -PreflightOnly.'
+}
+
+$journalPath = Join-Path $PSScriptRoot ("switch-attested-{0}.jsonl" -f [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'))
+$lock = $null
+$apiKey = $null
+$mutationStarted = $false
+$switchSucceeded = $false
+$stage = 'initial'
+$receipt = $null
+$stableEngine = $null
+$stableProxy = $null
+$stableEngineId = ''
+$stableProxyId = ''
+$candidateEngineId = ''
+$candidateProxyId = ''
+$engineConfig = $null
+$proxyConfig = $null
+
+function Write-Journal([string]$State, [hashtable]$Data = @{}) {
+    $record = [ordered]@{ at_utc = [DateTime]::UtcNow.ToString('o'); state = $State }
+    foreach ($entry in $Data.GetEnumerator()) { $record[$entry.Key] = $entry.Value }
+    try {
+        ($record | ConvertTo-Json -Compress) | Add-Content -LiteralPath $journalPath -Encoding utf8
+    }
+    catch {
+        if (-not $mutationStarted) { throw }
+    }
+}
+
+function Save-State {
+    $value = [ordered]@{
+        schema = 'friday.attested-switch-state.v1'
+        profile_id = $script:Attested.ProfileId
+        stable_engine_id = $stableEngineId
+        stable_proxy_id = $stableProxyId
+        stable_engine_image_id = $script:Attested.StableEngineImageId
+        stable_proxy_image_id = $script:Attested.StableProxyImageId
+        stable_engine_restart = Get-RestartSpec $stableEngine
+        stable_proxy_restart = Get-RestartSpec $stableProxy
+        candidate_engine_id = $(if ($candidateEngineId) { $candidateEngineId } else { $null })
+        candidate_proxy_id = $(if ($candidateProxyId) { $candidateProxyId } else { $null })
+        candidate_engine_image_id = [string]$receipt.engine.image_id
+        candidate_proxy_image_id = [string]$receipt.proxy.image_id
+        key_sha256 = Get-KeyHash $apiKey
+        written_at_utc = [DateTime]::UtcNow.ToString('o')
+    }
+    Write-AtomicJson $value $script:Attested.StatePath
+}
+
+function Get-HttpStatus(
+    [string]$Method,
+    [string]$Path,
+    [hashtable]$Headers = @{}
+) {
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Method $Method `
+            -Uri ("http://127.0.0.1:8001" + $Path) -Headers $Headers -TimeoutSec 10
+        return [int]$response.StatusCode
+    }
+    catch {
+        if ($null -ne $_.Exception.Response) {
+            return [int]$_.Exception.Response.StatusCode
+        }
+        throw 'Negative-path request failed without an HTTP response'
+    }
+}
+
+function Assert-ProxyNegativePaths([hashtable]$Headers) {
+    if ((Get-HttpStatus 'GET' '/health') -ne 200 -or
+        (Get-HttpStatus 'POST' '/health') -ne 405 -or
+        (Get-HttpStatus 'GET' '/v1/models') -ne 401 -or
+        (Get-HttpStatus 'GET' '/v1/models' @{ Authorization = 'Bearer definitely-wrong-key' }) -ne 401 -or
+        (Get-HttpStatus 'POST' '/v1/models' $Headers) -ne 405 -or
+        (Get-HttpStatus 'GET' '/v1/models/' $Headers) -ne 404 -or
+        (Get-HttpStatus 'POST' '/v1/chat/completions') -ne 401 -or
+        (Get-HttpStatus 'GET' '/v1/chat/completions' $Headers) -ne 405 -or
+        (Get-HttpStatus 'GET' '/metrics') -ne 401 -or
+        (Get-HttpStatus 'POST' '/metrics' $Headers) -ne 405 -or
+        (Get-HttpStatus 'GET' '/server_info') -ne 401 -or
+        (Get-HttpStatus 'POST' '/server_info' $Headers) -ne 405 -or
+        (Get-HttpStatus 'GET' '/server_info/') -ne 404 -or
+        (Get-HttpStatus 'GET' '/openapi.json' $Headers) -ne 404 -or
+        (Get-HttpStatus 'GET' '/v1/files' $Headers) -ne 404 -or
+        (Get-HttpStatus 'GET' '/_friday/v1/deployment-witness') -ne 401 -or
+        (Get-HttpStatus 'GET' '/_friday/v1/deployment-witness' @{ Authorization = 'Bearer definitely-wrong-key' }) -ne 401 -or
+        (Get-HttpStatus 'POST' '/_friday/v1/deployment-witness' $Headers) -ne 405 -or
+        (Get-HttpStatus 'GET' '/_friday/v1/deployment-witness/extra' $Headers) -ne 404) {
+        throw 'Closed proxy allowlist negative-path matrix failed'
+    }
+}
+
+function Wait-OldWitnessAbsent([hashtable]$Headers, [int]$TimeoutSeconds = 90) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $status = $null
+        try {
+            $status = Get-HttpStatus 'GET' '/_friday/v1/deployment-witness' $Headers
+        }
+        catch {
+            # nginx may need a moment to bind after the exact proxy container starts.
+            Start-Sleep -Seconds 1
+            continue
+        }
+        if ($status -eq 404) { return }
+        if ($status -notin @(200, 502, 503, 504)) {
+            throw 'Witness disappearance probe returned an unexpected HTTP status'
+        }
+        Start-Sleep -Seconds 1
+    }
+    throw 'Old deployment witness was never observed absent during engine restart'
+}
+
+function Invoke-Chat([hashtable]$Headers, [hashtable]$Body, [int]$TimeoutSeconds, [string]$Gate) {
+    try {
+        $bytes = [Text.Encoding]::UTF8.GetBytes(($Body | ConvertTo-Json -Depth 20 -Compress))
+        $response = Invoke-WebRequest -UseBasicParsing -Method Post `
+            -Uri 'http://127.0.0.1:8001/v1/chat/completions' -Headers $Headers `
+            -ContentType 'application/json; charset=utf-8' -Body $bytes -TimeoutSec $TimeoutSeconds
+        return [string]$response.Content | ConvertFrom-Json
+    }
+    catch {
+        $status = 0
+        if ($null -ne $_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+        Write-Journal 'request_failed' @{ gate = $Gate; status_code = $status }
+        throw "Candidate request failed at $Gate"
+    }
+}
+
+function Assert-ComposeConfig([object]$Value, [object]$BuildReceipt, [string]$KeyHash) {
+    $services = @($Value.services.PSObject.Properties.Name | Sort-Object)
+    if ([string]::Join(',', $services) -cne 'engine,proxy') {
+        throw 'Attested Compose must render exactly two sibling services'
+    }
+    $networks = @($Value.networks.PSObject.Properties.Name | Sort-Object)
+    $volumes = @($Value.volumes.PSObject.Properties.Name | Sort-Object)
+    if ([string]::Join(',', $networks) -cne 'attested' -or
+        [string]::Join(',', $volumes) -cne 'deployment-witness,model-snapshot' -or
+        [string]$Value.volumes.'model-snapshot'.name -cne $script:Attested.ModelVolumeName -or
+        -not [bool]$Value.volumes.'model-snapshot'.external) {
+        throw 'Attested Compose network or sealed external volume contract changed'
+    }
+    $script:engineConfig = $Value.services.engine
+    $script:proxyConfig = $Value.services.proxy
+    if ([string]$engineConfig.container_name -cne $script:Attested.CandidateEngineName -or
+        [string]$proxyConfig.container_name -cne $script:Attested.CandidateProxyName -or
+        [string]$engineConfig.image -cne [string]$BuildReceipt.engine.image_id -or
+        [string]$proxyConfig.image -cne [string]$BuildReceipt.proxy.image_id -or
+        [string]$engineConfig.pull_policy -cne 'never' -or
+        [string]$proxyConfig.pull_policy -cne 'never' -or
+        [string]$engineConfig.restart -cne 'no' -or [string]$proxyConfig.restart -cne 'no' -or
+        [string]$engineConfig.labels.'com.friday.deployment.engine-image-id' -cne [string]$BuildReceipt.engine.image_id -or
+        [string]$engineConfig.labels.'com.friday.deployment.proxy-image-id' -cne [string]$BuildReceipt.proxy.image_id -or
+        [string]$proxyConfig.labels.'com.friday.deployment.proxy-image-id' -cne [string]$BuildReceipt.proxy.image_id -or
+        [string]$proxyConfig.labels.'com.friday.proxy.openai-key-sha256' -cne $KeyHash -or
+        [string]$proxyConfig.environment.SGLANG_UPSTREAM -cne 'engine') {
+        throw 'Rendered attested Compose identities are not exact'
+    }
+    Assert-ExactCommand ([pscustomobject]@{ Config = [pscustomobject]@{ Cmd = @($engineConfig.command) } }) `
+        $script:ExpectedGraphCommand 'rendered candidate engine'
+    $enginePorts = @(if ($null -ne $engineConfig.PSObject.Properties['ports']) { $engineConfig.ports })
+    $proxyPorts = @(if ($null -ne $proxyConfig.PSObject.Properties['ports']) { $proxyConfig.ports })
+    if ($enginePorts.Count -ne 0 -or $proxyPorts.Count -ne 0) {
+        throw 'Base candidate Compose must not publish a host port'
+    }
+    $modelMounts = @($engineConfig.volumes | Where-Object {
+        [string]$_.target -ceq '/models/qwen3.8-27b-nvfp4-a2genesis-bfd9b312'
+    })
+    if ($modelMounts.Count -ne 1 -or [string]$modelMounts[0].type -cne 'volume' -or
+        [string]$modelMounts[0].source -cne 'model-snapshot' -or
+        -not [bool]$modelMounts[0].read_only) {
+        throw 'Rendered candidate model mount is not the exact sealed read-only volume'
+    }
+    foreach ($forbidden in @('privileged', 'pid', 'network_mode')) {
+        if ($null -ne $engineConfig.PSObject.Properties[$forbidden] -or
+            $null -ne $proxyConfig.PSObject.Properties[$forbidden]) {
+            throw 'Attested Compose isolation was broadened'
+        }
+    }
+    if ([string]$engineConfig.security_opt[0] -cne 'no-new-privileges:true' -or
+        [string]$proxyConfig.security_opt[0] -cne 'no-new-privileges:true' -or
+        [string]::Join(',', @($proxyConfig.cap_drop)) -cne 'ALL' -or
+        [string]::Join(',', @($proxyConfig.cap_add | Sort-Object)) -cne 'CHOWN,DAC_OVERRIDE,SETGID,SETUID') {
+        throw 'Attested container hardening changed'
+    }
+}
+
+function Assert-CurrentEndpoint([hashtable]$Headers) {
+    $models = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8001/v1/models' -Headers $Headers -TimeoutSec 10
+    $payload = [string]$models.Content | ConvertFrom-Json
+    if (@($payload.data).Count -ne 1 -or [string]$payload.data[0].id -cne 'dispatcher') {
+        throw 'Stable dispatcher model inventory is not exact'
+    }
+    $info = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8001/server_info' -Headers $Headers -TimeoutSec 10
+    Assert-ServerInfo ([string]$info.Content | ConvertFrom-Json)
+    $null = Get-EndpointMetrics $Headers
+    if ((Get-HttpStatus 'GET' '/_friday/v1/deployment-witness' $Headers) -ne 404) {
+        throw 'Stable graph unexpectedly exposes the new attested witness path'
+    }
+}
+
+function Restore-Stable {
+    Write-Journal 'automatic_rollback_started' @{ failed_stage = $stage }
+    $candidateProxy = Get-Container $script:Attested.CandidateProxyName
+    $candidateEngine = Get-Container $script:Attested.CandidateEngineName
+    if ($null -ne $candidateProxy) {
+        if (-not $candidateProxyId -or [string]$candidateProxy.Id -cne $candidateProxyId -or
+            [string]$candidateProxy.Image -cne [string]$receipt.proxy.image_id) {
+            throw 'Refusing to stop a non-attested proxy during automatic rollback'
+        }
+        Stop-ExactContainer $candidateProxy 45
+    }
+    if ($null -ne $candidateEngine) {
+        if (-not $candidateEngineId -or [string]$candidateEngine.Id -cne $candidateEngineId -or
+            [string]$candidateEngine.Image -cne [string]$receipt.engine.image_id) {
+            throw 'Refusing to stop a non-attested engine during automatic rollback'
+        }
+        if ([bool]$candidateEngine.State.Running) {
+            try { Wait-EngineIdle $script:Attested.CandidateEngineName 90 }
+            catch { Write-Journal 'candidate_drain_failed' @{ continuing_exact_stop = $true } }
+        }
+        Stop-ExactContainer $candidateEngine 90
+    }
+    $stableEngineNow = Get-Container $script:Attested.StableEngineName
+    $stableProxyNow = Get-Container $script:Attested.StableProxyName
+    if ($null -eq $stableEngineNow -or $null -eq $stableProxyNow -or
+        [string]$stableEngineNow.Id -cne $stableEngineId -or [string]$stableProxyNow.Id -cne $stableProxyId) {
+        throw 'Preserved stable container identities changed during rollback'
+    }
+    Assert-StableGraph $stableEngineNow $stableProxyNow (Get-KeyHash $apiKey)
+    if (-not [bool]$stableEngineNow.State.Running) {
+        $null = Wait-GpuRelease 180
+    }
+    Set-RestartPolicy $stableEngineId (Get-RestartSpec $stableEngine)
+    Set-RestartPolicy $stableProxyId (Get-RestartSpec $stableProxy)
+    $stableEngineNow = Get-Container $script:Attested.StableEngineName
+    $stableProxyNow = Get-Container $script:Attested.StableProxyName
+    if ([string]$stableEngineNow.Id -cne $stableEngineId -or
+        [string]$stableProxyNow.Id -cne $stableProxyId -or
+        (Get-RestartSpec $stableEngineNow) -cne (Get-RestartSpec $stableEngine) -or
+        (Get-RestartSpec $stableProxyNow) -cne (Get-RestartSpec $stableProxy)) {
+        throw 'Stable restart policies were not restored exactly'
+    }
+    if (-not [bool]$stableEngineNow.State.Running) {
+        & docker start $stableEngineId | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Could not restart preserved stable engine' }
+    }
+    $stableEngineNow = Wait-Healthy $script:Attested.StableEngineName 900
+    $stableProxyNow = Get-Container $script:Attested.StableProxyName
+    if (-not [bool]$stableProxyNow.State.Running) {
+        & docker start $stableProxyId | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Could not restart preserved stable proxy' }
+    }
+    $stableProxyNow = Wait-Healthy $script:Attested.StableProxyName 180
+    Assert-StableGraph $stableEngineNow $stableProxyNow (Get-KeyHash $apiKey)
+    $headers = @{ Authorization = "Bearer $apiKey" }
+    Assert-CurrentEndpoint $headers
+    Assert-SolePublisher $script:Attested.StableProxyName
+    Assert-Sidecars
+    Write-Journal 'automatic_rollback_complete' @{
+        stable_engine_id = $stableEngineId.Substring(0, 12)
+        stable_proxy_id = $stableProxyId.Substring(0, 12)
+    }
+}
+
+function Invoke-SixWayProbe([string]$Secret) {
+    $client = [Net.Http.HttpClient]::new()
+    try {
+        $client.Timeout = [TimeSpan]::FromSeconds(180)
+        $client.DefaultRequestHeaders.Authorization = [Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', $Secret)
+        $tasks = @()
+        for ($index = 1; $index -le 6; $index += 1) {
+            $body = [ordered]@{
+                model = 'dispatcher'
+                messages = @(@{ role = 'user'; content = "Reply with one word: READY$index" })
+                max_tokens = 24
+                temperature = 0.0
+                seed = 205000 + $index
+                stream = $false
+                chat_template_kwargs = @{ enable_thinking = $false }
+            } | ConvertTo-Json -Depth 10 -Compress
+            $content = [Net.Http.StringContent]::new($body, [Text.Encoding]::UTF8, 'application/json')
+            $tasks += $client.PostAsync('http://127.0.0.1:8001/v1/chat/completions', $content)
+        }
+        $all = [Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]$tasks)
+        if (-not $all.Wait(180000)) { throw 'Six-way request probe timed out' }
+        foreach ($response in $tasks | ForEach-Object { $_.Result }) {
+            if ([int]$response.StatusCode -ne 200) { throw 'Six-way request probe returned non-200' }
+            $payload = $response.Content.ReadAsStringAsync().Result | ConvertFrom-Json
+            if ([string]$payload.model -cne 'dispatcher' -or @($payload.choices).Count -ne 1 -or
+                [string]::IsNullOrWhiteSpace([string]$payload.choices[0].message.content)) {
+                throw 'Six-way response contract is invalid'
+            }
+        }
+    }
+    finally {
+        $client.Dispose()
+    }
+}
+
+try {
+    $stage = 'lock'
+    $lockDirectory = Split-Path -Parent $script:Attested.LockPath
+    if (-not (Test-Path -LiteralPath $lockDirectory -PathType Container)) {
+        throw 'Shared switch-lock directory is absent'
+    }
+    $lock = [IO.File]::Open($script:Attested.LockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    Write-Journal 'preflight_started'
+
+    $stage = 'build_receipt'
+    $receipt = Assert-BuildReceipt
+    Assert-ModelSnapshot
+    $modelVolumeStatus = Assert-ModelVolumePreflight $receipt
+
+    $stage = 'stable_identity'
+    $stableEngine = Get-Container $script:Attested.StableEngineName
+    $stableProxy = Get-Container $script:Attested.StableProxyName
+    if ($null -eq $stableEngine -or $null -eq $stableProxy -or
+        -not [bool]$stableEngine.State.Running -or -not [bool]$stableProxy.State.Running -or
+        [string]$stableEngine.State.Health.Status -cne 'healthy' -or
+        [string]$stableProxy.State.Health.Status -cne 'healthy') {
+        throw 'Exact stable graph pair is not healthy'
+    }
+    $stableEngineId = [string]$stableEngine.Id
+    $stableProxyId = [string]$stableProxy.Id
+    $apiKey = Get-EnvValue $stableProxy 'JARVIS_LLM_API_KEY'
+    if ($apiKey -cnotmatch '^[A-Za-z0-9._~-]{32,256}$') { throw 'Dispatcher API key shape is not safe' }
+    $keyHash = Get-KeyHash $apiKey
+    Assert-StableGraph $stableEngine $stableProxy $keyHash
+    Assert-SolePublisher $script:Attested.StableProxyName
+    foreach ($name in @($script:Attested.CandidateEngineName, $script:Attested.CandidateProxyName)) {
+        if ($null -ne (Get-Container $name)) { throw 'A sibling candidate container already exists' }
+    }
+    Assert-Sidecars
+
+    $stage = 'compose_render'
+    $env:JARVIS_LLM_API_KEY = $apiKey
+    $env:JARVIS_LLM_API_KEY_SHA256 = $keyHash
+    $env:JARVIS_QWEN38_ATTESTED_CACHE_HOST_PATH = $script:Attested.CachePath.Replace('\', '/')
+    $env:JARVIS_OPENAI_BIND_ADDRESS = '0.0.0.0'
+    $rendered = Invoke-Compose $receipt @('config', '--format', 'json')
+    $compose = [string]::Join([Environment]::NewLine, $rendered) | ConvertFrom-Json
+    Assert-ComposeConfig $compose $receipt $keyHash
+    $publishedRendered = Invoke-Compose $receipt @('config', '--format', 'json') -Publish8001
+    $published = [string]::Join([Environment]::NewLine, $publishedRendered) | ConvertFrom-Json
+    $ports = @($published.services.proxy.ports)
+    if ($ports.Count -ne 1 -or [int]$ports[0].published -ne 8001 -or [int]$ports[0].target -ne 8080 -or
+        [string]$ports[0].protocol -cne 'tcp') {
+        throw 'Publish override is not exact port 8001 to 8080'
+    }
+
+    $stage = 'stable_endpoint'
+    $headers = @{ Authorization = "Bearer $apiKey" }
+    Assert-CurrentEndpoint $headers
+    Write-Journal 'preflight_clear' @{
+        stable_engine_id = $stableEngineId.Substring(0, 12)
+        stable_proxy_id = $stableProxyId.Substring(0, 12)
+        candidate_engine_image_id = [string]$receipt.engine.image_id
+        candidate_proxy_image_id = [string]$receipt.proxy.image_id
+    }
+    if (-not $Execute) {
+        [pscustomobject]@{
+            status = 'preflight_clear'
+            mutation_authorized = $false
+            stable = 'qwen3.8-sglang-graph'
+            candidate = 'qwen38-v12-attested'
+            profile_id = $script:Attested.ProfileId
+            context_length = 40960
+            max_running_requests = 6
+            decode_cuda_graphs = 'full-bs1-6'
+            sealed_model_volume = $modelVolumeStatus
+            stable_untouched = $true
+            backend_bridge_untouched = $true
+        } | ConvertTo-Json -Compress
+        return
+    }
+
+    $stage = 'sealed_model_volume'
+    try {
+        Ensure-AttestedModelVolume $receipt
+    }
+    catch {
+        $cleanup = [string]$_.Exception.Data['new_model_volume_cleanup']
+        if ($cleanup -notin @('not_applicable', 'removed_exact_new_volume', 'failed_closed')) {
+            $cleanup = 'failed_closed'
+        }
+        Write-Journal 'sealed_model_volume_failed' @{ new_volume_cleanup = $cleanup }
+        throw
+    }
+    Write-Journal 'sealed_model_volume_verified' @{ volume = $script:Attested.ModelVolumeName }
+
+    $stage = 'state_seal'
+    Save-State
+
+    $stage = 'stable_drain'
+    Wait-EndpointIdle $headers 120
+    Write-Journal 'stable_endpoint_drained'
+    $mutationStarted = $true
+
+    $stage = 'stable_proxy_stop'
+    Stop-ExactContainer $stableProxy 45
+    Wait-EngineIdle $script:Attested.StableEngineName 120
+
+    $stage = 'stable_engine_stop'
+    Stop-ExactContainer $stableEngine 90
+    $null = Wait-GpuRelease 180
+    Write-Journal 'stable_preserved_stopped' @{
+        engine_id = $stableEngineId.Substring(0, 12)
+        proxy_id = $stableProxyId.Substring(0, 12)
+    }
+
+    $stage = 'candidate_engine_start'
+    try {
+        $null = Invoke-Compose $receipt @('up', '-d', '--no-deps', '--pull', 'never', 'engine')
+    }
+    finally {
+        $created = Get-Container $script:Attested.CandidateEngineName
+        if ($null -ne $created) { $candidateEngineId = [string]$created.Id; Save-State }
+    }
+    $candidateEngine = Wait-Healthy $script:Attested.CandidateEngineName 1200
+    if ([string]$candidateEngine.Id -cne $candidateEngineId -or (Get-RestartSpec $candidateEngine) -cne 'no') {
+        throw 'Candidate engine identity changed during startup'
+    }
+    Assert-CandidateContainers $candidateEngine $null $receipt $keyHash
+    Assert-FatalFree $candidateEngine
+    $null = Assert-GpuHeadroom
+
+    $stage = 'candidate_proxy_start'
+    try {
+        $null = Invoke-Compose $receipt @('up', '-d', '--no-deps', '--pull', 'never', 'proxy') -Publish8001
+    }
+    finally {
+        $created = Get-Container $script:Attested.CandidateProxyName
+        if ($null -ne $created) { $candidateProxyId = [string]$created.Id; Save-State }
+    }
+    $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 180
+    if ([string]$candidateProxy.Id -cne $candidateProxyId -or (Get-RestartSpec $candidateProxy) -cne 'no') {
+        throw 'Candidate proxy identity changed during startup'
+    }
+    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash
+    Assert-SolePublisher $script:Attested.CandidateProxyName
+
+    $stage = 'proxy_negative_paths'
+    Assert-ProxyNegativePaths $headers
+
+    $stage = 'identity_witness'
+    $models = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8001/v1/models' -Headers $headers -TimeoutSec 10
+    $modelsPayload = [string]$models.Content | ConvertFrom-Json
+    if (@($modelsPayload.data).Count -ne 1 -or [string]$modelsPayload.data[0].id -cne 'dispatcher') {
+        throw 'Candidate model inventory is not exact'
+    }
+    $serverInfoResponse = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8001/server_info' -Headers $headers -TimeoutSec 10
+    $serverInfo = [string]$serverInfoResponse.Content | ConvertFrom-Json
+    Assert-ServerInfo $serverInfo
+    $witnessResponse1 = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8001/_friday/v1/deployment-witness' -Headers $headers -TimeoutSec 10
+    $witnessRaw1 = [string]$witnessResponse1.Content
+    $witnessResponse2 = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8001/_friday/v1/deployment-witness' -Headers $headers -TimeoutSec 10
+    $witnessRaw2 = [string]$witnessResponse2.Content
+    if ([Text.Encoding]::UTF8.GetByteCount($witnessRaw1) -gt 8192 -or $witnessRaw1 -cne $witnessRaw2) {
+        throw 'Deployment witness is oversized or changed within one process'
+    }
+    $witness = $witnessRaw1 | ConvertFrom-Json
+    Assert-DeploymentWitness $witness $serverInfo $receipt
+    $metrics = Get-EndpointMetrics $headers
+    if ($metrics.Running -ne 0 -or $metrics.Queued -ne 0) { throw 'Candidate is not idle before acceptance' }
+    $null = Assert-GpuHeadroom
+
+    $stage = 'text_schema'
+    $schemaBody = @{
+        model = 'dispatcher'
+        messages = @(@{ role = 'user'; content = 'Return status ok and count 2 in the required JSON object.' })
+        max_tokens = 48
+        temperature = 0.0
+        stream = $false
+        chat_template_kwargs = @{ enable_thinking = $false }
+        response_format = @{
+            type = 'json_schema'
+            json_schema = @{
+                name = 'attested_health_probe'
+                strict = $true
+                schema = @{
+                    type = 'object'
+                    properties = @{
+                        status = @{ type = 'string'; enum = @('ok') }
+                        count = @{ type = 'integer'; enum = @(2) }
+                    }
+                    required = @('status', 'count')
+                    additionalProperties = $false
+                }
+            }
+        }
+    }
+    $schemaResponse = Invoke-Chat $headers $schemaBody 120 'text_schema'
+    $schemaValue = [string]$schemaResponse.choices[0].message.content | ConvertFrom-Json
+    if ([string]$schemaResponse.model -cne 'dispatcher' -or [string]$schemaValue.status -cne 'ok' -or
+        [int]$schemaValue.count -ne 2 -or @($schemaValue.PSObject.Properties).Count -ne 2) {
+        throw 'Text/JSON-schema acceptance failed'
+    }
+
+    $stage = 'six_way'
+    Invoke-SixWayProbe $apiKey
+    Wait-EndpointIdle $headers 180
+    $null = Assert-GpuHeadroom
+
+    $stage = 'long_context'
+    $longBody = @{
+        model = 'dispatcher'
+        messages = @(@{ role = 'user'; content = ((-join (' z' * 34000)) + ' End marker. Explain in at least 100 words that the marker was present.') })
+        max_tokens = 192
+        temperature = 0.2
+        stream = $false
+        chat_template_kwargs = @{ enable_thinking = $false }
+    }
+    $longResponse = Invoke-Chat $headers $longBody 300 'long_context'
+    $longTokens = [int]$longResponse.usage.prompt_tokens
+    if ($longTokens -lt 32000 -or $longTokens -gt 40000 -or
+        [int]$longResponse.usage.completion_tokens -lt 32 -or
+        [string]::IsNullOrWhiteSpace([string]$longResponse.choices[0].message.content)) {
+        throw '40K context acceptance did not exercise the required window'
+    }
+    $null = Assert-GpuHeadroom
+
+    $stage = 'image'
+    $probePng = 'iVBORw0KGgoAAAANSUhEUgAAABwAAAAcCAIAAAD9b0jDAAAAI0lEQVR42u3MsQ0AAAjAoP7/tD7hJgkzTZ1LKpVKpVKp9Ee6DsoNHtgm0ZUAAAAASUVORK5CYII='
+    $imageBody = @{
+        model = 'dispatcher'
+        messages = @(@{
+            role = 'user'
+            content = @(
+                @{ type = 'text'; text = 'State one visible property of this synthetic test image.' },
+                @{ type = 'image_url'; image_url = @{ url = "data:image/png;base64,$probePng" } }
+            )
+        })
+        max_tokens = 48
+        temperature = 0.0
+        stream = $false
+        chat_template_kwargs = @{ enable_thinking = $false }
+    }
+    $imageResponse = Invoke-Chat $headers $imageBody 180 'image'
+    if ([string]$imageResponse.model -cne 'dispatcher' -or
+        [string]::IsNullOrWhiteSpace([string]$imageResponse.choices[0].message.content) -or
+        -not [string]::IsNullOrWhiteSpace([string]$imageResponse.choices[0].message.reasoning_content)) {
+        throw 'Synthetic image acceptance failed'
+    }
+
+    $stage = 'soak'
+    Start-Sleep -Seconds 60
+    $candidateEngine = Wait-Healthy $script:Attested.CandidateEngineName 30
+    $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 30
+    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash
+    Assert-FatalFree $candidateEngine
+    $gpu = Assert-GpuHeadroom
+    $witnessAfter = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8001/_friday/v1/deployment-witness' -Headers $headers -TimeoutSec 10
+    if ([string]$witnessAfter.Content -cne $witnessRaw1) { throw 'Process witness changed during soak' }
+    Assert-Sidecars
+    Assert-SolePublisher $script:Attested.CandidateProxyName
+
+    $stage = 'epoch_restart_drain'
+    Wait-EndpointIdle $headers 120
+    Stop-ExactContainer $candidateProxy 45
+    Wait-EngineIdle $script:Attested.CandidateEngineName 120
+    Stop-ExactContainer $candidateEngine 90
+    $null = Wait-GpuRelease 180
+
+    $stage = 'epoch_restart_engine'
+    & docker start $candidateEngineId | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not restart exact candidate engine for epoch rehearsal' }
+    $candidateEngine = Get-Container $script:Attested.CandidateEngineName
+    if ($null -eq $candidateEngine -or [string]$candidateEngine.Id -cne $candidateEngineId) {
+        throw 'Candidate engine identity changed during epoch rehearsal'
+    }
+
+    # The witness volume is shared only with the closed proxy.  Start that same
+    # exact proxy briefly while the wrapper re-hashes the model and require a
+    # 404 before the new witness appears.  This proves the old epoch is not
+    # carried across the exec boundary.
+    $stage = 'epoch_old_witness_disappearance'
+    & docker start $candidateProxyId | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not start exact proxy for witness disappearance proof' }
+    Wait-OldWitnessAbsent $headers 90
+    $candidateProxy = Get-Container $script:Attested.CandidateProxyName
+    if ($null -eq $candidateProxy -or [string]$candidateProxy.Id -cne $candidateProxyId) {
+        throw 'Candidate proxy identity changed during epoch rehearsal'
+    }
+    Stop-ExactContainer $candidateProxy 45
+
+    $stage = 'epoch_restart_health'
+    $candidateEngine = Wait-Healthy $script:Attested.CandidateEngineName 1200
+    Assert-CandidateContainers $candidateEngine $null $receipt $keyHash
+    Assert-FatalFree $candidateEngine
+    $null = Assert-GpuHeadroom
+    & docker start $candidateProxyId | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not restart exact candidate proxy after epoch rehearsal' }
+    $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 180
+    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash
+    Assert-SolePublisher $script:Attested.CandidateProxyName
+    Assert-ProxyNegativePaths $headers
+
+    $stage = 'epoch_rotation_proof'
+    $serverInfoAfter = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8001/server_info' -Headers $headers -TimeoutSec 10
+    $serverInfo2 = [string]$serverInfoAfter.Content | ConvertFrom-Json
+    Assert-ServerInfo $serverInfo2
+    $witnessAfterRestart = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8001/_friday/v1/deployment-witness' -Headers $headers -TimeoutSec 10
+    $witnessRaw2 = [string]$witnessAfterRestart.Content
+    if ($witnessRaw2 -ceq $witnessRaw1) {
+        throw 'Engine restart did not rotate the canonical process witness'
+    }
+    $witness2 = $witnessRaw2 | ConvertFrom-Json
+    Assert-DeploymentWitness $witness2 $serverInfo2 $receipt
+    if ([string]$witness2.engine_start_nonce -ceq [string]$witness.engine_start_nonce) {
+        throw 'Engine restart reused the previous process nonce'
+    }
+    $metricsAfterRestart = Get-EndpointMetrics $headers
+    if ($metricsAfterRestart.Running -ne 0 -or $metricsAfterRestart.Queued -ne 0) {
+        throw 'Restarted candidate is not idle before the final smoke'
+    }
+
+    $stage = 'epoch_restart_text_smoke'
+    $schemaResponse2 = Invoke-Chat $headers $schemaBody 120 'epoch_restart_text_smoke'
+    $schemaValue2 = [string]$schemaResponse2.choices[0].message.content | ConvertFrom-Json
+    if ([string]$schemaResponse2.model -cne 'dispatcher' -or [string]$schemaValue2.status -cne 'ok' -or
+        [int]$schemaValue2.count -ne 2 -or @($schemaValue2.PSObject.Properties).Count -ne 2) {
+        throw 'Post-restart text/JSON-schema smoke failed'
+    }
+    Start-Sleep -Seconds 30
+    $candidateEngine = Wait-Healthy $script:Attested.CandidateEngineName 30
+    $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 30
+    Assert-FatalFree $candidateEngine
+    $gpu = Assert-GpuHeadroom
+    Assert-Sidecars
+    Assert-SolePublisher $script:Attested.CandidateProxyName
+
+    $stage = 'arm_candidate'
+    $expectedEngineRestart = Get-RestartSpec $stableEngine
+    $expectedProxyRestart = Get-RestartSpec $stableProxy
+    Set-RestartPolicy $candidateEngineId $expectedEngineRestart
+    Set-RestartPolicy $candidateProxyId $expectedProxyRestart
+    $candidateEngine = Wait-Healthy $script:Attested.CandidateEngineName 30
+    $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 30
+    if ((Get-RestartSpec $candidateEngine) -cne $expectedEngineRestart -or
+        (Get-RestartSpec $candidateProxy) -cne $expectedProxyRestart) {
+        throw 'Candidate restart policies were not armed exactly'
+    }
+    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash
+    Assert-SolePublisher $script:Attested.CandidateProxyName
+    $switchSucceeded = $true
+    Write-Journal 'ready' @{
+        engine_id = $candidateEngineId.Substring(0, 12)
+        proxy_id = $candidateProxyId.Substring(0, 12)
+        gpu_free_mib = $gpu.FreeMiB
+        long_prompt_tokens = $longTokens
+        witness_nonce_sha256 = Get-KeyHash ([string]$witness2.engine_start_nonce)
+        epoch_restart_rotated = $true
+    }
+    [pscustomobject]@{
+        status = 'ready'
+        active = 'qwen38-v12-attested'
+        profile_id = $script:Attested.ProfileId
+        context_length = 40960
+        max_running_requests = 6
+        decode_cuda_graphs = 'full-bs1-6'
+        gpu_free_mib = $gpu.FreeMiB
+        long_prompt_tokens = $longTokens
+        stable_preserved = $true
+        epoch_restart_rotated = $true
+        backend_bridge_untouched = $true
+        rollback = (Join-Path $PSScriptRoot 'Rollback-Qwen38V12Attested.ps1')
+        journal = $journalPath
+    } | ConvertTo-Json -Compress
+}
+catch {
+    try { Write-Journal 'failed' @{ stage = $stage; error_type = $_.Exception.GetType().FullName } } catch {}
+    if ($mutationStarted -and -not $switchSucceeded) {
+        try { Restore-Stable }
+        catch {
+            try { Write-Journal 'automatic_rollback_failed' @{ error_type = $_.Exception.GetType().FullName } } catch {}
+            throw 'Attested switch failed and exact automatic rollback also failed; inspect the sanitized journal.'
+        }
+    }
+    throw 'Attested switch failed; stable was untouched or automatically restored. Inspect the sanitized journal.'
+}
+finally {
+    Clear-AttestedEnvironment
+    $apiKey = $null
+    if ($null -ne $lock) { $lock.Dispose() }
+}

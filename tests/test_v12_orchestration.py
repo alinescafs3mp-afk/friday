@@ -558,6 +558,78 @@ def test_server_registers_file_read_only_after_live_attestation(
         assert health["model_gate"]["status"] == "canary_ready"
 
 
+def test_server_wires_bounded_dynamic_model_gate_status_to_organs(
+    settings,
+    monkeypatch,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    import friday.server as server_module
+
+    captured_contexts: list[Any] = []
+
+    class _Registry:
+        def capabilities(self):
+            return ()
+
+        def routers(self):
+            return ()
+
+        def workers(self, ctx):
+            captured_contexts.append(ctx)
+            return ()
+
+    class _AttestedRuntime:
+        def __init__(self) -> None:
+            self.gate = {
+                "status": "canary_ready",
+                "reason_code": "live_attestation_clear",
+                "private_epoch": "must-not-cross-the-organ-boundary",
+            }
+
+        async def attest(self, *, absolute_deadline: float) -> object:
+            assert absolute_deadline > time.monotonic()
+            return object()
+
+        def public_status(self) -> dict[str, object]:
+            return dict(self.gate)
+
+    runtime = _AttestedRuntime()
+    monkeypatch.setattr(server_module, "AttestedV12ModelRuntime", _AttestedRuntime)
+    monkeypatch.setattr(
+        server_module,
+        "create_attested_v12_model_runtime",
+        lambda _llm: runtime,
+    )
+    monkeypatch.setattr(server_module, "build_registry", lambda _settings: _Registry())
+    app = server_module.create_app(replace(settings, router_mode="canary"))
+
+    with TestClient(app):
+        assert len(captured_contexts) == 1
+        provider = captured_contexts[0].model_gate_status
+        assert provider is not None
+        assert provider() == {
+            "status": "canary_ready",
+            "reason_code": "live_attestation_clear",
+        }
+        runtime.gate = {
+            "status": "revoked",
+            "reason_code": "private transport response /srv/secret",
+            "private_epoch": "still-must-not-cross",
+        }
+        assert provider() == {"status": "revoked", "reason_code": "unknown"}
+        runtime.gate = {"status": "private-status", "reason_code": "private-reason"}
+        assert provider() == {
+            "status": "unavailable",
+            "reason_code": "observer_unavailable",
+        }
+        runtime.gate = {"status": "private-status", "reason_code": "epoch_invalid"}
+        assert provider() == {
+            "status": "unavailable",
+            "reason_code": "observer_unavailable",
+        }
+
+
 def test_server_attestation_failure_is_observable_and_keeps_exact_legacy(
     settings,
     monkeypatch,

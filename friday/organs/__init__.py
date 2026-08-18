@@ -20,7 +20,7 @@ other write path — they never turn material into canonical knowledge silently.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -53,6 +53,11 @@ class ServiceContext:
     # equivalent HTTP read performs; without it the outbound channel is a way
     # around the permission model rather than a use of it.
     auth: Any = None
+    # A deliberately bounded, read-only projection supplied by the server.  An
+    # organ must not reach into the V12 runtime (or learn its private endpoint,
+    # attestation payloads, epochs, prompts, or responses) merely to observe the
+    # public model-gate transition.
+    model_gate_status: Callable[[], Mapping[str, object]] | None = None
 
 
 @dataclass(frozen=True)

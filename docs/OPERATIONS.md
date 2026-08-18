@@ -221,8 +221,10 @@ pytest -q
 4. запустите `jericho doctor`;
 5. запустите backend и проверьте Admin/Telegram smoke.
 
-0.204.2 использует SQLite schema 33, как и 0.204.1: attachment summary fix не добавляет
-миграцию и не меняет авторитетные Knowledge/Graph/Inbox/Conversation records.
+0.205.0 использует SQLite schema 33, как и 0.204.2: Qwen3.8/SGLang
+profile и owner degradation alerts не добавляют миграцию и не меняют
+авторитетные Knowledge/Graph/Inbox/Conversation records. Sentinel хранит
+только техническое состояние эпизода в существующем `runtime_kv`.
 Отсутствующие производные projections могут идемпотентно достраиваться при
 открытии. Любая будущая поддерживаемая schema migration выполняется одной
 транзакцией; неизвестная более новая schema отклоняется fail-closed.
@@ -383,7 +385,8 @@ FRIDAY_ROUTER_PLAN_TIMEOUT_SEC=12
 `shadow` строит технический план в фоне, но ответ и эффекты всегда принадлежат
 legacy. `canary` требует непустой allowlist пользователя, хотя бы один явно
 разрешённый route (`file_read` и/или `archive_read`) и успешную live-аттестацию
-профиля `v12.13` при старте backend. `file_read` обрабатывает 1–2 полных UTF-8
+профиля `qwen38-27b-nvfp4-sglang:dispatcher:v12.14` при старте backend.
+`file_read` обрабатывает 1–2 полных UTF-8
 файла текущего хода. `archive_read` обрабатывает только прежние полные UTF-8
 файлы самого actor: уникальное точное имя, ровно 1–2 последних файла или не
 более двух файлов за точный локальный день «сегодня / вчера / позавчера».
@@ -393,6 +396,19 @@ legacy. `canary` требует непустой allowlist пользовате�
 автоматически остаются в legacy. Авторизация выполняется до чтения body; при
 публикации selector и каждый Raw Object повторно проверяются под одним SQLite
 write barrier, а conn-scoped idempotency fence фиксируется атомарно с ответом.
+
+Канонический deployment graph для этого profile: SGLang image
+`lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124`,
+source `c4271c3fe1262fc2adbd162c33b25de5255251c5`, reported version
+`0.0.0.dev0+qwen38.27b.g561c8f3`, model revision
+`bfd9b31207712e0850eec9da32261e8c5ee16af7`, alias `dispatcher`, context/total
+tokens `40960`, running/Mamba cache `6`, `mem_fraction_static=0.90`, FP8 E4M3 KV,
+Radix/speculation off, full decode CUDA graphs `1..6`, prefill graph off. Startup
+дополнительно требует exact per-process deployment witness для
+engine/base image, model snapshot, launch manifest и closed same-origin proxy.
+Build-time hashes берутся из code-owned profile/witness и не вводятся
+оператором вручную. Не печатайте raw witness: adapter выносит в health
+только ограниченную публичную проекцию.
 
 Минимальная owner-only конфигурация canary:
 
@@ -411,15 +427,24 @@ Startup probe синхронный и может занять до 330 секу�
 orchestration.configured_mode = canary
 orchestration.installed_mode = canary
 orchestration.registered_routes = [archive_read, file_read]
+orchestration.model_gate.profile_id = qwen38-27b-nvfp4-sglang:dispatcher:v12.14
 orchestration.model_gate.status = canary_ready
 orchestration.model_gate.reason_code = live_attestation_clear
+orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.204.2`.
+требуйте `status=ok` и `version=0.205.0`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
-не успешный canary. Для мгновенного отката оставьте bridge остановленным,
+не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту
+проверяет только bounded public gate status. `revoked`, `not_installed` и
+недоступность observer дают владельцу одно санитизированное
+предупреждение на непрерывный эпизод; recovery перевооружает следующий.
+Обычный route fallback не алертит, private reason не попадает в очередь,
+а quiet hours сохраняются.
+
+Для мгновенного отката оставьте bridge остановленным,
 верните `FRIDAY_ROUTER_MODE=legacy`, перезапустите backend, подтвердите
 configured/installed `legacy` и только затем снова запустите bridge. Обычный
 rollback кода не требует восстановления SQLite.

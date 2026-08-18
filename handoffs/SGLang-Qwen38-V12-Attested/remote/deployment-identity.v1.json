@@ -1,0 +1,15 @@
+{
+  "schema": "friday.sglang-deployment-identity.v1",
+  "profile_id": "qwen38-27b-nvfp4-sglang:dispatcher:v12.14",
+  "engine_base_image_digest": "lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124",
+  "engine_base_image_id": "sha256:317b75ce527f3b6ee482e9437c753e98f4df6e6b17a335f8681af5d86a8a9de8",
+  "runtime_source_revision": "c4271c3fe1262fc2adbd162c33b25de5255251c5",
+  "runtime_reported_version": "0.0.0.dev0+qwen38.27b.g561c8f3",
+  "model_repository": "a2genesis/Qwen3.8-27B-NVFP4",
+  "model_revision": "bfd9b31207712e0850eec9da32261e8c5ee16af7",
+  "model_snapshot_manifest_sha256": "da435c4b7556d8d5feed8551024914b0da0b48bb3fe85850536a0eb3b2489333",
+  "model_quantization": "W4A16_NVFP4",
+  "served_model_alias": "dispatcher",
+  "launch_manifest_sha256": "640a1ea428b2526ff6f3b3e412c18fef8e48f1fa882b3a94f9859a190678f62b",
+  "proxy_policy_sha256": "47e6b9c2dadea4a1e9395b8f8305699033b52a09ecba14d82afcdf77e7d9f3ae"
+}

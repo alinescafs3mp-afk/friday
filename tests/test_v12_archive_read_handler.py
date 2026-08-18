@@ -360,6 +360,7 @@ async def test_date_and_latest_select_exactly_one_or_two_files(
 
 @pytest.mark.asyncio
 async def test_document_date_selector_is_distinct_from_upload_time(settings, storage) -> None:
+    settings = replace(settings, local_timezone="UTC")
     today = datetime.now(ZoneInfo(settings.local_timezone or "UTC")).date()
     yesterday = today - timedelta(days=1)
     wanted = _registered_text_file(

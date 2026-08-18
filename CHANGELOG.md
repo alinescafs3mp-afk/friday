@@ -1,3 +1,40 @@
+## 0.205.0 — 2026-08-19
+
+### Qwen3.8/SGLang получает узкий V12.14 profile
+
+Добавлен code-owned profile
+`qwen38-27b-nvfp4-sglang:dispatcher:v12.14` для
+`a2genesis/Qwen3.8-27B-NVFP4` revision
+`bfd9b31207712e0850eec9da32261e8c5ee16af7` на закреплённом SGLang
+image/source. Профиль не расширяет полномочия V12.13: всё так же
+допускаются только `file_read`/`archive_read`, два prepared evidence,
+8K model context, read-only effect и обязательный verifier.
+
+SGLang adapter разделяет model alias и provenance. Перед выдачей
+lease он exact-сверяет inventory, bounded SGLang metrics с полным
+label set, `/server_info` и secret-free per-process deployment witness. Witness
+связывает model/runtime/build/launch/proxy identities с engine seed; endpoint
+остаётся same-origin, authenticated, без redirects и proxy inheritance.
+
+Аттестованный launch graph сохраняет `40960` model/total tokens,
+`6` running requests, FP8 E4M3 KV, Mamba cache `6`, Radix и speculation off,
+full decode CUDA graphs для batches `1..6` и выключённый prefill graph.
+Даже совпавший served alias не компенсирует drift этих facts.
+
+### Владелец видит деградацию V12
+
+Sentinel проверяет ограниченный public model-gate status не реже
+одного раза в минуту и ставит одно owner-only предупреждение на
+непрерывный эпизод `revoked`/`not_installed`/observer
+`unavailable`. Recovery перевооружает алерт для нового эпизода.
+Обычный route-level fallback не считается аварией; quiet hours и
+существующая durable notification queue сохранены, private reason в
+текст не попадает.
+
+Миграции нет: SQLite schema остаётся 33. Состояние эпизода
+использует существующие `runtime_kv` и notification queue; source
+release не переписывает `.env` и не переключает deployment.
+
 ## 0.204.2 — 2026-08-18
 
 ### Явная структуризация вложения остаётся чтением

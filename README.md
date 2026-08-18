@@ -2,7 +2,7 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.204.2**. Это release-candidate / 1.0-ready сборка с opt-in V12 model-first routes `file_read` и `archive_read`: аттестованный профиль `v12.13` читает 1–2 полных UTF-8 источника текущего хода либо строго выбранные прежние файлы самого пользователя. Архивный route принимает только уникальное точное имя, ровно 1–2 последних файла или точный локальный день «сегодня / вчера / позавчера»; неоднозначность, другой пользователь, reply/replay, выбор более двух файлов, PDF/изображения/OCR и partial extraction остаются у legacy. Полные Office-вложения получают детерминированную безопасную сводку, а точный подсчёт по таблице по-прежнему допускается только при структурно доказанной полноте. Явная просьба структурировать сведения из текущего вложения остаётся read-only обзором и не попадает под фильтр неподтверждённого создания файла.
+Текущая версия: **0.205.0**. Это release-candidate / 1.0-ready сборка с opt-in V12 model-first routes `file_read` и `archive_read`: тот же узкий read-only контракт теперь аттестуется как `qwen38-27b-nvfp4-sglang:dispatcher:v12.14` на точном graph-only SGLang deployment. Архивный route по-прежнему принимает только уникальное точное имя, ровно 1–2 последних файла или точный локальный день; неоднозначность, чужие файлы, reply/replay, PDF/изображения/OCR и partial extraction остаются у legacy. Sentinel теперь сообщает владельцу о потере аттестованного V12-canary один раз за непрерывный эпизод, не раскрывая private reason и не считая обычный route fallback аварией.
 
 ```text
 Telegram → подписанный durable bridge → Conversation + mode
@@ -81,8 +81,7 @@ Telegram → подписанный durable bridge → Conversation + mode
 - HTTP body limit действует на фактически полученные байты, включая chunked transfer, до аутентификации и JSON/multipart parsing; proxy headers принимаются только от явно доверенного непосредственного proxy-hop.
 - Online backup SQLite включает `integrity_check`, SHA-256 manifest и повторную верификацию; вместе с БД он сохраняет append-only историю отношений и её completeness floor. Tenant export включает только принадлежащие этому пользователю `relation_revisions`. `restore-backup` требует остановленного backend через эксклюзивный lease, повторно сверяет staged copy, заменяет БД атомарно и возвращает точные DB/WAL/SHM при сбое; для уже повреждённой активной БД сохраняется отдельный явно непроверенный recovery bundle. Markdown-vault пишет атомарно и использует Windows-safe пути.
 - Workers обслуживают всех активных tenants: lifecycle, entity-resolution candidates, vault, ежедневный backup, SQLite optimize, read-only quality report и bounded advisory Inbox refinement. Каждая задача публикует состояние, длительность, следующий запуск, timeout и consecutive failures для `status`, `doctor` и Admin UI.
-- Локальный multimodal vLLM-профиль закреплён за `qwen3.6-27b-nvfp4-nvidia`;
-  fail-closed tool-call protocol и редактирование секретов в логах сохранены.
+- Канонический multimodal profile `qwen38-27b-nvfp4-sglang` закрепляет точные model/runtime identities, graph-only 40K/6 launch contract и fail-closed V12 live attestation; прежний Qwen3.6/vLLM profile сохранён для совместимости.
 
 ## Быстрый запуск на Windows
 
@@ -105,13 +104,21 @@ jericho init --home D:\jericho
 
 ### 2. Модель
 
-Полный snapshot модели должен находиться здесь:
+Канонический внешне управляемый SGLang profile ожидает exact snapshot:
+
+```text
+D:\jericho\models\qwen3.8-27b-nvfp4-a2genesis-bfd9b312\
+```
+
+Включённый ниже reference Compose recipe для совместимости по-прежнему
+ожидает Qwen3.6/vLLM snapshot:
 
 ```text
 D:\jericho\models\qwen3.6-27b-nvfp4-nvidia\
 ```
 
-Веса в архив намеренно не включены. Каталог должен содержать модельные файлы и конфигурацию, пригодные для загрузки vLLM.
+Веса в архив намеренно не включены. Каждый каталог должен содержать полный
+snapshot и конфигурацию для соответствующего runtime.
 
 ### 3. Запуск без LLM для проверки системы
 
@@ -223,39 +230,45 @@ VRAM обнаружился при старте, а не на первом по�
 
 Перед обновлением выполните `jericho backup --label before-upgrade` и `jericho verify-backup`: совместимость схемы не заменяет проверенную резервную копию.
 
-## Параметры vLLM
+## Канонический SGLang-профиль
 
-Профиль `qwen36-27b-nvfp4-nvidia` закрепляет следующие значения:
+Профиль `qwen38-27b-nvfp4-sglang` закрепляет следующие значения:
 
 | Параметр | Значение |
 |---|---:|
-| model | `/models/qwen3.6-27b-nvfp4-nvidia` |
+| model | `/models/qwen3.8-27b-nvfp4-a2genesis-bfd9b312` |
 | served model name | `dispatcher` |
-| dtype | `auto` |
+| repository / revision | `a2genesis/Qwen3.8-27B-NVFP4` / `bfd9b31207712e0850eec9da32261e8c5ee16af7` |
+| quantization | `W4A16_NVFP4` |
+| runtime image | `lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124` |
+| runtime source / reported version | `c4271c3fe1262fc2adbd162c33b25de5255251c5` / `0.0.0.dev0+qwen38.27b.g561c8f3` |
 | max model length | `40960` |
-| quantization | `modelopt_mixed` |
-| GPU memory utilization | `0.80` |
-| KV cache dtype | `fp8` |
-| max sequences | `6` |
-| max batched tokens | `8192` |
-| tokenizer mode | `auto` |
-| safetensors load strategy | `prefetch` |
-| speculative decoding | `MTP`, `1` token |
-| multimodal limits | `image=4`, `video=0` |
-| prefix caching | включён |
-| MM profiling | включён |
-| MM processor cache | `4.0 GiB` |
+| static memory / total tokens | `0.90` / `40960` |
+| KV cache dtype | `fp8_e4m3` |
+| max running requests / Mamba cache | `6` / `6` |
+| chunked prefill | `2048` |
+| SSM dtype | `bfloat16` |
+| Radix / speculation | выключены |
+| CUDA graph decode | `full`, batches `1,2,3,4,5,6` |
+| CUDA graph prefill | выключён |
+| attention backend | `flashinfer` |
+| multimodal transport / limits | `cpu` / `image=4`, `video=0`, `audio=0` |
 | reasoning parser | `qwen3` |
-| tool-call parser | `qwen3_coder`, auto choice включён |
+| tool-call parser | `qwen3_coder` |
 
 Шесть scheduler sequences описывают пропускную способность общего endpoint, а не
 fan-out одной задачи. Иерархическое чтение документа имеет отдельный явный
 потолок `document_map_max_concurrency=1`: синхронизация профиля не превращает
 одну загрузку в три параллельные длинные генерации.
 
-Поля `FRIDAY_QWEN_ENFORCE_EAGER` и `FRIDAY_QWEN_EXTRA_ARGS` оставлены для
-аварийной диагностики конкретного GPU. Quantization закреплён прямо в команде:
-подмена ModelOpt loader через окружение больше не допускается.
+Этот profile описывает внешне управляемый endpoint, а не свободный набор
+переменных. До регистрации V12 routes startup probe сверяет exact
+`/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
+witness с code-owned identities и launch graph. Любой drift, неполный
+witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
+Успешный canary startup должен показать в `/api/health` версию `0.205.0`,
+точный profile id, `canary_ready`, `live_attestation_clear` и оба
+зарегистрированных route; простого HTTP `status=ok` недостаточно.
 
 ## Telegram
 
@@ -452,7 +465,7 @@ P01/P02/P04/P08/P09/P10 **120/120**, после выпуска официаль�
 приватные артефакты и точные критерии описаны в
 [docs/LIVE_BATTERY_RUNBOOK.md](docs/LIVE_BATTERY_RUNBOOK.md).
 
-Тесты покрывают provenance, tenant isolation, versions, soft delete, review-only lifecycle, backup verification/restore/rollback, entity resolution, терминальные relation decisions и монотонные conflict decisions, три исхода ingestion, feedback replacement и точную attribution, usage-aware retrieval, agent modes, knowledge-work/research-to-Inbox, grounded bounded vision/OCR, bulk Admin workflows, worker timeout/partial failure health, backend singleton lease, capability default-deny и безопасное делегирование, инструментальное ядро и завершение дерева процессов, архивные лимиты, SSRF, подписанный Telegram/API vertical slice, inline callbacks, миграцию/повторы/dead-letter очереди Telegram, redaction логов, tool-call protocol и закреплённый vLLM image/profile.
+Тесты покрывают provenance, tenant isolation, versions, soft delete, review-only lifecycle, backup verification/restore/rollback, entity resolution, терминальные relation decisions и монотонные conflict decisions, три исхода ingestion, feedback replacement и точную attribution, usage-aware retrieval, agent modes, knowledge-work/research-to-Inbox, grounded bounded vision/OCR, bulk Admin workflows, worker timeout/partial failure health, backend singleton lease, capability default-deny и безопасное делегирование, инструментальное ядро и завершение дерева процессов, архивные лимиты, SSRF, подписанный Telegram/API vertical slice, inline callbacks, миграцию/повторы/dead-letter очереди Telegram, redaction логов, tool-call protocol и exact vLLM/SGLang runtime profiles.
 
 ## Ограничения текущей версии
 

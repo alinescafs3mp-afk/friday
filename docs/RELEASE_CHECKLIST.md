@@ -56,8 +56,21 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 
 - без явных переменных configured/installed mode остаются `legacy`, routes пусты;
 - canary стартует только с `model_gate.status=canary_ready`, reason
-  `live_attestation_clear`, профилем `v12.13` и явно разрешёнными routes
+  `live_attestation_clear`, профилем
+  `qwen38-27b-nvfp4-sglang:dispatcher:v12.14` и явно разрешёнными routes
   `file_read`, `archive_read`;
+- SGLang startup сверяет exact model revision
+  `bfd9b31207712e0850eec9da32261e8c5ee16af7`, pinned runtime image/source,
+  served alias `dispatcher`, bounded `/metrics`, `/server_info` и secret-free
+  per-process deployment witness; build-time witness hashes берутся только
+  из code-owned profile, не подставляются вручную;
+- deployment witness подтверждает graph-only launch: context/total tokens
+  `40960`, running/Mamba cache `6`, `mem_fraction_static=0.90`, FP8 E4M3 KV,
+  Radix/speculation off, full decode CUDA graph batches `1..6`, prefill graph off,
+  FlashInfer attention, CPU MM transport и limits `image=4,video=0,audio=0`;
+- final startup health имеет `status=ok`, `version=0.205.0`, configured/installed
+  `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
+  `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
   citations, без повторного legacy-вызова после выбора V12;
 - `archive_read` допускает только self-owned prior exact UTF-8: уникальное точное
@@ -69,6 +82,10 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   публикацию при финальной exact reauthorization, а conn-scoped idempotency
   fence и сообщение либо commit-ятся вместе, либо вместе rollback-ятся;
 - неуспешная аттестация оставляет installed mode `legacy` и пустой список routes;
+- Sentinel в `canary`/`v12` даёт owner-only alert ровно один раз на
+  непрерывный `revoked`/`not_installed`/observer-unavailable эпизод,
+  после recovery перевооружается, уважает quiet hours, не утекает private
+  reason и молчит при ordinary route fallback и configured `legacy`;
 - rehearsal возврата `FRIDAY_ROUTER_MODE=legacy` не меняет и не восстанавливает
   SQLite, а bridge запускается только после зелёного backend health.
 
@@ -79,6 +96,8 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Проверить:
 
 - schema version = 33;
+- между 0.204.2 и 0.205.0 нет migration; model-gate episode использует
+  существующий `runtime_kv`, а alerts — существующую notification queue;
 - counts старых строк не изменились без предусмотренной миграции;
 - `integrity_check=ok`, foreign-key violations = 0;
 - FTS/retrieval работают;

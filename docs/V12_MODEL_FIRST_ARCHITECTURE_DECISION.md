@@ -1,8 +1,9 @@
 # V12: model-first архитектура Friday — принятое направление
 
-Статус: **архитектурное направление принято владельцем; release 0.204.0
-реализует безопасный shadow и аттестованные opt-in FILE_READ/ARCHIVE_READ
-routes, production по умолчанию остаётся `legacy`**.
+Статус: **архитектурное направление принято владельцем; release 0.205.0
+сохраняет безопасный shadow и узкие opt-in FILE_READ/ARCHIVE_READ routes,
+добавляя exact Qwen3.8/SGLang V12.14 attestation и owner-visible degradation;
+production по умолчанию остаётся `legacy`**.
 
 Дата решения: 2026-08-17.
 
@@ -219,16 +220,31 @@ conn-scoped idempotency fence и единственная публикация �
 атомарную SQLite commit boundary. Это узкий canary, а не заявление о полной
 функциональной паритетности V12; schema остаётся 33.
 
+Release 0.205.0 добавляет отдельный exact profile
+`qwen38-27b-nvfp4-sglang:dispatcher:v12.14`. Он не наследует доверие
+по имени `dispatcher`: model revision, SGLang build, graph-only launch,
+per-process deployment witness и свежий behavioral probe проверяются
+независимо. Authority остаётся той же: 1–2 prepared evidence,
+8192-token V12 context, ноль model-owned tool steps, read-only effect и
+обязательный verifier. Qwen3.6/V12.13 profile остаётся зарегистрированным
+для точной совместимости, а не как неявный fallback нового profile.
+
 ## 10. Работа V12 на текущей 27B-модели
 
-Текущий production profile на дату решения:
+Текущий аттестованный graph-only profile для release 0.205.0:
 
 ```text
-qwen36-27b-nvfp4-nvidia
+qwen38-27b-nvfp4-sglang
 served model alias: dispatcher
+model: a2genesis/Qwen3.8-27B-NVFP4@bfd9b31207712e0850eec9da32261e8c5ee16af7
+runtime: lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124
+runtime source: c4271c3fe1262fc2adbd162c33b25de5255251c5
+reported version: 0.0.0.dev0+qwen38.27b.g561c8f3
+launch: context/total=40960, running/mamba=6, FP8 E4M3 KV
+graphs: decode=full batches 1..6, prefill=disabled; radix/speculation=disabled
 ```
 
-V12 должна запускаться на ней с первого дня — сначала в `shadow`, затем в
+V12 должна запускаться на ней сначала в `shadow`, затем в
 ограниченном `canary`. Это полезно по двум причинам:
 
 1. архитектура остаётся model-agnostic и не строится под воображаемый API
@@ -379,7 +395,7 @@ tool-call protocol должны быть измерены отдельно. Он
    уникальному точному имени, exact latest 1–2 или today/yesterday/pozavchera;
 6. отвечает по нескольким файлам из одного EvidenceBundle;
 7. не исполняет второй эффект в shadow/retry;
-8. текущая 27B с профилем `v12.13` проходит `file_read`/`archive_read` canary,
+8. текущая 27B с профилем `v12.14` проходит `file_read`/`archive_read` canary,
    а ошибки плана и неподдерживаемые selector-ы уходят в legacy;
 9. rollback занимает одно изменение режима;
 10. все публикации сохраняют provenance и actor boundaries.

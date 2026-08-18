@@ -253,6 +253,30 @@ class VllmExtraArgs:
 
 
 @dataclass(frozen=True)
+class SglangExtraArgs:
+    """Code-owned launch facts for an externally managed SGLang endpoint."""
+
+    mem_fraction_static: float
+    max_total_tokens: int
+    chunked_prefill_size: int
+    mamba_ssm_dtype: str
+    max_mamba_cache_size: int
+    radix_cache_enabled: bool
+    cuda_graph_backend_decode: str
+    cuda_graph_max_bs_decode: int
+    cuda_graph_bs_decode: tuple[int, ...]
+    cuda_graph_backend_prefill: str
+    attention_backend: str
+    reasoning_parser: str
+    tool_call_parser: str
+    mm_feature_transport: str
+    limit_mm_data_per_request: str
+    metrics_enabled: bool
+    weight_version: str = "default"
+    speculative_algorithm: str | None = None
+
+
+@dataclass(frozen=True)
 class RuntimeProfile:
     name: str
     title: str
@@ -271,7 +295,24 @@ class RuntimeProfile:
     document_map_max_concurrency: int
     cpu_offload_gb: float
     kv_offloading_gb: int
+    # These generic identity fields bind non-vLLM endpoints without pretending
+    # that a served alias proves either model or runtime provenance.
+    inference_backend: str = "vllm"
+    model_repository: str = ""
+    model_revision: str = ""
+    model_quantization: str = ""
+    runtime_image: str = ""
+    runtime_source_revision: str = ""
+    runtime_reported_version: str = ""
+    engine_image_id: str = ""
+    engine_base_image_digest: str = ""
+    engine_base_image_id: str = ""
+    model_snapshot_manifest_sha256: str = ""
+    launch_manifest_sha256: str = ""
+    proxy_image_id: str = ""
+    proxy_policy_sha256: str = ""
     vllm_extra_args: VllmExtraArgs = field(default_factory=VllmExtraArgs)
+    sglang_extra_args: SglangExtraArgs | None = None
     tokenizer_mode: str = "slow"
     # Explicit vLLM quantization selector. Mixed ModelOpt checkpoints must not be
     # allowed to fall back to the older FP8-only ``modelopt`` loader.
@@ -400,6 +441,80 @@ PROFILES["qwen36-27b-nvfp4-nvidia"] = RuntimeProfile(
 )
 
 
+# Exact graph-only Qwen3.8 dispatcher measured on 2026-08-18.  The model and
+# SGLang identities are code-owned provenance; ``dispatcher`` remains only the
+# OpenAI-compatible served alias.  V12 authority is registered independently in
+# ``friday.model_profiles`` and still requires a fresh live attestation.
+PROFILES["qwen38-27b-nvfp4-sglang"] = RuntimeProfile(
+    name="qwen38-27b-nvfp4-sglang",
+    title="Qwen3.8 27B A2Genesis NVFP4 (SGLang)",
+    description=("Aligned multimodal Qwen3.8 27B served by the pinned graph-only SGLang runtime."),
+    model_dir_name="qwen3.8-27b-nvfp4-a2genesis-bfd9b312",
+    eager_mode=False,
+    max_steps=24,
+    temperature=0.25,
+    max_model_len=40_960,
+    gpu_memory_utilization=0.90,
+    kv_cache_dtype="fp8_e4m3",
+    max_num_seqs=6,
+    document_map_max_concurrency=1,
+    cpu_offload_gb=0,
+    kv_offloading_gb=0,
+    inference_backend="sglang",
+    model_repository="a2genesis/Qwen3.8-27B-NVFP4",
+    model_revision="bfd9b31207712e0850eec9da32261e8c5ee16af7",
+    model_quantization="W4A16_NVFP4",
+    runtime_image=("lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124"),
+    runtime_source_revision="c4271c3fe1262fc2adbd162c33b25de5255251c5",
+    runtime_reported_version="0.0.0.dev0+qwen38.27b.g561c8f3",
+    engine_image_id="sha256:7f27e2885eca5041860a8c28c0bc3304b43b9fce072f298da043393866aa5887",
+    engine_base_image_digest=(
+        "lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124"
+    ),
+    engine_base_image_id="sha256:317b75ce527f3b6ee482e9437c753e98f4df6e6b17a335f8681af5d86a8a9de8",
+    model_snapshot_manifest_sha256="da435c4b7556d8d5feed8551024914b0da0b48bb3fe85850536a0eb3b2489333",
+    launch_manifest_sha256="640a1ea428b2526ff6f3b3e412c18fef8e48f1fa882b3a94f9859a190678f62b",
+    proxy_image_id="sha256:2bf585895ba4ede01899f4b17db5c690dd893d77c3e1da9ac4dfb2482e22c091",
+    proxy_policy_sha256="47e6b9c2dadea4a1e9395b8f8305699033b52a09ecba14d82afcdf77e7d9f3ae",
+    tokenizer_mode="auto",
+    quantization=None,
+    vllm_image="",
+    vision_capable=True,
+    suppress_model_thinking=True,
+    sglang_extra_args=SglangExtraArgs(
+        mem_fraction_static=0.90,
+        max_total_tokens=40_960,
+        chunked_prefill_size=2_048,
+        mamba_ssm_dtype="bfloat16",
+        max_mamba_cache_size=6,
+        radix_cache_enabled=False,
+        cuda_graph_backend_decode="full",
+        cuda_graph_max_bs_decode=6,
+        cuda_graph_bs_decode=(1, 2, 3, 4, 5, 6),
+        cuda_graph_backend_prefill="disabled",
+        attention_backend="flashinfer",
+        reasoning_parser="qwen3",
+        tool_call_parser="qwen3_coder",
+        mm_feature_transport="cpu",
+        limit_mm_data_per_request='{"image":4,"video":0,"audio":0}',
+        metrics_enabled=True,
+        weight_version="default",
+        speculative_algorithm=None,
+    ),
+    certification="certified",
+    interactive_certified=True,
+    default_recommended=False,
+    research_only=False,
+    readiness_deadline_sec=900.0,
+    certification_reason=(
+        "Live graph-only dispatcher attested at 40K/6 with FP8 KV, text/image "
+        "smokes and soak; V12 authority still requires its own startup probe."
+    ),
+    menu_visible=True,
+    requires_experimental_opt_in=False,
+)
+
+
 def profile_public_dict(profile: RuntimeProfile) -> dict[str, object]:
     return {
         "name": profile.name,
@@ -414,6 +529,13 @@ def profile_public_dict(profile: RuntimeProfile) -> dict[str, object]:
         "kv_cache_dtype": profile.kv_cache_dtype,
         "max_num_seqs": profile.max_num_seqs,
         "document_map_max_concurrency": profile.document_map_max_concurrency,
+        "inference_backend": profile.inference_backend,
+        "model_repository": profile.model_repository,
+        "model_revision": profile.model_revision,
+        "model_quantization": profile.model_quantization,
+        "runtime_image": profile.runtime_image,
+        "runtime_source_revision": profile.runtime_source_revision,
+        "runtime_reported_version": profile.runtime_reported_version,
         "tokenizer_mode": profile.tokenizer_mode,
         "quantization": profile.quantization,
         "vllm_image": profile.vllm_image,
