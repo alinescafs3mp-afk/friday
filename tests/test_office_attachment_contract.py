@@ -449,6 +449,8 @@ def test_code_owned_membership_requires_all_sixteen_candidates_and_exact_ids():
         ("Никого не пропустила?", "list_people"),
         ("Проверь, никого ли не пропустила", "list_people"),
         ("Сколько всего?", "count_auto"),
+        ("Сколько всего в таблице?", "count_auto"),
+        ("Сколько в таблице?", "count_auto"),
         ("Сколько их всего?", "count_people"),
         ("А остальные?", "recheck"),
         ("Ну а кто ещё?", "list_people"),
@@ -472,8 +474,30 @@ def test_natural_targeted_exact_phrasings_are_closed_intents(question, kind):
     assert office_exact_request_detected(question) is True
 
 
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Сколько в таблице людей старше 30?",
+        "Сколько в таблице на листе 2?",
+        "Сколько в таблице стоит товар?",
+        "Сколько в таблице и создай отчёт.",
+        "В таблице написано: «сколько в таблице?»",
+    ],
+)
+def test_target_only_table_count_does_not_swallow_semantic_residue(question: str) -> None:
+    attachment, _, _ = _attachment()
+
+    assert office_request_kind(question) == ""
+    assert code_owned_office_answer(question, [attachment]) is None
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["Сколько всего?", "Сколько всего в таблице?", "Сколько в таблице?"],
+)
 @pytest.mark.asyncio
 async def test_exact_office_fast_path_never_calls_search_model_verifier_or_repair(
+    question,
     settings,
     storage,
 ):
@@ -494,7 +518,7 @@ async def test_exact_office_fast_path_never_calls_search_model_verifier_or_repai
 
     result = await runtime.chat(
         "alice",
-        "Сколько всего?",
+        question,
         actor=auth.actor_for_user("alice", source="test"),
         attachments=[attachment],
         hybrid_searcher=_NeverSearch(),

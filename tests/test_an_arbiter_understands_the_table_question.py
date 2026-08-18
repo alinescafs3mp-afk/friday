@@ -85,6 +85,16 @@ def test_a_question_the_regexes_already_catch_needs_no_call() -> None:
     assert office_arbiter_applies("сколько там человек", [_office_attachment()]) is False
 
 
+@pytest.mark.parametrize("question", ["сколько всего в таблице?", "сколько в таблице?"])
+def test_a_target_only_table_count_takes_the_closed_route_without_an_arbiter(
+    question: str,
+) -> None:
+    """The explicit table target makes count_auto structural and model-independent."""
+
+    assert office_request_kind(question) == "count_auto"
+    assert office_arbiter_applies(question, [_office_attachment()]) is False
+
+
 @pytest.mark.parametrize(
     "question",
     [

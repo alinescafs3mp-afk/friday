@@ -398,10 +398,16 @@ async def test_historical_office_reauth_rebuilds_full_fit_projection_without_map
         reply_assistant_reference=True,
     )
 
-    assert result["message"] == _REVIEW
+    assert result["message"].startswith("⚠️ Это выборочная сводка")
+    assert result["message"].endswith(_REVIEW)
     assert primary_calls == {"count": 1}
     assert result["attachment_coverage_complete"] is True
     assert result["attachment_verification_complete"] is True
+    assert result["verification_status"] == "unknown"
+    stored = storage.get_message(str(result["message_id"]), "alice")
+    assert stored is not None
+    metadata = json.loads(str(stored["metadata_json"]))
+    assert metadata["structural"]["office_summary_downgraded"] is True
 
 
 @pytest.mark.asyncio

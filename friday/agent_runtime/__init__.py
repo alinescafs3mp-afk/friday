@@ -12805,6 +12805,76 @@ def _answer_claims_complete_attachment(answer: str) -> bool:
     )
 
 
+_OFFICE_NON_EXHAUSTIVE_SUMMARY_NOTICE = (
+    "⚠️ Это выборочная сводка, а не полный перечень содержимого. "
+    "Она не подтверждает точное количество или полный состав."
+)
+_OFFICE_NON_EXHAUSTIVE_EMPTY_BODY = (
+    "Файлы прочитаны, но черновик оказался непригоден для безопасной сводки. "
+    "Уточни тему, таблицу либо раздел — тогда я дам безопасную сводку."
+)
+_OFFICE_SUMMARY_CLAIM_BOUNDARY = re.compile(r"(?<!\d\.)(?<=[.!?;])\s+|\s+(?=\*\s+(?!\*))")
+
+
+def _unqualified_complete_attachment_claim(text: str) -> bool:
+    """Match a whole-set claim without treating a nearby caveat as authority.
+
+    ``_answer_claims_complete_attachment`` deliberately accepts an explicitly
+    partial answer.  A downgrade has a stricter job: no sentence carrying an
+    exact cardinality, closed-set or absence claim may survive merely because
+    the code-owned notice says that the overall summary is partial.
+    """
+
+    value = str(text or "")
+    return bool(
+        _ANSWER_CLAIMS_COMPLETE_ATTACHMENT.search(value) or _ANSWER_NAMES_ALL_ATTACHMENT_MEMBERS.search(value)
+    )
+
+
+def _downgrade_office_summary(answer: str) -> tuple[str, bool]:
+    """Keep useful prose while deterministically removing whole-set claims.
+
+    This is intentionally code-owned and model-independent.  It is used only
+    for a complete, authenticated, ordinary Office summary; exact questions
+    continue through the closed exact/verifier paths.  The returned boolean
+    records whether any model sentence had to be removed.
+    """
+
+    kept_lines: list[str] = []
+    removed = False
+    for raw_line in str(answer or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            if kept_lines and kept_lines[-1]:
+                kept_lines.append("")
+            continue
+        safe_parts: list[str] = []
+        for part in _OFFICE_SUMMARY_CLAIM_BOUNDARY.split(line):
+            candidate = part.strip()
+            if not candidate:
+                continue
+            if _unqualified_complete_attachment_claim(candidate):
+                removed = True
+                continue
+            safe_parts.append(candidate)
+        if safe_parts:
+            kept_lines.append(" ".join(safe_parts))
+        else:
+            removed = True
+
+    while kept_lines and not kept_lines[-1]:
+        kept_lines.pop()
+    body = "\n".join(kept_lines).strip()
+    # A claim split across formatting boundaries must fail closed rather than
+    # be laundered by the partial-summary notice.
+    if body and _unqualified_complete_attachment_claim(body):
+        body = ""
+        removed = True
+    if not body:
+        body = _OFFICE_NON_EXHAUSTIVE_EMPTY_BODY
+    return f"{_OFFICE_NON_EXHAUSTIVE_SUMMARY_NOTICE}\n\n{body}", removed
+
+
 def _attachment_evidence_chunks(
     attachments: list[dict[str, Any]] | None,
 ) -> list[dict[str, str]]:
@@ -31617,6 +31687,62 @@ class AgentRuntime:
             response["voice_clip"] = None
             response["knowledge_object_ids"] = []
             response["_source_search_exhaustive_rejected"] = True
+        office_summary_downgraded = bool(
+            response.get("_office_exact_owned") is not True
+            and not synthetic_document_notice
+            and not office_exact_request_detected(clean_message)
+            and office_exhaustive_scope(clean_message)
+            and any(looks_like_office_attachment(item) for item in attachments)
+            and authenticated_attachment_scope
+            and attachment_expected_count > 0
+            and attachment_context_complete
+            and attachment_coverage_complete
+            and attachment_verification_complete
+            and advisory_body_count == 0
+            and response.get("_model_generated") is True
+            and not response.get("llm_failed")
+            and not response.get("tools_used")
+            and not response.get("tool_evidence")
+            and not response.get("file_clips")
+            and not response.get("voice_clip")
+            and not response.get("knowledge_object_ids")
+            and not attachment_tool_action_requested
+            and not file_web
+            and not file_voice
+            and not file_create
+            and not clean_workspace_channel_requested
+            and not workspace_authority_message
+            and not web_evidence_used
+            and not foreign_private_request
+            and not dangerous_instruction_request
+            and not dangerous_output_replaced
+            and not stale_conversational_replay_replaced
+            and not conversational_archive_fallback_replaced
+            and not private_web_search_blocked
+            and not web_evidence_replaced
+            and not outside_deed_replaced
+            and not supported_deed_replaced
+            and not source_search_exhaustive_rejected
+            and not archive_status_only_replaced
+        )
+        office_summary_claims_removed = False
+        if office_summary_downgraded:
+            # An ordinary request to summarise a complete Office set is not an
+            # exact-count/list contract.  Always put such prose behind the same
+            # code-owned, explicitly non-exhaustive ceiling, independent of
+            # whether this particular sampling happened to say “all” or “16”.
+            # Exact questions continue through the closed structural/verifier
+            # paths below.
+            content, office_summary_claims_removed = _downgrade_office_summary(content)
+            response["content"] = content
+            response["file_clips"] = []
+            response["voice_clip"] = None
+            response["knowledge_object_ids"] = []
+            response["_office_summary_downgraded"] = True
+            LOGGER.info(
+                "office-attachments: ordinary summary downgraded to non-exhaustive; claims_removed=%s",
+                office_summary_claims_removed,
+            )
         office_model_claim_rejected = bool(
             response.get("_office_exact_owned") is not True
             # A bare upload notice is backend-authored and means “summarise the
@@ -31626,6 +31752,7 @@ class AgentRuntime:
             # below.  Neither belongs to the exact Office refusal path merely
             # because the summary itself says “all”.
             and not synthetic_document_notice
+            and not office_summary_downgraded
             and any(looks_like_office_attachment(item) for item in attachments)
             and (
                 # A complete authenticated hierarchy may answer a rich exact
@@ -31717,6 +31844,7 @@ class AgentRuntime:
             and not private_web_search_blocked
             and not web_evidence_replaced
             and response.get("_office_exact_owned") is not True
+            and not office_summary_downgraded
             and not office_model_claim_rejected
             and not outside_deed_replaced
             and not supported_deed_replaced
@@ -32069,6 +32197,8 @@ class AgentRuntime:
             }
         elif response.get("_unreadable_attachment_owned") is True:
             verification = _unknown_verdict("attachment_content_unreadable")
+        elif office_summary_downgraded:
+            verification = _unknown_verdict("office_summary_non_exhaustive")
         elif office_model_claim_rejected:
             verification = _unknown_verdict("office_model_exhaustive_claim_rejected")
         else:
@@ -32083,6 +32213,7 @@ class AgentRuntime:
             and response.get("_office_exact_owned") is not True
             and response.get("_workspace_create_owned") is not True
             and response.get("_simple_public_news_owned") is not True
+            and not office_summary_downgraded
             and shape_contract is None
             and not exact_quote_pipeline_owned
             and not direct_attachment_exact_file_projection_turn
@@ -33041,6 +33172,9 @@ class AgentRuntime:
                         if verification_status == VERDICT_UNKNOWN
                         and attachment_readable_count > 0
                         and "attachment_coverage_incomplete" in normalized_private_issues
+                        else "attachment_summary_non_exhaustive"
+                        if verification_status == VERDICT_UNKNOWN
+                        and "office_summary_non_exhaustive" in normalized_private_issues
                         else "attachment_verification_unavailable"
                         if verification_status == VERDICT_UNKNOWN
                         else "attachment_verification_note"
@@ -33224,6 +33358,7 @@ class AgentRuntime:
                     or response.get("_small_talk_owned") is True
                 ),
                 "model_spoke": bool(model_said),
+                **({"office_summary_downgraded": True} if office_summary_downgraded else {}),
                 **({"small_talk_owned": True} if response.get("_small_talk_owned") is True else {}),
                 **(
                     {"readable_attachment_refusal_replaced": True}

@@ -30,7 +30,9 @@ from friday.agent_runtime import (
     _attachment_evidence_chunks,
     _attachment_reference_kind,
     _bounded_attachment_projection,
+    _downgrade_office_summary,
     _requires_complete_attachment_evidence,
+    _unqualified_complete_attachment_claim,
 )
 from friday.execution_kernel import ExecutionKernel, ToolResult
 from friday.permissions import AuthorizationService
@@ -1968,6 +1970,48 @@ def test_answer_only_exhaustiveness_language_requires_complete_attachment(answer
 
 
 @pytest.mark.parametrize(
+    ("draft", "kept", "removed_literal"),
+    [
+        (
+            "Общая тема — Alpha. Это весь список. Дополнительная тема — Beta.",
+            ("Общая тема — Alpha.", "Дополнительная тема — Beta."),
+            "Это весь список.",
+        ),
+        (
+            "Общая тема — Alpha; всего 16 позиций; дополнительная тема — Beta.",
+            ("Общая тема — Alpha;", "дополнительная тема — Beta."),
+            "всего 16 позиций",
+        ),
+        (
+            "Только Иван, Пётр и Анна. Речь идёт о синтетическом графике.",
+            ("Речь идёт о синтетическом графике.",),
+            "Только Иван, Пётр и Анна.",
+        ),
+        (
+            "Сотрудников:\n3\nТема — Alpha.",
+            ("черновик оказался непригоден",),
+            "Сотрудников:\n3",
+        ),
+    ],
+    ids=["closed-set", "count", "only", "cross-line-count"],
+)
+def test_office_summary_downgrade_removes_exhaustive_claim_mutations(
+    draft: str,
+    kept: tuple[str, ...],
+    removed_literal: str,
+) -> None:
+    downgraded, claims_removed = _downgrade_office_summary(draft)
+    notice, body = downgraded.split("\n\n", 1)
+
+    assert claims_removed is True
+    assert "выборочная сводка" in notice
+    assert "не полный перечень" in notice
+    assert all(fragment in body for fragment in kept)
+    assert removed_literal not in downgraded
+    assert not _unqualified_complete_attachment_claim(body)
+
+
+@pytest.mark.parametrize(
     "answer",
     [
         "Позиция 3 — Иван.",
@@ -2007,6 +2051,157 @@ def test_explicitly_partial_summary_question_does_not_require_complete_attachmen
         question,
         "Краткая сводка по названному фрагменту: Север — 120 продаж.",
     )
+
+
+@pytest.mark.parametrize("file_count", [2, 3])
+@pytest.mark.asyncio
+async def test_complete_office_summary_has_deterministic_non_exhaustive_disposition(
+    file_count: int,
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    """Different model wording cannot randomly turn the same file set into a refusal."""
+
+    storage.ensure_user("alice", preset_key="owner")
+    auth = AuthorizationService(storage)
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=_UnusedEnabledLLM(),
+        kernel=ExecutionKernel(auth, settings),
+    )
+    suffixes = ["xlsx", "xlsx", "docx"]
+    raws = [
+        _stored_file(
+            storage,
+            "alice",
+            f"SYNTHETIC-OFFICE-SOURCE-{index}\nТема — Alpha и Beta.",
+            filename=f"synthetic-{index}.{suffixes[index]}",
+        )
+        for index in range(file_count)
+    ]
+    drafts = iter(
+        [
+            "Материалы описывают синтетические проекты Alpha и Beta.",
+            ("Материалы описывают синтетические проекты Alpha и Beta. Это весь список. Всего 16 позиций."),
+        ]
+    )
+
+    async def generate(context, message, attachments):
+        del context, message, attachments
+        return {
+            "content": next(drafts),
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    async def forbidden_verifier(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("a code-owned non-exhaustive summary reached the model verifier")
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_verify_response", forbidden_verifier)
+
+    results: list[dict[str, Any]] = []
+    conversation_id: str | None = None
+    for _ in range(2):
+        result = await runtime.chat(
+            "alice",
+            "обобщи файлы",
+            actor=auth.actor_for_user("alice", source="test"),
+            conversation_id=conversation_id,
+            attachments=[_stored_current_attachment(storage, raw) for raw in raws],
+            enable_tools=False,
+        )
+        conversation_id = str(result["conversation_id"])
+        results.append(result)
+
+    expected_raw_ids = [raw.id for raw in raws]
+    for result in results:
+        assert result["message"] != agent_runtime_module.OFFICE_EXACT_UNAVAILABLE_MESSAGE
+        assert result["message"].startswith("⚠️ Это выборочная сводка")
+        assert "синтетические проекты Alpha и Beta" in result["message"]
+        assert "Это весь список" not in result["message"]
+        assert "16 позиций" not in result["message"]
+        assert result["attachment_context_expected_count"] == file_count
+        assert result["attachment_context_readable_count"] == file_count
+        assert result["attachment_coverage_complete"] is True
+        assert result["attachment_verification_complete"] is True
+        assert result["verification_status"] == "unknown"
+        assert result["verified"] is False
+        assert result["verification"]["issues"] == ["attachment_summary_non_exhaustive"]
+        assert result["tools_used"] == []
+        assert result["citation_check"]["status"] == "skipped"
+        assert result["context"]["answer_mode"] == "general_conversation"
+        stored = storage.get_message(str(result["message_id"]), "alice")
+        assert stored is not None
+        metadata = json.loads(str(stored["metadata_json"]))
+        assert metadata["conversation_attachment_raw_ids"] == expected_raw_ids
+        assert metadata["structural"]["model_spoke"] is True
+        assert metadata["structural"]["office_summary_downgraded"] is True
+
+    rows = storage.get_conversation_messages(str(conversation_id), user_id="alice")
+    user_rows = [row for row in rows if row["role"] == "user"]
+    assert [row["content"] for row in user_rows] == ["обобщи файлы", "обобщи файлы"]
+    assert [
+        json.loads(str(row["metadata_json"]))["conversation_attachment_raw_ids"] for row in user_rows
+    ] == [expected_raw_ids, expected_raw_ids]
+
+
+@pytest.mark.parametrize("file_count", [2, 3])
+@pytest.mark.asyncio
+async def test_office_summary_downgrade_never_opens_an_exact_count_request(
+    file_count: int,
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    auth = AuthorizationService(storage)
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=_UnusedEnabledLLM(),
+        kernel=ExecutionKernel(auth, settings),
+    )
+    raws = [
+        _stored_file(
+            storage,
+            "alice",
+            f"SYNTHETIC-EXACT-SOURCE-{index}",
+            filename=f"synthetic-exact-{index}.xlsx",
+        )
+        for index in range(file_count)
+    ]
+
+    async def exhaustive_draft(*args, **kwargs):
+        del args, kwargs
+        return {
+            "content": "Всего 16 человек. Это весь список.",
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    monkeypatch.setattr(runtime, "_generate_response", exhaustive_draft)
+    result = await runtime.chat(
+        "alice",
+        "Сколько всего людей в файлах?",
+        actor=auth.actor_for_user("alice", source="test"),
+        attachments=[_stored_current_attachment(storage, raw) for raw in raws],
+        enable_tools=False,
+    )
+
+    assert result["message"].endswith(agent_runtime_module.OFFICE_EXACT_UNAVAILABLE_MESSAGE)
+    assert result["verification_status"] == "unknown"
+    assert result["verified"] is False
+    stored = storage.get_message(str(result["message_id"]), "alice")
+    assert stored is not None
+    metadata = json.loads(str(stored["metadata_json"]))
+    assert metadata["conversation_attachment_raw_ids"] == [raw.id for raw in raws]
+    assert metadata["structural"]["verdict_kind"] == "office_exact"
+    assert metadata["structural"]["model_spoke"] is False
+    assert "office_summary_downgraded" not in metadata["structural"]
 
 
 @pytest.mark.parametrize(

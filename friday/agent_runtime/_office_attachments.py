@@ -957,6 +957,16 @@ def _closed_office_request_kind(question: str) -> str:
         return "recheck"
 
     remainder = " ".join(_TARGET_FRAGMENT.sub(" ", text).split())
+    if re.search(r"\bтаблиц\w*\b", text, flags=re.IGNORECASE) and re.fullmatch(
+        r"сколько(?:\s+всего)?",
+        remainder,
+    ):
+        # A target-only table count has no semantic residue and maps to the
+        # existing structural ``count_auto`` renderer: a roster counts its
+        # authoritative people column, while an ordinary table counts records.
+        # Keep this narrower than a generic “сколько в файле”: the explicit
+        # table noun is the only new closed grammar admitted here.
+        return "count_auto"
     if _EXPLICIT_ATTACHMENT_TARGET.search(text) and re.fullmatch(
         rf"(?:"
         rf"(?:скажи|скажите|сообщ\w*|напиш\w*|озвуч\w*|вытащ\w*)\s+"
