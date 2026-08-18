@@ -466,6 +466,9 @@ async def test_verifier_rejection_publishes_nothing(settings, storage, verifier:
     [
         "Ответ без метки.",
         "Ответ [A1], придуманный источник [A2].",
+        "Ответ [A1]. Чужая метка [A0].",
+        "Ответ [A1]. Чужая метка [A9999].",
+        "Ответ [A1]. Чужая метка [B1].",
         "<think>скрыто</think> Ответ [A1].",
     ],
 )

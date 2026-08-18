@@ -37,7 +37,10 @@ from friday.model_profiles import (
     V12LiveAttestation,
 )
 from friday.orchestration.contracts import EvidenceKind, OutputFormat, RouteClass
-from friday.orchestration.file_read_contract import build_file_verifier_messages
+from friday.orchestration.file_read_contract import (
+    build_file_verifier_messages,
+    validate_file_synthesis_answer,
+)
 
 _BINDING = "a" * 64
 _EPOCH_SHA256 = "c" * 64
@@ -500,6 +503,14 @@ def test_two_source_synthesis_accepts_the_closed_grounded_prose_variant() -> Non
             prompt_tokens=256,
         ),
     )
+
+
+@pytest.mark.parametrize("foreign_marker", ["[A0]", "[A9999]", "[B1]"])
+def test_shared_synthesis_contract_rejects_every_citation_like_foreign_marker(
+    foreign_marker: str,
+) -> None:
+    with pytest.raises(ValueError, match="citations do not match"):
+        validate_file_synthesis_answer(f"Факт [A1]. Чужая метка {foreign_marker}.", ("A1",))
 
 
 @pytest.mark.asyncio

@@ -524,7 +524,7 @@ def _probe_suite_manifest() -> Mapping[str, object]:
         },
         "plan": {
             "validator": {
-                "version": "turn-plan-production-applicability-read-zero-tools-effect-declarative.v3",
+                "version": "turn-plan-production-applicability-russian-text-read-zero-tools-effect-declarative.v4",
                 "parser": "friday.turn-plan.v1",
                 "reject_duplicate_keys": True,
             },
@@ -553,7 +553,7 @@ def _probe_suite_manifest() -> Mapping[str, object]:
                 for request in SYNTHESIS_PROBES
             ],
             "validator": {
-                "version": "production-file-prose-closed-fact-grammar.v5",
+                "version": "production-file-prose-closed-fact-grammar-citation-like-rejection.v6",
                 "reject_extra_claims": True,
                 "reject_invalid_citation_markers": True,
             },

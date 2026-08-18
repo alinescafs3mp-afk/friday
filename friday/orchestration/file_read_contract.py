@@ -9,7 +9,13 @@ from typing import Any
 
 from friday.evidence_bundle import EvidenceBundle
 from friday.model_input_hygiene import model_visible_text_is_secret_free
-from friday.orchestration.contracts import EvidenceKind, RouteClass, TurnInput, TurnPlan
+from friday.orchestration.contracts import (
+    EvidenceKind,
+    OutputFormat,
+    RouteClass,
+    TurnInput,
+    TurnPlan,
+)
 
 V12_FILE_VERIFIER_SCHEMA = "friday.v12-file-verifier.v1"
 V12_FILE_SYNTHESIS_SYSTEM = """\
@@ -30,6 +36,7 @@ schema всегда {V12_FILE_VERIFIER_SCHEMA}; supported — boolean; citation_
 """
 
 _CITATION_RE = re.compile(r"\[(A[1-9][0-9]{0,2})\]")
+_CITATION_LIKE_RE = re.compile(r"\[[A-Za-zА-Яа-я][0-9]{1,6}\]")
 _SERVICE_MARKUP_RE = re.compile(
     r"</?(?:think|tool_call|function|tool)(?:\s[^>]*)?>",
     re.IGNORECASE,
@@ -49,6 +56,8 @@ def file_read_plan_supports_attachment_count(plan: TurnPlan, attachment_count: i
         and requests[0].kind is EvidenceKind.ATTACHED_FILES
         and requests[0].required
         and requests[0].max_items >= attachment_count
+        and plan.output.format is OutputFormat.TEXT
+        and plan.output.language == "ru"
         and plan.output.require_citations
         and plan.output.one_message
     )
@@ -135,7 +144,12 @@ def validate_file_synthesis_answer(answer: object, expected_labels: tuple[str, .
     ):
         raise ValueError("file synthesis answer is unsafe")
     detected = tuple(dict.fromkeys(_CITATION_RE.findall(normalized)))
-    if detected != expected_labels or set(_CITATION_RE.findall(normalized)) != set(expected_labels):
+    expected_tokens = {f"[{label}]" for label in expected_labels}
+    if (
+        detected != expected_labels
+        or set(_CITATION_RE.findall(normalized)) != set(expected_labels)
+        or any(token not in expected_tokens for token in _CITATION_LIKE_RE.findall(normalized))
+    ):
         raise ValueError("file synthesis citations do not match evidence")
     return normalized
 

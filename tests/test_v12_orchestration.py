@@ -25,6 +25,7 @@ from friday.orchestration import (
     TurnPlanError,
     build_orchestrated_agent,
 )
+from friday.orchestration.file_read_contract import file_read_plan_supports_attachment_count
 from friday.orchestration.planner import V12Planner
 from friday.orchestration.router import (
     ReadOnlyRoutePreparation,
@@ -433,6 +434,20 @@ def test_turn_plan_tool_arguments_are_deeply_immutable() -> None:
     assert plan.canonical_sha256() == original_sha
     with pytest.raises(TypeError):
         plan.tool_intents[0].arguments["new"] = "forbidden"  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("output_key", "value"),
+    [("format", "table"), ("language", "en")],
+)
+def test_phase_one_file_canary_accepts_only_russian_text_output(
+    output_key: str,
+    value: str,
+) -> None:
+    payload = _plan_payload()
+    payload["output"][output_key] = value
+
+    assert not file_read_plan_supports_attachment_count(TurnPlan.parse(payload), 1)
 
 
 def test_configuration_defaults_to_legacy_and_invalid_env_is_legacy(settings, monkeypatch) -> None:
