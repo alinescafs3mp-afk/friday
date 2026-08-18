@@ -304,6 +304,16 @@ def test_metrics_parser_decimal_normalizes_epoch_and_requires_exact_gauges() -> 
         ).running
         == 2.0
     )
+    assert (
+        _parse_metrics(
+            _metrics().replace(
+                b'{model_name="dispatcher"}',
+                b'{engine="0",model_name="dispatcher"}',
+            ),
+            served_model_alias="dispatcher",
+        ).waiting
+        == 0.0
+    )
 
 
 def test_model_inventory_requires_one_exact_served_alias() -> None:

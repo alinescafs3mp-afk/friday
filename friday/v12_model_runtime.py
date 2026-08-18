@@ -422,7 +422,12 @@ def _transport_router(value: object) -> object:
 def _parse_labels(value: str | None, *, served_model_alias: str) -> None:
     if value is None or value == "":
         return
-    if value != f'model_name="{served_model_alias}"':
+    expected_model = f'model_name="{served_model_alias}"'
+    if value not in {
+        expected_model,
+        f'engine="0",{expected_model}',
+        f'{expected_model},engine="0"',
+    }:
         raise _runtime_error(V12ModelRuntimeFailure.METRICS_INVALID)
 
 
