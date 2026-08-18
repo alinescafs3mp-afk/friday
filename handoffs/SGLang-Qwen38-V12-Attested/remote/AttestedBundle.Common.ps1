@@ -169,7 +169,7 @@ function Assert-AttestedModelVolume([object]$Volume, [string]$ExpectedAttachment
         [string]$Volume.Labels.'com.friday.model.revision' -cne $script:Attested.ModelRevision) {
         throw 'Attested model volume labels changed'
     }
-    $options = if ($null -eq $Volume.Options) { @() } else { @($Volume.Options.PSObject.Properties.Name) }
+    $options = @(if ($null -ne $Volume.Options) { $Volume.Options.PSObject.Properties.Name })
     if ($options.Count -ne 0) { throw 'Attested model volume driver options are not empty' }
     $attached = @(& docker ps -aq --no-trunc --filter "volume=$($script:Attested.ModelVolumeName)")
     if ($LASTEXITCODE -ne 0) { throw 'Attested model volume attachment lookup failed' }
