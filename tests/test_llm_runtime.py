@@ -525,9 +525,7 @@ async def test_exact_response_model_accepts_one_choice_from_configured_model(
                 request=httpx.Request("POST", url),
                 json={
                     "model": router.model,
-                    "choices": [
-                        {"message": {"content": "exact model"}, "finish_reason": "stop"}
-                    ],
+                    "choices": [{"message": {"content": "exact model"}, "finish_reason": "stop"}],
                     "usage": {},
                 },
             )

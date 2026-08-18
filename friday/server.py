@@ -1526,9 +1526,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.agent = agent
             application.state.v12_model_runtime = attempted_v12_runtime
             application.state.v12_startup_reason = v12_startup_reason
-            application.state.v12_registered_routes = tuple(
-                sorted(route.value for route in route_handlers)
-            )
+            application.state.v12_registered_routes = tuple(sorted(route.value for route in route_handlers))
             application.state.executive = executive
             application.state.memory_vault = memory_vault
             application.state.workers = workers
@@ -1860,9 +1858,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 "installed_mode": (
                     agent.mode.value if isinstance(agent, OrchestrationRouter) else RouterMode.LEGACY.value
                 ),
-                "registered_routes": list(
-                    getattr(request.app.state, "v12_registered_routes", ())
-                ),
+                "registered_routes": list(getattr(request.app.state, "v12_registered_routes", ())),
                 "model_gate": gate_status,
             },
         }
