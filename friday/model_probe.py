@@ -486,7 +486,7 @@ def _probe_suite_manifest() -> Mapping[str, object]:
         },
         "plan": {
             "validator": {
-                "version": "turn-plan-production-applicability-native-text.v3",
+                "version": "turn-plan-production-applicability-read-zero-tools-effect-declarative.v3",
                 "parser": "friday.turn-plan.v1",
                 "reject_duplicate_keys": True,
             },
@@ -708,7 +708,7 @@ def _evaluate_plan(case: PlanProbeCase, response: object) -> None:
     if not (
         plan.route is case.expected_route
         and plan.output.language == case.expected_language
-        and not plan.tool_intents
+        and (plan.route is RouteClass.EFFECT or not plan.tool_intents)
         and (case.expected_output_format is None or plan.output.format is case.expected_output_format)
         and (
             plan.route is not RouteClass.FILE_READ

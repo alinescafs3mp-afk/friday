@@ -359,6 +359,36 @@ async def test_plan_requires_exact_route_ru_language_zero_tools_and_output_shape
     assert raised.value.code is ModelProbeFailure.PLAN_INVALID
 
 
+def test_effect_plan_may_declare_a_write_intent_but_never_emit_protocol_tool_calls() -> None:
+    case = next(item for item in PLAN_PROBE_CASES if item.case_id == "effect_document")
+    payload = _plan_payload(case)
+    payload["tool_intents"] = [
+        {
+            "name": "documents.create",
+            "arguments": {"format": "docx"},
+            "effect": "write",
+            "purpose": "create the requested document",
+        }
+    ]
+
+    model_probe_module._evaluate_plan(
+        case,
+        _plan_response(case, content=json.dumps(payload, ensure_ascii=False)),
+    )
+
+    with pytest.raises(ModelProbeError) as raised:
+        model_probe_module._evaluate_plan(
+            case,
+            ProbeCompletion(
+                content=json.dumps(payload, ensure_ascii=False),
+                finish_reason="stop",
+                tool_calls=("forbidden-protocol-call",),
+                prompt_tokens=10,
+            ),
+        )
+    assert raised.value.code is ModelProbeFailure.PLAN_INVALID
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mutation", ["insufficient_max_items", "extra_conversation"])
 async def test_file_plan_probe_requires_the_exact_production_applicability_shape(
