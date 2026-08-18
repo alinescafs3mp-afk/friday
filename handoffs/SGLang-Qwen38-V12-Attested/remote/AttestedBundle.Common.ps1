@@ -680,8 +680,8 @@ function Assert-CandidateContainers([object]$Engine, [object]$Proxy, [object]$Re
         (Get-EnvValue $Engine 'FRIDAY_EXPECTED_ENGINE_IMAGE_ID') -cne [string]$Receipt.engine.image_id -or
         (Get-EnvValue $Engine 'FRIDAY_EXPECTED_PROXY_IMAGE_ID') -cne [string]$Receipt.proxy.image_id -or
         [bool]$Engine.HostConfig.Privileged -or -not [string]::IsNullOrWhiteSpace([string]$Engine.HostConfig.PidMode) -or
-        @($Engine.HostConfig.SecurityOpt).Count -ne 1 -or
-        [string]$Engine.HostConfig.SecurityOpt[0] -cne 'no-new-privileges:true') {
+        [string]::Join(',', @($Engine.HostConfig.SecurityOpt | Sort-Object)) -cne
+            'label=disable,no-new-privileges:true') {
         throw 'Candidate engine identity is not exact'
     }
     Assert-ExactCommand $Engine $script:ExpectedGraphCommand 'attested candidate engine'
