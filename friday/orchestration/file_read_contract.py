@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from collections.abc import Mapping
 from typing import Any
 
@@ -36,7 +37,6 @@ schema всегда {V12_FILE_VERIFIER_SCHEMA}; supported — boolean; citation_
 """
 
 _CITATION_RE = re.compile(r"\[(A[1-9][0-9]{0,2})\]")
-_BRACKET_TOKEN_RE = re.compile(r"\[([^\[\]\r\n]*)\]")
 _SERVICE_MARKUP_RE = re.compile(
     r"</?(?:think|tool_call|function|tool)(?:\s[^>]*)?>",
     re.IGNORECASE,
@@ -44,19 +44,13 @@ _SERVICE_MARKUP_RE = re.compile(
 _MAX_ANSWER_JSON_UTF8_BYTES = 2_048
 
 
-def _citation_like_tokens(text: str) -> tuple[str, ...]:
-    """Return every closed bracket token that can masquerade as a citation."""
+def _has_unowned_brackets(text: str, expected_tokens: set[str]) -> bool:
+    """Reject every bracket glyph except exact citations owned by the evidence bundle."""
 
-    tokens: list[str] = []
-    for body in _BRACKET_TOKEN_RE.findall(text):
-        if (
-            body
-            and body[0].isalpha()
-            and any(character.isdigit() for character in body)
-            and all(character.isalnum() or character in "_-" for character in body)
-        ):
-            tokens.append(f"[{body}]")
-    return tuple(tokens)
+    remainder = text
+    for token in expected_tokens:
+        remainder = remainder.replace(token, "")
+    return any("BRACKET" in unicodedata.name(character, "") for character in remainder)
 
 
 def file_read_plan_supports_attachment_count(plan: TurnPlan, attachment_count: int) -> bool:
@@ -163,7 +157,7 @@ def validate_file_synthesis_answer(answer: object, expected_labels: tuple[str, .
     if (
         detected != expected_labels
         or set(_CITATION_RE.findall(normalized)) != set(expected_labels)
-        or any(token not in expected_tokens for token in _citation_like_tokens(normalized))
+        or _has_unowned_brackets(normalized, expected_tokens)
     ):
         raise ValueError("file synthesis citations do not match evidence")
     return normalized

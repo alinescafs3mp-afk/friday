@@ -553,7 +553,7 @@ def _probe_suite_manifest() -> Mapping[str, object]:
                 for request in SYNTHESIS_PROBES
             ],
             "validator": {
-                "version": "production-file-prose-closed-fact-grammar-citation-like-rejection.v7",
+                "version": "production-file-prose-closed-fact-grammar-unowned-bracket-rejection.v8",
                 "reject_extra_claims": True,
                 "reject_invalid_citation_markers": True,
             },

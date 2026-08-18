@@ -507,7 +507,28 @@ def test_two_source_synthesis_accepts_the_closed_grounded_prose_variant() -> Non
 
 @pytest.mark.parametrize(
     "foreign_marker",
-    ["[A0]", "[A9999]", "[A1000000]", "[AA1]", "[A_1]", "[A-1]", "[B1]", "[Б1]"],
+    [
+        "[A0]",
+        "[A9999]",
+        "[A1000000]",
+        "[AA1]",
+        "[A_1]",
+        "[A-1]",
+        "[A 1]",
+        "[A.1]",
+        "[A/1]",
+        "[A:1]",
+        "[A\u200b1]",
+        "[ A1]",
+        "[A1 ]",
+        "[B#1]",
+        "[B1]",
+        "[Б1]",
+        r"\[B1\]",
+        "［B1］",
+        "【B1】",
+        "[приложение]",
+    ],
 )
 def test_shared_synthesis_contract_rejects_every_citation_like_foreign_marker(
     foreign_marker: str,
