@@ -30,8 +30,9 @@ output has exactly format, language, require_citations, one_message.
 format: text|table|document. fallback: legacy|refuse.
 Every source-backed route must set require_citations=true. one_message must always be true.
 file_read uses only attached_files/conversation evidence; archive_read only archive/conversation;
-web_read only web/conversation. In the initial read-only canary, tool_intents must be empty.
-Creating a document is an effect route even when its contents came from read-only evidence.
+web_read only web/conversation. Read-only routes must leave tool_intents empty. An effect route may
+describe the requested write/high action declaratively in tool_intents, but never execute a protocol
+tool call. Creating a document is an effect route even when its contents came from read-only evidence.
 reason_code is a short machine label, not hidden reasoning.
 For requests to inspect, compare, summarize, OCR, or find facts in supplied files, choose file_read
 and request attached_files evidence. For earlier stored files, choose archive_read and archive evidence.

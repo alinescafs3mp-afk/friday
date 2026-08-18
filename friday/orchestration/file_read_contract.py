@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from friday.evidence_bundle import EvidenceBundle
@@ -89,24 +90,37 @@ def build_file_verifier_messages(
     bundle: EvidenceBundle,
     answer: str,
 ) -> list[dict[str, str]]:
-    payload = {
-        "schema": "friday.v12-file-verification-input.v1",
-        "request": turn.message,
-        "evidence": bundle.model_payload(),
-        "answer": answer,
-    }
+    prompt = build_file_verifier_prompt(
+        request=turn.message,
+        evidence=bundle.model_payload(),
+        answer=answer,
+    )
     return [
         {"role": "system", "content": V12_FILE_VERIFIER_SYSTEM},
-        {
-            "role": "user",
-            "content": json.dumps(
-                payload,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ),
-        },
+        {"role": "user", "content": prompt},
     ]
+
+
+def build_file_verifier_prompt(
+    *,
+    request: str,
+    evidence: Mapping[str, object],
+    answer: str,
+) -> str:
+    """Serialize the exact production verifier input for runtime and probe."""
+
+    payload = {
+        "schema": "friday.v12-file-verification-input.v1",
+        "request": request,
+        "evidence": evidence,
+        "answer": answer,
+    }
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def validate_file_synthesis_answer(answer: object, expected_labels: tuple[str, ...]) -> str:
@@ -189,6 +203,7 @@ __all__ = [
     "V12_FILE_VERIFIER_SYSTEM",
     "build_file_synthesis_messages",
     "build_file_verifier_messages",
+    "build_file_verifier_prompt",
     "file_read_plan_supports_attachment_count",
     "parse_file_verifier_result",
     "require_file_verifier_clear",

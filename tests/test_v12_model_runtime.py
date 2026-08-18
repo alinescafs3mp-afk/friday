@@ -15,7 +15,6 @@ from friday.model_probe import (
     CONTEXT_PROBE,
     PLAN_PROBE_CASES,
     SYNTHESIS_PROBE,
-    VERIFIER_PROBES,
     CancellationProbeRequest,
     ModelProbeError,
     ModelProbeFailure,
@@ -472,32 +471,53 @@ async def test_runtime_can_install_only_the_complete_live_probe_result(settings)
         )
         for case in PLAN_PROBE_CASES
     ]
-    synthesis = V12ServedCompletion(
-        content=(
-            "Код синтетического проекта: СЕВЕР-42 [A1]. "
-            "Контрольная дата синтетического проекта: 7 октября 2099 года [A2]."
+    synthesis_responses = [
+        V12ServedCompletion(
+            content="Код синтетического проекта: СЕВЕР-42 [A1].",
+            finish_reason="stop",
+            tool_calls=(),
+            prompt_tokens=256,
+            served_model_alias="dispatcher",
         ),
-        finish_reason="stop",
-        tool_calls=(),
-        prompt_tokens=256,
-        served_model_alias="dispatcher",
-    )
-    verifier_responses = [
         V12ServedCompletion(
             content=(
-                '{"schema":"friday.v12-file-verifier.v1","supported":true,'
-                '"citation_labels":["A1","A2"],"unsupported_claims":0}'
-                if request is VERIFIER_PROBES[0]
-                else '{"schema":"friday.v12-file-verifier.v1","supported":false,'
-                '"citation_labels":["A1","A2"],"unsupported_claims":1}'
+                "Код синтетического проекта: СЕВЕР-42 [A1]. "
+                "Контрольная дата синтетического проекта: 7 октября 2099 года [A2]."
+            ),
+            finish_reason="stop",
+            tool_calls=(),
+            prompt_tokens=256,
+            served_model_alias="dispatcher",
+        ),
+    ]
+    positive_verifier_responses = [
+        V12ServedCompletion(
+            content=json.dumps(
+                {
+                    "schema": "friday.v12-file-verifier.v1",
+                    "supported": True,
+                    "citation_labels": ["A1"] if index == 0 else ["A1", "A2"],
+                    "unsupported_claims": 0,
+                },
+                separators=(",", ":"),
             ),
             finish_reason="stop",
             tool_calls=(),
             prompt_tokens=256,
             served_model_alias="dispatcher",
         )
-        for request in VERIFIER_PROBES
+        for index in range(2)
     ]
+    negative_verifier = V12ServedCompletion(
+        content=(
+            '{"schema":"friday.v12-file-verifier.v1","supported":false,'
+            '"citation_labels":["A1","A2"],"unsupported_claims":1}'
+        ),
+        finish_reason="stop",
+        tool_calls=(),
+        prompt_tokens=256,
+        served_model_alias="dispatcher",
+    )
     context = V12ServedCompletion(
         content=json.dumps(
             {"начало": CONTEXT_PROBE.start_marker, "конец": CONTEXT_PROBE.end_marker},
@@ -522,7 +542,15 @@ async def test_runtime_can_install_only_the_complete_live_probe_result(settings)
             _metrics(),
             _metrics(),
         ],
-        completions=[*plan_responses, synthesis, *verifier_responses, context],
+        completions=[
+            *plan_responses,
+            synthesis_responses[0],
+            positive_verifier_responses[0],
+            synthesis_responses[1],
+            positive_verifier_responses[1],
+            negative_verifier,
+            context,
+        ],
     )
 
     attestation = await runtime.attest(absolute_deadline=time.monotonic() + 5)
@@ -530,7 +558,7 @@ async def test_runtime_can_install_only_the_complete_live_probe_result(settings)
     assert attestation.profile_id == QWEN36_27B_V12_PROFILE.profile_id
     assert attestation.process_epoch_sha256 == _EPOCH_SHA256
     assert runtime.public_status()["status"] == "canary_ready"
-    assert len(completion.calls) == len(PLAN_PROBE_CASES) + 5
+    assert len(completion.calls) == len(PLAN_PROBE_CASES) + 7
     assert completion.pending.cancel_calls == 1
     assert len(metrics.calls) == 9
 

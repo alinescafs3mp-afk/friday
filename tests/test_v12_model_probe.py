@@ -10,11 +10,13 @@ from typing import Any
 import pytest
 
 import friday.model_probe as model_probe_module
+from friday.evidence_bundle import CitationBinding, EvidenceBundle, EvidencePart
 from friday.model_probe import (
     CANCELLATION_PROBE,
     CONTEXT_PROBE,
     PLAN_PROBE_CASES,
     SYNTHESIS_PROBE,
+    SYNTHESIS_PROBES,
     VERIFIER_PROBES,
     CancellationProbeRequest,
     CancellationProbeResult,
@@ -35,6 +37,7 @@ from friday.model_profiles import (
     V12LiveAttestation,
 )
 from friday.orchestration.contracts import EvidenceKind, OutputFormat, RouteClass
+from friday.orchestration.file_read_contract import build_file_verifier_messages
 
 _BINDING = "a" * 64
 _EPOCH_SHA256 = "c" * 64
@@ -93,17 +96,34 @@ class _Client:
         self.load_index = 0
         self.load_times: list[float] = []
         self.plan_overrides: dict[str, ProbeCompletion] = {}
-        self.synthesis = ProbeCompletion(
-            content=(
-                "Код синтетического проекта: СЕВЕР-42 [A1]. "
-                "Контрольная дата синтетического проекта: 7 октября 2099 года [A2]."
+        self.syntheses = {
+            "production_file_synthesis_1": ProbeCompletion(
+                content="Код синтетического проекта: СЕВЕР-42 [A1].",
+                finish_reason="stop",
+                tool_calls=(),
+                prompt_tokens=256,
             ),
-            finish_reason="stop",
-            tool_calls=(),
-            prompt_tokens=256,
-        )
+            "production_file_synthesis_2": ProbeCompletion(
+                content=(
+                    "Код синтетического проекта: СЕВЕР-42 [A1]. "
+                    "Контрольная дата синтетического проекта: 7 октября 2099 года [A2]."
+                ),
+                finish_reason="stop",
+                tool_calls=(),
+                prompt_tokens=256,
+            ),
+        }
         self.verifier: dict[str, ProbeCompletion] = {
-            "verifier_case_31": ProbeCompletion(
+            "production_file_synthesis_1_verifier_clear": ProbeCompletion(
+                content=(
+                    '{"schema":"friday.v12-file-verifier.v1","supported":true,'
+                    '"citation_labels":["A1"],"unsupported_claims":0}'
+                ),
+                finish_reason="stop",
+                tool_calls=(),
+                prompt_tokens=256,
+            ),
+            "production_file_synthesis_2_verifier_clear": ProbeCompletion(
                 content=(
                     '{"schema":"friday.v12-file-verifier.v1","supported":true,'
                     '"citation_labels":["A1","A2"],"unsupported_claims":0}'
@@ -192,7 +212,7 @@ class _Client:
         self.requests.append(request)
         if self.raise_phase == "synthesis":
             raise RuntimeError("private synthesis response")
-        return self.synthesis
+        return self.syntheses[request.case_id]
 
     async def complete_verifier(
         self,
@@ -264,8 +284,13 @@ async def test_clear_suite_returns_only_the_sanitized_read_only_attestation() ->
     assert report.max_tool_steps == 0
     assert report.allowed_effects == frozenset({ModelEffect.READ})
     assert report.verifier_required is True
+    assert [request.case_id for request in client.requests if isinstance(request, SynthesisProbeRequest)] == [
+        request.case_id for request in SYNTHESIS_PROBES
+    ]
     assert [request.case_id for request in client.requests if isinstance(request, VerifierProbeRequest)] == [
-        request.case_id for request in VERIFIER_PROBES
+        "production_file_synthesis_1_verifier_clear",
+        "production_file_synthesis_2_verifier_clear",
+        *[request.case_id for request in VERIFIER_PROBES],
     ]
     assert len(client.load_times) == 4
     assert (
@@ -451,7 +476,10 @@ async def test_two_source_synthesis_requires_exact_source_fact_map_and_no_extra_
     content: str,
 ) -> None:
     client = _Client()
-    client.synthesis = replace(client.synthesis, content=content)
+    client.syntheses[SYNTHESIS_PROBE.case_id] = replace(
+        client.syntheses[SYNTHESIS_PROBE.case_id],
+        content=content,
+    )
 
     with pytest.raises(ModelProbeError) as raised:
         await _run(client)
@@ -459,12 +487,80 @@ async def test_two_source_synthesis_requires_exact_source_fact_map_and_no_extra_
     assert raised.value.code is ModelProbeFailure.SYNTHESIS_INVALID
 
 
+def test_two_source_synthesis_accepts_the_closed_grounded_prose_variant() -> None:
+    model_probe_module._evaluate_synthesis(
+        SYNTHESIS_PROBE,
+        ProbeCompletion(
+            content=(
+                "Код синтетического проекта — СЕВЕР-42 [A1], а его контрольная дата — "
+                "7 октября 2099 года [A2]."
+            ),
+            finish_reason="stop",
+            tool_calls=(),
+            prompt_tokens=256,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_positive_verifier_receives_the_exact_accepted_synthesis() -> None:
+    client = _Client()
+    accepted = (
+        "Код синтетического проекта — СЕВЕР-42 [A1], а его контрольная дата — 7 октября 2099 года [A2]."
+    )
+    client.syntheses[SYNTHESIS_PROBE.case_id] = replace(
+        client.syntheses[SYNTHESIS_PROBE.case_id],
+        content=accepted,
+    )
+
+    await _run(client)
+
+    request = next(
+        item
+        for item in client.requests
+        if isinstance(item, VerifierProbeRequest)
+        and item.case_id == "production_file_synthesis_2_verifier_clear"
+    )
+    assert json.loads(request.prompt)["answer"] == accepted
+
+
+def test_probe_verifier_prompt_is_byte_exact_with_the_production_builder() -> None:
+    accepted = (
+        "Код синтетического проекта: СЕВЕР-42 [A1]. "
+        "Контрольная дата синтетического проекта: 7 октября 2099 года [A2]."
+    )
+    parts = (
+        EvidencePart(
+            "A1", "probe-note-1.txt", "text/plain", "a" * 64, "Код синтетического проекта: СЕВЕР-42."
+        ),
+        EvidencePart(
+            "A2",
+            "probe-note-2.txt",
+            "text/plain",
+            "b" * 64,
+            "Контрольная дата синтетического проекта: 7 октября 2099 года.",
+        ),
+    )
+    bundle = EvidenceBundle(
+        parts=parts,
+        citations=(CitationBinding("A1", "a" * 64), CitationBinding("A2", "b" * 64)),
+        file_evidence_set_sha256="c" * 64,
+    )
+    turn = replace(
+        PLAN_PROBE_CASES[0].turn,
+        message="Назови код и контрольную дату проекта одним сообщением.",
+    )
+    probe = model_probe_module._positive_verifier_request(SYNTHESIS_PROBE, accepted)
+
+    assert probe.prompt == build_file_verifier_messages(turn, bundle, accepted)[1]["content"]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("case_id", "content"),
     [
         (
-            "verifier_case_31",
+            "production_file_synthesis_2_verifier_clear",
             '{"schema":"friday.v12-file-verifier.v1","supported":false,'
             '"citation_labels":["A1","A2"],"unsupported_claims":1}',
         ),
@@ -474,31 +570,31 @@ async def test_two_source_synthesis_requires_exact_source_fact_map_and_no_extra_
             '"citation_labels":["A1","A2"],"unsupported_claims":0}',
         ),
         (
-            "verifier_case_31",
+            "production_file_synthesis_2_verifier_clear",
             '{"schema":"friday.v12-file-verifier.v1","supported":true,'
             '"citation_labels":["A2","A1"],"unsupported_claims":0}',
         ),
         (
-            "verifier_case_31",
+            "production_file_synthesis_2_verifier_clear",
             '{"schema":"friday.v12-file-verifier.v1","supported":true,'
             '"citation_labels":["A1","A2"],"unsupported_claims":false}',
         ),
         (
-            "verifier_case_31",
+            "production_file_synthesis_2_verifier_clear",
             (
                 '{"schema":"friday.v12-file-verifier.v1","supported":true,"supported":false,'
                 '"citation_labels":["A1","A2"],"unsupported_claims":0}'
             ),
         ),
         (
-            "verifier_case_31",
+            "production_file_synthesis_2_verifier_clear",
             (
                 '{"schema":"friday.v12-file-verifier.v1","supported":true,'
                 '"citation_labels":["A1","A2"],"unsupported_claims":0,"extra":0}'
             ),
         ),
         (
-            "verifier_case_31",
+            "production_file_synthesis_2_verifier_clear",
             '{"supported":true,"citation_labels":["A1","A2"],"unsupported_claims":0}',
         ),
     ],
@@ -741,6 +837,7 @@ def test_requests_and_responses_hide_every_prompt_and_model_controlled_string_fr
     values = (
         *PLAN_PROBE_CASES,
         SYNTHESIS_PROBE,
+        *SYNTHESIS_PROBES,
         *VERIFIER_PROBES,
         CONTEXT_PROBE,
         CANCELLATION_PROBE,
@@ -776,14 +873,17 @@ def test_suite_hash_commits_to_prompts_validators_cases_timeouts_and_cancellatio
     if mutation == "prompt":
         monkeypatch.setattr(
             model_probe_module,
-            "SYNTHESIS_PROBE",
-            replace(SYNTHESIS_PROBE, prompt=f"{SYNTHESIS_PROBE.prompt} changed"),
+            "SYNTHESIS_PROBES",
+            (
+                replace(SYNTHESIS_PROBES[0], prompt=f"{SYNTHESIS_PROBES[0].prompt} changed"),
+                *SYNTHESIS_PROBES[1:],
+            ),
         )
     elif mutation == "validator":
         monkeypatch.setattr(
             model_probe_module,
-            "_SYNTHESIS_EXPECTED",
-            {"claims": [{"fact": "changed", "citation": "A1"}]},
+            "_SYNTHESIS_EXPECTED_PATTERNS",
+            {**model_probe_module._SYNTHESIS_EXPECTED_PATTERNS, SYNTHESIS_PROBE.case_id: "changed"},
         )
     elif mutation == "case_semantics":
         monkeypatch.setattr(

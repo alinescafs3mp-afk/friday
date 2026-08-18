@@ -522,23 +522,25 @@ class V12ModelGate:
 
 
 _QWEN36_27B_PLANNER_CONTRACT_SHA256 = _version_sha256(
-    "friday.v12-planner-contract.v1",
+    "friday.v12-planner-contract.v2",
     {
+        "effect_route_intents": "declarative_only",
         "initial_canary_tool_steps": 0,
         "one_publication": True,
+        "read_only_route_intents": "empty",
         "schema": V12_TURN_PLAN_SCHEMA,
         "source_routes_require_citations": True,
     },
 )
-# Exact v2 manifest digest produced by ``friday.model_probe``.  The manifest
+# Exact manifest digest produced by ``friday.model_probe``.  The manifest
 # binds fixed prompts, validators, verifier cases, deadlines and cancellation
 # semantics—not merely a list of case names.  Keeping the digest here avoids a
 # model_profiles -> orchestration/model_probe import cycle; the probe refuses a
 # profile if its independently recomputed manifest differs by one byte.
-_QWEN36_27B_PROBE_SUITE_SHA256 = "2d265b805f321d66c21504a27fae34ad87a6ed5eedf653ef454011a3555301cd"
+_QWEN36_27B_PROBE_SUITE_SHA256 = "751d78c432ece4a95b5500945471a3f90477972e38eb64679c87232c14aec7e6"
 
 QWEN36_27B_V12_PROFILE = V12ModelProfileSpec(
-    profile_id="qwen36-27b-nvfp4-nvidia:dispatcher:v12.3",
+    profile_id="qwen36-27b-nvfp4-nvidia:dispatcher:v12.8",
     runtime_profile_name="qwen36-27b-nvfp4-nvidia",
     served_model_alias="dispatcher",
     planner_contract_sha256=_QWEN36_27B_PLANNER_CONTRACT_SHA256,

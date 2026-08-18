@@ -20,7 +20,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import partial
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar, cast
 
 from friday.model_profiles import (
     ModelCapability,
@@ -40,6 +40,7 @@ from friday.orchestration.file_read_contract import (
     V12_FILE_SYNTHESIS_SYSTEM,
     V12_FILE_VERIFIER_SCHEMA,
     V12_FILE_VERIFIER_SYSTEM,
+    build_file_verifier_prompt,
     file_read_plan_supports_attachment_count,
     parse_file_verifier_result,
     validate_file_synthesis_answer,
@@ -294,7 +295,29 @@ PLAN_PROBE_CASES: tuple[PlanProbeCase, ...] = (
     ),
 )
 
-_SYNTHESIS_INPUT = {
+_SYNTHESIS_INPUT_ONE = {
+    "schema": "friday.v12-file-synthesis.v1",
+    "request": "Назови код проекта одним сообщением.",
+    "objective": "Сообщить точный код из приложенного источника.",
+    "output": {
+        "format": "text",
+        "language": "ru",
+        "one_message": True,
+        "require_citations": True,
+    },
+    "evidence": {
+        "schema": "friday.evidence-bundle.v1",
+        "parts": [
+            {
+                "display_name": "probe-note-1.txt",
+                "label": "A1",
+                "media_type": "text/plain",
+                "text": "Код синтетического проекта: СЕВЕР-42.",
+            }
+        ],
+    },
+}
+_SYNTHESIS_INPUT_TWO = {
     "schema": "friday.v12-file-synthesis.v1",
     "request": "Назови код и контрольную дату проекта одним сообщением.",
     "objective": "Сообщить два точных факта из двух приложенных источников.",
@@ -322,48 +345,63 @@ _SYNTHESIS_INPUT = {
         ],
     },
 }
-SYNTHESIS_PROBE = SynthesisProbeRequest(
-    case_id="production_file_synthesis_2",
-    system_prompt=V12_FILE_SYNTHESIS_SYSTEM,
-    prompt=json.dumps(
-        _SYNTHESIS_INPUT,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
+SYNTHESIS_PROBES: tuple[SynthesisProbeRequest, ...] = tuple(
+    SynthesisProbeRequest(
+        case_id=case_id,
+        system_prompt=V12_FILE_SYNTHESIS_SYSTEM,
+        prompt=json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
+    for case_id, payload in (
+        ("production_file_synthesis_1", _SYNTHESIS_INPUT_ONE),
+        ("production_file_synthesis_2", _SYNTHESIS_INPUT_TWO),
+    )
+)
+SYNTHESIS_PROBE = SYNTHESIS_PROBES[-1]
+_SYNTHESIS_EXPECTED_PATTERNS: Mapping[str, str] = {
+    "production_file_synthesis_1": (r"Код синтетического проекта\s*[:—-]\s*СЕВЕР-42\s*\[A1\]\.?"),
+    "production_file_synthesis_2": (
+        r"Код синтетического проекта\s*[:—-]\s*СЕВЕР-42\s*\[A1\]"
+        r"(?:\.\s*Контрольная дата синтетического проекта|,\s*а его контрольная дата)"
+        r"\s*[:—-]\s*7 октября 2099 года\s*\[A2\]\.?"
     ),
-)
-_SYNTHESIS_EXPECTED = (
-    "Код синтетического проекта: СЕВЕР-42 [A1]. "
-    "Контрольная дата синтетического проекта: 7 октября 2099 года [A2]."
-)
+}
+_SYNTHESIS_EXPECTED_LABELS: Mapping[str, tuple[str, ...]] = {
+    "production_file_synthesis_1": ("A1",),
+    "production_file_synthesis_2": ("A1", "A2"),
+}
+_SYNTHESIS_INPUTS: Mapping[str, Mapping[str, object]] = {
+    "production_file_synthesis_1": _SYNTHESIS_INPUT_ONE,
+    "production_file_synthesis_2": _SYNTHESIS_INPUT_TWO,
+}
 
 VERIFIER_PROBES: tuple[VerifierProbeRequest, ...] = (
     VerifierProbeRequest(
-        case_id="verifier_case_31",
-        system_prompt=V12_FILE_VERIFIER_SYSTEM,
-        prompt=(
-            '{"answer":"Код синтетического проекта: СЕВЕР-42 [A1]. Контрольная дата '
-            'синтетического проекта: 7 октября 2099 года [A2].","evidence":'
-            + json.dumps(_SYNTHESIS_INPUT["evidence"], ensure_ascii=False, separators=(",", ":"))
-            + ',"request":"Назови код и контрольную дату проекта одним сообщением.",'
-            '"schema":"friday.v12-file-verification-input.v1"}'
-        ),
-    ),
-    VerifierProbeRequest(
         case_id="verifier_case_79",
         system_prompt=V12_FILE_VERIFIER_SYSTEM,
-        prompt=(
-            '{"answer":"Код синтетического проекта: СЕВЕР-42 [A1]. Контрольная дата '
-            "синтетического проекта: 7 октября 2099 года [A2]. Бюджет проекта — "
-            '13 миллионов рублей [A1].","evidence":'
-            + json.dumps(_SYNTHESIS_INPUT["evidence"], ensure_ascii=False, separators=(",", ":"))
-            + ',"request":"Назови код, контрольную дату и бюджет проекта.",'
-            '"schema":"friday.v12-file-verification-input.v1"}'
+        prompt=build_file_verifier_prompt(
+            request="Назови код, контрольную дату и бюджет проекта.",
+            evidence=cast(Mapping[str, object], _SYNTHESIS_INPUT_TWO["evidence"]),
+            answer=(
+                "Код синтетического проекта: СЕВЕР-42 [A1]. Контрольная дата "
+                "синтетического проекта: 7 октября 2099 года [A2]. Бюджет проекта — "
+                "13 миллионов рублей [A1]."
+            ),
         ),
     ),
 )
 _VERIFIER_EXPECTED: Mapping[str, Mapping[str, object]] = {
-    "verifier_case_31": {
+    "production_file_synthesis_1_verifier_clear": {
+        "schema": V12_FILE_VERIFIER_SCHEMA,
+        "supported": True,
+        "citation_labels": ["A1"],
+        "unsupported_claims": 0,
+    },
+    "production_file_synthesis_2_verifier_clear": {
         "schema": V12_FILE_VERIFIER_SCHEMA,
         "supported": True,
         "citation_labels": ["A1", "A2"],
@@ -379,7 +417,7 @@ _VERIFIER_EXPECTED: Mapping[str, Mapping[str, object]] = {
 
 _CONTEXT_START = "CTX-НАЧАЛО-7F31"
 _CONTEXT_END = "CTX-КОНЕЦ-91D4"
-_CONTEXT_FILLER = " ".join(f"unit-{index:05d}" for index in range(7_000))
+_CONTEXT_FILLER = " ".join(f"unit-{index:05d}" for index in range(1_175))
 CONTEXT_PROBE = ContextProbeRequest(
     case_id="context_8k_edges",
     prompt=(
@@ -504,21 +542,25 @@ def _probe_suite_manifest() -> Mapping[str, object]:
             ],
         },
         "synthesis": {
-            "request": {
-                "case_id": SYNTHESIS_PROBE.case_id,
-                "system_prompt": SYNTHESIS_PROBE.system_prompt,
-                "prompt": SYNTHESIS_PROBE.prompt,
-            },
+            "requests": [
+                {
+                    "case_id": request.case_id,
+                    "system_prompt": request.system_prompt,
+                    "prompt": request.prompt,
+                    "expected_pattern": _SYNTHESIS_EXPECTED_PATTERNS[request.case_id],
+                    "expected_labels": list(_SYNTHESIS_EXPECTED_LABELS[request.case_id]),
+                }
+                for request in SYNTHESIS_PROBES
+            ],
             "validator": {
-                "version": "production-file-prose-exact-citations.v3",
-                "expected": _SYNTHESIS_EXPECTED,
+                "version": "production-file-prose-closed-fact-grammar.v5",
                 "reject_extra_claims": True,
                 "reject_invalid_citation_markers": True,
             },
         },
         "verifier": {
             "validator": {
-                "version": "production-file-verifier-schema-positive-negative.v2",
+                "version": "production-file-verifier-live-synthesis-positive-negative.v3",
                 "exact_keys": [
                     "citation_labels",
                     "schema",
@@ -526,6 +568,12 @@ def _probe_suite_manifest() -> Mapping[str, object]:
                     "unsupported_claims",
                 ],
                 "reject_duplicate_keys": True,
+                "positive_input": "exact_accepted_synthesis_via_shared_production_builder",
+                "positive_expected": {
+                    case_id: expected
+                    for case_id, expected in _VERIFIER_EXPECTED.items()
+                    if case_id.endswith("_verifier_clear")
+                },
             },
             "cases": [
                 {
@@ -718,14 +766,41 @@ def _evaluate_plan(case: PlanProbeCase, response: object) -> None:
         raise ModelProbeError(ModelProbeFailure.PLAN_INVALID)
 
 
-def _evaluate_synthesis(response: object) -> None:
+def _evaluate_synthesis(request: SynthesisProbeRequest, response: object) -> str:
     content = _completion_content(response, failure=ModelProbeFailure.SYNTHESIS_INVALID)
+    labels = _SYNTHESIS_EXPECTED_LABELS.get(request.case_id)
+    pattern = _SYNTHESIS_EXPECTED_PATTERNS.get(request.case_id)
+    if labels is None or pattern is None:
+        raise ModelProbeError(ModelProbeFailure.SYNTHESIS_INVALID)
     try:
-        normalized = validate_file_synthesis_answer(content, ("A1", "A2"))
+        normalized = validate_file_synthesis_answer(content, labels)
     except ValueError:
         raise ModelProbeError(ModelProbeFailure.SYNTHESIS_INVALID) from None
-    if normalized != _SYNTHESIS_EXPECTED:
+    if re.fullmatch(pattern, normalized) is None:
         raise ModelProbeError(ModelProbeFailure.SYNTHESIS_INVALID)
+    return normalized
+
+
+def _positive_verifier_request(
+    synthesis_request: SynthesisProbeRequest,
+    answer: str,
+) -> VerifierProbeRequest:
+    payload = _SYNTHESIS_INPUTS.get(synthesis_request.case_id)
+    if payload is None:
+        raise ModelProbeError(ModelProbeFailure.VERIFIER_INVALID)
+    request = payload.get("request")
+    evidence = payload.get("evidence")
+    if not isinstance(request, str) or not isinstance(evidence, Mapping):
+        raise ModelProbeError(ModelProbeFailure.VERIFIER_INVALID)
+    return VerifierProbeRequest(
+        case_id=f"{synthesis_request.case_id}_verifier_clear",
+        system_prompt=V12_FILE_VERIFIER_SYSTEM,
+        prompt=build_file_verifier_prompt(
+            request=request,
+            evidence=evidence,
+            answer=answer,
+        ),
+    )
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -860,15 +935,32 @@ async def run_v12_live_probe(
         )
         _evaluate_plan(case, response)
 
-    synthesis = await _bounded_call(
-        lambda: client.complete_synthesis(SYNTHESIS_PROBE, absolute_deadline=absolute_deadline),
-        deadline=absolute_deadline,
-        ceiling=SYNTHESIS_TIMEOUT_SEC,
-        failure=ModelProbeFailure.SYNTHESIS_CALL_FAILED,
-    )
-    _evaluate_synthesis(synthesis)
-
     verifier_probes_clear = False
+    for synthesis_request in SYNTHESIS_PROBES:
+        synthesis = await _bounded_call(
+            partial(
+                client.complete_synthesis,
+                synthesis_request,
+                absolute_deadline=absolute_deadline,
+            ),
+            deadline=absolute_deadline,
+            ceiling=SYNTHESIS_TIMEOUT_SEC,
+            failure=ModelProbeFailure.SYNTHESIS_CALL_FAILED,
+        )
+        normalized = _evaluate_synthesis(synthesis_request, synthesis)
+        positive_verifier = _positive_verifier_request(synthesis_request, normalized)
+        verification = await _bounded_call(
+            partial(
+                client.complete_verifier,
+                positive_verifier,
+                absolute_deadline=absolute_deadline,
+            ),
+            deadline=absolute_deadline,
+            ceiling=VERIFIER_TIMEOUT_SEC,
+            failure=ModelProbeFailure.VERIFIER_CALL_FAILED,
+        )
+        _evaluate_verifier(positive_verifier, verification)
+
     for request in VERIFIER_PROBES:
         verification = await _bounded_call(
             partial(client.complete_verifier, request, absolute_deadline=absolute_deadline),
@@ -951,6 +1043,7 @@ __all__ = [
     "PlanProbeCase",
     "ProbeCompletion",
     "SYNTHESIS_PROBE",
+    "SYNTHESIS_PROBES",
     "SynthesisProbeRequest",
     "VERIFIER_PROBES",
     "VerifierProbeRequest",
