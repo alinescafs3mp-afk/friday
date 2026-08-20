@@ -26,6 +26,136 @@ try {
     $httpClient.Dispose()
 }
 
+# Load only the production convergence helper through the native PowerShell AST.
+# The projection replaces its GPU reader and journal sink; it never calls Docker,
+# nvidia-smi, or the candidate endpoint.
+$switchPath = Join-Path $PSScriptRoot 'Switch-Qwen38V12Attested.ps1'
+$switchTokens = $null
+$switchErrors = $null
+$switchAst = [System.Management.Automation.Language.Parser]::ParseFile(
+    $switchPath,
+    [ref]$switchTokens,
+    [ref]$switchErrors
+)
+if ($switchErrors.Count -ne 0) {
+    throw 'Switch source does not parse for GPU headroom projection'
+}
+$headroomFunctions = @($switchAst.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        [string]$node.Name -ceq 'Wait-PostSixWayGpuHeadroom'
+}, $true))
+if ($headroomFunctions.Count -ne 1) {
+    throw 'Post-six-way GPU headroom helper definition is not exact'
+}
+. ([scriptblock]::Create([string]$headroomFunctions[0].Extent.Text))
+
+$script:gpuProjectionReadings = @()
+$script:gpuProjectionPersistentFreeMiB = $null
+$script:gpuProjectionProbeCount = 0
+$script:gpuProjectionJournal = @()
+
+function Set-GpuProjectionReadings([object[]]$Readings) {
+    $script:gpuProjectionReadings = @($Readings)
+    $script:gpuProjectionPersistentFreeMiB = $null
+    $script:gpuProjectionProbeCount = 0
+    $script:gpuProjectionJournal = @()
+}
+
+function Get-GpuMemory {
+    $script:gpuProjectionProbeCount += 1
+    if ($null -ne $script:gpuProjectionPersistentFreeMiB) {
+        $value = [int]$script:gpuProjectionPersistentFreeMiB
+    }
+    else {
+        if ($script:gpuProjectionReadings.Count -eq 0) {
+            throw 'GPU projection exhausted its exact readings'
+        }
+        $value = $script:gpuProjectionReadings[0]
+        $script:gpuProjectionReadings = @($script:gpuProjectionReadings | Select-Object -Skip 1)
+    }
+    if ($value -is [Exception]) { throw $value }
+    return [pscustomobject]@{
+        TotalMiB = 49140
+        UsedMiB = 49140 - [int]$value
+        FreeMiB = [int]$value
+    }
+}
+
+function Write-Journal([string]$State, [hashtable]$Data = @{}) {
+    $script:gpuProjectionJournal += [pscustomobject]@{
+        State = $State
+        Data = $Data
+    }
+}
+
+Set-GpuProjectionReadings @(1200, 1400, 1536)
+$verifiedGpu = Wait-PostSixWayGpuHeadroom 2 1
+if ([int]$verifiedGpu.FreeMiB -ne 1536 -or $script:gpuProjectionProbeCount -ne 3 -or
+    $script:gpuProjectionJournal.Count -ne 1) {
+    throw 'Post-six-way GPU headroom did not converge on the exact third valid reading'
+}
+$verifiedRecord = $script:gpuProjectionJournal[0]
+$verifiedKeys = [string]::Join(',', @($verifiedRecord.Data.Keys | Sort-Object))
+if ([string]$verifiedRecord.State -cne 'post_six_way_gpu_headroom_verified' -or
+    $verifiedKeys -cne 'attempts,free_mib,minimum_free_mib,request_count,timeout_seconds' -or
+    [int]$verifiedRecord.Data.attempts -ne 3 -or
+    [int]$verifiedRecord.Data.free_mib -ne 1536 -or
+    [int]$verifiedRecord.Data.minimum_free_mib -ne 1536 -or
+    [int]$verifiedRecord.Data.request_count -ne 6 -or
+    [int]$verifiedRecord.Data.timeout_seconds -ne 2) {
+    throw 'Verified post-six-way GPU journal evidence is not exact or body-free'
+}
+
+foreach ($probeFailure in @(
+    [ComponentModel.Win32Exception]::new('synthetic nvidia-smi command failure'),
+    [FormatException]::new('synthetic nvidia-smi schema failure')
+)) {
+    Set-GpuProjectionReadings @($probeFailure, 1536)
+    $probeFailed = $false
+    $probeTimer = [Diagnostics.Stopwatch]::StartNew()
+    try { $null = Wait-PostSixWayGpuHeadroom 30 2000 }
+    catch {
+        $probeFailed = $true
+        if ($_.Exception.GetType().FullName -cne $probeFailure.GetType().FullName) {
+            throw 'Post-six-way GPU headroom did not propagate the probe error exactly'
+        }
+    }
+    finally { $probeTimer.Stop() }
+    $probeState = [string]$script:gpuProjectionJournal[0].State
+    if (-not $probeFailed -or $script:gpuProjectionProbeCount -ne 1 -or
+        $probeTimer.Elapsed.TotalSeconds -ge 1 -or $script:gpuProjectionJournal.Count -ne 1 -or
+        $probeState -cne 'post_six_way_gpu_headroom_probe_failed') {
+        throw 'Post-six-way GPU command/schema failure was retried or not journaled'
+    }
+}
+
+Set-GpuProjectionReadings @()
+$script:gpuProjectionPersistentFreeMiB = 1400
+$timeoutTimer = [Diagnostics.Stopwatch]::StartNew()
+$timedOut = $false
+try { $null = Wait-PostSixWayGpuHeadroom 1 400 }
+catch {
+    $timedOut = $true
+    if ([string]$_.Exception.Message -cne 'Post-six-way candidate VRAM headroom did not converge') {
+        throw
+    }
+}
+finally { $timeoutTimer.Stop() }
+if (-not $timedOut -or $timeoutTimer.Elapsed.TotalSeconds -ge 3 -or
+    $script:gpuProjectionProbeCount -lt 2 -or $script:gpuProjectionJournal.Count -ne 1) {
+    throw 'Post-six-way persistent low-free projection was not bounded'
+}
+$timeoutRecord = $script:gpuProjectionJournal[0]
+$timeoutKeys = [string]::Join(',', @($timeoutRecord.Data.Keys | Sort-Object))
+if ([string]$timeoutRecord.State -cne 'post_six_way_gpu_headroom_timeout' -or
+    $timeoutKeys -cne 'attempts,free_mib,minimum_free_mib,timeout_seconds' -or
+    [int]$timeoutRecord.Data.free_mib -ne 1400 -or
+    [int]$timeoutRecord.Data.minimum_free_mib -ne 1536 -or
+    [int]$timeoutRecord.Data.timeout_seconds -ne 1) {
+    throw 'Timed-out post-six-way GPU journal evidence is not exact or body-free'
+}
+
 function New-ExactPublishReceipt {
     return [pscustomobject][ordered]@{
         id = 'd' * 64
@@ -86,4 +216,4 @@ foreach ($entry in $expectedSerializerCounts.GetEnumerator()) {
     }
 }
 
-'attested receipt depth-12 serialization and six-way HTTP client surface: PASS'
+'attested receipt serialization, six-way HTTP, and GPU convergence projections: PASS'

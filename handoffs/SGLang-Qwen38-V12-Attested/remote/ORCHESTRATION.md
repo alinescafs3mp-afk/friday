@@ -106,6 +106,14 @@ release/headroom gates, text/JSON-schema, six-way, long-context, image, and soak
 probes. The switch explicitly loads `System.Net.Http` before preflight so its
 HTTP client types resolve before mutation and the six-way probe; a missing
 runtime dependency fails before mutation.
+The six-way checkpoint has separate `six_way_probe`, `six_way_drain`, and
+`post_six_way_gpu_headroom_convergence` stages. After all six responses and
+three clear drain reads, only a valid free-VRAM reading below the unchanged
+1,536 MiB floor may be retried, every two seconds for at most 30 seconds. Any
+`nvidia-smi` command or response-schema error propagates immediately. The
+terminal convergence journal record contains no request body: success records
+the six-request count and verified free MiB, while a bounded timeout records
+the final valid free MiB and the unchanged floor.
 Before arming restart policies, the candidate engine is forcibly
 restarted and the switch proves old-witness disappearance plus new canonical
 witness and nonce rotation, then repeats identity, proxy, smoke, headroom,
