@@ -63,10 +63,14 @@ projection test exercises this matrix without Docker or container mutation.
 The base candidate graph has one internal bridge only. The publish overlay adds
 one external network and one attachment only: the proxy joins the exact durable
 code-owned publish bridge with gateway priority 1, while the engine remains on
-the internal bridge alone. Preflight verifies an existing publish bridge or
+the internal bridge alone. The publish bridge requires exact top-level
+IPv4/IPv6 booleans and Docker Desktop's exact empty driver-option map; the
+Compose-owned internal bridge retains its two exact IPv4/IPv6 driver options.
+Preflight verifies an existing publish bridge or
 reports that `-Execute` will provision it. Provisioning happens before stable
 drain and pins the exact name, 64-hex network ID, `bridge` driver, local scope,
-IPv4/IPv6 options, `internal=false`, `attachable=false`, non-ingress/non-config
+top-level IPv4/IPv6 booleans, the network-specific exact driver-option map,
+`internal=false`, `attachable=false`, non-ingress/non-config
 status, and the complete four-label ownership set. A name collision, foreign
 label, foreign attachment, wrong driver, wrong internal flag, or altered
 Compose-owned internal bridge fails closed.

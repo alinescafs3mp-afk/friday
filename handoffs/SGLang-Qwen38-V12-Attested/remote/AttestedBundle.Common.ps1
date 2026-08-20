@@ -75,10 +75,15 @@ $script:ExpectedGraphCommand = @(
 )
 
 function Assert-ExactProperties([object]$Value, [string[]]$Expected, [string]$Label) {
-    if ($null -eq $Value -or $Value -is [array]) {
+    if ($null -eq $Value -or $Value -is [array] -or
+        [string]$Value.GetType().FullName -cne 'System.Management.Automation.PSCustomObject') {
         throw "$Label is not one object"
     }
-    $actual = @($Value.PSObject.Properties.Name | Sort-Object)
+    $actual = @(
+        $Value.PSObject.Properties |
+            ForEach-Object { [string]$_.Name } |
+            Sort-Object
+    )
     $wanted = @($Expected | Sort-Object)
     if ([string]::Join(',', $actual) -cne [string]::Join(',', $wanted)) {
         throw "$Label schema is not exact"
@@ -171,6 +176,7 @@ function Assert-NetworkBaseIdentity(
     [object]$Network,
     [string]$Name,
     [bool]$Internal,
+    [bool]$RequireDriverIpOptions,
     [string]$Label
 ) {
     if ($null -eq $Network) { throw "$Label is absent" }
@@ -194,17 +200,22 @@ function Assert-NetworkBaseIdentity(
     if (-not [string]::IsNullOrEmpty([string]$Network.ConfigFrom.Network)) {
         throw "$Label unexpectedly inherits another network config"
     }
-    Assert-ExactProperties $Network.Options @(
-        'com.docker.network.enable_ipv4', 'com.docker.network.enable_ipv6'
-    ) "$Label options"
-    if ([string]$Network.Options.'com.docker.network.enable_ipv4' -cne 'true' -or
-        [string]$Network.Options.'com.docker.network.enable_ipv6' -cne 'false') {
-        throw "$Label IPv4/IPv6 driver options changed"
+    if ($RequireDriverIpOptions) {
+        Assert-ExactProperties $Network.Options @(
+            'com.docker.network.enable_ipv4', 'com.docker.network.enable_ipv6'
+        ) "$Label options"
+        if ([string]$Network.Options.'com.docker.network.enable_ipv4' -cne 'true' -or
+            [string]$Network.Options.'com.docker.network.enable_ipv6' -cne 'false') {
+            throw "$Label IPv4/IPv6 driver options changed"
+        }
+    }
+    else {
+        Assert-ExactProperties $Network.Options @() "$Label options"
     }
 }
 
 function Assert-AttestedInternalNetworkIdentity([object]$Network) {
-    Assert-NetworkBaseIdentity $Network $script:Attested.AttestedNetworkName $true `
+    Assert-NetworkBaseIdentity $Network $script:Attested.AttestedNetworkName $true $true `
         'attested internal network'
     Assert-ExactProperties $Network.Labels @(
         'com.docker.compose.config-hash', 'com.docker.compose.network',
@@ -229,7 +240,7 @@ function Get-ExpectedPublishNetworkLabels {
 }
 
 function Assert-PublishNetworkIdentity([object]$Network) {
-    Assert-NetworkBaseIdentity $Network $script:Attested.PublishNetworkName $false `
+    Assert-NetworkBaseIdentity $Network $script:Attested.PublishNetworkName $false $false `
         'attested publish network'
     $expected = Get-ExpectedPublishNetworkLabels
     Assert-ExactProperties $Network.Labels @($expected.Keys) 'attested publish network labels'

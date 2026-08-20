@@ -118,6 +118,7 @@ def _assert_static_publisher_contract(common: str, switch: str) -> None:
 
 
 def _assert_static_network_contract(common: str, switch: str) -> None:
+    exact_properties = _powershell_function(common, "Assert-ExactProperties")
     base = _powershell_function(common, "Assert-NetworkBaseIdentity")
     publish = _powershell_function(common, "Assert-PublishNetworkIdentity")
     provision = _powershell_function(common, "Ensure-PublishNetwork")
@@ -136,9 +137,17 @@ def _assert_static_network_contract(common: str, switch: str) -> None:
     assert "[bool]$Network.Attachable" in base
     assert "[bool]$Network.Ingress" in base
     assert "[bool]$Network.ConfigOnly" in base
+    assert "if ($RequireDriverIpOptions)" in base
     assert "'com.docker.network.enable_ipv4', 'com.docker.network.enable_ipv6'" in base
-    assert "$script:Attested.PublishNetworkName $false" in publish
+    assert 'Assert-ExactProperties $Network.Options @() "$Label options"' in base
+    assert "$script:Attested.PublishNetworkName $false $false" in publish
+    assert "$script:Attested.AttestedNetworkName $true $true" in common
     assert "Assert-ExactProperties $Network.Labels @($expected.Keys)" in publish
+
+    assert "$Value.PSObject.Properties |" in exact_properties
+    assert "ForEach-Object { [string]$_.Name }" in exact_properties
+    assert "$Value.PSObject.Properties.Name" not in exact_properties
+    assert "System.Management.Automation.PSCustomObject" in exact_properties
 
     assert "'network', 'create', '--driver', 'bridge', '--ipv4=true', '--ipv6=false'" in provision
     assert "'--attachable=false', '--internal=false'" in provision
@@ -665,7 +674,12 @@ def test_compose_overlay_adds_host_gateway_only_to_proxy() -> None:
     (
         ("Assert-NetworkBaseIdentity", "[string]$Network.Driver -cne 'bridge'", "$false"),
         ("Assert-NetworkBaseIdentity", "[bool]$Network.Internal -ne $Internal", "$false"),
-        ("Assert-PublishNetworkIdentity", "$script:Attested.PublishNetworkName $false", "$null $false"),
+        ("Assert-NetworkBaseIdentity", "if ($RequireDriverIpOptions)", "if ($false)"),
+        (
+            "Assert-PublishNetworkIdentity",
+            "$script:Attested.PublishNetworkName $false $false",
+            "$null $false $false",
+        ),
         ("Ensure-PublishNetwork", "'--attachable=false', '--internal=false'", "'--attachable=true'"),
         (
             "Assert-CandidateContainers",
@@ -745,6 +759,10 @@ def test_powershell_network_matrix_covers_required_negative_topologies() -> None
         "'engine attached to publish ingress'",
         "'publish gateway priority lost'",
         "'publish network driver changed'",
+        "'attested network driver options disappeared'",
+        "'publish network gained a driver option'",
+        "'publish network options became an integer'",
+        "'publish network options became a Boolean'",
         "'publish ownership label changed'",
         "'foreign publish attachment'",
         "attested network topology projection: PASS",
@@ -857,6 +875,7 @@ def test_powershell_cleanup_matrix_covers_v1_v2_and_unsafe_state_mutations() -> 
         "'wrong candidate image'",
         "'internal publish receipt'",
         "'wrong publish ownership label'",
+        "Options = [pscustomobject]@{}",
         "'post-removal different live network ID'",
         "'Final v2 cleanup did not preserve its sealed publish network receipt'",
         "'Final v1 cleanup did not adopt the exact live publish network'",
@@ -896,7 +915,7 @@ def test_powershell_receipt_serialization_test_is_ps51_compatible_and_exact() ->
 
 def test_transport_manifest_pins_exact_live_predecessors_and_frozen_sources() -> None:
     old_hashes = {
-        "AttestedBundle.Common.ps1": ("6b9a9952ebf443a99d7cbd9329d06b1c48faee52386cdb50021b28211e01d0c4"),
+        "AttestedBundle.Common.ps1": ("e1376ceffaefe613dd576cf379f2afeca68be91c4cdd914dff47bed9f6db068a"),
         "Cleanup-StoppedQwen38V12Attested.ps1": (
             "80bf04cb07792373d74512316bdee234120c36965c29583f7e7f373fab671c6d"
         ),

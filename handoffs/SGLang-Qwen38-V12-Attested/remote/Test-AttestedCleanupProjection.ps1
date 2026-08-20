@@ -35,10 +35,7 @@ function New-PublishNetwork([string]$Id = ('d' * 64)) {
         Ingress = $false
         ConfigOnly = $false
         ConfigFrom = [pscustomobject]@{ Network = '' }
-        Options = [pscustomobject][ordered]@{
-            'com.docker.network.enable_ipv4' = 'true'
-            'com.docker.network.enable_ipv6' = 'false'
-        }
+        Options = [pscustomobject]@{}
         Labels = [pscustomobject](Get-ExpectedPublishNetworkLabels)
         Containers = [pscustomobject]@{}
     }

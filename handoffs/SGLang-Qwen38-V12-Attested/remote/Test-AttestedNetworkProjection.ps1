@@ -29,6 +29,15 @@ function New-Network(
     [object]$Labels,
     [object]$Containers
 ) {
+    $options = if ($Internal) {
+        [pscustomobject][ordered]@{
+            'com.docker.network.enable_ipv4' = 'true'
+            'com.docker.network.enable_ipv6' = 'false'
+        }
+    }
+    else {
+        [pscustomobject]@{}
+    }
     return [pscustomobject]@{
         Name = $Name
         Id = $Id
@@ -41,10 +50,7 @@ function New-Network(
         Ingress = $false
         ConfigOnly = $false
         ConfigFrom = [pscustomobject]@{ Network = '' }
-        Options = [pscustomobject][ordered]@{
-            'com.docker.network.enable_ipv4' = 'true'
-            'com.docker.network.enable_ipv6' = 'false'
-        }
+        Options = $options
         Labels = $Labels
         Containers = [pscustomobject]$Containers
     }
@@ -156,6 +162,23 @@ Assert-Rejected 'publish gateway priority lost' {
 Assert-Rejected 'publish network driver changed' {
     param($graph)
     $graph.Publish.Driver = 'overlay'
+}
+Assert-Rejected 'attested network driver options disappeared' {
+    param($graph)
+    $graph.Attested.Options = [pscustomobject]@{}
+}
+Assert-Rejected 'publish network gained a driver option' {
+    param($graph)
+    $graph.Publish.Options | Add-Member -NotePropertyName 'com.docker.network.enable_ipv4' `
+        -NotePropertyValue 'true'
+}
+Assert-Rejected 'publish network options became an integer' {
+    param($graph)
+    $graph.Publish.Options = 42
+}
+Assert-Rejected 'publish network options became a Boolean' {
+    param($graph)
+    $graph.Publish.Options = $false
 }
 Assert-Rejected 'publish ownership label changed' {
     param($graph)
