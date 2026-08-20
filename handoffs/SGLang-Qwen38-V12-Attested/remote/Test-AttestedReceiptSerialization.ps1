@@ -1,6 +1,31 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'AttestedBundle.Common.ps1')
 
+# Exercise the exact .NET surface used by Invoke-SixWayProbe in a fresh native
+# PowerShell process, without issuing any network request.
+Add-Type -AssemblyName System.Net.Http -ErrorAction Stop
+$httpClient = [Net.Http.HttpClient]::new()
+try {
+    $httpClient.DefaultRequestHeaders.Authorization =
+        [Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', 'projection-token')
+    $content = [Net.Http.StringContent]::new(
+        '{"projection":true}',
+        [Text.Encoding]::UTF8,
+        'application/json'
+    )
+    $content.Dispose()
+    $tasks = @()
+    for ($index = 1; $index -le 6; $index += 1) {
+        $tasks += [Threading.Tasks.Task]::Delay(0)
+    }
+    $all = [Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]$tasks)
+    if (-not $all.Wait(1000)) {
+        throw 'Six-way HTTP client projection timed out'
+    }
+} finally {
+    $httpClient.Dispose()
+}
+
 function New-ExactPublishReceipt {
     return [pscustomobject][ordered]@{
         id = 'd' * 64
@@ -61,4 +86,4 @@ foreach ($entry in $expectedSerializerCounts.GetEnumerator()) {
     }
 }
 
-'attested receipt depth-12 serialization: PASS'
+'attested receipt depth-12 serialization and six-way HTTP client surface: PASS'

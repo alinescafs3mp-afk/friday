@@ -8,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 . (Join-Path $PSScriptRoot 'AttestedBundle.Common.ps1')
+Add-Type -AssemblyName System.Net.Http -ErrorAction Stop
 
 if ($Execute -and $PreflightOnly) {
     throw 'Choose either -Execute or -PreflightOnly.'

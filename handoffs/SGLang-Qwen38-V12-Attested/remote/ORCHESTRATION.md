@@ -103,7 +103,10 @@ exact labelled, unattached volume; it never removes a pre-existing volume.
 Acceptance requires the closed proxy negative-path matrix, exact 40,960-token
 and six-request capacity, full decode CUDA graphs for batches 1..6, VRAM
 release/headroom gates, text/JSON-schema, six-way, long-context, image, and soak
-probes. Before arming restart policies, the candidate engine is forcibly
+probes. The switch explicitly loads `System.Net.Http` before preflight so its
+HTTP client types resolve before mutation and the six-way probe; a missing
+runtime dependency fails before mutation.
+Before arming restart policies, the candidate engine is forcibly
 restarted and the switch proves old-witness disappearance plus new canonical
 witness and nonce rotation, then repeats identity, proxy, smoke, headroom,
 sidecar, and sole-port-8001 gates.

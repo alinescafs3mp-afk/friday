@@ -117,6 +117,41 @@ def _assert_static_publisher_contract(common: str, switch: str) -> None:
     assert switch.count("Assert-SolePublisher $script:Attested.CandidateProxyName") == 3
 
 
+def _assert_static_six_way_http_client_contract(switch: str, native_test: str) -> None:
+    loader = "Add-Type -AssemblyName System.Net.Http -ErrorAction Stop"
+    function = "function Invoke-SixWayProbe"
+    constructor = "$client = [Net.Http.HttpClient]::new()"
+    assert switch.count(loader) == 1
+    assert function in switch
+    assert constructor in switch
+    assert switch.index(loader) < switch.index(function) < switch.index(constructor)
+    assert native_test.count(loader) == 1
+    assert "$httpClient = [Net.Http.HttpClient]::new()" in native_test
+    assert "[Net.Http.StringContent]::new(" in native_test
+    assert "for ($index = 1; $index -le 6; $index += 1)" in native_test
+    assert "[Threading.Tasks.Task]::WhenAll([Threading.Tasks.Task[]]$tasks)" in native_test
+
+
+def test_six_way_probe_loads_http_client_assembly_before_preflight() -> None:
+    switch = _SWITCH.read_text(encoding="utf-8")
+    native_test = _RECEIPT_TEST.read_text(encoding="utf-8")
+    _assert_static_six_way_http_client_contract(switch, native_test)
+    mutated_switch = switch.replace(
+        "Add-Type -AssemblyName System.Net.Http -ErrorAction Stop\n",
+        "",
+        1,
+    )
+    with pytest.raises(AssertionError):
+        _assert_static_six_way_http_client_contract(mutated_switch, native_test)
+    mutated_native_test = native_test.replace(
+        "Add-Type -AssemblyName System.Net.Http -ErrorAction Stop\n",
+        "",
+        1,
+    )
+    with pytest.raises(AssertionError):
+        _assert_static_six_way_http_client_contract(switch, mutated_native_test)
+
+
 def _assert_static_network_contract(common: str, switch: str) -> None:
     exact_properties = _powershell_function(common, "Assert-ExactProperties")
     base = _powershell_function(common, "Assert-NetworkBaseIdentity")
@@ -908,31 +943,37 @@ def test_powershell_receipt_serialization_test_is_ps51_compatible_and_exact() ->
         "System.Management.Automation.Language.Parser",
         "'Switch-Qwen38V12Attested.ps1' = 3",
         "'Rollback-Qwen38V12Attested.ps1' = 4",
-        "attested receipt depth-12 serialization: PASS",
+        "attested receipt depth-12 serialization and six-way HTTP client surface: PASS",
     )
     assert all(item in source for item in required)
 
 
 def test_transport_manifest_pins_exact_live_predecessors_and_frozen_sources() -> None:
     old_hashes = {
-        "AttestedBundle.Common.ps1": ("e1376ceffaefe613dd576cf379f2afeca68be91c4cdd914dff47bed9f6db068a"),
+        "AttestedBundle.Common.ps1": ("639bd9a4cf37396387574ab65ad66d034b6c05a87f17c7ef35935cf3778e9acb"),
         "Cleanup-StoppedQwen38V12Attested.ps1": (
             "80bf04cb07792373d74512316bdee234120c36965c29583f7e7f373fab671c6d"
         ),
         "docker-compose.publish-8001.yml": (
             "5cfb5177a87881e9411b03f373cc2ccc9df7a034adae888dd5d6e3b4be1f0ea9"
         ),
-        "CORE-SHA256SUMS": ("844e65a1c3e1c727fe85819ae37589535698018dab051e55ba26766a8fed121a"),
-        "ORCHESTRATION-SHA256SUMS": ("645079759508610eac6e9213d61d6c891e3521496894f2e3d7dbac05765d26e5"),
-        "ORCHESTRATION.md": ("9e5a5d8d7953004cec1caa484784721bc7d1b834317d2f32d11abcd5966f850b"),
-        "README.md": "9e976a0382b5f1c93cdc0f61b5fd671302934d3ca0da5f6cb9537e2abfc695b4",
+        "CORE-SHA256SUMS": ("b1378e7524c44b92dd18176a51c45ce403440d1a7dfc20b9193bad633a0488b2"),
+        "ORCHESTRATION-SHA256SUMS": ("888da740245ad59bf91d38572aa4344b0f76b74888b9ab614379a191367b41cc"),
+        "ORCHESTRATION.md": ("2c24d7c27296144b136b14fb7c90aa3cc676fd9321b0604aa08af725885eff40"),
+        "README.md": "28e508e658350789a85345ba9748c85028dce8a7806da080096f59495d7520dd",
         "Rollback-Qwen38V12Attested.ps1": (
-            "812b8a2a8586d1c52053f6ab3580da645d9b201f31c612d41d631ff8abcd3962"
+            "a8e19b2704710f339be8aaf1fff3c0773b8304f27721106ae62a620907013d51"
         ),
-        "Switch-Qwen38V12Attested.ps1": ("02e441970c6c91b503668ca930d5f112521c6787a27f6de10d523f6bb7a1e690"),
-        "Test-AttestedCleanupProjection.ps1": None,
-        "Test-AttestedNetworkProjection.ps1": None,
-        "Test-AttestedReceiptSerialization.ps1": None,
+        "Switch-Qwen38V12Attested.ps1": ("0cff30930d18984dd1a6477cdcf23e7eaf89d3223a88f1b836432466b57a62d3"),
+        "Test-AttestedCleanupProjection.ps1": (
+            "d94846c65cc621e74426a436b121b164cb0c533cd03bbf99214e579e3d432dc6"
+        ),
+        "Test-AttestedNetworkProjection.ps1": (
+            "e537898cb72745fadf5300cede4ffe9a247c5348bb2668222189882d86981a2a"
+        ),
+        "Test-AttestedReceiptSerialization.ps1": (
+            "2559d0cd1ab9c75cd5a8aa62bb4cea34fee4db7b8be46e9507272749da4be826"
+        ),
     }
     expected_roles = {
         name: (
