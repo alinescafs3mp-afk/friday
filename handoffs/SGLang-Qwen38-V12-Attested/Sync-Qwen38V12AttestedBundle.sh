@@ -53,6 +53,7 @@ remote_dir=$script_dir/remote
 transport_dir=$script_dir/transport
 manifest=$transport_dir/TRANSPORT-FILES.v1
 applier=$transport_dir/Apply-Qwen38V12AttestedBundle.ps1
+replace_test=$transport_dir/Test-WindowsPowerShell51FileReplace.ps1
 
 remote_host='192.168.1.78'
 remote_user='admin'
@@ -60,8 +61,9 @@ ssh_key='/home/jericho/.ssh/friday_win_audit_ed25519'
 known_hosts='/home/jericho/.ssh/known_hosts'
 expected_client_fingerprint='SHA256:vhJUpURIJLODWZdo8LU8qnTMbLir86/J5tzl8VWp5+A'
 expected_host_fingerprint='SHA256:wfOf57TOtNhTuQ6OAQUcWhMF47C8FWeUhku2gSAe6mY'
-expected_manifest_sha256='6afe4e4e2fc0220ca6640f3fca8eed1664a67801ceee5b3f6f6ee1fcab8e40f5'
-expected_applier_sha256='beb61f9ab35cd6f70f1eba2260a65a8183b36ab9b733a205f4ad6605e6803d25'
+expected_manifest_sha256='7b97e9e3786c476ab645e1b347034ef9c49c34a874c8b2e18f7fbdf2375e8e65'
+expected_applier_sha256='fd76ee17cb2f2d63eefc74c59fc9b0e5ebe079891372407836cb1b5a0a84d0f2'
+expected_replace_test_sha256='64f58fbaeab76ea92308aaf4f93123631684529160d3eccbf3fa1e431776d7c7'
 
 fail() {
     printf 'ERROR: %s\n' "$*" >&2
@@ -73,6 +75,8 @@ for command_name in ssh ssh-keygen iconv base64 sha256sum zip awk cut mktemp rm 
 done
 [[ -f $manifest && ! -L $manifest ]] || fail 'transport manifest is absent or a symlink'
 [[ -f $applier && ! -L $applier ]] || fail 'transport applier is absent or a symlink'
+[[ -f $replace_test && ! -L $replace_test ]] ||
+    fail 'native File.Replace test is absent or a symlink'
 [[ -f $ssh_key && ! -L $ssh_key ]] || fail 'pinned SSH private key is absent or a symlink'
 [[ -f $known_hosts && ! -L $known_hosts ]] || fail 'pinned known_hosts is absent or a symlink'
 
@@ -82,6 +86,9 @@ actual_manifest_sha256=$(sha256sum -- "$manifest" | awk '{print $1}')
 actual_applier_sha256=$(sha256sum -- "$applier" | awk '{print $1}')
 [[ $actual_applier_sha256 == "$expected_applier_sha256" ]] ||
     fail 'transport applier is not the frozen byte set'
+actual_replace_test_sha256=$(sha256sum -- "$replace_test" | awk '{print $1}')
+[[ $actual_replace_test_sha256 == "$expected_replace_test_sha256" ]] ||
+    fail 'native File.Replace test is not the frozen byte set'
 
 ssh_args=(
     -F /dev/null
@@ -208,7 +215,8 @@ cleanup_temporary_root() {
 }
 trap cleanup_temporary_root EXIT
 archive_path=$temporary_root/qwen38-v12-attested-$phase.zip
-zip -q -X -j "$archive_path" "$applier" "$manifest" "${selected_files[@]}"
+zip -q -X -j "$archive_path" "$applier" "$manifest" "$replace_test" \
+    "${selected_files[@]}"
 archive_sha256=$(sha256sum -- "$archive_path" | awk '{print $1}')
 session_id=$(printf '%s' "$archive_sha256:$phase:$mode:$temporary_root" | sha256sum | cut -c1-32)
 
@@ -271,8 +279,11 @@ if(Test-Path -LiteralPath \$expanded){throw 'Expanded session path already exist
 Expand-Archive -LiteralPath \$archive -DestinationPath \$expanded
 \$manifest=Join-Path \$expanded 'TRANSPORT-FILES.v1'
 \$applier=Join-Path \$expanded 'Apply-Qwen38V12AttestedBundle.ps1'
+\$replaceTest=Join-Path \$expanded 'Test-WindowsPowerShell51FileReplace.ps1'
 if((Get-FileHash -LiteralPath \$manifest -Algorithm SHA256).Hash.ToLowerInvariant()-cne '$actual_manifest_sha256'){throw 'Expanded transport manifest is not frozen'}
 if((Get-FileHash -LiteralPath \$applier -Algorithm SHA256).Hash.ToLowerInvariant()-cne '$actual_applier_sha256'){throw 'Expanded transport applier is not frozen'}
+if((Get-FileHash -LiteralPath \$replaceTest -Algorithm SHA256).Hash.ToLowerInvariant()-cne '$actual_replace_test_sha256'){throw 'Expanded native File.Replace test is not frozen'}
+& \$replaceTest -RequireWindowsPowerShell51
 & \$applier -Phase '$phase' -SourceRoot \$expanded $execute_argument
 PS
 )

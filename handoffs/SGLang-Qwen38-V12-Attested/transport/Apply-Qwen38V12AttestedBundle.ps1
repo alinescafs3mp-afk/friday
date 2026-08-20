@@ -18,6 +18,7 @@ $liveRoot = 'D:\jarvis-gpt\qwen38-v12-attested-bundle'
 $lockPath = 'D:\jarvis-gpt\sglang-qwen38-w4a16\switch.lock'
 $manifestName = 'TRANSPORT-FILES.v1'
 $applierName = 'Apply-Qwen38V12AttestedBundle.ps1'
+$replaceTestName = 'Test-WindowsPowerShell51FileReplace.ps1'
 $stagePattern = '^D:\\jarvis-gpt\\qwen38-v12-attested-sync\\expanded\\[0-9a-f]{64}-[0-9a-f]{32}$'
 $expectedRoles = [ordered]@{
     'AttestedBundle.Common.ps1' = 'bootstrap'
@@ -62,6 +63,31 @@ function Get-ExactSha256([string]$Path, [string]$Label) {
         throw "$Label is a reparse point"
     }
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Get-OptionalExactSha256([string]$Path, [string]$Label) {
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    return Get-ExactSha256 $Path $Label
+}
+
+function Get-ExactBackupPath([string]$Root, [string]$Name) {
+    if (-not $expectedRoles.Contains($Name)) {
+        throw 'Backup target name is not allowlisted'
+    }
+    return Join-Path $Root ('.{0}.friday-attested-sync-v1.backup' -f $Name)
+}
+
+function Assert-NoSyncTemporaryResidue([string]$Root, [string]$Name) {
+    if (-not $expectedRoles.Contains($Name)) {
+        throw 'Temporary target name is not allowlisted'
+    }
+    $pattern = '^' + [regex]::Escape(".$Name.sync-") + '[0-9a-f]{32}\.tmp$'
+    $residue = @(Get-ChildItem -LiteralPath $Root -Force | Where-Object {
+        [string]$_.Name -cmatch $pattern
+    })
+    if ($residue.Count -ne 0) {
+        throw "Live root contains sync temporary residue: $Name"
+    }
 }
 
 function Read-TransportManifest([string]$Path) {
@@ -142,7 +168,7 @@ $selected = @(
         $records[[string]$name]
     }
 )
-$expectedStageNames = @($selected.name) + @($applierName, $manifestName)
+$expectedStageNames = @($selected.name) + @($applierName, $manifestName, $replaceTestName)
 $stageItems = @(Get-ChildItem -LiteralPath $SourceRoot -Force)
 if ($stageItems.Count -ne $expectedStageNames.Count) {
     throw 'Expanded stage item count is not exact'
@@ -164,25 +190,40 @@ foreach ($record in $selected) {
     }
 
     $targetPath = Join-Path $liveRoot ([string]$record.name)
-    $targetExists = Test-Path -LiteralPath $targetPath -PathType Leaf
-    $targetHash = $null
-    if ($targetExists) {
-        $targetHash = Get-ExactSha256 $targetPath "live $($record.name)"
-        if ($targetHash -cne [string]$record.new_sha256 -and
-            ($null -eq $record.old_sha256 -or
-                $targetHash -cne [string]$record.old_sha256)) {
-            throw "Live target is neither the exact old nor frozen new byte set: $($record.name)"
+    $backupPath = Get-ExactBackupPath $liveRoot ([string]$record.name)
+    Assert-NoSyncTemporaryResidue $liveRoot ([string]$record.name)
+    $targetHash = Get-OptionalExactSha256 $targetPath "live $($record.name)"
+    $backupHash = Get-OptionalExactSha256 $backupPath "live backup $($record.name)"
+    $action = ''
+    if (Test-ExactNullableSha256 $targetHash $record.new_sha256) {
+        if ($null -eq $backupHash) {
+            $action = 'retain'
+        }
+        elseif ($null -ne $record.old_sha256 -and
+            [string]$backupHash -ceq [string]$record.old_sha256) {
+            $action = 'remove_backup'
+        }
+        else {
+            throw "Converged live target has unsafe backup residue: $($record.name)"
         }
     }
-    elseif ($null -ne $record.old_sha256) {
-        throw "Required old live target is absent: $($record.name)"
+    elseif (Test-ExactNullableSha256 $targetHash $record.old_sha256) {
+        if ($null -ne $backupHash) {
+            throw "Old live target has unexpected backup residue: $($record.name)"
+        }
+        $action = 'replace'
+    }
+    else {
+        throw "Live target is neither the exact old nor frozen new byte set: $($record.name)"
     }
     $projections += [pscustomobject][ordered]@{
         name = [string]$record.name
         old_sha256 = $record.old_sha256
         new_sha256 = [string]$record.new_sha256
         before_sha256 = $targetHash
-        action = $(if ($targetHash -ceq [string]$record.new_sha256) { 'retain' } else { 'replace' })
+        backup_path = $backupPath
+        before_backup_sha256 = $backupHash
+        action = $action
     }
 }
 
@@ -198,27 +239,48 @@ try {
     # Revalidate the entire target projection while holding the same cooperative
     # lock used by switch, rollback, and cleanup before the first replacement.
     foreach ($projection in $projections) {
+        Assert-NoSyncTemporaryResidue $liveRoot ([string]$projection.name)
         $targetPath = Join-Path $liveRoot ([string]$projection.name)
-        $actual = $null
-        if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
-            $actual = Get-ExactSha256 $targetPath "locked live $($projection.name)"
-        }
+        $actual = Get-OptionalExactSha256 $targetPath "locked live $($projection.name)"
+        $actualBackup = Get-OptionalExactSha256 ([string]$projection.backup_path) `
+            "locked live backup $($projection.name)"
         if (-not (Test-ExactNullableSha256 $actual $projection.before_sha256)) {
             throw "Live target changed between CAS projection and lock: $($projection.name)"
+        }
+        if (-not (Test-ExactNullableSha256 `
+            $actualBackup $projection.before_backup_sha256)) {
+            throw "Live backup changed between CAS projection and lock: $($projection.name)"
         }
     }
 
     if ($Execute) {
         foreach ($projection in $projections) {
             $targetPath = Join-Path $liveRoot ([string]$projection.name)
-            $currentHash = $null
-            if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
-                $currentHash = Get-ExactSha256 $targetPath "current live $($projection.name)"
-            }
-            if ($currentHash -ceq [string]$projection.new_sha256) {
+            $backupPath = [string]$projection.backup_path
+            $currentHash = Get-OptionalExactSha256 $targetPath `
+                "current live $($projection.name)"
+            $currentBackupHash = Get-OptionalExactSha256 $backupPath `
+                "current live backup $($projection.name)"
+            if (Test-ExactNullableSha256 $currentHash $projection.new_sha256) {
+                if ($null -eq $currentBackupHash) {
+                    continue
+                }
+                if ($null -eq $projection.old_sha256 -or
+                    [string]$currentBackupHash -cne [string]$projection.old_sha256) {
+                    throw "Converged live target has unsafe backup residue: $($projection.name)"
+                }
+                Remove-Item -LiteralPath $backupPath -Force
+                if (Test-Path -LiteralPath $backupPath) {
+                    throw "Exact verified backup was not removed: $($projection.name)"
+                }
+                if ((Get-ExactSha256 $targetPath "retained live $($projection.name)") -cne
+                    [string]$projection.new_sha256) {
+                    throw "Live target changed while removing exact backup: $($projection.name)"
+                }
                 continue
             }
-            if (-not (Test-ExactNullableSha256 $currentHash $projection.old_sha256)) {
+            if (-not (Test-ExactNullableSha256 $currentHash $projection.old_sha256) -or
+                $null -ne $currentBackupHash) {
                 throw "Live target lost its exact CAS predecessor: $($projection.name)"
             }
 
@@ -232,18 +294,29 @@ try {
                     [string]$projection.new_sha256) {
                     throw "Copied temporary hash changed: $($projection.name)"
                 }
-                $currentHash = $null
-                if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
-                    $currentHash = Get-ExactSha256 $targetPath "immediate CAS live $($projection.name)"
-                }
-                if (-not (Test-ExactNullableSha256 $currentHash $projection.old_sha256)) {
+                $currentHash = Get-OptionalExactSha256 $targetPath `
+                    "immediate CAS live $($projection.name)"
+                $currentBackupHash = Get-OptionalExactSha256 $backupPath `
+                    "immediate CAS backup $($projection.name)"
+                if (-not (Test-ExactNullableSha256 $currentHash $projection.old_sha256) -or
+                    $null -ne $currentBackupHash) {
                     throw "Live target changed before atomic replacement: $($projection.name)"
                 }
                 if ($null -eq $projection.old_sha256) {
                     [IO.File]::Move($temporaryPath, $targetPath)
                 }
                 else {
-                    [IO.File]::Replace($temporaryPath, $targetPath, $null, $true)
+                    [IO.File]::Replace($temporaryPath, $targetPath, $backupPath, $true)
+                    if ((Get-ExactSha256 $targetPath "replaced live $($projection.name)") -cne
+                        [string]$projection.new_sha256 -or
+                        (Get-ExactSha256 $backupPath "replaced backup $($projection.name)") -cne
+                        [string]$projection.old_sha256) {
+                        throw "Atomic replacement evidence is not exact: $($projection.name)"
+                    }
+                    Remove-Item -LiteralPath $backupPath -Force
+                    if (Test-Path -LiteralPath $backupPath) {
+                        throw "Exact verified backup was not removed: $($projection.name)"
+                    }
                 }
             }
             finally {
@@ -259,14 +332,19 @@ try {
     }
 
     foreach ($projection in $projections) {
+        Assert-NoSyncTemporaryResidue $liveRoot ([string]$projection.name)
         $targetPath = Join-Path $liveRoot ([string]$projection.name)
-        $finalHash = $null
-        if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
-            $finalHash = Get-ExactSha256 $targetPath "final live $($projection.name)"
-        }
+        $finalHash = Get-OptionalExactSha256 $targetPath "final live $($projection.name)"
+        $finalBackupHash = Get-OptionalExactSha256 ([string]$projection.backup_path) `
+            "final live backup $($projection.name)"
         $projection | Add-Member -NotePropertyName after_sha256 -NotePropertyValue $finalHash
+        $projection | Add-Member -NotePropertyName after_backup_sha256 `
+            -NotePropertyValue $finalBackupHash
         if ($Execute -and $finalHash -cne [string]$projection.new_sha256) {
             throw "Final live target is not frozen: $($projection.name)"
+        }
+        if ($Execute -and $null -ne $finalBackupHash) {
+            throw "Final live target retained backup residue: $($projection.name)"
         }
     }
 

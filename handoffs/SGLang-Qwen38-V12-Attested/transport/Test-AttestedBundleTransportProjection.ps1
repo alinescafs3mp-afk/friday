@@ -20,7 +20,13 @@ $requiredApplierSource = @(
     'function Test-ExactNullableSha256(',
     'Test-ExactNullableSha256 $actual $projection.before_sha256',
     'Test-ExactNullableSha256 $currentHash $projection.old_sha256',
-    '[IO.File]::Replace($temporaryPath, $targetPath, $null, $true)',
+    "'.{0}.friday-attested-sync-v1.backup' -f `$Name",
+    '[IO.File]::Replace($temporaryPath, $targetPath, $backupPath, $true)',
+    'Get-ExactSha256 $backupPath "replaced backup $($projection.name)"',
+    'Remove-Item -LiteralPath $backupPath -Force',
+    'function Assert-NoSyncTemporaryResidue',
+    'Live root contains sync temporary residue',
+    "'remove_backup'",
     '[IO.File]::Move($temporaryPath, $targetPath)',
     "'CORE-SHA256SUMS',",
     "'ORCHESTRATION-SHA256SUMS'"
@@ -42,7 +48,9 @@ $requiredSshProjection = @(
     'effective_ssh=$(ssh -G "${ssh_args[@]}" "$remote_target" 2>/dev/null)',
     'assert_effective_ssh globalknownhostsfile /dev/null',
     'assert_effective_ssh hostkeyalgorithms ssh-ed25519',
-    'assert_effective_ssh updatehostkeys false'
+    'assert_effective_ssh updatehostkeys false',
+    'replace_test=$transport_dir/Test-WindowsPowerShell51FileReplace.ps1',
+    '& \$replaceTest -RequireWindowsPowerShell51'
 )
 foreach ($required in $requiredSshProjection) {
     if (-not $wrapperSource.Contains($required)) {
@@ -63,10 +71,18 @@ function Test-ReferenceNullableSha256(
 function Get-ReferenceCasAction(
     [AllowNull()][object]$OldHash,
     [AllowNull()][object]$LiveHash,
-    [string]$NewHash
+    [string]$NewHash,
+    [AllowNull()][object]$BackupHash = $null
 ) {
-    if (Test-ReferenceNullableSha256 $LiveHash $NewHash) { return 'retain' }
-    if (Test-ReferenceNullableSha256 $LiveHash $OldHash) { return 'replace' }
+    if (Test-ReferenceNullableSha256 $LiveHash $NewHash) {
+        if ($null -eq $BackupHash) { return 'retain' }
+        if ($null -ne $OldHash -and [string]$BackupHash -ceq [string]$OldHash) {
+            return 'remove_backup'
+        }
+        return 'reject'
+    }
+    if ((Test-ReferenceNullableSha256 $LiveHash $OldHash) -and
+        $null -eq $BackupHash) { return 'replace' }
     return 'reject'
 }
 
@@ -80,6 +96,9 @@ if ((Get-ReferenceCasAction $null $new $new) -cne 'retain') {
 }
 if ((Get-ReferenceCasAction $old $old $new) -cne 'replace' -or
     (Get-ReferenceCasAction $old $new $new) -cne 'retain' -or
+    (Get-ReferenceCasAction $old $new $new $old) -cne 'remove_backup' -or
+    (Get-ReferenceCasAction $old $old $new $old) -cne 'reject' -or
+    (Get-ReferenceCasAction $old $new $new ('c' * 64)) -cne 'reject' -or
     (Get-ReferenceCasAction $old ('c' * 64) $new) -cne 'reject') {
     throw 'Existing target CAS projection failed'
 }

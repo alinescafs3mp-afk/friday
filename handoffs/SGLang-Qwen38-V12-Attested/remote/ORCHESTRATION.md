@@ -130,11 +130,19 @@ the PowerShell applier, every old c560 byte set, and every new frozen byte set.
 It uses a flat SHA-addressed archive, verifies it again after receipt and
 expansion, and applies files under the same exclusive switch lock. Each target
 must be absent only when explicitly declared new, or equal the exact old or new
-SHA-256. Replacements use same-directory temporary files and atomic replacement;
-partial work is safely resumable. Payloads land first, `CORE-SHA256SUMS` lands
-only after all changed CORE members, and `ORCHESTRATION-SHA256SUMS` lands last.
-Runtime state and journals are not transported or deleted, and the applier has
-no network, container, volume, or image action.
+SHA-256. Existing-file replacement uses a same-directory temporary file and a
+deterministic, code-owned backup path. Windows PowerShell 5.1 receives that real
+backup path in `File.Replace`; the applier proves the new target and exact old
+backup before deleting only that backup. A retry accepts and converges the one
+post-replacement crash state (new target plus exact-old backup); any other
+backup or sync-temporary residue, hash, or target state fails closed. The
+new-file `File.Move` path is unchanged. A pinned native test performs an actual
+existing-file replacement and crash/retry matrix under Windows PowerShell 5.1
+before the applier may inspect or mutate live targets. Payloads land first,
+`CORE-SHA256SUMS` lands only after all changed CORE members, and
+`ORCHESTRATION-SHA256SUMS` lands last. Runtime state and journals are not
+transported or deleted, and the applier has no network, container, volume, or
+image action.
 
 The verified endpoint is `admin@192.168.1.78` on default TCP/22. The key is
 `/home/jericho/.ssh/friday_win_audit_ed25519`; its public fingerprint is

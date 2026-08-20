@@ -28,6 +28,7 @@ _SYNC = _HANDOFF / "Sync-Qwen38V12AttestedBundle.sh"
 _TRANSPORT_APPLIER = _TRANSPORT / "Apply-Qwen38V12AttestedBundle.ps1"
 _TRANSPORT_MANIFEST = _TRANSPORT / "TRANSPORT-FILES.v1"
 _TRANSPORT_TEST = _TRANSPORT / "Test-AttestedBundleTransportProjection.ps1"
+_REPLACE_TEST = _TRANSPORT / "Test-WindowsPowerShell51FileReplace.ps1"
 _WINDOWS_PATH = re.compile(r"(?P<drive>[A-Z]):\\(?P<tail>[A-Za-z0-9._-]+(?:\\[A-Za-z0-9._-]+)*)\Z")
 
 
@@ -238,11 +239,15 @@ def _assert_receipt_json_depth(source: str, expected_count: int) -> None:
 
 def _assert_static_transport_applier(source: str) -> None:
     nullable = _powershell_function(source, "Test-ExactNullableSha256")
+    backup_path = _powershell_function(source, "Get-ExactBackupPath")
     assert "$null -eq $Left -or $null -eq $Right" in nullable
     assert "return ($null -eq $Left -and $null -eq $Right)" in nullable
     assert "return ([string]$Left -ceq [string]$Right)" in nullable
+    assert "$expectedRoles.Contains($Name)" in backup_path
+    assert "'.{0}.friday-attested-sync-v1.backup' -f $Name" in backup_path
     assert source.count("Test-ExactNullableSha256 $actual $projection.before_sha256") == 1
     assert source.count("Test-ExactNullableSha256 $currentHash $projection.old_sha256") == 2
+    assert "Test-ExactNullableSha256 `\n            $actualBackup" in source
 
     order_match = re.search(
         r"\$fullPublicationOrder = @\((.*?)\n\)",
@@ -266,8 +271,21 @@ def _assert_static_transport_applier(source: str) -> None:
         "ORCHESTRATION-SHA256SUMS",
     ]
     assert "foreach ($name in $publicationOrder)" in source
-    assert "[IO.File]::Replace($temporaryPath, $targetPath, $null, $true)" in source
+    assert "[IO.File]::Replace($temporaryPath, $targetPath, $backupPath, $true)" in source
+    assert "[IO.File]::Replace($temporaryPath, $targetPath, $null, $true)" not in source
     assert "[IO.File]::Move($temporaryPath, $targetPath)" in source
+    assert source.count("Remove-Item -LiteralPath $backupPath -Force") == 2
+    assert 'Get-ExactSha256 $backupPath "replaced backup $($projection.name)"' in source
+    assert "Old live target has unexpected backup residue" in source
+    assert "Converged live target has unsafe backup residue" in source
+    assert "Final live target retained backup residue" in source
+    assert "function Assert-NoSyncTemporaryResidue" in source
+    assert "[0-9a-f]{32}\\.tmp$" in source
+    assert source.count("Assert-NoSyncTemporaryResidue $liveRoot") == 3
+    assert "Live root contains sync temporary residue" in source
+    assert "'remove_backup'" in source
+    assert "$replaceTestName = 'Test-WindowsPowerShell51FileReplace.ps1'" in source
+    assert "@($applierName, $manifestName, $replaceTestName)" in source
     assert "[IO.FileMode]::Open" in source
     assert "[IO.FileShare]::None" in source
     assert "ConvertTo-Json -Compress -Depth 12" in source
@@ -284,10 +302,15 @@ def _reference_transport_cas_action(
     old_hash: str | None,
     live_hash: str | None,
     new_hash: str,
+    backup_hash: str | None = None,
 ) -> str:
     if live_hash == new_hash:
-        return "retain"
-    if live_hash == old_hash:
+        if backup_hash is None:
+            return "retain"
+        if old_hash is not None and backup_hash == old_hash:
+            return "remove_backup"
+        return "reject"
+    if live_hash == old_hash and backup_hash is None:
         return "replace"
     return "reject"
 
@@ -938,6 +961,8 @@ def test_transport_wrapper_pins_verified_ssh_and_transport_identities() -> None:
         "assert_effective_ssh globalknownhostsfile /dev/null",
         "assert_effective_ssh hostkeyalgorithms ssh-ed25519",
         "assert_effective_ssh updatehostkeys false",
+        "replace_test=$transport_dir/Test-WindowsPowerShell51FileReplace.ps1",
+        "& \\$replaceTest -RequireWindowsPowerShell51",
     )
     assert all(value in source for value in required)
     assert "scp " not in source
@@ -948,10 +973,13 @@ def test_transport_wrapper_pins_verified_ssh_and_transport_identities() -> None:
 
     manifest_pin = re.search(r"expected_manifest_sha256='([0-9a-f]{64})'", source)
     applier_pin = re.search(r"expected_applier_sha256='([0-9a-f]{64})'", source)
+    replace_test_pin = re.search(r"expected_replace_test_sha256='([0-9a-f]{64})'", source)
     assert manifest_pin is not None
     assert applier_pin is not None
+    assert replace_test_pin is not None
     assert manifest_pin.group(1) == hashlib.sha256(_TRANSPORT_MANIFEST.read_bytes()).hexdigest()
     assert applier_pin.group(1) == hashlib.sha256(_TRANSPORT_APPLIER.read_bytes()).hexdigest()
+    assert replace_test_pin.group(1) == hashlib.sha256(_REPLACE_TEST.read_bytes()).hexdigest()
 
 
 def test_transport_applier_is_manifest_last_nullable_and_atomic() -> None:
@@ -968,8 +996,12 @@ def test_transport_applier_is_manifest_last_nullable_and_atomic() -> None:
             "'ORCHESTRATION-SHA256SUMS',\n    'CORE-SHA256SUMS'",
         ),
         (
-            "[IO.File]::Replace($temporaryPath, $targetPath, $null, $true)",
+            "[IO.File]::Replace($temporaryPath, $targetPath, $backupPath, $true)",
             "[IO.File]::Copy($temporaryPath, $targetPath, $true)",
+        ),
+        (
+            "Remove-Item -LiteralPath $backupPath -Force",
+            "Remove-Item -LiteralPath $targetPath -Force",
         ),
     )
     for old, mutation in mutations:
@@ -998,6 +1030,9 @@ def test_transport_crash_prefixes_are_manifest_safe_and_resumable() -> None:
     assert _reference_transport_cas_action(None, None, new) == "replace"
     assert _reference_transport_cas_action(None, new, new) == "retain"
     assert _reference_transport_cas_action(old, "c" * 64, new) == "reject"
+    assert _reference_transport_cas_action(old, new, new, old) == "remove_backup"
+    assert _reference_transport_cas_action(old, old, new, old) == "reject"
+    assert _reference_transport_cas_action(old, new, new, "c" * 64) == "reject"
 
     for prefix_length in range(len(publication_order) + 1):
         landed = set(publication_order[:prefix_length])
@@ -1026,6 +1061,27 @@ def test_native_transport_projection_covers_absent_retry_order_and_encoded_stdin
         "attested bundle transport projection: PASS",
     )
     assert all(value in source for value in required)
+
+
+def test_native_windows_powershell_file_replace_gate_is_real_and_crash_safe() -> None:
+    source = _REPLACE_TEST.read_text(encoding="utf-8")
+    required = (
+        "[switch]$RequireWindowsPowerShell51",
+        "PSEdition -cne 'Desktop'",
+        "PSVersion.Major -ne 5",
+        "PSVersion.Minor -ne 1",
+        "[IO.File]::Replace($sourcePath, $targetPath, $backupPath, $true)",
+        "Native File.Replace did not preserve exact atomic evidence",
+        "Native File.Replace crash residue was not resumable",
+        "Native File.Replace idempotent retry did not converge",
+        "old target plus backup",
+        "new target plus wrong backup",
+        "old target plus wrong backup",
+        "existing_file_replaced = $true",
+        "crash_retry_converged = $true",
+    )
+    assert all(value in source for value in required)
+    assert "[IO.File]::Replace($sourcePath, $targetPath, $null, $true)" not in source
 
 
 @pytest.mark.parametrize(
