@@ -55,6 +55,9 @@ _TRANSITION_JOURNAL_TIMEOUT_SEC = 5.0
 _ALBUM_SETTLE_SEC = 1.0
 _ALBUM_MAX_WAIT_SEC = 5.0
 _ALBUM_MAX_ITEMS = 10
+_DELIVERY_UNCERTAINTY_NOTICE = (
+    "доставка не подтверждена, не дублирую; повторите запрос если фрагмент не пришёл"
+)
 _ARCHIVE_DOCUMENT_SUFFIXES = (".zip", ".rar", ".7z")
 _ARCHIVE_DOCUMENT_MIME_TYPES = frozenset(
     {
@@ -960,7 +963,7 @@ class TransportMixin(BridgeShared):
             raise
         except Exception as exc:
             LOGGER.warning("Telegram update deferred (%s)", type(exc).__name__)
-            dead_lettered = self._inbox.mark_failure(update_id, type(exc).__name__)
+            dead_lettered = self._inbox.mark_failure_many(owned_update_ids, type(exc).__name__)
             if dead_lettered:
                 self._inbox.mark_dead_letter_many(owned_update_ids, type(exc).__name__)
                 LOGGER.error("Telegram update exhausted its retry budget")
@@ -1036,6 +1039,7 @@ class TransportMixin(BridgeShared):
         messages: list[dict[str, Any]] = []
         captions: list[str] = []
         chat_user_identity: tuple[str, str] | None = None
+        message_ids: set[int] = set()
         for candidate in rows:
             candidate_update = json.loads(candidate["payload_json"])
             if candidate.get("backend_response_json") and int(candidate["update_id"]) != int(
@@ -1045,6 +1049,15 @@ class TransportMixin(BridgeShared):
             message = candidate_update.get("message")
             if not isinstance(message, dict):
                 raise _AlbumPermanentError("Telegram album part has no message", rows)
+            message_id = message.get("message_id")
+            if (
+                not isinstance(message_id, int)
+                or isinstance(message_id, bool)
+                or not 0 < message_id <= (2**63 - 1)
+                or message_id in message_ids
+            ):
+                raise _AlbumPermanentError("Telegram album message identity is invalid", rows)
+            message_ids.add(message_id)
             chat = message.get("chat")
             sender = message.get("from")
             identity = (
@@ -1298,6 +1311,7 @@ class TransportMixin(BridgeShared):
         resume_key: int | None = None,
         text_format: str = "markdown",
         reply_source_message_id: str = "",
+        reply_to_message_id: int | None = None,
     ) -> None:
         """Отправить текст, при необходимости несколькими кусками.
 
@@ -1320,6 +1334,47 @@ class TransportMixin(BridgeShared):
         already_sent = 0
         if resume_key is not None:
             already_sent = min(self._inbox.answer_chunks_sent(resume_key), len(chunks))
+        reply_parameters: dict[str, Any] | None = None
+        if (
+            isinstance(reply_to_message_id, int)
+            and not isinstance(reply_to_message_id, bool)
+            and 0 < reply_to_message_id <= (2**63 - 1)
+        ):
+            reply_parameters = {
+                "message_id": reply_to_message_id,
+                "allow_sending_without_reply": True,
+            }
+        if (
+            resume_key is not None
+            and self._inbox.answer_delivery_uncertainty_pending(resume_key)
+            and self._inbox.begin_answer_delivery_uncertainty_notice(resume_key)
+        ):
+            notice_payload: dict[str, Any] = {
+                "chat_id": chat_id,
+                "text": _DELIVERY_UNCERTAINTY_NOTICE,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            }
+            if reply_parameters is not None:
+                notice_payload["reply_parameters"] = reply_parameters
+            try:
+                notice_response = await self._post_message_chunk(
+                    client,
+                    notice_payload,
+                    _DELIVERY_UNCERTAINTY_NOTICE,
+                )
+                notice_response.raise_for_status()
+            except httpx.ConnectError:
+                # No response and no accepted-write evidence: this narrow
+                # pre-accept failure remains retryable.
+                self._inbox.retry_answer_delivery_uncertainty_notice(resume_key)
+                raise
+            except httpx.HTTPStatusError:
+                # A concrete HTTP response is proof of rejection. Ambiguous
+                # transport errors (read/write/protocol/pool) deliberately do
+                # not enter this branch: the warning may already have arrived.
+                self._inbox.retry_answer_delivery_uncertainty_notice(resume_key)
+                raise
         plain_text = text_format == "plain"
         for index, chunk in enumerate(chunks):
             if index < already_sent:
@@ -1332,9 +1387,24 @@ class TransportMixin(BridgeShared):
             }
             if not plain_text:
                 payload["parse_mode"] = "HTML"
+            if reply_parameters is not None:
+                payload["reply_parameters"] = reply_parameters
             if reply_markup and index == len(chunks) - 1:
                 payload["reply_markup"] = reply_markup
-            response = await self._post_message_chunk(client, payload, chunk)
+            if resume_key is None:
+                # Service/administrative messages do not participate in the
+                # durable answer cursor.  Keep that non-resumable seam narrow:
+                # no synthetic ``None`` delivery identity is passed to custom
+                # transports or test adapters.
+                response = await self._post_message_chunk(client, payload, chunk)
+            else:
+                response = await self._post_message_chunk(
+                    client,
+                    payload,
+                    chunk,
+                    resume_key=resume_key,
+                    chunk_number=index + 1,
+                )
             response.raise_for_status()
             if reply_source_message_id:
                 body = response.json()
@@ -1346,17 +1416,24 @@ class TransportMixin(BridgeShared):
                 except (TypeError, ValueError):
                     telegram_message_id = 0
                 if telegram_message_id > 0:
-                    # Commit the opaque lineage before the delivery checkpoint.
-                    # If the process dies between the two, a retried duplicate is
-                    # preferable to a delivered message whose reply can drift to
-                    # unrelated attachment history.
+                    # Commit opaque lineage while the pre-write uncertainty
+                    # fence is still armed. A crash here skips the possibly
+                    # accepted chunk on restart instead of duplicating it.
                     self._inbox.remember_outbound_reply_context(
                         chat_id,
                         telegram_message_id,
                         reply_source_message_id,
                     )
-            if resume_key is not None:
-                self._inbox.record_answer_chunks_sent(resume_key, index + 1)
+            # The pre-write fence remains deliberately uncertain until the
+            # accepted response and its opaque reply lineage have both been
+            # handled.  A hard kill anywhere above therefore skips this chunk
+            # on restart and emits one bounded notice, never a second copy of
+            # possibly accepted model text.
+            if resume_key is not None and not self._inbox.confirm_answer_chunk_delivery(
+                resume_key,
+                index + 1,
+            ):
+                raise RuntimeError("Telegram answer delivery fence could not be confirmed")
 
     async def _send_message_returning_id(
         self,
@@ -1395,6 +1472,9 @@ class TransportMixin(BridgeShared):
         client: httpx.AsyncClient,
         payload: dict[str, Any],
         chunk: str,
+        *,
+        resume_key: int | None = None,
+        chunk_number: int | None = None,
     ) -> httpx.Response:
         """Отправить один кусок, пережив разметку и ограничение частоты.
 
@@ -1408,19 +1488,68 @@ class TransportMixin(BridgeShared):
         остановки, а не начинается заново.
         """
 
+        if (resume_key is None) != (chunk_number is None):
+            raise ValueError("resumable Telegram delivery identity is incomplete")
+
+        def begin_delivery() -> tuple[int, int] | None:
+            if resume_key is None or chunk_number is None:
+                return None
+            snapshot = self._inbox.begin_answer_chunk_delivery(resume_key, chunk_number)
+            if snapshot is None:
+                raise RuntimeError("Telegram answer delivery fence could not be committed")
+            return snapshot
+
+        def reject_delivery(snapshot: tuple[int, int] | None) -> None:
+            if snapshot is None or resume_key is None or chunk_number is None:
+                return
+            previous_count, previous_uncertainty = snapshot
+            if not self._inbox.reject_answer_chunk_delivery(
+                resume_key,
+                chunk_number,
+                previous_count=previous_count,
+                previous_uncertainty=previous_uncertainty,
+            ):
+                raise RuntimeError("Telegram answer delivery fence could not be rolled back")
+
+        async def post_once() -> tuple[httpx.Response, tuple[int, int] | None]:
+            # Commit before constructing the awaitable network seam. If the
+            # process dies before, during, or after this POST, restart observes
+            # an uncertain/advanced cursor and never resends this chunk.
+            snapshot = begin_delivery()
+            try:
+                response = await client.post(f"{self._api_url}/sendMessage", json=payload)
+            except httpx.ConnectError:
+                # This exception is raised while establishing the connection;
+                # no request reached Telegram, so retrying the exact chunk is
+                # safe after restoring the pre-write snapshot.
+                reject_delivery(snapshot)
+                raise
+            return response, snapshot
+
         for attempt in range(self._RATE_LIMIT_RETRIES):
-            response = await client.post(f"{self._api_url}/sendMessage", json=payload)
+            response, snapshot = await post_once()
             if response.status_code == 400 and "parse_mode" in payload:
                 # Разметка важна, но доставка важнее. Любая неожиданная
                 # последовательность — незакрытый тег на границе куска, экзотика
                 # из ответа модели — не должна стоить человеку СООБЩЕНИЯ: именно
                 # «ничего не приходит» владелец и разбирал сегодня.
                 LOGGER.warning("Telegram rejected formatted message; resending as plain text")
+                # A concrete HTTP rejection proves non-delivery. Restore the
+                # cursor before the schema-less retry gets its own pre-write
+                # fence; a kill in between can then safely retry the chunk.
+                reject_delivery(snapshot)
                 payload.pop("parse_mode", None)
                 payload["text"] = chunk
-                response = await client.post(f"{self._api_url}/sendMessage", json=payload)
+                response, snapshot = await post_once()
             if response.status_code != 429 or attempt == self._RATE_LIMIT_RETRIES - 1:
+                if not 200 <= int(response.status_code) < 300:
+                    # The response itself is proof Telegram rejected this write.
+                    reject_delivery(snapshot)
+                # A successful resumable response intentionally keeps the
+                # pre-write fence armed. `_send_message` confirms it only after
+                # opaque reply-lineage persistence, closing that crash window too.
                 return response
+            reject_delivery(snapshot)
             wait_sec = self._retry_after_sec(response)
             LOGGER.warning("Telegram rate limit; waiting %.1fs before resending the same chunk", wait_sec)
             await asyncio.sleep(wait_sec)

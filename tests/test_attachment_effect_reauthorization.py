@@ -685,7 +685,7 @@ async def test_registered_attachment_is_reauthorized_before_source_derived_mutat
 
 
 @pytest.mark.asyncio
-async def test_registered_attachment_is_reauthorized_before_deterministic_web_prefetch(
+async def test_registered_attachment_denies_deterministic_web_before_arbiter_or_provider(
     settings: Any,
     storage: Any,
 ) -> None:
@@ -718,21 +718,19 @@ async def test_registered_attachment_is_reauthorized_before_deterministic_web_pr
         hybrid_searcher=_EmptySearcher(),
     )
 
-    assert model.arbiter_calls == 1
-    assert model.arbiter_serialized
-    assert model.mutated is True
-    assert kernel.web_research_calls == [], (
-        "deterministic prefetch entered web_research after its registered Raw was revoked"
-    )
+    assert model.arbiter_calls == 0
+    assert model.arbiter_serialized == ""
+    assert model.mutated is False
+    assert kernel.web_research_calls == []
     public = json.dumps(response, ensure_ascii=False, sort_keys=True)
     assert _SOURCE_CANARY not in public
     assert _WEB_PREFETCH_QUERY_CANARY not in public
     assert response["verified"] is False
-    assert response["verification_status"] == "unknown"
+    assert response["verification_status"] == "skipped"
     assert response["files"] == []
     assert response["voice"] is None
-    assert response["attachment_authority_changed_before_publication"] is True
-    assert "источник стал недоступен или изменился" in str(response["message"]).casefold()
+    assert response["attachment_authority_changed_before_publication"] is False
+    assert "приватные вложения" in str(response["message"]).casefold()
     assistant, metadata = _stored_assistant(storage, response)
     durable = json.dumps(
         {"content": assistant["content"], "metadata": metadata},
@@ -876,22 +874,30 @@ async def test_rawless_workspace_source_identity_is_rechecked_before_model_selec
         hybrid_searcher=_EmptySearcher(),
     )
 
-    assert model.primary_calls == 1, model.unclassified_calls
-    assert model.mutated is True
-    assert kernel.changed is True
+    if tool_name == "web_search":
+        # A private MCP source closes web before schema/model execution; the
+        # canary can never become provider arguments, so no late mutation hook
+        # is reached either.
+        assert model.primary_calls == 0, model.unclassified_calls
+        assert model.mutated is False
+        assert kernel.changed is False
+    else:
+        assert model.primary_calls == 1, model.unclassified_calls
+        assert model.mutated is True
+        assert kernel.changed is True
     assert kernel.effect_calls == []
     assert all(name == "workspace_read" for name, _ in kernel.provider_calls)
-    assert len(kernel.provider_calls) == 3, (
-        "expected initial read, pre-effect reauthorization, and final-publication reread"
-    )
+    expected_provider_calls = 2 if tool_name == "web_search" else 3
+    assert len(kernel.provider_calls) == expected_provider_calls
     public = json.dumps(response, ensure_ascii=False, sort_keys=True)
     assert _SOURCE_CANARY not in public
     assert _MUTATOR_CANARY not in public
     assert response["verified"] is False
-    assert response["verification_status"] == "unknown"
+    assert response["verification_status"] == ("skipped" if tool_name == "web_search" else "unknown")
     assert response["files"] == []
     assert response["voice"] is None
-    assert "источник" in str(response["message"]).casefold()
+    expected_message_marker = "приватные вложения" if tool_name == "web_search" else "источник"
+    assert expected_message_marker in str(response["message"]).casefold()
     assistant, metadata = _stored_assistant(storage, response)
     durable = json.dumps(
         {"content": assistant["content"], "metadata": metadata},
@@ -900,9 +906,14 @@ async def test_rawless_workspace_source_identity_is_rechecked_before_model_selec
     )
     assert _SOURCE_CANARY not in durable
     assert _MUTATOR_CANARY not in durable
-    assert "workspace_inbox_relative_path" not in metadata
-    assert "workspace_inbox_sha256" not in metadata
-    assert "workspace_inbox_source_sha256" not in metadata
+    if tool_name == "web_search":
+        assert metadata["workspace_inbox_relative_path"] == _WORKSPACE_PATH
+        assert metadata["workspace_inbox_sha256"] == "a" * 64
+        assert metadata["workspace_inbox_source_sha256"] == "b" * 64
+    else:
+        assert "workspace_inbox_relative_path" not in metadata
+        assert "workspace_inbox_sha256" not in metadata
+        assert "workspace_inbox_source_sha256" not in metadata
 
 
 @pytest.mark.asyncio

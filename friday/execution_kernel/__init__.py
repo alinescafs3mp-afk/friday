@@ -1146,6 +1146,11 @@ class ToolResult:
         if self.tool_name == "web_research" and isinstance(self.data, dict):
             encoded, compacted = _web_research_for_llm(self.data)
             self.truncated = self.truncated or compacted
+        elif self.tool_name == "message_search" and isinstance(self.data, dict) and "total" in self.data:
+            # A complete day can hold close to one hundred short rows. Compact
+            # JSON preserves every chronological row under the same 12k tool
+            # envelope; pretty-print whitespace previously truncated the tail.
+            encoded = json.dumps(self.data, ensure_ascii=False, separators=(",", ":"))
         else:
             encoded = (
                 self.data
@@ -1823,6 +1828,8 @@ def _memory_graph_context_for_llm(
 # на второй вызов. Прежде сюда уходили тела документов, и одного среднего (16 565
 # знаков на этом архиве) хватало, чтобы переполнить бюджет целиком.
 _TOOL_EXCERPT_CHARS = 600
+_MESSAGE_SEARCH_FULL_ROW_CHARS = 8_000
+_MESSAGE_SEARCH_FULL_PAGE_CHARS = 80_000
 _SOURCE_SEARCH_QUERY_CHARS = 240
 _SOURCE_SEARCH_FOCUS_CHARS = 480
 _SOURCE_SEARCH_CANDIDATE_CAP = 100
@@ -5205,6 +5212,13 @@ class ExecutionKernel:
         query: str,
         limit: int = 10,
         conversation_id: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        role: str | None = None,
+        offset: int = 0,
+        before_message_id: str | None = None,
+        match_all_terms: bool = False,
+        include_full_content: bool = False,
     ) -> dict[str, Any]:
         """Search the caller's own chat history — not the knowledge base.
 
@@ -5221,25 +5235,139 @@ class ExecutionKernel:
         storage = self.storage
         if storage is None:
             raise RuntimeError("Execution kernel storage is not initialized")
-        limit = max(1, min(int(limit), 50))
+        limit = max(1, min(int(limit), 100 if since is not None or until is not None else 50))
         conv = " ".join(str(conversation_id or "").split()).strip() or None
-        rows = storage.search_messages(
+        if (since is None) != (until is None):
+            raise ValueError("since and until must be supplied together")
+        if since is not None and until is not None:
+            page = storage.list_messages_window(
+                actor.own_id,
+                since,
+                until,
+                role=role,
+                conversation_id=conv,
+                before_message_id=before_message_id,
+                limit=limit,
+                offset=offset,
+            )
+            rows = [row for row in page.get("results", []) if isinstance(row, Mapping)]
+            excerpt_chars = max(24, min(_TOOL_EXCERPT_CHARS, 3_600 // max(1, len(rows))))
+            results: list[dict[str, Any]] = []
+            content_complete = True
+            truncated_rows = 0
+            content_chars = 0
+            full_content = include_full_content is True
+            zone = self._zone()
+
+            def local_stamp(value: Any) -> str:
+                clean = str(value or "").strip()
+                if not clean:
+                    return ""
+                try:
+                    parsed = datetime.fromisoformat(clean.replace("Z", "+00:00"))
+                except ValueError:
+                    return ""
+                if parsed.tzinfo is None or parsed.utcoffset() is None:
+                    return ""
+                return parsed.astimezone(zone).isoformat()
+
+            for row in rows:
+                content = " ".join(str(row.get("content") or "").split())
+                if full_content:
+                    allowance = max(
+                        0,
+                        min(
+                            _MESSAGE_SEARCH_FULL_ROW_CHARS,
+                            _MESSAGE_SEARCH_FULL_PAGE_CHARS - content_chars,
+                        ),
+                    )
+                else:
+                    allowance = excerpt_chars
+                truncated = len(content) > allowance
+                visible = content[:allowance].rstrip() + ("…" if truncated else "") if allowance else ""
+                content_chars += len(visible)
+                content_complete = content_complete and not truncated
+                truncated_rows += int(truncated)
+                results.append(
+                    {
+                        "role": str(row.get("role") or ""),
+                        "at": local_stamp(row.get("created_at")),
+                        "text": visible,
+                    }
+                )
+            local_since = local_stamp(page.get("since"))
+            local_until = local_stamp(page.get("until"))
+            return {
+                "query": query,
+                "results": results,
+                "count": len(results),
+                "total": int(page.get("total") or 0),
+                "shown": len(results),
+                "complete": page.get("complete") is True,
+                "next_offset": page.get("next_offset"),
+                "offset": int(page.get("offset") or 0),
+                "since_local": local_since,
+                "until_local": local_until,
+                "timezone": str(getattr(self.settings, "local_timezone", "") or zone),
+                "role": page.get("role"),
+                "content_complete": content_complete,
+                "truncated_rows": truncated_rows,
+                "content_chars": content_chars,
+                "full_content": full_content,
+            }
+        message_rows = storage.search_messages(
             actor.own_id,
             query,
             limit=limit,
             conversation_id=conv,
+            role=role,
+            before_message_id=before_message_id,
+            match_all_terms=match_all_terms,
         )
-        results = [
-            {
+        thematic_results: list[dict[str, Any]] = []
+        content_complete = True
+        truncated_rows = 0
+        content_chars = 0
+        full_content = include_full_content is True
+        for row in message_rows:
+            content = " ".join(str(row.get("content") or "").split())
+            projected = {
                 "id": str(row.get("id") or ""),
                 "conversation_id": str(row.get("conversation_id") or ""),
                 "role": str(row.get("role") or ""),
                 "created_at": row.get("created_at"),
-                "excerpt": best_snippet(query, str(row.get("content") or ""), max_chars=_TOOL_EXCERPT_CHARS),
+                "excerpt": best_snippet(query, content, max_chars=_TOOL_EXCERPT_CHARS),
             }
-            for row in rows
-        ]
-        return {"count": len(results), "query": query, "results": results}
+            if full_content:
+                allowance = max(
+                    0,
+                    min(
+                        _MESSAGE_SEARCH_FULL_ROW_CHARS,
+                        _MESSAGE_SEARCH_FULL_PAGE_CHARS - content_chars,
+                    ),
+                )
+                truncated = len(content) > allowance
+                visible = content[:allowance].rstrip() + ("…" if truncated else "") if allowance else ""
+                projected["text"] = visible
+                content_chars += len(visible)
+                content_complete = content_complete and not truncated
+                truncated_rows += int(truncated)
+            thematic_results.append(projected)
+        payload: dict[str, Any] = {
+            "count": len(thematic_results),
+            "query": query,
+            "results": thematic_results,
+        }
+        if full_content:
+            payload.update(
+                {
+                    "full_content": True,
+                    "content_complete": content_complete,
+                    "truncated_rows": truncated_rows,
+                    "content_chars": content_chars,
+                }
+            )
+        return payload
 
     async def _memory_save(
         self,
@@ -7371,15 +7499,27 @@ class ExecutionKernel:
             "Поиск по ИСТОРИИ ПЕРЕПИСКИ этого пользователя, а не по базе знаний. "
             "Используй, когда человек спрашивает, что он уже писал или спрашивал, "
             "а не что сохранено как заметка. memory_search — про знания; этот — "
-            "про сообщения. conversation_id сужает до одного разговора.",
+            "про сообщения. Для полного временного окна передай обе UTC-границы "
+            "since/until: выборка half-open [since, until), хронологическая, с "
+            "total/complete/next_offset. conversation_id сужает до одного разговора.",
             "search.use",
             {
                 "query": {"type": "string"},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
                 "conversation_id": {
                     "type": "string",
                     "description": "опционально: искать только в этом разговоре",
                 },
+                "since": {
+                    "type": "string",
+                    "description": "UTC ISO-8601 inclusive lower bound; only together with until",
+                },
+                "until": {
+                    "type": "string",
+                    "description": "UTC ISO-8601 exclusive upper bound; only together with since",
+                },
+                "role": {"type": "string", "enum": ["user", "assistant"]},
+                "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
             },
             ["query"],
             risk="observe",

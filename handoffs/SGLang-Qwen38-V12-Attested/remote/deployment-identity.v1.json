@@ -11,5 +11,5 @@
   "model_quantization": "W4A16_NVFP4",
   "served_model_alias": "dispatcher",
   "launch_manifest_sha256": "640a1ea428b2526ff6f3b3e412c18fef8e48f1fa882b3a94f9859a190678f62b",
-  "proxy_policy_sha256": "47e6b9c2dadea4a1e9395b8f8305699033b52a09ecba14d82afcdf77e7d9f3ae"
+  "proxy_policy_sha256": "d51c092ca2ef566f092ef9d55320e302c2d10b710d319d27a6d982aba018dcfe"
 }

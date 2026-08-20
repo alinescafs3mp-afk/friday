@@ -609,6 +609,8 @@ async def test_current_odt_metadata_and_followup_use_the_registered_file_contour
     assert _multi_attachment_open_task_count("Сравни два файла") == 2
     assert _multi_attachment_open_task_count("Обобщи три вложения") == 3
     assert _multi_attachment_open_task_count("Дай мне в одном сообщении информацию про эти два скана") == 2
+    assert _multi_attachment_open_task_count("обобщи и сделай сводку по этим двум документам") == 2
+    assert _multi_attachment_summary_count("обобщи и сделай сводку по этим двум документам") == 2
     assert _multi_attachment_open_task_count("these two documents") == 2
     assert _multi_attachment_open_task_count("эти два сервера") is None
     assert _multi_attachment_summary_count("Обобщи три вложения") == 3
@@ -1855,7 +1857,11 @@ async def test_current_odt_metadata_and_followup_use_the_registered_file_contour
         attachments=[{"raw_object_id": effect_id}],
         enable_tools=True,
     )
-    assert capability_tools_seen == [["web_fetch", "web_research", "web_search"]]
+    # A proved web clause no longer authorizes any outbound schema once the
+    # current attachment participates.  The refusal is code-owned, so neither
+    # the model-selected loop nor a provider sees the file-derived request.
+    assert capability_tools_seen == []
+    assert "приватные вложения" in capability_result["message"].casefold()
     assert capability_timeline_prefetches == []
     assert capability_context_local == []
     assert _current_attachment_can_skip_archive(

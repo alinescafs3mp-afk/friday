@@ -416,7 +416,7 @@ def test_migration_creates_the_chunk_table_on_a_live_database(settings, tmp_path
         # назвать номер вслух. Забытый номер стоил 2026-08-04 поломки живого
         # маршрута — столбец добавили, а миграция без нового номера не
         # запускается вовсе.
-        assert version == SCHEMA_VERSION == 33
+        assert version == SCHEMA_VERSION == 34
         # The pre-existing vector survived and reads as "never chunked".
         row = migrated.execute(
             "SELECT chunk_scheme FROM knowledge_embeddings WHERE knowledge_object_id=?", (note["id"],)

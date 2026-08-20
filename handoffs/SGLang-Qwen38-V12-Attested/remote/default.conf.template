@@ -1,8 +1,3 @@
-map $http_authorization $friday_authorized {
-    default 0;
-    "Bearer ${JARVIS_LLM_API_KEY}" 1;
-}
-
 server {
     listen 8080;
     server_name _;
@@ -22,7 +17,7 @@ server {
 
     location = /v1/chat/completions {
         if ($request_method != POST) { return 405; }
-        if ($friday_authorized = 0) { return 401; }
+        if ($http_authorization != "Bearer ${JARVIS_LLM_API_KEY}") { return 401; }
         proxy_set_header Authorization "";
         proxy_set_header Host $host;
         proxy_set_header Connection "";
@@ -34,7 +29,7 @@ server {
 
     location = /v1/models {
         if ($request_method != GET) { return 405; }
-        if ($friday_authorized = 0) { return 401; }
+        if ($http_authorization != "Bearer ${JARVIS_LLM_API_KEY}") { return 401; }
         proxy_set_header Authorization "";
         proxy_set_header Host $host;
         proxy_pass http://${SGLANG_UPSTREAM}:30000/v1/models;
@@ -42,7 +37,7 @@ server {
 
     location = /metrics {
         if ($request_method != GET) { return 405; }
-        if ($friday_authorized = 0) { return 401; }
+        if ($http_authorization != "Bearer ${JARVIS_LLM_API_KEY}") { return 401; }
         proxy_set_header Authorization "";
         proxy_set_header Host $host;
         proxy_pass http://${SGLANG_UPSTREAM}:30000/metrics;
@@ -50,7 +45,7 @@ server {
 
     location = /server_info {
         if ($request_method != GET) { return 405; }
-        if ($friday_authorized = 0) { return 401; }
+        if ($http_authorization != "Bearer ${JARVIS_LLM_API_KEY}") { return 401; }
         proxy_set_header Authorization "";
         proxy_set_header Host $host;
         proxy_pass http://${SGLANG_UPSTREAM}:30000/server_info;
@@ -58,7 +53,7 @@ server {
 
     location = /_friday/v1/deployment-witness {
         if ($request_method != GET) { return 405; }
-        if ($friday_authorized = 0) { return 401; }
+        if ($http_authorization != "Bearer ${JARVIS_LLM_API_KEY}") { return 401; }
         alias /run/friday-witness/deployment-witness.v1.json;
         default_type application/json;
         open_file_cache off;

@@ -639,7 +639,7 @@ def _workspace_tool_schema(name: str) -> dict[str, Any]:
     }
 
 
-def test_exact_d10_three_turn_api_keeps_reply_source_and_forces_only_workspace_effect(
+def test_exact_d10_three_turn_api_keeps_reply_source_but_denies_workspace_effect(
     settings,
     monkeypatch,
 ) -> None:
@@ -852,20 +852,24 @@ def test_exact_d10_three_turn_api_keeps_reply_source_and_forces_only_workspace_e
         )
 
     workspace_calls = [arguments for name, arguments in executed if name == "workspace_create"]
-    assert workspace_calls == [{"filename": "mcp-metadata.txt", "content": "17-ДСП/1\nMETA-EXPORT-1\n"}]
+    assert workspace_calls == []
     assert sum(name == "make_file" for name, _arguments in executed) == make_file_before_workspace
     forced = [call for call in llm.calls if call["tool_choice"] == "workspace_create"]
     assert forced == []
     assert [call for call in llm.calls if "workspace_create" in call["user"]] == []
-    assert workspace.json()["tools_used"] == ["workspace_create"]
+    assert workspace.json()["tools_used"] == []
     assert workspace.json().get("files") == []
+    assert "не создан" in str(workspace.json().get("message") or "").casefold()
+    serialized_workspace = json.dumps(workspace.json(), ensure_ascii=False)
+    assert "17-ДСП/1" not in serialized_workspace
+    assert "META-EXPORT-1" not in serialized_workspace
     final_user = next(row for row in reversed(rows) if row.get("role") == "user")
     final_metadata = json.loads(str(final_user.get("metadata_json") or "{}"))
     assert final_metadata["conversation_attachment_raw_ids"] == [selected_raw_id]
     assert final_metadata["attachment_origin"] == "reply_reference"
 
 
-def _assert_exact_workspace_direct_effect_with_disabled_llm(
+def _assert_exact_workspace_source_effect_denied_with_disabled_llm(
     settings,
     monkeypatch,
     *,
@@ -950,21 +954,19 @@ def _assert_exact_workspace_direct_effect_with_disabled_llm(
 
     assert workspace.status_code == 200, workspace.text
     assert llm.calls == []
-    assert executed == [
-        (
-            "workspace_create",
-            {"filename": "mcp-metadata.txt", "content": expected_content},
-        )
-    ]
-    assert workspace.json()["tools_used"] == ["workspace_create"]
+    assert executed == []
+    assert workspace.json()["tools_used"] == []
     assert workspace.json().get("files") == []
+    assert "не создан" in str(workspace.json().get("message") or "").casefold()
+    serialized = json.dumps(workspace.json(), ensure_ascii=False)
+    assert expected_content.strip() not in serialized
 
 
-def test_exact_workspace_direct_effect_does_not_require_enabled_llm(
+def test_exact_workspace_source_effect_is_denied_with_disabled_llm(
     settings,
     monkeypatch,
 ) -> None:
-    _assert_exact_workspace_direct_effect_with_disabled_llm(
+    _assert_exact_workspace_source_effect_denied_with_disabled_llm(
         settings,
         monkeypatch,
         workspace_prompt=(
@@ -976,11 +978,11 @@ def test_exact_workspace_direct_effect_does_not_require_enabled_llm(
     )
 
 
-def test_exact_workspace_reversed_field_order_runs_directly_with_disabled_llm(
+def test_exact_workspace_reversed_field_order_is_denied_with_disabled_llm(
     settings,
     monkeypatch,
 ) -> None:
-    _assert_exact_workspace_direct_effect_with_disabled_llm(
+    _assert_exact_workspace_source_effect_denied_with_disabled_llm(
         settings,
         monkeypatch,
         workspace_prompt=(

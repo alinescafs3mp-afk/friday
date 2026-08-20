@@ -135,7 +135,6 @@ def init_storage(settings: FridaySettings) -> FridayStorage:
         settings.files_dir,
         settings.backups_dir,
         settings.exports_dir,
-        settings.memory_vault_dir,
         settings.log_dir,
         settings.cache_dir,
     ):

@@ -70,6 +70,7 @@ PERSON_SCOPED = {
     "idempotency_mark_effect_possible",
     "list_chat_thread",
     "list_conversations",
+    "list_messages_window",
     "set_conversation_archived",
     "set_conversation_mode",
     "store_message",
@@ -151,7 +152,11 @@ APPROVAL_TENANT_WITH_A_SEPARATE_PERSON = {
 # 253 → 254: idempotency_mark_effect_possible fences one person's transport
 # request before a possible side effect; sharing it at tenant scope would let
 # another participant poison or replay that person's operation key.
-EXPECTED_USER_ID_METHODS = 254
+# 254 → 255: list_messages_window pages one person's private accepted chat
+# history; its user_id is the principal even when the archive is shared.
+# 255 → 256: search_owned_files_by_term searches the shared archive tenant;
+# exact uploader/person authority is carried and checked separately.
+EXPECTED_USER_ID_METHODS = 256
 
 
 def _methods_taking_user_id() -> set[str]:

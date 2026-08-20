@@ -119,9 +119,9 @@ async def create_export(request: Request) -> dict[str, Any]:
     пишется с отступами, то есть ещё в полтора-два раза больше), пик памяти 759 МБ при
     3.9 ГБ доступных. В выгрузку НЕ входят оригиналы файлов (684 МБ) и вектора.
 
-    Настоящих способа переехать два, и оба названы в ответе: копия SQLite вместе с
-    каталогом файлов, либо `memory-vault` — 1539 заметок Markdown, которые читаются
-    чем угодно без Friday.
+    Полный перенос всегда требует SQLite вместе с каталогом файлов. Опциональный
+    `memory-vault` называется читаемым переносом только если владелец явно включил
+    full-body projector; body-free deployment не рекламирует отсутствующую копию.
 
     Работа ушла с event loop: она синхронная и на секунды подвешивала весь сервер —
     ни одного HTTP-запроса, ни одного сообщения в Telegram, пока строится словарь на
@@ -136,15 +136,18 @@ async def create_export(request: Request) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     _audit(request, "admin.export.create", "user", user_id, after=result)
+    settings = _services(request).settings
+    move_options = [
+        "скопируйте базу SQLite вместе с каталогом files/ — это полный перенос",
+    ]
+    if settings.memory_vault_mode == "full_owner":
+        move_options.append("memory-vault/ — заметки Markdown, читаются чем угодно и без Friday")
     return {
         "export": result,
         # Честно о том, чем эта выгрузка НЕ является. Человек, который считает её
         # способом переехать, узнает правду в худший момент — когда Friday уже нет.
         "readable_by": "archival JSON; no importer exists in Friday or elsewhere",
-        "to_move_your_data": [
-            "скопируйте базу SQLite вместе с каталогом files/ — это полный перенос",
-            "memory-vault/ — заметки Markdown, читаются чем угодно и без Friday",
-        ],
+        "to_move_your_data": move_options,
         "not_included": ["оригиналы загруженных файлов", "векторы поиска"],
     }
 

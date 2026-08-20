@@ -28,7 +28,10 @@ def _legacy_file(path: Path, content: bytes) -> None:
     path.chmod(0o644)
 
 
-def test_storage_startup_repairs_every_nested_private_tree(settings, tmp_path: Path) -> None:
+def test_storage_startup_repairs_owned_trees_without_touching_disabled_vault(
+    settings,
+    tmp_path: Path,
+) -> None:
     home = tmp_path / "legacy-private-home"
     secured = replace(
         settings,
@@ -39,18 +42,19 @@ def test_storage_startup_repairs_every_nested_private_tree(settings, tmp_path: P
         backups_dir=home / "backups",
         exports_dir=home / "exports",
         memory_vault_dir=home / "vault",
+        memory_vault_mode="disabled",
         log_dir=home / "logs",
         cache_dir=home / "cache",
     )
-    roots = (
+    runtime_roots = (
         secured.state_dir,
         secured.files_dir,
         secured.backups_dir,
         secured.exports_dir,
-        secured.memory_vault_dir,
         secured.log_dir,
         secured.cache_dir,
     )
+    roots = (*runtime_roots, secured.memory_vault_dir)
     for index, root in enumerate(roots):
         nested = root / "legacy" / "nested"
         nested.mkdir(parents=True, exist_ok=True)
@@ -65,11 +69,17 @@ def test_storage_startup_repairs_every_nested_private_tree(settings, tmp_path: P
     storage = None
     try:
         storage = init_storage(secured)
-        for root in roots:
+        for root in runtime_roots:
             for current, directories, filenames in os.walk(root):
                 assert _mode(Path(current)) == 0o700
                 assert all(_mode(Path(current) / name) == 0o700 for name in directories)
                 assert all(_mode(Path(current) / name) == 0o600 for name in filenames)
+        # Body-free mode may inventory a legacy projection, but startup must not
+        # create, chmod, delete, or otherwise mutate it implicitly.
+        assert _mode(secured.memory_vault_dir) == 0o755
+        assert _mode(secured.memory_vault_dir / "legacy") == 0o755
+        assert _mode(secured.memory_vault_dir / "legacy" / "nested") == 0o755
+        assert _mode(secured.memory_vault_dir / "legacy" / "nested" / "private-6.bin") == 0o644
     finally:
         if storage is not None:
             storage.close()

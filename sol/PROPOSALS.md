@@ -3687,3 +3687,184 @@
   пережить перезапуск модели; ложный отказ оставит безопасный legacy. Поэтому
   переключение разрешено только после полного zero-skip gate и live attestation,
   с остановленным bridge на время backend cutover.
+
+## 85. Стресс-контур: память переписки и файлов — путь данных, а не догадка модели
+
+- **Статус и preregistration.** Принято владельцем 2026-08-20 после живого
+  стресс-теста, начатого 2026-08-19 в 03:57 МСК. Этот baseline записан до выпуска
+  кандидата. Боевая БД измеряется только read-only; тесты используют исключительно
+  синтетические tenant, тексты, файлы и Telegram updates.
+- **Транспорт не терял диалоговые ходы.** После границы есть `121` пользовательский
+  ход и `121` ответ; пересекающиеся updates исполнялись последовательно и не были
+  отменены. Основной отказ семантический/структурный: Friday отвечала без данных,
+  которые доказательно уже лежали в её SQLite.
+- **Baseline поиска сообщений.** Точная пользовательская строка 18 августа 23:14
+  существует, но старый путь нашёл `0/1` и отобразил московское время как UTC. В
+  закрытом московском дне 13 августа есть `96` собственных сообщений, а обе формы
+  запроса дня вернули `0/96`. Причина детерминирована: prefetch передаёт в FTS всю
+  естественную реплику и не имеет `since/until`; слова даты не обязаны встречаться
+  в искомом сообщении, а только что сохранённый запрос может ранжироваться выше
+  ответа. Top-k также не доказывает полноту дня.
+- **Диагноз FTS.** Все три live FTS5-таблицы используют
+  `unicode61 remove_diacritics 2`, не английский `porter`; число shadow-строк
+  совпадает с базовыми таблицами. Русские формы сводит существующий query-time
+  Snowball Russian stemmer. Токенизатор `stemmer language='ru'` отсутствует в
+  pinned SQLite; замена основных индексов на `trigram` ухудшила бы словесное
+  ранжирование и раздула индекс. Подстрока имени файла поэтому получает отдельный
+  uploader-scoped путь, а не разрушительную миграцию FTS.
+- **Baseline поиска файлов.** В каталоге владельца есть два live filename-hit по
+  измеренному корню, пересечение с body FTS — `0/2`, а ответ показывал не больше
+  одного. Self inventory не узнавал «у меня» и `выведи` и поддерживал лишь all-time
+  либо один день, поэтому неделя/диапазон падали до чтения каталога. Утверждение о
+  собственной SQLite Friday было ошибочно принято за просьбу прочитать все
+  вложения и запустило ложную выборку из `1721` файлов.
+- **Baseline visual/file.** Провальные PDF/JPEG дошли до vision-модели, но ответы
+  обрывались ровно на `4096` токенах; дублирование полного OCR в page и top-level
+  раздувало строгий JSON. После этого провал скана назывался успешно прочитанным
+  пустым документом. Telegram-группа из десяти фото попала в dead-letter с
+  `attempts=0`: три Raw были записаны без chat message, семь фото до backend не
+  дошли. Dedup replay подменил новый alias старым каноническим именем. Два видимых
+  ответа «модель не сформировала ответ» возникли после успешных генераций,
+  отклонённых false-readable-file-refusal guard, а не после отказа модели.
+- **Другие детерминированные отказы.** Погода без места ушла в публичный поиск;
+  provider выбрал Владимир, а Friday ложно сослалась на геолокацию/контекст.
+  Поправка про Донецк затем потратила 185 секунд на сетевой timeout и выдала
+  неподтверждённый прогноз одновременно с повторным запросом. «Проведи
+  самодиагностику» классифицировалось как web research и вернуло отказ об
+  отсутствующей веб-выдаче вместо локального capability-gated health.
+- **Граница памяти сообщений.** Добавляется own-user-only хронологический selector
+  по проверенному UTC half-open окну `[since, until)`, с optional role/conversation,
+  rowid tie-breaker, точным `total`, sentinel страницы и `next_offset`. Runtime
+  вычисляет точный local day, bare day и minute в коде; минута —
+  `[HH:MM, HH:MM+1m)`. FTS остаётся для тематического поиска. Tool обязан явно
+  сообщать неполноту excerpt/page и никогда не называть top-k «всеми сообщениями».
+- **Граница памяти файлов.** Self inventory разрешает authenticated principal
+  напрямую, принимает закрытые code-built диапазоны и сохраняет те же
+  uploader/tenant/deleted/privacy predicates, что каталог. Поиск имени/содержимого
+  — bounded union body FTS и case-folded filename substring, с дедупликацией по
+  Raw id. Полнота true лишь при полноте обеих веток и directory. Несколько версий
+  с точным именем показываются как набор, а не выбираются молча.
+- **Граница visual/media.** У OCR JSON один полный carrier — `pages[].text`;
+  summary/entities/evidence ограничены, output budget отдельный и конечный.
+  Invalid multi-image output распадается на ordered singleton под исходным
+  deadline; partial coverage видна. Invalid singleton получает один OCR-only
+  retry. Scan без native и visual текста unreadable, а не verified-empty.
+  Telegram media group получает bounded stage/receipt по каждому sibling и
+  versioned ordered group identity: aggregate 400/409/413/422 распадается до
+  singleton, permanent outcome не теряет остальные части, а all-invalid album
+  получает один code-owned ответ. Dedup replay сохраняет message-bound alias
+  текущего хода, не меняя canonical Raw и не угадывая связь по timestamp.
+- **Граница system/meta и погоды.** Вопрос о persistent storage и диагностике
+  самой Friday — не attachment selection и не web search. Ответ о storage
+  сообщает реальный контракт: собственная переписка хранится целиком, prompt
+  window короткий, `message_search` читает durable history. Диагностика требует
+  `admin.diagnostics` и показывает только существующую safe projection. Текущая
+  погода без явного либо authenticated сохранённого места спрашивает город и не
+  делает network call; соседняя поправка с городом наследует только закрытый
+  weather intent и никогда не заявляет ambient geolocation.
+- **Граница корреляции и интеграций.** Каждая сохранённая assistant-строка
+  структурно ссылается на exact user-строку этого же владельца и разговора, а
+  Telegram reply пользователя — только на exact owned assistant-строку; чужая
+  роль, разговор или владелец fail-closed. Все audit-события одного HTTP-запроса
+  получают один server-proven correlation id через request-local context;
+  background-событие остаётся без него, а предложенный клиентом id хранится лишь
+  как keyed reference. Ответ о MCP строится по фактическим configured/connected
+  и числу allowlisted tools, без имён, путей и model self-description.
+- **Граница Telegram delivery.** Перед первым сетевым байтом каждого resumable
+  chunk durable cursor переводится в uncertain. Только доказанный ConnectError
+  до приёма либо конкретный HTTP reject возвращает snapshot; ReadTimeout или
+  hard kill никогда не повторяет возможно принятый текст и создаёт не более
+  одного безопасного уведомления, привязанного к исходному user message.
+- **Граница публикации и релиза.** Повторная проверка ответа по вложению имеет тот
+  же fail-closed исход, что source search: окончательный evidence mismatch не
+  публикует модельный текст, файл или голос. Guard-отказ не называется отказом
+  модели. Immutable release до переключения units импортирует именно установленный
+  wheel и проверяет его surface; частично обновлённое source-дерево никогда не
+  становится live runtime. SQLite/WAL/inbox копируются как один recovery set,
+  release anchor меняется атомарно, backend принимается раньше bridge, а
+  schema-33 rollback после первой записи schema-34 больше не допускается.
+- **Acceptance.** Синтетические варианты живых minute/day, week/range,
+  self-inventory и filename-union дают `1/1`, `96/96` с честной pagination и
+  `2/2`. Cross-user/conversation/uploader decoys невидимы; naive/reversed/invalid
+  bounds fail-closed. PDF scan, two-JPEG fallback, ten-photo recovery, dedup alias
+  и false-readable-refusal сохраняют exact receipts/coverage. Weather без города
+  делает ноль outbound-вызовов; explicit/follow-up Донецк получает grounded data.
+  Self-diagnostics делает ноль web-вызовов и запрещено без точной capability.
+  MCP status различает disabled/unavailable/connected; reply edges и request-id
+  correlation полны для synthetic API/Telegram turns и изолированы между
+  конкурентными запросами. Финальный attachment mismatch не выпускает ни одного
+  производного carrier.
+  Каждый новый тест обязан пережить явную мутацию своей границы.
+- **Условие release/V12.** Эти фиксы объединяются с Proposal 84 только после
+  pinned full quality gate с zero skips, одинаковых reproducible wheels и
+  verified backup перед любым durable repair. Immutable Qwen3.8/SGLang cutover
+  обязан достичь `canary_ready/live_attestation_clear`; иначе default остаётся
+  нынешний exact `40960/6` graph-only. Параметры, графы и сторонние VRAM consumers
+  ради релиза не урезаются.
+
+## 86. Единый авторизованный архив: каталог важнее размера модели и транспорта
+
+- **Статус и источник решения.** Принято владельцем 2026-08-20 после внешнего
+  архитектурного аудита `outer_sol/DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md` и
+  `outer_sol/MCP_ARCHITECTURE_OBSERVATION.md`. Сначала выпускается изолированный
+  safety-fix Proposal 85; следующий непрерывный этап V12 строится на измеренном
+  каталоге, а не объявляется исправленным одной новой моделью или MCP-сервером.
+- **Что уже есть.** HybridSearcher, Russian Snowball, FTS, passage recall для
+  Knowledge Objects, reauthorization Raw-источника, review gate, code-owned MCP
+  wrappers и узкий workspace MCP сохраняются. Основные FTS остаются
+  `unicode61`; ни английский `porter`, ни глобальный `trigram` не вводятся.
+- **Чего не хватает.** Pending Raw, подтверждённые Knowledge Objects и сообщения
+  остаются тремя каталогами с разными admission/date/semantic правилами.
+  Физически зарегистрированный файл ещё не обязан иметь semantic title,
+  passages, совместимый embedding или явную причину неполноты. История ищется по
+  отдельным строкам без соседнего контекста. Модель вынуждена выбирать corpus до
+  получения evidence, поэтому отсутствие кандидата ошибочно выглядит отсутствием
+  данных.
+- **Первый обязательный прибор.** Read-only `audit_document_catalog` отдельно
+  считает зарегистрированные, доступные в каталоге, passage-indexed,
+  current-embedded, typed-date, pending-semantic и incomplete источники; наружу
+  выходят только числа, версии и хеши. `search_explain` фиксирует выбранные
+  corpora/date role, recall channels, authorization count, caps и причины
+  исключения. До изменения ранжирования замораживается difficult-query gold set:
+  pending/old/unhelpful-name/typo/person+topic/topic+month/message paraphrase и
+  unknown-corpus.
+- **Вертикальный срез.** Вводится rebuildable `DocumentCatalog`, не заменяющий
+  Raw/Inbox/Knowledge: отдельные original/normalized/alias filenames,
+  `semantic_title`, evidence-bound `visible_document_title`, authority/review,
+  completeness и revisions. Каждый authorized text-bearing Raw получает passage
+  projection независимо от promotion; pending остаётся non-canonical и
+  verification-ineligible. Conversation passages связывают user+assistant и
+  bounded соседний контекст со stable message IDs и own-person scope.
+- **Единый контракт.** Code-owned `archive_search(SearchPlan)` веером вызывает
+  документы, сообщения и знания, применяет общий typed temporal constraint,
+  lifecycle/privacy/uploader filters, lexical/identity/dense recall, fusion,
+  reranking и повторную authorization. Partial/stale/capped индекс никогда не
+  доказывает отсутствие. V12 строит только typed SearchPlan и синтезирует только
+  EvidenceBundle; права, completeness и provenance остаются кодом.
+- **Даты.** `received_at`, container dates, visible issue/signing/registration,
+  email/event/mentioned/message time хранятся разными ролями с precision,
+  confidence, source, evidence span и extractor revision. Soft approximate date
+  ранжирует с decay; hard date не подменяется другим role. Существенная
+  неоднозначность показывается двумя scoped результатами либо уточнением.
+- **Полнота semantic recall.** Embedding revision связывает model identity и
+  chunk policy; несовместимость запускает resumable/idempotent backfill. Новый
+  индекс охватывает полный authorized passage corpus, а не newest-N. Release gate:
+  catalog/passages либо `index_incomplete_reason` для 100% live text-bearing
+  files, pending owner-recall без promotion, recall@50 не ниже `0.95` на
+  preregistered difficult set, message result с контекстом и повторная
+  reauthorization каждого excerpt.
+- **Что берём из MCP-аудита сейчас.** MCP остаётся границей внешних API, не
+  памятью. В runtime разделяются transport/protocol/remote-reject/policy-denied/
+  uncertain-effect; fallback разрешён только allowlisted read-only классам.
+  Capability routes, health/circuit-breaker и метрики остаются code-owned;
+  remote schemas модели не публикуются. Web-provider/browser и первый официальный
+  read-only connector идут после этой основы. Telegram, local parsing/OCR/voice,
+  storage/retrieval/permissions/provenance/V12 остаются native. Локальный
+  owner-only read-only Friday MCP server — следующий внешний интерфейс после
+  стабилизации `archive_search`, а не параллельная копия памяти.
+- **Обязательные мутации.** Убрать pending passage; выдать pending за canonical;
+  смешать uploader/tenant; принять stale embedding revision; подменить visible
+  date container date; потерять соседний message context; назвать capped индекс
+  полным; пропустить повторную authorization; передать remote MCP schema модели;
+  разрешить fallback после policy denial/uncertain effect. Каждая мутация обязана
+  краснить отдельный тест до full zero-skip gate.

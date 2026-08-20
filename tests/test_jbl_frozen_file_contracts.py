@@ -263,20 +263,21 @@ async def test_named_inventory_without_a_date_is_all_time_but_temporal_cues_stay
         "Какие документы за всё время загружал JBL?",
         actor=_actor(),
     )
-    unclosed = await runtime.chat(
+    calendar_month = await runtime.chat(
         "alice",
         "Какие файлы загружал JBL в июле?",
         actor=_actor(),
     )
 
-    assert kernel.calls == []
+    assert len(kernel.calls) == 1
+    assert kernel.calls[0]["person"] == "jbl"
     assert catalog_calls == [("jbl", "jbl", 5_001), ("jbl", "jbl", 5_001)]
     for reply in (all_time, explicit_all_time):
         assert "за всё время" in reply["message"].casefold()
         assert "alpha.pdf" in reply["message"] and "beta.docx" in reply["message"]
         assert reply["tools_used"] == []
-    assert "неизвест" in unclosed["message"].casefold()
-    assert unclosed["tools_used"] == []
+    assert "alpha.pdf" in calendar_month["message"] and "2 из 2" in calendar_month["message"]
+    assert calendar_month["tools_used"] == ["user_activity"]
 
 
 @pytest.mark.asyncio
@@ -356,24 +357,64 @@ async def test_self_document_inventory_needs_neither_a_name_day_nor_admin_tool_s
         actor=actor,
         conversation_id=first["conversation_id"],
     )
+    natural_self = await runtime.chat(
+        "alice",
+        "какие у меня есть загруженные файлы?",
+        actor=actor,
+    )
+    all_documents = await runtime.chat(
+        "alice",
+        "выведи все документы которые я загружал",
+        actor=actor,
+    )
+    reversed_range = await runtime.chat(
+        "alice",
+        "19-12 число",
+        actor=actor,
+        conversation_id=all_documents["conversation_id"],
+    )
+    last_week = await runtime.chat(
+        "alice",
+        "выведи все документы которые я загружал за последнюю неделю",
+        actor=actor,
+    )
 
-    assert kernel.calls == []
-    assert catalog_calls == [("alice", "alice", 5_001), ("alice", "alice", 5_001)]
-    for reply in (first, repeated):
+    assert len(kernel.calls) == 2
+    assert all(call["person"] == "alice" for call in kernel.calls)
+    assert all(call["documents_only"] is True for call in kernel.calls)
+    assert all(call["since"] is not None and call["until"] is not None for call in kernel.calls)
+    reversed_since = datetime.fromisoformat(str(kernel.calls[0]["since"]))
+    reversed_until = datetime.fromisoformat(str(kernel.calls[0]["until"]))
+    assert timedelta(days=7) < reversed_until - reversed_since <= timedelta(days=8)
+    assert catalog_calls == [("alice", "alice", 5_001)] * 4
+    for reply in (first, repeated, natural_self, all_documents):
         assert "участник не определён" not in reply["message"].casefold()
         assert "за всё время" in reply["message"].casefold()
         assert "alpha.pdf" in reply["message"] and "beta.docx" in reply["message"]
         assert reply["tools_used"] == []
+    assert "alpha.pdf" in last_week["message"] and "beta.docx" in last_week["message"]
+    assert "2 из 2" in last_week["message"]
+    assert last_week["tools_used"] == ["user_activity"]
+    assert "alpha.pdf" in reversed_range["message"] and "beta.docx" in reversed_range["message"]
+    assert reversed_range["tools_used"] == ["user_activity"]
+    stored_all = storage.get_message(str(all_documents["message_id"]), "alice")
+    assert stored_all is not None
+    all_metadata = json.loads(str(stored_all["metadata_json"] or "{}"))
+    assert all_metadata["structural"]["person_document_inventory_self"] is True
     assert "Проверила выборку повторно" in repeated["message"]
 
+    july = await runtime.chat("alice", "Какие документы я скидывал в июле?", actor=actor)
+    assert len(kernel.calls) == 3
+    assert "alpha.pdf" in july["message"] and "2 из 2" in july["message"]
+    assert july["tools_used"] == ["user_activity"]
+
     for temporal_request in (
-        "Какие документы я скидывал в июле?",
         "Какие документы я скидывал в 2025?",
         "Какие документы я скидывал в первом квартале?",
     ):
         scoped = await runtime.chat("alice", temporal_request, actor=actor)
-        assert kernel.calls == [], f"{temporal_request!r} was silently widened to all time"
-        assert len(catalog_calls) == 2, f"{temporal_request!r} was silently widened to all time"
+        assert len(kernel.calls) == 3, f"{temporal_request!r} unexpectedly called activity"
+        assert len(catalog_calls) == 4, f"{temporal_request!r} was silently widened to all time"
         assert "неизвест" in scoped["message"].casefold()
 
 
@@ -1566,7 +1607,7 @@ def test_fresh_public_news_is_an_explicit_web_request_but_local_news_is_not() ->
 
 
 @pytest.mark.asyncio
-async def test_recent_private_file_then_fresh_news_uses_normal_history_and_web(
+async def test_recent_private_file_then_fresh_news_denies_web_and_history_use(
     settings,
     storage,
     monkeypatch,
@@ -1591,22 +1632,17 @@ async def test_recent_private_file_then_fresh_news_uses_normal_history_and_web(
         conversation_id=conversation_id,
     )
 
-    assert kernel.calls == [
-        (
-            "web_research",
-            {"query": runtime.web_query_from(request), "max_sources": 3},
-        )
-    ]
-    assert reply["tools_used"] == ["web_research"]
-    assert reply["web_evidence_status"] == "sourced"
+    assert kernel.calls == []
+    assert reply["tools_used"] == []
+    assert reply["web_evidence_status"] == "none"
     exposed = json.dumps(model.calls, ensure_ascii=False)
-    assert "PRIVATE-HISTORY-CANARY" in exposed
-    assert "PRIVATE-ANSWER-CANARY" in exposed
-    assert request in exposed
+    assert "PRIVATE-HISTORY-CANARY" not in exposed
+    assert "PRIVATE-ANSWER-CANARY" not in exposed
+    assert "приватные вложения" in reply["message"].casefold()
 
 
 @pytest.mark.asyncio
-async def test_old_private_lineage_web_turn_keeps_normal_history(
+async def test_old_private_lineage_web_turn_is_denied_before_provider(
     settings,
     storage,
     monkeypatch,
@@ -1631,18 +1667,13 @@ async def test_old_private_lineage_web_turn_keeps_normal_history(
         conversation_id=conversation_id,
     )
 
-    assert kernel.calls == [
-        (
-            "web_research",
-            {"query": runtime.web_query_from(request), "max_sources": 3},
-        )
-    ]
-    assert reply["tools_used"] == ["web_research"]
-    assert reply["web_evidence_status"] == "sourced"
+    assert kernel.calls == []
+    assert reply["tools_used"] == []
+    assert reply["web_evidence_status"] == "none"
     exposed = json.dumps(model.calls, ensure_ascii=False)
-    assert "PRIVATE-HISTORY-CANARY" in exposed
-    assert "PRIVATE-ANSWER-CANARY" in exposed
-    assert request in exposed
+    assert "PRIVATE-HISTORY-CANARY" not in exposed
+    assert "PRIVATE-ANSWER-CANARY" not in exposed
+    assert "приватные вложения" in reply["message"].casefold()
     stored = storage.get_message(str(reply["message_id"]), "alice")
     metadata = json.loads(str(stored["metadata_json"] or "{}"))
     assert metadata["private_context_lineage"] is True
@@ -1660,7 +1691,7 @@ async def test_old_private_lineage_web_turn_keeps_normal_history(
         "Найди в интернете по ранее присланным данным",
     ],
 )
-async def test_old_private_lineage_allows_explicit_reference_only_web_requests(
+async def test_old_private_lineage_denies_explicit_reference_only_web_requests(
     settings,
     storage,
     monkeypatch,
@@ -1696,22 +1727,18 @@ async def test_old_private_lineage_allows_explicit_reference_only_web_requests(
         conversation_id=conversation_id,
     )
 
-    assert kernel.calls == [
-        (
-            "web_research",
-            {"query": runtime.web_query_from(query_text), "max_sources": 3},
-        )
-    ]
-    assert model.calls
-    assert reply["tools_used"] == ["web_research"]
-    assert reply["web_evidence_status"] == "sourced"
+    assert kernel.calls == []
+    assert model.calls == []
+    assert reply["tools_used"] == []
+    assert reply["web_evidence_status"] == "none"
+    assert "приватные вложения" in reply["message"].casefold()
     stored = storage.get_message(str(reply["message_id"]), "alice")
     metadata = json.loads(str(stored["metadata_json"] or "{}"))
-    assert metadata["structural"].get("private_web_search_blocked") is not True
+    assert metadata["structural"]["private_web_search_blocked"] is True
 
 
 @pytest.mark.asyncio
-async def test_recent_attachment_web_turn_uses_bounded_normal_history(
+async def test_recent_attachment_web_turn_denies_even_when_old_literals_leave_prompt_tail(
     settings,
     storage,
 ) -> None:
@@ -1742,19 +1769,14 @@ async def test_recent_attachment_web_turn_uses_bounded_normal_history(
         conversation_id=conversation_id,
     )
 
-    assert kernel.calls == [
-        (
-            "web_research",
-            {"query": runtime.web_query_from(request), "max_sources": 3},
-        )
-    ]
-    assert reply["tools_used"] == ["web_research"]
-    assert reply["web_evidence_status"] == "sourced"
+    assert kernel.calls == []
+    assert reply["tools_used"] == []
+    assert reply["web_evidence_status"] == "none"
     exposed = json.dumps(model.calls, ensure_ascii=False)
-    assert "neutral-20" in exposed
+    assert "neutral-20" not in exposed
     assert "PRIVATE-HISTORY-CANARY" not in exposed
     assert "PRIVATE-ANSWER-CANARY" not in exposed
-    assert request in exposed
+    assert "приватные вложения" in reply["message"].casefold()
 
 
 def _stored_file(

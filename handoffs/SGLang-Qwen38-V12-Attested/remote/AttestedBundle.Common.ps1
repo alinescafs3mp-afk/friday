@@ -28,13 +28,13 @@ $script:Attested = [ordered]@{
     StableProxyImageRef = 'nginx:1.28.3-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236'
     StableProxyImageId = 'sha256:dc73b49f5124cf2ee538dfbdfbd121f0b4ccdcb20fea30f3a81bd477c02e2bb5'
     CandidateEngineImageRef = 'jarvis-gpt/sglang-qwen38-v12-attested:model-da435c4b-launch-640a1ea4'
-    CandidateEngineImageId = 'sha256:7f27e2885eca5041860a8c28c0bc3304b43b9fce072f298da043393866aa5887'
-    CandidateProxyImageRef = 'jarvis-gpt/qwen38-v12-attested-proxy:policy-47e6b9c2'
-    CandidateProxyImageId = 'sha256:2bf585895ba4ede01899f4b17db5c690dd893d77c3e1da9ac4dfb2482e22c091'
+    CandidateEngineImageId = 'sha256:4a38144134d84d6f78c1844314f209c48ef69c4bd8bf7da1e5c400f9abda6f26'
+    CandidateProxyImageRef = 'jarvis-gpt/qwen38-v12-attested-proxy:policy-d51c092c'
+    CandidateProxyImageId = 'sha256:37ae13a39a5d8a0780b0b0f226065753c0d929c31956be27f7f375f79cdef750'
     ModelRevision = 'bfd9b31207712e0850eec9da32261e8c5ee16af7'
     ModelManifestSha256 = 'da435c4b7556d8d5feed8551024914b0da0b48bb3fe85850536a0eb3b2489333'
     LaunchManifestSha256 = '640a1ea428b2526ff6f3b3e412c18fef8e48f1fa882b3a94f9859a190678f62b'
-    ProxyPolicySha256 = '47e6b9c2dadea4a1e9395b8f8305699033b52a09ecba14d82afcdf77e7d9f3ae'
+    ProxyPolicySha256 = 'd51c092ca2ef566f092ef9d55320e302c2d10b710d319d27a6d982aba018dcfe'
     ComposeSha256 = '0797dbb8708c7454ce4a1477b644a78e2b44efcfe729374f88e6a5288469da7f'
     PublishSha256 = '9403b256555fd105f3c17395dd1049fac894e140891ef8ff9ccb86767934fcae'
     MinimumGpuReleaseMiB = 26000
@@ -350,10 +350,74 @@ function Assert-ExactCommand([object]$Container, [object[]]$Expected, [string]$L
     }
 }
 
+function Get-ExactDockerDesktopBindSource([string]$WindowsPath) {
+    if ([string]::IsNullOrEmpty($WindowsPath) -or $WindowsPath.Length -gt 240) {
+        throw 'Attested Windows bind source is not bounded'
+    }
+    $match = [regex]::Match(
+        $WindowsPath,
+        '\A(?<drive>[A-Z]):\\(?<tail>[A-Za-z0-9._-]+(?:\\[A-Za-z0-9._-]+)*)\z',
+        [Text.RegularExpressions.RegexOptions]::CultureInvariant
+    )
+    if (-not $match.Success) {
+        throw 'Attested Windows bind source is not canonical'
+    }
+    $segments = @($match.Groups['tail'].Value -csplit '\\')
+    if ($segments.Count -gt 32 -or
+        @($segments | Where-Object { [string]$_ -ceq '.' -or [string]$_ -ceq '..' }).Count -ne 0) {
+        throw 'Attested Windows bind source has unsafe segments'
+    }
+    $drive = $match.Groups['drive'].Value.ToLowerInvariant()
+    $tail = $match.Groups['tail'].Value.Replace('\', '/')
+    return ('/run/desktop/mnt/host/{0}/{1}' -f $drive, $tail)
+}
+
+function Test-ExactAttestedBindSource([string]$Observed, [string]$WindowsPath) {
+    $dockerDesktopPath = Get-ExactDockerDesktopBindSource $WindowsPath
+    $dockerWindowsPath = $WindowsPath.Replace('\', '/')
+    if ([string]::IsNullOrEmpty($Observed) -or $Observed.Length -gt 512) {
+        return $false
+    }
+    return ([string]::Equals($Observed, $WindowsPath, [StringComparison]::Ordinal) -or
+        [string]::Equals($Observed, $dockerWindowsPath, [StringComparison]::Ordinal) -or
+        [string]::Equals($Observed, $dockerDesktopPath, [StringComparison]::Ordinal))
+}
+
+function Test-ExactAttestedProxyCapabilitySet([AllowNull()][object[]]$Observed) {
+    $values = @($Observed)
+    if ($values.Count -ne 4) {
+        return $false
+    }
+    $actual = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($entry in $values) {
+        if ($null -eq $entry -or $entry -isnot [string]) {
+            return $false
+        }
+        $value = [string]$entry
+        if ($value.Length -lt 1 -or $value.Length -gt 32 -or -not $actual.Add($value)) {
+            return $false
+        }
+    }
+
+    $composeSpelling = [string[]]@('CHOWN', 'DAC_OVERRIDE', 'SETGID', 'SETUID')
+    $dockerRuntimeSpelling = [string[]]@('CAP_CHOWN', 'CAP_DAC_OVERRIDE', 'CAP_SETGID', 'CAP_SETUID')
+    $composeMatch = $true
+    $dockerRuntimeMatch = $true
+    for ($index = 0; $index -lt 4; $index++) {
+        if (-not $actual.Contains($composeSpelling[$index])) {
+            $composeMatch = $false
+        }
+        if (-not $actual.Contains($dockerRuntimeSpelling[$index])) {
+            $dockerRuntimeMatch = $false
+        }
+    }
+    return ($composeMatch -or $dockerRuntimeMatch)
+}
+
 function Assert-BindMount([object]$Container, [string]$Destination, [string]$Source, [bool]$ReadOnly) {
     $matches = @($Container.Mounts | Where-Object { [string]$_.Destination -ceq $Destination })
     if ($matches.Count -ne 1 -or [string]$matches[0].Type -cne 'bind' -or
-        [string]$matches[0].Source.Replace('/', '\') -cne $Source -or
+        -not (Test-ExactAttestedBindSource ([string]$matches[0].Source) $Source) -or
         [bool]$matches[0].RW -eq $ReadOnly) {
         throw "Container bind mount is not exact at $Destination"
     }
@@ -545,6 +609,47 @@ function Assert-SolePublisher([string]$ExpectedName) {
     }
 }
 
+function Test-SolePublisherObservation(
+    [AllowNull()][object[]]$Observed,
+    [string]$ExpectedName
+) {
+    if ($ExpectedName -cnotin @(
+        $script:Attested.StableProxyName,
+        $script:Attested.CandidateProxyName
+    )) {
+        throw 'Expected publisher is not code-owned'
+    }
+    $publishers = @($Observed)
+    if ($publishers.Count -eq 0) {
+        return $false
+    }
+    if ($publishers.Count -eq 1 -and $publishers[0] -is [string] -and
+        [string]$publishers[0] -ceq $ExpectedName) {
+        return $true
+    }
+    throw "Port 8001 publisher set is unsafe while waiting for: $ExpectedName"
+}
+
+function Wait-SolePublisher([string]$ExpectedName, [int]$TimeoutSeconds = 30) {
+    if ($TimeoutSeconds -lt 1 -or $TimeoutSeconds -gt 120) {
+        throw 'Publisher wait timeout is outside the code-owned bound'
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    while ($true) {
+        $publishers = @(& docker ps --filter 'publish=8001' --format '{{.Names}}')
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Port 8001 publisher observation failed'
+        }
+        if (Test-SolePublisherObservation $publishers $ExpectedName) {
+            return
+        }
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw "Port 8001 publisher did not appear within the bounded wait: $ExpectedName"
+        }
+        Start-Sleep -Milliseconds 250
+    }
+}
+
 function Get-MetricValue([string]$Body, [string]$Name, [switch]$ExactDispatcherLabels) {
     $values = @()
     $expectedLabels = 'engine_type="unified",model_name="dispatcher",moe_ep_rank="0",pp_rank="0",tp_rank="0"'
@@ -701,7 +806,7 @@ function Assert-CandidateContainers([object]$Engine, [object]$Proxy, [object]$Re
             @($Proxy.HostConfig.SecurityOpt).Count -ne 1 -or
             [string]$Proxy.HostConfig.SecurityOpt[0] -cne 'no-new-privileges:true' -or
             [string]::Join(',', @($Proxy.HostConfig.CapDrop | Sort-Object)) -cne 'ALL' -or
-            [string]::Join(',', @($Proxy.HostConfig.CapAdd | Sort-Object)) -cne 'CHOWN,DAC_OVERRIDE,SETGID,SETUID') {
+            -not (Test-ExactAttestedProxyCapabilitySet -Observed @($Proxy.HostConfig.CapAdd))) {
             throw 'Candidate proxy identity is not exact'
         }
     }

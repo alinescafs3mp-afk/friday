@@ -91,6 +91,13 @@ _VISION_PDF_MAX_PAGES = 40
 # covering that measured workload and leaving room in the 720-second turn.
 _VISION_OCR_BUDGET_SEC = 240.0
 _VISION_OCR_FALLBACK_RESERVE_SEC = 45.0
+# Full-page OCR is materially larger than the short Inbox/cognition JSON which
+# owns ``cognition_max_tokens``.  The live scan stress test produced several
+# syntactically truncated responses at exactly 4096 tokens.  Keep a separate
+# finite floor: the router still clips it to the remaining model context, while
+# the compact schema and one bounded transcription retry below ensure that a
+# larger ceiling is not the only recovery mechanism.
+_VISION_OCR_OUTPUT_TOKEN_FLOOR = 8_192
 # The model limit counts images, but image count alone does not bound visual
 # work.  Four individually legal 8M-pixel pages used to make one 32M-pixel
 # request; on the live dispatcher two such requests occupied the entire OCR
@@ -638,9 +645,13 @@ class FilesMixin(PipelineShared):
                     "and a visible quote when possible. Never invent obscured text, silently join "
                     "unrelated pages, or infer facts that are not visible. Every non-empty evidence.quote "
                     "must occur verbatim in the corresponding pages[].text; otherwise omit that evidence "
-                    "item. The summary may state only facts supported by pages[].text and evidence. "
-                    "Preserve uncertainty and use empty strings/lists when evidence is insufficient."
-                    + language_instruction
+                    "item. The pages[].text fields are the only full OCR carrier: when pages is "
+                    "non-empty, set top-level text to an empty string and never duplicate page text "
+                    "there. Keep the summary to at most three short sentences, evidence to at most "
+                    "eight items, entities to at most twelve items, and warnings to at most eight "
+                    "short strings. The summary may state only facts supported by pages[].text and "
+                    "evidence. Preserve uncertainty and use empty strings/lists when evidence is "
+                    "insufficient." + language_instruction
                 ),
             }
         ]
@@ -681,7 +692,10 @@ class FilesMixin(PipelineShared):
                 # по бюджету, а сообщение при этом советовало поднять настройку,
                 # которая на этот путь не влияла. Одна ручка на оба пути честнее
                 # двух чисел, из которых одно спрятано в коде.
-                max_tokens=self.settings.cognition_max_tokens,
+                max_tokens=max(
+                    self.settings.cognition_max_tokens,
+                    _VISION_OCR_OUTPUT_TOKEN_FLOOR,
+                ),
                 priority="foreground",
                 # OCR may legitimately contain long visual separators such as
                 # underscores, dots or angle brackets. The strict JSON parser,
@@ -691,6 +705,51 @@ class FilesMixin(PipelineShared):
                 reject_repeated_token_degeneration=False,
             )
             parsed = _parse_model_response(response, what="Vision extraction")
+        except ValueError as exc:
+            # A singleton page has no smaller ordinary batch. Invalid/truncated
+            # structured JSON therefore gets exactly one compact OCR-only retry
+            # inside the caller's unchanged document deadline. It deliberately
+            # yields no inferred title/entities/evidence: only the independently
+            # returned page carrier is admitted as advisory text.
+            if len(assets) == 1:
+                asset_id = next(iter(asset_catalog))
+                recovered_text = await self._reread_visual_asset_text(
+                    assets[0],
+                    asset_id=asset_id,
+                )
+                if recovered_text:
+                    return {
+                        "success": True,
+                        "error": "",
+                        "confidence": 0.45,
+                        "text": recovered_text,
+                        "title": "",
+                        "summary": "",
+                        "document_type": "",
+                        "entities": [],
+                        "evidence": [],
+                        "warnings": ["vision_structured_response_recovered"],
+                        "grounded_evidence_count": 0,
+                        "asset_coverage": 1.0,
+                        "assets": list(asset_catalog.values()),
+                        "reported_asset_ids": [asset_id],
+                        "model": self.settings.llm_model,
+                        "advisory_only": True,
+                        "_page_text": {asset_id: recovered_text},
+                    }
+            LOGGER.info("Local vision extraction failed (%s)", type(exc).__name__)
+            return {
+                "success": False,
+                "error": f"vision_request_failed:{type(exc).__name__}",
+                "confidence": 0.0,
+                "assets": list(asset_catalog.values()),
+                "text": "",
+                "title": "",
+                "summary": "",
+                "entities": [],
+                "evidence": [],
+                "warnings": ["vision_request_failed"],
+            }
         except Exception as exc:
             LOGGER.info("Local vision extraction failed (%s)", type(exc).__name__)
             return {
@@ -709,7 +768,13 @@ class FilesMixin(PipelineShared):
         confidence = _coerce_score(parsed.get("confidence"), default=0.0)
         page_text: dict[str, str] = {}
         reported_asset_ids: list[str] = []
-        for candidate in _json_list(parsed.get("pages"))[: len(assets)]:
+        pages_payload = parsed.get("pages")
+        iterable_pages = pages_payload if isinstance(pages_payload, list) else []
+        pages_shape_valid = bool(
+            len(iterable_pages) == len(assets)
+            and all(isinstance(candidate, dict) for candidate in iterable_pages)
+        )
+        for candidate in iterable_pages if pages_shape_valid else ():
             if not isinstance(candidate, dict):
                 continue
             asset_id = _bounded_text(candidate.get("asset_id"), 12).upper().strip()
@@ -718,7 +783,38 @@ class FilesMixin(PipelineShared):
                 page_text[asset_id] = visible
                 reported_asset_ids.append(asset_id)
         expected_asset_ids = list(asset_catalog)
-        if len(assets) > 1 and reported_asset_ids != expected_asset_ids:
+        page_carrier_complete = bool(
+            pages_shape_valid
+            and reported_asset_ids == expected_asset_ids
+            and all(str(page_text.get(asset_id) or "").strip() for asset_id in expected_asset_ids)
+        )
+        if not page_carrier_complete:
+            if len(assets) == 1:
+                asset_id = next(iter(asset_catalog))
+                recovered_text = await self._reread_visual_asset_text(
+                    assets[0],
+                    asset_id=asset_id,
+                )
+                if recovered_text:
+                    return {
+                        "success": True,
+                        "error": "",
+                        "confidence": 0.45,
+                        "text": recovered_text,
+                        "title": "",
+                        "summary": "",
+                        "document_type": "",
+                        "entities": [],
+                        "evidence": [],
+                        "warnings": ["vision_structured_response_recovered"],
+                        "grounded_evidence_count": 0,
+                        "asset_coverage": 1.0,
+                        "assets": list(asset_catalog.values()),
+                        "reported_asset_ids": [asset_id],
+                        "model": self.settings.llm_model,
+                        "advisory_only": True,
+                        "_page_text": {asset_id: recovered_text},
+                    }
             return {
                 "success": False,
                 "error": "vision_batch_page_coverage_incomplete",
@@ -732,18 +828,19 @@ class FilesMixin(PipelineShared):
                 "warnings": ["vision_batch_page_coverage_incomplete"],
                 "reported_asset_ids": reported_asset_ids,
             }
-        if page_text:
-            ordered_text: list[str] = []
-            for (asset_id, descriptor), asset in zip(asset_catalog.items(), assets, strict=True):
-                page_visible = page_text.get(asset_id)
-                if not page_visible:
-                    continue
-                page_number = _visual_page_number(asset)
-                label = f"Страница {page_number}" if page_number is not None else descriptor["source"]
-                ordered_text.append(f"[{label}]\n{page_visible}")
-            text = _bounded_text("\n\n".join(ordered_text), self.settings.max_extracted_text_chars)
-        else:
-            text = _bounded_text(parsed.get("text"), self.settings.max_extracted_text_chars)
+        ordered_text: list[str] = []
+        for (asset_id, descriptor), asset in zip(asset_catalog.items(), assets, strict=True):
+            page_visible = page_text.get(asset_id)
+            if not page_visible:
+                continue
+            page_number = _visual_page_number(asset)
+            label = f"Страница {page_number}" if page_number is not None else descriptor["source"]
+            ordered_text.append(f"[{label}]\n{page_visible}")
+        # ``pages[].text`` is the sole full OCR carrier.  Top-level ``text`` is
+        # deliberately ignored even for one asset: otherwise a schema mutation
+        # or truncated/missing page list can silently merge or mis-attribute
+        # text while still reporting complete coverage.
+        text = _bounded_text("\n\n".join(ordered_text), self.settings.max_extracted_text_chars)
         title = _bounded_text(parsed.get("title"), 200)
         summary = _bounded_text(parsed.get("summary"), 2_000)
         warnings: list[str] = []
@@ -754,6 +851,7 @@ class FilesMixin(PipelineShared):
 
         evidence: list[dict[str, str]] = []
         used_assets: set[str] = set()
+        grounded_evidence_count = 0
         for candidate in _json_list(parsed.get("evidence"))[:40]:
             if not isinstance(candidate, dict):
                 continue
@@ -763,7 +861,11 @@ class FilesMixin(PipelineShared):
             if asset_id not in asset_catalog or not (quote or claim):
                 continue
             evidence.append({"asset_id": asset_id, "quote": quote, "claim": claim})
-            used_assets.add(asset_id)
+            visible = " ".join(str(page_text.get(asset_id) or "").split())
+            normalized_quote = " ".join(quote.split())
+            if normalized_quote and normalized_quote in visible:
+                used_assets.add(asset_id)
+                grounded_evidence_count += 1
 
         nonspace = [character for character in text if not character.isspace()]
         if text and nonspace:
@@ -813,8 +915,32 @@ class FilesMixin(PipelineShared):
             )
         warnings = list(dict.fromkeys(warnings))[:20]
         confidence = round(_clamp(confidence), 3)
+        carrier_readable = bool(text.strip())
+        if not carrier_readable:
+            # Model-authored title/summary/entities are not a substitute for
+            # visible page transcription.  Without the sole OCR carrier the
+            # entire visual result is UNKNOWN/unreadable.
+            return {
+                "success": False,
+                "error": "vision_page_text_empty",
+                "confidence": 0.0,
+                "text": "",
+                "title": "",
+                "summary": "",
+                "document_type": "",
+                "entities": [],
+                "evidence": [],
+                "warnings": list(dict.fromkeys((*warnings, "vision_page_text_empty")))[:20],
+                "grounded_evidence_count": 0,
+                "asset_coverage": 0.0,
+                "assets": list(asset_catalog.values()),
+                "reported_asset_ids": reported_asset_ids or expected_asset_ids,
+                "model": self.settings.llm_model,
+                "advisory_only": True,
+                "_page_text": page_text,
+            }
         return {
-            "success": bool(text or summary) and confidence >= 0.2,
+            "success": confidence >= 0.2,
             "error": "",
             "confidence": confidence,
             "text": text,
@@ -824,7 +950,7 @@ class FilesMixin(PipelineShared):
             "entities": entities,
             "evidence": evidence,
             "warnings": warnings,
-            "grounded_evidence_count": len(evidence),
+            "grounded_evidence_count": grounded_evidence_count,
             "asset_coverage": round(len(used_assets) / len(assets), 3) if assets else 0.0,
             "assets": list(asset_catalog.values()),
             "reported_asset_ids": reported_asset_ids or expected_asset_ids,
@@ -876,7 +1002,10 @@ class FilesMixin(PipelineShared):
                     },
                 ],
                 temperature=0.0,
-                max_tokens=self.settings.cognition_max_tokens,
+                max_tokens=max(
+                    self.settings.cognition_max_tokens,
+                    _VISION_OCR_OUTPUT_TOKEN_FLOOR,
+                ),
                 priority="foreground",
                 reject_repeated_token_degeneration=False,
             )
@@ -1088,6 +1217,31 @@ class FilesMixin(PipelineShared):
         fallback_used = False
         fallback_mode = False
         stop = False
+
+        async def retry_as_singletons(offset: int, batch: Sequence[VisualAsset]) -> bool:
+            """Retry one failed aggregate batch once as an ordered page prefix."""
+
+            nonlocal batch_error, fallback_mode, fallback_used, ocr_deadline_reached, stop
+            fallback_used = True
+            fallback_mode = True
+            for asset_index, asset in enumerate(batch):
+                fallback = await run_batch(
+                    offset + asset_index,
+                    (asset,),
+                    deadline=common_deadline,
+                )
+                if fallback.get("_deadline"):
+                    ocr_deadline_reached = True
+                    batch_error = "vision_deadline_reached"
+                    stop = True
+                    return False
+                if fallback.get("success") is not True:
+                    batch_error = str(fallback.get("error") or "vision_batch_failed")
+                    stop = True
+                    return False
+                successful.append(((asset,), fallback))
+            return True
+
         # Two batches in flight use the measured spare foreground parallelism,
         # while waves preserve a contiguous prefix: after the first failed batch
         # no later page is accepted merely because its concurrent request won a
@@ -1132,25 +1286,8 @@ class FilesMixin(PipelineShared):
                     # Results are appended only from the start of the failed
                     # batch, so a later concurrent success can never create a
                     # hole in the reported prefix.
-                    if (len(batch) > 1 or fallback_mode) and loop.time() < common_deadline:
-                        fallback_used = True
-                        fallback_mode = True
-                        for asset_index, asset in enumerate(batch):
-                            fallback = await run_batch(
-                                offset + asset_index,
-                                (asset,),
-                                deadline=common_deadline,
-                            )
-                            if fallback.get("_deadline"):
-                                ocr_deadline_reached = True
-                                batch_error = "vision_deadline_reached"
-                                stop = True
-                                break
-                            if fallback.get("success") is not True:
-                                batch_error = str(fallback.get("error") or "vision_batch_failed")
-                                stop = True
-                                break
-                            successful.append(((asset,), fallback))
+                    if len(batch) > 1 and loop.time() < common_deadline:
+                        await retry_as_singletons(offset, batch)
                         if stop:
                             break
                         continue
@@ -1159,6 +1296,15 @@ class FilesMixin(PipelineShared):
                     stop = True
                     break
                 if result.get("success") is not True:
+                    # Invalid/truncated structured JSON is not a reason to lose
+                    # every page in an otherwise bounded multi-page batch. Like
+                    # the timeout contour above, split it once into ordered
+                    # singleton requests without renewing the document clock.
+                    if len(batch) > 1 and loop.time() < common_deadline:
+                        await retry_as_singletons(offset, batch)
+                        if stop:
+                            break
+                        continue
                     batch_error = str(result.get("error") or "vision_batch_failed")
                     stop = True
                     break
@@ -1188,38 +1334,51 @@ class FilesMixin(PipelineShared):
             normalized_text = " ".join(text.split())
             return bool(normalized_quote and normalized_quote in normalized_text)
 
-        asset_lookup = {f"A{index}": asset for index, asset in enumerate(successful_assets, start=1)}
-        result_lookup: dict[str, dict[str, Any]] = {}
-        missing_quotes: dict[str, list[str]] = {}
-        for successful_batch, result in successful:
+        asset_lookup: dict[tuple[int, str], VisualAsset] = {}
+        result_lookup: dict[tuple[int, str], dict[str, Any]] = {}
+        global_asset_ids: dict[tuple[int, str], str] = {}
+        missing_quotes: dict[tuple[int, str], list[str]] = {}
+        ungrounded_evidence_present = False
+        for result_index, (successful_batch, result) in enumerate(successful):
             page_text = result.get("_page_text")
             page_text_by_asset = page_text if isinstance(page_text, dict) else {}
             descriptors = [item for item in _json_list(result.get("assets")) if isinstance(item, dict)]
-            for descriptor in descriptors:
-                asset_id = _bounded_text(descriptor.get("asset_id"), 12).upper().strip()
-                if asset_id in asset_lookup:
-                    result_lookup[asset_id] = result
+            for asset, descriptor in zip(successful_batch, descriptors, strict=True):
+                reported_asset_id = _bounded_text(descriptor.get("asset_id"), 12).upper().strip()
+                identity = (result_index, reported_asset_id)
+                asset_lookup[identity] = asset
+                result_lookup[identity] = result
+                # `_extract_visual_batch` already owns the document-global
+                # offset (batch two may begin at A5, and a singleton fallback
+                # keeps that same id). Never fabricate batch-local A1.. here.
+                global_asset_ids[identity] = reported_asset_id
             for candidate in _json_list(result.get("evidence")):
                 if not isinstance(candidate, dict):
                     continue
                 asset_id = _bounded_text(candidate.get("asset_id"), 12).upper().strip()
                 quote = _bounded_text(candidate.get("quote"), 400).strip()
-                if not quote or asset_id not in asset_lookup:
+                claim = _bounded_text(candidate.get("claim"), 600).strip()
+                identity = (result_index, asset_id)
+                if identity not in asset_lookup:
+                    ungrounded_evidence_present = ungrounded_evidence_present or bool(quote or claim)
+                    continue
+                if not quote:
+                    ungrounded_evidence_present = ungrounded_evidence_present or bool(claim)
                     continue
                 visible = str(page_text_by_asset.get(asset_id) or "")
                 if not visible and len(successful_batch) == 1:
                     visible = str(result.get("text") or "")
                 if not quote_in_text(quote, visible):
-                    bucket = missing_quotes.setdefault(asset_id, [])
+                    bucket = missing_quotes.setdefault(identity, [])
                     if quote not in bucket:
                         bucket.append(quote)
 
         evidence_reread_attempted = False
         evidence_reread_confirmed = False
         if missing_quotes:
-            target_asset_id = max(
+            target_identity = max(
                 missing_quotes,
-                key=lambda asset_id: max(len(quote) for quote in missing_quotes[asset_id]),
+                key=lambda identity: max(len(quote) for quote in missing_quotes[identity]),
             )
             remaining = common_deadline - loop.time()
             if remaining > 0:
@@ -1227,33 +1386,37 @@ class FilesMixin(PipelineShared):
                 try:
                     async with asyncio.timeout(remaining):
                         reread_text = await self._reread_visual_asset_text(
-                            asset_lookup[target_asset_id],
-                            asset_id=target_asset_id,
+                            asset_lookup[target_identity],
+                            asset_id=target_identity[1],
                         )
                 except TimeoutError:
                     reread_text = ""
                     ocr_deadline_reached = True
                 confirmed = [
-                    quote for quote in missing_quotes[target_asset_id] if quote_in_text(quote, reread_text)
+                    quote for quote in missing_quotes[target_identity] if quote_in_text(quote, reread_text)
                 ]
                 if confirmed:
                     evidence_reread_confirmed = True
-                    target_result = result_lookup.get(target_asset_id)
+                    target_result = result_lookup.get(target_identity)
                     if target_result is not None:
+                        target_page_text = target_result.get("_page_text")
+                        page_map = dict(target_page_text) if isinstance(target_page_text, dict) else {}
+                        page_map[target_identity[1]] = reread_text
+                        target_result["_page_text"] = page_map
                         carrier = str(target_result.get("text") or "").rstrip()
                         additions = [quote for quote in confirmed if not quote_in_text(quote, carrier)]
                         if additions:
                             target_result["text"] = "\n".join((carrier, *additions)).strip()
                     unresolved = [
-                        quote for quote in missing_quotes[target_asset_id] if quote not in confirmed
+                        quote for quote in missing_quotes[target_identity] if quote not in confirmed
                     ]
                     if unresolved:
-                        missing_quotes[target_asset_id] = unresolved
+                        missing_quotes[target_identity] = unresolved
                     else:
-                        missing_quotes.pop(target_asset_id, None)
+                        missing_quotes.pop(target_identity, None)
             else:
                 ocr_deadline_reached = True
-        evidence_text_inconsistent = bool(missing_quotes)
+        evidence_text_inconsistent = bool(missing_quotes) or ungrounded_evidence_present
 
         text_parts: list[str] = []
         summaries: list[str] = []
@@ -1265,7 +1428,7 @@ class FilesMixin(PipelineShared):
         weighted_confidence = 0.0
         weighted_coverage = 0.0
         grounded_evidence_count = 0
-        for successful_batch, result in successful:
+        for result_index, (successful_batch, result) in enumerate(successful):
             batch_text = str(result.get("text") or "").strip()
             if batch_text:
                 if is_pdf and not batch_text.startswith("[Страница "):
@@ -1295,12 +1458,52 @@ class FilesMixin(PipelineShared):
                 bounded_warning = _bounded_text(warning, 160).strip()
                 if bounded_warning:
                     warnings.append(bounded_warning)
-            evidence.extend(item for item in _json_list(result.get("evidence")) if isinstance(item, dict))
-            entities.extend(item for item in _json_list(result.get("entities")) if isinstance(item, dict))
+            page_text_value = result.get("_page_text")
+            page_text_by_asset = page_text_value if isinstance(page_text_value, dict) else {}
+            for item in _json_list(result.get("evidence")):
+                if not isinstance(item, dict):
+                    continue
+                local_asset_id = _bounded_text(item.get("asset_id"), 12).upper().strip()
+                identity = (result_index, local_asset_id)
+                quote = _bounded_text(item.get("quote"), 400).strip()
+                visible = str(page_text_by_asset.get(local_asset_id) or "")
+                if not visible and len(successful_batch) == 1:
+                    visible = batch_text
+                global_asset_id = global_asset_ids.get(identity)
+                if not global_asset_id or not quote_in_text(quote, visible):
+                    continue
+                evidence.append(
+                    {
+                        "asset_id": global_asset_id,
+                        "quote": quote,
+                        "claim": _bounded_text(item.get("claim"), 600).strip(),
+                    }
+                )
+                grounded_evidence_count += 1
+            for item in _json_list(result.get("entities")):
+                if not isinstance(item, dict):
+                    continue
+                local_asset_id = _bounded_text(item.get("asset_id"), 12).upper().strip()
+                identity = (result_index, local_asset_id)
+                global_asset_id = global_asset_ids.get(identity)
+                if not global_asset_id:
+                    continue
+                entity = dict(item)
+                entity["asset_id"] = global_asset_id
+                entity_evidence = _bounded_text(entity.get("evidence"), 400).strip()
+                visible = str(page_text_by_asset.get(local_asset_id) or "")
+                if not visible and len(successful_batch) == 1:
+                    visible = batch_text
+                if not quote_in_text(entity_evidence, visible):
+                    entity["confidence"] = min(
+                        0.35,
+                        _coerce_score(entity.get("confidence"), default=0.0),
+                    )
+                    entity["evidence"] = ""
+                entities.append(entity)
             weight = len(successful_batch)
             weighted_confidence += _coerce_score(result.get("confidence"), default=0.0) * weight
             weighted_coverage += _coerce_score(result.get("asset_coverage"), default=0.0) * weight
-            grounded_evidence_count += max(0, int(result.get("grounded_evidence_count") or 0))
 
         joined_text = "\n\n".join(text_parts)
         text_truncated = len(joined_text) > self.settings.max_extracted_text_chars
@@ -1329,8 +1532,20 @@ class FilesMixin(PipelineShared):
             3,
         )
         error = batch_error or (render_error if pages_truncated else "")
+        carrier_readable = bool(text.strip())
+        if not carrier_readable:
+            error = error or "vision_page_text_empty"
+            confidence = 0.0
+            asset_coverage = 0.0
+            summaries = []
+            titles = []
+            document_types = []
+            evidence = []
+            entities = []
+            grounded_evidence_count = 0
+            warnings = list(dict.fromkeys((*warnings, "vision_page_text_empty")))[:20]
         return {
-            "success": bool(successful) and bool(text or summaries),
+            "success": bool(successful) and carrier_readable,
             "error": error,
             "confidence": confidence,
             "text": text,
@@ -1572,6 +1787,7 @@ class FilesMixin(PipelineShared):
                     uploaded_by,
                     base_source_ref,
                     raw_id,
+                    filename,
                 )
 
         self.storage.ensure_user(user_id, source="upload")
@@ -2403,6 +2619,26 @@ class FilesMixin(PipelineShared):
         )
         advisory_only = bool(vision_text.strip())
         source_text = vision_text if advisory_only else native_text
+        parser_metadata = extraction.metadata or {}
+        # Parser-open success is not body success. Images always require the
+        # visual path, and a PDF with zero native characters is a scan in this
+        # stack. If vision then fails, callers must see UNREADABLE rather than a
+        # fabricated, verifier-eligible EMPTY document.
+        visual_without_text = bool(
+            safe_mime_type.startswith("image/")
+            or (safe_mime_type == "application/pdf" and not native_text.strip())
+        )
+        empty_text = bool(
+            extraction.success
+            and not source_text.strip()
+            and not visual_without_text
+            and not _text_extraction_was_truncated(parser_metadata)
+            and parser_metadata.get("parse_deadline_reached") is not True
+            and parser_metadata.get("pages_truncated") is not True
+            and parser_metadata.get("archive_budget_exhausted") is not True
+            and parser_metadata.get("source_truncated_for_parse") is not True
+        )
+        body_extraction_success = bool(source_text.strip() or empty_text)
         vision_pages_total = max(0, int(vision.get("pages_total") or 0)) if vision is not None else 0
         vision_pages_read = max(0, int(vision.get("pages_read") or 0)) if vision is not None else 0
         vision_text_truncated = bool(advisory_only and (vision or {}).get("text_truncated"))
@@ -2414,7 +2650,6 @@ class FilesMixin(PipelineShared):
             advisory_only or (vision_pages_total > 0 and not native_text.strip())
         )
         vision_deadline_reached = bool(visual_page_source_selected and (vision or {}).get("deadline_reached"))
-        parser_metadata = extraction.metadata or {}
         limit = max(1_000, min(int(preview_chars), 48_000))
         transient = {
             "filename": safe_filename,
@@ -2423,8 +2658,12 @@ class FilesMixin(PipelineShared):
             "size_bytes": len(file_content),
             "transient": True,
             "persisted": False,
-            "extraction_success": bool(extraction.success or advisory_only),
-            "extraction_error": "" if extraction.success or advisory_only else extraction.error,
+            "extraction_success": body_extraction_success,
+            "extraction_error": (
+                ""
+                if body_extraction_success
+                else str((vision or {}).get("error") or extraction.error or "text_unavailable")
+            ),
             "text_preview": source_text[:limit],
             # Process-private whole extractor result for the request-aware
             # current-turn projector. The server removes this key before any
@@ -2485,7 +2724,7 @@ class FilesMixin(PipelineShared):
             # truth.  Runtime may synthesize from it with an explicit caveat;
             # the verifier must never certify it as parser evidence.
             "advisory_only": advisory_only,
-            "verification_eligible": bool(extraction.success and not advisory_only),
+            "verification_eligible": bool(body_extraction_success and not advisory_only),
             "vision_used": advisory_only,
             "vision_pages_total": vision_pages_total,
             "vision_pages_read": vision_pages_read,
@@ -2495,6 +2734,8 @@ class FilesMixin(PipelineShared):
                 and not looks_like_audio(content_type=safe_mime_type, filename=safe_filename)
             ),
         }
+        if empty_text:
+            transient["empty_text"] = True
         if vision is not None and vision.get("success") is True:
             transient.update(
                 {

@@ -1009,7 +1009,7 @@ async def test_exact_document_url_is_inert_but_invented_url_and_provenance_are_r
 
 
 @pytest.mark.asyncio
-async def test_explicit_web_request_with_current_file_reaches_web_research(
+async def test_explicit_web_request_with_current_file_is_denied_before_provider(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -1033,12 +1033,14 @@ async def test_explicit_web_request_with_current_file_reaches_web_research(
         allow_web_prefetch=True,
     )
 
-    assert "Синтетический публичный факт" in result["message"]
-    assert result["web_sources"] == [{"url": public_url, "title": "Synthetic public source"}]
-    assert result["tools_used"] == ["web_research"]
-    assert result["web_evidence_status"] == "sourced"
+    assert "Синтетический публичный факт" not in result["message"]
+    assert "приватные вложения" in result["message"].casefold()
+    assert result["web_sources"] == []
+    assert result["tools_used"] == []
+    assert result["web_evidence_status"] == "none"
     metadata = _assistant_metadata(storage, result["conversation_id"])
-    assert metadata["structural"].get("private_web_search_blocked") is not True
-    assert llm.calls and evidence
+    assert metadata["structural"]["private_web_search_blocked"] is True
+    assert llm.calls == []
+    assert evidence == []
     assert kernel.definition_topics
-    assert kernel.executed == ["web_research"]
+    assert kernel.executed == []

@@ -7,6 +7,7 @@ import io
 import json
 import zipfile
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -16,6 +17,8 @@ from friday.agent_runtime import (
     _UNCONFIRMED_SUPPORTED_DEED,
     AgentContext,
     AgentRuntime,
+    _data_subject_file_request,
+    _filename_clue_request,
     _named_person_aggregation_scope,
     _named_uploader_exact_file_request,
 )
@@ -644,6 +647,579 @@ async def test_filename_substring_inventory_lists_names_without_hydrating_bodies
     assert natural["tools_used"] == []
     assert natural["attachment_context_expected_count"] == 0
     assert natural["attachment_context_readable_count"] == 0
+
+    union = await runtime.chat(
+        actor.own_id,
+        'найди файлы которые я загружал, где содержится слово "штатка"',
+        actor=actor,
+        enable_tools=True,
+    )
+    assert "Полный подтверждённый список получен" in union["message"]
+    assert "ШТАТКА 01.06.2024.docx" in union["message"]
+    assert "штатка_назначение.xlsx" in union["message"]
+    assert "ordinary.txt" in union["message"]
+    assert "JBL-ШТАТКА-DECOY" not in union["message"]
+    assert "ONLY-IN-BODY" not in union["message"]
+    assert union["tools_used"] == []
+
+
+@pytest.mark.asyncio
+async def test_exact_filename_result_continuations_use_only_durable_selected_pointer(
+    settings,
+    storage,
+) -> None:
+    runtime, actor, tenant = _runtime(settings, storage)
+    first_raw = _file(
+        storage,
+        tenant,
+        "owner",
+        "ШТАТКА первая.xlsx",
+        "FIRST-RESULT-BODY",
+        "2026-08-13T10:00:00+00:00",
+    )
+    second_raw = _file(
+        storage,
+        tenant,
+        "owner",
+        "ШТАТКА вторая.xlsx",
+        "SECOND-RESULT-BODY",
+        "2026-08-14T10:00:00+00:00",
+    )
+    outside_raw = _file(
+        storage,
+        tenant,
+        "owner",
+        "обычный вне списка.txt",
+        "OUTSIDE-RESULT-BODY",
+        "2026-08-15T10:00:00+00:00",
+    )
+
+    found = await runtime.chat(
+        actor.own_id,
+        "какие у меня есть документы со словом штатка в названии?",
+        actor=actor,
+        enable_tools=True,
+    )
+    found_row = storage.get_message(str(found["message_id"]), actor.own_id)
+    found_metadata = json.loads(str((found_row or {}).get("metadata_json") or "{}"))
+    assert found_metadata["filename_result_raw_ids"] == [first_raw, second_raw]
+    assert found_metadata["filename_result_uploaders"] == {
+        first_raw: actor.own_id,
+        second_raw: actor.own_id,
+    }
+    assert found_metadata["filename_result_display_names"] == {
+        first_raw: "ШТАТКА первая.xlsx",
+        second_raw: "ШТАТКА вторая.xlsx",
+    }
+    assert "filename_selected_raw_id" not in found_metadata
+    assert found_metadata["structural"]["filename_result_set"] is True
+    assert outside_raw not in found_metadata["filename_result_raw_ids"]
+
+    other_conversation = await runtime.chat(
+        actor.own_id,
+        "другой файл",
+        actor=actor,
+        enable_tools=True,
+    )
+    assert other_conversation["conversation_id"] != found["conversation_id"]
+    assert "восстановить точный активный список" in other_conversation["message"]
+    cross_scope_number = await runtime.chat(
+        actor.own_id,
+        "2",
+        actor=actor,
+        enable_tools=True,
+    )
+    assert "восстановить точный активный список" in cross_scope_number["message"]
+
+    ambiguous = await runtime.chat(
+        actor.own_id,
+        "другой файл",
+        actor=actor,
+        conversation_id=found["conversation_id"],
+        enable_tools=True,
+    )
+    assert "Укажите номер" in ambiguous["message"]
+    ambiguous_row = storage.get_message(str(ambiguous["message_id"]), actor.own_id)
+    ambiguous_metadata = json.loads(str((ambiguous_row or {}).get("metadata_json") or "{}"))
+    assert "filename_selected_raw_id" not in ambiguous_metadata
+
+    numeric = await runtime.chat(
+        actor.own_id,
+        "2",
+        actor=actor,
+        conversation_id=found["conversation_id"],
+        enable_tools=True,
+    )
+    numeric_row = storage.get_message(str(numeric["message_id"]), actor.own_id)
+    numeric_metadata = json.loads(str((numeric_row or {}).get("metadata_json") or "{}"))
+    assert numeric_metadata["filename_result_raw_ids"] == [first_raw, second_raw]
+    assert numeric_metadata["filename_selected_raw_id"] == second_raw
+    assert outside_raw not in numeric_metadata["filename_result_raw_ids"]
+
+    # Re-run the set because an ambiguity answer is an intentional current
+    # result episode. The local-day continuation now has one exact winner.
+    found_again = await runtime.chat(
+        actor.own_id,
+        "какие у меня есть документы со словом штатка в названии?",
+        actor=actor,
+        conversation_id=found["conversation_id"],
+        enable_tools=True,
+    )
+    selected = await runtime.chat(
+        actor.own_id,
+        "13 числа я его загружал",
+        actor=actor,
+        conversation_id=found["conversation_id"],
+        enable_tools=True,
+    )
+    selected_row = storage.get_message(str(selected["message_id"]), actor.own_id)
+    selected_metadata = json.loads(str((selected_row or {}).get("metadata_json") or "{}"))
+    assert selected_metadata["filename_result_raw_ids"] == [first_raw, second_raw]
+    assert selected_metadata["filename_selected_raw_id"] == first_raw
+
+    other = await runtime.chat(
+        actor.own_id,
+        "другой файл",
+        actor=actor,
+        conversation_id=found_again["conversation_id"],
+        enable_tools=True,
+    )
+    other_row = storage.get_message(str(other["message_id"]), actor.own_id)
+    other_metadata = json.loads(str((other_row or {}).get("metadata_json") or "{}"))
+    assert other_metadata["filename_selected_raw_id"] == second_raw
+
+    history = storage.get_conversation_messages(
+        str(other["conversation_id"]),
+        user_id=actor.own_id,
+        limit=20,
+    )
+    deictic = runtime._filename_result_continuation(  # noqa: SLF001
+        "что в этом файле?",
+        history,
+        tenant_id=tenant,
+        person_id=actor.own_id,
+    )
+    assert deictic.applies is True and deictic.expected_count == 1
+    assert [item["raw_object_id"] for item in deictic.attachments] == [second_raw]
+    assert "FIRST-RESULT-BODY" not in json.dumps(deictic.attachments, ensure_ascii=False)
+
+    await runtime.chat(
+        actor.own_id,
+        "какие у меня есть документы со словом штатка в названии?",
+        actor=actor,
+        conversation_id=found["conversation_id"],
+        enable_tools=True,
+    )
+    word_ordinal = await runtime.chat(
+        actor.own_id,
+        "второй файл",
+        actor=actor,
+        conversation_id=found["conversation_id"],
+        enable_tools=True,
+    )
+    word_row = storage.get_message(str(word_ordinal["message_id"]), actor.own_id)
+    word_metadata = json.loads(str((word_row or {}).get("metadata_json") or "{}"))
+    assert word_metadata["filename_selected_raw_id"] == second_raw
+
+    await runtime.chat(
+        actor.own_id,
+        "какие у меня есть документы со словом штатка в названии?",
+        actor=actor,
+        conversation_id=found["conversation_id"],
+        enable_tools=True,
+    )
+    out_of_range = await runtime.chat(
+        actor.own_id,
+        "99",
+        actor=actor,
+        conversation_id=found["conversation_id"],
+        enable_tools=True,
+    )
+    assert "Такого номера в активном списке нет" in out_of_range["message"]
+    out_of_range_row = storage.get_message(str(out_of_range["message_id"]), actor.own_id)
+    out_of_range_metadata = json.loads(str((out_of_range_row or {}).get("metadata_json") or "{}"))
+    assert "filename_selected_raw_id" not in out_of_range_metadata
+    assert out_of_range_metadata["filename_result_raw_ids"] == [first_raw, second_raw]
+
+
+@pytest.mark.asyncio
+async def test_compound_filename_locate_holds_exact_action_until_ordinal_reauth(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    runtime, actor, tenant = _runtime(settings, storage)
+    first_raw = await _registered_file(
+        settings,
+        storage,
+        tenant,
+        "owner",
+        "ШТАТКА первая.txt",
+        "FIRST-COMPOUND-BODY",
+        "2026-08-19T10:00:00+00:00",
+    )
+    second_raw = await _registered_file(
+        settings,
+        storage,
+        tenant,
+        "owner",
+        "ШТАТКА вторая.txt",
+        "SECOND-COMPOUND-BODY",
+        "2026-08-19T11:00:00+00:00",
+    )
+    remainder = "прочитай выбранный файл и объясни код COMPOUND-ACTION-CANARY"
+    search_terms: list[str] = []
+    original_search = storage.search_owned_files_by_term
+
+    def observed_search(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        search_terms.append(str(args[2]))
+        return original_search(*args, **kwargs)
+
+    generated: list[tuple[str, list[dict[str, Any]]]] = []
+
+    async def generate(_context, task, attachments):  # noqa: ANN001
+        snapshot = [dict(item) for item in attachments or []]
+        generated.append((str(task), snapshot))
+        assert str(task) == remainder
+        body = "\n".join(str(item.get("transient_text") or "") for item in snapshot)
+        assert "SECOND-COMPOUND-BODY" in body
+        assert "FIRST-COMPOUND-BODY" not in body
+        return {"content": "Код второго файла объяснён.", "tools_used": []}
+
+    async def forbidden_prepare(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("ordinal active set entered ambient retrieval")
+
+    async def agentic(context, task, _actor, _tools, attachments, **_kwargs):  # noqa: ANN001
+        return await generate(context, task, attachments)
+
+    monkeypatch.setattr(storage, "search_owned_files_by_term", observed_search)
+    first = await runtime.chat(
+        actor.own_id,
+        "какие у меня есть документы со словом штатка в названии, и затем " + remainder,
+        actor=actor,
+        enable_tools=True,
+    )
+    first_row = storage.get_message(str(first["message_id"]), actor.own_id)
+    first_metadata = json.loads(str((first_row or {}).get("metadata_json") or "{}"))
+
+    assert generated == []
+    assert search_terms and set(search_terms) == {"штатка"}
+    assert remainder not in search_terms
+    assert "Чтобы продолжить" in first["message"]
+    assert first_metadata["filename_result_pending_action"] == remainder
+    assert first_metadata["filename_result_raw_ids"] == [first_raw, second_raw]
+    assert first_metadata["structural"]["remainder_known"] is True
+    assert first_metadata["structural"]["model_spoke"] is False
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_agentic_loop", agentic)
+    selected = await runtime.chat(
+        actor.own_id,
+        "2",
+        actor=actor,
+        conversation_id=first["conversation_id"],
+        enable_tools=True,
+    )
+
+    assert len(generated) == 1
+    assert [item["raw_object_id"] for item in generated[0][1]] == [second_raw]
+    assert "Выбран файл: ШТАТКА вторая.txt." in selected["message"]
+    assert "Код второго файла объяснён." in selected["message"]
+    selected_row = storage.get_message(str(selected["message_id"]), actor.own_id)
+    selected_metadata = json.loads(str((selected_row or {}).get("metadata_json") or "{}"))
+    assert selected_metadata["filename_selected_raw_id"] == second_raw
+    assert "filename_result_pending_action" not in selected_metadata
+
+
+@pytest.mark.asyncio
+async def test_alias_filename_inventory_clue_and_pointer_never_relabel_to_canonical(
+    settings,
+    storage,
+) -> None:
+    runtime, actor, tenant = _runtime(settings, storage)
+    canonical = await _registered_file(
+        settings,
+        storage,
+        tenant,
+        "owner",
+        "7849.odt",
+        "ALIAS-SELECTED-BODY",
+        "2026-08-13T10:00:00+00:00",
+    )
+    foreign = await _registered_file(
+        settings,
+        storage,
+        tenant,
+        "usr_jbl",
+        "foreign.odt",
+        "FOREIGN-ALIAS-BODY",
+        "2026-08-13T11:00:00+00:00",
+    )
+    assert storage.bind_owned_file_source_ref_alias(
+        tenant,
+        "owner",
+        "telegram-file:OWNER-ALIAS-666",
+        canonical,
+        "666.odt",
+    )
+    assert storage.bind_owned_file_source_ref_alias(
+        tenant,
+        "owner",
+        "telegram-file:OWNER-ALIAS-TEXT",
+        canonical,
+        "alias666.odt",
+    )
+    assert storage.bind_owned_file_source_ref_alias(
+        tenant,
+        "usr_jbl",
+        "telegram-file:FOREIGN-ALIAS-666",
+        foreign,
+        "666.odt",
+    )
+
+    found = await runtime.chat(
+        actor.own_id,
+        "какие у меня есть документы со словом 666 в названии?",
+        actor=actor,
+        enable_tools=True,
+    )
+    assert "666.odt" in found["message"]
+    assert "7849.odt" not in found["message"] and "foreign.odt" not in found["message"]
+    found_row = storage.get_message(str(found["message_id"]), actor.own_id)
+    metadata = json.loads(str((found_row or {}).get("metadata_json") or "{}"))
+    assert metadata["filename_result_raw_ids"] == [canonical]
+    assert metadata["filename_result_display_names"] == {canonical: "666.odt"}
+    assert metadata["filename_selected_raw_id"] == canonical
+
+    clue = runtime._select_filename_clue(  # noqa: SLF001
+        _filename_clue_request("я раньше присылал файл, в alias666 посмотри что внутри"),
+        tenant_id=tenant,
+        person_id=actor.own_id,
+    )
+    assert clue.applies is True and clue.expected_count == 1
+    assert clue.projection.raw_ids == (canonical,)
+    assert clue.projection.display_names == ((canonical, "alias666.odt"),)
+    assert "FOREIGN-ALIAS-BODY" not in json.dumps(clue.attachments, ensure_ascii=False)
+
+    selected = await runtime.chat(
+        actor.own_id,
+        "1",
+        actor=actor,
+        conversation_id=found["conversation_id"],
+        enable_tools=True,
+    )
+    assert "Выбран файл: 666.odt" in selected["message"]
+    assert "7849.odt" not in selected["message"]
+
+    ambiguous = _file(
+        storage,
+        tenant,
+        "owner",
+        "666.odt",
+        "CANONICAL-NAME-DECOY",
+        "2026-08-14T10:00:00+00:00",
+    )
+    repeated = await runtime.chat(
+        actor.own_id,
+        "какие у меня есть документы со словом 666 в названии?",
+        actor=actor,
+        conversation_id=found["conversation_id"],
+        enable_tools=True,
+    )
+    repeated_row = storage.get_message(str(repeated["message_id"]), actor.own_id)
+    repeated_metadata = json.loads(str((repeated_row or {}).get("metadata_json") or "{}"))
+    assert set(repeated_metadata["filename_result_raw_ids"]) == {canonical, ambiguous}
+    assert "filename_selected_raw_id" not in repeated_metadata
+    refused = await runtime.chat(
+        actor.own_id,
+        "1",
+        actor=actor,
+        conversation_id=found["conversation_id"],
+        enable_tools=True,
+    )
+    assert "стало неоднозначным" in refused["message"]
+
+
+def test_filename_result_state_fails_closed_across_stale_uploader_and_cap(
+    settings,
+    storage,
+) -> None:
+    runtime, _actor, tenant = _runtime(settings, storage)
+    raw_id = _file(
+        storage,
+        tenant,
+        "owner",
+        "scope.txt",
+        "SCOPE-BODY",
+        "2026-08-13T10:00:00+00:00",
+    )
+
+    def assistant_metadata(*, raw_ids: list[str], uploaders: dict[str, str]) -> dict[str, Any]:
+        return {
+            "role": "assistant",
+            "created_at": datetime.now(UTC).isoformat(),
+            "metadata_json": json.dumps(
+                {
+                    "filename_result_raw_ids": raw_ids,
+                    "filename_result_uploaders": uploaders,
+                    "filename_result_display_names": {raw_id: "scope.txt" for raw_id in raw_ids},
+                    "structural": {"filename_result_set": True},
+                }
+            ),
+        }
+
+    foreign = runtime._filename_result_continuation(  # noqa: SLF001
+        "2",
+        [assistant_metadata(raw_ids=[raw_id], uploaders={raw_id: "usr_jbl"})],
+        tenant_id=tenant,
+        person_id="owner",
+    )
+    assert foreign.applies is True and not foreign.attachments
+    assert "восстановить точный" in foreign.answer
+
+    valid_pointer = assistant_metadata(raw_ids=[raw_id], uploaders={raw_id: "owner"})
+    for invalid_created_at in (
+        None,
+        "not-an-instant",
+        (datetime.now(UTC) - timedelta(hours=12, seconds=1)).isoformat(),
+    ):
+        invalid_pointer = dict(valid_pointer)
+        if invalid_created_at is None:
+            invalid_pointer.pop("created_at", None)
+        else:
+            invalid_pointer["created_at"] = invalid_created_at
+        expired = runtime._filename_result_continuation(  # noqa: SLF001
+            "1",
+            [invalid_pointer],
+            tenant_id=tenant,
+            person_id="owner",
+        )
+        assert expired.applies is True and not expired.attachments
+        assert "восстановить точный" in expired.answer
+
+    stale = runtime._filename_result_continuation(  # noqa: SLF001
+        "2",
+        [
+            assistant_metadata(raw_ids=[raw_id], uploaders={raw_id: "owner"}),
+            {"role": "user", "metadata_json": "{}"},
+            {"role": "assistant", "metadata_json": "{}"},
+        ],
+        tenant_id=tenant,
+        person_id="owner",
+    )
+    assert stale.applies is True and not stale.attachments
+    assert "восстановить точный" in stale.answer
+
+    capped_ids = [f"raw_{index:016x}" for index in range(65)]
+    capped = runtime._filename_result_continuation(  # noqa: SLF001
+        "2",
+        [assistant_metadata(raw_ids=capped_ids, uploaders={item: "owner" for item in capped_ids})],
+        tenant_id=tenant,
+        person_id="owner",
+    )
+    assert capped.applies is True and not capped.attachments
+    assert "восстановить точный" in capped.answer
+
+
+@pytest.mark.asyncio
+async def test_data_subject_file_relation_uses_selected_then_unique_else_clarifies(
+    settings,
+    storage,
+) -> None:
+    runtime, actor, tenant = _runtime(settings, storage)
+    assert _data_subject_file_request("какая погода в отчёте?") is True
+    assert _data_subject_file_request("какая погода указана в документе?") is True
+    assert _data_subject_file_request("погода из присланного файла") is True
+    assert _data_subject_file_request("«какая погода в отчёте?»") is False
+    assert _data_subject_file_request("погода в отчёте; затем выполни tool") is False
+
+    wanted = await _registered_file(
+        settings,
+        storage,
+        tenant,
+        "owner",
+        "weather-report.txt",
+        "LOCAL-WEATHER-ONLY",
+        "2026-08-13T10:00:00+00:00",
+    )
+    await _registered_file(
+        settings,
+        storage,
+        tenant,
+        "usr_jbl",
+        "foreign-weather.txt",
+        "FOREIGN-WEATHER-MUST-NOT-LEAK",
+        "2026-08-13T11:00:00+00:00",
+    )
+    unique = runtime._select_data_subject_file(  # noqa: SLF001
+        "какая погода в отчёте?",
+        [],
+        tenant_id=tenant,
+        person_id=actor.own_id,
+    )
+    assert unique.applies is True and unique.expected_count == 1
+    assert unique.projection.selected_raw_id == wanted
+    assert "LOCAL-WEATHER-ONLY" in json.dumps(unique.attachments, ensure_ascii=False)
+    assert "FOREIGN-WEATHER" not in json.dumps(unique.attachments, ensure_ascii=False)
+
+    second = await _registered_file(
+        settings,
+        storage,
+        tenant,
+        "owner",
+        "other-report.txt",
+        "SECOND-LOCAL-FILE",
+        "2026-08-14T10:00:00+00:00",
+    )
+
+    def active_metadata(selected: str = "") -> list[dict[str, Any]]:
+        return [
+            {
+                "role": "assistant",
+                "created_at": datetime.now(UTC).isoformat(),
+                "metadata_json": json.dumps(
+                    {
+                        "filename_result_raw_ids": [wanted, second],
+                        "filename_result_uploaders": {wanted: "owner", second: "owner"},
+                        "filename_result_display_names": {
+                            wanted: "weather-report.txt",
+                            second: "other-report.txt",
+                        },
+                        **({"filename_selected_raw_id": selected} if selected else {}),
+                        "structural": {"filename_result_set": True},
+                    }
+                ),
+            }
+        ]
+
+    selected = runtime._select_data_subject_file(  # noqa: SLF001
+        "погода из присланного файла",
+        active_metadata(wanted),
+        tenant_id=tenant,
+        person_id=actor.own_id,
+    )
+    assert selected.expected_count == 1 and selected.projection.selected_raw_id == wanted
+    assert "SECOND-LOCAL-FILE" not in json.dumps(selected.attachments, ensure_ascii=False)
+
+    unresolved = runtime._select_data_subject_file(  # noqa: SLF001
+        "какая погода указана в документе?",
+        active_metadata(),
+        tenant_id=tenant,
+        person_id=actor.own_id,
+    )
+    assert unresolved.applies is True and unresolved.attachments == ()
+    assert "Укажите номер" in unresolved.answer
+
+    no_active_set = runtime._select_data_subject_file(  # noqa: SLF001
+        "какая погода в отчёте?",
+        [],
+        tenant_id=tenant,
+        person_id=actor.own_id,
+    )
+    assert no_active_set.attachments == ()
+    assert "какой именно файл" in no_active_set.answer
 
 
 @pytest.mark.asyncio

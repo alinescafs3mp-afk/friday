@@ -17,7 +17,9 @@ import ipaddress
 import math
 import re
 import urllib.parse
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import PurePath
 from typing import Any
@@ -39,6 +41,7 @@ _AUDIT_ID_RE = re.compile(r"^audit_(?:[0-9a-f]{16}|[0-9a-f]{24})$")
 # HTTP response to its durable audit rows.  Every other caller-controlled shape
 # remains a keyed opaque reference below.
 _SERVER_REQUEST_ID_RE = re.compile(r"^[0-9a-f]{24}$")
+_CLIENT_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 _GENERATED_ID_RE = re.compile(r"^(?P<prefix>[a-z][a-z0-9_]{0,31})_[0-9a-f]{16}$")
 _HMAC_KEY_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -47,8 +50,15 @@ class _ServerAuditRequestId(str):
     """In-process provenance marker for a correlation ID issued by the server."""
 
 
+class _ValidatedClientAuditRequestId(str):
+    """In-process marker for a bounded client correlation ID validated by the server."""
+
+
 class _ObservedAuditIp(str):
     """In-process marker for an IP observed as the request's ASGI peer."""
+
+
+_AUDIT_REQUEST_ID: ContextVar[str] = ContextVar("friday_audit_request_id", default="")
 
 
 _GENERATED_ID_PREFIXES = frozenset(
@@ -201,6 +211,7 @@ _SAFE_AUDIT_ACTIONS = frozenset(
         "admin.knowledge.entity_link.review",
         "admin.knowledge.inspect",
         "admin.knowledge.purge",
+        "admin.knowledge.purge_attempted",
         "admin.knowledge.read",
         "admin.knowledge.reenrich",
         "admin.knowledge.restore",
@@ -936,6 +947,43 @@ def server_audit_request_id(value: object) -> str:
     return _ServerAuditRequestId(text)
 
 
+def current_audit_request_id() -> str:
+    """Return the request-local correlation marker, or empty outside a request."""
+
+    return _AUDIT_REQUEST_ID.get()
+
+
+@contextmanager
+def bind_audit_request_id(value: object) -> Iterator[str]:
+    """Bind one independently validated request correlation marker.
+
+    Only the private server marker may retain the reserved 24-hex namespace.
+    Bounded client IDs receive a distinct marker and remain opaque ``reqref``
+    values at the durable boundary. Invalid or forged values abort before the
+    context changes, and reset is guaranteed across exceptions and nesting.
+    """
+
+    if not isinstance(value, str):
+        raise ValueError("audit request correlation ID must be a string")
+    text = str(value)
+    is_server_issued = isinstance(value, _ServerAuditRequestId)
+    if is_server_issued:
+        if not _SERVER_REQUEST_ID_RE.fullmatch(text):
+            raise ValueError("invalid server audit request ID marker")
+        marker: str = _ServerAuditRequestId(text)
+    elif _CLIENT_REQUEST_ID_RE.fullmatch(text) and not _SERVER_REQUEST_ID_RE.fullmatch(text):
+        marker = _ValidatedClientAuditRequestId(text)
+    else:
+        raise ValueError("invalid audit request correlation ID")
+    del value
+
+    token = _AUDIT_REQUEST_ID.set(marker)
+    try:
+        yield marker
+    finally:
+        _AUDIT_REQUEST_ID.reset(token)
+
+
 def sanitize_audit_request_id(value: object, *, key: bytes) -> str:
     is_server_issued = isinstance(value, _ServerAuditRequestId)
     text = str(value or "")
@@ -1316,6 +1364,8 @@ def sanitize_audit_payload(
 
 
 __all__ = [
+    "bind_audit_request_id",
+    "current_audit_request_id",
     "decode_audit_privacy_key",
     "sanitize_audit_action",
     "sanitize_audit_actor",

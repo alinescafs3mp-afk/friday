@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +14,33 @@ from friday.model_profiles import (
     V12ModelGate,
     v12_model_profile_for,
 )
+
+_PROXY_TEMPLATE = (
+    Path(__file__).resolve().parents[1]
+    / "handoffs"
+    / "SGLang-Qwen38-V12-Attested"
+    / "remote"
+    / "default.conf.template"
+)
+
+
+def test_attested_proxy_uses_exact_case_sensitive_bearer_guards() -> None:
+    template = _PROXY_TEMPLATE.read_text(encoding="utf-8")
+    guard = 'if ($http_authorization != "Bearer ${JARVIS_LLM_API_KEY}") { return 401; }'
+    protected_locations = (
+        "/v1/chat/completions",
+        "/v1/models",
+        "/metrics",
+        "/server_info",
+        "/_friday/v1/deployment-witness",
+    )
+
+    assert "map $http_authorization" not in template
+    assert template.count(guard) == len(protected_locations)
+    for location in protected_locations:
+        start = template.index(f"location = {location} {{")
+        end = template.index("\n    }", start)
+        assert template[start:end].count(guard) == 1
 
 
 def test_qwen38_runtime_profile_matches_the_attested_live_graph(monkeypatch, tmp_path) -> None:
@@ -36,7 +64,7 @@ def test_qwen38_runtime_profile_matches_the_attested_live_graph(monkeypatch, tmp
     assert profile.runtime_source_revision == "c4271c3fe1262fc2adbd162c33b25de5255251c5"
     assert profile.runtime_reported_version == "0.0.0.dev0+qwen38.27b.g561c8f3"
     assert profile.engine_image_id == (
-        "sha256:7f27e2885eca5041860a8c28c0bc3304b43b9fce072f298da043393866aa5887"
+        "sha256:4a38144134d84d6f78c1844314f209c48ef69c4bd8bf7da1e5c400f9abda6f26"
     )
     assert profile.engine_base_image_digest == profile.runtime_image
     assert profile.engine_base_image_id == (
@@ -49,9 +77,9 @@ def test_qwen38_runtime_profile_matches_the_attested_live_graph(monkeypatch, tmp
         "640a1ea428b2526ff6f3b3e412c18fef8e48f1fa882b3a94f9859a190678f62b"
     )
     assert profile.proxy_image_id == (
-        "sha256:2bf585895ba4ede01899f4b17db5c690dd893d77c3e1da9ac4dfb2482e22c091"
+        "sha256:37ae13a39a5d8a0780b0b0f226065753c0d929c31956be27f7f375f79cdef750"
     )
-    assert profile.proxy_policy_sha256 == ("47e6b9c2dadea4a1e9395b8f8305699033b52a09ecba14d82afcdf77e7d9f3ae")
+    assert profile.proxy_policy_sha256 == ("d51c092ca2ef566f092ef9d55320e302c2d10b710d319d27a6d982aba018dcfe")
     assert profile.max_model_len == 40_960
     assert profile.max_num_seqs == 6
     assert profile.gpu_memory_utilization == 0.90

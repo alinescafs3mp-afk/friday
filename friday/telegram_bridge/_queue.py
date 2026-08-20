@@ -150,6 +150,7 @@ class _UpdateInbox:
             "failed_at": "REAL",
             "ordering_key": "TEXT NOT NULL DEFAULT ''",
             "chunks_sent": "INTEGER NOT NULL DEFAULT 0",
+            "delivery_uncertainty": "INTEGER NOT NULL DEFAULT 0",
         }
         for name, definition in additions.items():
             if name not in columns:
@@ -652,6 +653,49 @@ class _UpdateInbox:
         self._conn.commit()
         return dead_lettered
 
+    def mark_failure_many(self, update_ids: list[int], error: str) -> bool:
+        """Charge one failed owned album attempt to every durable part atomically."""
+
+        cleaned = list(dict.fromkeys(int(value) for value in update_ids))
+        if not cleaned:
+            return False
+        placeholders = ",".join("?" for _value in cleaned)
+        rows = self._conn.execute(
+            f"SELECT update_id, attempts FROM updates WHERE update_id IN ({placeholders})",  # nosec B608
+            cleaned,
+        ).fetchall()
+        if len(rows) != len(cleaned):
+            # Ownership was resolved from these exact durable rows. A missing
+            # sibling means concurrent/corrupt queue mutation; do not advance a
+            # prefix into a state where it can later dispatch alone.
+            return False
+        attempted_at = time.time()
+        group_attempts = max(int(row["attempts"]) for row in rows) + 1
+        dead_lettered = group_attempts >= MAX_ATTEMPTS
+        updates: list[tuple[int, float, str, str, float, float | None, int]] = []
+        for row in rows:
+            delay = RETRY_DELAYS_SEC[min(group_attempts - 1, len(RETRY_DELAYS_SEC) - 1)]
+            updates.append(
+                (
+                    group_attempts,
+                    attempted_at,
+                    error[:500],
+                    "dead_letter" if dead_lettered else "pending",
+                    0 if dead_lettered else attempted_at + delay,
+                    attempted_at if dead_lettered else None,
+                    int(row["update_id"]),
+                )
+            )
+        self._conn.executemany(
+            """UPDATE updates
+               SET attempts=?, last_attempt_at=?, last_error=?, status=?,
+                   next_attempt_at=?, failed_at=?
+               WHERE update_id=?""",
+            updates,
+        )
+        self._conn.commit()
+        return dead_lettered
+
     def mark_dead_letter(self, update_id: int, error: str) -> None:
         failed_at = time.time()
         self._conn.execute(
@@ -715,8 +759,129 @@ class _UpdateInbox:
         не нужно и нечего забыть.
         """
         self._conn.execute(
-            "UPDATE updates SET chunks_sent=? WHERE update_id=?",
+            "UPDATE updates SET chunks_sent=?, delivery_uncertainty=0 WHERE update_id=?",
             (max(0, int(count)), int(update_id)),
+        )
+        self._conn.commit()
+
+    def begin_answer_chunk_delivery(self, update_id: int, count: int) -> tuple[int, int] | None:
+        """Fence one chunk *before* its first network byte can be written.
+
+        Advancing the cursor before I/O intentionally chooses at-most-once over
+        silent duplication.  A process death before the write may lose this one
+        chunk, but the same durable state produces the bounded uncertainty
+        notice on restart.  A confirmed pre-accept failure can atomically restore
+        the snapshot through :meth:`reject_answer_chunk_delivery`.
+        """
+
+        exact_update_id = int(update_id)
+        exact_count = max(0, int(count))
+        with self._conn:
+            row = self._conn.execute(
+                "SELECT chunks_sent, delivery_uncertainty FROM updates WHERE update_id=?",
+                (exact_update_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            previous_count = int(row["chunks_sent"])
+            previous_uncertainty = int(row["delivery_uncertainty"])
+            if exact_count != previous_count + 1 or previous_uncertainty not in {0, 1, 2}:
+                return None
+            cursor = self._conn.execute(
+                """UPDATE updates SET chunks_sent=?, delivery_uncertainty=1
+                     WHERE update_id=? AND chunks_sent=? AND delivery_uncertainty=?""",
+                (
+                    exact_count,
+                    exact_update_id,
+                    previous_count,
+                    previous_uncertainty,
+                ),
+            )
+            if cursor.rowcount != 1:
+                return None
+        return previous_count, previous_uncertainty
+
+    def reject_answer_chunk_delivery(
+        self,
+        update_id: int,
+        count: int,
+        *,
+        previous_count: int,
+        previous_uncertainty: int,
+    ) -> bool:
+        """Roll back only the exact pre-write fence proven not to be accepted."""
+
+        exact_count = max(0, int(count))
+        prior_count = max(0, int(previous_count))
+        prior_uncertainty = int(previous_uncertainty)
+        if exact_count != prior_count + 1 or prior_uncertainty not in {0, 1, 2}:
+            return False
+        cursor = self._conn.execute(
+            """UPDATE updates SET chunks_sent=?, delivery_uncertainty=?
+                 WHERE update_id=? AND chunks_sent=? AND delivery_uncertainty=1""",
+            (
+                prior_count,
+                prior_uncertainty,
+                int(update_id),
+                exact_count,
+            ),
+        )
+        self._conn.commit()
+        return cursor.rowcount == 1
+
+    def confirm_answer_chunk_delivery(self, update_id: int, count: int) -> bool:
+        """Turn the exact pre-write fence into one confirmed delivered cursor."""
+
+        exact_count = max(0, int(count))
+        cursor = self._conn.execute(
+            """UPDATE updates SET delivery_uncertainty=0
+                 WHERE update_id=? AND chunks_sent=? AND delivery_uncertainty=1""",
+            (int(update_id), exact_count),
+        )
+        self._conn.commit()
+        return cursor.rowcount == 1
+
+    def record_uncertain_answer_chunk(self, update_id: int, count: int) -> None:
+        """Never resend a chunk whose Telegram acceptance is unknowable.
+
+        ``ReadTimeout`` happens after the request has been written and may mean
+        that Telegram accepted the message but its response was lost.  Advance
+        the durable cursor and arm one code-owned warning in the same commit.
+        """
+
+        self._conn.execute(
+            """UPDATE updates
+               SET chunks_sent=MAX(chunks_sent, ?), delivery_uncertainty=1
+               WHERE update_id=?""",
+            (max(0, int(count)), int(update_id)),
+        )
+        self._conn.commit()
+
+    def answer_delivery_uncertainty_pending(self, update_id: int) -> bool:
+        row = self._conn.execute(
+            "SELECT delivery_uncertainty FROM updates WHERE update_id=?",
+            (int(update_id),),
+        ).fetchone()
+        return bool(row is not None and int(row["delivery_uncertainty"]) == 1)
+
+    def begin_answer_delivery_uncertainty_notice(self, update_id: int) -> bool:
+        """Fence the warning before its network write, making it at-most-once."""
+
+        cursor = self._conn.execute(
+            """UPDATE updates SET delivery_uncertainty=2
+               WHERE update_id=? AND delivery_uncertainty=1""",
+            (int(update_id),),
+        )
+        self._conn.commit()
+        return cursor.rowcount == 1
+
+    def retry_answer_delivery_uncertainty_notice(self, update_id: int) -> None:
+        """A pre-accept connection failure may retry the fenced warning."""
+
+        self._conn.execute(
+            """UPDATE updates SET delivery_uncertainty=1
+               WHERE update_id=? AND delivery_uncertainty=2""",
+            (int(update_id),),
         )
         self._conn.commit()
 

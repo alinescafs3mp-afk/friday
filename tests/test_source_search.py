@@ -1347,10 +1347,24 @@ def test_the_index_is_only_ever_read_through_filtered_storage_helpers():
         "search_raw_objects",
         "search_raw_objects_in_set",
         "search_owned_file_content",
+        "search_owned_files_by_term",
     }
     for name, source in readers.items():
         assert "_not_private_raw_dependency" in source, name
         assert "status='ignored'" in source, name
+    union_reader = readers["search_owned_files_by_term"]
+    for required in (
+        "r.user_id=?",
+        "r.deleted_at IS NULL",
+        "json_extract(r.metadata_json,'$.uploaded_by')=?",
+        "uploader_user.status='active'",
+        "_not_audio_document",
+        "_not_private_raw_dependency",
+        "i.status='ignored'",
+        "min(int(limit), 64)",
+        "page_size + 1",
+    ):
+        assert required in union_reader, required
 
 
 def test_source_text_only_reaches_prompts_through_the_explicit_filtered_tool():
@@ -1370,6 +1384,7 @@ def test_source_text_only_reaches_prompts_through_the_explicit_filtered_tool():
     runtime = (root / "agent_runtime" / "__init__.py").read_text(encoding="utf-8")
     assert "self.storage.search_raw_objects(" not in runtime
     assert "search_owned_file_content" in runtime
+    assert "search_owned_files_by_term" in runtime
     assert "search_raw_objects_in_set" in runtime
     kernel = (root / "execution_kernel" / "__init__.py").read_text(encoding="utf-8")
     assert kernel.count("storage.search_raw_objects") == 1

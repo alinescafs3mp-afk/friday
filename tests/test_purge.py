@@ -10,13 +10,16 @@ safety, retention-window eligibility, and admin-only capability gating.
 from __future__ import annotations
 
 import hashlib
+import json
+import os
+import stat
 from pathlib import Path
 
 import pytest
 
-from friday.memory import MemoryVault
+from friday.memory import MemoryVault, VaultProjectionBoundaryError
 from friday.permissions import ActorContext, AuthorizationService
-from friday.purge import purge_knowledge
+from friday.purge import VaultProjectionCleanupRequired, public_purge_receipt, purge_knowledge
 from friday.retrieval import pack_vector
 from friday.storage import SCHEMA_VERSION
 from friday.storage.models import FeedbackItem, FeedbackType, KnowledgeObject, RawObject, new_id
@@ -239,8 +242,115 @@ def test_purge_deletes_raw_file_and_vault_copy(storage, settings):
     assert report["raw_removed"] is True
     assert report["file_unlinked"] is True
     assert report["vault_removed"] is True
+    assert report["vault_removed_count"] == 1
+    assert "raw_file_path" not in report
     assert not file_path.exists()
     assert not Path(vault_path).exists()
+
+
+def test_purge_reports_an_exact_absent_vault_projection(storage, settings):
+    ko = _text_ko(storage, "alice", "no vault note", title="No projection")
+    storage.soft_delete_knowledge_object(ko["id"], "alice")
+
+    report = purge_knowledge(
+        storage,
+        settings,
+        MemoryVault(settings.memory_vault_dir),
+        ko["id"],
+        "alice",
+    )
+
+    assert report["vault_removed"] is False
+    assert report["vault_removed_count"] == 0
+
+
+def test_public_purge_receipt_excludes_internal_identifiers_bodies_and_paths():
+    ko_id = "ko-public-receipt-target"
+    internal = {
+        "existed": True,
+        "knowledge_object_id": ko_id,
+        "user_id": "TENANT-MUST-NOT-LEAK",
+        "title": "TITLE-MUST-NOT-LEAK",
+        "raw_object_id": "RAW-ID-MUST-NOT-LEAK",
+        "raw_file_path": "/private/PATH-MUST-NOT-LEAK.txt",
+        "body": "BODY-MUST-NOT-LEAK",
+        "raw_removed": True,
+        "file_unlinked": True,
+        "vault_removed": True,
+        "vault_removed_count": 2,
+        "deleted": {"knowledge_objects": 1, "raw_objects": 1, "versions": 3},
+    }
+
+    receipt = public_purge_receipt(internal, knowledge_object_id=ko_id)
+
+    assert receipt == {
+        "knowledge_object_ref_sha256": hashlib.sha256(ko_id.encode()).hexdigest(),
+        "existed": True,
+        "deleted_row_count": 5,
+        "raw_removed": True,
+        "file_unlinked": True,
+        "vault_removed": True,
+        "vault_removed_count": 2,
+    }
+    published = json.dumps(receipt, sort_keys=True)
+    for secret in (
+        ko_id,
+        "TENANT-MUST-NOT-LEAK",
+        "TITLE-MUST-NOT-LEAK",
+        "RAW-ID-MUST-NOT-LEAK",
+        "/private/PATH-MUST-NOT-LEAK.txt",
+        "BODY-MUST-NOT-LEAK",
+    ):
+        assert secret not in published
+
+
+def test_failed_vault_unlink_blocks_database_purge(
+    storage,
+    settings,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ko = _text_ko(storage, "alice", "must remain", title="Blocked purge")
+    vault = MemoryVault(settings.memory_vault_dir)
+    note = vault.sync_object(ko)
+    assert note is not None
+    storage.soft_delete_knowledge_object(ko["id"], "alice")
+
+    def fail_unlink(_descriptor: int, _name: str) -> None:
+        raise VaultProjectionBoundaryError("synthetic unlink failure")
+
+    monkeypatch.setattr(vault._deletion_handle, "_unlink_regular_name", fail_unlink)  # noqa: SLF001
+    with pytest.raises(VaultProjectionCleanupRequired):
+        purge_knowledge(storage, settings, vault, ko["id"], "alice")
+
+    assert storage.get_knowledge_object(ko["id"], "alice") is not None
+    assert note.is_file()
+
+
+def test_failed_vault_directory_fsync_blocks_database_purge(
+    storage,
+    settings,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    ko = _text_ko(storage, "alice", "durability proof", title="Durable purge")
+    vault = MemoryVault(settings.memory_vault_dir)
+    note = vault.sync_object(ko)
+    assert note is not None
+    storage.soft_delete_knowledge_object(ko["id"], "alice")
+    real_fsync = os.fsync
+
+    def fail_directory_fsync(descriptor: int) -> None:
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise OSError("synthetic directory fsync failure")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr("friday.memory.os.fsync", fail_directory_fsync)
+    with pytest.raises(VaultProjectionCleanupRequired):
+        purge_knowledge(storage, settings, vault, ko["id"], "alice")
+
+    assert storage.get_knowledge_object(ko["id"], "alice") is not None
+    # Unlink happened, but without its durable-directory proof the DB commit is
+    # still refused. A retry fsyncs the directory even when the match is absent.
+    assert not note.exists()
 
 
 def test_purge_keeps_a_deduplicated_file_until_the_last_reference(storage, settings):

@@ -258,6 +258,10 @@ def test_natural_whole_file_refusals_are_detected(refusal: str) -> None:
 def test_field_level_uncertainty_is_not_whole_file_refusal() -> None:
     assert _is_false_readable_attachment_refusal("Не могу разобрать одну цифру в строке 12.") is False
     assert _is_false_readable_attachment_refusal(f"В документе указано: {PDF_SENTINEL}.") is False
+    assert (
+        _is_false_readable_attachment_refusal("В документе не вижу различий между первой и второй таблицей.")
+        is False
+    )
 
 
 @pytest.mark.asyncio

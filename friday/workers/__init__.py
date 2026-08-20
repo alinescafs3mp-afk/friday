@@ -485,7 +485,24 @@ def _sync_vault_page(vault: Any, storage: Any, objects: Sequence[dict[str, Any]]
     links = storage.list_knowledge_entity_links_for([str(item.get("id") or "") for item in objects])
     for item in objects:
         try:
-            vault.sync_object({**item, "_entity_names": links.get(str(item.get("id") or ""), [])})
+            ko_id = str(item.get("id") or "")
+            user_id = str(item.get("user_id") or "")
+            # Re-read under the same BEGIN IMMEDIATE writer boundary held by
+            # soft-delete/hard-purge.  Holding it through the durable filesystem
+            # write closes the stale-page race: a projector write is ordered wholly
+            # before a delete (which then removes it), or wholly after and observes
+            # the object absent/deleted/private.  An autocommit recheck here would
+            # leave a TOCTOU window before os.replace.
+            with storage.transaction():
+                current = storage.get_knowledge_object(ko_id, user_id)
+                if current is None or current.get("deleted_at"):
+                    continue
+                vault.sync_object(
+                    {
+                        **current,
+                        "_entity_names": links.get(ko_id, []),
+                    }
+                )
         except OSError:
             # One unwritable note must not take the rest of the vault with it. The
             # loop below this one paginates the whole tenant and ends in
@@ -596,13 +613,16 @@ class WorkersManager:
             6 * 3600,
             timeout_sec=600,
         )
-        self.supervisor.register(
-            "memory_vault_sync",
-            self._vault_sync_all,
-            300,
-            enabled=self.memory_vault is not None,
-            timeout_sec=900,
-        )
+        # Disabled means there is no plaintext projector in the supervisor at
+        # all.  Merely registering a dormant task makes an accidental injected
+        # vault look like a rollout flag and leaves stale worker state behind.
+        if self.settings.memory_vault_mode == "full_owner" and self.memory_vault is not None:
+            self.supervisor.register(
+                "memory_vault_sync",
+                self._vault_sync_all,
+                300,
+                timeout_sec=900,
+            )
         self.supervisor.register(
             "mission_runner",
             self._mission_runner_tick,

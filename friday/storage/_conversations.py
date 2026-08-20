@@ -7,6 +7,9 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 
 from __future__ import annotations
 
+import re
+from datetime import UTC, datetime
+
 from friday.storage._base import (
     Any,
     StorageShared,
@@ -16,11 +19,36 @@ from friday.storage._base import (
     sqlite3,
     utc_now,
 )
-from friday.storage._knowledge import _fts_terms
+from friday.storage._knowledge import _fts_term_groups
 from friday.storage._privacy import (
     _not_private_knowledge_dependency,
     _not_private_raw_dependency,
 )
+
+_MESSAGE_ID_RE = re.compile(r"msg_[0-9a-f]{16}")
+
+
+def _validated_reply_parent(
+    conn: sqlite3.Connection,
+    *,
+    conversation_id: str,
+    user_id: str,
+    child_role: str,
+    reply_to: str | None,
+) -> str | None:
+    """Keep only one existing, same-scope, opposite-role message edge."""
+
+    candidate = reply_to if isinstance(reply_to, str) else ""
+    expected_parent_role = {"user": "assistant", "assistant": "user"}.get(child_role)
+    if expected_parent_role is None or _MESSAGE_ID_RE.fullmatch(candidate) is None:
+        return None
+    parent = conn.execute(
+        "SELECT role FROM messages WHERE id=? AND conversation_id=? AND user_id=?",
+        (candidate, conversation_id, user_id),
+    ).fetchone()
+    if parent is None or str(parent["role"] or "") != expected_parent_role:
+        return None
+    return candidate
 
 
 def create_conversation_in_transaction(
@@ -65,6 +93,14 @@ def store_message_in_transaction(
     if conversation is None:
         raise ValueError("Conversation does not belong to user")
 
+    validated_reply_to = _validated_reply_parent(
+        conn,
+        conversation_id=conversation_id,
+        user_id=user_id,
+        child_role=role,
+        reply_to=reply_to,
+    )
+
     message_id = new_id("msg")
     now = utc_now()
     conn.execute(
@@ -77,7 +113,7 @@ def store_message_in_transaction(
             role,
             content,
             json.dumps(metadata or {}, ensure_ascii=False, sort_keys=True),
-            reply_to,
+            validated_reply_to,
             now,
         ),
     )
@@ -274,6 +310,9 @@ class ConversationsMixin(StorageShared):
         *,
         limit: int = 20,
         conversation_id: str | None = None,
+        role: str | None = None,
+        before_message_id: str | None = None,
+        match_all_terms: bool = False,
     ) -> list[dict[str, Any]]:
         """Full-text search over the caller's own chat history.
 
@@ -287,49 +326,178 @@ class ConversationsMixin(StorageShared):
             return []
         window = max(1, min(int(limit), 200))
         conv = " ".join(str(conversation_id or "").split()).strip() or None
+        selected_role = str(role or "").strip().casefold() or None
+        if selected_role not in {None, "user", "assistant"}:
+            raise ValueError("invalid message role")
+        before = " ".join(str(before_message_id or "").split()).strip() or None
+        if before is not None and len(before) > 200:
+            raise ValueError("invalid message boundary identity")
+        clauses = ["m.user_id=?"]
+        params: list[Any] = [user_id]
+        if conv is not None:
+            clauses.append("m.conversation_id=?")
+            params.append(conv)
+        if selected_role is not None:
+            clauses.append("m.role=?")
+            params.append(selected_role)
+        if before is not None:
+            clauses.append(
+                "m.rowid < (SELECT boundary.rowid FROM messages boundary "
+                "WHERE boundary.id=? AND boundary.user_id=?)"
+            )
+            params.extend((before, user_id))
+        where = " AND ".join(clauses)
         rows: list[sqlite3.Row] = []
-        terms = _fts_terms(text)
-        if self._fts_available and terms:
-            match_query = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"*' for term in terms)
+        term_groups = _fts_term_groups(text)
+        if self._fts_available and term_groups:
+
+            def atom(term: str) -> str:
+                lexical = term[:-1] if term.endswith("*") else term
+                return f'"{lexical.replace(chr(34), chr(34) * 2)}"*'
+
+            if match_all_terms is True:
+                grouped = [
+                    "(" + " OR ".join(atom(term) for term in group) + ")"
+                    if len(group) > 1
+                    else atom(group[0])
+                    for group in term_groups
+                    if group
+                ]
+                match_query = " AND ".join(grouped)
+            else:
+                match_query = " OR ".join(atom(term) for group in term_groups for term in group)
             try:
-                if conv is not None:
-                    rows = self.execute(
-                        """SELECT m.*, bm25(messages_fts) AS _rank
+                rows = self.execute(
+                    f"""SELECT m.*, bm25(messages_fts) AS _rank
                            FROM messages_fts
                            JOIN messages m ON m.rowid=messages_fts.rowid
-                           WHERE m.user_id=? AND m.conversation_id=? AND messages_fts MATCH ?
-                           ORDER BY _rank ASC, m.created_at DESC LIMIT ?""",
-                        (user_id, conv, match_query, window),
-                    ).fetchall()
-                else:
-                    rows = self.execute(
-                        """SELECT m.*, bm25(messages_fts) AS _rank
-                           FROM messages_fts
-                           JOIN messages m ON m.rowid=messages_fts.rowid
-                           WHERE m.user_id=? AND messages_fts MATCH ?
-                           ORDER BY _rank ASC, m.created_at DESC LIMIT ?""",
-                        (user_id, match_query, window),
-                    ).fetchall()
+                          WHERE {where} AND messages_fts MATCH ?
+                          ORDER BY _rank ASC, m.created_at DESC, m.rowid DESC
+                          LIMIT ?""",  # nosec B608 - clauses are selected only by fixed branches
+                    (*params, match_query, window),
+                ).fetchall()
             except sqlite3.OperationalError:
                 rows = []
         if not rows:
             escaped = text.replace("%", r"\%").replace("_", r"\_")
             like = f"%{escaped}%"
-            if conv is not None:
-                rows = self.execute(
-                    """SELECT * FROM messages
-                       WHERE user_id=? AND conversation_id=? AND content LIKE ? ESCAPE '\\'
-                       ORDER BY created_at DESC LIMIT ?""",
-                    (user_id, conv, like, window),
-                ).fetchall()
-            else:
-                rows = self.execute(
-                    """SELECT * FROM messages
-                       WHERE user_id=? AND content LIKE ? ESCAPE '\\'
-                       ORDER BY created_at DESC LIMIT ?""",
-                    (user_id, like, window),
-                ).fetchall()
+            rows = self.execute(
+                f"""SELECT m.* FROM messages m
+                      WHERE {where} AND m.content LIKE ? ESCAPE '\\'
+                      ORDER BY m.created_at DESC, m.rowid DESC
+                      LIMIT ?""",  # nosec B608 - clauses are selected only by fixed branches
+                (*params, like, window),
+            ).fetchall()
         return [dict(row) for row in rows]
+
+    def list_messages_window(
+        self,
+        user_id: str,
+        since: str,
+        until: str,
+        *,
+        role: str | None = None,
+        conversation_id: str | None = None,
+        before_message_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Return one chronological, tenant-scoped half-open message window.
+
+        Unlike FTS search this selector does not require the user's date/time
+        words to occur in message bodies.  ``total`` is computed in the same
+        SQLite statement as the page, so ``complete`` can never be inferred
+        from a top-k result.  Bounds are normalized to UTC and use
+        ``[since, until)``; adjacent minute/day windows therefore cannot
+        duplicate a boundary row.
+        """
+
+        tenant = str(user_id or "").strip()
+        if not tenant:
+            raise ValueError("user_id is required")
+
+        def utc_boundary(value: str) -> str:
+            clean = str(value or "").strip()
+            if not clean or len(clean) > 64:
+                raise ValueError("invalid message time boundary")
+            try:
+                parsed = datetime.fromisoformat(clean.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("invalid message time boundary") from exc
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                raise ValueError("message time boundary must include an offset")
+            return parsed.astimezone(UTC).isoformat()
+
+        start = utc_boundary(since)
+        end = utc_boundary(until)
+        if start >= end:
+            raise ValueError("message time window must be non-empty")
+        selected_role = str(role or "").strip().casefold() or None
+        if selected_role not in {None, "user", "assistant"}:
+            raise ValueError("invalid message role")
+        conv = " ".join(str(conversation_id or "").split()).strip() or None
+        before = " ".join(str(before_message_id or "").split()).strip() or None
+        if before is not None and len(before) > 200:
+            raise ValueError("invalid message boundary identity")
+        page_size = max(1, min(int(limit), 100))
+        page_offset = max(0, min(int(offset), 1_000_000))
+
+        clauses = ["m.user_id=?", "m.created_at>=?", "m.created_at<?"]
+        params: list[Any] = [tenant, start, end]
+        if selected_role is not None:
+            clauses.append("m.role=?")
+            params.append(selected_role)
+        if conv is not None:
+            clauses.append("m.conversation_id=?")
+            params.append(conv)
+        if before is not None:
+            clauses.append(
+                "m.rowid < (SELECT boundary.rowid FROM messages boundary "
+                "WHERE boundary.id=? AND boundary.user_id=?)"
+            )
+            params.extend((before, tenant))
+        where = " AND ".join(clauses)
+        rows = self.execute(
+            f"""WITH scoped AS (
+                       SELECT m.*, m.rowid AS rowid
+                         FROM messages m
+                        WHERE {where}
+                   ),
+                   totals AS (
+                       SELECT COUNT(*) AS total FROM scoped
+                   ),
+                   page AS (
+                       SELECT * FROM scoped
+                        ORDER BY created_at ASC, rowid ASC
+                        LIMIT ? OFFSET ?
+                   )
+                   SELECT page.*, totals.total AS _total
+                     FROM totals LEFT JOIN page ON 1=1
+                    ORDER BY page.created_at ASC, page.rowid ASC""",  # nosec B608
+            (*params, page_size, page_offset),
+        ).fetchall()
+        total = int(rows[0]["_total"] if rows else 0)
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item.pop("_total", None)
+            item.pop("rowid", None)
+            if item.get("id") is not None:
+                results.append(item)
+        shown = len(results)
+        complete = page_offset + shown >= total
+        return {
+            "results": results,
+            "total": total,
+            "shown": shown,
+            "complete": complete,
+            "limit": page_size,
+            "offset": page_offset,
+            "next_offset": None if complete else page_offset + shown,
+            "since": start,
+            "until": end,
+            "role": selected_role,
+        }
 
     def count_conversations(self, user_id: str, *, include_archived: bool = False) -> int:
         """Total, so a truncated page can say it is truncated."""

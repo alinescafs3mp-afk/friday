@@ -7,6 +7,7 @@ before and nothing outside the package moved.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import date, timedelta
@@ -53,6 +54,81 @@ def _response_text_format(response: dict[str, Any]) -> str:
 
 
 _ALBUM_CACHE_MESSAGE_IDS = "_friday_album_message_ids"
+
+
+def _telegram_item_receipt(document: dict[str, Any]) -> dict[str, Any] | None:
+    """Build the exact bounded acknowledgement expected for one album sibling."""
+
+    message_id = document.get("telegram_message_id")
+    source_ref = document.get("source_ref")
+    if (
+        not isinstance(message_id, int)
+        or isinstance(message_id, bool)
+        or not 0 < message_id <= (2**63 - 1)
+        or not isinstance(source_ref, str)
+        or not source_ref
+    ):
+        return None
+    return {
+        "telegram_message_id": message_id,
+        "source_ref_sha256": hashlib.sha256(source_ref.encode("utf-8")).hexdigest(),
+    }
+
+
+def _album_final_source_ref(
+    update_id: int,
+    album_messages: list[dict[str, Any]],
+    prepared_documents: list[dict[str, Any]],
+) -> str:
+    """Bind a v2 final turn to the exact ordered album, never its old anchor key."""
+
+    prepared_by_message_id: dict[int, str] = {}
+    for document in prepared_documents:
+        receipt = _telegram_item_receipt(document)
+        if receipt is None:
+            continue
+        message_id = int(receipt["telegram_message_id"])
+        if message_id in prepared_by_message_id:
+            raise RuntimeError("Telegram album has duplicate prepared message identity")
+        prepared_by_message_id[message_id] = str(receipt["source_ref_sha256"])
+
+    ordered_items: list[dict[str, Any]] = []
+    for message in album_messages:
+        ordered_message_id = message.get("message_id")
+        if (
+            not isinstance(ordered_message_id, int)
+            or isinstance(ordered_message_id, bool)
+            or not 0 < ordered_message_id <= (2**63 - 1)
+        ):
+            raise RuntimeError("Telegram album has invalid ordered message identity")
+        ordered_items.append(
+            {
+                "telegram_message_id": ordered_message_id,
+                # An item rejected before preparation has no file authority in
+                # the final turn.  The empty digest is an explicit terminal
+                # marker and remains bound to its ordered Telegram identity.
+                "source_ref_sha256": prepared_by_message_id.get(ordered_message_id, ""),
+            }
+        )
+    canonical = json.dumps(ordered_items, ensure_ascii=True, separators=(",", ":"))
+    album_digest = hashlib.sha256(canonical.encode("ascii")).hexdigest()
+    return f"telegram-album-v2:{update_id}:{album_digest}"
+
+
+def _prepared_document_size(document: dict[str, Any]) -> int:
+    """Return exact decoded size for bridge-generated canonical base64."""
+
+    encoded = document.get("content_base64")
+    if not isinstance(encoded, str) or not encoded or len(encoded) % 4:
+        return -1
+    try:
+        ascii_value = encoded.encode("ascii")
+    except UnicodeEncodeError:
+        return -1
+    if not re.fullmatch(rb"[A-Za-z0-9+/]*={0,2}", ascii_value):
+        return -1
+    padding = len(ascii_value) - len(ascii_value.rstrip(b"="))
+    return (len(ascii_value) // 4) * 3 - padding
 
 
 _MONTHS_RU = {
@@ -309,6 +385,15 @@ class CommandsMixin(BridgeShared):
             self._inbox.remember_registered_chat(chat_id)
 
         update_id = int(update.get("update_id") or -1)
+        if update_id < 0:
+            raise PermanentUpdateError("Telegram update has no valid identity")
+        # The worker normally inserted this exact update before dispatch.  Keep
+        # the private processing seam independently safe as well: every model
+        # answer must have a durable delivery row before its first Telegram
+        # byte, including recovery/replay callers which invoke this method
+        # directly. ``store`` is INSERT-OR-IGNORE, so the worker-owned payload
+        # and its retry state are never overwritten.
+        self._inbox.store(update)
         archive_password = self._archive_passwords.get(update_id)
         pending_archive = self._inbox.archive_password_challenge(chat_id, int(external_user_id))
         password_followup = update.get("friday_archive_password_followup") is True
@@ -1323,6 +1408,7 @@ class CommandsMixin(BridgeShared):
                 # второй раз. Текст тот же самый — он взят из кеша, не из модели.
                 resume_key=int(update["update_id"]),
                 reply_source_message_id=str(response_to_send.get("message_id") or ""),
+                reply_to_message_id=message.get("message_id"),
             )
             await self._deliver_voice_reply(telegram, chat_id, response_to_send)
             await self._deliver_generated_files(telegram, chat_id, response_to_send)
@@ -1338,42 +1424,54 @@ class CommandsMixin(BridgeShared):
                 text = structured
                 force_knowledge = True
 
-        try:
-            prepared_documents: list[dict[str, Any]] = []
-            for media_message in album_messages or [message]:
+        prepared_documents: list[dict[str, Any]] = []
+        album_skipped_message_ids: set[int] = set()
+        for media_message in album_messages or [message]:
+            media_message_id = media_message.get("message_id")
+            album_message_id = (
+                media_message_id
+                if isinstance(media_message_id, int) and not isinstance(media_message_id, bool)
+                else None
+            )
+            if album_messages and album_message_id is None:
+                raise RuntimeError("Telegram album has invalid ordered message identity")
+            if album_messages and self._archive_document_descriptor(media_message) is not None:
+                assert album_message_id is not None
+                album_skipped_message_ids.add(album_message_id)
+                continue
+            try:
                 prepared = await self._prepare_document(telegram, media_message, update)
-                if prepared is not None:
-                    media_message_id = media_message.get("message_id")
-                    if isinstance(media_message_id, int) and not isinstance(media_message_id, bool):
-                        prepared["telegram_message_id"] = media_message_id
-                    prepared_documents.append(prepared)
-        except MediaTooLargeError as exc:
-            await register_backend_user()
-            # The exception text names the ACTUAL ceiling (Telegram's 20 MB or the
-            # configured limit) — the sender's next step depends on which it was.
-            await self._send_message(
-                telegram,
-                chat_id,
-                str(exc)
-                or "Файл слишком большой — Telegram-медиа превышает допустимый размер и не сохранено.",
-            )
-            return
-
-        if album_messages and len(prepared_documents) != len(album_messages):
-            raise PermanentUpdateError("Telegram album contains unsupported media")
-        if album_messages and any(
-            self._archive_document_descriptor(media_message) is not None for media_message in album_messages
-        ):
-            await self._send_message(
-                telegram,
-                chat_id,
-                "Архивы нужно присылать по одному: так пароль и результат относятся к точному файлу.",
-            )
-            return
+            except (MediaTooLargeError, PermanentUpdateError) as exc:
+                if album_messages:
+                    # One permanently invalid/oversized sibling is an explicit
+                    # terminal item, not authority to discard every valid row.
+                    # A single bounded warning is composed with the final album
+                    # response below; no second user-visible answer is sent.
+                    assert album_message_id is not None
+                    album_skipped_message_ids.add(album_message_id)
+                    continue
+                if isinstance(exc, MediaTooLargeError):
+                    await register_backend_user()
+                    await self._send_message(
+                        telegram,
+                        chat_id,
+                        str(exc)
+                        or "Файл слишком большой — Telegram-медиа превышает допустимый размер и не сохранено.",
+                    )
+                    return
+                raise
+            if prepared is None:
+                if album_messages:
+                    assert album_message_id is not None
+                    album_skipped_message_ids.add(album_message_id)
+                continue
+            if isinstance(media_message_id, int) and not isinstance(media_message_id, bool):
+                prepared["telegram_message_id"] = media_message_id
+            prepared_documents.append(prepared)
         documents = prepared_documents if album_messages else []
         document = prepared_documents[0] if prepared_documents and not album_messages else None
 
-        if not text and not document and not documents:
+        if not album_messages and not text and not document and not documents:
             await register_backend_user()
             label = self._unsupported_label(message)
             if label:
@@ -1399,9 +1497,13 @@ class CommandsMixin(BridgeShared):
             if replied_message_id > 0
             else ""
         )
-        if reply_source_message_id:
+        if reply_source_message_id and not album_messages:
             # Opaque backend identity only.  No quoted text, filename, Raw id or
             # attachment metadata becomes authority at the transport boundary.
+            # Albums are staged before their one model turn.  Preserve the old
+            # document-turn contract where an incidental quoted assistant reply
+            # cannot become a second attachment-authority lane merely because
+            # the final request carries stage ids instead of raw bytes.
             payload["reply_source_message_id"] = reply_source_message_id
         if forward:
             payload["forward"] = forward
@@ -1426,6 +1528,14 @@ class CommandsMixin(BridgeShared):
                     payload["reply_document_file_unique_id"] = unique_id
         if archive_password is not None:
             payload["archive_password"] = archive_password
+        if album_messages:
+            # Old album attempts used the anchor's single-update key.  A
+            # COMPLETE/uncertain legacy row must never replay over, or conflict
+            # with, the v2 staged turn.  Bind the new namespace to every
+            # ordered message identity and its prepared per-file source digest.
+            payload["source_ref"] = _album_final_source_ref(
+                int(update["update_id"]), album_messages, prepared_documents
+            )
         # На что человек ответил репликой. Прежде `reply_to_message` не читался
         # вовсе: человек отвечал на конкретное сообщение — своё или Пятницы, — и
         # связь терялась. Отдельным полем, а не приклеенным к тексту: текст хода
@@ -1435,14 +1545,127 @@ class CommandsMixin(BridgeShared):
             payload["reply_to"] = quoted
         typing_task = asyncio.create_task(self._typing_loop(telegram, chat_id))
         try:
-            response = await self._backend_json(
-                backend,
-                "POST",
-                "/api/chat",
-                payload,
-                external_user_id,
-                str(chat_id),
-            )
+            album_stage_receipts: list[dict[str, Any]] = []
+            ready_documents: list[dict[str, Any]] = []
+
+            async def stage_chunk(chunk: list[dict[str, Any]]) -> None:
+                stage_payload = {
+                    "message": "",
+                    "documents": chunk,
+                    "document_stage_only": True,
+                    "telegram_user": user,
+                }
+                try:
+                    stage_response = await self._backend_json(
+                        backend,
+                        "POST",
+                        "/api/chat",
+                        stage_payload,
+                        external_user_id,
+                        str(chat_id),
+                    )
+                except PermanentUpdateError as exc:
+                    if exc.status_code not in {400, 409, 413, 422}:
+                        raise
+                    if len(chunk) > 1:
+                        boundary = len(chunk) // 2
+                        await stage_chunk(chunk[:boundary])
+                        await stage_chunk(chunk[boundary:])
+                        return
+                    if exc.status_code == 409:
+                        # A singleton conflict can be a post-persist receipt
+                        # seam, not proof that this sibling is invalid.  Keep
+                        # the owned album retryable; successful siblings replay
+                        # by their exact source refs on the next attempt.
+                        raise RuntimeError("Telegram album stage is not yet converged") from exc
+                    album_skipped_message_ids.add(int(chunk[0]["telegram_message_id"]))
+                    return
+
+                receipts = stage_response.get("file_ingestions")
+                if not isinstance(receipts, list) or len(receipts) != len(chunk):
+                    raise RuntimeError("Backend returned an incomplete Telegram album stage")
+                for staged_document, item in zip(chunk, receipts, strict=True):
+                    expected = _telegram_item_receipt(staged_document)
+                    actual = item.get("telegram_item_receipt") if isinstance(item, dict) else None
+                    ready = item.get("telegram_stage_ready") if isinstance(item, dict) else None
+                    if (
+                        expected is None
+                        or not isinstance(actual, dict)
+                        or set(actual) != {"telegram_message_id", "source_ref_sha256"}
+                        or actual != expected
+                        or type(ready) is not bool
+                    ):
+                        raise RuntimeError("Backend returned an invalid Telegram album stage receipt")
+                    if not ready:
+                        album_skipped_message_ids.add(int(staged_document["telegram_message_id"]))
+                        continue
+                    ready_documents.append(staged_document)
+                    album_stage_receipts.append({"telegram_item_receipt": actual})
+
+            if album_messages:
+                # The backend bounds one document turn by total decoded bytes.
+                # Stage deterministic chunks under that same finite ceiling;
+                # a permanent aggregate rejection is bisected to singleton so
+                # one bad item never discards healthy siblings.
+                chunks: list[list[dict[str, Any]]] = []
+                current_chunk: list[dict[str, Any]] = []
+                current_bytes = 0
+                byte_limit = max(1, int(self.config.max_document_bytes))
+                for staged_document in documents:
+                    decoded_size = _prepared_document_size(staged_document)
+                    if decoded_size < 0 or decoded_size > byte_limit:
+                        album_skipped_message_ids.add(int(staged_document["telegram_message_id"]))
+                        continue
+                    if current_chunk and current_bytes + decoded_size > byte_limit:
+                        chunks.append(current_chunk)
+                        current_chunk = []
+                        current_bytes = 0
+                    current_chunk.append(staged_document)
+                    current_bytes += decoded_size
+                if current_chunk:
+                    chunks.append(current_chunk)
+                for chunk in chunks:
+                    await stage_chunk(chunk)
+
+                expected_message_ids = [int(item["message_id"]) for item in album_messages]
+                ready_message_ids = [int(item["telegram_message_id"]) for item in ready_documents]
+                if (
+                    len(set(ready_message_ids).union(album_skipped_message_ids)) != len(expected_message_ids)
+                    or set(ready_message_ids).intersection(album_skipped_message_ids)
+                    or set(expected_message_ids) != set(ready_message_ids).union(album_skipped_message_ids)
+                ):
+                    raise RuntimeError("Telegram album staging did not terminate every ordered sibling")
+                payload.pop("documents", None)
+                if ready_message_ids:
+                    payload["staged_document_message_ids"] = ready_message_ids
+
+            if album_messages and not ready_documents:
+                response = {
+                    "message": (
+                        "Не удалось принять ни одного файла из альбома. "
+                        f"Отклонено: {len(album_skipped_message_ids)}. "
+                        "Пришлите поддерживаемые файлы меньшего размера отдельными сообщениями."
+                    ),
+                    "message_format": "plain",
+                }
+            else:
+                response = await self._backend_json(
+                    backend,
+                    "POST",
+                    "/api/chat",
+                    payload,
+                    external_user_id,
+                    str(chat_id),
+                )
+            if album_messages:
+                response["file_ingestions"] = album_stage_receipts
+                if album_skipped_message_ids and ready_documents:
+                    response = dict(response)
+                    response["message"] = (
+                        f"⚠️ Не удалось принять {len(album_skipped_message_ids)} из "
+                        f"{len(album_messages)} файлов альбома; остальные обработаны.\n\n"
+                        f"{str(response.get('message') or '').strip()}"
+                    ).strip()
             if response.get("reply_media_recovery_required") is True:
                 if document is not None or documents or not isinstance(replied_to, dict):
                     raise PermanentUpdateError("Backend requested invalid reply media recovery")
@@ -1519,6 +1742,14 @@ class CommandsMixin(BridgeShared):
                     int(item.get("message_id") or 0) for item in album_messages
                 ]
             self._inbox.cache_backend_response(int(update["update_id"]), response_to_cache)
+        except PermanentUpdateError as exc:
+            if album_messages and exc.status_code == 409:
+                # A 409 after a persistent backend seam is not proof that every
+                # sibling is invalid. Keep the whole owned group retryable; its
+                # stable per-file source refs make already-received siblings
+                # replay-only while missing siblings continue.
+                raise RuntimeError("Telegram album backend state is not yet converged") from exc
+            raise
         finally:
             typing_task.cancel()
             await asyncio.gather(typing_task, return_exceptions=True)
@@ -1532,6 +1763,7 @@ class CommandsMixin(BridgeShared):
             # обрыва разрежет тот же текст и продолжит с места обрыва.
             resume_key=int(update["update_id"]),
             reply_source_message_id=str(response.get("message_id") or ""),
+            reply_to_message_id=message.get("message_id"),
         )
         await self._deliver_voice_reply(telegram, chat_id, response)
         await self._deliver_generated_files(telegram, chat_id, response)

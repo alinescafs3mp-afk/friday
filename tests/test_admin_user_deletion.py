@@ -17,13 +17,13 @@ from fastapi.testclient import TestClient
 
 from friday.account_deletion import (
     AccountDeletionConflict,
-    _account_directories,
+    _account_files_directory,
     _mark_account_deletion_history_clean,
     delete_account,
     preflight_account_deletion,
 )
 from friday.account_gate import AccountActivityGate, AccountGateClosed
-from friday.memory import VaultAccountWriteBlocked
+from friday.memory import VaultAccountWriteBlocked, _safe_component
 from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.server import create_app
 from friday.storage import (
@@ -51,7 +51,11 @@ def _headers(settings) -> dict[str, str]:
 def hard_delete_settings(settings):
     """Explicit test-only opt-in; production has no equivalent escape hatch."""
 
-    return replace(settings, account_hard_delete_enabled=True)
+    return replace(
+        settings,
+        account_hard_delete_enabled=True,
+        memory_vault_mode="full_owner",
+    )
 
 
 def _create_user(client: TestClient, settings, user_id: str, *, preset: str = "user") -> None:
@@ -193,7 +197,7 @@ def test_disabled_account_is_erased_with_access_sessions_data_and_audit(hard_del
                 {"user_ids": [target], "names": [marker]},
             )
 
-        _files_dir, target_vault_dir = _account_directories(storage, target)
+        target_vault_dir = storage.settings.memory_vault_dir / "users" / _safe_component(target)
         with pytest.raises(VaultAccountWriteBlocked):
             client.app.state.memory_vault.sync_object(
                 {
@@ -1338,7 +1342,7 @@ def test_nonempty_account_directory_blocks_without_reading_or_removing_it(storag
     target = "local:file-directory-delete"
     storage.ensure_user(target)
     storage.update_user(target, status="disabled")
-    files_dir, _vault_dir = _account_directories(storage, target)
+    files_dir = _account_files_directory(storage, target)
     files_dir.mkdir(parents=True)
     marker = files_dir / "must-survive.txt"
     marker.write_text("file body is not part of preflight", encoding="utf-8")

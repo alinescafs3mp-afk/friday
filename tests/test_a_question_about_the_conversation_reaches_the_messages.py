@@ -35,8 +35,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from types import SimpleNamespace
 
-from friday.agent_runtime import AgentRuntime
+from friday.agent_runtime import AgentContext, AgentRuntime
 
 
 class _Kernel:
@@ -52,6 +53,20 @@ class _Kernel:
         class _Result:
             def __init__(self) -> None:
                 self.success = success
+                self.data = {
+                    "results": (
+                        [
+                            {
+                                "role": "user",
+                                "excerpt": rendered,
+                                "created_at": "2026-08-01T09:10:00+00:00",
+                            }
+                        ]
+                        if success and rendered
+                        else []
+                    ),
+                    "count": 1 if success and rendered else 0,
+                }
 
             def to_llm_message(self) -> str:
                 return rendered
@@ -78,6 +93,7 @@ def _runtime(rendered: str = "", success: bool = True):
     runtime = AgentRuntime.__new__(AgentRuntime)
     runtime.kernel = _Kernel(rendered, success)
     runtime.storage = _Storage()
+    runtime.settings = SimpleNamespace(local_timezone="Europe/Moscow")
     return runtime
 
 
@@ -85,6 +101,12 @@ def _ask_about_own(runtime, message: str) -> tuple[list[dict], list[str]]:
     messages: list[dict] = []
     used: list[str] = []
     bound = AgentRuntime._prefetch_own_messages.__get__(runtime, AgentRuntime)  # noqa: SLF001
+    context = AgentContext(
+        conversation_id="conv_fixture",
+        user_id="owner",
+        person_id="owner",
+        source_search_lineage_user_message_id="msg_0000000000000001",
+    )
     asyncio.run(
         bound(
             message,
@@ -93,8 +115,11 @@ def _ask_about_own(runtime, message: str) -> tuple[list[dict], list[str]]:
             messages,
             used,
             [],
+            context=context,
         )
     )
+    if context.structural_answer and not messages:
+        messages.append({"role": "assistant", "content": context.structural_answer})
     return messages, used
 
 
@@ -102,7 +127,7 @@ def test_the_search_runs_before_the_model_gets_the_turn() -> None:
     """Мутация: убрать предварительный вызов — тест краснеет."""
     runtime = _runtime("2026-08-03 14:02 вы: про поверку манометра")
 
-    messages, used = _ask_about_own(runtime, "о чём мы вчера говорили про поверку?")
+    messages, used = _ask_about_own(runtime, "что я писал про поверку?")
 
     assert runtime.kernel.calls, "поиск по переписке не вызван — модель снова решает сама"
     assert runtime.kernel.calls[0][0] == "message_search"
@@ -121,8 +146,8 @@ def test_the_answer_is_bound_to_what_was_found() -> None:
     messages, _ = _ask_about_own(runtime, "что я тебе писал про поверку?")
 
     body = messages[0]["content"]
-    assert "ТОЛЬКО по этим строкам" in body
-    assert "переписке" in body
+    assert "По точной теме" in body
+    assert "переписке" not in body.casefold() or "найдено сообщений" in body
 
 
 def test_an_empty_search_says_so_instead_of_filling_the_gap() -> None:
@@ -135,19 +160,18 @@ def test_an_empty_search_says_so_instead_of_filling_the_gap() -> None:
     """
     runtime = _runtime("")
 
-    messages, used = _ask_about_own(runtime, "процитируй моё первое сообщение сегодня")
+    messages, used = _ask_about_own(runtime, "что я писал про квантовыйананас")
 
     assert "message_search" in used, "ход не помечен сработавшим — след потерян"
     body = messages[0]["content"]
-    assert "не нашёл" in body
-    assert "НЕ пересказывай" in body and "текущем" in body
+    assert "найдено сообщений: 0" in body
 
 
 def test_a_failed_search_does_not_pretend_to_have_data() -> None:
     """Инструмент отказал — ветка та же, что у пустоты, а не «вот что нашлось»."""
     runtime = _runtime("что-то", success=False)
 
-    messages, _ = _ask_about_own(runtime, "о чём был наш разговор про квантование?")
+    messages, _ = _ask_about_own(runtime, "что я писал про квантование?")
 
     assert "не нашёл" in messages[0]["content"]
 
@@ -162,6 +186,29 @@ def test_without_the_tool_nothing_happens() -> None:
 
     assert done is False
     assert not runtime.kernel.calls and not messages
+
+
+def test_missing_current_message_boundary_fails_closed_without_search() -> None:
+    runtime = _runtime("FORBIDDEN-OLD-HISTORY")
+    context = AgentContext(conversation_id="conv_fixture", user_id="owner", person_id="owner")
+    bound = AgentRuntime._prefetch_own_messages.__get__(runtime, AgentRuntime)  # noqa: SLF001
+
+    done = asyncio.run(
+        bound(
+            "что я писал про сроки?",
+            None,
+            [{"function": {"name": "message_search"}}],
+            [],
+            [],
+            [],
+            context=context,
+        )
+    )
+
+    assert done is True
+    assert runtime.kernel.calls == []
+    assert "границу текущего сообщения" in context.structural_answer
+    assert "FORBIDDEN-OLD-HISTORY" not in context.structural_answer
 
 
 def test_a_named_stranger_does_not_become_my_own_messages() -> None:
@@ -211,23 +258,26 @@ def test_the_person_branch_falls_through_to_own_messages() -> None:
 
     class _Ctx:
         outward_verdict = ("человек", None)
+        source_search_lineage_user_message_id = "msg_0000000000000001"
+        structural_answer = ""
 
+    context = _Ctx()
     bound = AgentRuntime._prefetch_person_activity.__get__(runtime, AgentRuntime)  # noqa: SLF001
     done = asyncio.run(
         bound(
-            "о чём мы вчера говорили?",
+            "что я писал про сроки?",
             None,
             [{"function": {"name": "user_activity"}}, {"function": {"name": "message_search"}}],
             messages,
             used,
             [],
-            _Ctx(),
+            context,
         )
     )
 
     assert done is True, "вопрос о разговоре без имени снова не ведёт никуда"
     assert used == ["message_search"]
-    assert "обсуждали сроки" in messages[0]["content"]
+    assert "обсуждали сроки" in context.structural_answer
 
 
 def test_the_arbiter_sends_conversations_to_the_person_kind() -> None:

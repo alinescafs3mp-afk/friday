@@ -68,6 +68,7 @@ def test_store_message_delegates_once_and_preserves_the_stored_row(
     conversation_id = str(conversation["id"])
     content = "Точная строка: 📦\n" + "x" * 210
     metadata = {"z": "Юникод", "a": {"n": 1}}
+    parent = storage.store_message(conversation_id, user_id, "user", "parent")
     created_at = "2026-08-18T10:20:30Z"
     message_id = "msg_transaction_exact"
     original = store_message_in_transaction
@@ -105,7 +106,7 @@ def test_store_message_delegates_once_and_preserves_the_stored_row(
         "assistant",
         content,
         metadata,
-        "msg_parent",
+        str(parent["id"]),
     )
 
     assert observed_connections == [storage.conn]
@@ -116,14 +117,17 @@ def test_store_message_delegates_once_and_preserves_the_stored_row(
         "role": "assistant",
         "content": content,
         "metadata_json": '{"a": {"n": 1}, "z": "Юникод"}',
-        "reply_to": "msg_parent",
+        "reply_to": parent["id"],
         "created_at": created_at,
     }
     rows = storage.execute(
         "SELECT * FROM messages WHERE conversation_id=? AND user_id=?",
         (conversation_id, user_id),
     ).fetchall()
-    assert [dict(row) for row in rows] == [stored]
+    assert {str(row["id"]): dict(row) for row in rows} == {
+        str(parent["id"]): parent,
+        str(stored["id"]): stored,
+    }
     assert stored["content"].encode("utf-8") == content.encode("utf-8")
     assert stored["metadata_json"].encode("utf-8") == (
         b'{"a": {"n": 1}, "z": "\xd0\xae\xd0\xbd\xd0\xb8\xd0\xba\xd0\xbe\xd0\xb4"}'

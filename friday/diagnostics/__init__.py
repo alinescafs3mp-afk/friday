@@ -27,6 +27,7 @@ from friday.diagnostics.runtime_lease import (
     inspect_process_lease,
     process_owns_lease,
 )
+from friday.memory import MemoryVaultDeletionHandle, VaultProjectionBoundaryError
 from friday.telemetry import SystemTelemetry
 from friday.telemetry.logging import redact_text
 
@@ -41,6 +42,47 @@ def _path_status(path: Path) -> dict[str, Any]:
         "is_directory": path.is_dir(),
         "readable": os.access(path, os.R_OK) if path.exists() else False,
         "writable": os.access(path, os.W_OK) if path.exists() else os.access(path.parent, os.W_OK),
+    }
+
+
+def _memory_vault_projection_status(settings: FridaySettings) -> dict[str, Any]:
+    """Return body-free projection facts without opening a Markdown note.
+
+    A disabled projector must not erase a pre-existing projection automatically:
+    those files may be the operator's last intentional export.  Diagnostics only
+    inventories regular artifacts (including crash-temporary files and unexpected
+    users-level entries) in the code-owned layout and publishes only a note count
+    plus presence/completeness; paths, filenames and file bodies never enter the result.
+    """
+
+    try:
+        root_present, count, projection_artifact_present, scan_complete = MemoryVaultDeletionHandle(
+            settings.memory_vault_dir
+        ).inventory_projection()
+    except VaultProjectionBoundaryError:
+        # A refused no-follow boundary says nothing about lexical existence: the
+        # root itself, an ancestor, or ``users`` may be a symlink.  Reporting
+        # ``False`` would contradict the generic path inventory and falsely turn
+        # "not safely inspectable" into "absent".
+        root_present, count, projection_artifact_present, scan_complete = None, 0, False, False
+
+    legacy_present: bool | None
+    if settings.memory_vault_mode != "disabled":
+        legacy_present = False
+    elif projection_artifact_present:
+        legacy_present = True
+    elif scan_complete:
+        legacy_present = False
+    else:
+        legacy_present = None
+    return {
+        "mode": settings.memory_vault_mode,
+        "body_free_mode": settings.memory_vault_mode == "disabled",
+        "body_projection_enabled": settings.memory_vault_mode == "full_owner",
+        "projection_root_present": root_present,
+        "projection_note_count": count,
+        "legacy_projection_present": legacy_present,
+        "scan_complete": scan_complete,
     }
 
 
@@ -573,6 +615,32 @@ def _worker_status(
             "tasks": {},
             "error": f"{type(exc).__name__}: {exc}",
         }
+
+
+def _configured_worker_status(
+    settings: FridaySettings,
+    status: dict[str, Any],
+) -> dict[str, Any]:
+    """Do not diagnose a retired plaintext projector as a live stalled task."""
+
+    if settings.memory_vault_mode != "disabled":
+        return status
+    tasks_value = status.get("tasks")
+    if not isinstance(tasks_value, dict) or "memory_vault_sync" not in tasks_value:
+        return status
+    projected = dict(status)
+    tasks = dict(tasks_value)
+    tasks.pop("memory_vault_sync", None)
+    projected["tasks"] = tasks
+    projected["task_count"] = len(tasks)
+    for key in ("degraded_tasks", "stale_tasks"):
+        values = projected.get(key)
+        if isinstance(values, list):
+            projected[key] = sorted(str(value) for value in values if value != "memory_vault_sync")
+    if projected.get("state") in {"ready", "no_history"}:
+        projected["state"] = "ready" if tasks else "no_history"
+        projected["healthy"] = not projected.get("degraded_tasks") and not projected.get("stale_tasks")
+    return projected
 
 
 def _bridge_queue_status(path: Path) -> dict[str, Any]:
@@ -1413,6 +1481,7 @@ def _active_backend_diagnostics_unavailable(
     """Fail closed without mapping the live main database in this process."""
 
     configuration = validate_settings(settings, production=not settings.is_loopback_bind)
+    memory_vault = _memory_vault_projection_status(settings)
     actions: list[dict[str, Any]] = []
 
     def add_action(
@@ -1439,6 +1508,24 @@ def _active_backend_diagnostics_unavailable(
             "warning" if warning else "error",
             "Проверьте конфигурацию",
             issue.removeprefix("warning:").strip(),
+            "jericho doctor",
+        )
+    if memory_vault["legacy_projection_present"] is True:
+        add_action(
+            "legacy_memory_vault_projection",
+            "warning",
+            "Отключённая Markdown-проекция всё ещё существует",
+            f"Найдено полнотекстовых заметок проекции: "
+            f"{memory_vault['projection_note_count']}. "
+            "Friday не читает и не удаляет их автоматически; сначала проверьте "
+            "назначение и резервную копию, затем выберите отдельный план remediation.",
+        )
+    elif memory_vault["legacy_projection_present"] is None:
+        add_action(
+            "legacy_memory_vault_projection_uninspected",
+            "warning",
+            "Отключённую Markdown-проекцию не удалось полностью проверить",
+            "Friday не читал и не изменял файлы проекции; проверьте каталог локально.",
             "jericho doctor",
         )
     add_action(
@@ -1483,6 +1570,7 @@ def _active_backend_diagnostics_unavailable(
         "bridge_queue": _bridge_queue_status_without_live_open(settings.state_dir / "telegram-inbox.sqlite3"),
         "auth_failures": {"state": "active_backend_uninspected"},
         "embeddings_index": {"available": False},
+        "memory_vault": memory_vault,
         "runtime": SystemTelemetry(settings.home).snapshot(),
         "features": {
             "llm_enabled": settings.llm_enabled,
@@ -1656,9 +1744,11 @@ def _collect_diagnostics_under_boundary(
     else:
         database = storage.diagnostics()
         workers = _worker_status(settings, storage)
+    workers = _configured_worker_status(settings, workers)
 
     configuration = validate_settings(settings, production=not settings.is_loopback_bind)
     backups = _latest_backup_status(settings.backups_dir)
+    memory_vault = _memory_vault_projection_status(settings)
     bridge_queue = _bridge_queue_status_without_live_open(settings.state_dir / "telegram-inbox.sqlite3")
     if not backend_active and workers.get("stale_tasks"):
         # A stopped backend naturally has old worker timestamps.  Keep the
@@ -1694,6 +1784,24 @@ def _collect_diagnostics_under_boundary(
             "warning" if warning else "error",
             "Проверьте конфигурацию",
             issue.removeprefix("warning:").strip(),
+            "jericho doctor",
+        )
+    if memory_vault["legacy_projection_present"] is True:
+        add_action(
+            "legacy_memory_vault_projection",
+            "warning",
+            "Отключённая Markdown-проекция всё ещё существует",
+            f"Найдено полнотекстовых заметок проекции: "
+            f"{memory_vault['projection_note_count']}. "
+            "Friday не читает и не удаляет их автоматически; сначала проверьте "
+            "назначение и резервную копию, затем выберите отдельный план remediation.",
+        )
+    elif memory_vault["legacy_projection_present"] is None:
+        add_action(
+            "legacy_memory_vault_projection_uninspected",
+            "warning",
+            "Отключённую Markdown-проекцию не удалось полностью проверить",
+            "Friday не читал и не изменял файлы проекции; проверьте каталог локально.",
             "jericho doctor",
         )
     if check_secrets:
@@ -1959,6 +2067,7 @@ def _collect_diagnostics_under_boundary(
         "bridge_queue": bridge_queue,
         "auth_failures": auth_failures,
         "embeddings_index": embeddings_coverage,
+        "memory_vault": memory_vault,
         "runtime": SystemTelemetry(settings.home).snapshot(),
         "features": {
             "llm_enabled": settings.llm_enabled,

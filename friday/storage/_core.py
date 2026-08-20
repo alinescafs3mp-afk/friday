@@ -2432,6 +2432,8 @@ class CoreMixin(StorageShared):
                 if parsed_version == 31:
                     _upgrade_relation_history_31_to_32(conn)
                     self._validate_relation_history_schema(conn, SCHEMA_VERSION)
+            if parsed_version is not None and parsed_version >= 34:
+                self._validate_file_source_alias_schema(conn)
             self._execute_statements(conn, CORE_TABLE_SCHEMA)
             if not already_current:
                 self._migrate_legacy_schema(conn)
@@ -2466,6 +2468,7 @@ class CoreMixin(StorageShared):
             audit_privacy_pending = _sanitize_legacy_audit_log(conn)
             idempotency_privacy_pending = _invalidate_legacy_idempotency_responses(conn)
             self._execute_statements(conn, CORE_INDEX_SCHEMA)
+            self._validate_file_source_alias_schema(conn)
             if not already_current:
                 # The marker is a durable proof, not an optimistic target. Run
                 # the current contract again after every legacy/privacy step so
@@ -2813,6 +2816,171 @@ class CoreMixin(StorageShared):
         return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
     @staticmethod
+    def _validate_file_source_alias_schema(conn: sqlite3.Connection) -> None:
+        """Fail closed on a schema-34 alias column/guard that was weakened."""
+
+        columns = {str(row[1]): row for row in conn.execute("PRAGMA table_info(file_source_aliases)")}
+        supplied = columns.get("supplied_filename")
+        if (
+            supplied is None
+            or str(supplied[2]).upper() != "TEXT"
+            or int(supplied[3]) != 1
+            or str(supplied[4] or "") != "''"
+        ):
+            raise UnsupportedSchemaVersionError(
+                "Schema 34 file source alias filename column is missing or weakened"
+            )
+        invalid = conn.execute(
+            """SELECT 1 FROM file_source_aliases a
+                WHERE length(a.supplied_filename)>260
+                   OR instr(a.supplied_filename,'/')<>0
+                   OR instr(a.supplied_filename,'\\')<>0
+                   OR instr(a.supplied_filename,char(0))<>0
+                   OR instr(a.supplied_filename,char(10))<>0
+                   OR instr(a.supplied_filename,char(13))<>0
+                   OR (substr(a.source_ref,1,20)='friday-message-name:'
+                       AND a.supplied_filename='')
+                   OR (a.supplied_filename<>''
+                       AND substr(a.source_ref,1,14)<>'telegram-file:'
+                       AND NOT (length(a.source_ref)=40
+                                AND substr(a.source_ref,1,24)='friday-message-name:msg_'
+                                AND substr(a.source_ref,25,16) NOT GLOB '*[^0-9a-f]*'))
+                   OR (a.supplied_filename<>''
+                       AND length(a.source_ref)=40
+                       AND substr(a.source_ref,1,24)='friday-message-name:msg_'
+                       AND (NOT EXISTS (
+                           SELECT 1 FROM messages m
+                           JOIN conversations c
+                             ON c.id=m.conversation_id AND c.user_id=m.user_id
+                           WHERE m.id=substr(a.source_ref,21,20)
+                             AND m.user_id=a.user_id AND m.role='user'
+                             AND m.content='Загружен документ: ' || a.supplied_filename
+                             AND json_valid(m.metadata_json)
+                             AND json_type(m.metadata_json,'$.synthetic_document_notice')='true'
+                             AND json_array_length(
+                                     m.metadata_json,
+                                     '$.conversation_attachment_raw_ids'
+                                 )=1
+                             AND json_array_length(
+                                     m.metadata_json,
+                                     '$.conversation_uploaded_raw_ids'
+                                 )=1
+                             AND json_extract(
+                                     m.metadata_json,
+                                     '$.conversation_attachment_raw_ids[0]'
+                                 )=a.raw_object_id
+                             AND json_extract(
+                                     m.metadata_json,
+                                     '$.conversation_uploaded_raw_ids[0]'
+                                 )=a.raw_object_id
+                       ) OR NOT EXISTS (
+                           SELECT 1 FROM raw_objects r
+                           JOIN users exact_alias_uploader
+                             ON exact_alias_uploader.id=a.uploaded_by
+                            AND exact_alias_uploader.status='active'
+                           WHERE r.id=a.raw_object_id AND r.user_id=a.user_id
+                             AND r.source='upload' AND r.content_type='file'
+                             AND r.deleted_at IS NULL
+                             AND CASE
+                               WHEN length(CAST(COALESCE(r.metadata_json,'') AS BLOB)) <= 131072
+                                AND typeof(r.metadata_json)='text'
+                                AND json_valid(r.metadata_json)
+                               THEN CASE
+                                 WHEN json_type(r.metadata_json)='object'
+                                  AND NOT EXISTS (
+                                        SELECT 1 FROM json_tree(r.metadata_json)
+                                                       uploader_json_member
+                                         WHERE uploader_json_member.key IS NOT NULL
+                                         GROUP BY uploader_json_member.parent,
+                                                  CAST(uploader_json_member.key AS TEXT)
+                                        HAVING COUNT(*) > 1
+                                      )
+                                  AND json_type(r.metadata_json,'$.uploaded_by')='text'
+                                 THEN json_extract(r.metadata_json,'$.uploaded_by')=a.uploaded_by
+                                 ELSE 0
+                               END
+                               ELSE 0
+                             END
+                       )))
+                LIMIT 1"""
+        ).fetchone()
+        if invalid is not None:
+            raise UnsupportedSchemaVersionError(
+                "Schema 34 file source alias filename data violates its invariant"
+            )
+        required: dict[str, tuple[str, ...]] = {
+            "file_source_alias_filename_insert_guard": (
+                "before insert on file_source_aliases",
+                "length(new.supplied_filename) > 260",
+                "instr(new.supplied_filename, '/')",
+                "instr(new.supplied_filename, '\\')",
+                "char(0)",
+                "char(10)",
+                "char(13)",
+                "telegram-file:",
+                "friday-message-name:msg_",
+                "length(new.source_ref) = 40",
+                "exact_alias_uploader.id=new.uploaded_by",
+                "exact_alias_uploader.status='active'",
+                "m.id=substr(new.source_ref,21,20)",
+                "m.user_id=new.user_id and m.role='user'",
+                "m.content='загружен документ: ' || new.supplied_filename",
+                "synthetic_document_notice",
+                "conversation_attachment_raw_ids",
+                "conversation_uploaded_raw_ids",
+                "r.id=new.raw_object_id and r.user_id=new.user_id",
+                "r.source='upload' and r.content_type='file'",
+                "json_extract(r.metadata_json,'$.uploaded_by')=new.uploaded_by",
+            ),
+            "file_source_alias_filename_update_guard": (
+                "before update of supplied_filename on file_source_aliases",
+                "old.supplied_filename <> '' and new.supplied_filename <> old.supplied_filename",
+                "length(new.supplied_filename) > 260",
+                "instr(new.supplied_filename, '/')",
+                "instr(new.supplied_filename, '\\')",
+                "char(0)",
+                "char(10)",
+                "char(13)",
+                "telegram-file:",
+                "friday-message-name:msg_",
+                "length(new.source_ref) = 40",
+                "exact_alias_uploader.id=new.uploaded_by",
+                "exact_alias_uploader.status='active'",
+                "m.id=substr(new.source_ref,21,20)",
+                "m.user_id=new.user_id and m.role='user'",
+                "m.content='загружен документ: ' || new.supplied_filename",
+                "synthetic_document_notice",
+                "conversation_attachment_raw_ids",
+                "conversation_uploaded_raw_ids",
+                "r.id=new.raw_object_id and r.user_id=new.user_id",
+                "r.source='upload' and r.content_type='file'",
+                "json_extract(r.metadata_json,'$.uploaded_by')=new.uploaded_by",
+            ),
+            "file_source_alias_identity_update_guard": (
+                "before update of user_id, uploaded_by, source_ref, raw_object_id, created_at",
+                "new.user_id is not old.user_id",
+                "new.uploaded_by is not old.uploaded_by",
+                "new.source_ref is not old.source_ref",
+                "new.raw_object_id is not old.raw_object_id",
+                "new.created_at is not old.created_at",
+            ),
+        }
+        rows = conn.execute(
+            """SELECT name, sql FROM sqlite_master
+                WHERE type='trigger' AND name IN (?, ?, ?)""",
+            tuple(required),
+        ).fetchall()
+        definitions = {str(row["name"]): " ".join(str(row["sql"] or "").casefold().split()) for row in rows}
+        if any(
+            name not in definitions
+            or any(fragment.casefold() not in definitions[name] for fragment in fragments)
+            for name, fragments in required.items()
+        ):
+            raise UnsupportedSchemaVersionError(
+                "Schema 34 file source alias filename guards are missing or weakened"
+            )
+
+    @staticmethod
     def _widen_mission_task_states(conn: sqlite3.Connection, table_names: set[str]) -> None:
         """Разрешить шагам миссии состояния восстановления.
 
@@ -3007,6 +3175,11 @@ class CoreMixin(StorageShared):
             # with. '' means "not chunked" -- exactly what every pre-0.41 row already
             # stores, so turning chunking off re-indexes nothing.
             "knowledge_embeddings": {"chunk_scheme": "TEXT NOT NULL DEFAULT ''"},
+            # Schema 34: preserve the basename attached to a deduplicated
+            # transport identity without rewriting the canonical Raw metadata.
+            "file_source_aliases": {
+                "supplied_filename": "TEXT NOT NULL DEFAULT ''",
+            },
             # Время связи (схема 27). Пустой `valid_from` у прежних строк — это
             # «начало неизвестно», и оно НЕ подменяется датой записи: `created_at`
             # говорит, когда мы узнали, а не когда стало правдой. Выдать одно за

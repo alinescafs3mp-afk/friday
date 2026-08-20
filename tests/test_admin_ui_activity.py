@@ -129,9 +129,51 @@ def test_the_activity_screen_works_in_a_browser(live_admin):
                 problems.append(f"missing block: {block}")
 
         # The name box: an inflected Cyrillic spelling has to reach the account.
-        page.fill("#activityName", "Ивану")
-        page.dispatch_event("#activityName", "change")
-        expect(page.locator("#app")).to_contain_text("Иван", timeout=5_000)
+        # Иван can already be the selected account (the fixture's timestamps tie,
+        # and the stable id tiebreaker puts usr_ivan first).  Waiting merely for
+        # the word «Иван» therefore accepted the OLD render.  The asynchronous
+        # change handler could clear it to «Загрузка…» one instruction later, so
+        # a saturated full gate sometimes counted zero rows.  Hold the resulting
+        # activity response briefly to make that intermediate state deterministic,
+        # then wait for both requests and the notice produced by THIS search.
+        activity_delayed = False
+
+        def delay_first_ivan_activity(route) -> None:
+            nonlocal activity_delayed
+            if not activity_delayed:
+                activity_delayed = True
+                time.sleep(0.35)
+            route.continue_()
+
+        activity_route = "**/api/admin/users/usr_ivan/activity**"
+        page.route(activity_route, delay_first_ivan_activity)
+        with (
+            page.expect_response(
+                lambda response: "/api/admin/users/resolve?" in response.url,
+                timeout=5_000,
+            ) as resolved,
+            page.expect_response(
+                lambda response: "/api/admin/users/usr_ivan/activity?" in response.url,
+                timeout=5_000,
+            ) as activity_loaded,
+            page.expect_request(
+                lambda request: "/api/admin/users/usr_ivan/activity?" in request.url,
+                timeout=5_000,
+            ) as activity_started,
+        ):
+            page.fill("#activityName", "Ивану")
+            page.dispatch_event("#activityName", "change")
+            assert activity_started.value.method == "GET"
+        assert resolved.value.ok, f"name resolution returned HTTP {resolved.value.status}"
+        assert activity_loaded.value.ok, (
+            f"resolved account activity returned HTTP {activity_loaded.value.status}"
+        )
+        assert activity_delayed, "the deterministic search-response delay did not apply"
+        page.unroute(activity_route, delay_first_ivan_activity)
+        expect(page.locator("#app h2").first).to_have_text("Активность: Иван", timeout=5_000)
+        expect(page.locator("#app .notice", has_text="Найден:")).to_contain_text(
+            "Найден: Иван", timeout=5_000
+        )
         body = page.locator("#app").inner_text()
         if "Иван" not in body:
             problems.append("«Ивану» did not resolve to the account")
@@ -139,8 +181,7 @@ def test_the_activity_screen_works_in_a_browser(live_admin):
             problems.append("another account's row appeared in this account's activity")
 
         rows = page.locator("#app table tbody tr")
-        if rows.count() != 7:
-            problems.append(f"expected the 7 seeded arrivals, rendered {rows.count()}")
+        expect(rows).to_have_count(7, timeout=5_000)
 
         show = page.locator("#app table tbody tr button", has_text="Показать").first
         show.click()

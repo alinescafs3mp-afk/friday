@@ -51,6 +51,16 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - worker timeout/partial batch health;
 - backend/bridge singleton leases;
 - backup verification, restore, safety backup и rollback.
+- история: local-time half-open окна, автопагинация, current-message boundary,
+  thematic query и hostile historical text как untrusted data;
+- файлы: filename/body union, durable upload aliases, `ё/е`, active-result selection
+  и exact uploader/privacy reauthorization;
+- PDF/JPEG/OCR: mandatory ordered `pages[]`, singleton fallback и unreadable boundary
+  без ложного `empty_text` success;
+- Telegram: per-sibling album receipts, partial replay, crash/timeout uncertainty fence,
+  reply edges и request-id correlation;
+- weather без явного города не идёт в web; diagnostics требует exact
+  capability, а MCP status строится из code-owned projection.
 
 Для V12 file/archive slice дополнительно:
 
@@ -68,7 +78,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   `40960`, running/Mamba cache `6`, `mem_fraction_static=0.90`, FP8 E4M3 KV,
   Radix/speculation off, full decode CUDA graph batches `1..6`, prefill graph off,
   FlashInfer attention, CPU MM transport и limits `image=4,video=0,audio=0`;
-- final startup health имеет `status=ok`, `version=0.205.0`, configured/installed
+- final startup health имеет `status=ok`, `version=0.206.0rc0`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
@@ -95,9 +105,9 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 
 Проверить:
 
-- schema version = 33;
-- между 0.204.2 и 0.205.0 нет migration; model-gate episode использует
-  существующий `runtime_kv`, а alerts — существующую notification queue;
+- schema version = 34;
+- schema 33 → 34 добавляет только message-bound `supplied_filename`; repair
+  требует exact owner/message/raw correlation и не переписывает canonical Raw;
 - counts старых строк не изменились без предусмотренной миграции;
 - `integrity_check=ok`, foreign-key violations = 0;
 - FTS/retrieval работают;
@@ -130,9 +140,68 @@ Wheel:
 - импорт идёт из `site-packages`;
 - package/runtime/CLI version совпадают;
 - Admin UI package data присутствует;
-- `pip check` clean.
+- `pip check` clean;
+- metadata содержит `venv_relocation_contract=absolute-final-v1`;
+- после удаления `__pycache__` exhaustive byte-scan всего дерева и symlink targets
+  не находит ни одной ссылки на staging root;
+- каждый установленный console script имеет exact final
+  `<RELEASE>/venv/bin/python` shebang и ровно одну совпадающую hash/size строку
+  `*.dist-info/RECORD`; `activate`, `activate.csh`, `activate.fish` и
+  `pyvenv.cfg` связаны с тем же final venv;
+- прямые `<RELEASE>/venv/bin/friday --help`, `jericho --help` и
+  `pip --version` проходят до и после атомарной публикации;
+- hermetic Bash source-smoke до публикации подтверждает effective
+  `VIRTUAL_ENV`/первый элемент `PATH`, а после публикации — также exact
+  `command -v python`, `sys.prefix` и `sys.executable`.
 
 Wheel, построенный из чисто распакованного ZIP, должен совпасть с опубликованным wheel.
+
+Единственный release path:
+
+```text
+<SOURCE_PYTHON> -I -B tools/immutable_release_operator.py build ...
+<CANDIDATE>/venv/bin/python -I -B \
+  <CANDIDATE>/artifacts/immutable_release_operator.py install-units ...
+<CANDIDATE>/venv/bin/python -I -B \
+  <CANDIDATE>/artifacts/immutable_release_operator.py activate ...
+<EXECUTOR>/venv/bin/python -I -B \
+  <EXECUTOR>/artifacts/immutable_release_operator.py recover-activation ...
+<CANDIDATE>/venv/bin/python -I -B \
+  <CANDIDATE>/artifacts/immutable_release_operator.py recover-historical-album ...
+```
+
+`install-units`, `activate` и recovery не запускаются из source tree: только
+sealed interpreter и копия оператора, связанные с exact release tree. Оператор
+управляет только `friday-backend.service` и `friday-bridge.service`.
+Ошибка проверки после атомарной публикации не удаляет уже видимое immutable-имя
+commit и не разрешает retry того же commit: sibling остаётся quarantined без
+clear receipt, а исправление получает новый commit.
+
+Phase-A retry без уже потреблённых alias claims допустим после terminal
+`rolled_back` или `recovered` только при неизменных persistent/retry scopes,
+доказанных DB mutation + network uncertainty + `writer_target=fallback`, exact
+том же candidate и lineage, где прежний fallback становится одновременно
+previous и fallback. Любое отсутствие evidence либо смена env/path/health/unit
+identity остаётся release-blocking.
+
+`recover-historical-album` не считается успешным после CAS и restart. CAS receipt
+имеет только `status=pending`; final `status=clear` требует, чтобы exact final
+bridge фактически завершил единый десятистрочный album turn, а оператор дважды
+прочитал inbox в `mode=ro/query_only`, увидел отсутствие всех десяти exact rows и
+между наблюдениями повторно принял identity bridge. Gate ограничен 600 секундами
+и crash-resumable из `bridge_accepted`; timeout, частичное исчезновение или новый
+`dead_letter` не создают completion receipt. Повтор terminal-команды заново
+проверяет durable отсутствие строк, а не доверяет одному journal-флагу.
+
+Перед переключением оба writer-процесса останавливаются, а SQLite, WAL и Telegram
+inbox копируются и проверяются как один recovery set. Candidate устанавливается
+только из wheel в новый sealed release root; backend проходит exact process и
+TLS `/api/health` gate до запуска bridge. Release anchor меняется атомарно.
+До любой попытки запуска candidate backend можно вернуть previous anchor и exact
+schema-33 DB/inbox snapshot. Начиная с `backend_start_attempted`, даже до health и
+запуска bridge, старый snapshot не восстанавливается и schema-33 binary не
+запускается; rollback идёт на заранее собранный sealed schema-34 fallback.
+Поштучная замена файлов внутри установленного venv запрещена.
 
 ## 6. Installed-package smoke
 

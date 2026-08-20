@@ -132,7 +132,10 @@ LOGGER = logging.getLogger("friday.storage")
 # 33 — immutable aliases for file transport identities. Content deduplication
 # deliberately reuses one Raw Object, but every successful Telegram re-upload
 # still needs its fresh file_id to resolve back to that canonical object.
-SCHEMA_VERSION = 33
+# 34 — the immutable transport alias also preserves the bounded basename that
+# arrived with that exact carrier. Dedup may keep an older canonical Raw name;
+# later exact filename lookup must still find the name the user actually sent.
+SCHEMA_VERSION = 34
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно
@@ -477,6 +480,20 @@ CREATE TABLE IF NOT EXISTS file_source_aliases (
     uploaded_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     source_ref TEXT NOT NULL,
     raw_object_id TEXT NOT NULL REFERENCES raw_objects(id) ON DELETE CASCADE,
+    supplied_filename TEXT NOT NULL DEFAULT ''
+        CHECK(length(supplied_filename) <= 260
+              AND instr(supplied_filename, '/') = 0
+              AND instr(supplied_filename, '\\') = 0
+              AND instr(supplied_filename, char(0)) = 0
+              AND instr(supplied_filename, char(10)) = 0
+              AND instr(supplied_filename, char(13)) = 0
+              AND (substr(source_ref,1,20) <> 'friday-message-name:'
+                   OR supplied_filename <> '')
+              AND (supplied_filename = ''
+                   OR substr(source_ref,1,14) = 'telegram-file:'
+                   OR (length(source_ref) = 40
+                       AND substr(source_ref,1,24) = 'friday-message-name:msg_'
+                       AND substr(source_ref,25,16) NOT GLOB '*[^0-9a-f]*'))),
     created_at TEXT NOT NULL,
     PRIMARY KEY (user_id, uploaded_by, source_ref)
 );
@@ -1169,6 +1186,140 @@ CREATE INDEX IF NOT EXISTS idx_raw_content_hash
     ON raw_objects(user_id, source, content_hash) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_file_source_alias_raw
     ON file_source_aliases(user_id, raw_object_id);
+CREATE TRIGGER IF NOT EXISTS file_source_alias_filename_insert_guard
+BEFORE INSERT ON file_source_aliases
+WHEN length(NEW.supplied_filename) > 260
+  OR instr(NEW.supplied_filename, '/') <> 0
+  OR instr(NEW.supplied_filename, '\\') <> 0
+  OR instr(NEW.supplied_filename, char(0)) <> 0
+  OR instr(NEW.supplied_filename, char(10)) <> 0
+  OR instr(NEW.supplied_filename, char(13)) <> 0
+  OR (substr(NEW.source_ref,1,20) = 'friday-message-name:'
+      AND NEW.supplied_filename = '')
+  OR (NEW.supplied_filename <> ''
+      AND substr(NEW.source_ref,1,14) <> 'telegram-file:'
+      AND NOT (length(NEW.source_ref) = 40
+               AND substr(NEW.source_ref,1,24) = 'friday-message-name:msg_'
+               AND substr(NEW.source_ref,25,16) NOT GLOB '*[^0-9a-f]*'))
+  OR (NEW.supplied_filename <> ''
+      AND length(NEW.source_ref) = 40
+      AND substr(NEW.source_ref,1,24) = 'friday-message-name:msg_'
+      AND (NOT EXISTS (
+          SELECT 1 FROM messages m
+          JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id
+          WHERE m.id=substr(NEW.source_ref,21,20)
+            AND m.user_id=NEW.user_id AND m.role='user'
+            AND m.content='Загружен документ: ' || NEW.supplied_filename
+            AND json_valid(m.metadata_json)
+            AND json_type(m.metadata_json,'$.synthetic_document_notice')='true'
+            AND json_array_length(m.metadata_json,'$.conversation_attachment_raw_ids')=1
+            AND json_array_length(m.metadata_json,'$.conversation_uploaded_raw_ids')=1
+            AND json_extract(m.metadata_json,'$.conversation_attachment_raw_ids[0]')=NEW.raw_object_id
+            AND json_extract(m.metadata_json,'$.conversation_uploaded_raw_ids[0]')=NEW.raw_object_id
+      ) OR NOT EXISTS (
+          SELECT 1 FROM raw_objects r
+          JOIN users exact_alias_uploader
+            ON exact_alias_uploader.id=NEW.uploaded_by
+           AND exact_alias_uploader.status='active'
+          WHERE r.id=NEW.raw_object_id AND r.user_id=NEW.user_id
+            AND r.source='upload' AND r.content_type='file'
+            AND r.deleted_at IS NULL
+            AND CASE
+              WHEN length(CAST(COALESCE(r.metadata_json,'') AS BLOB)) <= 131072
+               AND typeof(r.metadata_json)='text'
+               AND json_valid(r.metadata_json)
+              THEN CASE
+                WHEN json_type(r.metadata_json)='object'
+                 AND NOT EXISTS (
+                       SELECT 1 FROM json_tree(r.metadata_json) uploader_json_member
+                        WHERE uploader_json_member.key IS NOT NULL
+                        GROUP BY uploader_json_member.parent,
+                                 CAST(uploader_json_member.key AS TEXT)
+                       HAVING COUNT(*) > 1
+                     )
+                 AND json_type(r.metadata_json,'$.uploaded_by')='text'
+                THEN json_extract(r.metadata_json,'$.uploaded_by')=NEW.uploaded_by
+                ELSE 0
+              END
+              ELSE 0
+            END
+      )))
+BEGIN
+    SELECT RAISE(ABORT, 'invalid file source alias filename');
+END;
+CREATE TRIGGER IF NOT EXISTS file_source_alias_filename_update_guard
+BEFORE UPDATE OF supplied_filename ON file_source_aliases
+WHEN (OLD.supplied_filename <> '' AND NEW.supplied_filename <> OLD.supplied_filename)
+  OR length(NEW.supplied_filename) > 260
+  OR instr(NEW.supplied_filename, '/') <> 0
+  OR instr(NEW.supplied_filename, '\\') <> 0
+  OR instr(NEW.supplied_filename, char(0)) <> 0
+  OR instr(NEW.supplied_filename, char(10)) <> 0
+  OR instr(NEW.supplied_filename, char(13)) <> 0
+  OR (substr(NEW.source_ref,1,20) = 'friday-message-name:'
+      AND NEW.supplied_filename = '')
+  OR (NEW.supplied_filename <> ''
+      AND substr(NEW.source_ref,1,14) <> 'telegram-file:'
+      AND NOT (length(NEW.source_ref) = 40
+               AND substr(NEW.source_ref,1,24) = 'friday-message-name:msg_'
+               AND substr(NEW.source_ref,25,16) NOT GLOB '*[^0-9a-f]*'))
+  OR (NEW.supplied_filename <> ''
+      AND length(NEW.source_ref) = 40
+      AND substr(NEW.source_ref,1,24) = 'friday-message-name:msg_'
+      AND (NOT EXISTS (
+          SELECT 1 FROM messages m
+          JOIN conversations c ON c.id=m.conversation_id AND c.user_id=m.user_id
+          WHERE m.id=substr(NEW.source_ref,21,20)
+            AND m.user_id=NEW.user_id AND m.role='user'
+            AND m.content='Загружен документ: ' || NEW.supplied_filename
+            AND json_valid(m.metadata_json)
+            AND json_type(m.metadata_json,'$.synthetic_document_notice')='true'
+            AND json_array_length(m.metadata_json,'$.conversation_attachment_raw_ids')=1
+            AND json_array_length(m.metadata_json,'$.conversation_uploaded_raw_ids')=1
+            AND json_extract(m.metadata_json,'$.conversation_attachment_raw_ids[0]')=NEW.raw_object_id
+            AND json_extract(m.metadata_json,'$.conversation_uploaded_raw_ids[0]')=NEW.raw_object_id
+      ) OR NOT EXISTS (
+          SELECT 1 FROM raw_objects r
+          JOIN users exact_alias_uploader
+            ON exact_alias_uploader.id=NEW.uploaded_by
+           AND exact_alias_uploader.status='active'
+          WHERE r.id=NEW.raw_object_id AND r.user_id=NEW.user_id
+            AND r.source='upload' AND r.content_type='file'
+            AND r.deleted_at IS NULL
+            AND CASE
+              WHEN length(CAST(COALESCE(r.metadata_json,'') AS BLOB)) <= 131072
+               AND typeof(r.metadata_json)='text'
+               AND json_valid(r.metadata_json)
+              THEN CASE
+                WHEN json_type(r.metadata_json)='object'
+                 AND NOT EXISTS (
+                       SELECT 1 FROM json_tree(r.metadata_json) uploader_json_member
+                        WHERE uploader_json_member.key IS NOT NULL
+                        GROUP BY uploader_json_member.parent,
+                                 CAST(uploader_json_member.key AS TEXT)
+                       HAVING COUNT(*) > 1
+                     )
+                 AND json_type(r.metadata_json,'$.uploaded_by')='text'
+                THEN json_extract(r.metadata_json,'$.uploaded_by')=NEW.uploaded_by
+                ELSE 0
+              END
+              ELSE 0
+            END
+      )))
+BEGIN
+    SELECT RAISE(ABORT, 'immutable or invalid file source alias filename');
+END;
+CREATE TRIGGER IF NOT EXISTS file_source_alias_identity_update_guard
+BEFORE UPDATE OF user_id, uploaded_by, source_ref, raw_object_id, created_at
+ON file_source_aliases
+WHEN NEW.user_id IS NOT OLD.user_id
+  OR NEW.uploaded_by IS NOT OLD.uploaded_by
+  OR NEW.source_ref IS NOT OLD.source_ref
+  OR NEW.raw_object_id IS NOT OLD.raw_object_id
+  OR NEW.created_at IS NOT OLD.created_at
+BEGIN
+    SELECT RAISE(ABORT, 'immutable file source alias identity');
+END;
 CREATE INDEX IF NOT EXISTS idx_knowledge_user_lifecycle
     ON knowledge_objects(user_id, lifecycle_stage, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_knowledge_user_quality

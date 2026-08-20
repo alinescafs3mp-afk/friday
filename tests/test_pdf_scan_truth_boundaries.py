@@ -648,7 +648,8 @@ async def test_repeated_pdf_refusal_cannot_build_a_file_from_the_failure_fallbac
     )
 
     assert model.calls == 2
-    assert "Вложение прочитано, но модель не сформировала ответ" in result["message"]
+    assert "защитная проверка отклонила" in result["message"].casefold()
+    assert "это не сбой транспорта" in result["message"].casefold()
     assert "загруз" not in result["message"].casefold()
     assert result["files"] == []
     assert result["tools_used"] == []

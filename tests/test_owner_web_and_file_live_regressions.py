@@ -420,7 +420,7 @@ def _source_user_message(storage, response: dict[str, Any]) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_three_complete_bare_docx_summaries_survive_then_news_keeps_history(
+async def test_three_complete_bare_docx_summaries_then_isolated_news_excludes_history(
     settings,
     storage,
 ) -> None:
@@ -466,11 +466,13 @@ async def test_three_complete_bare_docx_summaries_survive_then_news_keeps_histor
 
     assert len(model.calls) == 3
     assert kernel.calls == []
-    assert asks_for_the_web(NEWS_REQUEST) is True
+    isolated_request = "Сделай сводку по новостям на зарубежных сайтах"
+    assert asks_for_the_web(isolated_request) is True
+    assert file_turn_authority(isolated_request).actions == frozenset({"web"})
 
     news = await runtime.chat(
         OWNER,
-        NEWS_REQUEST,
+        isolated_request,
         actor=_actor(),
         conversation_id=conversation_id,
     )
@@ -478,7 +480,11 @@ async def test_three_complete_bare_docx_summaries_survive_then_news_keeps_histor
     assert kernel.calls == [
         (
             "web_research",
-            {"query": runtime.web_query_from(NEWS_REQUEST), "max_sources": 3},
+            {
+                "query": runtime.web_query_from(isolated_request),
+                "max_sources": 3,
+                "source_class": "foreign",
+            },
         )
     ]
     assert news["tools_used"] == ["web_research"]
@@ -494,10 +500,10 @@ async def test_three_complete_bare_docx_summaries_survive_then_news_keeps_histor
     assert len(model.calls) > 3
     public_payload = json.dumps(model.calls[-1], ensure_ascii=False)
     outbound_payload = json.dumps(kernel.calls, ensure_ascii=False)
-    assert NEWS_REQUEST in public_payload
+    assert isolated_request in public_payload
     assert PUBLIC_FACT in public_payload
-    assert PRIVATE_PREFIX in public_payload
-    assert "Загружен документ" in public_payload
+    assert PRIVATE_PREFIX not in public_payload
+    assert "Загружен документ" not in public_payload
     assert PRIVATE_PREFIX not in outbound_payload
 
 
@@ -542,9 +548,10 @@ async def test_old_attachment_lineage_beyond_prompt_tail_still_allows_only_curre
             metadata={"private_context_lineage": True},
         )
 
+    isolated_request = "Сделай сводку по новостям на зарубежных сайтах"
     response = await runtime.chat(
         OWNER,
-        NEWS_REQUEST,
+        isolated_request,
         actor=_actor(),
         conversation_id=conversation_id,
     )
@@ -556,11 +563,10 @@ async def test_old_attachment_lineage_beyond_prompt_tail_still_allows_only_curre
     public_payload = json.dumps(model.calls[-1], ensure_ascii=False)
     assert PRIVATE_PREFIX not in public_payload
     assert "PRIVATE-HISTORICAL-ANSWER-CANARY" not in public_payload
-    # Same-tenant public-web turns now keep ordinary dialogue history instead
-    # of entering a history-free privacy chamber.  The expired attachment bytes
-    # themselves are still absent because they were not restored for this turn.
-    assert "SYNTHETIC-CLEAN-USER" in public_payload
-    assert "SYNTHETIC-CLEAN-ASSISTANT" in public_payload
+    # The sole public exception is current-message-only: sticky lineage remains
+    # durable, but neither the old file nor intervening dialogue participates.
+    assert "SYNTHETIC-CLEAN-USER" not in public_payload
+    assert "SYNTHETIC-CLEAN-ASSISTANT" not in public_payload
     assert PRIVATE_PREFIX not in json.dumps(kernel.calls, ensure_ascii=False)
 
 
@@ -717,7 +723,7 @@ async def test_news_inside_a_current_document_is_local_not_a_web_request(
 
 
 @pytest.mark.asyncio
-async def test_same_sentence_document_summary_and_web_request_executes_public_research(
+async def test_same_sentence_document_summary_and_web_request_denies_public_research(
     settings,
     storage,
 ) -> None:
@@ -741,15 +747,13 @@ async def test_same_sentence_document_summary_and_web_request_executes_public_re
         attachments=[document.attachment],
     )
 
-    assert response["tools_used"] == ["web_research"]
-    assert response["web_evidence_status"] == "sourced"
+    assert response["tools_used"] == []
+    assert response["web_evidence_status"] == "none"
     assert response["attachment_context_expected_count"] == 1
-    assert kernel.calls == [
-        (
-            "web_research",
-            {"query": "актуальные", "max_sources": 3},
-        )
-    ]
+    assert "приватные вложения" in response["message"].casefold()
+    assert kernel.calls == []
+    metadata = _stored_metadata(storage, response)
+    assert metadata["structural"]["private_web_search_blocked"] is True
 
 
 @pytest.mark.asyncio
@@ -763,7 +767,7 @@ async def test_same_sentence_document_summary_and_web_request_executes_public_re
         ("replayed_attachment", 1, 1),
     ],
 )
-async def test_attachment_derived_news_carriers_can_use_web(
+async def test_attachment_derived_news_carriers_cannot_use_web(
     settings,
     storage,
     carrier: str,
@@ -807,7 +811,6 @@ async def test_attachment_derived_news_carriers_can_use_web(
         source = _source_user_message(storage, first)
         chat_kwargs["replay_source_message_id"] = str(source["id"])
 
-    model_calls_before = len(model.calls)
     kernel_calls_before = len(kernel.calls)
     assert asks_for_the_web(query) is True
     response = await runtime.chat(
@@ -818,17 +821,12 @@ async def test_attachment_derived_news_carriers_can_use_web(
         **chat_kwargs,
     )
 
-    assert response["tools_used"] == ["web_research"]
-    assert response["web_evidence_status"] == "sourced"
+    assert response["tools_used"] == []
+    assert response["web_evidence_status"] == "none"
     assert response["attachment_context_expected_count"] == expected_count
     assert response["restored_attachment_count"] == expected_restored
-    assert len(model.calls) > model_calls_before
-    assert kernel.calls[kernel_calls_before:] == [
-        (
-            "web_research",
-            {"query": runtime.web_query_from(query), "max_sources": 3},
-        )
-    ]
+    assert "приватные вложения" in response["message"].casefold()
+    assert kernel.calls[kernel_calls_before:] == []
     metadata = _stored_metadata(storage, response)
-    assert metadata["structural"].get("private_web_search_blocked") is not True
-    assert metadata["structural"]["model_spoke"] is True
+    assert metadata["structural"]["private_web_search_blocked"] is True
+    assert metadata["structural"]["model_spoke"] is False

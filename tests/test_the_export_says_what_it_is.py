@@ -11,7 +11,8 @@
 
 Человек, считающий её способом уйти, узнает правду в худший момент — когда Friday уже
 нет. Поэтому ответ обязан называть настоящие пути: копия SQLite с каталогом файлов и
-`memory-vault` (1539 заметок Markdown, читаются чем угодно).
+явно включённый `memory-vault` (Markdown читается чем угодно). Body-free режим не
+должен рекламировать проекцию, которой backend не создаёт.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from fastapi.testclient import TestClient
 from friday.server import create_app
 
 
-def test_the_response_names_the_real_ways_to_move(settings):
+def test_body_free_response_does_not_advertise_a_nonexistent_plaintext_vault(settings):
     with TestClient(create_app(settings)) as client:
         headers = {"Authorization": f"Bearer {settings.api_token}"}
         client.post(
@@ -35,8 +36,21 @@ def test_the_response_names_the_real_ways_to_move(settings):
         body = response.json()
         ways = " ".join(body["to_move_your_data"]).casefold()
         assert "sqlite" in ways, "не назван настоящий путь переноса"
-        assert "vault" in ways, "не названа читаемая выгрузка, которая уже есть"
+        assert "vault" not in ways, "отключённая plaintext-проекция выдана за существующий перенос"
         assert "no importer exists" in str(body["readable_by"]).casefold()
+
+
+def test_explicit_full_owner_response_names_the_readable_vault(settings):
+    from dataclasses import replace
+
+    with TestClient(create_app(replace(settings, memory_vault_mode="full_owner"))) as client:
+        response = client.post(
+            "/api/admin/exports",
+            json={},
+            headers={"Authorization": f"Bearer {settings.api_token}"},
+        )
+        ways = " ".join(response.json()["to_move_your_data"]).casefold()
+        assert "vault" in ways
 
 
 def test_it_admits_what_it_leaves_behind(settings):

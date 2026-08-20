@@ -608,7 +608,7 @@ def _yo_spellings(token: str) -> list[str]:
     return [token] if folded == token else [token, folded]
 
 
-def _fts_terms(text: str) -> list[str]:
+def _fts_term_groups(text: str) -> list[list[str]]:
     """Spend the term budget on the words that select a document, not the first typed.
 
     The rule was ``re.findall(...)[:12]`` over the raw text, so a question longer
@@ -636,8 +636,9 @@ def _fts_terms(text: str) -> list[str]:
     # Unfolded on purpose: the index stored the text as it was written, so the query
     # has to reach BOTH spellings. `tokens_of` folds `ё` for scoring, which is
     # symmetric because it runs over query and document alike; FTS is the one place
-    # where only the query passes through us. Terms are OR-ed by the caller, so a
-    # second spelling costs one more alternative and nothing else.
+    # where only the query passes through us. Both spellings stay in ONE lexical
+    # group: OR-callers may flatten groups, while match-all callers must OR the
+    # variants inside each group before AND-ing distinct words.
     unique = list(dict.fromkeys(token for token in tokens_of(text, fold_yo=False) if len(token) >= 2))
     if len(unique) <= _FTS_TERM_BUDGET:
         chosen = unique
@@ -649,7 +650,7 @@ def _fts_terms(text: str) -> list[str]:
             chosen += [token for token in unique if token not in taken][: _FTS_TERM_BUDGET - len(chosen)]
     # Spellings are added AFTER the budget so a variant never costs a distinct word
     # its slot: the budget counts words, and `чёрных`/`черных` are one word.
-    expanded: list[str] = []
+    groups: list[list[str]] = []
     for token in chosen:
         # Слово ЗАМЕНЯЕТСЯ основой с префиксным оператором, а не дополняется ею:
         # бюджет считает слова, и добавление удваивало список.
@@ -676,10 +677,16 @@ def _fts_terms(text: str) -> list[str]:
             # искать надо в том написании, которое пришло.
             roots.append(root if "ё" not in folded else _restore_yo(folded, root))
         if roots:
-            expanded.extend(f"{root}*" for root in dict.fromkeys(roots))
+            groups.append([f"{root}*" for root in dict.fromkeys(roots)])
             continue
-        expanded.extend(_yo_spellings(token))
-    return list(dict.fromkeys(expanded))
+        groups.append(list(dict.fromkeys(_yo_spellings(token))))
+    return groups
+
+
+def _fts_terms(text: str) -> list[str]:
+    """Flatten bounded lexical groups for the ordinary match-any recall lanes."""
+
+    return list(dict.fromkeys(term for group in _fts_term_groups(text) for term in group))
 
 
 def _restore_yo(word: str, root: str) -> str:

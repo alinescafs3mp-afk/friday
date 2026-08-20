@@ -21,6 +21,7 @@
     {"name": "schema-30.sqlite3.gz", "sha256": "973158be3e5cf5908a5cac299d194014d63b2ff62c357633e295b97c33b5dfcf"},
     {"name": "schema-31.sqlite3.gz", "sha256": "5331cffbdd8bcb137d4a1416276e2e908f31d8754f0f2857bbca0129de891e69"},
     {"name": "schema-32.sqlite3.gz", "sha256": "69fe7f05410df18abace6c98a5d15f1f2cfbc95018c2a9df4ae808586f520459"},
-    {"name": "schema-33.sqlite3.gz", "sha256": "e67f84b42154f4cd2c90fb95d2a5caf98e41ebe9ea2202ffc94002febeb3f6d9"}
+    {"name": "schema-33.sqlite3.gz", "sha256": "e67f84b42154f4cd2c90fb95d2a5caf98e41ebe9ea2202ffc94002febeb3f6d9"},
+    {"name": "schema-34.sqlite3.gz", "sha256": "db773f67c76faf155c4f9f6afeea86c2077fec3d766cfdf67d2cae9129f3294e"}
   ]
 }

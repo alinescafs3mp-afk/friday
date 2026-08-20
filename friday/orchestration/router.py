@@ -25,6 +25,7 @@ from friday.orchestration.file_read_contract import (
 )
 from friday.orchestration.planner import AttestedPlannerRuntime, PlannerModel, V12Planner
 from friday.permissions import ActorContext
+from friday.turn_intent_policy import TurnPolicyDecision
 
 LOGGER = logging.getLogger(__name__)
 _MAX_PENDING_SHADOW_PLANS = 4
@@ -52,6 +53,7 @@ class ChatRuntime(Protocol):
         quoted_attachment_reference: bool = False,
         reply_assistant_reference: bool = False,
         reply_assistant_message_id: str | None = None,
+        turn_policy: TurnPolicyDecision | None = None,
         turn_deadline: float | None = None,
     ) -> dict[str, Any]: ...
 
@@ -529,6 +531,7 @@ class OrchestrationRouter:
         quoted_attachment_reference: bool = False,
         reply_assistant_reference: bool = False,
         reply_assistant_message_id: str | None = None,
+        turn_policy: TurnPolicyDecision | None = None,
         turn_deadline: float | None = None,
     ) -> dict[str, Any]:
         legacy_kwargs = {
@@ -549,6 +552,10 @@ class OrchestrationRouter:
             "reply_assistant_message_id": reply_assistant_message_id,
             "turn_deadline": turn_deadline,
         }
+        if turn_policy is not None:
+            legacy_kwargs["turn_policy"] = turn_policy
+        if turn_policy is not None and turn_policy.handled:
+            return await self._legacy.chat(user_id, message, **legacy_kwargs)
         if self.mode is RouterMode.LEGACY:
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
 

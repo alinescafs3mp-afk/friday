@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from friday.memory import MemoryVaultDeletionHandle, VaultProjectionBoundaryError
 from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.storage._base import (
     account_deletion_eligibility_key,
@@ -180,12 +181,8 @@ def _safe_component(user_id: str) -> str:
     return f"{slug}--{digest}"
 
 
-def _account_directories(storage: FridayStorage, user_id: str) -> tuple[Path, Path]:
-    component = _safe_component(user_id)
-    return (
-        Path(storage.settings.files_dir) / component,
-        Path(storage.settings.memory_vault_dir) / "users" / component,
-    )
+def _account_files_directory(storage: FridayStorage, user_id: str) -> Path:
+    return Path(storage.settings.files_dir) / _safe_component(user_id)
 
 
 def _path_state(path: Path) -> str:
@@ -201,6 +198,13 @@ def _path_state(path: Path) -> str:
         return "material" if next(path.iterdir(), None) is not None else "empty"
     except OSError:
         return "unreadable"
+
+
+def _vault_account_state(storage: FridayStorage, user_id: str) -> str:
+    try:
+        return MemoryVaultDeletionHandle(storage.settings.memory_vault_dir).account_state(user_id)
+    except VaultProjectionBoundaryError:
+        return "unsafe"
 
 
 def _account_export_artifacts(storage: FridayStorage, user_id: str) -> tuple[int, str]:
@@ -1079,11 +1083,11 @@ def _preflight(
     if external_history_recorded:
         external_identity_state += 1
 
-    files_dir, vault_dir = _account_directories(storage, user_id)
+    files_dir = _account_files_directory(storage, user_id)
     export_artifacts, export_state = _account_export_artifacts(storage, user_id)
     path_states = {
         "files": _path_state(files_dir),
-        "vault": _path_state(vault_dir),
+        "vault": _vault_account_state(storage, user_id),
         "exports": export_state,
     }
     if export_artifacts:
@@ -1408,9 +1412,12 @@ def delete_account(
     # Preflight permits only absent or empty per-account directories.  Removing an
     # empty shell after commit is idempotent and cannot destroy material.
     empty_directories_removed = 0
-    for path in reversed(_account_directories(storage, user_id)):
-        with suppress(OSError):
-            path.rmdir()
+    files_directory = _account_files_directory(storage, user_id)
+    with suppress(OSError):
+        files_directory.rmdir()
+        empty_directories_removed += 1
+    with suppress(VaultProjectionBoundaryError):
+        if MemoryVaultDeletionHandle(storage.settings.memory_vault_dir).remove_empty_account(user_id):
             empty_directories_removed += 1
     retained = dict(report["retained"])
     retained["audit_log"] = int(retained.get("audit_log") or 0) + 1

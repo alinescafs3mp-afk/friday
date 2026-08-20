@@ -297,7 +297,7 @@ def test_conversation_modes_and_lifecycle_candidates_are_persistent_and_safe(sto
     # каждого, кто меняет схему, назвать номер вслух. Забытый номер стоил
     # 2026-08-04 пятиминутной поломки живого маршрута: столбец добавили, а
     # миграция без нового номера не запускается.
-    assert SCHEMA_VERSION == 33
+    assert SCHEMA_VERSION == 34
     conversation = storage.create_conversation("alice", "Research", mode="research")
     assert conversation["mode"] == "research"
     storage.set_channel_conversation(
@@ -347,7 +347,13 @@ async def test_bounded_local_vision_creates_advisory_inbox_item(settings, storag
             return {
                 "content": json.dumps(
                     {
-                        "text": "Схема проекта Orion: PostgreSQL 16",
+                        "text": "",
+                        "pages": [
+                            {
+                                "asset_id": "A1",
+                                "text": "Схема проекта Orion: PostgreSQL 16",
+                            }
+                        ],
                         "title": "Схема Orion",
                         "summary": "На изображении указана база PostgreSQL 16 проекта Orion.",
                         "entities": [
@@ -356,7 +362,7 @@ async def test_bounded_local_vision_creates_advisory_inbox_item(settings, storag
                                 "entity_type": "project",
                                 "confidence": 0.98,
                                 "asset_id": "A1",
-                                "evidence": "проект Orion",
+                                "evidence": "проекта Orion",
                             },
                             {
                                 "name": "PostgreSQL",
@@ -369,7 +375,7 @@ async def test_bounded_local_vision_creates_advisory_inbox_item(settings, storag
                         "evidence": [
                             {
                                 "asset_id": "A1",
-                                "quote": "проект Orion: PostgreSQL 16",
+                                "quote": "проекта Orion: PostgreSQL 16",
                                 "claim": "Orion использует PostgreSQL 16",
                             }
                         ],

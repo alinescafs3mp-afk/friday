@@ -29,7 +29,9 @@ CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 # 51: пять known_at graph routes используют один allowlisted переводчик
 # RelationHistorySnapshotError. Он не отдаёт произвольный str(exc): наружу могут
 # выйти только русская категория и каноническая completeness boundary.
-EXPECTED_DYNAMIC_DETAIL_SITES = 51
+# 50: hard-purge больше не публикует внутренний английский ValueError и возвращает
+# закрытый русский текст двухфазной политики удаления.
+EXPECTED_DYNAMIC_DETAIL_SITES = 50
 
 
 def _detail_sites() -> list[tuple[pathlib.Path, int, str, ast.AST]]:

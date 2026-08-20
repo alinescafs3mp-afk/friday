@@ -17,6 +17,7 @@ import time
 from collections import defaultdict, deque
 from collections.abc import AsyncIterator, Mapping
 from contextlib import ExitStack, asynccontextmanager, suppress
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -65,13 +66,15 @@ from friday.api.knowledge import router as knowledge_router
 from friday.api.notifications import router as notifications_router
 from friday.api.projections import public_chat_ingestion
 from friday.archive_passwords import bounded_archive_password, strip_archive_password_directives
-from friday.audit_privacy import server_audit_ip, server_audit_request_id
+from friday.audit_privacy import bind_audit_request_id, server_audit_ip, server_audit_request_id
 from friday.config import (
+    MEMORY_VAULT_MODES,
     FridaySettings,
     ensure_runtime_dirs,
     load_settings,
     validate_settings,
 )
+from friday.diagnostics import collect_diagnostics
 from friday.diagnostics.runtime_lease import ProcessLease
 from friday.execution_kernel import ExecutionKernel, mark_request_effect_possible, track_request_effects
 from friday.executive import ExecutiveService
@@ -89,7 +92,7 @@ from friday.ingestion import (
 from friday.knowledge_graph import KnowledgeGraph, normalize_event_date
 from friday.mcp_runtime import MCPClientManager
 from friday.mcp_runtime.tools import bind_workspace_mcp_tools, workspace_server_definition
-from friday.memory import MemoryVault
+from friday.memory import MemoryVault, MemoryVaultDeletionHandle
 from friday.office_attestation import (
     OFFICE_STRUCTURE_ATTESTATION_METADATA_KEY,
     verify_office_structure_attestation,
@@ -140,6 +143,18 @@ from friday.storage.models import (
     new_id,
     normalize_known_at,
 )
+from friday.turn_intent_policy import (
+    ADMIN_DIAGNOSTICS_CAPABILITY,
+    AttachmentDisposition,
+    DiagnosticsAuthority,
+    IntegrationProjection,
+    TurnIntent,
+    TurnPolicyContext,
+    TurnPolicyDecision,
+    WebDisposition,
+    decide_turn_policy,
+    project_safe_diagnostics,
+)
 from friday.v12_model_runtime import AttestedV12ModelRuntime
 from friday.v12_model_transport import create_attested_v12_model_runtime
 from friday.web_surfer import WebSurfer
@@ -181,6 +196,62 @@ _IDEMPOTENCY_UNCERTAIN_MESSAGE = (
     "Не повторяю запрос автоматически: неизвестно, успело ли действие завершиться. "
     "Сначала проверьте результат; если его нет, отправьте команду заново."
 )
+
+
+def _turn_policy_context_from_history(history: list[dict[str, Any]]) -> TurnPolicyContext:
+    """Project only the immediately adjacent weather exchange."""
+
+    visible = [row for row in history if str(row.get("role") or "") in {"user", "assistant"}]
+    previous_users = [row for row in visible if str(row.get("role") or "") == "user"]
+    if not previous_users:
+        return TurnPolicyContext()
+    previous_decision = decide_turn_policy(str(previous_users[-1].get("content") or ""))
+    weather_followup = previous_decision.intent in {
+        TurnIntent.WEATHER_NEEDS_LOCATION,
+        TurnIntent.WEATHER_WITH_LOCATION,
+    }
+    if weather_followup:
+        return TurnPolicyContext(
+            weather_followup=True,
+            weather_horizon=previous_decision.weather_horizon,
+            weather_location_missing=previous_decision.intent is TurnIntent.WEATHER_NEEDS_LOCATION,
+        )
+    if len(previous_users) < 2:
+        return TurnPolicyContext()
+    older_decision = decide_turn_policy(str(previous_users[-2].get("content") or ""))
+    if older_decision.intent not in {
+        TurnIntent.WEATHER_NEEDS_LOCATION,
+        TurnIntent.WEATHER_WITH_LOCATION,
+    }:
+        return TurnPolicyContext()
+    chained_context = TurnPolicyContext(
+        weather_followup=True,
+        weather_horizon=older_decision.weather_horizon,
+        weather_location_missing=older_decision.intent is TurnIntent.WEATHER_NEEDS_LOCATION,
+    )
+    chained_decision = decide_turn_policy(
+        str(previous_users[-1].get("content") or ""),
+        context=chained_context,
+    )
+    if chained_decision.intent is not TurnIntent.WEATHER_LOCATION_CHALLENGE:
+        return TurnPolicyContext()
+    return TurnPolicyContext(
+        weather_followup=True,
+        weather_horizon=chained_decision.weather_horizon,
+        weather_location_missing=True,
+    )
+
+
+def _live_integration_projection(settings: FridaySettings, manager: object) -> IntegrationProjection:
+    """Expose MCP state/count only, never provider names, commands, or paths."""
+
+    configured = settings.mcp_enabled is True
+    if not configured:
+        return IntegrationProjection(False, False, 0)
+    definition = workspace_server_definition(settings)
+    is_available = getattr(manager, "is_available", None)
+    connected = bool(callable(is_available) and is_available("workspace") is True)
+    return IntegrationProjection(True, connected, len(definition.allowed_tools))
 
 
 def _idempotency_uncertain_response() -> dict[str, Any]:
@@ -298,12 +369,58 @@ def _public_chat_for_actor(
 ) -> dict[str, Any]:
     """Project a chat result through the exact authenticated person boundary."""
 
-    return public_chat_ingestion(
+    public = public_chat_ingestion(
         result,
         storage=storage,
         resource_user_id=actor.user_id,
         resource_owner_id=actor.own_id,
     )
+    if actor.source != "telegram-bridge":
+        return public
+
+    # The bridge may retire a durable Telegram media group only after one exact
+    # acknowledgement for every ordered sibling. Keep this proof separate from
+    # the generic ingestion receipt: it contains no Raw id or source_ref, only
+    # the authenticated Telegram message id and a fixed-size digest.
+    internal_items = result.get("file_ingestions")
+    public_items = public.get("file_ingestions")
+    if (
+        isinstance(internal_items, list)
+        and isinstance(public_items, list)
+        and len(internal_items) == len(public_items)
+    ):
+        for internal, projected in zip(internal_items, public_items, strict=True):
+            if not isinstance(internal, Mapping) or not isinstance(projected, dict):
+                continue
+            # A completed idempotency record stores the already-public form.
+            # Accept that exact bounded shape on replay as well as the private
+            # first-pass marker; otherwise a successful staged sibling loses
+            # its acknowledgement on the very retry meant to recover a later
+            # sibling.
+            item_receipt = internal.get("_telegram_item_receipt")
+            if not isinstance(item_receipt, Mapping):
+                item_receipt = internal.get("telegram_item_receipt")
+            if not isinstance(item_receipt, Mapping):
+                continue
+            message_id = item_receipt.get("telegram_message_id")
+            source_digest = item_receipt.get("source_ref_sha256")
+            if (
+                isinstance(message_id, int)
+                and not isinstance(message_id, bool)
+                and 0 < message_id <= (2**63 - 1)
+                and isinstance(source_digest, str)
+                and re.fullmatch(r"[0-9a-f]{64}", source_digest)
+            ):
+                projected["telegram_item_receipt"] = {
+                    "telegram_message_id": message_id,
+                    "source_ref_sha256": source_digest,
+                }
+                stage_ready = internal.get("_telegram_stage_ready")
+                if type(stage_ready) is not bool:
+                    stage_ready = internal.get("telegram_stage_ready")
+                if type(stage_ready) is bool:
+                    projected["telegram_stage_ready"] = stage_ready
+    return public
 
 
 class RequestBodyTooLargeError(RuntimeError):
@@ -989,6 +1106,8 @@ def _chat_request_fingerprint(
             else None
         ),
         "reply_source_message_id": reply_source_message_id,
+        "document_stage_only": body.get("document_stage_only") is True,
+        "staged_document_message_ids": body.get("staged_document_message_ids"),
         "attachments": attachments,
         "document": document_fingerprint,
     }
@@ -1463,6 +1582,11 @@ def _bounded_model_gate_status(
 
 def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
     settings = settings_override or load_settings()
+    if settings.memory_vault_mode not in MEMORY_VAULT_MODES:
+        valid = ", ".join(MEMORY_VAULT_MODES)
+        raise ValueError(
+            f"Unknown FRIDAY_MEMORY_VAULT_MODE={settings.memory_vault_mode!r}. Valid values: {valid}"
+        )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -1577,12 +1701,15 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             )
             executive = ExecutiveService(settings, storage, auth_service, kernel, llm, ingestion)
             kernel.bind_executive(executive)
-            memory_vault = MemoryVault(
-                settings.memory_vault_dir,
-                account_is_deleted=lambda user_id: (
-                    storage.kv_get(deleted_account_tombstone_key(user_id)) is not None
-                ),
-            )
+            memory_vault: MemoryVault | None = None
+            memory_vault_deletion = MemoryVaultDeletionHandle(settings.memory_vault_dir)
+            if settings.memory_vault_mode == "full_owner":
+                memory_vault = MemoryVault(
+                    settings.memory_vault_dir,
+                    account_is_deleted=lambda user_id: (
+                        storage.kv_get(deleted_account_tombstone_key(user_id)) is not None
+                    ),
+                )
 
             # Organs (JOP): register their capabilities, mount their routers, and
             # feed their background workers into the supervisor. All additive.
@@ -1642,6 +1769,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.v12_registered_routes = tuple(sorted(route.value for route in route_handlers))
             application.state.executive = executive
             application.state.memory_vault = memory_vault
+            application.state.memory_vault_deletion = memory_vault_deletion
             application.state.workers = workers
             application.state.organs = organs
             application.state.rate_limiter = SlidingWindowLimiter()
@@ -1782,7 +1910,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             or path.startswith("/admin/")
         )
         if request.method == "OPTIONS" or public:
-            response = await call_next(request)
+            with bind_audit_request_id(request.state.request_id):
+                response = await call_next(request)
         else:
             # Failed authentication is rate-limited per client IP so bearer
             # tokens and bridge signatures cannot be brute-forced: once the
@@ -1885,7 +2014,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         request.state.account_admission_token = admission_token
                         activity_token = current_activity.set("http")
                         try:
-                            with bind_actor(actor):
+                            with bind_actor(actor), bind_audit_request_id(request.state.request_id):
                                 response = await call_next(request)
                         finally:
                             current_activity.reset(activity_token)
@@ -1965,6 +2094,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             "llm_enabled": settings.llm_enabled,
             "model": settings.llm_model,
             "profile": settings.profile.name,
+            "memory_vault": {
+                "mode": settings.memory_vault_mode,
+                "body_free_mode": settings.memory_vault_mode == "disabled",
+                "body_projection_enabled": settings.memory_vault_mode == "full_owner",
+            },
             "orchestration": {
                 "schema": "friday.v12-orchestration-health.v1",
                 "configured_mode": settings.router_mode,
@@ -2592,6 +2726,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         # «Текст сочинил backend» и «файл уже принят отдельно» — разные факты; см.
         # разбор ниже, где они расходятся у голосового вопроса.
         synthetic_document_notice = False
+        staged_duplicate_count = 0
+        staged_unique_document_count = 0
         # Спросили ли голосом. Объявляется здесь, а не внутри разбора вложения:
         # без вложения ветка не выполняется вовсе, и обращение к переменной ниже
         # роняло бы обычный текстовый ход.
@@ -2623,6 +2759,91 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             [dict(item) for item in documents_value] if isinstance(documents_value, list) else []
         )
         incoming_documents = document_batch or ([document] if document is not None else [])
+        document_stage_value = body.get("document_stage_only")
+        if document_stage_value is not None and type(document_stage_value) is not bool:
+            raise HTTPException(status_code=400, detail="document_stage_only must be a boolean")
+        document_stage_only = document_stage_value is True
+        staged_ids_value = body.get("staged_document_message_ids")
+        staged_document_message_ids: list[int] = []
+        if staged_ids_value is not None:
+            if not isinstance(staged_ids_value, list) or not (
+                1 <= len(staged_ids_value) <= _DOCUMENT_TURN_MAX_FILES
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(f"staged_document_message_ids must contain 1..{_DOCUMENT_TURN_MAX_FILES} ids"),
+                )
+            if any(
+                not isinstance(value, int) or isinstance(value, bool) or not 0 < value <= (2**63 - 1)
+                for value in staged_ids_value
+            ):
+                raise HTTPException(status_code=400, detail="staged document identity is invalid")
+            staged_document_message_ids = [int(value) for value in staged_ids_value]
+            if len(set(staged_document_message_ids)) != len(staged_document_message_ids):
+                raise HTTPException(status_code=400, detail="staged document identities must be unique")
+        if document_stage_only:
+            if (
+                actor.source != "telegram-bridge"
+                or not document_batch
+                or bool(message)
+                or attachments_value is not None
+                or bool(str(body.get("source_ref") or "").strip())
+                or body.get("telegram_message_id") is not None
+                or staged_document_message_ids
+                or force_knowledge
+                or any(
+                    key in body
+                    for key in (
+                        "reply_source_message_id",
+                        "reply_document_source_ref",
+                        "reply_document_message_id",
+                        "reply_document_file_unique_id",
+                        "reply_document_recovery",
+                        "archive_password",
+                        "conversation_id",
+                        "forward",
+                    )
+                )
+            ):
+                raise HTTPException(status_code=400, detail="invalid document staging request")
+            stage_message_ids: list[int] = []
+            stage_source_refs: list[str] = []
+            for stage_document in document_batch:
+                stage_message_id = stage_document.get("telegram_message_id")
+                stage_source_ref = stage_document.get("source_ref")
+                if (
+                    not isinstance(stage_message_id, int)
+                    or isinstance(stage_message_id, bool)
+                    or not 0 < stage_message_id <= (2**63 - 1)
+                    or not isinstance(stage_source_ref, str)
+                    or not stage_source_ref
+                    or stage_source_ref != stage_source_ref.strip()
+                    or len(stage_source_ref) > 500
+                ):
+                    raise HTTPException(status_code=400, detail="staged document identity is invalid")
+                stage_message_ids.append(stage_message_id)
+                stage_source_refs.append(stage_source_ref)
+            if len(set(stage_message_ids)) != len(stage_message_ids) or len(set(stage_source_refs)) != len(
+                stage_source_refs
+            ):
+                raise HTTPException(status_code=400, detail="staged document identities must be unique")
+        if staged_document_message_ids and (
+            actor.source != "telegram-bridge"
+            or incoming_documents
+            or document_stage_only
+            or attachments_value is not None
+            or any(
+                key in body
+                for key in (
+                    "reply_source_message_id",
+                    "reply_document_source_ref",
+                    "reply_document_message_id",
+                    "reply_document_file_unique_id",
+                    "reply_document_recovery",
+                )
+            )
+        ):
+            raise HTTPException(status_code=400, detail="invalid staged document turn")
         recovery_value = body.get("reply_document_recovery")
         recovery_supplied = "reply_document_recovery" in body
         reply_document_recovery: dict[str, Any] | None = (
@@ -2632,6 +2853,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         reply_assistant_pointer_present = bool(
             actor.source == "telegram-bridge"
             and not incoming_documents
+            and not staged_document_message_ids
             and raw_reply_source_message_id is not None
         )
         reply_source_message_id = ""
@@ -2646,6 +2868,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         reply_pointer_present = bool(
             actor.source == "telegram-bridge"
             and not incoming_documents
+            and not staged_document_message_ids
             and not reply_assistant_pointer_present
             and any(
                 key in body
@@ -2710,7 +2933,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             source_ref = (
                 f"telegram:{getattr(request.state, 'bridge_chat_id', '')}:{message_id}" if message_id else ""
             )
-        if not message and not incoming_documents:
+        if not message and not incoming_documents and not staged_document_message_ids:
             raise HTTPException(status_code=400, detail="message or document is required")
         if len(message) > settings.max_extracted_text_chars:
             raise HTTPException(status_code=413, detail="Message is too long")
@@ -2829,6 +3052,71 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     conversation_id = str(session["conversation_id"])
                     if requested_mode is None:
                         requested_mode = normalize_conversation_mode(str(session.get("mode") or "dialogue"))
+            if staged_document_message_ids:
+                # Staging persisted exact sibling bytes without running the
+                # model.  Rebuild this one final turn solely from authenticated
+                # chat/message aliases; caller-provided filenames, Raw ids and
+                # ambient attachments never become read authority.
+                state.auth_service.require(actor, "files.read")
+                authenticated_chat_id = str(getattr(request.state, "bridge_chat_id", "") or "")
+                try:
+                    exact_chat_id = int(authenticated_chat_id)
+                except ValueError as exc:
+                    raise HTTPException(
+                        status_code=400, detail="authenticated chat identity is invalid"
+                    ) from exc
+                resolved_raw_ids: set[str] = set()
+                resolved_message_count = 0
+                attachments = []
+                for staged_message_id in staged_document_message_ids:
+                    stage_ref = f"telegram-message:{exact_chat_id}:{staged_message_id}"
+                    try:
+                        stage_resolution = await run_blocking(
+                            resolve_tenant_telegram_reply_aliases,
+                            state.storage,
+                            actor.user_id,
+                            (stage_ref,),
+                        )
+                    except Exception as exc:  # noqa: BLE001 - closed staged pointer
+                        LOGGER.warning(
+                            "Staged Telegram document resolution failed (%s)",
+                            type(exc).__name__,
+                        )
+                        stage_resolution = None
+                    if not stage_resolution:
+                        raise HTTPException(status_code=409, detail="staged document is not ready")
+                    staged_raw_id, staged_uploaded_by = stage_resolution
+                    if staged_uploaded_by != actor.own_id:
+                        raise HTTPException(status_code=409, detail="staged document identity is unavailable")
+                    resolved_message_count += 1
+                    if staged_raw_id in resolved_raw_ids:
+                        # Distinct authenticated Telegram siblings may contain
+                        # byte-identical files and therefore converge on one
+                        # immutable Raw. Preserve every ordered message-id proof
+                        # in the request fingerprint, but expose the content to
+                        # Runtime once; duplicate Raw carriers are intentionally
+                        # rejected by its publication verifier.
+                        staged_duplicate_count += 1
+                        continue
+                    minted = _historical_direct_read_attachment(
+                        staged_raw_id,
+                        tenant_id=actor.user_id,
+                        uploaded_by=staged_uploaded_by,
+                        selector_kind="telegram_reply",
+                    )
+                    if minted is None:
+                        raise HTTPException(status_code=409, detail="staged document is unavailable")
+                    resolved_raw_ids.add(staged_raw_id)
+                    attachments.append(minted)
+                if resolved_message_count != len(staged_document_message_ids) or not attachments:
+                    raise HTTPException(status_code=409, detail="staged document set is incomplete")
+                staged_unique_document_count = len(attachments)
+                if not message:
+                    message = f"Загружено документов: {len(staged_document_message_ids)}"
+                    if staged_duplicate_count:
+                        message += f"; уникальных по содержимому: {staged_unique_document_count}"
+                    file_already_ingested = True
+                    synthetic_document_notice = True
             reply_assistant_reference = reply_assistant_pointer_present
             if reply_assistant_pointer_present:
                 # The structural reply target is authoritative. Discard any
@@ -3195,32 +3483,72 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     item_source_ref = str(batch_document.get("source_ref") or "").strip()[:500]
                     if not item_source_ref and source_ref:
                         item_source_ref = f"{source_ref}:document:{index}"[:500]
-                    ensure_effect_fence()
-                    batch_ingestion = await state.ingestion.ingest_file(
-                        actor.user_id,
-                        None,
-                        batch_content,
-                        filename=filename,
-                        mime_type=mime_type,
-                        media_kind=media_kind,
-                        metadata={
-                            "channel": actor.source,
-                            "chat_id": getattr(request.state, "bridge_chat_id", ""),
-                            **({"media_kind": media_kind} if media_kind else {}),
-                            **({"language_code": language_code} if language_code else {}),
-                            **(
-                                {"duration_sec": batch_document["duration"]}
-                                if isinstance(batch_document.get("duration"), int)
-                                else {}
-                            ),
-                            **({"forward": forward_meta} if forward_meta else {}),
-                            # Keep this final and literal: no dynamic metadata
-                            # expansion may replace the authenticated uploader.
-                            "uploaded_by": actor.own_id,
-                        },
-                        source_ref=item_source_ref,
-                        turn_deadline=_turn_deadline,
+                    upload_message_id = batch_document.get("telegram_message_id")
+                    telegram_item_receipt = (
+                        {
+                            "telegram_message_id": upload_message_id,
+                            "source_ref_sha256": hashlib.sha256(item_source_ref.encode("utf-8")).hexdigest(),
+                        }
+                        if actor.source == "telegram-bridge"
+                        and isinstance(upload_message_id, int)
+                        and not isinstance(upload_message_id, bool)
+                        and 0 < upload_message_id <= (2**63 - 1)
+                        and item_source_ref
+                        else None
                     )
+                    ensure_effect_fence()
+                    try:
+                        batch_ingestion = await state.ingestion.ingest_file(
+                            actor.user_id,
+                            None,
+                            batch_content,
+                            filename=filename,
+                            mime_type=mime_type,
+                            media_kind=media_kind,
+                            metadata={
+                                "channel": actor.source,
+                                "chat_id": getattr(request.state, "bridge_chat_id", ""),
+                                **({"media_kind": media_kind} if media_kind else {}),
+                                **({"language_code": language_code} if language_code else {}),
+                                **(
+                                    {"duration_sec": batch_document["duration"]}
+                                    if isinstance(batch_document.get("duration"), int)
+                                    else {}
+                                ),
+                                **({"forward": forward_meta} if forward_meta else {}),
+                                # Keep this final and literal: no dynamic metadata
+                                # expansion may replace the authenticated uploader.
+                                "uploaded_by": actor.own_id,
+                            },
+                            source_ref=item_source_ref,
+                            turn_deadline=_turn_deadline,
+                        )
+                    except SourceReferenceConflictError:
+                        if not document_stage_only or telegram_item_receipt is None:
+                            raise
+                        # One Telegram file identity was reused for different
+                        # bytes. It is a terminal item rejection, not authority
+                        # to discard already staged healthy siblings.
+                        file_ingestions.append(
+                            {
+                                "persisted": False,
+                                "promoted": False,
+                                "queued_for_review": False,
+                                "_telegram_item_receipt": telegram_item_receipt,
+                                "_telegram_stage_ready": False,
+                            }
+                        )
+                        continue
+                    if telegram_item_receipt is not None:
+                        # This internal marker is projected only back to the
+                        # authenticated bridge by ``_public_chat_for_actor``.
+                        # It makes a 200 response an ordered per-item receipt,
+                        # while keeping the caller-controlled source_ref itself
+                        # out of the response and idempotency cache.
+                        batch_ingestion = {
+                            **batch_ingestion,
+                            "_telegram_item_receipt": telegram_item_receipt,
+                        }
                     if _archive_password_challenge(batch_ingestion) is not None:
                         # Archives were rejected before the first persistent
                         # seam.  Reaching a challenge now means the declared
@@ -3229,9 +3557,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             "A document in the batch requires isolated archive handling"
                         )
                     raw_id = str(batch_ingestion.get("raw_object_id") or "")
+                    stage_alias_ready = False
                     if raw_id and actor.source == "telegram-bridge":
                         batch_transport_aliases: list[str] = []
-                        upload_message_id = batch_document.get("telegram_message_id")
                         if (
                             isinstance(upload_message_id, int)
                             and not isinstance(upload_message_id, bool)
@@ -3260,13 +3588,35 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                                     tuple(batch_transport_aliases),
                                 )
                             except SourceReferenceConflictError as exc:
-                                raise IdempotencyConflictError(
-                                    "Telegram reply identity is unavailable for this upload"
-                                ) from exc
+                                if document_stage_only:
+                                    LOGGER.info("Telegram stage alias conflicted for one batch item")
+                                    bound = False
+                                else:
+                                    raise IdempotencyConflictError(
+                                        "Telegram reply identity is unavailable for this upload"
+                                    ) from exc
                             if not bound:
-                                raise IdempotencyConflictError(
-                                    "Telegram reply identity could not be authorized"
-                                )
+                                # The Raw receipt remains valid even when the
+                                # stronger reply alias is deliberately denied
+                                # (for example after the privacy-material cache
+                                # closes over OCR text).  Rejecting the whole
+                                # album here used to strand an already-persisted
+                                # prefix and discard every later part.  Keep the
+                                # alias fail-closed, but continue the bounded,
+                                # source-ref-idempotent batch; the public
+                                # ``file_ingestions`` list is the per-item
+                                # receipt checked by the bridge before it owns
+                                # and retires every Telegram row.
+                                LOGGER.info("Telegram reply alias was not authorized for one batch item")
+                            else:
+                                stage_alias_ready = True
+                    if document_stage_only:
+                        batch_ingestion = {
+                            **batch_ingestion,
+                            "_telegram_stage_ready": stage_alias_ready,
+                        }
+                        file_ingestions.append(batch_ingestion)
+                        continue
                     current_turn_raw = (
                         await run_blocking(state.storage.get_raw_object, raw_id, actor.user_id)
                         if raw_id and state.auth_service.authorize(actor, "files.read").allowed
@@ -3281,6 +3631,20 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         )
                     )
                     file_ingestions.append(batch_ingestion)
+                if document_stage_only:
+                    stage_result = {
+                        "document_stage_only": True,
+                        "file_ingestions": file_ingestions,
+                    }
+                    # Stage requests deliberately carry no batch-level
+                    # idempotency key: each immutable item source_ref owns
+                    # replay, so a crash after a persisted prefix can resume
+                    # siblings instead of replaying one opaque uncertain turn.
+                    return _public_chat_for_actor(
+                        stage_result,
+                        storage=state.storage,
+                        actor=actor,
+                    )
                 if not message:
                     message = f"Загружено документов: {len(file_ingestions)}"
                     file_already_ingested = True
@@ -3580,6 +3944,50 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             verification_eligible=False,
                         )
 
+            policy_history: list[dict[str, Any]] = []
+            if (
+                conversation_id is not None
+                and state.storage.get_conversation(conversation_id, actor.own_id) is not None
+            ):
+                policy_history = await run_blocking(
+                    state.storage.get_conversation_messages,
+                    conversation_id,
+                    user_id=actor.own_id,
+                    limit=4,
+                )
+            turn_policy: TurnPolicyDecision = decide_turn_policy(
+                message,
+                context=_turn_policy_context_from_history(policy_history),
+                diagnostics=DiagnosticsAuthority(
+                    capability_allowed=state.auth_service.authorize(
+                        actor,
+                        ADMIN_DIAGNOSTICS_CAPABILITY,
+                    ).allowed
+                ),
+                integrations=_live_integration_projection(state.settings, state.mcp),
+            )
+            if turn_policy.intent is TurnIntent.LOCAL_DIAGNOSTICS:
+                try:
+                    diagnostic_report = await run_blocking(
+                        collect_diagnostics,
+                        state.settings,
+                        state.storage,
+                        check_llm_port=False,
+                        check_secrets=False,
+                    )
+                except Exception:  # noqa: BLE001 - closed, non-sensitive UNKNOWN projection
+                    diagnostic_report = {}
+                safe_diagnostics = project_safe_diagnostics(diagnostic_report)
+                diagnostic_report = {}
+                turn_policy = replace(
+                    turn_policy,
+                    public_response=safe_diagnostics.render_ru(),
+                )
+            if turn_policy.attachments is AttachmentDisposition.NONE:
+                attachments = []
+                quoted_attachment_reference = False
+                reply_assistant_reference = False
+
             ingestion_result = None
             if state.auth_service.authorize(actor, "knowledge.create").allowed:
                 if file_already_ingested:
@@ -3592,6 +4000,19 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         "category": "system_notice",
                         "reason": "synthetic document acknowledgement; file ingestion handled separately",
                         "synthetic": True,
+                    }
+                elif turn_policy.handled:
+                    policy_is_web = turn_policy.web is WebDisposition.ALLOW_EXPLICIT_WEATHER
+                    ingestion_result = {
+                        "promoted": False,
+                        "queued_for_review": False,
+                        "action": "transient",
+                        "category": "web_request" if policy_is_web else "turn_policy",
+                        "reason": (
+                            "явный погодный запрос — команда, а не материал"
+                            if policy_is_web
+                            else "code-owned meta/diagnostic turn — команда, а не материал"
+                        ),
                     }
                 elif asks_for_the_web(message):
                     # «Найди в интернете курс доллара» — это команда, а не факт,
@@ -3665,8 +4086,21 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 # role/conversation/emitted knowledge_citations; caller JSON is
                 # never a citation map grant.
                 reply_assistant_message_id=reply_source_message_id or None,
+                turn_policy=turn_policy if turn_policy.handled else None,
                 turn_deadline=_turn_deadline,
             )
+            if staged_duplicate_count:
+                duplicate_notice = (
+                    "⚠️ В альбоме обнаружены одинаковые по содержимому файлы: "
+                    f"{staged_duplicate_count} повтор(а) сведены к "
+                    f"{staged_unique_document_count} уникальным документам."
+                )
+                previous_warning = str(result.get("grounding_warning") or "").strip()
+                result["grounding_warning"] = (
+                    f"{duplicate_notice}\n\n{previous_warning}" if previous_warning else duplicate_notice
+                )
+                result["staged_document_message_count"] = len(staged_document_message_ids)
+                result["staged_duplicate_count"] = staged_duplicate_count
             # ``make_file`` keeps inline base64 for existing clients, but the
             # durable authority is an exact-byte, person-owned artifact.  Freeze
             # it before the HTTP/idempotency response is published so refreshes

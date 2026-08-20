@@ -401,7 +401,7 @@ async def test_actionable_recipe_in_a_missed_model_answer_is_discarded(
 
 
 @pytest.mark.asyncio
-async def test_private_file_lineage_does_not_block_an_explicit_web_search(
+async def test_private_file_lineage_blocks_explicit_web_before_provider_and_model(
     settings,
     storage,
     monkeypatch,
@@ -464,15 +464,16 @@ async def test_private_file_lineage_does_not_block_an_explicit_web_search(
         conversation_id=conversation_id,
     )
 
-    assert surfer.queries == [runtime.web_query_from(request)]
-    assert reply["tools_used"] == ["web_research"]
-    assert reply["web_evidence_status"] == "sourced"
-    assert router.calls
+    assert surfer.queries == []
+    assert reply["tools_used"] == []
+    assert reply["web_evidence_status"] == "none"
+    assert router.calls == []
     exposed = json.dumps(router.calls, ensure_ascii=False)
-    assert "Документ разобран." in exposed
+    assert "Документ разобран." not in exposed
+    assert "приватные вложения" in reply["message"].casefold()
     metadata = _stored_metadata(storage, reply)
-    assert metadata["structural"].get("private_web_search_blocked") is not True
-    assert metadata["web_evidence_used"] is True
+    assert metadata["structural"]["private_web_search_blocked"] is True
+    assert metadata["web_evidence_used"] is False
 
 
 @pytest.mark.asyncio

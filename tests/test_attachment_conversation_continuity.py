@@ -1262,6 +1262,67 @@ async def test_reread_file_again_reinspects_verified_bytes_instead_of_reusing_sp
     assert recovered[0]["advisory_only"] is True
 
 
+@pytest.mark.asyncio
+async def test_legacy_scan_replay_with_failed_visual_reinspection_stays_unreadable(
+    settings,
+    storage,
+    monkeypatch,
+):
+    """Parser-open plus zero OCR chars must not become a fabricated empty PDF."""
+
+    raw = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "[document: legacy-scan.pdf; type=application/pdf; size=128]",
+        filename="legacy-scan.pdf",
+        extraction_success=False,
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", raw, "legacy scan upload")
+    before = storage.get_raw_object(raw.id, "alice")["metadata_json"]
+
+    class FailedVisualInspection:
+        async def inspect_file_transient(self, content, **kwargs):  # noqa: ANN001
+            del content, kwargs
+            return {
+                "extraction_success": True,
+                "advisory_only": False,
+                "_runtime_source_text": "",
+                "text_preview": "",
+                "vision_used": False,
+                "vision_error": "vision_request_failed:ValueError",
+                "parse_pages_read": 0,
+                "parse_total_pages": 1,
+            }
+
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    runtime.kernel.ingestion = FailedVisualInspection()
+
+    async def forbidden(*_args, **_kwargs):
+        raise AssertionError("failed visual replay reached model generation")
+
+    monkeypatch.setattr(runtime, "_generate_response", forbidden)
+    result = await runtime.chat(
+        "alice",
+        "перечитай файл ещё раз",
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert result["restored_attachment_count"] == 1
+    assert result["attachment_context_readable_count"] == 0
+    assert result["attachment_coverage_complete"] is False
+    assert "прочитать не удалось" in result["message"].casefold()
+    assert storage.get_raw_object(raw.id, "alice")["metadata_json"] == before
+
+
 @pytest.mark.parametrize(
     ("query", "expected_indices"),
     [
@@ -1678,6 +1739,158 @@ async def test_current_two_file_turn_never_expands_all_to_the_archive(
         [first.id, second.id],
     ]
     assert "OLD-ARCHIVE-BODY" not in json.dumps(seen, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_dative_two_document_follow_up_restores_two_separate_used_uploads(
+    settings,
+    storage,
+    monkeypatch,
+):
+    """The live ``этим двум документам`` wording names the last two used uploads."""
+
+    first = _pending_file(storage, "alice", "alice", "FIRST-PAYSLIP", filename="first.pdf")
+    second = _pending_file(storage, "alice", "alice", "SECOND-PAYSLIP", filename="second.pdf")
+    conversation = storage.create_conversation("alice")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+
+    await runtime.chat(
+        "alice",
+        "Загружен документ: first.pdf",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[_current_attachment(storage, first)],
+        enable_tools=False,
+    )
+    await runtime.chat(
+        "alice",
+        "Загружен документ: second.pdf",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[_current_attachment(storage, second)],
+        enable_tools=False,
+    )
+    result = await runtime.chat(
+        "alice",
+        "обобщи и сделай сводку по этим двум документам",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert [item["raw_object_id"] for item in seen[-1][1]] == [first.id, second.id]
+    assert result["restored_attachment_count"] == 2
+    assert result["attachment_context_expected_count"] == 2
+    assert result["attachment_context_readable_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_bare_adjacent_obobschi_uses_only_the_fresh_single_upload(
+    settings,
+    storage,
+    monkeypatch,
+):
+    old = [
+        _pending_file(storage, "alice", "alice", f"OLD-{index}", filename=f"old-{index}.txt")
+        for index in range(3)
+    ]
+    fresh = _pending_file(storage, "alice", "alice", "FRESH-XLSX", filename="fresh.xlsx")
+    conversation = storage.create_conversation("alice")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+
+    await runtime.chat(
+        "alice",
+        "Обобщи все старые расчётные листки",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[_current_attachment(storage, item) for item in old],
+        enable_tools=False,
+    )
+    await runtime.chat(
+        "alice",
+        "Загружен документ: fresh.xlsx",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[_current_attachment(storage, fresh)],
+        enable_tools=False,
+    )
+    result = await runtime.chat(
+        "alice",
+        "обобщи",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert [item["raw_object_id"] for item in seen[-1][1]] == [fresh.id]
+    assert result["restored_attachment_count"] == 1
+    assert "OLD-" not in json.dumps(seen[-1], ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_plural_deictic_summary_reuses_exact_immediately_used_two_file_set(
+    settings,
+    storage,
+    monkeypatch,
+):
+    old = [
+        _pending_file(storage, "alice", "alice", f"OLD-{index}", filename=f"old-{index}.txt")
+        for index in range(3)
+    ]
+    first = _pending_file(storage, "alice", "alice", "CURRENT-FIRST", filename="first.pdf")
+    second = _pending_file(storage, "alice", "alice", "CURRENT-SECOND", filename="second.pdf")
+    conversation = storage.create_conversation("alice")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    seen = _patch_attachment_generation(runtime, monkeypatch)
+    actor = ActorContext(user_id="alice", preset_key="owner", source="test")
+
+    await runtime.chat(
+        "alice",
+        "Сделай старую сводку",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[_current_attachment(storage, item) for item in old],
+        enable_tools=False,
+    )
+    await runtime.chat(
+        "alice",
+        "Дай сводку по двум новым документам",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[_current_attachment(storage, first), _current_attachment(storage, second)],
+        enable_tools=False,
+    )
+    result = await runtime.chat(
+        "alice",
+        "обобщи эти документы",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert [item["raw_object_id"] for item in seen[-1][1]] == [first.id, second.id]
+    assert result["restored_attachment_count"] == 2
+    assert result["attachment_context_expected_count"] == 2
+    assert "OLD-" not in json.dumps(seen[-1], ensure_ascii=False)
 
 
 @pytest.mark.parametrize("lifecycle", ["ignored", "deleted"])
@@ -2439,11 +2652,11 @@ async def test_filename_similarity_finishes_before_content_clue_scoring(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("query", "expected_active"),
+    ("query", "expected_active", "expected_generation"),
     [
-        ("В Североградске мне дай информацию по отделу", True),
-        ("Поищи в интернете новости о Североградске", False),
-        ("Как приготовить запеканку?", False),
+        ("В Североградске мне дай информацию по отделу", True, True),
+        ("Поищи в интернете новости о Североградске", False, False),
+        ("Как приготовить запеканку?", False, True),
     ],
 )
 async def test_recent_active_attachment_uses_strong_topic_overlap_only(
@@ -2452,6 +2665,7 @@ async def test_recent_active_attachment_uses_strong_topic_overlap_only(
     monkeypatch,
     query,
     expected_active,
+    expected_generation,
 ):
     active = _pending_file(
         storage,
@@ -2478,7 +2692,7 @@ async def test_recent_active_attachment_uses_strong_topic_overlap_only(
         enable_tools=False,
     )
 
-    expected_ids = [[active.id]] if expected_active else [[]]
+    expected_ids = [[active.id]] if expected_active else [[]] if expected_generation else []
     assert [[item["raw_object_id"] for item in call[1]] for call in seen] == expected_ids
     assert result["restored_attachment_count"] == int(expected_active)
 
@@ -3075,16 +3289,21 @@ async def test_compound_attachment_file_effect_retains_agentic_route(
     base_definitions = runtime.kernel.get_tool_definitions
 
     def definitions(actor, topic=None):  # noqa: ANN001
-        return [
-            *base_definitions(actor, topic=topic),
-            {
-                "type": "function",
-                "function": {
-                    "name": "synthetic_other_effect",
-                    "parameters": {"type": "object", "properties": {}},
-                },
-            },
-        ]
+        current = list(base_definitions(actor, topic=topic))
+        names = {
+            str((item.get("function") or {}).get("name") or "") for item in current if isinstance(item, dict)
+        }
+        if "remind" not in names:
+            current.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "remind",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            )
+        return current
 
     async def prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
         del message, kwargs
@@ -3128,7 +3347,7 @@ async def test_compound_attachment_file_effect_retains_agentic_route(
     )
 
     assert len(agentic_calls) == 1
-    assert agentic_calls[0][1]
+    assert "remind" in agentic_calls[0][1]
 
 
 @pytest.mark.parametrize(

@@ -1,3 +1,72 @@
+## 0.206.0rc0 — 2026-08-20
+
+### Plaintext memory-vault закрыт безопасным режимом
+
+- Новый code-owned `FRIDAY_MEMORY_VAULT_MODE` принимает только `disabled` и
+  `full_owner`; отсутствие значения безопасно означает `disabled`, а опечатка
+  останавливает startup. В body-free режиме backend не создаёт `MemoryVault` и
+  не регистрирует projector. Существующие Markdown-файлы не удаляются молча:
+  диагностика выдаёт только наличие legacy-проекции и число заметок, а offline purge
+  удаляет только заметку действительно очищаемого Knowledge Object и не выдаётся
+  за массовую remediation. Эффективный режим связан с immutable
+  activation config и проверяется по health кандидата до приёмки backend.
+- Release metadata теперь несёт аттестованный
+  `memory_vault_mode_contract=v1`; semver не считается capability. Legacy и stale
+  pre-contract releases допустимы только при expected `full_owner` и никогда
+  при `disabled`; migration идёт через mode-aware rc0→rc1 bridge, затем final.
+- Vault traversal/read/write/prune/delete привязаны к descriptor-relative
+  `O_NOFOLLOW` boundary. Targeted purge удаляет final и matching crash-temp,
+  возвращает точный count и требует directory `fsync` до DB commit. При
+  symlink/IO/durability failure Admin/CLI purge останавливается; batch audit
+  фиксирует каждый уже совершённый purge до перехода к следующему. Admin сначала
+  пишет durable body-free `purge_attempted`; если завершающая audit-запись после
+  commit не подтвердилась, ответ — явный `purged_audit_unconfirmed`, а не ложный
+  generic 500. Публичные Admin/CLI receipts содержат только SHA-256 reference,
+  counts и cleanup booleans: title, tenant/raw identifiers, bodies и filesystem
+  paths остаются внутренними и не публикуются.
+  Full-owner projector перечитывает каждый page item под тем же SQLite
+  `BEGIN IMMEDIATE`, который purge удерживает через vault unlink и DB delete:
+  stale worker не может вернуть plaintext между unlink и commit.
+- Config сохраняет lexical vault root и не благословляет symlink через
+  `resolve()`. На платформе без нужной no-follow boundary явный `full_owner`
+  отклоняет startup; default `disabled` остаётся body-free.
+- Terminal activation journal принимает exact legacy-v1 predecessor только в
+  `full_owner` и связывает Phase-A→Phase-B с одним config scope, успешной фазой
+  `clear` и lineage rc1=previous=fallback. Узкий Phase-A retry после schema-34
+  fallback позволяет только доказанно уже применённые one-shot alias claims
+  заменить на пустой набор при неизменных env/runtime scope и rc1/rc0 lineage.
+  Album recovery требует exact `clear` activation final-кандидата в `disabled`;
+  его completed journal идемпотентен лишь при той же config identity и не
+  «усыновляет» смену mode/env. Unfinished и иной mismatch остаются fail-closed.
+
+### Память переписки и поиск собственных файлов
+
+- Поиск собственной истории получает точные локальные интервалы, честную
+  пагинацию, тематический FTS-запрос вместо полной пользовательской фразы и
+  структурные ссылки ответа на исходное сообщение.
+- Поиск собственных файлов объединяет содержимое, каноническое имя и сохранённые
+  имена повторных загрузок. Schema 33 создала message-bound transport alias;
+  schema 34 добавляет к нему проверяемое `supplied_filename`, не меняя канонический Raw Object
+  и не смешивая владельцев.
+- SQLite FTS остаётся на `unicode61`; русская нормализация и Snowball-stemming
+  выполняются в query layer. Английский `porter`, отсутствующий в pinned SQLite
+  `stemmer language='ru'` и глобальный `trigram` не вводятся.
+- PDF/JPEG/OCR требуют полного `pages[]`-контракта, корректно распадаются до
+  одиночных изображений и больше не называют неудачное распознавание пустым
+  читаемым документом. Telegram-альбомы обрабатываются поэлементно и переживают
+  partial failure, replay и неоднозначный timeout без потери либо дублирования.
+- Погода, MCP и самодиагностика используют code-owned intent/status; отсутствие
+  города не превращается в догадку о местоположении или веб-запрос.
+- Выпуск выполняется из воспроизводимого wheel через атомарный release anchor,
+  с точной резервной копией SQLite/WAL/inbox, backend-first проверкой и
+  fail-closed rollback. Старое in-place изменённое окружение не является
+  допустимой точкой восстановления.
+- Аттестованный SGLang proxy сравнивает Bearer-токен побайтово во всех пяти
+  разрешённых endpoint, а runtime identity учитывает безопасную нормализацию
+  GPU-контейнера Docker Desktop. Proxy policy, engine witness и точные image IDs
+  пересобраны и закреплены вместе; узкие полномочия V12 и graph-only
+  SGLang-параметры не расширены.
+
 ## 0.205.0 — 2026-08-19
 
 ### Qwen3.8/SGLang получает узкий V12.14 profile

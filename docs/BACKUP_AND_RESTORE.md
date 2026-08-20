@@ -80,7 +80,7 @@ data/state/jericho.sqlite3
 Не включены в SQLite backup:
 
 - `data/files/` (они защищаются отдельным инкрементальным воркером выше);
-- `data/memory-vault/`;
+- `data/memory-vault/` (optional plaintext: только явный `full_owner` или осознанно сохраняемые legacy-артефакты);
 - `data/state/telegram-inbox.sqlite3*`;
 - `.env`/`.env.local`;
 - model weights и container images.
@@ -148,13 +148,15 @@ jericho server
 ```text
 data/backups/<выбранная БД + manifest>
 data/files/
-data/memory-vault/
+data/memory-vault/               только known full_owner/legacy plaintext
 data/state/telegram-inbox.sqlite3*   если нужно сохранить pending/dead-letter updates
 .env или .env.local                  только в отдельное зашифрованное хранилище
 ```
 
 4. Сохраните checksum списка файлов.
 5. Проверьте восстановление в отдельном `FRIDAY_HOME`.
+
+При `FRIDAY_MEMORY_VAULT_MODE=disabled` не копируйте неожиданно обнаруженный legacy-vault в новые generations. Сначала зафиксируйте body-free inventory и решите, нужен ли отдельный зашифрованный preservation snapshot. Обычный `jericho purge --yes` не является bulk-remediation.
 
 Модельные веса можно исключить только при наличии надёжного источника и зафиксированного checksum snapshot.
 
@@ -167,7 +169,8 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $target = "E:\FridayBackups\$stamp"
 New-Item -ItemType Directory -Force $target | Out-Null
 robocopy D:\jericho\data\files "$target\files" /MIR /COPY:DAT /R:2 /W:2
-robocopy D:\jericho\data\memory-vault "$target\memory-vault" /MIR /COPY:DAT /R:2 /W:2
+# Только для явного full_owner или осознанно сохраняемого legacy plaintext:
+# robocopy D:\jericho\data\memory-vault "$target\memory-vault" /MIR /COPY:DAT /R:2 /W:2
 robocopy D:\jericho\data\backups "$target\database" /E /COPY:DAT /R:2 /W:2
 robocopy D:\jericho\data\state "$target\state" telegram-inbox.sqlite3* /COPY:DAT /R:2 /W:2
 Get-ChildItem $target -Recurse -File | Get-FileHash -Algorithm SHA256 |
@@ -179,7 +182,7 @@ Get-ChildItem $target -Recurse -File | Get-FileHash -Algorithm SHA256 |
 ## 5. Полное восстановление
 
 1. Разверните ту же или совместимую версию Friday в новом каталоге.
-2. Восстановите `data/files/`, `data/memory-vault/` и при необходимости Telegram queue из одного согласованного snapshot.
+2. Восстановите `data/files/` и при необходимости Telegram queue из одного согласованного snapshot. `data/memory-vault/` возвращайте только если snapshot и целевой `full_owner` были явно согласованы; legacy plaintext помещайте в offline review, а не в активный runtime автоматически.
 3. Верните secrets из зашифрованного хранилища.
 4. Поместите пару `.sqlite3 + manifest` в `data/backups/`.
 5. Запустите `jericho restore-backup <filename> --yes`.

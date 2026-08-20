@@ -98,10 +98,19 @@ class _Storage:
     def get_conversation_messages(self, conversation_id, user_id="", limit=20):  # noqa: ANN001, ARG002
         return []
 
-    def store_message(self, conversation_id, user_id, role, content, metadata=None):  # noqa: ANN001, ARG002
+    def store_message(
+        self,
+        conversation_id,
+        user_id,
+        role,
+        content,
+        metadata=None,
+        reply_to=None,
+    ):  # noqa: ANN001, ARG002
+        del reply_to
         self.stored.append((role, content))
         self.metadata.append(dict(metadata or {}))
-        return {"id": f"msg_{len(self.stored)}", "metadata_json": metadata or {}}
+        return {"id": f"msg_{len(self.stored):016x}", "metadata_json": metadata or {}}
 
 
 class _ExplodingLLM:
@@ -220,11 +229,19 @@ async def test_the_turn_is_marked_as_structural() -> None:
     storage = _Storage()
     stored: dict = {}
 
-    def capture(conversation_id, user_id, role, content, metadata=None):  # noqa: ANN001, ARG001
+    def capture(
+        conversation_id,
+        user_id,
+        role,
+        content,
+        metadata=None,
+        reply_to=None,
+    ):  # noqa: ANN001, ARG001
+        del reply_to
         if role == "assistant":
             stored.update(metadata or {})
         storage.stored.append((role, content))
-        return {"id": "msg_1"}
+        return {"id": f"msg_{len(storage.stored):016x}"}
 
     runtime = _runtime(storage)
     runtime.storage.store_message = capture  # type: ignore[method-assign]

@@ -108,33 +108,67 @@ def resolve_owned_file_exact_filename_direct_read(
     content_projection = (
         ", r.raw_content AS _raw_content, r.metadata_json AS _raw_metadata" if include_content else ""
     )
-    rows = storage.execute(
-        f"""SELECT r.id, r.source, r.source_ref, r.content_type, r.received_at,
-                   r.content_hash,
-                   substr(json_extract(r.metadata_json,'$.filename'),1,260) AS filename
-                   {content_projection}
-              FROM raw_objects r
-             WHERE r.user_id=? AND r.deleted_at IS NULL
+    base = f"""r.user_id=? AND r.deleted_at IS NULL
                AND r.content_type='file'
                AND {_exact_uploader_raw_dependency("r")}
-               AND json_type(r.metadata_json,'$.filename')='text'
-               AND length(json_extract(r.metadata_json,'$.filename')) BETWEEN 1 AND 260
-               AND replace(
-                       jericho_casefold(substr(json_extract(r.metadata_json,'$.filename'),1,261)),
-                       'ё','е')=
-                   replace(jericho_casefold(?),'ё','е')
                AND {_not_audio_document("r")}
                AND {_not_private_raw_dependency("r")}
                AND EXISTS (
                    SELECT 1 FROM users exact_direct_read_uploader
                     WHERE exact_direct_read_uploader.id=?
                       AND exact_direct_read_uploader.status='active'
+               )"""
+    rows = storage.execute(
+        f"""WITH candidates AS (
+                   SELECT r.id, r.source, r.source_ref, r.content_type, r.received_at,
+                          r.content_hash,
+                          substr(json_extract(r.metadata_json,'$.filename'),1,260) AS filename,
+                          1 AS lane{content_projection}
+                     FROM raw_objects r
+                    WHERE {base}
+                      AND json_type(r.metadata_json,'$.filename')='text'
+                      AND length(json_extract(r.metadata_json,'$.filename')) BETWEEN 1 AND 260
+                      AND replace(jericho_casefold(
+                              substr(json_extract(r.metadata_json,'$.filename'),1,261)
+                          ),'ё','е')=replace(jericho_casefold(?),'ё','е')
+                   UNION ALL
+                   SELECT r.id, r.source, r.source_ref, r.content_type, r.received_at,
+                          r.content_hash, a.supplied_filename AS filename,
+                          0 AS lane{content_projection}
+                     FROM file_source_aliases a
+                     JOIN raw_objects r ON r.id=a.raw_object_id
+                    WHERE a.user_id=? AND a.uploaded_by=?
+                      AND {base}
+                      AND length(a.supplied_filename) BETWEEN 1 AND 260
+                      AND replace(jericho_casefold(a.supplied_filename),'ё','е')=
+                          replace(jericho_casefold(?),'ё','е')
+               ),
+               ranked AS (
+                   SELECT *, ROW_NUMBER() OVER (
+                       PARTITION BY id ORDER BY lane ASC, received_at ASC, source_ref ASC
+                   ) AS _choice
+                     FROM candidates
                )
-             ORDER BY r.received_at ASC, r.id ASC
-             LIMIT 2""",  # nosec B608 - only fixed privacy predicates
-        (tenant, person, clean_filename, person),
+               SELECT * FROM ranked WHERE _choice=1
+                ORDER BY received_at ASC, id ASC
+                LIMIT 2""",  # nosec B608 - only fixed privacy predicates
+        (
+            tenant,
+            person,
+            person,
+            clean_filename,
+            tenant,
+            person,
+            tenant,
+            person,
+            person,
+            clean_filename,
+        ),
     ).fetchall()
     result = [dict(row) for row in rows]
+    for item in result:
+        item.pop("lane", None)
+        item.pop("_choice", None)
     if expected_raw_id is not None and (len(result) != 1 or str(result[0].get("id") or "") != expected):
         return []
     return result
@@ -864,6 +898,7 @@ class IntakeMixin(StorageShared):
         uploaded_by: str,
         source_ref: str,
         raw_object_id: str,
+        supplied_filename: str = "",
     ) -> bool:
         """Bind one fresh Telegram file id to an existing immutable Raw Object.
 
@@ -878,12 +913,15 @@ class IntakeMixin(StorageShared):
         exact_uploader = str(uploaded_by or "").strip()
         exact_ref = str(source_ref or "").strip()
         exact_raw = str(raw_object_id or "").strip()
+        alias_filename = str(supplied_filename or "").strip()
         if (
             not exact_user
             or not exact_uploader
             or not exact_raw
             or _telegram_file_source_ref_kind(exact_ref) != "file"
             or len(exact_ref) > 500
+            or len(alias_filename) > 260
+            or any(char in alias_filename for char in ("/", "\\", "\x00", "\r", "\n"))
         ):
             return False
         with self.transaction() as conn:
@@ -905,7 +943,7 @@ class IntakeMixin(StorageShared):
             if canonical is None:
                 return False
             existing = conn.execute(
-                """SELECT raw_object_id FROM file_source_aliases
+                """SELECT raw_object_id, supplied_filename FROM file_source_aliases
                     WHERE user_id=? AND uploaded_by=? AND source_ref=?""",
                 (exact_user, exact_uploader, exact_ref),
             ).fetchone()
@@ -914,12 +952,20 @@ class IntakeMixin(StorageShared):
                     raise SourceReferenceConflictError(
                         "file source alias is already bound to different content"
                     )
+                if alias_filename and not str(existing["supplied_filename"] or ""):
+                    conn.execute(
+                        """UPDATE file_source_aliases SET supplied_filename=?
+                            WHERE user_id=? AND uploaded_by=? AND source_ref=?
+                              AND supplied_filename=''""",
+                        (alias_filename, exact_user, exact_uploader, exact_ref),
+                    )
                 return True
             conn.execute(
                 """INSERT INTO file_source_aliases(
-                       user_id, uploaded_by, source_ref, raw_object_id, created_at
-                   ) VALUES(?, ?, ?, ?, ?)""",
-                (exact_user, exact_uploader, exact_ref, exact_raw, utc_now()),
+                       user_id, uploaded_by, source_ref, raw_object_id,
+                       supplied_filename, created_at
+                   ) VALUES(?, ?, ?, ?, ?, ?)""",
+                (exact_user, exact_uploader, exact_ref, exact_raw, alias_filename, utc_now()),
             )
             return True
 
@@ -1731,29 +1777,68 @@ class IntakeMixin(StorageShared):
         clean_filename = str(filename or "").strip()
         if not tenant or not person or not clean_filename or len(clean_filename) > 260:
             return []
-        rows = self.execute(
-            f"""SELECT r.id, r.content_type, r.received_at,
-                       substr(json_extract(r.metadata_json,'$.filename'),1,260) AS filename
-                  FROM raw_objects r
-                 WHERE r.user_id=? AND r.deleted_at IS NULL
+        base = f"""r.user_id=? AND r.deleted_at IS NULL
                    AND r.content_type='file'
                    AND json_valid(r.metadata_json)
                    AND json_type(r.metadata_json,'$.uploaded_by')='text'
                    AND json_extract(r.metadata_json,'$.uploaded_by')=?
-                   AND json_type(r.metadata_json,'$.filename')='text'
-                   AND length(json_extract(r.metadata_json,'$.filename')) BETWEEN 1 AND 260
-                   AND jericho_casefold(substr(json_extract(r.metadata_json,'$.filename'),1,261))=
-                       jericho_casefold(?)
+                   AND EXISTS (
+                       SELECT 1 FROM users exact_filename_uploader
+                        WHERE exact_filename_uploader.id=?
+                          AND exact_filename_uploader.status='active'
+                   )
                    AND {_not_audio_document("r")}
                    AND {_not_private_raw_dependency("r")}
                    AND NOT EXISTS (
                        SELECT 1 FROM inbox i
                         WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
                           AND i.status='ignored'
+                   )"""
+        rows = self.execute(
+            f"""WITH candidates AS (
+                       SELECT r.id, r.content_type, r.received_at,
+                              substr(json_extract(r.metadata_json,'$.filename'),1,260) AS filename,
+                              1 AS lane
+                         FROM raw_objects r
+                        WHERE {base}
+                          AND json_type(r.metadata_json,'$.filename')='text'
+                          AND length(json_extract(r.metadata_json,'$.filename')) BETWEEN 1 AND 260
+                          AND replace(jericho_casefold(
+                                  substr(json_extract(r.metadata_json,'$.filename'),1,261)
+                              ),'ё','е')=replace(jericho_casefold(?),'ё','е')
+                       UNION ALL
+                       SELECT r.id, r.content_type, r.received_at,
+                              a.supplied_filename AS filename, 0 AS lane
+                         FROM file_source_aliases a
+                         JOIN raw_objects r ON r.id=a.raw_object_id
+                        WHERE a.user_id=? AND a.uploaded_by=?
+                          AND {base}
+                          AND length(a.supplied_filename) BETWEEN 1 AND 260
+                          AND replace(jericho_casefold(a.supplied_filename),'ё','е')=
+                              replace(jericho_casefold(?),'ё','е')
+                   ),
+                   ranked AS (
+                       SELECT *, ROW_NUMBER() OVER (
+                           PARTITION BY id ORDER BY lane ASC, received_at ASC
+                       ) AS _choice
+                         FROM candidates
                    )
-                 ORDER BY r.received_at ASC, r.id ASC
-                 LIMIT 2""",  # nosec B608 - only fixed privacy predicates
-            (tenant, person, clean_filename),
+                   SELECT id, content_type, received_at, filename
+                     FROM ranked WHERE _choice=1
+                    ORDER BY received_at ASC, id ASC
+                    LIMIT 2""",  # nosec B608 - only fixed privacy predicates
+            (
+                tenant,
+                person,
+                person,
+                clean_filename,
+                tenant,
+                person,
+                tenant,
+                person,
+                person,
+                clean_filename,
+            ),
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -1824,6 +1909,271 @@ class IntakeMixin(StorageShared):
             "available": True,
             "limit": page_size,
             "matched_at_least": len(rows),
+        }
+
+    def search_owned_files_by_term(
+        self,
+        user_id: str,
+        uploaded_by: str,
+        query: str,
+        *,
+        limit: int = 64,
+    ) -> dict[str, Any]:
+        """Union exact-uploader filename substring and body FTS matches.
+
+        Each lane receives its own sentinel before the deterministic merge, so
+        a dense body page cannot crowd filename matches out.  Both lanes keep
+        tenant, uploader, lifecycle, private, ignored and audio predicates in
+        SQL.  Raw body text is never projected.
+        """
+
+        page_size = max(1, min(int(limit), 64))
+        tenant = str(user_id or "").strip()
+        person = str(uploaded_by or "").strip()
+        text = " ".join(str(query or "").split()).strip()
+        empty: dict[str, Any] = {
+            "results": [],
+            "filename_results": [],
+            "complete": False,
+            "available": False,
+            "filename_complete": False,
+            "filename_matched_at_least": 0,
+            "filename_total": None,
+            "content_complete": False,
+            "limit": page_size,
+            "matched_at_least": 0,
+            "total": None,
+        }
+        if not tenant or not person or not text or len(text) > 260:
+            return empty
+        escaped = text.replace("\\", r"\\").replace("%", r"\%").replace("_", r"\_")
+        filename_like = f"%{escaped}%"
+        base = f"""r.user_id=? AND r.deleted_at IS NULL
+                   AND r.content_type='file'
+                   AND json_valid(r.metadata_json)
+                   AND json_type(r.metadata_json,'$.uploaded_by')='text'
+                   AND json_extract(r.metadata_json,'$.uploaded_by')=?
+                   AND EXISTS (
+                       SELECT 1 FROM users uploader_user
+                        WHERE uploader_user.id=? AND uploader_user.status='active'
+                   )
+                   AND {_not_audio_document("r")}
+                   AND {_not_private_raw_dependency("r")}
+                   AND NOT EXISTS (
+                       SELECT 1 FROM inbox i
+                        WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
+                          AND i.status='ignored'
+                   )"""
+        base_params = (tenant, person, person)
+
+        def filename_rows_only() -> list[sqlite3.Row]:
+            return self.execute(
+                f"""WITH alias_hits AS (
+                           SELECT r.id, r.content_type, r.received_at,
+                                  a.supplied_filename AS filename,
+                                  'filename_alias' AS match_kind, 0 AS lane, 0.0 AS rank
+                             FROM file_source_aliases a
+                             JOIN raw_objects r ON r.id=a.raw_object_id
+                            WHERE a.user_id=? AND a.uploaded_by=?
+                              AND {base}
+                              AND length(a.supplied_filename) BETWEEN 1 AND 260
+                              AND jericho_casefold(a.supplied_filename)
+                                  LIKE jericho_casefold(?) ESCAPE '\\'
+                            ORDER BY a.created_at DESC, a.source_ref ASC
+                            LIMIT ?
+                       ),
+                       canonical_hits AS (
+                           SELECT r.id, r.content_type, r.received_at,
+                                  substr(json_extract(r.metadata_json,'$.filename'),1,260) AS filename,
+                                  'filename' AS match_kind, 1 AS lane, 0.0 AS rank
+                             FROM raw_objects r
+                            WHERE {base}
+                              AND json_type(r.metadata_json,'$.filename')='text'
+                              AND length(json_extract(r.metadata_json,'$.filename')) BETWEEN 1 AND 260
+                              AND jericho_casefold(
+                                      substr(json_extract(r.metadata_json,'$.filename'),1,261)
+                                  ) LIKE jericho_casefold(?) ESCAPE '\\'
+                            ORDER BY r.received_at DESC, r.rowid DESC
+                            LIMIT ?
+                       )
+                       SELECT * FROM alias_hits
+                       UNION ALL
+                       SELECT * FROM canonical_hits
+                       ORDER BY lane ASC, received_at DESC, id ASC""",  # nosec B608
+                (
+                    tenant,
+                    person,
+                    *base_params,
+                    filename_like,
+                    page_size + 1,
+                    *base_params,
+                    filename_like,
+                    page_size + 1,
+                ),
+            ).fetchall()
+
+        def merge_filename_rows(rows: Sequence[sqlite3.Row]) -> tuple[list[dict[str, Any]], bool]:
+            alias_rows = [row for row in rows if str(row["match_kind"]) == "filename_alias"]
+            canonical_rows = [row for row in rows if str(row["match_kind"]) == "filename"]
+            lane_complete = len(alias_rows) <= page_size and len(canonical_rows) <= page_size
+            merged: dict[str, dict[str, Any]] = {}
+            for row in [*alias_rows[:page_size], *canonical_rows[:page_size]]:
+                item = dict(row)
+                raw_id = str(item.get("id") or "")
+                kind = str(item.pop("match_kind", "") or "")
+                item.pop("lane", None)
+                item.pop("rank", None)
+                if raw_id in merged:
+                    kinds = merged[raw_id]["match_kinds"]
+                    if kind and kind not in kinds:
+                        kinds.append(kind)
+                else:
+                    item["match_kinds"] = [kind] if kind else []
+                    merged[raw_id] = item
+            return list(merged.values()), lane_complete
+
+        terms = _fts_terms(text)
+        if not self._fts_available or not terms:
+            try:
+                filename_rows = filename_rows_only()
+            except sqlite3.OperationalError:
+                return empty
+            merged_names, filename_complete = merge_filename_rows(filename_rows)
+            return {
+                "results": merged_names[:page_size],
+                "filename_results": merged_names[:page_size],
+                "complete": False,
+                "available": False,
+                "filename_complete": filename_complete,
+                "filename_matched_at_least": len(merged_names),
+                "filename_total": (
+                    len(merged_names) if filename_complete and len(merged_names) <= page_size else None
+                ),
+                "content_complete": False,
+                "limit": page_size,
+                "matched_at_least": len(merged_names),
+                "total": None,
+            }
+        match_query = " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"*' for term in terms)
+        try:
+            rows = self.execute(
+                f"""WITH alias_hits AS (
+                           SELECT r.id, r.content_type, r.received_at,
+                                  a.supplied_filename AS filename,
+                                  'filename_alias' AS match_kind, 0 AS lane, 0.0 AS rank
+                             FROM file_source_aliases a
+                             JOIN raw_objects r ON r.id=a.raw_object_id
+                            WHERE a.user_id=? AND a.uploaded_by=?
+                              AND {base}
+                              AND length(a.supplied_filename) BETWEEN 1 AND 260
+                              AND jericho_casefold(a.supplied_filename)
+                                  LIKE jericho_casefold(?) ESCAPE '\\'
+                            ORDER BY a.created_at DESC, a.source_ref ASC
+                            LIMIT ?
+                       ),
+                       filename_hits AS (
+                           SELECT r.id, r.content_type, r.received_at,
+                                  substr(json_extract(r.metadata_json,'$.filename'),1,260) AS filename,
+                                  'filename' AS match_kind, 1 AS lane, 0.0 AS rank
+                             FROM raw_objects r
+                            WHERE {base}
+                              AND json_type(r.metadata_json,'$.filename')='text'
+                              AND length(json_extract(r.metadata_json,'$.filename')) BETWEEN 1 AND 260
+                              AND jericho_casefold(
+                                      substr(json_extract(r.metadata_json,'$.filename'),1,261)
+                                  ) LIKE jericho_casefold(?) ESCAPE '\\'
+                            ORDER BY r.received_at DESC, r.rowid DESC
+                            LIMIT ?
+                       ),
+                       content_hits AS (
+                           SELECT r.id, r.content_type, r.received_at,
+                                  substr(COALESCE(json_extract(r.metadata_json,'$.filename'),''),1,260)
+                                      AS filename,
+                                  'content' AS match_kind, 2 AS lane, bm25(raw_fts) AS rank
+                             FROM raw_fts
+                             JOIN raw_objects r ON r.rowid=raw_fts.rowid
+                            WHERE {base}
+                              AND raw_fts MATCH ?
+                            ORDER BY rank ASC, r.received_at DESC, r.id ASC
+                            LIMIT ?
+                       )
+                       SELECT * FROM alias_hits
+                       UNION ALL
+                       SELECT * FROM filename_hits
+                       UNION ALL
+                       SELECT * FROM content_hits
+                       ORDER BY lane ASC, rank ASC, received_at DESC, id ASC""",  # nosec B608
+                (
+                    tenant,
+                    person,
+                    *base_params,
+                    filename_like,
+                    page_size + 1,
+                    *base_params,
+                    filename_like,
+                    page_size + 1,
+                    *base_params,
+                    match_query,
+                    page_size + 1,
+                ),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            try:
+                filename_rows = filename_rows_only()
+            except sqlite3.OperationalError:
+                return empty
+            merged_names, filename_complete = merge_filename_rows(filename_rows)
+            return {
+                "results": merged_names[:page_size],
+                "filename_results": merged_names[:page_size],
+                "complete": False,
+                "available": False,
+                "filename_complete": filename_complete,
+                "filename_matched_at_least": len(merged_names),
+                "filename_total": (
+                    len(merged_names) if filename_complete and len(merged_names) <= page_size else None
+                ),
+                "content_complete": False,
+                "limit": page_size,
+                "matched_at_least": len(merged_names),
+                "total": None,
+            }
+
+        filename_rows = [row for row in rows if str(row["match_kind"]) in {"filename_alias", "filename"}]
+        content_rows = [row for row in rows if str(row["match_kind"]) == "content"]
+        merged_names, filename_complete = merge_filename_rows(filename_rows)
+        content_complete = len(content_rows) <= page_size
+        merged: dict[str, dict[str, Any]] = {str(item["id"]): item for item in merged_names}
+        for row in content_rows[:page_size]:
+            item = dict(row)
+            raw_id = str(item.get("id") or "")
+            kind = str(item.pop("match_kind", "") or "")
+            item.pop("lane", None)
+            item.pop("rank", None)
+            if raw_id in merged:
+                kinds = merged[raw_id]["match_kinds"]
+                if kind and kind not in kinds:
+                    kinds.append(kind)
+            else:
+                item["match_kinds"] = [kind] if kind else []
+                merged[raw_id] = item
+        all_results = list(merged.values())
+        complete = filename_complete and content_complete and len(all_results) <= page_size
+        shown = all_results[:page_size]
+        return {
+            "results": shown,
+            "filename_results": merged_names[:page_size],
+            "complete": complete,
+            "available": True,
+            "filename_complete": filename_complete,
+            "filename_matched_at_least": len(merged_names),
+            "filename_total": (
+                len(merged_names) if filename_complete and len(merged_names) <= page_size else None
+            ),
+            "content_complete": content_complete,
+            "limit": page_size,
+            "matched_at_least": len(all_results),
+            "total": len(all_results) if complete else None,
         }
 
     def store_inbox_item(self, item: InboxItem) -> InboxItem:

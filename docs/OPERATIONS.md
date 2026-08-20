@@ -156,17 +156,17 @@ FRIDAY_CORS_ORIGINS=https://127.0.0.1:8000,https://localhost:8000,https://LAN-NA
 его hostname обязан входить в SAN. `FRIDAY_BACKEND_CA_FILE` указывает только на
 public CA/certificate — никогда на key.
 
-Установленные CLI units обычно называются `jericho-backend.service` и
-`jericho-bridge.service`; у переименованной существующей установки это могут быть
-`friday-backend.service` и `friday-bridge.service`. Сначала переключите backend и
-докажите HTTPS health через CA, только затем перезапустите bridge:
+Канонические 0.206 units называются `friday-backend.service` и
+`friday-bridge.service`. Сначала переключите backend и докажите HTTPS health
+через CA, только затем перезапустите bridge. Старые `jericho-*` units могут
+встречаться только в pre-0.206 установках и не являются release path:
 
 ```bash
-systemctl --user restart jericho-backend.service
+systemctl --user restart friday-backend.service
 curl --fail --silent --show-error --cacert /absolute/path/ca-or-self-signed-server.crt \
   https://127.0.0.1:8000/api/health
-systemctl --user restart jericho-bridge.service
-systemctl --user is-active jericho-backend.service jericho-bridge.service
+systemctl --user restart friday-bridge.service
+systemctl --user is-active friday-backend.service friday-bridge.service
 FRIDAY_ENV_FILE=/absolute/path/.env.local jericho doctor
 ```
 
@@ -205,7 +205,7 @@ Admin diagnostics показывает те же schema/backup/worker/lease/acti
 
 ## 6. Обновление
 
-Перед заменой кода:
+Перед заменой кода можно создать дополнительную operator-independent копию:
 
 ```powershell
 jericho backup --label before-upgrade
@@ -213,23 +213,111 @@ jericho verify-backup
 pytest -q
 ```
 
-Затем:
+Единственный release path — `tools/immutable_release_operator.py`. Снача source
+Python строит sealed wheel-only siblings; все последующие команды запускаются
+только из sealed release его же interpreter и копией оператора:
 
-1. остановите backend и Telegram bridge;
-2. замените только исходники, сохранив `data/`, модели и secrets;
-3. активируйте venv и выполните `pip install -e ".[dev]"`;
-4. запустите `jericho doctor`;
-5. запустите backend и проверьте Admin/Telegram smoke.
+```text
+<SOURCE_PYTHON> -I -B tools/immutable_release_operator.py build ...
+<CANDIDATE>/venv/bin/python -I -B \
+  <CANDIDATE>/artifacts/immutable_release_operator.py install-units ...
+<CANDIDATE>/venv/bin/python -I -B \
+  <CANDIDATE>/artifacts/immutable_release_operator.py activate ...
+<EXECUTOR>/venv/bin/python -I -B \
+  <EXECUTOR>/artifacts/immutable_release_operator.py recover-activation ...
+<CANDIDATE>/venv/bin/python -I -B \
+  <CANDIDATE>/artifacts/immutable_release_operator.py recover-historical-album ...
+```
 
-0.205.0 использует SQLite schema 33, как и 0.204.2: Qwen3.8/SGLang
-profile и owner degradation alerts не добавляют миграцию и не меняют
-авторитетные Knowledge/Graph/Inbox/Conversation records. Sentinel хранит
-только техническое состояние эпизода в существующем `runtime_kv`.
-Отсутствующие производные projections могут идемпотентно достраиваться при
-открытии. Любая будущая поддерживаемая schema migration выполняется одной
-транзакцией; неизвестная более новая schema отклоняется fail-closed.
+`build` запускается отдельно для каждого sealed sibling. Режим vault связан с
+immutable config identity и с аттестованной release-metadata capability
+`memory_vault_mode_contract=v1`; совпадение semver её не заменяет. `install-units`
+допускает новый candidate только с
+`venv_relocation_contract=absolute-final-v1`: до seal оператор перепривязывает
+все console shebangs, shell activation scripts и `pyvenv.cfg` к exact final
+venv, пересчитывает соответствующие `RECORD` hash/size, удаляет `__pycache__` и
+доказывает exhaustive scan, что staging root не остался ни в одном regular file
+или symlink target. До и после atomic rename напрямую исполняются `friday
+--help`, `jericho --help` и `pip --version`; smoke также связывает `sys.prefix`
+и `sys.executable` с этим venv. Отдельный hermetic Bash smoke фактически source-ит
+`activate`: до публикации проверяет effective `VIRTUAL_ENV` и начало `PATH`, а
+после неё также `command -v python`, `sys.prefix` и `sys.executable`. Ошибка после
+публикации оставляет immutable
+commit-root quarantined без clear receipt: автоматического удаления или retry
+того же имени нет.
 
-Восстановление выполняется только штатной командой при остановленном backend:
+`install-units`
+crash-recoverably переводит уже подготовленную canonical Friday-пару с
+аттестованного transition runtime на anchor-based unit files, не останавливая
+live; `jericho-*` units он не мигрирует. `activate` сам останавливает writers,
+делает exact DB/WAL/inbox
+recovery set, мигрирует, переключает атомарный anchor и доказывает
+process/TLS health backend до bridge. `recover-historical-album` **никогда не
+запускается в Phase A**: только после accepted final Phase B исторический альбом
+восстанавливается отдельной crash-recoverable командой. CAS из `dead_letter` в
+`pending` выдаёт только внутренний `pending` receipt. Публичный `status=clear`
+появляется лишь после запуска exact final bridge, двух read-only наблюдений, что
+все десять связанных update rows атомарно исчезли из durable inbox, и повторной
+проверки identity живого bridge между наблюдениями. Это означает, что bridge
+завершил единый album turn и удалил все десять строк только после возврата
+`_process_update`; сам CAS, health или restart доказательством публикации не
+считаются. Ожидание ограничено 600 секундами: timeout оставляет journal в
+`bridge_accepted` без completion receipt, а повтор команды продолжает только
+monitor; частичное исчезновение либо повторный `dead_letter` fail-closed и не
+маскируются как recovery. Completed album journal идемпотентен лишь при exact той
+же config identity и при повторно подтверждённом отсутствии всех десяти строк;
+mismatch mode/env/config или возвращённые строки не переходят автоматически и
+требуют review/remediation под исходной bound-config.
+
+0.206.0rc0 использует SQLite schema 34. Новое поле имени загрузки принадлежит
+точному message-bound alias и не переписывает канонический Raw Object. Миграция
+и исторический backfill разрешены только при остановленных backend/bridge,
+проверенной копии SQLite вместе с WAL и Telegram inbox, exact lease/identity
+и post-verify публичного поиска. Cutover из 0.205 в body-free режим двухфазный:
+
+1. **До редактирования env** сохраните SHA-256 его точных sealed bytes. **Phase A /
+   bridge:** `FRIDAY_MEMORY_VAULT_MODE=full_owner`; candidate — mode-aware
+   schema-34 `0.206.0rc1`, previous — legacy 0.205/schema-33, fallback — отдельный
+   mode-aware schema-34 `0.206.0rc0`. В `activate` передайте сохранённый digest как
+   `--terminal-journal-env-sha256 <PRE_EDIT_ENV_SHA256>`: только так exact legacy-v1
+   terminal identity может быть аутентифицирована после добавления `full_owner`.
+   Неверный digest, unfinished journal или попытка применить этот переход сразу к
+   `disabled` отклоняются. Если rollback активировал rc0, повтор указывает rc0
+   одновременно как previous и fallback. Если этот rollback случился после
+   network-writer boundary, уже применённые alias claims при повторе **опускаются**:
+   terminal journal разрешает это только для `rolled_back` **или** crash-recovery
+   terminal `recovered` с подтверждёнными DB mutation/network uncertainty и exact
+   `writer_target=fallback`, тем же rc1 candidate, прежним rc0 fallback, rc0 как
+   новые previous=fallback, неизменными persistent scope и retry-scope (включая
+   прежний env hash). `recovered` с previous/candidate writer, иной lineage или
+   изменённой конфигурацией не может оправдать omission. При rollback до этой
+   boundary точный backup восстановлен, поэтому claims повторяются.
+   Одноразовые alias-claim manifests разрешены только здесь: полный config
+   identity Phase A связывает их exact paths/counts/plan hashes.
+2. **Phase B / body-free:** только после accepted rc1 и schema 34 перевести
+   env в `disabled`; candidate — final, previous и fallback — один и тот же rc1.
+   Alias-claim arguments здесь обязаны отсутствовать: persistent cutover scope
+   исключает уже потреблённые одноразовые claims, но остальные runtime paths,
+   health/unit identities и lineage остаются связанными.
+
+Lineage закрыт: rc0 содержит последний functional diff, rc1 отличается от rc0
+только version identity, а final от rc1 — только version/docs; новые runtime-правки
+между этими siblings запрещены и требуют нового bridge cycle.
+
+Release без mode contract считается legacy `full_owner` и допустим только в Phase A.
+В `disabled` такой previous/fallback/candidate отклоняется независимо от semver,
+включая stale pre-contract 0.206 siblings. Activation receipt связывает фазу и
+режим. Завершённый activation journal заменяется при exact legacy-v1 migration
+только в Phase A или при строго связанном переходе Phase A→B: прежняя фаза должна
+быть `clear` (не `rolled_back`), config scope совпадает, прежний candidate равен
+новым previous и fallback, а mode меняется ровно `full_owner`→`disabled`. Любой
+unfinished/иной identity mismatch остаётся fail-closed и требует recovery в
+исходной identity. Album journal mode/env transition не принимает. Неизвестная
+более новая schema отклоняется fail-closed.
+
+Обычное восстановление вне release transition выполняется только штатной
+командой при остановленном backend. Незавершённая activation восстанавливается
+только `recover-activation`; `jericho restore-backup` не заменяет release journal:
 
 ```powershell
 jericho restore-backup <backup.sqlite3> --yes
@@ -286,7 +374,7 @@ CLI не аутентифицирует человека и поэтому не 
 
 ## 8. Background workers
 
-При `FRIDAY_WORKERS_ENABLED=1` supervisor запускает tenant-scoped задачи lifecycle, ER candidates, vault, backup, SQLite optimize, quality scan и bounded model advice.
+При `FRIDAY_WORKERS_ENABLED=1` supervisor запускает tenant-scoped задачи lifecycle, ER candidates, backup, SQLite optimize, quality scan и bounded model advice. Полнотекстовый Markdown-projector регистрируется только при явном `FRIDAY_MEMORY_VAULT_MODE=full_owner`; безопасное умолчание `disabled` не создаёт `MemoryVault` и не планирует эту задачу. Неизвестное значение останавливает startup; `full_owner` также fail-closed на платформе без descriptor-relative `O_NOFOLLOW` boundary (включая Windows), до публикации enabled-health. Отключение никогда не удаляет прежние заметки автоматически: `status`/`doctor` показывают presence, Markdown-count и completeness без публикации имён, путей и содержимого; crash-temp и другие regular artifacts тоже отмечают plaintext presence. Обычный offline `jericho purge --yes` удаляет лишь final/crash-temp файлы Knowledge Object, который действительно проходит purge; это не команда массовой очистки legacy-vault.
 
 Для каждой задачи сохраняются:
 
@@ -434,7 +522,7 @@ orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.205.0`.
+требуйте `status=ok` и `version=0.206.0rc0`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

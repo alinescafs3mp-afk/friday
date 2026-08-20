@@ -354,7 +354,10 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_prepare_document": "(self, telegram: 'httpx.AsyncClient', message: 'dict[str, Any]', update: 'dict[str, Any]') -> 'dict[str, Any] | None'",
     "_reply_document_source_ref": "(message: 'dict[str, Any]') -> 'str'",
     "_process_callback_query": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', callback: 'dict[str, Any]') -> 'None'",
-    "_post_message_chunk": "(self, client: 'httpx.AsyncClient', payload: 'dict[str, Any]', chunk: 'str') -> 'httpx.Response'",
+    "_post_message_chunk": (
+        "(self, client: 'httpx.AsyncClient', payload: 'dict[str, Any]', chunk: 'str', *, "
+        "resume_key: 'int | None' = None, chunk_number: 'int | None' = None) -> 'httpx.Response'"
+    ),
     "_offer_access_to_owner": "(self, telegram: 'httpx.AsyncClient', actor: 'dict[str, Any]', newcomer: 'dict[str, Any]') -> 'None'",
     "_process_update": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', update: 'dict[str, Any]', *, cached_response: 'dict[str, Any] | None') -> 'None'",
     "_retry_after_sec": "(response: 'httpx.Response') -> 'float'",
@@ -393,7 +396,8 @@ EXPECTED_BRIDGE: dict[str, str] = {
     "_send_message": (
         "(self, client: 'httpx.AsyncClient', chat_id: 'int', text: 'str', *, "
         "reply_markup: 'dict[str, Any] | None' = None, resume_key: 'int | None' = None, "
-        "text_format: 'str' = 'markdown', reply_source_message_id: 'str' = '') -> 'None'"
+        "text_format: 'str' = 'markdown', reply_source_message_id: 'str' = '', "
+        "reply_to_message_id: 'int | None' = None) -> 'None'"
     ),
     "_send_missions": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]') -> 'None'",
     "_send_search": "(self, telegram: 'httpx.AsyncClient', backend: 'httpx.AsyncClient', chat_id: 'int', external_user_id: 'str', telegram_user: 'dict[str, Any]', query: 'str') -> 'None'",
@@ -416,6 +420,9 @@ EXPECTED_INBOX: dict[str, str] = {
     "close": "(self) -> 'None'",
     "contiguous_pending_rows": "(self, ordering_key: 'str', anchor_update_id: 'int', *, limit: 'int') -> 'list[dict[str, Any]]'",
     "answer_chunks_sent": "(self, update_id: 'int') -> 'int'",
+    "answer_delivery_uncertainty_pending": "(self, update_id: 'int') -> 'bool'",
+    "begin_answer_chunk_delivery": ("(self, update_id: 'int', count: 'int') -> 'tuple[int, int] | None'"),
+    "begin_answer_delivery_uncertainty_notice": "(self, update_id: 'int') -> 'bool'",
     "dead_letters": "(self, *, limit: 'int' = 100) -> 'list[dict[str, Any]]'",
     "delivered_notification_ids": "(self) -> 'set[str]'",
     "forget_delivered_notifications": "(self, notification_ids: 'list[str]') -> 'None'",
@@ -425,8 +432,11 @@ EXPECTED_INBOX: dict[str, str] = {
     "mark_dead_letter": "(self, update_id: 'int', error: 'str') -> 'None'",
     "mark_dead_letter_many": "(self, update_ids: 'list[int]', error: 'str') -> 'None'",
     "mark_failure": "(self, update_id: 'int', error: 'str') -> 'bool'",
+    "mark_failure_many": "(self, update_ids: 'list[int]', error: 'str') -> 'bool'",
     "pending": "(self, *, now: 'float | None' = None, limit: 'int' = 20) -> 'list[dict[str, Any]]'",
     "record_answer_chunks_sent": "(self, update_id: 'int', count: 'int') -> 'None'",
+    "record_uncertain_answer_chunk": "(self, update_id: 'int', count: 'int') -> 'None'",
+    "confirm_answer_chunk_delivery": "(self, update_id: 'int', count: 'int') -> 'bool'",
     "remember_edit_prompt": "(self, prompt_message_id: 'int', knowledge_id: 'str') -> 'None'",
     "remember_archive_password_challenge": "(self, chat_id: 'int', user_id: 'int', document: 'dict[str, Any]', *, safe_query: 'str' = '', original_message_id: 'int' = 0, ttl_sec: 'float' = 3600.0) -> 'None'",
     "remember_generated_file_delivery": "(self, delivery_key: 'str') -> 'None'",
@@ -440,6 +450,11 @@ EXPECTED_INBOX: dict[str, str] = {
     "remember_registered_chat": "(self, chat_id: 'int') -> 'None'",
     "remove": "(self, update_id: 'int') -> 'None'",
     "remove_many": "(self, update_ids: 'list[int]') -> 'None'",
+    "reject_answer_chunk_delivery": (
+        "(self, update_id: 'int', count: 'int', *, previous_count: 'int', "
+        "previous_uncertainty: 'int') -> 'bool'"
+    ),
+    "retry_answer_delivery_uncertainty_notice": "(self, update_id: 'int') -> 'None'",
     "clear_archive_password_challenge": "(self, chat_id: 'int', user_id: 'int') -> 'None'",
     "set_offset": "(self, offset: 'int') -> 'None'",
     "stats": "(self) -> 'dict[str, int]'",

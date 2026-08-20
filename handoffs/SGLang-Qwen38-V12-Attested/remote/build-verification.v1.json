@@ -1,6 +1,6 @@
 {
   "schema": "friday.attested-build-verification.v1",
-  "observed_utc": "2026-08-18T21:57:58.8921072Z",
+  "observed_utc": "2026-08-19T00:16:37.8451821Z",
   "model_snapshot": {
     "file_count": 17,
     "total_bytes": 21952105742,
@@ -9,14 +9,24 @@
     "semantic_manifest_sha256": "da435c4b7556d8d5feed8551024914b0da0b48bb3fe85850536a0eb3b2489333"
   },
   "images": {
-    "engine_image_id": "sha256:7f27e2885eca5041860a8c28c0bc3304b43b9fce072f298da043393866aa5887",
-    "proxy_image_id": "sha256:2bf585895ba4ede01899f4b17db5c690dd893d77c3e1da9ac4dfb2482e22c091",
+    "engine_image_id": "sha256:4a38144134d84d6f78c1844314f209c48ef69c4bd8bf7da1e5c400f9abda6f26",
+    "proxy_image_id": "sha256:37ae13a39a5d8a0780b0b0f226065753c0d929c31956be27f7f375f79cdef750",
+    "proxy_policy_sha256": "d51c092ca2ef566f092ef9d55320e302c2d10b710d319d27a6d982aba018dcfe",
     "base_rootfs_prefixes_verified": true,
     "code_owned_labels_verified": true,
     "embedded_wrapper_compile": "ok",
     "model_sealer_sha256": "3de3307620168e5d78732ab3880cb1434b51967c76ab7872ded56893c2613b70",
     "model_volume_schema": "friday.sealed-model-volume.v1",
     "proxy_nginx_test": "ok",
+    "proxy_nginx_test_256_character_key": "ok",
+    "proxy_nginx_test_stable_key": "ok",
+    "proxy_authorization_matrix": {
+      "exact_key_authorized": true,
+      "wrong_case_rejected": true,
+      "missing_key_rejected": true,
+      "wrong_key_rejected": true,
+      "management_route_closed": true
+    },
     "proxy_test_capabilities": ["CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID"]
   },
   "static_gates": {
@@ -26,16 +36,17 @@
     "core_sha256_manifest": "ok",
     "base_compose_host_ports": [],
     "engine_model_mount": "named-volume-read-only",
-    "model_volume_population": "deferred-to-execute-before-stable-mutation",
-    "candidate_containers": []
+    "model_volume_population": "switch-managed-and-verified-before-stable-mutation",
+    "candidate_containers_running": [],
+    "proxy_test_containers_remaining": []
   },
   "live_unchanged": {
     "engine_name": "jarvis-gpt-sglang-qwen38-perf-graph",
     "engine_status": "running",
-    "engine_started_at": "2026-08-18T17:46:16.08924069Z",
+    "engine_started_at": "2026-08-18T23:49:16.235508052Z",
     "proxy_name": "jarvis-gpt-sglang-qwen38-perf-graph-api",
     "proxy_status": "running",
-    "proxy_started_at": "2026-08-18T17:48:56.160836848Z",
+    "proxy_started_at": "2026-08-18T23:57:29.423036193Z",
     "port_8001_owner": "jarvis-gpt-sglang-qwen38-perf-graph-api"
   }
 }

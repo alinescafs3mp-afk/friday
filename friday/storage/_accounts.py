@@ -8,6 +8,7 @@ signatures and bodies. Mixed back into that class, so ``self.execute`` and
 from __future__ import annotations
 
 from friday.audit_privacy import (
+    current_audit_request_id,
     decode_audit_privacy_key,
     sanitize_audit_action,
     sanitize_audit_actor,
@@ -687,7 +688,10 @@ class AccountsMixin(StorageShared):
         row["target_type"] = safe_target_type
         row["target_id"] = safe_target_id
         row["ip_address"] = sanitize_audit_ip(entry.ip_address, key=privacy_key)
-        row["request_id"] = sanitize_audit_request_id(entry.request_id, key=privacy_key)
+        effective_request_id = entry.request_id
+        if effective_request_id == "":
+            effective_request_id = current_audit_request_id()
+        row["request_id"] = sanitize_audit_request_id(effective_request_id, key=privacy_key)
         row["created_at"] = sanitize_audit_created_at(entry.created_at, fallback=utc_now())
         row["before_json"] = (
             json.dumps(safe_before, ensure_ascii=False, sort_keys=True) if safe_before is not None else None

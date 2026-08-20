@@ -78,7 +78,27 @@ function Get-HttpStatus(
     }
 }
 
+function Get-WrongCaseAuthorization([hashtable]$Headers) {
+    $authorization = [string]$Headers.Authorization
+    if (-not $authorization.StartsWith('Bearer ', [StringComparison]::Ordinal)) {
+        throw 'Authorization header shape is not exact'
+    }
+    $characters = $authorization.ToCharArray()
+    for ($index = 7; $index -lt $characters.Count; $index++) {
+        if ([char]::IsLower($characters[$index])) {
+            $characters[$index] = [char]::ToUpperInvariant($characters[$index])
+            return (-join $characters)
+        }
+        if ([char]::IsUpper($characters[$index])) {
+            $characters[$index] = [char]::ToLowerInvariant($characters[$index])
+            return (-join $characters)
+        }
+    }
+    throw 'Current API key has no letter for the wrong-case authorization gate'
+}
+
 function Assert-ProxyNegativePaths([hashtable]$Headers) {
+    $wrongCaseHeaders = @{ Authorization = (Get-WrongCaseAuthorization $Headers) }
     if ((Get-HttpStatus 'GET' '/health') -ne 200 -or
         (Get-HttpStatus 'POST' '/health') -ne 405 -or
         (Get-HttpStatus 'GET' '/v1/models') -ne 401 -or
@@ -96,6 +116,7 @@ function Assert-ProxyNegativePaths([hashtable]$Headers) {
         (Get-HttpStatus 'GET' '/v1/files' $Headers) -ne 404 -or
         (Get-HttpStatus 'GET' '/_friday/v1/deployment-witness') -ne 401 -or
         (Get-HttpStatus 'GET' '/_friday/v1/deployment-witness' @{ Authorization = 'Bearer definitely-wrong-key' }) -ne 401 -or
+        (Get-HttpStatus 'GET' '/_friday/v1/deployment-witness' $wrongCaseHeaders) -ne 401 -or
         (Get-HttpStatus 'POST' '/_friday/v1/deployment-witness' $Headers) -ne 405 -or
         (Get-HttpStatus 'GET' '/_friday/v1/deployment-witness/extra' $Headers) -ne 404) {
         throw 'Closed proxy allowlist negative-path matrix failed'
@@ -450,7 +471,7 @@ try {
         throw 'Candidate proxy identity changed during startup'
     }
     Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash
-    Assert-SolePublisher $script:Attested.CandidateProxyName
+    Wait-SolePublisher $script:Attested.CandidateProxyName 120
 
     $stage = 'proxy_negative_paths'
     Assert-ProxyNegativePaths $headers
@@ -605,7 +626,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not restart exact candidate proxy after epoch rehearsal' }
     $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 180
     Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash
-    Assert-SolePublisher $script:Attested.CandidateProxyName
+    Wait-SolePublisher $script:Attested.CandidateProxyName 120
     Assert-ProxyNegativePaths $headers
 
     $stage = 'epoch_rotation_proof'

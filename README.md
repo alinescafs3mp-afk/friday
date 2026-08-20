@@ -2,7 +2,17 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.205.0**. Это release-candidate / 1.0-ready сборка с opt-in V12 model-first routes `file_read` и `archive_read`: тот же узкий read-only контракт теперь аттестуется как `qwen38-27b-nvfp4-sglang:dispatcher:v12.14` на точном graph-only SGLang deployment. Архивный route по-прежнему принимает только уникальное точное имя, ровно 1–2 последних файла или точный локальный день; неоднозначность, чужие файлы, reply/replay, PDF/изображения/OCR и partial extraction остаются у legacy. Sentinel теперь сообщает владельцу о потере аттестованного V12-canary один раз за непрерывный эпизод, не раскрывая private reason и не считая обычный route fallback аварией.
+Текущая версия: **0.206.0rc0**. Это release candidate с code-owned
+поиском собственной истории по точным временным окнам и тематической
+лексике, bounded-поиском по содержимому и сохранённым именам собственных
+файлов, строгими page/failure-границами поддерживаемых PDF/JPEG/OCR-путей и
+recoverable Telegram media groups. `DocumentCatalog`, единый `archive_search`,
+pending/conversation passages, semantic catalog titles, типизированные роли дат и
+полная MCP failure taxonomy/circuit breaker остаются следующим этапом
+[Proposal 86](sol/PROPOSALS.md). Opt-in V12 routes `file_read` и `archive_read`
+аттестуются как `qwen38-27b-nvfp4-sglang:dispatcher:v12.14` на точном
+graph-only SGLang deployment; всё неподдержанное остаётся в legacy без
+урезания контекста, concurrency или CUDA graphs.
 
 ```text
 Telegram → подписанный durable bridge → Conversation + mode
@@ -41,8 +51,16 @@ Telegram → подписанный durable bridge → Conversation + mode
 - Entity extraction распознаёт явно названные проекты, инфраструктуру, технологии и версии, организации, события, локации, документы, людей и точные коды (`BRK.A`, `BRNQ26`, ISIN) с confidence/evidence. Пунктуация идентификаторов сохраняется, fuzzy/prefix merge для них запрещён.
 - Entity Resolution учитывает точные алиасы, сходство имён, аббревиатуры, общие knowledge links и соседей. Сомнительные сущности только предлагаются к объединению; canonical target выбирает человек, а история merge сохраняется.
 - Гибридный поиск объединяет SQLite FTS, lexical similarity, optional embeddings, точные идентификаторы, предметные поля, graph evidence, importance, lifecycle, feedback, quality и promotion confidence.
+- FTS-индексы используют SQLite `unicode61`; русская нормализация, Snowball-основы и
+  группы `ё/е` строятся в query layer. Английский `porter` не применяется;
+  недоступный в pinned SQLite `stemmer language='ru'` и глобальный `trigram`
+  не включаются вместо доказанного scoped-поиска.
 - Явный `source_search` ищет по исходному тексту загруженных файлов, включая pending Inbox до promotion, но не подмешивает Raw-корпус в обычный контекст. Выдача tenant-scoped, ограничена query-aware выдержками и исключает ignored/deleted/private-dependent материал; pending никогда не называется уже сохранённым знанием.
-- Длинные объекты индексируются ещё и по пассажам: один релевантный абзац целой статьи находится, а вектор всего объекта остаётся полом скора (чанкинг может только добавить recall). Выигравший пассаж и цитируется в ответе.
+- Длинные продвинутые **Knowledge Objects** индексируются ещё и по пассажам:
+  один релевантный абзац целой статьи находится, а вектор всего Knowledge Object
+  остаётся полом скора (чанкинг может только добавить recall). Выигравший
+  пассаж и цитируется в ответе; pending Raw Objects и переписка этой гарантией пока
+  не охвачены.
 - Холодный passage-скан выбирает SQL-план по состоянию индекса: плотный актуальный корпус читается сразу в порядке объектов без сортировки всех BLOB-строк, а sparse/rolling корпус сохраняет дешёвый chunk-first путь. Окно newest-N имеет полный tie-break по ID; обе стороны денормализованного tenant ключа проверяются fail-closed.
 - Для relational-запросов используется аккуратно затухающее двухшаговое расширение графа; обычный поиск остаётся одношаговым, чтобы не тащить шум. Явно отброшенная реляционная оговорка не включает дорогую дорогу, но вводная часть перед настоящим вопросом и второе неподавленное совпадение его не скрывают.
 - Ранжирование, Agent Runtime и `memory_search` используют один и тот же ограниченный `graph_context`, без повторного обхода графа. Две временные границы независимы: `as_of` означает valid-time («когда связь была верна»), а offset-aware RFC3339 `known_at` — transaction-time («что Friday уже знала к этому моменту»). Обе применяются на каждом шаге; явный исторический снимок не подмешивает сегодняшние implicit `co_occurs_in`.
@@ -59,7 +77,7 @@ Telegram → подписанный durable bridge → Conversation + mode
 ### Администрирование, безопасность и эксплуатация
 
 - Строгая tenant isolation действует на SQL, graph, conversations, files, feedback, Admin API и tools.
-- Opt-in V12 routes `file_read` и `archive_read` используют одни и те же fail-closed evidence-границы: архивный selector принадлежит коду и ограничен собственными файлами actor, авторизация завершается до чтения body, а перед публикацией точный selector и каждый источник повторно проверяются в той же SQLite-транзакции. Idempotency fence ставится через уже удерживаемое соединение атомарно с единственной публикацией; schema остаётся **33**.
+- Opt-in V12 routes `file_read` и `archive_read` используют одни и те же fail-closed evidence-границы: архивный selector принадлежит коду и ограничен собственными файлами actor, авторизация завершается до чтения body, а перед публикацией точный selector и каждый источник повторно проверяются в той же SQLite-транзакции. Idempotency fence ставится через уже удерживаемое соединение атомарно с единственной публикацией. Узкие V12-полномочия не расширены; общая schema теперь **34**.
 - В shared archive личное напоминание остаётся данными конкретного человека: durable owner marker создаётся атомарно с событием, а generic retrieval/model/graph/organs/admin исключают полное dependency closure по ID, current и authenticated historical именам/алиасам. Alias containers рекурсивно декодируются в bounded budget, а сравнение NFC → casefold → NFC закрывает иной регистр и NFD. Только точный person-scoped reminder path может вернуть и доставить запись владельцу; person export из одной snapshot отдельно разрешает его непротиворечивые marker/time/source и производные только от них, не открывая чужой или неоднозначный material.
 - Capability-based permissions используют default deny, preset-ы `owner`, `admin`, `moderator`, `user`, `guest`, custom presets и явные allow/deny overrides без обходного повышения прав.
 - В общем архиве надзор за поступлениями одного человека отделяет tenant от точного `uploaded_by`: лента, сводка, ритм, объём, темы и сравнение двух периодов считают один и тот же авторский срез. Материалы без достоверной отметки никому не приписываются и показываются отдельным числом.
@@ -79,8 +97,8 @@ Telegram → подписанный durable bridge → Conversation + mode
 - Admin UI также управляет пользователями, правами, знаниями, графом, разговорами, файлами, аудитом, экспортом, backups и diagnostics.
 - Документы и Telegram-вложения ограничиваются ещё во время чтения: CSV/TAR/PDF/Office и сжатые форматы разбираются с byte/entry/page/row/output budget, без предварительного безграничного буферизования; web fetch защищён от SSRF, redirects и DNS rebinding закреплением уже проверенного IP.
 - HTTP body limit действует на фактически полученные байты, включая chunked transfer, до аутентификации и JSON/multipart parsing; proxy headers принимаются только от явно доверенного непосредственного proxy-hop.
-- Online backup SQLite включает `integrity_check`, SHA-256 manifest и повторную верификацию; вместе с БД он сохраняет append-only историю отношений и её completeness floor. Tenant export включает только принадлежащие этому пользователю `relation_revisions`. `restore-backup` требует остановленного backend через эксклюзивный lease, повторно сверяет staged copy, заменяет БД атомарно и возвращает точные DB/WAL/SHM при сбое; для уже повреждённой активной БД сохраняется отдельный явно непроверенный recovery bundle. Markdown-vault пишет атомарно и использует Windows-safe пути.
-- Workers обслуживают всех активных tenants: lifecycle, entity-resolution candidates, vault, ежедневный backup, SQLite optimize, read-only quality report и bounded advisory Inbox refinement. Каждая задача публикует состояние, длительность, следующий запуск, timeout и consecutive failures для `status`, `doctor` и Admin UI.
+- Online backup SQLite включает `integrity_check`, SHA-256 manifest и повторную верификацию; вместе с БД он сохраняет append-only историю отношений и её completeness floor. Tenant export включает только принадлежащие этому пользователю `relation_revisions`. `restore-backup` требует остановленного backend через эксклюзивный lease, повторно сверяет staged copy, заменяет БД атомарно и возвращает точные DB/WAL/SHM при сбое; для уже повреждённой активной БД сохраняется отдельный явно непроверенный recovery bundle. Опциональная Markdown-проекция пишется только в явном `full_owner`; безопасное умолчание `disabled` не создаёт plaintext-копий.
+- Workers обслуживают всех активных tenants: lifecycle, entity-resolution candidates, ежедневный backup, SQLite optimize, read-only quality report и bounded advisory Inbox refinement. Vault-projector добавляется только в `FRIDAY_MEMORY_VAULT_MODE=full_owner`. Каждая задача публикует состояние, длительность, следующий запуск, timeout и consecutive failures для `status`, `doctor` и Admin UI.
 - Канонический multimodal profile `qwen38-27b-nvfp4-sglang` закрепляет точные model/runtime identities, graph-only 40K/6 launch contract и fail-closed V12 live attestation; прежний Qwen3.6/vLLM profile сохранён для совместимости.
 
 ## Быстрый запуск на Windows
@@ -222,13 +240,20 @@ VRAM обнаружился при старте, а не на первом по�
 
 ## Обновление существующей установки
 
-1. Остановите backend и Telegram bridge.
-2. Сделайте копию каталога `data/` и файлов конфигурации.
-3. Замените только исходники проекта; не переносите из архива runtime-каталоги поверх своих данных.
-4. Повторите `pip install -e ".[dev]"` и запустите `jericho doctor`.
-5. Схема SQLite — **33**. Schema 31 один раз фиксирует `relation_history_complete_from` и текущий baseline отношений именно в момент обновления, не сочиняя историю из старых `created_at`; schema 32 атомарно добавляет monotonic observed boundary и REPLACE/context guards только после точной проверки predecessor-контракта; schema 33 добавляет неизменяемые привязки свежих transport-id повторно загруженного файла к его каноническому Raw Object. Остальные авторитетные знания, Inbox и разговоры не переписываются. При открытии могут идемпотентно достраиваться отсутствующие производные projections вроде usage state. Более новая неизвестная схема отклоняется без изменений.
+Эти шаги выполняет только `immutable_release_operator.py` по контракту из
+[Operations](docs/OPERATIONS.md). Ручная остановка writers, миграция,
+замена unit-файлов или переключение anchor не являются release path.
 
-Перед обновлением выполните `jericho backup --label before-upgrade` и `jericho verify-backup`: совместимость схемы не заменяет проверенную резервную копию.
+1. Соберите wheel дважды из одного commit и убедитесь, что SHA-256 совпадает.
+2. Создайте новый sibling release только из wheel; установленный venv не правьте пофайлово.
+3. Остановите backend и Telegram bridge и сохраните проверенный согласованный снимок SQLite, WAL и Telegram inbox.
+4. Выполните offline migration, переключите общий release anchor атомарно, примите backend и только затем запускайте bridge. При ошибке используйте exact rollback, а не повреждённый прежний каталог.
+5. Схема SQLite — **34**. Schema 31 один раз фиксирует `relation_history_complete_from`; schema 32 добавляет monotonic observed boundary и REPLACE/context guards; schema 33 — неизменяемые transport-id повторной загрузки; schema 34 — проверяемое имя, данное пользователем в конкретном сообщении, без изменения канонического Raw Object. Миграция и backfill выполняются только после проверенной резервной копии и exact message/raw/owner correlation. Остальные авторитетные знания, Inbox и разговоры не переписываются; более новая неизвестная схема отклоняется без изменений.
+
+Перед обновлением можно дополнительно выполнить
+`jericho backup --label before-upgrade` и `jericho verify-backup`. Это SQLite-only
+копия, а не exact DB/WAL/Telegram-inbox recovery set атомарного cutover;
+она не заменяет backup и release journal оператора.
 
 ## Канонический SGLang-профиль
 
@@ -266,7 +291,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Успешный canary startup должен показать в `/api/health` версию `0.205.0`,
+Успешный canary startup должен показать в `/api/health` версию `0.206.0rc0`,
 точный profile id, `canary_ready`, `live_attestation_clear` и оба
 зарегистрированных route; простого HTTP `status=ok` недостаточно.
 
@@ -400,7 +425,7 @@ jericho model-check
 data/state/friday.sqlite3       основная БД новой установки
 data/state/telegram-inbox.sqlite3 очередь Telegram bridge
 data/files/                      исходные загруженные файлы
-data/memory-vault/               Markdown-представление знаний
+data/memory-vault/               optional full_owner/legacy Markdown-проекция
 data/backups/                    SQLite-копии и SHA-256-манифесты
 data/exports/                    JSON-экспорты пользователей
 cache/                           временные кэши
@@ -419,7 +444,7 @@ Runtime-каталоги и секреты исключены из Git и из �
 `jericho backup` создаёт транзакционно согласованную копию **только SQLite-БД**. Полная резервная копия установки должна дополнительно включать:
 
 - `data/files/`;
-- `data/memory-vault/`;
+- `data/memory-vault/` — только если `full_owner` явно включён или legacy-артефакты осознанно сохраняются; это plaintext, шифруйте копию;
 - `.env.local` или `.env` — хранить отдельно и зашифрованно;
 - модельные веса — можно не копировать, если есть проверяемый источник повторного получения.
 
@@ -477,7 +502,7 @@ P01/P02/P04/P08/P09/P10 **120/120**, после выпуска официаль�
 - Vision/OCR для изображений и сканов требует включённого локального мультимодального vLLM и остаётся advisory-only: качество зависит от модели и сложные документы всё равно требуют review.
 - RAR/7z поддержка зависит от установленных Python-библиотек и формата архива; опасное содержимое не исполняется и не распаковывается в произвольные пути.
 - `code_run` — ограниченный subprocess executor, а не security boundary; он выключен по умолчанию и не выдан ни одному стандартному preset-у.
-- Встроенный backup/restore охватывает только SQLite. Полный disaster-recovery snapshot файлового хранилища, vault, Telegram queue и секретов выполняется внешней файловой процедурой; БД резервируется автоматически раз в сутки при включённых workers.
+- Встроенный backup/restore охватывает только SQLite. Полный disaster-recovery snapshot файлового хранилища, Telegram queue и секретов выполняется внешней файловой процедурой; optional vault включайте только при осознанном `full_owner`/хранении legacy plaintext. БД резервируется автоматически раз в сутки при включённых workers.
 
 ## Документация
 

@@ -23,6 +23,7 @@ from friday.private_fs import ensure_private_directory
 # Читается ВТОРЫМ: если заданы обе переменные, побеждает новая.
 _LEGACY_PREFIX = "JERICHO_"
 _PREFIX = "FRIDAY_"
+MEMORY_VAULT_MODES = ("disabled", "full_owner")
 
 
 _Default = TypeVar("_Default")
@@ -118,6 +119,12 @@ def _int_list_env(name: str) -> list[int]:
         except ValueError:
             continue
     return result
+
+
+def _absolute_lexical_path(value: str | Path) -> Path:
+    """Normalize dot segments without resolving any existing symlink component."""
+
+    return Path(os.path.abspath(Path(value).expanduser()))
 
 
 def local_env_file_path(path: str | Path | None = None) -> Path:
@@ -467,15 +474,15 @@ PROFILES["qwen38-27b-nvfp4-sglang"] = RuntimeProfile(
     runtime_image=("lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124"),
     runtime_source_revision="c4271c3fe1262fc2adbd162c33b25de5255251c5",
     runtime_reported_version="0.0.0.dev0+qwen38.27b.g561c8f3",
-    engine_image_id="sha256:7f27e2885eca5041860a8c28c0bc3304b43b9fce072f298da043393866aa5887",
+    engine_image_id="sha256:4a38144134d84d6f78c1844314f209c48ef69c4bd8bf7da1e5c400f9abda6f26",
     engine_base_image_digest=(
         "lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124"
     ),
     engine_base_image_id="sha256:317b75ce527f3b6ee482e9437c753e98f4df6e6b17a335f8681af5d86a8a9de8",
     model_snapshot_manifest_sha256="da435c4b7556d8d5feed8551024914b0da0b48bb3fe85850536a0eb3b2489333",
     launch_manifest_sha256="640a1ea428b2526ff6f3b3e412c18fef8e48f1fa882b3a94f9859a190678f62b",
-    proxy_image_id="sha256:2bf585895ba4ede01899f4b17db5c690dd893d77c3e1da9ac4dfb2482e22c091",
-    proxy_policy_sha256="47e6b9c2dadea4a1e9395b8f8305699033b52a09ecba14d82afcdf77e7d9f3ae",
+    proxy_image_id="sha256:37ae13a39a5d8a0780b0b0f226065753c0d929c31956be27f7f375f79cdef750",
+    proxy_policy_sha256="d51c092ca2ef566f092ef9d55320e302c2d10b710d319d27a6d982aba018dcfe",
     tokenizer_mode="auto",
     quantization=None,
     vllm_image="",
@@ -569,6 +576,10 @@ class FridaySettings:
     database_must_exist: bool
     files_dir: Path
     memory_vault_dir: Path
+    # Plaintext Markdown is a second full-body representation, not a required
+    # part of the knowledge store.  It therefore needs an explicit owner choice;
+    # a missing setting is the body-free mode and an unknown value stops startup.
+    memory_vault_mode: str
     backups_dir: Path
     # How many verified backups to keep locally. The schedule adds a full copy of the
     # database every 24 hours and nothing used to remove one, so the disk filled and
@@ -1004,6 +1015,10 @@ class FridaySettings:
             },
             "data": {
                 "database_must_exist": self.database_must_exist,
+                "memory_vault": {
+                    "mode": self.memory_vault_mode,
+                    "body_free_mode": self.memory_vault_mode == "disabled",
+                },
                 "purge_retention_days": self.purge_retention_days,
                 "ingestion_review_policy": self.ingestion_review_policy,
                 "backup_mirror_configured": self.backup_mirror_dir is not None,
@@ -1117,9 +1132,15 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         database_path=database_path,
         database_must_exist=database_must_exist,
         files_dir=Path(env("FRIDAY_FILES_DIR", data_dir / "files")).expanduser().resolve(),
-        memory_vault_dir=Path(env("FRIDAY_MEMORY_VAULT_DIR", data_dir / "memory-vault"))
-        .expanduser()
-        .resolve(),
+        # This path is a deletion boundary for legacy plaintext even when the
+        # projector is disabled. Resolving it here would bless a symlink target
+        # before MemoryVaultDeletionHandle can apply O_NOFOLLOW traversal.
+        memory_vault_dir=_absolute_lexical_path(env("FRIDAY_MEMORY_VAULT_DIR", data_dir / "memory-vault")),
+        memory_vault_mode=_choice_env(
+            "FRIDAY_MEMORY_VAULT_MODE",
+            "disabled",
+            MEMORY_VAULT_MODES,
+        ),
         backups_dir=Path(env("FRIDAY_BACKUPS_DIR", data_dir / "backups")).expanduser().resolve(),
         exports_dir=Path(env("FRIDAY_EXPORTS_DIR", data_dir / "exports")).expanduser().resolve(),
         backup_mirror_dir=(
@@ -1426,7 +1447,6 @@ def ensure_runtime_dirs(settings: FridaySettings) -> list[Path]:
         settings.home,
         settings.data_dir,
         settings.files_dir,
-        settings.memory_vault_dir,
         settings.cache_dir,
         settings.log_dir,
         settings.model_root,

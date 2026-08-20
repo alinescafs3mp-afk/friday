@@ -121,6 +121,23 @@ def test_no_tool_result_carries_an_order_to_the_model():
     #: Повелительные обороты, которыми пишут поручение самой себе.
     orders = ("не отвечай", "скажи человеку", "скажи это человеку", "перескажи", "предложи посмотреть")
     offenders: list[str] = []
+
+    def is_regex_grammar(node: ast.AST, parents: dict[int, ast.AST]) -> bool:
+        """A compiled classifier pattern is not a model/tool-result string."""
+
+        current = node
+        while (parent := parents.get(id(current))) is not None:
+            if (
+                isinstance(parent, ast.Call)
+                and isinstance(parent.func, ast.Attribute)
+                and isinstance(parent.func.value, ast.Name)
+                and parent.func.value.id == "re"
+                and parent.func.attr == "compile"
+            ):
+                return True
+            current = parent
+        return False
+
     for path in sorted(root.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         # Докстринги — пояснение для людей, а не текст, уходящий модели. Без их
@@ -137,10 +154,12 @@ def test_no_tool_result_carries_an_order_to_the_model():
             and isinstance(node.body[0].value, ast.Constant)
             and isinstance(node.body[0].value.value, str)
         }
+        parents = {id(child): parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+
         for node in ast.walk(tree):
             if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
                 continue
-            if id(node) in docstrings:
+            if id(node) in docstrings or is_regex_grammar(node, parents):
                 continue
             lowered = node.value.casefold()
             if any(order in lowered for order in orders):

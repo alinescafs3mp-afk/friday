@@ -2183,8 +2183,8 @@ def _purge(args: argparse.Namespace) -> int:
 
     from friday.config import ensure_runtime_dirs, load_settings
     from friday.diagnostics.runtime_lease import ProcessLease
-    from friday.memory import MemoryVault
-    from friday.purge import purge_knowledge
+    from friday.memory import MemoryVaultDeletionHandle
+    from friday.purge import VaultProjectionCleanupRequired, public_purge_receipt, purge_knowledge
     from friday.storage import init_storage
     from friday.storage.models import AuditEntry, new_id
 
@@ -2193,7 +2193,47 @@ def _purge(args: argparse.Namespace) -> int:
     with ProcessLease(settings.state_dir / "backend.lock", protocol="friday.backend.v1"):
         storage = init_storage(settings)
         try:
-            vault = MemoryVault(settings.memory_vault_dir)
+            # Runtime projection may be disabled while old Markdown notes still
+            # exist.  A real KO purge must still remove that KO's matching note;
+            # this is deliberately not a general legacy-vault cleanup path, and
+            # it must not create a vault merely because there is nothing to remove.
+            vault = MemoryVaultDeletionHandle(settings.memory_vault_dir)
+            results: list[dict[str, Any]] = []
+            audited_refs: list[str] = []
+
+            def audit_committed(
+                receipt: dict[str, bool | int | str],
+                *,
+                knowledge_object_id: str,
+                owner: str,
+            ) -> None:
+                reference = str(receipt["knowledge_object_ref_sha256"])
+                storage.log_audit(
+                    AuditEntry(
+                        id=new_id("audit"),
+                        user_id=owner,
+                        action="cli.knowledge.purge",
+                        target_type="knowledge_object",
+                        target_id=knowledge_object_id,
+                        before_json=None,
+                        after_json={"status": "purged", **receipt},
+                        ip_address="",
+                        request_id="cli",
+                    )
+                )
+                audited_refs.append(reference)
+
+            def print_partial_failure(error: BaseException) -> None:
+                _json_print(
+                    {
+                        "status": "partial_failure",
+                        "purged": len(results),
+                        "audited": len(audited_refs),
+                        "items": [{"knowledge_object_ref_sha256": reference} for reference in audited_refs],
+                        "failure_type": type(error).__name__,
+                    }
+                )
+
             if args.id:
                 # `--user` scopes the purge when given; without it, resolve the
                 # object's real owner. Defaulting to LEGACY_OWNER_USER_ID meant
@@ -2207,16 +2247,23 @@ def _purge(args: argparse.Namespace) -> int:
                         print("Объект не найден.", file=sys.stderr)
                         return 2
                     owner = str(existing.get("user_id") or "")
-                    print(f"Объект принадлежит арендатору {owner}.")
+                    print("Владелец объекта определён.")
                 try:
                     report = purge_knowledge(storage, settings, vault, args.id, owner)
-                except ValueError as exc:
+                except (ValueError, VaultProjectionCleanupRequired) as exc:
                     print(str(exc), file=sys.stderr)
                     return 2
                 if not report.get("existed"):
                     print("Объект не найден.", file=sys.stderr)
                     return 2
-                results = [report]
+                receipt = public_purge_receipt(report, knowledge_object_id=args.id)
+                results.append(receipt)
+                try:
+                    audit_committed(receipt, knowledge_object_id=args.id, owner=owner)
+                except Exception as exc:  # noqa: BLE001 - committed purge must be reported
+                    print_partial_failure(exc)
+                    print("Безвозвратная операция завершилась, но audit не подтверждён.", file=sys.stderr)
+                    return 2
             else:
                 days = (
                     args.older_than_days
@@ -2226,24 +2273,41 @@ def _purge(args: argparse.Namespace) -> int:
                 candidates = storage.list_purgeable_knowledge(
                     args.user, older_than_days=days, limit=args.limit
                 )
-                results = [
-                    purge_knowledge(storage, settings, vault, cand["id"], cand["user_id"])
-                    for cand in candidates
-                ]
-            for report in results:
-                storage.log_audit(
-                    AuditEntry(
-                        id=new_id("audit"),
-                        user_id=str(report.get("user_id") or ""),
-                        action="cli.knowledge.purge",
-                        target_type="knowledge_object",
-                        target_id=str(report.get("knowledge_object_id") or ""),
-                        before_json=None,
-                        after_json=report,
-                        ip_address="",
-                        request_id="cli",
-                    )
-                )
+                for candidate in candidates:
+                    try:
+                        report = purge_knowledge(
+                            storage,
+                            settings,
+                            vault,
+                            candidate["id"],
+                            candidate["user_id"],
+                        )
+                        if not report.get("existed"):
+                            raise RuntimeError("purge candidate disappeared before commit")
+                        receipt = public_purge_receipt(
+                            report,
+                            knowledge_object_id=str(candidate["id"]),
+                        )
+                        results.append(receipt)
+                        # Audit each irreversible commit immediately.  If a later
+                        # candidate fails its vault boundary, already-completed
+                        # work remains both visible and durably audited.
+                        audit_committed(
+                            receipt,
+                            knowledge_object_id=str(candidate["id"]),
+                            owner=str(candidate["user_id"]),
+                        )
+                    except (VaultProjectionCleanupRequired, ValueError, RuntimeError) as exc:
+                        print_partial_failure(exc)
+                        print(str(exc), file=sys.stderr)
+                        return 2
+                    except Exception as exc:  # noqa: BLE001 - disclose committed count, not bodies
+                        print_partial_failure(exc)
+                        print(
+                            "Batch purge stopped after an unconfirmed audit write.",
+                            file=sys.stderr,
+                        )
+                        return 2
         finally:
             storage.close()
     _json_print({"purged": len(results), "items": results})

@@ -7,9 +7,11 @@ owns ``/api/admin`` and the order these modules are included in.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from friday.admin_api._deps import (
     Any,
@@ -32,6 +34,7 @@ from friday.admin_api._deps import (
 from friday.api.kg import _entity_audit_fingerprint, _public_container_card
 from friday.id_provenance import mark_verified_id
 from friday.mentions import mention_spans
+from friday.purge import VaultProjectionCleanupRequired, public_purge_receipt
 from friday.storage.models import EntityType
 from friday.workers._blocking import run_blocking
 
@@ -939,18 +942,60 @@ async def list_purgeable_data(
 
 
 @router.post("/knowledge/{knowledge_id}/purge")
-async def purge_knowledge_endpoint(knowledge_id: str, request: Request, user_id: str) -> dict[str, Any]:
+async def purge_knowledge_endpoint(
+    knowledge_id: str,
+    request: Request,
+    user_id: str,
+) -> Any:
     _require(request, "admin.data.purge")
     _protect_owner_target(request, user_id)
     state = _services(request)
     before = state.storage.get_knowledge_object(knowledge_id, user_id)
     if not before:
         raise HTTPException(status_code=404, detail="Объект знания не найден")
+    knowledge_ref = hashlib.sha256(knowledge_id.encode("utf-8", errors="replace")).hexdigest()
+    # Establish a durable, body-free intent record before the first irreversible
+    # unlink/DELETE.  If the audit boundary is unavailable, nothing is purged.
     try:
-        report = purge_knowledge(state.storage, state.settings, state.memory_vault, knowledge_id, user_id)
+        _audit(
+            request,
+            "admin.knowledge.purge_attempted",
+            "knowledge_object",
+            mark_verified_id(knowledge_id),
+            before=_knowledge_fingerprint(before),
+            after={"status": "started"},
+        )
+    except Exception:  # noqa: BLE001 - response is deliberately body/error-text free
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "purge_audit_unavailable",
+                "purged": False,
+                "knowledge_object_ref_sha256": knowledge_ref,
+                "vault_removed_count": 0,
+                "deleted_row_count": 0,
+            },
+        )
+    try:
+        report = purge_knowledge(
+            state.storage,
+            state.settings,
+            state.memory_vault_deletion,
+            knowledge_id,
+            user_id,
+        )
+    except VaultProjectionCleanupRequired as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=("Не удалось подтвердить очистку текстовой проекции; объект не был безвозвратно удалён"),
+        ) from exc
     except ValueError as exc:
         # Not yet soft-deleted: purge requires the two-phase delete first.
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409,
+            detail="Перед безвозвратным удалением объект нужно мягко удалить",
+        ) from exc
+    receipt = public_purge_receipt(report, knowledge_object_id=knowledge_id)
     # A FINGERPRINT, never the body. `audit_log` carries BEFORE UPDATE and BEFORE
     # DELETE triggers that `RAISE(ABORT)`, so anything written here cannot be
     # removed afterwards by any code or any SQL. Auditing the whole row meant
@@ -958,12 +1003,22 @@ async def purge_knowledge_endpoint(knowledge_id: str, request: Request, user_id:
     # a Knowledge Object — durably wrote that object's full text into the one
     # table nothing can clean. The CLI path already did the right thing
     # (`before_json=None`); this one did not.
-    _audit(
-        request,
-        "admin.knowledge.purge",
-        "knowledge_object",
-        mark_verified_id(knowledge_id),
-        before=_knowledge_fingerprint(before),
-        after=report,
-    )
-    return {"status": "purged", "report": report}
+    try:
+        _audit(
+            request,
+            "admin.knowledge.purge",
+            "knowledge_object",
+            mark_verified_id(knowledge_id),
+            before=_knowledge_fingerprint(before),
+            after=receipt,
+        )
+    except Exception:  # noqa: BLE001 - deletion committed; publish only a closed receipt
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "purged_audit_unconfirmed",
+                "purged": True,
+                **receipt,
+            },
+        )
+    return {"status": "purged", "report": receipt}

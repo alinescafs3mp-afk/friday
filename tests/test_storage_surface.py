@@ -174,15 +174,16 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # roles distinct and returns totals separately from its bounded page.
 # 359 → 360: the admin messenger reads one bounded chronological tail per
 # person instead of issuing one request for each of five conversations.
-EXPECTED_MEMBER_COUNT = 361
+EXPECTED_MEMBER_COUNT = 364
 EXPECTED_SIGNATURES: dict[str, str] = {
-    "bind_owned_file_source_ref_alias": "(self, user_id: 'str', uploaded_by: 'str', source_ref: 'str', raw_object_id: 'str') -> 'bool'",
+    "bind_owned_file_source_ref_alias": "(self, user_id: 'str', uploaded_by: 'str', source_ref: 'str', raw_object_id: 'str', supplied_filename: 'str' = '') -> 'bool'",
     "find_owned_files_by_filename": "(self, user_id: 'str', uploaded_by: 'str', filename: 'str') -> 'list[dict[str, Any]]'",
     "get_raw_object_descriptors": "(self, raw_ids: 'list[str]', user_id: 'str', *, limit: 'int' = 1000) -> 'list[dict[str, Any]]'",
     "get_searchable_file_sources": "(self, user_id: 'str', raw_ids: 'list[str]', *, uploaded_by: 'str | None' = None, limit: 'int' = 100, include_content: 'bool' = False) -> 'list[dict[str, Any]]'",
     "list_owned_file_catalog": "(self, user_id: 'str', uploaded_by: 'str', *, limit: 'int' = 5000) -> 'list[dict[str, Any]]'",
     "select_owned_file_corpus": "(self, user_id: 'str', uploaded_by: 'str', *, received_since: 'str | None' = None, received_until: 'str | None' = None, document_since: 'str | None' = None, document_until: 'str | None' = None, limit: 'int' = 13, offset: 'int' = 0) -> 'dict[str, Any]'",
     "search_owned_file_content": "(self, user_id: 'str', uploaded_by: 'str', query: 'str', *, limit: 'int' = 64) -> 'dict[str, Any]'",
+    "search_owned_files_by_term": "(self, user_id: 'str', uploaded_by: 'str', query: 'str', *, limit: 'int' = 64) -> 'dict[str, Any]'",
     "search_raw_objects_in_set": "(self, user_id: 'str', query: 'str', raw_ids: 'list[str]', *, limit: 'int' = 64) -> 'list[dict[str, Any]]'",
     "list_documents_with_entity_suggestions": "(self, user_id: 'str', *, limit: 'int' = 50, offset: 'int' = 0) -> 'tuple[list[dict[str, Any]], int]'",
     "restore_knowledge_version": "(self, ko_id: 'str', user_id: 'str', version: 'int', *, reviewed_by: 'str | None' = None) -> 'dict[str, Any] | None'",
@@ -204,6 +205,7 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "_retire_outdated_indexes": "(self, conn: 'sqlite3.Connection') -> 'None'",
     "_migrate_schema": "(self, conn: 'sqlite3.Connection') -> 'None'",
     "_validate_relation_history_schema": "(conn: 'sqlite3.Connection', schema_version: 'int') -> 'None'",
+    "_validate_file_source_alias_schema": "(conn: 'sqlite3.Connection') -> 'None'",
     "_open": "(self) -> 'sqlite3.Connection'",
     "_open_once": "(self) -> 'sqlite3.Connection'",
     "_raw_from_row": "(self, row: 'sqlite3.Row | dict[str, Any]') -> 'RawObject'",
@@ -390,7 +392,8 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "revoke_api_token": "(self, token_id: 'str', *, user_id: 'str | None' = None) -> 'bool'",
     "search_raw_objects": "(self, user_id: 'str', query: 'str', *, limit: 'int' = 20, include_content: 'bool' = False, uploaded_by: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "search_knowledge": "(self, user_id: 'str', query: 'str', *, limit: 'int' = 20, uploaded_by: 'str | None' = None) -> 'list[dict[str, Any]]'",
-    "search_messages": "(self, user_id: 'str', query: 'str', *, limit: 'int' = 20, conversation_id: 'str | None' = None) -> 'list[dict[str, Any]]'",
+    "search_messages": "(self, user_id: 'str', query: 'str', *, limit: 'int' = 20, conversation_id: 'str | None' = None, role: 'str | None' = None, before_message_id: 'str | None' = None, match_all_terms: 'bool' = False) -> 'list[dict[str, Any]]'",
+    "list_messages_window": "(self, user_id: 'str', since: 'str', until: 'str', *, role: 'str | None' = None, conversation_id: 'str | None' = None, before_message_id: 'str | None' = None, limit: 'int' = 50, offset: 'int' = 0) -> 'dict[str, Any]'",
     "set_channel_conversation": "(self, user_id: 'str', channel: 'str', channel_id: 'str', conversation_id: 'str', *, mode: 'str | None' = None) -> 'None'",
     "set_channel_mode": "(self, user_id: 'str', channel: 'str', channel_id: 'str', mode: 'str') -> 'dict[str, Any] | None'",
     "set_conversation_archived": "(self, conversation_id: 'str', user_id: 'str', archived: 'bool') -> 'dict[str, Any] | None'",

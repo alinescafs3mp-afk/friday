@@ -32,7 +32,10 @@ BACKUP_GUIDANCE = (ROOT / "docs" / "BACKUP_AND_RESTORE.md").read_text(encoding="
 def test_the_readme_states_the_version_the_package_has():
     from friday import __version__
 
-    match = re.search(r"Текущая версия: \*\*([0-9.]+)\*\*", README)
+    match = re.search(
+        r"Текущая версия: \*\*([0-9]+(?:\.[0-9]+)*(?:rc[0-9]+)?)\*\*",
+        README,
+    )
     assert match, "в README больше нет строки с версией — поправьте тест вместе с ней"
     assert match.group(1) == __version__, f"README обещает {match.group(1)}, пакет — {__version__}"
 

@@ -106,7 +106,17 @@ async def test_every_sent_answer_chunk_maps_to_same_backend_message(tmp_path, mo
 async def test_cached_backend_response_still_maps_retried_chunks(tmp_path, monkeypatch) -> None:
     bridge = _bridge(tmp_path)
 
-    async def post(_client, _payload, _chunk):  # noqa: ANN001
+    async def post(
+        _client,
+        _payload,
+        _chunk,
+        *,
+        resume_key=None,
+        chunk_number=None,
+    ):  # noqa: ANN001
+        assert resume_key == 8150
+        assert chunk_number == 1
+        assert bridge._inbox.begin_answer_chunk_delivery(resume_key, chunk_number) is not None
         request = httpx.Request("POST", "https://api.telegram.test/sendMessage")
         return httpx.Response(
             200,

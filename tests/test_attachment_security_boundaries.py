@@ -717,6 +717,95 @@ async def test_attachment_verifier_repair_and_reverify_share_one_secondary_deadl
 
 
 @pytest.mark.asyncio
+async def test_final_attachment_mismatch_discards_repair_and_all_derived_carriers(
+    settings,
+    storage,
+    monkeypatch,
+):
+    """A second failed verdict is a publication boundary, not a caution."""
+
+    storage.ensure_user("alice", preset_key="owner")
+    auth = AuthorizationService(storage)
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=_UnusedEnabledLLM(),
+        kernel=ExecutionKernel(auth, settings),
+    )
+    verifier_answers: list[str] = []
+    repair_calls = 0
+
+    async def simple_context(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
+        del message, kwargs
+        return AgentContext(conversation_id=conversation_id, user_id=user_id, person_id=user_id)
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {
+            "content": "MODEL-CONTRADICTION: во вложении нет указанной записи.",
+            "tools_used": [],
+            "file_clips": [{"filename": "derived.txt", "content_base64": "dW5zYWZl"}],
+            "voice_clip": {"content_base64": "dW5zYWZl", "mime_type": "audio/ogg"},
+        }
+
+    async def verify(_question, answer, _context, **_kwargs):
+        verifier_answers.append(str(answer))
+        return {
+            "status": "failed",
+            "ok": False,
+            "score": 0.0,
+            "issues": ["attachment_evidence_mismatch"],
+        }
+
+    async def repair(*_args, **_kwargs):
+        nonlocal repair_calls
+        repair_calls += 1
+        return (
+            "REPAIRED-CONTRADICTION: во вложении по-прежнему нет указанной записи, "
+            "и это утверждение достаточно длинное для bounded repair."
+        )
+
+    async def forbidden_voice(*_args, **_kwargs):
+        raise AssertionError("a rejected attachment answer reached derived voice synthesis")
+
+    monkeypatch.setattr(runtime, "_prepare_context", simple_context)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_verify_response", verify)
+    monkeypatch.setattr(runtime, "_repair_once", repair)
+    monkeypatch.setattr(runtime, "_voice_of_the_final_answer", forbidden_voice)
+
+    result = await runtime.chat(
+        "alice",
+        "Что сказано в этом вложении?",
+        actor=auth.actor_for_user("alice", source="test"),
+        attachments=[
+            _transient_attachment(
+                filename="mismatch.txt",
+                text="Подтверждённая запись: ALPHA-17 присутствует.",
+            )
+        ],
+        enable_tools=False,
+    )
+
+    assert repair_calls == 1
+    assert len(verifier_answers) == 2
+    assert verifier_answers[0].startswith("MODEL-CONTRADICTION")
+    assert verifier_answers[1].startswith("REPAIRED-CONTRADICTION")
+    assert "MODEL-CONTRADICTION" not in result["message"]
+    assert "REPAIRED-CONTRADICTION" not in result["message"]
+    assert result["message"].startswith("Ответ модели отклонён")
+    assert result["verification_status"] == "unknown"
+    assert result["verified"] is False
+    assert result["files"] == []
+    assert result["voice"] is None
+
+    stored = storage.get_message(result["message_id"], "alice")
+    metadata = json.loads(stored["metadata_json"])
+    assert metadata["structural"]["attachment_verification_rejection"] is True
+    assert metadata["structural"]["model_spoke"] is False
+
+
+@pytest.mark.asyncio
 async def test_cancelling_an_attachment_turn_cancels_the_inflight_primary_model(
     settings,
     storage,
@@ -2774,8 +2863,9 @@ class _HallucinatedOutboundLLM:
     model = "hallucinated-outbound"
     total_budget_sec = 30.0
 
-    def __init__(self) -> None:
+    def __init__(self, *, include_mcp: bool = False) -> None:
         self.calls = 0
+        self.include_mcp = include_mcp
         self.offered_names: list[set[str]] = []
         self.second_round_tool_text = ""
 
@@ -2790,45 +2880,68 @@ class _HallucinatedOutboundLLM:
             }
         )
         if self.calls == 1:
+            tool_calls = [
+                {
+                    "id": "call-search",
+                    "function": {
+                        "name": "web_search",
+                        "arguments": json.dumps({"query": "PRIVATE-FILE-SENTINEL"}),
+                    },
+                },
+                {
+                    "id": "call-fetch",
+                    "function": {
+                        "name": "web_fetch",
+                        "arguments": json.dumps({"url": "https://invalid.example/private"}),
+                    },
+                },
+                {
+                    "id": "call-code",
+                    "function": {
+                        "name": "code_run",
+                        "arguments": json.dumps({"code": "import urllib.request  # PRIVATE-FILE-SENTINEL"}),
+                    },
+                },
+                {
+                    "id": "call-data",
+                    "function": {
+                        "name": "data_query",
+                        "arguments": json.dumps(
+                            {
+                                "source_id": "configured-external-db",
+                                "sql": "SELECT * FROM notes WHERE body='PRIVATE-FILE-SENTINEL'",
+                            }
+                        ),
+                    },
+                },
+            ]
+            if self.include_mcp:
+                tool_calls.extend(
+                    [
+                        {
+                            "id": "call-workspace-create",
+                            "function": {
+                                "name": "workspace_create",
+                                "arguments": json.dumps(
+                                    {
+                                        "filename": "leak.txt",
+                                        "content": "PRIVATE-FILE-SENTINEL",
+                                    }
+                                ),
+                            },
+                        },
+                        {
+                            "id": "call-future-mcp",
+                            "function": {
+                                "name": "future_mcp_export",
+                                "arguments": json.dumps({"payload": "PRIVATE-FILE-SENTINEL"}),
+                            },
+                        },
+                    ]
+                )
             return {
                 "content": "",
-                "tool_calls": [
-                    {
-                        "id": "call-search",
-                        "function": {
-                            "name": "web_search",
-                            "arguments": json.dumps({"query": "PRIVATE-FILE-SENTINEL"}),
-                        },
-                    },
-                    {
-                        "id": "call-fetch",
-                        "function": {
-                            "name": "web_fetch",
-                            "arguments": json.dumps({"url": "https://invalid.example/private"}),
-                        },
-                    },
-                    {
-                        "id": "call-code",
-                        "function": {
-                            "name": "code_run",
-                            "arguments": json.dumps(
-                                {"code": "import urllib.request  # PRIVATE-FILE-SENTINEL"}
-                            ),
-                        },
-                    },
-                    {
-                        "id": "call-data",
-                        "function": {
-                            "name": "data_query",
-                            "arguments": json.dumps(
-                                {
-                                    "source_id": "configured-external-db",
-                                    "sql": "SELECT * FROM notes WHERE body='PRIVATE-FILE-SENTINEL'",
-                                }
-                            ),
-                        },
-                    },
-                ],
+                "tool_calls": tool_calls,
                 "_queue_wait_sec": 0.0,
             }
         self.second_round_tool_text = "\n".join(
@@ -2838,12 +2951,25 @@ class _HallucinatedOutboundLLM:
 
 
 class _OutboundRecordingKernel:
-    def __init__(self, authorization: AuthorizationService) -> None:
+    def __init__(self, authorization: AuthorizationService, *, include_mcp: bool = False) -> None:
         self.authorization = authorization
+        self.include_mcp = include_mcp
         self.executed: list[str] = []
+        self.executed_arguments: list[dict[str, Any]] = []
 
     def get_tool_definitions(self, actor, *, topic=None):
         del actor, topic
+        names = [
+            "memory_search",
+            "web_search",
+            "web_research",
+            "web_fetch",
+            "code_run",
+            "data_query",
+        ]
+        if self.include_mcp:
+            names.extend(["workspace_list", "workspace_search", "workspace_read", "workspace_create"])
+            names.append("future_mcp_export")
         return [
             {
                 "type": "function",
@@ -2853,14 +2979,7 @@ class _OutboundRecordingKernel:
                     "parameters": {"type": "object", "properties": {}},
                 },
             }
-            for name in (
-                "memory_search",
-                "web_search",
-                "web_research",
-                "web_fetch",
-                "code_run",
-                "data_query",
-            )
+            for name in names
         ]
 
     @staticmethod
@@ -2874,13 +2993,32 @@ class _OutboundRecordingKernel:
         return SimpleNamespace(risk=contract[0], security_id=contract[1]) if contract is not None else None
 
     async def execute(self, name, arguments, *, actor=None):
-        del arguments, actor
+        del actor
         self.executed.append(name)
+        self.executed_arguments.append(dict(arguments))
         return ToolResult(name, True, data={"unexpected": True})
 
 
+def test_private_source_tool_classification_is_closed_for_external_mcp_and_unknown_names() -> None:
+    for name in (
+        "web_search",
+        "web_fetch",
+        "web_research",
+        "code_run",
+        "data_sources",
+        "data_schema",
+        "data_query",
+        "workspace_create",
+    ):
+        assert agent_runtime_module._private_source_tool_policy(name) == "external"  # noqa: SLF001
+    for name in ("workspace_list", "workspace_search", "workspace_read"):
+        assert agent_runtime_module._private_source_tool_policy(name) == "acquire"  # noqa: SLF001
+    assert agent_runtime_module._private_source_tool_policy("future_mcp_export") == "deny"  # noqa: SLF001
+    assert agent_runtime_module._private_source_tool_policy("memory_search") == "local"  # noqa: SLF001
+
+
 @pytest.mark.asyncio
-async def test_private_attachment_allows_only_web_family_outbound_calls(
+async def test_private_attachment_denies_explicit_web_before_model_or_kernel(
     settings,
     storage,
     monkeypatch,
@@ -2913,13 +3051,13 @@ async def test_private_attachment_allows_only_web_family_outbound_calls(
         enable_tools=True,
     )
 
-    assert llm.calls == 2
-    assert {"web_search", "web_research", "web_fetch"} <= llm.offered_names[0]
-    assert all("code_run" not in names and "data_query" not in names for names in llm.offered_names)
-    assert kernel.executed == ["web_search", "web_fetch"]
-    assert result["tools_used"] == ["web_search", "web_fetch", "code_run", "data_query"]
-    assert llm.second_round_tool_text.count("Внешний сетевой инструмент недоступен") == 2
+    assert llm.calls == 0
+    assert llm.offered_names == []
+    assert kernel.executed == []
+    assert kernel.executed_arguments == []
+    assert result["tools_used"] == []
     assert not result.get("web_query_notice")
+    assert "приватные вложения" in result["message"].casefold()
     assert result["attachment_context_available"] is True
     assert result["attachment_context_expected_count"] == 1
     assert result["attachment_context_readable_count"] == 1
@@ -3035,13 +3173,17 @@ async def test_person_topic_without_web_intent_blocks_model_selected_outbound(
 
 
 @pytest.mark.asyncio
-async def test_private_attachment_lineage_allows_model_selected_web_only(
+async def test_private_lineage_denies_hallucinated_web_mcp_and_unknown_connector(
     settings,
     storage,
     monkeypatch,
 ):
     storage.ensure_user("alice", preset_key="owner")
-    conversation = storage.create_conversation("alice", title="synthetic private lineage")
+    conversation = storage.create_conversation(
+        "alice",
+        title="synthetic private lineage",
+        mode="research",
+    )
     storage.store_message(
         conversation["id"],
         "alice",
@@ -3066,8 +3208,8 @@ async def test_private_attachment_lineage_allows_model_selected_web_only(
     )
 
     auth = AuthorizationService(storage)
-    kernel = _OutboundRecordingKernel(auth)
-    llm = _HallucinatedOutboundLLM()
+    kernel = _OutboundRecordingKernel(auth, include_mcp=True)
+    llm = _HallucinatedOutboundLLM(include_mcp=True)
     runtime = AgentRuntime(
         replace(settings, verify_answers=False),
         storage,
@@ -3083,7 +3225,8 @@ async def test_private_attachment_lineage_allows_model_selected_web_only(
             conversation_id=conversation_id,
             user_id=user_id,
             person_id=user_id,
-            outward_verdict=("интернет", None),
+            outward_verdict=("архив", None),
+            interaction_mode="research",
         )
 
     async def no_prefetch(*args, **kwargs):
@@ -3101,15 +3244,211 @@ async def test_private_attachment_lineage_allows_model_selected_web_only(
     )
 
     assert llm.calls == 2
-    assert kernel.executed == ["web_search", "web_fetch"]
-    assert {"web_search", "web_research", "web_fetch"} <= llm.offered_names[0]
-    assert all("code_run" not in names and "data_query" not in names for names in llm.offered_names)
+    assert kernel.executed == []
+    assert kernel.executed_arguments == []
+    forbidden = {
+        "web_search",
+        "web_research",
+        "web_fetch",
+        "code_run",
+        "data_query",
+        "workspace_list",
+        "workspace_search",
+        "workspace_read",
+        "workspace_create",
+        "future_mcp_export",
+    }
+    assert all(not forbidden & names for names in llm.offered_names)
     rows = storage.get_conversation_messages(conversation["id"], user_id="alice")
     latest_metadata = json.loads(rows[-1]["metadata_json"])
     assert latest_metadata["private_context_lineage"] is True
     assert latest_metadata["attachment_context_used"] is False
-    assert result["tools_used"] == ["web_search", "web_fetch", "code_run", "data_query"]
+    assert result["tools_used"] == [
+        "web_search",
+        "web_fetch",
+        "code_run",
+        "data_query",
+        "workspace_create",
+        "future_mcp_export",
+    ]
+    assert llm.second_round_tool_text.count("приватным источником") == 6
     assert prepare_private_lineage == [True]
+
+
+@pytest.mark.asyncio
+async def test_dynamically_loaded_private_retrieval_closes_schemas_and_execution(
+    settings,
+    storage,
+    monkeypatch,
+):
+    storage.ensure_user("alice", preset_key="owner")
+    auth = AuthorizationService(storage)
+    kernel = _OutboundRecordingKernel(auth, include_mcp=True)
+    llm = _HallucinatedOutboundLLM(include_mcp=True)
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=llm,
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+
+    async def prepare(user_id, message, conversation_id, **kwargs):
+        del message, kwargs
+        return AgentContext(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            person_id=user_id,
+            conversation_history=[
+                {"role": "user", "content": "ordinary conversational context"},
+            ],
+            knowledge_hits=[
+                {
+                    "id": "ko_private_dynamic",
+                    "title": "private dynamic retrieval",
+                    "content": "PRIVATE-DYNAMIC-RETRIEVAL-SENTINEL",
+                },
+            ],
+            outward_verdict=("интернет", None),
+        )
+
+    async def no_prefetch(*args, **kwargs):
+        del args, kwargs
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", no_prefetch)
+    result = await runtime.chat(
+        "alice",
+        "Синтетический вопрос с динамическим контекстом",
+        actor=auth.actor_for_user("alice", source="test"),
+        attachments=[],
+        enable_tools=True,
+    )
+
+    forbidden = {
+        "web_search",
+        "web_research",
+        "web_fetch",
+        "code_run",
+        "data_query",
+        "workspace_list",
+        "workspace_search",
+        "workspace_read",
+        "workspace_create",
+        "future_mcp_export",
+    }
+    assert llm.calls == 2
+    assert all(not forbidden & names for names in llm.offered_names)
+    assert kernel.executed == []
+    assert kernel.executed_arguments == []
+    assert result["tools_used"] == [
+        "web_search",
+        "web_fetch",
+        "code_run",
+        "data_query",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_successful_code_owned_private_prefetch_closes_web_before_serialization(
+    settings,
+    storage,
+    monkeypatch,
+):
+    storage.ensure_user("alice", preset_key="owner")
+    auth = AuthorizationService(storage)
+    kernel = _OutboundRecordingKernel(auth, include_mcp=True)
+    llm = _HallucinatedOutboundLLM(include_mcp=True)
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=llm,
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    web_prefetch_calls: list[str] = []
+
+    async def prepare(user_id, message, conversation_id, **kwargs):
+        del message, kwargs
+        return AgentContext(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            person_id=user_id,
+        )
+
+    async def no_person(*args, **kwargs):
+        del args, kwargs
+        return False
+
+    async def admit_private_archive(
+        message,
+        actor,
+        tools,
+        messages,
+        tools_used,
+        tool_evidence,
+        context,
+        **kwargs,
+    ):
+        del message, actor, tools, context, kwargs
+        tools_used.append("kg_stats")
+        tool_evidence.append(
+            {
+                "tool": "kg_stats",
+                "output": "PRIVATE-CODE-OWNED-PREFETCH-SENTINEL",
+            }
+        )
+        messages.append(
+            {
+                "role": "user",
+                "content": "PRIVATE-CODE-OWNED-PREFETCH-SENTINEL",
+            }
+        )
+
+    async def forbidden_web_prefetch(message, *args, **kwargs):
+        del args, kwargs
+        web_prefetch_calls.append(str(message))
+        raise AssertionError("private prefetch was serialized into a web request")
+
+    async def no_archive(*args, **kwargs):
+        del args, kwargs
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_prefetch_person_activity", no_person)
+    monkeypatch.setattr(runtime, "_prefetch_the_timeline_if_asked", no_archive)
+    monkeypatch.setattr(runtime, "_prefetch_archive_numbers", admit_private_archive)
+    monkeypatch.setattr(runtime, "_prefetch_the_archive_if_asked", no_archive)
+    monkeypatch.setattr(runtime, "_prefetch_the_web_if_asked", forbidden_web_prefetch)
+    result = await runtime.chat(
+        "alice",
+        "Какая погода в Москве сегодня?",
+        actor=auth.actor_for_user("alice", source="test"),
+        attachments=[],
+        enable_tools=True,
+    )
+
+    assert web_prefetch_calls == []
+    assert kernel.executed == []
+    assert kernel.executed_arguments == []
+    assert llm.calls == 2
+    assert all(
+        not {
+            "web_search",
+            "web_fetch",
+            "web_research",
+            "code_run",
+            "data_query",
+            "workspace_create",
+            "future_mcp_export",
+        }
+        & names
+        for names in llm.offered_names
+    )
+    assert result["tools_used"] == [
+        "kg_stats",
+        "web_search",
+        "web_fetch",
+        "code_run",
+        "data_query",
+    ]
 
 
 def test_private_lineage_scan_is_independent_of_prompt_character_budget():
@@ -3225,11 +3564,10 @@ async def test_private_lineage_survives_a_crash_after_oversized_user_persistence
     )
 
     assert seen_lineage == [True]
-    assert llm.calls == 2
-    assert kernel.executed == ["web_search", "web_fetch"]
-    assert {"web_search", "web_research", "web_fetch"} <= llm.offered_names[0]
-    assert all("code_run" not in names and "data_query" not in names for names in llm.offered_names)
-    assert result["tools_used"] == ["web_search", "web_fetch", "code_run", "data_query"]
+    assert llm.calls == 0
+    assert kernel.executed == []
+    assert kernel.executed_arguments == []
+    assert result["tools_used"] == []
     final_rows = storage.get_conversation_messages(conversation["id"], user_id="alice")
     next_user_metadata = json.loads(final_rows[-2]["metadata_json"])
     next_assistant_metadata = json.loads(final_rows[-1]["metadata_json"])
