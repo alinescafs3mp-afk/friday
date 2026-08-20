@@ -2,3 +2,13 @@ services:
   proxy:
     ports:
       - "${JARVIS_OPENAI_BIND_ADDRESS:-0.0.0.0}:8001:8080"
+    networks:
+      attested:
+        gw_priority: 0
+      publish:
+        gw_priority: 1
+
+networks:
+  publish:
+    name: jarvis-gpt-qwen38-v12-attested-publish-net
+    external: true

@@ -8,11 +8,38 @@ the explicit `-Execute` flag authorizes candidate/stable container changes.
 & 'D:\jarvis-gpt\qwen38-v12-attested-bundle\Test-AttestedBindMountProjection.ps1'
 & 'D:\jarvis-gpt\qwen38-v12-attested-bundle\Test-AttestedCapabilityProjection.ps1'
 & 'D:\jarvis-gpt\qwen38-v12-attested-bundle\Test-AttestedPublisherObservation.ps1'
+& 'D:\jarvis-gpt\qwen38-v12-attested-bundle\Test-AttestedNetworkProjection.ps1'
+& 'D:\jarvis-gpt\qwen38-v12-attested-bundle\Test-AttestedCleanupProjection.ps1'
+& 'D:\jarvis-gpt\qwen38-v12-attested-bundle\Test-AttestedReceiptSerialization.ps1'
 & 'D:\jarvis-gpt\qwen38-v12-attested-bundle\Preflight-Qwen38V12Attested.ps1'
 & 'D:\jarvis-gpt\qwen38-v12-attested-bundle\Switch-Qwen38V12Attested.ps1' -Execute
 & 'D:\jarvis-gpt\qwen38-v12-attested-bundle\Rollback-Qwen38V12Attested.ps1' -PreflightOnly
 & 'D:\jarvis-gpt\qwen38-v12-attested-bundle\Rollback-Qwen38V12Attested.ps1' -Execute
 ```
+
+If a previous rollback left the sealed candidate containers stopped, the switch
+correctly rejects their occupied names. Use the dedicated cleanup transaction;
+its default is read-only, and only an explicit `-Execute` removes anything:
+
+```powershell
+& 'D:\jarvis-gpt\qwen38-v12-attested-bundle\Cleanup-StoppedQwen38V12Attested.ps1'
+& 'D:\jarvis-gpt\qwen38-v12-attested-bundle\Cleanup-StoppedQwen38V12Attested.ps1' -Execute
+```
+
+Cleanup accepts only the exact rollback-state v1 internal-only graph or the v2
+two-network graph, the bound candidate IDs/images/labels, stopped state with
+restart `no`, the exact model-volume attachment, and a healthy sole-publisher
+stable graph. It removes the bound stopped proxy first and engine second, with
+plain `docker container rm`; it never uses force, `compose down`, volume/image
+removal, network disconnect, or network removal. It then proves both candidate
+names absent, the model volume unattached, the Compose-owned internal network
+exact and unattached, and the permanent publish bridge exact and unattached.
+For a v1 cleanup only, it provisions that permanent bridge after removing the
+old containers. A v2 cleanup never provisions, adopts, or replaces that bridge:
+after container removal it reuses the receipt sealed in state, re-inspects the
+live network, and rejects a missing or different ID even if every other field
+and label is identical. An interrupted cleanup can safely re-run under the same
+state.
 
 The proxy test uses no host port and removes its isolated test container. It
 sources the API key only inside PowerShell from the exact stable proxy and does
@@ -33,12 +60,29 @@ case-folded or stripped of prefixes. Mixed spellings, missing, duplicate, extra,
 wrong-case, and near-prefix capabilities remain fail-closed. The capability
 projection test exercises this matrix without Docker or container mutation.
 
-Docker Desktop may report the exact proxy healthy before its publisher index
-shows port 8001. Candidate startup therefore waits at most 120 seconds while the
-publisher set is empty. Any wrong, duplicate, or multiple publisher fails
-immediately; the wait never tolerates a competing owner. The publisher
-observation test exercises the accepted, pending, and rejected sets without
-Docker or container mutation.
+The base candidate graph has one internal bridge only. The publish overlay adds
+one external network and one attachment only: the proxy joins the exact durable
+code-owned publish bridge with gateway priority 1, while the engine remains on
+the internal bridge alone. Preflight verifies an existing publish bridge or
+reports that `-Execute` will provision it. Provisioning happens before stable
+drain and pins the exact name, 64-hex network ID, `bridge` driver, local scope,
+IPv4/IPv6 options, `internal=false`, `attachable=false`, non-ingress/non-config
+status, and the complete four-label ownership set. A name collision, foreign
+label, foreign attachment, wrong driver, wrong internal flag, or altered
+Compose-owned internal bridge fails closed.
+
+After proxy start, the runtime gate requires engine network count 1, proxy
+network count 2, exact network IDs, internal/publish gateway priorities 0/1,
+nonempty running IPv4 endpoints, internal attachments limited to the two
+candidate siblings, and publish attachments limited to the proxy. It then
+requires both configured and effective `0.0.0.0:8001 -> 8080/tcp` bindings plus
+the exact sole Docker publisher. Every current-topology gate also rebinds the
+live publish network ID to the sealed v2 receipt, so an otherwise identically
+labelled replacement fails closed. The 120-second publisher wait remains only
+for bounded registration settling: an empty set may wait, while any wrong,
+duplicate, or multiple owner fails immediately. It cannot make an internal-only
+container publishable. The publisher and network projection tests exercise the
+accepted and negative matrices without Docker or container mutation.
 
 The switch captures and seals the exact current stable container IDs immediately
 before mutation. It never invokes the mutable image builder and requires the
@@ -61,5 +105,148 @@ witness and nonce rotation, then repeats identity, proxy, smoke, headroom,
 sidecar, and sole-port-8001 gates.
 
 Any post-mutation failure runs exact automatic rollback to the captured stable
-container IDs. The backend, Telegram bridge, and all sidecars are never
-reconfigured or restarted by these scripts.
+container IDs. The publish bridge is permanent code-owned infrastructure: its
+full identity and labels are sealed into rollback state v2, journals, preflight,
+ready, and rollback receipts. Rollback never runs `docker network rm`,
+`docker network disconnect`, or Compose `down`; it retains the exact network and
+any stopped candidate proxy attachment as evidence. A later cleanup may remove
+only the stopped candidate container IDs already bound in that state, then must
+re-attest the same now-unattached publish network before reuse. It must never
+force-disconnect, replace, or delete the durable bridge. The backend, Telegram
+bridge, and all sidecars are never reconfigured or restarted by these scripts.
+
+Switch and rollback serialize every journal or terminal record that may carry a
+publish-network receipt with explicit JSON depth 12. This preserves the complete
+nested four-label ownership object on Windows PowerShell 5.1. The receipt
+serialization projection parses both scripts with the PowerShell AST, round
+trips the nested receipt, and rejects any serializer that falls back to the
+depth-2 default.
+
+## Frozen Linux-to-Windows transport
+
+The code-owned sync wrapper is fail-closed and defaults to a local-only plan. It
+pins the SSH client key, the Windows ED25519 host key, the transport manifest,
+the PowerShell applier, every old c560 byte set, and every new frozen byte set.
+It uses a flat SHA-addressed archive, verifies it again after receipt and
+expansion, and applies files under the same exclusive switch lock. Each target
+must be absent only when explicitly declared new, or equal the exact old or new
+SHA-256. Replacements use same-directory temporary files and atomic replacement;
+partial work is safely resumable. Payloads land first, `CORE-SHA256SUMS` lands
+only after all changed CORE members, and `ORCHESTRATION-SHA256SUMS` lands last.
+Runtime state and journals are not transported or deleted, and the applier has
+no network, container, volume, or image action.
+
+The verified endpoint is `admin@192.168.1.78` on default TCP/22. The key is
+`/home/jericho/.ssh/friday_win_audit_ed25519`; its public fingerprint is
+`SHA256:vhJUpURIJLODWZdo8LU8qnTMbLir86/J5tzl8VWp5+A`. Host-key checking is
+strict against `/home/jericho/.ssh/known_hosts`; the pinned Windows ED25519
+fingerprint is `SHA256:wfOf57TOtNhTuQ6OAQUcWhMF47C8FWeUhku2gSAe6mY`.
+The wrapper permits only `ssh-ed25519`, disables the global known-hosts file and
+host-key updates, and verifies those effective settings with local-only
+`ssh -G` before either a plan or a connection.
+
+From the frozen Linux checkout, use this exact order. The two
+`--remote-preflight` calls write only SHA-addressed staging evidence; they do not
+change live bundle files. No remote command is run by a plain `--phase` plan.
+
+```bash
+sync=handoffs/SGLang-Qwen38-V12-Attested/Sync-Qwen38V12AttestedBundle.sh
+
+"$sync" --phase bootstrap
+"$sync" --phase bootstrap --remote-preflight
+"$sync" --phase bootstrap --execute
+```
+
+The bootstrap phase contains only `AttestedBundle.Common.ps1`,
+`Cleanup-StoppedQwen38V12Attested.ps1`, and
+`docker-compose.publish-8001.yml`. It deliberately precedes cleanup so the
+legacy v1 rollback state can be cleaned without copying or deleting that state.
+Invoke cleanup through the verified PowerShell encoding convention:
+
+```bash
+ssh_base=(
+  ssh -F /dev/null
+  -i /home/jericho/.ssh/friday_win_audit_ed25519
+  -o BatchMode=yes
+  -o ConnectTimeout=10
+  -o StrictHostKeyChecking=yes
+  -o UserKnownHostsFile=/home/jericho/.ssh/known_hosts
+  -o GlobalKnownHostsFile=/dev/null
+  -o HostKeyAlgorithms=ssh-ed25519
+  -o UpdateHostKeys=no
+  -o IdentitiesOnly=yes
+  -o PasswordAuthentication=no
+  -o KbdInteractiveAuthentication=no
+  -o PreferredAuthentications=publickey
+  -o ProxyCommand=none
+  -o ProxyJump=none
+  admin@192.168.1.78
+)
+
+cleanup_preflight=$(iconv -f UTF-8 -t UTF-16LE <<'PS' | base64 -w0
+$ErrorActionPreference = 'Stop'
+& 'D:\jarvis-gpt\qwen38-v12-attested-bundle\Cleanup-StoppedQwen38V12Attested.ps1' -PreflightOnly
+PS
+)
+"${ssh_base[@]}" \
+  "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand $cleanup_preflight"
+
+cleanup_execute=$(iconv -f UTF-8 -t UTF-16LE <<'PS' | base64 -w0
+$ErrorActionPreference = 'Stop'
+& 'D:\jarvis-gpt\qwen38-v12-attested-bundle\Cleanup-StoppedQwen38V12Attested.ps1' -Execute
+PS
+)
+"${ssh_base[@]}" \
+  "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand $cleanup_execute"
+
+"$sync" --phase full --remote-preflight
+"$sync" --phase full --execute
+```
+
+After full sync, validate both SHA manifests and all six native, Docker-free
+projection scripts before the ordinary read-only deployment preflight. The
+following encoded invocation performs validation and preflight only; it has no
+`-Execute` switch:
+
+```bash
+validate_preflight=$(iconv -f UTF-8 -t UTF-16LE <<'PS' | base64 -w0
+$ErrorActionPreference = 'Stop'
+$root = 'D:\jarvis-gpt\qwen38-v12-attested-bundle'
+foreach ($manifestName in @('CORE-SHA256SUMS', 'ORCHESTRATION-SHA256SUMS')) {
+    foreach ($line in Get-Content -LiteralPath (Join-Path $root $manifestName) -Encoding ascii) {
+        if ([string]$line -cnotmatch '^([0-9a-f]{64})  ([A-Za-z0-9._-]+)$') {
+            throw "Non-canonical SHA manifest row: $manifestName"
+        }
+        $actual = (Get-FileHash -LiteralPath (Join-Path $root $Matches[2]) -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -cne [string]$Matches[1]) { throw "SHA mismatch: $($Matches[2])" }
+    }
+}
+foreach ($name in @(
+    'Test-AttestedBindMountProjection.ps1',
+    'Test-AttestedCapabilityProjection.ps1',
+    'Test-AttestedPublisherObservation.ps1',
+    'Test-AttestedNetworkProjection.ps1',
+    'Test-AttestedCleanupProjection.ps1',
+    'Test-AttestedReceiptSerialization.ps1'
+)) {
+    & (Join-Path $root $name)
+}
+& (Join-Path $root 'Preflight-Qwen38V12Attested.ps1')
+PS
+)
+"${ssh_base[@]}" \
+  "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand $validate_preflight"
+```
+
+Only after that output is exact and retained for review is the GO mutation a
+separate, explicit invocation:
+
+```bash
+switch_execute=$(iconv -f UTF-8 -t UTF-16LE <<'PS' | base64 -w0
+$ErrorActionPreference = 'Stop'
+& 'D:\jarvis-gpt\qwen38-v12-attested-bundle\Switch-Qwen38V12Attested.ps1' -Execute
+PS
+)
+"${ssh_base[@]}" \
+  "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand $switch_execute"
+```

@@ -28,12 +28,16 @@ $candidateEngineId = ''
 $candidateProxyId = ''
 $engineConfig = $null
 $proxyConfig = $null
+$publishNetworkReceipt = $null
+$publishNetworkStatus = ''
+$attestedNetworkStatus = ''
 
 function Write-Journal([string]$State, [hashtable]$Data = @{}) {
     $record = [ordered]@{ at_utc = [DateTime]::UtcNow.ToString('o'); state = $State }
     foreach ($entry in $Data.GetEnumerator()) { $record[$entry.Key] = $entry.Value }
     try {
-        ($record | ConvertTo-Json -Compress) | Add-Content -LiteralPath $journalPath -Encoding utf8
+        ($record | ConvertTo-Json -Compress -Depth 12) | Add-Content `
+            -LiteralPath $journalPath -Encoding utf8
     }
     catch {
         if (-not $mutationStarted) { throw }
@@ -41,8 +45,11 @@ function Write-Journal([string]$State, [hashtable]$Data = @{}) {
 }
 
 function Save-State {
+    if ($null -eq $publishNetworkReceipt) {
+        throw 'Publish network receipt is absent while sealing rollback state'
+    }
     $value = [ordered]@{
-        schema = 'friday.attested-switch-state.v1'
+        schema = 'friday.attested-switch-state.v2'
         profile_id = $script:Attested.ProfileId
         stable_engine_id = $stableEngineId
         stable_proxy_id = $stableProxyId
@@ -54,6 +61,7 @@ function Save-State {
         candidate_proxy_id = $(if ($candidateProxyId) { $candidateProxyId } else { $null })
         candidate_engine_image_id = [string]$receipt.engine.image_id
         candidate_proxy_image_id = [string]$receipt.proxy.image_id
+        publish_network = $publishNetworkReceipt
         key_sha256 = Get-KeyHash $apiKey
         written_at_utc = [DateTime]::UtcNow.ToString('o')
     }
@@ -169,12 +177,16 @@ function Assert-ComposeConfig([object]$Value, [object]$BuildReceipt, [string]$Ke
     $volumes = @($Value.volumes.PSObject.Properties.Name | Sort-Object)
     if ([string]::Join(',', $networks) -cne 'attested' -or
         [string]::Join(',', $volumes) -cne 'deployment-witness,model-snapshot' -or
+        [string]$Value.networks.attested.name -cne $script:Attested.AttestedNetworkName -or
+        -not [bool]$Value.networks.attested.internal -or
         [string]$Value.volumes.'model-snapshot'.name -cne $script:Attested.ModelVolumeName -or
         -not [bool]$Value.volumes.'model-snapshot'.external) {
         throw 'Attested Compose network or sealed external volume contract changed'
     }
     $script:engineConfig = $Value.services.engine
     $script:proxyConfig = $Value.services.proxy
+    $engineNetworks = @($engineConfig.networks.PSObject.Properties.Name | Sort-Object)
+    $proxyNetworks = @($proxyConfig.networks.PSObject.Properties.Name | Sort-Object)
     if ([string]$engineConfig.container_name -cne $script:Attested.CandidateEngineName -or
         [string]$proxyConfig.container_name -cne $script:Attested.CandidateProxyName -or
         [string]$engineConfig.image -cne [string]$BuildReceipt.engine.image_id -or
@@ -186,7 +198,9 @@ function Assert-ComposeConfig([object]$Value, [object]$BuildReceipt, [string]$Ke
         [string]$engineConfig.labels.'com.friday.deployment.proxy-image-id' -cne [string]$BuildReceipt.proxy.image_id -or
         [string]$proxyConfig.labels.'com.friday.deployment.proxy-image-id' -cne [string]$BuildReceipt.proxy.image_id -or
         [string]$proxyConfig.labels.'com.friday.proxy.openai-key-sha256' -cne $KeyHash -or
-        [string]$proxyConfig.environment.SGLANG_UPSTREAM -cne 'engine') {
+        [string]$proxyConfig.environment.SGLANG_UPSTREAM -cne 'engine' -or
+        [string]::Join(',', $engineNetworks) -cne 'attested' -or
+        [string]::Join(',', $proxyNetworks) -cne 'attested') {
         throw 'Rendered attested Compose identities are not exact'
     }
     Assert-ExactCommand ([pscustomobject]@{ Config = [pscustomobject]@{ Cmd = @($engineConfig.command) } }) `
@@ -215,6 +229,73 @@ function Assert-ComposeConfig([object]$Value, [object]$BuildReceipt, [string]$Ke
         [string]::Join(',', @($proxyConfig.cap_drop)) -cne 'ALL' -or
         [string]::Join(',', @($proxyConfig.cap_add | Sort-Object)) -cne 'CHOWN,DAC_OVERRIDE,SETGID,SETUID') {
         throw 'Attested container hardening changed'
+    }
+}
+
+function Assert-PublishedComposeConfig([object]$Value, [object]$BuildReceipt, [string]$KeyHash) {
+    $services = @($Value.services.PSObject.Properties.Name | Sort-Object)
+    $networks = @($Value.networks.PSObject.Properties.Name | Sort-Object)
+    $volumes = @($Value.volumes.PSObject.Properties.Name | Sort-Object)
+    if ([string]::Join(',', $services) -cne 'engine,proxy' -or
+        [string]::Join(',', $networks) -cne 'attested,publish' -or
+        [string]::Join(',', $volumes) -cne 'deployment-witness,model-snapshot' -or
+        [string]$Value.networks.attested.name -cne $script:Attested.AttestedNetworkName -or
+        -not [bool]$Value.networks.attested.internal -or
+        [string]$Value.networks.publish.name -cne $script:Attested.PublishNetworkName -or
+        -not [bool]$Value.networks.publish.external) {
+        throw 'Published Compose network graph is not exact'
+    }
+    $engine = $Value.services.engine
+    $proxy = $Value.services.proxy
+    $engineNetworks = @($engine.networks.PSObject.Properties.Name | Sort-Object)
+    $proxyNetworks = @($proxy.networks.PSObject.Properties.Name | Sort-Object)
+    $engineAttestedEndpoint = $engine.networks.PSObject.Properties['attested'].Value
+    $attestedEndpoint = $proxy.networks.PSObject.Properties['attested'].Value
+    $publishEndpoint = $proxy.networks.PSObject.Properties['publish'].Value
+    $attestedEndpointProperties = @($attestedEndpoint.PSObject.Properties | ForEach-Object {
+        [string]$_.Name
+    } | Sort-Object)
+    $publishEndpointProperties = @($publishEndpoint.PSObject.Properties | ForEach-Object {
+        [string]$_.Name
+    } | Sort-Object)
+    if ([string]$engine.container_name -cne $script:Attested.CandidateEngineName -or
+        [string]$proxy.container_name -cne $script:Attested.CandidateProxyName -or
+        [string]$engine.image -cne [string]$BuildReceipt.engine.image_id -or
+        [string]$proxy.image -cne [string]$BuildReceipt.proxy.image_id -or
+        [string]$proxy.labels.'com.friday.proxy.openai-key-sha256' -cne $KeyHash -or
+        [string]::Join(',', $engineNetworks) -cne 'attested' -or
+        $null -ne $engineAttestedEndpoint -or
+        [string]::Join(',', $proxyNetworks) -cne 'attested,publish' -or
+        $attestedEndpointProperties.Count -ne 0 -or
+        [string]::Join(',', $publishEndpointProperties) -cne 'gw_priority' -or
+        [int]$publishEndpoint.gw_priority -ne 1) {
+        throw 'Published Compose container topology is not exact'
+    }
+    $enginePorts = @(if ($null -ne $engine.PSObject.Properties['ports']) { $engine.ports })
+    $ports = @($proxy.ports)
+    if ($enginePorts.Count -ne 0 -or $ports.Count -ne 1) {
+        throw 'Published Compose port cardinality is not exact'
+    }
+    Assert-ExactProperties $ports[0] @(
+        'mode', 'host_ip', 'target', 'published', 'protocol'
+    ) 'published Compose proxy port'
+    if ([string]$ports[0].mode -cne 'ingress' -or
+        [string]$ports[0].host_ip -cne '0.0.0.0' -or
+        [int]$ports[0].published -ne 8001 -or [int]$ports[0].target -ne 8080 -or
+        [string]$ports[0].protocol -cne 'tcp') {
+        throw 'Published Compose port is not exact 0.0.0.0:8001 to proxy 8080/tcp'
+    }
+    foreach ($forbidden in @('privileged', 'pid', 'network_mode')) {
+        if ($null -ne $engine.PSObject.Properties[$forbidden] -or
+            $null -ne $proxy.PSObject.Properties[$forbidden]) {
+            throw 'Published Compose isolation was broadened'
+        }
+    }
+    if ([string]$engine.security_opt[0] -cne 'no-new-privileges:true' -or
+        [string]$proxy.security_opt[0] -cne 'no-new-privileges:true' -or
+        [string]::Join(',', @($proxy.cap_drop)) -cne 'ALL' -or
+        [string]::Join(',', @($proxy.cap_add | Sort-Object)) -cne 'CHOWN,DAC_OVERRIDE,SETGID,SETUID') {
+        throw 'Published Compose container hardening changed'
     }
 }
 
@@ -254,6 +335,13 @@ function Restore-Stable {
         }
         Stop-ExactContainer $candidateEngine 90
     }
+    $candidateProxy = Get-Container $script:Attested.CandidateProxyName
+    $publishNetwork = Get-DockerNetwork $script:Attested.PublishNetworkName
+    if ($null -eq $publishNetwork) { throw 'Durable publish network disappeared during rollback' }
+    Assert-PublishNetworkReceipt $publishNetworkReceipt $publishNetwork
+    $allowedPublishAttachments = @(if ($null -ne $candidateProxy) { $candidateProxy })
+    Assert-NetworkContainerProjection $publishNetwork $allowedPublishAttachments @() `
+        'durable publish network after candidate stop'
     $stableEngineNow = Get-Container $script:Attested.StableEngineName
     $stableProxyNow = Get-Container $script:Attested.StableProxyName
     if ($null -eq $stableEngineNow -or $null -eq $stableProxyNow -or
@@ -293,6 +381,8 @@ function Restore-Stable {
     Write-Journal 'automatic_rollback_complete' @{
         stable_engine_id = $stableEngineId.Substring(0, 12)
         stable_proxy_id = $stableProxyId.Substring(0, 12)
+        publish_network = $publishNetworkReceipt
+        publish_network_retained = $true
     }
 }
 
@@ -366,6 +456,12 @@ try {
     }
     Assert-Sidecars
 
+    $stage = 'network_preflight'
+    $attestedNetworkStatus = Get-AttestedNetworkPreflight
+    $publishPreflight = Get-PublishNetworkPreflight
+    $publishNetworkStatus = [string]$publishPreflight.Status
+    $publishNetworkReceipt = $publishPreflight.Receipt
+
     $stage = 'compose_render'
     $env:JARVIS_LLM_API_KEY = $apiKey
     $env:JARVIS_LLM_API_KEY_SHA256 = $keyHash
@@ -376,11 +472,7 @@ try {
     Assert-ComposeConfig $compose $receipt $keyHash
     $publishedRendered = Invoke-Compose $receipt @('config', '--format', 'json') -Publish8001
     $published = [string]::Join([Environment]::NewLine, $publishedRendered) | ConvertFrom-Json
-    $ports = @($published.services.proxy.ports)
-    if ($ports.Count -ne 1 -or [int]$ports[0].published -ne 8001 -or [int]$ports[0].target -ne 8080 -or
-        [string]$ports[0].protocol -cne 'tcp') {
-        throw 'Publish override is not exact port 8001 to 8080'
-    }
+    Assert-PublishedComposeConfig $published $receipt $keyHash
 
     $stage = 'stable_endpoint'
     $headers = @{ Authorization = "Bearer $apiKey" }
@@ -390,6 +482,9 @@ try {
         stable_proxy_id = $stableProxyId.Substring(0, 12)
         candidate_engine_image_id = [string]$receipt.engine.image_id
         candidate_proxy_image_id = [string]$receipt.proxy.image_id
+        attested_network = $attestedNetworkStatus
+        publish_network = $publishNetworkStatus
+        publish_network_receipt = $publishNetworkReceipt
     }
     if (-not $Execute) {
         [pscustomobject]@{
@@ -402,9 +497,19 @@ try {
             max_running_requests = 6
             decode_cuda_graphs = 'full-bs1-6'
             sealed_model_volume = $modelVolumeStatus
+            attested_network = $attestedNetworkStatus
+            publish_network = $publishNetworkStatus
+            publish_network_receipt = $publishNetworkReceipt
+            publish_network_expected = [ordered]@{
+                name = $script:Attested.PublishNetworkName
+                driver = 'bridge'
+                internal = $false
+                attachable = $false
+                labels = Get-ExpectedPublishNetworkLabels
+            }
             stable_untouched = $true
             backend_bridge_untouched = $true
-        } | ConvertTo-Json -Compress
+        } | ConvertTo-Json -Compress -Depth 12
         return
     }
 
@@ -421,6 +526,14 @@ try {
         throw
     }
     Write-Journal 'sealed_model_volume_verified' @{ volume = $script:Attested.ModelVolumeName }
+
+    $stage = 'durable_publish_network'
+    $publishNetworkReceipt = Ensure-PublishNetwork
+    $publishNetworkStatus = 'verified_durable'
+    Write-Journal 'durable_publish_network_verified' @{
+        publish_network = $publishNetworkReceipt
+        retained_on_rollback = $true
+    }
 
     $stage = 'state_seal'
     Save-State
@@ -454,7 +567,7 @@ try {
     if ([string]$candidateEngine.Id -cne $candidateEngineId -or (Get-RestartSpec $candidateEngine) -cne 'no') {
         throw 'Candidate engine identity changed during startup'
     }
-    Assert-CandidateContainers $candidateEngine $null $receipt $keyHash
+    Assert-CandidateContainers $candidateEngine $null $receipt $keyHash $publishNetworkReceipt
     Assert-FatalFree $candidateEngine
     $null = Assert-GpuHeadroom
 
@@ -470,8 +583,15 @@ try {
     if ([string]$candidateProxy.Id -cne $candidateProxyId -or (Get-RestartSpec $candidateProxy) -cne 'no') {
         throw 'Candidate proxy identity changed during startup'
     }
-    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash
+    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash $publishNetworkReceipt
     Wait-SolePublisher $script:Attested.CandidateProxyName 120
+    $candidateProxy = Get-Container $script:Attested.CandidateProxyName
+    if ($null -eq $candidateProxy -or [string]$candidateProxy.Id -cne $candidateProxyId -or
+        -not [bool]$candidateProxy.State.Running) {
+        throw 'Candidate proxy identity changed after publisher registration'
+    }
+    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash $publishNetworkReceipt
+    Assert-CandidateProxyPortPublication $candidateProxy
 
     $stage = 'proxy_negative_paths'
     Assert-ProxyNegativePaths $headers
@@ -580,13 +700,14 @@ try {
     Start-Sleep -Seconds 60
     $candidateEngine = Wait-Healthy $script:Attested.CandidateEngineName 30
     $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 30
-    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash
+    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash $publishNetworkReceipt
     Assert-FatalFree $candidateEngine
     $gpu = Assert-GpuHeadroom
     $witnessAfter = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8001/_friday/v1/deployment-witness' -Headers $headers -TimeoutSec 10
     if ([string]$witnessAfter.Content -cne $witnessRaw1) { throw 'Process witness changed during soak' }
     Assert-Sidecars
     Assert-SolePublisher $script:Attested.CandidateProxyName
+    Assert-CandidateProxyPortPublication $candidateProxy
 
     $stage = 'epoch_restart_drain'
     Wait-EndpointIdle $headers 120
@@ -619,14 +740,21 @@ try {
 
     $stage = 'epoch_restart_health'
     $candidateEngine = Wait-Healthy $script:Attested.CandidateEngineName 1200
-    Assert-CandidateContainers $candidateEngine $null $receipt $keyHash
+    Assert-CandidateContainers $candidateEngine $null $receipt $keyHash $publishNetworkReceipt
     Assert-FatalFree $candidateEngine
     $null = Assert-GpuHeadroom
     & docker start $candidateProxyId | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not restart exact candidate proxy after epoch rehearsal' }
     $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 180
-    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash
+    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash $publishNetworkReceipt
     Wait-SolePublisher $script:Attested.CandidateProxyName 120
+    $candidateProxy = Get-Container $script:Attested.CandidateProxyName
+    if ($null -eq $candidateProxy -or [string]$candidateProxy.Id -cne $candidateProxyId -or
+        -not [bool]$candidateProxy.State.Running) {
+        throw 'Candidate proxy identity changed after epoch publisher registration'
+    }
+    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash $publishNetworkReceipt
+    Assert-CandidateProxyPortPublication $candidateProxy
     Assert-ProxyNegativePaths $headers
 
     $stage = 'epoch_rotation_proof'
@@ -658,6 +786,8 @@ try {
     Start-Sleep -Seconds 30
     $candidateEngine = Wait-Healthy $script:Attested.CandidateEngineName 30
     $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 30
+    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash $publishNetworkReceipt
+    Assert-CandidateProxyPortPublication $candidateProxy
     Assert-FatalFree $candidateEngine
     $gpu = Assert-GpuHeadroom
     Assert-Sidecars
@@ -674,8 +804,9 @@ try {
         (Get-RestartSpec $candidateProxy) -cne $expectedProxyRestart) {
         throw 'Candidate restart policies were not armed exactly'
     }
-    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash
+    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash $publishNetworkReceipt
     Assert-SolePublisher $script:Attested.CandidateProxyName
+    Assert-CandidateProxyPortPublication $candidateProxy
     $switchSucceeded = $true
     Write-Journal 'ready' @{
         engine_id = $candidateEngineId.Substring(0, 12)
@@ -684,6 +815,8 @@ try {
         long_prompt_tokens = $longTokens
         witness_nonce_sha256 = Get-KeyHash ([string]$witness2.engine_start_nonce)
         epoch_restart_rotated = $true
+        publish_network = $publishNetworkReceipt
+        publish_network_retained_on_rollback = $true
     }
     [pscustomobject]@{
         status = 'ready'
@@ -696,13 +829,23 @@ try {
         long_prompt_tokens = $longTokens
         stable_preserved = $true
         epoch_restart_rotated = $true
+        publish_network = $publishNetworkReceipt
+        publish_network_retained_on_rollback = $true
         backend_bridge_untouched = $true
         rollback = (Join-Path $PSScriptRoot 'Rollback-Qwen38V12Attested.ps1')
         journal = $journalPath
-    } | ConvertTo-Json -Compress
+    } | ConvertTo-Json -Compress -Depth 12
 }
 catch {
-    try { Write-Journal 'failed' @{ stage = $stage; error_type = $_.Exception.GetType().FullName } } catch {}
+    try {
+        Write-Journal 'failed' @{
+            stage = $stage
+            error_type = $_.Exception.GetType().FullName
+            publish_network_retained = ($null -ne $publishNetworkReceipt)
+            publish_network = $publishNetworkReceipt
+        }
+    }
+    catch {}
     if ($mutationStarted -and -not $switchSucceeded) {
         try { Restore-Stable }
         catch {

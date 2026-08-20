@@ -17,11 +17,13 @@ $journalPath = Join-Path $PSScriptRoot ("rollback-attested-{0}.jsonl" -f [DateTi
 $lock = $null
 $apiKey = $null
 $stage = 'initial'
+$publishNetworkReceipt = $null
 
 function Write-Journal([string]$State, [hashtable]$Data = @{}) {
     $record = [ordered]@{ at_utc = [DateTime]::UtcNow.ToString('o'); state = $State }
     foreach ($entry in $Data.GetEnumerator()) { $record[$entry.Key] = $entry.Value }
-    ($record | ConvertTo-Json -Compress) | Add-Content -LiteralPath $journalPath -Encoding utf8
+    ($record | ConvertTo-Json -Compress -Depth 12) | Add-Content `
+        -LiteralPath $journalPath -Encoding utf8
 }
 
 function Assert-State([object]$State, [object]$Receipt) {
@@ -29,10 +31,10 @@ function Assert-State([object]$State, [object]$Receipt) {
         'schema', 'profile_id', 'stable_engine_id', 'stable_proxy_id',
         'stable_engine_image_id', 'stable_proxy_image_id', 'stable_engine_restart',
         'stable_proxy_restart', 'candidate_engine_id', 'candidate_proxy_id',
-        'candidate_engine_image_id', 'candidate_proxy_image_id', 'key_sha256',
+        'candidate_engine_image_id', 'candidate_proxy_image_id', 'publish_network', 'key_sha256',
         'written_at_utc'
     ) 'rollback state'
-    if ([string]$State.schema -cne 'friday.attested-switch-state.v1' -or
+    if ([string]$State.schema -cne 'friday.attested-switch-state.v2' -or
         [string]$State.profile_id -cne $script:Attested.ProfileId -or
         [string]$State.stable_engine_id -cnotmatch '^[0-9a-f]{64}$' -or
         [string]$State.stable_proxy_id -cnotmatch '^[0-9a-f]{64}$' -or
@@ -44,6 +46,9 @@ function Assert-State([object]$State, [object]$Receipt) {
         [string]::IsNullOrWhiteSpace([string]$State.written_at_utc)) {
         throw 'Rollback state immutable identity is invalid'
     }
+    $publishNetwork = Get-DockerNetwork $script:Attested.PublishNetworkName
+    if ($null -eq $publishNetwork) { throw 'Recorded durable publish network is absent' }
+    Assert-PublishNetworkReceipt $State.publish_network $publishNetwork
     foreach ($field in @('candidate_engine_id', 'candidate_proxy_id')) {
         $value = $State.$field
         if ($null -ne $value -and [string]$value -cnotmatch '^[0-9a-f]{64}$') {
@@ -95,6 +100,7 @@ try {
     $receipt = Assert-BuildReceipt
     $state = Get-ExactJson $script:Attested.StatePath 'rollback state'
     Assert-State $state $receipt
+    $publishNetworkReceipt = $state.publish_network
 
     $stage = 'identity_validation'
     $stableEngine = Get-Container $script:Attested.StableEngineName
@@ -120,7 +126,8 @@ try {
             [string]$candidateEngine.Id -cne [string]$state.candidate_engine_id) {
             throw 'Candidate engine no longer matches rollback state'
         }
-        Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash
+        Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash `
+            $publishNetworkReceipt
     }
     elseif ($null -ne $state.candidate_engine_id) {
         throw 'Recorded candidate engine is absent'
@@ -131,6 +138,9 @@ try {
     }
     if ($null -eq $candidateProxy -and $null -ne $state.candidate_proxy_id) {
         throw 'Recorded candidate proxy is absent'
+    }
+    if ($null -ne $candidateProxy -and $null -eq $candidateEngine) {
+        throw 'Recorded candidate proxy exists without its exact engine sibling'
     }
 
     $publishers = @(& docker ps --filter 'publish=8001' --format '{{.Names}}')
@@ -150,6 +160,8 @@ try {
         stable_proxy_id = ([string]$stableProxy.Id).Substring(0, 12)
         candidate_engine_present = ($null -ne $candidateEngine)
         candidate_proxy_present = ($null -ne $candidateProxy)
+        publish_network = $publishNetworkReceipt
+        publish_network_retained = $true
     }
     if (-not $Execute) {
         [pscustomobject]@{
@@ -159,8 +171,10 @@ try {
             stable_preserved = $true
             candidate_engine_present = ($null -ne $candidateEngine)
             candidate_proxy_present = ($null -ne $candidateProxy)
+            publish_network = $publishNetworkReceipt
+            publish_network_retained = $true
             backend_bridge_untouched = $true
-        } | ConvertTo-Json -Compress
+        } | ConvertTo-Json -Compress -Depth 12
         return
     }
 
@@ -189,9 +203,11 @@ try {
             active = 'qwen3.8-sglang-graph'
             stable_preserved = $true
             candidate_stopped = $true
+            publish_network = $publishNetworkReceipt
+            publish_network_retained = $true
             backend_bridge_untouched = $true
             journal = $journalPath
-        } | ConvertTo-Json -Compress
+        } | ConvertTo-Json -Compress -Depth 12
         return
     }
 
@@ -231,6 +247,13 @@ try {
             throw 'Candidate did not reach exact disarmed stopped state'
         }
     }
+    $candidateProxy = Get-Container $script:Attested.CandidateProxyName
+    $publishNetwork = Get-DockerNetwork $script:Attested.PublishNetworkName
+    if ($null -eq $publishNetwork) { throw 'Durable publish network disappeared during rollback' }
+    Assert-PublishNetworkReceipt $publishNetworkReceipt $publishNetwork
+    $allowedPublishAttachments = @(if ($null -ne $candidateProxy) { $candidateProxy })
+    Assert-NetworkContainerProjection $publishNetwork $allowedPublishAttachments @() `
+        'durable publish network after explicit rollback stop'
 
     $stage = 'stable_restart_policy'
     $stableEngine = Get-Container $script:Attested.StableEngineName
@@ -274,6 +297,8 @@ try {
     Write-Journal 'rollback_complete' @{
         engine_id = ([string]$stableEngine.Id).Substring(0, 12)
         proxy_id = ([string]$stableProxy.Id).Substring(0, 12)
+        publish_network = $publishNetworkReceipt
+        publish_network_retained = $true
     }
     [pscustomobject]@{
         status = 'rollback_complete'
@@ -282,12 +307,22 @@ try {
         stable_proxy_id = ([string]$stableProxy.Id).Substring(0, 12)
         candidate_stopped = $true
         sole_port_8001 = $true
+        publish_network = $publishNetworkReceipt
+        publish_network_retained = $true
         backend_bridge_untouched = $true
         journal = $journalPath
-    } | ConvertTo-Json -Compress
+    } | ConvertTo-Json -Compress -Depth 12
 }
 catch {
-    try { Write-Journal 'rollback_failed' @{ stage = $stage; error_type = $_.Exception.GetType().FullName } } catch {}
+    try {
+        Write-Journal 'rollback_failed' @{
+            stage = $stage
+            error_type = $_.Exception.GetType().FullName
+            publish_network_retained = ($null -ne $publishNetworkReceipt)
+            publish_network = $publishNetworkReceipt
+        }
+    }
+    catch {}
     throw
 }
 finally {

@@ -23,6 +23,13 @@ $script:Attested = [ordered]@{
     ComposeProfile = 'qwen38-v12-attested-go'
     EngineService = 'engine'
     ProxyService = 'proxy'
+    AttestedNetworkName = 'jarvis-gpt-qwen38-v12-attested-net'
+    PublishNetworkName = 'jarvis-gpt-qwen38-v12-attested-publish-net'
+    PublishNetworkSchema = 'friday.attested-publish-network.v1'
+    PublishNetworkOwner = 'jarvis-gpt-qwen38-v12-attested'
+    PublishNetworkRole = 'proxy-host-8001-publication'
+    AttestedNetworkConfigHash = '28b60bde46b6e3fb432b2f04a062762695437fef8652edccfe38030db90a26b3'
+    ComposeVersion = '5.3.0'
     StableEngineImageRef = 'lmsysorg/sglang@sha256:506525a5907ea22c9d445afb7c03603959b912de034d86915cf17da814f1a124'
     StableEngineImageId = 'sha256:317b75ce527f3b6ee482e9437c753e98f4df6e6b17a335f8681af5d86a8a9de8'
     StableProxyImageRef = 'nginx:1.28.3-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236'
@@ -36,7 +43,7 @@ $script:Attested = [ordered]@{
     LaunchManifestSha256 = '640a1ea428b2526ff6f3b3e412c18fef8e48f1fa882b3a94f9859a190678f62b'
     ProxyPolicySha256 = 'd51c092ca2ef566f092ef9d55320e302c2d10b710d319d27a6d982aba018dcfe'
     ComposeSha256 = '0797dbb8708c7454ce4a1477b644a78e2b44efcfe729374f88e6a5288469da7f'
-    PublishSha256 = '9403b256555fd105f3c17395dd1049fac894e140891ef8ff9ccb86767934fcae'
+    PublishSha256 = '5cfb5177a87881e9411b03f373cc2ccc9df7a034adae888dd5d6e3b4be1f0ea9'
     MinimumGpuReleaseMiB = 26000
     MinimumCandidateFreeMiB = 1536
 }
@@ -136,6 +143,369 @@ function Get-Image([string]$Reference) {
         throw "Image inspection is ambiguous: $Reference"
     }
     return $items[0]
+}
+
+function Get-DockerNetwork([string]$Name) {
+    if ($Name -cnotin @($script:Attested.AttestedNetworkName, $script:Attested.PublishNetworkName)) {
+        throw 'Docker network lookup is not code-owned'
+    }
+    $ids = @(& docker network ls --quiet --no-trunc --filter "name=^$([regex]::Escape($Name))$")
+    if ($LASTEXITCODE -ne 0) { throw 'Docker network lookup failed' }
+    if ($ids.Count -eq 0) { return $null }
+    if ($ids.Count -ne 1 -or [string]$ids[0] -cnotmatch '^[0-9a-f]{64}$') {
+        throw "Docker network lookup is ambiguous: $Name"
+    }
+    $raw = @(& docker network inspect ([string]$ids[0]))
+    if ($LASTEXITCODE -ne 0 -or $raw.Count -eq 0) {
+        throw "Docker network inspection failed: $Name"
+    }
+    $items = @($raw | Out-String | ConvertFrom-Json)
+    if ($items.Count -ne 1 -or [string]$items[0].Name -cne $Name -or
+        [string]$items[0].Id -cne [string]$ids[0]) {
+        throw "Docker network inspection is ambiguous: $Name"
+    }
+    return $items[0]
+}
+
+function Assert-NetworkBaseIdentity(
+    [object]$Network,
+    [string]$Name,
+    [bool]$Internal,
+    [string]$Label
+) {
+    if ($null -eq $Network) { throw "$Label is absent" }
+    foreach ($property in @(
+        'EnableIPv4', 'EnableIPv6', 'Internal', 'Attachable', 'Ingress', 'ConfigOnly'
+    )) {
+        if ($null -eq $Network.PSObject.Properties[$property] -or
+            $Network.$property -isnot [bool]) {
+            throw "$Label $property projection is not an exact Boolean"
+        }
+    }
+    if ([string]$Network.Name -cne $Name -or
+        [string]$Network.Id -cnotmatch '^[0-9a-f]{64}$' -or
+        [string]$Network.Driver -cne 'bridge' -or [string]$Network.Scope -cne 'local' -or
+        -not [bool]$Network.EnableIPv4 -or [bool]$Network.EnableIPv6 -or
+        [bool]$Network.Internal -ne $Internal -or [bool]$Network.Attachable -or
+        [bool]$Network.Ingress -or [bool]$Network.ConfigOnly) {
+        throw "$Label identity, driver, or isolation changed"
+    }
+    Assert-ExactProperties $Network.ConfigFrom @('Network') "$Label config-from"
+    if (-not [string]::IsNullOrEmpty([string]$Network.ConfigFrom.Network)) {
+        throw "$Label unexpectedly inherits another network config"
+    }
+    Assert-ExactProperties $Network.Options @(
+        'com.docker.network.enable_ipv4', 'com.docker.network.enable_ipv6'
+    ) "$Label options"
+    if ([string]$Network.Options.'com.docker.network.enable_ipv4' -cne 'true' -or
+        [string]$Network.Options.'com.docker.network.enable_ipv6' -cne 'false') {
+        throw "$Label IPv4/IPv6 driver options changed"
+    }
+}
+
+function Assert-AttestedInternalNetworkIdentity([object]$Network) {
+    Assert-NetworkBaseIdentity $Network $script:Attested.AttestedNetworkName $true `
+        'attested internal network'
+    Assert-ExactProperties $Network.Labels @(
+        'com.docker.compose.config-hash', 'com.docker.compose.network',
+        'com.docker.compose.project', 'com.docker.compose.version'
+    ) 'attested internal network labels'
+    if ([string]$Network.Labels.'com.docker.compose.config-hash' -cne
+            $script:Attested.AttestedNetworkConfigHash -or
+        [string]$Network.Labels.'com.docker.compose.network' -cne 'attested' -or
+        [string]$Network.Labels.'com.docker.compose.project' -cne $script:Attested.ComposeProject -or
+        [string]$Network.Labels.'com.docker.compose.version' -cne $script:Attested.ComposeVersion) {
+        throw 'Attested internal network ownership labels changed'
+    }
+}
+
+function Get-ExpectedPublishNetworkLabels {
+    return [ordered]@{
+        'com.friday.network.schema' = $script:Attested.PublishNetworkSchema
+        'com.friday.deployment.profile-id' = $script:Attested.ProfileId
+        'com.friday.network.owner' = $script:Attested.PublishNetworkOwner
+        'com.friday.network.role' = $script:Attested.PublishNetworkRole
+    }
+}
+
+function Assert-PublishNetworkIdentity([object]$Network) {
+    Assert-NetworkBaseIdentity $Network $script:Attested.PublishNetworkName $false `
+        'attested publish network'
+    $expected = Get-ExpectedPublishNetworkLabels
+    Assert-ExactProperties $Network.Labels @($expected.Keys) 'attested publish network labels'
+    foreach ($entry in $expected.GetEnumerator()) {
+        if ([string]$Network.Labels.($entry.Key) -cne [string]$entry.Value) {
+            throw 'Attested publish network ownership labels changed'
+        }
+    }
+}
+
+function Get-PublishNetworkReceipt([object]$Network) {
+    Assert-PublishNetworkIdentity $Network
+    return [pscustomobject][ordered]@{
+        id = [string]$Network.Id
+        name = [string]$Network.Name
+        driver = [string]$Network.Driver
+        scope = [string]$Network.Scope
+        internal = [bool]$Network.Internal
+        attachable = [bool]$Network.Attachable
+        ingress = [bool]$Network.Ingress
+        config_only = [bool]$Network.ConfigOnly
+        labels = [pscustomobject](Get-ExpectedPublishNetworkLabels)
+    }
+}
+
+function Assert-PublishNetworkReceipt([object]$Receipt, [AllowNull()][object]$Network) {
+    Assert-ExactProperties $Receipt @(
+        'id', 'name', 'driver', 'scope', 'internal', 'attachable', 'ingress',
+        'config_only', 'labels'
+    ) 'publish network receipt'
+    $expectedLabels = Get-ExpectedPublishNetworkLabels
+    Assert-ExactProperties $Receipt.labels @($expectedLabels.Keys) 'publish network receipt labels'
+    if ([string]$Receipt.id -cnotmatch '^[0-9a-f]{64}$' -or
+        [string]$Receipt.name -cne $script:Attested.PublishNetworkName -or
+        [string]$Receipt.driver -cne 'bridge' -or [string]$Receipt.scope -cne 'local' -or
+        $Receipt.internal -isnot [bool] -or [bool]$Receipt.internal -or
+        $Receipt.attachable -isnot [bool] -or [bool]$Receipt.attachable -or
+        $Receipt.ingress -isnot [bool] -or [bool]$Receipt.ingress -or
+        $Receipt.config_only -isnot [bool] -or [bool]$Receipt.config_only) {
+        throw 'Publish network receipt identity is not exact'
+    }
+    foreach ($entry in $expectedLabels.GetEnumerator()) {
+        if ([string]$Receipt.labels.($entry.Key) -cne [string]$entry.Value) {
+            throw 'Publish network receipt labels are not exact'
+        }
+    }
+    if ($null -ne $Network) {
+        Assert-PublishNetworkIdentity $Network
+        if ([string]$Network.Id -cne [string]$Receipt.id) {
+            throw 'Publish network object changed from the sealed receipt'
+        }
+    }
+}
+
+function Get-CleanupFinalPublishNetworkReceipt(
+    [string]$StateSchema,
+    [AllowNull()][object]$SealedReceipt,
+    [object]$PublishNetwork
+) {
+    if ($StateSchema -cnotin @(
+        'friday.attested-switch-state.v1', 'friday.attested-switch-state.v2'
+    )) {
+        throw 'Final cleanup publish network state schema is not allowlisted'
+    }
+    if ($null -eq $PublishNetwork) {
+        throw 'Final cleanup durable publish network is absent'
+    }
+    Assert-PublishNetworkIdentity $PublishNetwork
+    Assert-NetworkContainerProjection $PublishNetwork @() @() `
+        'cleanup unattached permanent publish network'
+    if ($StateSchema -ceq 'friday.attested-switch-state.v2') {
+        if ($null -eq $SealedReceipt) {
+            throw 'Final v2 cleanup publish network receipt is absent'
+        }
+        Assert-PublishNetworkReceipt $SealedReceipt $PublishNetwork
+        return $SealedReceipt
+    }
+    if ($null -ne $SealedReceipt) {
+        throw 'Legacy v1 cleanup unexpectedly supplied a publish network receipt'
+    }
+    return Get-PublishNetworkReceipt $PublishNetwork
+}
+
+function Assert-NetworkContainerProjection(
+    [object]$Network,
+    [AllowNull()][object[]]$AllowedContainers,
+    [AllowNull()][object[]]$RequiredContainers,
+    [string]$Label
+) {
+    $allowed = @{}
+    foreach ($container in @($AllowedContainers)) {
+        if ($null -eq $container -or [string]$container.Id -cnotmatch '^[0-9a-f]{64}$' -or
+            [string]::IsNullOrWhiteSpace([string]$container.Name)) {
+            throw "$Label allowed container identity is invalid"
+        }
+        $allowed[[string]$container.Id] = [string]$container.Name.TrimStart('/')
+    }
+    $required = @($RequiredContainers | ForEach-Object { [string]$_.Id })
+    if ($null -eq $Network.Containers) {
+        $actual = @()
+    }
+    else {
+        $actual = @($Network.Containers.PSObject.Properties | ForEach-Object {
+            [string]$_.Name
+        })
+    }
+    foreach ($id in $actual) {
+        if (-not $allowed.ContainsKey([string]$id)) {
+            throw "$Label has a foreign container attachment"
+        }
+        $attachment = $Network.Containers.PSObject.Properties[[string]$id].Value
+        if ([string]$attachment.Name -cne [string]$allowed[[string]$id]) {
+            throw "$Label container attachment name changed"
+        }
+    }
+    foreach ($id in $required) {
+        if ([string]$id -cnotin $actual) {
+            throw "$Label omits a required running container attachment"
+        }
+        $attachment = $Network.Containers.PSObject.Properties[[string]$id].Value
+        if ([string]$attachment.IPv4Address -cnotmatch '^(?:[0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$') {
+            throw "$Label running container has no IPv4 attachment"
+        }
+    }
+}
+
+function Assert-ContainerNetworkEndpoint(
+    [object]$Container,
+    [string]$NetworkName,
+    [string]$NetworkId,
+    [int]$GwPriority
+) {
+    $property = $Container.NetworkSettings.Networks.PSObject.Properties[$NetworkName]
+    if ($null -eq $property) { throw "Container network endpoint is absent: $NetworkName" }
+    $endpoint = $property.Value
+    if ($null -eq $endpoint.PSObject.Properties['GwPriority'] -or
+        [string]$endpoint.NetworkID -cne $NetworkId -or [int]$endpoint.GwPriority -ne $GwPriority) {
+        throw "Container network endpoint identity or gateway priority changed: $NetworkName"
+    }
+    if ([bool]$Container.State.Running -and
+        [string]$endpoint.IPAddress -cnotmatch '^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$') {
+        throw "Running container network endpoint has no IPv4 address: $NetworkName"
+    }
+}
+
+function Assert-CandidateNetworkTopology(
+    [object]$Engine,
+    [AllowNull()][object]$Proxy,
+    [object]$AttestedNetwork,
+    [object]$PublishNetwork
+) {
+    Assert-AttestedInternalNetworkIdentity $AttestedNetwork
+    Assert-PublishNetworkIdentity $PublishNetwork
+    $engineNetworks = @($Engine.NetworkSettings.Networks.PSObject.Properties.Name | Sort-Object)
+    if ($engineNetworks.Count -ne 1 -or
+        [string]$engineNetworks[0] -cne $script:Attested.AttestedNetworkName) {
+        throw 'Candidate engine must remain only on the exact internal attested network'
+    }
+    Assert-ContainerNetworkEndpoint $Engine $script:Attested.AttestedNetworkName `
+        ([string]$AttestedNetwork.Id) 0
+
+    $attestedAllowed = @($Engine)
+    $attestedRequired = @(if ([bool]$Engine.State.Running) { $Engine })
+    $publishAllowed = @()
+    $publishRequired = @()
+    if ($null -ne $Proxy) {
+        $proxyNetworks = @($Proxy.NetworkSettings.Networks.PSObject.Properties.Name | Sort-Object)
+        $expectedProxyNetworks = @(
+            $script:Attested.AttestedNetworkName,
+            $script:Attested.PublishNetworkName
+        ) | Sort-Object
+        if ($proxyNetworks.Count -ne 2 -or
+            [string]::Join(',', $proxyNetworks) -cne [string]::Join(',', $expectedProxyNetworks)) {
+            throw 'Candidate proxy must use exactly the internal and publish networks'
+        }
+        Assert-ContainerNetworkEndpoint $Proxy $script:Attested.AttestedNetworkName `
+            ([string]$AttestedNetwork.Id) 0
+        Assert-ContainerNetworkEndpoint $Proxy $script:Attested.PublishNetworkName `
+            ([string]$PublishNetwork.Id) 1
+        $attestedAllowed += $Proxy
+        $publishAllowed = @($Proxy)
+        if ([bool]$Proxy.State.Running) {
+            $attestedRequired += $Proxy
+            $publishRequired = @($Proxy)
+        }
+    }
+    Assert-NetworkContainerProjection $AttestedNetwork $attestedAllowed $attestedRequired `
+        'attested internal network'
+    Assert-NetworkContainerProjection $PublishNetwork $publishAllowed $publishRequired `
+        'attested publish network'
+}
+
+function Assert-LegacyCandidateNetworkTopology(
+    [object]$Engine,
+    [AllowNull()][object]$Proxy,
+    [object]$AttestedNetwork
+) {
+    Assert-AttestedInternalNetworkIdentity $AttestedNetwork
+    $engineNetworks = @($Engine.NetworkSettings.Networks.PSObject.Properties.Name | Sort-Object)
+    if ($engineNetworks.Count -ne 1 -or
+        [string]$engineNetworks[0] -cne $script:Attested.AttestedNetworkName) {
+        throw 'Legacy candidate engine network is not exact internal-only topology'
+    }
+    Assert-ContainerNetworkEndpoint $Engine $script:Attested.AttestedNetworkName `
+        ([string]$AttestedNetwork.Id) 0
+    $allowed = @($Engine)
+    $required = @(if ([bool]$Engine.State.Running) { $Engine })
+    if ($null -ne $Proxy) {
+        $proxyNetworks = @($Proxy.NetworkSettings.Networks.PSObject.Properties.Name | Sort-Object)
+        if ($proxyNetworks.Count -ne 1 -or
+            [string]$proxyNetworks[0] -cne $script:Attested.AttestedNetworkName) {
+            throw 'Legacy candidate proxy network is not exact internal-only topology'
+        }
+        Assert-ContainerNetworkEndpoint $Proxy $script:Attested.AttestedNetworkName `
+            ([string]$AttestedNetwork.Id) 0
+        $allowed += $Proxy
+        if ([bool]$Proxy.State.Running) { $required += $Proxy }
+    }
+    Assert-NetworkContainerProjection $AttestedNetwork $allowed $required `
+        'legacy attested internal network'
+}
+
+function Get-PublishNetworkPreflight {
+    $network = Get-DockerNetwork $script:Attested.PublishNetworkName
+    if ($null -eq $network) {
+        return [pscustomobject]@{ Status = 'absent_provision_on_execute'; Receipt = $null }
+    }
+    Assert-PublishNetworkIdentity $network
+    Assert-NetworkContainerProjection $network @() @() 'attested publish network preflight'
+    return [pscustomobject]@{
+        Status = 'verified_existing_unattached'
+        Receipt = Get-PublishNetworkReceipt $network
+    }
+}
+
+function Get-AttestedNetworkPreflight {
+    $network = Get-DockerNetwork $script:Attested.AttestedNetworkName
+    if ($null -eq $network) { return 'absent_compose_provision_on_execute' }
+    Assert-AttestedInternalNetworkIdentity $network
+    Assert-NetworkContainerProjection $network @() @() 'attested internal network preflight'
+    return 'verified_existing_unattached'
+}
+
+function Ensure-PublishNetwork {
+    $network = Get-DockerNetwork $script:Attested.PublishNetworkName
+    if ($null -eq $network) {
+        $labels = Get-ExpectedPublishNetworkLabels
+        $arguments = @(
+            'network', 'create', '--driver', 'bridge', '--ipv4=true', '--ipv6=false',
+            '--attachable=false', '--internal=false'
+        )
+        foreach ($entry in $labels.GetEnumerator()) {
+            $arguments += @('--label', "$($entry.Key)=$($entry.Value)")
+        }
+        $arguments += $script:Attested.PublishNetworkName
+        $preference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $output = @(& docker @arguments 2>&1)
+            $exit = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $preference
+        }
+        if ($exit -ne 0 -or $output.Count -ne 1 -or
+            [string]$output[0] -cnotmatch '^[0-9a-f]{64}$') {
+            throw 'Exact durable publish network creation failed'
+        }
+        $network = Get-DockerNetwork $script:Attested.PublishNetworkName
+        if ($null -eq $network -or [string]$network.Id -cne [string]$output[0]) {
+            throw 'Created publish network identity is not exact'
+        }
+    }
+    Assert-PublishNetworkIdentity $network
+    Assert-NetworkContainerProjection $network @() @() 'attested publish network provisioning'
+    return Get-PublishNetworkReceipt $network
 }
 
 function Get-AttestedModelVolume {
@@ -774,7 +1144,59 @@ function Assert-StableGraph([object]$Engine, [object]$Proxy, [string]$KeyHash) {
     Assert-BindMount $Engine '/models/qwen3.8-27b-nvfp4-a2genesis-bfd9b312' $script:Attested.ModelPath $true
 }
 
-function Assert-CandidateContainers([object]$Engine, [object]$Proxy, [object]$Receipt, [string]$KeyHash) {
+function Assert-NoHostPortBindings([object]$Container, [string]$Label) {
+    $bindings = @(if ($null -ne $Container.HostConfig.PortBindings) {
+        $Container.HostConfig.PortBindings.PSObject.Properties | ForEach-Object {
+            [string]$_.Name
+        }
+    })
+    if ($bindings.Count -ne 0) { throw "$Label unexpectedly publishes a host port" }
+}
+
+function Assert-ExactProxyPortBindingMap([object]$Bindings, [string]$Label) {
+    if ($null -eq $Bindings) { throw "$Label is absent" }
+    $names = @($Bindings.PSObject.Properties.Name)
+    if ($names.Count -ne 1 -or [string]$names[0] -cne '8080/tcp') {
+        throw "$Label key set is not exact"
+    }
+    $rows = @($Bindings.PSObject.Properties['8080/tcp'].Value)
+    if ($rows.Count -ne 1) { throw "$Label cardinality is not exact" }
+    Assert-ExactProperties $rows[0] @('HostIp', 'HostPort') "$Label row"
+    if ([string]$rows[0].HostIp -cne '0.0.0.0' -or [string]$rows[0].HostPort -cne '8001') {
+        throw "$Label is not exact 0.0.0.0:8001 to 8080/tcp"
+    }
+}
+
+function Assert-CandidateProxyPortConfiguration([object]$Proxy) {
+    $exposed = @($Proxy.Config.ExposedPorts.PSObject.Properties.Name)
+    if ($exposed.Count -ne 1 -or [string]$exposed[0] -cne '8080/tcp') {
+        throw 'Candidate proxy exposed-port set is not exact'
+    }
+    Assert-ExactProxyPortBindingMap $Proxy.HostConfig.PortBindings `
+        'candidate proxy configured port bindings'
+}
+
+function Assert-CandidateProxyPortPublication([object]$Proxy) {
+    Assert-CandidateProxyPortConfiguration $Proxy
+    Assert-ExactProxyPortBindingMap $Proxy.NetworkSettings.Ports `
+        'candidate proxy effective port bindings'
+    $publish = $Proxy.NetworkSettings.Networks.PSObject.Properties[
+        $script:Attested.PublishNetworkName
+    ]
+    if ($null -eq $publish -or
+        [string]$publish.Value.IPAddress -cnotmatch '^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$') {
+        throw 'Candidate proxy publish endpoint has no exact IPv4 projection'
+    }
+}
+
+function Assert-CandidateContainers(
+    [object]$Engine,
+    [AllowNull()][object]$Proxy,
+    [object]$Receipt,
+    [string]$KeyHash,
+    [AllowNull()][object]$PublishNetworkReceipt = $null,
+    [switch]$LegacyInternalOnly
+) {
     if ($null -eq $Engine -or
         [string]$Engine.Name.TrimStart('/') -cne $script:Attested.CandidateEngineName -or
         [string]$Engine.Image -cne [string]$Receipt.engine.image_id -or
@@ -794,6 +1216,7 @@ function Assert-CandidateContainers([object]$Engine, [object]$Proxy, [object]$Re
         $script:Attested.ModelVolumeName $true
     Assert-BindMount $Engine '/root/.cache' $script:Attested.CachePath $false
     Assert-AttestedModelVolume (Get-AttestedModelVolume) ([string]$Engine.Id)
+    Assert-NoHostPortBindings $Engine 'candidate engine'
     if ($null -ne $Proxy) {
         if ([string]$Proxy.Name.TrimStart('/') -cne $script:Attested.CandidateProxyName -or
             [string]$Proxy.Image -cne [string]$Receipt.proxy.image_id -or
@@ -809,16 +1232,23 @@ function Assert-CandidateContainers([object]$Engine, [object]$Proxy, [object]$Re
             -not (Test-ExactAttestedProxyCapabilitySet -Observed @($Proxy.HostConfig.CapAdd))) {
             throw 'Candidate proxy identity is not exact'
         }
+        Assert-CandidateProxyPortConfiguration $Proxy
     }
-    $engineNetworks = @($Engine.NetworkSettings.Networks.PSObject.Properties.Name)
-    if ($engineNetworks.Count -ne 1 -or [string]$engineNetworks[0] -cne 'jarvis-gpt-qwen38-v12-attested-net') {
-        throw 'Candidate engine network is not the exact internal sibling network'
+    $attestedNetwork = Get-DockerNetwork $script:Attested.AttestedNetworkName
+    if ($null -eq $attestedNetwork) { throw 'Candidate internal network is absent' }
+    if ($LegacyInternalOnly) {
+        Assert-LegacyCandidateNetworkTopology $Engine $Proxy $attestedNetwork
+    }
+    else {
+        $publishNetwork = Get-DockerNetwork $script:Attested.PublishNetworkName
+        if ($null -eq $publishNetwork) { throw 'Candidate publish network is absent' }
+        if ($null -eq $PublishNetworkReceipt) {
+            throw 'Candidate publish network receipt is absent'
+        }
+        Assert-PublishNetworkReceipt $PublishNetworkReceipt $publishNetwork
+        Assert-CandidateNetworkTopology $Engine $Proxy $attestedNetwork $publishNetwork
     }
     if ($null -ne $Proxy) {
-        $proxyNetworks = @($Proxy.NetworkSettings.Networks.PSObject.Properties.Name)
-        if ($proxyNetworks.Count -ne 1 -or [string]$proxyNetworks[0] -cne 'jarvis-gpt-qwen38-v12-attested-net') {
-            throw 'Candidate proxy network is not the exact internal sibling network'
-        }
         $witnessMount = @($Proxy.Mounts | Where-Object { [string]$_.Destination -ceq '/run/friday-witness' })
         if ($witnessMount.Count -ne 1 -or [string]$witnessMount[0].Type -cne 'volume' -or [bool]$witnessMount[0].RW) {
             throw 'Candidate proxy witness mount is not exact read-only volume'
@@ -971,6 +1401,72 @@ function Clear-AttestedEnvironment {
         'JARVIS_OPENAI_BIND_ADDRESS'
     )) {
         [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+    }
+}
+
+function Assert-CandidateCleanupState([object]$State, [object]$Receipt) {
+    $schema = [string]$State.schema
+    $properties = @(
+        'schema', 'profile_id', 'stable_engine_id', 'stable_proxy_id',
+        'stable_engine_image_id', 'stable_proxy_image_id', 'stable_engine_restart',
+        'stable_proxy_restart', 'candidate_engine_id', 'candidate_proxy_id',
+        'candidate_engine_image_id', 'candidate_proxy_image_id', 'key_sha256',
+        'written_at_utc'
+    )
+    if ($schema -ceq 'friday.attested-switch-state.v2') { $properties += 'publish_network' }
+    elseif ($schema -cne 'friday.attested-switch-state.v1') {
+        throw 'Candidate cleanup state schema is not allowlisted'
+    }
+    Assert-ExactProperties $State $properties 'candidate cleanup state'
+    if ([string]$State.profile_id -cne $script:Attested.ProfileId -or
+        [string]$State.stable_engine_id -cnotmatch '^[0-9a-f]{64}$' -or
+        [string]$State.stable_proxy_id -cnotmatch '^[0-9a-f]{64}$' -or
+        [string]$State.stable_engine_image_id -cne $script:Attested.StableEngineImageId -or
+        [string]$State.stable_proxy_image_id -cne $script:Attested.StableProxyImageId -or
+        [string]$State.candidate_engine_image_id -cne [string]$Receipt.engine.image_id -or
+        [string]$State.candidate_proxy_image_id -cne [string]$Receipt.proxy.image_id -or
+        [string]$State.key_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        [string]::IsNullOrWhiteSpace([string]$State.written_at_utc)) {
+        throw 'Candidate cleanup state immutable identity is invalid'
+    }
+    foreach ($field in @('candidate_engine_id', 'candidate_proxy_id')) {
+        $value = $State.$field
+        if ($null -ne $value -and [string]$value -cnotmatch '^[0-9a-f]{64}$') {
+            throw "Candidate cleanup state contains an invalid $field"
+        }
+    }
+    if ($null -eq $State.candidate_engine_id -and $null -eq $State.candidate_proxy_id) {
+        throw 'Candidate cleanup state binds no candidate container'
+    }
+    foreach ($policy in @([string]$State.stable_engine_restart, [string]$State.stable_proxy_restart)) {
+        if ($policy -cnotmatch '^(?:no|always|unless-stopped|on-failure(?::[1-9][0-9]*)?)$') {
+            throw 'Candidate cleanup restart policy is not allowlisted'
+        }
+    }
+    if ($schema -ceq 'friday.attested-switch-state.v2') {
+        Assert-PublishNetworkReceipt $State.publish_network $null
+    }
+    return $schema
+}
+
+function Remove-ExactStoppedContainer([object]$Container, [string]$ExpectedId, [string]$Label) {
+    if ($null -eq $Container -or [string]$Container.Id -cne $ExpectedId -or
+        [bool]$Container.State.Running -or (Get-RestartSpec $Container) -cne 'no') {
+        throw "$Label is not the exact disarmed stopped container"
+    }
+    $name = [string]$Container.Name.TrimStart('/')
+    $preference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = @(& docker container rm $ExpectedId 2>&1)
+        $exit = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $preference
+    }
+    if ($exit -ne 0 -or $output.Count -ne 1 -or [string]$output[0] -cne $ExpectedId -or
+        $null -ne (Get-Container $name)) {
+        throw "$Label exact removal did not complete"
     }
 }
 

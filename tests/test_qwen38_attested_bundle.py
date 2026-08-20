@@ -7,18 +7,32 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
-_REMOTE = Path(__file__).resolve().parents[1] / "handoffs" / "SGLang-Qwen38-V12-Attested" / "remote"
+_HANDOFF = Path(__file__).resolve().parents[1] / "handoffs" / "SGLang-Qwen38-V12-Attested"
+_REMOTE = _HANDOFF / "remote"
+_TRANSPORT = _HANDOFF / "transport"
 _COMMON = _REMOTE / "AttestedBundle.Common.ps1"
 _POWERSHELL_TEST = _REMOTE / "Test-AttestedBindMountProjection.ps1"
 _CAPABILITY_TEST = _REMOTE / "Test-AttestedCapabilityProjection.ps1"
 _PUBLISHER_TEST = _REMOTE / "Test-AttestedPublisherObservation.ps1"
+_NETWORK_TEST = _REMOTE / "Test-AttestedNetworkProjection.ps1"
+_CLEANUP_TEST = _REMOTE / "Test-AttestedCleanupProjection.ps1"
+_RECEIPT_TEST = _REMOTE / "Test-AttestedReceiptSerialization.ps1"
 _SWITCH = _REMOTE / "Switch-Qwen38V12Attested.ps1"
+_ROLLBACK = _REMOTE / "Rollback-Qwen38V12Attested.ps1"
+_CLEANUP = _REMOTE / "Cleanup-StoppedQwen38V12Attested.ps1"
+_BASE_COMPOSE = _REMOTE / "docker-compose.attested.yml"
+_PUBLISH_COMPOSE = _REMOTE / "docker-compose.publish-8001.yml"
+_SYNC = _HANDOFF / "Sync-Qwen38V12AttestedBundle.sh"
+_TRANSPORT_APPLIER = _TRANSPORT / "Apply-Qwen38V12AttestedBundle.ps1"
+_TRANSPORT_MANIFEST = _TRANSPORT / "TRANSPORT-FILES.v1"
+_TRANSPORT_TEST = _TRANSPORT / "Test-AttestedBundleTransportProjection.ps1"
 _WINDOWS_PATH = re.compile(r"(?P<drive>[A-Z]):\\(?P<tail>[A-Za-z0-9._-]+(?:\\[A-Za-z0-9._-]+)*)\Z")
 
 
 def _powershell_function(source: str, name: str) -> str:
-    start = source.index(f"function {name}(")
+    start = source.index(f"function {name}")
     end = source.find("\nfunction ", start + 1)
     return source[start:] if end == -1 else source[start:end]
 
@@ -100,6 +114,182 @@ def _assert_static_publisher_contract(common: str, switch: str) -> None:
     candidate_wait = "Wait-SolePublisher $script:Attested.CandidateProxyName 120"
     assert switch.count(candidate_wait) == 2
     assert switch.count("Assert-SolePublisher $script:Attested.CandidateProxyName") == 3
+
+
+def _assert_static_network_contract(common: str, switch: str) -> None:
+    base = _powershell_function(common, "Assert-NetworkBaseIdentity")
+    publish = _powershell_function(common, "Assert-PublishNetworkIdentity")
+    provision = _powershell_function(common, "Ensure-PublishNetwork")
+    receipt = _powershell_function(common, "Get-PublishNetworkReceipt")
+    topology = _powershell_function(common, "Assert-CandidateNetworkTopology")
+    candidate = _powershell_function(common, "Assert-CandidateContainers")
+    publication = _powershell_function(common, "Assert-CandidateProxyPortPublication")
+    rendered = _powershell_function(switch, "Assert-PublishedComposeConfig")
+    state = _powershell_function(switch, "Save-State")
+
+    assert "[string]$Network.Driver -cne 'bridge'" in base
+    assert "[string]$Network.Scope -cne 'local'" in base
+    assert "-not [bool]$Network.EnableIPv4 -or [bool]$Network.EnableIPv6" in base
+    assert "[bool]$Network.Internal -ne $Internal" in base
+    assert "[bool]$Network.Attachable" in base
+    assert "[bool]$Network.Ingress" in base
+    assert "[bool]$Network.ConfigOnly" in base
+    assert "'com.docker.network.enable_ipv4', 'com.docker.network.enable_ipv6'" in base
+    assert "$script:Attested.PublishNetworkName $false" in publish
+    assert "Assert-ExactProperties $Network.Labels @($expected.Keys)" in publish
+
+    assert "'network', 'create', '--driver', 'bridge', '--ipv4=true', '--ipv6=false'" in provision
+    assert "'--attachable=false', '--internal=false'" in provision
+    assert "Assert-NetworkContainerProjection $network @() @()" in provision
+    assert "return [pscustomobject][ordered]@{" in receipt
+    assert "labels = [pscustomobject](Get-ExpectedPublishNetworkLabels)" in receipt
+    assert "docker network rm" not in common
+    assert "docker network disconnect" not in common
+
+    assert "$engineNetworks.Count -ne 1" in topology
+    assert "$proxyNetworks.Count -ne 2" in topology
+    assert "$script:Attested.AttestedNetworkName" in topology
+    assert "$script:Attested.PublishNetworkName" in topology
+    assert "Assert-ContainerNetworkEndpoint $Engine" in topology
+    assert "Assert-ContainerNetworkEndpoint $Proxy" in topology
+    assert "([string]$PublishNetwork.Id) 1" in topology
+    assert "Assert-NetworkContainerProjection $PublishNetwork" in topology
+    assert "Assert-PublishNetworkReceipt $PublishNetworkReceipt $publishNetwork" in candidate
+
+    assert "Assert-ExactProxyPortBindingMap $Proxy.NetworkSettings.Ports" in publication
+    assert "$script:Attested.PublishNetworkName" in publication
+    assert "-cnotmatch '^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$'" in publication
+
+    assert "[string]::Join(',', $engineNetworks) -cne 'attested'" in rendered
+    assert "$null -ne $engineAttestedEndpoint" in rendered
+    assert "[string]::Join(',', $proxyNetworks) -cne 'attested,publish'" in rendered
+    assert "$attestedEndpointProperties.Count -ne 0" in rendered
+    assert "[string]::Join(',', $publishEndpointProperties) -cne 'gw_priority'" in rendered
+    assert "[int]$publishEndpoint.gw_priority -ne 1" in rendered
+    assert "Assert-ExactProperties $ports[0]" in rendered
+    assert "[string]$ports[0].mode -cne 'ingress'" in rendered
+    assert "[string]$ports[0].host_ip -cne '0.0.0.0'" in rendered
+    assert "publish_network = $publishNetworkReceipt" in state
+    assert "friday.attested-switch-state.v2" in state
+
+
+def _assert_static_cleanup_contract(common: str, cleanup: str) -> None:
+    state = _powershell_function(common, "Assert-CandidateCleanupState")
+    remove = _powershell_function(common, "Remove-ExactStoppedContainer")
+    final_network = _powershell_function(common, "Get-CleanupFinalPublishNetworkReceipt")
+
+    assert state.count("friday.attested-switch-state.v1") == 1
+    assert state.count("friday.attested-switch-state.v2") == 2
+    assert "Assert-ExactProperties $State $properties" in state
+    assert "[string]$State.candidate_engine_image_id -cne [string]$Receipt.engine.image_id" in state
+    assert "[string]$State.candidate_proxy_image_id -cne [string]$Receipt.proxy.image_id" in state
+    assert "Assert-PublishNetworkReceipt $State.publish_network $null" in state
+
+    assert "[string]$Container.Id -cne $ExpectedId" in remove
+    assert "[bool]$Container.State.Running" in remove
+    assert "(Get-RestartSpec $Container) -cne 'no'" in remove
+    assert "docker container rm $ExpectedId" in remove
+    assert "--force" not in remove
+    assert "--volumes" not in remove
+
+    assert "if ($StateSchema -ceq 'friday.attested-switch-state.v2')" in final_network
+    assert "Assert-PublishNetworkReceipt $SealedReceipt $PublishNetwork" in final_network
+    assert "return $SealedReceipt" in final_network
+    assert "return Get-PublishNetworkReceipt $PublishNetwork" in final_network
+
+    assert "Assert-CandidateCleanupState $state $receipt" in cleanup
+    assert (
+        "Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash -LegacyInternalOnly"
+        in cleanup
+    )
+    assert "Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash `" in cleanup
+    assert "$publishNetworkReceipt" in cleanup
+    assert cleanup.index("Remove-ExactStoppedContainer $candidateProxy") < cleanup.index(
+        "Remove-ExactStoppedContainer $candidateEngine"
+    )
+    assert "Assert-NetworkContainerProjection $attestedNetwork @() @()" in cleanup
+    assert "Assert-NetworkContainerProjection $publishNetwork @() @()" in cleanup
+    v1_provision = (
+        "if ($stateSchema -ceq 'friday.attested-switch-state.v1') {\n"
+        "        $null = Ensure-PublishNetwork\n"
+        "    }"
+    )
+    assert cleanup.count("Ensure-PublishNetwork") == 1
+    assert v1_provision in cleanup
+    assert "$state.publish_network" in cleanup
+    assert (
+        "Get-CleanupFinalPublishNetworkReceipt $stateSchema `\n"
+        "        $sealedPublishNetworkReceipt $publishNetwork" in cleanup
+    )
+    for forbidden in (
+        "docker network rm",
+        "docker network disconnect",
+        "docker compose down",
+        "docker volume rm",
+        "docker image rm",
+    ):
+        assert forbidden not in cleanup
+
+
+def _assert_receipt_json_depth(source: str, expected_count: int) -> None:
+    serializers = re.findall(r"ConvertTo-Json -Compress(?: -Depth [0-9]+)?", source)
+    assert serializers == ["ConvertTo-Json -Compress -Depth 12"] * expected_count
+
+
+def _assert_static_transport_applier(source: str) -> None:
+    nullable = _powershell_function(source, "Test-ExactNullableSha256")
+    assert "$null -eq $Left -or $null -eq $Right" in nullable
+    assert "return ($null -eq $Left -and $null -eq $Right)" in nullable
+    assert "return ([string]$Left -ceq [string]$Right)" in nullable
+    assert source.count("Test-ExactNullableSha256 $actual $projection.before_sha256") == 1
+    assert source.count("Test-ExactNullableSha256 $currentHash $projection.old_sha256") == 2
+
+    order_match = re.search(
+        r"\$fullPublicationOrder = @\((.*?)\n\)",
+        source,
+        flags=re.DOTALL,
+    )
+    assert order_match is not None
+    publication_order = re.findall(r"'([A-Za-z0-9._-]+)'", order_match.group(1))
+    assert publication_order == [
+        "docker-compose.publish-8001.yml",
+        "AttestedBundle.Common.ps1",
+        "Cleanup-StoppedQwen38V12Attested.ps1",
+        "ORCHESTRATION.md",
+        "README.md",
+        "Rollback-Qwen38V12Attested.ps1",
+        "Switch-Qwen38V12Attested.ps1",
+        "Test-AttestedCleanupProjection.ps1",
+        "Test-AttestedNetworkProjection.ps1",
+        "Test-AttestedReceiptSerialization.ps1",
+        "CORE-SHA256SUMS",
+        "ORCHESTRATION-SHA256SUMS",
+    ]
+    assert "foreach ($name in $publicationOrder)" in source
+    assert "[IO.File]::Replace($temporaryPath, $targetPath, $null, $true)" in source
+    assert "[IO.File]::Move($temporaryPath, $targetPath)" in source
+    assert "[IO.FileMode]::Open" in source
+    assert "[IO.FileShare]::None" in source
+    assert "ConvertTo-Json -Compress -Depth 12" in source
+    for forbidden in (
+        "docker ",
+        "Remove-Item -LiteralPath $targetPath",
+        "rollback-state-attested.json",
+        "switch-attested-",
+    ):
+        assert forbidden not in source
+
+
+def _reference_transport_cas_action(
+    old_hash: str | None,
+    live_hash: str | None,
+    new_hash: str,
+) -> str:
+    if live_hash == new_hash:
+        return "retain"
+    if live_hash == old_hash:
+        return "replace"
+    return "reject"
 
 
 def _reference_bind_source_allowed(observed: str, windows_path: str) -> bool:
@@ -337,19 +527,18 @@ def test_publisher_wait_is_used_only_at_fresh_candidate_publication_edges() -> N
     switch = _SWITCH.read_text(encoding="utf-8")
     _assert_static_publisher_contract(common, switch)
 
-    initial = """\
-    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash
-    Wait-SolePublisher $script:Attested.CandidateProxyName 120
+    initial_start = switch.index("    $stage = 'candidate_proxy_start'")
+    initial_end = switch.index("    $stage = 'proxy_negative_paths'", initial_start)
+    initial = switch[initial_start:initial_end]
+    assert initial.count("Wait-SolePublisher $script:Attested.CandidateProxyName 120") == 1
+    assert "Assert-CandidateProxyPortPublication $candidateProxy" in initial
 
-    $stage = 'proxy_negative_paths'
-"""
-    restarted = """\
-    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash
-    Wait-SolePublisher $script:Attested.CandidateProxyName 120
-    Assert-ProxyNegativePaths $headers
-"""
-    assert initial in switch
-    assert restarted in switch
+    restart_start = switch.index("    $stage = 'epoch_restart_health'")
+    restart_end = switch.index("    $stage = 'epoch_rotation_proof'", restart_start)
+    restarted = switch[restart_start:restart_end]
+    assert restarted.count("Wait-SolePublisher $script:Attested.CandidateProxyName 120") == 1
+    assert "Assert-CandidateProxyPortPublication $candidateProxy" in restarted
+    assert "Assert-ProxyNegativePaths $headers" in restarted
 
 
 def test_powershell_publisher_matrix_covers_pending_and_unsafe_sets() -> None:
@@ -368,6 +557,477 @@ def test_powershell_publisher_matrix_covers_pending_and_unsafe_sets() -> None:
     assert all(item in source for item in required)
 
 
+def _reference_network_topology_allowed(
+    *,
+    engine_networks: tuple[str, ...] = ("attested",),
+    proxy_networks: tuple[str, ...] = ("attested", "publish"),
+    attested_internal: bool = True,
+    publish_internal: bool = False,
+    attested_driver: str = "bridge",
+    publish_driver: str = "bridge",
+    engine_attested_id: str = "internal-id",
+    proxy_attested_id: str = "internal-id",
+    proxy_publish_id: str = "publish-id",
+    publish_gw_priority: int = 1,
+) -> bool:
+    return (
+        engine_networks == ("attested",)
+        and tuple(sorted(proxy_networks)) == ("attested", "publish")
+        and attested_internal
+        and not publish_internal
+        and attested_driver == "bridge"
+        and publish_driver == "bridge"
+        and engine_attested_id == "internal-id"
+        and proxy_attested_id == "internal-id"
+        and proxy_publish_id == "publish-id"
+        and publish_gw_priority == 1
+    )
+
+
+def test_network_topology_reference_rejects_missing_extra_swapped_and_engine_ingress() -> None:
+    assert _reference_network_topology_allowed()
+    mutations = (
+        {"proxy_networks": ("attested",)},
+        {"proxy_networks": ("attested", "foreign", "publish")},
+        {"proxy_attested_id": "publish-id", "proxy_publish_id": "internal-id"},
+        {"attested_internal": False},
+        {"publish_internal": True},
+        {"engine_networks": ("attested", "publish")},
+        {"publish_gw_priority": 0},
+        {"attested_driver": "overlay"},
+        {"publish_driver": "overlay"},
+    )
+    assert not any(_reference_network_topology_allowed(**mutation) for mutation in mutations)
+
+
+def test_compose_overlay_adds_host_gateway_only_to_proxy() -> None:
+    base = yaml.safe_load(_BASE_COMPOSE.read_text(encoding="utf-8"))
+    publish = yaml.safe_load(_PUBLISH_COMPOSE.read_text(encoding="utf-8"))
+
+    assert base["services"]["engine"]["networks"] == ["attested"]
+    assert base["services"]["proxy"]["networks"] == ["attested"]
+    assert base["networks"] == {
+        "attested": {
+            "name": "jarvis-gpt-qwen38-v12-attested-net",
+            "internal": True,
+        }
+    }
+    assert publish == {
+        "services": {
+            "proxy": {
+                "ports": ["${JARVIS_OPENAI_BIND_ADDRESS:-0.0.0.0}:8001:8080"],
+                "networks": {
+                    "attested": {"gw_priority": 0},
+                    "publish": {"gw_priority": 1},
+                },
+            }
+        },
+        "networks": {
+            "publish": {
+                "name": "jarvis-gpt-qwen38-v12-attested-publish-net",
+                "external": True,
+            }
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("function_name", "old", "mutation"),
+    (
+        ("Assert-NetworkBaseIdentity", "[string]$Network.Driver -cne 'bridge'", "$false"),
+        ("Assert-NetworkBaseIdentity", "[bool]$Network.Internal -ne $Internal", "$false"),
+        ("Assert-PublishNetworkIdentity", "$script:Attested.PublishNetworkName $false", "$null $false"),
+        ("Ensure-PublishNetwork", "'--attachable=false', '--internal=false'", "'--attachable=true'"),
+        (
+            "Assert-CandidateContainers",
+            "Assert-PublishNetworkReceipt $PublishNetworkReceipt $publishNetwork",
+            "$null = $PublishNetworkReceipt",
+        ),
+        ("Assert-CandidateNetworkTopology", "$engineNetworks.Count -ne 1", "$engineNetworks.Count -lt 1"),
+        ("Assert-CandidateNetworkTopology", "$proxyNetworks.Count -ne 2", "$proxyNetworks.Count -lt 2"),
+        (
+            "Assert-CandidateNetworkTopology",
+            "([string]$PublishNetwork.Id) 1",
+            "([string]$PublishNetwork.Id) 0",
+        ),
+        (
+            "Assert-CandidateProxyPortPublication",
+            "Assert-ExactProxyPortBindingMap $Proxy.NetworkSettings.Ports",
+            "$null = $Proxy.NetworkSettings.Ports",
+        ),
+    ),
+)
+def test_static_gate_kills_network_contract_mutations(
+    function_name: str,
+    old: str,
+    mutation: str,
+) -> None:
+    common = _COMMON.read_text(encoding="utf-8")
+    switch = _SWITCH.read_text(encoding="utf-8")
+    _assert_static_network_contract(common, switch)
+    function = _powershell_function(common, function_name)
+    assert old in function
+    mutated = common.replace(function, function.replace(old, mutation, 1), 1)
+
+    with pytest.raises(AssertionError):
+        _assert_static_network_contract(mutated, switch)
+
+
+@pytest.mark.parametrize(
+    ("old", "mutation"),
+    (
+        ("[string]::Join(',', $engineNetworks) -cne 'attested'", "$false"),
+        ("$null -ne $engineAttestedEndpoint", "$false"),
+        ("[string]::Join(',', $proxyNetworks) -cne 'attested,publish'", "$false"),
+        ("$attestedEndpointProperties.Count -ne 0", "$false"),
+        ("[int]$publishEndpoint.gw_priority -ne 1", "[int]$publishEndpoint.gw_priority -ne 0"),
+        ("[string]$ports[0].host_ip -cne '0.0.0.0'", "$false"),
+    ),
+)
+def test_static_gate_kills_published_compose_topology_mutations(old: str, mutation: str) -> None:
+    common = _COMMON.read_text(encoding="utf-8")
+    switch = _SWITCH.read_text(encoding="utf-8")
+    _assert_static_network_contract(common, switch)
+    function = _powershell_function(switch, "Assert-PublishedComposeConfig")
+    assert old in function
+    mutated = switch.replace(function, function.replace(old, mutation, 1), 1)
+
+    with pytest.raises(AssertionError):
+        _assert_static_network_contract(common, mutated)
+
+
+def test_powershell_network_matrix_covers_required_negative_topologies() -> None:
+    source = _NETWORK_TEST.read_text(encoding="utf-8")
+    required = (
+        "$exact = New-ExactTopology",
+        "Assert-Topology $exact",
+        "Get-PublishNetworkReceipt $exact.Publish",
+        "Assert-PublishNetworkReceipt $publishReceipt $exact.Publish",
+        "'missing publish network'",
+        "'extra proxy network'",
+        "'swapped network identities'",
+        "'attested network is not internal'",
+        "'publish network became internal'",
+        "'engine attached to publish ingress'",
+        "'publish gateway priority lost'",
+        "'publish network driver changed'",
+        "'publish ownership label changed'",
+        "'foreign publish attachment'",
+        "attested network topology projection: PASS",
+    )
+    assert all(item in source for item in required)
+
+
+def test_cleanup_is_explicit_identity_bound_and_preserves_networks() -> None:
+    common = _COMMON.read_text(encoding="utf-8")
+    cleanup = _CLEANUP.read_text(encoding="utf-8")
+    _assert_static_cleanup_contract(common, cleanup)
+    assert "[switch]$Execute" in cleanup
+    assert "if (-not $Execute)" in cleanup
+    assert "mutation_authorized = $false" in cleanup
+    assert "publish_network_permanent = $true" in cleanup
+    assert "removed_only_bound_candidate_ids = $true" in cleanup
+
+
+@pytest.mark.parametrize(
+    ("old", "mutation"),
+    (
+        (
+            "if ($stateSchema -ceq 'friday.attested-switch-state.v1') {\n"
+            "        $null = Ensure-PublishNetwork\n"
+            "    }",
+            "if ($stateSchema -ceq 'friday.attested-switch-state.v2') {\n"
+            "        $null = Ensure-PublishNetwork\n"
+            "    }",
+        ),
+        (
+            "$sealedPublishNetworkReceipt $publishNetwork",
+            "$null $publishNetwork",
+        ),
+    ),
+)
+def test_static_gate_kills_cleanup_final_network_flow_mutations(
+    old: str,
+    mutation: str,
+) -> None:
+    common = _COMMON.read_text(encoding="utf-8")
+    cleanup = _CLEANUP.read_text(encoding="utf-8")
+    _assert_static_cleanup_contract(common, cleanup)
+    assert old in cleanup
+    mutated = cleanup.replace(old, mutation, 1)
+
+    with pytest.raises(AssertionError):
+        _assert_static_cleanup_contract(common, mutated)
+
+
+@pytest.mark.parametrize(
+    ("function_name", "old", "mutation"),
+    (
+        (
+            "Assert-CandidateCleanupState",
+            "friday.attested-switch-state.v1",
+            "friday.attested-switch-state.v0",
+        ),
+        (
+            "Assert-CandidateCleanupState",
+            "friday.attested-switch-state.v2",
+            "friday.attested-switch-state.v3",
+        ),
+        (
+            "Remove-ExactStoppedContainer",
+            "[string]$Container.Id -cne $ExpectedId",
+            "[string]$Container.Id -like $ExpectedId",
+        ),
+        (
+            "Remove-ExactStoppedContainer",
+            "[bool]$Container.State.Running",
+            "$false",
+        ),
+        (
+            "Remove-ExactStoppedContainer",
+            "(Get-RestartSpec $Container) -cne 'no'",
+            "$false",
+        ),
+        (
+            "Get-CleanupFinalPublishNetworkReceipt",
+            "Assert-PublishNetworkReceipt $SealedReceipt $PublishNetwork",
+            "$null = $SealedReceipt",
+        ),
+    ),
+)
+def test_static_gate_kills_cleanup_identity_mutations(
+    function_name: str,
+    old: str,
+    mutation: str,
+) -> None:
+    common = _COMMON.read_text(encoding="utf-8")
+    cleanup = _CLEANUP.read_text(encoding="utf-8")
+    _assert_static_cleanup_contract(common, cleanup)
+    function = _powershell_function(common, function_name)
+    assert old in function
+    mutated = common.replace(function, function.replace(old, mutation, 1), 1)
+
+    with pytest.raises(AssertionError):
+        _assert_static_cleanup_contract(mutated, cleanup)
+
+
+def test_powershell_cleanup_matrix_covers_v1_v2_and_unsafe_state_mutations() -> None:
+    source = _CLEANUP_TEST.read_text(encoding="utf-8")
+    required = (
+        "New-State 'v1'",
+        "New-State 'v2'",
+        "'unknown state schema'",
+        "'extra state property'",
+        "'unbound candidate ID'",
+        "'no candidate IDs'",
+        "'wrong candidate image'",
+        "'internal publish receipt'",
+        "'wrong publish ownership label'",
+        "'post-removal different live network ID'",
+        "'Final v2 cleanup did not preserve its sealed publish network receipt'",
+        "'Final v1 cleanup did not adopt the exact live publish network'",
+        "attested stopped-candidate cleanup projection: PASS",
+    )
+    assert all(item in source for item in required)
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_count"),
+    ((_SWITCH, 3), (_ROLLBACK, 4)),
+)
+def test_receipt_bearing_json_is_explicit_depth_12(
+    path: Path,
+    expected_count: int,
+) -> None:
+    source = path.read_text(encoding="utf-8")
+    _assert_receipt_json_depth(source, expected_count)
+    mutated = source.replace("ConvertTo-Json -Compress -Depth 12", "ConvertTo-Json -Compress", 1)
+    with pytest.raises(AssertionError):
+        _assert_receipt_json_depth(mutated, expected_count)
+
+
+def test_powershell_receipt_serialization_test_is_ps51_compatible_and_exact() -> None:
+    source = _RECEIPT_TEST.read_text(encoding="utf-8")
+    required = (
+        "ConvertTo-Json -Compress -Depth 12",
+        "ConvertFrom-Json",
+        "Assert-PublishNetworkReceipt $parsed.output.publish_network $null",
+        "System.Management.Automation.Language.Parser",
+        "'Switch-Qwen38V12Attested.ps1' = 3",
+        "'Rollback-Qwen38V12Attested.ps1' = 4",
+        "attested receipt depth-12 serialization: PASS",
+    )
+    assert all(item in source for item in required)
+
+
+def test_transport_manifest_pins_exact_c560_predecessors_and_frozen_sources() -> None:
+    old_hashes = {
+        "AttestedBundle.Common.ps1": ("6a4e16654505decdd6599e95127e65e7dd50f55727d3eea296b0a5b4b38f6b0e"),
+        "Cleanup-StoppedQwen38V12Attested.ps1": None,
+        "docker-compose.publish-8001.yml": (
+            "9403b256555fd105f3c17395dd1049fac894e140891ef8ff9ccb86767934fcae"
+        ),
+        "CORE-SHA256SUMS": ("844e65a1c3e1c727fe85819ae37589535698018dab051e55ba26766a8fed121a"),
+        "ORCHESTRATION-SHA256SUMS": ("645079759508610eac6e9213d61d6c891e3521496894f2e3d7dbac05765d26e5"),
+        "ORCHESTRATION.md": ("9e5a5d8d7953004cec1caa484784721bc7d1b834317d2f32d11abcd5966f850b"),
+        "README.md": "9e976a0382b5f1c93cdc0f61b5fd671302934d3ca0da5f6cb9537e2abfc695b4",
+        "Rollback-Qwen38V12Attested.ps1": (
+            "812b8a2a8586d1c52053f6ab3580da645d9b201f31c612d41d631ff8abcd3962"
+        ),
+        "Switch-Qwen38V12Attested.ps1": ("02e441970c6c91b503668ca930d5f112521c6787a27f6de10d523f6bb7a1e690"),
+        "Test-AttestedCleanupProjection.ps1": None,
+        "Test-AttestedNetworkProjection.ps1": None,
+        "Test-AttestedReceiptSerialization.ps1": None,
+    }
+    expected_roles = {
+        name: (
+            "bootstrap"
+            if name
+            in {
+                "AttestedBundle.Common.ps1",
+                "Cleanup-StoppedQwen38V12Attested.ps1",
+                "docker-compose.publish-8001.yml",
+            }
+            else "full"
+        )
+        for name in old_hashes
+    }
+    observed: dict[str, tuple[str, str | None, str]] = {}
+    for row in _TRANSPORT_MANIFEST.read_text(encoding="ascii").splitlines():
+        match = re.fullmatch(
+            r"(bootstrap|full) ([0-9a-f]{64}|ABSENT) ([0-9a-f]{64}) "
+            r"([A-Za-z0-9._-]+)",
+            row,
+        )
+        assert match is not None
+        role, old_value, new_value, name = match.groups()
+        assert name not in observed
+        observed[name] = (role, None if old_value == "ABSENT" else old_value, new_value)
+        assert hashlib.sha256((_REMOTE / name).read_bytes()).hexdigest() == new_value
+    assert set(observed) == set(old_hashes)
+    for name, expected_old in old_hashes.items():
+        assert observed[name][:2] == (expected_roles[name], expected_old)
+
+
+def test_transport_wrapper_pins_verified_ssh_and_transport_identities() -> None:
+    source = _SYNC.read_text(encoding="utf-8")
+    required = (
+        "remote_host='192.168.1.78'",
+        "remote_user='admin'",
+        "ssh_key='/home/jericho/.ssh/friday_win_audit_ed25519'",
+        "known_hosts='/home/jericho/.ssh/known_hosts'",
+        "SHA256:vhJUpURIJLODWZdo8LU8qnTMbLir86/J5tzl8VWp5+A",
+        "SHA256:wfOf57TOtNhTuQ6OAQUcWhMF47C8FWeUhku2gSAe6mY",
+        "-F /dev/null",
+        "-o BatchMode=yes",
+        "-o ConnectTimeout=10",
+        "-o StrictHostKeyChecking=yes",
+        '-o UserKnownHostsFile="$known_hosts"',
+        "-o GlobalKnownHostsFile=/dev/null",
+        "-o HostKeyAlgorithms=ssh-ed25519",
+        "-o UpdateHostKeys=no",
+        "-o IdentitiesOnly=yes",
+        "-o PasswordAuthentication=no",
+        "-o KbdInteractiveAuthentication=no",
+        "-o PreferredAuthentications=publickey",
+        "-o ProxyCommand=none",
+        "-o ProxyJump=none",
+        "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand",
+        r"\$stdinStream=[Console]::OpenStandardInput()",
+        'effective_ssh=$(ssh -G "${ssh_args[@]}" "$remote_target" 2>/dev/null)',
+        "assert_effective_ssh globalknownhostsfile /dev/null",
+        "assert_effective_ssh hostkeyalgorithms ssh-ed25519",
+        "assert_effective_ssh updatehostkeys false",
+    )
+    assert all(value in source for value in required)
+    assert "scp " not in source
+    assert "-p 22" not in source
+    plan_exit = source.index("if [[ $mode == plan ]]")
+    assert source.index('effective_ssh=$(ssh -G "${ssh_args[@]}"') < plan_exit
+    assert plan_exit < source.index('ssh "${ssh_args[@]}"')
+
+    manifest_pin = re.search(r"expected_manifest_sha256='([0-9a-f]{64})'", source)
+    applier_pin = re.search(r"expected_applier_sha256='([0-9a-f]{64})'", source)
+    assert manifest_pin is not None
+    assert applier_pin is not None
+    assert manifest_pin.group(1) == hashlib.sha256(_TRANSPORT_MANIFEST.read_bytes()).hexdigest()
+    assert applier_pin.group(1) == hashlib.sha256(_TRANSPORT_APPLIER.read_bytes()).hexdigest()
+
+
+def test_transport_applier_is_manifest_last_nullable_and_atomic() -> None:
+    source = _TRANSPORT_APPLIER.read_text(encoding="utf-8")
+    _assert_static_transport_applier(source)
+
+    mutations = (
+        (
+            "Test-ExactNullableSha256 $actual $projection.before_sha256",
+            "[string]$actual -ceq [string]$projection.before_sha256",
+        ),
+        (
+            "'CORE-SHA256SUMS',\n    'ORCHESTRATION-SHA256SUMS'",
+            "'ORCHESTRATION-SHA256SUMS',\n    'CORE-SHA256SUMS'",
+        ),
+        (
+            "[IO.File]::Replace($temporaryPath, $targetPath, $null, $true)",
+            "[IO.File]::Copy($temporaryPath, $targetPath, $true)",
+        ),
+    )
+    for old, mutation in mutations:
+        assert old in source
+        with pytest.raises(AssertionError):
+            _assert_static_transport_applier(source.replace(old, mutation, 1))
+
+
+def test_transport_crash_prefixes_are_manifest_safe_and_resumable() -> None:
+    publication_order = (
+        "docker-compose.publish-8001.yml",
+        "AttestedBundle.Common.ps1",
+        "Cleanup-StoppedQwen38V12Attested.ps1",
+        "ORCHESTRATION.md",
+        "README.md",
+        "Rollback-Qwen38V12Attested.ps1",
+        "Switch-Qwen38V12Attested.ps1",
+        "Test-AttestedCleanupProjection.ps1",
+        "Test-AttestedNetworkProjection.ps1",
+        "Test-AttestedReceiptSerialization.ps1",
+        "CORE-SHA256SUMS",
+        "ORCHESTRATION-SHA256SUMS",
+    )
+    old = "a" * 64
+    new = "b" * 64
+    assert _reference_transport_cas_action(None, None, new) == "replace"
+    assert _reference_transport_cas_action(None, new, new) == "retain"
+    assert _reference_transport_cas_action(old, "c" * 64, new) == "reject"
+
+    for prefix_length in range(len(publication_order) + 1):
+        landed = set(publication_order[:prefix_length])
+        if "CORE-SHA256SUMS" in landed:
+            assert {"README.md", "docker-compose.publish-8001.yml"} <= landed
+        if "ORCHESTRATION-SHA256SUMS" in landed:
+            assert landed == set(publication_order)
+        for name in publication_order:
+            live = new if name in landed else old
+            assert _reference_transport_cas_action(old, live, new) != "reject"
+
+
+def test_native_transport_projection_covers_absent_retry_order_and_encoded_stdin() -> None:
+    source = _TRANSPORT_TEST.read_text(encoding="utf-8")
+    required = (
+        "ABSENT to create CAS projection failed",
+        "Created target idempotent retry projection failed",
+        "Interrupted prefix published CORE before all changed CORE members",
+        "Interrupted prefix published orchestration manifest before all payloads",
+        "Interrupted publication prefix is not resumable",
+        r"$wrapperSource.Contains('\$stdinStream=[Console]::OpenStandardInput()')",
+        "-EncodedCommand",
+        "$startInfo.RedirectStandardInput = $true",
+        "$process.StandardInput.BaseStream.Write($inputBytes, 0, $inputBytes.Length)",
+        "Native encoded-command stdin receiver changed bytes",
+        "attested bundle transport projection: PASS",
+    )
+    assert all(value in source for value in required)
+
+
 @pytest.mark.parametrize(
     ("manifest_name", "required_names"),
     (
@@ -377,10 +1037,14 @@ def test_powershell_publisher_matrix_covers_pending_and_unsafe_sets() -> None:
                 "AttestedBundle.Common.ps1",
                 "Switch-Qwen38V12Attested.ps1",
                 "Rollback-Qwen38V12Attested.ps1",
+                "Cleanup-StoppedQwen38V12Attested.ps1",
                 "Preflight-Qwen38V12Attested.ps1",
                 "Test-AttestedBindMountProjection.ps1",
                 "Test-AttestedCapabilityProjection.ps1",
                 "Test-AttestedPublisherObservation.ps1",
+                "Test-AttestedNetworkProjection.ps1",
+                "Test-AttestedCleanupProjection.ps1",
+                "Test-AttestedReceiptSerialization.ps1",
                 "ORCHESTRATION.md",
                 "CORE-SHA256SUMS",
             },

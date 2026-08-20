@@ -5,6 +5,21 @@ Qwen3.8 dispatcher.  It does not alter the stable deployment.  The base compose
 file has no host `ports`; port 8001 exists only in the separate publish overlay
 and must be used exclusively by the transactional GO switch.
 
+The base graph remains deliberately internal: the engine has exactly one
+attachment, `jarvis-gpt-qwen38-v12-attested-net` (`bridge`, `internal=true`),
+and the unpublished proxy has that same single attachment. The publish overlay
+adds only the proxy to the durable code-owned
+`jarvis-gpt-qwen38-v12-attested-publish-net` (`bridge`, `internal=false`,
+`attachable=false`). Its `gw_priority=1` makes that endpoint the proxy's default
+gateway; the internal endpoint remains priority 0. The engine is never attached
+to the publish bridge and therefore never gains its host-facing gateway.
+
+This split is required by Docker Desktop. A container whose only network is
+internal can retain an exact `HostConfig.PortBindings` entry while Desktop
+cannot select a reachable container IP, so no host publisher is created. The
+dedicated bridge gives Desktop one eligible proxy IP without weakening the
+engine network or the authenticated same-origin proxy/witness boundary.
+
 ## Immutable identities
 
 - Engine image ID: `sha256:4a38144134d84d6f78c1844314f209c48ef69c4bd8bf7da1e5c400f9abda6f26`
@@ -28,6 +43,11 @@ stable proxy, never prints it, and verifies both a 256-character key and that
 stable key with `nginx -t`. Its isolated, unpublished container then proves
 exact-key access, case-flipped/missing/wrong-key rejection, and management-route
 closure before any deployment.
+
+`ORCHESTRATION.md` contains the exact frozen Linux-to-Windows transport and
+execution order. Its code-owned sync wrapper pins both SSH identities and every
+old/new file hash, defaults to a no-network local plan, and separates the
+three-file cleanup bootstrap from the complete post-cleanup sync.
 
 ## Runtime witness contract
 
