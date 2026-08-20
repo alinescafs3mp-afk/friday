@@ -124,6 +124,7 @@ def _assert_static_network_contract(common: str, switch: str) -> None:
     receipt = _powershell_function(common, "Get-PublishNetworkReceipt")
     topology = _powershell_function(common, "Assert-CandidateNetworkTopology")
     candidate = _powershell_function(common, "Assert-CandidateContainers")
+    configuration = _powershell_function(common, "Assert-CandidateProxyPortConfiguration")
     publication = _powershell_function(common, "Assert-CandidateProxyPortPublication")
     rendered = _powershell_function(switch, "Assert-PublishedComposeConfig")
     state = _powershell_function(switch, "Save-State")
@@ -146,6 +147,11 @@ def _assert_static_network_contract(common: str, switch: str) -> None:
     assert "labels = [pscustomobject](Get-ExpectedPublishNetworkLabels)" in receipt
     assert "docker network rm" not in common
     assert "docker network disconnect" not in common
+
+    assert "$Proxy.Config.ExposedPorts.PSObject.Properties.Name | Sort-Object" in configuration
+    assert "$exposed.Count -ne 2" in configuration
+    assert "[string]::Join(',', $exposed) -cne '80/tcp,8080/tcp'" in configuration
+    assert "Assert-ExactProxyPortBindingMap $Proxy.HostConfig.PortBindings" in configuration
 
     assert "$engineNetworks.Count -ne 1" in topology
     assert "$proxyNetworks.Count -ne 2" in topology
@@ -674,6 +680,11 @@ def test_compose_overlay_adds_host_gateway_only_to_proxy() -> None:
             "([string]$PublishNetwork.Id) 0",
         ),
         (
+            "Assert-CandidateProxyPortConfiguration",
+            "[string]::Join(',', $exposed) -cne '80/tcp,8080/tcp'",
+            "$false",
+        ),
+        (
             "Assert-CandidateProxyPortPublication",
             "Assert-ExactProxyPortBindingMap $Proxy.NetworkSettings.Ports",
             "$null = $Proxy.NetworkSettings.Ports",
@@ -883,12 +894,14 @@ def test_powershell_receipt_serialization_test_is_ps51_compatible_and_exact() ->
     assert all(item in source for item in required)
 
 
-def test_transport_manifest_pins_exact_c560_predecessors_and_frozen_sources() -> None:
+def test_transport_manifest_pins_exact_live_predecessors_and_frozen_sources() -> None:
     old_hashes = {
-        "AttestedBundle.Common.ps1": ("6a4e16654505decdd6599e95127e65e7dd50f55727d3eea296b0a5b4b38f6b0e"),
-        "Cleanup-StoppedQwen38V12Attested.ps1": None,
+        "AttestedBundle.Common.ps1": ("6b9a9952ebf443a99d7cbd9329d06b1c48faee52386cdb50021b28211e01d0c4"),
+        "Cleanup-StoppedQwen38V12Attested.ps1": (
+            "80bf04cb07792373d74512316bdee234120c36965c29583f7e7f373fab671c6d"
+        ),
         "docker-compose.publish-8001.yml": (
-            "9403b256555fd105f3c17395dd1049fac894e140891ef8ff9ccb86767934fcae"
+            "5cfb5177a87881e9411b03f373cc2ccc9df7a034adae888dd5d6e3b4be1f0ea9"
         ),
         "CORE-SHA256SUMS": ("844e65a1c3e1c727fe85819ae37589535698018dab051e55ba26766a8fed121a"),
         "ORCHESTRATION-SHA256SUMS": ("645079759508610eac6e9213d61d6c891e3521496894f2e3d7dbac05765d26e5"),

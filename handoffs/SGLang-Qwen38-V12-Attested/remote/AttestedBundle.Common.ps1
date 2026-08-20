@@ -1168,8 +1168,9 @@ function Assert-ExactProxyPortBindingMap([object]$Bindings, [string]$Label) {
 }
 
 function Assert-CandidateProxyPortConfiguration([object]$Proxy) {
-    $exposed = @($Proxy.Config.ExposedPorts.PSObject.Properties.Name)
-    if ($exposed.Count -ne 1 -or [string]$exposed[0] -cne '8080/tcp') {
+    $exposed = @($Proxy.Config.ExposedPorts.PSObject.Properties.Name | Sort-Object)
+    if ($exposed.Count -ne 2 -or
+        [string]::Join(',', $exposed) -cne '80/tcp,8080/tcp') {
         throw 'Candidate proxy exposed-port set is not exact'
     }
     Assert-ExactProxyPortBindingMap $Proxy.HostConfig.PortBindings `

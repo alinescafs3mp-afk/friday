@@ -126,7 +126,8 @@ depth-2 default.
 
 The code-owned sync wrapper is fail-closed and defaults to a local-only plan. It
 pins the SSH client key, the Windows ED25519 host key, the transport manifest,
-the PowerShell applier, every old c560 byte set, and every new frozen byte set.
+the PowerShell applier, every exact live predecessor byte set (including an
+already-applied bootstrap), and every new frozen byte set.
 It uses a flat SHA-addressed archive, verifies it again after receipt and
 expansion, and applies files under the same exclusive switch lock. Each target
 must be absent only when explicitly declared new, or equal the exact old or new
