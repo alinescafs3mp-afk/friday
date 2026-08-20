@@ -1,178 +1,178 @@
-# Friday: где применять MCP и где сохранять нативное ядро
+# Friday: Where MCP Belongs and Where the Native Core Must Remain
 
-> Статус: внешнее архитектурное наблюдение  
-> Срез репозитория: `main`, Friday `0.205.0`, 20 августа 2026 года  
-> Цель: уменьшить объём собственной разработки, не размывая local-first, provenance, безопасность, tenant isolation и индивидуальность Friday.
+> Status: external architecture observation  
+> Repository snapshot: `main`, Friday `0.205.0`, 20 August 2026  
+> Goal: reduce custom integration work without weakening local-first operation, provenance, privacy, tenant isolation, or the product identity of Friday.
 
-## Исходное наблюдение
+## Executive conclusion
 
-Friday уже не нужно переделывать под MCP с нуля. В проекте существуют:
+Friday does not need to be redesigned around MCP from scratch. The repository already contains:
 
-- собственный MCP runtime в [`friday/mcp_runtime/`](../friday/mcp_runtime/);
-- постоянные stdio-соединения с ограниченными таймаутами;
-- code-owned определения серверов;
-- жёсткие allowlist инструментов;
-- проверка наличия обязательных инструментов при старте;
-- требование structured result;
-- отдельный безопасный workspace MCP server;
-- зависимость `mcp>=2,<3` в [`pyproject.toml`](../pyproject.toml).
+- a native MCP runtime in [`friday/mcp_runtime/`](../friday/mcp_runtime/);
+- persistent stdio connections with bounded startup and call timeouts;
+- code-owned server definitions;
+- strict tool allowlists;
+- startup checks for required tools;
+- structured-result validation;
+- a dedicated constrained workspace MCP server;
+- the dependency `mcp>=2,<3` in [`pyproject.toml`](../pyproject.toml).
 
-Важнейшее уже принятое архитектурное решение видно в [`friday/mcp_runtime/client.py`](../friday/mcp_runtime/client.py) и [`friday/mcp_runtime/tools.py`](../friday/mcp_runtime/tools.py): удалённые описания, schemas и annotations не публикуются модели напрямую. Friday выставляет свои узкие инструменты и сама владеет их контрактами.
+The most important architectural choice is already present in [`friday/mcp_runtime/client.py`](../friday/mcp_runtime/client.py) and [`friday/mcp_runtime/tools.py`](../friday/mcp_runtime/tools.py): remote descriptions, schemas, and annotations are not exposed directly to the model. Friday publishes its own narrow tool contracts and remains responsible for policy, validation, and result projection.
 
-Это правильная основа. Её следует расширять, а не заменять универсальным динамическим MCP-клиентом.
+That is the correct foundation. It should be generalized rather than replaced by a universal dynamic MCP client.
 
-## Главный вывод
+## Governing principle
 
-**Не заменять MCP-серверами ядро Friday. Заменять ими края системы.**
+**Do not replace Friday's core with MCP servers. Replace the edges of the system.**
 
-Friday должна владеть:
+Friday should continue to own:
 
-- памятью и смыслом;
-- provenance и evidence;
-- правами и приватностью;
-- маршрутизацией и бюджетами;
-- approvals и idempotency;
-- проверкой результатов;
-- долговременным состоянием пользователя.
+- memory and meaning;
+- provenance and evidence;
+- authorization and privacy;
+- routing and budgets;
+- approvals and idempotency;
+- result validation;
+- durable user state.
 
-MCP разумно поручить чужую API-инфраструктуру:
+MCP should handle infrastructure that belongs to somebody else:
 
 - OAuth;
-- пагинацию;
-- изменения внешних API;
-- SaaS-коннекторы;
-- браузерные сессии;
-- облачные хранилища;
-- внешние системы разработки и наблюдения;
-- новые виды внешних баз данных.
+- pagination;
+- external API churn;
+- SaaS connectors;
+- browser sessions;
+- cloud storage;
+- external development and observability systems;
+- new external database engines.
 
-Краткая формула:
+A compact formulation:
 
-> Мозг, память и правила принадлежат Friday. Чужие дверные ручки подключаются через MCP.
+> Friday owns the brain, memory, and rules. MCP standardizes the external door handles.
 
-## Рекомендуемый разрез
+## Recommended boundary by subsystem
 
-| Подсистема Friday | Решение | Практическое действие |
+| Friday subsystem | Recommendation | Practical action |
 |---|---|---|
-| GitHub, Jira, Linear, Notion, Drive, Slack, почта, календари, CRM | MCP-first | Не писать полные нативные клиенты без доказанной необходимости |
-| Провайдеры интернет-поиска | MCP primary + нативный fallback | Вынести provider-specific API, сохранить свою приватность, provenance и обработку источников |
-| Полноценный браузер и JS-сайты | MCP | Подключить браузерный MCP только для страниц, где обычного HTTP fetch недостаточно |
-| Внешние СУБД | Гибрид | SQLite/Postgres/MySQL оставить; новые движки подключать через MCP |
-| Локальный workspace | Оставить как есть | Собственный узкий MCP server безопаснее универсального filesystem server |
-| Telegram bridge | Нативно | Это frontend transport, очередь доставки и UX, а не простой tool connector |
-| Локальный разбор файлов, OCR, DOCX/XLSX/PDF | Нативно | MCP применять для импорта из облака и публикации результатов |
-| Whisper, Piper и локальные модели | Нативно | Они поддерживают local-first и контролируемую приватность |
-| Memory, retrieval, graph, ingestion, provenance | Только нативно | Это продуктовая сущность Friday |
-| Permissions, approvals, idempotency, tenant isolation | Только нативно | Никогда не делегировать внешнему MCP server |
-| Sentry, Grafana, CI и внешняя диагностика | MCP-first | Sentinel остаётся своим, внешние сигналы поступают через адаптеры |
-| LLM provider/runtime layer | Нативно | Здесь находятся attestation, model profiles, budgets и fail-closed маршрутизация |
+| GitHub, Jira, Linear, Notion, Drive, Slack, mail, calendars, CRM | MCP-first | Do not write full native clients without measured justification |
+| Internet search providers | MCP primary plus native fallback | Move provider-specific API work out; retain privacy policy, provenance, and source handling |
+| Full browser and JavaScript sites | MCP | Use a browser MCP only when ordinary safe HTTP fetch is insufficient |
+| External databases | Hybrid | Keep SQLite, PostgreSQL, and MySQL support; connect new engines through MCP |
+| Local workspace | Keep current implementation | The narrow code-owned MCP server is safer than a general filesystem server |
+| Telegram bridge | Native | It is a frontend transport, delivery queue, and UX surface, not a simple tool connector |
+| Local parsing, OCR, DOCX, XLSX, PDF | Native | Use MCP only for cloud import or publication |
+| Whisper, Piper, and local models | Native | They preserve local-first behavior and controlled privacy |
+| Memory, retrieval, graph, ingestion, provenance | Native only | These are the product |
+| Permissions, approvals, idempotency, tenant isolation | Native only | Never delegate these to an external MCP server |
+| Sentry, Grafana, CI, and external diagnostics | MCP-first | Keep Sentinel native, but ingest external signals through adapters |
+| LLM provider and runtime layer | Native | Attestation, model profiles, budgets, and fail-closed routing belong here |
 
-## Первый крупный кандидат: `web_surfer`
+## Highest-value current candidate: `web_surfer`
 
-Самая заметная область, где Friday сейчас обслуживает много чужой инфраструктуры, находится в [`friday/web_surfer/`](../friday/web_surfer/).
+The largest area where Friday currently maintains a great deal of third-party infrastructure is [`friday/web_surfer/`](../friday/web_surfer/).
 
-Этот контур самостоятельно решает:
+That contour handles:
 
-- DNS и SSRF-защиту;
-- защиту от DNS rebinding;
+- DNS and SSRF protection;
+- DNS rebinding protection;
 - redirect policy;
 - `robots.txt`;
-- provider-specific поисковые запросы;
-- антибот-ответы и отказ провайдера;
-- фильтры свежести, языка, страны и доменов;
-- глобальные и поэтапные таймауты;
-- лимиты тела ответа;
+- provider-specific search requests;
+- anti-bot responses and provider refusal;
+- freshness, language, country, and domain filters;
+- global and per-stage deadlines;
+- response-body limits;
 - HTML parsing;
 - PDF extraction;
-- классификацию полных и неполных результатов;
-- fallback между провайдерами.
+- complete versus incomplete result classification;
+- fallback between search providers.
 
-Это полезная и качественная работа, но значительная её часть не создаёт уникальность Friday. Особенно показателен зафиксированный в коде случай, когда DuckDuckGo отдавал HTTP 202 со страницей-заглушкой и выглядел как честный пустой результат. Подобные provider quirks способны бесконечно поедать время.
+This work is useful and often carefully implemented, but much of it does not define Friday's unique value. The code even records a concrete provider quirk in which DuckDuckGo returned HTTP 202 placeholder pages that looked like legitimate empty results. These are exactly the kinds of external irregularities that can consume development time forever.
 
-### Что оставить внутри Friday
+### Keep inside Friday
 
-- решение, разрешено ли отправлять конкретный запрос наружу;
-- защиту от утечки имён, внутренних документов и личных данных;
-- предотвращение отправки приватной сущности во внешний поиск;
-- лимиты числа источников и размера текста;
-- нормализацию результата;
-- provenance и citations;
-- проверку evidence;
-- классификацию полного, частичного и непроверяемого ответа;
-- простой безопасный HTTP fetch публичной статической страницы;
-- собственный bounded research workflow.
+- the decision whether a specific query may leave the host at all;
+- protection against leaking names, internal documents, and personal data;
+- prevention of private-entity disclosure to a public search service;
+- result-count and body-size limits;
+- normalization of returned sources;
+- provenance and citations;
+- evidence validation;
+- classification of complete, partial, or unverifiable answers;
+- a simple safe fetch path for public static pages;
+- the bounded research workflow.
 
-### Что передать MCP
+### Delegate to MCP
 
-- обращения к конкретным search API;
+- calls to specific search APIs;
 - provider authentication;
-- пагинацию;
-- provider rate limits;
-- retry policy конкретного API;
-- постоянную браузерную сессию;
+- pagination;
+- provider rate limiting;
+- provider-specific retry behavior;
+- persistent browser sessions;
 - JavaScript rendering;
-- авторизованные сайты;
-- клики, формы и навигацию;
-- работу с cookie и session state.
+- authenticated websites;
+- clicks, forms, and navigation;
+- cookie and session-state management.
 
-### Предлагаемый маршрут
+### Proposed route
 
 ```text
-Обычный поиск
+Ordinary search
     -> search MCP
-    -> Friday валидирует и нормализует выдачу
-    -> native safe fetch статических страниц
-    -> собственные provenance, evidence и citations
+    -> Friday validates and normalizes the result set
+    -> native safe fetch for static pages
+    -> Friday provenance, evidence, and citations
 
-Сложная JS-страница
+Complex JavaScript page
     -> browser MCP
-    -> Friday получает bounded structured result
-    -> проверяет источник, полноту и ограничения
-    -> допускает результат в synthesis
+    -> Friday receives a bounded structured result
+    -> Friday validates source identity, completeness, and limits
+    -> the result may enter synthesis
 ```
 
-Для браузерного слоя разумным кандидатом является официальный Playwright MCP. Его не следует запускать на каждую обычную статью. Иначе вместо упрощения получится тяжёлый браузерный процесс, который приносит одну страницу вместе с большим accessibility tree.
+The official Playwright MCP server is a reasonable browser-layer candidate. It should not be invoked for every ordinary article. Otherwise the intended simplification becomes a heavy browser process delivering one page together with a large accessibility tree.
 
-## Внешние базы данных: сохранить текущий native fallback
+## External databases: retain the current native fallback
 
-[`friday/data_sources.py`](../friday/data_sources.py) уже представляет внешнюю базу как источник, а не как внутреннее хранилище Friday.
+[`friday/data_sources.py`](../friday/data_sources.py) already models an external database as a source, not as Friday's own storage.
 
-Полезные свойства текущей реализации:
+Useful properties of the current implementation include:
 
-- DSN не хранится в базе Friday;
-- хранится только имя переменной окружения;
-- запрос ограничен чтением;
-- разрешён один `SELECT` или `WITH ... SELECT`;
-- SQLite открывается в `mode=ro`;
-- Postgres получает read-only connection;
-- есть row limit;
-- есть timeout;
-- обрез результата обозначается явно;
-- имеются schema-description операции;
-- поддерживаются SQLite, Postgres и MySQL.
+- the DSN is not stored in Friday's database;
+- only the name of an environment variable is persisted;
+- queries are read-only;
+- only one `SELECT` or `WITH ... SELECT` statement is allowed;
+- SQLite opens in `mode=ro`;
+- PostgreSQL receives a read-only connection;
+- row limits are enforced;
+- timeouts are enforced;
+- truncation is reported explicitly;
+- schema-description operations exist;
+- SQLite, PostgreSQL, and MySQL are supported.
 
-Этот код сравнительно узкий, уже написан и является хорошим fallback. Выбрасывать его нет смысла.
+This code is narrow, already implemented, and useful as a fallback. Removing it would not simplify the project.
 
-Рекомендуемое новое правило:
+A sensible new rule is:
 
-> После SQLite, Postgres и MySQL не добавлять в core новые нативные драйверы без веской причины.
+> After SQLite, PostgreSQL, and MySQL, do not add new native database drivers to core without strong evidence that MCP is inadequate.
 
-Snowflake, Oracle, ClickHouse, Microsoft SQL Server, BigQuery, MongoDB и корпоративные специфические источники лучше подключать через MCP.
+Snowflake, Oracle, ClickHouse, Microsoft SQL Server, BigQuery, MongoDB, and organization-specific engines should normally arrive through MCP.
 
-Friday всё равно должна сохранить собственную оболочку:
+Friday must still retain its own stable wrapper:
 
 ```text
 Model
     -> friday_query_external_source
-    -> actor / tenant / permissions
+    -> actor / tenant / permission checks
     -> read-only policy
     -> row and time budgets
     -> MCP database server
-    -> structured result validation
+    -> structured-result validation
     -> provenance and audit
 ```
 
-Не следует публиковать модели сырой `execute_sql` от случайного MCP server. Предпочтительнее стабильные code-owned инструменты Friday:
+The model should not receive a raw `execute_sql` tool from an arbitrary MCP server. Prefer stable code-owned tools such as:
 
 ```text
 external_source_list
@@ -181,54 +181,54 @@ external_source_query
 external_source_sample
 ```
 
-Так модель видит единый контракт Friday, а нижний транспорт можно менять независимо.
+The model then sees one Friday contract even when the underlying transport changes.
 
-## Workspace MCP уже сделан почти образцово
+## The current workspace MCP is already close to exemplary
 
-Текущий [`friday/mcp_runtime/workspace_fs.py`](../friday/mcp_runtime/workspace_fs.py) не следует заменять универсальным filesystem MCP server.
+[`friday/mcp_runtime/workspace_fs.py`](../friday/mcp_runtime/workspace_fs.py) should not be replaced with a general filesystem MCP server.
 
-Его поверхность намеренно узкая:
+Its surface is intentionally narrow:
 
-- inbox предназначен для чтения;
-- outbox допускает только создание новых безопасных текстовых файлов;
-- нет overwrite;
-- нет append;
-- нет rename;
-- нет move;
-- нет delete;
-- нет shell;
-- нет SQLite access;
-- нет network access;
-- пути проверяются;
-- symlink traversal блокируется;
-- выбранный файл повторно открывается и сверяется;
-- проверяются descriptor identity, inode, device, размер и временные поля;
-- результат ограничивается бюджетом;
-- extracted source получает digest и признаки полноты.
+- inbox is read-oriented;
+- outbox allows only creation of new safe text files;
+- no overwrite;
+- no append;
+- no rename;
+- no move;
+- no delete;
+- no shell;
+- no SQLite access;
+- no network access;
+- paths are validated;
+- symlink traversal is blocked;
+- selected files are reopened and rechecked;
+- descriptor identity, inode, device, size, and timestamps are verified;
+- results are bounded;
+- extracted sources carry a digest and completeness markers.
 
-Большинство универсальных filesystem MCP servers имеют более широкую поверхность. Замена здесь означала бы не упрощение, а отказ от уже построенной защитной границы.
+Most general filesystem MCP servers expose a much larger surface. Replacing this implementation would trade an existing security boundary for convenience that Friday does not need.
 
-Этот workspace server стоит оставить эталоном для будущих интеграций:
+The workspace server should remain the reference design for future connectors:
 
-> Узкий MCP transport снаружи, полная policy и повторная валидация внутри Friday.
+> A narrow MCP transport outside, with complete policy and repeat validation inside Friday.
 
-## Telegram bridge оставить нативным
+## Keep the Telegram bridge native
 
-[`friday/telegram_bridge/`](../friday/telegram_bridge/) выполняет существенно больше, чем `send_message`:
+[`friday/telegram_bridge/`](../friday/telegram_bridge/) does much more than `send_message`:
 
-- принимает updates;
-- обрабатывает команды;
-- ведёт callback lifecycle;
-- формирует markup;
-- принимает и отправляет media;
-- управляет очередью;
-- обрабатывает retries;
-- связывает frontend события с backend operations;
-- доставляет proactive notifications;
-- обеспечивает deny-by-default chat allowlist;
-- участвует в idempotency и durable delivery.
+- receives updates;
+- handles commands;
+- maintains callback lifecycle;
+- builds markup;
+- receives and sends media;
+- manages queues;
+- handles retries;
+- connects frontend events to backend operations;
+- delivers proactive notifications;
+- enforces a deny-by-default chat allowlist;
+- participates in idempotency and durable delivery.
 
-MCP хорошо подходит для действий вида:
+MCP is well suited to actions such as:
 
 ```text
 send_slack_message
@@ -237,7 +237,7 @@ create_github_issue
 upload_to_drive
 ```
 
-Но MCP плохо заменяет frontend transport вида:
+It is poorly suited to replacing a frontend transport that must:
 
 ```text
 receive Telegram updates
@@ -248,25 +248,25 @@ operate a durable delivery queue
 bind update identity to idempotency fences
 ```
 
-Поэтому:
+Therefore:
 
-- Telegram остаётся native frontend;
-- дополнительные исходящие каналы можно подключать через MCP;
-- полноценные входящие интерфейсы Slack, Discord или Matrix лучше оформлять как отдельные transport adapters, а не как tools модели.
+- Telegram remains a native frontend;
+- additional outbound channels may use MCP;
+- full inbound Slack, Discord, or Matrix interfaces should be separate transport adapters, not model tools.
 
-## Файлы, OCR, voice и локальные модели оставить своими
+## Keep files, OCR, voice, and local models native
 
-Нативные DOCX/XLSX/PDF, OCR, Whisper и Piper поддерживают ключевые свойства Friday:
+Native DOCX, XLSX, PDF, OCR, Whisper, and Piper support Friday's defining properties:
 
-- local-first;
-- воспроизводимое извлечение;
-- собственные признаки полноты;
-- собственные evidence spans;
+- local-first operation;
+- reproducible extraction;
+- explicit completeness markers;
+- evidence spans;
 - controlled privacy;
 - review-gated ingestion;
-- fail-closed семантику.
+- fail-closed semantics.
 
-У Friday существуют важные понятия, которых обычный внешний file tool часто не предоставляет:
+Friday has important concepts that ordinary external file tools usually do not provide:
 
 ```text
 source_complete
@@ -278,28 +278,28 @@ archive_truncated
 source_truncated_for_parse
 ```
 
-Если отдать parsing pipeline внешнему серверу, он может вернуть просто строку текста и потерять семантику достоверности.
+Delegating the parsing pipeline to an external server may reduce all of this to an unqualified text string and destroy the semantics of trustworthiness.
 
-MCP здесь полезен вокруг native processing:
+MCP is useful around native processing:
 
 ```text
-Drive MCP импортирует файл
-    -> Friday нативно сохраняет original bytes
-    -> Friday нативно извлекает текст и evidence
-    -> ingestion/review остаются своими
+Drive MCP imports a file
+    -> Friday stores original bytes natively
+    -> Friday extracts text and evidence natively
+    -> ingestion and review remain native
 
-Friday нативно создаёт DOCX
-    -> Drive MCP публикует документ
+Friday creates a DOCX natively
+    -> Drive MCP publishes it
 
-Friday нативно строит таблицу
-    -> Sheets MCP создаёт облачную копию
+Friday builds a spreadsheet natively
+    -> Sheets MCP creates a cloud copy
 ```
 
-[`friday/whisper.py`](../friday/whisper.py), [`friday/tts.py`](../friday/tts.py), [`friday/ingestion/`](../friday/ingestion/) и [`friday/generated_files.py`](../friday/generated_files.py) лучше оставить внутри продукта.
+[`friday/whisper.py`](../friday/whisper.py), [`friday/tts.py`](../friday/tts.py), [`friday/ingestion/`](../friday/ingestion/), and [`friday/generated_files.py`](../friday/generated_files.py) should remain inside the product.
 
-## Что точно нельзя заменять MCP
+## Components that must never be replaced by MCP
 
-Следующие подсистемы составляют ДНК Friday:
+The following subsystems are Friday's product DNA:
 
 - `ingestion`;
 - `retrieval`;
@@ -317,56 +317,56 @@ Friday нативно строит таблицу
 - idempotency fences;
 - approvals;
 - model attestation;
-- V12 runtime;
+- the V12 runtime;
 - review queues;
-- transaction-time и valid-time semantics.
+- transaction-time and valid-time semantics.
 
-MCP стандартизирует доступ к tools, resources и prompts. Он не предоставляет готовую модель:
+MCP standardizes access to tools, resources, and prompts. It does not provide a ready-made model for:
 
-- персональной памяти;
+- personal memory;
 - provenance;
 - tenant isolation;
 - graph identity;
 - review workflow;
 - temporal semantics;
-- доказательности ответа;
-- безопасного повторения побочных эффектов.
+- evidential answer quality;
+- safe repetition of side effects.
 
-MCP может принести Friday документ. Решать, что документ означает, кому принадлежит и можно ли на него опереться, должна сама Friday.
+MCP can deliver a document to Friday. Friday must decide what that document means, who owns it, and whether it is safe to rely on.
 
-## Новые SaaS-коннекторы: MCP-first по умолчанию
+## New SaaS connectors should be MCP-first
 
-Для будущих внешних интеграций стоит принять правило:
+A useful default rule for future integrations is:
 
 ```text
-Внешний API не принадлежит Friday
-    -> сначала ищется официальный или vendor-maintained MCP server
-    -> затем пишется узкий Friday adapter
-    -> полноценный native connector создаётся только при доказанной необходимости
+The external API does not belong to Friday
+    -> first look for an official or vendor-maintained MCP server
+    -> then write a narrow Friday adapter
+    -> create a full native connector only when necessity is measured
 ```
 
-Приоритет доверия:
+Recommended trust order:
 
-1. официальный сервер самого сервиса;
-2. vendor-maintained сервер;
-3. хорошо проверенный open-source сервер;
-4. собственный узкий server;
-5. случайный community server только после отдельного security review.
+1. an official server maintained by the service itself;
+2. a vendor-maintained server;
+3. a well-reviewed open-source server;
+4. a narrow server maintained by Friday;
+5. a community server only after a dedicated security review.
 
-MCP Registry является каталогом, но не знаком качества и не автоматическим доверием. Remote schemas, descriptions и annotations нужно считать недоверенными данными.
+The MCP Registry is a catalog, not a quality seal or automatic trust boundary. Remote schemas, descriptions, and annotations must be treated as untrusted input.
 
-### Пример: GitHub
+### Example: GitHub
 
-Официальный GitHub MCP server уже покрывает repositories, issues, pull requests, Actions и другие GitHub API.
+The official GitHub MCP server already covers repositories, issues, pull requests, Actions, and other GitHub APIs.
 
-Начальная интеграция должна быть минимальной:
+The initial integration should be deliberately small:
 
 ```text
-режим: read-only
+mode: read-only
 toolsets: repositories, issues, pull requests
 ```
 
-Friday не обязана выставлять модели десятки сырых GitHub tools. Достаточно нескольких собственных стабильных контрактов:
+Friday does not need to expose dozens of raw GitHub tools to the model. A handful of stable internal contracts is enough:
 
 ```text
 github_read_file
@@ -375,7 +375,7 @@ github_read_issue
 github_list_pull_requests
 ```
 
-Позднее mutating tools можно подключить отдельно:
+Mutating operations can be introduced later and separately:
 
 ```text
 github_create_issue
@@ -384,73 +384,73 @@ github_create_branch
 github_open_pull_request
 ```
 
-Для них должны работать approvals, idempotency и reconciliation Friday.
+They must pass through Friday's approvals, idempotency, and reconciliation logic.
 
-## Fallback не должен дублировать полную реализацию
+## Fallback must not duplicate the complete implementation
 
-Полноценный native fallback для каждого MCP server уничтожит экономию. Получатся:
+A complete native fallback for every MCP server would erase the expected savings. It would create:
 
-- две реализации;
-- два набора тестов;
-- две поверхности ошибок;
-- постоянная проблема расхождения поведения.
+- two implementations;
+- two test suites;
+- two error surfaces;
+- permanent behavior drift.
 
-Fallback должен быть тонким и деградированным, а не функционально равным primary implementation.
+Fallback should be thin and degraded, not functionally equivalent to the primary implementation.
 
-| Возможность | MCP primary | Разумный fallback |
+| Capability | MCP primary | Reasonable fallback |
 |---|---|---|
-| Web search | Search MCP | Текущий простой native provider |
-| JS browser | Playwright MCP | Попытка обычного fetch и честный отказ от интерактивной части |
-| GitHub | Official GitHub MCP | Локальный checkout или явная недоступность |
-| Внешняя БД | MCP для новых engines | Текущие SQLite/Postgres/MySQL |
-| Cloud files | Drive/Dropbox MCP | Локальный inbox/outbox |
-| Уведомления | Slack/email MCP | Durable queue, но не молчаливая отправка через другой канал |
-| Calendar | Calendar MCP | Локальное reminder предложение только после согласия пользователя |
+| Web search | Search MCP | Current simple native provider |
+| JavaScript browser | Playwright MCP | Try ordinary fetch and explicitly decline the interactive portion |
+| GitHub | Official GitHub MCP | Local checkout or explicit unavailability |
+| External database | MCP for new engines | Current SQLite, PostgreSQL, and MySQL support |
+| Cloud files | Drive or Dropbox MCP | Local inbox and outbox |
+| Notifications | Slack or email MCP | Durable queue, not silent delivery through a different channel |
+| Calendar | Calendar MCP | Offer a local reminder only after explicit user consent |
 
-### Когда автоматический fallback допустим
+### Safe automatic fallback cases
 
-Только для безопасного чтения и только при ясной категории сбоя:
+Only for safe read operations and only with a clear failure category:
 
 - server unavailable;
 - startup timeout;
-- transport failure до начала исполнения;
-- отсутствующий allowlisted tool;
-- protocol violation с последующим отключением подозрительного server;
-- временная недоступность read-only операции.
+- transport failure before execution begins;
+- missing allowlisted tool;
+- protocol violation followed by disabling the suspicious server;
+- temporary failure of a read-only operation.
 
-### Когда fallback запрещён
+### Cases where fallback must be forbidden
 
 - `PermissionError`;
 - policy denial;
-- некорректные аргументы;
-- отказ пользователя;
-- domain error, например «issue не существует»;
-- unknown outcome изменяющей операции;
-- ситуация, когда внешний эффект мог уже произойти.
+- invalid arguments;
+- user refusal;
+- a domain error such as "issue not found";
+- unknown outcome of a mutating operation;
+- any situation in which an external effect may already have occurred.
 
-Особенно опасен сценарий:
+A particularly dangerous case is:
 
 ```text
-Calendar MCP получил create_event
-    -> соединение оборвалось
-    -> Friday вызывает native fallback
-    -> создаются два события
+Calendar MCP receives create_event
+    -> the connection drops
+    -> Friday invokes a native fallback
+    -> two events are created
 ```
 
-Правильная реакция:
+The correct response is:
 
 ```text
 status = uncertain
-    -> проверить postcondition
-    -> определить, произошёл ли эффект
-    -> только после этого решать, повторять ли операцию
+    -> check the postcondition
+    -> determine whether the effect occurred
+    -> only then decide whether another attempt is safe
 ```
 
-Эта философия уже присутствует в Friday для побочных эффектов, idempotency fences и mission execution. Её следует распространить на MCP integrations.
+This philosophy already exists in Friday's side-effect, mission, and idempotency logic. It should be applied consistently to MCP integrations.
 
-## Разделить классы MCP-ошибок
+## Split MCP error classes
 
-Сейчас [`MCPUnavailableError`](../friday/mcp_runtime/client.py) охватывает несколько разных случаев:
+At present, [`MCPUnavailableError`](../friday/mcp_runtime/client.py) covers several materially different cases:
 
 - server unavailable;
 - missing tool;
@@ -460,9 +460,9 @@ status = uncertain
 - retired connection;
 - timeout.
 
-Для ручного использования это приемлемо. Для автоматического fallback такой категории недостаточно.
+That is acceptable for manual use, but insufficient for safe automatic fallback.
 
-Предлагаемая таксономия:
+A more useful taxonomy would be:
 
 ```python
 class MCPError(RuntimeError):
@@ -470,30 +470,30 @@ class MCPError(RuntimeError):
 
 
 class MCPTransportUnavailable(MCPError):
-    """Для read-only операции допустим доверенный fallback."""
+    """A trusted read-only fallback may be permitted."""
 
 
 class MCPProtocolViolation(MCPError):
-    """Сервер нужно отключить; read-only fallback может быть разрешён policy."""
+    """Disable the server; policy may permit a read-only fallback."""
 
 
 class MCPRemoteRejected(MCPError):
-    """Удалённый tool обработал запрос и отказал. Не повторять автоматически."""
+    """The remote tool processed and rejected the request. Do not retry automatically."""
 
 
 class MCPPolicyDenied(MCPError):
-    """Локальная policy Friday запретила действие. Fallback запрещён."""
+    """Friday policy denied the operation. Fallback is forbidden."""
 
 
 class MCPUncertainEffect(MCPError):
-    """Изменение могло произойти. Требуются reconciliation и postcondition."""
+    """The effect may have happened. Reconciliation and a postcondition are required."""
 ```
 
-## Сделать capability routing декларативным
+## Make capability routing declarative
 
-Модель не должна знать, каким transport реализован инструмент.
+The model should not need to know which transport implements a capability.
 
-Предлагаемый уровень абстракции:
+A useful abstraction would be:
 
 ```python
 @dataclass(frozen=True)
@@ -506,7 +506,7 @@ class CapabilityRoute:
     postcondition: Callable[..., Awaitable[bool]] | None = None
 ```
 
-Общая архитектура:
+The overall architecture remains:
 
 ```text
 Model
@@ -520,23 +520,23 @@ Model
     -> provenance / audit
 ```
 
-Модели должно быть безразлично, находится ли под Friday ToolSpec:
+The model should not care whether a Friday ToolSpec is implemented by:
 
-- MCP server;
-- Python function;
-- локальный subprocess;
-- HTTP adapter;
-- queued human approval.
+- an MCP server;
+- a Python function;
+- a local subprocess;
+- an HTTP adapter;
+- a queued human approval.
 
-Контракт принадлежит Friday.
+The contract belongs to Friday.
 
-## Friday стоит сделать MCP-сервером
+## Friday should also become an MCP server
 
-Это отдельный стратегически выгодный ход.
+This is a separate strategically valuable move.
 
-Сейчас Friday строит собственные frontend и agent interfaces. Если Friday сама предоставит MCP server, её память смогут использовать другие среды и агенты без отдельных интеграций.
+Friday currently builds its own frontends and agent interfaces. If Friday also exposes a local MCP server, other agent environments can use its memory without requiring a dedicated integration for each one.
 
-### Возможные resources
+### Candidate resources
 
 ```text
 friday://documents/{document_id}
@@ -565,19 +565,19 @@ friday_create_reminder
 friday_resolve_conflict
 ```
 
-Resources подходят для адресуемых данных и контекста. Tools подходят для вычислений и действий.
+Resources are appropriate for addressable data and context. Tools are appropriate for computations and actions.
 
-Начальная версия должна быть максимально узкой:
+The first version should be deliberately narrow:
 
 - local stdio;
 - owner-only;
 - read-only;
 - fixed allowlist;
-- без remote dynamic discovery;
-- с теми же tenant, permission и evidence boundaries;
-- без mutating tools.
+- no remote dynamic discovery;
+- the same tenant, permission, and evidence boundaries;
+- no mutating tools.
 
-Первый безопасный набор:
+A safe initial set is:
 
 ```text
 friday_search
@@ -586,56 +586,56 @@ friday://documents/{id}
 friday://entities/{id}
 ```
 
-После стабилизации можно добавить `remember` и reminders через approvals.
+After stabilization, `remember` and reminder operations can be added behind approvals.
 
-В перспективе Friday станет не только самостоятельным ассистентом, но и персональным memory backend для других агентов.
+This would make Friday not only an assistant, but also a personal memory backend for other agents.
 
-## Поэтапный план
+## Suggested implementation sequence
 
-### Этап 1: обобщить существующий MCP runtime
+### Phase 1: generalize the current MCP runtime
 
-Без изменения текущего поведения:
+Without changing current behavior:
 
-- разделить классы ошибок;
-- добавить `CapabilityRoute`;
-- описать fallback policy;
-- добавить health state;
-- добавить circuit breaker;
-- добавить метрики latency, failure class и unavailable duration;
-- сохранить fixed wrappers;
-- сохранить запрет на публикацию remote schemas модели;
-- сохранить code-owned server definitions.
+- split the error classes;
+- add `CapabilityRoute`;
+- document fallback policy;
+- add health state;
+- add a circuit breaker;
+- add metrics for latency, failure class, and unavailable duration;
+- preserve fixed wrappers;
+- preserve the prohibition on publishing remote schemas to the model;
+- preserve code-owned server definitions.
 
-### Этап 2: подключить первый официальный внешний MCP
+### Phase 2: connect the first official external MCP
 
-Подходящий кандидат: GitHub MCP в read-only режиме.
+A suitable candidate is the official GitHub MCP server in read-only mode.
 
-Ограничения первой версии:
+Initial constraints:
 
-- только repositories, issues и pull requests;
-- несколько собственных Friday ToolSpec;
-- отдельные tenant-scoped credentials;
-- pinned server version или image digest;
+- repositories, issues, and pull requests only;
+- a small set of Friday-owned ToolSpecs;
+- tenant-scoped credentials;
+- pinned server version or image digest;
 - bounded result projection;
-- никаких write tools;
-- полный audit вызова;
-- native fallback только к локальному checkout.
+- no write tools;
+- complete call auditing;
+- native fallback only to a local checkout.
 
-Это проверит общую архитектуру на зрелом сервере без риска для памяти и приватных документов.
+This validates the general architecture against a mature server without risking memory or private documents.
 
-### Этап 3: разделить web path
+### Phase 3: split the web path
 
-- static safe fetch оставить native;
-- search provider разрешить через MCP;
-- browser MCP использовать как escalation path;
-- browser write actions сначала полностью запретить;
-- результаты прогонять через существующие provenance и citation механизмы;
-- сохранить privacy classifier перед отправкой внешнего запроса;
-- сохранить domain/freshness policy внутри Friday.
+- retain static safe fetch natively;
+- allow search providers through MCP;
+- use browser MCP as an escalation path;
+- initially forbid browser write actions;
+- pass results through existing provenance and citation machinery;
+- retain the privacy classifier before any external query;
+- retain domain and freshness policy inside Friday.
 
-### Этап 4: добавить Friday MCP server
+### Phase 4: expose a Friday MCP server
 
-Первая версия:
+Initial version:
 
 ```text
 friday_search
@@ -644,7 +644,7 @@ friday://documents/{id}
 friday://entities/{id}
 ```
 
-Режим:
+Mode:
 
 - local;
 - owner-only;
@@ -652,27 +652,27 @@ friday://entities/{id}
 - bounded;
 - audited.
 
-### После этого
+### Afterward
 
-- новые SaaS подключать через MCP;
-- новые СУБД подключать через MCP;
-- новые cloud storage подключать через MCP;
-- не писать новые native OAuth clients без очень веской причины;
-- каждый mutating connector вводить отдельно после read-only эксплуатации;
-- каждый внешний server рассматривать как недоверенный процесс.
+- connect new SaaS products through MCP;
+- connect new database engines through MCP;
+- connect new cloud storage through MCP;
+- avoid new native OAuth clients without strong justification;
+- introduce every mutating connector separately after read-only operation is proven;
+- treat every external MCP server as an untrusted process.
 
-## Что убрать из собственной разработки
+## Work that should leave Friday core
 
-- полные API-клиенты SaaS;
-- OAuth для каждого отдельного сервиса;
-- provider-specific пагинацию;
-- полноценный браузерный оркестратор;
-- поддержку новых СУБД;
-- отдельные GitHub/Jira/Linear клиенты;
-- cloud publishing implementation;
-- низкоуровневые клиенты внешней диагностики.
+- full SaaS API clients;
+- per-service OAuth implementations;
+- provider-specific pagination;
+- a full custom browser orchestrator;
+- support for additional database engines;
+- dedicated GitHub, Jira, and Linear clients;
+- cloud publication plumbing;
+- low-level clients for external observability platforms.
 
-## Что сохранить своим
+## Work that should remain native
 
 - ingestion;
 - memory;
@@ -693,36 +693,36 @@ friday://entities/{id}
 - review workflow;
 - audit.
 
-## Итоговая оценка масштаба
+## Final assessment of project scope
 
-Friday уже является не просто Telegram-ботом. По текущему дереву проекта это локальная knowledge-платформа, включающая:
+Friday is no longer a simple Telegram bot. The current repository is a local knowledge platform with:
 
-- ingestion pipeline;
+- an ingestion pipeline;
 - immutable raw objects;
-- knowledge graph;
+- a knowledge graph;
 - hybrid retrieval;
 - temporal graph semantics;
-- agent runtime;
-- execution kernel;
+- an agent runtime;
+- an execution kernel;
 - missions;
 - permissions;
-- privacy plane;
-- admin UI;
-- Telegram frontend;
+- a privacy plane;
+- an admin UI;
+- a Telegram frontend;
 - backup and restore;
 - diagnostics;
 - voice;
-- files and OCR;
-- MCP runtime;
+- file and OCR handling;
+- an MCP runtime;
 - operational supervision.
 
-Объективно тяжело одновременно строить продукт такого масштаба и собственную реализацию каждого внешнего API.
+It is objectively expensive to build a product of this scope while also maintaining a custom implementation of every external API.
 
-Задачу не обязательно уменьшать до банального бота. Нужно уменьшить территорию, которую Friday обязана обслуживать собственными руками.
+The product vision does not need to shrink into an ordinary bot. The territory Friday must maintain directly should shrink.
 
-**Итоговая формула:** сохранить собственными мозг, память, доказательства и правила. Стандартизировать внешние интеграции через MCP.
+**Final formula:** keep the brain, memory, evidence, and rules native. Standardize external integrations through MCP.
 
-## Файлы репозитория, на которых основано наблюдение
+## Repository files reviewed
 
 - [`README.md`](../README.md)
 - [`pyproject.toml`](../pyproject.toml)
@@ -741,7 +741,7 @@ Friday уже является не просто Telegram-ботом. По те�
 - [`docs/ORGANS.md`](../docs/ORGANS.md)
 - [`docs/EXECUTIVE.md`](../docs/EXECUTIVE.md)
 
-## Внешние ориентиры
+## External reference points
 
 - MCP Specification: <https://modelcontextprotocol.io/specification/>
 - MCP Python SDK: <https://github.com/modelcontextprotocol/python-sdk>
