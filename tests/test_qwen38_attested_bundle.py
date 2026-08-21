@@ -210,7 +210,7 @@ def _assert_static_long_context_epoch_contract(switch: str) -> None:
     gpu_release = switch.index("    $null = Wait-GpuRelease 180", stop_engine)
     restart_stage = switch.index("    $stage = 'epoch_restart_engine'", gpu_release)
     restart_health_stage = switch.index("    $stage = 'epoch_restart_health'", restart_stage)
-    strict_after_restart = switch.index("    $null = Assert-GpuHeadroom", restart_health_stage)
+    strict_after_restart = switch.index("    $gpu = Assert-GpuHeadroom", restart_health_stage)
 
     assert text_stage < image_stage < soak_stage < soak_headroom < six_stage < six_probe
     assert six_probe < six_drain_stage < six_drain < six_gpu_observation < six_journal < long_stage
@@ -292,6 +292,123 @@ def test_static_gate_kills_long_context_epoch_mutations(old: str, mutation: str)
     assert old in switch
     with pytest.raises((AssertionError, ValueError)):
         _assert_static_long_context_epoch_contract(switch.replace(old, mutation, 1))
+
+
+def _assert_static_epoch_restart_smoke_contract(switch: str) -> None:
+    health_stage = switch.index("    $stage = 'epoch_restart_health'")
+    strict_headroom = switch.index("    $gpu = Assert-GpuHeadroom", health_stage)
+    proxy_start = switch.index("    & docker start $candidateProxyId | Out-Null", strict_headroom)
+    rotation_stage = switch.index("    $stage = 'epoch_rotation_proof'", proxy_start)
+    smoke_stage = switch.index("    $stage = 'epoch_restart_text_smoke'", rotation_stage)
+    smoke_request = switch.index(
+        "    $schemaResponse2 = Invoke-Chat $headers $schemaBody 120 'epoch_restart_text_smoke'",
+        smoke_stage,
+    )
+    smoke_parse = switch.index(
+        "    $schemaValue2 = [string]$schemaResponse2.choices[0].message.content | ConvertFrom-Json",
+        smoke_request,
+    )
+    response_failure = switch.index("        throw 'Post-restart text/JSON-schema smoke failed'", smoke_parse)
+    settle_stage = switch.index("    $stage = 'epoch_restart_post_smoke_settle'", response_failure)
+    settle_sleep = switch.index("    Start-Sleep -Seconds 30", settle_stage)
+    candidate_stage = switch.index(
+        "    $stage = 'epoch_restart_post_smoke_candidate_gates'",
+        settle_sleep,
+    )
+    engine_health = switch.index(
+        "    $candidateEngine = Wait-Healthy $script:Attested.CandidateEngineName 30",
+        candidate_stage,
+    )
+    proxy_health = switch.index(
+        "    $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 30",
+        engine_health,
+    )
+    identity = switch.index(
+        "    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash $publishNetworkReceipt",
+        proxy_health,
+    )
+    publication = switch.index("    Assert-CandidateProxyPortPublication $candidateProxy", identity)
+    fatal = switch.index("    Assert-FatalFree $candidateEngine", publication)
+    gpu_stage = switch.index("    $stage = 'epoch_restart_post_smoke_gpu_observation'", fatal)
+    gpu_observation = switch.index("    $postRestartSmokeGpu = Get-GpuMemory", gpu_stage)
+    journal = switch.index(
+        "    Write-Journal 'post_epoch_restart_smoke_gpu_headroom_observed' @{",
+        gpu_observation,
+    )
+    external_stage = switch.index("    $stage = 'epoch_restart_post_smoke_external_gates'", journal)
+    sidecars = switch.index("    Assert-Sidecars", external_stage)
+    sole_publisher = switch.index(
+        "    Assert-SolePublisher $script:Attested.CandidateProxyName",
+        sidecars,
+    )
+    arm_stage = switch.index("    $stage = 'arm_candidate'", sole_publisher)
+    ready = switch.index("    Write-Journal 'ready' @{", arm_stage)
+
+    assert health_stage < strict_headroom < proxy_start < rotation_stage < smoke_stage
+    assert smoke_stage < smoke_request < smoke_parse < response_failure < settle_stage < settle_sleep
+    assert settle_sleep < candidate_stage < engine_health < proxy_health < identity < publication < fatal
+    assert fatal < gpu_stage < gpu_observation < journal < external_stage
+    assert external_stage < sidecars < sole_publisher < arm_stage < ready
+
+    smoke_block = switch[smoke_stage:settle_stage]
+    for exact_assertion in (
+        "[string]$schemaResponse2.model -cne 'dispatcher'",
+        "[string]$schemaValue2.status -cne 'ok'",
+        "[int]$schemaValue2.count -ne 2",
+        "@($schemaValue2.PSObject.Properties).Count -ne 2",
+    ):
+        assert smoke_block.count(exact_assertion) == 1
+
+    journal_block = switch[journal:sidecars]
+    for exact_field in (
+        "free_mib = [int]$postRestartSmokeGpu.FreeMiB",
+        "minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB",
+        "request_count = 1",
+        "strict_headroom_stage = 'epoch_restart_health'",
+    ):
+        assert journal_block.count(exact_field) == 1
+    assert "body" not in journal_block.lower()
+
+    settle_block = switch[settle_stage:arm_stage]
+    assert "Assert-GpuHeadroom" not in settle_block
+    assert "gpu_headroom_verified" not in settle_block
+    assert "gpu_headroom_timeout" not in settle_block
+    assert switch[ready : ready + 1500].count("gpu_free_mib = $gpu.FreeMiB") == 2
+
+
+def test_epoch_restart_smoke_preserves_strict_pre_smoke_sample_and_observes_after() -> None:
+    _assert_static_epoch_restart_smoke_contract(_SWITCH.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(
+    ("old", "mutation"),
+    (
+        (
+            "    Assert-FatalFree $candidateEngine\n    $gpu = Assert-GpuHeadroom\n    & docker start",
+            "    Assert-FatalFree $candidateEngine\n    $gpu = Get-GpuMemory\n    & docker start",
+        ),
+        ("[int]$schemaValue2.count -ne 2", "[int]$schemaValue2.count -ne 3"),
+        (
+            "    $stage = 'epoch_restart_post_smoke_settle'\n    Start-Sleep -Seconds 30",
+            "    $stage = 'epoch_restart_text_smoke'\n    Start-Sleep -Seconds 30",
+        ),
+        (
+            "    $postRestartSmokeGpu = Get-GpuMemory",
+            "    $postRestartSmokeGpu = Assert-GpuHeadroom",
+        ),
+        (
+            "post_epoch_restart_smoke_gpu_headroom_observed",
+            "post_epoch_restart_smoke_gpu_headroom_verified",
+        ),
+        ("gpu_free_mib = $gpu.FreeMiB", "gpu_free_mib = $postRestartSmokeGpu.FreeMiB"),
+    ),
+)
+def test_static_gate_kills_epoch_restart_smoke_mutations(old: str, mutation: str) -> None:
+    switch = _SWITCH.read_text(encoding="utf-8")
+    _assert_static_epoch_restart_smoke_contract(switch)
+    assert old in switch
+    with pytest.raises((AssertionError, ValueError)):
+        _assert_static_epoch_restart_smoke_contract(switch.replace(old, mutation, 1))
 
 
 def _assert_static_network_contract(common: str, switch: str) -> None:
@@ -1123,13 +1240,13 @@ def test_transport_manifest_pins_exact_live_predecessors_and_frozen_sources() ->
             "5cfb5177a87881e9411b03f373cc2ccc9df7a034adae888dd5d6e3b4be1f0ea9"
         ),
         "CORE-SHA256SUMS": ("b1378e7524c44b92dd18176a51c45ce403440d1a7dfc20b9193bad633a0488b2"),
-        "ORCHESTRATION-SHA256SUMS": ("2e9bacdc4c7528e7b800dfd237f313e1f40ac8221ef618f6ef7e7d9a60fcee32"),
-        "ORCHESTRATION.md": ("d7bfdaf1ced72faf5660d70d0612d6d9567aae6a5dd56ffc7145ae66fe40a6b7"),
+        "ORCHESTRATION-SHA256SUMS": ("b78e591f80571d68a132a18ef95a3373eeb5c997aae433a71ae27a3ba3487e8a"),
+        "ORCHESTRATION.md": ("9a7fc4612f2129bfbbc17ac9cbec8a67cc8f4f36bccdce336a2a21d41e362869"),
         "README.md": "28e508e658350789a85345ba9748c85028dce8a7806da080096f59495d7520dd",
         "Rollback-Qwen38V12Attested.ps1": (
             "a8e19b2704710f339be8aaf1fff3c0773b8304f27721106ae62a620907013d51"
         ),
-        "Switch-Qwen38V12Attested.ps1": ("a08e10a3c67cac4b2833be468a10898320f9d02d609c8a73d895d8cfc21eef82"),
+        "Switch-Qwen38V12Attested.ps1": ("f66859e82d8ffb491708b6d70943b51be10a24f0924047d8e6873b1135a8ca08"),
         "Test-AttestedCleanupProjection.ps1": (
             "d94846c65cc621e74426a436b121b164cb0c533cd03bbf99214e579e3d432dc6"
         ),
@@ -1137,7 +1254,7 @@ def test_transport_manifest_pins_exact_live_predecessors_and_frozen_sources() ->
             "e537898cb72745fadf5300cede4ffe9a247c5348bb2668222189882d86981a2a"
         ),
         "Test-AttestedReceiptSerialization.ps1": (
-            "83930f030a91b62d066ad09a4592fc7b11b559bb2386fc3c88b65dd4e79bd8ea"
+            "9ced1a1b3d74f962945bcd3e2c9ecbcf53dca1f288644789d23458df7e528984"
         ),
     }
     expected_roles = {

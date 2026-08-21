@@ -764,7 +764,7 @@ try {
     $candidateEngine = Wait-Healthy $script:Attested.CandidateEngineName 1200
     Assert-CandidateContainers $candidateEngine $null $receipt $keyHash $publishNetworkReceipt
     Assert-FatalFree $candidateEngine
-    $null = Assert-GpuHeadroom
+    $gpu = Assert-GpuHeadroom
     & docker start $candidateProxyId | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not restart exact candidate proxy after epoch rehearsal' }
     $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 180
@@ -805,13 +805,27 @@ try {
         [int]$schemaValue2.count -ne 2 -or @($schemaValue2.PSObject.Properties).Count -ne 2) {
         throw 'Post-restart text/JSON-schema smoke failed'
     }
+
+    $stage = 'epoch_restart_post_smoke_settle'
     Start-Sleep -Seconds 30
+
+    $stage = 'epoch_restart_post_smoke_candidate_gates'
     $candidateEngine = Wait-Healthy $script:Attested.CandidateEngineName 30
     $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 30
     Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash $publishNetworkReceipt
     Assert-CandidateProxyPortPublication $candidateProxy
     Assert-FatalFree $candidateEngine
-    $gpu = Assert-GpuHeadroom
+
+    $stage = 'epoch_restart_post_smoke_gpu_observation'
+    $postRestartSmokeGpu = Get-GpuMemory
+    Write-Journal 'post_epoch_restart_smoke_gpu_headroom_observed' @{
+        free_mib = [int]$postRestartSmokeGpu.FreeMiB
+        minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB
+        request_count = 1
+        strict_headroom_stage = 'epoch_restart_health'
+    }
+
+    $stage = 'epoch_restart_post_smoke_external_gates'
     Assert-Sidecars
     Assert-SolePublisher $script:Attested.CandidateProxyName
 

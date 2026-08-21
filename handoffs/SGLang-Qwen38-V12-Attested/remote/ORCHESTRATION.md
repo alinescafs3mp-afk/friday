@@ -121,8 +121,14 @@ release, restarts the exact engine, and enforces the strict 1,536 MiB gate at
 `epoch_restart_health`.
 Before arming restart policies, the candidate engine is forcibly
 restarted and the switch proves old-witness disappearance plus new canonical
-witness and nonce rotation, then repeats identity, proxy, smoke, headroom,
-sidecar, and sole-port-8001 gates.
+witness and nonce rotation. `epoch_restart_health` enforces the unchanged
+strict 1,536 MiB floor and retains that authoritative sample before the final
+text/JSON-schema smoke. The exact response assertion remains fail-closed under
+`epoch_restart_text_smoke`; only after it succeeds does
+`epoch_restart_post_smoke_settle` wait 30 seconds. Separate candidate, GPU
+observation, and external-gate stages then repeat container identity, health,
+fatal-log, sidecar, and sole-port-8001 checks. The body-free VRAM record is an
+observation, not a second post-request headroom acceptance claim.
 
 Any post-mutation failure runs exact automatic rollback to the captured stable
 container IDs. The publish bridge is permanent code-owned infrastructure: its
