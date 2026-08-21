@@ -53,6 +53,20 @@ recovery set. Обычный disaster-recovery snapshot остаётся ост�
 Telegram/Syncthing-Fork steps, смысл статусов и acceptance-чеклист см. в
 [OBSIDIAN_ANDROID.md](OBSIDIAN_ANDROID.md).
 
+Первое включение в живой immutable-install не делается ручным изменением
+канонического `.env.local`. Сначала schema-35 `rc1` принимается с Obsidian в
+режиме `disabled` и с точными bytes исходного `ENV0`. Затем рядом с activation
+journal в owner-private `state_dir` готовится отдельный `ENV1`: exact `ENV0`
+плюс утверждённые Obsidian-параметры. Финальный `activate` получает одновременно
+`--env-file-sha256 <ENV0_SHA256>`,
+`--terminal-journal-env-sha256 <ENV0_SHA256>`, `--next-env-file <ENV1>` и
+`--next-env-file-sha256 <ENV1_SHA256>`. Оператор проверяет оба конфига до
+остановки writers, сохраняет канонический `ENV0` до полностью проверенной копии
+SQLite/WAL, inbox и exact Obsidian root, после чего атомарно и durable публикует
+`ENV1`. При успехе staged-файл удаляется и это отсутствие fsync-подтверждается;
+при crash продолжение выполняется только `recover-activation` в identity из
+journal, без ручного запуска systemd или восстановления отдельных файлов.
+
 ## 2. Что проверяет doctor
 
 ```powershell
