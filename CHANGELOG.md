@@ -1,3 +1,16 @@
+## 0.206.2 — 2026-08-21
+
+### V12 post-context idle проверяется с bounded convergence
+
+- После успешного long-context ответа live-аттестация больше не принимает
+  мгновенный SGLang `running` как окончательный отказ: только валидный busy-sample
+  той же process epoch может повторяться до 2 секунд с интервалом 50 мс. Invalid
+  sample, transport failure и смена epoch по-прежнему завершают probe немедленно;
+  истёкший global/local deadline никогда не превращается в успех. Initial idle и
+  две post-cancellation quiet-проверки остаются строгими. Политика convergence
+  связана новым `probe_suite_sha256`; `profile_id` остаётся
+  `qwen38-27b-nvfp4-sglang:dispatcher:v12.14`.
+
 ## 0.206.1 — 2026-08-21
 
 ### V12 context probe требует bare JSON

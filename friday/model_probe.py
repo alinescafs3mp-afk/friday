@@ -56,6 +56,8 @@ CANCELLATION_TIMEOUT_SEC = 6.0
 REMOTE_QUEUE_DRAIN_MAX_MS = 5_000
 POST_CANCELLATION_QUIET_OBSERVATIONS = 2
 POST_CANCELLATION_QUIET_INTERVAL_SEC = 0.05
+POST_CONTEXT_IDLE_CONVERGENCE_TIMEOUT_SEC = 2.0
+POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC = 0.05
 TASK_CANCELLATION_DRAIN_SEC = 0.05
 MAX_COMPLETION_CHARS = 65_536
 
@@ -509,7 +511,7 @@ def _probe_suite_manifest() -> Mapping[str, object]:
     """Return the complete, code-owned semantics covered by the suite hash."""
 
     return {
-        "schema": "friday.qwen36-27b-v12-probe-suite.v3",
+        "schema": "friday.qwen36-27b-v12-probe-suite.v4",
         "completion_contract": {
             "max_chars": MAX_COMPLETION_CHARS,
             "finish_reason": "stop",
@@ -522,6 +524,7 @@ def _probe_suite_manifest() -> Mapping[str, object]:
             "verifier": VERIFIER_TIMEOUT_SEC,
             "context": CONTEXT_TIMEOUT_SEC,
             "load": LOAD_TIMEOUT_SEC,
+            "post_context_idle_convergence": POST_CONTEXT_IDLE_CONVERGENCE_TIMEOUT_SEC,
             "cancellation": CANCELLATION_TIMEOUT_SEC,
             "task_cancellation_drain": TASK_CANCELLATION_DRAIN_SEC,
         },
@@ -615,7 +618,15 @@ def _probe_suite_manifest() -> Mapping[str, object]:
                 "same_process_epoch": True,
             },
         },
-        "load_validator": "finite-nonnegative-idle-same-positive-epoch.v1",
+        "load_validator": {
+            "version": "finite-nonnegative-idle-same-positive-epoch.v2",
+            "post_context_idle_convergence": {
+                "retry_interval_sec": POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC,
+                "retry_only": ModelProbeFailure.MODEL_BUSY.value,
+                "same_epoch_required_before_retry": True,
+                "strict_deadline": True,
+            },
+        },
         "attested_limits": {
             "context_tokens": 8_192,
             "prepared_evidence_items": 2,
@@ -908,6 +919,67 @@ async def _quiet_observation_interval(*, deadline: float) -> None:
     await asyncio.sleep(POST_CANCELLATION_QUIET_INTERVAL_SEC)
 
 
+def _post_context_convergence_failure(*, bounded_by_absolute_deadline: bool) -> ModelProbeError:
+    code = (
+        ModelProbeFailure.DEADLINE_EXHAUSTED if bounded_by_absolute_deadline else ModelProbeFailure.MODEL_BUSY
+    )
+    return ModelProbeError(code)
+
+
+def _require_post_context_convergence_active(
+    *,
+    convergence_deadline: float,
+    bounded_by_absolute_deadline: bool,
+) -> None:
+    if not math.isfinite(convergence_deadline) or time.monotonic() >= convergence_deadline:
+        raise _post_context_convergence_failure(bounded_by_absolute_deadline=bounded_by_absolute_deadline)
+
+
+async def _await_post_context_idle(
+    client: V12ModelProbeClient,
+    *,
+    process_epoch_sha256: str,
+    absolute_deadline: float,
+) -> ModelLoadSample:
+    """Allow only a short, same-epoch convergence of valid busy samples."""
+
+    started = time.monotonic()
+    local_deadline = started + POST_CONTEXT_IDLE_CONVERGENCE_TIMEOUT_SEC
+    bounded_by_absolute_deadline = absolute_deadline <= local_deadline
+    convergence_deadline = min(absolute_deadline, local_deadline)
+
+    while True:
+        sample = _load_sample(
+            await _bounded_call(
+                lambda: client.sample_load(absolute_deadline=absolute_deadline),
+                deadline=convergence_deadline,
+                ceiling=LOAD_TIMEOUT_SEC,
+                failure=ModelProbeFailure.LOAD_CALL_FAILED,
+            )
+        )
+        _require_same_epoch(process_epoch_sha256, sample)
+        _require_post_context_convergence_active(
+            convergence_deadline=convergence_deadline,
+            bounded_by_absolute_deadline=bounded_by_absolute_deadline,
+        )
+        try:
+            _require_idle(sample)
+        except ModelProbeError as exc:
+            if exc.code is not ModelProbeFailure.MODEL_BUSY:
+                raise
+        else:
+            return sample
+
+        remaining = convergence_deadline - time.monotonic()
+        if not math.isfinite(remaining) or remaining <= POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC:
+            raise _post_context_convergence_failure(bounded_by_absolute_deadline=bounded_by_absolute_deadline)
+        await asyncio.sleep(POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC)
+        _require_post_context_convergence_active(
+            convergence_deadline=convergence_deadline,
+            bounded_by_absolute_deadline=bounded_by_absolute_deadline,
+        )
+
+
 async def run_v12_live_probe(
     profile: V12ModelProfileSpec,
     client: V12ModelProbeClient,
@@ -983,16 +1055,11 @@ async def run_v12_live_probe(
     )
     _evaluate_context(context)
 
-    before_cancel = _load_sample(
-        await _bounded_call(
-            lambda: client.sample_load(absolute_deadline=absolute_deadline),
-            deadline=absolute_deadline,
-            ceiling=LOAD_TIMEOUT_SEC,
-            failure=ModelProbeFailure.LOAD_CALL_FAILED,
-        )
+    await _await_post_context_idle(
+        client,
+        process_epoch_sha256=first.process_epoch_sha256,
+        absolute_deadline=absolute_deadline,
     )
-    _require_same_epoch(first.process_epoch_sha256, before_cancel)
-    _require_idle(before_cancel)
 
     cancellation = await _bounded_call(
         lambda: client.cancel_and_drain(CANCELLATION_PROBE, absolute_deadline=absolute_deadline),

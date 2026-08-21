@@ -269,7 +269,7 @@ monitor; частичное исчезновение либо повторный
 mismatch mode/env/config или возвращённые строки не переходят автоматически и
 требуют review/remediation под исходной bound-config.
 
-0.206.1 использует SQLite schema 34. Новое поле имени загрузки принадлежит
+0.206.2 использует SQLite schema 34. Новое поле имени загрузки принадлежит
 точному message-bound alias и не переписывает канонический Raw Object. Миграция
 и исторический backfill разрешены только при остановленных backend/bridge,
 проверенной копии SQLite вместе с WAL и Telegram inbox, exact lease/identity
@@ -507,6 +507,12 @@ FRIDAY_ROUTER_CANARY_USER_IDS=owner
 FRIDAY_ROUTER_PLAN_TIMEOUT_SEC=12
 ```
 
+После принятого long-context ответа probe допускает только bounded convergence
+собственной SGLang load-метрики: до 2 секунд, один same-epoch valid busy-sample
+за попытку и пауза 50 мс. Invalid sample, transport failure, epoch drift и любой
+исчерпанный deadline немедленно fail-closed; initial idle и post-cancellation
+quiet observations не смягчаются.
+
 Startup probe синхронный и может занять до 330 секунд. При контролируемом
 переключении сначала штатно остановите bridge, затем запустите backend и не
 возвращайте bridge до полного health-подтверждения:
@@ -522,7 +528,7 @@ orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.206.1`.
+требуйте `status=ok` и `version=0.206.2`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

@@ -14,6 +14,7 @@ from friday.agent_runtime.llm import LLMRouter
 from friday.model_probe import (
     CONTEXT_PROBE,
     PLAN_PROBE_CASES,
+    POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC,
     SYNTHESIS_PROBE,
     CancellationProbeRequest,
     ModelProbeError,
@@ -94,6 +95,8 @@ class _MetricsTransport:
         self._router = router
         self.bodies = list(bodies or [_metrics()])
         self.calls: list[tuple[int, float]] = []
+        self.call_times: list[float] = []
+        self.returned_bodies: list[bytes] = []
 
     @property
     def bound_router(self) -> LLMRouter:
@@ -101,9 +104,10 @@ class _MetricsTransport:
 
     async def fetch_metrics(self, *, maximum_bytes: int, absolute_deadline: float) -> bytes:
         self.calls.append((maximum_bytes, absolute_deadline))
-        if len(self.bodies) > 1:
-            return self.bodies.pop(0)
-        return self.bodies[0]
+        self.call_times.append(time.monotonic())
+        body = self.bodies.pop(0) if len(self.bodies) > 1 else self.bodies[0]
+        self.returned_bodies.append(body)
+        return body
 
     async def fetch_model_inventory(
         self,
@@ -553,6 +557,7 @@ async def test_runtime_can_install_only_the_complete_live_probe_result(settings)
         settings,
         metrics=[
             _metrics(),
+            _metrics(running="1"),
             _metrics(),
             _metrics(),
             _metrics(running="1"),
@@ -580,7 +585,11 @@ async def test_runtime_can_install_only_the_complete_live_probe_result(settings)
     assert runtime.public_status()["status"] == "canary_ready"
     assert len(completion.calls) == len(PLAN_PROBE_CASES) + 7
     assert completion.pending.cancel_calls == 1
-    assert len(metrics.calls) == 9
+    assert [
+        (_parse_metrics(body, served_model_alias="dispatcher").running) for body in metrics.returned_bodies
+    ] == [0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+    assert len(metrics.calls) == 10
+    assert metrics.call_times[2] - metrics.call_times[1] >= POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC * 0.9
 
 
 async def _no_sleep(_delay: float) -> None:

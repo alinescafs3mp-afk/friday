@@ -2,8 +2,11 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.206.1**. Это patch-релиз с code-owned
-поиском собственной истории по точным временным окнам и тематической
+Текущая версия: **0.206.2**. Это patch-релиз с fail-closed bounded
+post-context idle convergence для V12 live-аттестации: повтор разрешён только
+для валидного busy-sample той же process epoch, а invalid sample, epoch drift и
+deadline немедленно закрывают probe. Остальные возможности включают code-owned
+поиск собственной истории по точным временным окнам и тематической
 лексике, bounded-поиском по содержимому и сохранённым именам собственных
 файлов, строгими page/failure-границами поддерживаемых PDF/JPEG/OCR-путей и
 recoverable Telegram media groups. `DocumentCatalog`, единый `archive_search`,
@@ -291,7 +294,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Успешный canary startup должен показать в `/api/health` версию `0.206.1`,
+Успешный canary startup должен показать в `/api/health` версию `0.206.2`,
 точный profile id, `canary_ready`, `live_attestation_clear` и оба
 зарегистрированных route; простого HTTP `status=ok` недостаточно.
 

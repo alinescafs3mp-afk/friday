@@ -774,6 +774,130 @@ async def test_queue_must_be_idle_and_process_epoch_stable(
 
 
 @pytest.mark.asyncio
+async def test_post_context_valid_busy_sample_converges_to_same_epoch_idle() -> None:
+    client = _Client()
+    client.loads = [
+        ModelLoadSample(0, 0, _EPOCH_SHA256),
+        ModelLoadSample(1, 0, _EPOCH_SHA256),
+        ModelLoadSample(0, 0, _EPOCH_SHA256),
+        ModelLoadSample(0, 0, _EPOCH_SHA256),
+        ModelLoadSample(0, 0, _EPOCH_SHA256),
+    ]
+
+    await _run(client)
+
+    assert len(client.load_times) == 5
+    assert (
+        client.load_times[2] - client.load_times[1]
+        >= model_probe_module.POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC * 0.9
+    )
+
+
+@pytest.mark.asyncio
+async def test_post_context_idle_convergence_fails_closed_when_busy_persists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(model_probe_module, "POST_CONTEXT_IDLE_CONVERGENCE_TIMEOUT_SEC", 0.03)
+    monkeypatch.setattr(model_probe_module, "POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC", 0.005)
+    client = _Client()
+    client.loads = [ModelLoadSample(1, 0, _EPOCH_SHA256)]
+    started = time.monotonic()
+
+    with pytest.raises(ModelProbeError) as raised:
+        await model_probe_module._await_post_context_idle(
+            client,
+            process_epoch_sha256=_EPOCH_SHA256,
+            absolute_deadline=time.monotonic() + 1,
+        )
+
+    assert raised.value.code is ModelProbeFailure.MODEL_BUSY
+    assert client.load_index >= 2
+    assert time.monotonic() - started < 0.2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("loads", "raise_phase", "expected"),
+    [
+        (
+            [
+                ModelLoadSample(1, 0, _EPOCH_SHA256),
+                ModelLoadSample(0, 0, _OTHER_EPOCH_SHA256),
+            ],
+            "",
+            ModelProbeFailure.EPOCH_CHANGED,
+        ),
+        (
+            [ModelLoadSample(float("nan"), 0, _EPOCH_SHA256)],
+            "",
+            ModelProbeFailure.LOAD_INVALID,
+        ),
+        (
+            [ModelLoadSample(1, 0, _EPOCH_SHA256)],
+            "load",
+            ModelProbeFailure.LOAD_CALL_FAILED,
+        ),
+    ],
+)
+async def test_post_context_idle_convergence_retries_only_valid_same_epoch_busy(
+    loads: list[ModelLoadSample],
+    raise_phase: str,
+    expected: ModelProbeFailure,
+) -> None:
+    client = _Client()
+    client.loads = loads
+    client.raise_phase = raise_phase
+
+    with pytest.raises(ModelProbeError) as raised:
+        await model_probe_module._await_post_context_idle(
+            client,
+            process_epoch_sha256=_EPOCH_SHA256,
+            absolute_deadline=time.monotonic() + 1,
+        )
+
+    assert raised.value.code is expected
+    assert client.load_index <= 2
+
+
+@pytest.mark.asyncio
+async def test_post_context_idle_convergence_obeys_global_deadline() -> None:
+    client = _Client()
+    client.loads = [ModelLoadSample(1, 0, _EPOCH_SHA256)]
+
+    with pytest.raises(ModelProbeError) as raised:
+        await model_probe_module._await_post_context_idle(
+            client,
+            process_epoch_sha256=_EPOCH_SHA256,
+            absolute_deadline=(
+                time.monotonic() + model_probe_module.POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC / 2
+            ),
+        )
+
+    assert raised.value.code is ModelProbeFailure.DEADLINE_EXHAUSTED
+    assert client.load_index == 1
+
+
+@pytest.mark.asyncio
+async def test_post_context_idle_convergence_never_accepts_late_idle() -> None:
+    class _LateIdleClient(_Client):
+        async def sample_load(self, *, absolute_deadline: float) -> ModelLoadSample:
+            self.deadlines.append(absolute_deadline)
+            await asyncio.sleep(0.03)
+            return ModelLoadSample(0, 0, _EPOCH_SHA256)
+
+    client = _LateIdleClient()
+
+    with pytest.raises(ModelProbeError) as raised:
+        await model_probe_module._await_post_context_idle(
+            client,
+            process_epoch_sha256=_EPOCH_SHA256,
+            absolute_deadline=time.monotonic() + 0.01,
+        )
+
+    assert raised.value.code is ModelProbeFailure.DEADLINE_EXHAUSTED
+
+
+@pytest.mark.asyncio
 async def test_post_cancellation_queue_must_remain_quiet_across_separated_observations() -> None:
     client = _Client()
     client.loads = [
@@ -940,7 +1064,15 @@ def test_probe_module_has_no_environment_file_or_network_implementation() -> Non
 
 @pytest.mark.parametrize(
     "mutation",
-    ["prompt", "validator", "case_semantics", "timeout", "cancellation_contract"],
+    [
+        "prompt",
+        "validator",
+        "case_semantics",
+        "timeout",
+        "cancellation_contract",
+        "idle_convergence_timeout",
+        "idle_convergence_interval",
+    ],
 )
 def test_suite_hash_commits_to_prompts_validators_cases_timeouts_and_cancellation(
     monkeypatch: pytest.MonkeyPatch,
@@ -977,11 +1109,23 @@ def test_suite_hash_commits_to_prompts_validators_cases_timeouts_and_cancellatio
             "SYNTHESIS_TIMEOUT_SEC",
             model_probe_module.SYNTHESIS_TIMEOUT_SEC + 1,
         )
-    else:
+    elif mutation == "cancellation_contract":
         monkeypatch.setattr(
             model_probe_module,
             "POST_CANCELLATION_QUIET_OBSERVATIONS",
             model_probe_module.POST_CANCELLATION_QUIET_OBSERVATIONS + 1,
+        )
+    elif mutation == "idle_convergence_timeout":
+        monkeypatch.setattr(
+            model_probe_module,
+            "POST_CONTEXT_IDLE_CONVERGENCE_TIMEOUT_SEC",
+            model_probe_module.POST_CONTEXT_IDLE_CONVERGENCE_TIMEOUT_SEC + 1,
+        )
+    else:
+        monkeypatch.setattr(
+            model_probe_module,
+            "POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC",
+            model_probe_module.POST_CONTEXT_IDLE_RETRY_INTERVAL_SEC + 0.01,
         )
 
     assert model_probe_module._probe_suite_sha256() != baseline
