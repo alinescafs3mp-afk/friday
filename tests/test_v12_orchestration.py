@@ -575,6 +575,9 @@ def test_server_wires_bounded_dynamic_model_gate_status_to_organs(
         def routers(self):
             return ()
 
+        def tools(self, _ctx):
+            return ()
+
         def workers(self, ctx):
             captured_contexts.append(ctx)
             return ()

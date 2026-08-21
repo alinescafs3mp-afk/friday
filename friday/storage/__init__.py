@@ -41,6 +41,7 @@ from friday.storage._intake import IntakeMixin
 from friday.storage._knowledge import KnowledgeMixin
 from friday.storage._maintenance import MaintenanceMixin
 from friday.storage._missions import MissionsMixin
+from friday.storage._obsidian import ObsidianMixin
 from friday.storage._oversight import OversightMixin
 from friday.storage._runtime import RuntimeMixin
 from friday.storage._vectors import VectorsMixin
@@ -81,6 +82,7 @@ class FridayStorage(
     MaintenanceMixin,
     MissionsMixin,
     OversightMixin,
+    ObsidianMixin,
     RuntimeMixin,
     VectorsMixin,
 ):

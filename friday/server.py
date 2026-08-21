@@ -1602,6 +1602,12 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         raise ValueError(
             f"Unknown FRIDAY_MEMORY_VAULT_MODE={settings.memory_vault_mode!r}. Valid values: {valid}"
         )
+    obsidian_health_identity = {
+        "mode": "enabled" if settings.obsidian_enabled else "disabled",
+        "root_sha256": hashlib.sha256(
+            str(settings.obsidian_effective_root).encode("utf-8", errors="strict")
+        ).hexdigest(),
+    }
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -1726,6 +1732,34 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     ),
                 )
 
+            obsidian_runtime = None
+            if settings.obsidian_enabled:
+                from friday.organs.obsidian.runtime import ObsidianRuntime
+                from friday.organs.obsidian.syncthing import (
+                    SyncthingProcessManager,
+                    SyncthingProcessSupervisor,
+                    SyncthingRestClient,
+                )
+
+                def make_obsidian_supervisor(spec):
+                    return SyncthingProcessSupervisor(
+                        spec,
+                        client_factory=lambda profile, key: SyncthingRestClient(
+                            profile.make_transport(),
+                            key,
+                            timeout=settings.obsidian_rest_timeout_sec,
+                        ),
+                    )
+
+                obsidian_runtime = ObsidianRuntime(
+                    settings,
+                    storage,
+                    SyncthingProcessManager(
+                        max_profiles=settings.obsidian_max_profiles,
+                        supervisor_factory=make_obsidian_supervisor,
+                    ),
+                )
+
             # Organs (JOP): register their capabilities, mount their routers, and
             # feed their background workers into the supervisor. All additive.
             organs = build_registry(settings)
@@ -1743,7 +1777,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     attempted_v12_runtime,
                     startup_reason=v12_startup_reason,
                 ),
+                obsidian=obsidian_runtime,
             )
+            for tool in organs.tools(organ_ctx):
+                kernel.register(tool)
+            kernel.assert_risk_declarations_agree()
             organ_workers = [
                 IntervalTask(
                     name=worker.name,
@@ -1785,6 +1823,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.executive = executive
             application.state.memory_vault = memory_vault
             application.state.memory_vault_deletion = memory_vault_deletion
+            application.state.obsidian_runtime = obsidian_runtime
             application.state.workers = workers
             application.state.organs = organs
             application.state.rate_limiter = SlidingWindowLimiter()
@@ -1799,6 +1838,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 except BaseException:
                     if mcp_manager is not None:
                         await mcp_manager.close()
+                    if obsidian_runtime is not None:
+                        await obsidian_runtime.close()
                     raise
             application.state.mcp = mcp_manager
             try:
@@ -1806,6 +1847,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             except BaseException:
                 if mcp_manager is not None:
                     await mcp_manager.close()
+                if obsidian_runtime is not None:
+                    await obsidian_runtime.close()
                 raise
             LOGGER.info("Friday API started on configured interface, port %d", settings.api_port)
             try:
@@ -1814,6 +1857,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 if isinstance(agent, OrchestrationRouter):
                     await agent.close()
                 await workers.stop()
+                if obsidian_runtime is not None:
+                    await obsidian_runtime.close()
                 await web_surfer.close()
                 if mcp_manager is not None:
                     await mcp_manager.close()
@@ -1923,8 +1968,34 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             or path == "/health"
             or path == "/admin"
             or path.startswith("/admin/")
+            or (
+                settings.obsidian_enabled
+                and path
+                in {
+                    "/obsidian/setup",
+                    "/obsidian/setup.js",
+                    "/obsidian/open",
+                    "/obsidian/open.js",
+                    "/api/public/obsidian/setup/resolve",
+                }
+            )
         )
-        if request.method == "OPTIONS" or public:
+        if request.method == "POST" and path == "/api/public/obsidian/setup/resolve" and public:
+            public_limiter: SlidingWindowLimiter = request.app.state.rate_limiter
+            allowed = await public_limiter.allow(
+                f"obsidian-public-setup:{request.state.client_ip}",
+                settings.obsidian_public_setup_rate_limit_per_minute,
+            )
+            if not allowed:
+                response = JSONResponse(
+                    {"detail": "Public Obsidian setup rate limit exceeded"},
+                    status_code=429,
+                    headers={"Retry-After": "60"},
+                )
+            else:
+                with bind_audit_request_id(request.state.request_id):
+                    response = await call_next(request)
+        elif request.method == "OPTIONS" or public:
             with bind_audit_request_id(request.state.request_id):
                 response = await call_next(request)
         else:
@@ -2114,6 +2185,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 "body_free_mode": settings.memory_vault_mode == "disabled",
                 "body_projection_enabled": settings.memory_vault_mode == "full_owner",
             },
+            "obsidian": dict(obsidian_health_identity),
             "orchestration": {
                 "schema": "friday.v12-orchestration-health.v1",
                 "configured_mode": settings.router_mode,

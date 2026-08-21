@@ -65,6 +65,13 @@ class _Scope:
 # target's entity set.  ``relation_revisions`` is counted separately and blocks:
 # its append-only trigger correctly refuses ordinary DELETE.
 _DELETE_SCOPES: tuple[_Scope, ...] = (
+    _Scope("obsidian_conflicts", "obsidian_conflicts", "user_id=?"),
+    _Scope("obsidian_operations", "obsidian_operations", "user_id=?"),
+    _Scope("obsidian_pairing_candidates", "obsidian_pairing_candidates", "user_id=?"),
+    _Scope("obsidian_onboarding_sessions", "obsidian_onboarding_sessions", "user_id=?"),
+    _Scope("obsidian_vaults", "obsidian_vaults", "user_id=?"),
+    _Scope("obsidian_android_devices", "obsidian_android_devices", "user_id=?"),
+    _Scope("obsidian_sync_profiles", "obsidian_sync_profiles", "user_id=?"),
     _Scope(
         "private_entity_owners",
         "private_entity_owners",
@@ -183,6 +190,12 @@ def _safe_component(user_id: str) -> str:
 
 def _account_files_directory(storage: FridayStorage, user_id: str) -> Path:
     return Path(storage.settings.files_dir) / _safe_component(user_id)
+
+
+def _obsidian_account_directory(storage: FridayStorage, user_id: str) -> Path:
+    from friday.organs.obsidian.syncthing import owner_filesystem_key
+
+    return storage.settings.obsidian_effective_root / "users" / owner_filesystem_key(user_id)
 
 
 def _path_state(path: Path) -> str:
@@ -965,6 +978,7 @@ _BLOCKER_MESSAGES = {
     "stored_files": "У аккаунта есть сохранённые файлы; требуется согласованное файловое удаление.",
     "file_directory": "Каталог файлов не пуст, небезопасен или недоступен.",
     "vault_directory": "Проекция Memory Vault не пуста, небезопасна или недоступна.",
+    "obsidian_directory": "Профиль или vault Obsidian не пуст; сначала остановите синхронизацию и удалите его согласованно.",
     "export_artifacts": "Ранее созданный JSON-экспорт аккаунта сохранён вне базы; сначала удалите его вручную.",
     "export_directory": "Каталог экспортов небезопасен или недоступен для проверки.",
     "shared_owned_data": "Часть данных создана внутри другого (общего) арендатора; нужна явная политика архива.",
@@ -1088,6 +1102,7 @@ def _preflight(
     path_states = {
         "files": _path_state(files_dir),
         "vault": _vault_account_state(storage, user_id),
+        "obsidian": _path_state(_obsidian_account_directory(storage, user_id)),
         "exports": export_state,
     }
     if export_artifacts:
@@ -1122,6 +1137,8 @@ def _preflight(
         block("file_directory")
     if path_states["vault"] not in {"absent", "empty"}:
         block("vault_directory")
+    if path_states["obsidian"] not in {"absent", "empty"}:
+        block("obsidian_directory")
     if export_artifacts:
         block("export_artifacts", export_artifacts)
     if export_state in {"unsafe", "unreadable"}:
@@ -1419,6 +1436,9 @@ def delete_account(
     with suppress(VaultProjectionBoundaryError):
         if MemoryVaultDeletionHandle(storage.settings.memory_vault_dir).remove_empty_account(user_id):
             empty_directories_removed += 1
+    with suppress(OSError):
+        _obsidian_account_directory(storage, user_id).rmdir()
+        empty_directories_removed += 1
     retained = dict(report["retained"])
     retained["audit_log"] = int(retained.get("audit_log") or 0) + 1
     return {

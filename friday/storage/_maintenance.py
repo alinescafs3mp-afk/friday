@@ -460,6 +460,7 @@ class MaintenanceMixin(StorageShared):
                 "sqlite_database": "included",
                 "raw_files": "external",
                 "memory_vault": "external",
+                "obsidian_profiles_and_vaults": "external",
                 "model_weights": "external",
                 "configuration_and_secrets": "external",
             },
@@ -838,6 +839,7 @@ class MaintenanceMixin(StorageShared):
                     "sqlite_database": "restored",
                     "raw_files": "unchanged",
                     "memory_vault": "unchanged",
+                    "obsidian_profiles_and_vaults": "unchanged",
                     "telegram_queue": "unchanged",
                     "model_weights": "unchanged",
                     "configuration_and_secrets": "unchanged",
@@ -969,6 +971,34 @@ class MaintenanceMixin(StorageShared):
             table_queries = {
                 # Personal account state is already stored by own_id, not by the
                 # shared archive tenant.
+                "obsidian_sync_profiles": (
+                    "SELECT * FROM obsidian_sync_profiles WHERE user_id=?",
+                    (user_id,),
+                ),
+                "obsidian_android_devices": (
+                    "SELECT * FROM obsidian_android_devices WHERE user_id=?",
+                    (user_id,),
+                ),
+                "obsidian_vaults": (
+                    "SELECT * FROM obsidian_vaults WHERE user_id=?",
+                    (user_id,),
+                ),
+                "obsidian_onboarding_sessions": (
+                    "SELECT * FROM obsidian_onboarding_sessions WHERE user_id=?",
+                    (user_id,),
+                ),
+                "obsidian_pairing_candidates": (
+                    "SELECT * FROM obsidian_pairing_candidates WHERE user_id=?",
+                    (user_id,),
+                ),
+                "obsidian_operations": (
+                    "SELECT * FROM obsidian_operations WHERE user_id=?",
+                    (user_id,),
+                ),
+                "obsidian_conflicts": (
+                    "SELECT * FROM obsidian_conflicts WHERE user_id=?",
+                    (user_id,),
+                ),
                 "user_identities": ("SELECT * FROM user_identities WHERE user_id=?", (user_id,)),
                 "raw_objects": ("SELECT * FROM raw_objects WHERE user_id=?", (user_id,)),
                 "knowledge_objects": ("SELECT * FROM knowledge_objects WHERE user_id=?", (user_id,)),

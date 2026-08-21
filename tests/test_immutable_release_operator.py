@@ -14,7 +14,7 @@ import venv
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -63,6 +63,11 @@ class FakePort:
         self.events: list[str] = []
         self.active: operator.ReleaseIdentity | None = None
         self.leases_held = False
+        self.obsidian_mode = "enabled"
+        self.predecessor_env_sha256 = ""
+        self.canonical_env_sha256 = ""
+        self.next_env_file = Path("/private-state/next.env")
+        self.next_env_file_sha256 = ""
         self.backup = operator.DatabaseBackup(
             schema_version=backup_schema,
             receipt_sha256="b" * 64,
@@ -84,7 +89,13 @@ class FakePort:
             "memory_vault_mode": self.memory_vault_mode,
         }
 
-    def verify_release(self, release: operator.ReleaseIdentity) -> None:
+    def verify_release(
+        self,
+        release: operator.ReleaseIdentity,
+        *,
+        use_predecessor_config: bool = False,
+    ) -> None:
+        del use_predecessor_config
         self._event(f"verify:{release.root.name}")
 
     def verify_units(self, candidate: operator.ReleaseIdentity) -> None:
@@ -114,6 +125,56 @@ class FakePort:
     def release_writer_leases(self) -> None:
         self._event("release_leases")
         self.leases_held = False
+
+    def validate_staged_config_transition(
+        self,
+        transition: str,
+        predecessor_env_sha256: str,
+        next_env_file: Path,
+        next_env_file_sha256: str,
+    ) -> None:
+        assert transition == "obsidian_enable"
+        assert len(predecessor_env_sha256) == 64
+        assert len(next_env_file_sha256) == 64
+        if self.canonical_env_sha256:
+            assert self.canonical_env_sha256 == predecessor_env_sha256
+        self.predecessor_env_sha256 = predecessor_env_sha256
+        self.canonical_env_sha256 = predecessor_env_sha256
+        self.next_env_file = next_env_file
+        self.next_env_file_sha256 = next_env_file_sha256
+        self._event("validate_staged_config")
+
+    def activate_staged_config_transition(
+        self,
+        transition: str,
+        predecessor_env_sha256: str,
+        next_env_file: Path,
+        next_env_file_sha256: str,
+    ) -> None:
+        assert transition == "obsidian_enable"
+        assert self.canonical_env_sha256 in {"", predecessor_env_sha256, next_env_file_sha256}
+        self._event("activate_staged_config")
+        self.predecessor_env_sha256 = predecessor_env_sha256
+        self.canonical_env_sha256 = next_env_file_sha256
+        self.next_env_file = next_env_file
+        self.next_env_file_sha256 = next_env_file_sha256
+        self.obsidian_mode = "enabled"
+
+    def select_predecessor_config_transition(
+        self,
+        transition: str,
+        predecessor_env_sha256: str,
+        next_env_file: Path,
+        next_env_file_sha256: str,
+    ) -> None:
+        assert transition == "obsidian_enable"
+        assert self.canonical_env_sha256 in {"", predecessor_env_sha256}
+        self.predecessor_env_sha256 = predecessor_env_sha256
+        self.canonical_env_sha256 = predecessor_env_sha256
+        self.next_env_file = next_env_file
+        self.next_env_file_sha256 = next_env_file_sha256
+        self.obsidian_mode = "disabled"
+        self._event("select_predecessor_config")
 
     def backup_database(self) -> operator.DatabaseBackup:
         self._event("backup_db_wal_inbox")
@@ -172,9 +233,20 @@ class FakePort:
 
 
 class MemoryJournal:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        prebackup_config_transition: str = "",
+        predecessor_env_sha256: str = "",
+        next_env_file: Path | None = None,
+        next_env_file_sha256: str = "",
+    ) -> None:
         self.events: list[str] = []
         self.state: dict[str, object] = {}
+        self.prebackup_config_transition = prebackup_config_transition
+        self.predecessor_env_sha256 = predecessor_env_sha256
+        self.next_env_file = next_env_file
+        self.next_env_file_sha256 = next_env_file_sha256
 
     def begin(self, *, candidate, previous, fallback) -> None:
         self.events.append("prepared")
@@ -187,6 +259,10 @@ class MemoryJournal:
             "database_mutation_possible": False,
             "network_writer_uncertain": False,
             "writer_target": "",
+            "prebackup_config_transition": self.prebackup_config_transition,
+            "predecessor_env_sha256": self.predecessor_env_sha256,
+            "next_env_file": str(self.next_env_file) if self.next_env_file is not None else "",
+            "next_env_file_sha256": self.next_env_file_sha256,
         }
 
     def record(
@@ -261,6 +337,8 @@ def test_units_share_one_atomic_anchor_and_bound_restart_storm(tmp_path: Path) -
     for unit in units.values():
         assert f"ExecStart={anchor}/venv/bin/python -I -B -m friday.cli" in unit
         assert "StartLimitBurst=3" in unit
+        assert "KillMode=control-group" in unit
+        assert "UMask=0077" in unit
         assert "UnsetEnvironment=PYTHONPATH" in unit
         assert "candidate" not in unit
 
@@ -453,6 +531,167 @@ def test_every_prebackup_failure_restarts_clean_previous_without_database_restor
     assert port.active is releases.previous
 
 
+def test_obsidian_enable_prebackup_failure_keeps_disabled_env_before_previous_acceptance(
+    releases: Releases,
+) -> None:
+    class ModeBoundPort(FakePort):
+        def accept_backend(self, release: operator.ReleaseIdentity) -> None:
+            if release is releases.previous:
+                assert self.obsidian_mode == "disabled"
+                assert self.predecessor_env_sha256 == "7" * 64
+            super().accept_backend(release)
+
+    port = ModeBoundPort(fail="backup_db_wal_inbox")
+    journal = MemoryJournal(
+        prebackup_config_transition="obsidian_enable",
+        predecessor_env_sha256="7" * 64,
+        next_env_file=Path("/private-state/next.env"),
+        next_env_file_sha256="9" * 64,
+    )
+    with pytest.raises(operator.ReleaseFailure, match="activation_failed_rolled_back"):
+        operator.activate_release(
+            port,
+            journal,
+            candidate=releases.candidate,
+            previous=releases.previous,
+            schema_capable_fallback=releases.fallback,
+        )
+
+    assert "activate_staged_config" not in port.events
+    assert port.events.index("select_predecessor_config") < port.events.index("start_backend:clean-schema33")
+    assert port.canonical_env_sha256 == "7" * 64
+    assert journal.state["backup"] is None
+    assert journal.state["database_mutation_possible"] is False
+    assert journal.state["writer_target"] == "previous"
+    assert port.active is releases.previous
+
+
+def test_obsidian_enable_prebackup_recovery_keeps_disabled_env_before_restart(
+    releases: Releases,
+) -> None:
+    class ModeBoundPort(FakePort):
+        def accept_backend(self, release: operator.ReleaseIdentity) -> None:
+            if release is releases.previous:
+                assert self.obsidian_mode == "disabled"
+                assert self.predecessor_env_sha256 == "8" * 64
+            super().accept_backend(release)
+
+    journal = MemoryJournal(
+        prebackup_config_transition="obsidian_enable",
+        predecessor_env_sha256="8" * 64,
+        next_env_file=Path("/private-state/next.env"),
+        next_env_file_sha256="a" * 64,
+    )
+    journal.begin(
+        candidate=releases.candidate,
+        previous=releases.previous,
+        fallback=releases.fallback,
+    )
+    journal.record("bridge_stop_attempted")
+    journal.record("backend_stop_attempted")
+    port = ModeBoundPort()
+
+    receipt = operator.recover_interrupted_activation(port, journal)
+
+    assert receipt["status"] == "recovered"
+    assert "activate_staged_config" not in port.events
+    assert port.events.index("select_predecessor_config") < port.events.index("start_backend:clean-schema33")
+    assert port.canonical_env_sha256 == "8" * 64
+    assert journal.state["phase"] == "recovered"
+    assert journal.state["backup"] is None
+    assert journal.state["database_mutation_possible"] is False
+    assert journal.state["writer_target"] == "previous"
+    assert port.active is releases.previous
+
+
+def test_obsidian_enable_activates_staged_env_only_after_verified_backup(
+    releases: Releases,
+) -> None:
+    journal = MemoryJournal(
+        prebackup_config_transition="obsidian_enable",
+        predecessor_env_sha256="1" * 64,
+        next_env_file=Path("/private-state/next.env"),
+        next_env_file_sha256="2" * 64,
+    )
+
+    class BoundaryPort(FakePort):
+        def backup_database(self) -> operator.DatabaseBackup:
+            assert self.canonical_env_sha256 == "1" * 64
+            assert journal.state["phase"] == "leases_acquired"
+            return super().backup_database()
+
+        def offline_migrate(
+            self,
+            release: operator.ReleaseIdentity,
+            backup: operator.DatabaseBackup,
+        ) -> None:
+            assert self.canonical_env_sha256 == "2" * 64
+            assert journal.state["phase"] == "migration_attempted"
+            super().offline_migrate(release, backup)
+
+    port = BoundaryPort()
+    receipt = operator.activate_release(
+        port,
+        journal,
+        candidate=releases.candidate,
+        previous=releases.previous,
+        schema_capable_fallback=releases.fallback,
+    )
+
+    assert receipt["status"] == "clear"
+    assert journal.events.index("backup_complete") < journal.events.index("environment_swap_attempted")
+    assert journal.events.index("environment_swap_attempted") < journal.events.index("environment_active")
+    assert journal.events.index("environment_active") < journal.events.index("migration_attempted")
+    assert port.events.index("backup_db_wal_inbox") < port.events.index("activate_staged_config")
+    assert port.canonical_env_sha256 == "2" * 64
+
+
+@pytest.mark.parametrize(
+    ("phase", "canonical_sha256"),
+    [
+        ("backup_complete", "3" * 64),
+        ("environment_swap_attempted", "3" * 64),
+        ("environment_swap_attempted", "4" * 64),
+    ],
+)
+def test_obsidian_postbackup_recovery_converges_staged_env_before_writer_restart(
+    releases: Releases,
+    phase: str,
+    canonical_sha256: str,
+) -> None:
+    next_env_file = Path("/private-state/next.env")
+    journal = MemoryJournal(
+        prebackup_config_transition="obsidian_enable",
+        predecessor_env_sha256="3" * 64,
+        next_env_file=next_env_file,
+        next_env_file_sha256="4" * 64,
+    )
+    capable_previous = replace(
+        releases.previous,
+        obsidian_cutover_contract=operator.OBSIDIAN_CUTOVER_CONTRACT,
+    )
+    journal.begin(
+        candidate=releases.candidate,
+        previous=capable_previous,
+        fallback=releases.fallback,
+    )
+    journal.record("backup_complete", backup=FakePort().backup)
+    if phase == "environment_swap_attempted":
+        journal.record(phase, backup=journal.database_backup())
+    port = FakePort()
+    port.predecessor_env_sha256 = "3" * 64
+    port.canonical_env_sha256 = canonical_sha256
+    port.next_env_file = next_env_file
+    port.next_env_file_sha256 = "4" * 64
+
+    receipt = operator.recover_interrupted_activation(port, journal)
+
+    assert receipt["status"] == "recovered"
+    assert port.canonical_env_sha256 == "4" * 64
+    assert port.events.index("activate_staged_config") < port.events.index("start_backend:clean-schema33")
+    assert port.active is capable_previous
+
+
 def test_failure_after_bridge_start_never_runs_schema33_and_uses_schema34_fallback(
     releases: Releases,
 ) -> None:
@@ -591,6 +830,223 @@ def test_exact_database_and_inbox_backup_restores_schema33_bytes_before_bridge(
             backup_root=config.backup_dir,
             config_identity_sha256=config_identity,
         ).database_backup()
+
+
+def _obsidian_cutover_config(tmp_path: Path) -> operator.SystemdConfig:
+    port = _systemd_test_port(tmp_path)
+    connection = sqlite3.connect(port.config.database)
+    try:
+        connection.execute("CREATE TABLE schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+        connection.execute("INSERT INTO schema_meta VALUES('schema_version','35')")
+        connection.execute("INSERT INTO marker VALUES('database-before')")
+        connection.commit()
+    finally:
+        connection.close()
+    connection = sqlite3.connect(port.config.inbox_database)
+    try:
+        connection.execute("INSERT INTO marker VALUES('inbox-before')")
+        connection.commit()
+    finally:
+        connection.close()
+    port.config.database.chmod(0o600)
+    port.config.inbox_database.chmod(0o600)
+    root = operator._obsidian_root(port.config)  # noqa: SLF001
+    (root / "notes" / "empty").mkdir(parents=True, mode=0o700)
+    root.chmod(0o700)
+    (root / "notes").chmod(0o755)
+    (root / "notes" / "empty").chmod(0o755)
+    (root / "notes" / "entry.md").write_text("before\n", encoding="utf-8")
+    (root / "notes" / "entry.md").chmod(0o644)
+    return port.config
+
+
+def test_obsidian_root_is_restored_exactly_with_database_and_inbox(tmp_path: Path) -> None:
+    config = _obsidian_cutover_config(tmp_path)
+    root = operator._obsidian_root(config)  # noqa: SLF001
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    payload = backup.opaque
+    assert isinstance(payload, operator._ExactBackupPayload)  # noqa: SLF001
+    assert payload.obsidian is not None and payload.obsidian.present
+
+    connection = sqlite3.connect(config.database)
+    connection.execute("UPDATE marker SET value='database-after'")
+    connection.commit()
+    connection.close()
+    connection = sqlite3.connect(config.inbox_database)
+    connection.execute("UPDATE marker SET value='inbox-after'")
+    connection.commit()
+    connection.close()
+    (root / "notes" / "entry.md").write_text("after\n", encoding="utf-8")
+    (root / "notes" / "extra.md").write_text("extra\n", encoding="utf-8")
+    (root / "notes" / "extra.md").chmod(0o600)
+
+    operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
+    connection = sqlite3.connect(config.database)
+    assert connection.execute("SELECT value FROM marker").fetchone()[0] == "database-before"
+    connection.close()
+    connection = sqlite3.connect(config.inbox_database)
+    assert connection.execute("SELECT value FROM marker").fetchone()[0] == "inbox-before"
+    connection.close()
+    assert (root / "notes" / "entry.md").read_text(encoding="utf-8") == "before\n"
+    assert stat.S_IMODE((root / "notes").stat().st_mode) == 0o755
+    assert stat.S_IMODE((root / "notes" / "entry.md").stat().st_mode) == 0o644
+    assert (root / "notes" / "empty").is_dir()
+    assert not (root / "notes" / "extra.md").exists()
+
+
+@pytest.mark.parametrize("unsafe_kind", ["symlink", "hardlink", "fifo"])
+def test_obsidian_snapshot_rejects_unsafe_tree_entries(
+    tmp_path: Path,
+    unsafe_kind: str,
+) -> None:
+    config = _obsidian_cutover_config(tmp_path)
+    root = operator._obsidian_root(config)  # noqa: SLF001
+    source = root / "notes" / "entry.md"
+    if unsafe_kind == "symlink":
+        (root / "unsafe").symlink_to(source)
+    elif unsafe_kind == "hardlink":
+        os.link(source, root / "unsafe")
+    else:
+        os.mkfifo(root / "unsafe", mode=0o600)
+    with pytest.raises(operator.ReleaseFailure, match="obsidian_backup_source_invalid"):
+        operator._exact_sqlite_backup(config)  # noqa: SLF001
+
+
+def test_obsidian_snapshot_rejects_tree_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _obsidian_cutover_config(tmp_path)
+    root = operator._obsidian_root(config)  # noqa: SLF001
+    original = operator._capture_obsidian_tree  # noqa: SLF001
+    captures = 0
+
+    def capture(*args, **kwargs):
+        nonlocal captures
+        result = original(*args, **kwargs)
+        captures += 1
+        if captures == 1:
+            (root / "notes" / "entry.md").write_text("drift\n", encoding="utf-8")
+            (root / "notes" / "entry.md").chmod(0o600)
+        return result
+
+    monkeypatch.setattr(operator, "_capture_obsidian_tree", capture)
+    with pytest.raises(operator.ReleaseFailure, match="obsidian_backup_source_changed"):
+        operator._exact_sqlite_backup(config)  # noqa: SLF001
+
+
+def test_obsidian_private_manifest_enforces_the_restore_size_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _systemd_test_port(tmp_path).config
+    manifest = {
+        "schema": "friday.immutable-cutover-obsidian-root.v1",
+        "present": False,
+        "root": None,
+        "directories": [],
+        "files": [],
+    }
+    encoded = operator._canonical_json(manifest) + b"\n"  # noqa: SLF001
+    monkeypatch.setattr(
+        operator,
+        "_capture_obsidian_tree",
+        lambda *_args, **_kwargs: (manifest, ()),
+    )
+
+    accepted = tmp_path / "accepted-boundary"
+    accepted.mkdir(mode=0o700)
+    monkeypatch.setattr(operator, "MAX_EXACT_MANIFEST_BYTES", len(encoded))
+    descriptor = operator._snapshot_obsidian_root(config, accepted)  # noqa: SLF001
+    assert descriptor.present is False
+    assert (accepted / "obsidian-manifest.json").read_bytes() == encoded
+
+    rejected = tmp_path / "rejected-boundary"
+    rejected.mkdir(mode=0o700)
+    monkeypatch.setattr(operator, "MAX_EXACT_MANIFEST_BYTES", len(encoded) - 1)
+    with pytest.raises(operator.ReleaseFailure, match="obsidian_backup_manifest_bound_exceeded"):
+        operator._snapshot_obsidian_root(config, rejected)  # noqa: SLF001
+    assert not (rejected / "obsidian-manifest.json").exists()
+
+
+def test_obsidian_snapshot_self_verifies_before_backup_can_return(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _obsidian_cutover_config(tmp_path)
+    real_verify = operator._verify_obsidian_backup  # noqa: SLF001
+    verification_count = 0
+
+    def tamper_then_verify(directory, descriptor):
+        nonlocal verification_count
+        verification_count += 1
+        copied_note = directory / "obsidian-root" / "notes" / "entry.md"
+        copied_note.chmod(0o600)
+        copied_note.write_text("tampered before return\n", encoding="utf-8")
+        return real_verify(directory, descriptor)
+
+    monkeypatch.setattr(operator, "_verify_obsidian_backup", tamper_then_verify)
+    with pytest.raises(operator.ReleaseFailure, match="obsidian_backup_manifest_mismatch"):
+        operator._exact_sqlite_backup(config)  # noqa: SLF001
+    assert verification_count == 1
+
+
+def test_tampered_obsidian_backup_is_rejected_before_any_live_restore(tmp_path: Path) -> None:
+    config = _obsidian_cutover_config(tmp_path)
+    root = operator._obsidian_root(config)  # noqa: SLF001
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    payload = backup.opaque
+    assert isinstance(payload, operator._ExactBackupPayload)  # noqa: SLF001
+    connection = sqlite3.connect(config.database)
+    connection.execute("UPDATE marker SET value='live-database'")
+    connection.commit()
+    connection.close()
+    connection = sqlite3.connect(config.inbox_database)
+    connection.execute("UPDATE marker SET value='live-inbox'")
+    connection.commit()
+    connection.close()
+    live_root = root / "notes" / "entry.md"
+    live_root.write_text("live-root\n", encoding="utf-8")
+    live_root.chmod(0o600)
+    database_before = config.database.read_bytes()
+    inbox_before = config.inbox_database.read_bytes()
+    root_before = live_root.read_bytes()
+    backup_note = payload.directory / "obsidian-root" / "notes" / "entry.md"
+    backup_note.chmod(0o600)
+    backup_note.write_text("tampered\n", encoding="utf-8")
+
+    with pytest.raises(operator.ReleaseFailure, match="obsidian_backup_manifest_mismatch"):
+        operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
+    assert config.database.read_bytes() == database_before
+    assert config.inbox_database.read_bytes() == inbox_before
+    assert live_root.read_bytes() == root_before
+
+
+def test_obsidian_restore_replays_after_crash_between_quarantine_and_publish(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _obsidian_cutover_config(tmp_path)
+    root = operator._obsidian_root(config)  # noqa: SLF001
+    backup = operator._exact_sqlite_backup(config)  # noqa: SLF001
+    (root / "notes" / "entry.md").write_text("changed\n", encoding="utf-8")
+    (root / "notes" / "entry.md").chmod(0o600)
+    original_replace = operator.os.replace
+    crashed = False
+
+    def replace_once(source, destination):
+        nonlocal crashed
+        original_replace(source, destination)
+        if Path(source) == root and str(destination).endswith(".old") and not crashed:
+            crashed = True
+            raise RuntimeError("synthetic crash after quarantine")
+
+    monkeypatch.setattr(operator.os, "replace", replace_once)
+    with pytest.raises(RuntimeError, match="synthetic crash"):
+        operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
+    assert not root.exists()
+    operator._restore_exact_sqlite_backup(config, backup)  # noqa: SLF001
+    assert (root / "notes" / "entry.md").read_text(encoding="utf-8") == "before\n"
 
 
 def _album_payload(message_id: int, *, payload_marker: str = "") -> str:
@@ -762,6 +1218,8 @@ def _album_live_port(
         ),
         alias_claim_count=len(port.config.alias_claim_manifests),
         memory_vault_mode=port.config.memory_vault_mode,
+        obsidian_mode=port.config.obsidian_mode,
+        obsidian_root_sha256=operator._obsidian_root_sha256(port.config),  # noqa: SLF001
     )
     activation.begin(
         candidate=release,
@@ -1093,6 +1551,213 @@ def _systemd_test_port(tmp_path: Path) -> operator.SystemdActivationPort:
     )
 
 
+def test_systemd_port_stages_then_activates_environment_idempotently(tmp_path: Path) -> None:
+    base = _systemd_test_port(tmp_path)
+    predecessor = base.config.env_file.read_bytes()
+    predecessor_sha256 = hashlib.sha256(predecessor).hexdigest()
+    enabled = predecessor + b"FRIDAY_OBSIDIAN_ENABLED=1\n"
+    enabled_sha256 = hashlib.sha256(enabled).hexdigest()
+    staged = base.config.state_dir / "next.env"
+    staged.write_bytes(enabled)
+    staged.chmod(0o600)
+    operator._obsidian_root(base.config).mkdir(mode=0o700)  # noqa: SLF001
+    port = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            obsidian_mode="enabled",
+            next_env_file=staged,
+            next_env_file_sha256=enabled_sha256,
+        )
+    )
+
+    descriptor = ("obsidian_enable", predecessor_sha256, staged, enabled_sha256)
+    port.validate_staged_config_transition(*descriptor)
+    assert port.config.env_file.read_bytes() == predecessor
+    port.activate_staged_config_transition(*descriptor)
+    port.activate_staged_config_transition(*descriptor)
+
+    assert port.config.env_file.read_bytes() == enabled
+    assert port.config.env_file_sha256 == enabled_sha256
+    assert port.config.obsidian_mode == "enabled"
+    assert port.config.next_env_file is None
+    assert not staged.exists()
+
+
+@pytest.mark.parametrize("interruption", ["before_replace", "after_replace"])
+def test_systemd_port_resumes_environment_activation_after_interruption(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    interruption: str,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    predecessor = base.config.env_file.read_bytes()
+    predecessor_sha256 = hashlib.sha256(predecessor).hexdigest()
+    enabled = predecessor + b"FRIDAY_OBSIDIAN_ENABLED=1\n"
+    enabled_sha256 = hashlib.sha256(enabled).hexdigest()
+    staged = base.config.state_dir / "next.env"
+    staged.write_bytes(enabled)
+    staged.chmod(0o600)
+    operator._obsidian_root(base.config).mkdir(mode=0o700)  # noqa: SLF001
+    port = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            obsidian_mode="enabled",
+            next_env_file=staged,
+            next_env_file_sha256=enabled_sha256,
+        )
+    )
+    descriptor = ("obsidian_enable", predecessor_sha256, staged, enabled_sha256)
+    durable_replace = operator._replace_private_durable  # noqa: SLF001
+
+    def interrupt(path: Path, value: bytes) -> None:
+        if interruption == "after_replace":
+            durable_replace(path, value)
+        raise RuntimeError("synthetic interruption")
+
+    monkeypatch.setattr(operator, "_replace_private_durable", interrupt)
+    with pytest.raises(RuntimeError, match="synthetic interruption"):
+        port.activate_staged_config_transition(*descriptor)
+    expected_after_interruption = enabled if interruption == "after_replace" else predecessor
+    assert port.config.env_file.read_bytes() == expected_after_interruption
+    assert staged.read_bytes() == enabled
+
+    monkeypatch.setattr(operator, "_replace_private_durable", durable_replace)
+    port.activate_staged_config_transition(*descriptor)
+    assert port.config.env_file.read_bytes() == enabled
+    assert port.config.env_file_sha256 == enabled_sha256
+    assert not staged.exists()
+
+
+def test_systemd_port_selects_predecessor_without_replacing_canonical_env(tmp_path: Path) -> None:
+    base = _systemd_test_port(tmp_path)
+    predecessor = base.config.env_file.read_bytes()
+    predecessor_sha256 = hashlib.sha256(predecessor).hexdigest()
+    enabled = predecessor + b"FRIDAY_OBSIDIAN_ENABLED=1\n"
+    enabled_sha256 = hashlib.sha256(enabled).hexdigest()
+    staged = base.config.state_dir / "next.env"
+    staged.write_bytes(enabled)
+    staged.chmod(0o600)
+    operator._obsidian_root(base.config).mkdir(mode=0o700)  # noqa: SLF001
+    port = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            obsidian_mode="enabled",
+            next_env_file=staged,
+            next_env_file_sha256=enabled_sha256,
+        )
+    )
+
+    port.select_predecessor_config_transition("obsidian_enable", predecessor_sha256, staged, enabled_sha256)
+
+    assert port.config.env_file.read_bytes() == predecessor
+    assert port.config.env_file_sha256 == predecessor_sha256
+    assert port.config.obsidian_mode == "disabled"
+    assert staged.read_bytes() == enabled
+
+
+@pytest.mark.parametrize("tamper", ["staged", "current"])
+def test_systemd_port_rejects_unbound_staged_environment(
+    tmp_path: Path,
+    tamper: str,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    predecessor = base.config.env_file.read_bytes()
+    predecessor_sha256 = hashlib.sha256(predecessor).hexdigest()
+    enabled = predecessor + b"FRIDAY_OBSIDIAN_ENABLED=1\n"
+    enabled_sha256 = hashlib.sha256(enabled).hexdigest()
+    staged = base.config.state_dir / "next.env"
+    staged.write_bytes(enabled)
+    staged.chmod(0o600)
+    operator._obsidian_root(base.config).mkdir(mode=0o700)  # noqa: SLF001
+    port = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            obsidian_mode="enabled",
+            next_env_file=staged,
+            next_env_file_sha256=enabled_sha256,
+        )
+    )
+    target = staged if tamper == "staged" else port.config.env_file
+    target.write_bytes(b"unbound environment\n")
+    target.chmod(0o600)
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match=(
+            "next_environment_file_digest_mismatch"
+            if tamper == "staged"
+            else "staged_canonical_environment_changed"
+        ),
+    ):
+        port.activate_staged_config_transition("obsidian_enable", predecessor_sha256, staged, enabled_sha256)
+
+
+def test_systemd_release_verification_uses_staged_target_and_canonical_predecessor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    predecessor = base.config.env_file.read_bytes()
+    enabled = predecessor + b"FRIDAY_OBSIDIAN_ENABLED=1\n"
+    staged = base.config.state_dir / "next.env"
+    staged.write_bytes(enabled)
+    staged.chmod(0o600)
+    root = operator._obsidian_root(base.config)  # noqa: SLF001
+    root.mkdir(mode=0o700)
+    port = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            obsidian_mode="enabled",
+            next_env_file=staged,
+            next_env_file_sha256=hashlib.sha256(enabled).hexdigest(),
+        )
+    )
+    candidate = operator.ReleaseIdentity(
+        tmp_path / "schema35-candidate",
+        "a" * 40,
+        "0.207.0",
+        "b" * 64,
+        35,
+        operator.MEMORY_VAULT_MODE_CONTRACT,
+        operator.VENV_RELOCATION_CONTRACT,
+        operator.OBSIDIAN_CUTOVER_CONTRACT,
+    )
+    predecessor_release = replace(
+        candidate,
+        root=tmp_path / "schema34-previous",
+        commit="c" * 40,
+        version="0.206.0",
+        tree_manifest_sha256="d" * 64,
+        max_schema=34,
+        obsidian_cutover_contract="",
+    )
+    monkeypatch.setattr(operator, "verify_release_tree", lambda _release: None)
+    monkeypatch.setattr(operator, "installed_surface_smoke", lambda _release: "e" * 64)
+    observed_env_files: list[Path] = []
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        observed_env_files.append(Path(command[5]))
+        receipt = {
+            "memory_vault_mode": command[10],
+            "obsidian_mode": command[11],
+            "obsidian_root_sha256": hashlib.sha256(command[12].encode()).hexdigest(),
+            "status": "clear",
+        }
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=operator._canonical_json(receipt) + b"\n",  # noqa: SLF001
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(operator.subprocess, "run", run)
+    port.verify_release(candidate)
+    port.verify_release(predecessor_release, use_predecessor_config=True)
+
+    assert observed_env_files == [staged, base.config.env_file]
+    assert port.config.env_file.read_bytes() == predecessor
+
+
 def test_manager_units_are_exact_anchor_fragments_and_database_environment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1169,6 +1834,10 @@ def test_manager_units_are_exact_anchor_fragments_and_database_environment(
             stdout = " ".join(values).encode()
         elif "--property=Environment" in arguments:
             stdout = environment
+        elif "--property=KillMode" in arguments:
+            stdout = b"control-group\n"
+        elif "--property=UMask" in arguments:
+            stdout = b"0077\n"
         elif "--property=UnitFileState" in arguments:
             stdout = b"enabled\n"
         elif "--property=LimitCORE" in arguments:
@@ -1204,6 +1873,7 @@ def test_manager_units_are_exact_anchor_fragments_and_database_environment(
 def test_runtime_queue_path_is_structurally_and_candidate_settings_bound(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     port = _systemd_test_port(tmp_path)
     unrelated = port.config.state_dir / "unrelated-private.sqlite3"
@@ -1229,22 +1899,68 @@ def test_runtime_queue_path_is_structurally_and_candidate_settings_bound(
 
     def run(command, **kwargs):
         observed.append((list(command), dict(kwargs["env"])))
+        root_sha256 = hashlib.sha256(str(operator._obsidian_root(port.config)).encode()).hexdigest()  # noqa: SLF001
         return subprocess.CompletedProcess(
             command,
             0,
-            stdout=b'{"memory_vault_mode":"disabled","status":"clear"}\n',
+            stdout=(
+                json.dumps(
+                    {
+                        "memory_vault_mode": "disabled",
+                        "obsidian_mode": "disabled",
+                        "obsidian_root_sha256": root_sha256,
+                        "status": "clear",
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            ),
             stderr=b"",
         )
 
     monkeypatch.setattr(operator.subprocess, "run", run)
     port.verify_release(release)
-    assert observed[0][0][-4:] == [
+    assert observed[0][0][-7:] == [
         str(port.config.state_dir),
         str(port.config.database),
         str(port.config.inbox_database),
         "disabled",
+        "disabled",
+        str(operator._obsidian_root(port.config)),  # noqa: SLF001
+        "legacy",
     ]
     assert observed[0][1]["FRIDAY_DATABASE_PATH"] == str(port.config.database)
+
+    legacy_settings = SimpleNamespace(
+        home=port.config.friday_home,
+        state_dir=port.config.state_dir,
+        database_path=port.config.database,
+        database_must_exist=True,
+        memory_vault_mode="disabled",
+    )
+    validation_modes: list[bool] = []
+    legacy_config = ModuleType("friday.config")
+    legacy_config.load_local_env_file = lambda: None  # type: ignore[attr-defined]
+    legacy_config.load_settings = lambda: legacy_settings  # type: ignore[attr-defined]
+    legacy_config.validate_settings = (  # type: ignore[attr-defined]
+        lambda _settings, *, production: validation_modes.append(production) or []
+    )
+    monkeypatch.setitem(sys.modules, "friday.config", legacy_config)
+    probe_script = observed[0][0][4]
+    legacy_argv = ["-c", *observed[0][0][5:]]
+    monkeypatch.setattr(sys, "argv", legacy_argv)
+    monkeypatch.setenv("FRIDAY_ENV_FILE", str(port.config.env_file))
+    exec(compile(probe_script, "<legacy-runtime-config-probe>", "exec"), {})  # noqa: S102
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["obsidian_mode"] == "disabled"
+    assert validation_modes == [True]
+
+    enabled_legacy_argv = list(legacy_argv)
+    enabled_legacy_argv[7] = "enabled"
+    monkeypatch.setattr(sys, "argv", enabled_legacy_argv)
+    with pytest.raises(AssertionError):
+        exec(compile(probe_script, "<legacy-runtime-config-probe>", "exec"), {})  # noqa: S102
 
 
 def test_memory_vault_mode_is_bound_to_candidate_config_and_health(
@@ -1285,6 +2001,170 @@ def test_memory_vault_mode_is_bound_to_candidate_config_and_health(
     assert not operator._release_binds_memory_vault_mode(stale_same_version)  # noqa: SLF001
 
 
+def test_obsidian_health_identity_is_exact_with_only_a_legacy_disabled_omission(
+    tmp_path: Path,
+) -> None:
+    root_sha256 = "a" * 64
+    schema35 = operator.ReleaseIdentity(
+        tmp_path / "schema35",
+        "b" * 40,
+        "0.207.0",
+        "c" * 64,
+        35,
+        obsidian_cutover_contract=operator.OBSIDIAN_CUTOVER_CONTRACT,
+    )
+    legacy_previous = operator.ReleaseIdentity(
+        tmp_path / "legacy-previous",
+        "d" * 40,
+        "0.206.0",
+        "e" * 64,
+        34,
+    )
+    capable_schema34 = replace(
+        legacy_previous,
+        obsidian_cutover_contract=operator.OBSIDIAN_CUTOVER_CONTRACT,
+    )
+    exact = {"obsidian": {"mode": "enabled", "root_sha256": root_sha256}}
+
+    assert operator._obsidian_health_identity_matches(  # noqa: SLF001
+        exact,
+        schema35,
+        "enabled",
+        root_sha256,
+    )
+    assert not operator._obsidian_health_identity_matches(  # noqa: SLF001
+        {"obsidian": {**exact["obsidian"], "root": "/private/path"}},
+        schema35,
+        "enabled",
+        root_sha256,
+    )
+    assert not operator._obsidian_health_identity_matches(  # noqa: SLF001
+        {"obsidian": {"mode": "disabled", "root_sha256": root_sha256}},
+        schema35,
+        "enabled",
+        root_sha256,
+    )
+    assert not operator._obsidian_health_identity_matches(  # noqa: SLF001
+        {"obsidian": {"mode": "enabled", "root_sha256": "f" * 64}},
+        schema35,
+        "enabled",
+        root_sha256,
+    )
+    assert not operator._obsidian_health_identity_matches(  # noqa: SLF001
+        {},
+        schema35,
+        "disabled",
+        root_sha256,
+    )
+    assert operator._obsidian_health_identity_matches(  # noqa: SLF001
+        {},
+        legacy_previous,
+        "disabled",
+        root_sha256,
+    )
+    assert not operator._obsidian_health_identity_matches(  # noqa: SLF001
+        {},
+        legacy_previous,
+        "enabled",
+        root_sha256,
+    )
+    assert not operator._obsidian_health_identity_matches(  # noqa: SLF001
+        {},
+        capable_schema34,
+        "disabled",
+        root_sha256,
+    )
+
+
+def test_backend_acceptance_requires_the_exact_obsidian_health_attestation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    port = _systemd_test_port(tmp_path)
+    schema35 = operator.ReleaseIdentity(
+        tmp_path / "schema35",
+        "a" * 40,
+        "0.207.0",
+        "b" * 64,
+        35,
+        memory_vault_mode_contract=operator.MEMORY_VAULT_MODE_CONTRACT,
+        obsidian_cutover_contract=operator.OBSIDIAN_CUTOVER_CONTRACT,
+    )
+    legacy_previous = replace(
+        schema35,
+        root=tmp_path / "legacy-previous",
+        commit="c" * 40,
+        version="0.206.0",
+        tree_manifest_sha256="d" * 64,
+        max_schema=34,
+        obsidian_cutover_contract="",
+    )
+    current_payload: dict[str, object] = {}
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def geturl(self) -> str:
+            return port.config.health_url
+
+        def read(self, _limit: int) -> bytes:
+            return json.dumps(current_payload, separators=(",", ":")).encode("ascii")
+
+    class Opener:
+        def open(self, *_args: object, **_kwargs: object) -> Response:
+            return Response()
+
+    monkeypatch.setattr(
+        operator.ssl,
+        "create_default_context",
+        lambda **_kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(operator.urllib.request, "build_opener", lambda *_handlers: Opener())
+    monkeypatch.setattr(operator.time, "sleep", lambda _seconds: None)
+    accepted: list[operator.ReleaseIdentity] = []
+    monkeypatch.setattr(port, "_wait_process", lambda _unit, release, _role: accepted.append(release))
+
+    def health_payload(release: operator.ReleaseIdentity, *, include_obsidian: bool) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "status": "ok",
+            "version": release.version,
+            "memory_vault": {
+                "mode": "disabled",
+                "body_free_mode": True,
+                "body_projection_enabled": False,
+            },
+        }
+        if include_obsidian:
+            payload["obsidian"] = {
+                "mode": "disabled",
+                "root_sha256": operator._obsidian_root_sha256(port.config),  # noqa: SLF001
+            }
+        return payload
+
+    current_payload.update(health_payload(schema35, include_obsidian=True))
+    monkeypatch.setattr(operator.time, "monotonic", lambda: 0.0)
+    port.accept_backend(schema35)
+
+    current_payload.clear()
+    current_payload.update(health_payload(schema35, include_obsidian=False))
+    ticks = iter((0.0, 0.0, 421.0))
+    monkeypatch.setattr(operator.time, "monotonic", lambda: next(ticks))
+    with pytest.raises(operator.ReleaseFailure, match="backend_health_identity_timeout"):
+        port.accept_backend(schema35)
+
+    current_payload.clear()
+    current_payload.update(health_payload(legacy_previous, include_obsidian=False))
+    monkeypatch.setattr(operator.time, "monotonic", lambda: 0.0)
+    port.accept_backend(legacy_previous)
+    assert accepted == [schema35, legacy_previous]
+
+
 def test_release_mode_capability_not_semver_controls_legacy_acceptance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1319,9 +2199,17 @@ def test_release_mode_capability_not_semver_controls_legacy_acceptance(
 
     def run(command, **_kwargs):
         mode = "disabled" if "capable-0206" in str(command[0]) else "full_owner"
+        root_sha256 = hashlib.sha256(
+            str(operator._obsidian_root(disabled_port.config)).encode()  # noqa: SLF001
+        ).hexdigest()
         payload = (
             json.dumps(
-                {"memory_vault_mode": mode, "status": "clear"},
+                {
+                    "memory_vault_mode": mode,
+                    "obsidian_mode": "disabled",
+                    "obsidian_root_sha256": root_sha256,
+                    "status": "clear",
+                },
                 sort_keys=True,
                 separators=(",", ":"),
             ).encode("ascii")
@@ -2118,6 +3006,12 @@ def test_installed_surface_smoke_uses_one_hermetic_environment_and_cleans_it(
     live_state.mkdir(parents=True)
     (live_state / "friday.sqlite3").write_bytes(b"live-current")
     (live_state / "jericho.sqlite3").write_bytes(b"live-legacy")
+    smoke_temp_root = tmp_path / "code-owned-smoke-root"
+    smoke_temp_root.mkdir(mode=0o700)
+    hostile_tmp = live_home / "data/obsidian"
+    hostile_tmp.mkdir(mode=0o700)
+    monkeypatch.setenv("TMPDIR", str(hostile_tmp))
+    monkeypatch.setattr(operator, "_SMOKE_SCRATCH_ROOT", smoke_temp_root)
     poison = {
         "HOME": str(live_home),
         "PYTHONPATH": "/sentinel/import-injection",
@@ -2172,6 +3066,7 @@ def test_installed_surface_smoke_uses_one_hermetic_environment_and_cleans_it(
     assert all(first_environment is call[1]["env"] for call in observed[1:])
     scratch = Path(observed[0][1]["cwd"])
     assert all(scratch == Path(call[1]["cwd"]) for call in observed[1:])
+    assert scratch.parent == smoke_temp_root
     assert not scratch.is_relative_to(release.root)
     home = scratch / "home"
     data = home / "data"
@@ -2205,7 +3100,30 @@ def test_installed_surface_smoke_uses_one_hermetic_environment_and_cleans_it(
     ]
     assert observed[4][0][:4] == ["/bin/bash", "--noprofile", "--norc", "-c"]
     assert not scratch.exists()
+    assert list(hostile_tmp.iterdir()) == []
     assert all(os.environ[name] == value for name, value in poison.items())
+
+
+def test_smoke_scratch_root_rejects_release_and_runtime_overlap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = tmp_path / "release"
+    release.mkdir(mode=0o700)
+    monkeypatch.setattr(operator, "_SMOKE_SCRATCH_ROOT", release)
+    with (
+        pytest.raises(operator.ReleaseFailure, match="installed_surface_smoke_isolation_failed"),
+        operator._isolated_smoke_environment(release),  # noqa: SLF001
+    ):
+        pytest.fail("overlapping smoke root must not be entered")
+    assert list(release.iterdir()) == []
+
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    base = _systemd_test_port(runtime)
+    monkeypatch.setattr(operator, "_SMOKE_SCRATCH_ROOT", base.config.state_dir)
+    with pytest.raises(operator.ReleaseFailure, match="smoke_scratch_runtime_overlap"):
+        operator.SystemdActivationPort(base.config)
 
 
 def test_installed_surface_smoke_cleans_hermetic_root_after_probe_failure(
@@ -2343,10 +3261,11 @@ def test_actual_installed_source_smoke_ignores_a_poisoned_live_database(
         commit="a" * 40,
         version=version,
         tree_manifest_sha256="b" * 64,
-        max_schema=34,
+        max_schema=35,
         memory_vault_mode_contract=operator.MEMORY_VAULT_MODE_CONTRACT,
+        obsidian_cutover_contract=operator.OBSIDIAN_CUTOVER_CONTRACT,
     )
-    receipt = b'{"memory_vault_mode_contract":"v1","schema":34,"status":"clear"}\n'
+    receipt = b'{"memory_vault_mode_contract":"v1","schema":35,"status":"clear"}\n'
     assert operator.installed_surface_smoke(release) == hashlib.sha256(receipt).hexdigest()
     assert current_database.read_bytes() == b"live-current"
     assert legacy_database.read_bytes() == b"live-legacy"
@@ -2922,6 +3841,12 @@ def test_activation_journal_config_identity_transition_is_terminal_and_exact(
         core.pop("config_retry_scope_sha256")
         core.pop("alias_claim_count")
         core.pop("memory_vault_mode")
+        core.pop("obsidian_mode")
+        core.pop("obsidian_root_sha256")
+        core.pop("prebackup_config_transition")
+        core.pop("predecessor_env_sha256")
+        core.pop("next_env_file")
+        core.pop("next_env_file_sha256")
         core["config_identity_sha256"] = legacy_identity
 
     _rewrite_signed_journal(legacy_terminal.path, convert_to_legacy_terminal)
@@ -2938,7 +3863,7 @@ def test_activation_journal_config_identity_transition_is_terminal_and_exact(
         previous=releases.previous,
         fallback=releases.fallback,
     )
-    assert successor.load()["config_identity_schema"] == operator.RUNTIME_CONFIG_SCHEMA_V2
+    assert successor.load()["config_identity_schema"] == operator.RUNTIME_CONFIG_SCHEMA_V3
     assert successor.load()["memory_vault_mode"] == "full_owner"
 
     legacy_to_disabled = make_journal("legacy-to-disabled", phase_a_config)
@@ -2965,6 +3890,12 @@ def test_activation_journal_config_identity_transition_is_terminal_and_exact(
         core.pop("config_retry_scope_sha256")
         core.pop("alias_claim_count")
         core.pop("memory_vault_mode")
+        core.pop("obsidian_mode")
+        core.pop("obsidian_root_sha256")
+        core.pop("prebackup_config_transition")
+        core.pop("predecessor_env_sha256")
+        core.pop("next_env_file")
+        core.pop("next_env_file_sha256")
         core["config_identity_sha256"] = legacy_identity
 
     _rewrite_signed_journal(legacy_unfinished.path, convert_to_legacy_unfinished)
@@ -2991,6 +3922,12 @@ def test_activation_journal_config_identity_transition_is_terminal_and_exact(
         core.pop("config_retry_scope_sha256")
         core.pop("alias_claim_count")
         core.pop("memory_vault_mode")
+        core.pop("obsidian_mode")
+        core.pop("obsidian_root_sha256")
+        core.pop("prebackup_config_transition")
+        core.pop("predecessor_env_sha256")
+        core.pop("next_env_file")
+        core.pop("next_env_file_sha256")
         core["config_identity_sha256"] = operator._activation_legacy_config_identity(  # noqa: SLF001
             phase_a_config,
             "4" * 64,
@@ -3366,6 +4303,329 @@ def test_activation_journal_config_identity_transition_is_terminal_and_exact(
         ).load()
 
 
+def test_v2_journal_upgrade_then_exact_disabled_to_enabled_obsidian_transition(
+    tmp_path: Path,
+    releases: Releases,
+) -> None:
+    port = _systemd_test_port(tmp_path)
+    disabled = port.config
+    state = tmp_path / "obsidian-transition"
+    backups = state / "backups"
+    state.mkdir(mode=0o700)
+    backups.mkdir(mode=0o700)
+    path = state / "immutable-release-activation.v1.json"
+    old_candidate = releases.previous
+    legacy = operator.DurableActivationJournal(
+        path,
+        backup_root=backups,
+        config_identity_sha256=operator._systemd_config_identity(disabled),  # noqa: SLF001
+        config_scope_sha256=operator._systemd_config_scope_identity(disabled),  # noqa: SLF001
+        config_retry_scope_sha256=operator._systemd_config_retry_scope_identity(disabled),  # noqa: SLF001
+        obsidian_mode="disabled",
+        obsidian_root_sha256=operator._obsidian_root_sha256(disabled),  # noqa: SLF001
+    )
+    legacy.begin(
+        candidate=old_candidate,
+        previous=releases.previous,
+        fallback=releases.fallback,
+    )
+
+    def make_v2_terminal(core: dict[str, object]) -> None:
+        core["phase"] = "clear"
+        core["terminal_receipt_sha256"] = "a" * 64
+        core["config_identity_schema"] = operator.RUNTIME_CONFIG_SCHEMA_V2
+        core["config_identity_sha256"] = operator._systemd_config_identity_v2(disabled)  # noqa: SLF001
+        core.pop("obsidian_mode")
+        core.pop("obsidian_root_sha256")
+        core.pop("prebackup_config_transition")
+        core.pop("predecessor_env_sha256")
+        core.pop("next_env_file")
+        core.pop("next_env_file_sha256")
+
+    _rewrite_signed_journal(path, make_v2_terminal)
+    bootstrap = operator.DurableActivationJournal(
+        path,
+        backup_root=backups,
+        config_identity_sha256=operator._systemd_config_identity(disabled),  # noqa: SLF001
+        legacy_v2_config_identity_sha256=operator._systemd_config_identity_v2(disabled),  # noqa: SLF001
+        config_scope_sha256=operator._systemd_config_scope_identity(disabled),  # noqa: SLF001
+        config_retry_scope_sha256=operator._systemd_config_retry_scope_identity(disabled),  # noqa: SLF001
+        obsidian_mode="disabled",
+        obsidian_root_sha256=operator._obsidian_root_sha256(disabled),  # noqa: SLF001
+    )
+    bootstrap.begin(
+        candidate=releases.candidate,
+        previous=old_candidate,
+        fallback=releases.fallback,
+    )
+    assert bootstrap.load()["config_identity_schema"] == operator.RUNTIME_CONFIG_SCHEMA_V3
+
+    def make_v3_terminal(core: dict[str, object]) -> None:
+        core["phase"] = "clear"
+        core["terminal_receipt_sha256"] = "b" * 64
+
+    _rewrite_signed_journal(path, make_v3_terminal)
+    disabled_terminal = path.read_bytes()
+    enabled = replace(disabled, env_file_sha256="e" * 64, obsidian_mode="enabled")
+    next_env_file = state / "next.env"
+    final_candidate = replace(
+        releases.fallback,
+        root=tmp_path / "obsidian-final",
+        commit="d" * 40,
+        tree_manifest_sha256="6" * 64,
+    )
+
+    forged = operator.DurableActivationJournal(
+        path,
+        backup_root=backups,
+        config_identity_sha256=operator._systemd_config_identity(enabled),  # noqa: SLF001
+        transition_config_identity_sha256=operator._activation_obsidian_predecessor_identity(  # noqa: SLF001
+            enabled,
+            "f" * 64,
+        ),
+        config_scope_sha256=operator._systemd_config_scope_identity(enabled),  # noqa: SLF001
+        config_retry_scope_sha256=operator._systemd_config_retry_scope_identity(enabled),  # noqa: SLF001
+        obsidian_mode="enabled",
+        obsidian_root_sha256=operator._obsidian_root_sha256(enabled),  # noqa: SLF001
+        predecessor_env_sha256="f" * 64,
+        next_env_file=next_env_file,
+        next_env_file_sha256=enabled.env_file_sha256,
+    )
+    with pytest.raises(operator.ReleaseFailure, match="activation_config_identity_changed"):
+        forged.begin(
+            candidate=final_candidate,
+            previous=releases.candidate,
+            fallback=releases.candidate,
+        )
+    path.chmod(0o600)
+    path.write_bytes(disabled_terminal)
+    path.chmod(0o600)
+
+    transition = operator.DurableActivationJournal(
+        path,
+        backup_root=backups,
+        config_identity_sha256=operator._systemd_config_identity(enabled),  # noqa: SLF001
+        transition_config_identity_sha256=operator._activation_obsidian_predecessor_identity(  # noqa: SLF001
+            enabled,
+            disabled.env_file_sha256,
+        ),
+        config_scope_sha256=operator._systemd_config_scope_identity(enabled),  # noqa: SLF001
+        config_retry_scope_sha256=operator._systemd_config_retry_scope_identity(enabled),  # noqa: SLF001
+        obsidian_mode="enabled",
+        obsidian_root_sha256=operator._obsidian_root_sha256(enabled),  # noqa: SLF001
+        predecessor_env_sha256=disabled.env_file_sha256,
+        next_env_file=next_env_file,
+        next_env_file_sha256=enabled.env_file_sha256,
+    )
+    transition.begin(
+        candidate=final_candidate,
+        previous=releases.candidate,
+        fallback=releases.candidate,
+    )
+    prepared = transition.load()
+    assert prepared["obsidian_mode"] == "enabled"
+    assert prepared["prebackup_config_transition"] == "obsidian_enable"
+    assert prepared["predecessor_env_sha256"] == disabled.env_file_sha256
+    assert prepared["next_env_file"] == str(next_env_file)
+    assert prepared["next_env_file_sha256"] == enabled.env_file_sha256
+
+    def make_prebackup_rollback(core: dict[str, object]) -> None:
+        core["phase"] = "rolled_back"
+        core["terminal_receipt_sha256"] = "c" * 64
+        core["backup"] = None
+        core["database_mutation_possible"] = False
+        core["network_writer_uncertain"] = True
+        core["writer_target"] = "previous"
+
+    _rewrite_signed_journal(path, make_prebackup_rollback)
+    retry = operator.DurableActivationJournal(
+        path,
+        backup_root=backups,
+        config_identity_sha256=operator._systemd_config_identity(enabled),  # noqa: SLF001
+        config_scope_sha256=operator._systemd_config_scope_identity(enabled),  # noqa: SLF001
+        config_retry_scope_sha256=operator._systemd_config_retry_scope_identity(enabled),  # noqa: SLF001
+        obsidian_mode="enabled",
+        obsidian_root_sha256=operator._obsidian_root_sha256(enabled),  # noqa: SLF001
+        predecessor_env_sha256=disabled.env_file_sha256,
+        next_env_file=next_env_file,
+        next_env_file_sha256=enabled.env_file_sha256,
+    )
+    retry.begin(
+        candidate=final_candidate,
+        previous=releases.candidate,
+        fallback=releases.candidate,
+    )
+    retried = retry.load()
+    assert retried["prebackup_config_transition"] == "obsidian_enable"
+    assert retried["predecessor_env_sha256"] == disabled.env_file_sha256
+    assert retried["next_env_file"] == str(next_env_file)
+    assert retried["next_env_file_sha256"] == enabled.env_file_sha256
+
+
+def test_prebackup_recovery_reopens_staged_journal_with_canonical_env_unchanged(
+    tmp_path: Path,
+    releases: Releases,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    disabled = base.config
+    predecessor = disabled.env_file.read_bytes()
+    predecessor_sha256 = hashlib.sha256(predecessor).hexdigest()
+    path = disabled.state_dir / "immutable-release-activation.v1.json"
+    prior = operator.DurableActivationJournal(
+        path,
+        backup_root=disabled.backup_dir,
+        config_identity_sha256=operator._systemd_config_identity(disabled),  # noqa: SLF001
+        config_scope_sha256=operator._systemd_config_scope_identity(disabled),  # noqa: SLF001
+        config_retry_scope_sha256=operator._systemd_config_retry_scope_identity(disabled),  # noqa: SLF001
+        obsidian_mode="disabled",
+        obsidian_root_sha256=operator._obsidian_root_sha256(disabled),  # noqa: SLF001
+    )
+    prior.begin(
+        candidate=releases.candidate,
+        previous=releases.previous,
+        fallback=releases.fallback,
+    )
+
+    def make_terminal(core: dict[str, object]) -> None:
+        core["phase"] = "clear"
+        core["terminal_receipt_sha256"] = "a" * 64
+
+    _rewrite_signed_journal(path, make_terminal)
+    enabled_bytes = predecessor + b"FRIDAY_OBSIDIAN_ENABLED=1\n"
+    enabled_sha256 = hashlib.sha256(enabled_bytes).hexdigest()
+    next_env_file = disabled.state_dir / "next.env"
+    next_env_file.write_bytes(enabled_bytes)
+    next_env_file.chmod(0o600)
+    operator._obsidian_root(disabled).mkdir(mode=0o700)  # noqa: SLF001
+    target = replace(
+        disabled,
+        env_file_sha256=enabled_sha256,
+        obsidian_mode="enabled",
+    )
+    transition = operator.DurableActivationJournal(
+        path,
+        backup_root=target.backup_dir,
+        config_identity_sha256=operator._systemd_config_identity(target),  # noqa: SLF001
+        transition_config_identity_sha256=operator._activation_obsidian_predecessor_identity(  # noqa: SLF001
+            target,
+            predecessor_sha256,
+        ),
+        config_scope_sha256=operator._systemd_config_scope_identity(target),  # noqa: SLF001
+        config_retry_scope_sha256=operator._systemd_config_retry_scope_identity(target),  # noqa: SLF001
+        obsidian_mode="enabled",
+        obsidian_root_sha256=operator._obsidian_root_sha256(target),  # noqa: SLF001
+        predecessor_env_sha256=predecessor_sha256,
+        next_env_file=next_env_file,
+        next_env_file_sha256=enabled_sha256,
+    )
+    final_candidate = replace(
+        releases.fallback,
+        root=tmp_path / "recovery-final",
+        commit="d" * 40,
+        tree_manifest_sha256="6" * 64,
+    )
+    transition.begin(
+        candidate=final_candidate,
+        previous=releases.candidate,
+        fallback=releases.candidate,
+    )
+    transition.record("bridge_stop_attempted")
+    persisted = transition.load()
+    assert disabled.env_file.read_bytes() == predecessor
+    recovery_args = replace(disabled, obsidian_mode="enabled")
+    effective = operator._activation_recovery_systemd_config(recovery_args, persisted)  # noqa: SLF001
+    assert effective.obsidian_mode == "enabled"
+    assert effective.env_file_sha256 == predecessor_sha256
+    assert effective.next_env_file == next_env_file
+    assert effective.next_env_file_sha256 == enabled_sha256
+    recovery_port = operator.SystemdActivationPort(effective)
+    recovery_target = operator._activation_target_config(effective)  # noqa: SLF001
+    reopened = operator.DurableActivationJournal(
+        path,
+        backup_root=effective.backup_dir,
+        config_identity_sha256=operator._systemd_config_identity(recovery_target),  # noqa: SLF001
+        config_scope_sha256=operator._systemd_config_scope_identity(recovery_target),  # noqa: SLF001
+        config_retry_scope_sha256=operator._systemd_config_retry_scope_identity(  # noqa: SLF001
+            recovery_target
+        ),
+        obsidian_mode="enabled",
+        obsidian_root_sha256=operator._obsidian_root_sha256(effective),  # noqa: SLF001
+        predecessor_env_sha256=predecessor_sha256,
+        next_env_file=next_env_file,
+        next_env_file_sha256=enabled_sha256,
+    )
+    assert reopened.load()["phase"] == "bridge_stop_attempted"
+    recovery_port.select_predecessor_config_transition(
+        "obsidian_enable", predecessor_sha256, next_env_file, enabled_sha256
+    )
+    assert recovery_port.config.obsidian_mode == "disabled"
+    assert recovery_port.config.env_file.read_bytes() == predecessor
+
+
+def test_schema35_releases_require_exact_obsidian_cutover_capability(
+    tmp_path: Path,
+    releases: Releases,
+) -> None:
+    candidate = replace(releases.candidate, max_schema=35)
+    fallback = replace(releases.fallback, max_schema=35)
+    with pytest.raises(operator.ReleaseFailure, match="candidate_obsidian_cutover_contract_missing"):
+        operator.activate_release(
+            FakePort(backup_schema=35),
+            MemoryJournal(),
+            candidate=candidate,
+            previous=releases.previous,
+            schema_capable_fallback=fallback,
+        )
+    capable_candidate = replace(
+        candidate,
+        obsidian_cutover_contract=operator.OBSIDIAN_CUTOVER_CONTRACT,
+    )
+    with pytest.raises(operator.ReleaseFailure, match="fallback_obsidian_cutover_contract_missing"):
+        operator.activate_release(
+            FakePort(backup_schema=35),
+            MemoryJournal(),
+            candidate=capable_candidate,
+            previous=releases.previous,
+            schema_capable_fallback=fallback,
+        )
+
+
+def test_enabled_candidate_runs_full_settings_validation_before_cutover(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    root = operator._obsidian_root(base.config)  # noqa: SLF001
+    root.mkdir(mode=0o700)
+    enabled = operator.SystemdActivationPort(
+        replace(base.config, obsidian_mode="enabled", obsidian_root=root)
+    )
+    release = operator.ReleaseIdentity(
+        tmp_path / "schema35-candidate",
+        "c" * 40,
+        "0.207.0",
+        "d" * 64,
+        35,
+        operator.MEMORY_VAULT_MODE_CONTRACT,
+        operator.VENV_RELOCATION_CONTRACT,
+        operator.OBSIDIAN_CUTOVER_CONTRACT,
+    )
+    monkeypatch.setattr(operator, "verify_release_tree", lambda _release: None)
+    monkeypatch.setattr(operator, "installed_surface_smoke", lambda _release: "e" * 64)
+    observed_script = ""
+
+    def reject_invalid_settings(command, **_kwargs):
+        nonlocal observed_script
+        observed_script = command[4]
+        return subprocess.CompletedProcess(command, 1, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(operator.subprocess, "run", reject_invalid_settings)
+    with pytest.raises(operator.ReleaseFailure, match="candidate_runtime_config_identity_mismatch"):
+        enabled.verify_release(release)
+    assert "validate_settings(settings,production=True)" in observed_script
+    assert "FRIDAY_SYNCTHING_BINARY" not in observed_script
+
+
 def test_album_journal_requires_exact_current_config_and_rejects_legacy(
     tmp_path: Path,
     releases: Releases,
@@ -3525,10 +4785,16 @@ def test_terminal_journal_env_digest_is_activate_only() -> None:
             "5" * 64,
             "--terminal-journal-env-sha256",
             "6" * 64,
+            "--next-env-file",
+            "/runtime/state/next.env",
+            "--next-env-file-sha256",
+            "8" * 64,
             *common,
         ]
     )
     assert activate.terminal_journal_env_sha256 == "6" * 64
+    assert activate.next_env_file == Path("/runtime/state/next.env")
+    assert activate.next_env_file_sha256 == "8" * 64
 
     with pytest.raises(SystemExit):
         operator.build_parser().parse_args(
@@ -3540,6 +4806,10 @@ def test_terminal_journal_env_digest_is_activate_only() -> None:
                 "7" * 64,
                 "--terminal-journal-env-sha256",
                 "6" * 64,
+                "--next-env-file",
+                "/runtime/state/next.env",
+                "--next-env-file-sha256",
+                "8" * 64,
                 *common,
             ]
         )
@@ -3558,6 +4828,43 @@ def test_operator_transaction_lock_is_process_wide_nonblocking(tmp_path: Path) -
         pytest.fail("a concurrent release controller acquired the same lock")
     with operator.OperatorTransactionLock(lock_path):
         assert lock_path.stat().st_mode & 0o077 == 0
+
+
+def test_empty_two_field_v3_transition_shape_normalizes_to_no_transition(
+    tmp_path: Path,
+    releases: Releases,
+) -> None:
+    tmp_path.chmod(0o700)
+    state = tmp_path / "state"
+    backups = tmp_path / "backups"
+    state.mkdir(mode=0o700)
+    backups.mkdir(mode=0o700)
+    journal = operator.DurableActivationJournal(
+        state / "immutable-release-activation.v1.json",
+        backup_root=backups,
+        config_identity_sha256="9" * 64,
+    )
+    journal.begin(
+        candidate=releases.candidate,
+        previous=releases.previous,
+        fallback=releases.fallback,
+    )
+
+    def make_two_field_v3(core: dict[str, object]) -> None:
+        core.pop("next_env_file")
+        core.pop("next_env_file_sha256")
+
+    _rewrite_signed_journal(journal.path, make_two_field_v3)
+    reopened = operator.DurableActivationJournal(
+        journal.path,
+        backup_root=backups,
+        config_identity_sha256="9" * 64,
+    )
+    loaded = reopened.load()
+
+    assert loaded["prebackup_config_transition"] == ""
+    assert loaded["predecessor_env_sha256"] == ""
+    assert operator._staged_config_transition(loaded) is None  # noqa: SLF001
 
 
 def test_durable_journal_rejects_nonmonotonic_phase_without_rewriting_state(

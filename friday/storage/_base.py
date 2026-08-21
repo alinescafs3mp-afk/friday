@@ -135,7 +135,10 @@ LOGGER = logging.getLogger("friday.storage")
 # 34 — the immutable transport alias also preserves the bounded basename that
 # arrived with that exact carrier. Dedup may keep an older canonical Raw name;
 # later exact filename lookup must still find the name the user actually sent.
-SCHEMA_VERSION = 34
+# 35 — isolated Syncthing/Obsidian identity, onboarding, operation-delivery and
+# conflict records. Note bodies remain in the contained per-user vault checkout;
+# API keys remain in private Syncthing config files and never enter SQLite.
+SCHEMA_VERSION = 35
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно

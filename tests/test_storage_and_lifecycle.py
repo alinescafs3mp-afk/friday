@@ -122,6 +122,7 @@ def test_online_backup_and_manifest_are_verifiable(storage):
     assert len(result["sha256"]) == 64
     assert result["scope"]["sqlite_database"] == "included"
     assert result["scope"]["raw_files"] == "external"
+    assert result["scope"]["obsidian_profiles_and_vaults"] == "external"
     verification = storage.verify_backup(result["database"])
     assert verification["ok"] is True
     assert verification["sha256"] == result["sha256"]
@@ -304,6 +305,7 @@ def test_verified_backup_restore_is_atomic_and_creates_safety_copy(storage):
     assert restored["foreign_key_violations"] == 0
     assert restored["scope"]["sqlite_database"] == "restored"
     assert restored["scope"]["raw_files"] == "unchanged"
+    assert restored["scope"]["obsidian_profiles_and_vaults"] == "unchanged"
     assert storage.get_user("before-restore") is not None
     assert storage.get_user("after-backup") is None
     safety = restored["safety_backup"]

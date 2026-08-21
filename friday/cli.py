@@ -2415,15 +2415,32 @@ def _telegram_backend_url(settings: Any) -> str:
 
 
 def _run_telegram_bridge() -> int:
-    from friday.config import ensure_runtime_dirs, load_settings, validate_settings
+    from dataclasses import replace
+
+    from friday.config import load_settings, validate_settings
+    from friday.private_fs import ensure_private_directory
     from friday.telegram_bridge import TelegramBridge, TelegramConfig
 
     settings = load_settings()
-    ensure_runtime_dirs(settings)
+    inbox_db_path = (
+        Path(
+            config_env(
+                "FRIDAY_TELEGRAM_INBOX_DB_PATH",
+                str(settings.state_dir / "telegram-inbox.sqlite3"),
+            )
+        )
+        .expanduser()
+        .absolute()
+    )
+    ensure_private_directory(inbox_db_path.parent)
     # Surface deny-by-default and credential problems as a clear CLI error before
     # the bridge starts, since validate_settings is otherwise only run by the
     # backend process.
-    problems = validate_settings(settings, production=not settings.is_loopback_bind)
+    # The bridge renders the Obsidian feature flag but never owns a Syncthing
+    # profile or vault. Do not make it create/validate backend-local plaintext
+    # roots merely to expose `/obsidian` in Telegram.
+    validation_settings = replace(settings, obsidian_enabled=False)
+    problems = validate_settings(validation_settings, production=not validation_settings.is_loopback_bind)
     fatal = [item for item in problems if not item.startswith("warning:")]
     if fatal:
         raise ValueError("Invalid Friday configuration: " + "; ".join(fatal))
@@ -2437,7 +2454,7 @@ def _run_telegram_bridge() -> int:
         or (settings.ssl_certfile if settings.api_tls_enabled else ""),
         bridge_secret=settings.telegram_bridge_secret,
         allowed_chat_ids=settings.telegram_effective_allowed_chat_ids,
-        inbox_db_path=str(settings.state_dir / "telegram-inbox.sqlite3"),
+        inbox_db_path=str(inbox_db_path),
         max_document_bytes=settings.max_upload_bytes,
         # Одно число на обе стороны. Прежняя формула `llm_timeout_sec + 30` жила
         # своей жизнью и на умолчаниях давала 270 с против 720 с, которые
@@ -2446,6 +2463,7 @@ def _run_telegram_bridge() -> int:
         backend_timeout_sec=settings.bridge_backend_timeout_sec,
         telegram_proxy=settings.telegram_proxy,
         open_registration=settings.telegram_open_registration,
+        obsidian_enabled=settings.obsidian_enabled,
         # Outbound delivery polls faster than the reminder scan so a queued
         # message reaches the user promptly rather than on the next scan.
     )

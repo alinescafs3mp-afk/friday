@@ -103,6 +103,8 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("retry", "сгенерировать ответ на последний вопрос заново"),
     ("reminders", "предстоящие напоминания и снять одно"),
     ("export", "скачать текущий разговор текстом"),
+    ("obsidian", "подключить или проверить Obsidian на Android"),
+    ("obsidian_alias", "задать имя vault в Obsidian"),
     ("help", "справка по командам"),
 )
 
@@ -129,6 +131,8 @@ class TelegramConfig:
     telegram_proxy: str = ""
     # Mirrors settings.telegram_open_registration — see there for what it grants.
     open_registration: bool = False
+    # Optional backend organ; hidden from the Telegram menu when unavailable.
+    obsidian_enabled: bool = False
 
     def validate(self) -> None:
         if not self.bot_token or ":" not in self.bot_token:
