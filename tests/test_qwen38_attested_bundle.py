@@ -152,15 +152,152 @@ def test_six_way_probe_loads_http_client_assembly_before_preflight() -> None:
         _assert_static_six_way_http_client_contract(switch, mutated_native_test)
 
 
+def _assert_static_public_traffic_headroom_contract(switch: str) -> None:
+    candidate_engine_stage = switch.index("    $stage = 'candidate_engine_start'")
+    initial_strict = switch.index("    $null = Assert-GpuHeadroom", candidate_engine_stage)
+    candidate_proxy_stage = switch.index("    $stage = 'candidate_proxy_start'", initial_strict)
+    identity_stage = switch.index("    $stage = 'identity_witness'", candidate_proxy_stage)
+    metrics = switch.index("    $metrics = Get-EndpointMetrics $headers", identity_stage)
+    identity_observation_stage = switch.index(
+        "    $stage = 'identity_witness_gpu_observation_non_acceptance'",
+        metrics,
+    )
+    identity_observation = switch.index(
+        "    $identityWitnessGpu = Get-GpuMemory",
+        identity_observation_stage,
+    )
+    identity_journal = switch.index(
+        "    Write-Journal 'identity_witness_gpu_headroom_observed_non_acceptance' @{",
+        identity_observation,
+    )
+    text_stage = switch.index("    $stage = 'text_schema'", identity_journal)
+    image_stage = switch.index("    $stage = 'image'", text_stage)
+    soak_settle_stage = switch.index("    $stage = 'soak_settle'", image_stage)
+    soak_sleep = switch.index("    Start-Sleep -Seconds 60", soak_settle_stage)
+    soak_candidate_stage = switch.index("    $stage = 'soak_candidate_gates'", soak_sleep)
+    engine_health = switch.index(
+        "    $candidateEngine = Wait-Healthy $script:Attested.CandidateEngineName 30",
+        soak_candidate_stage,
+    )
+    proxy_health = switch.index(
+        "    $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 30",
+        engine_health,
+    )
+    identity = switch.index(
+        "    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash $publishNetworkReceipt",
+        proxy_health,
+    )
+    fatal = switch.index("    Assert-FatalFree $candidateEngine", identity)
+    soak_witness_stage = switch.index("    $stage = 'soak_witness_gate'", fatal)
+    witness = switch.index("    $witnessAfter = Invoke-WebRequest", soak_witness_stage)
+    witness_assertion = switch.index("throw 'Process witness changed during soak'", witness)
+    soak_external_stage = switch.index("    $stage = 'soak_external_gates'", witness_assertion)
+    sidecars = switch.index("    Assert-Sidecars", soak_external_stage)
+    sole_publisher = switch.index(
+        "    Assert-SolePublisher $script:Attested.CandidateProxyName",
+        sidecars,
+    )
+    publication = switch.index("    Assert-CandidateProxyPortPublication $candidateProxy", sole_publisher)
+    soak_observation_stage = switch.index(
+        "    $stage = 'soak_gpu_observation_non_acceptance'",
+        publication,
+    )
+    soak_observation = switch.index("    $postSoakGpu = Get-GpuMemory", soak_observation_stage)
+    soak_journal = switch.index(
+        "    Write-Journal 'post_soak_gpu_headroom_observed_non_acceptance' @{",
+        soak_observation,
+    )
+    six_stage = switch.index("    $stage = 'six_way_probe'", soak_journal)
+    epoch_health_stage = switch.index("    $stage = 'epoch_restart_health'", six_stage)
+    epoch_strict = switch.index("    $gpu = Assert-GpuHeadroom", epoch_health_stage)
+    epoch_proxy_start = switch.index("    & docker start $candidateProxyId | Out-Null", epoch_strict)
+
+    assert candidate_engine_stage < initial_strict < candidate_proxy_stage < identity_stage < metrics
+    assert metrics < identity_observation_stage < identity_observation < identity_journal < text_stage
+    assert text_stage < image_stage < soak_settle_stage < soak_sleep < soak_candidate_stage
+    assert soak_candidate_stage < engine_health < proxy_health < identity < fatal < soak_witness_stage
+    assert soak_witness_stage < witness < witness_assertion < soak_external_stage
+    assert soak_external_stage < sidecars < sole_publisher < publication < soak_observation_stage
+    assert soak_observation_stage < soak_observation < soak_journal < six_stage
+    assert six_stage < epoch_health_stage < epoch_strict < epoch_proxy_start
+
+    identity_journal_block = switch[identity_journal:text_stage]
+    for exact_field in (
+        "free_mib = [int]$identityWitnessGpu.FreeMiB",
+        "minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB",
+        "strict_headroom_stage = 'candidate_engine_start'",
+        "acceptance = $false",
+    ):
+        assert identity_journal_block.count(exact_field) == 1
+    assert "body" not in identity_journal_block.lower()
+
+    soak_journal_block = switch[soak_journal:six_stage]
+    for exact_field in (
+        "free_mib = [int]$postSoakGpu.FreeMiB",
+        "minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB",
+        "strict_headroom_stage = 'candidate_engine_start'",
+        "acceptance = $false",
+    ):
+        assert soak_journal_block.count(exact_field) == 1
+    assert "body" not in soak_journal_block.lower()
+
+    assert switch.count("Assert-GpuHeadroom") == 2
+    assert "Assert-GpuHeadroom" not in switch[candidate_proxy_stage:epoch_health_stage]
+    assert "Assert-GpuHeadroom" not in switch[epoch_proxy_start:]
+    assert "gpu_headroom_verified" not in switch[identity_stage:six_stage]
+    assert "gpu_headroom_timeout" not in switch[identity_stage:six_stage]
+
+
+def test_public_traffic_headroom_is_observed_between_two_offline_strict_gates() -> None:
+    _assert_static_public_traffic_headroom_contract(_SWITCH.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(
+    ("old", "mutation"),
+    (
+        ("    $null = Assert-GpuHeadroom", "    $null = Get-GpuMemory"),
+        ("    $identityWitnessGpu = Get-GpuMemory", "    $identityWitnessGpu = Assert-GpuHeadroom"),
+        (
+            "identity_witness_gpu_headroom_observed_non_acceptance",
+            "identity_witness_gpu_headroom_verified",
+        ),
+        (
+            "    $stage = 'identity_witness_gpu_observation_non_acceptance'",
+            "    $stage = 'identity_witness'",
+        ),
+        ("    $stage = 'soak_settle'", "    $stage = 'soak'"),
+        ("    $stage = 'soak_external_gates'", "    $stage = 'soak_candidate_gates'"),
+        ("    $postSoakGpu = Get-GpuMemory", "    $postSoakGpu = Assert-GpuHeadroom"),
+        (
+            "post_soak_gpu_headroom_observed_non_acceptance",
+            "post_soak_gpu_headroom_verified",
+        ),
+        (
+            "free_mib = [int]$postSoakGpu.FreeMiB",
+            "free_mib = [int]$identityWitnessGpu.FreeMiB",
+        ),
+        ("        acceptance = $false", "        acceptance = $true"),
+        ("    $gpu = Assert-GpuHeadroom", "    $gpu = Get-GpuMemory"),
+    ),
+)
+def test_static_gate_kills_public_traffic_headroom_mutations(old: str, mutation: str) -> None:
+    switch = _SWITCH.read_text(encoding="utf-8")
+    _assert_static_public_traffic_headroom_contract(switch)
+    assert old in switch
+    with pytest.raises((AssertionError, ValueError)):
+        _assert_static_public_traffic_headroom_contract(switch.replace(old, mutation, 1))
+
+
 def _assert_static_long_context_epoch_contract(switch: str) -> None:
     text_stage = switch.index("    $stage = 'text_schema'")
     image_stage = switch.index("    $stage = 'image'")
-    soak_stage = switch.index("    $stage = 'soak'", image_stage)
-    soak_headroom = switch.index(
-        "    $gpu = Assert-GpuHeadroom\n    $witnessAfter",
+    soak_stage = switch.index("    $stage = 'soak_settle'", image_stage)
+    soak_observation_stage = switch.index(
+        "    $stage = 'soak_gpu_observation_non_acceptance'",
         soak_stage,
     )
-    six_stage = switch.index("    $stage = 'six_way_probe'", soak_headroom)
+    soak_observation = switch.index("    $postSoakGpu = Get-GpuMemory", soak_observation_stage)
+    six_stage = switch.index("    $stage = 'six_way_probe'", soak_observation)
     six_probe = switch.index("    Invoke-SixWayProbe $apiKey", six_stage)
     six_drain_stage = switch.index("    $stage = 'six_way_drain'", six_probe)
     six_drain = switch.index("    Wait-EndpointIdle $headers 180", six_drain_stage)
@@ -212,7 +349,8 @@ def _assert_static_long_context_epoch_contract(switch: str) -> None:
     restart_health_stage = switch.index("    $stage = 'epoch_restart_health'", restart_stage)
     strict_after_restart = switch.index("    $gpu = Assert-GpuHeadroom", restart_health_stage)
 
-    assert text_stage < image_stage < soak_stage < soak_headroom < six_stage < six_probe
+    assert text_stage < image_stage < soak_stage < soak_observation_stage < soak_observation
+    assert soak_observation < six_stage < six_probe
     assert six_probe < six_drain_stage < six_drain < six_gpu_observation < six_journal < long_stage
     assert long_stage < long_request < usage_assertion
     assert usage_assertion < long_drain_stage < long_drain < engine_health < proxy_health
@@ -280,10 +418,7 @@ def test_long_context_is_observed_then_reclaimed_by_epoch_restart() -> None:
             "    Stop-ExactContainer $candidateEngine 90\n    $null = Get-GpuMemory",
         ),
         ("$longTokens -lt 32000", "$longTokens -lt 1"),
-        (
-            "    $gpu = Assert-GpuHeadroom\n    $witnessAfter",
-            "    $gpu = Get-GpuMemory\n    $witnessAfter",
-        ),
+        ("    $postSoakGpu = Get-GpuMemory", "    $postSoakGpu = Assert-GpuHeadroom"),
     ),
 )
 def test_static_gate_kills_long_context_epoch_mutations(old: str, mutation: str) -> None:
@@ -1240,13 +1375,13 @@ def test_transport_manifest_pins_exact_live_predecessors_and_frozen_sources() ->
             "5cfb5177a87881e9411b03f373cc2ccc9df7a034adae888dd5d6e3b4be1f0ea9"
         ),
         "CORE-SHA256SUMS": ("b1378e7524c44b92dd18176a51c45ce403440d1a7dfc20b9193bad633a0488b2"),
-        "ORCHESTRATION-SHA256SUMS": ("b78e591f80571d68a132a18ef95a3373eeb5c997aae433a71ae27a3ba3487e8a"),
-        "ORCHESTRATION.md": ("9a7fc4612f2129bfbbc17ac9cbec8a67cc8f4f36bccdce336a2a21d41e362869"),
+        "ORCHESTRATION-SHA256SUMS": ("de94d1bf10a1d328ede1fd6824beab512db9c9f0eb7fd19c32b0c34aba8bcc65"),
+        "ORCHESTRATION.md": ("b954595300a594cb3bd97a2d12abe3152a4246fdcf87e766bbde6e4ef8127597"),
         "README.md": "28e508e658350789a85345ba9748c85028dce8a7806da080096f59495d7520dd",
         "Rollback-Qwen38V12Attested.ps1": (
             "a8e19b2704710f339be8aaf1fff3c0773b8304f27721106ae62a620907013d51"
         ),
-        "Switch-Qwen38V12Attested.ps1": ("f66859e82d8ffb491708b6d70943b51be10a24f0924047d8e6873b1135a8ca08"),
+        "Switch-Qwen38V12Attested.ps1": ("31c00831efa96631943252a615c4a9e855cc0b9ff069761bc6a065a9f18a05db"),
         "Test-AttestedCleanupProjection.ps1": (
             "d94846c65cc621e74426a436b121b164cb0c533cd03bbf99214e579e3d432dc6"
         ),

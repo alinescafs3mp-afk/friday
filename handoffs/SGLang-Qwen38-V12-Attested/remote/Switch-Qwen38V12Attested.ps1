@@ -617,7 +617,15 @@ try {
     Assert-DeploymentWitness $witness $serverInfo $receipt
     $metrics = Get-EndpointMetrics $headers
     if ($metrics.Running -ne 0 -or $metrics.Queued -ne 0) { throw 'Candidate is not idle before acceptance' }
-    $null = Assert-GpuHeadroom
+
+    $stage = 'identity_witness_gpu_observation_non_acceptance'
+    $identityWitnessGpu = Get-GpuMemory
+    Write-Journal 'identity_witness_gpu_headroom_observed_non_acceptance' @{
+        free_mib = [int]$identityWitnessGpu.FreeMiB
+        minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB
+        strict_headroom_stage = 'candidate_engine_start'
+        acceptance = $false
+    }
 
     $stage = 'text_schema'
     $schemaBody = @{
@@ -674,18 +682,32 @@ try {
         throw 'Synthetic image acceptance failed'
     }
 
-    $stage = 'soak'
+    $stage = 'soak_settle'
     Start-Sleep -Seconds 60
+
+    $stage = 'soak_candidate_gates'
     $candidateEngine = Wait-Healthy $script:Attested.CandidateEngineName 30
     $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 30
     Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash $publishNetworkReceipt
     Assert-FatalFree $candidateEngine
-    $gpu = Assert-GpuHeadroom
+
+    $stage = 'soak_witness_gate'
     $witnessAfter = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8001/_friday/v1/deployment-witness' -Headers $headers -TimeoutSec 10
     if ([string]$witnessAfter.Content -cne $witnessRaw1) { throw 'Process witness changed during soak' }
+
+    $stage = 'soak_external_gates'
     Assert-Sidecars
     Assert-SolePublisher $script:Attested.CandidateProxyName
     Assert-CandidateProxyPortPublication $candidateProxy
+
+    $stage = 'soak_gpu_observation_non_acceptance'
+    $postSoakGpu = Get-GpuMemory
+    Write-Journal 'post_soak_gpu_headroom_observed_non_acceptance' @{
+        free_mib = [int]$postSoakGpu.FreeMiB
+        minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB
+        strict_headroom_stage = 'candidate_engine_start'
+        acceptance = $false
+    }
 
     $stage = 'six_way_probe'
     Invoke-SixWayProbe $apiKey

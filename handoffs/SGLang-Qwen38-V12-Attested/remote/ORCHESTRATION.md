@@ -105,13 +105,20 @@ and six-request capacity, full decode CUDA graphs for batches 1..6, VRAM
 release/headroom gates, text/JSON-schema, six-way, long-context, image, and soak
 probes. The switch explicitly loads `System.Net.Http` before preflight so its
 HTTP client types resolve before mutation and the six-way probe; a missing
-runtime dependency fails before mutation.
-Image acceptance and the 60-second soak checkpoint, including the unchanged
-strict 1,536 MiB headroom gate, run before cumulative capacity stress. The
-six-way probe must still return all six successful responses, then three clear
-drain reads are required. One body-free journal record observes actual free
-MiB, the unchanged floor, and the six-request count; it makes no headroom
-acceptance or convergence claim.
+runtime dependency fails before mutation. The unchanged strict 1,536 MiB gate
+runs at `candidate_engine_start` while the public proxy is still stopped. Once
+the proxy is published, the identity/witness checkpoint records actual free
+MiB in a body-free non-acceptance observation that points back to that strict
+stage; concurrent legitimate traffic cannot turn it into a false release
+failure.
+Image acceptance and the 60-second soak checkpoint run before cumulative
+capacity stress. After the soak, separate stages fail closed on candidate
+health and identity, fatal logs, unchanged witness, sidecars, sole publisher,
+and exact port publication before writing a second body-free, explicitly
+non-acceptance VRAM observation. The six-way probe must still return all six
+successful responses, then three clear drain reads are required. Its body-free
+journal record observes actual free MiB, the unchanged floor, and the
+six-request count; it makes no headroom acceptance or convergence claim.
 The exact long-context usage assertion follows that six-way observation. After
 three more clear drain reads, the switch rechecks candidate health, identity,
 and fatal logs, then writes the corresponding one-request body-free VRAM
@@ -121,9 +128,11 @@ release, restarts the exact engine, and enforces the strict 1,536 MiB gate at
 `epoch_restart_health`.
 Before arming restart policies, the candidate engine is forcibly
 restarted and the switch proves old-witness disappearance plus new canonical
-witness and nonce rotation. `epoch_restart_health` enforces the unchanged
-strict 1,536 MiB floor and retains that authoritative sample before the final
-text/JSON-schema smoke. The exact response assertion remains fail-closed under
+witness and nonce rotation. Together with the pre-publication
+`candidate_engine_start` gate, `epoch_restart_health` is the second and only
+other strict 1,536 MiB gate; it runs while the restarted proxy is still stopped
+and retains that authoritative sample before the final text/JSON-schema smoke.
+The exact response assertion remains fail-closed under
 `epoch_restart_text_smoke`; only after it succeeds does
 `epoch_restart_post_smoke_settle` wait 30 seconds. Separate candidate, GPU
 observation, and external-gate stages then repeat container identity, health,
