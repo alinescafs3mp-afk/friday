@@ -766,14 +766,20 @@ def test_open_review_allows_a_provable_person_count_and_rejects_the_adjacent_wro
     assert "attachment_derived_record_count_not_in_evidence" in contradicted["issues"]
 
 
-def test_open_review_rejects_an_impossible_record_count_and_absolute_quality_claim() -> None:
+def test_open_review_rejects_an_unsupported_record_count_and_absolute_quality_claim() -> None:
     skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
     evidence = [{"tool": "attachment", "output": "Документ описывает назначение проекта."}]
 
-    impossible = _attachment_verdict_with_deterministic_drift(
+    unsupported = _attachment_verdict_with_deterministic_drift(
         skipped,
-        "Документ содержит 777 записей.",
+        "Документ содержит 11 записей.",
         evidence,
+        high_confidence_only=True,
+    )
+    literal = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит 11 записей.",
+        [{"tool": "attachment", "output": "Документ содержит 11 записей."}],
         high_confidence_only=True,
     )
     absolute = _attachment_verdict_with_deterministic_drift(
@@ -783,8 +789,9 @@ def test_open_review_rejects_an_impossible_record_count_and_absolute_quality_cla
         high_confidence_only=True,
     )
 
-    assert impossible["status"] == "failed"
-    assert "attachment_derived_record_count_not_in_evidence" in impossible["issues"]
+    assert unsupported["status"] == "failed"
+    assert "attachment_derived_record_count_not_in_evidence" in unsupported["issues"]
+    assert literal["status"] == "skipped"
     assert absolute["status"] == "failed"
     assert "attachment_absolute_quality_claim" in absolute["issues"]
 

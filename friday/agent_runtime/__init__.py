@@ -15556,9 +15556,9 @@ def _attachment_record_count_candidates(
 
     Counts come from explicit structured metadata, closed bullet/numbered
     records, uniformly repeated one-line records, or paired personnel
-    role/full-name lines.  Ambiguous prose yields no candidate and remains an
-    honestly unverified model inference rather than a false deterministic
-    rejection.
+    role/full-name lines. Ambiguous prose yields no candidate, so a one-pass
+    review cannot publish an exact record/person count inferred only by the
+    model.
     """
 
     generic: set[int] = set()
@@ -15625,14 +15625,6 @@ def _attachment_derived_record_count_issues(
     normalized_evidence = _attachment_quantity_normalized(evidence)
     source_relations = _attachment_quantity_relations(normalized_evidence)
     generic_counts, people_counts = _attachment_record_count_candidates(evidence_entries)
-    lexical_upper_bound = len(re.findall(r"[A-Za-zА-ЯЁа-яё0-9]+", evidence))
-    literal_upper_bound_valid = all(
-        not str(entry.get("output") or "").startswith(
-            (OFFICE_PROMPT_PREFIX, _ATTACHMENT_MAP_PREFIX, _ATTACHMENT_TABULAR_PROFILE_PREFIX)
-        )
-        for entry in evidence_entries
-        if isinstance(entry, Mapping) and str(entry.get("tool") or "") == "attachment"
-    )
     for number, unit in _attachment_quantity_relations(normalized_answer):
         if not number.isdigit():
             continue
@@ -15652,9 +15644,7 @@ def _attachment_derived_record_count_issues(
             continue
         claimed = int(number)
         candidates = people_counts if category == "people" else generic_counts
-        if (candidates and claimed not in candidates) or (
-            not candidates and literal_upper_bound_valid and claimed > lexical_upper_bound
-        ):
+        if claimed not in candidates:
             return ["attachment_derived_record_count_not_in_evidence"]
     return []
 
