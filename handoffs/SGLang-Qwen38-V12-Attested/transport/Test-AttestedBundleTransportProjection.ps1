@@ -37,9 +37,14 @@ foreach ($required in $requiredApplierSource) {
     }
 }
 if (-not $wrapperSource.Contains('\$stdinStream=[Console]::OpenStandardInput()') -or
-    -not $wrapperSource.Contains('\$stdinStream.CopyTo(\$output)') -or
+    -not $wrapperSource.Contains('\$readTask=\$stdinStream.ReadAsync(\$buffer,0,\$wanted)') -or
+    -not $wrapperSource.Contains("maximum_archive_bytes=8388608") -or
+    -not $wrapperSource.Contains("AddSeconds(120)") -or
+    $wrapperSource.Contains('\$stdinStream.CopyTo(\$output)') -or
+    $wrapperSource.Contains('[Console]::In.ReadToEnd()') -or
+    $wrapperSource.Contains('[ScriptBlock]::Create(') -or
     $wrapperSource.Contains('\$input=[Console]::OpenStandardInput()')) {
-    throw 'Encoded-command receiver does not use the exact non-automatic stdin variable'
+    throw 'Encoded-command receiver is not exact-byte, capped, and deadline-bounded'
 }
 $requiredSshProjection = @(
     '-o GlobalKnownHostsFile=/dev/null',
@@ -170,11 +175,33 @@ try {
     $outputPath = Join-Path $temporaryRoot 'output.bin'
     [IO.File]::WriteAllBytes($inputPath, [byte[]](0, 1, 2, 10, 13, 127, 128, 254, 255))
     $escapedOutputPath = $outputPath.Replace("'", "''")
+    $expectedInputBytes = ([IO.FileInfo]$inputPath).Length
     $receiver = @"
 `$ErrorActionPreference='Stop'
+`$expected=[int64]$expectedInputBytes
+`$cap=[int64]8388608
+if(`$expected-lt 1-or `$expected-gt `$cap){throw 'Archive size is outside the receiver cap'}
 `$stdinStream=[Console]::OpenStandardInput()
 `$output=[IO.File]::Open('$escapedOutputPath',[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-try{`$stdinStream.CopyTo(`$output)}finally{`$output.Dispose()}
+`$buffer=New-Object byte[] 65536
+`$remaining=`$expected
+`$deadline=[DateTime]::UtcNow.AddSeconds(120)
+try{
+  while(`$remaining-gt 0){
+    `$now=[DateTime]::UtcNow
+    if(`$now-ge `$deadline){throw 'Archive receive deadline expired'}
+    `$wait=[int][Math]::Min(10000,[Math]::Max(1,(`$deadline-`$now).TotalMilliseconds))
+    `$wanted=[int][Math]::Min([int64]`$buffer.Length,`$remaining)
+    `$readTask=`$stdinStream.ReadAsync(`$buffer,0,`$wanted)
+    if(-not `$readTask.Wait(`$wait)){throw 'Archive stdin read timed out'}
+    `$read=[int]`$readTask.Result
+    if(`$read-le 0){throw 'Archive stdin ended before the exact byte count'}
+    `$output.Write(`$buffer,0,`$read)
+    `$remaining-=`$read
+  }
+  `$output.Flush(`$true)
+}finally{`$output.Dispose();`$stdinStream.Dispose()}
+if((Get-Item -LiteralPath '$escapedOutputPath' -Force).Length-ne `$expected){throw 'Staged archive size changed'}
 "@
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($receiver))
     $enginePath = (Get-Process -Id $PID).Path
@@ -201,6 +228,54 @@ try{`$stdinStream.CopyTo(`$output)}finally{`$output.Dispose()}
     $outputHash = (Get-FileHash -LiteralPath $outputPath -Algorithm SHA256).Hash
     if ([string]$inputHash -cne [string]$outputHash) {
         throw "Native encoded-command stdin receiver changed bytes: $inputHash -> $outputHash"
+    }
+
+    $journalPath = Join-Path $temporaryRoot 'extended-string-journal.jsonl'
+    [IO.File]::WriteAllLines(
+        $journalPath,
+        [string[]]@(
+            '{"at_utc":"2026-08-20T16:03:29Z","state":"started"}',
+            '{"at_utc":"2026-08-20T16:05:24Z","state":"ssh_disconnected"}'
+        ),
+        [Text.UTF8Encoding]::new($false)
+    )
+    $unsafeJournalTail = @(Get-Content -LiteralPath $journalPath -Encoding utf8)
+    if ($unsafeJournalTail.Count -ne 2 -or
+        $null -eq $unsafeJournalTail[0].PSObject.Properties['PSPath'] -or
+        $null -eq $unsafeJournalTail[0].PSObject.Properties['PSProvider']) {
+        throw 'Native Get-Content extended-string reproduction is absent'
+    }
+    $unsafeProjectionRejected = $false
+    try {
+        foreach ($line in $unsafeJournalTail) {
+            if ($null -ne $line.PSObject.Properties['PSPath'] -or
+                $null -ne $line.PSObject.Properties['PSProvider']) {
+                throw 'extended Get-Content string is not a JSON primitive'
+            }
+        }
+    }
+    catch {
+        if ($_.Exception.Message -cne 'extended Get-Content string is not a JSON primitive') {
+            throw
+        }
+        $unsafeProjectionRejected = $true
+    }
+    if (-not $unsafeProjectionRejected) {
+        throw 'Raw Get-Content journal projection was not rejected before serialization'
+    }
+    $safeJournalTail = @($unsafeJournalTail | ForEach-Object {
+        $record = ([string]$_ | ConvertFrom-Json)
+        [ordered]@{
+            at_utc = [string]$record.at_utc
+            state = [string]$record.state
+        }
+    })
+    $safeJson = [ordered]@{ journal_tail = $safeJournalTail } |
+        ConvertTo-Json -Compress -Depth 4
+    $safeJsonBytes = [Text.Encoding]::UTF8.GetByteCount([string]$safeJson)
+    if ($safeJsonBytes -lt 1 -or $safeJsonBytes -gt 4096 -or
+        $safeJson -match 'PSPath|PSProvider|PSDrive|PSParentPath') {
+        throw 'Safe primitive journal projection is not bounded'
     }
 }
 finally {

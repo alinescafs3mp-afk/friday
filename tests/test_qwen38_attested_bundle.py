@@ -448,6 +448,29 @@ def _assert_static_transport_applier(source: str) -> None:
         assert forbidden not in source
 
 
+def _assert_static_bounded_stdin_receiver(source: str) -> None:
+    required = (
+        "archive_size=$(stat -c '%s' -- \"$archive_path\")",
+        "maximum_archive_bytes=8388608",
+        "$archive_size -le $maximum_archive_bytes",
+        r"\$expected=[int64]$archive_size",
+        r"\$cap=[int64]$maximum_archive_bytes",
+        r"\$buffer=New-Object byte[] 65536",
+        r"\$remaining=\$expected",
+        r"\$deadline=[DateTime]::UtcNow.AddSeconds(120)",
+        r"\$readTask=\$stdinStream.ReadAsync(\$buffer,0,\$wanted)",
+        r"if(-not \$readTask.Wait(\$wait))",
+        r"if(\$read-le 0)",
+        r"\$remaining-=\$read",
+        r".Length-ne \$expected",
+        "[[ ${#receiver_encoded} -le 7600 ]]",
+    )
+    assert all(value in source for value in required)
+    assert r"\$stdinStream.CopyTo(\$output)" not in source
+    assert "[Console]::In.ReadToEnd()" not in source
+    assert "[ScriptBlock]::Create(" not in source
+
+
 def _reference_transport_cas_action(
     old_hash: str | None,
     live_hash: str | None,
@@ -1107,6 +1130,7 @@ def test_transport_manifest_pins_exact_live_predecessors_and_frozen_sources() ->
 
 def test_transport_wrapper_pins_verified_ssh_and_transport_identities() -> None:
     source = _SYNC.read_text(encoding="utf-8")
+    _assert_static_bounded_stdin_receiver(source)
     required = (
         "remote_host='192.168.1.78'",
         "remote_user='admin'",
@@ -1153,6 +1177,29 @@ def test_transport_wrapper_pins_verified_ssh_and_transport_identities() -> None:
     assert manifest_pin.group(1) == hashlib.sha256(_TRANSPORT_MANIFEST.read_bytes()).hexdigest()
     assert applier_pin.group(1) == hashlib.sha256(_TRANSPORT_APPLIER.read_bytes()).hexdigest()
     assert replace_test_pin.group(1) == hashlib.sha256(_REPLACE_TEST.read_bytes()).hexdigest()
+
+    mutations = (
+        ("maximum_archive_bytes=8388608", "maximum_archive_bytes=0"),
+        (
+            r"\$readTask=\$stdinStream.ReadAsync(\$buffer,0,\$wanted)",
+            r"\$stdinStream.CopyTo(\$output)",
+        ),
+        (r"\$deadline=[DateTime]::UtcNow.AddSeconds(120)", ""),
+        (r"\$remaining-=\$read", ""),
+        ("[[ ${#receiver_encoded} -le 7600 ]]", ":"),
+    )
+    for old, mutation in mutations:
+        assert old in source
+        with pytest.raises(AssertionError):
+            _assert_static_bounded_stdin_receiver(source.replace(old, mutation, 1))
+
+
+def test_tracked_windows_operations_forbid_generic_scriptblock_stdin() -> None:
+    operational_sources = [_SYNC, *sorted(_REMOTE.glob("*.ps1"))]
+    for path in operational_sources:
+        source = path.read_text(encoding="utf-8")
+        assert "[Console]::In.ReadToEnd()" not in source, path
+        assert "[ScriptBlock]::Create(" not in source, path
 
 
 def test_transport_applier_is_manifest_last_nullable_and_atomic() -> None:
@@ -1227,10 +1274,18 @@ def test_native_transport_projection_covers_absent_retry_order_and_encoded_stdin
         "Interrupted prefix published orchestration manifest before all payloads",
         "Interrupted publication prefix is not resumable",
         r"$wrapperSource.Contains('\$stdinStream=[Console]::OpenStandardInput()')",
+        r"$wrapperSource.Contains('\$readTask=\$stdinStream.ReadAsync(\$buffer,0,\$wanted)')",
+        "$wrapperSource.Contains('[Console]::In.ReadToEnd()')",
+        "Encoded-command receiver is not exact-byte, capped, and deadline-bounded",
         "-EncodedCommand",
         "$startInfo.RedirectStandardInput = $true",
         "$process.StandardInput.BaseStream.Write($inputBytes, 0, $inputBytes.Length)",
         "Native encoded-command stdin receiver changed bytes",
+        "Native Get-Content extended-string reproduction is absent",
+        "extended Get-Content string is not a JSON primitive",
+        "Raw Get-Content journal projection was not rejected before serialization",
+        "Safe primitive journal projection is not bounded",
+        "ConvertTo-Json -Compress -Depth 4",
         "attested bundle transport projection: PASS",
     )
     assert all(value in source for value in required)

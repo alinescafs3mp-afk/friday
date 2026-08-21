@@ -70,7 +70,7 @@ fail() {
     exit 1
 }
 
-for command_name in ssh ssh-keygen iconv base64 sha256sum zip awk cut mktemp rm dirname cat; do
+for command_name in ssh ssh-keygen iconv base64 sha256sum zip awk cut mktemp rm dirname cat stat; do
     command -v "$command_name" >/dev/null || fail "required command is absent: $command_name"
 done
 [[ -f $manifest && ! -L $manifest ]] || fail 'transport manifest is absent or a symlink'
@@ -218,6 +218,11 @@ archive_path=$temporary_root/qwen38-v12-attested-$phase.zip
 zip -q -X -j "$archive_path" "$applier" "$manifest" "$replace_test" \
     "${selected_files[@]}"
 archive_sha256=$(sha256sum -- "$archive_path" | awk '{print $1}')
+archive_size=$(stat -c '%s' -- "$archive_path")
+maximum_archive_bytes=8388608
+[[ $archive_size =~ ^[0-9]+$ && $archive_size -ge 1 &&
+    $archive_size -le $maximum_archive_bytes ]] ||
+    fail 'transport archive size is outside the bounded receiver contract'
 session_id=$(printf '%s' "$archive_sha256:$phase:$mode:$temporary_root" | sha256sum | cut -c1-32)
 
 receiver_source=$(cat <<PS
@@ -231,12 +236,33 @@ if((\$si.Attributes-band [IO.FileAttributes]::ReparsePoint)-ne 0){throw 'Sync ro
 \$ri=Get-Item -LiteralPath \$root -Force
 if((\$ri.Attributes-band [IO.FileAttributes]::ReparsePoint)-ne 0){throw 'Incoming root is a reparse point'}
 \$sha='$archive_sha256'
+\$expected=[int64]$archive_size
+\$cap=[int64]$maximum_archive_bytes
+if(\$expected-lt 1-or \$expected-gt \$cap){throw 'Archive size is outside the receiver cap'}
 \$dst=Join-Path \$root (\$sha+'.zip')
 \$tmp=Join-Path \$root ('.'+\$sha+'.$session_id.partial')
 try{
   \$stdinStream=[Console]::OpenStandardInput()
   \$output=[IO.File]::Open(\$tmp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-  try{\$stdinStream.CopyTo(\$output)}finally{\$output.Dispose()}
+  \$buffer=New-Object byte[] 65536
+  \$remaining=\$expected
+  \$deadline=[DateTime]::UtcNow.AddSeconds(120)
+  try{
+    while(\$remaining-gt 0){
+      \$now=[DateTime]::UtcNow
+      if(\$now-ge \$deadline){throw 'Archive receive deadline expired'}
+      \$wait=[int][Math]::Min(10000,[Math]::Max(1,(\$deadline-\$now).TotalMilliseconds))
+      \$wanted=[int][Math]::Min([int64]\$buffer.Length,\$remaining)
+      \$readTask=\$stdinStream.ReadAsync(\$buffer,0,\$wanted)
+      if(-not \$readTask.Wait(\$wait)){throw 'Archive stdin read timed out'}
+      \$read=[int]\$readTask.Result
+      if(\$read-le 0){throw 'Archive stdin ended before the exact byte count'}
+      \$output.Write(\$buffer,0,\$read)
+      \$remaining-=\$read
+    }
+    \$output.Flush(\$true)
+  }finally{\$output.Dispose();\$stdinStream.Dispose()}
+  if((Get-Item -LiteralPath \$tmp -Force).Length-ne \$expected){throw 'Staged archive size changed'}
   if((Get-FileHash -LiteralPath \$tmp -Algorithm SHA256).Hash.ToLowerInvariant()-cne \$sha){throw 'Staged archive hash changed'}
   if(Test-Path -LiteralPath \$dst -PathType Leaf){
     \$di=Get-Item -LiteralPath \$dst -Force
@@ -244,10 +270,11 @@ try{
     if((Get-FileHash -LiteralPath \$dst -Algorithm SHA256).Hash.ToLowerInvariant()-cne \$sha){throw 'Existing staged archive is corrupt'}
   }else{[IO.File]::Move(\$tmp,\$dst)}
 }finally{if(Test-Path -LiteralPath \$tmp -PathType Leaf){Remove-Item -LiteralPath \$tmp -Force}}
-[pscustomobject][ordered]@{schema='friday.attested-bundle-stage.v1';archive_sha256=\$sha;status='staged'}|ConvertTo-Json -Compress -Depth 12
+[pscustomobject][ordered]@{schema='friday.attested-bundle-stage.v1';archive_sha256=\$sha;archive_size=\$expected;status='staged'}|ConvertTo-Json -Compress -Depth 4
 PS
 )
 receiver_encoded=$(printf '%s' "$receiver_source" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+[[ ${#receiver_encoded} -le 7600 ]] || fail 'bounded receiver exceeds the remote command-line budget'
 ssh "${ssh_args[@]}" "$remote_target" \
     "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand $receiver_encoded" \
     < "$archive_path"
