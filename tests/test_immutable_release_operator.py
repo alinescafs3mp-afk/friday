@@ -1950,6 +1950,7 @@ def test_runtime_queue_path_is_structurally_and_candidate_settings_bound(
     probe_script = observed[0][0][4]
     legacy_argv = ["-c", *observed[0][0][5:]]
     monkeypatch.setattr(sys, "argv", legacy_argv)
+    monkeypatch.setenv("FRIDAY_ENV_FILE", str(port.config.env_file))
     exec(compile(probe_script, "<legacy-runtime-config-probe>", "exec"), {})  # noqa: S102
     receipt = json.loads(capsys.readouterr().out)
     assert receipt["obsidian_mode"] == "disabled"
