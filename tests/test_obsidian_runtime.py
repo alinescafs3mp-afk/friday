@@ -484,9 +484,7 @@ async def test_folder_offer_resumes_after_post_folder_before_state_transition(
 
 
 @pytest.mark.asyncio
-async def test_selected_device_posted_before_durable_bind_resumes_safely(
-    settings, storage, tmp_path
-) -> None:
+async def test_selected_device_posted_before_durable_bind_resumes_safely(settings, storage, tmp_path) -> None:
     storage.ensure_user("alice")
     runtime, client = _runtime(settings, storage, tmp_path)
     await runtime.start("alice")
@@ -562,12 +560,8 @@ async def test_incomplete_durable_state_stops_profile(
         )[0]
         storage.select_obsidian_pairing_candidate("alice", candidate["id"])
     else:
-        storage.bind_obsidian_android_device(
-            "alice", syncthing_device_id=PHONE_ID, display_name="Pixel"
-        )
-    storage.transition_obsidian_onboarding(
-        "alice", "android_device_detected", pending_device_id=PHONE_ID
-    )
+        storage.bind_obsidian_android_device("alice", syncthing_device_id=PHONE_ID, display_name="Pixel")
+    storage.transition_obsidian_onboarding("alice", "android_device_detected", pending_device_id=PHONE_ID)
     if invalid_state == "offering_without_folder":
         storage.transition_obsidian_onboarding("alice", "offering_folder")
 

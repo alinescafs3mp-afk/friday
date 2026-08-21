@@ -322,9 +322,7 @@ class ObsidianRuntime:
         stop_succeeded = False
         cancelled_during_cleanup = False
         for _attempt in range(2):
-            stop_task = asyncio.create_task(
-                asyncio.to_thread(self.manager.stop_profile, profile_id)
-            )
+            stop_task = asyncio.create_task(asyncio.to_thread(self.manager.stop_profile, profile_id))
             while not stop_task.done():
                 try:
                     await asyncio.shield(stop_task)
@@ -1010,9 +1008,7 @@ class ObsidianRuntime:
             return
 
         if state == "android_device_detected" and (not bound_device_id or configured is None):
-            raise ObsidianCompatibilityError(
-                "detected Android state has no durable configured device"
-            )
+            raise ObsidianCompatibilityError("detected Android state has no durable configured device")
         if state in folder_required_states and (not bound_device_id or configured is None):
             raise ObsidianCompatibilityError("bound Android device is required for this onboarding state")
 
@@ -1026,7 +1022,9 @@ class ObsidianRuntime:
         )
         if not folders:
             if folder_required:
-                raise ObsidianCompatibilityError("managed vault folder is absent from Syncthing configuration")
+                raise ObsidianCompatibilityError(
+                    "managed vault folder is absent from Syncthing configuration"
+                )
             return
         if not folder_allowed or set(folders) != {folder_id}:
             raise ObsidianCompatibilityError("managed Syncthing profile folder allowlist changed")
@@ -1332,8 +1330,7 @@ class ObsidianRuntime:
         conflicts = self.storage.list_obsidian_conflicts(owner_id)
         session = self.storage.get_obsidian_onboarding(owner_id)
         terminal = bool(
-            session is not None
-            and str(session["state"]) in {"cancelled", "failed", "disconnected"}
+            session is not None and str(session["state"]) in {"cancelled", "failed", "disconnected"}
         )
         connection: dict[str, Any] = (
             {"state": "offline", "transport": "none"}
