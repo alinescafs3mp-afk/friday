@@ -1,76 +1,74 @@
 # Friday Obsidian Integration Architecture and Implementation Plan
 
 > Document ID: FRIDAY-OBS-001  
-> Status: External architecture proposal, draft v0.3  
+> Status: External architecture proposal, draft v0.4  
 > Repository snapshot: `main`, Friday `0.206.0`, 21 August 2026  
-> Primary scenario: free Android-only user, Telegram as the Friday interface, no Obsidian Sync subscription, no desktop Obsidian requirement, and an always-on Friday host.  
+> Primary scenario: a free Android-only user, Telegram as the Friday interface, no Obsidian account requirement, no Obsidian Sync subscription, no desktop Obsidian requirement, one physical phone, and an always-on Friday host.  
 > Primary Android sync client: Syncthing-Fork.  
 > Related documents: [`INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md`](INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md), [`DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md`](DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md), [`MCP_ARCHITECTURE_OBSERVATION.md`](MCP_ARCHITECTURE_OBSERVATION.md), and [`SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md`](SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md).
 
-## Revision 0.3
+## Revision 0.4
 
-This revision replaces the account-centric and Obsidian-Sync-centric design from v0.2.
+This revision corrects a practical flaw in v0.3: a user who owns only one Android phone cannot scan a QR code displayed on that same phone.
 
-The system must now work under the following hard assumption:
-
-> Obsidian Sync does not exist as an available product. The user has an Android phone, a free local Obsidian vault, Telegram, and no desktop computer that Friday may rely on.
-
-The primary architecture is therefore:
+The primary pairing flow is now **copy and paste**, not QR scanning.
 
 ```text
-Telegram on Android
-    -> Friday
-    -> server-side vault checkout
-    -> managed Syncthing instance
-    -> Syncthing protocol
-    -> Syncthing-Fork on Android
-    -> Android device-storage folder
-    -> official Obsidian mobile app
+Telegram
+    -> Copy Friday Device ID
+    -> switch to Syncthing-Fork
+    -> Add device
+    -> paste ID
+    -> save
 ```
 
-The consequences are important:
+QR remains an optional convenience when the Telegram setup page is displayed on another screen. It is never required for the one-phone path.
 
-1. No Obsidian account login is required.
-2. Friday does not bind to an Obsidian account.
-3. Friday binds one Friday user to one Android Syncthing device and one logical vault.
-4. Syncthing-Fork is the persistent delivery channel.
-5. Obsidian URI is the one-tap navigation channel.
-6. A Friday companion plugin is optional foreground context, not the synchronization backbone.
-7. Friday must implement server-side note semantics that were previously delegated to Obsidian desktop or CLI.
-8. Android background execution and synchronization delay are normal operating conditions, not exceptional failures.
+The important consequences are:
 
-## Non-negotiable deployment assumptions
+1. The complete supported setup must work on one Android device.
+2. Telegram's clipboard button is the preferred handoff.
+3. A plain selectable Device ID and HTTPS setup page are mandatory fallbacks.
+4. The user pastes only Friday's Syncthing Device ID.
+5. Friday discovers the Android Device ID from Syncthing's pending-device state and accepts it automatically within the active setup session.
+6. The user never has to copy an Android Device ID back into Telegram.
+7. QR-specific wording, acceptance criteria, and implementation tasks are secondary only.
 
-The main design assumes:
+## Hard product assumptions
+
+The primary design assumes:
 
 ```text
-user device:
-    Android phone or tablet
-    official Obsidian mobile application
-    Syncthing-Fork
+user side:
+    one Android phone or tablet
     Telegram client
+    official Obsidian Android application
+    Syncthing-Fork
+    no desktop computer required
 
 Friday side:
     always-on Linux host or home server
+    Friday backend and workers
     writable per-user vault checkout
     managed Syncthing process
-    Friday backend and workers
 
 not assumed:
-    paid Obsidian services
     Obsidian account
+    paid Obsidian services
+    Obsidian Sync
     desktop Obsidian
     desktop CLI
+    second screen
     browser-session import
-    continuously running Obsidian mobile app
-    continuously connected mobile companion plugin
+    continuously open Obsidian mobile app
+    continuously connected companion plugin
 ```
 
-Desktop and paid-provider transports may be added later, but they must not shape the core contracts or acceptance criteria of this plan.
+Future desktop or account-based transports may attach behind the same contracts, but they must not shape the core free Android workflow.
 
 ## Product goal
 
-A user should perform one setup procedure and then use Obsidian through Friday in ordinary Russian from Telegram.
+The user performs one setup procedure and then uses Obsidian through Friday in ordinary Russian from Telegram.
 
 Examples after setup:
 
@@ -99,16 +97,16 @@ The intended experience is:
 ```text
 The user talks to Friday.
 Friday understands and coordinates the task.
-Friday changes or searches its server-side vault checkout.
-Syncthing-Fork carries the change to or from Android.
+Friday reads or changes its server-side vault checkout.
+Syncthing-Fork transfers changes between Friday and Android.
 Obsidian remains the native mobile editor and viewer.
 ```
 
-## What is available before full synchronization
+## Functional tiers
 
-A user with only the Obsidian Android app may use an URI-only degraded mode.
+### URI-only handoff
 
-Friday may return `obsidian://` actions that ask the phone to:
+A user with only the Obsidian Android app may use `obsidian://` actions to:
 
 ```text
 open a vault
@@ -119,30 +117,47 @@ open or create a daily note
 open Obsidian search
 ```
 
-This mode is useful for immediate capture with one user tap.
+This is a one-tap handoff. Friday cannot reliably read the vault, search all notes, observe edits, confirm URI writes, maintain note identity, or continue a multi-step note workflow.
 
-It does not give Friday durable access to the vault. Friday cannot reliably:
+### Full free Android mode
+
+With Syncthing-Fork connected, Friday may:
 
 ```text
-read existing notes
-search the complete vault
-confirm that a URI write succeeded
-edit while the user is offline
-observe phone-side edits
-maintain backlinks or note identity
-continue a multi-step vault workflow
+list and search notes
+read and edit notes while Obsidian is closed
+manage properties, tags, tasks, templates, and daily notes
+maintain links and backlinks
+create .base files
+index notes semantically
+link Obsidian notes to Friday objects
+synchronize changes whenever Android is available
 ```
 
-URI-only mode must be presented as a handoff, not as full integration.
+### Optional companion mode
+
+A future Friday companion plugin adds foreground-only context:
+
+```text
+current note
+selected text
+cursor insertion
+active heading
+native Obsidian commands
+pane and workspace actions
+```
+
+The plugin is never the synchronization backbone.
 
 ## Full free Android architecture
 
 ```text
 ┌──────────────────────────────────────────────┐
-│ Telegram client on Android                   │
+│ Telegram client on the only Android phone    │
 │                                              │
 │ /obsidian                                    │
 │ ordinary Russian requests                    │
+│ Copy Friday ID button                        │
 │ Open in Obsidian buttons                     │
 └──────────────────────┬───────────────────────┘
                        │
@@ -152,10 +167,9 @@ URI-only mode must be presented as a handoff, not as full integration.
 │                                              │
 │ Interaction Control Plane                    │
 │ Obsidian Organ                               │
-│ vault operations                             │
-│ note index and backlinks                     │
+│ note operations and index                    │
 │ Work Items and Playbooks                     │
-│ operation ledger                             │
+│ operation and delivery ledger                │
 └──────────────────────┬───────────────────────┘
                        │ local filesystem
                        ▼
@@ -170,11 +184,11 @@ URI-only mode must be presented as a handoff, not as full integration.
                        │
                        ▼
 ┌──────────────────────────────────────────────┐
-│ Managed Syncthing instance                   │
+│ Managed per-user Syncthing profile           │
 │                                              │
 │ unique server Device ID                      │
 │ REST and event adapter                       │
-│ folder and peer status                       │
+│ folder, peer, and delivery state             │
 └──────────────────────┬───────────────────────┘
                        │ Syncthing protocol
                        ▼
@@ -190,27 +204,26 @@ URI-only mode must be presented as a handoff, not as full integration.
 │ Official Obsidian Android app                │
 │                                              │
 │ opens the same folder as a vault             │
-│ native editing, links, views, plugins         │
+│ native editing, links, views, and plugins    │
 └──────────────────────────────────────────────┘
 ```
 
-## There is no Obsidian account binding
+## Identity model
 
-In this architecture, an Obsidian account is irrelevant.
-
-The durable identity graph is:
+There is no Obsidian account binding in the primary path.
 
 ```text
 Telegram identity
     -> Friday user
         -> Syncthing server profile
-        -> Android Syncthing Device ID
+        -> Android Syncthing device
         -> logical vault
         -> server checkout
-        -> Android vault alias and local folder
+        -> Android vault alias and folder
+        -> Obsidian note identities
 ```
 
-Suggested records:
+Suggested contracts:
 
 ```python
 SyncthingProfile(
@@ -239,42 +252,36 @@ ObsidianLogicalVault(
     folder_id="friday-user-...",
     server_path="...",
     android_vault_name="Friday",
-    android_path_hint="Documents/Friday",
+    android_path_hint="Documents/Obsidian/Friday",
     sync_device_id="stdev_...",
     state="ready",
 )
 ```
 
-Do not create an `ObsidianAccountConnection` in the primary free path.
+A future sync provider may attach to the logical vault without changing note, search, or Work Item contracts.
 
-A future paid or delegated account provider may attach to the logical vault without changing note, search, or Work Item contracts.
+## Recommended Syncthing topology
 
-## Recommended server topology
-
-### Default: one Syncthing profile per Friday user
-
-The simplest functionally correct topology is one managed Syncthing profile and process per connected Friday user.
+Use one managed Syncthing profile and process per connected Friday user for the first implementation.
 
 Advantages:
 
-- one unique server Device ID maps unambiguously to one Friday user;
-- QR pairing cannot attach a phone to the wrong user profile;
-- device and folder state are easy to reason about;
-- disconnect and reset are local to one user;
-- per-user event streams and REST credentials are simple;
-- no cross-user folder configuration exists inside one Syncthing process.
+- one server Device ID maps to exactly one Friday user;
+- the pending Android device cannot be assigned to another user's setup profile;
+- device and folder state remain easy to diagnose;
+- disconnect and reset affect one user only;
+- each profile has its own REST key and event stream;
+- one active pairing session has one unambiguous pending-device queue.
 
 Cost:
 
-- one additional lightweight process and database per connected user;
-- more local ports and supervisor entries;
+- one lightweight process and database per connected user;
+- additional supervisor entries and local ports;
 - more startup and upgrade work.
 
-For Friday's current scale, this trade is preferable to a pooled daemon with a complicated pairing broker.
+A pooled daemon may be introduced later behind `VaultSyncTransport`.
 
-A pooled multi-user Syncthing daemon may be introduced later behind the same `VaultSyncTransport` contract.
-
-### Suggested directory layout
+Suggested layout:
 
 ```text
 data/obsidian/
@@ -290,11 +297,11 @@ data/obsidian/
                     Templates/
 ```
 
-The Syncthing GUI and REST API bind only to loopback. Friday talks to it through a generated API key.
+The Syncthing GUI and REST API bind to loopback. Friday uses a generated API key.
 
-## One-time Telegram onboarding
+## One-phone Telegram onboarding
 
-## Entry point
+### Entry point
 
 The user sends:
 
@@ -316,114 +323,161 @@ You need two free Android apps:
 [ Install Syncthing-Fork ]
 ```
 
-The setup button opens either:
+The setup may be displayed as:
 
-- a Telegram Mini App in clients that support it;
-- a short-lived normal HTTPS link in clients that do not.
+- an edited Telegram message with inline buttons;
+- a Telegram Mini App;
+- a short-lived HTTPS page for clients without adequate Mini App support.
 
-The setup page is bound to the existing Friday user. It does not ask for an Obsidian login.
+All paths refer to the same resumable onboarding session bound to the Friday user.
 
-## Android preflight
+### Android storage preflight
 
-The page explains one important Android choice:
-
-> The Obsidian vault must use device storage, not private app storage, because Syncthing-Fork must access the same folder.
+The vault must use Android device storage, not Obsidian private app storage, because Syncthing-Fork must access the same folder.
 
 Supported cases:
 
-### Existing Android vault
+#### Existing vault
 
-The user already has an Obsidian vault in device storage.
+The user already has an Obsidian vault in device storage. During folder acceptance, the user selects that existing folder.
 
-During folder acceptance, the user selects that existing folder.
+#### New Friday vault
 
-### New Friday vault
+Friday creates an empty server checkout. The user accepts the offered folder into device storage and then opens that folder as a vault in Obsidian.
 
-Friday creates an empty server checkout and offers it as a Syncthing folder.
+### Provisioning
 
-The user accepts the folder into a device-storage location and then opens that folder as a vault in Obsidian.
-
-## Provisioning
-
-Friday creates:
+Friday durably creates:
 
 ```text
 one onboarding session
 one per-user Syncthing profile
 one server Device ID
-one empty logical vault checkout
+one logical vault checkout
 one unique Syncthing folder ID
 ```
 
-The onboarding state is persisted before the process is started.
+Provisioning is idempotent. Refreshing or repeating `/obsidian` resumes the same state.
 
-## Device pairing
+## Primary pairing flow: clipboard first
 
-The setup page displays:
+### Telegram response
 
-```text
-1. Open Syncthing-Fork.
-2. Tap Add device.
-3. Scan this QR code.
-4. Save the device.
-```
-
-The QR contains the Friday-side Syncthing Device ID. Device IDs are public identifiers used for mutual device configuration, not account passwords.
-
-Because the server Device ID belongs to this user's dedicated Syncthing profile, the next pending Android device on that profile is unambiguous.
-
-Friday polls the Syncthing pending-device endpoint or consumes the corresponding event.
-
-When the Android device attempts to connect, Friday:
-
-1. records its Device ID and reported name;
-2. adds it to the per-user Syncthing configuration;
-3. associates it with the onboarding session;
-4. shares the logical vault folder with it.
-
-The page changes to:
+Friday presents:
 
 ```text
-Android device found: Pixel 10
+Copy the Friday Device ID, then add it as a remote device in Syncthing-Fork.
 
-Now accept the offered folder in Syncthing-Fork.
+[ Copy Friday Device ID ]
+[ Open step-by-step guide ]
+[ Show QR for another screen ]
 ```
 
-An explicit confirmation may be shown if the device name or pairing timing is ambiguous.
+The first button uses Telegram `InlineKeyboardButton.copy_text`. The copied text is the complete Friday-side Syncthing Device ID.
+
+The Device ID also appears below as selectable monospaced text:
+
+```text
+XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX-XXXXXXX
+```
+
+This fallback is required because some unofficial or old Telegram clients may not implement the clipboard button correctly.
+
+The HTTPS setup page also provides:
+
+```text
+[ Copy ID ]
+```
+
+If browser clipboard access fails, the page selects the full ID for manual copy.
+
+### Android action
+
+The user performs:
+
+```text
+1. Tap Copy Friday Device ID in Telegram.
+2. Open Syncthing-Fork.
+3. Open Devices.
+4. Tap Add device.
+5. Paste the ID.
+6. Use a friendly name such as Friday.
+7. Save.
+```
+
+No second screen is needed.
+
+### Automatic reverse binding
+
+After Android saves Friday as a device, the Android Syncthing instance attempts to connect. The dedicated Friday Syncthing profile observes an unknown pending device.
+
+Friday then:
+
+1. reads the Android Device ID and reported device name from the pending-device state;
+2. checks that exactly one onboarding session is actively waiting on this dedicated profile;
+3. records the Android Device ID;
+4. adds the Android device to the profile configuration;
+5. associates it with the Friday user and logical vault;
+6. shares the logical vault folder with it;
+7. updates the Telegram message and setup page.
+
+The user does not copy the Android Device ID back to Friday.
+
+If multiple pending devices appear unexpectedly, Friday does not guess. It shows device names and short Device ID suffixes and asks for one selection.
+
+### Optional QR fallback
+
+QR is only an alternate presentation of the same Friday Device ID.
+
+It is useful when:
+
+- Telegram is open on a computer or tablet;
+- another screen is available;
+- the user explicitly chooses QR.
+
+It is not shown as the default instruction and is not part of the minimum one-phone acceptance path.
+
+The design must not depend on Syncthing-Fork importing a QR image from the same phone's gallery unless that behavior is separately probed and versioned.
 
 ## Folder acceptance
 
-Syncthing-Fork receives a folder offer.
+After Friday accepts the Android device, Syncthing-Fork receives a folder offer.
 
-The user performs the unavoidable Android-side action:
+The user performs:
 
 ```text
-1. Accept the folder.
-2. Choose or create the device-storage folder used by Obsidian.
+1. Accept the Friday Vault folder.
+2. Choose or create a device-storage path.
 3. Keep folder type Send & Receive.
 ```
 
-Friday cannot choose an Android filesystem folder remotely. This is the irreducible manual step in a third-party free sync design.
+Recommended new-vault path:
 
-After the Android client accepts the folder, Friday observes `remoteState=valid` and waits for folder completion.
+```text
+Documents/Obsidian/Friday
+```
+
+For an existing vault, the user selects the existing device-storage vault folder.
+
+Friday cannot remotely choose an Android filesystem path. This is an unavoidable manual step.
+
+Friday observes folder acceptance and waits for synchronization readiness.
 
 ## Registering the folder in Obsidian
 
-For a new vault, the user opens Obsidian once and chooses:
+For a new vault, the user opens Obsidian and chooses:
 
 ```text
 Open folder as vault
 ```
 
-Then the user selects the same device-storage folder and assigns the desired vault name.
+The user selects the synchronized folder and names the vault. Friday recommends the default alias `Friday` so the generated `obsidian://` links work immediately.
 
-For an existing vault, this step is already complete.
-
-The setup page asks for the local Obsidian vault name only so Friday can generate correct `obsidian://` links later.
+For an existing vault, the user supplies or confirms its current Obsidian vault name.
 
 ## Round-trip verification
 
-Friday writes a small note:
+Friday writes:
 
 ```text
 Friday Connection Test.md
@@ -431,39 +485,44 @@ Friday Connection Test.md
 
 Then it:
 
-1. requests a local Syncthing scan;
-2. waits for the server index to contain the note;
-3. waits for the Android device completion status to reach 100 percent while connected;
-4. shows an `Open in Obsidian` button;
-5. asks the user to confirm that the note opens.
+1. commits the file atomically;
+2. requests a local Syncthing scan;
+3. waits for the server index to include it;
+4. waits for Android remote completion to reach 100 percent while connected;
+5. sends an `Open in Obsidian` action;
+6. asks the user to confirm that the note opens.
 
-The final confirmation binds the Android vault alias to the logical vault.
+The last confirmation proves Obsidian vault registration and binds the Android vault alias. It is not required to prove the lower-level Syncthing transfer itself.
 
-Friday may remove the test note after confirmation or keep it as a short onboarding guide.
+## Minimum unavoidable actions
 
-## Minimum unavoidable user actions
-
-For a new Android-only user, the realistic one-time sequence is:
+Assuming both Android apps are already installed:
 
 ```text
-1. Install Obsidian.
-2. Install Syncthing-Fork.
-3. Send /obsidian and open setup.
-4. Scan one QR code in Syncthing-Fork.
-5. Accept one folder and choose its Android path.
-6. Open that folder as a vault in Obsidian.
-7. Tap the verification link once.
+1. Send /obsidian.
+2. Tap Copy Friday Device ID.
+3. Open Syncthing-Fork, add a device, paste, and save.
+4. Accept the offered folder and choose its Android path.
+5. Open that folder as a vault in Obsidian.
+6. Tap the verification or Open in Obsidian button.
 ```
 
-This is more work than an OAuth login because no central sync account exists.
+The one-phone path never requires scanning its own screen.
 
-Reducing the flow below this level would require Friday to ship its own Android application or its own Obsidian sync plugin with a custom transport.
+Reducing the flow further would require either:
+
+- a supported Syncthing-Fork Android intent that pre-fills the Device ID;
+- a Friday Android setup helper;
+- a Friday Obsidian plugin with its own synchronization transport.
+
+None is a baseline dependency.
 
 ## Onboarding state machine
 
 ```text
 not_connected
     -> provisioning_server_profile
+    -> awaiting_device_id_handoff
     -> awaiting_android_device
     -> android_device_detected
     -> offering_folder
@@ -474,9 +533,13 @@ not_connected
     -> ready
 
 recoverable states:
+    obsidian_missing
     syncthing_fork_missing
+    copy_button_unsupported
+    manual_copy_required
     device_storage_required
     device_offline
+    multiple_pending_devices
     folder_not_accepted
     folder_path_error
     android_background_restricted
@@ -490,7 +553,7 @@ terminal states:
     failed
 ```
 
-Refreshing the setup page must resume the same state instead of creating another profile or folder.
+`awaiting_device_id_handoff` means Friday has exposed the Device ID. It does not require proof that the clipboard button worked. The next observable proof is the pending Android device.
 
 ## Telegram status panel
 
@@ -507,16 +570,17 @@ Last phone contact: 21:43
 
 [ Open vault ]
 [ Test sync ]
-[ Change vault name ]
 [ Reconnect phone ]
+[ Show Friday Device ID ]
+[ Change vault name ]
 [ Disconnect ]
 ```
 
-There is no account email because no Obsidian account is involved.
+During pairing, the same message may be edited as state advances. The user may also reopen `/obsidian` at any time.
 
 ## Syncthing management adapter
 
-Implement a dedicated service:
+Implement:
 
 ```text
 friday/organs/obsidian/
@@ -527,29 +591,30 @@ friday/organs/obsidian/
     syncthing_status.py
 ```
 
-The adapter should use the local Syncthing REST and event APIs, not scrape its web UI.
-
 Required operations:
 
 ```text
 start or stop one profile
 probe version and status
-read server Device ID
-render Device ID QR
+read the complete server Device ID
+construct Telegram copy-text payload
+render optional QR
 list pending devices
 add or remove an Android device
 create or update a folder
 share a folder with a device
-query restart-required state
 request folder scan
 read local folder status
 read remote-device completion
 consume connection and folder events
 pause or resume a device
 read folder errors
+query restart-required state
 ```
 
-Useful Syncthing endpoints include:
+Use Syncthing's local REST and event APIs, not web UI scraping.
+
+Relevant endpoints include:
 
 ```text
 /rest/system/version
@@ -565,244 +630,216 @@ Useful Syncthing endpoints include:
 /rest/events
 ```
 
-All raw responses are normalized into Friday-owned contracts before reaching planners or models.
+All responses are normalized into Friday-owned contracts.
+
+## Discovery and connectivity
+
+The server profile must be able to receive the Android connection through supported Syncthing discovery and relay behavior or a configured direct address.
+
+Friday diagnostics should distinguish:
+
+```text
+Android has not added Friday yet
+Android added Friday but has not connected
+peer discovered through global discovery
+peer connected directly
+peer connected through relay
+folder offered but not accepted
+folder connected but synchronization incomplete
+```
+
+The setup page should not ask the user to configure ports unless automated discovery and relays have failed and diagnostics identify a network problem.
 
 ## Version compatibility
 
-Syncthing's REST surface can evolve. Friday should maintain a probed compatibility profile:
+Friday should pin and probe supported Syncthing versions.
 
-```python
-SyncthingRuntimeProfile(
-    version="v2.1.0",
-    supported=True,
-    pending_devices=True,
-    granular_config=True,
-    remote_completion=True,
-    folder_completion_events=True,
-)
-```
-
-Startup should fail the Obsidian Organ closed when the active Syncthing version is outside the tested range.
-
-The Android app distribution URL should be configuration-owned. Do not hardcode one maintainer repository forever. The default recommendation may point to the F-Droid package for Syncthing-Fork, while the source repository and update channel remain replaceable metadata.
-
-## Recommended Syncthing folder configuration
-
-Primary folder type:
+A startup probe records:
 
 ```text
-Send & Receive
+Syncthing version
+REST API availability
+required endpoint availability
+event schema version
+server Device ID validity
+profile configuration health
 ```
 
-Recommended server-side settings:
-
-```text
-filesystem watcher enabled
-bounded rescan interval
-ignore permissions where cross-platform metadata causes churn
-auto normalization enabled
-conflict copies allowed
-versioning enabled on the server side
-no nested Syncthing shares
-```
-
-### Versioning
-
-Syncthing is synchronization, not backup.
-
-Enable server-side file versioning so that remote Android replacements and deletions retain recoverable previous versions for a configured period.
-
-This protects against accidental edits arriving from Android. It does not replace Friday's ordinary backup system, and it does not archive server-local changes before they are made.
-
-### `.obsidian` settings folder
-
-The default first release should synchronize the complete vault, including `.obsidian`, because it minimizes user setup and keeps mobile configuration portable.
-
-A later per-vault option may provide:
-
-```text
-shared settings
-    -> sync .obsidian
-
-device-local settings
-    -> ignore .obsidian or selected workspace files
-```
-
-Friday itself should never require `.obsidian` settings to perform basic note operations. It should store daily-note, template, and attachment conventions in its own vault configuration after learning or asking for them.
-
-### Ignore patterns
-
-A conservative optional ignore profile may exclude temporary or backup artifacts, but must not silently exclude user notes.
-
-Ignore patterns are per Syncthing folder and are not themselves synchronized automatically. The onboarding UI should not require manual `.stignore` editing in the first release.
+Syncthing-Fork is outside Friday's release control. The onboarding guide should state a tested minimum version and detect behavior through observable protocol state rather than UI labels alone.
 
 ## Sync truth model
 
-One word, `synced`, is not precise enough.
-
-Friday should track separate postconditions:
-
-```text
-write_committed
-    Friday atomically wrote the server file
-
-server_scan_complete
-    Syncthing indexed the server-side change
-
-android_peer_connected
-    the Android device currently has a Syncthing connection
-
-android_folder_accepted
-    the Android device shares the folder back
-
-android_completion_known
-    Friday has a current remote completion report
-
-android_received
-    remote completion is 100 percent for the relevant folder while state is valid
-
-obsidian_opened
-    the user invoked an Obsidian URI or the companion plugin confirmed navigation
-```
-
-Friday must not collapse these into one success claim.
-
-Example response when the phone is offline:
-
-```text
-The note was updated on Friday's server. Your phone is currently offline, so delivery is pending.
-```
-
-Example response after remote completion:
-
-```text
-The note was updated and Syncthing reports the Android vault as current.
-```
-
-Neither response claims that the user has opened or read the note.
-
-## Outbound write sequence
-
-```text
-user request
-    -> resolve exact vault and note
-    -> obtain or verify expected revision
-    -> atomically mutate server file
-    -> persist operation result
-    -> request Syncthing scan when needed
-    -> observe server index
-    -> observe remote completion if peer is connected
-    -> return precise delivery state
-    -> include Open in Obsidian action when useful
-```
-
-A user-visible response should not wait indefinitely for an offline phone. Delivery observation has a bounded deadline and may continue as a background operation state.
-
-## Inbound Android edit sequence
-
-```text
-user edits note in Obsidian Android
-    -> Syncthing-Fork detects local file change
-    -> change is transferred to Friday host
-    -> server Syncthing applies file
-    -> Syncthing event or filesystem watcher identifies change
-    -> Friday updates note revision and index
-    -> active Work Items invalidate stale reads if necessary
-```
-
-Friday must distinguish its own operation from an Android-originated edit to avoid unnecessary loops.
-
-## Android background behavior
-
-Syncthing-Fork may be delayed or stopped by Android background and battery policies.
-
-The onboarding and diagnostics UI should help the user:
-
-```text
-allow background operation
-remove restrictive battery optimization when required
-allow network access under the desired conditions
-select whether mobile data is allowed
-verify last successful contact
-run a manual synchronization test
-```
-
-These steps should be advisory and device-specific. Friday should not pretend it can configure Android power management remotely.
-
-Expected behavior while the app is stopped:
-
-```text
-Friday continues changing the server checkout.
-Operations remain durable.
-The Android delivery state becomes pending or unknown.
-Synchronization resumes when Syncthing-Fork runs and reconnects.
-```
-
-## Conflict handling
-
-Syncthing detects concurrent file changes and may create `sync-conflict` copies.
-
-Friday must treat conflict files as first-class operational events.
-
-```text
-conflict detected
-    -> preserve both files
-    -> bind conflict to the logical note
-    -> stop automatic full-note replacement for that note
-    -> show a user-visible conflict state
-    -> offer compare, keep server, keep Android, or merge
-```
-
-For Markdown text, Friday may generate a proposed merge, but the original files remain available until the user chooses a resolution.
-
-Do not automatically delete conflict copies.
-
-Do not index both copies as unrelated independent notes without a conflict relationship.
-
-Suggested model:
+Do not collapse synchronization into one Boolean.
 
 ```python
-ObsidianSyncConflict(
-    id="obsconf_...",
-    vault_id="obsvault_...",
-    canonical_path="Projects/Friday.md",
-    conflict_path="Projects/Friday.sync-conflict-....md",
-    detected_at="...",
-    state="awaiting_resolution",
+VaultDeliveryState(
+    local_write_complete=True,
+    server_scan_complete=True,
+    android_connected=False,
+    android_completion=None,
+    android_received=False,
+    obsidian_opened=False,
 )
 ```
 
-## Friday note-operation service
+Meaning:
 
-Because no desktop Obsidian process is assumed, Friday needs a native server-side note service.
+```text
+local_write_complete
+    Friday committed the note to the server checkout
+
+server_scan_complete
+    the server Syncthing index observed the revision
+
+android_connected
+    the Android peer is currently connected
+
+android_completion
+    the peer completion percentage for the folder
+
+android_received
+    Syncthing reports the Android peer has the revision
+
+obsidian_opened
+    only a user action or active companion plugin can establish this
+```
+
+Friday may say:
+
+```text
+The note is saved on the Friday server and will synchronize when the phone is available.
+```
+
+or:
+
+```text
+The note is saved and Syncthing reports that the Android device received the current folder state.
+```
+
+It must not claim that Obsidian displayed the note without evidence.
+
+## Android background constraints
+
+Android may delay or stop Syncthing-Fork in the background.
+
+Onboarding should explain one optional reliability step:
+
+```text
+Allow background operation and exclude Syncthing-Fork from aggressive battery optimization if the device vendor requires it.
+```
+
+This should be presented after functional setup, not as a wall of permissions before pairing.
+
+Phone offline and background delay are normal states:
+
+```text
+server write succeeds
+    -> delivery pending
+    -> Android reconnects later
+    -> transfer completes
+```
+
+They are not note-operation failures.
+
+## Conflict and recovery model
+
+Both Friday and Android may edit the same note offline. Syncthing may create a conflict copy.
+
+Friday should:
+
+- detect `sync-conflict` files;
+- register a conflict record;
+- preserve both versions;
+- exclude conflict copies from ordinary canonical note search unless explicitly requested;
+- offer compare, keep server, keep Android, or merge;
+- record the resolution as a new note revision;
+- never delete a conflict copy silently.
+
+Enable a bounded server-side Syncthing versioning policy for replaced and deleted remote files.
+
+## Friday server note service
+
+Because no running Obsidian desktop process is assumed, Friday must own server-side Markdown semantics.
+
+Suggested package:
 
 ```text
 friday/organs/obsidian/
-    note_store.py
+    __init__.py
+    contracts.py
+    service.py
+    router.py
+    worker.py
+    tools.py
+    playbooks.py
+    vault_store.py
+    markdown_notes.py
     frontmatter.py
-    markdown_links.py
-    tasks.py
-    templates.py
-    daily_notes.py
-    bases.py
+    wikilinks.py
     note_identity.py
     note_merge.py
+    task_index.py
+    base_spec.py
     indexer.py
+    diagnostics.py
 ```
 
-The model never writes filesystem paths directly. It calls Friday-owned capabilities through Execution Kernel.
+The service operates only inside the configured server checkout and uses atomic writes, expected revisions, operation IDs, and postcondition checks.
 
-## Note identity
+## Friday Organ integration
 
-Obsidian naturally navigates by vault-relative path, but path changes after rename or move.
+Obsidian should be a first-party Organ.
 
-Friday-managed or bound notes should contain:
+The current Organ Protocol contributes capabilities, workers, and routers. Add a code-owned tool registration extension:
+
+```python
+class Organ:
+    def capabilities(self):
+        return ()
+
+    def tools(self, ctx):
+        return ()
+
+    def workers(self, ctx):
+        return ()
+
+    def router(self):
+        return None
+```
+
+The Obsidian Organ contributes:
+
+```text
+capabilities
+    obsidian.connect
+    obsidian.read
+    obsidian.write
+    obsidian.manage
+
+workers
+    Syncthing supervisor
+    event consumer
+    delivery reconciler
+    note indexer
+
+router
+    onboarding and status API
+
+Friday-owned tools
+    note and vault capabilities
+```
+
+Do not add a large Obsidian branch inside `AgentRuntime`.
+
+## Note identity and ownership
+
+Use stable frontmatter for notes Friday creates or binds:
 
 ```yaml
 friday_obsidian_id: obnote_7d18d2f4c9e44a35
 ```
 
-Optional links:
+Optional bindings:
 
 ```yaml
 friday_object_id: ko_...
@@ -811,85 +848,38 @@ friday_projection_kind: linked
 friday_projection_revision: 4
 ```
 
-For an unbound user note, temporary identity is:
+Identity invariants:
+
+- title is not identity;
+- path is not permanent identity after binding;
+- content digest is a revision, not identity;
+- rename and move preserve the integration ID;
+- copied notes receive a new integration ID;
+- deleted bindings become tombstones;
+- unbound user notes may be read without modifying them.
+
+Ownership modes:
 
 ```text
-logical vault ID + exact path + observed revision
+user_owned
+    explicit edits only
+
+linked
+    Friday may update selected properties and managed regions
+
+friday_managed
+    Friday owns the whole note body
+
+projection
+    rebuildable mirror, never independently ingested
+
+inbox
+    user note selected for Friday ingestion
 ```
-
-A durable ID is inserted only when Friday creates, links, or manages the note, or when the user explicitly enables ID assignment for indexed notes.
-
-Identity rules:
-
-```text
-title is not identity
-path is not permanent identity after binding
-content digest is revision, not identity
-copy creates a new identity
-rename preserves identity
-move preserves identity
-delete tombstones identity
-```
-
-## Revision and write model
-
-Every read returns:
-
-```text
-logical vault ID
-path
-integration ID when present
-content revision digest
-modified time
-source device when known
-```
-
-Every full replacement accepts an expected revision.
-
-Possible outcomes:
-
-```text
-success
-unchanged
-not_found
-ambiguous
-conflict
-invalid_note
-sync_pending
-sync_unknown
-unsupported
-unavailable
-uncertain
-failed
-```
-
-Mutations use atomic temporary-file replacement inside the server checkout.
-
-## Editing ownership modes
-
-### User-owned
-
-Friday reads and explicitly edits the note when requested. It does not refresh content automatically.
-
-### Linked
-
-Friday may modify selected properties and explicitly marked managed regions while preserving user text.
-
-### Friday-managed
-
-Friday owns the complete body and may regenerate it from Friday state or a Work Item outcome.
-
-### Projection
-
-The note is a rebuildable mirror such as the current `MemoryVault`. Edits are not imported as authoritative changes.
-
-### Inbox note
-
-The note is user-authored and selected for explicit ingestion into Friday's ordinary review pipeline.
 
 ## Managed regions
 
-Linked notes use bounded markers:
+For linked notes, update marked regions instead of replacing the whole note:
 
 ```markdown
 <!-- friday:managed:start id="summary" revision="4" -->
@@ -901,48 +891,15 @@ Generated content here.
 
 Rules:
 
-- Friday updates only the selected region;
-- user text outside the markers is preserved;
+- region IDs are unique within a note;
+- user text outside the region is preserved;
 - malformed or duplicate markers return `ambiguous`;
-- one operation produces one new note revision;
-- managed regions are not nested;
-- a conflict blocks automatic region refresh until reconciled.
+- the write uses an expected note revision;
+- a successful write returns a new revision digest.
 
-## Move and rename semantics
+## Capability surface
 
-A filesystem rename performed on the server does not automatically guarantee that Obsidian has updated all links.
-
-Therefore `obsidian_move_note` must expose:
-
-```text
-update_links = true | false
-```
-
-When `update_links=true`, Friday uses its own vault link index to update:
-
-```text
-wikilinks
-Markdown links that target the moved note
-known embeds
-bindings and candidate references
-```
-
-The operation is planned as one multi-file transaction with an operation ledger and expected revisions.
-
-If Friday cannot safely rewrite an ambiguous link, it returns a partial outcome and lists unresolved references.
-
-A companion plugin may later delegate rename to native Obsidian while the app is open, but the server-side implementation remains required for background Android operation.
-
-## Friday-owned capability surface
-
-### Connection and status
-
-```text
-obsidian_connection_status
-obsidian_test_sync
-obsidian_disconnect
-obsidian_reconnect_device
-```
+Expose stable Friday tools, not raw filesystem access.
 
 ### Discovery and navigation
 
@@ -950,9 +907,9 @@ obsidian_reconnect_device
 obsidian_list_vaults
 obsidian_list_notes
 obsidian_search_notes
-obsidian_recent_notes
 obsidian_open_note
 obsidian_open_search
+obsidian_recent_notes
 ```
 
 ### Note content
@@ -982,7 +939,7 @@ obsidian_list_orphans
 obsidian_list_deadends
 ```
 
-### Daily notes, templates, and tasks
+### Daily notes, templates, tasks, and Bases
 
 ```text
 obsidian_daily_note
@@ -990,18 +947,13 @@ obsidian_create_from_template
 obsidian_list_templates
 obsidian_list_tasks
 obsidian_update_task
-```
-
-### Bases
-
-```text
 obsidian_list_bases
 obsidian_query_base
 obsidian_create_base_item
 obsidian_create_or_update_base
 ```
 
-### Foreground-only companion capabilities
+### Foreground-only plugin tools
 
 ```text
 obsidian_get_active_note
@@ -1013,51 +965,29 @@ obsidian_run_command
 obsidian_load_workspace
 ```
 
-Foreground-only capabilities are unavailable when the mobile companion plugin is disconnected. Their absence must not break the normal Syncthing-backed feature set.
-
-## Capability matrix
-
-| Capability | URI-only | Syncthing-Fork full mode | Companion plugin active |
-|---|---:|---:|---:|
-| Open note | user tap | user tap | yes |
-| Create or append by URI | user tap | yes | yes |
-| Read existing note | no | yes | yes |
-| Search all notes | no | yes | yes |
-| Semantic search | no | yes | yes |
-| Edit while Obsidian is closed | no | yes | not required |
-| Properties and tags | no | yes | yes |
-| Daily notes | limited handoff | yes | yes |
-| Templates | limited | yes | yes |
-| Tasks | no | yes | yes |
-| Backlinks and outgoing links | no | yes | yes |
-| Create `.base` files | no | yes | yes |
-| Query Friday's BaseSpec | no | yes | yes |
-| Current note and selection | no | no | yes |
-| Insert at cursor | no | no | yes |
-| Run community-plugin command | no | no | yes |
-| Work while phone is offline | no | server write pending | no foreground action |
+Foreground-only tools return `unavailable` when the companion plugin is disconnected. Core Syncthing-backed features remain available.
 
 ## Search architecture
 
-Friday should combine:
+Friday combines:
 
 ```text
 exact path and title lookup
-frontmatter property lookup
+frontmatter properties
 tag index
 Markdown lexical search
-backlink and outgoing-link index
-Friday semantic passage index
+wikilink and backlink graph
+semantic passage index
 approximate date parsing
 active Work Item context
 ```
 
-Unified search:
+Pipeline:
 
 ```text
 query
     -> exact identity lane
-    -> lexical note lane
+    -> lexical lane
     -> property and tag lane
     -> link graph lane
     -> semantic passage lane
@@ -1079,31 +1009,11 @@ sync conflict state
 last server observation
 ```
 
-## Indexing Android-originated changes
+The server checkout is the index source. Syncthing events, filesystem events, reconnect reconciliation, and manual rebuild trigger incremental indexing.
 
-The server checkout is the index source.
+## Projection-loop prevention
 
-Triggers:
-
-```text
-Syncthing RemoteChangeDetected events
-filesystem watcher events
-folder scan completion
-reconnect reconciliation
-manual rebuild
-```
-
-The indexer should debounce repeated updates and index only the affected note.
-
-On rename, preserve note identity and update the path.
-
-On delete, invalidate passages and candidate references.
-
-On conflict, index the canonical file and attach the conflict copy as a related operational artifact.
-
-## Avoiding projection loops
-
-The existing `MemoryVault` and any Friday-managed projection roots must be marked as projections and excluded from automatic ingestion as independent evidence.
+The existing `MemoryVault` and any Friday-managed projection roots remain searchable but are marked as `friday_projection`.
 
 ```text
 Friday Knowledge Object
@@ -1112,11 +1022,11 @@ Friday Knowledge Object
     -> Friday note index
 ```
 
-This note may be searchable and openable, but it must retain source kind `friday_projection` and must not re-enter the ingestion pipeline as new knowledge.
+The projected note must not re-enter Friday ingestion as independent evidence.
 
-## Daily-note conventions
+## Daily notes and templates
 
-Without desktop Obsidian configuration, Friday needs its own per-vault convention:
+Friday stores one stable convention per logical vault:
 
 ```python
 ObsidianVaultConvention(
@@ -1127,25 +1037,20 @@ ObsidianVaultConvention(
 )
 ```
 
-During onboarding, defaults are accepted without another question. The user may change them later through `/obsidian` or ordinary language.
+Defaults are accepted during onboarding without another question and may be changed later.
 
-Friday may inspect known `.obsidian` core-plugin configuration files when present, but those files are advisory and version-sensitive. Friday's stored convention is the stable contract.
+Template operations should:
 
-## Templates
-
-Friday should:
-
-- list Markdown templates from the configured folder;
+- list Markdown templates;
 - create a note from a selected template;
-- resolve common date and time variables;
-- fill explicitly named placeholders;
+- resolve common date and time values;
+- fill explicit placeholders;
 - preserve unknown syntax;
-- ask only for missing required fields;
-- synchronize the final note through the normal write path.
+- ask only for missing required values.
 
-## Properties and tags
+## Properties, links, tasks, and Bases
 
-Use typed mutations:
+Property mutations are typed:
 
 ```text
 text
@@ -1156,149 +1061,58 @@ date
 datetime
 ```
 
-A multi-property change is one atomic frontmatter rewrite.
+A multi-property update is one atomic frontmatter rewrite. Do not expose arbitrary YAML replacement to the model.
 
-Do not expose arbitrary YAML string replacement to the model.
+Friday maintains a structured link index for wikilinks, Markdown links, headings, blocks, embeds, resolved targets, and unresolved targets.
 
-## Links and backlinks
+Task references prefer block IDs and otherwise use exact text plus nearby context and the observed revision. Line numbers alone are not durable.
 
-Friday maintains a structured link index:
+Friday may create `.base` files as ordinary vault files. Because no desktop Obsidian engine is assumed, server-side Base queries use a Friday-owned typed `BaseSpec` evaluator over the note index. The generated file should remain compatible with the supported Obsidian Base subset.
 
-```text
-source note
-raw link text
-display text
-target path or unresolved target
-heading or block subpath
-embed flag
-resolved state
+## Interaction Control Plane integration
+
+Use Work Items and Active Frames from [`INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md`](INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md).
+
+```python
+ObsidianActiveFrame(
+    logical_vault_id="obsvault_...",
+    active_note_id="obnote_...",
+    active_path="Projects/Friday.md",
+    active_revision="sha256:...",
+    active_heading="#Retrieval",
+    selected_candidate_set_id="candset_...",
+    last_operation_id="obsop_...",
+)
 ```
 
 This supports:
 
 ```text
-backlinks
-outgoing links
-unresolved links
-orphan notes
-dead ends
-safe rename planning
-related-note navigation
-```
-
-## Tasks
-
-A task reference should include:
-
-```text
-vault ID
-note ID or path
-block ID when available
-line and nearby text fallback
-observed revision
-status
-text excerpt
-```
-
-Line numbers alone are not durable.
-
-Task changes use expected revision and reconcile by block ID or exact text plus local context.
-
-## Bases
-
-Friday can create and edit `.base` files as ordinary vault files.
-
-Because no running desktop Obsidian engine is assumed, querying a Base on the server should use a Friday-owned typed `BaseSpec` evaluator against the note index.
-
-```python
-BaseSpec(
-    name="Friday Active Notes",
-    source_folder="Projects",
-    filters=(
-        PropertyEquals("project", "Friday"),
-        PropertyNotEquals("status", "done"),
-    ),
-    columns=("file.name", "status", "due", "updated"),
-    sort=(Sort("due", "asc"),),
-)
-```
-
-Friday writes the corresponding `.base` representation for Obsidian mobile and uses the typed specification for its own results.
-
-A future companion plugin may query the native Bases engine when Obsidian is open.
-
-## Optional Android companion plugin
-
-The companion plugin is useful but not required for synchronization.
-
-It adds:
-
-```text
-current note
-current heading
-selected text
-insert at cursor
-open in split
-native command execution
-community-plugin commands
-workspace context
-```
-
-Pairing:
-
-```text
-Friday displays a short pairing code
-    -> user enters it in the plugin
-    -> plugin binds to the existing Friday user and logical vault
-```
-
-The plugin should not become a second sync engine. It reads and modifies the same local Android vault that Syncthing-Fork synchronizes.
-
-The plugin connection is considered foreground and opportunistic. Android may suspend it when Obsidian is closed.
-
-## Interaction Control Plane integration
-
-The Obsidian integration should use Work Items and Active Frames from [`INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md`](INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md).
-
-```python
-ObsidianActiveFrame(
-    logical_vault_id="obsvault_...",
-    android_device_id="stdev_...",
-    active_note_id="obnote_...",
-    active_path="Projects/Friday.md",
-    active_revision="sha256:...",
-    selected_candidate_set_id="candset_...",
-    last_operation_id="obsop_...",
-    delivery_state="android_received",
-)
-```
-
-This supports follow-ups:
-
-```text
-Открой второй.
 Добавь это туда.
-Перемести её в архив.
-Теперь свяжи с тем документом.
-Поставь эти пункты задачами.
+Открой второй результат.
+Перемести его в архив.
+Теперь свяжи с найденным документом.
+Сделай из этого задачи.
 ```
+
+The model resolves language. Friday validates the durable target and operation state.
 
 ## Recommended Playbooks
 
-### ConnectAndroidObsidianVault
+### ConnectFreeAndroidObsidian
 
 ```text
 create onboarding session
     -> provision per-user Syncthing profile
-    -> show server Device ID QR
-    -> detect Android device
-    -> add device
-    -> offer vault folder
+    -> expose Friday Device ID with clipboard-first handoff
+    -> wait for Android pending device
+    -> bind and accept Android device
+    -> offer logical vault folder
     -> wait for folder acceptance
-    -> run initial synchronization
-    -> collect Android vault alias
-    -> verify round trip
-    -> mark ready
+    -> initial synchronization
+    -> register Obsidian vault alias
+    -> round-trip verification
+    -> ready
 ```
 
 ### CaptureConversationToObsidian
@@ -1309,8 +1123,8 @@ select conversation range
     -> resolve vault and destination
     -> resolve template or capture format
     -> create or update note
-    -> verify server revision
-    -> observe Android delivery within bounded deadline
+    -> verify local revision
+    -> track Android delivery
     -> return Open in Obsidian action
 ```
 
@@ -1318,17 +1132,17 @@ select conversation range
 
 ```text
 resolve local date and vault convention
-    -> resolve note path
     -> format capture or task
     -> append idempotently
-    -> observe sync state
+    -> verify local revision
+    -> track delivery
 ```
 
 ### SearchAndOpenObsidianNote
 
 ```text
 parse query and vault scope
-    -> search exact, lexical, property, graph, and semantic lanes
+    -> lexical, property, graph, and semantic search
     -> rank and deduplicate
     -> select or ask user
     -> generate exact Obsidian URI
@@ -1338,93 +1152,76 @@ parse query and vault scope
 
 ```text
 resolve note
-    -> read current frontmatter and revision
+    -> read current properties
     -> validate typed mutations
-    -> atomically update
-    -> observe sync state
+    -> apply one atomic update
+    -> track delivery
 ```
 
 ### LinkFridayObjectToObsidian
 
 ```text
 resolve Friday object
-    -> resolve Obsidian note
+    -> resolve note
     -> create durable binding
-    -> update property or managed links region
-    -> observe sync state
-    -> return both navigation targets
+    -> update property or managed region
+    -> track delivery
 ```
 
-### ExportFridayResearchToObsidian
+### IngestObsidianNoteIntoFriday
 
 ```text
-resolve completed Work Item outcome
-    -> choose template
-    -> render claims, sources, and uncertainties
-    -> create note
-    -> update links
-    -> observe sync state
-    -> return mobile open action
+resolve note and revision
+    -> read exact content
+    -> create stable source_ref
+    -> ordinary Friday ingestion
+    -> return Inbox or promotion outcome
+    -> bind source identity
 ```
 
-### ResolveSyncthingConflict
+## Operation and delivery ledger
 
-```text
-identify canonical and conflict copies
-    -> compare revisions
-    -> generate structured diff
-    -> offer keep Android, keep Friday, or merge
-    -> apply chosen resolution
-    -> remove conflict artifact only after confirmation
-    -> rescan and verify
-```
-
-## Operation durability
-
-Every mutation is stored before dispatch:
+Store mutating operations before dispatch:
 
 ```text
 operation_id
-work_item_id
-vault_id
-note identity
+work_item_id nullable
+logical_vault_id
 method
-arguments digest
-expected revision
+arguments_digest
+expected_revision nullable
 status
-attempt
-server result revision
-delivery state
+result_revision nullable
+server_scan_state
+android_delivery_state
 created_at
 updated_at
 ```
 
-State machine:
+Operation states:
 
 ```text
 prepared
-    -> server_write_committed
-    -> server_scan_complete
-    -> android_delivery_pending
-    -> android_received
-    -> completed
-
-error branches:
-    conflict
-    uncertain
-    failed
-    cancelled
+committed
+scan_pending
+scan_complete
+delivery_pending
+delivered
+conflict
+failed
+uncertain
+reconciled
+cancelled
 ```
 
 Retry rules:
 
-- reads may retry;
-- creates reconcile by target path and operation marker;
-- append uses an idempotency marker or postcondition;
-- full replacement requires the same expected revision;
+- reads may retry after transient failure;
+- create checks target existence and operation ID;
+- append uses idempotency markers or postcondition reconciliation;
+- replace requires expected revision;
 - move checks source and destination;
-- delete never blindly retries after an uncertain outcome;
-- offline Android delivery does not roll back a committed server write.
+- delete never blindly retries after an uncertain result.
 
 ## Suggested storage projection
 
@@ -1435,8 +1232,8 @@ obsidian_sync_profiles
     config_root
     database_root
     api_endpoint
+    api_key_ref
     server_device_id
-    runtime_version
     state
     created_at
     updated_at
@@ -1444,26 +1241,24 @@ obsidian_sync_profiles
 obsidian_android_devices
     id
     friday_user_id
-    sync_profile_id
+    profile_id
     syncthing_device_id
     display_name
     state
     last_seen_at
-    created_at
-    updated_at
 
-obsidian_logical_vaults
+obsidian_vaults
     id
     friday_user_id
-    sync_profile_id
+    profile_id
     android_device_id
-    folder_id
     display_name
+    folder_id
     server_path
     android_vault_name
     android_path_hint
-    convention_json
     state
+    convention_json
     created_at
     updated_at
 
@@ -1471,9 +1266,11 @@ obsidian_onboarding_sessions
     id
     friday_user_id
     state
-    setup_token_digest
+    setup_token_hash
+    telegram_chat_id
+    copied_id_exposed_at nullable
+    pending_device_id nullable
     expires_at
-    error_code
     created_at
     updated_at
 
@@ -1487,8 +1284,6 @@ obsidian_note_bindings
     friday_object_kind nullable
     friday_object_id nullable
     deleted_at nullable
-    created_at
-    updated_at
 
 obsidian_operations
     id
@@ -1498,88 +1293,30 @@ obsidian_operations
     arguments_digest
     expected_revision nullable
     status
-    server_revision nullable
-    delivery_state
     result_json
+    delivery_json
     created_at
     updated_at
 
-obsidian_sync_conflicts
+obsidian_conflicts
     id
     vault_id
     canonical_path
     conflict_path
-    state
     detected_at
-    resolved_at nullable
-
-obsidian_index_state
-    vault_id
-    note_binding_id nullable
-    path
-    source_revision
-    embedding_revision nullable
-    indexed_at
-    deleted_at nullable
+    status
+    resolution_json nullable
 ```
-
-## Friday Organ implementation
-
-Recommended repository structure:
-
-```text
-friday/organs/obsidian/
-    __init__.py
-    contracts.py
-    models.py
-    service.py
-    router.py
-    worker.py
-
-    syncthing_process.py
-    syncthing_rest.py
-    syncthing_events.py
-    syncthing_pairing.py
-    syncthing_status.py
-
-    note_store.py
-    note_identity.py
-    frontmatter.py
-    markdown_links.py
-    tasks.py
-    templates.py
-    daily_notes.py
-    bases.py
-    note_merge.py
-    indexer.py
-
-    tools.py
-    playbooks.py
-    diagnostics.py
-```
-
-Obsidian is an appropriate Friday Organ because it is optional and contributes:
-
-```text
-capabilities
-tools
-workers
-HTTP and Mini App routes
-background process supervision
-```
-
-The Friday Organ Protocol should gain a first-class `tools()` extension rather than placing Obsidian branching in `AgentRuntime`.
 
 ## API surface
-
-Suggested endpoints:
 
 ```text
 POST   /api/obsidian/onboarding/start
 GET    /api/obsidian/onboarding/{id}
-POST   /api/obsidian/onboarding/{id}/cancel
-POST   /api/obsidian/onboarding/{id}/confirm-vault
+POST   /api/obsidian/onboarding/{id}/select-device
+POST   /api/obsidian/onboarding/{id}/vault-alias
 POST   /api/obsidian/onboarding/{id}/verify
+POST   /api/obsidian/onboarding/{id}/cancel
 
 GET    /api/obsidian/status
 POST   /api/obsidian/test-sync
@@ -1587,85 +1324,77 @@ POST   /api/obsidian/reconnect
 POST   /api/obsidian/disconnect
 
 GET    /api/obsidian/vaults
-PATCH  /api/obsidian/vaults/{id}
-
 GET    /api/obsidian/notes/search
 GET    /api/obsidian/notes/read
 POST   /api/obsidian/operations
 GET    /api/obsidian/operations/{id}
 
-GET    /api/obsidian/conflicts
-POST   /api/obsidian/conflicts/{id}/resolve
-
 POST   /api/obsidian/index/rebuild
 GET    /api/obsidian/index/status
 ```
 
-The conversational runtime calls the service directly through Execution Kernel handlers instead of calling its own HTTP API.
+The conversational runtime calls the service through Execution Kernel handlers, not through its own HTTP API.
 
 ## Diagnostics
 
-Add an Obsidian and Syncthing section to Friday diagnostics:
+Expose:
 
 ```text
-connected Friday users
-managed Syncthing processes
-Syncthing runtime versions
-server Device IDs by profile
-Android peer state
-last device contact
-folder acceptance state
-server folder health
-remote completion percentage
-pending bytes and items
+configured users and vaults
+Syncthing version
+server profile state
+server Device ID validity
+pending devices
+connected Android device
+connection type: direct or relay
+folder acceptance
+local scan status
+remote completion
+last Android contact
 folder errors
 conflict count
-last successful operation
-pending delivery operations
+operation backlog
 index coverage
 ```
 
-User-facing doctor output:
+Example:
 
 ```text
-Obsidian vault: Friday
-Server checkout: healthy
-Syncthing process: running
-Android device: Pixel 10
-Phone connection: offline
-Pending delivery: 2 files
-Last phone contact: 18 minutes ago
+Obsidian free Android integration: ready
+Vault: Friday
+Server profile: running
+Android device: Pixel 10, online through relay
+Folder: up to date
+Last Android contact: 21:43
+Pending operations: 0
 Conflicts: 0
 ```
 
 ## MCP position
 
-MCP is not needed inside this integration.
-
-Preferred path:
+MCP is not required for Friday-to-Obsidian integration.
 
 ```text
 Friday-owned tools
     -> ObsidianService
-    -> note store and Syncthing adapter
+    -> server note store
+    -> managed Syncthing adapter
 ```
 
-An optional MCP façade may later expose the same stable Friday capabilities to external agents.
-
-A generic Obsidian MCP server does not replace the Android synchronization transport, device pairing, note identity, Work Items, or delivery-state model.
+An optional MCP facade may later expose the same stable capabilities to external agents. A generic Obsidian MCP server does not replace device pairing, Android synchronization, note identity, Work Items, or delivery-state tracking.
 
 ## Implementation phases
 
-### P0: freeze the free Android product contract
+### P0: freeze the one-phone product contract
 
-- make Android-only and no-subscription assumptions executable;
-- remove Obsidian account and Headless concepts from the primary schema;
-- define the sync truth model;
-- define the per-user Syncthing process contract;
-- define onboarding and delivery states;
-- select a tested Syncthing and Syncthing-Fork version range.
+- make Android-only, one-phone, and no-subscription assumptions executable;
+- define copy and paste as the primary pairing flow;
+- define the plain-text and HTTPS clipboard fallbacks;
+- make QR optional only;
+- define sync truth, onboarding states, and error taxonomy;
+- select tested Syncthing and Syncthing-Fork versions.
 
-Deliverable: a versioned architecture contract and probe utility.
+Deliverable: versioned contracts and an executable compatibility probe.
 
 ### P1: managed Syncthing runtime
 
@@ -1673,24 +1402,27 @@ Deliverable: a versioned architecture contract and probe utility.
 - create per-user config and database roots;
 - supervise one process per connected user;
 - implement REST authentication and version probe;
-- implement device, folder, scan, completion, and event adapters;
+- implement pending-device, folder, scan, completion, and event adapters;
 - add diagnostics and restart recovery.
 
-Deliverable: Friday can create and monitor one isolated server-side Syncthing profile.
+Deliverable: Friday creates and monitors one isolated user profile.
 
-### P2: Telegram onboarding
+### P2: clipboard-first Telegram onboarding
 
 - add `/obsidian` status panel;
-- add Mini App and normal HTTPS fallback;
-- provision profile, folder, and Device ID QR;
-- detect and accept the Android device;
+- add Telegram `copy_text` button;
+- display the exact Device ID as selectable text;
+- add Mini App or HTTPS guide with copy fallback;
+- leave QR behind an optional second-screen action;
+- detect the Android pending device;
+- auto-accept it within the dedicated setup profile;
 - offer the folder;
-- wait for Android acceptance;
-- collect Android vault alias;
+- wait for folder acceptance;
+- collect vault alias;
 - perform round-trip verification;
-- make onboarding resumable and idempotent.
+- make the flow resumable and idempotent.
 
-Deliverable: one Android user reaches `ready` without an Obsidian account or desktop.
+Deliverable: one user completes setup on one Android phone with no QR scan.
 
 ### P3: native server note operations
 
@@ -1712,83 +1444,72 @@ daily notes
 templates
 ```
 
-Add atomic writes, revision checks, and an operation ledger.
+Add atomic writes, expected revisions, and operation ledger.
 
-Deliverable: the user performs useful background Obsidian work through Telegram.
+### P4: delivery and conflict handling
 
-### P4: delivery semantics and conflict handling
-
-- track server write, scan, peer, and remote completion separately;
+- track local write, server scan, peer connection, and Android receipt separately;
 - return pending delivery without blocking;
-- detect `sync-conflict` files;
+- detect conflict files;
 - add compare and resolution flow;
 - enable server-side versioning;
 - add reconnect reconciliation.
 
-Deliverable: offline Android and concurrent edits do not produce false success or silent loss.
-
 ### P5: note identity, links, and graph
 
 - add stable note IDs and bindings;
-- build wikilink and Markdown-link index;
+- build link index;
 - implement backlinks, unresolved links, orphans, and dead ends;
 - implement move with bounded link updates;
 - preserve identity across rename and move.
 
-Deliverable: Friday can organize a real vault rather than only append files.
-
-### P6: semantic indexing and Interaction Control Plane
+### P6: semantic indexing and operational memory
 
 - index configured vault roots;
 - combine lexical, property, graph, and semantic lanes;
-- add Obsidian Active Frame;
+- add `ObsidianActiveFrame`;
 - persist candidate sets;
 - implement Playbooks and Completion Gates;
 - combine Obsidian notes with Friday documents and conversations.
 
-Deliverable: approximate search and short follow-ups work across the integrated system.
-
 ### P7: tasks, Bases, and advanced note semantics
 
 - durable task targeting;
-- typed BaseSpec and `.base` generation;
+- typed `BaseSpec` and `.base` generation;
 - managed regions;
-- Friday-to-Obsidian object bindings;
-- explicit Obsidian-note ingestion into Friday Inbox.
-
-Deliverable: broader Obsidian workflows are available without desktop Obsidian.
+- Friday-to-Obsidian bindings;
+- explicit note ingestion into Friday Inbox.
 
 ### P8: optional Android companion plugin
 
-- pair plugin with the existing Friday user and logical vault;
+- pair plugin with existing Friday user and vault;
 - expose current note and selection;
 - insert at cursor;
 - run native commands;
 - open panes and views;
-- keep the plugin out of the sync path.
-
-Deliverable: live in-app context when Obsidian is open.
+- keep plugin out of synchronization.
 
 ### P9: optional future transports
 
-- pooled Syncthing daemon for larger deployments;
+- pooled Syncthing daemon;
+- supported Android intent or helper for prefilled Device ID;
 - alternative free sync providers;
 - desktop CLI adapter;
-- paid-provider adapter if ever desired;
-- MCP façade;
-- packaged mobile companion plugin release.
+- MCP facade;
+- packaged companion plugin release.
 
-## Suggested first release scope
-
-The first production-useful release should contain:
+## Suggested first release
 
 ```text
 one Friday user
 one Android device
 one logical vault
-per-user Syncthing process
+per-user Syncthing profile
 Telegram /obsidian onboarding
-QR device pairing
+copy-text Device ID handoff
+manual selectable-ID fallback
+optional QR only
+pending-device auto-accept
 folder-offer detection
 round-trip verification
 server note list/search/read/create/append
@@ -1800,102 +1521,100 @@ Obsidian URI open button
 basic diagnostics
 ```
 
-Do not block this release on:
+Do not block the release on:
 
 ```text
 companion plugin
 community-plugin commands
 custom Bases view
 Canvas
-multiple Android devices
+multiple phones
 multiple vaults per user
 pooled Syncthing runtime
 ```
 
 ## Acceptance criteria
 
-### Free Android onboarding
+### One-phone onboarding
 
-- A user with no Obsidian account can complete setup.
-- `/obsidian` begins the setup from a verified Friday identity.
-- Mini App and ordinary HTTPS flows resume the same session.
-- Friday provisions exactly one server Syncthing profile for one accepted setup.
-- The QR contains the correct per-user server Device ID.
-- The first Android pending device is bound to the correct user profile.
+- A user completes setup with one Android phone and no second screen.
+- No Obsidian account, email, password, or subscription is required.
+- `/obsidian` starts setup from the correct Friday identity.
+- The primary Telegram button copies the complete Friday Device ID.
+- The Device ID fits the Telegram copy-text contract.
+- The message also contains a selectable full Device ID.
+- An unsupported copy button falls back to manual copy or the HTTPS page.
+- QR is not required by any happy-path state or test.
+- Friday observes the Android pending device after the user pastes and saves the ID.
+- The user never copies the Android Device ID back into Friday.
+- One active dedicated profile binds the pending device to the correct user.
+- Multiple unexpected pending devices require explicit selection.
 - Friday offers exactly one logical vault folder.
-- Setup waits until the Android client shares the folder back.
-- A new Android folder can be opened as an Obsidian vault.
-- The round-trip note reaches 100 percent remote completion while connected.
-- Refreshing or restarting Friday does not duplicate profiles, devices, or folders.
-
-### Identity
-
-- Friday never requires an Obsidian email or password.
-- Friday user, Syncthing profile, Android device, logical vault, and note are separate identities.
-- A device reconnect preserves its binding.
-- Replacing the phone requires an explicit new-device flow.
-- Rename and move preserve bound note identity.
+- Setup waits for folder acceptance.
+- The round-trip note reaches Android remote completion while connected.
+- Refreshing setup does not duplicate profiles, devices, folders, or notes.
 
 ### Android operation
 
-- Friday may write while the phone is offline.
-- Offline delivery remains pending rather than failed.
-- Reconnection transfers pending files.
+- Friday writes while Android is offline.
+- Offline delivery is pending, not failed.
+- Reconnection transfers pending revisions.
 - Friday distinguishes server write from Android receipt.
-- Friday never claims that Obsidian opened a note without a user or plugin action.
-- The Open in Obsidian link uses the configured Android vault alias.
+- Friday never claims Obsidian opened a note without evidence.
+- Open links use the configured Android vault alias.
 
-### Notes
+### Notes and conflicts
 
 - Friday creates, reads, appends, prepends, replaces, moves, and deletes notes.
-- Every full replacement uses an expected revision.
-- Typed property updates preserve the note body.
-- Daily-note paths follow the stored vault convention.
-- Template creation preserves unknown template syntax.
-- Managed-region updates preserve user text outside the region.
+- Full replacement uses expected revision.
+- Typed property updates preserve the body.
+- Daily-note paths follow the stored convention.
+- Managed-region updates preserve user text.
+- Syncthing restart preserves pairing and folder state.
+- Conflict copies are preserved and surfaced.
+- Uncertain mutations are reconciled before retry.
+- One accepted operation produces at most one durable mutation.
 
-### Sync and conflicts
+### Search and composition
 
-- Syncthing process restart does not lose pairing state.
-- Server scan and remote completion are observable.
-- A concurrent edit creates a visible conflict workflow.
-- Conflict copies are never deleted automatically.
-- Server-side versioning retains configured remote replacements and deletions.
-- An uncertain mutation is reconciled before retry.
-- One accepted operation produces at most one durable note mutation.
-
-### Search and graph
-
-- Exact path and title search work over the server checkout.
+- Exact path and title search work.
 - Lexical search returns path and excerpt.
-- Indexed notes can be found by approximate semantic description.
-- Backlinks and outgoing links are computed without a running desktop app.
-- A move with `update_links=true` reports all changed and unresolved references.
+- Semantic search finds approximate content.
+- Backlinks and outgoing links are computed without desktop Obsidian.
+- A move reports updated and unresolved links.
 - Friday projections are not re-ingested as independent evidence.
+- Follow-ups use the active candidate set and note frame.
 
-### Companion plugin independence
+### Companion independence
 
-- All core synchronized note operations work with no plugin installed.
+- All core operations work with no plugin installed.
 - Plugin offline state does not mark the vault unhealthy.
-- Installing the plugin adds active-note capabilities without changing the sync binding.
+- Installing the plugin adds active-note features without changing the Syncthing binding.
 
-## Suggested executable regression tests
+## Suggested regression tests
 
 ```text
 test_free_android_setup_requires_no_obsidian_account.py
-test_obsidian_setup_starts_from_the_friday_telegram_identity.py
-test_one_setup_creates_one_syncthing_profile.py
+test_one_phone_setup_never_requires_qr.py
+test_copy_text_button_contains_the_exact_server_device_id.py
+test_server_device_id_fits_the_telegram_copy_limit.py
+test_selectable_device_id_is_always_present.py
+test_unsupported_copy_button_has_an_https_and_manual_fallback.py
+test_qr_is_optional_and_never_a_happy_path_dependency.py
+test_android_pending_device_is_discovered_after_manual_paste.py
+test_user_never_has_to_return_the_android_device_id.py
 test_each_user_profile_has_a_unique_server_device_id.py
-test_the_first_pending_android_device_binds_to_the_correct_profile.py
+test_the_pending_device_binds_to_the_correct_profile.py
+test_multiple_pending_devices_require_selection.py
 test_folder_acceptance_is_required_before_ready.py
 test_round_trip_verification_reaches_remote_completion.py
-test_refreshing_setup_does_not_duplicate_the_folder.py
+test_refreshing_setup_does_not_duplicate_resources.py
 
 test_friday_can_write_while_android_is_offline.py
 test_offline_delivery_is_pending_not_failed.py
 test_android_receipt_is_distinct_from_server_write.py
-test_friday_never_claims_that_mobile_obsidian_opened_without_evidence.py
-test_the_open_uri_uses_the_configured_android_vault_alias.py
+test_friday_never_claims_mobile_obsidian_opened_without_evidence.py
+test_the_open_uri_uses_the_configured_vault_alias.py
 
 test_friday_can_create_and_append_to_an_obsidian_note.py
 test_friday_can_append_to_the_daily_note_once.py
@@ -1909,47 +1628,52 @@ test_syncthing_restart_preserves_device_and_folder_configuration.py
 test_an_uncertain_append_is_reconciled_before_retry.py
 test_a_sync_conflict_becomes_a_user_visible_conflict_record.py
 test_conflict_files_are_not_deleted_without_resolution.py
-test_remote_completion_updates_the_operation_delivery_state.py
+test_remote_completion_updates_delivery_state.py
 
-test_native_and_semantic_note_results_deduplicate.py
-test_android_originated_changes_reindex_only_the_changed_note.py
+test_native_and_semantic_results_deduplicate.py
+test_android_changes_reindex_only_the_changed_note.py
 test_delete_events_remove_note_passages.py
 test_a_friday_projection_is_not_reingested_as_new_knowledge.py
 test_the_second_result_uses_the_active_candidate_set.py
 test_add_that_there_uses_the_active_note.py
 
-test_core_vault_operations_need_no_companion_plugin.py
+test_core_operations_need_no_companion_plugin.py
 test_companion_plugin_offline_does_not_break_syncthing_operations.py
 test_obsidian_tools_are_registered_by_the_organ_not_agent_runtime.py
 ```
 
-## Key architectural invariants
+## Architectural invariants
 
-1. The primary free Android path requires no Obsidian account.
-2. Friday binds to an Android Syncthing device and logical vault, not to cloud identity.
-3. Syncthing-Fork is the persistent transport between Friday and Android.
-4. Obsidian URI is navigation and handoff, not synchronization proof.
-5. The companion plugin is optional foreground context, not the sync backbone.
-6. Friday owns the natural-language task and Work Item.
-7. Obsidian owns native mobile viewing and editing.
-8. The server checkout is Friday's operational copy of the vault.
-9. Local write, server scan, Android receipt, and Obsidian open are separate postconditions.
-10. Path is navigation, not durable note identity after binding.
-11. A projection is rebuildable and never treated as independent evidence.
-12. A model may select and parameterize capabilities, but it never writes vault paths directly.
-13. One accepted operation produces at most one durable mutation.
-14. Offline Android delivery never erases a committed server result.
-15. Conflicts preserve both versions until an explicit resolution.
-16. Core note features do not depend on a running Obsidian desktop or mobile process.
-17. The sync provider is replaceable behind Friday-owned contracts.
+1. The primary path works with one Android phone.
+2. The primary path requires no Obsidian account or subscription.
+3. Copy and paste is the default Device ID handoff.
+4. QR is optional and assumes another display.
+5. The user copies only Friday's Device ID.
+6. Friday learns the Android Device ID from pending-device state.
+7. Friday binds to an Android Syncthing device and logical vault, not a cloud account.
+8. Syncthing-Fork is the persistent transport.
+9. Obsidian URI is navigation, not synchronization proof.
+10. The companion plugin is optional foreground context.
+11. Friday owns the natural-language task and Work Item.
+12. Obsidian owns native mobile viewing and editing.
+13. The server checkout is Friday's operational vault copy.
+14. Local write, server scan, Android receipt, and Obsidian open are separate postconditions.
+15. Path is navigation, not durable note identity after binding.
+16. Projections are rebuildable and never independent evidence.
+17. One accepted operation produces at most one durable mutation.
+18. Offline Android delivery never erases a committed server result.
+19. Conflicts preserve both versions until explicit resolution.
+20. Core features do not depend on a running Obsidian process.
+21. The sync provider remains replaceable behind Friday-owned contracts.
 
 ## Final recommendation
 
-Build the integration in this order:
+Build in this order:
 
 ```text
 per-user Syncthing runtime
-    -> Telegram QR onboarding
+    -> clipboard-first Telegram onboarding
+    -> pending Android device auto-binding
     -> Android folder acceptance
     -> round-trip verification
     -> native server note operations
@@ -1960,29 +1684,33 @@ per-user Syncthing runtime
     -> optional companion plugin
 ```
 
-The existing `MemoryVault` remains a rebuildable Friday projection. The new Obsidian Organ operates ordinary user vaults through a managed server checkout and Syncthing-Fork.
+The existing `MemoryVault` remains a rebuildable Friday projection. The Obsidian Organ operates ordinary user vaults through a managed server checkout and Syncthing-Fork.
 
-The final free Android experience is:
+The final free one-phone Android experience is:
 
 ```text
 The user installs Obsidian and Syncthing-Fork once.
-The user scans one Friday QR code and accepts one folder.
-The user opens that folder as an Obsidian vault.
+The user sends /obsidian.
+The user taps Copy Friday Device ID.
+The user pastes the ID into Add device in Syncthing-Fork.
+Friday discovers and accepts the Android device automatically.
+The user accepts one folder and opens it as an Obsidian vault.
 After that, the user talks to Friday in Telegram.
 Friday searches, creates, edits, links, and organizes notes.
 Syncthing-Fork transfers changes whenever Android is available.
-Friday reports whether delivery is complete or still pending.
+Friday reports whether delivery is complete or pending.
 A one-tap URI opens the result in the official Obsidian app.
 ```
 
-This is not as frictionless as a central account-based sync service, but it is achievable without a subscription, without a desktop, and without building a complete proprietary synchronization engine inside Friday.
+This is achievable without a subscription, without a desktop, without a second screen, and without building a complete proprietary synchronization engine inside Friday.
 
 ## Official and project references
 
 Sources checked on 21 August 2026:
 
-- [Obsidian: Sync your notes across devices](https://obsidian.md/help/sync-notes)
+- [Telegram Bot API: InlineKeyboardButton and CopyTextButton](https://core.telegram.org/bots/api)
 - [Obsidian for Android](https://obsidian.md/help/android)
+- [Obsidian: Sync your notes across devices](https://obsidian.md/help/sync-notes)
 - [Obsidian URI](https://help.obsidian.md/Extending%2BObsidian/Obsidian%2BURI)
 - [Obsidian mobile plugin development](https://docs.obsidian.md/Plugins/Getting%20started/Mobile%20development)
 - [Syncthing documentation](https://docs.syncthing.net/)
@@ -1993,4 +1721,4 @@ Sources checked on 21 August 2026:
 - [Syncthing remote completion](https://docs.syncthing.net/rest/db-completion-get.html)
 - [Syncthing file versioning](https://docs.syncthing.net/users/versioning.html)
 - [Syncthing-Fork on F-Droid](https://f-droid.org/packages/com.github.catfriend1.syncthingfork/)
-- [Syncthing-Fork source](https://github.com/researchxxl/syncthing-android)
+- [Syncthing-Fork source](https://github.com/Catfriend1/syncthing-android)
