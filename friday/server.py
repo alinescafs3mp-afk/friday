@@ -20,7 +20,7 @@ from contextlib import ExitStack, asynccontextmanager, suppress
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -34,10 +34,12 @@ from friday.account_gate import AccountActivityGate, AccountGateClosed
 from friday.admin_api import router as admin_router
 from friday.agent_runtime import (
     AgentRuntime,
+    _bind_storage_owned_exact_filename_direct_read,
     _historical_direct_read_attachment,
     _is_file_provenance_stub,
     _mime_is_visual_without_text_layer,
     _OwnedAttachment,
+    _ResolvedTelegramReplyAttachment,
     _validated_attachment_lineage_metadata,
     asks_for_the_web,
 )
@@ -135,6 +137,7 @@ from friday.storage._intake import (
     resolve_structural_telegram_reply_direct_read,
     resolve_tenant_telegram_reply_alias_state,
     resolve_tenant_telegram_reply_aliases,
+    resolve_tenant_telegram_reply_supplied_filename,
 )
 from friday.storage.models import (
     AuditEntry,
@@ -700,6 +703,8 @@ def _current_turn_file_attachment(
     file_ingestion: dict[str, Any],
     raw: dict[str, Any] | None,
     storage: Any | None = None,
+    tenant_id: str = "",
+    uploaded_by: str = "",
 ) -> dict[str, Any]:
     """Project a just-uploaded Raw Object into one ephemeral prompt attachment.
 
@@ -876,8 +881,18 @@ def _current_turn_file_attachment(
     )
     if office_index is not None:
         attachment[OFFICE_STRUCTURE_KEY] = office_index
-        return stamp_current_turn_file_reference(trusted_office_attachment(attachment), raw or {})
-    return stamp_current_turn_file_reference(_OwnedAttachment(attachment), raw or {})
+        carrier = stamp_current_turn_file_reference(trusted_office_attachment(attachment), raw or {})
+    else:
+        carrier = stamp_current_turn_file_reference(_OwnedAttachment(attachment), raw or {})
+    if storage is not None and tenant_id and uploaded_by:
+        carrier = _bind_storage_owned_exact_filename_direct_read(
+            storage,
+            carrier,
+            tenant_id=tenant_id,
+            uploaded_by=uploaded_by,
+            filename=filename,
+        )
+    return carrier
 
 
 def _request_hostname(value: str) -> str | None:
@@ -3216,6 +3231,41 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             reply_files_upload = state.auth_service.authorize(actor, "files.upload").allowed
             reply_resolution_status = TELEGRAM_REPLY_BLOCKED
             reply_resolution: tuple[str, str] | None = None
+
+            async def mint_reply_pointer_attachment(
+                raw_id: str,
+                uploaded_by: str,
+            ) -> _ResolvedTelegramReplyAttachment | None:
+                minted = _historical_direct_read_attachment(
+                    raw_id,
+                    tenant_id=actor.user_id,
+                    uploaded_by=uploaded_by,
+                    selector_kind="telegram_reply",
+                )
+                if minted is None:
+                    return None
+                supplied_filename = await run_blocking(
+                    resolve_tenant_telegram_reply_supplied_filename,
+                    state.storage,
+                    actor.user_id,
+                    reply_document_refs,
+                    raw_object_id=raw_id,
+                    uploaded_by=uploaded_by,
+                )
+                if not supplied_filename:
+                    return minted
+                return cast(
+                    _ResolvedTelegramReplyAttachment,
+                    await run_blocking(
+                        _bind_storage_owned_exact_filename_direct_read,
+                        state.storage,
+                        minted,
+                        tenant_id=actor.user_id,
+                        uploaded_by=uploaded_by,
+                        filename=supplied_filename,
+                    ),
+                )
+
             if reply_document_refs and reply_files_read:
                 try:
                     reply_resolution = await run_blocking(
@@ -3234,12 +3284,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     # marker type, never as caller JSON. Runtime performs its
                     # ordinary atomic lifecycle/privacy/registry read against
                     # that exact uploader before any file text becomes visible.
-                    minted = _historical_direct_read_attachment(
-                        reply_raw_id,
-                        tenant_id=actor.user_id,
-                        uploaded_by=reply_uploaded_by,
-                        selector_kind="telegram_reply",
-                    )
+                    minted = await mint_reply_pointer_attachment(reply_raw_id, reply_uploaded_by)
                     if minted is not None:
                         attachments.append(minted)
                 else:
@@ -3264,11 +3309,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             reply_state.raw_object_id,
                             reply_state.uploaded_by,
                         )
-                        minted = _historical_direct_read_attachment(
+                        minted = await mint_reply_pointer_attachment(
                             reply_state.raw_object_id,
-                            tenant_id=actor.user_id,
-                            uploaded_by=reply_state.uploaded_by,
-                            selector_kind="telegram_reply",
+                            reply_state.uploaded_by,
                         )
                         if minted is not None:
                             attachments.append(minted)
@@ -3427,12 +3470,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 )
                 if final_resolution != (recovered_raw_id, actor.own_id):
                     raise IdempotencyConflictError("Telegram reply recovery did not converge")
-                minted = _historical_direct_read_attachment(
-                    recovered_raw_id,
-                    tenant_id=actor.user_id,
-                    uploaded_by=actor.own_id,
-                    selector_kind="telegram_reply",
-                )
+                minted = await mint_reply_pointer_attachment(recovered_raw_id, actor.own_id)
                 if minted is not None:
                     attachments.append(minted)
             elif recovery_supplied and reply_resolution_status == TELEGRAM_REPLY_BLOCKED:
@@ -3628,6 +3666,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             file_ingestion=batch_ingestion,
                             raw=current_turn_raw,
                             storage=state.storage,
+                            tenant_id=actor.user_id,
+                            uploaded_by=actor.own_id,
                         )
                     )
                     file_ingestions.append(batch_ingestion)
@@ -3870,6 +3910,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             file_ingestion=file_ingestion,
                             raw=current_turn_raw,
                             storage=state.storage,
+                            tenant_id=actor.user_id,
+                            uploaded_by=actor.own_id,
                         )
                     )
                 # Голосовое сообщение — обычно ВОПРОС, произнесённый вслух.

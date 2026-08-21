@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from friday.agent_runtime import (
+    _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION,
     _BARE_UPLOAD_REVIEW_TASK,
     _UNCONFIRMED_SUPPORTED_DEED,
     AgentContext,
@@ -306,7 +307,7 @@ class _UnexpectedModel:
         pytest.param("STRICT LIVE REVIEW.odt", id="odt"),
     ],
 )
-async def test_bare_document_verifier_and_repair_share_the_filename_free_review_task(
+async def test_bare_document_one_pass_uses_code_drift_then_one_bounded_repair(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -317,9 +318,7 @@ async def test_bare_document_verifier_and_repair_share_the_filename_free_review_
         settings,
         storage,
         filename=filename,
-        source_text=(
-            "Материал описывает назначение проекта, его структуру и контрольный риск SYNTHETIC-REVIEW-RISK."
-        ),
+        source_text="Продажи по регионам: Север — 120; Юг — 80.",
     )
     runtime = AgentRuntime(
         replace(settings, verify_answers=True, verify_min_answer_chars=1),
@@ -329,8 +328,8 @@ async def test_bare_document_verifier_and_repair_share_the_filename_free_review_
     generation_questions: list[str] = []
     verification_questions: list[str] = []
     repair_questions: list[str] = []
-    initial_mismatch = "Документ безупречен: в нём ровно 777 критических ошибок."
-    repaired_mismatch = "В документе ровно 999 критических ошибок."
+    initial_mismatch = "По данным документа, Юг — 120 продаж."
+    repaired_mismatch = "По данным документа, Север — 80 продаж."
 
     async def generate(context, question, attachments):  # noqa: ANN001
         del context, attachments
@@ -366,14 +365,17 @@ async def test_bare_document_verifier_and_repair_share_the_filename_free_review_
     )
 
     assert generation_questions == [f"Загружен документ: {filename}"]
-    assert verification_questions == [_BARE_UPLOAD_REVIEW_TASK, _BARE_UPLOAD_REVIEW_TASK]
+    # The ordinary bare review never asks the same model to judge its own
+    # initial prose. The code-owned high-confidence drift guard catches the
+    # swapped labelled value, then the one permitted repair is rechecked once.
+    assert verification_questions == [_BARE_UPLOAD_REVIEW_TASK]
     assert repair_questions == [_BARE_UPLOAD_REVIEW_TASK]
     assert filename not in _BARE_UPLOAD_REVIEW_TASK
     assert ".doc" not in _BARE_UPLOAD_REVIEW_TASK.casefold()
     assert initial_mismatch not in str(reply["message"])
     assert repaired_mismatch not in str(reply["message"])
-    assert filename in str(reply["message"])
-    assert "полностью прочитан" in str(reply["message"]).casefold()
+    assert reply["message"] == _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION
+    assert "быстрый обзор" not in str(reply["message"]).casefold()
     assert reply["verification_status"] == "unknown"
 
 
@@ -434,10 +436,7 @@ async def test_bare_upload_cannot_publish_an_inverted_source_negation(
         synthetic_document_notice=True,
     )
 
-    assert [question for question, _answer in verification_calls] == [
-        _BARE_UPLOAD_REVIEW_TASK,
-        _BARE_UPLOAD_REVIEW_TASK,
-    ]
+    assert [question for question, _answer in verification_calls] == [_BARE_UPLOAD_REVIEW_TASK]
     assert repair_calls == [_BARE_UPLOAD_REVIEW_TASK]
     assert false_positive not in str(reply["message"])
     assert "не подготовлен" not in false_positive
@@ -510,7 +509,11 @@ async def test_a_hostile_repair_cannot_add_a_supported_deed_to_a_bare_upload_rev
 
     async def generate(context, question, attachments):  # noqa: ANN001
         del context, question, attachments
-        return {"content": "Документ безупречен.", "tools_used": [], "_model_generated": True}
+        return {
+            "content": "Документ «Альфа» не подготовлен отделом снабжения.",
+            "tools_used": [],
+            "_model_generated": True,
+        }
 
     async def verify(question, answer, context, *, tool_evidence):  # noqa: ANN001
         del answer, context, tool_evidence
@@ -537,7 +540,10 @@ async def test_a_hostile_repair_cannot_add_a_supported_deed_to_a_bare_upload_rev
         synthetic_document_notice=True,
     )
 
-    assert verification_calls == [_BARE_UPLOAD_REVIEW_TASK]
+    # The deterministic polarity guard owns the first rejection; the hostile
+    # repair is removed by the supported-deed guard before it can be judged or
+    # published.
+    assert verification_calls == []
     assert reply["message"] == _UNCONFIRMED_SUPPORTED_DEED
     assert repaired_deed not in repr(reply)
 
@@ -728,6 +734,59 @@ def test_deterministic_attachment_drift_overrules_a_false_model_pass(
     assert verdict["status"] == "failed"
     assert verdict["ok"] is False
     assert expected_issue in verdict["issues"]
+
+
+def test_open_review_allows_a_provable_person_count_and_rejects_the_adjacent_wrong_count() -> None:
+    evidence = (
+        'Вложение "staff.txt", фрагмент 1:\n'
+        "Рядовой, стрелок первого отделения\n"
+        "Иванов Иван Иванович\n"
+        "Сержант, командир отделения\n"
+        "Петров Пётр Петрович\n"
+        "Капитан, командир роты\n"
+        "Сидоров Сидор Сидорович"
+    )
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+
+    supported = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит 3 военнослужащих.",
+        [{"tool": "attachment", "output": evidence}],
+        high_confidence_only=True,
+    )
+    contradicted = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит 4 военнослужащих.",
+        [{"tool": "attachment", "output": evidence}],
+        high_confidence_only=True,
+    )
+
+    assert supported["status"] == "skipped"
+    assert contradicted["status"] == "failed"
+    assert "attachment_derived_record_count_not_in_evidence" in contradicted["issues"]
+
+
+def test_open_review_rejects_an_impossible_record_count_and_absolute_quality_claim() -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+    evidence = [{"tool": "attachment", "output": "Документ описывает назначение проекта."}]
+
+    impossible = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит 777 записей.",
+        evidence,
+        high_confidence_only=True,
+    )
+    absolute = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ безупречен.",
+        evidence,
+        high_confidence_only=True,
+    )
+
+    assert impossible["status"] == "failed"
+    assert "attachment_derived_record_count_not_in_evidence" in impossible["issues"]
+    assert absolute["status"] == "failed"
+    assert "attachment_absolute_quality_claim" in absolute["issues"]
 
 
 @pytest.mark.parametrize(

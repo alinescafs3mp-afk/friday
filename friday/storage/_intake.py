@@ -174,6 +174,84 @@ def resolve_owned_file_exact_filename_direct_read(
     return result
 
 
+def resolve_owned_file_exact_raw_filename_direct_read(
+    storage: StorageShared,
+    user_id: str,
+    uploaded_by: str,
+    raw_object_id: str,
+    filename: str,
+    *,
+    include_content: bool = False,
+) -> list[dict[str, Any]]:
+    """Re-authorize one already typed Raw/name binding without global ambiguity.
+
+    Filename selection must be globally unique when the Raw is first chosen.
+    A process-private authority already freezes that exact Raw, so a later file
+    with the same display name must not revoke or redirect it.  This query still
+    requires the exact live tenant/uploader/Raw and an extant canonical-or-alias
+    filename binding in one storage read.
+    """
+
+    tenant = str(user_id or "").strip()
+    person = str(uploaded_by or "").strip()
+    raw_id = str(raw_object_id or "").strip()
+    clean_filename = str(filename or "").strip()
+    if not tenant or not person or not raw_id or not clean_filename or len(clean_filename) > 260:
+        return []
+    content_projection = (
+        ", r.raw_content AS _raw_content, r.metadata_json AS _raw_metadata" if include_content else ""
+    )
+    rows = storage.execute(
+        f"""SELECT r.id, r.source, r.source_ref, r.content_type, r.received_at,
+                   r.content_hash{content_projection}
+              FROM raw_objects r
+             WHERE r.user_id=? AND r.id=? AND r.deleted_at IS NULL
+               AND r.content_type='file'
+               AND {_exact_uploader_raw_dependency("r")}
+               AND {_not_audio_document("r")}
+               AND {_not_private_raw_dependency("r")}
+               AND EXISTS (
+                   SELECT 1 FROM users exact_raw_filename_uploader
+                    WHERE exact_raw_filename_uploader.id=?
+                      AND exact_raw_filename_uploader.status='active'
+               )
+               AND (
+                   (
+                       json_type(r.metadata_json,'$.filename')='text'
+                       AND length(json_extract(r.metadata_json,'$.filename')) BETWEEN 1 AND 260
+                       AND replace(jericho_casefold(
+                               substr(json_extract(r.metadata_json,'$.filename'),1,261)
+                           ),'ё','е')=replace(jericho_casefold(?),'ё','е')
+                   )
+                   OR EXISTS (
+                       SELECT 1 FROM file_source_aliases exact_raw_filename_alias
+                        WHERE exact_raw_filename_alias.user_id=?
+                          AND exact_raw_filename_alias.uploaded_by=?
+                          AND exact_raw_filename_alias.raw_object_id=r.id
+                          AND length(exact_raw_filename_alias.supplied_filename) BETWEEN 1 AND 260
+                          AND replace(
+                                  jericho_casefold(exact_raw_filename_alias.supplied_filename),'ё','е'
+                              )=replace(jericho_casefold(?),'ё','е')
+                   )
+               )
+             LIMIT 2""",  # nosec B608 - only fixed privacy predicates
+        (
+            tenant,
+            raw_id,
+            person,
+            person,
+            clean_filename,
+            tenant,
+            person,
+            clean_filename,
+        ),
+    ).fetchall()
+    result = [dict(row) for row in rows]
+    for item in result:
+        item["filename"] = clean_filename
+    return result
+
+
 def resolve_structural_telegram_reply_direct_read(
     storage: StorageShared,
     user_id: str,
@@ -640,6 +718,65 @@ def resolve_tenant_telegram_reply_aliases(
         if not canonical_source_ref.startswith(expected_prefix):
             return None
     return str(rows[0]["id"]), resolved_uploader
+
+
+def resolve_tenant_telegram_reply_supplied_filename(
+    storage: StorageShared,
+    user_id: str,
+    source_refs: tuple[str, ...],
+    *,
+    raw_object_id: str,
+    uploaded_by: str,
+) -> str:
+    """Return one exact filename carried by the resolved Telegram identities.
+
+    Raw metadata is immutable under content deduplication, so it may contain an
+    older upload name.  This resolver reads only names bound to the exact reply
+    identities and exact Raw/uploader pair.  Empty or conflicting names stay
+    closed; callers must then keep the canonical Raw name rather than trusting
+    a transport field.
+    """
+
+    exact_user = str(user_id or "").strip()
+    exact_raw = str(raw_object_id or "").strip()
+    exact_uploader = str(uploaded_by or "").strip()
+    refs = list(dict.fromkeys(str(value or "") for value in source_refs))
+    kinds = [_telegram_file_source_ref_kind(value) for value in refs]
+    if (
+        not exact_user
+        or not exact_raw
+        or not exact_uploader
+        or not refs
+        or len(refs) > 3
+        or any(not kind for kind in kinds)
+    ):
+        return ""
+    placeholders = ",".join("?" for _value in refs)
+    rows = storage.execute(
+        f"""SELECT DISTINCT a.supplied_filename
+              FROM file_source_aliases a
+              JOIN raw_objects r ON r.id=a.raw_object_id
+              JOIN users uploader ON uploader.id=a.uploaded_by
+             WHERE a.user_id=? AND a.uploaded_by=? AND a.raw_object_id=?
+               AND a.source_ref IN ({placeholders})
+               AND length(a.supplied_filename) BETWEEN 1 AND 260
+               AND r.user_id=? AND r.source='upload'
+               AND r.content_type='file' AND r.deleted_at IS NULL
+               AND uploader.status='active'
+               AND {_exact_uploader_raw_dependency("r")}
+               AND {_not_audio_document("r")}
+               AND {_not_private_raw_dependency("r")}
+             LIMIT 2""",  # nosec B608 - bounded placeholders and fixed predicates only
+        (
+            exact_user,
+            exact_uploader,
+            exact_raw,
+            *refs,
+            exact_user,
+            exact_uploader,
+        ),
+    ).fetchall()
+    return str(rows[0]["supplied_filename"] or "") if len(rows) == 1 else ""
 
 
 def resolve_tenant_telegram_reply_alias_state(

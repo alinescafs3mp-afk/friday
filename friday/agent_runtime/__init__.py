@@ -129,6 +129,7 @@ from friday.storage._core import iso_date
 from friday.storage._intake import (
     resolve_explicit_file_citation_sources,
     resolve_owned_file_exact_filename_direct_read,
+    resolve_owned_file_exact_raw_filename_direct_read,
     resolve_structural_telegram_reply_direct_read,
 )
 from friday.storage.models import FeedbackItem, FeedbackType, InboxStatus, new_id, normalize_known_at
@@ -572,6 +573,7 @@ def _clone_resolved_telegram_reply_attachment(
     if authority is not None:
         object.__setattr__(cloned, _HISTORICAL_DIRECT_READ_AUTHORITY_ATTR, authority)
         object.__setattr__(cloned, _TELEGRAM_REPLY_UPLOADER_ATTR, authority.uploaded_by)
+        cloned = cast(_ResolvedTelegramReplyAttachment, _retain_explicit_filename_direct_read(item, cloned))
         return _retain_file_evidence_stamp(item, cloned)
     object.__setattr__(
         cloned,
@@ -673,6 +675,56 @@ def _make_explicit_filename_direct_read_authority(
         filename=exact_filename,
         normalized_filename=normalized,
     )
+
+
+def _bind_storage_owned_exact_filename_direct_read(
+    storage: FridayStorage,
+    item: Any,
+    *,
+    tenant_id: str,
+    uploaded_by: str,
+    filename: str,
+) -> Any:
+    """Attach an exact display name only after a same-Raw storage proof.
+
+    A content-deduplicated upload keeps the first Raw row immutable, including
+    its original ``metadata.filename``.  The fresh name lives in
+    ``file_source_aliases``.  Caller dictionaries are not authority for that
+    alias: only a process-private carrier whose exact Raw/uploader/name tuple is
+    re-resolved from storage receives the typed filename authority.
+    """
+
+    if not (
+        isinstance(item, (_OwnedAttachment, _ProjectedAttachment))
+        or is_trusted_office_attachment(item)
+    ):
+        return item
+    raw_id = str(item.get("raw_object_id") or "").strip()
+    tenant = str(tenant_id or "").strip()
+    person = str(uploaded_by or "").strip()
+    candidate = str(filename or "").strip()
+    if not raw_id or not tenant or not person or not candidate:
+        return item
+    rows = resolve_owned_file_exact_raw_filename_direct_read(
+        storage,
+        tenant,
+        person,
+        raw_id,
+        candidate,
+    )
+    if len(rows) != 1:
+        return item
+    row = rows[0]
+    authority = _make_explicit_filename_direct_read_authority(
+        raw_object_id=str(row.get("id") or ""),
+        tenant_id=tenant,
+        uploaded_by=person,
+        filename=str(row.get("filename") or ""),
+    )
+    if authority is None or authority.raw_object_id != raw_id:
+        return item
+    item["filename"] = authority.filename
+    return _mark_explicit_filename_direct_read(item, authority)
 
 
 def _explicit_filename_direct_read_authority_of(
@@ -10127,6 +10179,12 @@ _REPLY_ASSISTANT_EXPLICIT_SOURCE_REFERENCE = re.compile(
     r"(?:the\s+)?(?:quoted|previous)\s+answer\b",
     re.IGNORECASE,
 )
+_QUOTED_ATTACHMENT_EFFECT_SOURCE_REFERENCE = re.compile(
+    rf"\b(?:по|из|на\s+основе|согласно|from|using|based\s+on)\s+"
+    rf"(?:(?:процитированн)\w*|(?:the\s+)?quoted)\s+"
+    rf"(?:{_ATTACHMENT_REFERENCE_NOUN}|files?|documents?|texts?|attachments?)\b",
+    re.IGNORECASE,
+)
 _ATTACHMENT_IMPLICIT_CURRENT_COMPARISON = re.compile(
     r"(?:"
     r"\b(?:этот|текущ)\w*\b|"
@@ -10344,6 +10402,14 @@ def _attachment_requested_record_positions(message: str) -> tuple[int, ...]:
     return tuple(positions)
 
 
+_ATTACHMENT_NOUN_FIRST_REVIEW_PATTERN = (
+    r"(?:(?:полноценн|подробн|разв[её]рнут|детальн|содержательн)\w*\s+)?"
+    r"(?:обзор\w*|ревью|анализ\w*|сводк\w*|резюме)"
+    r"(?:\s+(?:мне|нам))?\s+"
+    r"(?:сдела(?:й|йте)|да(?:й|йте)|подготов(?:ь|ьте)|провед(?:и|ите))"
+)
+
+
 _ATTACHMENT_SUMMARY_REQUEST = re.compile(
     r"(?:"
     r"\b(?:структурируй(?:те)?|структурировать)\b[^.!?\n]{0,40}"
@@ -10377,6 +10443,48 @@ _ATTACHMENT_TOPIC_REVIEW_REQUEST = re.compile(
     r")",
     re.IGNORECASE,
 )
+
+
+def _noun_first_attachment_review_request(message: str) -> bool:
+    """Recognize one whole current-speech review command, never an excerpt.
+
+    The noun-first Russian form is useful but unusually easy to find inside a
+    negation or a quoted/document-authored sentence.  It therefore stays out of
+    every unanchored ``search`` regex and grants file-read authority only when
+    the complete unquoted speech is this closed command.
+    """
+
+    visible = " ".join(_QUOTED_TEXT.sub(" ", _classification_text(message)).split())
+    return bool(
+        visible
+        and re.fullmatch(
+            rf"(?:(?:пожалуйста)\s*[,—:-]?\s*)?"
+            rf"{_ATTACHMENT_NOUN_FIRST_REVIEW_PATTERN}[.!?]*",
+            visible,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _attachment_summary_request(message: str) -> bool:
+    """Summary/review intent with the noun-first form kept whole-speech only."""
+
+    command = _record_source_command_text(message)
+    return bool(
+        _ATTACHMENT_SUMMARY_REQUEST.search(command)
+        or _noun_first_attachment_review_request(message)
+    )
+
+
+def _unclosed_noun_first_review_fragment(message: str) -> bool:
+    """An embedded noun-first phrase is data/ambiguous, never read authority."""
+
+    visible = " ".join(_QUOTED_TEXT.sub(" ", _classification_text(message)).split())
+    return bool(
+        visible
+        and re.search(_ATTACHMENT_NOUN_FIRST_REVIEW_PATTERN, visible, re.IGNORECASE)
+        and not _noun_first_attachment_review_request(message)
+    )
 _ATTACHMENT_COMPARISON_REQUEST = re.compile(
     r"(?:"
     r"\b(?:сравн|сопостав|свер|различ|отлич|разниц)\w*\b[^.!?\n]{0,120}"
@@ -10552,7 +10660,7 @@ def _file_route_action_command(message: str) -> bool:
         _ATTACHMENT_LAST_ITEM_REQUEST.search(text)
         or _intra_file_record_set_count(message) is not None
         or _ATTACHMENT_RECORD_POSITION.search(text)
-        or _ATTACHMENT_SUMMARY_REQUEST.search(text)
+        or _attachment_summary_request(message)
         or _ATTACHMENT_ABSTRACT_REQUEST.search(text)
         or _ATTACHMENT_COMPARISON_REQUEST.search(text)
         or _ATTACHMENT_BODY_LOOKUP_ACTION.search(text)
@@ -10620,6 +10728,67 @@ def _quoted_record_source_command_is_data(message: str) -> bool:
     return any(
         _file_operation_in_span(span.group(0)[1:-1]) for span in quoted_spans if len(span.group(0)) >= 2
     )
+
+
+_DOCUMENT_AUTHORED_FILE_COMMAND_PREFIX = re.compile(
+    r"^\s*(?:"
+    r"(?:в|внутри)\s+(?:(?:этом|данном|процитированном|приложенном|указанном)\s+)?"
+    r"(?:файл|документ|вложени|текст)\w*\s+"
+    r"(?:написан|сказан|указан|говор)\w*|"
+    r"(?:(?:этот|этот же|данный|процитированный|приложенный)\s+)?"
+    r"(?:файл|документ|вложени|текст)\w*\s+"
+    r"(?:гласит|говорит|требует|предписывает)|"
+    r"(?:the\s+|this\s+|quoted\s+)?(?:file|document|attachment|text)\s+"
+    r"(?:says|states|reads)|"
+    r"(?:in|inside)\s+(?:the\s+|this\s+|quoted\s+)?"
+    r"(?:file|document|attachment|text)\s+(?:it\s+)?(?:says|states|is\s+written)"
+    r")\s*[:—–-]\s*",
+    re.IGNORECASE,
+)
+_DOCUMENT_AUTHORED_FILE_COMMAND_SUFFIX = re.compile(
+    r"\s*(?:[,;]\s*|[—–-]\s*)"
+    r"(?:"
+    r"(?:это\s+)?(?:так\s+)?(?:написан|сказан|указан)\w*\s+"
+    r"(?:в|внутри)\s+(?:(?:этом|данном|процитированном)\s+)?"
+    r"(?:файл|документ|вложени|текст)\w*|"
+    r"(?:это\s+)?(?:цитат|фраз|пример)\w*\s+из\s+"
+    r"(?:(?:этого|данного|процитированного)\s+)?(?:файл|документ|вложени|текст)\w*|"
+    r"(?:as\s+)?(?:written|stated|said)\s+in\s+"
+    r"(?:the\s+|this\s+|quoted\s+)?(?:file|document|attachment|text)"
+    r")\s*[.!?]*\s*$",
+    re.IGNORECASE,
+)
+_DOCUMENT_AUTHORED_CURRENT_SPEECH_RESET = re.compile(
+    r"(?:[.!?;]\s*|\s+[—–-]\s*)"
+    r"(?P<request>(?:(?:а|но)\s+)?(?:теперь|сейчас)\b.*|"
+    r"(?:мой\s+(?:вопрос|запрос)|я\s+(?:прошу|хочу))\b.*|"
+    r"(?:(?:but|and)\s+)?(?:now|my\s+(?:question|request)|i\s+(?:ask|want))\b.*)$",
+    re.IGNORECASE,
+)
+
+
+def _document_authored_file_command_is_data(message: str) -> bool:
+    """Keep an attributed document command from becoming current authority.
+
+    Telegram's reply metadata identifies bytes but cannot turn prose attributed
+    to those bytes into the sender's request.  Balanced quotes are handled by
+    :func:`_quoted_record_source_command_is_data`; this closes the equally
+    common unquoted ``В документе написано: сделай ...`` form.  A separately
+    owned clause after an explicit current-speech reset remains actionable.
+    """
+
+    speech = _record_source_command_text(message)
+    if not speech:
+        return False
+    prefix = _DOCUMENT_AUTHORED_FILE_COMMAND_PREFIX.match(speech)
+    if prefix is not None:
+        reported_payload = speech[prefix.end() :].strip()
+        reset = _DOCUMENT_AUTHORED_CURRENT_SPEECH_RESET.search(reported_payload)
+        if reset is not None and _file_operation_in_span(reset.group("request")):
+            return False
+        return _file_operation_in_span(reported_payload)
+    suffix = _DOCUMENT_AUTHORED_FILE_COMMAND_SUFFIX.search(speech)
+    return bool(suffix is not None and _file_operation_in_span(speech[: suffix.start()]))
 
 
 _RECORD_SET_NEGATED_ANSWER = "Пункты этого файла по этому запросу называть не буду."
@@ -10702,7 +10871,7 @@ def _multi_attachment_summary_count(message: str) -> int | None:
         re.IGNORECASE,
     ):
         return None
-    if not _ATTACHMENT_SUMMARY_REQUEST.search(text):
+    if not _attachment_summary_request(message):
         return None
     matched = _MULTI_ATTACHMENT_SUMMARY_COUNT.search(text)
     if matched is None:
@@ -10786,7 +10955,7 @@ def _requests_all_attachment_set(message: str) -> bool:
     return bool(
         _ALL_ATTACHMENT_SET_REQUEST.search(text)
         and (
-            _ATTACHMENT_SUMMARY_REQUEST.search(text)
+            _attachment_summary_request(message)
             or _ATTACHMENT_COMPARISON_REQUEST.search(text)
             or _ATTACHMENT_ABSTRACT_REQUEST.search(text)
         )
@@ -10907,7 +11076,7 @@ _ATTACHMENT_REVIEW_EXACT_VALUE_REQUEST = re.compile(
 )
 _ATTACHMENT_REVIEW_STRICT_QUESTION_CUE = re.compile(
     r"(?:"
-    r"\b(?:полн|исчерпывающ)\w*\s+(?:обзор|ревью|анализ|сводк)\w*\b|"
+    r"\b(?:полн(?!оценн)|исчерпывающ)\w*\s+(?:обзор|ревью|анализ|сводк)\w*\b|"
     r"\b(?:full|complete|exhaustive|comprehensive)\s+(?:overview|review|analysis|summary)\b|"
     r"\b(?:и|а\s+также|затем)\s+(?:назов|укаж|скаж|сообщ|перечисл|выпиш|извлек|"
     r"найд|определ)\w*\b|"
@@ -10921,7 +11090,7 @@ _ATTACHMENT_REVIEW_STRICT_QUESTION_CUE = re.compile(
     re.IGNORECASE,
 )
 _ATTACHMENT_REVIEW_OPEN_TOPIC_QUESTION = re.compile(
-    r"^\s*(?:"
+    rf"^\s*(?:"
     r"(?:что|чего)\s+(?:находится\s+|содержится\s+)?в\s+(?:этом\s+)?(?:файле|документе)|"
     r"о\s+ч[её]м\s+(?:(?:ид[её]т\s+)?речь\s+)?в\s+(?:этом\s+)?(?:файле|документе)|"
     r"про\s+что\s+(?:этот|данный|текущий)?\s*(?:файл|документ)|"
@@ -10940,7 +11109,8 @@ _ATTACHMENT_REVIEW_OPEN_TOPIC_QUESTION = re.compile(
     r"(?:(?:could|can|would)\s+you\s+)?(?:please\s+)?(?:give|provide)\s+"
     r"(?:an?\s+)?(?:overview|summary|review|analysis)\s+(?:of\s+)?"
     r"(?:this\s+|the\s+)?(?:file|document)|"
-    r"(?:please\s+)?tell\s+me\s+about\s+(?:this\s+|the\s+)?(?:file|document)"
+    r"(?:please\s+)?tell\s+me\s+about\s+(?:this\s+|the\s+)?(?:file|document)|"
+    rf"{_ATTACHMENT_NOUN_FIRST_REVIEW_PATTERN}"
     r")\s*[?!.]*\s*$",
     re.IGNORECASE,
 )
@@ -11233,11 +11403,16 @@ def _brainfuck_explanation_followup_response(
 
 
 def _open_attachment_review_requires_verifier(question: str, answer: str) -> bool:
-    """Keep exact, exhaustive and negative claims off the one-pass review lane.
+    """Keep strict *requests* off the one-pass open-review lane.
 
     This is a model-independent policy seam shared by the legacy runtime now
     and by a future compact router.  It does not certify prose; it only decides
-    whether a second evidence-bound pass remains mandatory.
+    whether a second evidence-bound pass remains mandatory.  Once the user has
+    asked for an ordinary open review, answer-side counts and findings must not
+    silently turn that request into a different verifier/repair workflow: those
+    are normal products of a useful review, and asking the same model to judge
+    them is not independent authentication.  Complete-source code guards still
+    reject deterministic relation/value drift after synthesis.
     """
 
     raw_question = str(question or "")
@@ -11248,18 +11423,24 @@ def _open_attachment_review_requires_verifier(question: str, answer: str) -> boo
         raw_question = raw_question.splitlines()[0][len("TASK:") :].strip()
     speech = file_authority_speech(raw_question)
     question_command = _record_source_command_text(raw_question)
-    combined = f"{question_command}\n{answer}"
-    return bool(
+    strict_request = bool(
         _office_action_present(speech)
-        or office_exact_request_detected(question)
-        or _attachment_requested_record_positions(question)
+        or office_exact_request_detected(raw_question)
+        or _attachment_requested_record_positions(raw_question)
         or _REQUIRES_COMPLETE_ATTACHMENT_EVIDENCE.search(question_command)
         or _ATTACHMENT_REVIEW_EXHAUSTIVE_SCOPE_REQUEST.search(question_command)
         or _ATTACHMENT_REVIEW_EXACT_VALUE_REQUEST.search(question_command)
         or _ATTACHMENT_REVIEW_STRICT_QUESTION_CUE.search(question_command)
         or "?" in question_command
         and not _ATTACHMENT_REVIEW_OPEN_TOPIC_QUESTION.fullmatch(question_command)
-        or _ANSWER_CLAIMS_COMPLETE_ATTACHMENT.search(answer)
+    )
+    if strict_request:
+        return True
+    if _attachment_whole_document_task(raw_question, file_count=1) in {"summary", "analysis"}:
+        return False
+    combined = f"{question_command}\n{answer}"
+    return bool(
+        _ANSWER_CLAIMS_COMPLETE_ATTACHMENT.search(answer)
         or _ATTACHMENT_REVIEW_NEGATIVE_CLAIM.search(combined)
         or _ATTACHMENT_REVIEW_EXHAUSTIVE_CLAIM.search(combined)
         or _ATTACHMENT_REVIEW_ABSOLUTE_QUALITY_CLAIM.search(answer)
@@ -14078,7 +14259,7 @@ def _requires_complete_attachment_evidence(question: str, answer: str) -> bool:
         _REQUIRES_COMPLETE_ATTACHMENT_EVIDENCE.search(question_command)
         or _ATTACHMENT_RECORD_POSITION.search(question_command)
         or _attachment_whole_document_task(question_text, file_count=2)
-        or (_ATTACHMENT_SUMMARY_REQUEST.search(question_command) and not question_is_explicitly_partial)
+        or (_attachment_summary_request(question_text) and not question_is_explicitly_partial)
         or (
             not answer_is_explicitly_partial
             and (
@@ -15303,15 +15484,211 @@ def _attachment_deterministic_drift_issues(
     return issues
 
 
+_ATTACHMENT_PERSON_COUNT_UNIT_PREFIXES = (
+    "военнослуж",
+    "человек",
+    "сотрудник",
+    "работник",
+    "участник",
+    "персон",
+    "кандидат",
+    "исполнител",
+    "ответствен",
+    "специалист",
+    "коллег",
+    "должност",
+    "фамил",
+    "имен",
+    "лиц",
+)
+_ATTACHMENT_RECORD_COUNT_UNIT_PREFIXES = (
+    "запис",
+    "строк",
+    "пункт",
+    "позиц",
+    "элемент",
+    "объект",
+    "контакт",
+)
+_ATTACHMENT_PERSON_NAME_LINE = re.compile(
+    r"^\s*(?:[А-ЯЁ]{2,}(?:-[А-ЯЁ]{2,})?|[А-ЯЁ][а-яё-]{2,})\s+"
+    r"[А-ЯЁ][а-яё-]{2,}\s+[А-ЯЁ][а-яё-]{2,}\s*$"
+)
+_ATTACHMENT_PERSON_ROLE_LINE = re.compile(
+    r"^\s*(?:рядов\w*|(?:мл\.?\s*)?(?:сержант\w*|с-т\b)|старшин\w*|"
+    r"прапорщик\w*|лейтенант\w*|капитан\w*|майор\w*|подполковник\w*|"
+    r"полковник\w*)\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_STRUCTURED_RECORD_COUNT_KEYS = frozenset(
+    {
+        "items_total",
+        "record_count",
+        "records_count",
+        "records_total",
+        "row_count",
+        "rows_count",
+        "rows_total",
+    }
+)
+
+
+def _attachment_structured_record_counts(value: Any) -> set[int]:
+    counts: set[int] = set()
+    if isinstance(value, Mapping):
+        for raw_key, item in value.items():
+            key = str(raw_key or "").casefold()
+            if (
+                key in _ATTACHMENT_STRUCTURED_RECORD_COUNT_KEYS
+                and isinstance(item, int)
+                and not isinstance(item, bool)
+                and 0 <= item <= 100_000
+            ):
+                counts.add(item)
+            elif isinstance(item, (Mapping, list, tuple)):
+                counts.update(_attachment_structured_record_counts(item))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            counts.update(_attachment_structured_record_counts(item))
+    return counts
+
+
+def _attachment_record_count_candidates(
+    evidence_entries: Sequence[Mapping[str, Any]],
+) -> tuple[set[int], set[int]]:
+    """Return only code-provable generic/person record counts.
+
+    Counts come from explicit structured metadata, closed bullet/numbered
+    records, uniformly repeated one-line records, or paired personnel
+    role/full-name lines.  Ambiguous prose yields no candidate and remains an
+    honestly unverified model inference rather than a false deterministic
+    rejection.
+    """
+
+    generic: set[int] = set()
+    people: set[int] = set()
+    for entry in evidence_entries:
+        if not isinstance(entry, Mapping) or str(entry.get("tool") or "") != "attachment":
+            continue
+        output = str(entry.get("output") or "")
+        prefix = next(
+            (
+                item
+                for item in (
+                    OFFICE_PROMPT_PREFIX,
+                    _ATTACHMENT_MAP_PREFIX,
+                    _ATTACHMENT_TABULAR_PROFILE_PREFIX,
+                )
+                if output.startswith(item)
+            ),
+            "",
+        )
+        if prefix:
+            try:
+                payload = json.loads(output.removeprefix(prefix).strip())
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            generic.update(_attachment_structured_record_counts(payload))
+
+    evidence = _attachment_drift_evidence_text(evidence_entries)
+    if not evidence.strip():
+        return generic, people
+    list_records = _list_item_records(evidence)
+    if len(list_records) >= 2:
+        generic.add(len(list_records))
+
+    lines = [line.strip() for line in evidence.splitlines() if line.strip()]
+    bounded_lines = [line for line in lines if len(line) <= 240]
+    if 2 <= len(lines) == len(bounded_lines) <= 10_000:
+        first_tokens = [
+            re.findall(r"[A-Za-zА-ЯЁа-яё]{2,}", line)[0].casefold().replace("ё", "е")
+            for line in bounded_lines
+            if re.findall(r"[A-Za-zА-ЯЁа-яё]{2,}", line)
+        ]
+        if len(first_tokens) == len(bounded_lines) and len(set(first_tokens)) == 1:
+            generic.add(len(bounded_lines))
+
+    name_count = sum(1 for line in lines if _ATTACHMENT_PERSON_NAME_LINE.fullmatch(line))
+    role_count = sum(1 for line in lines if _ATTACHMENT_PERSON_ROLE_LINE.search(line))
+    if name_count >= 2 and name_count == role_count:
+        people.add(name_count)
+        generic.add(name_count)
+    return generic, people
+
+
+def _attachment_derived_record_count_issues(
+    answer: str,
+    evidence_entries: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    """Reject only a record count contradicted by a code-provable structure."""
+
+    evidence = _attachment_drift_evidence_text(evidence_entries)
+    if not evidence.strip():
+        return []
+    normalized_answer = _attachment_quantity_normalized(answer)
+    normalized_evidence = _attachment_quantity_normalized(evidence)
+    source_relations = _attachment_quantity_relations(normalized_evidence)
+    generic_counts, people_counts = _attachment_record_count_candidates(evidence_entries)
+    lexical_upper_bound = len(re.findall(r"[A-Za-zА-ЯЁа-яё0-9]+", evidence))
+    literal_upper_bound_valid = all(
+        not str(entry.get("output") or "").startswith(
+            (OFFICE_PROMPT_PREFIX, _ATTACHMENT_MAP_PREFIX, _ATTACHMENT_TABULAR_PROFILE_PREFIX)
+        )
+        for entry in evidence_entries
+        if isinstance(entry, Mapping) and str(entry.get("tool") or "") == "attachment"
+    )
+    for number, unit in _attachment_quantity_relations(normalized_answer):
+        if not number.isdigit():
+            continue
+        category = (
+            "people"
+            if unit.startswith(_ATTACHMENT_PERSON_COUNT_UNIT_PREFIXES)
+            else "records"
+            if unit.startswith(_ATTACHMENT_RECORD_COUNT_UNIT_PREFIXES)
+            else ""
+        )
+        if not category or _attachment_source_supports_quantity(
+            number,
+            unit,
+            normalized_evidence,
+            source_relations,
+        ):
+            continue
+        claimed = int(number)
+        candidates = people_counts if category == "people" else generic_counts
+        if (candidates and claimed not in candidates) or (
+            not candidates and literal_upper_bound_valid and claimed > lexical_upper_bound
+        ):
+            return ["attachment_derived_record_count_not_in_evidence"]
+    return []
+
+
+def _attachment_positive_absolute_quality_claim(answer: str) -> bool:
+    for matched in _ATTACHMENT_REVIEW_ABSOLUTE_QUALITY_CLAIM.finditer(str(answer or "")):
+        clause_start = max(answer.rfind(mark, 0, matched.start()) for mark in ("\n", ".", "!", "?", ";"))
+        clause_end_candidates = [
+            position
+            for mark in ("\n", ".", "!", "?", ";")
+            if (position := answer.find(mark, matched.end())) >= 0
+        ]
+        clause_end = min(clause_end_candidates) if clause_end_candidates else len(answer)
+        clause = answer[clause_start + 1 : clause_end].casefold().replace("ё", "е")
+        if not re.search(r"\b(?:не|нельзя|not|isn['’]?t|aren['’]?t)\b", clause):
+            return True
+    return False
+
+
 def _attachment_verdict_with_deterministic_drift(
     verification: Mapping[str, Any],
     answer: str,
     evidence_entries: Sequence[Mapping[str, Any]],
+    *,
+    high_confidence_only: bool = False,
 ) -> dict[str, Any]:
     status = str(verification.get("status") or "")
     if status == VERDICT_FAILED:
         return dict(verification)
-    if status == VERDICT_PASSED:
+    if status == VERDICT_PASSED and not high_confidence_only:
         issues = _attachment_deterministic_drift_issues(answer, evidence_entries)
     else:
         evidence = _attachment_drift_evidence_text(evidence_entries)
@@ -15330,6 +15707,9 @@ def _attachment_verdict_with_deterministic_drift(
             answer_quantities, evidence_quantities
         ) or not _attachment_directional_relations_supported(answer, evidence):
             issues.append("attachment_relation_not_in_evidence")
+        issues.extend(_attachment_derived_record_count_issues(answer, evidence_entries))
+        if _attachment_positive_absolute_quality_claim(answer):
+            issues.append("attachment_absolute_quality_claim")
     if not issues:
         return dict(verification)
     return {"status": VERDICT_FAILED, "ok": False, "score": 0.0, "issues": issues}
@@ -15720,7 +16100,7 @@ def _attachment_query_terms(message: str) -> tuple[str, ...]:
     explicitly_partial = _attachment_explicitly_partial_scope(message)
     if (
         _ATTACHMENT_SEARCH_RESULT_REFERENCE.search(command)
-        or (_ATTACHMENT_SUMMARY_REQUEST.search(command) or _ATTACHMENT_ABSTRACT_REQUEST.search(command))
+        or (_attachment_summary_request(message) or _ATTACHMENT_ABSTRACT_REQUEST.search(command))
         and not explicitly_partial
         or _is_direct_file_request(command)
     ):
@@ -15883,7 +16263,7 @@ def _attachment_whole_document_task(message: str, *, file_count: int = 0) -> str
     # forms are rejected inside the closed adjacent predicate.
     if file_count > 0 and _adjacent_attachment_overview_request(message):
         return "summary"
-    if _ATTACHMENT_SUMMARY_REQUEST.search(command) or _ATTACHMENT_TOPIC_REVIEW_REQUEST.search(command):
+    if _attachment_summary_request(message) or _ATTACHMENT_TOPIC_REVIEW_REQUEST.search(command):
         return "summary"
     if _ATTACHMENT_ABSTRACT_REQUEST.search(command):
         return "analysis"
@@ -16228,7 +16608,7 @@ def _archived_source_search_query(message: str) -> str:
         or _COUNT_INTENT_CUE.search(visible)
         or _REQUIRES_COMPLETE_ATTACHMENT_EVIDENCE.search(visible)
         or _WEB_EXHAUSTIVE_CLAIM.search(visible)
-        or _ATTACHMENT_SUMMARY_REQUEST.search(authority_text)
+        or _attachment_summary_request(authority_text)
         or _ATTACHMENT_COMPARISON_REQUEST.search(visible)
         or _is_direct_file_request(visible)
         or _ASKS_FOR_VOICE.search(authority_text)
@@ -17549,7 +17929,13 @@ def _adjacent_attachment_overview_request(message: str) -> bool:
     ):
         return False
     speech = " ".join(authority.speech.split())
-    return bool(speech and _ADJACENT_ATTACHMENT_OVERVIEW_REQUEST.fullmatch(speech))
+    return bool(
+        speech
+        and (
+            _ADJACENT_ATTACHMENT_OVERVIEW_REQUEST.fullmatch(speech)
+            or _noun_first_attachment_review_request(message)
+        )
+    )
 
 
 def _adjacent_used_attachment_set_overview_request(message: str) -> bool:
@@ -17677,7 +18063,7 @@ def _advisory_vision_overview_set(
         or _is_document_metadata_request(message)
         or _ATTACHMENT_COMPARISON_REQUEST.search(command)
         or _attachment_query_terms(message)
-        or not _ATTACHMENT_SUMMARY_REQUEST.search(command)
+        or not _attachment_summary_request(message)
     ):
         return ""
 
@@ -21697,15 +22083,23 @@ def _closed_attachment_read_only_request(message: str) -> bool:
     """
 
     visible = " ".join(_QUOTED_TEXT.sub(" ", _classification_text(message)).split())
-    if not visible or not _ATTACHMENT_READ_ONLY_ACTION.search(visible):
+    noun_first_open_review = _noun_first_attachment_review_request(message)
+    if not visible or (
+        not _ATTACHMENT_READ_ONLY_ACTION.search(visible) and not noun_first_open_review
+    ):
         return False
     if (
         _ASKS_ABOUT_PERSONAL_STORAGE.search(visible)
-        or _ABOUT_MY_OWN_STUFF.search(visible)
+        # In the closed noun-first review grammar, ``мне`` is only a
+        # dative recipient (``ревью мне сделай``), not authority to search
+        # the speaker's archive. Other ownership wording stays excluded.
+        or (_ABOUT_MY_OWN_STUFF.search(visible) and not noun_first_open_review)
         or _ATTACHMENT_CROSS_CONTEXT_REQUEST.search(visible)
         or _archived_source_search_query(visible)
     ):
         return False
+    if noun_first_open_review:
+        return True
     for match in _ATTACHMENT_COORDINATED_ACTION.finditer(visible):
         tail = visible[match.start("head") :]
         if _ATTACHMENT_FILENAME_REFERENCE.match(tail):
@@ -21747,7 +22141,7 @@ def _attachment_temporal_read_clause(message: str) -> str:
 
     visible = temporal_routing_text(_record_source_command_text(message))
     fragments = _split_tag_request_clauses(visible)
-    if not _ATTACHMENT_SUMMARY_REQUEST.search(visible):
+    if not _attachment_summary_request(message):
         # A question about a date *inside* the selected file remains a local
         # read. Only an independently actionable later clause authorises the
         # owner's timeline/calendar route.
@@ -22511,6 +22905,7 @@ def file_turn_authority(message: str) -> FileTurnAuthority:
         )
     )
     archive_read = _attachment_requests_archive_tool(speech)
+    unclosed_noun_first_review = _unclosed_noun_first_review_fragment(message)
     # A whole-archive count may contain ordinary question words (``сколько
     # всего``) and an independent archive-search tail (``что там по проекту``
     # or ``найди документы про ...``).  Neither is proof that the person asked
@@ -22526,13 +22921,15 @@ def file_turn_authority(message: str) -> FileTurnAuthority:
         or _DEICTIC_SAME_FILE_TOPIC.search(speech)
         or _ATTACHMENT_LAST_ITEM_REQUEST.search(speech)
         or _ATTACHMENT_RECORD_POSITION.search(speech)
-        or _ATTACHMENT_SUMMARY_REQUEST.search(speech)
+        or _attachment_summary_request(message)
         or _ATTACHMENT_ABSTRACT_REQUEST.search(speech)
         or _ATTACHMENT_COMPARISON_REQUEST.search(speech)
         or _is_document_metadata_request(message)
         or office_request_kind(message)
     )
     deictic_content_navigation = bool(
+        not unclosed_noun_first_review
+        and
         (
             _EXPLICIT_ATTACHMENT_REFERENCE.search(speech)
             or _DEICTIC_SAME_FILE_TOPIC.search(speech)
@@ -26541,8 +26938,44 @@ class AgentRuntime:
         if not _RAW_OBJECT_ID_RE.fullmatch(str(raw_id or "")):
             return None
         if historical_authority is not None and direct_read_authority is not None:
-            return None
-        if direct_read_authority is not None:
+            if (
+                not isinstance(historical_authority, _HistoricalDirectReadAuthority)
+                or not isinstance(direct_read_authority, _ExplicitFilenameDirectReadAuthority)
+                or historical_authority.raw_object_id != raw_id
+                or direct_read_authority.raw_object_id != raw_id
+                or historical_authority.tenant_id != tenant_id
+                or direct_read_authority.tenant_id != tenant_id
+                or historical_authority.uploaded_by != person_id
+                or direct_read_authority.uploaded_by != person_id
+                or historical_authority.selector_kind not in _HISTORICAL_DIRECT_READ_SELECTOR_KINDS
+            ):
+                return None
+            historical_rows = resolve_structural_telegram_reply_direct_read(
+                self.storage,
+                tenant_id,
+                person_id,
+                raw_id,
+                include_content=True,
+            )
+            exact_rows = resolve_owned_file_exact_raw_filename_direct_read(
+                self.storage,
+                tenant_id,
+                person_id,
+                raw_id,
+                direct_read_authority.filename,
+                include_content=True,
+            )
+            if (
+                len(historical_rows) != 1
+                or len(exact_rows) != 1
+                or str(historical_rows[0].get("id") or "") != raw_id
+                or str(exact_rows[0].get("id") or "") != raw_id
+                or str(historical_rows[0].get("content_hash") or "")
+                != str(exact_rows[0].get("content_hash") or "")
+            ):
+                return None
+            rows = exact_rows
+        elif direct_read_authority is not None:
             if (
                 not isinstance(direct_read_authority, _ExplicitFilenameDirectReadAuthority)
                 or direct_read_authority.raw_object_id != raw_id
@@ -26550,12 +26983,12 @@ class AgentRuntime:
                 or direct_read_authority.uploaded_by != person_id
             ):
                 return None
-            rows = resolve_owned_file_exact_filename_direct_read(
+            rows = resolve_owned_file_exact_raw_filename_direct_read(
                 self.storage,
                 tenant_id,
                 person_id,
+                raw_id,
                 direct_read_authority.filename,
-                expected_raw_id=raw_id,
                 include_content=True,
             )
         elif historical_authority is not None:
@@ -31542,24 +31975,64 @@ class AgentRuntime:
                 policy_web_query = self.web_query_from(clean_message)[:140]
             else:
                 policy_web_query = f"погода {turn_policy.location}"[:140]
-        reply_assistant_lineage_requested = bool(
-            reply_assistant_reference
+        current_speech_attachment_lineage_requested = bool(
+            file_turn.proved("local_read")
+            or adjacent_overview_request
+            or _ATTACHMENT_TOPIC_REVIEW_REQUEST.search(file_turn.speech)
+            or _REPLY_ASSISTANT_ATTACHMENT_SET_ACTION.fullmatch(file_turn.speech)
+            or _REPLY_ASSISTANT_EXPLICIT_SOURCE_REFERENCE.search(file_turn.speech)
+            or _document_metadata_request_scope(clean_message, selected_document=True)
+        )
+        quoted_attachment_lineage_requested = bool(
+            quoted_attachment_reference
+            and not _document_authored_file_command_is_data(clean_message)
             and (
-                file_turn.proved("local_read")
-                or bool(message_locate_action)
-                # These bounded whole-file forms are intentionally meaningful
-                # only beside one exact assistant attachment pointer.  They do
-                # not need to manufacture a broader ``local_read`` capability,
-                # but the transport-selected Raw lineage must survive long
-                # enough to cross the ordinary ownership/registered-byte gates.
-                or adjacent_overview_request
-                or _ATTACHMENT_TOPIC_REVIEW_REQUEST.search(file_turn.speech)
-                or _REPLY_ASSISTANT_ATTACHMENT_SET_ACTION.fullmatch(file_turn.speech)
-                or _REPLY_ASSISTANT_EXPLICIT_SOURCE_REFERENCE.search(file_turn.speech)
-                or _document_metadata_request_scope(clean_message, selected_document=True)
+                current_speech_attachment_lineage_requested
+                # A compound output/effect command can consume the exact
+                # Telegram reply carrier even when its output grammar does not
+                # itself mint ``local_read``. Keep this admission whole-turn,
+                # imperative-led and explicitly related to the quoted source;
+                # reported prose such as ``В документе написано: ...`` cannot
+                # project the document merely by containing an action phrase.
+                or (
+                    file_turn.has_tool_effect()
+                    and _WORKSPACE_CREATE_IMPERATIVE.match(file_turn.speech)
+                    and _QUOTED_ATTACHMENT_EFFECT_SOURCE_REFERENCE.search(file_turn.speech)
+                )
             )
         )
-        if reply_assistant_reference and not reply_assistant_lineage_requested:
+        passive_quoted_attachment_turn = bool(
+            quoted_attachment_reference and not quoted_attachment_lineage_requested
+        )
+        reply_assistant_lineage_requested = bool(
+            reply_assistant_reference
+            and not _document_authored_file_command_is_data(clean_message)
+            # These bounded whole-file forms are intentionally meaningful only
+            # beside one exact assistant attachment pointer. They do not need
+            # to manufacture a broader ``local_read`` capability, but the
+            # transport-selected Raw lineage must survive the ordinary gates.
+            and (
+                current_speech_attachment_lineage_requested
+                # A valid [K#] marker is an explicit current-speech selector
+                # for the exact assistant row being replied to. Malformed and
+                # unknown labels still close later in the ordered selector.
+                or _KNOWLEDGE_CITATION_RE.search(clean_message)
+            )
+        )
+        passive_reply_assistant_attachment_turn = bool(
+            reply_assistant_reference and not reply_assistant_lineage_requested
+        )
+        passive_structural_attachment_turn = bool(
+            passive_quoted_attachment_turn or passive_reply_assistant_attachment_turn
+        )
+        if passive_quoted_attachment_turn:
+            # A Telegram reply pointer identifies possible source bytes; it is
+            # not authority to read them. An unrelated statement or a command
+            # merely reported as document-authored keeps structural provenance
+            # but projects neither the supplied carrier nor an ambient fallback.
+            attachments = []
+            supplied_attachment_count = 0
+        if passive_reply_assistant_attachment_turn:
             # The transport may resolve an assistant reply's cited files before
             # Runtime sees the current words.  A structural pointer is source
             # authority only for a current file read; an unrelated question in
@@ -31572,7 +32045,7 @@ class AgentRuntime:
         # is never an acceptable substitute: doing ordinary deictic restoration
         # relabels unrelated evidence as the quoted document.
         quoted_attachment_resolution_failed = bool(
-            quoted_attachment_reference and supplied_attachment_count == 0
+            quoted_attachment_lineage_requested and supplied_attachment_count == 0
         )
         # A native reply on an assistant multi-citation answer may carry only
         # the exact message id; Runtime resolves emitted knowledge_citations
@@ -32156,6 +32629,11 @@ class AgentRuntime:
             # preceding turn happened to use one: that stale carrier previously
             # ran an attachment query first and removed the inventory capability.
             restored_attachments, restored_attachment_expected_count = [], 0
+        elif passive_structural_attachment_turn:
+            # The structural quote is passive on this turn. In particular,
+            # never replace its intentionally withheld bytes with the latest
+            # file from conversation history.
+            restored_attachments, restored_attachment_expected_count = [], 0
         elif filename_clue_selection.applies:
             # Candidate discovery inspected only the body-free filename catalog;
             # a unique winner crossed one exact name+Raw re-authorization above.
@@ -32371,6 +32849,8 @@ class AgentRuntime:
         turn_private_context_lineage = bool(
             inherited_private_context_lineage
             or supplied_attachment_count
+            or quoted_attachment_reference
+            or reply_assistant_reference
             or replay_had_attachments
             or restored_attachment_expected_count
             or person_inventory_turn
@@ -32429,7 +32909,9 @@ class AgentRuntime:
                 "attachment_origin": "restored",
             }
         resolved_turn_attachment_ids = (
-            restored_attachment_ids
+            []
+            if passive_structural_attachment_turn
+            else restored_attachment_ids
             if selector_replaces_current and not attachment_resolution_failed
             else []
             if selector_replaces_current
@@ -32572,7 +33054,10 @@ class AgentRuntime:
         # ordinary questions still receive no ambient old attachment text.
         active_candidates = (
             []
-            if quoted_file_command_is_data
+            if (
+                quoted_file_command_is_data
+                or passive_structural_attachment_turn
+            )
             else [workspace_inbox_resolution.attachment]
             if workspace_inbox_resolution.attachment is not None
             else []
@@ -33221,7 +33706,7 @@ class AgentRuntime:
                     and not file_create
                     and (
                         attachment_request_projection.applied
-                        or bool(_ATTACHMENT_SUMMARY_REQUEST.search(file_turn.speech))
+                        or _attachment_summary_request(file_turn.speech)
                         or bool(whole_document_task)
                         or synthetic_document_notice
                         or (file_source_only and active_attachment_set)
@@ -34097,7 +34582,12 @@ class AgentRuntime:
                 person_id=person_id,
                 private_context_lineage=turn_private_context_lineage,
                 current_attachment_present=bool(attachment_expected_count),
-                current_attachment_local=current_attachment_local,
+                # A passive structural reply is private local context but not
+                # a readable source. Suppress archive retrieval/arbiters without
+                # pretending that an attachment is present in the model prompt.
+                current_attachment_local=(
+                    current_attachment_local or passive_structural_attachment_turn
+                ),
                 policy_web_query=policy_web_query,
                 turn_deadline=turn_deadline,
             )
@@ -36641,12 +37131,13 @@ class AgentRuntime:
         )
         open_attachment_review_one_pass = bool(
             whole_document_task in {"summary", "analysis"}
-            # A transport-authored bare-upload review has a concrete evidence
-            # contract and must cross the verifier: fluent prose can still
-            # invert source negation. Keep one-pass latency only for an
-            # explicit, non-synthetic open review.
-            and pure_file_read_turn
-            and not synthetic_document_notice
+            # One model cannot independently authenticate its own prose. A
+            # complete, parser-owned open review therefore uses one synthesis
+            # pass for both explicit requests and backend-authored bare-upload
+            # notices. Exact/count/exhaustive requests still leave this lane,
+            # while code-owned high-confidence relation/value drift checks
+            # remain active for every answer.
+            and (synthetic_document_notice or pure_file_read_turn)
             and authenticated_attachment_scope
             and attachment_expected_count > 0
             and attachment_context_complete
@@ -36807,6 +37298,7 @@ class AgentRuntime:
                 verification,
                 model_said,
                 attachment_evidence,
+                high_confidence_only=open_attachment_review_one_pass,
             )
         if web_verifier_evidence_incomplete:
             # The judge did not receive every accepted fact-bearing web result
@@ -36961,6 +37453,7 @@ class AgentRuntime:
                             verification,
                             model_said,
                             attachment_evidence,
+                            high_confidence_only=open_attachment_review_one_pass,
                         )
                     verification_status = str(verification.get("status") or VERDICT_SKIPPED)
                 else:
@@ -37035,17 +37528,7 @@ class AgentRuntime:
                 attachments,
                 expected_count=attachment_expected_count,
             )
-            bare_upload_salvage = (
-                _registered_upload_receipt_answer(
-                    active_attachment_set,
-                    expected_count=attachment_expected_count,
-                    evidence_set=active_source_evidence_set,
-                    intake=False,
-                )
-                if synthetic_document_notice and authenticated_attachment_scope
-                else ""
-            )
-            replacement = literal_salvage or bare_upload_salvage or _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION
+            replacement = literal_salvage or _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION
             LOGGER.warning("attachment: evidence-mismatching final answer discarded")
             model_said = ""
             content = f"{spoken}\n\n{replacement}".strip() if spoken else replacement
@@ -37057,8 +37540,6 @@ class AgentRuntime:
             response["_attachment_verification_rejection_owned"] = True
             if literal_salvage:
                 response["_advisory_attachment_literal_owned"] = True
-            if bare_upload_salvage:
-                response["_bare_upload_literal_fallback_owned"] = True
             verification = _unknown_verdict("attachment_evidence_mismatch_rejected")
             verification_status = VERDICT_UNKNOWN
         if (

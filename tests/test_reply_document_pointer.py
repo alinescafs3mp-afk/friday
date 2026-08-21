@@ -1620,6 +1620,214 @@ def test_content_dedup_binds_fresh_telegram_ref_to_canonical_odt_for_reply_metad
         assert "Canonical alias title" in metadata.json()["message"]
 
 
+def test_deduplicated_current_upload_and_exact_telegram_reply_keep_the_fresh_filename(
+    settings,
+    monkeypatch,
+) -> None:
+    from friday.agent_runtime import (
+        _bind_storage_owned_exact_filename_direct_read,
+        _clone_resolved_telegram_reply_attachment,
+        _explicit_filename_direct_read_authority_of,
+        _historical_direct_read_attachment,
+        _historical_direct_read_authority_of,
+    )
+    from friday.server import create_app
+
+    scoped = replace(settings, verify_answers=False, shared_archive=True)
+    app = create_app(scoped)
+    captured: list[dict[str, Any]] = []
+    payload = _synthetic_metadata_odt(
+        transport_marker=b"same exact bytes",
+        title="Deduplicated display-name contract",
+    )
+
+    async def chat_spy(user_id, message, **kwargs):
+        captured.append({"user_id": user_id, "message": message, "kwargs": kwargs})
+        conversation_id = str(kwargs.get("conversation_id") or "")
+        if not conversation_id:
+            conversation_id = str(app.state.storage.create_conversation(uploader)["id"])
+        return {
+            "conversation_id": conversation_id,
+            "message": "accepted",
+            "context": {"interaction_mode": "dialogue"},
+        }
+
+    with TestClient(app) as client:
+        me = _bridge_call(client, scoped, "GET", "/api/me", user="1001")
+        assert me.status_code == 200, me.text
+        uploader = str(me.json()["actor"]["user_id"])
+        tenant = LEGACY_OWNER_USER_ID
+        storage = app.state.storage
+        storage.update_user(uploader, preset_key="user")
+        monkeypatch.setattr(app.state.agent, "chat", chat_spy)
+
+        raw_ids: list[str] = []
+        for index, (filename, file_ref) in enumerate(
+            (("7849.odt", "DISPLAY-NAME-A"), ("668.odt", "DISPLAY-NAME-B")),
+            start=1,
+        ):
+            upload = _bridge_call(
+                client,
+                scoped,
+                "POST",
+                "/api/chat",
+                {
+                    "message": "",
+                    "source_ref": f"telegram-update:display-name-{index}",
+                    "telegram_message_id": 700 + index,
+                    "telegram_user": {"id": 1001, "first_name": "Alice"},
+                    "document": {
+                        "filename": filename,
+                        "mime_type": "application/vnd.oasis.opendocument.text",
+                        "media_kind": "document",
+                        "source_ref": f"telegram-file:{file_ref}",
+                        "content_base64": base64.b64encode(payload).decode("ascii"),
+                    },
+                },
+                user="1001",
+            )
+            assert upload.status_code == 200, upload.text
+            raw_id = storage.resolve_owned_file_source_ref(
+                tenant,
+                uploader,
+                f"telegram-file:{file_ref}",
+            )
+            assert raw_id is not None
+            raw_ids.append(raw_id)
+
+        assert raw_ids[0] == raw_ids[1]
+        raw_id = raw_ids[0]
+        canonical = storage.get_raw_object(raw_id, tenant)
+        assert canonical is not None
+        assert json.loads(str(canonical["metadata_json"]))["filename"] == "7849.odt"
+
+        current = captured[-1]["kwargs"]["attachments"][0]
+        current_authority = _explicit_filename_direct_read_authority_of(current)
+        assert current["filename"] == "668.odt"
+        assert current_authority is not None and current_authority.filename == "668.odt"
+        hydrated_current = app.state.agent._owned_file_attachment(  # noqa: SLF001
+            raw_id,
+            tenant_id=tenant,
+            person_id=uploader,
+            direct_read_authority=current_authority,
+        )
+        assert hydrated_current is not None and hydrated_current["filename"] == "668.odt"
+
+        reply = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "сделай подробное ревью этого документа",
+                "source_ref": "telegram-update:display-name-reply",
+                "telegram_message_id": 703,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "reply_document_source_ref": "telegram-file:DISPLAY-NAME-B",
+            },
+            user="1001",
+        )
+        assert reply.status_code == 200, reply.text
+        quoted = captured[-1]["kwargs"]["attachments"][0]
+        quoted = _clone_resolved_telegram_reply_attachment(quoted)
+        quoted_exact = _explicit_filename_direct_read_authority_of(quoted)
+        quoted_historical = _historical_direct_read_authority_of(quoted)
+        assert quoted["filename"] == "668.odt"
+        assert quoted_exact is not None and quoted_exact.filename == "668.odt"
+        assert quoted_historical is not None
+        hydrated_quote = app.state.agent._owned_file_attachment(  # noqa: SLF001
+            raw_id,
+            tenant_id=tenant,
+            person_id=uploader,
+            direct_read_authority=quoted_exact,
+            historical_authority=quoted_historical,
+        )
+        assert hydrated_quote is not None and hydrated_quote["filename"] == "668.odt"
+
+        duplicate_name_upload = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "",
+                "source_ref": "telegram-update:display-name-duplicate-raw",
+                "telegram_message_id": 704,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "document": {
+                    "filename": "668.odt",
+                    "mime_type": "application/vnd.oasis.opendocument.text",
+                    "media_kind": "document",
+                    "source_ref": "telegram-file:DISPLAY-NAME-C",
+                    "content_base64": base64.b64encode(
+                        _synthetic_metadata_odt(
+                            transport_marker=b"different exact bytes",
+                            title="Different Raw with the same display name",
+                        )
+                    ).decode("ascii"),
+                },
+            },
+            user="1001",
+        )
+        assert duplicate_name_upload.status_code == 200, duplicate_name_upload.text
+        duplicate_raw_id = storage.resolve_owned_file_source_ref(
+            tenant,
+            uploader,
+            "telegram-file:DISPLAY-NAME-C",
+        )
+        assert duplicate_raw_id is not None and duplicate_raw_id != raw_id
+        still_bound_quote = app.state.agent._owned_file_attachment(  # noqa: SLF001
+            raw_id,
+            tenant_id=tenant,
+            person_id=uploader,
+            direct_read_authority=quoted_exact,
+            historical_authority=quoted_historical,
+        )
+        assert still_bound_quote is not None
+        assert still_bound_quote["raw_object_id"] == raw_id
+        assert still_bound_quote["filename"] == "668.odt"
+
+        forged = _historical_direct_read_attachment(
+            raw_id,
+            tenant_id=tenant,
+            uploaded_by=uploader,
+            selector_kind="telegram_reply",
+        )
+        assert forged is not None
+        forged["filename"] = "caller-forged.odt"
+        forged = _bind_storage_owned_exact_filename_direct_read(
+            storage,
+            forged,
+            tenant_id=tenant,
+            uploaded_by=uploader,
+            filename="caller-forged.odt",
+        )
+        assert _explicit_filename_direct_read_authority_of(forged) is None
+        canonical_fallback = app.state.agent._owned_file_attachment(  # noqa: SLF001
+            raw_id,
+            tenant_id=tenant,
+            person_id=uploader,
+            historical_authority=_historical_direct_read_authority_of(forged),
+        )
+        assert canonical_fallback is not None and canonical_fallback["filename"] == "7849.odt"
+
+        with storage.transaction() as conn:
+            conn.execute(
+                "DELETE FROM file_source_aliases WHERE user_id=? AND uploaded_by=? AND source_ref=?",
+                (tenant, uploader, "telegram-file:DISPLAY-NAME-B"),
+            )
+        assert (
+            app.state.agent._owned_file_attachment(  # noqa: SLF001
+                raw_id,
+                tenant_id=tenant,
+                person_id=uploader,
+                direct_read_authority=quoted_exact,
+                historical_authority=quoted_historical,
+            )
+            is None
+        )
+
+
 @pytest.mark.anyio
 async def test_same_odt_text_with_changed_technical_metadata_keeps_second_reply_target(
     settings,

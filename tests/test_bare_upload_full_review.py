@@ -11,6 +11,7 @@ import pytest
 from openpyxl import Workbook
 
 from friday.agent_runtime import (
+    _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION,
     _ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS,
     _MODEL_LENGTH_LIMIT_FALLBACK,
     _MODEL_LENGTH_LIMIT_NOTICE,
@@ -62,7 +63,8 @@ class _ReviewSpy:
 class _VerifiedReviewSpy(_ReviewSpy):
     async def chat(self, messages, **kwargs):  # noqa: ANN001
         copied = [dict(item) for item in messages]
-        if any("FRIDAY_VERIFICATION_DATA" in str(item.get("content") or "") for item in copied):
+        blob = "\n".join(str(item.get("content") or "") for item in copied)
+        if "FRIDAY_REPAIR_DATA" not in blob and "FRIDAY_VERIFICATION_DATA" in blob:
             self.calls.append({"messages": copied, **kwargs})
             return {
                 "content": json.dumps(
@@ -164,7 +166,7 @@ async def test_bare_upload_runs_one_ordinary_full_review_and_preserves_markdown(
 
 
 @pytest.mark.asyncio
-async def test_production_verification_runs_the_mandatory_complete_open_review_verifier(
+async def test_production_bare_upload_review_is_one_complete_synthesis_pass(
     settings,
     storage,
 ) -> None:
@@ -183,11 +185,94 @@ async def test_production_verification_runs_the_mandatory_complete_open_review_v
     )
 
     assert result["message"] == _REVIEW
-    assert len(model.calls) == 2
-    assert result["verified"] is True
-    assert result["verification_status"] == "passed"
+    assert len(model.calls) == 1
+    assert result["verified"] is False
+    assert result["verification_status"] == "skipped"
     assert result["attachment_coverage_complete"] is True
     assert result["attachment_verification_complete"] is True
+
+
+@pytest.mark.asyncio
+async def test_bare_upload_detailed_review_keeps_a_source_derived_record_count(
+    settings,
+    storage,
+) -> None:
+    configured = replace(settings, verify_answers=True, verify_min_answer_chars=1)
+    storage.ensure_user("alice", preset_key="owner")
+    source = "Проект Альфа описан.\nПроект Бета описан."
+    pipeline = IngestionPipeline(configured, storage, KnowledgeGraph(storage))
+    ingested = await pipeline.ingest_file(
+        "alice",
+        None,
+        source.encode(),
+        filename="derived-count-review.md",
+        mime_type="text/markdown",
+        metadata={"uploaded_by": "alice"},
+        source_ref="telegram-file:DERIVED-COUNT-REVIEW",
+    )
+    review = (
+        "## Подробное ревью\n\n"
+        "Документ содержит 2 записи: по проектам Альфа и Бета.\n\n"
+        "**Проблемы:** у большинства записей отсутствуют сроки; у некоторых "
+        "есть только краткое описание.\n\n"
+        "**Вывод:** обе записи имеют одинаковую краткую структуру."
+    )
+    model = _VerifiedReviewSpy(review)
+    runtime = AgentRuntime(configured, storage, llm=model)  # type: ignore[arg-type]
+
+    result = await runtime.chat(
+        "alice",
+        "Загружен документ: derived-count-review.md",
+        actor=_actor(),
+        attachments=[{"raw_object_id": str(ingested["raw_object_id"])}],
+        synthetic_document_notice=True,
+    )
+
+    assert result["message"] == review
+    assert len(model.calls) == 1
+    assert result["verification_status"] == "skipped"
+    assert "Быстрый обзор" not in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_bare_upload_wrong_derived_count_gets_one_repair_then_hard_rejection(
+    settings,
+    storage,
+) -> None:
+    configured = replace(settings, verify_answers=True, verify_min_answer_chars=1)
+    storage.ensure_user("alice", preset_key="owner")
+    source = "Проект Альфа описан.\nПроект Бета описан."
+    pipeline = IngestionPipeline(configured, storage, KnowledgeGraph(storage))
+    ingested = await pipeline.ingest_file(
+        "alice",
+        None,
+        source.encode(),
+        filename="wrong-derived-count-review.md",
+        mime_type="text/markdown",
+        metadata={"uploaded_by": "alice"},
+        source_ref="telegram-file:WRONG-DERIVED-COUNT-REVIEW",
+    )
+    model = _VerifiedReviewSpy(
+        "Документ содержит 3 записи: проекты Альфа, Бета и Гамма; структура записей краткая."
+    )
+    runtime = AgentRuntime(configured, storage, llm=model)  # type: ignore[arg-type]
+
+    result = await runtime.chat(
+        "alice",
+        "Загружен документ: wrong-derived-count-review.md",
+        actor=_actor(),
+        attachments=[{"raw_object_id": str(ingested["raw_object_id"])}],
+        synthetic_document_notice=True,
+    )
+
+    blobs = [
+        "\n".join(str(item.get("content") or "") for item in call["messages"])
+        for call in model.calls
+    ]
+    assert result["message"] == _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION
+    assert sum("FRIDAY_REPAIR_DATA" in blob for blob in blobs) == 1
+    assert sum("FRIDAY_VERIFICATION_DATA" in blob for blob in blobs) == 1
+    assert "Быстрый обзор" not in result["message"]
 
 
 @pytest.mark.asyncio
@@ -265,8 +350,8 @@ async def test_token_capped_fragment_without_a_sentence_gets_a_complete_fallback
         ),
         ("дай обзор и перечисли всех людей", "Люди в тексте не перечислены.", 1),
         ("проанализируй, есть ли ошибки в файле", "Ошибок не найдено.", 1),
-        ("дай обзор файла", "Никаких рисков и ошибок.", 1),
-        ("дай обзор файла", "Критичных рисков не вижу.", 1),
+        ("дай обзор файла", "Никаких рисков и ошибок.", 0),
+        ("дай обзор файла", "Критичных рисков не вижу.", 0),
         ("дай исчерпывающий обзор файла", "Это исчерпывающий обзор.", 1),
         ("проанализируй весь файл", _REVIEW, 1),
         ("analyze the whole file", _REVIEW, 1),
@@ -281,10 +366,9 @@ async def test_token_capped_fragment_without_a_sentence_gets_a_complete_fallback
             1,
         ),
         ("Tell me about this file: who is the director?", "The director is Alice.", 1),
-        ("дай обзор файла", "Документ безупречен.", 1),
     ],
 )
-async def test_open_file_review_uses_one_pass_only_for_non_strict_claims(
+async def test_open_file_review_uses_one_pass_unless_the_request_is_strict(
     settings,
     storage,
     monkeypatch,
