@@ -269,7 +269,7 @@ monitor; частичное исчезновение либо повторный
 mismatch mode/env/config или возвращённые строки не переходят автоматически и
 требуют review/remediation под исходной bound-config.
 
-0.206.0 использует SQLite schema 34. Новое поле имени загрузки принадлежит
+0.206.1 использует SQLite schema 34. Новое поле имени загрузки принадлежит
 точному message-bound alias и не переписывает канонический Raw Object. Миграция
 и исторический backfill разрешены только при остановленных backend/bridge,
 проверенной копии SQLite вместе с WAL и Telegram inbox, exact lease/identity
@@ -522,7 +522,7 @@ orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.206.0`.
+требуйте `status=ok` и `version=0.206.1`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

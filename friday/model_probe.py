@@ -426,6 +426,8 @@ CONTEXT_PROBE = ContextProbeRequest(
         f"Синтетическое наполнение: {_CONTEXT_FILLER}\n"
         f"Конечный маркер: {_CONTEXT_END}.\n"
         "Верни строго JSON с ключами начало и конец и точными маркерами."
+        " Ответ должен быть одним JSON-объектом без Markdown, без блоков кода и без любого "
+        "текста до или после объекта."
     ),
     start_marker=_CONTEXT_START,
     end_marker=_CONTEXT_END,

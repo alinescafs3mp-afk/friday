@@ -1,3 +1,13 @@
+## 0.206.1 — 2026-08-21
+
+### V12 context probe требует bare JSON
+
+- Контекстная live-аттестация теперь прямо требует один JSON-объект без Markdown,
+  code fence и текста вокруг. Это сохраняет строгий exact-JSON валидатор, но не
+  отклоняет Qwen3.8/SGLang из-за детерминированного оформления верного ответа в
+  Markdown-блок. Новый prompt связан новым `probe_suite_sha256`; code-owned
+  `profile_id` остаётся `qwen38-27b-nvfp4-sglang:dispatcher:v12.14`.
+
 ## 0.206.0 — 2026-08-21
 
 ### Plaintext memory-vault закрыт безопасным режимом

@@ -678,6 +678,12 @@ async def test_both_verifier_cases_require_strict_grounding_verdicts(
     [
         ProbeCompletion('{"начало":"wrong","конец":"wrong"}', "stop", (), 8_192),
         ProbeCompletion(
+            '```json\n{"начало":"CTX-НАЧАЛО-7F31","конец":"CTX-КОНЕЦ-91D4"}\n```',
+            "stop",
+            (),
+            8_335,
+        ),
+        ProbeCompletion(
             json.dumps({"начало": CONTEXT_PROBE.start_marker, "конец": CONTEXT_PROBE.end_marker}),
             "stop",
             (),
@@ -910,6 +916,17 @@ def test_requests_and_responses_hide_every_prompt_and_model_controlled_string_fr
     assert CONTEXT_PROBE.start_marker not in rendered
     assert "натуральные числа" not in rendered
     assert "PRIVATE" not in rendered
+
+
+def test_context_prompt_requires_one_bare_json_object_without_surrounding_text() -> None:
+    assert CONTEXT_PROBE.prompt.endswith(
+        " Ответ должен быть одним JSON-объектом без Markdown, без блоков кода и без любого "
+        "текста до или после объекта."
+    )
+
+
+def test_registered_profile_binds_the_exact_probe_suite_manifest() -> None:
+    assert model_probe_module._probe_suite_sha256() == QWEN36_27B_V12_PROFILE.probe_suite_sha256
 
 
 def test_probe_module_has_no_environment_file_or_network_implementation() -> None:
