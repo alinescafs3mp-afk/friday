@@ -766,6 +766,29 @@ def test_open_review_allows_a_provable_person_count_and_rejects_the_adjacent_wro
     assert "attachment_derived_record_count_not_in_evidence" in contradicted["issues"]
 
 
+def test_open_review_checks_worded_person_counts_above_ten_against_structure() -> None:
+    personnel = "\n".join(["Рядовой, стрелок первого отделения", "Иванов Иван Иванович"] * 11)
+    evidence = f'Вложение "staff.txt", фрагмент 1:\n{personnel}'
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+
+    supported = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит одиннадцать военнослужащих.",
+        [{"tool": "attachment", "output": evidence}],
+        high_confidence_only=True,
+    )
+    contradicted = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит двенадцать военнослужащих.",
+        [{"tool": "attachment", "output": evidence}],
+        high_confidence_only=True,
+    )
+
+    assert supported["status"] == "skipped"
+    assert contradicted["status"] == "failed"
+    assert "attachment_derived_record_count_not_in_evidence" in contradicted["issues"]
+
+
 def test_open_review_rejects_an_unsupported_record_count_and_absolute_quality_claim() -> None:
     skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
     evidence = [{"tool": "attachment", "output": "Документ описывает назначение проекта."}]
@@ -782,6 +805,63 @@ def test_open_review_rejects_an_unsupported_record_count_and_absolute_quality_cl
         [{"tool": "attachment", "output": "Документ содержит 11 записей."}],
         high_confidence_only=True,
     )
+    unsupported_worded = [
+        _attachment_verdict_with_deterministic_drift(
+            skipped,
+            answer,
+            evidence,
+            high_confidence_only=True,
+        )
+        for answer in (
+            "Документ содержит одиннадцать записей.",
+            "Документ содержит двадцать военнослужащих.",
+            "Документ содержит двадцать одну запись.",
+            "Документ содержит сведения о двадцати одном сотруднике.",
+            "Данные подтверждены двадцатью тремя военнослужащими.",
+            "Документ содержит сто двадцать пять позиций.",
+            "Документ содержит одну тысячу записей.",
+            "Документ содержит одиннадцать отдельных записей.",
+            "Документ содержит двадцать новых сотрудников.",
+            "Документ содержит сто двадцать пять штатных позиций.",
+            "Документ содержит 125 отдельных штатных позиций.",
+        )
+    ]
+    literal_worded = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит одиннадцать записей.",
+        [
+            {
+                "tool": "attachment",
+                "output": "Документ содержит одиннадцать записей.",
+            }
+        ],
+        high_confidence_only=True,
+    )
+    literal_cross_form = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит одиннадцать записей.",
+        [{"tool": "attachment", "output": "Документ содержит 11 записей."}],
+        high_confidence_only=True,
+    )
+    literal_modified = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит одиннадцать отдельных записей.",
+        [{"tool": "attachment", "output": "Документ содержит 11 отдельных записей."}],
+        high_confidence_only=True,
+    )
+    non_counts = [
+        _attachment_verdict_with_deterministic_drift(
+            skipped,
+            answer,
+            evidence,
+            high_confidence_only=True,
+        )
+        for answer in (
+            "Нужно обеспечить семью сотрудника жильём.",
+            "Нужно проверить двадцать первый пункт.",
+            "Исполнитель — СТО «Маяк».",
+        )
+    ]
     absolute = _attachment_verdict_with_deterministic_drift(
         skipped,
         "Документ безупречен.",
@@ -792,6 +872,14 @@ def test_open_review_rejects_an_unsupported_record_count_and_absolute_quality_cl
     assert unsupported["status"] == "failed"
     assert "attachment_derived_record_count_not_in_evidence" in unsupported["issues"]
     assert literal["status"] == "skipped"
+    assert all(item["status"] == "failed" for item in unsupported_worded)
+    assert all(
+        "attachment_derived_record_count_not_in_evidence" in item["issues"] for item in unsupported_worded
+    )
+    assert literal_worded["status"] == "skipped"
+    assert literal_cross_form["status"] == "skipped"
+    assert literal_modified["status"] == "skipped"
+    assert all(item["status"] == "skipped" for item in non_counts)
     assert absolute["status"] == "failed"
     assert "attachment_absolute_quality_claim" in absolute["issues"]
 

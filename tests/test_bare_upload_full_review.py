@@ -199,7 +199,7 @@ async def test_bare_upload_detailed_review_keeps_a_source_derived_record_count(
 ) -> None:
     configured = replace(settings, verify_answers=True, verify_min_answer_chars=1)
     storage.ensure_user("alice", preset_key="owner")
-    source = "Проект Альфа описан.\nПроект Бета описан."
+    source = "\n".join(f"- Проект {index:02d} описан." for index in range(1, 12))
     pipeline = IngestionPipeline(configured, storage, KnowledgeGraph(storage))
     ingested = await pipeline.ingest_file(
         "alice",
@@ -212,10 +212,10 @@ async def test_bare_upload_detailed_review_keeps_a_source_derived_record_count(
     )
     review = (
         "## Подробное ревью\n\n"
-        "Документ содержит 2 записи: по проектам Альфа и Бета.\n\n"
+        "Документ содержит одиннадцать записей проектов.\n\n"
         "**Проблемы:** у большинства записей отсутствуют сроки; у некоторых "
         "есть только краткое описание.\n\n"
-        "**Вывод:** обе записи имеют одинаковую краткую структуру."
+        "**Вывод:** записи имеют одинаковую краткую структуру."
     )
     model = _VerifiedReviewSpy(review)
     runtime = AgentRuntime(configured, storage, llm=model)  # type: ignore[arg-type]
@@ -235,9 +235,11 @@ async def test_bare_upload_detailed_review_keeps_a_source_derived_record_count(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("claimed", ["3", "одиннадцать"])
 async def test_bare_upload_wrong_derived_count_gets_one_repair_then_hard_rejection(
     settings,
     storage,
+    claimed: str,
 ) -> None:
     configured = replace(settings, verify_answers=True, verify_min_answer_chars=1)
     storage.ensure_user("alice", preset_key="owner")
@@ -253,7 +255,7 @@ async def test_bare_upload_wrong_derived_count_gets_one_repair_then_hard_rejecti
         source_ref="telegram-file:WRONG-DERIVED-COUNT-REVIEW",
     )
     model = _VerifiedReviewSpy(
-        "Документ содержит 3 записи: проекты Альфа, Бета и Гамма; структура записей краткая."
+        f"Документ содержит {claimed} записей: проекты Альфа, Бета и Гамма; структура записей краткая."
     )
     runtime = AgentRuntime(configured, storage, llm=model)  # type: ignore[arg-type]
 

@@ -14453,7 +14453,181 @@ _ATTACHMENT_NAMED_CUE_VALUE = re.compile(
 )
 _ATTACHMENT_DIGIT_NUMBER = r"[+−-]?(?:\d{1,3}(?:[ \u00a0\u202f]\d{3})+|\d{1,9})(?:[.,]\d{1,6})?"
 _ATTACHMENT_UNSIGNED_INTEGER = r"(?:\d{1,3}(?:[ \u00a0\u202f]\d{3})+|\d{1,9})"
-_ATTACHMENT_NUMBER_WORDS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+_ATTACHMENT_NUMBER_WORD_VALUES = {
+    "ноль": 0,
+    "нуль": 0,
+    "ноля": 0,
+    "нуля": 0,
+    "один": 1,
+    "одна": 1,
+    "одно": 1,
+    "одну": 1,
+    "одного": 1,
+    "одной": 1,
+    "одному": 1,
+    "одним": 1,
+    "одном": 1,
+    "два": 2,
+    "две": 2,
+    "двух": 2,
+    "двум": 2,
+    "двумя": 2,
+    "три": 3,
+    "трех": 3,
+    "трем": 3,
+    "тремя": 3,
+    "четыре": 4,
+    "четырех": 4,
+    "четырем": 4,
+    "четырьмя": 4,
+    "пять": 5,
+    "пяти": 5,
+    "пятью": 5,
+    "шесть": 6,
+    "шести": 6,
+    "шестью": 6,
+    "семь": 7,
+    "семи": 7,
+    "семью": 7,
+    "восемь": 8,
+    "восьми": 8,
+    "восемью": 8,
+    "девять": 9,
+    "девяти": 9,
+    "девятью": 9,
+    "десять": 10,
+    "десяти": 10,
+    "десятью": 10,
+    "одиннадцать": 11,
+    "одиннадцати": 11,
+    "одиннадцатью": 11,
+    "двенадцать": 12,
+    "двенадцати": 12,
+    "двенадцатью": 12,
+    "тринадцать": 13,
+    "тринадцати": 13,
+    "тринадцатью": 13,
+    "четырнадцать": 14,
+    "четырнадцати": 14,
+    "четырнадцатью": 14,
+    "пятнадцать": 15,
+    "пятнадцати": 15,
+    "пятнадцатью": 15,
+    "шестнадцать": 16,
+    "шестнадцати": 16,
+    "шестнадцатью": 16,
+    "семнадцать": 17,
+    "семнадцати": 17,
+    "семнадцатью": 17,
+    "восемнадцать": 18,
+    "восемнадцати": 18,
+    "восемнадцатью": 18,
+    "девятнадцать": 19,
+    "девятнадцати": 19,
+    "девятнадцатью": 19,
+    "двадцать": 20,
+    "двадцати": 20,
+    "двадцатью": 20,
+    "тридцать": 30,
+    "тридцати": 30,
+    "тридцатью": 30,
+    "сорок": 40,
+    "сорока": 40,
+    "пятьдесят": 50,
+    "пятидесяти": 50,
+    "пятьюдесятью": 50,
+    "шестьдесят": 60,
+    "шестидесяти": 60,
+    "шестьюдесятью": 60,
+    "семьдесят": 70,
+    "семидесяти": 70,
+    "семьюдесятью": 70,
+    "восемьдесят": 80,
+    "восьмидесяти": 80,
+    "восемьюдесятью": 80,
+    "девяносто": 90,
+    "девяноста": 90,
+    "сто": 100,
+    "ста": 100,
+    "двести": 200,
+    "двухсот": 200,
+    "двумстам": 200,
+    "двумястами": 200,
+    "двухстах": 200,
+    "триста": 300,
+    "трехсот": 300,
+    "тремстам": 300,
+    "тремястами": 300,
+    "трехстах": 300,
+    "четыреста": 400,
+    "четырехсот": 400,
+    "четыремстам": 400,
+    "четырьмястами": 400,
+    "четырехстах": 400,
+    "пятьсот": 500,
+    "пятисот": 500,
+    "пятистам": 500,
+    "пятьюстами": 500,
+    "пятистах": 500,
+    "шестьсот": 600,
+    "шестисот": 600,
+    "шестистам": 600,
+    "шестьюстами": 600,
+    "шестистах": 600,
+    "семьсот": 700,
+    "семисот": 700,
+    "семистам": 700,
+    "семьюстами": 700,
+    "семистах": 700,
+    "восемьсот": 800,
+    "восьмисот": 800,
+    "восьмистам": 800,
+    "восемьюстами": 800,
+    "восьмистах": 800,
+    "девятьсот": 900,
+    "девятисот": 900,
+    "девятистам": 900,
+    "девятьюстами": 900,
+    "девятистах": 900,
+}
+_ATTACHMENT_NUMBER_WORD_SCALES = {
+    "тысяча": 1_000,
+    "тысячи": 1_000,
+    "тысяч": 1_000,
+    "тысяче": 1_000,
+    "тысячу": 1_000,
+    "тысячей": 1_000,
+    "тысячью": 1_000,
+    "тысячами": 1_000,
+    "тысячах": 1_000,
+    "миллион": 1_000_000,
+    "миллиона": 1_000_000,
+    "миллионов": 1_000_000,
+    "миллиону": 1_000_000,
+    "миллионом": 1_000_000,
+    "миллионе": 1_000_000,
+    "миллионах": 1_000_000,
+}
+_ATTACHMENT_NUMBER_WORD_TOKEN = "|".join(
+    sorted(
+        (
+            re.escape(word)
+            for word in _ATTACHMENT_NUMBER_WORD_VALUES.keys() | _ATTACHMENT_NUMBER_WORD_SCALES.keys()
+        ),
+        key=len,
+        reverse=True,
+    )
+)
+_ATTACHMENT_REVIEW_COUNT_UNIT = rf"(?:военнослуж\w*|{_ATTACHMENT_COUNT_NOUN}\w*)"
+_ATTACHMENT_NUMBER_WORD_COUNT_RELATION = re.compile(
+    rf"(?<![\w-])(?P<number>(?:{_ATTACHMENT_NUMBER_WORD_TOKEN})"
+    rf"(?:[\t \u00a0\u202f]+(?:{_ATTACHMENT_NUMBER_WORD_TOKEN})){{0,7}})"
+    rf"(?P<modifiers>(?:[\t \u00a0\u202f]+[A-Za-zА-ЯЁа-яё-]+){{0,4}})"
+    rf"(?P<spacing>[\t \u00a0\u202f]+)"
+    rf"(?P<unit>{_ATTACHMENT_REVIEW_COUNT_UNIT})(?![\w-])",
+    re.IGNORECASE,
+)
+_ATTACHMENT_LEGACY_NUMBER_WORDS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
     (re.compile(rf"(?<![\w-])(?:{forms})(?![\w-])", re.IGNORECASE), number)
     for forms, number in (
         (r"один|одна|одно|одну", "1"),
@@ -14468,9 +14642,61 @@ _ATTACHMENT_NUMBER_WORDS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
         (r"десять", "10"),
     )
 )
+
+
+def _attachment_sub_thousand_word_value(tokens: Sequence[str]) -> int | None:
+    values = [_ATTACHMENT_NUMBER_WORD_VALUES[token] for token in tokens]
+    if len(values) == 1:
+        return values[0]
+    if values[0] >= 100 and values[0] % 100 == 0:
+        if len(values) == 2 and 0 < values[1] < 100:
+            return values[0] + values[1]
+        if len(values) == 3 and values[1] in range(20, 100, 10) and 0 < values[2] < 10:
+            return sum(values)
+        return None
+    if len(values) == 2 and values[0] in range(20, 100, 10) and 0 < values[1] < 10:
+        return sum(values)
+    return None
+
+
+def _attachment_russian_cardinal_value(raw: str) -> int | None:
+    """Parse one complete, bounded Russian cardinal without taking its tail."""
+
+    total = 0
+    group: list[str] = []
+    preceding_scale = 1_000_000_000
+    for token in raw.split():
+        scale = _ATTACHMENT_NUMBER_WORD_SCALES.get(token)
+        if scale is None:
+            group.append(token)
+            continue
+        if scale >= preceding_scale:
+            return None
+        group_value = _attachment_sub_thousand_word_value(group) if group else 1
+        if group_value is None or not 0 < group_value < 1_000:
+            return None
+        total += group_value * scale
+        if total > 999_999_999:
+            return None
+        preceding_scale = scale
+        group.clear()
+    tail = _attachment_sub_thousand_word_value(group) if group else 0
+    if tail is None:
+        return None
+    value = total + tail
+    return value if 0 <= value <= 999_999_999 else None
+
+
 _ATTACHMENT_NUMBER = (
     rf"(?i:{_ATTACHMENT_DIGIT_NUMBER}|один|одна|одно|одну|два|две|три|четыре|пять|"
     r"шесть|семь|восемь|девять|десять)"
+)
+_ATTACHMENT_NUMBER_COUNT_MODIFIER_RELATION = re.compile(
+    rf"(?<![\w-])(?P<number>{_ATTACHMENT_NUMBER})"
+    rf"(?P<modifiers>(?:[\t \u00a0\u202f]+[A-Za-zА-ЯЁа-яё-]+){{1,4}})"
+    rf"(?P<spacing>[\t \u00a0\u202f]+)"
+    rf"(?P<unit>{_ATTACHMENT_REVIEW_COUNT_UNIT})(?![\w-])",
+    re.IGNORECASE,
 )
 _ATTACHMENT_UNIT = (
     r"(?:[$€₽£¥]|"
@@ -14568,8 +14794,31 @@ _ATTACHMENT_RUSSIAN_MONTHS = {
 
 def _attachment_quantity_normalized(text: str) -> str:
     normalized = str(text or "").casefold().replace("ё", "е")
-    for pattern, number in _ATTACHMENT_NUMBER_WORDS:
+
+    def replace_cardinal(matched: re.Match[str]) -> str:
+        value = _attachment_russian_cardinal_value(matched.group("number"))
+        unit = matched.group("unit")
+        tokens = matched.group("number").split()
+        if tokens == ["семью"] and not unit.endswith(("ами", "ями", "ьми")):
+            return matched.group(0)
+        modifiers = matched.group("modifiers")
+        if value is None or _ATTACHMENT_ORDINAL_TOKEN.search(modifiers):
+            return matched.group(0)
+        return f"{value}{modifiers}{matched.group('spacing')}{unit}"
+
+    normalized = _ATTACHMENT_NUMBER_WORD_COUNT_RELATION.sub(replace_cardinal, normalized)
+    for pattern, number in _ATTACHMENT_LEGACY_NUMBER_WORDS:
         normalized = pattern.sub(number, normalized)
+
+    def collapse_count_modifiers(matched: re.Match[str]) -> str:
+        if _ATTACHMENT_ORDINAL_TOKEN.search(matched.group("modifiers")):
+            return matched.group(0)
+        return f"{matched.group('number')}{matched.group('spacing')}{matched.group('unit')}"
+
+    normalized = _ATTACHMENT_NUMBER_COUNT_MODIFIER_RELATION.sub(
+        collapse_count_modifiers,
+        normalized,
+    )
     return normalized
 
 
@@ -15506,6 +15755,8 @@ _ATTACHMENT_RECORD_COUNT_UNIT_PREFIXES = (
     "объект",
     "контакт",
 )
+_ATTACHMENT_PERSON_COUNT_UNIT_EXACT_STEMS = frozenset({"им"})
+_ATTACHMENT_RECORD_COUNT_UNIT_EXACT_STEMS = frozenset({"зап"})
 _ATTACHMENT_PERSON_NAME_LINE = re.compile(
     r"^\s*(?:[А-ЯЁ]{2,}(?:-[А-ЯЁ]{2,})?|[А-ЯЁ][а-яё-]{2,})\s+"
     r"[А-ЯЁ][а-яё-]{2,}\s+[А-ЯЁ][а-яё-]{2,}\s*$"
@@ -15630,9 +15881,11 @@ def _attachment_derived_record_count_issues(
             continue
         category = (
             "people"
-            if unit.startswith(_ATTACHMENT_PERSON_COUNT_UNIT_PREFIXES)
+            if unit in _ATTACHMENT_PERSON_COUNT_UNIT_EXACT_STEMS
+            or unit.startswith(_ATTACHMENT_PERSON_COUNT_UNIT_PREFIXES)
             else "records"
-            if unit.startswith(_ATTACHMENT_RECORD_COUNT_UNIT_PREFIXES)
+            if unit in _ATTACHMENT_RECORD_COUNT_UNIT_EXACT_STEMS
+            or unit.startswith(_ATTACHMENT_RECORD_COUNT_UNIT_PREFIXES)
             else ""
         )
         if not category or _attachment_source_supports_quantity(
