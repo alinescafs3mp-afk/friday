@@ -1,1308 +1,808 @@
 # Friday Obsidian Integration Architecture and Implementation Plan
 
 > Document ID: FRIDAY-OBS-001  
-> Status: External architecture proposal, draft v0.2  
-> Repository snapshot: `main`, Friday `0.206.0`, 20 August 2026  
-> Scope: one-time Obsidian account onboarding from Telegram, mobile-first Obsidian Sync, per-user Headless profiles, vault and note identity, natural-language Obsidian control through Friday, desktop CLI and companion-plugin transports, note search and editing, properties, links, tasks, templates, Bases, workspace actions, event synchronization, operational-memory integration, implementation phases, and acceptance criteria.  
+> Status: External architecture proposal, draft v0.3  
+> Repository snapshot: `main`, Friday `0.206.0`, 21 August 2026  
+> Primary scenario: free Android-only user, Telegram as the Friday interface, no Obsidian Sync subscription, no desktop Obsidian requirement, and an always-on Friday host.  
+> Primary Android sync client: Syncthing-Fork.  
 > Related documents: [`INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md`](INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md), [`DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md`](DOCUMENT_AND_MESSAGE_RETRIEVAL_AUDIT.md), [`MCP_ARCHITECTURE_OBSERVATION.md`](MCP_ARCHITECTURE_OBSERVATION.md), and [`SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md`](SENSITIVE_DOCUMENT_HANDLING_AND_SECURE_WORKBENCH.md).
 
-## Revision 0.2
+## Revision 0.3
 
-This revision changes the center of gravity of the integration.
+This revision replaces the account-centric and Obsidian-Sync-centric design from v0.2.
 
-The earlier version treated the desktop Obsidian CLI as the primary first step and left Headless Sync as a later optional adapter. That ordering is appropriate only when Friday and Obsidian run inside the same desktop session.
+The system must now work under the following hard assumption:
 
-The intended product experience is mobile-first:
+> Obsidian Sync does not exist as an available product. The user has an Android phone, a free local Obsidian vault, Telegram, and no desktop computer that Friday may rely on.
 
-```text
-Telegram on the phone
-    -> one-time Obsidian connection
-    -> Friday maintains an always-on server-side vault checkout
-    -> Obsidian Sync delivers changes to the official mobile app
-    -> the user continues to command Friday in ordinary Russian
-```
-
-Therefore:
-
-1. Per-user Obsidian Headless and Obsidian Sync become the primary always-on transport.
-2. Telegram onboarding becomes an early product requirement, not an administrative afterthought.
-3. The Obsidian account, remote vault, server-side local checkout, desktop installation, and mobile installation become separate identities.
-4. Desktop CLI remains a useful local accelerator.
-5. The companion plugin remains the interactive context bridge when Obsidian is open.
-6. Obsidian URI remains the mobile navigation mechanism.
-7. Browser-session cookie extraction is explicitly rejected as the primary login contract.
-
-## Scope decision
-
-This proposal is functionality-first.
-
-It assumes that enabling Obsidian integration is an explicit deployment and user choice. It does not redesign the sensitive-document boundary, encryption policy, or restricted-data handling described in the other architecture documents.
-
-Existing Friday authorization, actor scope, effect classification, idempotency, audit, and publication contracts should remain in place. Beyond that baseline, the product goal is straightforward:
-
-> A person should be able to connect Obsidian once from Telegram and then use useful Obsidian functionality by talking to Friday in ordinary language.
-
-The integration should feel like one workspace with two interfaces:
+The primary architecture is therefore:
 
 ```text
-Friday
-    natural-language intent
-    semantic retrieval
-    document and conversation context
-    multi-step coordination
-    model synthesis
-    durable Work Items
-
-Obsidian
-    notes and folders
-    links and backlinks
-    properties and tags
-    tasks and daily notes
-    templates
-    Bases
-    tabs, workspaces, and native editing
-    mobile and desktop clients
+Telegram on Android
+    -> Friday
+    -> server-side vault checkout
+    -> managed Syncthing instance
+    -> Syncthing protocol
+    -> Syncthing-Fork on Android
+    -> Android device-storage folder
+    -> official Obsidian mobile app
 ```
 
-Friday should not attempt to reproduce Obsidian. Obsidian should not become a second implementation of Friday's memory, provenance, or work-state engine.
+The consequences are important:
 
-## Product requirement
+1. No Obsidian account login is required.
+2. Friday does not bind to an Obsidian account.
+3. Friday binds one Friday user to one Android Syncthing device and one logical vault.
+4. Syncthing-Fork is the persistent delivery channel.
+5. Obsidian URI is the one-tap navigation channel.
+6. A Friday companion plugin is optional foreground context, not the synchronization backbone.
+7. Friday must implement server-side note semantics that were previously delegated to Obsidian desktop or CLI.
+8. Android background execution and synchronization delay are normal operating conditions, not exceptional failures.
 
-The primary onboarding path begins in Telegram.
+## Non-negotiable deployment assumptions
 
-A user should be able to send:
+The main design assumes:
+
+```text
+user device:
+    Android phone or tablet
+    official Obsidian mobile application
+    Syncthing-Fork
+    Telegram client
+
+Friday side:
+    always-on Linux host or home server
+    writable per-user vault checkout
+    managed Syncthing process
+    Friday backend and workers
+
+not assumed:
+    paid Obsidian services
+    Obsidian account
+    desktop Obsidian
+    desktop CLI
+    browser-session import
+    continuously running Obsidian mobile app
+    continuously connected mobile companion plugin
+```
+
+Desktop and paid-provider transports may be added later, but they must not shape the core contracts or acceptance criteria of this plan.
+
+## Product goal
+
+A user should perform one setup procedure and then use Obsidian through Friday in ordinary Russian from Telegram.
+
+Examples after setup:
+
+```text
+Добавь итог разговора в сегодняшнюю заметку.
+
+Найди в Obsidian заметку про проблемы с индексом документов.
+
+Создай заметку в Projects/Friday и добавь туда ссылки на найденные документы.
+
+Поставь в ежедневную заметку задачу проверить аудит завтра.
+
+Добавь заметке статус review и тег friday.
+
+Покажи, какие заметки ссылаются на архитектуру поиска.
+
+Перемести второй результат в Archive/2026.
+
+Собери Base для активных заметок по Friday.
+
+Сохрани результат исследования и дай кнопку, чтобы открыть его в Obsidian.
+```
+
+The intended experience is:
+
+```text
+The user talks to Friday.
+Friday understands and coordinates the task.
+Friday changes or searches its server-side vault checkout.
+Syncthing-Fork carries the change to or from Android.
+Obsidian remains the native mobile editor and viewer.
+```
+
+## What is available before full synchronization
+
+A user with only the Obsidian Android app may use an URI-only degraded mode.
+
+Friday may return `obsidian://` actions that ask the phone to:
+
+```text
+open a vault
+open a note
+create a note
+append text to a note
+open or create a daily note
+open Obsidian search
+```
+
+This mode is useful for immediate capture with one user tap.
+
+It does not give Friday durable access to the vault. Friday cannot reliably:
+
+```text
+read existing notes
+search the complete vault
+confirm that a URI write succeeded
+edit while the user is offline
+observe phone-side edits
+maintain backlinks or note identity
+continue a multi-step vault workflow
+```
+
+URI-only mode must be presented as a handoff, not as full integration.
+
+## Full free Android architecture
+
+```text
+┌──────────────────────────────────────────────┐
+│ Telegram client on Android                   │
+│                                              │
+│ /obsidian                                    │
+│ ordinary Russian requests                    │
+│ Open in Obsidian buttons                     │
+└──────────────────────┬───────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────┐
+│ Friday                                       │
+│                                              │
+│ Interaction Control Plane                    │
+│ Obsidian Organ                               │
+│ vault operations                             │
+│ note index and backlinks                     │
+│ Work Items and Playbooks                     │
+│ operation ledger                             │
+└──────────────────────┬───────────────────────┘
+                       │ local filesystem
+                       ▼
+┌──────────────────────────────────────────────┐
+│ Per-user server checkout                     │
+│                                              │
+│ Markdown notes                               │
+│ attachments                                  │
+│ templates                                    │
+│ .base files                                  │
+└──────────────────────┬───────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────┐
+│ Managed Syncthing instance                   │
+│                                              │
+│ unique server Device ID                      │
+│ REST and event adapter                       │
+│ folder and peer status                       │
+└──────────────────────┬───────────────────────┘
+                       │ Syncthing protocol
+                       ▼
+┌──────────────────────────────────────────────┐
+│ Syncthing-Fork on Android                    │
+│                                              │
+│ Send & Receive folder                        │
+│ Android background synchronization           │
+└──────────────────────┬───────────────────────┘
+                       │ shared device storage
+                       ▼
+┌──────────────────────────────────────────────┐
+│ Official Obsidian Android app                │
+│                                              │
+│ opens the same folder as a vault             │
+│ native editing, links, views, plugins         │
+└──────────────────────────────────────────────┘
+```
+
+## There is no Obsidian account binding
+
+In this architecture, an Obsidian account is irrelevant.
+
+The durable identity graph is:
+
+```text
+Telegram identity
+    -> Friday user
+        -> Syncthing server profile
+        -> Android Syncthing Device ID
+        -> logical vault
+        -> server checkout
+        -> Android vault alias and local folder
+```
+
+Suggested records:
+
+```python
+SyncthingProfile(
+    id="stprof_...",
+    friday_user_id="user_...",
+    config_root="...",
+    database_root="...",
+    api_endpoint="http://127.0.0.1:...",
+    server_device_id="...",
+    state="running",
+)
+
+AndroidSyncDevice(
+    id="stdev_...",
+    friday_user_id="user_...",
+    syncthing_device_id="...",
+    display_name="Pixel 10",
+    state="connected",
+    last_seen_at="...",
+)
+
+ObsidianLogicalVault(
+    id="obsvault_...",
+    friday_user_id="user_...",
+    display_name="Friday",
+    folder_id="friday-user-...",
+    server_path="...",
+    android_vault_name="Friday",
+    android_path_hint="Documents/Friday",
+    sync_device_id="stdev_...",
+    state="ready",
+)
+```
+
+Do not create an `ObsidianAccountConnection` in the primary free path.
+
+A future paid or delegated account provider may attach to the logical vault without changing note, search, or Work Item contracts.
+
+## Recommended server topology
+
+### Default: one Syncthing profile per Friday user
+
+The simplest functionally correct topology is one managed Syncthing profile and process per connected Friday user.
+
+Advantages:
+
+- one unique server Device ID maps unambiguously to one Friday user;
+- QR pairing cannot attach a phone to the wrong user profile;
+- device and folder state are easy to reason about;
+- disconnect and reset are local to one user;
+- per-user event streams and REST credentials are simple;
+- no cross-user folder configuration exists inside one Syncthing process.
+
+Cost:
+
+- one additional lightweight process and database per connected user;
+- more local ports and supervisor entries;
+- more startup and upgrade work.
+
+For Friday's current scale, this trade is preferable to a pooled daemon with a complicated pairing broker.
+
+A pooled multi-user Syncthing daemon may be introduced later behind the same `VaultSyncTransport` contract.
+
+### Suggested directory layout
+
+```text
+data/obsidian/
+    users/
+        <friday-user-id>/
+            syncthing-config/
+            syncthing-db/
+            vaults/
+                <logical-vault-id>/
+                    .stfolder/
+                    Notes/
+                    Attachments/
+                    Templates/
+```
+
+The Syncthing GUI and REST API bind only to loopback. Friday talks to it through a generated API key.
+
+## One-time Telegram onboarding
+
+## Entry point
+
+The user sends:
 
 ```text
 /obsidian
 ```
 
-and receive:
+Before pairing, Friday replies:
 
 ```text
 Obsidian is not connected.
 
-[ Connect Obsidian ]
+You need two free Android apps:
+1. Obsidian
+2. Syncthing-Fork
+
+[ Start setup ]
+[ Install Obsidian ]
+[ Install Syncthing-Fork ]
 ```
 
-The happy path should require only:
+The setup button opens either:
+
+- a Telegram Mini App in clients that support it;
+- a short-lived normal HTTPS link in clients that do not.
+
+The setup page is bound to the existing Friday user. It does not ask for an Obsidian login.
+
+## Android preflight
+
+The page explains one important Android choice:
+
+> The Obsidian vault must use device storage, not private app storage, because Syncthing-Fork must access the same folder.
+
+Supported cases:
+
+### Existing Android vault
+
+The user already has an Obsidian vault in device storage.
+
+During folder acceptance, the user selects that existing folder.
+
+### New Friday vault
+
+Friday creates an empty server checkout and offers it as a Syncthing folder.
+
+The user accepts the folder into a device-storage location and then opens that folder as a vault in Obsidian.
+
+## Provisioning
+
+Friday creates:
 
 ```text
-1. Send /obsidian.
-2. Tap Connect Obsidian.
-3. Enter Obsidian account credentials once.
-4. Select a vault only when more than one is available.
-5. Enter MFA or the vault E2EE password only when the account requires it.
+one onboarding session
+one per-user Syncthing profile
+one server Device ID
+one empty logical vault checkout
+one unique Syncthing folder ID
 ```
 
-After that, slash commands are optional. The normal interface is natural language:
+The onboarding state is persisted before the process is started.
+
+## Device pairing
+
+The setup page displays:
 
 ```text
-Add this to today's note.
-
-Find the Obsidian note about the Friday retrieval architecture.
-
-Create a task to review the document audit tomorrow.
-
-Save this research result in my Work vault.
-
-Link the note we opened to the document we found earlier.
-
-Open the result in Obsidian on my phone.
+1. Open Syncthing-Fork.
+2. Tap Add device.
+3. Scan this QR code.
+4. Save the device.
 ```
 
-The user should not have to keep Obsidian open on the phone for Friday to perform ordinary note operations.
+The QR contains the Friday-side Syncthing Device ID. Device IDs are public identifiers used for mutual device configuration, not account passwords.
 
-## Executive architecture decision
+Because the server Device ID belongs to this user's dedicated Syncthing profile, the next pending Android device on that profile is unambiguous.
 
-Build the integration as a first-party Friday Organ with four adapters behind one Friday-owned service contract.
+Friday polls the Syncthing pending-device endpoint or consumes the corresponding event.
+
+When the Android device attempts to connect, Friday:
+
+1. records its Device ID and reported name;
+2. adds it to the per-user Syncthing configuration;
+3. associates it with the onboarding session;
+4. shares the logical vault folder with it.
+
+The page changes to:
 
 ```text
-1. Headless Sync adapter
-   - primary always-on and mobile-first path
-   - one isolated Obsidian Headless profile per Friday user
-   - one server-side local checkout per connected remote vault
-   - continuous Obsidian Sync
+Android device found: Pixel 10
 
-2. Vault file adapter
-   - performs ordinary note reads and writes against the server-side checkout
-   - supports Markdown, properties, links, tasks, templates, and managed regions
-   - feeds Friday semantic indexing
-
-3. Desktop CLI adapter
-   - controls a running desktop Obsidian installation
-   - useful when Friday runs in the same desktop user environment
-   - provides native commands, workspaces, panes, active files, and plugin commands
-
-4. Companion plugin adapter
-   - event-driven active-note and selection context
-   - atomic in-app modifications
-   - rename and delete notifications
-   - richer workspace behavior
-   - optional on mobile and desktop
+Now accept the offered folder in Syncthing-Fork.
 ```
 
-Obsidian URI is a fifth, navigation-only fallback:
+An explicit confirmation may be shown if the device name or pairing timing is ambiguous.
+
+## Folder acceptance
+
+Syncthing-Fork receives a folder offer.
+
+The user performs the unavoidable Android-side action:
 
 ```text
-open a vault
-open a note
-open a heading or block
-open a search
-open or create a daily note
+1. Accept the folder.
+2. Choose or create the device-storage folder used by Obsidian.
+3. Keep folder type Send & Receive.
 ```
 
-The target architecture is:
+Friday cannot choose an Android filesystem folder remotely. This is the irreducible manual step in a third-party free sync design.
+
+After the Android client accepts the folder, Friday observes `remoteState=valid` and waits for folder completion.
+
+## Registering the folder in Obsidian
+
+For a new vault, the user opens Obsidian once and chooses:
 
 ```text
-Telegram user
-    -> Friday account
-    -> Interaction Control Plane
-    -> Obsidian Playbook or direct capability
-    -> Friday Obsidian Service
-         -> server-side vault file adapter
-         -> Headless Sync supervisor
-         -> desktop CLI when available
-         -> companion plugin when active
-         -> Obsidian URI for navigation
-    -> typed CapabilityOutcome
-    -> Work Item continuation and Completion Gate
-    -> one user-visible response
+Open folder as vault
 ```
 
-## The three channels must not be confused
+Then the user selects the same device-storage folder and assigns the desired vault name.
 
-The integration has three different channels with different jobs.
+For an existing vault, this step is already complete.
 
-### Obsidian Sync
+The setup page asks for the local Obsidian vault name only so Friday can generate correct `obsidian://` links later.
+
+## Round-trip verification
+
+Friday writes a small note:
 
 ```text
-Friday server checkout
-    <-> remote Obsidian vault
-    <-> phone and desktop local vaults
+Friday Connection Test.md
 ```
 
-This is the persistent delivery backbone.
+Then it:
 
-### Companion plugin
+1. requests a local Syncthing scan;
+2. waits for the server index to contain the note;
+3. waits for the Android device completion status to reach 100 percent while connected;
+4. shows an `Open in Obsidian` button;
+5. asks the user to confirm that the note opens.
+
+The final confirmation binds the Android vault alias to the logical vault.
+
+Friday may remove the test note after confirmation or keep it as a short onboarding guide.
+
+## Minimum unavoidable user actions
+
+For a new Android-only user, the realistic one-time sequence is:
 
 ```text
-currently open Obsidian application
-    <-> Friday
+1. Install Obsidian.
+2. Install Syncthing-Fork.
+3. Send /obsidian and open setup.
+4. Scan one QR code in Syncthing-Fork.
+5. Accept one folder and choose its Android path.
+6. Open that folder as a vault in Obsidian.
+7. Tap the verification link once.
 ```
 
-This provides live UI context while the app is active.
+This is more work than an OAuth login because no central sync account exists.
 
-### Obsidian URI
+Reducing the flow below this level would require Friday to ship its own Android application or its own Obsidian sync plugin with a custom transport.
 
-```text
-Telegram or Friday UI link
-    -> user tap
-    -> mobile or desktop Obsidian opens a target
-```
-
-This provides navigation, not background synchronization.
-
-A mobile companion plugin cannot be treated as a permanently connected daemon. The integration must continue to work when the phone is offline or the Obsidian app is closed.
-
-## One-time Telegram onboarding
-
-### Entry point
-
-The command:
-
-```text
-/obsidian
-```
-
-opens a status panel.
-
-Before connection:
-
-```text
-Obsidian: not connected
-
-[ Connect Obsidian ]
-[ What is required? ]
-```
-
-After connection:
-
-```text
-Obsidian: connected
-Account: user@example.com
-Default vault: Work
-Sync: ready
-Last successful server sync: 21:43
-
-[ Change vault ]
-[ Reconnect ]
-[ Disconnect ]
-```
-
-### Official Telegram clients
-
-The preferred button opens a Telegram Mini App.
-
-The Mini App sends Telegram `initData` to Friday. Friday validates that signed payload and binds the setup session to the existing Friday user and Telegram identity.
-
-No separate Friday password is required.
-
-### Unofficial Telegram clients
-
-The bot must also include a normal HTTPS fallback link:
-
-```text
-https://friday.example/connect/obsidian/<single-use-token>
-```
-
-The token is:
-
-```text
-single use
-short lived
-bound to one Friday user
-bound to the requesting Telegram identity and chat context
-scoped only to obsidian.connect
-invalidated after completion or cancellation
-```
-
-The browser page does not require a second Friday login because the setup token already identifies the requesting Friday account.
-
-Mini App support must never be the only door.
-
-## Obsidian login contract
-
-### Friday does not reuse a random browser cookie
-
-The integration should not depend on extracting or importing an existing `obsidian.md` browser session.
-
-The current official Headless authentication contract is:
-
-```text
-ob login
-```
-
-with interactive email, password, and automatic MFA prompting when enabled.
-
-There is currently no documented OAuth authorization-code flow, device-code flow, or supported browser-session import for Obsidian Headless.
-
-Therefore the stable onboarding path is a web wrapper around the official Headless login process, not cookie transplantation.
-
-### Interactive login broker
-
-For each Friday user, Friday creates an isolated Headless profile and launches `ob login` through a bounded pseudo-terminal broker.
-
-```text
-Telegram Mini App or HTTPS page
-    -> login session
-    -> PTY broker
-    -> ob login
-    -> isolated Headless profile
-```
-
-The browser displays the prompts produced by the current login state:
-
-```text
-Email
-Password
-MFA code when requested
-```
-
-The password and MFA code are sent to the live login process. They are not placed in command-line arguments, Work Items, audit bodies, ordinary logs, or the main Friday database.
-
-After successful login, the durable Obsidian session belongs to the isolated Headless profile.
-
-### Remote vault selection
-
-Friday runs:
-
-```text
-ob sync-list-remote
-```
-
-and obtains all remote vaults available to the account, including shared vaults.
-
-Selection behavior:
-
-```text
-zero remote vaults
-    -> explain that an Obsidian Sync vault is required
-
-one remote vault
-    -> select automatically and ask for one final confirmation only if needed
-
-multiple remote vaults
-    -> show one compact selection screen
-```
-
-The selected remote vault may become the user's default logical vault.
-
-### E2EE password
-
-The Obsidian account password and a remote vault's end-to-end encryption password are separate credentials.
-
-If `ob sync-setup` requests a vault password, the onboarding page displays one additional prompt and feeds it to the interactive process.
-
-The E2EE password is not stored in Friday's main database. The Headless client stores the session material it requires for later synchronization inside the user's isolated profile.
-
-### Initial synchronization
-
-Friday creates a per-user local checkout and runs:
-
-```text
-ob sync-setup \
-  --vault <remote-vault-id> \
-  --path <local-checkout> \
-  --device-name Friday
-```
-
-Then:
-
-```text
-ob sync --path <local-checkout> --continuous
-```
-
-When initial synchronization reaches a usable state, the connection becomes `ready`.
-
-### Onboarding state machine
+## Onboarding state machine
 
 ```text
 not_connected
-    -> issuing_setup_token
-    -> awaiting_login
-    -> awaiting_mfa
-    -> listing_remote_vaults
-    -> selecting_remote_vault
-    -> awaiting_e2ee_password
-    -> configuring_local_checkout
+    -> provisioning_server_profile
+    -> awaiting_android_device
+    -> android_device_detected
+    -> offering_folder
+    -> awaiting_android_folder_acceptance
     -> initial_sync
+    -> awaiting_obsidian_vault_registration
+    -> round_trip_verification
     -> ready
 
-ready
-    -> reauthentication_required
-    -> sync_degraded
-    -> sync_error
-    -> reconnecting
-    -> disconnecting
-    -> disconnected
+recoverable states:
+    syncthing_fork_missing
+    device_storage_required
+    device_offline
+    folder_not_accepted
+    folder_path_error
+    android_background_restricted
+    verification_failed
+    reconnect_required
+
+terminal states:
+    ready
+    cancelled
+    disconnected
+    failed
 ```
 
-Every state is resumable within the setup-session lifetime.
+Refreshing the setup page must resume the same state instead of creating another profile or folder.
 
-A failed MFA code does not create a second Obsidian connection.
+## Telegram status panel
 
-A browser refresh does not restart `ob login` blindly. It reconnects to the existing bounded setup session or creates a fresh one after explicit expiry.
-
-## Minimum user movement
-
-The product should optimize for the following happy path:
+After setup, `/obsidian` displays:
 
 ```text
-/obsidian
-    -> tap one button
-    -> enter Obsidian email and password
-    -> done when one vault and no extra prompt exist
+Obsidian: connected
+Vault: Friday
+Android device: Pixel 10
+Server vault: ready
+Phone connection: online / offline
+Phone sync: current / pending / unknown
+Last phone contact: 21:43
+
+[ Open vault ]
+[ Test sync ]
+[ Change vault name ]
+[ Reconnect phone ]
+[ Disconnect ]
 ```
 
-Conditional extra steps:
+There is no account email because no Obsidian account is involved.
 
-```text
-MFA enabled
-    -> enter code
+## Syncthing management adapter
 
-multiple remote vaults
-    -> choose one
-
-E2EE remote vault
-    -> enter vault encryption password
-```
-
-These steps cannot be removed without an official account delegation flow from Obsidian.
-
-If Obsidian later publishes OAuth or a device-code flow, the `ObsidianAccountAuthenticator` can adopt it without changing the rest of the account, vault, or operation model.
-
-## Mobile-first topology
-
-The default always-on deployment is:
-
-```text
-┌──────────────────────────────────────┐
-│ Friday                               │
-│                                      │
-│ Work Items                           │
-│ semantic search                      │
-│ Obsidian operations                  │
-└─────────────────┬────────────────────┘
-                  │ local checkout
-┌─────────────────▼────────────────────┐
-│ Obsidian Headless                    │
-│ per-user profile                     │
-│ continuous Sync                      │
-└─────────────────┬────────────────────┘
-                  │
-          Obsidian remote vault
-                  │
-      ┌───────────┴───────────┐
-      │                       │
-┌─────▼──────┐          ┌─────▼──────┐
-│ Phone      │          │ Desktop    │
-│ Obsidian   │          │ Obsidian   │
-│ mobile     │          │ app        │
-└─────┬──────┘          └─────┬──────┘
-      │                       │
-      └──── optional companion plugin
-```
-
-The phone and the Friday host are separate Sync clients.
-
-```text
-mobile Obsidian session
-    != desktop Obsidian session
-    != browser session
-    != Friday Headless session
-```
-
-They may belong to the same Obsidian account and remote vault, but each client authenticates independently.
-
-### Mobile prerequisite
-
-For the official, low-friction, always-on route:
-
-> Mobile-first Friday integration requires an active Obsidian Sync subscription and a mobile Obsidian vault connected to the same remote vault.
-
-The user performs the ordinary Obsidian mobile setup once:
-
-```text
-install or open Obsidian mobile
-sign in inside Obsidian mobile
-connect a local mobile vault to the same remote vault
-enter the E2EE password if that vault requires it
-```
-
-Friday cannot perform this device-local Obsidian step remotely.
-
-### Server-side operation flow
-
-Example:
-
-```text
-User in Telegram:
-    Add the result to today's note.
-
-Friday:
-    resolve account and default logical vault
-    resolve today's note path
-    modify the server-side local checkout
-    verify the new file revision
-    wait for or observe server-side Sync completion
-    report completion
-
-Obsidian mobile:
-    downloads the change on its next Sync cycle
-```
-
-Friday may truthfully say:
-
-```text
-The note was updated and synchronized from Friday's side.
-```
-
-Friday must not claim:
-
-```text
-The phone has already downloaded and displayed it.
-```
-
-The phone may be offline or the app may not have synchronized yet.
-
-## One-tap mobile opening
-
-After locating or creating a note, Friday may return:
-
-```text
-[ Open in Obsidian ]
-```
-
-using an Obsidian URI such as:
-
-```text
-obsidian://open?vault=Work&file=Projects%2FFriday
-```
-
-The user taps the link and the official mobile application opens the target note.
-
-### Device-local vault identity caveat
-
-An Obsidian URI targets a local vault name or local vault ID. A remote Sync vault and a phone's local vault are not the same identity.
-
-Friday therefore models device-local aliases explicitly:
-
-```text
-logical vault: Work
-remote vault: remote_123
-Friday checkout: local_server_456
-phone local vault name: Work
-phone local vault ID: optional until companion pairing
-```
-
-Without a mobile companion plugin, Friday may assume that the mobile local vault name matches the remote vault name. That is a convenience assumption, not a durable identity guarantee.
-
-If opening fails, the user can set one mobile vault alias once. A paired mobile companion plugin can report the exact local vault ID automatically.
-
-## Identity model
-
-The word "vault" refers to several different objects. They must not be collapsed into one field.
-
-```text
-FridayUser
-    -> ObsidianAccountConnection
-        -> ObsidianHeadlessProfile
-        -> ObsidianLogicalVault
-            -> ObsidianRemoteVaultBinding
-            -> FridayLocalVaultCheckout
-            -> ObsidianDeviceVaultBinding[]
-```
-
-### Friday user
-
-The durable Friday identity that owns Work Items and Obsidian connections.
-
-### Telegram identity
-
-The transport identity that initiated pairing. It is a login bootstrap and notification route, not the canonical Obsidian owner key.
-
-### Obsidian account connection
-
-The durable fact that one Friday user has an authenticated Headless profile.
-
-```python
-ObsidianAccountConnection(
-    id="obsconn_...",
-    owner_id="friday_user_...",
-    headless_profile_id="obshp_...",
-    account_display="user@example.com",
-    account_state="authenticated",
-    session_epoch=4,
-    connected_at="...",
-    last_probe_at="...",
-)
-```
-
-Friday may retain a display email or account label returned by `ob login`. It does not need the user's password after onboarding.
-
-### Headless profile
-
-An isolated Obsidian Headless configuration and credential store owned by one Friday account.
-
-```python
-ObsidianHeadlessProfile(
-    id="obshp_...",
-    owner_id="friday_user_...",
-    profile_root="...",
-    state="ready",
-    headless_version="...",
-)
-```
-
-A Headless profile must never be shared by unrelated Friday users.
-
-### Logical vault
-
-Friday's human-facing identity for "my Work vault".
-
-It survives local path changes and may have multiple device-local realizations.
-
-### Remote vault
-
-The Obsidian Sync identity returned by `ob sync-list-remote`.
-
-### Friday local checkout
-
-The local server-side directory synchronized by Obsidian Headless and modified by Friday.
-
-### Device vault binding
-
-A mobile or desktop local vault associated with the same logical vault.
-
-```python
-ObsidianDeviceVaultBinding(
-    logical_vault_id="obslv_...",
-    installation_id="obsinst_phone_...",
-    local_vault_id="optional",
-    local_vault_name="Work",
-    platform="android",
-)
-```
-
-## Account change and reauthentication
-
-If the stored Headless session expires:
-
-```text
-account_state = reauthentication_required
-```
-
-Friday keeps the logical vault and local checkout records but refuses account-dependent Sync operations until reauthentication completes.
-
-If the user intentionally switches Obsidian accounts:
-
-1. stop continuous Sync workers;
-2. unlink the affected local checkouts;
-3. increment the account `session_epoch`;
-4. run a new login flow;
-5. list remote vaults again;
-6. require explicit rebinding when a previous remote vault is unavailable or ambiguous.
-
-Friday must not silently treat a vault with the same display name under another account as the same remote vault.
-
-## Disconnect behavior
-
-The `/obsidian` panel should support disconnecting one vault or the whole account.
-
-Account disconnect:
-
-```text
-stop all continuous Sync processes
-run ob sync-unlink for bound checkouts
-run ob logout for the isolated profile
-revoke setup and plugin sessions
-mark account connection disconnected
-preserve or delete local checkouts according to explicit user choice
-```
-
-Vault disconnect:
-
-```text
-stop one Sync process
-unlink one checkout
-remove the remote binding
-preserve other account and vault connections
-```
-
-Disconnecting the account does not delete the user's remote Obsidian vault.
-
-## Deployment topologies
-
-### Topology A: always-on and mobile-first
-
-```text
-Friday service
-    -> Headless profile
-    -> server-side local checkout
-    -> Obsidian Sync
-    -> mobile and desktop clients
-```
-
-This is the primary product topology.
-
-### Topology B: same desktop session
-
-```text
-Friday
-    -> official Obsidian CLI
-    -> running desktop application
-    -> optional Obsidian Sync
-```
-
-This is the simplest local developer and single-machine topology.
-
-### Topology C: hybrid
-
-```text
-Friday Headless checkout
-    -> continuous Sync
-
-Desktop or mobile companion plugin
-    -> active note, selection, workspace, and UI actions
-```
-
-This provides always-on background operations plus rich foreground interaction.
-
-### One Sync mechanism per device
-
-Do not use desktop-app Sync and Headless Sync against the same vault on the same machine. Obsidian's official Headless documentation warns that running both Sync mechanisms on one device can create conflicts.
-
-A Friday host should use Headless Sync for its checkout. A user's desktop application on another device may use desktop Sync normally.
-
-## Why the current Friday code is a useful starting point
-
-### Human-readable Markdown projection
-
-[`friday/memory/__init__.py`](../friday/memory/__init__.py) already implements a filesystem projection of Knowledge Objects into Markdown. It has:
-
-- stable identity in the filename suffix;
-- YAML frontmatter;
-- tags, lifecycle, version, entity, provenance, and timestamps;
-- human-readable titles and summaries;
-- Obsidian-style wikilinks to entities;
-- atomic replacement;
-- orphan pruning;
-- a clear statement that SQLite remains the source of truth.
-
-This projection should remain available as a read-oriented Friday knowledge mirror.
-
-It is not sufficient as the interactive integration because its README explicitly states that edits will be overwritten on the next synchronization. A user-facing Obsidian integration needs writable notes, note identity across renames, conflict handling, account and remote-vault binding, active-editor context, and incremental events.
-
-### Friday Organ Protocol
-
-[`docs/ORGANS.md`](../docs/ORGANS.md) already defines code-owned extension modules with capabilities, workers, and routers. Obsidian is a good Organ candidate because it is optional, contributes an API surface, supervises long-lived Sync processes, receives plugin sessions, and should not enlarge the central agent runtime.
-
-### Execution and orchestration boundaries
-
-Friday already has:
-
-- capability-gated tools;
-- execution-kernel ownership of effects;
-- V12 typed planning contracts;
-- durable missions;
-- the proposed Interaction Control Plane and Work Items;
-- document, conversation, graph, and generated-file services.
-
-The Obsidian integration should attach to these boundaries rather than build a separate agent loop.
-
-## Recommended repository structure
-
-Server-side Organ:
+Implement a dedicated service:
 
 ```text
 friday/organs/obsidian/
-    __init__.py
-    contracts.py
-    models.py
-    service.py
-    router.py
-    tools.py
-    playbooks.py
-
-    onboarding/
-        service.py
-        tokens.py
-        pty_broker.py
-        state_machine.py
-        mini_app.py
-
-    account/
-        profiles.py
-        authenticator.py
-        registry.py
-
-    sync/
-        headless.py
-        supervisor.py
-        status.py
-        reconciliation.py
-
-    vault/
-        editor.py
-        markdown.py
-        frontmatter.py
-        links.py
-        tasks.py
-        templates.py
-        bases.py
-        daily_notes.py
-        identity.py
-        merge.py
-
-    transports/
-        desktop_cli.py
-        plugin.py
-        uri.py
-
-    indexer.py
-    diagnostics.py
+    syncthing_process.py
+    syncthing_rest.py
+    syncthing_events.py
+    syncthing_pairing.py
+    syncthing_status.py
 ```
 
-Companion plugin:
+The adapter should use the local Syncthing REST and event APIs, not scrape its web UI.
+
+Required operations:
 
 ```text
-integrations/obsidian-friday/
-    manifest.json
-    package.json
-    tsconfig.json
-    esbuild.config.mjs
-    src/
-        main.ts
-        settings.ts
-        connection.ts
-        pairing.ts
-        protocol.ts
-        commands.ts
-        events.ts
-        note-operations.ts
-        friday-view.ts
-        status-bar.ts
+start or stop one profile
+probe version and status
+read server Device ID
+render Device ID QR
+list pending devices
+add or remove an Android device
+create or update a folder
+share a folder with a device
+query restart-required state
+request folder scan
+read local folder status
+read remote-device completion
+consume connection and folder events
+pause or resume a device
+read folder errors
 ```
 
-Mini App and fallback onboarding UI may live inside Friday's existing UI package or as a small dedicated frontend.
+Useful Syncthing endpoints include:
 
-## JOP extension required for natural-language tools
+```text
+/rest/system/version
+/rest/system/status
+/rest/system/connections
+/rest/config/devices
+/rest/config/folders
+/rest/config/restart-required
+/rest/cluster/pending/devices
+/rest/db/scan
+/rest/db/status
+/rest/db/completion
+/rest/events
+```
 
-The current Friday Organ Protocol exposes capabilities, workers, and HTTP routers, but not a first-class tool-provider extension.
+All raw responses are normalized into Friday-owned contracts before reaching planners or models.
 
-Obsidian is a strong justification for a small JOP extension rather than wiring many handlers into the legacy runtime.
+## Version compatibility
+
+Syncthing's REST surface can evolve. Friday should maintain a probed compatibility profile:
 
 ```python
-class Organ:
-    def capabilities(self) -> Sequence[CapabilityDefinition]:
-        return ()
-
-    def tools(self, ctx: ServiceContext) -> Sequence[ToolRegistration]:
-        return ()
-
-    def workers(self, ctx: ServiceContext) -> Sequence[OrganWorker]:
-        return ()
-
-    def router(self) -> APIRouter | None:
-        return None
-```
-
-A `ToolRegistration` should contain:
-
-```text
-Friday-owned ToolSpec
-handler
-effect class
-required capability
-input and output revisions
-```
-
-The Organ registry contributes these registrations to the existing Execution Kernel during startup.
-
-This extension will also benefit future SaaS and MCP-backed Organs while preserving JOP's explicit-registration rule.
-
-## Service and adapter model
-
-The model-visible capabilities call one `ObsidianService`.
-
-```python
-class ObsidianService:
-    async def execute(
-        self,
-        operation: ObsidianOperation,
-        *,
-        actor: ActorContext,
-        absolute_deadline: float,
-    ) -> ObsidianOperationResult: ...
-```
-
-The service separates two concerns.
-
-### Vault operation adapter
-
-Performs the actual note or workspace action:
-
-```text
-server-side file adapter
-desktop CLI adapter
-companion plugin adapter
-URI navigation adapter
-```
-
-### Sync adapter
-
-Moves file changes between the Friday checkout and the Obsidian remote vault:
-
-```text
-Headless Sync adapter
-```
-
-A successful local write and a successful remote Sync are distinct postconditions.
-
-Example outcome:
-
-```python
-ObsidianOperationResult(
-    status="success",
-    local_write="confirmed",
-    server_sync="confirmed",
-    mobile_delivery="not_observed",
-    path="Projects/Friday.md",
-    revision="sha256:...",
+SyncthingRuntimeProfile(
+    version="v2.1.0",
+    supported=True,
+    pending_devices=True,
+    granular_config=True,
+    remote_completion=True,
+    folder_completion_events=True,
 )
 ```
 
-## Headless account and Sync adapter
+Startup should fail the Obsidian Organ closed when the active Syncthing version is outside the tested range.
 
-### Supported operations
+The Android app distribution URL should be configuration-owned. Do not hardcode one maintainer repository forever. The default recommendation may point to the F-Droid package for Syncthing-Fork, while the source repository and update channel remain replaceable metadata.
 
-```text
-ob login
-ob logout
-ob sync-list-remote
-ob sync-list-local
-ob sync-setup
-ob sync
-ob sync --continuous
-ob sync-status
-ob sync-unlink
-ob sync-config
-```
+## Recommended Syncthing folder configuration
 
-### Process supervision
-
-One long-lived Sync worker is supervised per connected checkout.
-
-The supervisor records:
+Primary folder type:
 
 ```text
-process identity
-Headless version
-profile identity
-logical and remote vault identity
-checkout path
-start time
-last healthy status
-last successful sync
-restart count
-current error class
+Send & Receive
 ```
 
-Crash recovery:
+Recommended server-side settings:
 
 ```text
-unexpected exit
-    -> status degraded
-    -> bounded restart policy
-    -> probe sync status
-    -> reconcile local and remote state
-    -> ready or operator-visible error
+filesystem watcher enabled
+bounded rescan interval
+ignore permissions where cross-platform metadata causes churn
+auto normalization enabled
+conflict copies allowed
+versioning enabled on the server side
+no nested Syncthing shares
 ```
 
-### Selective synchronization
+### Versioning
 
-The adapter may configure:
+Syncthing is synchronization, not backup.
+
+Enable server-side file versioning so that remote Android replacements and deletions retain recoverable previous versions for a configured period.
+
+This protects against accidental edits arriving from Android. It does not replace Friday's ordinary backup system, and it does not archive server-local changes before they are made.
+
+### `.obsidian` settings folder
+
+The default first release should synchronize the complete vault, including `.obsidian`, because it minimizes user setup and keeps mobile configuration portable.
+
+A later per-vault option may provide:
 
 ```text
-bidirectional mode
-conflict strategy
-attachment types
-configuration categories
-excluded folders
-device name
+shared settings
+    -> sync .obsidian
+
+device-local settings
+    -> ignore .obsidian or selected workspace files
 ```
 
-These are per-vault settings stored in Friday's vault configuration.
+Friday itself should never require `.obsidian` settings to perform basic note operations. It should store daily-note, template, and attachment conventions in its own vault configuration after learning or asking for them.
 
-### Headless is the Sync transport, not the full Obsidian UI
+### Ignore patterns
 
-Headless does not replace desktop Obsidian commands and workspace behavior.
+A conservative optional ignore profile may exclude temporary or backup artifacts, but must not silently exclude user notes.
 
-Friday performs ordinary note operations against the synchronized local checkout. The desktop CLI or companion plugin is required for features that inherently depend on a running application, current selection, tabs, panes, or community-plugin commands.
+Ignore patterns are per Syncthing folder and are not themselves synchronized automatically. The onboarding UI should not require manual `.stignore` editing in the first release.
 
-## Server-side vault file adapter
+## Sync truth model
 
-This adapter provides the mobile-first functional core even when no desktop Obsidian process is running.
+One word, `synced`, is not precise enough.
 
-### Supported core operations
+Friday should track separate postconditions:
 
 ```text
-list and search files
-read note
-create note
-append and prepend
-replace with expected revision
-move and rename with link reconciliation
-delete and trash policy
-read and update YAML properties
-read and update tags
-parse outgoing links
-compute backlinks from the indexed vault
-read and update tasks
-resolve daily note path
-apply templates
-read and generate supported Base files
-managed-region updates
+write_committed
+    Friday atomically wrote the server file
+
+server_scan_complete
+    Syncthing indexed the server-side change
+
+android_peer_connected
+    the Android device currently has a Syncthing connection
+
+android_folder_accepted
+    the Android device shares the folder back
+
+android_completion_known
+    Friday has a current remote completion report
+
+android_received
+    remote completion is 100 percent for the relevant folder while state is valid
+
+obsidian_opened
+    the user invoked an Obsidian URI or the companion plugin confirmed navigation
 ```
 
-### Atomicity
+Friday must not collapse these into one success claim.
 
-Writes use:
+Example response when the phone is offline:
 
 ```text
-read current revision
-construct updated content
-write temporary file in the same directory
-fsync where required
-atomic replace
-return new revision
+The note was updated on Friday's server. Your phone is currently offline, so delivery is pending.
 ```
 
-### Rename and move
-
-A raw filesystem rename does not automatically provide every Obsidian behavior.
-
-The service therefore treats rename and move as semantic operations:
+Example response after remote completion:
 
 ```text
-resolve the exact source
-verify destination absence
-compute inbound link rewrite plan
-rename or move the file
-rewrite affected links where configured
-verify all changed revisions
-return a multi-file outcome
+The note was updated and Syncthing reports the Android vault as current.
 ```
 
-When a companion plugin or desktop CLI is available, Friday may delegate rename to Obsidian so the application performs its native link-update behavior.
+Neither response claims that the user has opened or read the note.
 
-When neither is available and the backlink index is incomplete, Friday returns `partial` or `needs_input` instead of claiming that all references were updated.
-
-### Daily note configuration
-
-The server-side adapter needs:
+## Outbound write sequence
 
 ```text
-daily note folder
-date format
-template path or template folder
-time zone
+user request
+    -> resolve exact vault and note
+    -> obtain or verify expected revision
+    -> atomically mutate server file
+    -> persist operation result
+    -> request Syncthing scan when needed
+    -> observe server index
+    -> observe remote completion if peer is connected
+    -> return precise delivery state
+    -> include Open in Obsidian action when useful
 ```
 
-Friday should attempt to discover these values from the synchronized vault configuration when possible. During onboarding it asks the user only when discovery is missing or ambiguous.
+A user-visible response should not wait indefinitely for an offline phone. Delivery observation has a bounded deadline and may continue as a background operation state.
 
-A sensible zero-configuration fallback may be offered, but it must be visible in the connection summary.
-
-## Desktop Obsidian CLI adapter
-
-The official Obsidian CLI controls the desktop application and provides a broad native surface.
-
-It is the preferred adapter when Friday runs in the same desktop user environment.
-
-### Useful capabilities
+## Inbound Android edit sequence
 
 ```text
-search and read
-create, append, prepend, move, and delete
-properties and tags
-daily notes
-templates
-tasks
-links and backlinks
-Bases
-commands and plugin commands
-tabs and workspaces
-active file
-open and focus actions
+user edits note in Obsidian Android
+    -> Syncthing-Fork detects local file change
+    -> change is transferred to Friday host
+    -> server Syncthing applies file
+    -> Syncthing event or filesystem watcher identifies change
+    -> Friday updates note revision and index
+    -> active Work Items invalidate stale reads if necessary
 ```
 
-### Execution rules
+Friday must distinguish its own operation from an Android-originated edit to avoid unnecessary loops.
 
-The adapter should:
+## Android background behavior
 
-- invoke the binary without a shell;
-- pass every argument separately;
-- target vault by exact ID when available;
-- prefer exact `path=` after resolution;
-- request structured output where supported;
-- enforce deadlines and output caps;
-- normalize output into Friday contracts;
-- probe the Obsidian and CLI version;
-- cache a command and capability manifest by version;
-- mark the adapter unavailable when the observed contract is incompatible.
+Syncthing-Fork may be delayed or stopped by Android background and battery policies.
 
-### Topology limitation
-
-The CLI requires access to the desktop user's Obsidian installation and application session. It should not be stretched into the primary server/mobile solution.
-
-## Companion plugin adapter
-
-The companion plugin opens an outbound connection to Friday.
+The onboarding and diagnostics UI should help the user:
 
 ```text
-Obsidian companion plugin
-    -> authenticated WebSocket
-    -> Friday Obsidian Organ
+allow background operation
+remove restrictive battery optimization when required
+allow network access under the desired conditions
+select whether mobile data is allowed
+verify last successful contact
+run a manual synchronization test
 ```
 
-An outbound plugin connection works for:
+These steps should be advisory and device-specific. Friday should not pretend it can configure Android power management remotely.
 
-- Friday in Docker;
-- Friday under another local service account;
-- Friday on another reachable machine;
-- mobile foreground interaction;
-- desktop foreground interaction.
-
-### Handshake
-
-```json
-{
-  "protocol": "friday.obsidian.v1",
-  "plugin_version": "0.1.0",
-  "obsidian_version": "1.12.7",
-  "installation": {
-    "id": "obsinst_...",
-    "platform": "android",
-    "device_name": "Phone"
-  },
-  "vault": {
-    "local_id": "ef6ca3e3b524d22f",
-    "name": "Work",
-    "logical_vault_id": "obslv_..."
-  },
-  "capabilities": [
-    "note.read",
-    "note.create",
-    "note.process",
-    "note.rename",
-    "note.delete",
-    "properties",
-    "links",
-    "commands",
-    "workspace",
-    "selection",
-    "events"
-  ],
-  "commands_digest": "sha256:..."
-}
-```
-
-### Plugin pairing
-
-Plugin pairing is separate from Obsidian account onboarding.
+Expected behavior while the app is stopped:
 
 ```text
-Obsidian account onboarding
-    -> lets Friday operate and synchronize the vault
-
-companion plugin pairing
-    -> lets the open app share active UI context with Friday
+Friday continues changing the server checkout.
+Operations remain durable.
+The Android delivery state becomes pending or unknown.
+Synchronization resumes when Syncthing-Fork runs and reconnects.
 ```
 
-The plugin displays a short pairing code or opens a Friday pairing link. The code binds the Obsidian installation and local vault to the already connected Friday logical vault.
+## Conflict handling
 
-The plugin never needs the user's Obsidian password.
+Syncthing detects concurrent file changes and may create `sync-conflict` copies.
 
-### Plugin responsibilities
-
-The plugin should:
-
-- use Obsidian Vault APIs for note operations;
-- use `Vault.process()` for read-modify-write operations;
-- listen for create, modify, rename, and delete events;
-- expose the current file, heading, selection, active leaf, and workspace state;
-- report the exact local vault ID and name for deep links;
-- list available command IDs;
-- execute explicit command IDs;
-- register Friday-facing command-palette actions;
-- maintain a reconnecting outbound session while the app is active;
-- deduplicate operation IDs;
-- acknowledge events after Friday accepts them.
-
-### Mobile limitation
-
-The mobile plugin is an interactive foreground bridge. Friday must not rely on its WebSocket being alive while the app is backgrounded or closed.
-
-## Obsidian URI adapter
-
-Obsidian URI is useful for navigation-only actions:
+Friday must treat conflict files as first-class operational events.
 
 ```text
-open a vault
-open a note
-open a heading or block
-create or append to a note
-open the daily note
-open search with a query
+conflict detected
+    -> preserve both files
+    -> bind conflict to the logical note
+    -> stop automatic full-note replacement for that note
+    -> show a user-visible conflict state
+    -> offer compare, keep server, keep Android, or merge
 ```
 
-URI invocation should not be treated as proof that a write completed or that the user viewed the note.
+For Markdown text, Friday may generate a proposed merge, but the original files remain available until the user chooses a resolution.
 
-For a Telegram response, the ideal pattern is:
+Do not automatically delete conflict copies.
 
-```text
-Found: Friday Retrieval Architecture
+Do not index both copies as unrelated independent notes without a conflict relationship.
 
-[ Open in Obsidian ]
-```
-
-## Browser session bridge position
-
-A browser extension could detect an already authenticated `obsidian.md` session and help the user reach account or Sync pages.
-
-It should not be part of the required architecture.
-
-Allowed future role:
-
-```text
-observe signed-in account state
-open the correct Obsidian setup page
-assist pairing
-never export raw cookies
-never act as the primary vault transport
-```
-
-Rejected primary contract:
-
-```text
-copy browser cookies into Friday
-call undocumented internal web endpoints
-pretend the browser session is a Headless session
-```
-
-The login provider remains replaceable so an official OAuth or device-code flow can be adopted later.
-
-## Vault registry
-
-Friday needs a durable registry independent of live transport sessions.
+Suggested model:
 
 ```python
-@dataclass(frozen=True, slots=True)
-class ObsidianLogicalVault:
-    id: str
-    owner_id: str
-    display_name: str
-    account_connection_id: str
-    remote_vault_id: str
-    remote_vault_name: str
-    server_checkout_id: str
-    default: bool
-    default_capture_folder: str
-    daily_note_enabled: bool
-    browse_roots: tuple[str, ...]
-    index_roots: tuple[str, ...]
-    inbox_roots: tuple[str, ...]
-    managed_roots: tuple[str, ...]
-    enabled: bool
+ObsidianSyncConflict(
+    id="obsconf_...",
+    vault_id="obsvault_...",
+    canonical_path="Projects/Friday.md",
+    conflict_path="Projects/Friday.sync-conflict-....md",
+    detected_at="...",
+    state="awaiting_resolution",
+)
 ```
 
-### Multiple vaults
+## Friday note-operation service
 
-Friday should support:
-
-- one default logical vault per user;
-- explicit named selection;
-- a remembered active vault inside a Work Item;
-- per-vault folder defaults;
-- multiple remote vaults under one account;
-- shared remote vaults;
-- multiple device-local aliases.
-
-Natural-language examples:
+Because no desktop Obsidian process is assumed, Friday needs a native server-side note service.
 
 ```text
-Save this to my Work vault.
-
-Search the Personal vault instead.
-
-Use Archive only for this task.
-
-Make Work the default for daily notes.
+friday/organs/obsidian/
+    note_store.py
+    frontmatter.py
+    markdown_links.py
+    tasks.py
+    templates.py
+    daily_notes.py
+    bases.py
+    note_identity.py
+    note_merge.py
+    indexer.py
 ```
+
+The model never writes filesystem paths directly. It calls Friday-owned capabilities through Execution Kernel.
 
 ## Note identity
 
-Obsidian addresses notes by vault-relative path, but paths change.
+Obsidian naturally navigates by vault-relative path, but path changes after rename or move.
 
-### Managed and linked notes
-
-Friday adds a stable property:
+Friday-managed or bound notes should contain:
 
 ```yaml
 friday_obsidian_id: obnote_7d18d2f4c9e44a35
 ```
 
-Optional properties:
+Optional links:
 
 ```yaml
 friday_object_id: ko_...
@@ -1311,59 +811,85 @@ friday_projection_kind: linked
 friday_projection_revision: 4
 ```
 
-### Unmodified user notes
-
-Friday does not require injecting a property merely to read or search a note.
-
-Before durable binding, the observed identity is:
+For an unbound user note, temporary identity is:
 
 ```text
-logical_vault_id + exact path + observed revision
+logical vault ID + exact path + observed revision
 ```
 
-A durable binding is created when:
+A durable ID is inserted only when Friday creates, links, or manages the note, or when the user explicitly enables ID assignment for indexed notes.
 
-- the user asks Friday to link the note;
-- Friday creates the note;
-- Friday creates a managed region;
-- indexed mode is configured to assign IDs;
-- a companion plugin reports an existing integration ID.
+Identity rules:
 
-### Identity invariants
+```text
+title is not identity
+path is not permanent identity after binding
+content digest is revision, not identity
+copy creates a new identity
+rename preserves identity
+move preserves identity
+delete tombstones identity
+```
 
-- title is not identity;
-- path is not permanent identity after binding;
-- content digest is a revision, not identity;
-- a copied note receives a new integration identity;
-- rename and move update the binding;
-- deletion tombstones the binding;
-- restore or recreation is reconciled explicitly.
+## Revision and write model
 
-## Note ownership and editing modes
+Every read returns:
+
+```text
+logical vault ID
+path
+integration ID when present
+content revision digest
+modified time
+source device when known
+```
+
+Every full replacement accepts an expected revision.
+
+Possible outcomes:
+
+```text
+success
+unchanged
+not_found
+ambiguous
+conflict
+invalid_note
+sync_pending
+sync_unknown
+unsupported
+unavailable
+uncertain
+failed
+```
+
+Mutations use atomic temporary-file replacement inside the server checkout.
+
+## Editing ownership modes
 
 ### User-owned
 
-The note is entirely user-authored. Friday modifies it only after an explicit request.
+Friday reads and explicitly edits the note when requested. It does not refresh content automatically.
 
 ### Linked
 
-The note is user-owned, but Friday may modify selected properties and marked managed regions.
+Friday may modify selected properties and explicitly marked managed regions while preserving user text.
 
 ### Friday-managed
 
-Friday owns the complete body and may regenerate it from a Friday object or Work Item outcome.
+Friday owns the complete body and may regenerate it from Friday state or a Work Item outcome.
 
 ### Projection
 
-The note is a rebuildable mirror such as the current `MemoryVault`. Edits are not imported.
+The note is a rebuildable mirror such as the current `MemoryVault`. Edits are not imported as authoritative changes.
 
 ### Inbox note
 
-The note is user-owned and selected for explicit ingestion into Friday's review pipeline.
+The note is user-authored and selected for explicit ingestion into Friday's ordinary review pipeline.
 
 ## Managed regions
 
-For linked notes, Friday should update marked regions rather than rewrite the complete file.
+Linked notes use bounded markers:
 
 ```markdown
 <!-- friday:managed:start id="summary" revision="4" -->
@@ -1375,144 +901,58 @@ Generated content here.
 
 Rules:
 
-- region IDs are unique within a note;
 - Friday updates only the selected region;
-- content outside managed markers is preserved;
+- user text outside the markers is preserved;
 - malformed or duplicate markers return `ambiguous`;
-- every successful write returns a new revision digest.
+- one operation produces one new note revision;
+- managed regions are not nested;
+- a conflict blocks automatic region refresh until reconciled.
 
-Useful region kinds:
+## Move and rename semantics
 
-```text
-summary
-source-links
-related-documents
-conversation-capture
-research-result
-review-status
-action-items
-```
+A filesystem rename performed on the server does not automatically guarantee that Obsidian has updated all links.
 
-## Revision and conflict model
-
-Every read result includes:
+Therefore `obsidian_move_note` must expose:
 
 ```text
-logical vault ID
-path
-integration ID if present
-revision digest
-modified time
-server Sync state
+update_links = true | false
 ```
 
-Every destructive replacement accepts `expected_revision`.
-
-Possible outcomes:
+When `update_links=true`, Friday uses its own vault link index to update:
 
 ```text
-success
-unchanged
-not_found
-ambiguous
-conflict
-invalid_note
-unsupported
-unavailable
-partial
-uncertain
-failed
+wikilinks
+Markdown links that target the moved note
+known embeds
+bindings and candidate references
 ```
 
-Default policy:
+The operation is planned as one multi-file transaction with an operation ledger and expected revisions.
 
-```text
-append or prepend
-    -> apply to the current note through an idempotent operation
+If Friday cannot safely rewrite an ambiguous link, it returns a partial outcome and lists unresolved references.
 
-property update
-    -> update current frontmatter atomically
-
-managed region update
-    -> merge into current body
-
-full replacement with stale revision
-    -> conflict
-
-rename target already exists
-    -> conflict
-
-uncertain transport failure
-    -> reconcile before retry
-```
-
-## Operation durability and recovery
-
-Store each mutation before dispatch:
-
-```text
-operation_id
-work_item_id
-logical_vault_id
-method
-arguments digest
-expected revision
-operation adapter
-sync requirement
-status
-attempt
-local result revision
-server sync result
-created_at
-updated_at
-```
-
-State machine:
-
-```text
-prepared
-    -> dispatched
-    -> local_succeeded
-    -> sync_pending
-    -> succeeded
-    -> failed
-    -> uncertain
-    -> reconciled
-    -> cancelled
-```
-
-Retry rules:
-
-- reads may retry after transport failure;
-- create uses operation identity or target reconciliation;
-- append uses a deduplication marker or postcondition;
-- move and rename inspect source and destination;
-- delete never blindly retries after an uncertain outcome;
-- UI commands without observable postconditions remain `uncertain` after disconnect.
+A companion plugin may later delegate rename to native Obsidian while the app is open, but the server-side implementation remains required for background Android operation.
 
 ## Friday-owned capability surface
-
-Do not publish the complete CLI or plugin command catalog directly to the model. Expose stable Friday capabilities.
 
 ### Connection and status
 
 ```text
 obsidian_connection_status
-obsidian_list_vaults
-obsidian_select_default_vault
-obsidian_sync_status
+obsidian_test_sync
+obsidian_disconnect
+obsidian_reconnect_device
 ```
-
-The conversational model should not receive raw login credentials or drive the authentication prompt.
 
 ### Discovery and navigation
 
 ```text
+obsidian_list_vaults
 obsidian_list_notes
 obsidian_search_notes
+obsidian_recent_notes
 obsidian_open_note
 obsidian_open_search
-obsidian_recent_notes
 ```
 
 ### Note content
@@ -1552,324 +992,160 @@ obsidian_list_tasks
 obsidian_update_task
 ```
 
-### Bases and workspace
+### Bases
 
 ```text
 obsidian_list_bases
 obsidian_query_base
 obsidian_create_base_item
 obsidian_create_or_update_base
-obsidian_list_workspaces
-obsidian_load_workspace
-obsidian_save_workspace
 ```
 
-Workspace operations require a desktop CLI or active companion plugin.
-
-### Expert command bridge
+### Foreground-only companion capabilities
 
 ```text
+obsidian_get_active_note
+obsidian_get_selection
+obsidian_insert_at_cursor
+obsidian_open_in_split
 obsidian_list_commands
 obsidian_run_command
+obsidian_load_workspace
 ```
 
-`obsidian_run_command` requires an exact command ID returned by the current desktop or plugin command catalog.
+Foreground-only capabilities are unavailable when the mobile companion plugin is disconnected. Their absence must not break the normal Syncthing-backed feature set.
 
-### Effect classes
+## Capability matrix
 
-Read-only:
-
-```text
-list, search, read, backlinks, tags, tasks, Base query, command listing
-```
-
-Mutating:
-
-```text
-create, append, properties, task update, move, managed-region update, workspace load
-```
-
-High-impact:
-
-```text
-delete, permanent delete, full overwrite, plugin install or uninstall, publish, Sync restore, arbitrary expert command without a known behavior profile
-```
-
-## Typed capability outcomes
-
-The model receives normalized outcomes, not raw subprocess output.
-
-Search example:
-
-```python
-CapabilityOutcome(
-    status="success",
-    result_type="obsidian.note_candidates.v1",
-    items=(
-        ObsidianNoteCandidate(
-            logical_vault_id="obslv_...",
-            path="Projects/Friday.md",
-            title="Friday",
-            excerpt="...",
-            score=0.91,
-            match_kinds=("native_text", "property", "semantic"),
-            revision="sha256:...",
-        ),
-    ),
-    coverage=CoverageReport(
-        complete=True,
-        sources=("vault_text_search", "friday_semantic_index"),
-    ),
-)
-```
-
-Write example:
-
-```python
-CapabilityOutcome(
-    status="success",
-    result_type="obsidian.note_write.v1",
-    postcondition={
-        "logical_vault_id": "obslv_...",
-        "path": "Projects/Friday.md",
-        "revision": "sha256:...",
-        "operation": "append",
-        "local_write": "confirmed",
-        "server_sync": "confirmed",
-        "mobile_delivery": "not_observed",
-    },
-)
-```
+| Capability | URI-only | Syncthing-Fork full mode | Companion plugin active |
+|---|---:|---:|---:|
+| Open note | user tap | user tap | yes |
+| Create or append by URI | user tap | yes | yes |
+| Read existing note | no | yes | yes |
+| Search all notes | no | yes | yes |
+| Semantic search | no | yes | yes |
+| Edit while Obsidian is closed | no | yes | not required |
+| Properties and tags | no | yes | yes |
+| Daily notes | limited handoff | yes | yes |
+| Templates | limited | yes | yes |
+| Tasks | no | yes | yes |
+| Backlinks and outgoing links | no | yes | yes |
+| Create `.base` files | no | yes | yes |
+| Query Friday's BaseSpec | no | yes | yes |
+| Current note and selection | no | no | yes |
+| Insert at cursor | no | no | yes |
+| Run community-plugin command | no | no | yes |
+| Work while phone is offline | no | server write pending | no foreground action |
 
 ## Search architecture
 
-Friday and Obsidian have different strengths.
+Friday should combine:
 
-### Vault-native lanes
+```text
+exact path and title lookup
+frontmatter property lookup
+tag index
+Markdown lexical search
+backlink and outgoing-link index
+Friday semantic passage index
+approximate date parsing
+active Work Item context
+```
 
-Use the synchronized local vault or desktop Obsidian for:
-
-- exact and lexical text search;
-- path and folder filtering;
-- property queries;
-- tags;
-- tasks;
-- backlinks and outgoing links;
-- unresolved links;
-- orphan and dead-end reports;
-- Bases queries.
-
-### Friday lanes
-
-Use Friday for:
-
-- semantic search over configured roots;
-- approximate content;
-- approximate dates;
-- cross-corpus search with Friday documents and conversations;
-- entity and project resolution;
-- reranking;
-- continuation from an active Work Item.
-
-### Unified result
+Unified search:
 
 ```text
 query
-    -> exact path and title lane
-    -> vault lexical search
-    -> property and tag lanes
-    -> optional Friday semantic index
-    -> deduplicate by logical vault and note identity
+    -> exact identity lane
+    -> lexical note lane
+    -> property and tag lane
+    -> link graph lane
+    -> semantic passage lane
     -> rank fusion
     -> typed candidate set
 ```
 
-Explain match channels:
+Each candidate returns:
 
 ```text
-exact title
+logical vault ID
+stable note ID if available
 path
-text
-property
-tag
-backlink
-semantic passage
-recent activity
+title
+excerpt
+revision
+match channels
+sync conflict state
+last server observation
 ```
 
-### Avoiding duplicate Friday material
+## Indexing Android-originated changes
 
-The current `MemoryVault` projection and any Friday-managed export roots are excluded from automatic re-ingestion by default.
+The server checkout is the index source.
+
+Triggers:
+
+```text
+Syncthing RemoteChangeDetected events
+filesystem watcher events
+folder scan completion
+reconnect reconciliation
+manual rebuild
+```
+
+The indexer should debounce repeated updates and index only the affected note.
+
+On rename, preserve note identity and update the path.
+
+On delete, invalidate passages and candidate references.
+
+On conflict, index the canonical file and attach the conflict copy as a related operational artifact.
+
+## Avoiding projection loops
+
+The existing `MemoryVault` and any Friday-managed projection roots must be marked as projections and excluded from automatic ingestion as independent evidence.
 
 ```text
 Friday Knowledge Object
     -> Markdown projection
-    -> Obsidian or vault indexing
-    -> never becomes independent Friday evidence
+    -> Syncthing vault
+    -> Friday note index
 ```
 
-Projection notes may be searched and opened. They are marked `friday_projection`.
+This note may be searchable and openable, but it must retain source kind `friday_projection` and must not re-enter the ingestion pipeline as new knowledge.
 
-## Obsidian note indexing in Friday
+## Daily-note conventions
 
-Indexed mode creates a rebuildable source projection, not a Knowledge Object.
-
-```text
-obsidian_note_index
-    logical_vault_id
-    integration_id nullable
-    path
-    revision
-    title
-    aliases
-    properties
-    tags
-    headings
-    text passages
-    embedding revision
-    indexed_at
-    deleted_at
-```
-
-Stable source reference:
-
-```text
-obsidian:<logical-vault-id>:<integration-id>
-```
-
-Before binding:
-
-```text
-obsidian:<logical-vault-id>:path:<normalized-path>
-```
-
-On rename, update the path while preserving integration identity.
-
-On modification, re-index only the changed note.
-
-On delete, invalidate passages and embeddings.
-
-### Browse versus ingest
-
-Reading an Obsidian note for the current Work Item does not make it canonical Friday knowledge.
-
-Explicit import routes:
-
-```text
-Remember this note.
-Send this note to Friday Inbox.
-Move note into a configured Friday Inbox folder.
-Obsidian command: Ingest current note into Friday.
-```
-
-All use Friday's ordinary ingestion and review pipeline.
-
-## Friday object and Obsidian note bindings
-
-Support durable links between:
-
-```text
-Friday Raw Object
-Friday Knowledge Object
-Friday document catalog entry
-Friday entity
-Friday conversation
-Friday Work Item outcome
-
-and
-
-Obsidian note
-Obsidian heading
-Obsidian block
-Obsidian Base
-```
+Without desktop Obsidian configuration, Friday needs its own per-vault convention:
 
 ```python
-ObsidianBinding(
-    id="obsbind_...",
-    logical_vault_id="obslv_...",
-    note_id="obnote_...",
-    note_path="Projects/Friday.md",
-    subpath="#Retrieval",
-    friday_object_kind="knowledge_object",
-    friday_object_id="ko_...",
-    relation="describes",
+ObsidianVaultConvention(
+    daily_folder="Daily",
+    daily_format="YYYY-MM-DD",
+    template_folder="Templates",
+    attachment_folder="Attachments",
 )
 ```
 
-Relations:
+During onboarding, defaults are accepted without another question. The user may change them later through `/obsidian` or ordinary language.
 
-```text
-describes
-annotates
-summarizes
-source_for
-related_to
-result_of_work_item
-projects
-```
-
-## Daily notes
-
-Daily notes are among the highest-value early capabilities.
-
-Friday should support:
-
-```text
-open today's daily note
-read today's daily note
-append a capture
-prepend a briefing
-add a task
-add a completed-work summary
-create or open a note for a requested date
-```
-
-Example:
-
-```markdown
-## Friday
-
-- 21:10 Captured [[Friday Architecture]]
-- [ ] Review document retrieval audit
-
-<!-- friday:managed:start id="daily-summary-2026-08-20" revision="1" -->
-### Friday work summary
-
-...
-<!-- friday:managed:end id="daily-summary-2026-08-20" -->
-```
-
-User text outside managed regions remains untouched.
+Friday may inspect known `.obsidian` core-plugin configuration files when present, but those files are advisory and version-sensitive. Friday's stored convention is the stable contract.
 
 ## Templates
 
 Friday should:
 
-- discover or configure the template folder;
-- list templates;
+- list Markdown templates from the configured folder;
 - create a note from a selected template;
+- resolve common date and time variables;
 - fill explicitly named placeholders;
-- preserve unknown template syntax;
-- return `needs_input` when required values are missing.
-
-Example playbook:
-
-```text
-Create a meeting note from my Architecture Review template using what we discussed.
-
-summarize current discussion
-    -> resolve template
-    -> identify required fields
-    -> ask only for missing fields
-    -> create note
-    -> verify local revision and Sync state
-    -> return an Open in Obsidian action
-```
+- preserve unknown syntax;
+- ask only for missing required fields;
+- synchronize the final note through the normal write path.
 
 ## Properties and tags
 
-Use typed property mutations:
+Use typed mutations:
 
 ```text
 text
@@ -1880,80 +1156,59 @@ date
 datetime
 ```
 
-```python
-PropertyMutation(
-    name="status",
-    action="set",
-    value="review",
-    value_type="text",
-)
-```
+A multi-property change is one atomic frontmatter rewrite.
 
-A multi-property update is one atomic operation.
+Do not expose arbitrary YAML string replacement to the model.
 
 ## Links and backlinks
 
-Return links as structured data:
+Friday maintains a structured link index:
 
 ```text
-source path
-resolved target path if any
-link text
-subpath
-count
-resolved or unresolved
+source note
+raw link text
+display text
+target path or unresolved target
+heading or block subpath
+embed flag
+resolved state
 ```
 
-Useful workflows:
+This supports:
 
 ```text
-show backlinks
-find notes with no incoming links
-find dead ends
-resolve an ambiguous wikilink
-add links to related Friday documents
-create an index note from a candidate set
+backlinks
+outgoing links
+unresolved links
+orphan notes
+dead ends
+safe rename planning
+related-note navigation
 ```
 
 ## Tasks
 
-Support:
+A task reference should include:
 
 ```text
-list incomplete tasks
-list tasks in the active or daily note
-create a task
-mark a task done or todo
-set a custom status
-open the task's note and location
-```
-
-A task reference includes:
-
-```text
-logical vault ID
-path
-line or stable block identifier
+vault ID
+note ID or path
+block ID when available
+line and nearby text fallback
 observed revision
-text excerpt
 status
+text excerpt
 ```
 
-Line numbers alone are unstable. Prefer block IDs; otherwise reconcile by task text and nearby context.
+Line numbers alone are not durable.
+
+Task changes use expected revision and reconcile by block ID or exact text plus local context.
 
 ## Bases
 
-Treat Bases as a first-class feature.
+Friday can create and edit `.base` files as ordinary vault files.
 
-### Core stage
-
-```text
-list Bases
-list views
-query a view
-create a note through a Base
-generate a supported .base file from a typed specification
-```
+Because no running desktop Obsidian engine is assumed, querying a Base on the server should use a Friday-owned typed `BaseSpec` evaluator against the note index.
 
 ```python
 BaseSpec(
@@ -1968,168 +1223,125 @@ BaseSpec(
 )
 ```
 
-### Plugin stage
+Friday writes the corresponding `.base` representation for Obsidian mobile and uses the typed specification for its own results.
 
-The companion plugin may register a custom Friday Bases view for:
+A future companion plugin may query the native Bases engine when Obsidian is open.
 
-```text
-Friday documents linked to notes
-Friday Work Items captured in Obsidian
-notes awaiting Friday ingestion
-related documents and conversations
-semantic matches for the selected row
-```
+## Optional Android companion plugin
 
-## Workspace and UI actions
+The companion plugin is useful but not required for synchronization.
 
-Desktop CLI and companion plugin may support:
+It adds:
 
 ```text
-open in current tab
-open in new tab
+current note
+current heading
+selected text
+insert at cursor
 open in split
-open in new window where supported
-load workspace
-save workspace
-list recent notes
-focus Friday companion view
+native command execution
+community-plugin commands
+workspace context
 ```
 
-These are UI effects. Opening a note does not prove that the user read it.
-
-## Expert command bridge
-
-The command bridge allows Friday to use core and community-plugin commands without custom integration for each plugin.
+Pairing:
 
 ```text
-1. list current command IDs and names
-2. resolve by exact ID or unambiguous display name
-3. record the command-catalog digest
-4. execute one command
-5. observe postconditions when available
+Friday displays a short pairing code
+    -> user enters it in the plugin
+    -> plugin binds to the existing Friday user and logical vault
 ```
 
-```python
-ObsidianCommandProfile(
-    command_id="some-plugin:command",
-    display_name="Some Plugin: Do thing",
-    effect="mutate",
-    requires_active_file=True,
-    supports_postcondition=False,
-)
-```
+The plugin should not become a second sync engine. It reads and modifies the same local Android vault that Syncthing-Fork synchronizes.
 
-Unknown commands remain expert operations and may finish as `uncertain`.
+The plugin connection is considered foreground and opportunistic. Android may suspend it when Obsidian is closed.
 
 ## Interaction Control Plane integration
 
-The integration should use Work Items and Active Frames from [`INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md`](INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md).
-
-### Active Obsidian frame
+The Obsidian integration should use Work Items and Active Frames from [`INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md`](INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md).
 
 ```python
 ObsidianActiveFrame(
-    account_connection_id="obsconn_...",
-    logical_vault_id="obslv_...",
+    logical_vault_id="obsvault_...",
+    android_device_id="stdev_...",
     active_note_id="obnote_...",
     active_path="Projects/Friday.md",
     active_revision="sha256:...",
-    active_heading="#Retrieval",
     selected_candidate_set_id="candset_...",
     last_operation_id="obsop_...",
+    delivery_state="android_received",
 )
 ```
 
-This resolves follow-ups:
+This supports follow-ups:
 
 ```text
-Add that there.
-Open the second one.
-Move it to Archive.
-Now link it to the document we found.
-Use the same template for tomorrow.
-Add these as tasks instead.
+Открой второй.
+Добавь это туда.
+Перемести её в архив.
+Теперь свяжи с тем документом.
+Поставь эти пункты задачами.
 ```
-
-### Direct capability versus Work Item
-
-Direct:
-
-```text
-Open today's daily note.
-```
-
-Work Item:
-
-```text
-Summarize this conversation, create a project note from my template,
-link the three documents we discussed, synchronize it, and give me a button
-to open it on the phone.
-```
-
-The latter is a playbook, not one giant tool call.
 
 ## Recommended Playbooks
 
-### ConnectObsidianAccount
+### ConnectAndroidObsidianVault
 
 ```text
-issue Telegram setup session
-    -> authenticate Headless account
-    -> list remote vaults
-    -> select or auto-select vault
-    -> collect E2EE password if required
-    -> create local checkout
-    -> initial Sync
-    -> set default logical vault
-    -> report ready
+create onboarding session
+    -> provision per-user Syncthing profile
+    -> show server Device ID QR
+    -> detect Android device
+    -> add device
+    -> offer vault folder
+    -> wait for folder acceptance
+    -> run initial synchronization
+    -> collect Android vault alias
+    -> verify round trip
+    -> mark ready
 ```
-
-This playbook is UI-driven and never model-driven for credentials.
 
 ### CaptureConversationToObsidian
 
 ```text
 select conversation range
     -> summarize
-    -> resolve logical vault and destination
+    -> resolve vault and destination
     -> resolve template or capture format
     -> create or update note
-    -> verify local revision
-    -> verify server-side Sync
-    -> return mobile open action
+    -> verify server revision
+    -> observe Android delivery within bounded deadline
+    -> return Open in Obsidian action
 ```
 
 ### AppendToDailyNote
 
 ```text
-resolve date and time zone
-    -> resolve daily note path
+resolve local date and vault convention
+    -> resolve note path
     -> format capture or task
     -> append idempotently
-    -> verify local revision and Sync
+    -> observe sync state
 ```
 
 ### SearchAndOpenObsidianNote
 
 ```text
 parse query and vault scope
-    -> native vault search
-    -> optional semantic search
+    -> search exact, lexical, property, graph, and semantic lanes
     -> rank and deduplicate
     -> select or ask user
-    -> generate exact Obsidian URI or plugin open action
+    -> generate exact Obsidian URI
 ```
 
 ### UpdateObsidianMetadata
 
 ```text
-resolve active or named note
-    -> read current properties
+resolve note
+    -> read current frontmatter and revision
     -> validate typed mutations
-    -> apply one atomic update
-    -> synchronize
-    -> return changed property set
+    -> atomically update
+    -> observe sync state
 ```
 
 ### LinkFridayObjectToObsidian
@@ -2139,7 +1351,7 @@ resolve Friday object
     -> resolve Obsidian note
     -> create durable binding
     -> update property or managed links region
-    -> synchronize
+    -> observe sync state
     -> return both navigation targets
 ```
 
@@ -2150,164 +1362,124 @@ resolve completed Work Item outcome
     -> choose template
     -> render claims, sources, and uncertainties
     -> create note
-    -> create source links or managed region
-    -> synchronize
+    -> update links
+    -> observe sync state
     -> return mobile open action
 ```
 
-### BuildObsidianBase
+### ResolveSyncthingConflict
 
 ```text
-interpret collection
-    -> build typed BaseSpec
-    -> preview if ambiguous
-    -> create or update Base
-    -> query and verify
-    -> synchronize
+identify canonical and conflict copies
+    -> compare revisions
+    -> generate structured diff
+    -> offer keep Android, keep Friday, or merge
+    -> apply chosen resolution
+    -> remove conflict artifact only after confirmation
+    -> rescan and verify
 ```
 
-### IngestObsidianNoteIntoFriday
+## Operation durability
+
+Every mutation is stored before dispatch:
 
 ```text
-resolve note and revision
-    -> read exact content
-    -> create stable source_ref
-    -> ordinary Friday ingestion
-    -> return Inbox or promotion outcome
-    -> bind source identity
+operation_id
+work_item_id
+vault_id
+note identity
+method
+arguments digest
+expected revision
+status
+attempt
+server result revision
+delivery state
+created_at
+updated_at
 ```
 
-## Companion event synchronization
-
-Relevant events:
+State machine:
 
 ```text
-installation.connected
-installation.disconnected
-vault.connected
-vault.disconnected
-note.created
-note.modified
-note.renamed
-note.deleted
-active_file.changed
-selection.changed
-workspace.changed
-commands.changed
+prepared
+    -> server_write_committed
+    -> server_scan_complete
+    -> android_delivery_pending
+    -> android_received
+    -> completed
+
+error branches:
+    conflict
+    uncertain
+    failed
+    cancelled
 ```
 
-Processing:
+Retry rules:
 
-```text
-plugin emits event
-    -> Friday stores event ID
-    -> update installation and note binding
-    -> enqueue bounded reindex or Inbox action if configured
-    -> acknowledge event
-```
-
-Do not send complete note bodies in every event. Request the body only when required.
-
-After reconnect:
-
-```text
-last acknowledged event ID
-current vault manifest digest
-changed paths since checkpoint when available
-```
-
-If no checkpoint is available, perform a bounded manifest comparison over configured roots.
+- reads may retry;
+- creates reconcile by target path and operation marker;
+- append uses an idempotency marker or postcondition;
+- full replacement requires the same expected revision;
+- move checks source and destination;
+- delete never blindly retries after an uncertain outcome;
+- offline Android delivery does not roll back a committed server write.
 
 ## Suggested storage projection
 
 ```text
-obsidian_account_connections
+obsidian_sync_profiles
     id
-    owner_id
-    headless_profile_id
-    account_display
-    account_state
-    session_epoch
-    connected_at
-    last_probe_at
-    disconnected_at nullable
-
-obsidian_headless_profiles
-    id
-    owner_id
-    profile_root_ref
-    headless_version
+    friday_user_id
+    config_root
+    database_root
+    api_endpoint
+    server_device_id
+    runtime_version
     state
     created_at
     updated_at
 
-obsidian_setup_sessions
+obsidian_android_devices
     id
-    owner_id
-    telegram_user_id
-    token_digest
+    friday_user_id
+    sync_profile_id
+    syncthing_device_id
+    display_name
     state
-    expires_at
-    headless_process_ref nullable
-    selected_remote_vault_id nullable
+    last_seen_at
     created_at
     updated_at
 
 obsidian_logical_vaults
     id
-    owner_id
-    account_connection_id
+    friday_user_id
+    sync_profile_id
+    android_device_id
+    folder_id
     display_name
-    default
-    configuration_json
-    enabled
+    server_path
+    android_vault_name
+    android_path_hint
+    convention_json
+    state
     created_at
     updated_at
 
-obsidian_remote_vault_bindings
+obsidian_onboarding_sessions
     id
-    logical_vault_id
-    remote_vault_id
-    remote_vault_name
-    shared
-    region nullable
-    created_at
-    updated_at
-
-obsidian_local_checkouts
-    id
-    logical_vault_id
-    local_path_ref
-    sync_mode
-    sync_state
-    last_successful_sync_at
-    supervisor_state
-    created_at
-    updated_at
-
-obsidian_installations
-    id
-    owner_id
-    kind
-    platform
-    device_name
-    plugin_version nullable
-    obsidian_version nullable
-    session_epoch
-    last_seen_at
-
-obsidian_device_vault_bindings
-    id
-    installation_id
-    logical_vault_id
-    local_vault_id nullable
-    local_vault_name
+    friday_user_id
+    state
+    setup_token_digest
+    expires_at
+    error_code
     created_at
     updated_at
 
 obsidian_note_bindings
     id
-    logical_vault_id
+    vault_id
     integration_id
     current_path
     current_revision
@@ -2321,522 +1493,504 @@ obsidian_note_bindings
 obsidian_operations
     id
     work_item_id nullable
-    logical_vault_id
+    vault_id
     method
     arguments_digest
     expected_revision nullable
-    adapter
     status
-    attempt
-    local_result_json
-    sync_result_json
+    server_revision nullable
+    delivery_state
+    result_json
     created_at
     updated_at
 
-obsidian_events
+obsidian_sync_conflicts
     id
-    installation_id
-    remote_event_id
-    kind
-    subject_identity
-    revision nullable
-    status
-    occurred_at
-    processed_at nullable
+    vault_id
+    canonical_path
+    conflict_path
+    state
+    detected_at
+    resolved_at nullable
 
 obsidian_index_state
-    logical_vault_id
+    vault_id
     note_binding_id nullable
     path
     source_revision
     embedding_revision nullable
     indexed_at
     deleted_at nullable
-
-obsidian_command_profiles
-    installation_id
-    command_id
-    display_name
-    effect
-    requirements_json
-    catalog_digest
-    observed_at
 ```
 
-Large note bodies and credentials do not belong in operation or setup rows.
+## Friday Organ implementation
 
-## Friday API surface
-
-### Telegram onboarding and account management
+Recommended repository structure:
 
 ```text
-POST   /api/obsidian/connect/start
-GET    /api/obsidian/connect/{session_id}
-POST   /api/obsidian/connect/{session_id}/input
-POST   /api/obsidian/connect/{session_id}/select-vault
-POST   /api/obsidian/connect/{session_id}/cancel
+friday/organs/obsidian/
+    __init__.py
+    contracts.py
+    models.py
+    service.py
+    router.py
+    worker.py
 
-GET    /api/obsidian/account
-POST   /api/obsidian/account/reauthenticate
-DELETE /api/obsidian/account
+    syncthing_process.py
+    syncthing_rest.py
+    syncthing_events.py
+    syncthing_pairing.py
+    syncthing_status.py
+
+    note_store.py
+    note_identity.py
+    frontmatter.py
+    markdown_links.py
+    tasks.py
+    templates.py
+    daily_notes.py
+    bases.py
+    note_merge.py
+    indexer.py
+
+    tools.py
+    playbooks.py
+    diagnostics.py
 ```
 
-### Vault configuration and status
+Obsidian is an appropriate Friday Organ because it is optional and contributes:
 
 ```text
-GET    /api/obsidian/vaults
-POST   /api/obsidian/vaults
-PATCH  /api/obsidian/vaults/{id}
-DELETE /api/obsidian/vaults/{id}
+capabilities
+tools
+workers
+HTTP and Mini App routes
+background process supervision
+```
+
+The Friday Organ Protocol should gain a first-class `tools()` extension rather than placing Obsidian branching in `AgentRuntime`.
+
+## API surface
+
+Suggested endpoints:
+
+```text
+POST   /api/obsidian/onboarding/start
+GET    /api/obsidian/onboarding/{id}
+POST   /api/obsidian/onboarding/{id}/cancel
+POST   /api/obsidian/onboarding/{id}/confirm-vault
+POST   /api/obsidian/onboarding/{id}/verify
 
 GET    /api/obsidian/status
-POST   /api/obsidian/probe
-POST   /api/obsidian/vaults/{id}/sync
-GET    /api/obsidian/vaults/{id}/sync-status
-```
+POST   /api/obsidian/test-sync
+POST   /api/obsidian/reconnect
+POST   /api/obsidian/disconnect
 
-### Notes and operations
+GET    /api/obsidian/vaults
+PATCH  /api/obsidian/vaults/{id}
 
-```text
 GET    /api/obsidian/notes/search
 GET    /api/obsidian/notes/read
 POST   /api/obsidian/operations
 GET    /api/obsidian/operations/{id}
-```
 
-### Companion plugin
+GET    /api/obsidian/conflicts
+POST   /api/obsidian/conflicts/{id}/resolve
 
-```text
-WS     /api/obsidian/plugin
-POST   /api/obsidian/plugin/events
-POST   /api/obsidian/plugin/ack
-```
-
-### Index
-
-```text
 POST   /api/obsidian/index/rebuild
 GET    /api/obsidian/index/status
 ```
 
-The conversational runtime calls the service directly through Execution Kernel handlers rather than its own HTTP API.
+The conversational runtime calls the service directly through Execution Kernel handlers instead of calling its own HTTP API.
 
 ## Diagnostics
 
-Add an Obsidian diagnostics section:
+Add an Obsidian and Syncthing section to Friday diagnostics:
 
 ```text
-connected accounts
-Headless version and authentication state
-configured logical and remote vaults
-local checkouts
-continuous Sync processes
-last successful server-side Sync
-Sync backlog and errors
-available operation adapters
-desktop CLI version
-connected companion installations
-plugin protocol version
-command catalog digests
+connected Friday users
+managed Syncthing processes
+Syncthing runtime versions
+server Device IDs by profile
+Android peer state
+last device contact
+folder acceptance state
+server folder health
+remote completion percentage
+pending bytes and items
+folder errors
+conflict count
 last successful operation
-uncertain operations
-last event checkpoint
+pending delivery operations
 index coverage
-reconciliation backlog
 ```
 
-Example:
+User-facing doctor output:
 
 ```text
-Obsidian account: connected
-Headless: 0.x, authenticated
-Default logical vault: Work
-Remote vault: Work
-Server checkout: ready
-Continuous Sync: healthy
-Last server Sync: 21:43
-Desktop CLI: unavailable
-Phone plugin: offline
-Indexed roots: 2
-Pending events: 0
-Uncertain operations: 0
+Obsidian vault: Friday
+Server checkout: healthy
+Syncthing process: running
+Android device: Pixel 10
+Phone connection: offline
+Pending delivery: 2 files
+Last phone contact: 18 minutes ago
+Conflicts: 0
 ```
-
-An offline phone plugin is not a health failure when Headless Sync is healthy.
 
 ## MCP position
 
-MCP is not required for the internal Friday-to-Obsidian integration.
+MCP is not needed inside this integration.
 
 Preferred path:
 
 ```text
 Friday-owned tools
     -> ObsidianService
-    -> vault file adapter
-    -> Headless Sync
-    -> optional CLI or companion plugin
+    -> note store and Syncthing adapter
 ```
 
-An optional MCP façade may later expose the same stable capabilities to external agents.
+An optional MCP façade may later expose the same stable Friday capabilities to external agents.
 
-A generic third-party Obsidian MCP server should not be the primary integration because it would not understand Friday account bindings, Work Items, remote and local vault identities, operation reconciliation, projection identity, or completion semantics.
+A generic Obsidian MCP server does not replace the Android synchronization transport, device pairing, note identity, Work Items, or delivery-state model.
 
 ## Implementation phases
 
-### P0: contracts and official capability probe
+### P0: freeze the free Android product contract
 
-- freeze account, logical-vault, remote-vault, checkout, installation, and note identities;
-- probe the installed Obsidian Headless contract;
-- record interactive login, MFA, remote-vault listing, Sync setup, status, unlink, and logout behavior;
-- probe official desktop CLI where available;
-- define `ObsidianOperation`, `ObsidianOperationResult`, and error taxonomy;
-- define the JOP tool-provider extension;
-- define the setup-session state machine.
+- make Android-only and no-subscription assumptions executable;
+- remove Obsidian account and Headless concepts from the primary schema;
+- define the sync truth model;
+- define the per-user Syncthing process contract;
+- define onboarding and delivery states;
+- select a tested Syncthing and Syncthing-Fork version range.
 
-Deliverable: executable probes and frozen contracts.
+Deliverable: a versioned architecture contract and probe utility.
 
-### P1: Telegram onboarding and Headless connection
+### P1: managed Syncthing runtime
+
+- package or require Syncthing on the Friday host;
+- create per-user config and database roots;
+- supervise one process per connected user;
+- implement REST authentication and version probe;
+- implement device, folder, scan, completion, and event adapters;
+- add diagnostics and restart recovery.
+
+Deliverable: Friday can create and monitor one isolated server-side Syncthing profile.
+
+### P2: Telegram onboarding
+
+- add `/obsidian` status panel;
+- add Mini App and normal HTTPS fallback;
+- provision profile, folder, and Device ID QR;
+- detect and accept the Android device;
+- offer the folder;
+- wait for Android acceptance;
+- collect Android vault alias;
+- perform round-trip verification;
+- make onboarding resumable and idempotent.
+
+Deliverable: one Android user reaches `ready` without an Obsidian account or desktop.
+
+### P3: native server note operations
 
 Implement:
 
 ```text
-/obsidian status panel
-Telegram Mini App entry
-single-use HTTPS fallback
-validated Telegram identity binding
-per-user Headless profile
-interactive ob login broker
-MFA flow
-remote-vault listing and selection
-E2EE prompt
-local checkout creation
-initial Sync
-continuous Sync supervisor
-disconnect and reauthentication
+list
+search
+read
+create
+append
+prepend
+replace
+move
+delete
+properties
+tags
+daily notes
+templates
 ```
 
-Deliverable: one user can connect one remote vault from a phone and Friday keeps a server-side checkout synchronized continuously.
+Add atomic writes, revision checks, and an operation ledger.
 
-### P2: mobile-first vault operations
+Deliverable: the user performs useful background Obsidian work through Telegram.
 
-Implement against the server checkout:
+### P4: delivery semantics and conflict handling
 
-```text
-list and search notes
-read note
-create note
-append and prepend
-properties and tags
-backlinks and outgoing links
-daily note operations
-template-based create
-tasks
-managed regions
-mobile Obsidian URI generation
-```
+- track server write, scan, peer, and remote completion separately;
+- return pending delivery without blocking;
+- detect `sync-conflict` files;
+- add compare and resolution flow;
+- enable server-side versioning;
+- add reconnect reconciliation.
 
-Register a small Friday-owned tool surface through Execution Kernel.
+Deliverable: offline Android and concurrent edits do not produce false success or silent loss.
 
-Deliverable: the user can perform the most common Obsidian work entirely through Telegram and receive one-tap mobile open links.
+### P5: note identity, links, and graph
 
-### P3: vault registry, note bindings, and operation ledger
+- add stable note IDs and bindings;
+- build wikilink and Markdown-link index;
+- implement backlinks, unresolved links, orphans, and dead ends;
+- implement move with bounded link updates;
+- preserve identity across rename and move.
 
-- support multiple logical and remote vaults;
-- add stable note bindings;
-- attach revision digests to reads and writes;
-- support managed, linked, and user-owned modes;
-- implement managed-region merge;
-- add operation ledger and reconciliation;
-- add semantic rename and link-update behavior.
+Deliverable: Friday can organize a real vault rather than only append files.
 
-Deliverable: renames, moves, retries, and follow-ups no longer depend on paths alone.
+### P6: semantic indexing and Interaction Control Plane
 
-### P4: Interaction Control Plane integration
-
-- add `ObsidianActiveFrame`;
+- index configured vault roots;
+- combine lexical, property, graph, and semantic lanes;
+- add Obsidian Active Frame;
 - persist candidate sets;
-- implement continuation references;
-- add the first Playbooks;
-- return typed CapabilityOutcomes;
-- use Completion Gates for local write plus Sync postconditions.
-
-Deliverable: requests such as "open the second one" and "add that there" continue the correct task.
-
-### P5: desktop CLI adapter
-
-Implement:
-
-```text
-native desktop search and editing
-workspaces and tabs
-active file
-native rename behavior
-command catalog and command execution
-plugin-command bridge
-```
-
-Deliverable: same-machine users receive richer native Obsidian control without changing the mobile-first core.
-
-### P6: companion plugin
-
-Implement:
-
-- pairing to an existing Friday logical vault;
-- outbound WebSocket;
-- active note, heading, and selection context;
-- atomic note processing;
-- event stream;
-- device-local vault identity;
-- Friday command palette;
-- mobile and desktop status indicator;
-- reconnect and operation deduplication.
-
-Deliverable: Friday can interact with the currently open note while Obsidian is active.
-
-### P7: indexed mode and cross-corpus retrieval
-
-- configure browse and index roots;
-- build incremental note passage index;
-- combine vault-native and semantic search;
-- exclude Friday projections from re-ingestion;
-- handle rename, modify, and delete events;
-- expose index coverage;
+- implement Playbooks and Completion Gates;
 - combine Obsidian notes with Friday documents and conversations.
 
-Deliverable: Friday finds Obsidian notes by approximate content and composes them with the rest of the user's memory.
+Deliverable: approximate search and short follow-ups work across the integrated system.
 
-### P8: bindings, Inbox, Bases, and advanced functionality
+### P7: tasks, Bases, and advanced note semantics
 
-- create durable Friday-to-Obsidian bindings;
-- add Open in Friday and Open in Obsidian actions;
-- support explicit note ingestion and Inbox folders;
-- generate typed Base files;
-- add optional custom Friday Bases view;
-- profile community-plugin commands;
-- evaluate Canvas separately.
+- durable task targeting;
+- typed BaseSpec and `.base` generation;
+- managed regions;
+- Friday-to-Obsidian object bindings;
+- explicit Obsidian-note ingestion into Friday Inbox.
 
-### P9: optional future surfaces
+Deliverable: broader Obsidian workflows are available without desktop Obsidian.
 
-- optional MCP façade;
-- optional alternative Sync providers;
-- optional browser-assisted account setup if Obsidian publishes a supported delegation flow;
-- optional packaged plugin release and community-directory submission.
+### P8: optional Android companion plugin
+
+- pair plugin with the existing Friday user and logical vault;
+- expose current note and selection;
+- insert at cursor;
+- run native commands;
+- open panes and views;
+- keep the plugin out of the sync path.
+
+Deliverable: live in-app context when Obsidian is open.
+
+### P9: optional future transports
+
+- pooled Syncthing daemon for larger deployments;
+- alternative free sync providers;
+- desktop CLI adapter;
+- paid-provider adapter if ever desired;
+- MCP façade;
+- packaged mobile companion plugin release.
 
 ## Suggested first release scope
 
-The first production-useful mobile slice should be:
+The first production-useful release should contain:
 
 ```text
 one Friday user
-one Obsidian account connection
-one default remote vault
+one Android device
+one logical vault
+per-user Syncthing process
 Telegram /obsidian onboarding
-Mini App plus HTTPS fallback
-per-user Headless profile
-continuous Sync
-server-side note list/search/read/create/append
+QR device pairing
+folder-offer detection
+round-trip verification
+server note list/search/read/create/append
 properties
 daily notes
-templates
-backlinks
-one CaptureConversationToObsidian playbook
-one SearchAndOpenObsidianNote playbook
 operation ledger
-Obsidian URI button
+precise delivery status
+Obsidian URI open button
+basic diagnostics
 ```
 
-Desktop CLI and the companion plugin should not block this first mobile release.
+Do not block this release on:
+
+```text
+companion plugin
+community-plugin commands
+custom Bases view
+Canvas
+multiple Android devices
+multiple vaults per user
+pooled Syncthing runtime
+```
 
 ## Acceptance criteria
 
-### Onboarding
+### Free Android onboarding
 
-- `/obsidian` shows a connection panel.
-- An official Telegram client opens the Mini App.
-- A client without Mini App support can use the single-use HTTPS link.
-- Friday validates the Telegram setup identity without a separate Friday password.
-- A user completes `ob login` through the setup page.
-- MFA is handled when requested.
-- One remote vault is selected automatically.
-- Multiple remote vaults produce one compact choice.
-- E2EE password is requested only when required.
-- Initial Sync creates a usable server checkout.
-- Refreshing the page does not duplicate the account connection.
+- A user with no Obsidian account can complete setup.
+- `/obsidian` begins the setup from a verified Friday identity.
+- Mini App and ordinary HTTPS flows resume the same session.
+- Friday provisions exactly one server Syncthing profile for one accepted setup.
+- The QR contains the correct per-user server Device ID.
+- The first Android pending device is bound to the correct user profile.
+- Friday offers exactly one logical vault folder.
+- Setup waits until the Android client shares the folder back.
+- A new Android folder can be opened as an Obsidian vault.
+- The round-trip note reaches 100 percent remote completion while connected.
+- Refreshing or restarting Friday does not duplicate profiles, devices, or folders.
 
-### Account and vault identity
+### Identity
 
-- Two Friday users never share one Headless profile.
-- A remote vault ID, logical vault ID, server checkout, and phone local vault are distinct records.
-- Changing Obsidian accounts increments `session_epoch` and invalidates stale bindings.
-- A same-named vault under another account is not silently rebound.
-- Disconnect stops Sync and clears Headless authentication without deleting the remote vault.
+- Friday never requires an Obsidian email or password.
+- Friday user, Syncthing profile, Android device, logical vault, and note are separate identities.
+- A device reconnect preserves its binding.
+- Replacing the phone requires an explicit new-device flow.
+- Rename and move preserve bound note identity.
 
-### Mobile workflow
+### Android operation
 
-- Friday updates a note while the phone Obsidian app is closed.
-- The server-side Headless client synchronizes the update.
-- Friday reports server-side Sync accurately without claiming phone delivery.
-- The response includes an Obsidian URI button.
-- A configured mobile vault alias opens the correct note.
-- The integration remains functional while the mobile companion plugin is offline.
+- Friday may write while the phone is offline.
+- Offline delivery remains pending rather than failed.
+- Reconnection transfers pending files.
+- Friday distinguishes server write from Android receipt.
+- Friday never claims that Obsidian opened a note without a user or plugin action.
+- The Open in Obsidian link uses the configured Android vault alias.
 
-### Basic control
+### Notes
 
-- Friday creates a note at an exact path and returns path and revision.
-- Friday reads, appends, prepends, moves, renames, and opens a note.
-- Friday sets and removes typed properties.
-- Friday appends to today's daily note.
-- Friday creates a note from a template.
-- Every mutating success distinguishes local write from server Sync.
+- Friday creates, reads, appends, prepends, replaces, moves, and deletes notes.
+- Every full replacement uses an expected revision.
+- Typed property updates preserve the note body.
+- Daily-note paths follow the stored vault convention.
+- Template creation preserves unknown template syntax.
+- Managed-region updates preserve user text outside the region.
+
+### Sync and conflicts
+
+- Syncthing process restart does not lose pairing state.
+- Server scan and remote completion are observable.
+- A concurrent edit creates a visible conflict workflow.
+- Conflict copies are never deleted automatically.
+- Server-side versioning retains configured remote replacements and deletions.
+- An uncertain mutation is reconciled before retry.
+- One accepted operation produces at most one durable note mutation.
 
 ### Search and graph
 
-- Friday searches exact text and returns paths with excerpts.
-- Friday returns backlinks and outgoing links.
-- An indexed note can be found by approximate semantic description.
-- Native and semantic results deduplicate to one candidate.
+- Exact path and title search work over the server checkout.
+- Lexical search returns path and excerpt.
+- Indexed notes can be found by approximate semantic description.
+- Backlinks and outgoing links are computed without a running desktop app.
+- A move with `update_links=true` reports all changed and unresolved references.
 - Friday projections are not re-ingested as independent evidence.
 
-### Continuation
+### Companion plugin independence
 
-- "Open the second one" uses the active candidate set.
-- "Add that there" uses the active note and Work Item outcome.
-- A renamed note remains the same bound note.
-- An expired candidate set is not silently reused.
-
-### Editing and conflicts
-
-- A managed-region update preserves user text outside the region.
-- A stale full replacement returns `conflict`.
-- A rename collision does not overwrite the destination.
-- An uncertain mutation is reconciled before retry.
-- Exactly one durable write is produced for one accepted operation.
-
-### Desktop and plugin
-
-- Desktop CLI and server-file adapters return the same outcome shape.
-- The plugin reconnects after Friday or Obsidian restarts.
-- Duplicate plugin operation IDs do not duplicate writes.
-- Rename and delete events update Friday bindings.
-- The current note and selection can be sent to Friday.
-- Plugin offline state does not mark Headless Sync unhealthy.
-
-### Bases, tasks, and commands
-
-- Friday queries a supported Base and receives structured rows.
-- Friday creates a supported `.base` file from a typed specification.
-- Friday lists and updates a task using a durable target.
-- Friday lists command IDs from an active desktop or plugin connection.
-- A command without an observable postcondition remains `uncertain`.
+- All core synchronized note operations work with no plugin installed.
+- Plugin offline state does not mark the vault unhealthy.
+- Installing the plugin adds active-note capabilities without changing the sync binding.
 
 ## Suggested executable regression tests
 
 ```text
-test_obsidian_connect_starts_from_a_telegram_identity.py
-test_the_https_fallback_uses_one_single_use_setup_token.py
-test_refreshing_the_setup_page_does_not_duplicate_login.py
-test_mfa_continues_the_same_headless_login_session.py
-test_one_remote_vault_is_selected_automatically.py
-test_multiple_remote_vaults_require_one_explicit_choice.py
-test_e2ee_password_is_requested_only_when_headless_requires_it.py
-test_two_friday_users_never_share_a_headless_profile.py
-test_account_switch_invalidates_stale_remote_vault_bindings.py
-test_disconnect_stops_sync_and_logs_out_the_profile.py
+test_free_android_setup_requires_no_obsidian_account.py
+test_obsidian_setup_starts_from_the_friday_telegram_identity.py
+test_one_setup_creates_one_syncthing_profile.py
+test_each_user_profile_has_a_unique_server_device_id.py
+test_the_first_pending_android_device_binds_to_the_correct_profile.py
+test_folder_acceptance_is_required_before_ready.py
+test_round_trip_verification_reaches_remote_completion.py
+test_refreshing_setup_does_not_duplicate_the_folder.py
 
-test_friday_can_update_a_vault_while_the_phone_app_is_closed.py
-test_a_successful_write_distinguishes_local_and_server_sync.py
-test_friday_never_claims_mobile_delivery_without_device_evidence.py
-test_the_mobile_open_link_uses_the_configured_device_vault_alias.py
-test_mobile_plugin_offline_does_not_break_headless_operations.py
+test_friday_can_write_while_android_is_offline.py
+test_offline_delivery_is_pending_not_failed.py
+test_android_receipt_is_distinct_from_server_write.py
+test_friday_never_claims_that_mobile_obsidian_opened_without_evidence.py
+test_the_open_uri_uses_the_configured_android_vault_alias.py
 
-test_friday_can_create_and_open_an_obsidian_note.py
+test_friday_can_create_and_append_to_an_obsidian_note.py
 test_friday_can_append_to_the_daily_note_once.py
+test_a_stale_full_replacement_returns_conflict.py
 test_a_note_rename_preserves_the_integration_identity.py
+test_a_move_updates_resolvable_links_and_reports_ambiguous_links.py
 test_a_managed_region_preserves_user_text.py
-test_a_stale_replacement_returns_conflict.py
+test_typed_properties_preserve_markdown_body.py
+
+test_syncthing_restart_preserves_device_and_folder_configuration.py
 test_an_uncertain_append_is_reconciled_before_retry.py
-test_native_and_semantic_search_results_deduplicate.py
+test_a_sync_conflict_becomes_a_user_visible_conflict_record.py
+test_conflict_files_are_not_deleted_without_resolution.py
+test_remote_completion_updates_the_operation_delivery_state.py
+
+test_native_and_semantic_note_results_deduplicate.py
+test_android_originated_changes_reindex_only_the_changed_note.py
+test_delete_events_remove_note_passages.py
 test_a_friday_projection_is_not_reingested_as_new_knowledge.py
 test_the_second_result_uses_the_active_candidate_set.py
 test_add_that_there_uses_the_active_note.py
 
-test_a_plugin_reconnect_resumes_pending_operations.py
-test_duplicate_plugin_operation_ids_do_not_duplicate_writes.py
-test_note_events_reindex_only_the_changed_note.py
-test_delete_events_remove_search_passages.py
-test_a_base_query_returns_typed_rows.py
-test_a_command_without_postcondition_remains_uncertain.py
-test_cli_plugin_and_file_adapters_return_the_same_outcome_shape.py
+test_core_vault_operations_need_no_companion_plugin.py
+test_companion_plugin_offline_does_not_break_syncthing_operations.py
 test_obsidian_tools_are_registered_by_the_organ_not_agent_runtime.py
 ```
 
 ## Key architectural invariants
 
-1. Friday owns the natural-language task and Work Item.
-2. Obsidian owns the remote account and native client experience.
-3. Headless Sync is the persistent mobile delivery backbone.
-4. The companion plugin is optional foreground context, not the backbone.
-5. A browser session is not a Headless session.
-6. Friday never depends on undocumented cookie transplantation for login.
-7. One Friday user owns one or more isolated Headless profiles and logical vaults.
-8. Remote vault, server checkout, desktop local vault, and phone local vault are separate identities.
-9. The operation adapter is replaceable; the Friday capability contract is stable.
-10. SQLite remains the source of truth for Friday objects.
-11. Obsidian remains the source of truth for user-owned Obsidian notes.
-12. A managed projection is rebuildable and never treated as independent evidence.
-13. A linked note may contain user and Friday-owned regions without silent overwrite.
-14. Path is navigation, not durable identity after binding.
-15. Local write, server Sync, and phone delivery are separate postconditions.
-16. Tool success is not task completion.
-17. Raw CLI, Headless, or plugin prose never becomes model-visible evidence without normalization.
-18. One accepted operation produces at most one durable mutation.
-19. The model may select and parameterize capabilities, but it never handles login secrets or writes vault files directly.
+1. The primary free Android path requires no Obsidian account.
+2. Friday binds to an Android Syncthing device and logical vault, not to cloud identity.
+3. Syncthing-Fork is the persistent transport between Friday and Android.
+4. Obsidian URI is navigation and handoff, not synchronization proof.
+5. The companion plugin is optional foreground context, not the sync backbone.
+6. Friday owns the natural-language task and Work Item.
+7. Obsidian owns native mobile viewing and editing.
+8. The server checkout is Friday's operational copy of the vault.
+9. Local write, server scan, Android receipt, and Obsidian open are separate postconditions.
+10. Path is navigation, not durable note identity after binding.
+11. A projection is rebuildable and never treated as independent evidence.
+12. A model may select and parameterize capabilities, but it never writes vault paths directly.
+13. One accepted operation produces at most one durable mutation.
+14. Offline Android delivery never erases a committed server result.
+15. Conflicts preserve both versions until an explicit resolution.
+16. Core note features do not depend on a running Obsidian desktop or mobile process.
+17. The sync provider is replaceable behind Friday-owned contracts.
 
 ## Final recommendation
 
 Build the integration in this order:
 
 ```text
-Telegram onboarding
-    -> per-user Headless account connection
-    -> remote vault selection
-    -> continuous server-side Sync
-    -> core vault operations
-    -> Friday-owned conversational tools
-    -> operation ledger and note identity
-    -> Work Items and Playbooks
-    -> desktop CLI
-    -> companion plugin
-    -> semantic indexing and advanced Obsidian features
+per-user Syncthing runtime
+    -> Telegram QR onboarding
+    -> Android folder acceptance
+    -> round-trip verification
+    -> native server note operations
+    -> precise delivery status
+    -> conflict handling
+    -> note identity and link graph
+    -> semantic indexing and Work Items
+    -> optional companion plugin
 ```
 
-The existing `MemoryVault` remains a simple, rebuildable Friday projection. The new Obsidian Organ provides interactive access to ordinary user vaults and to the always-on server checkout.
+The existing `MemoryVault` remains a rebuildable Friday projection. The new Obsidian Organ operates ordinary user vaults through a managed server checkout and Syncthing-Fork.
 
-The intended mobile experience is:
+The final free Android experience is:
 
 ```text
-The user sends /obsidian once.
-The user completes one compact Obsidian login flow.
-Friday keeps the selected remote vault synchronized continuously.
-The user commands Friday in ordinary Russian from Telegram.
-Friday edits, searches, and organizes Obsidian notes.
-The phone receives changes through Obsidian Sync.
-Friday returns one-tap links that open the result in the official mobile app.
+The user installs Obsidian and Syncthing-Fork once.
+The user scans one Friday QR code and accepts one folder.
+The user opens that folder as an Obsidian vault.
+After that, the user talks to Friday in Telegram.
+Friday searches, creates, edits, links, and organizes notes.
+Syncthing-Fork transfers changes whenever Android is available.
+Friday reports whether delivery is complete or still pending.
+A one-tap URI opens the result in the official Obsidian app.
 ```
 
-This is the useful integration boundary. Friday becomes a semantic and conversational control surface for Obsidian, while Obsidian remains the mature human workspace rather than a feature list Friday must rebuild.
+This is not as frictionless as a central account-based sync service, but it is achievable without a subscription, without a desktop, and without building a complete proprietary synchronization engine inside Friday.
 
-## Official references
+## Official and project references
 
-Sources checked on 20 August 2026:
+Sources checked on 21 August 2026:
 
-- [Obsidian Headless](https://obsidian.md/help/headless)
-- [Headless Sync](https://obsidian.md/help/sync/headless)
-- [Obsidian CLI](https://obsidian.md/help/cli)
+- [Obsidian: Sync your notes across devices](https://obsidian.md/help/sync-notes)
+- [Obsidian for Android](https://obsidian.md/help/android)
 - [Obsidian URI](https://help.obsidian.md/Extending%2BObsidian/Obsidian%2BURI)
-- [Obsidian Vault developer guide](https://docs.obsidian.md/Plugins/Vault)
-- [Build an Obsidian plugin](https://docs.obsidian.md/Plugins/Getting%20started/Build%20a%20plugin)
-- [Mobile plugin development](https://docs.obsidian.md/Plugins/Getting%20started/Mobile%20development)
-- [Build a Bases view](https://docs.obsidian.md/plugins/guides/bases-view)
-- [Telegram Mini Apps](https://core.telegram.org/bots/webapps)
+- [Obsidian mobile plugin development](https://docs.obsidian.md/Plugins/Getting%20started/Mobile%20development)
+- [Syncthing documentation](https://docs.syncthing.net/)
+- [Syncthing getting started](https://docs.syncthing.net/intro/getting-started.html)
+- [Syncthing REST API](https://docs.syncthing.net/dev/rest.html)
+- [Syncthing configuration API](https://docs.syncthing.net/rest/config.html)
+- [Syncthing event API](https://docs.syncthing.net/dev/events.html)
+- [Syncthing remote completion](https://docs.syncthing.net/rest/db-completion-get.html)
+- [Syncthing file versioning](https://docs.syncthing.net/users/versioning.html)
+- [Syncthing-Fork on F-Droid](https://f-droid.org/packages/com.github.catfriend1.syncthingfork/)
+- [Syncthing-Fork source](https://github.com/researchxxl/syncthing-android)
