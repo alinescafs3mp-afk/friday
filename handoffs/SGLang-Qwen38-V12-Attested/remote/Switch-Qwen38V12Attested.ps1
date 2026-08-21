@@ -169,10 +169,27 @@ function Invoke-Chat([hashtable]$Headers, [hashtable]$Body, [int]$TimeoutSeconds
     }
 }
 
-function Wait-PostSixWayGpuHeadroom([int]$TimeoutSeconds, [int]$PollMilliseconds) {
+function Wait-GpuHeadroomConvergence(
+    [string]$Checkpoint,
+    [int]$TimeoutSeconds,
+    [int]$PollMilliseconds
+) {
+    if ($Checkpoint -ceq 'post_six_way') {
+        $journalPrefix = 'post_six_way_gpu_headroom'
+        $requestCount = 6
+        $failureLabel = 'Post-six-way'
+    }
+    elseif ($Checkpoint -ceq 'post_long_context') {
+        $journalPrefix = 'post_long_context_gpu_headroom'
+        $requestCount = 1
+        $failureLabel = 'Post-long-context'
+    }
+    else {
+        throw 'GPU headroom convergence checkpoint is invalid'
+    }
     if ($TimeoutSeconds -lt 1 -or $TimeoutSeconds -gt 30 -or
         $PollMilliseconds -lt 1 -or $PollMilliseconds -gt 2000) {
-        throw 'Post-six-way GPU headroom convergence bounds are invalid'
+        throw 'GPU headroom convergence bounds are invalid'
     }
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     $attempts = 0
@@ -184,7 +201,7 @@ function Wait-PostSixWayGpuHeadroom([int]$TimeoutSeconds, [int]$PollMilliseconds
             $freeMiB = [int]$gpu.FreeMiB
         }
         catch {
-            Write-Journal 'post_six_way_gpu_headroom_probe_failed' @{
+            Write-Journal ($journalPrefix + '_probe_failed') @{
                 attempts = $attempts
                 error_type = $_.Exception.GetType().FullName
                 minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB
@@ -196,11 +213,11 @@ function Wait-PostSixWayGpuHeadroom([int]$TimeoutSeconds, [int]$PollMilliseconds
         $sampledAt = [DateTime]::UtcNow
         if ($sampledAt -lt $deadline -and
             $freeMiB -ge $script:Attested.MinimumCandidateFreeMiB) {
-            Write-Journal 'post_six_way_gpu_headroom_verified' @{
+            Write-Journal ($journalPrefix + '_verified') @{
                 attempts = $attempts
                 free_mib = $freeMiB
                 minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB
-                request_count = 6
+                request_count = $requestCount
                 timeout_seconds = $TimeoutSeconds
             }
             return $gpu
@@ -215,13 +232,13 @@ function Wait-PostSixWayGpuHeadroom([int]$TimeoutSeconds, [int]$PollMilliseconds
         }
         Start-Sleep -Milliseconds $sleepMilliseconds
     }
-    Write-Journal 'post_six_way_gpu_headroom_timeout' @{
+    Write-Journal ($journalPrefix + '_timeout') @{
         attempts = $attempts
         free_mib = $lastFreeMiB
         minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB
         timeout_seconds = $TimeoutSeconds
     }
-    throw 'Post-six-way candidate VRAM headroom did not converge'
+    throw "$failureLabel candidate VRAM headroom did not converge"
 }
 
 function Assert-ComposeConfig([object]$Value, [object]$BuildReceipt, [string]$KeyHash) {
@@ -713,7 +730,7 @@ try {
     Wait-EndpointIdle $headers 180
 
     $stage = 'post_six_way_gpu_headroom_convergence'
-    $null = Wait-PostSixWayGpuHeadroom 30 2000
+    $null = Wait-GpuHeadroomConvergence 'post_six_way' 30 2000
 
     $stage = 'long_context'
     $longBody = @{
@@ -731,7 +748,12 @@ try {
         [string]::IsNullOrWhiteSpace([string]$longResponse.choices[0].message.content)) {
         throw '40K context acceptance did not exercise the required window'
     }
-    $null = Assert-GpuHeadroom
+
+    $stage = 'long_context_drain'
+    Wait-EndpointIdle $headers 180
+
+    $stage = 'post_long_context_gpu_headroom_convergence'
+    $null = Wait-GpuHeadroomConvergence 'post_long_context' 30 2000
 
     $stage = 'image'
     $probePng = 'iVBORw0KGgoAAAANSUhEUgAAABwAAAAcCAIAAAD9b0jDAAAAI0lEQVR42u3MsQ0AAAjAoP7/tD7hJgkzTZ1LKpVKpVKp9Ee6DsoNHtgm0ZUAAAAASUVORK5CYII='
