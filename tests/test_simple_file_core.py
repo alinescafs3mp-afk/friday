@@ -1135,6 +1135,9 @@ async def test_current_odt_metadata_and_followup_use_the_registered_file_contour
         del args, kwargs
         raise AssertionError("quote-only file command entered repair")
 
+    original_hierarchy = runtime._build_attachment_hierarchy_bundle  # noqa: SLF001
+    original_verify = runtime._verify_response  # noqa: SLF001
+    original_repair = runtime._repair_once  # noqa: SLF001
     monkeypatch.setattr(runtime, "_build_attachment_hierarchy_bundle", forbidden_hierarchy)
     monkeypatch.setattr(runtime, "_verify_response", forbidden_verify)
     monkeypatch.setattr(runtime, "_repair_once", forbidden_repair)
@@ -1205,6 +1208,13 @@ async def test_current_odt_metadata_and_followup_use_the_registered_file_contour
         "«прочитай файл»",
     ):
         await assert_quote_only_closed(quoted_request)
+
+    # The sentinels above prove that quote-only messages cannot enter semantic
+    # file processing.  Later assertions intentionally exercise ordinary file
+    # lookups, so restore their production routes before leaving that scope.
+    monkeypatch.setattr(runtime, "_build_attachment_hierarchy_bundle", original_hierarchy)
+    monkeypatch.setattr(runtime, "_verify_response", original_verify)
+    monkeypatch.setattr(runtime, "_repair_once", original_repair)
 
     topic_history = storage.get_conversation_messages(metadata["conversation_id"], user_id="alice")
     topic_restored, topic_expected = runtime._restore_conversation_attachments(  # noqa: SLF001

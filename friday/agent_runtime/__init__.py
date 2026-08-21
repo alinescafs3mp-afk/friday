@@ -10730,10 +10730,13 @@ _DOCUMENT_AUTHORED_FILE_COMMAND_PREFIX = re.compile(
     r"^\s*(?:"
     r"(?:в|внутри)\s+(?:(?:этом|данном|процитированном|приложенном|указанном)\s+)?"
     r"(?:файл|документ|вложени|текст)\w*\s+"
-    r"(?:написан|сказан|указан|говор)\w*|"
+    r"(?:(?:написан|сказан|указан|говор)\w*|"
+    r"(?:есть|имеется|содержится|приведен\w*|дан\w*)\s+"
+    r"(?:просьб|инструкц|команд|требован|указан|фраз)\w*)|"
     r"(?:(?:этот|этот же|данный|процитированный|приложенный)\s+)?"
     r"(?:файл|документ|вложени|текст)\w*\s+"
-    r"(?:гласит|говорит|требует|предписывает)|"
+    r"(?:(?:гласит|говорит|требует|предписывает)|"
+    r"(?:содержит|включает)\s+(?:просьб|инструкц|команд|требован|указан|фраз)\w*)|"
     r"(?:the\s+|this\s+|quoted\s+)?(?:file|document|attachment|text)\s+"
     r"(?:says|states|reads)|"
     r"(?:in|inside)\s+(?:the\s+|this\s+|quoted\s+)?"
@@ -14598,6 +14601,7 @@ _ATTACHMENT_NUMBER_WORD_SCALES = {
     "тысячу": 1_000,
     "тысячей": 1_000,
     "тысячью": 1_000,
+    "тысячам": 1_000,
     "тысячами": 1_000,
     "тысячах": 1_000,
     "миллион": 1_000_000,
@@ -14605,9 +14609,35 @@ _ATTACHMENT_NUMBER_WORD_SCALES = {
     "миллионов": 1_000_000,
     "миллиону": 1_000_000,
     "миллионом": 1_000_000,
+    "миллионам": 1_000_000,
+    "миллионами": 1_000_000,
     "миллионе": 1_000_000,
     "миллионах": 1_000_000,
 }
+_ATTACHMENT_NUMBER_WORD_VALUES.update(
+    {
+        "двое": 2,
+        "двоих": 2,
+        "двоим": 2,
+        "двоими": 2,
+        "трое": 3,
+        "троих": 3,
+        "троим": 3,
+        "троими": 3,
+        "четверо": 4,
+        "четверых": 4,
+        "четверым": 4,
+        "четверыми": 4,
+        "оба": 2,
+        "обе": 2,
+        "обоих": 2,
+        "обеих": 2,
+        "обоим": 2,
+        "обеим": 2,
+        "обоими": 2,
+        "обеими": 2,
+    }
+)
 _ATTACHMENT_NUMBER_WORD_TOKEN = "|".join(
     sorted(
         (
@@ -14618,11 +14648,105 @@ _ATTACHMENT_NUMBER_WORD_TOKEN = "|".join(
         reverse=True,
     )
 )
-_ATTACHMENT_REVIEW_COUNT_UNIT = rf"(?:военнослуж\w*|{_ATTACHMENT_COUNT_NOUN}\w*)"
+_ATTACHMENT_COUNT_CARDINAL_TOKEN = rf"(?:{_ATTACHMENT_NUMBER_WORD_TOKEN}|\d{{1,9}})"
+_ATTACHMENT_RECORD_COUNT_UNIT_FORMS: tuple[tuple[str, str, str], ...] = (
+    (r"запис(?:ь|и|ью|ей|ям|ями|ях)", "запись", "records"),
+    (r"строк(?:а|и|е|у|ой|ою|ам|ами|ах)?", "строка", "records"),
+    (r"пункт(?:а|е|у|ом|ы|ов|ам|ами|ах)?", "пункт", "records"),
+    (r"позици(?:я|и|ю|ей|й|ям|ями|ях)", "позиция", "records"),
+    (r"элемент(?:а|е|у|ом|ы|ов|ам|ами|ах)?", "элемент", "records"),
+    (r"объект(?:а|е|у|ом|ы|ов|ам|ами|ах)?", "объект", "records"),
+    (r"контакт(?:а|е|у|ом|ы|ов|ам|ами|ах)?", "контакт", "records"),
+    (
+        r"военнослужащ(?:ий|ая|ую|ей|его|ему|им|ем|ие|их|ими)",
+        "военнослужащий",
+        "people",
+    ),
+    (r"человек(?:а|у|ом|е|и)?", "человек", "people"),
+    (r"люд(?:и|ей|ям|ьми|ях)", "человек", "people"),
+    (r"чел\.?", "человек", "people"),
+    (r"сотрудник(?:а|е|у|ом|и|ов|ам|ами|ах)?", "сотрудник", "people"),
+    (r"работник(?:а|е|у|ом|и|ов|ам|ами|ах)?", "работник", "people"),
+    (r"участник(?:а|е|у|ом|и|ов|ам|ами|ах)?", "участник", "people"),
+    (r"кандидат(?:а|е|у|ом|ы|ов|ам|ами|ах)?", "кандидат", "people"),
+    (r"специалист(?:а|е|у|ом|ы|ов|ам|ами|ах)?", "специалист", "people"),
+    (
+        r"исполнител(?:ь|я|ю|ем|е|и|ей|ям|ями|ях)",
+        "исполнитель",
+        "people",
+    ),
+    (r"персон(?:а|ы|е|у|ой|ою|ам|ами|ах)?", "персона", "people"),
+    (r"персонал(?:а|у|ом|е)?", "персонал", "people"),
+    (r"коллег(?:а|и|е|у|ой|ою|ам|ами|ах)?", "коллега", "people"),
+    (r"должност(?:ь|и|ью|ей|ям|ями|ях)", "должность", "records"),
+    (r"фамили(?:я|и|ю|ей|й|ям|ями|ях)", "фамилия", "people"),
+    (r"им(?:я|ени|енем|ена|ен|енам|енами|енах)", "имя", "people"),
+    (r"лиц(?:о|а|у|ом|е|ам|ами|ах)?", "лицо", "people"),
+    (
+        r"ответственн(?:ый|ая|ого|ой|ому|ым|ом|ую|ые|ых|ыми)"
+        r"(?=\s*(?:$|[,.;:!?—–-]))",
+        "ответственный",
+        "people",
+    ),
+)
+_ATTACHMENT_REVIEW_COUNT_UNIT = (
+    "(?:" + "|".join(form for form, _key, _category in _ATTACHMENT_RECORD_COUNT_UNIT_FORMS) + ")"
+)
+_ATTACHMENT_REVIEW_COUNT_UNIT_HINT = re.compile(
+    rf"(?<![\w-]){_ATTACHMENT_REVIEW_COUNT_UNIT}(?![\w-])",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_MODIFIER = (
+    rf"(?!(?:и|или|либо|and|or)\b)(?!(?:{_ATTACHMENT_REVIEW_COUNT_UNIT})(?![\w-]))"
+    r"(?:[А-ЯЁа-яё]+(?:-[А-ЯЁа-яё]+)*)"
+)
+_ATTACHMENT_COUNT_MODIFIER_LIST = (
+    rf"(?:[\t \u00a0\u202f]+{_ATTACHMENT_COUNT_MODIFIER}"
+    rf"(?:(?:[\t \u00a0\u202f]+(?:и|или|либо|and|or)[\t \u00a0\u202f]+|"
+    rf"[\t \u00a0\u202f]*,[\t \u00a0\u202f]*|[\t \u00a0\u202f]+)"
+    rf"{_ATTACHMENT_COUNT_MODIFIER}){{0,15}})?"
+)
+_ATTACHMENT_COUNT_ORDINAL_WORD = (
+    r"(?:"
+    r"(?:перв|втор|четв[её]рт|пят|шест|седьм|восьм|девят|десят|"
+    r"одиннадцат|двенадцат|последн|предыдущ|следующ)"
+    r"(?:ый|ий|ой|ая|яя|ое|ее|ые|ие|ого|его|ой|ому|ему|ым|им|ом|ем|"
+    r"ую|юю|ых|их|ыми|ими)|"
+    r"трет(?:ий|ья|ье|ьи|ьего|ьей|ьему|ьим|ью|ьих|ьими)"
+    r")"
+)
+_ATTACHMENT_COUNT_ORDINAL_MODIFIER = re.compile(
+    rf"(?<![\w-]){_ATTACHMENT_COUNT_ORDINAL_WORD}(?![\w-])",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_WORD_EXPRESSION = (
+    rf"{_ATTACHMENT_COUNT_CARDINAL_TOKEN}"
+    rf"(?:[\t \u00a0\u202f]+{_ATTACHMENT_COUNT_CARDINAL_TOKEN}){{0,15}}"
+)
+_ATTACHMENT_COUNT_DECIMAL_EXPRESSION = (
+    r"\d{1,6}[.,]\d{1,6}[\t \u00a0\u202f]+"
+    r"(?:тыс\.?|млн\.?|тысяч(?:а|и|у|е|ей|ью|ам|ами|ах)?|"
+    r"миллион(?:а|ов|у|ом|е|ам|ами|ах)?)"
+)
+_ATTACHMENT_COUNT_SCALE_EXPRESSION = (
+    r"(?:тыс\.?|млн\.?|тысяч(?:а|и|у|е|ей|ью|ам|ами|ах)?|"
+    r"миллион(?:а|ов|у|ом|е|ам|ами|ах)?)"
+)
+_ATTACHMENT_COUNT_ABBREVIATED_SEGMENT = (
+    rf"(?:{_ATTACHMENT_COUNT_WORD_EXPRESSION})[\t \u00a0\u202f]+(?:тыс\.?|млн\.?)"
+)
+_ATTACHMENT_COUNT_ABBREVIATED_EXPRESSION = (
+    rf"{_ATTACHMENT_COUNT_ABBREVIATED_SEGMENT}"
+    rf"(?:[\t \u00a0\u202f]+{_ATTACHMENT_COUNT_ABBREVIATED_SEGMENT})?"
+    rf"(?:[\t \u00a0\u202f]+(?:{_ATTACHMENT_COUNT_WORD_EXPRESSION}))?"
+)
+_ATTACHMENT_COUNT_EXPRESSION = (
+    rf"(?:{_ATTACHMENT_COUNT_DECIMAL_EXPRESSION}|"
+    rf"{_ATTACHMENT_COUNT_ABBREVIATED_EXPRESSION}|{_ATTACHMENT_COUNT_WORD_EXPRESSION})"
+)
 _ATTACHMENT_NUMBER_WORD_COUNT_RELATION = re.compile(
-    rf"(?<![\w-])(?P<number>(?:{_ATTACHMENT_NUMBER_WORD_TOKEN})"
-    rf"(?:[\t \u00a0\u202f]+(?:{_ATTACHMENT_NUMBER_WORD_TOKEN})){{0,7}})"
-    rf"(?P<modifiers>(?:[\t \u00a0\u202f]+[A-Za-zА-ЯЁа-яё-]+){{0,4}})"
+    rf"(?<![\w-])(?P<number>{_ATTACHMENT_COUNT_WORD_EXPRESSION})"
+    rf"(?P<modifiers>{_ATTACHMENT_COUNT_MODIFIER_LIST})"
     rf"(?P<spacing>[\t \u00a0\u202f]+)"
     rf"(?P<unit>{_ATTACHMENT_REVIEW_COUNT_UNIT})(?![\w-])",
     re.IGNORECASE,
@@ -14645,9 +14769,9 @@ _ATTACHMENT_LEGACY_NUMBER_WORDS: tuple[tuple[re.Pattern[str], str], ...] = tuple
 
 
 def _attachment_sub_thousand_word_value(tokens: Sequence[str]) -> int | None:
-    values = [_ATTACHMENT_NUMBER_WORD_VALUES[token] for token in tokens]
+    values = [int(token) if token.isdigit() else _ATTACHMENT_NUMBER_WORD_VALUES[token] for token in tokens]
     if len(values) == 1:
-        return values[0]
+        return values[0] if 0 <= values[0] < 1_000 else None
     if values[0] >= 100 and values[0] % 100 == 0:
         if len(values) == 2 and 0 < values[1] < 100:
             return values[0] + values[1]
@@ -14662,10 +14786,26 @@ def _attachment_sub_thousand_word_value(tokens: Sequence[str]) -> int | None:
 def _attachment_russian_cardinal_value(raw: str) -> int | None:
     """Parse one complete, bounded Russian cardinal without taking its tail."""
 
+    normalized = str(raw or "").casefold().replace("ё", "е").strip()
+    if re.fullmatch(r"\d{1,3}(?:[ \u00a0\u202f]\d{3})+", normalized):
+        value = int(re.sub(r"[ \u00a0\u202f]", "", normalized))
+        return value if 0 <= value <= 999_999_999 else None
+    tokens = normalized.split()
+    if not tokens or any(
+        not token.isdigit()
+        and token not in _ATTACHMENT_NUMBER_WORD_VALUES
+        and token not in _ATTACHMENT_NUMBER_WORD_SCALES
+        for token in tokens
+    ):
+        return None
+    if len(tokens) == 1 and tokens[0].isdigit():
+        value = int(tokens[0])
+        return value if 0 <= value <= 999_999_999 else None
+
     total = 0
     group: list[str] = []
     preceding_scale = 1_000_000_000
-    for token in raw.split():
+    for token in tokens:
         scale = _ATTACHMENT_NUMBER_WORD_SCALES.get(token)
         if scale is None:
             group.append(token)
@@ -14687,17 +14827,227 @@ def _attachment_russian_cardinal_value(raw: str) -> int | None:
     return value if 0 <= value <= 999_999_999 else None
 
 
+def _attachment_record_count_value(raw: str) -> int | None:
+    """Parse an integer count, including bounded Russian ``тыс.``/``млн`` forms."""
+
+    normalized = str(raw or "").casefold().replace("ё", "е").strip()
+    decimal = re.fullmatch(
+        r"(?P<whole>\d{1,6})[.,](?P<fraction>\d{1,6})\s+"
+        r"(?P<scale>тыс\.?|млн\.?|тысяч(?:а|и|у|е|ей|ью|ам|ами|ах)?|"
+        r"миллион(?:а|ов|у|ом|е|ам|ами|ах)?)",
+        normalized,
+    )
+    if decimal is not None:
+        scale = decimal.group("scale")
+        multiplier = 1_000 if scale.startswith("тыс") else 1_000_000
+        denominator = 10 ** len(decimal.group("fraction"))
+        numerator = int(decimal.group("whole")) * denominator + int(decimal.group("fraction"))
+        if numerator * multiplier % denominator:
+            return None
+        value = numerator * multiplier // denominator
+        return value if 0 <= value <= 999_999_999 else None
+    abbreviated = re.fullmatch(
+        r"(?P<base>.+?)\s+(?P<scale>тыс\.?|млн\.?)(?:\s+(?P<tail>.+))?",
+        normalized,
+    )
+    if abbreviated is not None:
+        multiplier = 1_000 if abbreviated.group("scale").startswith("тыс") else 1_000_000
+        base = _attachment_russian_cardinal_value(abbreviated.group("base"))
+        tail_raw = abbreviated.group("tail")
+        tail = _attachment_record_count_value(tail_raw) if tail_raw else 0
+        if base is None or tail is None or tail >= multiplier:
+            return None
+        value = base * multiplier + tail
+        return value if 0 <= value <= 999_999_999 else None
+    value = _attachment_russian_cardinal_value(normalized)
+    if value is None:
+        return None
+    return value
+
+
+def _attachment_record_count_unit(value: str) -> tuple[str, str]:
+    folded = str(value or "").casefold().replace("ё", "е")
+    for pattern, key, category in _ATTACHMENT_RECORD_COUNT_UNIT_FORMS:
+        if re.fullmatch(pattern, folded, re.IGNORECASE):
+            return key, category
+    return "", ""
+
+
+_ATTACHMENT_COUNT_SINGULAR_MODIFIER_ENDINGS = (
+    "ый",
+    "ий",
+    "ой",
+    "ая",
+    "яя",
+    "ое",
+    "ее",
+    "ого",
+    "его",
+    "ому",
+    "ему",
+    "ым",
+    "им",
+    "ом",
+    "ем",
+    "ую",
+    "юю",
+    "ою",
+    "ею",
+)
+_ATTACHMENT_COUNT_SMALL_PLURAL_MODIFIER_ENDINGS = (
+    "ые",
+    "ие",
+    "ых",
+    "их",
+    "ым",
+    "им",
+    "ыми",
+    "ими",
+)
+_ATTACHMENT_COUNT_OBLIQUE_PLURAL_MODIFIER_ENDINGS = ("ых", "их", "ым", "им", "ыми", "ими")
+_ATTACHMENT_COUNT_HEADER_MODIFIER_ENDINGS = (
+    *_ATTACHMENT_COUNT_SINGULAR_MODIFIER_ENDINGS,
+    *_ATTACHMENT_COUNT_SMALL_PLURAL_MODIFIER_ENDINGS,
+)
+_ATTACHMENT_COUNT_MODIFIER_ADVERB = re.compile(
+    r"(?:[а-яё-]+(?:ально|ельно|ически|чески|ированно|ованно|шно|чно)|"
+    r"особо|крайне|наиболее|наименее|отдельно|вновь|ранее|недавно|давно|уже|успешно|"
+    r"фактически|реально|формально|предварительно|полностью|частично)",
+    re.IGNORECASE,
+)
+
+
+def _attachment_count_modifier_tokens(raw: str) -> tuple[str, ...]:
+    return tuple(
+        folded
+        for token in re.findall(r"[А-ЯЁа-яё]+(?:-[А-ЯЁа-яё]+)*", str(raw or ""))
+        if (folded := token.casefold().replace("ё", "е")) not in {"и", "или", "либо", "and", "or"}
+    )
+
+
+def _attachment_count_modifiers_valid(value: int, raw: str, *, header: bool = False) -> bool:
+    tokens = _attachment_count_modifier_tokens(raw)
+    if not tokens:
+        return True
+    endings: tuple[str, ...]
+    if header:
+        endings = _ATTACHMENT_COUNT_HEADER_MODIFIER_ENDINGS
+    elif value % 10 == 1 and value % 100 != 11:
+        endings = _ATTACHMENT_COUNT_SINGULAR_MODIFIER_ENDINGS
+    elif value % 10 in {2, 3, 4} and value % 100 not in {12, 13, 14}:
+        endings = _ATTACHMENT_COUNT_SMALL_PLURAL_MODIFIER_ENDINGS
+    else:
+        endings = _ATTACHMENT_COUNT_OBLIQUE_PLURAL_MODIFIER_ENDINGS
+    adjective_slots = [token.endswith(endings) for token in tokens]
+    return all(
+        adjective_slots[index]
+        or (
+            _ATTACHMENT_COUNT_MODIFIER_ADVERB.fullmatch(token) is not None
+            and any(adjective_slots[index + 1 :])
+        )
+        for index, token in enumerate(tokens)
+    )
+
+
+_ATTACHMENT_COUNT_QUALIFIER_ROOTS: tuple[tuple[str, str], ...] = (
+    ("пронумерова", "нумерова"),
+    ("нумерова", "нумерова"),
+    ("присутств", "присутств"),
+    ("участв", "участв"),
+    ("наход", "наход"),
+    ("работ", "работ"),
+    ("труд", "труд"),
+    ("облада", "облада"),
+    ("получ", "получ"),
+    ("допущ", "допущ"),
+    ("лишен", "лишен"),
+    ("име", "име"),
+    ("зарегистрир", "зарегистрир"),
+    ("подтвержд", "подтвержд"),
+    ("обработ", "обработ"),
+    ("провер", "провер"),
+    ("исправ", "исправ"),
+    ("увол", "увол"),
+    ("нанят", "нанят"),
+    ("принят", "принят"),
+    ("выбран", "выбран"),
+    ("отобран", "отобран"),
+    ("удален", "удален"),
+    ("добавлен", "добавлен"),
+    ("изменен", "изменен"),
+    ("показан", "показан"),
+    ("найден", "найден"),
+)
+
+
+def _attachment_count_qualifier_key(token: str) -> str:
+    folded = str(token or "").casefold().replace("ё", "е")
+    return next(
+        (key for prefix, key in _ATTACHMENT_COUNT_QUALIFIER_ROOTS if folded.startswith(prefix)),
+        _attachment_unit_stem(folded),
+    )
+
+
+def _attachment_count_modifier_signature(raw: str) -> tuple[str, ...]:
+    return tuple(
+        sorted({_attachment_count_qualifier_key(token) for token in _attachment_count_modifier_tokens(raw)})
+    )
+
+
+def _attachment_count_has_numeric_prefix(text: str, start: int) -> bool:
+    """Reject a tail captured from a decimal, range, ratio, or version."""
+
+    prefix = text[max(0, start - 96) : start]
+    tail = prefix.rstrip()
+    last_word = tail.rsplit(maxsplit=1)[-1].rstrip(".") if tail else ""
+    if not tail.endswith((",", ".", "/", "-", "–", "—")) and last_word not in {
+        "до",
+        "и",
+        "или",
+        "либо",
+        "млн",
+        "по",
+        "тыс",
+    }:
+        return False
+    previous = rf"(?:\d{{1,9}}|{_ATTACHMENT_NUMBER_WORD_TOKEN})"
+    return bool(
+        re.search(rf"{previous}\s*(?:[,./\-–—]|или|либо)\s*$", prefix, re.IGNORECASE)
+        or re.search(
+            rf"\b(?:от|с)\s+{previous}\s+(?:до|по)\s*$",
+            prefix,
+            re.IGNORECASE,
+        )
+        or re.search(rf"\bмежду\s+{previous}\s+и\s*$", prefix, re.IGNORECASE)
+        or re.search(
+            rf"\b(?:либо|или)\s+{previous}\s*,?\s*(?:либо|или)\s*$",
+            prefix,
+            re.IGNORECASE,
+        )
+        or re.search(rf"{previous}\s+и\s*$", prefix, re.IGNORECASE)
+        or re.search(
+            rf"{previous}\s+(?:тыс\.?|млн\.?)\s*$",
+            prefix,
+            re.IGNORECASE,
+        )
+    )
+
+
 _ATTACHMENT_NUMBER = (
     rf"(?i:{_ATTACHMENT_DIGIT_NUMBER}|один|одна|одно|одну|два|две|три|четыре|пять|"
     r"шесть|семь|восемь|девять|десять)"
 )
-_ATTACHMENT_NUMBER_COUNT_MODIFIER_RELATION = re.compile(
-    rf"(?<![\w-])(?P<number>{_ATTACHMENT_NUMBER})"
-    rf"(?P<modifiers>(?:[\t \u00a0\u202f]+[A-Za-zА-ЯЁа-яё-]+){{1,4}})"
+_ATTACHMENT_RECORD_COUNT_RELATION = re.compile(
+    rf"(?<![\w-])(?P<number>{_ATTACHMENT_COUNT_EXPRESSION})"
+    rf"(?:\s*\(\s*(?P<alternate>{_ATTACHMENT_COUNT_EXPRESSION})\s*\)"
+    rf"(?P<outer_scale>[\t \u00a0\u202f]+{_ATTACHMENT_COUNT_SCALE_EXPRESSION})?)?"
+    rf"(?P<modifiers>{_ATTACHMENT_COUNT_MODIFIER_LIST})"
     rf"(?P<spacing>[\t \u00a0\u202f]+)"
-    rf"(?P<unit>{_ATTACHMENT_REVIEW_COUNT_UNIT})(?![\w-])",
+    rf"(?P<unit>{_ATTACHMENT_REVIEW_COUNT_UNIT})(?![\w-])"
+    rf"(?:\s*\(\s*(?P<post_alternate>{_ATTACHMENT_COUNT_EXPRESSION})\s*\))?",
     re.IGNORECASE,
 )
+_ATTACHMENT_COUNT_RELATION_MAX_MATCHES = 512
 _ATTACHMENT_UNIT = (
     r"(?:[$€₽£¥]|"
     r"(?:(?:тыс(?:\.|\w*)?|млн|миллион\w*|млрд|миллиард\w*)\s+)?"
@@ -14796,29 +15146,25 @@ def _attachment_quantity_normalized(text: str) -> str:
     normalized = str(text or "").casefold().replace("ё", "е")
 
     def replace_cardinal(matched: re.Match[str]) -> str:
-        value = _attachment_russian_cardinal_value(matched.group("number"))
+        value = _attachment_record_count_value(matched.group("number"))
         unit = matched.group("unit")
         tokens = matched.group("number").split()
         if tokens == ["семью"] and not unit.endswith(("ами", "ями", "ьми")):
             return matched.group(0)
         modifiers = matched.group("modifiers")
-        if value is None or _ATTACHMENT_ORDINAL_TOKEN.search(modifiers):
+        if (
+            value is None
+            or _attachment_count_has_numeric_prefix(normalized, matched.start())
+            or _ATTACHMENT_COUNT_ORDINAL_MODIFIER.search(modifiers)
+            or not _attachment_count_modifiers_valid(value, modifiers)
+        ):
             return matched.group(0)
         return f"{value}{modifiers}{matched.group('spacing')}{unit}"
 
-    normalized = _ATTACHMENT_NUMBER_WORD_COUNT_RELATION.sub(replace_cardinal, normalized)
+    if _ATTACHMENT_REVIEW_COUNT_UNIT_HINT.search(normalized):
+        normalized = _ATTACHMENT_NUMBER_WORD_COUNT_RELATION.sub(replace_cardinal, normalized)
     for pattern, number in _ATTACHMENT_LEGACY_NUMBER_WORDS:
         normalized = pattern.sub(number, normalized)
-
-    def collapse_count_modifiers(matched: re.Match[str]) -> str:
-        if _ATTACHMENT_ORDINAL_TOKEN.search(matched.group("modifiers")):
-            return matched.group(0)
-        return f"{matched.group('number')}{matched.group('spacing')}{matched.group('unit')}"
-
-    normalized = _ATTACHMENT_NUMBER_COUNT_MODIFIER_RELATION.sub(
-        collapse_count_modifiers,
-        normalized,
-    )
     return normalized
 
 
@@ -15170,6 +15516,536 @@ def _attachment_source_supports_quantity(
             # is not the unit currently being sought.
             active_header_has_unit = False
     return False
+
+
+_ATTACHMENT_COUNT_PARTIAL_PREFIX = re.compile(
+    r"(?:"
+    r"\b(?:ни|не|нет|без|кроме)\s+(?:(?:в|на|у)\s+)?|"
+    r"\b(?:в|на|у)\s+|"
+    r"\b(?:(?:не|как)\s+)?(?:более|менее|больше|меньше|минимум|максимум)"
+    r"(?:\s+чем)?\s+|"
+    r"\b(?:до|от|около|примерно|порядка|почти|свыше)\s+|"
+    r"(?:~|≈|<=|>=|<|>|≤|≥)\s*|"
+    rf"\b{_ATTACHMENT_COUNT_ORDINAL_WORD}\s+|"
+    r"(?:\b(?:номер|идентификатор|id|код|пункт|позици|запис|строк|раздел|"
+    r"страниц|лист|таблиц|колонк)\w*|№|#)"
+    r"\s*(?:[:=№#-]\s*)?"
+    r")$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_NEGATED_PREDICATE_PREFIX = re.compile(
+    r"\bне\s+(?:содерж|включ|насчитыва|име|перечисл|указ|составля|равн)\w*\b"
+    r"[^,;.!?\n]{0,64}$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_NONASSERTIVE_SENTENCE_PREFIX = re.compile(
+    r"(?:"
+    r"\b(?:если|ежели)\b|"
+    r"\b(?:при\s+условии|в\s+случае)\b|"
+    r"\b(?:нельзя|невозможно|недопустимо|не\s+следует)\b"
+    r"[^.!?\n]{0,96}\b(?:утвержда|счита|говор|заключа|дела\w*\s+вывод)\w*\b|"
+    r"\bнет\s+(?:никаких\s+)?основан\w*\b"
+    r"[^.!?\n]{0,64}\b(?:утвержда|счита|говор|заключа|полага)\w*\b|"
+    r"\b(?:неверно|ошибочно|ложно)\s*,?\s+(?:что|будто)\b|"
+    r"\b(?:не\s+факт|вряд\s+ли|сомнител\w*|под\s+вопросом)\b|"
+    r"\b(?:сомнева|оспарива|не\s+подтвержда)\w*\b[^.!?\n]{0,48}\b(?:что|будто)\b|"
+    r"\b(?:предположим|допустим|неизвестно|неясно|возможно|вероятно|"
+    r"предположительно|якобы)\b|"
+    r"\b(?:может|мог(?:ут|ла|ло|ли)?)\b"
+    r"[^.!?\n]{0,32}\b(?:содерж|включ|насчитыва|име)\w*\b"
+    r")",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_REJECTED_CLAIM_SUFFIX = re.compile(
+    r"^\s*[»”\"']?\s*(?:[,—–-]\s*)?(?:это\s+)?(?:неверно|ошибочно|ложно)\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_BOUND_PREDICATE_PREFIX = re.compile(
+    r"(?:\b(?:не\s+)?(?:превыша|превосход|достига|огранич)\w*\b|"
+    r"\b(?:не\s+равн\w*|отлича\w*\s+от)\b|"
+    r"\b(?:минимум|максимум)\s+(?:равн\w*\s+)?|"
+    r"\bне\s+(?:выше|ниже)\s+|(?:≠|!=)\s*)[^,;.!?\n]{0,24}$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_REQUIRED_OR_PLANNED_PREFIX = re.compile(
+    r"(?:"
+    r"\b(?:нужно|необходимо|нуж(?:ен|на|но|ны)|требу(?:ется|ются)|потребу(?:ется|ются)|"
+    r"следует|предстоит|планируется|запланировано)\b[^,:;.!?\n—–-]{0,48}|"
+    r"\bплан\s*(?:—|–|-|:)\s*[^,:;.!?\n—–-]{0,32}"
+    r")$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_WHOLE_TOTAL_PREFIX = re.compile(
+    r"(?:"
+    r"\b(?:содерж|насчитыва|име|располага)\w*|"
+    r"\bвключ\w*(?:\s+в\s+себя)?|"
+    r"\b(?:состо|разбит|разделен|распределен|поделен|сгруппирован|объединен)\w*"
+    r"\s+(?:ровно\s+)?(?:из|на|в)|"
+    r"\bв\s+состав\w*\s+вход\w*|"
+    r"\b(?:указан|перечислен|представлен|приведен|собран)\w*|"
+    r"\b(?:был[аио]?|были|есть|имеется|находится|находятся|работает|работают)"
+    r")\s*(?:(?:ровно|всего|итого|только|лишь)\s+)?$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_EXISTENTIAL_PREFIX = re.compile(r"\b(?:есть|имеется)\s*$", re.IGNORECASE)
+_ATTACHMENT_COUNT_CONTAINER_PREFIX = re.compile(
+    r"\b(?:в|на)\s+(?:(?:одн|кажд|перв|втор|трет|последн|текущ)\w*\s+)?"
+    r"(?:строк|запис|раздел|страниц|лист|таблиц|колонк|блок|секци)\w*\b"
+    r"[^,;.!?\n]{0,48}$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_POSSESSION_PREFIX = re.compile(
+    r"\bу\s+[А-ЯЁа-яё][А-ЯЁа-яё-]*(?:\s+[А-ЯЁа-яё][А-ЯЁа-яё-]*){0,3}\s*$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_PARTIAL_SUFFIX = re.compile(
+    rf"^\s*(?:\(\s*)?(?:"
+    rf"из\s+(?:(?:{_ATTACHMENT_COUNT_WORD_EXPRESSION})(?![\w-])|"
+    r"(?:общ\w*\s+)?(?:штат|состав|спис|переч|выборк|страниц|раздел|таблиц)\w*\b)|"
+    r"(?:на|в)\s+(?:(?:кажд|эт|одн|перв|втор|трет|текущ)\w*\s+)?"
+    r"(?:страниц|раздел|таблиц|лист|колонк|блок|секци)\w*\b|"
+    rf"(?:\(\s*(?:{_ATTACHMENT_COUNT_WORD_EXPRESSION})?\s*)?/\s*"
+    rf"(?:{_ATTACHMENT_COUNT_WORD_EXPRESSION})(?![\w-])|"
+    r"(?:—|–|-)\s*(?:только|лишь)\s+(?:пример|част|фрагмент)\w*\b"
+    r")",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_PARTIAL_FOLLOWUP = re.compile(
+    r"^\s*[,;—–-]\s*(?:это\s+)?(?:неполн\w*\s+(?:спис|переч)|"
+    r"(?:спис|переч)\w*\s+неполн\w*|(?:только|лишь)\s+(?:пример|част|фрагмент)\w*)\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_NON_RECORD_POINT_MODIFIER = re.compile(
+    r"\b(?:процентн|базисн|рейтингов)\w*\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_NON_RECORD_LINE_COMPLEMENT = re.compile(
+    r"^\s+(?:(?:исходн|программн)\w*\s+)?(?:код|программ|скрипт)\w*\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_CONTEXT_PREFIX = re.compile(
+    r"(?:\b(?P<scope>(?:увол|нанят|принят|выбран|отобран|удален|добавлен|"
+    r"изменен|исправ|показан|найден|подтвержд|провер|обработ|активн|неактивн|"
+    r"ошибочн)\w*|[а-яё-]{3,}(?:ен|ена|ено|ены|ан|ана|ано|аны|ян|яна|яно|яны|"
+    r"ил|ила|ило|или|ал|ала|ало|али|ял|яла|яло|яли))\b|"
+    r"\b(?P<subset>из\s+них|среди\s+них|в\s+том\s+числе|еще|дополнительно)\b)"
+    r"[^,;.!?\n]{0,40}$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_CONTEXT_SUFFIX = re.compile(
+    r"^\s+(?:(?:бы(?:л[аио]?|ли)|явля\w*)\s+)?(?P<scope>(?:увол|нанят|принят|выбран|"
+    r"отобран|удален|добавлен|изменен|исправ|показан|найден|подтвержд|"
+    r"провер|обработ|активн|неактивн|ошибочн)\w*|"
+    r"[а-яё-]{3,}(?:ен|ена|ено|ены|ан|ана|ано|аны|ян|яна|яно|яны|"
+    r"ил|ила|ило|или|ал|ала|ало|али|ял|яла|яло|яли))\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_RELATIONAL_SUFFIX = re.compile(
+    r"^\s+(?P<negation>не\s+)?"
+    r"(?P<scope>име|облада|получ|допущ|лишен|работа|труд|наход|присутств|участв)\w*\b"
+    r"(?P<object>[^,;.!?\n]{0,48})",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_FRONTED_RELATIONAL_PREFIX = re.compile(
+    r"\b(?P<object>[а-яё-]{2,}(?:\s+[а-яё-]{2,}){0,3})\s+"
+    r"(?P<negation>не\s+)?"
+    r"(?P<scope>имеют|имели|обладают|обладали|получили|получают|получат|"
+    r"работают|работали|трудятся|трудились|находятся|находились|"
+    r"присутствуют|присутствовали|участвуют|участвовали)\s*$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_EXPLICIT_SUBSET_PREFIX = re.compile(
+    r"(?:"
+    r"\b(?:из\s+них|в\s+том\s+числе|еще|дополнительно)\b|"
+    r"\bиз\s+(?:(?:общ\w*|всего)\s+)?"
+    r"(?:числ|количеств|состав|штат|спис|переч|реестр|выборк)\w*\b|"
+    r"\bсреди\s+(?!прочего\b)[а-яё-]+(?:\s+[а-яё-]+){0,2}\b|"
+    r"\b(?:часть|доля)\s+(?:(?:общ\w*|всего)\s+)?"
+    r"(?:числ|количеств|состав|штат|спис|переч|реестр|выборк)\w*\b"
+    r")",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_LOCAL_SCOPE_PREFIX = re.compile(
+    r"\b(?:в|на)\s+(?P<scope>"
+    r"(?:(?:одн|перв|втор|трет|четверт|последн|текущ|отдельн|кажд)\w*\s+)?"
+    r"(?:отдел|подразделен|департамент|филиал|офис|групп|команд|смен|"
+    r"регион|город|проект|категори|выборк|участ|сектор|приложен)\w*"
+    r")\b[^,;.!?\n]{0,48}$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_LOCAL_SUBJECT_PREFIX = re.compile(
+    r"\b(?P<scope>"
+    r"(?:(?:одн|перв|втор|трет|четверт|последн|текущ|отдельн|кажд)\w*\s+)?"
+    r"(?:отдел|подразделен|департамент|филиал|офис|групп|команд|смен|"
+    r"регион|город|проект|категори|выборк|участ|сектор|приложен|раздел|"
+    r"страниц|лист|таблиц|колонк|блок|секци)\w*"
+    r"(?:\s*(?:(?:№|номер|#)\s*)?\d{1,4})?"
+    r")\s+(?:содерж|насчитыва|име|располага|включ)\w*(?:\s+в\s+себя)?\s*$",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_STRONG_SUBGROUP_PREFIX = re.compile(
+    r"\b(?P<scope>(?:увол|нанят|принят|выбран|отобран|удален|добавлен|"
+    r"изменен|исправ|показан|найден|подтвержд|провер|обработ|активн|"
+    r"неактивн|ошибочн)\w*)\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_HEADER_TOTAL_CUE = re.compile(
+    r"^(?:(?:общее|общее\s+фактическое|фактическое)\s+)?"
+    r"(?:количество|число|кол-во|численность|всего|итого|total|count|"
+    r"список|перечень|реестр)\s+",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_INLINE_SEPARATOR = re.compile(r"[:=]|\s+[—–-]\s+")
+_ATTACHMENT_COUNT_STATIVE_SEPARATOR = re.compile(
+    r"\b(?:составля\w*|равн\w*|насчитыва\w*|всего|итого)\s+",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_VALUE_PREFIX = re.compile(
+    rf"^\s*(?P<number>{_ATTACHMENT_COUNT_EXPRESSION})"
+    rf"(?:\s*\(\s*(?P<alternate>{_ATTACHMENT_COUNT_EXPRESSION})\s*\)"
+    rf"(?P<outer_scale>[\t \u00a0\u202f]+{_ATTACHMENT_COUNT_SCALE_EXPRESSION})?)?",
+    re.IGNORECASE,
+)
+
+
+def _attachment_count_span_is_partial(text: str, start: int, end: int) -> bool:
+    left = max(text.rfind(mark, 0, start) for mark in ("\n", ".", "!", "?", ";", ",", ":"))
+    right_candidates = [
+        position for mark in ("\n", ".", "!", "?", ";", ",", ":") if (position := text.find(mark, end)) >= 0
+    ]
+    right = min(right_candidates) if right_candidates else len(text)
+    prefix = text[max(left + 1, start - 512) : start]
+    suffix = text[end : min(right, end + 256)]
+    partial_prefix = (
+        text[max(0, start - 128) : start] if left >= 0 and text[left : left + 1] == ":" else prefix
+    )
+    prefix_is_partial = bool(
+        _ATTACHMENT_COUNT_PARTIAL_PREFIX.search(partial_prefix)
+        and not _ATTACHMENT_COUNT_WHOLE_TOTAL_PREFIX.search(partial_prefix)
+    )
+    planned_or_required = bool(
+        _ATTACHMENT_COUNT_REQUIRED_OR_PLANNED_PREFIX.search(prefix)
+        and not _ATTACHMENT_COUNT_WHOLE_TOTAL_PREFIX.search(prefix)
+    )
+    sentence_left = max(text.rfind(mark, 0, start) for mark in ("\n", ".", "!", "?"))
+    sentence_prefix = text[max(sentence_left + 1, start - 512) : start]
+    sentence_right_candidates = [
+        position for mark in ("\n", ".", "!", "?") if (position := text.find(mark, end)) >= 0
+    ]
+    sentence_right = min(sentence_right_candidates) if sentence_right_candidates else len(text)
+    sentence_terminator = text[sentence_right : sentence_right + 1]
+    return bool(
+        prefix_is_partial
+        or _ATTACHMENT_COUNT_NEGATED_PREDICATE_PREFIX.search(prefix)
+        or _ATTACHMENT_COUNT_NONASSERTIVE_SENTENCE_PREFIX.search(sentence_prefix)
+        or _ATTACHMENT_COUNT_REJECTED_CLAIM_SUFFIX.search(text[end:sentence_right])
+        or sentence_terminator == "?"
+        or _ATTACHMENT_COUNT_BOUND_PREDICATE_PREFIX.search(prefix)
+        or planned_or_required
+        or _ATTACHMENT_COUNT_CONTAINER_PREFIX.search(prefix)
+        or _ATTACHMENT_COUNT_POSSESSION_PREFIX.search(prefix)
+        or _ATTACHMENT_COUNT_PARTIAL_SUFFIX.search(suffix)
+        or _ATTACHMENT_COUNT_PARTIAL_FOLLOWUP.search(text[end : end + 96])
+    )
+
+
+def _attachment_count_is_unqualified_existential_singular(
+    text: str,
+    start: int,
+    value: int,
+) -> bool:
+    """Treat ``есть одна запись`` as existence, not a closed total."""
+
+    if value != 1:
+        return False
+    left = max(text.rfind(mark, 0, start) for mark in ("\n", ".", "!", "?", ";", ",", ":"))
+    return _ATTACHMENT_COUNT_EXISTENTIAL_PREFIX.search(text[max(left + 1, start - 128) : start]) is not None
+
+
+def _attachment_count_local_qualifier(raw: str) -> str:
+    words = tuple(
+        _attachment_unit_stem(token)
+        for token in re.findall(r"[А-ЯЁа-яё-]{3,}", str(raw or ""))
+        if token.casefold().replace("ё", "е") != "номер"
+    )
+    identifiers = tuple(f"id{value}" for value in re.findall(r"(?<!\d)\d{1,4}(?!\d)", str(raw or "")))
+    return "local:" + ":".join((*words, *identifiers))
+
+
+def _attachment_count_context_signature(text: str, start: int, end: int) -> tuple[str, ...]:
+    left = max(text.rfind(mark, 0, start) for mark in ("\n", ".", "!", "?", ";", ",", ":", "—", "–"))
+    right_candidates = [
+        position
+        for mark in ("\n", ".", "!", "?", ";", ",", ":", "—", "–")
+        if (position := text.find(mark, end)) >= 0
+    ]
+    right = min(right_candidates) if right_candidates else len(text)
+    prefix = text[max(left + 1, start - 512) : start]
+    if left >= 0 and text[left : left + 1] in {":", "—", "–"}:
+        previous_left = max(
+            text.rfind(mark, 0, left) for mark in ("\n", ".", "!", "?", ";", ",", ":", "—", "–")
+        )
+        context_header = text[max(previous_left + 1, left - 128) : left].strip()
+        if context_header and not _ATTACHMENT_COUNT_REQUIRED_OR_PLANNED_PREFIX.search(context_header):
+            prefix = f"{context_header} {prefix}"
+    signatures: set[str] = set()
+
+    def followed_by_prior_count_unit(matched: re.Match[str], group: str) -> bool:
+        return bool(
+            re.search(
+                rf"(?<![\w-]){_ATTACHMENT_REVIEW_COUNT_UNIT}(?![\w-])",
+                prefix[matched.end(group) :],
+                re.IGNORECASE,
+            )
+        )
+
+    explicit_subset = _ATTACHMENT_COUNT_EXPLICIT_SUBSET_PREFIX.search(prefix)
+    if explicit_subset is not None:
+        signatures.add("subset")
+    local_scope = _ATTACHMENT_COUNT_LOCAL_SCOPE_PREFIX.search(prefix)
+    if local_scope is not None:
+        signatures.add(_attachment_count_local_qualifier(local_scope.group("scope")))
+    local_subject = _ATTACHMENT_COUNT_LOCAL_SUBJECT_PREFIX.search(prefix)
+    if local_subject is not None:
+        signatures.add(_attachment_count_local_qualifier(local_subject.group("scope")))
+    fronted_relation = _ATTACHMENT_COUNT_FRONTED_RELATIONAL_PREFIX.search(prefix)
+    if fronted_relation is not None:
+        object_tokens = tuple(
+            _attachment_unit_stem(token)
+            for token in re.findall(r"[А-ЯЁа-яё-]{3,}", fronted_relation.group("object"))
+            if token.casefold().replace("ё", "е") not in {"всего", "итого"}
+        )
+        if object_tokens:
+            signatures.add(
+                ":".join(
+                    (
+                        "state",
+                        "not" if fronted_relation.group("negation") else "yes",
+                        _attachment_count_qualifier_key(fronted_relation.group("scope")),
+                        *object_tokens,
+                    )
+                )
+            )
+    strong_matches = [
+        matched
+        for matched in _ATTACHMENT_COUNT_STRONG_SUBGROUP_PREFIX.finditer(prefix)
+        if not followed_by_prior_count_unit(matched, "scope")
+    ]
+    signatures.update(_attachment_count_qualifier_key(matched.group("scope")) for matched in strong_matches)
+
+    if not signatures and not _ATTACHMENT_COUNT_WHOLE_TOTAL_PREFIX.search(prefix):
+        prefix_matches = list(_ATTACHMENT_COUNT_CONTEXT_PREFIX.finditer(prefix))
+        prefix_match = prefix_matches[-1] if prefix_matches else None
+        if prefix_match is not None:
+            group = "subset" if prefix_match.groupdict().get("subset") else "scope"
+            if not followed_by_prior_count_unit(prefix_match, group):
+                if group == "subset":
+                    signatures.add("subset")
+                else:
+                    signatures.add(_attachment_count_qualifier_key(prefix_match.group("scope")))
+
+    suffix = text[end : min(right, end + 256)]
+    suffix_match = _ATTACHMENT_COUNT_CONTEXT_SUFFIX.search(suffix)
+    if suffix_match is not None:
+        signatures.add(_attachment_count_qualifier_key(suffix_match.group("scope")))
+    relational_suffix = _ATTACHMENT_COUNT_RELATIONAL_SUFFIX.search(suffix)
+    if relational_suffix is not None:
+        object_stems = tuple(
+            _attachment_unit_stem(token)
+            for token in re.findall(r"[А-ЯЁа-яё-]{3,}", relational_suffix.group("object"))[:3]
+        )
+        signatures.add(
+            ":".join(
+                (
+                    "state",
+                    "not" if relational_suffix.group("negation") else "yes",
+                    _attachment_count_qualifier_key(relational_suffix.group("scope")),
+                    *object_stems,
+                )
+            )
+        )
+    return tuple(sorted(signatures))
+
+
+def _attachment_count_header_scope(raw: str, value: int) -> tuple[str, tuple[str, ...]] | None:
+    folded = str(raw or "").casefold().replace("ё", "е").strip()
+    unit_match = re.search(
+        rf"(?P<unit>{_ATTACHMENT_REVIEW_COUNT_UNIT})(?![\w-])"
+        r"(?P<location>\s+(?:в|на)\s+"
+        r"(?:(?:эт|данн|текущ|исходн|одн|перв|втор|трет|последн)\w*\s+){0,2}"
+        r"(?:документ|файл|спис|переч|реестр|приложен|раздел|страниц|лист|"
+        r"таблиц|колонк|блок|секци|отдел|подразделен|департамент|филиал|офис)\w*"
+        r"(?:\s*(?:(?:№|номер|#)\s*)?\d{1,4})?"
+        r")?\s*$",
+        folded,
+    )
+    if unit_match is None:
+        return None
+    unit, _category = _attachment_record_count_unit(unit_match.group("unit"))
+    if not unit:
+        return None
+    modifiers = folded[: unit_match.start()].strip()
+    modifiers = _ATTACHMENT_COUNT_HEADER_TOTAL_CUE.sub("", f"{modifiers} ", count=1).strip()
+    if modifiers and not _attachment_count_modifiers_valid(value, modifiers, header=True):
+        return None
+    qualifiers = set(_attachment_count_modifier_signature(modifiers))
+    location = unit_match.group("location") or ""
+    if location and not re.search(r"\b(?:документ|файл|спис|переч|реестр)\w*\b", location):
+        qualifiers.add(_attachment_count_local_qualifier(location))
+    return unit, tuple(sorted(qualifiers))
+
+
+def _attachment_count_prefix_value(raw: str) -> tuple[int, int] | None:
+    matched = _ATTACHMENT_COUNT_VALUE_PREFIX.match(str(raw or "").casefold().replace("ё", "е"))
+    if matched is None:
+        return None
+    outer_scale = matched.group("outer_scale") or ""
+    value = _attachment_record_count_value(f"{matched.group('number')}{outer_scale}")
+    alternate_raw = matched.group("alternate")
+    alternate = _attachment_record_count_value(f"{alternate_raw}{outer_scale}") if alternate_raw else value
+    if value is None or alternate != value:
+        return None
+    remainder = str(raw or "")[matched.end() :]
+    if re.match(r"\s*[,./\-–—]\s*\d", remainder) or re.match(r"\s*%", remainder):
+        return None
+    if remainder and re.match(r"\s*(?:$|[,;.!?—–-])", remainder) is None:
+        return None
+    return value, matched.end()
+
+
+def _attachment_count_prefix_contradiction(raw: str) -> tuple[bool, int | None]:
+    matched = _ATTACHMENT_COUNT_VALUE_PREFIX.match(str(raw or "").casefold().replace("ё", "е"))
+    if matched is None or not matched.group("alternate"):
+        return False, None
+    outer_scale = matched.group("outer_scale") or ""
+    value = _attachment_record_count_value(f"{matched.group('number')}{outer_scale}")
+    alternate = _attachment_record_count_value(f"{matched.group('alternate')}{outer_scale}")
+    return value is None or alternate != value, value
+
+
+def _attachment_count_enclosing_header_scope(
+    text: str,
+    start: int,
+    value: int,
+) -> tuple[str, tuple[str, ...]] | None:
+    line_start = text.rfind("\n", 0, start) + 1
+    prefix = text[max(line_start, start - 512) : start]
+    separators = list(_ATTACHMENT_COUNT_INLINE_SEPARATOR.finditer(prefix))
+    if separators:
+        separator = separators[-1]
+        header = re.split(r"[;,!?]|\.(?=\s|$)", prefix[: separator.start()])[-1]
+        scope = _attachment_count_header_scope(header, value)
+        if scope is not None:
+            return scope
+    stative_separators = list(_ATTACHMENT_COUNT_STATIVE_SEPARATOR.finditer(prefix))
+    if stative_separators:
+        separator = stative_separators[-1]
+        header = re.split(r"[;,!?]|\.(?=\s|$)", prefix[: separator.start()])[-1]
+        scope = _attachment_count_header_scope(header, value)
+        if scope is not None:
+            return scope
+    if prefix.strip():
+        return None
+    previous_end = line_start - 1
+    if previous_end <= 0:
+        return None
+    previous_start = text.rfind("\n", 0, previous_end) + 1
+    previous = text[previous_start:previous_end].strip()
+    header = re.fullmatch(r"(?P<header>.+?)\s*[:=]\s*", previous)
+    return _attachment_count_header_scope(header.group("header"), value) if header is not None else None
+
+
+def _attachment_record_count_header_relations(
+    text: str,
+) -> list[tuple[str, str, tuple[str, ...]]]:
+    relations: list[tuple[str, str, tuple[str, ...]]] = []
+    active_header = ""
+    for raw_line in str(text or "").splitlines() or [str(text or "")]:
+        line = raw_line.strip()
+        if not line:
+            active_header = ""
+            continue
+        if active_header:
+            parsed = _attachment_count_prefix_value(line)
+            if parsed is not None:
+                value, _end = parsed
+                scope = _attachment_count_header_scope(active_header, value)
+                if scope is not None:
+                    unit, qualifiers = scope
+                    relations.append((str(value), unit, qualifiers))
+            active_header = ""
+
+        for separator in _ATTACHMENT_COUNT_INLINE_SEPARATOR.finditer(line):
+            parsed = _attachment_count_prefix_value(line[separator.end() :])
+            if parsed is None:
+                continue
+            value, _end = parsed
+            header = re.split(r"[;,!?]|\.(?=\s|$)", line[: separator.start()])[-1]
+            scope = _attachment_count_header_scope(header, value)
+            if scope is not None:
+                unit, qualifiers = scope
+                relations.append((str(value), unit, qualifiers))
+
+        for separator in _ATTACHMENT_COUNT_STATIVE_SEPARATOR.finditer(line):
+            parsed = _attachment_count_prefix_value(line[separator.end() :])
+            if parsed is None:
+                continue
+            value, _end = parsed
+            header = re.split(r"[;,!?]|\.(?=\s|$)", line[: separator.start()])[-1]
+            scope = _attachment_count_header_scope(header, value)
+            if scope is not None:
+                unit, qualifiers = scope
+                relations.append((str(value), unit, qualifiers))
+
+        header = re.fullmatch(r"(?P<header>.+?)\s*[:=]\s*", line)
+        if header is not None:
+            active_header = header.group("header")
+    return relations
+
+
+def _attachment_has_contradictory_record_count_header(text: str) -> bool:
+    active_header = ""
+    for raw_line in str(text or "").splitlines() or [str(text or "")]:
+        line = raw_line.strip()
+        if not line:
+            active_header = ""
+            continue
+        if active_header:
+            contradictory, value = _attachment_count_prefix_contradiction(line)
+            if contradictory and value is not None and _attachment_count_header_scope(active_header, value):
+                return True
+            active_header = ""
+        for separator_pattern in (
+            _ATTACHMENT_COUNT_INLINE_SEPARATOR,
+            _ATTACHMENT_COUNT_STATIVE_SEPARATOR,
+        ):
+            for separator in separator_pattern.finditer(line):
+                contradictory, value = _attachment_count_prefix_contradiction(line[separator.end() :])
+                if not contradictory or value is None:
+                    continue
+                header = re.split(r"[;,!?]|\.(?=\s|$)", line[: separator.start()])[-1]
+                if _attachment_count_header_scope(header, value):
+                    return True
+        header = re.fullmatch(r"(?P<header>.+?)\s*[:=]\s*", line)
+        if header is not None:
+            active_header = header.group("header")
+    return False
+
+
+def _attachment_source_supports_record_count(
+    number: str,
+    unit: str,
+    qualifiers: tuple[str, ...],
+    source_relations: Sequence[tuple[str, str, tuple[str, ...]]],
+) -> bool:
+    """Require a local count shape, not unrelated values in the same clause."""
+
+    return any(
+        source_number == number
+        and _attachment_units_compatible(source_unit, unit)
+        and source_qualifiers == qualifiers
+        for source_number, source_unit, source_qualifiers in source_relations
+    )
 
 
 _ATTACHMENT_QUANTITY_ANCHOR_STEMS = frozenset(
@@ -15726,6 +16602,7 @@ def _attachment_deterministic_drift_issues(
         answer_quantities, evidence_quantities
     ) or not _attachment_directional_relations_supported(answer, evidence):
         issues.append("attachment_relation_not_in_evidence")
+    issues.extend(_attachment_derived_record_count_issues(answer, evidence_entries))
     return issues
 
 
@@ -15755,7 +16632,7 @@ _ATTACHMENT_RECORD_COUNT_UNIT_PREFIXES = (
     "объект",
     "контакт",
 )
-_ATTACHMENT_PERSON_COUNT_UNIT_EXACT_STEMS = frozenset({"им"})
+_ATTACHMENT_PERSON_COUNT_UNIT_EXACT_STEMS = frozenset({"им", "имя"})
 _ATTACHMENT_RECORD_COUNT_UNIT_EXACT_STEMS = frozenset({"зап"})
 _ATTACHMENT_PERSON_NAME_LINE = re.compile(
     r"^\s*(?:[А-ЯЁ]{2,}(?:-[А-ЯЁ]{2,})?|[А-ЯЁ][а-яё-]{2,})\s+"
@@ -15800,6 +16677,109 @@ def _attachment_structured_record_counts(value: Any) -> set[int]:
     return counts
 
 
+_ATTACHMENT_TABULAR_HEADER_VALUES = frozenset(
+    {
+        "item",
+        "items",
+        "name",
+        "position",
+        "role",
+        "state",
+        "status",
+        "должность",
+        "имя",
+        "наименование",
+        "название",
+        "позиция",
+        "роль",
+        "состояние",
+        "статус",
+        "фио",
+    }
+)
+_ATTACHMENT_NUMBERED_LIST_ITEM = re.compile(r"^\s*\d{1,9}\s*[.)]\s+\S")
+
+
+def _attachment_tabular_header_like(values: Sequence[Any]) -> bool:
+    return any(
+        str(value or "").casefold().replace("ё", "е").strip(" \t:._-") in _ATTACHMENT_TABULAR_HEADER_VALUES
+        for value in values
+    )
+
+
+def _attachment_structured_tabular_record_counts(value: Any) -> set[int]:
+    """Infer rows only from a complete emitted table with a proved header."""
+
+    counts: set[int] = set()
+    if isinstance(value, Mapping):
+        items = value.get("items")
+        if (
+            value.get("complete_for_prompt") is True
+            and not value.get("omission_reasons")
+            and isinstance(items, list)
+        ):
+            tables: dict[str, list[Mapping[str, Any]]] = {}
+            for item in items:
+                if not isinstance(item, Mapping) or item.get("kind") != "row":
+                    continue
+                tables.setdefault(str(item.get("block_id") or ""), []).append(item)
+            for rows in tables.values():
+                if len(rows) < 3:
+                    continue
+                first = rows[0]
+                if first.get("role") != "header":
+                    continue
+                trailing_roles = [str(row.get("role") or "unknown") for row in rows[1:]]
+                if any(role not in {"data", "record"} for role in trailing_roles):
+                    continue
+                data_rows = rows[1:]
+                if len(data_rows) >= 2:
+                    counts.add(len(data_rows))
+        for item in value.values():
+            if isinstance(item, (Mapping, list, tuple)):
+                counts.update(_attachment_structured_tabular_record_counts(item))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            counts.update(_attachment_structured_tabular_record_counts(item))
+    return counts
+
+
+def _attachment_delimited_tabular_record_counts(evidence: str) -> set[int]:
+    counts: set[int] = set()
+    group: list[list[str]] = []
+
+    def settle() -> None:
+        if len(group) < 3 or not _attachment_tabular_header_like(group[0]):
+            return
+        width = len(group[0])
+        if width < 2 or not all(len(row) == width and all(cell for cell in row) for row in group):
+            return
+        data_rows = group[1:]
+        if data_rows and all(re.fullmatch(r":?-{3,}:?", cell) for cell in data_rows[0]):
+            data_rows = data_rows[1:]
+        if len(data_rows) >= 2:
+            counts.add(len(data_rows))
+
+    for raw_line in str(evidence or "").splitlines():
+        cells = [cell.strip() for cell in raw_line.split("|")]
+        if len(cells) >= 2 and all(cells):
+            group.append(cells)
+            continue
+        settle()
+        group = []
+    settle()
+    return counts
+
+
+def _attachment_numbered_record_count_candidates(
+    evidence_entries: Sequence[Mapping[str, Any]],
+) -> set[int]:
+    records = _list_item_records(_attachment_drift_evidence_text(evidence_entries))
+    if len(records) >= 2 and all(_ATTACHMENT_NUMBERED_LIST_ITEM.match(item) for item in records):
+        return {len(records)}
+    return set()
+
+
 def _attachment_record_count_candidates(
     evidence_entries: Sequence[Mapping[str, Any]],
 ) -> tuple[set[int], set[int]]:
@@ -15836,10 +16816,12 @@ def _attachment_record_count_candidates(
             except (TypeError, ValueError, json.JSONDecodeError):
                 continue
             generic.update(_attachment_structured_record_counts(payload))
+            generic.update(_attachment_structured_tabular_record_counts(payload))
 
     evidence = _attachment_drift_evidence_text(evidence_entries)
     if not evidence.strip():
         return generic, people
+    generic.update(_attachment_delimited_tabular_record_counts(evidence))
     list_records = _list_item_records(evidence)
     if len(list_records) >= 2:
         generic.add(len(list_records))
@@ -15863,6 +16845,116 @@ def _attachment_record_count_candidates(
     return generic, people
 
 
+def _attachment_record_count_category(unit: str) -> str:
+    _key, category = _attachment_record_count_unit(unit)
+    return category
+
+
+def _attachment_record_count_relations(text: str) -> list[tuple[str, str, tuple[str, ...]]]:
+    """Return only whole-set record/person counts from one answer or source."""
+
+    folded = str(text or "").casefold().replace("ё", "е")
+    if not _ATTACHMENT_REVIEW_COUNT_UNIT_HINT.search(folded):
+        return []
+    relations: list[tuple[str, str, tuple[str, ...]]] = []
+    for index, matched in enumerate(_ATTACHMENT_RECORD_COUNT_RELATION.finditer(folded)):
+        if index >= _ATTACHMENT_COUNT_RELATION_MAX_MATCHES:
+            break
+        if _attachment_count_has_numeric_prefix(folded, matched.start()):
+            continue
+        outer_scale = matched.group("outer_scale") or ""
+        value = _attachment_record_count_value(f"{matched.group('number')}{outer_scale}")
+        alternate_raw = matched.group("alternate")
+        alternates = [
+            _attachment_record_count_value(f"{alternate_raw}{outer_scale}") if alternate_raw else value,
+            _attachment_record_count_value(matched.group("post_alternate"))
+            if matched.group("post_alternate")
+            else value,
+        ]
+        if value is None or any(alternate != value for alternate in alternates):
+            continue
+        if _attachment_count_is_unqualified_existential_singular(folded, matched.start(), value):
+            continue
+        modifiers = matched.group("modifiers")
+        unit_raw = matched.group("unit")
+        if matched.group("number").split() == ["семью"] and not unit_raw.endswith(("ами", "ями", "ьми")):
+            continue
+        if _ATTACHMENT_COUNT_ORDINAL_MODIFIER.search(modifiers) or not _attachment_count_modifiers_valid(
+            value, modifiers
+        ):
+            continue
+        unit, category = _attachment_record_count_unit(unit_raw)
+        if not category:
+            continue
+        if unit == "строка" and _ATTACHMENT_COUNT_NON_RECORD_LINE_COMPLEMENT.search(folded[matched.end() :]):
+            continue
+        if _attachment_count_span_is_partial(folded, matched.start(), matched.end()):
+            continue
+        if unit in {"пункт", "позиция"} and _ATTACHMENT_NON_RECORD_POINT_MODIFIER.search(modifiers):
+            continue
+        header_scope = _attachment_count_enclosing_header_scope(folded, matched.start(), value)
+        header_qualifiers: tuple[str, ...] = ()
+        if header_scope is not None:
+            header_unit, header_qualifiers = header_scope
+            if _attachment_record_count_category(header_unit) != category:
+                header_qualifiers = (f"header:{header_unit}",)
+        qualifiers = tuple(
+            sorted(
+                {
+                    *_attachment_count_modifier_signature(modifiers),
+                    *_attachment_count_context_signature(folded, matched.start(), matched.end()),
+                    *header_qualifiers,
+                }
+            )
+        )
+        relations.append(
+            (
+                str(value),
+                unit,
+                qualifiers,
+            )
+        )
+    relations.extend(_attachment_record_count_header_relations(folded))
+    return list(dict.fromkeys(relations))
+
+
+def _attachment_has_contradictory_record_count_notation(text: str) -> bool:
+    folded = str(text or "").casefold().replace("ё", "е")
+    if not _ATTACHMENT_REVIEW_COUNT_UNIT_HINT.search(folded):
+        return False
+    for index, matched in enumerate(_ATTACHMENT_RECORD_COUNT_RELATION.finditer(folded)):
+        if index >= _ATTACHMENT_COUNT_RELATION_MAX_MATCHES:
+            break
+        alternate_raw = matched.group("alternate")
+        post_alternate = matched.group("post_alternate")
+        if (
+            not alternate_raw
+            and not post_alternate
+            or _attachment_count_has_numeric_prefix(folded, matched.start())
+        ):
+            continue
+        outer_scale = matched.group("outer_scale") or ""
+        value = _attachment_record_count_value(f"{matched.group('number')}{outer_scale}")
+        alternates = [
+            _attachment_record_count_value(f"{alternate_raw}{outer_scale}") if alternate_raw else value,
+            _attachment_record_count_value(post_alternate) if post_alternate else value,
+        ]
+        if all(alternate == value for alternate in alternates):
+            continue
+        modifiers = matched.group("modifiers")
+        if (
+            value is not None
+            and _attachment_count_modifiers_valid(value, modifiers)
+            and _attachment_record_count_unit(matched.group("unit"))[1]
+            and not _attachment_count_span_is_partial(folded, matched.start(), matched.end())
+        ):
+            return True
+    return _attachment_has_contradictory_record_count_header(folded)
+
+
+_ATTACHMENT_COUNT_CODE_PROVABLE_QUALIFIERS = frozenset({"нумерова"})
+
+
 def _attachment_derived_record_count_issues(
     answer: str,
     evidence_entries: Sequence[Mapping[str, Any]],
@@ -15872,32 +16964,33 @@ def _attachment_derived_record_count_issues(
     evidence = _attachment_drift_evidence_text(evidence_entries)
     if not evidence.strip():
         return []
-    normalized_answer = _attachment_quantity_normalized(answer)
-    normalized_evidence = _attachment_quantity_normalized(evidence)
-    source_relations = _attachment_quantity_relations(normalized_evidence)
+    for index, _matched in enumerate(_ATTACHMENT_RECORD_COUNT_RELATION.finditer(str(answer or ""))):
+        if index >= _ATTACHMENT_COUNT_RELATION_MAX_MATCHES:
+            return ["attachment_derived_record_count_not_in_evidence"]
+    if _attachment_has_contradictory_record_count_notation(answer):
+        return ["attachment_derived_record_count_not_in_evidence"]
+    source_relations = _attachment_record_count_relations(evidence)
     generic_counts, people_counts = _attachment_record_count_candidates(evidence_entries)
-    for number, unit in _attachment_quantity_relations(normalized_answer):
+    numbered_counts = _attachment_numbered_record_count_candidates(evidence_entries)
+    for number, unit, qualifiers in _attachment_record_count_relations(answer):
         if not number.isdigit():
             continue
-        category = (
-            "people"
-            if unit in _ATTACHMENT_PERSON_COUNT_UNIT_EXACT_STEMS
-            or unit.startswith(_ATTACHMENT_PERSON_COUNT_UNIT_PREFIXES)
-            else "records"
-            if unit in _ATTACHMENT_RECORD_COUNT_UNIT_EXACT_STEMS
-            or unit.startswith(_ATTACHMENT_RECORD_COUNT_UNIT_PREFIXES)
-            else ""
-        )
-        if not category or _attachment_source_supports_quantity(
+        category = _attachment_record_count_category(unit)
+        if not category or _attachment_source_supports_record_count(
             number,
             unit,
-            normalized_evidence,
+            qualifiers,
             source_relations,
         ):
             continue
         claimed = int(number)
         candidates = people_counts if category == "people" else generic_counts
-        if claimed not in candidates:
+        code_qualifiers_supported = bool(
+            qualifiers
+            and set(qualifiers).issubset(_ATTACHMENT_COUNT_CODE_PROVABLE_QUALIFIERS)
+            and claimed in numbered_counts
+        )
+        if claimed not in candidates or qualifiers and not code_qualifiers_supported:
             return ["attachment_derived_record_count_not_in_evidence"]
     return []
 
@@ -15913,6 +17006,35 @@ def _attachment_positive_absolute_quality_claim(answer: str) -> bool:
         clause_end = min(clause_end_candidates) if clause_end_candidates else len(answer)
         clause = answer[clause_start + 1 : clause_end].casefold().replace("ё", "е")
         if not re.search(r"\b(?:не|нельзя|not|isn['’]?t|aren['’]?t)\b", clause):
+            return True
+    return False
+
+
+def _attachment_has_direct_quantity_contradiction(answer: str, evidence: str) -> bool:
+    """Reject a changed value only when the source states the same unit."""
+
+    answer_normalized = _attachment_quantity_normalized(answer)
+    evidence_normalized = _attachment_quantity_normalized(evidence)
+    source = list(_ATTACHMENT_QUANTITY_UNIT.finditer(evidence_normalized))
+    for claim in _ATTACHMENT_QUANTITY_UNIT.finditer(answer_normalized):
+        if _attachment_count_span_is_partial(answer_normalized, claim.start(), claim.end()):
+            continue
+        number = _attachment_number_canonical(claim.group("number"))
+        unit = _attachment_unit_stem(claim.group("unit"))
+        comparable = [
+            matched
+            for matched in source
+            if _attachment_units_compatible(_attachment_unit_stem(matched.group("unit")), unit)
+        ]
+        if comparable and not any(
+            _attachment_number_canonical(matched.group("number")) == number
+            and not _attachment_count_span_is_partial(
+                evidence_normalized,
+                matched.start(),
+                matched.end(),
+            )
+            for matched in comparable
+        ):
             return True
     return False
 
@@ -15936,7 +17058,9 @@ def _attachment_verdict_with_deterministic_drift(
         issues = []
         if not _attachment_named_values_supported(answer, evidence):
             issues.append("attachment_proper_name_not_in_evidence")
-        if not _attachment_entity_values_supported(answer_quantities, evidence_quantities):
+        if not _attachment_entity_values_supported(
+            answer_quantities, evidence_quantities
+        ) or _attachment_has_direct_quantity_contradiction(answer_quantities, evidence_quantities):
             issues.append("attachment_quantity_not_in_evidence")
         if not _attachment_bounds_supported(
             answer_quantities, evidence_quantities
@@ -37271,8 +38395,27 @@ class AgentRuntime:
         # tool output, but unlike real ``response['tool_evidence']`` they never
         # leave this stack frame.  Put them first: this answer saw the file
         # directly, whereas optional tools may have gathered adjacent context.
+        office_only_attachment_evidence = bool(
+            active_attachment_set
+            and all(
+                isinstance(item, Mapping) and looks_like_office_attachment(item)
+                for item in active_attachment_set
+            )
+        )
+        attachment_evidence_relevant = bool(
+            not office_only_attachment_evidence
+            or synthetic_document_notice
+            or whole_document_task
+            or document_metadata_evidence_requested
+            or isinstance(hierarchy_bundle_value, _AttachmentHierarchyBundle)
+            or attachment_request_projection.applied
+            or office_request_kind(attachment_task_message)
+            or office_exact_request_detected(attachment_task_message)
+            or office_exhaustive_scope(attachment_task_message)
+        )
+        verification_attachment_evidence = attachment_evidence if attachment_evidence_relevant else []
         verification_evidence = [
-            *attachment_evidence,
+            *verification_attachment_evidence,
             *(response.get("tool_evidence") or [])[:_MAX_TOOL_EVIDENCE],
         ]
         web_tool_names = {"web_search", "web_research", "web_fetch"}
@@ -37390,7 +38533,7 @@ class AgentRuntime:
                 model_said,
             )
         )
-        if attachment_evidence:
+        if verification_attachment_evidence:
             secondary_deadline = time.monotonic() + _ATTACHMENT_SECONDARY_BUDGET_SEC
             context.attachment_secondary_deadline = (
                 min(secondary_deadline, context.turn_deadline)
@@ -37484,7 +38627,10 @@ class AgentRuntime:
             # holding a foreground slot for 24 minutes.
             # Порог считается по словам МОДЕЛИ: структурный факт длину набирает,
             # а судить в нём нечего.
-            and (len(model_said) >= self.settings.verify_min_answer_chars or bool(attachment_evidence))
+            and (
+                len(model_said) >= self.settings.verify_min_answer_chars
+                or bool(verification_attachment_evidence)
+            )
             # Проверять есть смысл только там, где есть С ЧЕМ сверять.
             #
             # Судья складывает данные из личных записей и результатов
@@ -37499,8 +38645,8 @@ class AgentRuntime:
             # Предупреждение, которое появляется не по делу, обесценивает те, что
             # по делу: человек перестаёт их читать — и пропустит настоящее
             # расхождение с документом.
-            and (context.knowledge_hits or response.get("tool_evidence") or attachment_evidence)
-            and (not context.small_talk or bool(attachment_evidence))
+            and (context.knowledge_hits or response.get("tool_evidence") or verification_attachment_evidence)
+            and (not context.small_talk or bool(verification_attachment_evidence))
             # Судить нечего, если модель не говорила.
             #
             # Найдено разбором СВОЕЙ ЖЕ правки, гейт этого не показал бы. Ответ,
@@ -37524,11 +38670,11 @@ class AgentRuntime:
                 context,
                 tool_evidence=verification_evidence,
             )
-        if attachment_evidence and attachment_verification_complete and model_said:
+        if verification_attachment_evidence and attachment_verification_complete and model_said:
             verification = _attachment_verdict_with_deterministic_drift(
                 verification,
                 model_said,
-                attachment_evidence,
+                verification_attachment_evidence,
                 high_confidence_only=open_attachment_review_one_pass,
             )
         if web_verifier_evidence_incomplete:
@@ -37679,11 +38825,11 @@ class AgentRuntime:
                         context,
                         tool_evidence=verification_evidence,
                     )
-                    if attachment_verification_complete:
+                    if verification_attachment_evidence and attachment_verification_complete:
                         verification = _attachment_verdict_with_deterministic_drift(
                             verification,
                             model_said,
-                            attachment_evidence,
+                            verification_attachment_evidence,
                             high_confidence_only=open_attachment_review_one_pass,
                         )
                     verification_status = str(verification.get("status") or VERDICT_SKIPPED)
@@ -37743,7 +38889,7 @@ class AgentRuntime:
             verification_status = VERDICT_UNKNOWN
         if (
             not context.source_search_used
-            and attachment_evidence
+            and verification_attachment_evidence
             and model_said
             and verification_status == VERDICT_FAILED
         ):
@@ -37834,7 +38980,7 @@ class AgentRuntime:
         if (
             verification_status == VERDICT_PASSED
             and not response.get("tool_evidence")
-            and not attachment_evidence
+            and not verification_attachment_evidence
         ):
             rested_on = self._extract_cited_knowledge_ids(content, context)
             if not rested_on:
