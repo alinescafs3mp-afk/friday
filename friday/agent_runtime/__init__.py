@@ -14692,6 +14692,10 @@ _ATTACHMENT_RECORD_COUNT_UNIT_FORMS: tuple[tuple[str, str, str], ...] = (
 _ATTACHMENT_REVIEW_COUNT_UNIT = (
     "(?:" + "|".join(form for form, _key, _category in _ATTACHMENT_RECORD_COUNT_UNIT_FORMS) + ")"
 )
+_ATTACHMENT_REVIEW_COUNT_UNIT_HINT = re.compile(
+    rf"(?<![\w-]){_ATTACHMENT_REVIEW_COUNT_UNIT}(?![\w-])",
+    re.IGNORECASE,
+)
 _ATTACHMENT_COUNT_MODIFIER = (
     rf"(?!(?:и|или|либо|and|or)\b)(?!(?:{_ATTACHMENT_REVIEW_COUNT_UNIT})(?![\w-]))"
     r"(?:[А-ЯЁа-яё]+(?:-[А-ЯЁа-яё]+)*)"
@@ -14946,6 +14950,8 @@ def _attachment_count_modifiers_valid(value: int, raw: str, *, header: bool = Fa
 
 
 _ATTACHMENT_COUNT_QUALIFIER_ROOTS: tuple[tuple[str, str], ...] = (
+    ("пронумерова", "нумерова"),
+    ("нумерова", "нумерова"),
     ("присутств", "присутств"),
     ("участв", "участв"),
     ("наход", "наход"),
@@ -14992,6 +14998,18 @@ def _attachment_count_has_numeric_prefix(text: str, start: int) -> bool:
     """Reject a tail captured from a decimal, range, ratio, or version."""
 
     prefix = text[max(0, start - 96) : start]
+    tail = prefix.rstrip()
+    last_word = tail.rsplit(maxsplit=1)[-1].rstrip(".") if tail else ""
+    if not tail.endswith((",", ".", "/", "-", "–", "—")) and last_word not in {
+        "до",
+        "и",
+        "или",
+        "либо",
+        "млн",
+        "по",
+        "тыс",
+    }:
+        return False
     previous = rf"(?:\d{{1,9}}|{_ATTACHMENT_NUMBER_WORD_TOKEN})"
     return bool(
         re.search(rf"{previous}\s*(?:[,./\-–—]|или|либо)\s*$", prefix, re.IGNORECASE)
@@ -15029,6 +15047,7 @@ _ATTACHMENT_RECORD_COUNT_RELATION = re.compile(
     rf"(?:\s*\(\s*(?P<post_alternate>{_ATTACHMENT_COUNT_EXPRESSION})\s*\))?",
     re.IGNORECASE,
 )
+_ATTACHMENT_COUNT_RELATION_MAX_MATCHES = 512
 _ATTACHMENT_UNIT = (
     r"(?:[$€₽£¥]|"
     r"(?:(?:тыс(?:\.|\w*)?|млн|миллион\w*|млрд|миллиард\w*)\s+)?"
@@ -15142,7 +15161,8 @@ def _attachment_quantity_normalized(text: str) -> str:
             return matched.group(0)
         return f"{value}{modifiers}{matched.group('spacing')}{unit}"
 
-    normalized = _ATTACHMENT_NUMBER_WORD_COUNT_RELATION.sub(replace_cardinal, normalized)
+    if _ATTACHMENT_REVIEW_COUNT_UNIT_HINT.search(normalized):
+        normalized = _ATTACHMENT_NUMBER_WORD_COUNT_RELATION.sub(replace_cardinal, normalized)
     for pattern, number in _ATTACHMENT_LEGACY_NUMBER_WORDS:
         normalized = pattern.sub(number, normalized)
     return normalized
@@ -15547,6 +15567,14 @@ _ATTACHMENT_COUNT_BOUND_PREDICATE_PREFIX = re.compile(
     r"\bне\s+(?:выше|ниже)\s+|(?:≠|!=)\s*)[^,;.!?\n]{0,24}$",
     re.IGNORECASE,
 )
+_ATTACHMENT_COUNT_REQUIRED_OR_PLANNED_PREFIX = re.compile(
+    r"(?:"
+    r"\b(?:нужно|необходимо|нуж(?:ен|на|но|ны)|требу(?:ется|ются)|потребу(?:ется|ются)|"
+    r"следует|предстоит|планируется|запланировано)\b[^,:;.!?\n—–-]{0,48}|"
+    r"\bплан\s*(?:—|–|-|:)\s*[^,:;.!?\n—–-]{0,32}"
+    r")$",
+    re.IGNORECASE,
+)
 _ATTACHMENT_COUNT_WHOLE_TOTAL_PREFIX = re.compile(
     r"(?:"
     r"\b(?:содерж|насчитыва|име|располага)\w*|"
@@ -15556,9 +15584,10 @@ _ATTACHMENT_COUNT_WHOLE_TOTAL_PREFIX = re.compile(
     r"\bв\s+состав\w*\s+вход\w*|"
     r"\b(?:указан|перечислен|представлен|приведен|собран)\w*|"
     r"\b(?:был[аио]?|были|есть|имеется|находится|находятся|работает|работают)"
-    r")\s*$",
+    r")\s*(?:(?:ровно|всего|итого|только|лишь)\s+)?$",
     re.IGNORECASE,
 )
+_ATTACHMENT_COUNT_EXISTENTIAL_PREFIX = re.compile(r"\b(?:есть|имеется)\s*$", re.IGNORECASE)
 _ATTACHMENT_COUNT_CONTAINER_PREFIX = re.compile(
     r"\b(?:в|на)\s+(?:(?:одн|кажд|перв|втор|трет|последн|текущ)\w*\s+)?"
     r"(?:строк|запис|раздел|страниц|лист|таблиц|колонк|блок|секци)\w*\b"
@@ -15588,6 +15617,10 @@ _ATTACHMENT_COUNT_PARTIAL_FOLLOWUP = re.compile(
 )
 _ATTACHMENT_NON_RECORD_POINT_MODIFIER = re.compile(
     r"\b(?:процентн|базисн|рейтингов)\w*\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_COUNT_NON_RECORD_LINE_COMPLEMENT = re.compile(
+    r"^\s+(?:(?:исходн|программн)\w*\s+)?(?:код|программ|скрипт)\w*\b",
     re.IGNORECASE,
 )
 _ATTACHMENT_COUNT_CONTEXT_PREFIX = re.compile(
@@ -15676,19 +15709,26 @@ _ATTACHMENT_COUNT_VALUE_PREFIX = re.compile(
 
 
 def _attachment_count_span_is_partial(text: str, start: int, end: int) -> bool:
-    left = max(text.rfind(mark, 0, start) for mark in ("\n", ".", "!", "?", ";", ","))
+    left = max(text.rfind(mark, 0, start) for mark in ("\n", ".", "!", "?", ";", ",", ":"))
     right_candidates = [
-        position for mark in ("\n", ".", "!", "?", ";", ",") if (position := text.find(mark, end)) >= 0
+        position for mark in ("\n", ".", "!", "?", ";", ",", ":") if (position := text.find(mark, end)) >= 0
     ]
     right = min(right_candidates) if right_candidates else len(text)
-    prefix = text[left + 1 : start]
-    suffix = text[end:right]
+    prefix = text[max(left + 1, start - 512) : start]
+    suffix = text[end : min(right, end + 256)]
+    partial_prefix = (
+        text[max(0, start - 128) : start] if left >= 0 and text[left : left + 1] == ":" else prefix
+    )
     prefix_is_partial = bool(
-        _ATTACHMENT_COUNT_PARTIAL_PREFIX.search(prefix)
+        _ATTACHMENT_COUNT_PARTIAL_PREFIX.search(partial_prefix)
+        and not _ATTACHMENT_COUNT_WHOLE_TOTAL_PREFIX.search(partial_prefix)
+    )
+    planned_or_required = bool(
+        _ATTACHMENT_COUNT_REQUIRED_OR_PLANNED_PREFIX.search(prefix)
         and not _ATTACHMENT_COUNT_WHOLE_TOTAL_PREFIX.search(prefix)
     )
     sentence_left = max(text.rfind(mark, 0, start) for mark in ("\n", ".", "!", "?"))
-    sentence_prefix = text[sentence_left + 1 : start]
+    sentence_prefix = text[max(sentence_left + 1, start - 512) : start]
     sentence_right_candidates = [
         position for mark in ("\n", ".", "!", "?") if (position := text.find(mark, end)) >= 0
     ]
@@ -15701,11 +15741,25 @@ def _attachment_count_span_is_partial(text: str, start: int, end: int) -> bool:
         or _ATTACHMENT_COUNT_REJECTED_CLAIM_SUFFIX.search(text[end:sentence_right])
         or sentence_terminator == "?"
         or _ATTACHMENT_COUNT_BOUND_PREDICATE_PREFIX.search(prefix)
+        or planned_or_required
         or _ATTACHMENT_COUNT_CONTAINER_PREFIX.search(prefix)
         or _ATTACHMENT_COUNT_POSSESSION_PREFIX.search(prefix)
         or _ATTACHMENT_COUNT_PARTIAL_SUFFIX.search(suffix)
         or _ATTACHMENT_COUNT_PARTIAL_FOLLOWUP.search(text[end : end + 96])
     )
+
+
+def _attachment_count_is_unqualified_existential_singular(
+    text: str,
+    start: int,
+    value: int,
+) -> bool:
+    """Treat ``есть одна запись`` as existence, not a closed total."""
+
+    if value != 1:
+        return False
+    left = max(text.rfind(mark, 0, start) for mark in ("\n", ".", "!", "?", ";", ",", ":"))
+    return _ATTACHMENT_COUNT_EXISTENTIAL_PREFIX.search(text[max(left + 1, start - 128) : start]) is not None
 
 
 def _attachment_count_local_qualifier(raw: str) -> str:
@@ -15719,12 +15773,21 @@ def _attachment_count_local_qualifier(raw: str) -> str:
 
 
 def _attachment_count_context_signature(text: str, start: int, end: int) -> tuple[str, ...]:
-    left = max(text.rfind(mark, 0, start) for mark in ("\n", ".", "!", "?", ";", ","))
+    left = max(text.rfind(mark, 0, start) for mark in ("\n", ".", "!", "?", ";", ",", ":", "—", "–"))
     right_candidates = [
-        position for mark in ("\n", ".", "!", "?", ";", ",") if (position := text.find(mark, end)) >= 0
+        position
+        for mark in ("\n", ".", "!", "?", ";", ",", ":", "—", "–")
+        if (position := text.find(mark, end)) >= 0
     ]
     right = min(right_candidates) if right_candidates else len(text)
-    prefix = text[left + 1 : start]
+    prefix = text[max(left + 1, start - 512) : start]
+    if left >= 0 and text[left : left + 1] in {":", "—", "–"}:
+        previous_left = max(
+            text.rfind(mark, 0, left) for mark in ("\n", ".", "!", "?", ";", ",", ":", "—", "–")
+        )
+        context_header = text[max(previous_left + 1, left - 128) : left].strip()
+        if context_header and not _ATTACHMENT_COUNT_REQUIRED_OR_PLANNED_PREFIX.search(context_header):
+            prefix = f"{context_header} {prefix}"
     signatures: set[str] = set()
 
     def followed_by_prior_count_unit(matched: re.Match[str], group: str) -> bool:
@@ -15781,10 +15844,11 @@ def _attachment_count_context_signature(text: str, start: int, end: int) -> tupl
                 else:
                     signatures.add(_attachment_count_qualifier_key(prefix_match.group("scope")))
 
-    suffix_match = _ATTACHMENT_COUNT_CONTEXT_SUFFIX.search(text[end:right])
+    suffix = text[end : min(right, end + 256)]
+    suffix_match = _ATTACHMENT_COUNT_CONTEXT_SUFFIX.search(suffix)
     if suffix_match is not None:
         signatures.add(_attachment_count_qualifier_key(suffix_match.group("scope")))
-    relational_suffix = _ATTACHMENT_COUNT_RELATIONAL_SUFFIX.search(text[end:right])
+    relational_suffix = _ATTACHMENT_COUNT_RELATIONAL_SUFFIX.search(suffix)
     if relational_suffix is not None:
         object_stems = tuple(
             _attachment_unit_stem(token)
@@ -15865,7 +15929,7 @@ def _attachment_count_enclosing_header_scope(
     value: int,
 ) -> tuple[str, tuple[str, ...]] | None:
     line_start = text.rfind("\n", 0, start) + 1
-    prefix = text[line_start:start]
+    prefix = text[max(line_start, start - 512) : start]
     separators = list(_ATTACHMENT_COUNT_INLINE_SEPARATOR.finditer(prefix))
     if separators:
         separator = separators[-1]
@@ -16613,6 +16677,109 @@ def _attachment_structured_record_counts(value: Any) -> set[int]:
     return counts
 
 
+_ATTACHMENT_TABULAR_HEADER_VALUES = frozenset(
+    {
+        "item",
+        "items",
+        "name",
+        "position",
+        "role",
+        "state",
+        "status",
+        "должность",
+        "имя",
+        "наименование",
+        "название",
+        "позиция",
+        "роль",
+        "состояние",
+        "статус",
+        "фио",
+    }
+)
+_ATTACHMENT_NUMBERED_LIST_ITEM = re.compile(r"^\s*\d{1,9}\s*[.)]\s+\S")
+
+
+def _attachment_tabular_header_like(values: Sequence[Any]) -> bool:
+    return any(
+        str(value or "").casefold().replace("ё", "е").strip(" \t:._-") in _ATTACHMENT_TABULAR_HEADER_VALUES
+        for value in values
+    )
+
+
+def _attachment_structured_tabular_record_counts(value: Any) -> set[int]:
+    """Infer rows only from a complete emitted table with a proved header."""
+
+    counts: set[int] = set()
+    if isinstance(value, Mapping):
+        items = value.get("items")
+        if (
+            value.get("complete_for_prompt") is True
+            and not value.get("omission_reasons")
+            and isinstance(items, list)
+        ):
+            tables: dict[str, list[Mapping[str, Any]]] = {}
+            for item in items:
+                if not isinstance(item, Mapping) or item.get("kind") != "row":
+                    continue
+                tables.setdefault(str(item.get("block_id") or ""), []).append(item)
+            for rows in tables.values():
+                if len(rows) < 3:
+                    continue
+                first = rows[0]
+                if first.get("role") != "header":
+                    continue
+                trailing_roles = [str(row.get("role") or "unknown") for row in rows[1:]]
+                if any(role not in {"data", "record"} for role in trailing_roles):
+                    continue
+                data_rows = rows[1:]
+                if len(data_rows) >= 2:
+                    counts.add(len(data_rows))
+        for item in value.values():
+            if isinstance(item, (Mapping, list, tuple)):
+                counts.update(_attachment_structured_tabular_record_counts(item))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            counts.update(_attachment_structured_tabular_record_counts(item))
+    return counts
+
+
+def _attachment_delimited_tabular_record_counts(evidence: str) -> set[int]:
+    counts: set[int] = set()
+    group: list[list[str]] = []
+
+    def settle() -> None:
+        if len(group) < 3 or not _attachment_tabular_header_like(group[0]):
+            return
+        width = len(group[0])
+        if width < 2 or not all(len(row) == width and all(cell for cell in row) for row in group):
+            return
+        data_rows = group[1:]
+        if data_rows and all(re.fullmatch(r":?-{3,}:?", cell) for cell in data_rows[0]):
+            data_rows = data_rows[1:]
+        if len(data_rows) >= 2:
+            counts.add(len(data_rows))
+
+    for raw_line in str(evidence or "").splitlines():
+        cells = [cell.strip() for cell in raw_line.split("|")]
+        if len(cells) >= 2 and all(cells):
+            group.append(cells)
+            continue
+        settle()
+        group = []
+    settle()
+    return counts
+
+
+def _attachment_numbered_record_count_candidates(
+    evidence_entries: Sequence[Mapping[str, Any]],
+) -> set[int]:
+    records = _list_item_records(_attachment_drift_evidence_text(evidence_entries))
+    if len(records) >= 2 and all(_ATTACHMENT_NUMBERED_LIST_ITEM.match(item) for item in records):
+        return {len(records)}
+    return set()
+
+
 def _attachment_record_count_candidates(
     evidence_entries: Sequence[Mapping[str, Any]],
 ) -> tuple[set[int], set[int]]:
@@ -16649,10 +16816,12 @@ def _attachment_record_count_candidates(
             except (TypeError, ValueError, json.JSONDecodeError):
                 continue
             generic.update(_attachment_structured_record_counts(payload))
+            generic.update(_attachment_structured_tabular_record_counts(payload))
 
     evidence = _attachment_drift_evidence_text(evidence_entries)
     if not evidence.strip():
         return generic, people
+    generic.update(_attachment_delimited_tabular_record_counts(evidence))
     list_records = _list_item_records(evidence)
     if len(list_records) >= 2:
         generic.add(len(list_records))
@@ -16685,8 +16854,12 @@ def _attachment_record_count_relations(text: str) -> list[tuple[str, str, tuple[
     """Return only whole-set record/person counts from one answer or source."""
 
     folded = str(text or "").casefold().replace("ё", "е")
+    if not _ATTACHMENT_REVIEW_COUNT_UNIT_HINT.search(folded):
+        return []
     relations: list[tuple[str, str, tuple[str, ...]]] = []
-    for matched in _ATTACHMENT_RECORD_COUNT_RELATION.finditer(folded):
+    for index, matched in enumerate(_ATTACHMENT_RECORD_COUNT_RELATION.finditer(folded)):
+        if index >= _ATTACHMENT_COUNT_RELATION_MAX_MATCHES:
+            break
         if _attachment_count_has_numeric_prefix(folded, matched.start()):
             continue
         outer_scale = matched.group("outer_scale") or ""
@@ -16700,6 +16873,8 @@ def _attachment_record_count_relations(text: str) -> list[tuple[str, str, tuple[
         ]
         if value is None or any(alternate != value for alternate in alternates):
             continue
+        if _attachment_count_is_unqualified_existential_singular(folded, matched.start(), value):
+            continue
         modifiers = matched.group("modifiers")
         unit_raw = matched.group("unit")
         if matched.group("number").split() == ["семью"] and not unit_raw.endswith(("ами", "ями", "ьми")):
@@ -16710,6 +16885,8 @@ def _attachment_record_count_relations(text: str) -> list[tuple[str, str, tuple[
             continue
         unit, category = _attachment_record_count_unit(unit_raw)
         if not category:
+            continue
+        if unit == "строка" and _ATTACHMENT_COUNT_NON_RECORD_LINE_COMPLEMENT.search(folded[matched.end() :]):
             continue
         if _attachment_count_span_is_partial(folded, matched.start(), matched.end()):
             continue
@@ -16743,7 +16920,11 @@ def _attachment_record_count_relations(text: str) -> list[tuple[str, str, tuple[
 
 def _attachment_has_contradictory_record_count_notation(text: str) -> bool:
     folded = str(text or "").casefold().replace("ё", "е")
-    for matched in _ATTACHMENT_RECORD_COUNT_RELATION.finditer(folded):
+    if not _ATTACHMENT_REVIEW_COUNT_UNIT_HINT.search(folded):
+        return False
+    for index, matched in enumerate(_ATTACHMENT_RECORD_COUNT_RELATION.finditer(folded)):
+        if index >= _ATTACHMENT_COUNT_RELATION_MAX_MATCHES:
+            break
         alternate_raw = matched.group("alternate")
         post_alternate = matched.group("post_alternate")
         if (
@@ -16771,6 +16952,9 @@ def _attachment_has_contradictory_record_count_notation(text: str) -> bool:
     return _attachment_has_contradictory_record_count_header(folded)
 
 
+_ATTACHMENT_COUNT_CODE_PROVABLE_QUALIFIERS = frozenset({"нумерова"})
+
+
 def _attachment_derived_record_count_issues(
     answer: str,
     evidence_entries: Sequence[Mapping[str, Any]],
@@ -16780,10 +16964,14 @@ def _attachment_derived_record_count_issues(
     evidence = _attachment_drift_evidence_text(evidence_entries)
     if not evidence.strip():
         return []
+    for index, _matched in enumerate(_ATTACHMENT_RECORD_COUNT_RELATION.finditer(str(answer or ""))):
+        if index >= _ATTACHMENT_COUNT_RELATION_MAX_MATCHES:
+            return ["attachment_derived_record_count_not_in_evidence"]
     if _attachment_has_contradictory_record_count_notation(answer):
         return ["attachment_derived_record_count_not_in_evidence"]
     source_relations = _attachment_record_count_relations(evidence)
     generic_counts, people_counts = _attachment_record_count_candidates(evidence_entries)
+    numbered_counts = _attachment_numbered_record_count_candidates(evidence_entries)
     for number, unit, qualifiers in _attachment_record_count_relations(answer):
         if not number.isdigit():
             continue
@@ -16797,7 +16985,12 @@ def _attachment_derived_record_count_issues(
             continue
         claimed = int(number)
         candidates = people_counts if category == "people" else generic_counts
-        if qualifiers or claimed not in candidates:
+        code_qualifiers_supported = bool(
+            qualifiers
+            and set(qualifiers).issubset(_ATTACHMENT_COUNT_CODE_PROVABLE_QUALIFIERS)
+            and claimed in numbered_counts
+        )
+        if claimed not in candidates or qualifiers and not code_qualifiers_supported:
             return ["attachment_derived_record_count_not_in_evidence"]
     return []
 
@@ -16813,6 +17006,35 @@ def _attachment_positive_absolute_quality_claim(answer: str) -> bool:
         clause_end = min(clause_end_candidates) if clause_end_candidates else len(answer)
         clause = answer[clause_start + 1 : clause_end].casefold().replace("ё", "е")
         if not re.search(r"\b(?:не|нельзя|not|isn['’]?t|aren['’]?t)\b", clause):
+            return True
+    return False
+
+
+def _attachment_has_direct_quantity_contradiction(answer: str, evidence: str) -> bool:
+    """Reject a changed value only when the source states the same unit."""
+
+    answer_normalized = _attachment_quantity_normalized(answer)
+    evidence_normalized = _attachment_quantity_normalized(evidence)
+    source = list(_ATTACHMENT_QUANTITY_UNIT.finditer(evidence_normalized))
+    for claim in _ATTACHMENT_QUANTITY_UNIT.finditer(answer_normalized):
+        if _attachment_count_span_is_partial(answer_normalized, claim.start(), claim.end()):
+            continue
+        number = _attachment_number_canonical(claim.group("number"))
+        unit = _attachment_unit_stem(claim.group("unit"))
+        comparable = [
+            matched
+            for matched in source
+            if _attachment_units_compatible(_attachment_unit_stem(matched.group("unit")), unit)
+        ]
+        if comparable and not any(
+            _attachment_number_canonical(matched.group("number")) == number
+            and not _attachment_count_span_is_partial(
+                evidence_normalized,
+                matched.start(),
+                matched.end(),
+            )
+            for matched in comparable
+        ):
             return True
     return False
 
@@ -16836,7 +17058,9 @@ def _attachment_verdict_with_deterministic_drift(
         issues = []
         if not _attachment_named_values_supported(answer, evidence):
             issues.append("attachment_proper_name_not_in_evidence")
-        if not _attachment_entity_values_supported(answer_quantities, evidence_quantities):
+        if not _attachment_entity_values_supported(
+            answer_quantities, evidence_quantities
+        ) or _attachment_has_direct_quantity_contradiction(answer_quantities, evidence_quantities):
             issues.append("attachment_quantity_not_in_evidence")
         if not _attachment_bounds_supported(
             answer_quantities, evidence_quantities
@@ -38171,8 +38395,26 @@ class AgentRuntime:
         # tool output, but unlike real ``response['tool_evidence']`` they never
         # leave this stack frame.  Put them first: this answer saw the file
         # directly, whereas optional tools may have gathered adjacent context.
+        office_only_attachment_evidence = bool(
+            active_attachment_set
+            and all(
+                isinstance(item, Mapping) and looks_like_office_attachment(item)
+                for item in active_attachment_set
+            )
+        )
+        attachment_evidence_relevant = bool(
+            not office_only_attachment_evidence
+            or synthetic_document_notice
+            or whole_document_task
+            or document_metadata_evidence_requested
+            or attachment_request_projection.applied
+            or office_request_kind(attachment_task_message)
+            or office_exact_request_detected(attachment_task_message)
+            or office_exhaustive_scope(attachment_task_message)
+        )
+        verification_attachment_evidence = attachment_evidence if attachment_evidence_relevant else []
         verification_evidence = [
-            *attachment_evidence,
+            *verification_attachment_evidence,
             *(response.get("tool_evidence") or [])[:_MAX_TOOL_EVIDENCE],
         ]
         web_tool_names = {"web_search", "web_research", "web_fetch"}
@@ -38290,7 +38532,7 @@ class AgentRuntime:
                 model_said,
             )
         )
-        if attachment_evidence:
+        if verification_attachment_evidence:
             secondary_deadline = time.monotonic() + _ATTACHMENT_SECONDARY_BUDGET_SEC
             context.attachment_secondary_deadline = (
                 min(secondary_deadline, context.turn_deadline)
@@ -38384,7 +38626,10 @@ class AgentRuntime:
             # holding a foreground slot for 24 minutes.
             # Порог считается по словам МОДЕЛИ: структурный факт длину набирает,
             # а судить в нём нечего.
-            and (len(model_said) >= self.settings.verify_min_answer_chars or bool(attachment_evidence))
+            and (
+                len(model_said) >= self.settings.verify_min_answer_chars
+                or bool(verification_attachment_evidence)
+            )
             # Проверять есть смысл только там, где есть С ЧЕМ сверять.
             #
             # Судья складывает данные из личных записей и результатов
@@ -38399,8 +38644,8 @@ class AgentRuntime:
             # Предупреждение, которое появляется не по делу, обесценивает те, что
             # по делу: человек перестаёт их читать — и пропустит настоящее
             # расхождение с документом.
-            and (context.knowledge_hits or response.get("tool_evidence") or attachment_evidence)
-            and (not context.small_talk or bool(attachment_evidence))
+            and (context.knowledge_hits or response.get("tool_evidence") or verification_attachment_evidence)
+            and (not context.small_talk or bool(verification_attachment_evidence))
             # Судить нечего, если модель не говорила.
             #
             # Найдено разбором СВОЕЙ ЖЕ правки, гейт этого не показал бы. Ответ,
@@ -38424,11 +38669,11 @@ class AgentRuntime:
                 context,
                 tool_evidence=verification_evidence,
             )
-        if attachment_evidence and attachment_verification_complete and model_said:
+        if verification_attachment_evidence and attachment_verification_complete and model_said:
             verification = _attachment_verdict_with_deterministic_drift(
                 verification,
                 model_said,
-                attachment_evidence,
+                verification_attachment_evidence,
                 high_confidence_only=open_attachment_review_one_pass,
             )
         if web_verifier_evidence_incomplete:
@@ -38579,11 +38824,11 @@ class AgentRuntime:
                         context,
                         tool_evidence=verification_evidence,
                     )
-                    if attachment_verification_complete:
+                    if verification_attachment_evidence and attachment_verification_complete:
                         verification = _attachment_verdict_with_deterministic_drift(
                             verification,
                             model_said,
-                            attachment_evidence,
+                            verification_attachment_evidence,
                             high_confidence_only=open_attachment_review_one_pass,
                         )
                     verification_status = str(verification.get("status") or VERDICT_SKIPPED)
@@ -38643,7 +38888,7 @@ class AgentRuntime:
             verification_status = VERDICT_UNKNOWN
         if (
             not context.source_search_used
-            and attachment_evidence
+            and verification_attachment_evidence
             and model_said
             and verification_status == VERDICT_FAILED
         ):
@@ -38734,7 +38979,7 @@ class AgentRuntime:
         if (
             verification_status == VERDICT_PASSED
             and not response.get("tool_evidence")
-            and not attachment_evidence
+            and not verification_attachment_evidence
         ):
             rested_on = self._extract_cited_knowledge_ids(content, context)
             if not rested_on:

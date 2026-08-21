@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import re
 import zipfile
 from dataclasses import replace
@@ -14,8 +15,10 @@ from friday.agent_runtime import (
     _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION,
     _BARE_UPLOAD_REVIEW_TASK,
     _UNCONFIRMED_SUPPORTED_DEED,
+    OFFICE_PROMPT_PREFIX,
     AgentContext,
     AgentRuntime,
+    _attachment_record_count_candidates,
     _attachment_record_count_relations,
     _attachment_verdict_with_deterministic_drift,
     _brainfuck_bounded_output,
@@ -1020,6 +1023,9 @@ def test_open_review_rejects_every_unproved_exact_count_grammar(answer: str) -> 
         "20 записей / 25.",
         "20 записей (20/25).",
         "Нужно обеспечить семью сотрудника жильём.",
+        "В файле 120 строк кода.",
+        "Для проекта нужно 3 человека.",
+        "Для проекта требуются 3 человека.",
     ],
 )
 def test_open_review_ignores_non_total_record_number_contexts(answer: str) -> None:
@@ -1034,6 +1040,158 @@ def test_open_review_ignores_non_total_record_number_contexts(answer: str) -> No
     )
 
     assert verdict["status"] == "skipped"
+
+
+def test_planned_record_headcount_does_not_hide_an_unproved_financial_quantity() -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        _FALSE_PASS,
+        "Для проекта нужно 3 человека и 500 рублей.",
+        [{"tool": "attachment", "output": "Для проекта нужно 3 человека и 50 рублей."}],
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_quantity_not_in_evidence" in verdict["issues"]
+
+
+def test_planning_clause_does_not_hide_a_later_asserted_total() -> None:
+    evidence = "\n".join(f"- Запись {index}" for index in range(1, 12))
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "Нужно проверить документ: он содержит 20 записей.",
+        [{"tool": "attachment", "output": evidence}],
+        high_confidence_only=True,
+    )
+
+    assert _attachment_record_count_relations("Нужно проверить документ: он содержит 20 записей.") == [
+        ("20", "запись", ())
+    ]
+    assert verdict["status"] == "failed"
+    dash_answer = "Нужно проверить документ — в нём 20 записей."
+    assert _attachment_record_count_relations(dash_answer) == [("20", "запись", ())]
+
+
+def test_named_subset_does_not_launder_a_smaller_total() -> None:
+    evidence = "Позиции:\n- Alpha\n- Beta\n- Gamma"
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "Документ содержит 2 позиции — Alpha и Beta.",
+        [{"tool": "attachment", "output": evidence}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_derived_record_count_not_in_evidence" in verdict["issues"]
+
+
+def test_numbered_qualifier_requires_numbered_not_bulleted_provenance() -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+    answer = "В документе есть два нумерованных пункта."
+
+    bulleted = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        answer,
+        [{"tool": "attachment", "output": "- Alpha\n- Beta"}],
+        high_confidence_only=True,
+    )
+    numbered = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        answer,
+        [{"tool": "attachment", "output": "1. Alpha\n2. Beta"}],
+        high_confidence_only=True,
+    )
+
+    assert bulleted["status"] == "failed"
+    assert numbered["status"] == "skipped"
+    assert (
+        _attachment_verdict_with_deterministic_drift(
+            skipped,
+            "В документе есть два пронумерованных пункта.",
+            [{"tool": "attachment", "output": "1. Alpha\n2. Beta"}],
+            high_confidence_only=True,
+        )["status"]
+        == "skipped"
+    )
+
+
+def test_code_line_quantity_keeps_direct_contradiction_grounding() -> None:
+    for source in (
+        "Объём проекта — 100 строк кода.",
+        "В проекте около 120 строк кода.",
+        "В проекте от 90 до 120 строк кода.",
+    ):
+        verdict = _attachment_verdict_with_deterministic_drift(
+            {"status": "skipped", "ok": True, "score": None, "issues": []},
+            "В файле 120 строк кода.",
+            [{"tool": "attachment", "output": source}],
+            high_confidence_only=True,
+        )
+
+        assert verdict["status"] == "failed"
+        assert "attachment_quantity_not_in_evidence" in verdict["issues"]
+
+
+def test_table_fallback_excludes_markdown_separators_and_typed_footers() -> None:
+    markdown = [{"tool": "attachment", "output": "Name | Status\n--- | ---\nAlpha | active\nBeta | active"}]
+    payload = {
+        "complete_for_prompt": True,
+        "omission_reasons": [],
+        "items": [
+            {"kind": "row", "block_id": "t1", "role": "header", "cells": [{"value": "Name"}]},
+            {"kind": "row", "block_id": "t1", "role": "record", "cells": [{"value": "Alpha"}]},
+            {"kind": "row", "block_id": "t1", "role": "footer", "cells": [{"value": "Total"}]},
+        ],
+    }
+    structured = [{"tool": "attachment", "output": OFFICE_PROMPT_PREFIX + "\n" + json.dumps(payload)}]
+    unknown_payload = {
+        **payload,
+        "items": [{**row, "role": "unknown"} for row in payload["items"]],
+    }
+    unknown_structured = [
+        {"tool": "attachment", "output": OFFICE_PROMPT_PREFIX + "\n" + json.dumps(unknown_payload)}
+    ]
+
+    assert _attachment_record_count_candidates(markdown)[0] == {2}
+    assert _attachment_record_count_candidates(structured)[0] == set()
+    assert _attachment_record_count_candidates(unknown_structured)[0] == set()
+
+
+def test_colon_scoped_counts_cannot_authorize_a_global_total() -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+    for source in (
+        "В первом отделе: 20 сотрудников.",
+        "Из них: 20 сотрудников.",
+        "Активные: 20 сотрудников.",
+    ):
+        verdict = _attachment_verdict_with_deterministic_drift(
+            skipped,
+            "Документ содержит 20 сотрудников.",
+            [{"tool": "attachment", "output": source}],
+            high_confidence_only=True,
+        )
+        assert verdict["status"] == "failed"
+
+
+def test_existential_singular_does_not_prove_an_exact_total() -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+    existential = "В документе есть одна активная запись."
+    contradictory_source = "В документе есть активная запись. Также есть ещё одна активная запись."
+
+    assert _attachment_record_count_relations(existential) == []
+    exact = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит одну активную запись.",
+        [{"tool": "attachment", "output": contradictory_source}],
+        high_confidence_only=True,
+    )
+    non_total = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        existential,
+        [{"tool": "attachment", "output": "В документе есть активная запись."}],
+        high_confidence_only=True,
+    )
+
+    assert exact["status"] == "failed"
+    assert non_total["status"] == "skipped"
 
 
 @pytest.mark.parametrize(

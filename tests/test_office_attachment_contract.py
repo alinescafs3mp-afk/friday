@@ -632,7 +632,11 @@ async def test_active_office_preserves_model_answer_for_an_unrelated_scope(
     attachment, _, _ = _attachment()
     storage.ensure_user("alice", preset_key="owner")
     auth = AuthorizationService(storage)
-    runtime = AgentRuntime(replace(settings, verify_answers=False), storage, llm=_NeverCalledLLM())
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=_NeverCalledLLM(),
+    )
     monkeypatch.setattr(runtime, "_prepare_context", _simple_context)
 
     async def generate(context, message, attachments):
@@ -640,6 +644,13 @@ async def test_active_office_preserves_model_answer_for_an_unrelated_scope(
         return {"content": model_answer, "tools_used": []}
 
     monkeypatch.setattr(runtime, "_generate_response", generate)
+
+    async def forbidden_verifier(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("unrelated Office evidence entered verifier")
+
+    monkeypatch.setattr(runtime, "_verify_response", forbidden_verifier)
+    monkeypatch.setattr(runtime, "_repair_once", forbidden_verifier)
     result = await runtime.chat(
         "alice",
         question,
