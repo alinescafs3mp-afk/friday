@@ -38407,6 +38407,7 @@ class AgentRuntime:
             or synthetic_document_notice
             or whole_document_task
             or document_metadata_evidence_requested
+            or isinstance(hierarchy_bundle_value, _AttachmentHierarchyBundle)
             or attachment_request_projection.applied
             or office_request_kind(attachment_task_message)
             or office_exact_request_detected(attachment_task_message)
