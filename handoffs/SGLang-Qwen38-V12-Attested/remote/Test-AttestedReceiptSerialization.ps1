@@ -43,10 +43,10 @@ if ($switchErrors.Count -ne 0) {
 $headroomFunctions = @($switchAst.FindAll({
     param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        [string]$node.Name -ceq 'Wait-GpuHeadroomConvergence'
+        [string]$node.Name -ceq 'Wait-PostSixWayGpuHeadroom'
 }, $true))
 if ($headroomFunctions.Count -ne 1) {
-    throw 'Post-load GPU headroom helper definition is not exact'
+    throw 'Post-six-way GPU headroom helper definition is not exact'
 }
 . ([scriptblock]::Create([string]$headroomFunctions[0].Extent.Text))
 
@@ -90,7 +90,7 @@ function Write-Journal([string]$State, [hashtable]$Data = @{}) {
 }
 
 Set-GpuProjectionReadings @(1200, 1400, 1536)
-$verifiedGpu = Wait-GpuHeadroomConvergence 'post_six_way' 2 1
+$verifiedGpu = Wait-PostSixWayGpuHeadroom 2 1
 if ([int]$verifiedGpu.FreeMiB -ne 1536 -or $script:gpuProjectionProbeCount -ne 3 -or
     $script:gpuProjectionJournal.Count -ne 1) {
     throw 'Post-six-way GPU headroom did not converge on the exact third valid reading'
@@ -107,38 +107,6 @@ if ([string]$verifiedRecord.State -cne 'post_six_way_gpu_headroom_verified' -or
     throw 'Verified post-six-way GPU journal evidence is not exact or body-free'
 }
 
-Set-GpuProjectionReadings @(1400, 1536)
-$longVerifiedGpu = Wait-GpuHeadroomConvergence 'post_long_context' 2 1
-if ([int]$longVerifiedGpu.FreeMiB -ne 1536 -or $script:gpuProjectionProbeCount -ne 2 -or
-    $script:gpuProjectionJournal.Count -ne 1) {
-    throw 'Post-long-context GPU headroom did not converge on the exact second valid reading'
-}
-$longVerifiedRecord = $script:gpuProjectionJournal[0]
-$longVerifiedKeys = [string]::Join(',', @($longVerifiedRecord.Data.Keys | Sort-Object))
-if ([string]$longVerifiedRecord.State -cne 'post_long_context_gpu_headroom_verified' -or
-    $longVerifiedKeys -cne 'attempts,free_mib,minimum_free_mib,request_count,timeout_seconds' -or
-    [int]$longVerifiedRecord.Data.attempts -ne 2 -or
-    [int]$longVerifiedRecord.Data.free_mib -ne 1536 -or
-    [int]$longVerifiedRecord.Data.minimum_free_mib -ne 1536 -or
-    [int]$longVerifiedRecord.Data.request_count -ne 1 -or
-    [int]$longVerifiedRecord.Data.timeout_seconds -ne 2) {
-    throw 'Verified post-long-context GPU journal evidence is not exact or body-free'
-}
-
-Set-GpuProjectionReadings @(1536)
-$invalidCheckpointFailed = $false
-try { $null = Wait-GpuHeadroomConvergence 'invalid' 30 2000 }
-catch {
-    $invalidCheckpointFailed = $true
-    if ([string]$_.Exception.Message -cne 'GPU headroom convergence checkpoint is invalid') {
-        throw
-    }
-}
-if (-not $invalidCheckpointFailed -or $script:gpuProjectionProbeCount -ne 0 -or
-    $script:gpuProjectionJournal.Count -ne 0) {
-    throw 'Invalid GPU headroom checkpoint reached a probe or journal sink'
-}
-
 foreach ($probeFailure in @(
     [ComponentModel.Win32Exception]::new('synthetic nvidia-smi command failure'),
     [FormatException]::new('synthetic nvidia-smi schema failure')
@@ -146,19 +114,19 @@ foreach ($probeFailure in @(
     Set-GpuProjectionReadings @($probeFailure, 1536)
     $probeFailed = $false
     $probeTimer = [Diagnostics.Stopwatch]::StartNew()
-    try { $null = Wait-GpuHeadroomConvergence 'post_long_context' 30 2000 }
+    try { $null = Wait-PostSixWayGpuHeadroom 30 2000 }
     catch {
         $probeFailed = $true
         if ($_.Exception.GetType().FullName -cne $probeFailure.GetType().FullName) {
-            throw 'Post-long-context GPU headroom did not propagate the probe error exactly'
+            throw 'Post-six-way GPU headroom did not propagate the probe error exactly'
         }
     }
     finally { $probeTimer.Stop() }
     $probeState = [string]$script:gpuProjectionJournal[0].State
     if (-not $probeFailed -or $script:gpuProjectionProbeCount -ne 1 -or
         $probeTimer.Elapsed.TotalSeconds -ge 1 -or $script:gpuProjectionJournal.Count -ne 1 -or
-        $probeState -cne 'post_long_context_gpu_headroom_probe_failed') {
-        throw 'Post-long-context GPU command/schema failure was retried or not journaled'
+        $probeState -cne 'post_six_way_gpu_headroom_probe_failed') {
+        throw 'Post-six-way GPU command/schema failure was retried or not journaled'
     }
 }
 
@@ -166,26 +134,26 @@ Set-GpuProjectionReadings @()
 $script:gpuProjectionPersistentFreeMiB = 1400
 $timeoutTimer = [Diagnostics.Stopwatch]::StartNew()
 $timedOut = $false
-try { $null = Wait-GpuHeadroomConvergence 'post_long_context' 1 400 }
+try { $null = Wait-PostSixWayGpuHeadroom 1 400 }
 catch {
     $timedOut = $true
-    if ([string]$_.Exception.Message -cne 'Post-long-context candidate VRAM headroom did not converge') {
+    if ([string]$_.Exception.Message -cne 'Post-six-way candidate VRAM headroom did not converge') {
         throw
     }
 }
 finally { $timeoutTimer.Stop() }
 if (-not $timedOut -or $timeoutTimer.Elapsed.TotalSeconds -ge 3 -or
     $script:gpuProjectionProbeCount -lt 2 -or $script:gpuProjectionJournal.Count -ne 1) {
-    throw 'Post-long-context persistent low-free projection was not bounded'
+    throw 'Post-six-way persistent low-free projection was not bounded'
 }
 $timeoutRecord = $script:gpuProjectionJournal[0]
 $timeoutKeys = [string]::Join(',', @($timeoutRecord.Data.Keys | Sort-Object))
-if ([string]$timeoutRecord.State -cne 'post_long_context_gpu_headroom_timeout' -or
+if ([string]$timeoutRecord.State -cne 'post_six_way_gpu_headroom_timeout' -or
     $timeoutKeys -cne 'attempts,free_mib,minimum_free_mib,timeout_seconds' -or
     [int]$timeoutRecord.Data.free_mib -ne 1400 -or
     [int]$timeoutRecord.Data.minimum_free_mib -ne 1536 -or
     [int]$timeoutRecord.Data.timeout_seconds -ne 1) {
-    throw 'Timed-out post-long-context GPU journal evidence is not exact or body-free'
+    throw 'Timed-out post-six-way GPU journal evidence is not exact or body-free'
 }
 
 function New-ExactPublishReceipt {
@@ -248,4 +216,4 @@ foreach ($entry in $expectedSerializerCounts.GetEnumerator()) {
     }
 }
 
-'attested receipt serialization, six-way HTTP, and post-load GPU convergence projections: PASS'
+'attested receipt serialization, six-way HTTP, and GPU convergence projections: PASS'

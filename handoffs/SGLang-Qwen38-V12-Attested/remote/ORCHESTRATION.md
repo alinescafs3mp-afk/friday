@@ -114,12 +114,14 @@ three clear drain reads, only a valid free-VRAM reading below the unchanged
 terminal convergence journal record contains no request body: success records
 the six-request count and verified free MiB, while a bounded timeout records
 the final valid free MiB and the unchanged floor.
-The long-context checkpoint similarly separates the accepted response,
-`long_context_drain`, and `post_long_context_gpu_headroom_convergence`. After
-three clear drain reads, it reuses the same valid-low-only two-second polling
-and 30-second bound at the unchanged 1,536 MiB floor. Its body-free success
-record identifies one request; command and response-schema failures still
-propagate immediately instead of entering the convergence loop.
+Image acceptance and the soak checkpoint, including the unchanged strict
+1,536 MiB headroom gate, run before the long-context request. After the exact
+long-context usage assertion and three clear drain reads, the switch rechecks
+candidate health and fatal logs, then writes a body-free observation of the
+current free MiB and the unchanged floor. It does not mislabel retained
+allocator memory as converging headroom: the existing epoch drain stops the
+candidate, proves GPU release, restarts the exact engine, and enforces the
+strict 1,536 MiB gate at `epoch_restart_health`.
 Before arming restart policies, the candidate engine is forcibly
 restarted and the switch proves old-witness disappearance plus new canonical
 witness and nonce rotation, then repeats identity, proxy, smoke, headroom,

@@ -152,15 +152,8 @@ def test_six_way_probe_loads_http_client_assembly_before_preflight() -> None:
         _assert_static_six_way_http_client_contract(switch, mutated_native_test)
 
 
-def _assert_static_post_load_headroom_contract(switch: str, native_test: str) -> None:
-    convergence = _powershell_function(switch, "Wait-GpuHeadroomConvergence")
-    assert "$Checkpoint -ceq 'post_six_way'" in convergence
-    assert "$Checkpoint -ceq 'post_long_context'" in convergence
-    assert "$journalPrefix = 'post_six_way_gpu_headroom'" in convergence
-    assert "$journalPrefix = 'post_long_context_gpu_headroom'" in convergence
-    assert "$requestCount = 6" in convergence
-    assert "$requestCount = 1" in convergence
-    assert "throw 'GPU headroom convergence checkpoint is invalid'" in convergence
+def _assert_static_post_six_way_headroom_contract(switch: str, native_test: str) -> None:
+    convergence = _powershell_function(switch, "Wait-PostSixWayGpuHeadroom")
     assert "$TimeoutSeconds -lt 1 -or $TimeoutSeconds -gt 30 -or\n" in convergence
     assert "$PollMilliseconds -lt 1 -or $PollMilliseconds -gt 2000) {" in convergence
     assert "[DateTime]::UtcNow.AddSeconds($TimeoutSeconds)" in convergence
@@ -169,10 +162,10 @@ def _assert_static_post_load_headroom_contract(switch: str, native_test: str) ->
     assert convergence.count("Start-Sleep -Milliseconds $sleepMilliseconds") == 1
     assert "$sampledAt -lt $deadline -and\n" in convergence
     assert "$freeMiB -ge $script:Attested.MinimumCandidateFreeMiB)" in convergence
-    assert convergence.count("Write-Journal ($journalPrefix + '_probe_failed')") == 1
-    assert convergence.count("Write-Journal ($journalPrefix + '_verified')") == 1
-    assert convergence.count("Write-Journal ($journalPrefix + '_timeout')") == 1
-    assert "request_count = $requestCount" in convergence
+    assert convergence.count("post_six_way_gpu_headroom_probe_failed") == 1
+    assert convergence.count("post_six_way_gpu_headroom_verified") == 1
+    assert convergence.count("post_six_way_gpu_headroom_timeout") == 1
+    assert "request_count = 6" in convergence
     assert "free_mib = $freeMiB" in convergence
     assert "free_mib = $lastFreeMiB" in convergence
     assert convergence.count("minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB") == 3
@@ -189,59 +182,34 @@ def _assert_static_post_load_headroom_contract(switch: str, native_test: str) ->
         drain,
     )
     convergence_call = switch.index(
-        "    $null = Wait-GpuHeadroomConvergence 'post_six_way' 30 2000",
+        "    $null = Wait-PostSixWayGpuHeadroom 30 2000",
         convergence_stage,
     )
-    long_context_stage = switch.index("    $stage = 'long_context'", convergence_call)
+    image_stage = switch.index("    $stage = 'image'", convergence_call)
     assert probe_stage < probe < drain_stage < drain
-    assert drain < convergence_stage < convergence_call < long_context_stage
-    checkpoint = switch[probe_stage:long_context_stage]
+    assert drain < convergence_stage < convergence_call < image_stage
+    checkpoint = switch[probe_stage:image_stage]
     assert "Assert-GpuHeadroom" not in checkpoint
     assert "$stage = 'six_way'" not in switch
 
-    long_acceptance = switch.index(
-        "throw '40K context acceptance did not exercise the required window'",
-        long_context_stage,
-    )
-    long_drain_stage = switch.index("    $stage = 'long_context_drain'", long_acceptance)
-    long_drain = switch.index("    Wait-EndpointIdle $headers 180", long_drain_stage)
-    long_convergence_stage = switch.index(
-        "    $stage = 'post_long_context_gpu_headroom_convergence'",
-        long_drain,
-    )
-    long_convergence_call = switch.index(
-        "    $null = Wait-GpuHeadroomConvergence 'post_long_context' 30 2000",
-        long_convergence_stage,
-    )
-    image_stage = switch.index("    $stage = 'image'", long_convergence_call)
-    assert long_context_stage < long_acceptance < long_drain_stage < long_drain
-    assert long_drain < long_convergence_stage < long_convergence_call < image_stage
-    long_checkpoint = switch[long_context_stage:image_stage]
-    assert "Assert-GpuHeadroom" not in long_checkpoint
-    assert switch.count("Wait-GpuHeadroomConvergence 'post_six_way' 30 2000") == 1
-    assert switch.count("Wait-GpuHeadroomConvergence 'post_long_context' 30 2000") == 1
-
     required_native_cases = (
-        "Wait-GpuHeadroomConvergence'",
+        "Wait-PostSixWayGpuHeadroom'",
         "Set-GpuProjectionReadings @(1200, 1400, 1536)",
-        "Set-GpuProjectionReadings @(1400, 1536)",
-        "Wait-GpuHeadroomConvergence 'post_long_context'",
         "[ComponentModel.Win32Exception]::new('synthetic nvidia-smi command failure')",
         "[FormatException]::new('synthetic nvidia-smi schema failure')",
         "$script:gpuProjectionPersistentFreeMiB = 1400",
         "post_six_way_gpu_headroom_verified",
-        "post_long_context_gpu_headroom_verified",
-        "post_long_context_gpu_headroom_probe_failed",
-        "post_long_context_gpu_headroom_timeout",
+        "post_six_way_gpu_headroom_probe_failed",
+        "post_six_way_gpu_headroom_timeout",
         "not exact or body-free",
     )
     assert all(item in native_test for item in required_native_cases)
 
 
-def test_post_load_headroom_convergence_is_bounded_and_diagnosable() -> None:
+def test_post_six_way_headroom_convergence_is_bounded_and_diagnosable() -> None:
     switch = _SWITCH.read_text(encoding="utf-8")
     native_test = _RECEIPT_TEST.read_text(encoding="utf-8")
-    _assert_static_post_load_headroom_contract(switch, native_test)
+    _assert_static_post_six_way_headroom_contract(switch, native_test)
 
 
 @pytest.mark.parametrize(
@@ -262,37 +230,134 @@ def test_post_load_headroom_convergence_is_bounded_and_diagnosable() -> None:
             "            throw\n        }\n        $lastFreeMiB = $freeMiB",
             "            continue\n        }\n        $lastFreeMiB = $freeMiB",
         ),
-        ("$journalPrefix = 'post_long_context_gpu_headroom'", "$journalPrefix = 'post_long_gpu_headroom'"),
-        ("$requestCount = 1", "$requestCount = 6"),
+        ("post_six_way_gpu_headroom_timeout", "post_six_way_gpu_timeout"),
+        ("request_count = 6", "request_count = 5"),
         (
             "$stage = 'post_six_way_gpu_headroom_convergence'",
             "$stage = 'six_way_drain'",
         ),
-        (
-            "$stage = 'post_long_context_gpu_headroom_convergence'",
-            "$stage = 'long_context_drain'",
-        ),
-        (
-            "Wait-GpuHeadroomConvergence 'post_six_way' 30 2000",
-            "Wait-GpuHeadroomConvergence 'post_six_way' 300 20000",
-        ),
-        (
-            "Wait-GpuHeadroomConvergence 'post_long_context' 30 2000",
-            "Assert-GpuHeadroom",
-        ),
+        ("Wait-PostSixWayGpuHeadroom 30 2000", "Wait-PostSixWayGpuHeadroom 300 20000"),
     ),
 )
-def test_static_gate_kills_post_load_headroom_mutations(old: str, mutation: str) -> None:
+def test_static_gate_kills_post_six_way_headroom_mutations(old: str, mutation: str) -> None:
     switch = _SWITCH.read_text(encoding="utf-8")
     native_test = _RECEIPT_TEST.read_text(encoding="utf-8")
-    _assert_static_post_load_headroom_contract(switch, native_test)
+    _assert_static_post_six_way_headroom_contract(switch, native_test)
     assert old in switch
 
     with pytest.raises((AssertionError, ValueError)):
-        _assert_static_post_load_headroom_contract(
+        _assert_static_post_six_way_headroom_contract(
             switch.replace(old, mutation, 1),
             native_test,
         )
+
+
+def _assert_static_long_context_epoch_contract(switch: str) -> None:
+    image_stage = switch.index("    $stage = 'image'")
+    soak_stage = switch.index("    $stage = 'soak'", image_stage)
+    soak_headroom = switch.index(
+        "    $gpu = Assert-GpuHeadroom\n    $witnessAfter",
+        soak_stage,
+    )
+    long_stage = switch.index("    $stage = 'long_context'", soak_headroom)
+    long_request = switch.index(
+        "    $longResponse = Invoke-Chat $headers $longBody 300 'long_context'",
+        long_stage,
+    )
+    usage_assertion = switch.index("    if ($longTokens -lt 32000 -or", long_request)
+    assert (
+        "[int]$longResponse.usage.completion_tokens -lt 32" in switch[usage_assertion : usage_assertion + 500]
+    )
+
+    long_drain_stage = switch.index("    $stage = 'long_context_drain'", usage_assertion)
+    long_drain = switch.index("    Wait-EndpointIdle $headers 180", long_drain_stage)
+    engine_health = switch.index(
+        "    $candidateEngine = Wait-Healthy $script:Attested.CandidateEngineName 30",
+        long_drain,
+    )
+    proxy_health = switch.index(
+        "    $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 30",
+        engine_health,
+    )
+    identity = switch.index(
+        "    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash $publishNetworkReceipt",
+        proxy_health,
+    )
+    fatal = switch.index("    Assert-FatalFree $candidateEngine", identity)
+    gpu_observation = switch.index("    $postLongGpu = Get-GpuMemory", fatal)
+    journal = switch.index(
+        "    Write-Journal 'post_long_context_gpu_headroom_observed_before_epoch_restart' @{",
+        gpu_observation,
+    )
+    epoch_drain_stage = switch.index("    $stage = 'epoch_restart_drain'", journal)
+    epoch_drain = switch.index("    Wait-EndpointIdle $headers 120", epoch_drain_stage)
+    stop_proxy = switch.index("    Stop-ExactContainer $candidateProxy 45", epoch_drain)
+    engine_drain = switch.index(
+        "    Wait-EngineIdle $script:Attested.CandidateEngineName 120",
+        stop_proxy,
+    )
+    stop_engine = switch.index("    Stop-ExactContainer $candidateEngine 90", engine_drain)
+    gpu_release = switch.index("    $null = Wait-GpuRelease 180", stop_engine)
+    restart_stage = switch.index("    $stage = 'epoch_restart_engine'", gpu_release)
+    restart_health_stage = switch.index("    $stage = 'epoch_restart_health'", restart_stage)
+    strict_after_restart = switch.index("    $null = Assert-GpuHeadroom", restart_health_stage)
+
+    assert image_stage < soak_stage < soak_headroom < long_stage < long_request < usage_assertion
+    assert usage_assertion < long_drain_stage < long_drain < engine_health < proxy_health
+    assert proxy_health < identity < fatal < gpu_observation < journal < epoch_drain_stage
+    assert epoch_drain_stage < epoch_drain < stop_proxy < engine_drain < stop_engine < gpu_release
+    assert gpu_release < restart_stage < restart_health_stage < strict_after_restart
+
+    journal_block = switch[journal:epoch_drain_stage]
+    for exact_field in (
+        "free_mib = [int]$postLongGpu.FreeMiB",
+        "minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB",
+        "request_count = 1",
+        "strict_headroom_stage = 'epoch_restart_health'",
+    ):
+        assert journal_block.count(exact_field) == 1
+    assert "body" not in journal_block.lower()
+
+    post_long = switch[long_drain_stage:epoch_drain_stage]
+    assert "Assert-GpuHeadroom" not in post_long
+    assert "Wait-PostSixWayGpuHeadroom" not in post_long
+    assert "gpu_headroom_convergence" not in post_long
+    assert "post_long_context_gpu_headroom_verified" not in switch
+    assert "post_long_context_gpu_headroom_timeout" not in switch
+
+
+def test_long_context_is_observed_then_reclaimed_by_epoch_restart() -> None:
+    _assert_static_long_context_epoch_contract(_SWITCH.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(
+    ("old", "mutation"),
+    (
+        ("    $stage = 'long_context_drain'", "    $stage = 'long_context'"),
+        ("    $postLongGpu = Get-GpuMemory", "    $postLongGpu = Assert-GpuHeadroom"),
+        (
+            "post_long_context_gpu_headroom_observed_before_epoch_restart",
+            "post_long_context_gpu_headroom_verified",
+        ),
+        ("strict_headroom_stage = 'epoch_restart_health'", "strict_headroom_stage = 'long_context_drain'"),
+        ("    $stage = 'epoch_restart_drain'", "    $stage = 'long_context_drain'"),
+        (
+            "    Stop-ExactContainer $candidateEngine 90\n    $null = Wait-GpuRelease 180",
+            "    Stop-ExactContainer $candidateEngine 90\n    $null = Get-GpuMemory",
+        ),
+        ("$longTokens -lt 32000", "$longTokens -lt 1"),
+        (
+            "    $gpu = Assert-GpuHeadroom\n    $witnessAfter",
+            "    $gpu = Get-GpuMemory\n    $witnessAfter",
+        ),
+    ),
+)
+def test_static_gate_kills_long_context_epoch_mutations(old: str, mutation: str) -> None:
+    switch = _SWITCH.read_text(encoding="utf-8")
+    _assert_static_long_context_epoch_contract(switch)
+    assert old in switch
+    with pytest.raises((AssertionError, ValueError)):
+        _assert_static_long_context_epoch_contract(switch.replace(old, mutation, 1))
 
 
 def _assert_static_network_contract(common: str, switch: str) -> None:
@@ -1109,7 +1174,7 @@ def test_powershell_receipt_serialization_test_is_ps51_compatible_and_exact() ->
         "System.Management.Automation.Language.Parser",
         "'Switch-Qwen38V12Attested.ps1' = 3",
         "'Rollback-Qwen38V12Attested.ps1' = 4",
-        "attested receipt serialization, six-way HTTP, and post-load GPU convergence projections: PASS",
+        "attested receipt serialization, six-way HTTP, and GPU convergence projections: PASS",
     )
     assert all(item in source for item in required)
 

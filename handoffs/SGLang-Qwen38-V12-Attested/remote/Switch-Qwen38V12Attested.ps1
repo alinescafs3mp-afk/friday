@@ -169,27 +169,10 @@ function Invoke-Chat([hashtable]$Headers, [hashtable]$Body, [int]$TimeoutSeconds
     }
 }
 
-function Wait-GpuHeadroomConvergence(
-    [string]$Checkpoint,
-    [int]$TimeoutSeconds,
-    [int]$PollMilliseconds
-) {
-    if ($Checkpoint -ceq 'post_six_way') {
-        $journalPrefix = 'post_six_way_gpu_headroom'
-        $requestCount = 6
-        $failureLabel = 'Post-six-way'
-    }
-    elseif ($Checkpoint -ceq 'post_long_context') {
-        $journalPrefix = 'post_long_context_gpu_headroom'
-        $requestCount = 1
-        $failureLabel = 'Post-long-context'
-    }
-    else {
-        throw 'GPU headroom convergence checkpoint is invalid'
-    }
+function Wait-PostSixWayGpuHeadroom([int]$TimeoutSeconds, [int]$PollMilliseconds) {
     if ($TimeoutSeconds -lt 1 -or $TimeoutSeconds -gt 30 -or
         $PollMilliseconds -lt 1 -or $PollMilliseconds -gt 2000) {
-        throw 'GPU headroom convergence bounds are invalid'
+        throw 'Post-six-way GPU headroom convergence bounds are invalid'
     }
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     $attempts = 0
@@ -201,7 +184,7 @@ function Wait-GpuHeadroomConvergence(
             $freeMiB = [int]$gpu.FreeMiB
         }
         catch {
-            Write-Journal ($journalPrefix + '_probe_failed') @{
+            Write-Journal 'post_six_way_gpu_headroom_probe_failed' @{
                 attempts = $attempts
                 error_type = $_.Exception.GetType().FullName
                 minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB
@@ -213,11 +196,11 @@ function Wait-GpuHeadroomConvergence(
         $sampledAt = [DateTime]::UtcNow
         if ($sampledAt -lt $deadline -and
             $freeMiB -ge $script:Attested.MinimumCandidateFreeMiB) {
-            Write-Journal ($journalPrefix + '_verified') @{
+            Write-Journal 'post_six_way_gpu_headroom_verified' @{
                 attempts = $attempts
                 free_mib = $freeMiB
                 minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB
-                request_count = $requestCount
+                request_count = 6
                 timeout_seconds = $TimeoutSeconds
             }
             return $gpu
@@ -232,13 +215,13 @@ function Wait-GpuHeadroomConvergence(
         }
         Start-Sleep -Milliseconds $sleepMilliseconds
     }
-    Write-Journal ($journalPrefix + '_timeout') @{
+    Write-Journal 'post_six_way_gpu_headroom_timeout' @{
         attempts = $attempts
         free_mib = $lastFreeMiB
         minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB
         timeout_seconds = $TimeoutSeconds
     }
-    throw "$failureLabel candidate VRAM headroom did not converge"
+    throw 'Post-six-way candidate VRAM headroom did not converge'
 }
 
 function Assert-ComposeConfig([object]$Value, [object]$BuildReceipt, [string]$KeyHash) {
@@ -730,30 +713,7 @@ try {
     Wait-EndpointIdle $headers 180
 
     $stage = 'post_six_way_gpu_headroom_convergence'
-    $null = Wait-GpuHeadroomConvergence 'post_six_way' 30 2000
-
-    $stage = 'long_context'
-    $longBody = @{
-        model = 'dispatcher'
-        messages = @(@{ role = 'user'; content = ((-join (' z' * 34000)) + ' End marker. Explain in at least 100 words that the marker was present.') })
-        max_tokens = 192
-        temperature = 0.2
-        stream = $false
-        chat_template_kwargs = @{ enable_thinking = $false }
-    }
-    $longResponse = Invoke-Chat $headers $longBody 300 'long_context'
-    $longTokens = [int]$longResponse.usage.prompt_tokens
-    if ($longTokens -lt 32000 -or $longTokens -gt 40000 -or
-        [int]$longResponse.usage.completion_tokens -lt 32 -or
-        [string]::IsNullOrWhiteSpace([string]$longResponse.choices[0].message.content)) {
-        throw '40K context acceptance did not exercise the required window'
-    }
-
-    $stage = 'long_context_drain'
-    Wait-EndpointIdle $headers 180
-
-    $stage = 'post_long_context_gpu_headroom_convergence'
-    $null = Wait-GpuHeadroomConvergence 'post_long_context' 30 2000
+    $null = Wait-PostSixWayGpuHeadroom 30 2000
 
     $stage = 'image'
     $probePng = 'iVBORw0KGgoAAAANSUhEUgAAABwAAAAcCAIAAAD9b0jDAAAAI0lEQVR42u3MsQ0AAAjAoP7/tD7hJgkzTZ1LKpVKpVKp9Ee6DsoNHtgm0ZUAAAAASUVORK5CYII='
@@ -790,6 +750,37 @@ try {
     Assert-Sidecars
     Assert-SolePublisher $script:Attested.CandidateProxyName
     Assert-CandidateProxyPortPublication $candidateProxy
+
+    $stage = 'long_context'
+    $longBody = @{
+        model = 'dispatcher'
+        messages = @(@{ role = 'user'; content = ((-join (' z' * 34000)) + ' End marker. Explain in at least 100 words that the marker was present.') })
+        max_tokens = 192
+        temperature = 0.2
+        stream = $false
+        chat_template_kwargs = @{ enable_thinking = $false }
+    }
+    $longResponse = Invoke-Chat $headers $longBody 300 'long_context'
+    $longTokens = [int]$longResponse.usage.prompt_tokens
+    if ($longTokens -lt 32000 -or $longTokens -gt 40000 -or
+        [int]$longResponse.usage.completion_tokens -lt 32 -or
+        [string]::IsNullOrWhiteSpace([string]$longResponse.choices[0].message.content)) {
+        throw '40K context acceptance did not exercise the required window'
+    }
+
+    $stage = 'long_context_drain'
+    Wait-EndpointIdle $headers 180
+    $candidateEngine = Wait-Healthy $script:Attested.CandidateEngineName 30
+    $candidateProxy = Wait-Healthy $script:Attested.CandidateProxyName 30
+    Assert-CandidateContainers $candidateEngine $candidateProxy $receipt $keyHash $publishNetworkReceipt
+    Assert-FatalFree $candidateEngine
+    $postLongGpu = Get-GpuMemory
+    Write-Journal 'post_long_context_gpu_headroom_observed_before_epoch_restart' @{
+        free_mib = [int]$postLongGpu.FreeMiB
+        minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB
+        request_count = 1
+        strict_headroom_stage = 'epoch_restart_health'
+    }
 
     $stage = 'epoch_restart_drain'
     Wait-EndpointIdle $headers 120
