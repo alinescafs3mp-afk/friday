@@ -605,6 +605,60 @@ def _authorized_raw(
     return row
 
 
+def _exact_alias_is_publicly_eligible(
+    conn: sqlite3.Connection,
+    item: FilenameCandidate,
+) -> bool:
+    """Verify one repaired alias through the public lookup predicates.
+
+    ``find_owned_files_by_filename`` deliberately returns at most two rows to
+    prove ambiguity.  A valid repaired Raw can therefore sit outside that
+    bounded page.  This connection-bound probe keeps the same authority,
+    lifecycle and filename predicates while selecting the exact alias identity
+    inside the still-uncommitted repair transaction.
+    """
+
+    rows = conn.execute(
+        f"""SELECT a.supplied_filename
+              FROM file_source_aliases a
+              JOIN raw_objects r ON r.id=a.raw_object_id
+             WHERE a.user_id=? AND a.uploaded_by=? AND a.source_ref=?
+               AND a.raw_object_id=?
+               AND r.user_id=? AND r.deleted_at IS NULL
+               AND r.content_type='file'
+               AND json_valid(r.metadata_json)
+               AND json_type(r.metadata_json,'$.uploaded_by')='text'
+               AND json_extract(r.metadata_json,'$.uploaded_by')=?
+               AND EXISTS (
+                   SELECT 1 FROM users exact_filename_uploader
+                    WHERE exact_filename_uploader.id=?
+                      AND exact_filename_uploader.status='active'
+               )
+               AND {_not_audio_document("r")}
+               AND {_not_private_raw_dependency("r")}
+               AND NOT EXISTS (
+                   SELECT 1 FROM inbox i
+                    WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
+                      AND i.status='ignored'
+               )
+               AND length(a.supplied_filename) BETWEEN 1 AND 260
+               AND replace(jericho_casefold(a.supplied_filename),'ё','е')=
+                   replace(jericho_casefold(?),'ё','е')
+             LIMIT 2""",  # nosec B608 - only fixed privacy predicates
+        (
+            item.tenant_id,
+            item.uploader_id,
+            item.source_ref,
+            item.raw_id,
+            item.tenant_id,
+            item.uploader_id,
+            item.uploader_id,
+            item.filename,
+        ),
+    ).fetchall()
+    return bool(len(rows) == 1 and str(rows[0]["supplied_filename"] or "") == item.filename)
+
+
 def build_plan(
     conn: sqlite3.Connection,
     *,
@@ -843,17 +897,8 @@ def _apply_locked_plan(
                 or _message_name_source_ref(item.message_id) != item.source_ref
             ):
                 raise ContractError("exact synthetic message evidence changed during apply")
-            public_matches = storage.find_owned_files_by_filename(
-                item.tenant_id,
-                item.uploader_id,
-                item.filename,
-            )
-            if not any(
-                str(match.get("id") or "") == item.raw_id
-                and str(match.get("filename") or "") == item.filename
-                for match in public_matches
-            ):
-                raise ContractError("public exact filename lookup did not expose the repaired alias")
+            if not _exact_alias_is_publicly_eligible(conn, item):
+                raise ContractError("repaired alias does not satisfy exact public filename eligibility")
         integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
         foreign_keys = conn.execute("PRAGMA foreign_key_check").fetchall()
         if integrity != "ok" or foreign_keys:

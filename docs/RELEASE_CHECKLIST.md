@@ -78,7 +78,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   `40960`, running/Mamba cache `6`, `mem_fraction_static=0.90`, FP8 E4M3 KV,
   Radix/speculation off, full decode CUDA graph batches `1..6`, prefill graph off,
   FlashInfer attention, CPU MM transport и limits `image=4,video=0,audio=0`;
-- final startup health имеет `status=ok`, `version=0.206.0`, configured/installed
+- final startup health имеет `status=ok`, `version=0.206.0rc0`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными

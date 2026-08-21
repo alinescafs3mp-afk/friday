@@ -227,6 +227,70 @@ def test_unique_synthetic_notice_repairs_alias_but_not_canonical_raw(
     assert _plan(settings).candidate_count == 0
 
 
+def test_repair_succeeds_when_exact_target_ranks_after_public_ambiguity_page(
+    settings,
+    storage,
+    tmp_path,
+) -> None:
+    older = _raw(storage)
+    middle = _raw(storage)
+    target = _raw(storage)
+    with storage.transaction() as conn:
+        for raw_id, received_at in (
+            (older, "2026-08-17T10:00:00+00:00"),
+            (middle, "2026-08-18T10:00:00+00:00"),
+            (target, "2026-08-19T10:00:00+00:00"),
+        ):
+            row = conn.execute(
+                "SELECT metadata_json FROM raw_objects WHERE id=?",
+                (raw_id,),
+            ).fetchone()
+            assert row is not None
+            metadata = json.loads(row["metadata_json"])
+            if raw_id != target:
+                metadata["filename"] = "shared-name.odt"
+            conn.execute(
+                "UPDATE raw_objects SET metadata_json=?,received_at=? WHERE id=?",
+                (json.dumps(metadata, ensure_ascii=False, sort_keys=True), received_at, raw_id),
+            )
+    _notice_and_aliases(
+        storage,
+        target,
+        filename="shared-name.odt",
+        timestamp="2026-08-19T17:46:40+00:00",
+        suffix="1962",
+    )
+    before = storage.find_owned_files_by_filename("alice", "alice", "shared-name.odt")
+    assert [row["id"] for row in before] == [older, middle]
+
+    plan = _plan(settings)
+    assert plan.candidate_count == 1
+    claim = _claim(tmp_path, plan)
+    backups = tmp_path / "backups"
+    backups.mkdir(mode=0o700)
+    applied, evidence = apply_plan(
+        Path(settings.database_path),
+        tenant_id="alice",
+        owner_id="alice",
+        uploader_id="alice",
+        claim_manifest=claim,
+        expected_count=1,
+        expected_plan_sha256=plan.plan_sha256,
+        backup_dir=backups,
+    )
+
+    assert applied.candidate_count == evidence["applied_count"] == 1
+    bounded = storage.find_owned_files_by_filename("alice", "alice", "shared-name.odt")
+    assert [row["id"] for row in bounded] == [older, middle]
+    alias = storage.execute(
+        """SELECT supplied_filename FROM file_source_aliases
+            WHERE raw_object_id=? AND source_ref=?""",
+        (target, plan.candidates[0].source_ref),
+    ).fetchone()
+    assert alias is not None and alias["supplied_filename"] == "shared-name.odt"
+    assert _plan(settings).candidate_count == 0
+
+
 def test_release_operator_can_apply_exact_claim_under_same_two_held_leases(
     settings,
     storage,
@@ -674,7 +738,7 @@ def test_telegram_alias_timestamp_is_not_a_message_name_identity_surface(setting
     assert plan.candidates[0].created_at == "2026-08-19T17:46:40+00:00"
 
 
-def test_public_lookup_failure_rolls_back_repair_after_verified_backup(
+def test_exact_public_eligibility_failure_rolls_back_repair_after_verified_backup(
     settings,
     storage,
     tmp_path,
@@ -692,8 +756,8 @@ def test_public_lookup_failure_rolls_back_repair_after_verified_backup(
     claim = _claim(tmp_path, plan)
     backups = tmp_path / "backups"
     backups.mkdir(mode=0o700)
-    monkeypatch.setattr(FridayStorage, "find_owned_files_by_filename", lambda *_args: [])
-    with pytest.raises(ContractError, match="public exact filename lookup"):
+    monkeypatch.setattr(operator, "_exact_alias_is_publicly_eligible", lambda *_args: False)
+    with pytest.raises(ContractError, match="exact public filename eligibility"):
         apply_plan(
             Path(settings.database_path),
             tenant_id="alice",
