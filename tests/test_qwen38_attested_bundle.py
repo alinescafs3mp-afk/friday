@@ -152,114 +152,24 @@ def test_six_way_probe_loads_http_client_assembly_before_preflight() -> None:
         _assert_static_six_way_http_client_contract(switch, mutated_native_test)
 
 
-def _assert_static_post_six_way_headroom_contract(switch: str, native_test: str) -> None:
-    convergence = _powershell_function(switch, "Wait-PostSixWayGpuHeadroom")
-    assert "$TimeoutSeconds -lt 1 -or $TimeoutSeconds -gt 30 -or\n" in convergence
-    assert "$PollMilliseconds -lt 1 -or $PollMilliseconds -gt 2000) {" in convergence
-    assert "[DateTime]::UtcNow.AddSeconds($TimeoutSeconds)" in convergence
-    assert "while ($attempts -eq 0 -or [DateTime]::UtcNow -lt $deadline)" in convergence
-    assert convergence.count("$gpu = Get-GpuMemory") == 1
-    assert convergence.count("Start-Sleep -Milliseconds $sleepMilliseconds") == 1
-    assert "$sampledAt -lt $deadline -and\n" in convergence
-    assert "$freeMiB -ge $script:Attested.MinimumCandidateFreeMiB)" in convergence
-    assert convergence.count("post_six_way_gpu_headroom_probe_failed") == 1
-    assert convergence.count("post_six_way_gpu_headroom_verified") == 1
-    assert convergence.count("post_six_way_gpu_headroom_timeout") == 1
-    assert "request_count = 6" in convergence
-    assert "free_mib = $freeMiB" in convergence
-    assert "free_mib = $lastFreeMiB" in convergence
-    assert convergence.count("minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB") == 3
-    assert convergence.count("timeout_seconds = $TimeoutSeconds") == 3
-    assert "            throw\n        }\n        $lastFreeMiB = $freeMiB" in convergence
-    assert "body" not in convergence.lower()
-
-    probe_stage = switch.index("    $stage = 'six_way_probe'")
-    probe = switch.index("    Invoke-SixWayProbe $apiKey", probe_stage)
-    drain_stage = switch.index("    $stage = 'six_way_drain'", probe)
-    drain = switch.index("    Wait-EndpointIdle $headers 180", drain_stage)
-    convergence_stage = switch.index(
-        "    $stage = 'post_six_way_gpu_headroom_convergence'",
-        drain,
-    )
-    convergence_call = switch.index(
-        "    $null = Wait-PostSixWayGpuHeadroom 30 2000",
-        convergence_stage,
-    )
-    image_stage = switch.index("    $stage = 'image'", convergence_call)
-    assert probe_stage < probe < drain_stage < drain
-    assert drain < convergence_stage < convergence_call < image_stage
-    checkpoint = switch[probe_stage:image_stage]
-    assert "Assert-GpuHeadroom" not in checkpoint
-    assert "$stage = 'six_way'" not in switch
-
-    required_native_cases = (
-        "Wait-PostSixWayGpuHeadroom'",
-        "Set-GpuProjectionReadings @(1200, 1400, 1536)",
-        "[ComponentModel.Win32Exception]::new('synthetic nvidia-smi command failure')",
-        "[FormatException]::new('synthetic nvidia-smi schema failure')",
-        "$script:gpuProjectionPersistentFreeMiB = 1400",
-        "post_six_way_gpu_headroom_verified",
-        "post_six_way_gpu_headroom_probe_failed",
-        "post_six_way_gpu_headroom_timeout",
-        "not exact or body-free",
-    )
-    assert all(item in native_test for item in required_native_cases)
-
-
-def test_post_six_way_headroom_convergence_is_bounded_and_diagnosable() -> None:
-    switch = _SWITCH.read_text(encoding="utf-8")
-    native_test = _RECEIPT_TEST.read_text(encoding="utf-8")
-    _assert_static_post_six_way_headroom_contract(switch, native_test)
-
-
-@pytest.mark.parametrize(
-    ("old", "mutation"),
-    (
-        ("$TimeoutSeconds -gt 30", "$TimeoutSeconds -gt 300"),
-        ("$PollMilliseconds -gt 2000", "$PollMilliseconds -gt 20000"),
-        (
-            "while ($attempts -eq 0 -or [DateTime]::UtcNow -lt $deadline)",
-            "while ($true)",
-        ),
-        ("$sampledAt -lt $deadline -and", "$sampledAt -ge $deadline -and"),
-        (
-            "$freeMiB -ge $script:Attested.MinimumCandidateFreeMiB)",
-            "$freeMiB -gt $script:Attested.MinimumCandidateFreeMiB)",
-        ),
-        (
-            "            throw\n        }\n        $lastFreeMiB = $freeMiB",
-            "            continue\n        }\n        $lastFreeMiB = $freeMiB",
-        ),
-        ("post_six_way_gpu_headroom_timeout", "post_six_way_gpu_timeout"),
-        ("request_count = 6", "request_count = 5"),
-        (
-            "$stage = 'post_six_way_gpu_headroom_convergence'",
-            "$stage = 'six_way_drain'",
-        ),
-        ("Wait-PostSixWayGpuHeadroom 30 2000", "Wait-PostSixWayGpuHeadroom 300 20000"),
-    ),
-)
-def test_static_gate_kills_post_six_way_headroom_mutations(old: str, mutation: str) -> None:
-    switch = _SWITCH.read_text(encoding="utf-8")
-    native_test = _RECEIPT_TEST.read_text(encoding="utf-8")
-    _assert_static_post_six_way_headroom_contract(switch, native_test)
-    assert old in switch
-
-    with pytest.raises((AssertionError, ValueError)):
-        _assert_static_post_six_way_headroom_contract(
-            switch.replace(old, mutation, 1),
-            native_test,
-        )
-
-
 def _assert_static_long_context_epoch_contract(switch: str) -> None:
+    text_stage = switch.index("    $stage = 'text_schema'")
     image_stage = switch.index("    $stage = 'image'")
     soak_stage = switch.index("    $stage = 'soak'", image_stage)
     soak_headroom = switch.index(
         "    $gpu = Assert-GpuHeadroom\n    $witnessAfter",
         soak_stage,
     )
-    long_stage = switch.index("    $stage = 'long_context'", soak_headroom)
+    six_stage = switch.index("    $stage = 'six_way_probe'", soak_headroom)
+    six_probe = switch.index("    Invoke-SixWayProbe $apiKey", six_stage)
+    six_drain_stage = switch.index("    $stage = 'six_way_drain'", six_probe)
+    six_drain = switch.index("    Wait-EndpointIdle $headers 180", six_drain_stage)
+    six_gpu_observation = switch.index("    $postSixWayGpu = Get-GpuMemory", six_drain)
+    six_journal = switch.index(
+        "    Write-Journal 'post_six_way_gpu_headroom_observed_during_cumulative_stress' @{",
+        six_gpu_observation,
+    )
+    long_stage = switch.index("    $stage = 'long_context'", six_journal)
     long_request = switch.index(
         "    $longResponse = Invoke-Chat $headers $longBody 300 'long_context'",
         long_stage,
@@ -302,11 +212,23 @@ def _assert_static_long_context_epoch_contract(switch: str) -> None:
     restart_health_stage = switch.index("    $stage = 'epoch_restart_health'", restart_stage)
     strict_after_restart = switch.index("    $null = Assert-GpuHeadroom", restart_health_stage)
 
-    assert image_stage < soak_stage < soak_headroom < long_stage < long_request < usage_assertion
+    assert text_stage < image_stage < soak_stage < soak_headroom < six_stage < six_probe
+    assert six_probe < six_drain_stage < six_drain < six_gpu_observation < six_journal < long_stage
+    assert long_stage < long_request < usage_assertion
     assert usage_assertion < long_drain_stage < long_drain < engine_health < proxy_health
     assert proxy_health < identity < fatal < gpu_observation < journal < epoch_drain_stage
     assert epoch_drain_stage < epoch_drain < stop_proxy < engine_drain < stop_engine < gpu_release
     assert gpu_release < restart_stage < restart_health_stage < strict_after_restart
+
+    six_journal_block = switch[six_journal:long_stage]
+    for exact_field in (
+        "free_mib = [int]$postSixWayGpu.FreeMiB",
+        "minimum_free_mib = $script:Attested.MinimumCandidateFreeMiB",
+        "request_count = 6",
+        "strict_headroom_stage = 'epoch_restart_health'",
+    ):
+        assert six_journal_block.count(exact_field) == 1
+    assert "body" not in six_journal_block.lower()
 
     journal_block = switch[journal:epoch_drain_stage]
     for exact_field in (
@@ -318,10 +240,15 @@ def _assert_static_long_context_epoch_contract(switch: str) -> None:
         assert journal_block.count(exact_field) == 1
     assert "body" not in journal_block.lower()
 
+    cumulative_stress = switch[six_stage:epoch_drain_stage]
     post_long = switch[long_drain_stage:epoch_drain_stage]
+    assert "Assert-GpuHeadroom" not in cumulative_stress
     assert "Assert-GpuHeadroom" not in post_long
     assert "Wait-PostSixWayGpuHeadroom" not in post_long
     assert "gpu_headroom_convergence" not in post_long
+    assert "function Wait-PostSixWayGpuHeadroom" not in switch
+    assert "post_six_way_gpu_headroom_verified" not in switch
+    assert "post_six_way_gpu_headroom_timeout" not in switch
     assert "post_long_context_gpu_headroom_verified" not in switch
     assert "post_long_context_gpu_headroom_timeout" not in switch
 
@@ -333,6 +260,13 @@ def test_long_context_is_observed_then_reclaimed_by_epoch_restart() -> None:
 @pytest.mark.parametrize(
     ("old", "mutation"),
     (
+        ("    $stage = 'six_way_probe'", "    $stage = 'soak'"),
+        ("    $postSixWayGpu = Get-GpuMemory", "    $postSixWayGpu = Assert-GpuHeadroom"),
+        (
+            "post_six_way_gpu_headroom_observed_during_cumulative_stress",
+            "post_six_way_gpu_headroom_verified",
+        ),
+        ("request_count = 6", "request_count = 5"),
         ("    $stage = 'long_context_drain'", "    $stage = 'long_context'"),
         ("    $postLongGpu = Get-GpuMemory", "    $postLongGpu = Assert-GpuHeadroom"),
         (
@@ -1174,7 +1108,7 @@ def test_powershell_receipt_serialization_test_is_ps51_compatible_and_exact() ->
         "System.Management.Automation.Language.Parser",
         "'Switch-Qwen38V12Attested.ps1' = 3",
         "'Rollback-Qwen38V12Attested.ps1' = 4",
-        "attested receipt serialization, six-way HTTP, and GPU convergence projections: PASS",
+        "attested receipt serialization and six-way HTTP client surface: PASS",
     )
     assert all(item in source for item in required)
 
@@ -1189,13 +1123,13 @@ def test_transport_manifest_pins_exact_live_predecessors_and_frozen_sources() ->
             "5cfb5177a87881e9411b03f373cc2ccc9df7a034adae888dd5d6e3b4be1f0ea9"
         ),
         "CORE-SHA256SUMS": ("b1378e7524c44b92dd18176a51c45ce403440d1a7dfc20b9193bad633a0488b2"),
-        "ORCHESTRATION-SHA256SUMS": ("fd8affdbfae0e20493e37d0d3a617e45359a40572266977cf00758ecad5c9818"),
-        "ORCHESTRATION.md": ("0dea3c5323110c85beba3d1892b97870906b143af77480f266f8a89637cf8701"),
+        "ORCHESTRATION-SHA256SUMS": ("2e9bacdc4c7528e7b800dfd237f313e1f40ac8221ef618f6ef7e7d9a60fcee32"),
+        "ORCHESTRATION.md": ("d7bfdaf1ced72faf5660d70d0612d6d9567aae6a5dd56ffc7145ae66fe40a6b7"),
         "README.md": "28e508e658350789a85345ba9748c85028dce8a7806da080096f59495d7520dd",
         "Rollback-Qwen38V12Attested.ps1": (
             "a8e19b2704710f339be8aaf1fff3c0773b8304f27721106ae62a620907013d51"
         ),
-        "Switch-Qwen38V12Attested.ps1": ("eb310176c1980f431798ffb1b25d25a700d40a31320fdcd999924c6c7634b895"),
+        "Switch-Qwen38V12Attested.ps1": ("a08e10a3c67cac4b2833be468a10898320f9d02d609c8a73d895d8cfc21eef82"),
         "Test-AttestedCleanupProjection.ps1": (
             "d94846c65cc621e74426a436b121b164cb0c533cd03bbf99214e579e3d432dc6"
         ),
@@ -1203,7 +1137,7 @@ def test_transport_manifest_pins_exact_live_predecessors_and_frozen_sources() ->
             "e537898cb72745fadf5300cede4ffe9a247c5348bb2668222189882d86981a2a"
         ),
         "Test-AttestedReceiptSerialization.ps1": (
-            "07afaa10023ad26be9128923608fb5a37d7cba4d3961c10979c17b4bc975d071"
+            "83930f030a91b62d066ad09a4592fc7b11b559bb2386fc3c88b65dd4e79bd8ea"
         ),
     }
     expected_roles = {

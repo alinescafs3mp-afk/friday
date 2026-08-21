@@ -106,22 +106,19 @@ release/headroom gates, text/JSON-schema, six-way, long-context, image, and soak
 probes. The switch explicitly loads `System.Net.Http` before preflight so its
 HTTP client types resolve before mutation and the six-way probe; a missing
 runtime dependency fails before mutation.
-The six-way checkpoint has separate `six_way_probe`, `six_way_drain`, and
-`post_six_way_gpu_headroom_convergence` stages. After all six responses and
-three clear drain reads, only a valid free-VRAM reading below the unchanged
-1,536 MiB floor may be retried, every two seconds for at most 30 seconds. Any
-`nvidia-smi` command or response-schema error propagates immediately. The
-terminal convergence journal record contains no request body: success records
-the six-request count and verified free MiB, while a bounded timeout records
-the final valid free MiB and the unchanged floor.
-Image acceptance and the soak checkpoint, including the unchanged strict
-1,536 MiB headroom gate, run before the long-context request. After the exact
-long-context usage assertion and three clear drain reads, the switch rechecks
-candidate health and fatal logs, then writes a body-free observation of the
-current free MiB and the unchanged floor. It does not mislabel retained
-allocator memory as converging headroom: the existing epoch drain stops the
-candidate, proves GPU release, restarts the exact engine, and enforces the
-strict 1,536 MiB gate at `epoch_restart_health`.
+Image acceptance and the 60-second soak checkpoint, including the unchanged
+strict 1,536 MiB headroom gate, run before cumulative capacity stress. The
+six-way probe must still return all six successful responses, then three clear
+drain reads are required. One body-free journal record observes actual free
+MiB, the unchanged floor, and the six-request count; it makes no headroom
+acceptance or convergence claim.
+The exact long-context usage assertion follows that six-way observation. After
+three more clear drain reads, the switch rechecks candidate health, identity,
+and fatal logs, then writes the corresponding one-request body-free VRAM
+observation. Retained allocator memory is not mislabelled as a failure or as
+converging headroom: the existing epoch drain stops the candidate, proves GPU
+release, restarts the exact engine, and enforces the strict 1,536 MiB gate at
+`epoch_restart_health`.
 Before arming restart policies, the candidate engine is forcibly
 restarted and the switch proves old-witness disappearance plus new canonical
 witness and nonce rotation, then repeats identity, proxy, smoke, headroom,
