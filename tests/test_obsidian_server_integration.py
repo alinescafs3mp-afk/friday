@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 
 from fastapi.testclient import TestClient
@@ -56,6 +57,24 @@ def test_optional_organ_and_routes_exist_only_when_enabled(settings) -> None:
         "/obsidian/open",
         "/api/public/obsidian/setup/resolve",
     } <= enabled_paths
+
+
+def test_public_health_attests_only_obsidian_mode_and_effective_root_digest(settings) -> None:
+    for configured, expected_mode in (
+        (settings, "disabled"),
+        (_enabled(settings), "enabled"),
+    ):
+        expected_root = str(configured.obsidian_effective_root)
+        expected_digest = hashlib.sha256(expected_root.encode("utf-8")).hexdigest()
+        with TestClient(create_app(configured)) as client:
+            response = client.get("/api/health")
+
+        assert response.status_code == 200
+        assert response.json()["obsidian"] == {
+            "mode": expected_mode,
+            "root_sha256": expected_digest,
+        }
+        assert expected_root not in response.text
 
 
 def test_enabled_server_registers_tools_and_only_setup_is_public(settings) -> None:

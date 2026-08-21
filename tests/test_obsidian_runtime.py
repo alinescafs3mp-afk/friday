@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import threading
 from dataclasses import replace
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from friday.organs.obsidian.runtime import ObsidianCompatibilityError, ObsidianRuntime
+from friday.organs.obsidian.runtime import (
+    ObsidianCompatibilityError,
+    ObsidianContainmentError,
+    ObsidianRuntime,
+)
 from friday.organs.obsidian.syncthing import (
     ConfiguredDevice,
     ConfiguredFolder,
@@ -138,17 +144,28 @@ class _Client:
 
 
 class _Manager:
-    def __init__(self, client: _Client, *, version: str = "v2.1.3") -> None:
+    def __init__(
+        self,
+        client: _Client,
+        *,
+        version: str = "v2.1.3",
+        stop_error: Exception | None = None,
+    ) -> None:
         self.client = client
         self.version = version
+        self.server_device_id = SERVER_ID
         self.profile_id = ""
+        self.ensure_calls = 0
+        self.stopped_profile_ids: list[str] = []
+        self.stop_error = stop_error
         self.closed = False
 
     def ensure_profile(self, spec, **_kwargs):
+        self.ensure_calls += 1
         self.profile_id = spec.profile_id
         return SyncthingReadiness(
             SyncthingVersion(self.version, None, "linux", "amd64"),
-            SyncthingSystemStatus(SERVER_ID, spec.gui_address, 1),
+            SyncthingSystemStatus(self.server_device_id, spec.gui_address, 1),
         )
 
     def client_for(self, profile_id: str):
@@ -157,10 +174,48 @@ class _Manager:
 
     def stop_profile(self, profile_id: str, **_kwargs) -> bool:
         assert profile_id == self.profile_id
+        self.stopped_profile_ids.append(profile_id)
+        if self.stop_error is not None:
+            raise self.stop_error
         return True
 
     def close(self, **_kwargs) -> None:
         self.closed = True
+
+
+class _BlockingEnsureManager(_Manager):
+    def __init__(self, client: _Client) -> None:
+        super().__init__(client)
+        self.ensure_started = threading.Event()
+        self.ensure_release = threading.Event()
+        self.stop_started = threading.Event()
+        self._profile_lock = threading.Lock()
+
+    def ensure_profile(self, spec, **kwargs):
+        with self._profile_lock:
+            self.profile_id = spec.profile_id
+            self.ensure_started.set()
+            if not self.ensure_release.wait(timeout=5.0):
+                raise TimeoutError("test did not release ensure_profile")
+            return super().ensure_profile(spec, **kwargs)
+
+    def stop_profile(self, profile_id: str, **kwargs) -> bool:
+        self.stop_started.set()
+        with self._profile_lock:
+            return super().stop_profile(profile_id, **kwargs)
+
+
+class _BlockingPolicyClient(_Client):
+    def __init__(self) -> None:
+        super().__init__()
+        self.policy_started = threading.Event()
+        self.policy_release = threading.Event()
+
+    def apply_discovery_relay(self) -> DiscoveryRelayConfiguration:
+        self.policy_started.set()
+        if not self.policy_release.wait(timeout=5.0):
+            raise TimeoutError("test did not release policy attestation")
+        return super().apply_discovery_relay()
 
 
 def _runtime(settings, storage, tmp_path, client: _Client | None = None, *, version="v2.1.3"):
@@ -221,6 +276,61 @@ async def test_one_phone_flow_uses_fragment_token_and_exact_delivery_evidence(
     assert diagnostics["connection"]["transport"] == "relay"
     assert diagnostics["conflicts"][0]["canonical_path"] == "Note.md"
     assert conflict.exists()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_diagnostics_reports_offline_without_restarting_profile(
+    settings, storage, tmp_path
+) -> None:
+    storage.ensure_user("alice")
+    runtime, _ = _runtime(settings, storage, tmp_path)
+    await runtime.start("alice")
+    await runtime.check("alice")
+    assert (await runtime.cancel("alice"))["state"] == "cancelled"
+    profile = storage.get_obsidian_profile("alice")
+    ensure_calls = runtime.manager.ensure_calls
+    stopped_profile_ids = tuple(runtime.manager.stopped_profile_ids)
+
+    diagnostics = await runtime.diagnostics("alice")
+
+    assert diagnostics["state"] == "cancelled"
+    assert diagnostics["sync_state"] == "unavailable"
+    assert diagnostics["connection"] == {"state": "offline", "transport": "none"}
+    assert diagnostics["profile"]["state"] == "stopped"
+    assert storage.get_obsidian_profile("alice")["state"] == "stopped"
+    assert runtime.manager.ensure_calls == ensure_calls
+    assert tuple(runtime.manager.stopped_profile_ids) == stopped_profile_ids == (profile["id"],)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_state", ["failed", "disconnected"])
+async def test_other_terminal_diagnostics_never_touch_process_manager(
+    settings, storage, tmp_path, terminal_state: str
+) -> None:
+    storage.ensure_user("alice")
+    runtime, _ = _runtime(settings, storage, tmp_path)
+    await runtime.start("alice")
+    await runtime.check("alice")
+    storage.transition_obsidian_onboarding("alice", "failed")
+    if terminal_state == "disconnected":
+        storage.transition_obsidian_onboarding("alice", "disconnected")
+    profile = storage.get_obsidian_profile("alice")
+    runtime.manager.stop_profile(profile["id"])
+    storage.update_obsidian_profile("alice", state=terminal_state)
+    storage.update_obsidian_vault("alice", state=terminal_state)
+    storage.update_obsidian_device("alice", state="disconnected")
+    ensure_calls = runtime.manager.ensure_calls
+    stopped_profile_ids = tuple(runtime.manager.stopped_profile_ids)
+
+    diagnostics = await runtime.diagnostics("alice")
+
+    assert diagnostics["state"] == terminal_state
+    assert diagnostics["sync_state"] == "unavailable"
+    assert diagnostics["connection"] == {"state": "offline", "transport": "none"}
+    assert diagnostics["profile"]["state"] == terminal_state
+    assert storage.get_obsidian_profile("alice")["state"] == terminal_state
+    assert runtime.manager.ensure_calls == ensure_calls
+    assert tuple(runtime.manager.stopped_profile_ids) == stopped_profile_ids == (profile["id"],)
 
 
 @pytest.mark.asyncio
@@ -306,7 +416,7 @@ async def test_ready_panel_never_claims_live_sync_when_android_or_daemon_is_offl
 
 
 @pytest.mark.asyncio
-async def test_pairing_effects_resume_after_detected_offering_initial_sync_and_cancel(
+async def test_pairing_effects_resume_after_selected_offering_initial_sync_and_cancel(
     settings, storage, tmp_path
 ) -> None:
     storage.ensure_user("alice")
@@ -316,11 +426,10 @@ async def test_pairing_effects_resume_after_detected_offering_initial_sync_and_c
         "alice", [{"syncthing_device_id": PHONE_ID, "display_name": "Pixel"}]
     )[0]
     storage.select_obsidian_pairing_candidate("alice", candidate["id"])
-    storage.transition_obsidian_onboarding("alice", "android_device_detected", pending_device_id=PHONE_ID)
     client.remote_state = "unknown"
 
-    detected_recovered = await runtime.check("alice")
-    assert detected_recovered["state"] == "awaiting_android_folder_acceptance"
+    selected_recovered = await runtime.check("alice")
+    assert selected_recovered["state"] == "awaiting_android_folder_acceptance"
     assert len(client.devices) == 1
     assert len(client.folders) == 1
 
@@ -343,19 +452,131 @@ async def test_pairing_effects_resume_after_detected_offering_initial_sync_and_c
 
 
 @pytest.mark.asyncio
-async def test_folder_offer_resumes_when_a_crash_left_the_offering_state(settings, storage, tmp_path) -> None:
+async def test_folder_offer_resumes_after_post_folder_before_state_transition(
+    settings, storage, tmp_path
+) -> None:
     storage.ensure_user("alice")
     runtime, client = _runtime(settings, storage, tmp_path)
     await runtime.start("alice")
     client.devices[PHONE_ID] = ConfiguredDevice(PHONE_ID, "Pixel", ("dynamic",), False)
     storage.bind_obsidian_android_device("alice", syncthing_device_id=PHONE_ID, display_name="Pixel")
     storage.transition_obsidian_onboarding("alice", "android_device_detected", pending_device_id=PHONE_ID)
-    storage.transition_obsidian_onboarding("alice", "offering_folder")
+    vault = storage.get_obsidian_vault("alice")
+    client.post_folder(
+        {
+            "id": vault["folder_id"],
+            "label": vault["display_name"],
+            "path": vault["server_path"],
+            "type": "sendreceive",
+            "devices": [{"deviceID": PHONE_ID}],
+            "versioning": {
+                "type": "staggered",
+                "params": {"cleanoutDays": "365", "maxAge": "31536000"},
+            },
+            "paused": False,
+        }
+    )
     client.remote_state = "unknown"
 
     recovered = await runtime.check("alice")
     assert recovered["state"] == "awaiting_android_folder_acceptance"
     assert len(client.folders) == 1
+
+
+@pytest.mark.asyncio
+async def test_selected_device_posted_before_durable_bind_resumes_safely(
+    settings, storage, tmp_path
+) -> None:
+    storage.ensure_user("alice")
+    runtime, client = _runtime(settings, storage, tmp_path)
+    await runtime.start("alice")
+    candidate = storage.record_obsidian_pairing_candidates(
+        "alice", [{"syncthing_device_id": PHONE_ID, "display_name": "Pixel"}]
+    )[0]
+    storage.select_obsidian_pairing_candidate("alice", candidate["id"])
+    client.devices[PHONE_ID] = ConfiguredDevice(PHONE_ID, "Pixel", ("dynamic",), False)
+    client.remote_state = "unknown"
+    assert storage.get_obsidian_device("alice") is None
+
+    recovered = await runtime.check("alice")
+
+    assert recovered["state"] == "awaiting_android_folder_acceptance"
+    assert storage.get_obsidian_device("alice")["syncthing_device_id"] == PHONE_ID
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rogue_binding", ["device", "folder"])
+async def test_rogue_prebinding_stops_unselected_profile(
+    settings, storage, tmp_path, rogue_binding: str
+) -> None:
+    storage.ensure_user("alice")
+    runtime, client = _runtime(settings, storage, tmp_path)
+    if rogue_binding == "device":
+        client.devices[OTHER_ID] = ConfiguredDevice(OTHER_ID, "Rogue", ("dynamic",), False)
+    else:
+        client.folders["rogue-folder"] = ConfiguredFolder(
+            "rogue-folder",
+            "Rogue",
+            str(tmp_path / "rogue"),
+            (OTHER_ID,),
+            False,
+            "sendreceive",
+        )
+
+    panel = await runtime.start("alice")
+
+    profile = storage.get_obsidian_profile("alice")
+    assert panel["state"] == "failed"
+    assert panel["error_code"] == "syncthing_unavailable"
+    assert profile["state"] == "failed"
+    assert runtime.manager.stopped_profile_ids == [profile["id"]]
+
+
+@pytest.mark.asyncio
+async def test_observed_server_identity_mismatch_stops_profile(settings, storage, tmp_path) -> None:
+    storage.ensure_user("alice")
+    runtime, _ = _runtime(settings, storage, tmp_path)
+    await runtime.start("alice")
+    runtime.manager.server_device_id = OTHER_ID
+
+    panel = await runtime.check("alice")
+
+    profile = storage.get_obsidian_profile("alice")
+    assert panel["error_code"] == "sync_observation_unavailable"
+    assert profile["state"] == "failed"
+    assert runtime.manager.stopped_profile_ids == [profile["id"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_state", ["detected_without_bound", "offering_without_folder"])
+async def test_incomplete_durable_state_stops_profile(
+    settings, storage, tmp_path, invalid_state: str
+) -> None:
+    storage.ensure_user("alice")
+    runtime, client = _runtime(settings, storage, tmp_path)
+    await runtime.start("alice")
+    client.devices[PHONE_ID] = ConfiguredDevice(PHONE_ID, "Pixel", ("dynamic",), False)
+    if invalid_state == "detected_without_bound":
+        candidate = storage.record_obsidian_pairing_candidates(
+            "alice", [{"syncthing_device_id": PHONE_ID, "display_name": "Pixel"}]
+        )[0]
+        storage.select_obsidian_pairing_candidate("alice", candidate["id"])
+    else:
+        storage.bind_obsidian_android_device(
+            "alice", syncthing_device_id=PHONE_ID, display_name="Pixel"
+        )
+    storage.transition_obsidian_onboarding(
+        "alice", "android_device_detected", pending_device_id=PHONE_ID
+    )
+    if invalid_state == "offering_without_folder":
+        storage.transition_obsidian_onboarding("alice", "offering_folder")
+
+    panel = await runtime.check("alice")
+
+    profile = storage.get_obsidian_profile("alice")
+    assert panel["error_code"] == "sync_observation_unavailable"
+    assert profile["state"] == "failed"
+    assert runtime.manager.stopped_profile_ids == [profile["id"]]
 
 
 @pytest.mark.asyncio
@@ -367,6 +588,73 @@ async def test_unsupported_syncthing_version_fails_closed(settings, storage, tmp
     assert panel["state"] == "failed"
     assert panel["error_code"] == "syncthing_unavailable"
     assert storage.get_obsidian_profile("alice")["state"] == "failed"
+    assert runtime.manager.stopped_profile_ids == [storage.get_obsidian_profile("alice")["id"]]
+
+
+@pytest.mark.asyncio
+async def test_unsupported_version_preserves_failure_when_profile_stop_also_fails(
+    settings,
+    storage,
+    tmp_path,
+) -> None:
+    storage.ensure_user("alice")
+    runtime, client = _runtime(settings, storage, tmp_path, version="v2.2.0")
+    runtime.manager = _Manager(client, version="v2.2.0", stop_error=OSError("cannot stop"))
+
+    with pytest.raises(ObsidianContainmentError) as raised:
+        await runtime.start("alice")
+
+    profile = storage.get_obsidian_profile("alice")
+    assert isinstance(raised.value.__cause__, ObsidianCompatibilityError)
+    assert profile["state"] == "failed"
+    assert runtime.manager.stopped_profile_ids == [profile["id"], profile["id"]]
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_profile_start_waits_for_exact_profile_stop(
+    settings,
+    storage,
+    tmp_path,
+) -> None:
+    storage.ensure_user("alice")
+    runtime, client = _runtime(settings, storage, tmp_path)
+    manager = _BlockingEnsureManager(client)
+    runtime.manager = manager
+
+    started = asyncio.create_task(runtime.start("alice"))
+    assert await asyncio.to_thread(manager.ensure_started.wait, 2.0)
+    started.cancel()
+    assert await asyncio.to_thread(manager.stop_started.wait, 2.0)
+    assert manager.stopped_profile_ids == []
+    manager.ensure_release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await started
+    profile = storage.get_obsidian_profile("alice")
+    assert profile["state"] == "failed"
+    assert manager.stopped_profile_ids == [profile["id"]]
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_policy_attestation_stops_exact_profile(
+    settings,
+    storage,
+    tmp_path,
+) -> None:
+    storage.ensure_user("alice")
+    client = _BlockingPolicyClient()
+    runtime, _ = _runtime(settings, storage, tmp_path, client)
+
+    started = asyncio.create_task(runtime.start("alice"))
+    assert await asyncio.to_thread(client.policy_started.wait, 2.0)
+    started.cancel()
+    client.policy_release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await started
+    profile = storage.get_obsidian_profile("alice")
+    assert profile["state"] == "failed"
+    assert runtime.manager.stopped_profile_ids == [profile["id"]]
 
 
 @pytest.mark.asyncio
@@ -504,6 +792,9 @@ async def test_unexpected_remote_device_blocks_note_writes_fail_closed(settings,
     vault = Path(storage.get_obsidian_vault("alice")["server_path"])
     assert not (vault / "Private.md").exists()
     assert storage.get_obsidian_operation("alice", "must-not-run") is None
+    profile = storage.get_obsidian_profile("alice")
+    assert profile["state"] == "failed"
+    assert runtime.manager.stopped_profile_ids == [profile["id"]]
 
 
 @pytest.mark.asyncio
@@ -530,6 +821,9 @@ async def test_unsafe_folder_policy_drift_blocks_note_writes_fail_closed(
     vault = Path(storage.get_obsidian_vault("alice")["server_path"])
     assert not (vault / "Private.md").exists()
     assert storage.get_obsidian_operation("alice", f"drift-{drift}") is None
+    profile = storage.get_obsidian_profile("alice")
+    assert profile["state"] == "failed"
+    assert runtime.manager.stopped_profile_ids == [profile["id"]]
 
 
 @pytest.mark.asyncio

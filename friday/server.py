@@ -1587,6 +1587,12 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         raise ValueError(
             f"Unknown FRIDAY_MEMORY_VAULT_MODE={settings.memory_vault_mode!r}. Valid values: {valid}"
         )
+    obsidian_health_identity = {
+        "mode": "enabled" if settings.obsidian_enabled else "disabled",
+        "root_sha256": hashlib.sha256(
+            str(settings.obsidian_effective_root).encode("utf-8", errors="strict")
+        ).hexdigest(),
+    }
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -2164,6 +2170,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 "body_free_mode": settings.memory_vault_mode == "disabled",
                 "body_projection_enabled": settings.memory_vault_mode == "full_owner",
             },
+            "obsidian": dict(obsidian_health_identity),
             "orchestration": {
                 "schema": "friday.v12-orchestration-health.v1",
                 "configured_mode": settings.router_mode,

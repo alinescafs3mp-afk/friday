@@ -22,6 +22,21 @@ fallback. It does not expose QR, and no happy-path step requires QR. The open
 launcher is currently for `Friday Connection Test.md`; arbitrary-note navigation
 is not part of this slice.
 
+## Planning record
+
+Initial engineering estimate from the architecture review:
+
+- testable P0-P4 Android beta: 43-65 engineer-days, or roughly 9-13 weeks for
+  one engineer / 6-8 calendar weeks for two engineers with review capacity;
+- complete P0-P7 product contour: 95-140 engineer-days;
+- the first 12-hour checkpoint was scoped to a testable beta, not physical
+  Android certification or the P5-P9 follow-ups.
+
+The implementation task list is the checklist below. Release work is isolated
+in a dedicated worktree because a parallel engineer is repairing the 0.206.x
+line; only committed, verified bug-fix lineage is merged before sealing the
+Obsidian release.
+
 ## First-release checklist
 
 - [x] P0: versioned contracts, onboarding/error states and distinct sync facts.

@@ -131,6 +131,10 @@ class ObsidianCompatibilityError(RuntimeError):
     """The managed Syncthing build is outside Friday's tested contract."""
 
 
+class ObsidianContainmentError(RuntimeError):
+    """Friday could not prove that an untrusted Syncthing profile was stopped."""
+
+
 def _now() -> datetime:
     return datetime.now(tz=UTC)
 
@@ -306,6 +310,67 @@ class ObsidianRuntime:
         if not minimum <= observed < maximum:
             raise ObsidianCompatibilityError("Syncthing version is outside the tested range")
 
+    async def _stop_untrusted_profile(
+        self,
+        owner_id: str,
+        profile_id: str,
+        failure: BaseException,
+    ) -> None:
+        """Quiesce an untrusted profile before propagating an attestation failure."""
+
+        stop_failures: list[BaseException] = []
+        stop_succeeded = False
+        cancelled_during_cleanup = False
+        for _attempt in range(2):
+            stop_task = asyncio.create_task(
+                asyncio.to_thread(self.manager.stop_profile, profile_id)
+            )
+            while not stop_task.done():
+                try:
+                    await asyncio.shield(stop_task)
+                except asyncio.CancelledError:
+                    # Cleanup is a security boundary. A repeated cancellation
+                    # must not detach the stop thread and let the daemon outlive
+                    # the request that rejected its configuration.
+                    cancelled_during_cleanup = True
+                except BaseException:  # noqa: BLE001 - classified from the completed task below
+                    pass
+            try:
+                stop_task.result()
+            except BaseException as exc:  # noqa: BLE001 - retry and surface containment failure
+                stop_failures.append(exc)
+            else:
+                stop_succeeded = True
+                break
+
+        state_failure: Exception | None = None
+        try:
+            self.storage.update_obsidian_profile(owner_id, state="failed")
+        except Exception as exc:  # noqa: BLE001 - preserve the attestation failure
+            state_failure = exc
+
+        if not stop_succeeded:
+            containment = ObsidianContainmentError(
+                "managed Syncthing profile could not be stopped after attestation failure"
+            )
+            for index, stop_failure in enumerate(stop_failures, start=1):
+                containment.add_note(
+                    f"stop attempt {index} failed with {type(stop_failure).__name__}: {stop_failure}"
+                )
+            if state_failure is not None:
+                containment.add_note(
+                    "failed profile state could not be persisted: "
+                    f"{type(state_failure).__name__}: {state_failure}"
+                )
+            raise containment from failure
+
+        if state_failure is not None:
+            failure.add_note("Could not persist failed Syncthing profile state after attestation failure")
+        if cancelled_during_cleanup and not isinstance(failure, asyncio.CancelledError):
+            cancelled = asyncio.CancelledError()
+            cancelled.add_note("Cancellation arrived while an untrusted Syncthing profile was being stopped")
+            raise cancelled from failure
+
     async def _ensure_running(
         self, owner_id: str, *, readiness_timeout: float = 30.0
     ) -> tuple[Mapping[str, Any], Any]:
@@ -313,17 +378,8 @@ class ObsidianRuntime:
         if profile is None:
             raise ValueError("Obsidian profile not found")
         spec = self._spec(owner_id, profile)
-        readiness = await asyncio.to_thread(
-            self.manager.ensure_profile,
-            spec,
-            readiness_timeout=readiness_timeout,
-            poll_interval=0.1,
-        )
-        self._check_version(readiness.version.version)
-        client = self.manager.client_for(str(profile["id"]))
-        connectivity = await asyncio.to_thread(client.apply_discovery_relay)
-        if connectivity.restart_required:
-            await asyncio.to_thread(self.manager.stop_profile, str(profile["id"]))
+        profile_id = str(profile["id"])
+        try:
             readiness = await asyncio.to_thread(
                 self.manager.ensure_profile,
                 spec,
@@ -331,16 +387,37 @@ class ObsidianRuntime:
                 poll_interval=0.1,
             )
             self._check_version(readiness.version.version)
-            client = self.manager.client_for(str(profile["id"]))
-            options = await asyncio.to_thread(client.get_options)
-            if not options.is_discovery_relay:
-                raise ObsidianCompatibilityError("discovery-and-relay policy was not retained after restart")
-        profile = self.storage.update_obsidian_profile(
-            owner_id,
-            state="running",
-            server_device_id=readiness.status.server_device_id,
-            syncthing_version=readiness.version.version,
-        )
+            client = self.manager.client_for(profile_id)
+            connectivity = await asyncio.to_thread(client.apply_discovery_relay)
+            if connectivity.restart_required:
+                await asyncio.to_thread(self.manager.stop_profile, profile_id)
+                readiness = await asyncio.to_thread(
+                    self.manager.ensure_profile,
+                    spec,
+                    readiness_timeout=readiness_timeout,
+                    poll_interval=0.1,
+                )
+                self._check_version(readiness.version.version)
+                client = self.manager.client_for(profile_id)
+                options = await asyncio.to_thread(client.get_options)
+                if not options.is_discovery_relay:
+                    raise ObsidianCompatibilityError(
+                        "discovery-and-relay policy was not retained after restart"
+                    )
+            await self._assert_bound_configuration_unchecked(
+                owner_id,
+                client,
+                readiness.status.server_device_id,
+            )
+            profile = self.storage.update_obsidian_profile(
+                owner_id,
+                state="running",
+                server_device_id=readiness.status.server_device_id,
+                syncthing_version=readiness.version.version,
+            )
+        except BaseException as exc:
+            await self._stop_untrusted_profile(owner_id, profile_id, exc)
+            raise
         return profile, client
 
     async def start(self, owner_id: str) -> dict[str, Any]:
@@ -550,6 +627,21 @@ class ObsidianRuntime:
             return await self._panel(owner_id)
 
     async def _configure_bound_folder(
+        self,
+        owner_id: str,
+        client: Any,
+        candidate: Mapping[str, Any],
+    ) -> None:
+        profile = self.storage.get_obsidian_profile(owner_id)
+        if profile is None:
+            raise ValueError("Obsidian onboarding not found")
+        try:
+            await self._configure_bound_folder_unchecked(owner_id, client, candidate)
+        except BaseException as exc:
+            await self._stop_untrusted_profile(owner_id, str(profile["id"]), exc)
+            raise
+
+    async def _configure_bound_folder_unchecked(
         self,
         owner_id: str,
         client: Any,
@@ -838,30 +930,112 @@ class ObsidianRuntime:
         return dict(value) if isinstance(value, dict) else {}
 
     async def _assert_bound_configuration(self, owner_id: str, client: Any) -> None:
+        profile = self.storage.get_obsidian_profile(owner_id)
+        if profile is None:
+            return
+        try:
+            await self._assert_bound_configuration_unchecked(
+                owner_id,
+                client,
+                str(profile.get("server_device_id") or ""),
+            )
+        except BaseException as exc:
+            await self._stop_untrusted_profile(owner_id, str(profile["id"]), exc)
+            raise
+
+    async def _assert_bound_configuration_unchecked(
+        self,
+        owner_id: str,
+        client: Any,
+        observed_server_device_id: str,
+    ) -> None:
         device = self.storage.get_obsidian_device(owner_id)
         vault = self.storage.get_obsidian_vault(owner_id)
         profile = self.storage.get_obsidian_profile(owner_id)
-        if device is None or vault is None or profile is None:
-            return
-        device_id = str(device["syncthing_device_id"])
-        server_device_id = str(profile.get("server_device_id") or "")
-        if not server_device_id:
+        session = self.storage.get_obsidian_onboarding(owner_id)
+        if vault is None or profile is None or session is None:
+            raise ObsidianCompatibilityError("managed Syncthing binding state is incomplete")
+
+        observed_server_id = str(observed_server_device_id or "").strip().upper()
+        stored_server_id = str(profile.get("server_device_id") or "").strip().upper()
+        if not observed_server_id:
             raise ObsidianCompatibilityError("managed Syncthing identity is unavailable")
+        if stored_server_id and stored_server_id != observed_server_id:
+            raise ObsidianCompatibilityError("managed Syncthing identity changed")
+
+        state = str(session["state"])
+        pending_device_id = str(session.get("pending_device_id") or "").strip().upper()
+        bound_device_id = (
+            "" if device is None else str(device.get("syncthing_device_id") or "").strip().upper()
+        )
+        if bound_device_id and pending_device_id and bound_device_id != pending_device_id:
+            raise ObsidianCompatibilityError("selected Android identity does not match its binding")
+        selected_device_id = bound_device_id or pending_device_id
+        if selected_device_id == observed_server_id:
+            raise ObsidianCompatibilityError("managed Syncthing identity cannot be its own Android peer")
+
         devices = {item.device_id: item for item in await asyncio.to_thread(client.list_devices)}
-        if device_id not in devices or set(devices) - {device_id, server_device_id}:
-            raise ObsidianCompatibilityError("managed Syncthing profile remote-device allowlist changed")
-        configured = devices[device_id]
-        if configured.auto_accept_folders or configured.introducer:
-            raise ObsidianCompatibilityError("managed remote-device policy changed")
         folders = {item.folder_id: item for item in await asyncio.to_thread(client.list_folders)}
+        allowed_device_ids = {observed_server_id}
+        if selected_device_id:
+            allowed_device_ids.add(selected_device_id)
+        if set(devices) - allowed_device_ids:
+            raise ObsidianCompatibilityError("managed Syncthing profile remote-device allowlist changed")
+        configured = devices.get(selected_device_id)
+        if configured is not None and (configured.auto_accept_folders or configured.introducer):
+            raise ObsidianCompatibilityError("managed remote-device policy changed")
+        if bound_device_id and configured is None:
+            raise ObsidianCompatibilityError("bound Android device is absent from Syncthing configuration")
+
+        pre_binding_states = {
+            "provisioning_server_profile",
+            "awaiting_device_id_handoff",
+            "awaiting_android_device",
+            "multiple_pending_devices",
+        }
+        folder_required_states = {
+            "offering_folder",
+            "awaiting_android_folder_acceptance",
+            "initial_sync",
+            "awaiting_obsidian_vault_registration",
+            "round_trip_verification",
+            "ready",
+            "disconnected",
+        }
+        if state in pre_binding_states and not bound_device_id:
+            if folders:
+                raise ObsidianCompatibilityError(
+                    "managed Syncthing profile contains a folder before durable binding"
+                )
+            return
+
+        if state == "android_device_detected" and (not bound_device_id or configured is None):
+            raise ObsidianCompatibilityError(
+                "detected Android state has no durable configured device"
+            )
+        if state in folder_required_states and (not bound_device_id or configured is None):
+            raise ObsidianCompatibilityError("bound Android device is required for this onboarding state")
+
         folder_id = str(vault["folder_id"])
-        if set(folders) != {folder_id}:
+        folder_required = state in folder_required_states
+        folder_allowed = bool(bound_device_id) and (
+            state in pre_binding_states
+            or state == "android_device_detected"
+            or folder_required
+            or state in {"failed", "cancelled"}
+        )
+        if not folders:
+            if folder_required:
+                raise ObsidianCompatibilityError("managed vault folder is absent from Syncthing configuration")
+            return
+        if not folder_allowed or set(folders) != {folder_id}:
             raise ObsidianCompatibilityError("managed Syncthing profile folder allowlist changed")
         folder = folders[folder_id]
         if (
-            Path(folder.path) != Path(str(vault["server_path"]))
-            or device_id not in folder.device_ids
-            or set(folder.device_ids) - {device_id, server_device_id}
+            folder.label != str(vault["display_name"])
+            or Path(folder.path) != Path(str(vault["server_path"]))
+            or bound_device_id not in folder.device_ids
+            or set(folder.device_ids) - {bound_device_id, observed_server_id}
             or folder.paused
             or folder.folder_type != "sendreceive"
             or folder.versioning_type != "staggered"
@@ -1148,12 +1322,26 @@ class ObsidianRuntime:
         ]
 
     async def diagnostics(self, owner_id: str) -> dict[str, Any]:
+        lock = await self._owner_lock(owner_id)
+        async with lock:
+            return await self._diagnostics_locked(owner_id)
+
+    async def _diagnostics_locked(self, owner_id: str) -> dict[str, Any]:
         await asyncio.to_thread(self._scan_conflicts, owner_id)
-        panel = await self.status(owner_id)
+        panel = await self._panel(owner_id)
         conflicts = self.storage.list_obsidian_conflicts(owner_id)
-        connection: dict[str, Any] = {"state": "unavailable", "transport": "unknown"}
+        session = self.storage.get_obsidian_onboarding(owner_id)
+        terminal = bool(
+            session is not None
+            and str(session["state"]) in {"cancelled", "failed", "disconnected"}
+        )
+        connection: dict[str, Any] = (
+            {"state": "offline", "transport": "none"}
+            if terminal
+            else {"state": "unavailable", "transport": "unknown"}
+        )
         device = self.storage.get_obsidian_device(owner_id)
-        if device is not None:
+        if device is not None and not terminal:
             try:
                 _profile, client = await self._ensure_running(owner_id)
                 await self._assert_bound_configuration(owner_id, client)
@@ -1175,6 +1363,8 @@ class ObsidianRuntime:
                     }
             except (SyncthingError, ObsidianCompatibilityError, ValueError):
                 pass
+        if terminal:
+            panel = {**panel, "sync_state": "unavailable"}
         return {
             **panel,
             "conflict_count": len(conflicts),
