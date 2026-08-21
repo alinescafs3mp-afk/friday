@@ -16,6 +16,7 @@ from friday.agent_runtime import (
     _UNCONFIRMED_SUPPORTED_DEED,
     AgentContext,
     AgentRuntime,
+    _attachment_record_count_relations,
     _attachment_verdict_with_deterministic_drift,
     _brainfuck_bounded_output,
     _brainfuck_explanation_followup_response,
@@ -789,6 +790,501 @@ def test_open_review_checks_worded_person_counts_above_ten_against_structure() -
     assert "attachment_derived_record_count_not_in_evidence" in contradicted["issues"]
 
 
+def test_open_review_count_normalization_does_not_cross_clause_syntax_or_take_a_numeric_tail() -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+    misleading_source = [{"tool": "attachment", "output": "В пункте 20 указано имя сотрудника."}]
+    neutral_sentence = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "В одной таблице приведены имена сотрудников.",
+        [{"tool": "attachment", "output": "Документ описывает проект."}],
+        high_confidence_only=True,
+    )
+    fabricated_total = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит двадцать сотрудников.",
+        misleading_source,
+        high_confidence_only=True,
+    )
+    nine_records = "\n".join(f"- Запись {index}" for index in range(1, 10))
+    oversized_total = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит девятьсот девяносто девять миллионов девятьсот "
+        "девяносто девять тысяч девятьсот девяносто девять записей.",
+        [{"tool": "attachment", "output": nine_records}],
+        high_confidence_only=True,
+    )
+    partial_answers = [
+        _attachment_verdict_with_deterministic_drift(
+            skipped,
+            answer,
+            [{"tool": "attachment", "output": nine_records}],
+            high_confidence_only=True,
+        )
+        for answer in (
+            "Показаны только первые одиннадцать записей.",
+            "На первой странице одиннадцать позиций.",
+        )
+    ]
+    partial_sources = [
+        "Показаны только первые 20 позиций.",
+        "На первой странице 20 позиций.",
+        "Сотрудники:\nПозиция 20 — Иванов Иван Иванович",
+        "По позиции 20 ответственный сотрудник — Иванов.",
+    ]
+    fabricated_from_partial = [
+        _attachment_verdict_with_deterministic_drift(
+            skipped,
+            "Документ содержит двадцать позиций."
+            if "отрудник" not in source
+            else "Документ содержит двадцать сотрудников.",
+            [{"tool": "attachment", "output": source}],
+            high_confidence_only=True,
+        )
+        for source in partial_sources
+    ]
+    metric_sentence = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Рост составил двадцать процентных пунктов.",
+        [{"tool": "attachment", "output": "Документ описывает динамику показателя."}],
+        high_confidence_only=True,
+    )
+    fabricated_from_metric = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит двадцать пунктов.",
+        [{"tool": "attachment", "output": "Рост составил 20 процентных пунктов."}],
+        high_confidence_only=True,
+    )
+
+    assert neutral_sentence["status"] == "skipped"
+    assert fabricated_total["status"] == "failed"
+    assert oversized_total["status"] == "failed"
+    assert all(item["status"] == "skipped" for item in partial_answers)
+    assert all(item["status"] == "failed" for item in fabricated_from_partial)
+    assert metric_sentence["status"] == "skipped"
+    assert fabricated_from_metric["status"] == "failed"
+    assert "attachment_derived_record_count_not_in_evidence" in fabricated_total["issues"]
+    assert "attachment_derived_record_count_not_in_evidence" in oversized_total["issues"]
+
+
+def test_open_review_record_count_observations_are_span_local_and_semantic() -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+    twelve_records = [{"tool": "attachment", "output": "\n".join(f"- Запись {n}" for n in range(12))}]
+
+    truthful_non_totals = [
+        _attachment_verdict_with_deterministic_drift(
+            skipped,
+            answer,
+            twelve_records,
+            high_confidence_only=True,
+        )
+        for answer in (
+            "Ни в одной записи не указан срок.",
+            "Номер 11 записи указан неверно.",
+        )
+    ]
+    fabricated = [
+        _attachment_verdict_with_deterministic_drift(
+            skipped,
+            answer,
+            [{"tool": "attachment", "output": source}],
+            high_confidence_only=True,
+        )
+        for answer, source in (
+            ("Документ содержит 2 миллиона записей.", "Документ содержит 1 миллион записей."),
+            ("Документ содержит двадцать одно имя.", "Документ описывает проект."),
+            ("Документ содержит 11 сотрудников.", "Документ содержит 11 категорий сотрудников."),
+            (
+                "Документ содержит 11 сотрудников, сведения приведены в таблице 1.",
+                "Документ описывает проект.",
+            ),
+            ("Документ содержит 11 пунктов, включая пункт 1.", "Документ описывает проект."),
+            (
+                "Документ содержит 20 сотрудников.",
+                "Всего в документе 20 разделов, а сотрудники перечислены ниже.",
+            ),
+            (
+                "Документ содержит 20 сотрудников.",
+                "Разделы: 20, сотрудники не указаны.",
+            ),
+            (
+                "Документ содержит 20 сотрудников.",
+                "По записи 20 ответственный сотрудник — Иванов.",
+            ),
+        )
+    ]
+    supported = [
+        _attachment_verdict_with_deterministic_drift(
+            skipped,
+            answer,
+            [{"tool": "attachment", "output": source}],
+            high_confidence_only=True,
+        )
+        for answer, source in (
+            ("Документ содержит два миллиона записей.", "Документ содержит 2000000 записей."),
+            ("Документ содержит 11 записей.", "Количество записей:\nодиннадцать"),
+        )
+    ]
+
+    assert all(item["status"] == "skipped" for item in truthful_non_totals)
+    assert all(item["status"] == "failed" for item in fabricated)
+    assert all(item["status"] == "skipped" for item in supported)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Документ содержит одиннадцать архивных записей.",
+        "Документ содержит 11 кадровых сотрудников.",
+        "Список состоит из двадцати записей.",
+        "Данные приведены по двадцати сотрудникам.",
+        "Документ содержит 2 млн записей.",
+        "Документ содержит 2,5 миллиона записей.",
+        "Документ содержит 11 (одиннадцать) записей.",
+        "Документ содержит только двадцать записей.",
+        "Документ содержит лишь 20 записей.",
+        "Документ содержит 2 (два) миллиона записей.",
+        "Количество записей: 2 (два) миллиона.",
+        "Записей всего 20.",
+        "Документ содержит 11 официально зарегистрированных сотрудников.",
+        "Документ содержит 11 уже зарегистрированных сотрудников.",
+        "Документ содержит 11 недавно зарегистрированных сотрудников.",
+        "Документ содержит 11 успешно обработанных записей.",
+        "Документ содержит двадцать первоклассных сотрудников.",
+        "Документ содержит одиннадцать вторичных записей.",
+        "Документ содержит двадцать ответственных.",
+        "Документ содержит двадцать новых и активных сотрудников.",
+        "Документ содержит двадцать новых, важных и активных сотрудников.",
+        "Документ содержит 1 тыс 20 записей.",
+        "Документ содержит 2 млн 500 тыс записей.",
+        "Документ разбит на двадцать записей.",
+        "Документ содержит 11 новых активных важных вакантных штатных позиций.",
+        "Документ содержит 20 строк.",
+        "Документ содержит 20 персон.",
+        "Документ содержит 20 коллег.",
+        "Документ содержит 20 лиц.",
+        "Сотрудников: 20.",
+        "Количество сотрудников составляет 20.",
+    ],
+)
+def test_open_review_rejects_every_unproved_exact_count_grammar(answer: str) -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+
+    verdict = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        answer,
+        [{"tool": "attachment", "output": "Документ описывает проект."}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_derived_record_count_not_in_evidence" in verdict["issues"]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Документ не содержит двадцать записей.",
+        "Номер 11 записи указан неверно.",
+        "Идентификатор 11 записи указан неверно.",
+        "ID 11 записи указан неверно.",
+        "№ 11 записи указан неверно.",
+        "Код 11 записи указан неверно.",
+        "ID: 11 записи указан неверно.",
+        "Код=11 записи указан неверно.",
+        "Вторые 11 записей проверены.",
+        "Исправлены 11 записей из 12.",
+        "11 записей на странице.",
+        "В каждом разделе приведено 11 записей.",
+        "11 сотрудников из общего штата.",
+        "У Ивана 11 должностей.",
+        "Рост составил 11 рейтинговых позиций.",
+        "Диапазон охватывает 2–3 миллиона записей.",
+        "Между 2 и 3 записями есть различия.",
+        "Между двумя и тремя миллионами записей есть различия.",
+        "Указаны либо 2, либо 3 миллиона записей.",
+        "Не менее чем 20 записей проверены.",
+        "Не больше чем 11 записей проверены.",
+        "Более чем 11 записей проверены.",
+        "Нет 20 записей.",
+        "Количество не превышает 11 записей.",
+        "Количество записей не равно 11 записям.",
+        "Количество записей ≠ 11 записей.",
+        "Количество записей отличается от 11 записей.",
+        "Количество ≤ 11 записей.",
+        "Количество < 11 записей.",
+        "Количество ограничено 11 записями.",
+        "Количество максимум равно 11 записям.",
+        "Количество не выше 11 записей.",
+        "Примерно ~11 записей.",
+        "2 и 3 записи различаются.",
+        "20 записей / 25.",
+        "20 записей (20/25).",
+        "Нужно обеспечить семью сотрудника жильём.",
+    ],
+)
+def test_open_review_ignores_non_total_record_number_contexts(answer: str) -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+
+    assert _attachment_record_count_relations(answer) == []
+    verdict = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        answer,
+        [{"tool": "attachment", "output": "Документ описывает проект."}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "11 пунктуационных ошибок.",
+        "11 контактных адресов.",
+        "11 лицензий.",
+        "11 объективных причин.",
+        "11 должностных инструкций.",
+        "11 категорий сотрудников.",
+        "11 разновидностей сотрудников.",
+        "11 полномочий сотрудников.",
+        "11 самолётов сотрудников.",
+    ],
+)
+def test_open_review_exact_count_nouns_do_not_match_lookalikes(answer: str) -> None:
+    assert _attachment_record_count_relations(answer) == []
+
+
+def test_open_review_qualified_source_counts_do_not_authorize_an_unqualified_total() -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+    twenty_five_records = "\n".join(f"- Запись {index}" for index in range(1, 26))
+    error_source = f"Ошибочные записи: 20\n{twenty_five_records}"
+
+    fabricated_total = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит 20 записей.",
+        [{"tool": "attachment", "output": error_source}],
+        high_confidence_only=True,
+    )
+    supported_qualified = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит 20 ошибочных записей.",
+        [{"tool": "attachment", "output": error_source}],
+        high_confidence_only=True,
+    )
+    supported_total = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит 25 записей.",
+        [{"tool": "attachment", "output": error_source}],
+        high_confidence_only=True,
+    )
+
+    assert fabricated_total["status"] == "failed"
+    assert supported_qualified["status"] == "skipped"
+    assert supported_total["status"] == "skipped"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "20 активных сотрудников и 5 неактивных сотрудников.",
+        "Уволенные сотрудники:\n20",
+        "Активные сотрудники:\n20",
+        "Уволены 20 сотрудников.",
+        "Количество сотрудников увеличилось на 20%.",
+        "20 сотрудников активны.",
+        "Активны 20 сотрудников.",
+        "20 записей ошибочны.",
+        "20 записей, список неполный.",
+        "Количество активных сотрудников составляет 20 сотрудников.",
+        "Проверены 20 сотрудников.",
+        "Обработаны 20 сотрудников.",
+        "Проверено всего 20 сотрудников.",
+        "Всего проверено 20 сотрудников.",
+        "Из них проверено всего 20 сотрудников.",
+        "Проанализировано 20 записей.",
+        "Просмотрено 20 записей.",
+        "Отклонено 20 записей.",
+        "Всего уволены 20 сотрудников.",
+        "Итого активны 20 сотрудников.",
+        "Всего найдено 20 записей.",
+        "20 сотрудников являются активными.",
+        "20 записей являются ошибочными.",
+        "Из них указаны 20 записей.",
+        "Среди них перечислены 20 записей.",
+        "В том числе представлены 20 записей.",
+        "Уволены и перечислены 20 сотрудников.",
+        "Отобраны и перечислены 20 сотрудников.",
+        "Найдены и указаны 20 записей.",
+        "Активны и перечислены 20 сотрудников.",
+        "Из общего числа указаны 20 записей.",
+        "Среди всех перечислены 20 записей.",
+        "Часть списка — 20 записей.",
+        "В отделе работают 20 сотрудников.",
+        "В первом отделе работают 20 сотрудников.",
+        "В подразделении работают 20 сотрудников.",
+        "Среди участников работают 20 сотрудников.",
+        "В первом приложении приведены 20 записей.",
+        "Первое приложение содержит 20 записей.",
+        "Раздел 1 содержит 20 записей.",
+        "В одном разделе приведены 20 записей.",
+        "На одном листе приведены 20 записей.",
+        "В одном отделе работают 20 сотрудников.",
+        "20 сотрудников не имеют допуска; 5 сотрудников имеют допуск.",
+        "20 сотрудников работают очно; 5 сотрудников работают удалённо.",
+        "Допуск имеют 20 сотрудников; ещё 5 сотрудников допуска не имеют.",
+    ],
+)
+def test_open_review_subgroups_and_deltas_do_not_authorize_a_total(source: str) -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+
+    verdict = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит 20 записей." if "запис" in source else "Документ содержит 20 сотрудников.",
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_derived_record_count_not_in_evidence" in verdict["issues"]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "В документе указаны одиннадцать записей.",
+        "В документе приведены одиннадцать записей.",
+        "В состав входили 11 записей.",
+        "Документ содержит ровно 11 записей.",
+        "Документ содержит только 11 записей.",
+        "Список включает ровно 11 записей.",
+        "Данные сгруппированы в одиннадцать записей.",
+        "Список поделён на одиннадцать записей.",
+        "В документе собрано одиннадцать записей.",
+    ],
+)
+def test_open_review_structural_total_predicates_accept_a_proved_count(answer: str) -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+    evidence = "\n".join(f"- Запись {index}" for index in range(1, 12))
+
+    verdict = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        answer,
+        [{"tool": "attachment", "output": evidence}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+def test_open_review_qualifier_order_and_inflection_are_not_semantic_drift() -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+
+    verdict = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит 20 штатных активных сотрудников.",
+        [{"tool": "attachment", "output": "Активные штатные сотрудники: 20"}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+@pytest.mark.parametrize(
+    ("answer", "source"),
+    [
+        ("Документ содержит 11 записей.", "Количество записей: одиннадцать"),
+        ("Документ содержит 11 записей.", "Количество записей:\nодиннадцать."),
+        ("Документ содержит 2 миллиона записей.", "Документ содержит 2 млн записей."),
+        ("Документ содержит 2500000 записей.", "Документ содержит 2,5 миллиона записей."),
+        ("Документ содержит 11 записей.", "Документ содержит 11 (одиннадцать) записей."),
+        ("Документ содержит 20 сотрудников.", "Количество сотрудников составляет 20."),
+        ("Документ содержит 11 записей.", "Документ включает в себя 11 записей."),
+        ("Документ содержит 11 записей.", "Документ состоит ровно из 11 записей."),
+        ("Документ содержит 11 записей.", "Полный документ — 11 записей."),
+        ("Документ содержит 11 записей.", "Количество записей в документе: 11"),
+        ("Документ содержит 5 сотрудников.", "Записи: 20, сотрудники: 5"),
+    ],
+)
+def test_open_review_accepts_equivalent_exact_count_notations(answer: str, source: str) -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+
+    verdict = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Документ содержит 11 (двенадцать) записей.",
+        "Количество записей: 11 (двенадцать).",
+        "Документ содержит 11 записей (двенадцать).",
+    ],
+)
+def test_open_review_rejects_a_contradictory_parenthetical_count_even_after_model_pass(
+    answer: str,
+) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        _FALSE_PASS,
+        answer,
+        [{"tool": "attachment", "output": "Документ содержит 11 записей."}],
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_derived_record_count_not_in_evidence" in verdict["issues"]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "11 (12) категорий сотрудников.",
+        "11 (12) разновидностей сотрудников.",
+        "11 (12) полномочий сотрудников.",
+    ],
+)
+def test_open_review_does_not_invent_a_count_contradiction_through_a_noun_collision(
+    answer: str,
+) -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+
+    verdict = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        answer,
+        [{"tool": "attachment", "output": "Документ описывает проект."}],
+        high_confidence_only=True,
+    )
+
+    assert _attachment_record_count_relations(answer) == []
+    assert verdict["status"] == "skipped"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "Документ содержит 20 сотрудников.",
+        "Количество сотрудников: 20.",
+        "Сотрудников: 20.",
+        "Сотрудники:\n20",
+    ],
+)
+def test_open_review_accepts_only_explicit_literal_record_count_shapes(source: str) -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+
+    verdict = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Документ содержит двадцать сотрудников.",
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
 def test_open_review_rejects_an_unsupported_record_count_and_absolute_quality_claim() -> None:
     skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
     evidence = [{"tool": "attachment", "output": "Документ описывает назначение проекта."}]
@@ -820,10 +1316,14 @@ def test_open_review_rejects_an_unsupported_record_count_and_absolute_quality_cl
             "Данные подтверждены двадцатью тремя военнослужащими.",
             "Документ содержит сто двадцать пять позиций.",
             "Документ содержит одну тысячу записей.",
+            "Документ располагает двумя миллионами записей.",
+            "Документ приближается к двум миллионам записей.",
             "Документ содержит одиннадцать отдельных записей.",
             "Документ содержит двадцать новых сотрудников.",
+            "Документ содержит двадцать новых либо активных сотрудников.",
             "Документ содержит сто двадцать пять штатных позиций.",
             "Документ содержит 125 отдельных штатных позиций.",
+            "Записи в приложении № 1: 20",
         )
     ]
     literal_worded = _attachment_verdict_with_deterministic_drift(
@@ -882,6 +1382,38 @@ def test_open_review_rejects_an_unsupported_record_count_and_absolute_quality_cl
     assert all(item["status"] == "skipped" for item in non_counts)
     assert absolute["status"] == "failed"
     assert "attachment_absolute_quality_claim" in absolute["issues"]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "Нельзя утверждать, что документ содержит 20 записей.",
+        "Нет оснований считать, что документ содержит 20 записей.",
+        "Если документ содержит 20 записей, вывод изменится.",
+        "Документ может содержать 20 записей.",
+        "Содержит ли документ 20 записей?",
+        "Неверно, что документ содержит 20 записей.",
+        "Утверждение «Документ содержит 20 записей» неверно.",
+        "Документ содержит 20 записей — это неверно.",
+        "Не факт, что документ содержит 20 записей.",
+        "Вряд ли документ содержит 20 записей.",
+        "Сомнительно, что документ содержит 20 записей.",
+        "Автор сомневается, что документ содержит 20 записей.",
+    ],
+)
+def test_open_review_does_not_treat_nonassertive_counts_as_factual_totals(answer: str) -> None:
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+    evidence = "\n".join(f"- Запись {index}" for index in range(1, 12))
+
+    verdict = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        answer,
+        [{"tool": "attachment", "output": evidence}],
+        high_confidence_only=True,
+    )
+
+    assert _attachment_record_count_relations(answer) == []
+    assert verdict["status"] == "skipped"
 
 
 @pytest.mark.parametrize(
