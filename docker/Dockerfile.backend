@@ -3,6 +3,8 @@
 # verified — the whole point of pinning the runtime.
 FROM python:3.14-slim
 
+ARG TARGETARCH
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
@@ -13,15 +15,21 @@ RUN groupadd --system jericho \
 WORKDIR /build
 COPY pyproject.toml README.md requirements.lock ./
 COPY friday/ ./friday/
+COPY docker/install_syncthing.py ./docker/install_syncthing.py
 # Constrained to the exact transitive versions the suite was green on, so a rebuild
 # months later cannot quietly resolve a different dependency tree. Every compiled
 # dependency has a cp314 manylinux wheel, so no build toolchain is needed here.
 RUN python -m pip install --upgrade pip \
-    && python -m pip install . --constraint requirements.lock
+    && python -m pip install . --constraint requirements.lock \
+    && TARGETARCH="${TARGETARCH}" python ./docker/install_syncthing.py
 
 COPY docker/entrypoint.sh /usr/local/bin/jericho-entrypoint
 RUN chmod 0755 /usr/local/bin/jericho-entrypoint \
     && mkdir -p /runtime/data /runtime/cache /runtime/logs /runtime/models \
+        /runtime/bridge-state \
+    && install -d -m 0700 /runtime/data/obsidian \
+        /runtime/data/obsidian/profiles /runtime/data/obsidian/run \
+        /runtime/data/obsidian/logs /runtime/data/obsidian/vaults \
     && chown -R jericho:jericho /runtime /home/jericho
 
 WORKDIR /runtime

@@ -39,7 +39,7 @@ import urllib.request
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
 OPERATOR_SCHEMA = "friday.immutable-release-operator.v1"
@@ -55,9 +55,12 @@ ALBUM_RECOVERY_JOURNAL_SCHEMA = "friday.telegram-historical-album-recovery-journ
 ALIAS_REPAIR_RECEIPT_SCHEMA = "friday.file-alias-release-repair-receipt.v1"
 MEMORY_VAULT_MODES = ("disabled", "full_owner")
 MEMORY_VAULT_MODE_CONTRACT = "v1"
+OBSIDIAN_MODES = ("disabled", "enabled")
+OBSIDIAN_CUTOVER_CONTRACT = "exact-root-v1"
 VENV_RELOCATION_CONTRACT = "absolute-final-v1"
 RUNTIME_CONFIG_SCHEMA_V1 = "friday.immutable-release-runtime-config.v1"
 RUNTIME_CONFIG_SCHEMA_V2 = "friday.immutable-release-runtime-config.v2"
+RUNTIME_CONFIG_SCHEMA_V3 = "friday.immutable-release-runtime-config.v3"
 RUNTIME_CONFIG_SCOPE_SCHEMA = "friday.immutable-release-runtime-config-scope.v1"
 RUNTIME_CONFIG_RETRY_SCOPE_SCHEMA = "friday.immutable-release-runtime-config-retry-scope.v1"
 
@@ -80,6 +83,8 @@ MAX_WHEELHOUSE_FILES = 512
 MAX_CONSOLE_SCRIPT_BYTES = 1 << 20
 MAX_RECORD_BYTES = 64 << 20
 MAX_SHEBANG_BYTES = 255
+MAX_OBSIDIAN_BACKUP_ENTRIES = 100_000
+MAX_OBSIDIAN_BACKUP_BYTES = 16 << 30
 BOOTSTRAP_WHEELS = (("pip", "26.1.2", "pip-26.1.2-py3-none-any.whl"),)
 _ACTIVATION_SMOKE_RECEIPT = b"friday-activation-smoke:clear:v1\n"
 
@@ -126,6 +131,11 @@ def _release_binds_memory_vault_mode(release: ReleaseIdentity) -> bool:
 
 def _require_venv_relocation_contract(release: ReleaseIdentity, *, code: str) -> None:
     if release.venv_relocation_contract != VENV_RELOCATION_CONTRACT:
+        raise ReleaseFailure(code)
+
+
+def _require_obsidian_cutover_contract(release: ReleaseIdentity, *, code: str) -> None:
+    if release.max_schema >= 35 and release.obsidian_cutover_contract != OBSIDIAN_CUTOVER_CONTRACT:
         raise ReleaseFailure(code)
 
 
@@ -395,6 +405,7 @@ class ReleaseIdentity:
     max_schema: int
     memory_vault_mode_contract: str = ""
     venv_relocation_contract: str = ""
+    obsidian_cutover_contract: str = ""
 
 
 @dataclass(frozen=True)
@@ -403,6 +414,7 @@ class DatabaseBackup:
     receipt_sha256: str
     inbox_receipt_sha256: str
     opaque: Any = None
+    obsidian_receipt_sha256: str = "0" * 64
 
 
 @dataclass
@@ -626,6 +638,8 @@ StartLimitBurst=3
 Type=simple
 Restart=on-failure
 RestartSec=5
+KillMode=control-group
+UMask=0077
 Environment=FRIDAY_HOME={friday_home}
 WorkingDirectory={friday_home}
 UnsetEnvironment=PYTHONPATH
@@ -693,6 +707,8 @@ if tuple(getattr(friday.config,'MEMORY_VAULT_MODES',()))==('disabled','full_owne
   raise AssertionError('unknown memory-vault mode did not fail closed')
  os.environ.pop('FRIDAY_MEMORY_VAULT_MODE',None)
  contract='v1'
+assert getattr(settings,'obsidian_enabled',None) is False
+assert isinstance(getattr(settings,'obsidian_effective_root',None),pathlib.Path)
 print(json.dumps({{'memory_vault_mode_contract':contract,'status':'clear','schema':expected['schema']}},sort_keys=True,separators=(',',':')))
 """
 
@@ -1618,6 +1634,7 @@ def build_release(spec: BuildSpec) -> ReleaseIdentity:
             "alias_tool_sha256": alias_tool_sha256,
             "alias_dependency_sha256": alias_dependency_sha256,
             "memory_vault_mode_contract": MEMORY_VAULT_MODE_CONTRACT,
+            "obsidian_cutover_contract": OBSIDIAN_CUTOVER_CONTRACT,
             "venv_relocation_contract": VENV_RELOCATION_CONTRACT,
         }
         (artifacts / "immutable-release.json").write_bytes(_canonical_json(metadata) + b"\n")
@@ -1629,6 +1646,7 @@ def build_release(spec: BuildSpec) -> ReleaseIdentity:
             spec.max_schema,
             MEMORY_VAULT_MODE_CONTRACT,
             VENV_RELOCATION_CONTRACT,
+            OBSIDIAN_CUTOVER_CONTRACT,
         )
         installed_surface_smoke(provisional)
         _relocate_venv_generated_paths(staging, target)
@@ -1763,6 +1781,18 @@ def activate_release(
         schema_capable_fallback,
         code="fallback_venv_relocation_contract_missing",
     )
+    _require_obsidian_cutover_contract(
+        candidate,
+        code="candidate_obsidian_cutover_contract_missing",
+    )
+    _require_obsidian_cutover_contract(
+        schema_capable_fallback,
+        code="fallback_obsidian_cutover_contract_missing",
+    )
+    _require_obsidian_cutover_contract(
+        previous,
+        code="previous_obsidian_cutover_contract_missing",
+    )
     for release in (candidate, previous, schema_capable_fallback):
         port.verify_release(release)
     port.verify_units(candidate)
@@ -1791,6 +1821,7 @@ def activate_release(
             raise ReleaseFailure("candidate_schema_too_old")
         _closed_hash(backup.receipt_sha256, "database_backup_invalid")
         _closed_hash(backup.inbox_receipt_sha256, "inbox_backup_invalid")
+        _closed_hash(backup.obsidian_receipt_sha256, "obsidian_backup_invalid")
         journal.record("backup_complete", backup=backup)
         journal.record(
             "migration_attempted",
@@ -1879,6 +1910,7 @@ def activate_release(
             "candidate_tree_sha256": candidate.tree_manifest_sha256,
             "backup_receipt_sha256": backup.receipt_sha256,
             "inbox_backup_receipt_sha256": backup.inbox_receipt_sha256,
+            "obsidian_backup_receipt_sha256": backup.obsidian_receipt_sha256,
             "database_schema_before": backup.schema_version,
             "alias_repair": dict(alias_repair),
             "runtime_policy": runtime_policy,
@@ -2027,6 +2059,18 @@ def recover_interrupted_activation(
         fallback,
         code="recovery_fallback_venv_relocation_contract_missing",
     )
+    _require_obsidian_cutover_contract(
+        candidate,
+        code="recovery_candidate_obsidian_cutover_contract_missing",
+    )
+    _require_obsidian_cutover_contract(
+        fallback,
+        code="recovery_fallback_obsidian_cutover_contract_missing",
+    )
+    _require_obsidian_cutover_contract(
+        previous,
+        code="recovery_previous_obsidian_cutover_contract_missing",
+    )
     for release in (candidate, previous, fallback):
         port.verify_release(release)
     port.verify_units(candidate)
@@ -2136,12 +2180,25 @@ class SystemdConfig:
     alias_expected_counts: tuple[int, ...] = ()
     alias_expected_plan_sha256s: tuple[str, ...] = ()
     memory_vault_mode: str = "disabled"
+    obsidian_mode: str = "disabled"
+    obsidian_root: Path | None = None
     health_url: str = "https://127.0.0.1:8000/api/health"
     backend_unit: str = "friday-backend.service"
     bridge_unit: str = "friday-bridge.service"
 
 
-def _systemd_config_identity(config: SystemdConfig) -> str:
+def _obsidian_root(config: SystemdConfig) -> Path:
+    configured = config.obsidian_root or (config.friday_home / "data" / "obsidian")
+    return Path(os.path.abspath(configured))
+
+
+def _obsidian_root_sha256(config: SystemdConfig) -> str:
+    return _sha256_bytes(str(_obsidian_root(config)).encode("utf-8"))
+
+
+def _systemd_config_identity_v2(config: SystemdConfig) -> str:
+    """Exact identity emitted by the pre-Obsidian release operator."""
+
     return _sha256_bytes(
         _canonical_json(
             {
@@ -2160,6 +2217,35 @@ def _systemd_config_identity(config: SystemdConfig) -> str:
                 "health_url": config.health_url,
                 "inbox_database": str(config.inbox_database),
                 "memory_vault_mode": config.memory_vault_mode,
+                "state_dir": str(config.state_dir),
+                "unit_dir": str(config.unit_dir),
+                "unit_names": [config.backend_unit, config.bridge_unit],
+            }
+        )
+    )
+
+
+def _systemd_config_identity(config: SystemdConfig) -> str:
+    return _sha256_bytes(
+        _canonical_json(
+            {
+                "schema": RUNTIME_CONFIG_SCHEMA_V3,
+                "alias_claim_manifests": [str(path) for path in config.alias_claim_manifests],
+                "alias_expected_counts": list(config.alias_expected_counts),
+                "alias_expected_plan_sha256s": list(config.alias_expected_plan_sha256s),
+                "anchor": str(config.anchor),
+                "backup_dir": str(config.backup_dir),
+                "database": str(config.database),
+                "env_file": str(config.env_file),
+                "env_file_sha256": config.env_file_sha256,
+                "friday_home": str(config.friday_home),
+                "health_ca": str(config.health_ca),
+                "health_ca_sha256": config.health_ca_sha256,
+                "health_url": config.health_url,
+                "inbox_database": str(config.inbox_database),
+                "memory_vault_mode": config.memory_vault_mode,
+                "obsidian_mode": config.obsidian_mode,
+                "obsidian_root": str(_obsidian_root(config)),
                 "state_dir": str(config.state_dir),
                 "unit_dir": str(config.unit_dir),
                 "unit_names": [config.backend_unit, config.bridge_unit],
@@ -2221,6 +2307,7 @@ def _systemd_config_scope_identity(config: SystemdConfig) -> str:
                 "health_ca_sha256": config.health_ca_sha256,
                 "health_url": config.health_url,
                 "inbox_database": str(config.inbox_database),
+                "obsidian_root": str(_obsidian_root(config)),
                 "state_dir": str(config.state_dir),
                 "unit_dir": str(config.unit_dir),
                 "unit_names": [config.backend_unit, config.bridge_unit],
@@ -2247,6 +2334,8 @@ def _systemd_config_retry_scope_identity(config: SystemdConfig) -> str:
                 "health_url": config.health_url,
                 "inbox_database": str(config.inbox_database),
                 "memory_vault_mode": config.memory_vault_mode,
+                "obsidian_mode": config.obsidian_mode,
+                "obsidian_root": str(_obsidian_root(config)),
                 "state_dir": str(config.state_dir),
                 "unit_dir": str(config.unit_dir),
                 "unit_names": [config.backend_unit, config.bridge_unit],
@@ -2255,10 +2344,49 @@ def _systemd_config_retry_scope_identity(config: SystemdConfig) -> str:
     )
 
 
+def _activation_v2_config_identity(
+    config: SystemdConfig,
+    terminal_journal_env_sha256: str | None,
+) -> str:
+    predecessor_env_sha256 = _closed_hash(
+        terminal_journal_env_sha256 or config.env_file_sha256,
+        "terminal_journal_env_digest_invalid",
+    )
+    return _systemd_config_identity_v2(replace(config, env_file_sha256=predecessor_env_sha256))
+
+
+def _activation_obsidian_predecessor_identity(
+    config: SystemdConfig,
+    terminal_journal_env_sha256: str | None,
+) -> str:
+    if terminal_journal_env_sha256 is None:
+        return ""
+    predecessor_env_sha256 = _closed_hash(
+        terminal_journal_env_sha256,
+        "terminal_journal_env_digest_invalid",
+    )
+    return _systemd_config_identity(
+        replace(
+            config,
+            env_file_sha256=predecessor_env_sha256,
+            obsidian_mode="disabled",
+        )
+    )
+
+
+@dataclass(frozen=True)
+class _ExactObsidianBackup:
+    present: bool
+    manifest_sha256: str
+    file_count: int
+    total_bytes: int
+
+
 @dataclass(frozen=True)
 class _ExactBackupPayload:
     directory: Path
     files: tuple[tuple[str, str, int], ...]
+    obsidian: _ExactObsidianBackup | None = None
 
 
 @dataclass(frozen=True)
@@ -2309,10 +2437,14 @@ class DurableActivationJournal:
         backup_root: Path,
         config_identity_sha256: str | None,
         legacy_config_identity_sha256: str | None = None,
+        legacy_v2_config_identity_sha256: str | None = None,
+        transition_config_identity_sha256: str | None = None,
         config_scope_sha256: str | None = None,
         config_retry_scope_sha256: str | None = None,
         alias_claim_count: int = 0,
         memory_vault_mode: str = "disabled",
+        obsidian_mode: str = "disabled",
+        obsidian_root_sha256: str | None = None,
     ) -> None:
         parent = _private_directory(path.parent)
         lexical = Path(os.path.abspath(path))
@@ -2331,6 +2463,22 @@ class DurableActivationJournal:
                 "activation_legacy_config_identity_invalid",
             )
             if legacy_config_identity_sha256 is not None
+            else ""
+        )
+        self.legacy_v2_config_identity_sha256 = (
+            _closed_hash(
+                legacy_v2_config_identity_sha256,
+                "activation_legacy_v2_config_identity_invalid",
+            )
+            if legacy_v2_config_identity_sha256 is not None
+            else ""
+        )
+        self.transition_config_identity_sha256 = (
+            _closed_hash(
+                transition_config_identity_sha256,
+                "activation_transition_config_identity_invalid",
+            )
+            if transition_config_identity_sha256
             else ""
         )
         if config_scope_sha256 is not None:
@@ -2362,6 +2510,13 @@ class DurableActivationJournal:
         if memory_vault_mode not in MEMORY_VAULT_MODES:
             raise ReleaseFailure("activation_memory_vault_mode_invalid")
         self.memory_vault_mode = memory_vault_mode
+        if obsidian_mode not in OBSIDIAN_MODES:
+            raise ReleaseFailure("activation_obsidian_mode_invalid")
+        self.obsidian_mode = obsidian_mode
+        self.obsidian_root_sha256 = _closed_hash(
+            obsidian_root_sha256 or ("0" * 64),
+            "activation_obsidian_root_digest_invalid",
+        )
         self._state: dict[str, Any] | None = None
 
     def _write(self, core: Mapping[str, Any]) -> None:
@@ -2419,14 +2574,20 @@ class DurableActivationJournal:
             "writer_target",
         }
         schema_v2_expected = legacy_expected | {"config_identity_schema"}
-        current_expected = schema_v2_expected | {
+        v2_current_expected = schema_v2_expected | {
             "alias_claim_count",
             "config_scope_sha256",
             "config_retry_scope_sha256",
             "memory_vault_mode",
         }
+        current_expected = v2_current_expected | {"obsidian_mode", "obsidian_root_sha256"}
         payload_keys = set(payload)
-        if payload_keys not in (legacy_expected, schema_v2_expected, current_expected):
+        if payload_keys not in (
+            legacy_expected,
+            schema_v2_expected,
+            v2_current_expected,
+            current_expected,
+        ):
             raise ReleaseFailure("activation_journal_invalid")
         supplied = str(payload.pop("journal_sha256") or "")
         if supplied != _sha256_bytes(_canonical_json(payload)):
@@ -2440,17 +2601,28 @@ class DurableActivationJournal:
             or payload.get("writer_target") not in {"", "candidate", "previous", "fallback"}
             or _HEX64.fullmatch(str(payload.get("config_identity_sha256") or "")) is None
             or (
-                payload_keys in (schema_v2_expected, current_expected)
+                payload_keys in (schema_v2_expected, v2_current_expected)
                 and payload.get("config_identity_schema") != RUNTIME_CONFIG_SCHEMA_V2
             )
             or (
                 payload_keys == current_expected
+                and payload.get("config_identity_schema") != RUNTIME_CONFIG_SCHEMA_V3
+            )
+            or (
+                payload_keys in (v2_current_expected, current_expected)
                 and (
                     _HEX64.fullmatch(str(payload.get("config_scope_sha256") or "")) is None
                     or _HEX64.fullmatch(str(payload.get("config_retry_scope_sha256") or "")) is None
                     or type(payload.get("alias_claim_count")) is not int
                     or not 0 <= int(payload["alias_claim_count"]) <= 64
                     or payload.get("memory_vault_mode") not in MEMORY_VAULT_MODES
+                )
+            )
+            or (
+                payload_keys == current_expected
+                and (
+                    payload.get("obsidian_mode") not in OBSIDIAN_MODES
+                    or _HEX64.fullmatch(str(payload.get("obsidian_root_sha256") or "")) is None
                 )
             )
         ):
@@ -2487,24 +2659,34 @@ class DurableActivationJournal:
         )
         config_scope_changed = bool(
             self.config_scope_sha256
-            and payload_keys == current_expected
+            and payload_keys in (v2_current_expected, current_expected)
             and payload.get("config_scope_sha256") != self.config_scope_sha256
         )
         config_retry_scope_changed = bool(
             self.config_retry_scope_sha256
-            and payload_keys == current_expected
+            and payload_keys in (v2_current_expected, current_expected)
             and payload.get("config_retry_scope_sha256") != self.config_retry_scope_sha256
         )
         alias_claim_count_changed = bool(
             self.config_identity_sha256
-            and payload_keys == current_expected
+            and payload_keys in (v2_current_expected, current_expected)
             and payload.get("alias_claim_count") != self.alias_claim_count
+        )
+        runtime_policy_changed = bool(
+            self.config_identity_sha256
+            and payload_keys == current_expected
+            and (
+                payload.get("memory_vault_mode") != self.memory_vault_mode
+                or payload.get("obsidian_mode") != self.obsidian_mode
+                or payload.get("obsidian_root_sha256") != self.obsidian_root_sha256
+            )
         )
         if (
             config_identity_changed
             or config_scope_changed
             or config_retry_scope_changed
             or alias_claim_count_changed
+            or runtime_policy_changed
         ):
             terminal = payload["phase"] in _TERMINAL_JOURNAL_PHASES
             legacy_v1_transition = bool(
@@ -2524,6 +2706,24 @@ class DurableActivationJournal:
             expected_candidate = (
                 _journal_release(transition_candidate) if transition_candidate is not None else None
             )
+            v2_to_v3_transition = bool(
+                allow_terminal_config_transition
+                and payload["phase"] == "clear"
+                and payload_keys in (schema_v2_expected, v2_current_expected)
+                and self.legacy_v2_config_identity_sha256
+                and payload.get("config_identity_sha256") == self.legacy_v2_config_identity_sha256
+                and self.obsidian_mode == "disabled"
+                and self.alias_claim_count == 0
+                and (
+                    payload_keys == schema_v2_expected
+                    or (
+                        payload.get("memory_vault_mode") == self.memory_vault_mode
+                        and int(payload.get("alias_claim_count") or 0) == 0
+                    )
+                )
+                and expected_previous is not None
+                and payload.get("candidate") == expected_previous
+            )
             phase_a_to_b_transition = bool(
                 allow_terminal_config_transition
                 and payload["phase"] == "clear"
@@ -2532,6 +2732,26 @@ class DurableActivationJournal:
                 and payload.get("config_scope_sha256") == self.config_scope_sha256
                 and payload.get("memory_vault_mode") == "full_owner"
                 and self.memory_vault_mode == "disabled"
+                and payload.get("obsidian_mode") == self.obsidian_mode
+                and payload.get("obsidian_root_sha256") == self.obsidian_root_sha256
+                and self.alias_claim_count == 0
+                and expected_previous is not None
+                and payload.get("candidate") == expected_previous
+                and expected_previous == expected_fallback
+            )
+            obsidian_enable_transition = bool(
+                allow_terminal_config_transition
+                and payload["phase"] == "clear"
+                and payload_keys == current_expected
+                and self.transition_config_identity_sha256
+                and payload.get("config_identity_sha256") == self.transition_config_identity_sha256
+                and self.config_scope_sha256
+                and payload.get("config_scope_sha256") == self.config_scope_sha256
+                and payload.get("memory_vault_mode") == self.memory_vault_mode
+                and payload.get("obsidian_mode") == "disabled"
+                and self.obsidian_mode == "enabled"
+                and payload.get("obsidian_root_sha256") == self.obsidian_root_sha256
+                and int(payload.get("alias_claim_count") or 0) == 0
                 and self.alias_claim_count == 0
                 and expected_previous is not None
                 and payload.get("candidate") == expected_previous
@@ -2547,6 +2767,8 @@ class DurableActivationJournal:
                 and payload.get("config_retry_scope_sha256") == self.config_retry_scope_sha256
                 and payload.get("memory_vault_mode") == "full_owner"
                 and self.memory_vault_mode == "full_owner"
+                and payload.get("obsidian_mode") == self.obsidian_mode
+                and payload.get("obsidian_root_sha256") == self.obsidian_root_sha256
                 and int(payload.get("alias_claim_count") or 0) > 0
                 and self.alias_claim_count == 0
                 and payload.get("database_mutation_possible") is True
@@ -2558,7 +2780,13 @@ class DurableActivationJournal:
                 and payload.get("fallback") == expected_previous
                 and expected_previous == expected_fallback
             )
-            if not (legacy_v1_transition or phase_a_to_b_transition or phase_a_retry_after_fallback):
+            if not (
+                legacy_v1_transition
+                or v2_to_v3_transition
+                or phase_a_to_b_transition
+                or obsidian_enable_transition
+                or phase_a_retry_after_fallback
+            ):
                 raise ReleaseFailure("activation_config_identity_changed")
         self._state = payload
         return dict(payload)
@@ -2590,11 +2818,13 @@ class DurableActivationJournal:
                 "transaction_id": os.urandom(32).hex(),
                 "phase": "prepared",
                 "config_identity_sha256": self.config_identity_sha256,
-                "config_identity_schema": RUNTIME_CONFIG_SCHEMA_V2,
+                "config_identity_schema": RUNTIME_CONFIG_SCHEMA_V3,
                 "config_scope_sha256": self.config_scope_sha256,
                 "config_retry_scope_sha256": self.config_retry_scope_sha256,
                 "alias_claim_count": self.alias_claim_count,
                 "memory_vault_mode": self.memory_vault_mode,
+                "obsidian_mode": self.obsidian_mode,
+                "obsidian_root_sha256": self.obsidian_root_sha256,
                 "candidate": _journal_release(candidate),
                 "previous": _journal_release(previous),
                 "fallback": _journal_release(fallback),
@@ -2609,12 +2839,22 @@ class DurableActivationJournal:
     @staticmethod
     def _backup_record(backup: DatabaseBackup) -> dict[str, Any]:
         payload = backup.opaque
-        if not isinstance(payload, _ExactBackupPayload):
+        if not isinstance(payload, _ExactBackupPayload) or payload.obsidian is None:
+            raise ReleaseFailure("activation_journal_backup_invalid")
+        obsidian = payload.obsidian
+        if backup.obsidian_receipt_sha256 != obsidian.manifest_sha256:
             raise ReleaseFailure("activation_journal_backup_invalid")
         return {
             "directory": str(payload.directory),
             "files": [{"name": name, "sha256": digest, "size": size} for name, digest, size in payload.files],
             "inbox_receipt_sha256": backup.inbox_receipt_sha256,
+            "obsidian": {
+                "file_count": obsidian.file_count,
+                "manifest_sha256": obsidian.manifest_sha256,
+                "present": obsidian.present,
+                "total_bytes": obsidian.total_bytes,
+            },
+            "obsidian_receipt_sha256": backup.obsidian_receipt_sha256,
             "receipt_sha256": backup.receipt_sha256,
             "schema_version": backup.schema_version,
         }
@@ -2678,14 +2918,21 @@ class DurableActivationJournal:
         raw = state.get("backup")
         if raw is None:
             return None
-        if not isinstance(raw, dict) or set(raw) != {
+        legacy_keys = {
             "directory",
             "files",
             "inbox_receipt_sha256",
             "receipt_sha256",
             "schema_version",
+        }
+        current_keys = legacy_keys | {"obsidian", "obsidian_receipt_sha256"}
+        if not isinstance(raw, dict) or frozenset(raw) not in {
+            frozenset(legacy_keys),
+            frozenset(current_keys),
         }:
             raise ReleaseFailure("activation_journal_backup_invalid")
+        if state.get("config_identity_schema") == RUNTIME_CONFIG_SCHEMA_V3 and set(raw) != current_keys:
+            raise ReleaseFailure("activation_journal_backup_obsidian_required")
         directory = _private_directory(Path(str(raw["directory"])))
         if directory.parent != self.backup_root or not directory.name.startswith("immutable-cutover-"):
             raise ReleaseFailure("activation_journal_backup_invalid")
@@ -2757,11 +3004,61 @@ class DurableActivationJournal:
             "files": entries,
         }:
             raise ReleaseFailure("activation_journal_backup_manifest_mismatch")
+        obsidian: _ExactObsidianBackup | None = None
+        obsidian_receipt = "0" * 64
+        if set(raw) == current_keys:
+            obsidian_raw = raw.get("obsidian")
+            if not isinstance(obsidian_raw, dict) or set(obsidian_raw) != {
+                "file_count",
+                "manifest_sha256",
+                "present",
+                "total_bytes",
+            }:
+                raise ReleaseFailure("activation_journal_backup_invalid")
+            file_count = obsidian_raw.get("file_count")
+            total_bytes = obsidian_raw.get("total_bytes")
+            present = obsidian_raw.get("present")
+            manifest_sha256 = _closed_hash(
+                str(obsidian_raw.get("manifest_sha256") or ""),
+                "activation_journal_backup_invalid",
+            )
+            obsidian_receipt = _closed_hash(
+                str(raw.get("obsidian_receipt_sha256") or ""),
+                "activation_journal_backup_invalid",
+            )
+            if (
+                type(file_count) is not int
+                or not 0 <= int(file_count) <= MAX_OBSIDIAN_BACKUP_ENTRIES
+                or type(total_bytes) is not int
+                or not 0 <= int(total_bytes) <= MAX_OBSIDIAN_BACKUP_BYTES
+                or type(present) is not bool
+                or manifest_sha256 != obsidian_receipt
+            ):
+                raise ReleaseFailure("activation_journal_backup_invalid")
+            obsidian = _ExactObsidianBackup(
+                bool(present),
+                manifest_sha256,
+                int(file_count),
+                int(total_bytes),
+            )
+            _verify_obsidian_backup(directory, obsidian)
+        expected_top_level = {name for name, _digest, _size in files} | {"manifest.json"}
+        if obsidian is not None:
+            expected_top_level.add("obsidian-manifest.json")
+            if obsidian.present:
+                expected_top_level.add("obsidian-root")
+        try:
+            actual_top_level = {path.name for path in directory.iterdir()}
+        except OSError as exc:
+            raise ReleaseFailure("activation_journal_backup_invalid") from exc
+        if actual_top_level != expected_top_level:
+            raise ReleaseFailure("activation_journal_backup_manifest_mismatch")
         return DatabaseBackup(
             schema_version=schema_version,
             receipt_sha256=database_receipt,
             inbox_receipt_sha256=inbox_receipt,
-            opaque=_ExactBackupPayload(directory, tuple(sorted(files))),
+            obsidian_receipt_sha256=obsidian_receipt,
+            opaque=_ExactBackupPayload(directory, tuple(sorted(files)), obsidian),
         )
 
 
@@ -2894,6 +3191,426 @@ def _verify_sqlite_snapshot_copy(
         scratch.rmdir()
 
 
+def _obsidian_entry_identity(status: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        int(status.st_dev),
+        int(status.st_ino),
+        int(status.st_size),
+        int(status.st_mtime_ns),
+        int(status.st_ctime_ns),
+    )
+
+
+def _hash_descriptor(descriptor: int) -> str:
+    digest = hashlib.sha256()
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    while chunk := os.read(descriptor, 1 << 20):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _copy_descriptor_private(source_descriptor: int, destination: Path) -> str:
+    descriptor = os.open(
+        destination,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
+        0o600,
+    )
+    digest = hashlib.sha256()
+    try:
+        os.lseek(source_descriptor, 0, os.SEEK_SET)
+        while chunk := os.read(source_descriptor, 1 << 20):
+            digest.update(chunk)
+            _write_all(descriptor, chunk)
+        os.fchmod(descriptor, 0o600)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    return digest.hexdigest()
+
+
+def _obsidian_relative_path(parent: str, name: str) -> str:
+    if not name or name in {".", ".."} or "/" in name or any(character in name for character in "\x00\r\n"):
+        raise ReleaseFailure("obsidian_backup_path_invalid")
+    return f"{parent}/{name}" if parent else name
+
+
+def _validate_obsidian_source_root(root: Path, *, allow_absent: bool) -> tuple[Path, bool]:
+    lexical = Path(os.path.abspath(root))
+    if not lexical.is_absolute() or any(character in str(lexical) for character in "\x00\r\n"):
+        raise ReleaseFailure("obsidian_root_invalid")
+    try:
+        parent = _private_directory(lexical.parent)
+    except ReleaseFailure as exc:
+        if not allow_absent or lexical.parent.exists() or lexical.parent.is_symlink():
+            raise
+        existing = lexical.parent
+        while not existing.exists() and not existing.is_symlink():
+            if existing.parent == existing:
+                raise ReleaseFailure("obsidian_root_invalid") from exc
+            existing = existing.parent
+        _private_directory(existing)
+        if lexical.parent.resolve(strict=False) != lexical.parent:
+            raise ReleaseFailure("obsidian_root_invalid") from exc
+        parent = lexical.parent
+    if lexical.parent != parent:
+        raise ReleaseFailure("obsidian_root_invalid")
+    try:
+        status = os.stat(lexical, follow_symlinks=False)
+    except FileNotFoundError as exc:
+        if lexical.is_symlink() or not allow_absent:
+            raise ReleaseFailure("obsidian_root_invalid") from exc
+        return lexical, False
+    except OSError as exc:
+        raise ReleaseFailure("obsidian_root_invalid") from exc
+    try:
+        resolved = lexical.resolve(strict=True)
+    except OSError as exc:
+        raise ReleaseFailure("obsidian_root_invalid") from exc
+    if (
+        resolved != lexical
+        or not stat.S_ISDIR(status.st_mode)
+        or status.st_uid != os.geteuid()
+        or stat.S_IMODE(status.st_mode) != 0o700
+    ):
+        raise ReleaseFailure("obsidian_root_invalid")
+    return lexical, True
+
+
+def _capture_obsidian_tree(
+    root: Path,
+    *,
+    destination: Path | None,
+) -> tuple[dict[str, Any], tuple[tuple[str, tuple[int, int, int, int, int]], ...]]:
+    """Capture one stable, no-follow tree and optionally copy it privately."""
+
+    lexical, present = _validate_obsidian_source_root(root, allow_absent=True)
+    if not present:
+        if lexical.exists() or lexical.is_symlink():
+            raise ReleaseFailure("obsidian_backup_source_changed")
+        return (
+            {
+                "schema": "friday.immutable-cutover-obsidian-root.v1",
+                "present": False,
+                "root": None,
+                "directories": [],
+                "files": [],
+            },
+            (),
+        )
+    if destination is not None:
+        destination.mkdir(mode=0o700)
+        os.chmod(destination, 0o700)
+    root_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    root_descriptor = os.open(lexical, root_flags)
+    directories: list[dict[str, Any]] = []
+    files: list[dict[str, Any]] = []
+    identities: list[tuple[str, tuple[int, int, int, int, int]]] = []
+    total_bytes = 0
+    entry_count = 0
+
+    def walk(descriptor: int, relative: str, destination_directory: Path | None) -> None:
+        nonlocal entry_count, total_bytes
+        try:
+            entries = sorted(os.scandir(descriptor), key=lambda item: item.name)
+        except OSError as exc:
+            raise ReleaseFailure("obsidian_backup_source_invalid") from exc
+        for entry in entries:
+            relative_path = _obsidian_relative_path(relative, entry.name)
+            try:
+                status = entry.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise ReleaseFailure("obsidian_backup_source_changed") from exc
+            entry_count += 1
+            if entry_count > MAX_OBSIDIAN_BACKUP_ENTRIES:
+                raise ReleaseFailure("obsidian_backup_entry_bound_exceeded")
+            mode = stat.S_IMODE(status.st_mode)
+            if status.st_uid != os.geteuid() or not 0 <= mode <= 0o777:
+                raise ReleaseFailure("obsidian_backup_source_invalid")
+            if stat.S_ISDIR(status.st_mode):
+                child_descriptor = os.open(
+                    entry.name,
+                    root_flags,
+                    dir_fd=descriptor,
+                )
+                try:
+                    opened = os.fstat(child_descriptor)
+                    identity = _obsidian_entry_identity(status)
+                    if not stat.S_ISDIR(opened.st_mode) or _obsidian_entry_identity(opened) != identity:
+                        raise ReleaseFailure("obsidian_backup_source_changed")
+                    child_destination = (
+                        destination_directory / entry.name if destination_directory is not None else None
+                    )
+                    if child_destination is not None:
+                        child_destination.mkdir(mode=0o700)
+                        os.chmod(child_destination, 0o700)
+                    directories.append(
+                        {"path": relative_path, "mode": mode, "mtime_ns": int(status.st_mtime_ns)}
+                    )
+                    identities.append((relative_path + "/", identity))
+                    walk(child_descriptor, relative_path, child_destination)
+                    after = os.fstat(child_descriptor)
+                    lexical_after = os.stat(entry.name, dir_fd=descriptor, follow_symlinks=False)
+                    if (
+                        _obsidian_entry_identity(after) != identity
+                        or _obsidian_entry_identity(lexical_after) != identity
+                    ):
+                        raise ReleaseFailure("obsidian_backup_source_changed")
+                    if child_destination is not None:
+                        _fsync_directory(child_destination)
+                finally:
+                    os.close(child_descriptor)
+                continue
+            if not stat.S_ISREG(status.st_mode) or status.st_nlink != 1:
+                raise ReleaseFailure("obsidian_backup_source_invalid")
+            total_bytes += int(status.st_size)
+            if total_bytes > MAX_OBSIDIAN_BACKUP_BYTES:
+                raise ReleaseFailure("obsidian_backup_byte_bound_exceeded")
+            file_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+            source_descriptor = os.open(entry.name, file_flags, dir_fd=descriptor)
+            try:
+                opened = os.fstat(source_descriptor)
+                identity = _obsidian_entry_identity(status)
+                if (
+                    not stat.S_ISREG(opened.st_mode)
+                    or opened.st_nlink != 1
+                    or _obsidian_entry_identity(opened) != identity
+                ):
+                    raise ReleaseFailure("obsidian_backup_source_changed")
+                digest = (
+                    _copy_descriptor_private(source_descriptor, destination_directory / entry.name)
+                    if destination_directory is not None
+                    else _hash_descriptor(source_descriptor)
+                )
+                after = os.fstat(source_descriptor)
+                lexical_after = os.stat(entry.name, dir_fd=descriptor, follow_symlinks=False)
+                if (
+                    _obsidian_entry_identity(after) != identity
+                    or _obsidian_entry_identity(lexical_after) != identity
+                ):
+                    raise ReleaseFailure("obsidian_backup_source_changed")
+            finally:
+                os.close(source_descriptor)
+            files.append(
+                {
+                    "path": relative_path,
+                    "sha256": digest,
+                    "size": int(status.st_size),
+                    "mode": mode,
+                    "mtime_ns": int(status.st_mtime_ns),
+                }
+            )
+            identities.append((relative_path, identity))
+
+    try:
+        root_status = os.fstat(root_descriptor)
+        lexical_status = os.stat(lexical, follow_symlinks=False)
+        root_identity = _obsidian_entry_identity(root_status)
+        if not stat.S_ISDIR(root_status.st_mode) or _obsidian_entry_identity(lexical_status) != root_identity:
+            raise ReleaseFailure("obsidian_backup_source_changed")
+        identities.append(("/", root_identity))
+        walk(root_descriptor, "", destination)
+        after = os.fstat(root_descriptor)
+        lexical_after = os.stat(lexical, follow_symlinks=False)
+        if (
+            _obsidian_entry_identity(after) != root_identity
+            or _obsidian_entry_identity(lexical_after) != root_identity
+        ):
+            raise ReleaseFailure("obsidian_backup_source_changed")
+    finally:
+        os.close(root_descriptor)
+    return (
+        {
+            "schema": "friday.immutable-cutover-obsidian-root.v1",
+            "present": True,
+            "root": {
+                "mode": stat.S_IMODE(root_status.st_mode),
+                "mtime_ns": int(root_status.st_mtime_ns),
+            },
+            "directories": sorted(directories, key=lambda item: str(item["path"])),
+            "files": sorted(files, key=lambda item: str(item["path"])),
+        },
+        tuple(sorted(identities)),
+    )
+
+
+def _snapshot_obsidian_root(config: SystemdConfig, directory: Path) -> _ExactObsidianBackup:
+    destination = directory / "obsidian-root"
+    first, identities = _capture_obsidian_tree(_obsidian_root(config), destination=destination)
+    second, second_identities = _capture_obsidian_tree(_obsidian_root(config), destination=None)
+    if first != second or identities != second_identities:
+        raise ReleaseFailure("obsidian_backup_source_changed")
+    manifest_bytes = _canonical_json(first) + b"\n"
+    manifest_sha256 = _sha256_bytes(manifest_bytes)
+    _write_private_durable(
+        directory / "obsidian-manifest.json",
+        manifest_bytes,
+        final_mode=0o400,
+    )
+    if destination.exists():
+        _fsync_tree(destination)
+    return _ExactObsidianBackup(
+        present=bool(first["present"]),
+        manifest_sha256=manifest_sha256,
+        file_count=len(first["files"]),
+        total_bytes=sum(int(item["size"]) for item in first["files"]),
+    )
+
+
+def _validated_obsidian_manifest_path(value: Any) -> str:
+    if not isinstance(value, str) or not value or any(character in value for character in "\x00\r\n"):
+        raise ReleaseFailure("obsidian_backup_manifest_invalid")
+    path = PurePosixPath(value)
+    if path.is_absolute() or str(path) != value or any(part in {"", ".", ".."} for part in path.parts):
+        raise ReleaseFailure("obsidian_backup_manifest_invalid")
+    return value
+
+
+def _validate_obsidian_manifest(
+    payload: Any,
+) -> tuple[bool, dict[str, Any], dict[str, dict[str, Any]]]:
+    if not isinstance(payload, dict) or set(payload) != {
+        "schema",
+        "present",
+        "root",
+        "directories",
+        "files",
+    }:
+        raise ReleaseFailure("obsidian_backup_manifest_invalid")
+    if (
+        payload.get("schema") != "friday.immutable-cutover-obsidian-root.v1"
+        or type(payload.get("present")) is not bool
+        or not isinstance(payload.get("directories"), list)
+        or not isinstance(payload.get("files"), list)
+    ):
+        raise ReleaseFailure("obsidian_backup_manifest_invalid")
+    present = bool(payload["present"])
+    if not present:
+        if payload.get("root") is not None or payload["directories"] or payload["files"]:
+            raise ReleaseFailure("obsidian_backup_manifest_invalid")
+        return False, {}, {}
+    root = payload.get("root")
+    if not isinstance(root, dict) or set(root) != {"mode", "mtime_ns"}:
+        raise ReleaseFailure("obsidian_backup_manifest_invalid")
+    root_mode = root.get("mode")
+    root_mtime = root.get("mtime_ns")
+    if (
+        type(root_mode) is not int
+        or not 0 <= int(root_mode) <= 0o777
+        or int(root_mode) != 0o700
+        or type(root_mtime) is not int
+        or int(root_mtime) < 0
+    ):
+        raise ReleaseFailure("obsidian_backup_manifest_invalid")
+    directories: dict[str, dict[str, Any]] = {}
+    files: dict[str, dict[str, Any]] = {}
+    for item in payload["directories"]:
+        if not isinstance(item, dict) or set(item) != {"path", "mode", "mtime_ns"}:
+            raise ReleaseFailure("obsidian_backup_manifest_invalid")
+        path = _validated_obsidian_manifest_path(item.get("path"))
+        mode = item.get("mode")
+        mtime_ns = item.get("mtime_ns")
+        if (
+            path in directories
+            or type(mode) is not int
+            or not 0 <= int(mode) <= 0o777
+            or type(mtime_ns) is not int
+            or int(mtime_ns) < 0
+        ):
+            raise ReleaseFailure("obsidian_backup_manifest_invalid")
+        directories[path] = item
+    total_bytes = 0
+    for item in payload["files"]:
+        if not isinstance(item, dict) or set(item) != {
+            "path",
+            "sha256",
+            "size",
+            "mode",
+            "mtime_ns",
+        }:
+            raise ReleaseFailure("obsidian_backup_manifest_invalid")
+        path = _validated_obsidian_manifest_path(item.get("path"))
+        mode = item.get("mode")
+        size = item.get("size")
+        mtime_ns = item.get("mtime_ns")
+        _closed_hash(str(item.get("sha256") or ""), "obsidian_backup_manifest_invalid")
+        if (
+            path in files
+            or path in directories
+            or type(mode) is not int
+            or not 0 <= int(mode) <= 0o777
+            or type(size) is not int
+            or int(size) < 0
+            or type(mtime_ns) is not int
+            or int(mtime_ns) < 0
+        ):
+            raise ReleaseFailure("obsidian_backup_manifest_invalid")
+        total_bytes += int(size)
+        files[path] = item
+    if len(directories) + len(files) > MAX_OBSIDIAN_BACKUP_ENTRIES:
+        raise ReleaseFailure("obsidian_backup_entry_bound_exceeded")
+    if total_bytes > MAX_OBSIDIAN_BACKUP_BYTES:
+        raise ReleaseFailure("obsidian_backup_byte_bound_exceeded")
+    all_paths = set(directories) | set(files)
+    for path in all_paths:
+        parent = str(PurePosixPath(path).parent)
+        if parent != "." and parent not in directories:
+            raise ReleaseFailure("obsidian_backup_manifest_invalid")
+    return True, directories, files
+
+
+def _verify_obsidian_backup(
+    directory: Path,
+    descriptor: _ExactObsidianBackup,
+) -> dict[str, Any]:
+    manifest_path = _private_regular_file(
+        directory / "obsidian-manifest.json",
+        maximum_bytes=64 << 20,
+        code="obsidian_backup_manifest_invalid",
+    )
+    raw = manifest_path.read_bytes()
+    if _sha256_bytes(raw) != _closed_hash(
+        descriptor.manifest_sha256,
+        "obsidian_backup_receipt_invalid",
+    ):
+        raise ReleaseFailure("obsidian_backup_manifest_changed")
+    try:
+        manifest = _unique_json(raw.decode("ascii"))
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ReleaseFailure("obsidian_backup_manifest_invalid") from exc
+    present, directories, files = _validate_obsidian_manifest(manifest)
+    if (
+        present != descriptor.present
+        or len(files) != descriptor.file_count
+        or sum(int(item["size"]) for item in files.values()) != descriptor.total_bytes
+    ):
+        raise ReleaseFailure("obsidian_backup_receipt_mismatch")
+    backup_root = directory / "obsidian-root"
+    if not present:
+        if backup_root.exists() or backup_root.is_symlink():
+            raise ReleaseFailure("obsidian_backup_manifest_mismatch")
+        return manifest
+    actual, _identities = _capture_obsidian_tree(backup_root, destination=None)
+    if actual.get("present") is not True or actual.get("root", {}).get("mode") != 0o700:
+        raise ReleaseFailure("obsidian_backup_manifest_mismatch")
+    actual_directories = {
+        str(item["path"]): item for item in actual.get("directories", []) if isinstance(item, dict)
+    }
+    actual_files = {str(item["path"]): item for item in actual.get("files", []) if isinstance(item, dict)}
+    if set(actual_directories) != set(directories) or set(actual_files) != set(files):
+        raise ReleaseFailure("obsidian_backup_manifest_mismatch")
+    if any(int(item.get("mode", -1)) != 0o700 for item in actual_directories.values()):
+        raise ReleaseFailure("obsidian_backup_manifest_mismatch")
+    for path, expected in files.items():
+        observed = actual_files[path]
+        if (
+            int(observed.get("mode", -1)) != 0o600
+            or observed.get("sha256") != expected.get("sha256")
+            or observed.get("size") != expected.get("size")
+        ):
+            raise ReleaseFailure("obsidian_backup_manifest_mismatch")
+    return manifest
+
+
 def _exact_sqlite_backup(config: SystemdConfig) -> DatabaseBackup:
     backup_root = _private_directory(config.backup_dir, create=True)
     directory = Path(tempfile.mkdtemp(prefix="immutable-cutover-", dir=backup_root))
@@ -2920,6 +3637,7 @@ def _exact_sqlite_backup(config: SystemdConfig) -> DatabaseBackup:
             require_schema=True,
         )
         _verify_sqlite_snapshot_copy(directory, label="inbox", require_schema=False)
+        obsidian = _snapshot_obsidian_root(config, directory)
         manifest: dict[str, Any] = {
             "schema": "friday.immutable-cutover-exact-backup.v1",
             "database_schema": schema_version,
@@ -2936,7 +3654,8 @@ def _exact_sqlite_backup(config: SystemdConfig) -> DatabaseBackup:
             schema_version=schema_version,
             receipt_sha256=_sha256_bytes(_canonical_json(database_basis)),
             inbox_receipt_sha256=_sha256_bytes(_canonical_json(inbox_basis)),
-            opaque=_ExactBackupPayload(directory, tuple(files)),
+            obsidian_receipt_sha256=obsidian.manifest_sha256,
+            opaque=_ExactBackupPayload(directory, tuple(files), obsidian),
         )
     except BaseException:
         # Keep a partial private directory for forensic inspection.  It is never
@@ -3244,15 +3963,157 @@ class DurableAlbumRecoveryJournal:
         return _verify_exact_inbox_backup(config, backup)
 
 
+def _obsidian_tree_matches_manifest(root: Path, manifest: Mapping[str, Any]) -> bool:
+    try:
+        expected_present, expected_directories, expected_files = _validate_obsidian_manifest(manifest)
+        actual, _identities = _capture_obsidian_tree(root, destination=None)
+        actual_present, actual_directories, actual_files = _validate_obsidian_manifest(actual)
+    except (OSError, ReleaseFailure):
+        return False
+    if actual_present != expected_present:
+        return False
+    if not expected_present:
+        return True
+    if actual.get("root") != manifest.get("root"):
+        return False
+    return actual_directories == expected_directories and actual_files == expected_files
+
+
+def _build_obsidian_restore_staging(
+    backup_directory: Path,
+    staging: Path,
+    manifest: Mapping[str, Any],
+) -> None:
+    present, directories, files = _validate_obsidian_manifest(manifest)
+    if not present:
+        return
+    staging.mkdir(mode=0o700)
+    os.chmod(staging, 0o700)
+    try:
+        for relative, _item in sorted(
+            directories.items(),
+            key=lambda pair: (len(PurePosixPath(pair[0]).parts), pair[0]),
+        ):
+            destination = staging.joinpath(*PurePosixPath(relative).parts)
+            destination.mkdir(mode=0o700)
+            os.chmod(destination, 0o700)
+        for relative, item in sorted(files.items()):
+            source = (backup_directory / "obsidian-root").joinpath(*PurePosixPath(relative).parts)
+            destination = staging.joinpath(*PurePosixPath(relative).parts)
+            _copy_private(source, destination)
+            os.chmod(destination, int(item["mode"]))
+            os.utime(
+                destination,
+                ns=(int(item["mtime_ns"]), int(item["mtime_ns"])),
+                follow_symlinks=False,
+            )
+        for relative, item in sorted(
+            directories.items(),
+            key=lambda pair: (-len(PurePosixPath(pair[0]).parts), pair[0]),
+        ):
+            destination = staging.joinpath(*PurePosixPath(relative).parts)
+            os.chmod(destination, int(item["mode"]))
+            os.utime(
+                destination,
+                ns=(int(item["mtime_ns"]), int(item["mtime_ns"])),
+                follow_symlinks=False,
+            )
+        root = manifest["root"]
+        os.chmod(staging, int(root["mode"]))
+        os.utime(
+            staging,
+            ns=(int(root["mtime_ns"]), int(root["mtime_ns"])),
+            follow_symlinks=False,
+        )
+        _fsync_tree(staging)
+    except BaseException:
+        # Never erase an ambiguous partial tree.  Give it a unique forensic name;
+        # a replay can create a fresh deterministic staging directory.
+        failed = staging.with_name(f"{staging.name}.failed-{os.urandom(8).hex()}")
+        with suppress(OSError):
+            os.replace(staging, failed)
+            _fsync_directory(staging.parent)
+        raise
+
+
+def _restore_exact_obsidian_backup(config: SystemdConfig, payload: _ExactBackupPayload) -> None:
+    descriptor = payload.obsidian
+    if descriptor is None:
+        # Compatibility for recovery of an unfinished pre-Obsidian V2 journal.
+        return
+    manifest = _verify_obsidian_backup(payload.directory, descriptor)
+    root, _present = _validate_obsidian_source_root(
+        _obsidian_root(config),
+        allow_absent=True,
+    )
+    if _obsidian_tree_matches_manifest(root, manifest):
+        return
+    parent = _private_directory(root.parent, create=True)
+    token = _sha256_bytes(f"{payload.directory}:{descriptor.manifest_sha256}".encode())[:20]
+    staging = parent / f".{root.name}.friday-restore-{token}.new"
+    quarantine = parent / f".{root.name}.friday-restore-{token}.old"
+    desired_present = bool(manifest["present"])
+
+    if (staging.exists() or staging.is_symlink()) and (
+        staging.is_symlink() or not _obsidian_tree_matches_manifest(staging, manifest)
+    ):
+        if staging.is_symlink():
+            raise ReleaseFailure("obsidian_restore_staging_unsafe")
+        failed = staging.with_name(f"{staging.name}.failed-{os.urandom(8).hex()}")
+        os.replace(staging, failed)
+        _fsync_directory(parent)
+    if desired_present and not staging.exists():
+        _build_obsidian_restore_staging(payload.directory, staging, manifest)
+        if not _obsidian_tree_matches_manifest(staging, manifest):
+            raise ReleaseFailure("obsidian_restore_staging_mismatch")
+    _verify_obsidian_backup(payload.directory, descriptor)
+
+    target_exists = root.exists() or root.is_symlink()
+    if target_exists:
+        if root.is_symlink():
+            raise ReleaseFailure("obsidian_restore_target_unsafe")
+        root_status = os.stat(root, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(root_status.st_mode)
+            or root_status.st_uid != os.geteuid()
+            or stat.S_IMODE(root_status.st_mode) & 0o077
+        ):
+            raise ReleaseFailure("obsidian_restore_target_unsafe")
+        if quarantine.exists() or quarantine.is_symlink():
+            raise ReleaseFailure("obsidian_restore_quarantine_conflict")
+        os.replace(root, quarantine)
+        _fsync_directory(parent)
+    elif quarantine.is_symlink():
+        raise ReleaseFailure("obsidian_restore_quarantine_conflict")
+
+    if desired_present:
+        if not staging.exists() or staging.is_symlink():
+            raise ReleaseFailure("obsidian_restore_staging_missing")
+        os.replace(staging, root)
+        _fsync_directory(parent)
+        if not _obsidian_tree_matches_manifest(root, manifest):
+            raise ReleaseFailure("obsidian_restore_target_mismatch")
+    elif root.exists() or root.is_symlink():
+        raise ReleaseFailure("obsidian_restore_target_mismatch")
+
+
 def _restore_exact_sqlite_backup(config: SystemdConfig, backup: DatabaseBackup) -> None:
     payload = backup.opaque
     if not isinstance(payload, _ExactBackupPayload):
         raise ReleaseFailure("backup_restore_identity_invalid")
     declared = {name: (digest, size) for name, digest, size in payload.files}
     for name, (digest, size) in declared.items():
-        source = payload.directory / name
+        source = _private_regular_file(
+            payload.directory / name,
+            maximum_bytes=1 << 40,
+            code="backup_restore_source_changed",
+        )
         if source.stat().st_size != size or _sha256_file(source) != digest:
             raise ReleaseFailure("backup_restore_source_changed")
+    if payload.obsidian is not None:
+        # Prove every component before mutating any live state.  The second
+        # verification in the root restore closes drift during DB replacement.
+        _verify_obsidian_backup(payload.directory, payload.obsidian)
     for label, destination in (("database", config.database), ("inbox", config.inbox_database)):
         _private_directory(destination.parent)
         for suffix in ("", "-wal", "-shm"):
@@ -3283,6 +4144,7 @@ def _restore_exact_sqlite_backup(config: SystemdConfig, backup: DatabaseBackup) 
     if _sqlite_integrity(config.database, require_schema=True) != backup.schema_version:
         raise ReleaseFailure("restored_database_schema_changed")
     _sqlite_integrity(config.inbox_database, require_schema=False)
+    _restore_exact_obsidian_backup(config, payload)
 
 
 def _atomic_anchor_root(anchor: Path, release_root: Path) -> None:
@@ -3749,6 +4611,10 @@ class SystemdActivationPort:
             raise ReleaseFailure("inbox_database_not_runtime_queue")
         if config.memory_vault_mode not in MEMORY_VAULT_MODES:
             raise ReleaseFailure("memory_vault_mode_invalid")
+        if config.obsidian_mode not in OBSIDIAN_MODES:
+            raise ReleaseFailure("obsidian_mode_invalid")
+        if config.obsidian_root is not None and not config.obsidian_root.is_absolute():
+            raise ReleaseFailure("obsidian_root_invalid")
         ca = _private_regular_file(
             config.health_ca,
             maximum_bytes=1 << 20,
@@ -3776,6 +4642,27 @@ class SystemdActivationPort:
             config.state_dir,
         ):
             _private_directory(directory, create=directory in {config.backup_dir})
+        obsidian_root, obsidian_present = _validate_obsidian_source_root(
+            _obsidian_root(config),
+            allow_absent=config.obsidian_mode == "disabled",
+        )
+        if config.obsidian_mode == "enabled" and not obsidian_present:
+            raise ReleaseFailure("obsidian_root_required")
+        protected = (
+            config.state_dir,
+            config.backup_dir,
+            config.database,
+            config.inbox_database,
+            config.unit_dir,
+        )
+        for path in protected:
+            lexical = Path(os.path.abspath(path))
+            if (
+                lexical == obsidian_root
+                or lexical.is_relative_to(obsidian_root)
+                or obsidian_root.is_relative_to(lexical)
+            ):
+                raise ReleaseFailure("obsidian_root_not_dedicated")
         database = _private_regular_file(config.database, maximum_bytes=1 << 40, code="database_file_invalid")
         inbox = _private_regular_file(
             config.inbox_database,
@@ -3845,24 +4732,33 @@ class SystemdActivationPort:
     def verify_release(self, release: ReleaseIdentity) -> None:
         verify_release_tree(release)
         installed_surface_smoke(release)
+        _require_obsidian_cutover_contract(
+            release,
+            code="release_obsidian_cutover_contract_missing",
+        )
         script = """
-import json, logging, os, pathlib, sys
+import hashlib, json, logging, os, pathlib, sys
 logging.disable(logging.CRITICAL)
 os.environ['FRIDAY_ENV_FILE']=sys.argv[1]
-from friday.config import load_local_env_file, load_settings
+from friday.config import load_local_env_file, load_settings, validate_settings
 load_local_env_file(); settings=load_settings()
 home=pathlib.Path(sys.argv[2]).resolve(strict=True)
 state=pathlib.Path(sys.argv[3]).resolve(strict=True)
 database=pathlib.Path(sys.argv[4]).resolve(strict=True)
 inbox=pathlib.Path(sys.argv[5]).resolve(strict=True)
 memory_vault_mode=sys.argv[6]
+obsidian_mode=sys.argv[7]
+obsidian_root=pathlib.Path(sys.argv[8]).absolute()
 assert settings.home.resolve(strict=True)==home
 assert settings.state_dir.resolve(strict=True)==state
 assert settings.database_path.resolve(strict=True)==database
 assert settings.database_must_exist is True
 assert (settings.state_dir/'telegram-inbox.sqlite3').resolve(strict=True)==inbox
 effective_memory_vault_mode=getattr(settings,'memory_vault_mode','full_owner')
-print(json.dumps({'memory_vault_mode':effective_memory_vault_mode,'status':'clear'},sort_keys=True,separators=(',',':')))
+assert getattr(settings,'obsidian_enabled',None)==(obsidian_mode=='enabled')
+assert pathlib.Path(getattr(settings,'obsidian_effective_root')).absolute()==obsidian_root
+assert not [problem for problem in validate_settings(settings,production=True) if not problem.startswith('warning: ')]
+print(json.dumps({'memory_vault_mode':effective_memory_vault_mode,'obsidian_mode':obsidian_mode,'obsidian_root_sha256':hashlib.sha256(str(obsidian_root).encode()).hexdigest(),'status':'clear'},sort_keys=True,separators=(',',':')))
 """
         if not _release_binds_memory_vault_mode(release) and self.config.memory_vault_mode != "full_owner":
             raise ReleaseFailure("candidate_memory_vault_mode_contract_missing")
@@ -3892,6 +4788,8 @@ print(json.dumps({'memory_vault_mode':effective_memory_vault_mode,'status':'clea
                 str(self.config.database),
                 str(self.config.inbox_database),
                 self.config.memory_vault_mode,
+                self.config.obsidian_mode,
+                str(_obsidian_root(self.config)),
             ],
             check=False,
             capture_output=True,
@@ -3900,6 +4798,8 @@ print(json.dumps({'memory_vault_mode':effective_memory_vault_mode,'status':'clea
         )
         expected_receipt = {
             "memory_vault_mode": self.config.memory_vault_mode,
+            "obsidian_mode": self.config.obsidian_mode,
+            "obsidian_root_sha256": _obsidian_root_sha256(self.config),
             "status": "clear",
         }
         try:
@@ -4017,6 +4917,26 @@ print(json.dumps({'memory_vault_mode':effective_memory_vault_mode,'status':'clea
                 "FRIDAY_HOME": str(self.config.friday_home),
             }:
                 raise ReleaseFailure("systemd_manager_environment_invalid")
+            if (
+                self._systemctl(
+                    "show",
+                    unit,
+                    "--property=KillMode",
+                    "--value",
+                ).stdout.strip()
+                != b"control-group"
+            ):
+                raise ReleaseFailure("systemd_manager_kill_mode_invalid")
+            if (
+                self._systemctl(
+                    "show",
+                    unit,
+                    "--property=UMask",
+                    "--value",
+                ).stdout.strip()
+                != b"0077"
+            ):
+                raise ReleaseFailure("systemd_manager_umask_invalid")
             if (
                 self._systemctl(
                     "show",
@@ -4568,6 +5488,8 @@ print(json.dumps({'schema':SCHEMA_VERSION,'status':'clear'},sort_keys=True,separ
             config_retry_scope_sha256=_systemd_config_retry_scope_identity(self.config),
             alias_claim_count=len(self.config.alias_claim_manifests),
             memory_vault_mode=self.config.memory_vault_mode,
+            obsidian_mode=self.config.obsidian_mode,
+            obsidian_root_sha256=_obsidian_root_sha256(self.config),
         ).load()
         if accepted_activation.get("phase") != "clear":
             raise ReleaseFailure("album_recovery_requires_clear_phase_b")
@@ -4769,12 +5691,19 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         "wheelhouse_manifest_sha256",
     }
     metadata_keys = set(metadata) if isinstance(metadata, dict) else set()
-    optional_capability_keys = {"memory_vault_mode_contract", "venv_relocation_contract"}
+    optional_capability_keys = {
+        "memory_vault_mode_contract",
+        "obsidian_cutover_contract",
+        "venv_relocation_contract",
+    }
     memory_vault_mode_contract = (
         str(metadata.get("memory_vault_mode_contract") or "") if isinstance(metadata, dict) else ""
     )
     venv_relocation_contract = (
         str(metadata.get("venv_relocation_contract") or "") if isinstance(metadata, dict) else ""
+    )
+    obsidian_cutover_contract = (
+        str(metadata.get("obsidian_cutover_contract") or "") if isinstance(metadata, dict) else ""
     )
     if (
         not isinstance(metadata, dict)
@@ -4787,6 +5716,10 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         or (
             ("venv_relocation_contract" in metadata_keys)
             != (venv_relocation_contract == VENV_RELOCATION_CONTRACT)
+        )
+        or (
+            ("obsidian_cutover_contract" in metadata_keys)
+            != (obsidian_cutover_contract == OBSIDIAN_CUTOVER_CONTRACT)
         )
         or metadata.get("schema") != BUILD_RECEIPT_SCHEMA
         or _VERSION.fullmatch(str(metadata.get("version") or "")) is None
@@ -4849,6 +5782,7 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         max_schema=int(metadata.get("max_schema") or 0),
         memory_vault_mode_contract=memory_vault_mode_contract,
         venv_relocation_contract=venv_relocation_contract,
+        obsidian_cutover_contract=obsidian_cutover_contract,
     )
     verify_release_tree(release)
     return release
@@ -4890,6 +5824,10 @@ def _require_candidate_bound_operator(release: ReleaseIdentity) -> None:
     _require_venv_relocation_contract(
         release,
         code="operator_release_venv_relocation_contract_missing",
+    )
+    _require_obsidian_cutover_contract(
+        release,
+        code="operator_release_obsidian_cutover_contract_missing",
     )
     expected_script = release.root / "artifacts/immutable_release_operator.py"
     try:
@@ -5116,6 +6054,17 @@ def _add_systemd_arguments(parser: argparse.ArgumentParser) -> None:
         default="disabled",
         help="Effective code-owned plaintext projection mode expected from the candidate",
     )
+    parser.add_argument(
+        "--obsidian-mode",
+        choices=OBSIDIAN_MODES,
+        default="disabled",
+        help="Exact Obsidian integration mode expected from the candidate environment",
+    )
+    parser.add_argument(
+        "--obsidian-root",
+        type=Path,
+        help="Dedicated owner-private Obsidian root (defaults to FRIDAY_HOME/data/obsidian)",
+    )
     parser.add_argument("--health-url", default="https://127.0.0.1:8000/api/health")
     parser.add_argument("--alias-claim-manifest", action="append", type=Path, default=[])
     parser.add_argument("--alias-expect-count", action="append", type=int, default=[])
@@ -5136,6 +6085,8 @@ def _systemd_config(args: argparse.Namespace) -> SystemdConfig:
         health_ca=args.health_ca,
         health_ca_sha256=args.health_ca_sha256,
         memory_vault_mode=args.memory_vault_mode,
+        obsidian_mode=args.obsidian_mode,
+        obsidian_root=args.obsidian_root,
         alias_claim_manifests=tuple(args.alias_claim_manifest),
         alias_expected_counts=tuple(args.alias_expect_count),
         alias_expected_plan_sha256s=tuple(args.alias_expect_plan_sha256),
@@ -5192,7 +6143,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--terminal-journal-env-sha256",
         help=(
             "Exact pre-edit env-file digest used only to authenticate a terminal "
-            "legacy-v1 activation journal during the full_owner bridge cutover"
+            "activation journal during an explicitly permitted config transition"
         ),
     )
     _add_systemd_arguments(activate)
@@ -5297,10 +6248,20 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                     config,
                     args.terminal_journal_env_sha256,
                 ),
+                legacy_v2_config_identity_sha256=_activation_v2_config_identity(
+                    config,
+                    args.terminal_journal_env_sha256,
+                ),
+                transition_config_identity_sha256=_activation_obsidian_predecessor_identity(
+                    config,
+                    args.terminal_journal_env_sha256,
+                ),
                 config_scope_sha256=_systemd_config_scope_identity(config),
                 config_retry_scope_sha256=_systemd_config_retry_scope_identity(config),
                 alias_claim_count=len(config.alias_claim_manifests),
                 memory_vault_mode=config.memory_vault_mode,
+                obsidian_mode=config.obsidian_mode,
+                obsidian_root_sha256=_obsidian_root_sha256(config),
             )
             candidate = load_release_identity(
                 args.candidate,
@@ -5334,6 +6295,8 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 config_retry_scope_sha256=_systemd_config_retry_scope_identity(config),
                 alias_claim_count=len(config.alias_claim_manifests),
                 memory_vault_mode=config.memory_vault_mode,
+                obsidian_mode=config.obsidian_mode,
+                obsidian_root_sha256=_obsidian_root_sha256(config),
             )
             executor = load_release_identity(
                 args.executor_release,
@@ -5407,6 +6370,7 @@ __all__ = [
     "FORBIDDEN_ROLLBACK_COMMITS",
     "HISTORICAL_ALBUM_PLAN_SHA256",
     "HISTORICAL_ALBUM_UPDATE_IDS",
+    "OBSIDIAN_CUTOVER_CONTRACT",
     "ActivationPort",
     "DurableAlbumRecoveryJournal",
     "DurableActivationJournal",

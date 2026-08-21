@@ -69,6 +69,11 @@ EXPECTED_BINDING: dict[str, tuple[bool, str]] = {
     "feedback:search_off": (False, "то же самое"),
     "research:save": (False, "сохранение в Inbox обратимо и не трогает чужого"),
     "work:save": (False, "то же самое"),
+    "obs:check": (True, "состояние onboarding принадлежит владельцу личного чата"),
+    "obs:select": (True, "кандидата выбирает владелец активной настройки"),
+    "obs:opened": (True, "регистрацию vault подтверждает владелец настройки"),
+    "obs:retry": (True, "повтор шага меняет только настройку владельца"),
+    "obs:cancel": (True, "отменить настройку может только её владелец"),
 }
 
 

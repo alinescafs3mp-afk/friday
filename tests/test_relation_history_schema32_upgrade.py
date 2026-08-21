@@ -37,7 +37,7 @@ def _unpack_schema_31(tmp_path: Path, name: str) -> Path:
 def _make_schema_32(settings: Any, tmp_path: Path, name: str) -> Path:
     """Build the exact schema-32 predecessor of the file-alias migration.
 
-    A fresh ``FridayStorage`` now creates schema 34.  Tests which labelled that
+    A fresh ``FridayStorage`` now creates schema 35.  Tests which labelled that
     database "v32" were no longer exercising the predecessor at all and then
     expected the wrong version in fail-closed diagnostics.  Schema 33 adds only
     the immutable transport-alias table/index, so remove those two artifacts
@@ -229,7 +229,7 @@ def test_schema_31_to_32_preserves_evidence_and_installs_the_exact_current_contr
         assert migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[
             0
         ] == str(SCHEMA_VERSION)
-        assert SCHEMA_VERSION == 34
+        assert SCHEMA_VERSION == 35
         assert tuple(
             migrated.execute(
                 """SELECT singleton, batch_id, recorded_at, observed_at

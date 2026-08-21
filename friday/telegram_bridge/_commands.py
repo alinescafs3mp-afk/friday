@@ -26,6 +26,7 @@ from friday.telegram_bridge._base import (
     refusal_notice,
 )
 from friday.telegram_bridge._media import _reply_document_file_unique_id
+from friday.telegram_bridge._obsidian import obsidian_panel
 from friday.telegram_bridge._views import _TIMELINE_SHOWN
 
 
@@ -590,9 +591,94 @@ class CommandsMixin(BridgeShared):
                 "/instructions — как отвечать: показать, задать или очистить\n"
                 "/retry — сгенерировать ответ на последний вопрос заново\n"
                 "/reminders — предстоящие напоминания; кнопка «Снять» отменяет одно\n"
-                "/export — скачать текущий разговор текстом\n\n"
+                "/export — скачать текущий разговор текстом\n"
+                + (
+                    "/obsidian — подключить или проверить Obsidian на Android\n"
+                    "/obsidian_alias имя — задать имя Android-vault для ссылок\n"
+                    if self.config.obsidian_enabled
+                    else ""
+                )
+                + "\n"
                 "Ответы можно оценивать кнопками, а результаты /work, /research и миссий — "
                 "отправлять в Inbox на review.",
+            )
+            return
+        if command == "/obsidian":
+            if not self.config.obsidian_enabled:
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Интеграция Obsidian не включена владельцем Friday.",
+                )
+                return
+            # The panel contains a private per-user Device ID and pairing state.
+            # Even an allowlisted group must never receive either one.
+            if str(chat.get("type") or "") != "private" or external_user_id != str(chat_id):
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Настройка Obsidian доступна только в личной переписке со мной.",
+                )
+                return
+            # `start` is idempotent and doubles as resume: reopening /obsidian
+            # always asks the backend for the durable current state.
+            response = await self._backend_json(
+                backend,
+                "POST",
+                "/api/obsidian/onboarding/start",
+                None,
+                external_user_id,
+                str(chat_id),
+            )
+            panel_text, panel_markup = obsidian_panel(response)
+            await self._send_message(
+                telegram,
+                chat_id,
+                panel_text,
+                reply_markup=panel_markup,
+            )
+            return
+        if command == "/obsidian_alias":
+            if not self.config.obsidian_enabled:
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Интеграция Obsidian не включена владельцем Friday.",
+                )
+                return
+            if str(chat.get("type") or "") != "private" or external_user_id != str(chat_id):
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Настройка Obsidian доступна только в личной переписке со мной.",
+                )
+                return
+            if not argument:
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Укажите точное имя vault: /obsidian_alias Friday",
+                )
+                return
+            response = await self._backend_json(
+                backend,
+                "POST",
+                "/api/obsidian/onboarding/vault-alias",
+                {"alias": argument},
+                external_user_id,
+                str(chat_id),
+            )
+            await self._send_message(
+                telegram,
+                chat_id,
+                "Имя vault для Obsidian-ссылок обновлено.",
+            )
+            panel_text, panel_markup = obsidian_panel(response)
+            await self._send_message(
+                telegram,
+                chat_id,
+                panel_text,
+                reply_markup=panel_markup,
             )
             return
         if command == "/retry":

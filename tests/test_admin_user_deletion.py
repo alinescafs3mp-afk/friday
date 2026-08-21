@@ -19,6 +19,7 @@ from friday.account_deletion import (
     AccountDeletionConflict,
     _account_files_directory,
     _mark_account_deletion_history_clean,
+    _obsidian_account_directory,
     delete_account,
     preflight_account_deletion,
 )
@@ -1353,6 +1354,108 @@ def test_nonempty_account_directory_blocks_without_reading_or_removing_it(storag
     assert {item["code"] for item in plan["blockers"]} == {"file_directory"}
     assert marker.read_text(encoding="utf-8") == "file body is not part of preflight"
     assert storage.get_user(target) is not None
+
+
+def test_nonempty_obsidian_directory_blocks_without_reading_or_removing_it(storage) -> None:
+    target = "local:obsidian-directory-delete"
+    storage.ensure_user(target)
+    storage.update_user(target, status="disabled")
+    obsidian_dir = _obsidian_account_directory(storage, target)
+    obsidian_dir.mkdir(parents=True)
+    marker = obsidian_dir / "must-survive.md"
+    marker.write_text("Obsidian material is outside the SQLite cascade", encoding="utf-8")
+
+    plan = _verified_plan(storage, target)
+
+    assert plan["ready"] is False
+    assert {item["code"] for item in plan["blockers"]} == {"obsidian_directory"}
+    assert marker.read_text(encoding="utf-8") == "Obsidian material is outside the SQLite cascade"
+    assert storage.get_user(target) is not None
+
+
+def test_obsidian_rows_are_counted_deleted_and_empty_owner_directory_is_removed(storage) -> None:
+    actor = "local:obsidian-delete-admin"
+    target = "local:obsidian-delete-target"
+    storage.ensure_user(actor, preset_key="admin")
+    storage.ensure_user(target)
+    account_dir = _obsidian_account_directory(storage, target)
+    account_dir.mkdir(parents=True)
+    bundle = storage.create_obsidian_bundle(
+        target,
+        config_root=str(account_dir / "profile"),
+        database_root=str(account_dir / "database"),
+        api_endpoint="unix:///tmp/obsidian-delete-target.sock",
+        api_key_ref="secret:obsidian:delete-target",
+        server_path=str(account_dir / "vault"),
+        folder_id="friday-delete-target",
+        setup_token_hash=hashlib.sha256(b"obsidian-delete-token").hexdigest(),
+        expires_at="2030-01-01T00:00:00+00:00",
+        convention={},
+    )
+    storage.transition_obsidian_onboarding(target, "awaiting_device_id_handoff")
+    storage.transition_obsidian_onboarding(target, "awaiting_android_device")
+    storage.record_obsidian_pairing_candidates(
+        target,
+        [{"syncthing_device_id": "AAAA-BBBB", "display_name": "Pixel"}],
+    )
+    storage.bind_obsidian_android_device(
+        target,
+        syncthing_device_id="AAAA-BBBB",
+        display_name="Pixel",
+    )
+    storage.prepare_obsidian_operation(
+        target,
+        operation_id="delete-operation",
+        vault_id=bundle["vault"]["id"],
+        method="create",
+        arguments_digest=hashlib.sha256(b"delete-operation").hexdigest(),
+    )
+    storage.record_obsidian_conflict(
+        target,
+        vault_id=bundle["vault"]["id"],
+        canonical_path="Notes/A.md",
+        conflict_path="Notes/A.sync-conflict.md",
+    )
+    storage.update_user(target, status="disabled")
+
+    plan = _verified_plan(storage, target)
+
+    assert plan["ready"] is True, plan
+    for table in (
+        "obsidian_sync_profiles",
+        "obsidian_android_devices",
+        "obsidian_vaults",
+        "obsidian_onboarding_sessions",
+        "obsidian_pairing_candidates",
+        "obsidian_operations",
+        "obsidian_conflicts",
+    ):
+        assert plan["counts"][table] == 1
+
+    outcome = delete_account(
+        storage,
+        target,
+        expected_fingerprint=plan["fingerprint"],
+        actor_user_id=actor,
+        quiescence_verified=True,
+    )
+
+    assert outcome["status"] == "deleted"
+    assert not account_dir.exists()
+    for table in (
+        "obsidian_sync_profiles",
+        "obsidian_android_devices",
+        "obsidian_vaults",
+        "obsidian_onboarding_sessions",
+        "obsidian_pairing_candidates",
+        "obsidian_operations",
+        "obsidian_conflicts",
+    ):
+        remaining = storage.execute(
+            f'SELECT COUNT(*) FROM "{table}" WHERE user_id=?',  # nosec B608 - closed test table tuple
+            (target,),
+        ).fetchone()[0]
+        assert remaining == 0
 
 
 def test_existing_user_export_is_an_external_artifact_blocker(storage) -> None:

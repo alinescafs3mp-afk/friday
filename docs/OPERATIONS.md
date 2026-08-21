@@ -36,6 +36,23 @@ jericho doctor
 
 `status` печатает короткую сводку и конкретные действия. `doctor` возвращает тот же snapshot в подробном JSON, удобном для тикета или автоматической проверки. Если backend уже владеет process lease, внешний CLI не открывает его SQLite даже `mode=ro`: snapshot приходит от локального authenticated API. Недоступность API при живом lease даёт честный `degraded` без SQLite fallback. При остановленном backend offline-проверка сама удерживает тот же lease на всём окне чтения, поэтому стартующий backend либо ждёт, либо выигрывает до первого SQLite-open.
 
+### Obsidian Android beta
+
+Ветка содержит opt-in контракт `FRIDAY_OBSIDIAN_ENABLED=1`,
+`FRIDAY_PUBLIC_BASE_URL=https://...` и `FRIDAY_WORKERS_ENABLED=1`; без флага
+Organ выключен. Public URL должен быть HTTPS origin без
+credentials/path/query/fragment. Syncthing ожидается в полуинтервале
+`[2.1.3, 2.2.0)`, а `FRIDAY_OBSIDIAN_ROOT` — owner-private каталог mode
+`0700`, отдельный от state/files/models/cache/logs/backups. Unix socket GUI/REST
+и relay/discovery topology не требуют публиковать Syncthing GUI/sync ports.
+
+Immutable release operator связывает mode/root/env с activation identity и
+включает SQLite, Telegram inbox и точный Obsidian root в единый проверяемый
+recovery set. Обычный disaster-recovery snapshot остаётся остановленной внешней
+процедурой. Физическая Android-приёмка ещё не выполнена. Полные env-границы,
+Telegram/Syncthing-Fork steps, смысл статусов и acceptance-чеклист см. в
+[OBSIDIAN_ANDROID.md](OBSIDIAN_ANDROID.md).
+
 ## 2. Что проверяет doctor
 
 ```powershell
@@ -269,7 +286,8 @@ monitor; частичное исчезновение либо повторный
 mismatch mode/env/config или возвращённые строки не переходят автоматически и
 требуют review/remediation под исходной bound-config.
 
-0.206.3 использует SQLite schema 34. Новое поле имени загрузки принадлежит
+0.206.3 исходно использовал SQLite schema 34; Obsidian-ветка поднимает её до
+schema 35. Новое поле имени загрузки принадлежит
 точному message-bound alias и не переписывает канонический Raw Object. Миграция
 и исторический backfill разрешены только при остановленных backend/bridge,
 проверенной копии SQLite вместе с WAL и Telegram inbox, exact lease/identity

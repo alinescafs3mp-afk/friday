@@ -174,7 +174,9 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # roles distinct and returns totals separately from its bounded page.
 # 359 → 360: the admin messenger reads one bounded chronological tail per
 # person instead of issuing one request for each of five conversations.
-EXPECTED_MEMBER_COUNT = 364
+# 364 → 388: schema 35 adds the owner-scoped Obsidian onboarding, operation,
+# delivery, conflict, vault-alias and atomic-finalization storage surface.
+EXPECTED_MEMBER_COUNT = 388
 EXPECTED_SIGNATURES: dict[str, str] = {
     "bind_owned_file_source_ref_alias": "(self, user_id: 'str', uploaded_by: 'str', source_ref: 'str', raw_object_id: 'str', supplied_filename: 'str' = '') -> 'bool'",
     "find_owned_files_by_filename": "(self, user_id: 'str', uploaded_by: 'str', filename: 'str') -> 'list[dict[str, Any]]'",

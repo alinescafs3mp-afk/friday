@@ -81,6 +81,8 @@ data/state/jericho.sqlite3
 
 - `data/files/` (они защищаются отдельным инкрементальным воркером выше);
 - `data/memory-vault/` (optional plaintext: только явный `full_owner` или осознанно сохраняемые legacy-артефакты);
+- весь `FRIDAY_OBSIDIAN_ROOT` (профили Syncthing и Markdown-vault;
+  `data/obsidian/` по умолчанию);
 - `data/state/telegram-inbox.sqlite3*`;
 - `.env`/`.env.local`;
 - model weights и container images.
@@ -139,16 +141,27 @@ jericho server
 
 ## 4. Полный snapshot установки
 
+Для общего disaster recovery Obsidian это **внешний остановленный snapshot**,
+не обычная команда `jericho backup`. SQLite хранит
+onboarding/operation metadata, а `FRIDAY_OBSIDIAN_ROOT` — Markdown, private
+`config.xml`, device identity и Syncthing index. Их нельзя смешивать между
+generations. Root содержит secrets и личные заметки: шифруйте копию и
+сохраняйте private permissions. Immutable release activation решает более узкую
+задачу cutover: автоматически проверяет и восстанавливает SQLite, Telegram inbox
+и exact Obsidian root как один crash-recoverable recovery set.
+
 Для полного disaster-recovery snapshot:
 
-1. Создайте и проверьте встроенный DB backup.
-2. Остановите backend и Telegram bridge.
+1. Остановите backend и Telegram bridge; это останавливает и
+   управляемые Syncthing-процессы.
+2. После остановки создайте и проверьте свежий встроенный DB backup.
 3. Скопируйте:
 
 ```text
 data/backups/<выбранная БД + manifest>
 data/files/
 data/memory-vault/               только known full_owner/legacy plaintext
+FRIDAY_OBSIDIAN_ROOT/            весь configured root, если Obsidian тестируется
 data/state/telegram-inbox.sqlite3*   если нужно сохранить pending/dead-letter updates
 .env или .env.local                  только в отдельное зашифрованное хранилище
 ```
@@ -162,13 +175,16 @@ data/state/telegram-inbox.sqlite3*   если нужно сохранить pend
 
 ### Пример PowerShell
 
-После `jericho backup` и остановки процессов:
+После остановки процессов и свежего `jericho backup`:
 
 ```powershell
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $target = "E:\FridayBackups\$stamp"
 New-Item -ItemType Directory -Force $target | Out-Null
 robocopy D:\jericho\data\files "$target\files" /MIR /COPY:DAT /R:2 /W:2
+# Эта строка верна только для default FRIDAY_OBSIDIAN_ROOT;
+# при custom root укажите его точный путь.
+robocopy D:\jericho\data\obsidian "$target\obsidian" /MIR /COPY:DAT /R:2 /W:2
 # Только для явного full_owner или осознанно сохраняемого legacy plaintext:
 # robocopy D:\jericho\data\memory-vault "$target\memory-vault" /MIR /COPY:DAT /R:2 /W:2
 robocopy D:\jericho\data\backups "$target\database" /E /COPY:DAT /R:2 /W:2
@@ -182,13 +198,19 @@ Get-ChildItem $target -Recurse -File | Get-FileHash -Algorithm SHA256 |
 ## 5. Полное восстановление
 
 1. Разверните ту же или совместимую версию Friday в новом каталоге.
-2. Восстановите `data/files/` и при необходимости Telegram queue из одного согласованного snapshot. `data/memory-vault/` возвращайте только если snapshot и целевой `full_owner` были явно согласованы; legacy plaintext помещайте в offline review, а не в активный runtime автоматически.
+2. Восстановите `data/files/`, весь configured
+   `FRIDAY_OBSIDIAN_ROOT` и при необходимости Telegram queue из одного
+   согласованного snapshot. До старта верните ту же конфигурацию,
+   owner и private permissions root. `data/memory-vault/` возвращайте только
+   если snapshot и целевой `full_owner` были явно согласованы; legacy plaintext
+   помещайте в offline review, а не в активный runtime автоматически.
 3. Верните secrets из зашифрованного хранилища.
 4. Поместите пару `.sqlite3 + manifest` в `data/backups/`.
 5. Запустите `jericho restore-backup <filename> --yes`.
 6. Выполните `jericho doctor`, затем product smoke через Admin/API/Telegram.
 
-Не смешивайте БД из одного snapshot с content-addressed files из другого: provenance останется целым, но часть исходников может отсутствовать физически.
+Не смешивайте БД из одного snapshot с files или Obsidian root из
+другого. Встроенной проверки согласованности SQLite и Obsidian root пока нет.
 
 ## 6. Регулярный recovery drill
 

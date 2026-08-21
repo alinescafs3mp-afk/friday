@@ -883,6 +883,21 @@ class FridaySettings:
     mcp_call_timeout_sec: float = 20.0
     mcp_result_chars: int = 7_000
 
+    # Android-first Obsidian integration. Disabled by default so an upgrade does
+    # not spawn a sync daemon or create plaintext vaults without owner consent.
+    obsidian_enabled: bool = False
+    obsidian_root: Path | None = None
+    obsidian_syncthing_binary: str = "/usr/local/bin/syncthing"
+    obsidian_syncthing_min_version: str = "2.1.3"
+    obsidian_syncthing_max_version: str = "2.2.0"
+    obsidian_pairing_ttl_sec: int = 900
+    obsidian_max_profiles: int = 64
+    obsidian_transport_mode: str = "discovery_relay"
+    obsidian_public_base_url: str = ""
+    obsidian_reconcile_interval_sec: float = 10.0
+    obsidian_rest_timeout_sec: float = 5.0
+    obsidian_public_setup_rate_limit_per_minute: int = 10
+
     # V12 is a reversible orchestration migration over the same storage,
     # authorization and execution kernel. Defaults preserve the exact legacy
     # runtime; canary routes are inert until both the mode and a handler exist.
@@ -966,6 +981,10 @@ class FridaySettings:
         scheme = "https" if self.api_tls_enabled else "http"
         return f"{scheme}://{host}:{self.api_port}"
 
+    @property
+    def obsidian_effective_root(self) -> Path:
+        return Path(self.obsidian_root or (self.data_dir / "obsidian")).absolute()
+
     def public_dict(self) -> dict[str, object]:
         return {
             "home": str(self.home),
@@ -1029,6 +1048,17 @@ class FridaySettings:
                 "enabled": self.mcp_enabled,
                 "workspace_configured": bool(self.mcp_workspace_inbox_dir and self.mcp_workspace_outbox_dir),
                 "filesystem_mode": "inbox-read/outbox-create" if self.mcp_enabled else "disabled",
+            },
+            "obsidian": {
+                "enabled": self.obsidian_enabled,
+                "root": str(self.obsidian_effective_root),
+                "transport_mode": self.obsidian_transport_mode,
+                "public_setup_configured": bool(self.obsidian_public_base_url),
+                "syncthing_version_range": [
+                    self.obsidian_syncthing_min_version,
+                    self.obsidian_syncthing_max_version,
+                ],
+                "max_profiles": self.obsidian_max_profiles,
             },
             "graph": {"max_depth": self.graph_max_depth},
             "api": {"host": self.api_host, "port": self.api_port, "tls": self.api_tls_enabled},
@@ -1426,6 +1456,37 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
             7_000,
             _int_env("FRIDAY_MCP_RESULT_CHARS", 7_000, minimum=1_000),
         ),
+        obsidian_enabled=_bool_env("FRIDAY_OBSIDIAN_ENABLED", False),
+        obsidian_root=Path(env("FRIDAY_OBSIDIAN_ROOT", "").strip() or home / "data" / "obsidian")
+        .expanduser()
+        .absolute(),
+        obsidian_syncthing_binary=env("FRIDAY_SYNCTHING_BINARY", "/usr/local/bin/syncthing").strip(),
+        obsidian_syncthing_min_version=env("FRIDAY_SYNCTHING_MIN_VERSION", "2.1.3").strip(),
+        obsidian_syncthing_max_version=env("FRIDAY_SYNCTHING_MAX_VERSION", "2.2.0").strip(),
+        obsidian_pairing_ttl_sec=min(
+            3600,
+            _int_env("FRIDAY_OBSIDIAN_PAIRING_TTL_SEC", 900, minimum=300),
+        ),
+        obsidian_max_profiles=min(
+            512,
+            _int_env("FRIDAY_OBSIDIAN_MAX_PROFILES", 64, minimum=1),
+        ),
+        obsidian_transport_mode=_fail_closed_choice_env(
+            "FRIDAY_OBSIDIAN_TRANSPORT_MODE", "discovery_relay", ("discovery_relay",)
+        ),
+        obsidian_public_base_url=env("FRIDAY_PUBLIC_BASE_URL", "").strip().rstrip("/"),
+        obsidian_reconcile_interval_sec=min(
+            60.0,
+            _float_env("FRIDAY_OBSIDIAN_RECONCILE_INTERVAL_SEC", 10.0, minimum=2.0),
+        ),
+        obsidian_rest_timeout_sec=min(
+            30.0,
+            _float_env("FRIDAY_OBSIDIAN_REST_TIMEOUT_SEC", 5.0, minimum=1.0),
+        ),
+        obsidian_public_setup_rate_limit_per_minute=min(
+            120,
+            _int_env("FRIDAY_OBSIDIAN_PUBLIC_SETUP_RATE_LIMIT_PER_MINUTE", 10, minimum=1),
+        ),
         router_mode=_fail_closed_choice_env(
             "FRIDAY_ROUTER_MODE",
             "legacy",
@@ -1462,6 +1523,12 @@ def ensure_runtime_dirs(settings: FridaySettings) -> list[Path]:
         assert settings.mcp_workspace_inbox_dir is not None
         assert settings.mcp_workspace_outbox_dir is not None
         paths.extend((settings.mcp_workspace_inbox_dir, settings.mcp_workspace_outbox_dir))
+    if settings.obsidian_enabled:
+        root = settings.obsidian_effective_root
+        root_errors = _obsidian_root_errors(settings)
+        if root_errors:
+            raise ValueError("; ".join(root_errors))
+        paths.extend((root, root / "profiles", root / "run", root / "vaults", root / "logs"))
     for path in paths:
         ensure_private_directory(path)
     return paths
@@ -1505,6 +1572,71 @@ def _path_has_symlink_component(path: Path) -> bool:
         except OSError:
             return True
     return False
+
+
+def _obsidian_root_errors(settings: FridaySettings) -> list[str]:
+    """Validate the directory before any mkdir/chmod mutates host state."""
+
+    root = settings.obsidian_effective_root
+    errors: list[str] = []
+    if _path_has_symlink_component(root):
+        errors.append("FRIDAY_OBSIDIAN_ROOT must not contain a symlink component")
+    broad_roots = {
+        Path("/"),
+        Path("/tmp"),
+        Path("/var"),
+        Path("/var/tmp"),
+        Path.home().absolute(),
+        settings.home.absolute(),
+        settings.data_dir.absolute(),
+        settings.cache_dir.absolute(),
+        settings.log_dir.absolute(),
+        settings.model_root.absolute(),
+        settings.model_dir.absolute(),
+    }
+    if root.absolute() in broad_roots:
+        errors.append("FRIDAY_OBSIDIAN_ROOT must be a dedicated, non-broad directory")
+    protected = {
+        settings.state_dir,
+        settings.files_dir,
+        settings.memory_vault_dir,
+        settings.backups_dir,
+        settings.exports_dir,
+        # The documented/default Obsidian root is a dedicated child of
+        # ``data_dir``.  Guard the database file itself, not its whole parent,
+        # so sibling durable roots remain possible without allowing either
+        # tree to contain the database.
+        settings.database_path,
+        settings.cache_dir,
+        settings.log_dir,
+        settings.model_root,
+        settings.model_dir,
+    }
+    if any(_path_is_within(root, guarded) or _path_is_within(guarded, root) for guarded in protected):
+        errors.append("FRIDAY_OBSIDIAN_ROOT must not overlap state, files, model, cache, log or backup paths")
+    try:
+        if root.exists():
+            if not root.is_dir():
+                errors.append("FRIDAY_OBSIDIAN_ROOT must point to a directory")
+            else:
+                root_stat = root.stat(follow_symlinks=False)
+                if root_stat.st_uid != os.geteuid():
+                    errors.append("FRIDAY_OBSIDIAN_ROOT must be owned by the Friday process user")
+                if root_stat.st_mode & 0o077:
+                    errors.append(
+                        "FRIDAY_OBSIDIAN_ROOT already exists with non-private permissions; chmod it to 0700 explicitly"
+                    )
+        else:
+            ancestor = root.parent
+            while not ancestor.exists() and ancestor != ancestor.parent:
+                ancestor = ancestor.parent
+            if ancestor.stat(follow_symlinks=False).st_uid != os.geteuid():
+                errors.append(
+                    "FRIDAY_OBSIDIAN_ROOT must have an existing parent owned by the Friday process user"
+                )
+    except OSError:
+        errors.append("FRIDAY_OBSIDIAN_ROOT cannot be inspected safely")
+    return list(dict.fromkeys(errors))
 
 
 def _mcp_workspace_errors(settings: FridaySettings) -> list[str]:
@@ -1720,6 +1852,33 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
         )
     if settings.mcp_enabled:
         errors.extend(_mcp_workspace_errors(settings))
+    if settings.obsidian_enabled:
+        binary = Path(settings.obsidian_syncthing_binary)
+        if not binary.is_absolute() or binary.is_symlink() or not binary.is_file():
+            errors.append("FRIDAY_SYNCTHING_BINARY must be an existing absolute file")
+        elif not os.access(binary, os.X_OK):
+            errors.append("FRIDAY_SYNCTHING_BINARY must be executable")
+        errors.extend(_obsidian_root_errors(settings))
+        if settings.obsidian_transport_mode != "discovery_relay":
+            errors.append("FRIDAY_OBSIDIAN_TRANSPORT_MODE supports only discovery_relay in this release")
+        public_url = urlparse(settings.obsidian_public_base_url)
+        if (
+            public_url.scheme != "https"
+            or not public_url.hostname
+            or public_url.username is not None
+            or public_url.password is not None
+            or public_url.query
+            or public_url.fragment
+            or public_url.path not in {"", "/"}
+        ):
+            errors.append("FRIDAY_PUBLIC_BASE_URL must use HTTPS when Obsidian integration is enabled")
+        version_pattern = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+        minimum = settings.obsidian_syncthing_min_version
+        maximum = settings.obsidian_syncthing_max_version
+        if not version_pattern.fullmatch(minimum) or not version_pattern.fullmatch(maximum):
+            errors.append("FRIDAY_SYNCTHING_MIN_VERSION/MAX_VERSION must be numeric semantic versions")
+        elif tuple(map(int, minimum.split("."))) >= tuple(map(int, maximum.split("."))):
+            errors.append("FRIDAY_SYNCTHING_MIN_VERSION must be lower than MAX_VERSION")
     # Открытая регистрация впускает НЕЗНАКОМОГО человека — того, кого владелец не
     # называл ни по имени, ни по номеру чата. Что этот человек получит, решают две
     # соседние настройки, и оба сочетания отдают ему архив целиком. Цена ошибки

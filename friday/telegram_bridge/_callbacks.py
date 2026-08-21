@@ -27,6 +27,7 @@ from friday.telegram_bridge._base import (
     refusal_notice,
     urlsplit,
 )
+from friday.telegram_bridge._obsidian import obsidian_panel
 
 _FILE_PROMOTED_STATUS = "✅ Файл стал знанием — можно спрашивать."
 _FILE_REVIEW_STATUS = "📥 Файл ждёт разбора в /inbox — в поиск попадёт после подтверждения."
@@ -431,7 +432,59 @@ class CallbacksMixin(BridgeShared):
             pressed_family = family
             if not CALLBACK_TARGET_RE.fullmatch(target_id):
                 raise PermanentUpdateError("Invalid callback target")
-            if family == "inbox" and action in {"promote", "ignore"}:
+            if family == "obs" and action in {"check", "select", "opened", "retry", "cancel"}:
+                # Onboarding exposes a private Device ID and mutates a profile.
+                # Bind it to the private chat owner before making the already
+                # signed backend request; callbacks from groups or forwarded
+                # markup cannot operate another person's setup.
+                if str(chat.get("type") or "") != "private" or external_user_id != str(chat_id):
+                    await self._answer_callback(telegram, callback_id, "Эта кнопка не для вас", alert=True)
+                    return
+                if len(data.encode("utf-8")) > 64:
+                    raise PermanentUpdateError("Obsidian callback exceeds Telegram limit")
+                if action == "select":
+                    if target_id == "current":
+                        raise PermanentUpdateError("Invalid Obsidian device candidate")
+                    path = "/api/obsidian/onboarding/select-device"
+                    payload: dict[str, Any] | None = {"candidate_id": target_id}
+                else:
+                    if target_id != "current":
+                        raise PermanentUpdateError("Invalid Obsidian onboarding target")
+                    path = {
+                        "check": "/api/obsidian/onboarding/check",
+                        "opened": "/api/obsidian/onboarding/confirm-open",
+                        "retry": "/api/obsidian/onboarding/retry",
+                        "cancel": "/api/obsidian/onboarding/cancel",
+                    }[action]
+                    payload = None
+                response = await self._backend_json(
+                    backend,
+                    "POST",
+                    path,
+                    payload,
+                    external_user_id,
+                    str(chat_id),
+                )
+                await self._answer_callback(
+                    telegram,
+                    callback_id,
+                    {
+                        "check": "Статус обновлён",
+                        "select": "Устройство выбрано",
+                        "opened": "Проверяю подключение",
+                        "retry": "Повторяю шаг",
+                        "cancel": "Настройка отменена",
+                    }[action],
+                )
+                panel_text, panel_markup = obsidian_panel(response)
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    panel_text,
+                    reply_markup=panel_markup,
+                )
+                clear_markup = True
+            elif family == "inbox" and action in {"promote", "ignore"}:
                 # Цель приходит как «{id}.{id нажавшего}»: идентификаторы записей
                 # точек не содержат, поэтому разделение по последней однозначно.
                 target_id, _, pressed_by = target_id.rpartition(".")

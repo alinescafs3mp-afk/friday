@@ -16,6 +16,8 @@ x-backend-environment: &backend-environment
   FRIDAY_MEMORY_VAULT_DIR: /runtime/data/memory-vault
   FRIDAY_BACKUPS_DIR: /runtime/data/backups
   FRIDAY_EXPORTS_DIR: /runtime/data/exports
+  FRIDAY_OBSIDIAN_ROOT: /runtime/data/obsidian
+  FRIDAY_SYNCTHING_BINARY: /usr/local/bin/syncthing
   FRIDAY_WHISPER_DOWNLOAD_ROOT: /runtime/cache/whisper
   # The container has no `.env` of its own (both are in .dockerignore) and must not
   # go looking for one on a path inherited from the host.
@@ -69,6 +71,12 @@ x-backend-environment: &backend-environment
   FRIDAY_CODE_EXECUTION_ENABLED: ${FRIDAY_CODE_EXECUTION_ENABLED:-0}
   FRIDAY_CODE_EXECUTION_TIMEOUT_SEC: ${FRIDAY_CODE_EXECUTION_TIMEOUT_SEC:-15}
   FRIDAY_CODE_EXECUTION_MAX_OUTPUT_BYTES: ${FRIDAY_CODE_EXECUTION_MAX_OUTPUT_BYTES:-65536}
+  FRIDAY_OBSIDIAN_ENABLED: ${FRIDAY_OBSIDIAN_ENABLED:-0}
+  FRIDAY_OBSIDIAN_PAIRING_TTL_SEC: ${FRIDAY_OBSIDIAN_PAIRING_TTL_SEC:-900}
+  FRIDAY_OBSIDIAN_MAX_PROFILES: ${FRIDAY_OBSIDIAN_MAX_PROFILES:-64}
+  FRIDAY_OBSIDIAN_TRANSPORT_MODE: discovery_relay
+  FRIDAY_OBSIDIAN_PUBLIC_SETUP_RATE_LIMIT_PER_MINUTE: 10
+  FRIDAY_PUBLIC_BASE_URL: ${FRIDAY_PUBLIC_BASE_URL:-}
   FRIDAY_WEB_ALLOW_PRIVATE_NETWORKS: ${FRIDAY_WEB_ALLOW_PRIVATE_NETWORKS:-0}
   FRIDAY_WEB_MAX_RESPONSE_BYTES: ${FRIDAY_WEB_MAX_RESPONSE_BYTES:-5242880}
   FRIDAY_MAX_UPLOAD_BYTES: ${FRIDAY_MAX_UPLOAD_BYTES:-52428800}
@@ -209,25 +217,55 @@ services:
     tmpfs:
       - /tmp:size=128m,noexec,nosuid,nodev
     command: ["jericho", "telegram-bridge"]
-    # `.env` reaches the containers here, not through the map above. Compose reads
-    # `.env` for `${...}` interpolation only, so every setting the operator wrote in
-    # the file README tells them to copy was silently discarded on the Docker path —
-    # FRIDAY_TELEGRAM_PROXY among them, which is the whole point of the setting when
-    # Telegram is only reachable through a tunnel. Keys in `environment:` still win,
-    # so the container-owned paths above cannot be overridden from the host.
-    env_file:
-      - path: .env
-        required: false
+    # Deliberately no env_file: the bridge gets only the credentials/settings it
+    # needs, never backend API/search keys or paths to plaintext tenant data.
     environment:
-      <<: *backend-environment
+      FRIDAY_HOME: /runtime/bridge-state
+      FRIDAY_DATA_DIR: /runtime/bridge-state/data
+      FRIDAY_CACHE_DIR: /runtime/bridge-state/cache
+      FRIDAY_LOG_DIR: /runtime/bridge-state/logs
+      FRIDAY_MODEL_ROOT: /runtime/bridge-state/models
+      FRIDAY_STATE_DIR: /runtime/bridge-state/state
+      FRIDAY_DATABASE_PATH: /runtime/bridge-state/state/unused-backend.sqlite3
+      FRIDAY_FILES_DIR: /runtime/bridge-state/files
+      FRIDAY_MEMORY_VAULT_DIR: /runtime/bridge-state/memory-vault
+      FRIDAY_BACKUPS_DIR: /runtime/bridge-state/backups
+      FRIDAY_EXPORTS_DIR: /runtime/bridge-state/exports
+      FRIDAY_TELEGRAM_INBOX_DB_PATH: /runtime/bridge-state/telegram-inbox.sqlite3
+      FRIDAY_ENV_FILE: ""
+      FRIDAY_API_HOST: 127.0.0.1
+      FRIDAY_API_PORT: ${FRIDAY_API_PORT:-8000}
+      FRIDAY_SSL_CERTFILE: ""
+      FRIDAY_SSL_KEYFILE: ""
+      FRIDAY_BACKEND_CA_FILE: ""
       FRIDAY_BACKEND_URL: http://backend:${FRIDAY_API_PORT:-8000}
       FRIDAY_TELEGRAM_BOT_TOKEN: ${FRIDAY_TELEGRAM_BOT_TOKEN:?set FRIDAY_TELEGRAM_BOT_TOKEN in .env}
+      FRIDAY_TELEGRAM_BRIDGE_SECRET: ${FRIDAY_TELEGRAM_BRIDGE_SECRET:?set FRIDAY_TELEGRAM_BRIDGE_SECRET in .env}
+      FRIDAY_TELEGRAM_REALM_ID: ${FRIDAY_TELEGRAM_REALM_ID:-telegram}
+      FRIDAY_TELEGRAM_ALLOWED_CHAT_IDS: ${FRIDAY_TELEGRAM_ALLOWED_CHAT_IDS:-}
+      FRIDAY_TELEGRAM_OWNER_CHAT_IDS: ${FRIDAY_TELEGRAM_OWNER_CHAT_IDS:-}
+      FRIDAY_TELEGRAM_PROXY: ${FRIDAY_TELEGRAM_PROXY:-}
+      FRIDAY_TELEGRAM_SIGNATURE_MAX_AGE_SEC: ${FRIDAY_TELEGRAM_SIGNATURE_MAX_AGE_SEC:-90}
+      FRIDAY_TELEGRAM_GROUP_MEMBERS_FULL_ACCESS: ${FRIDAY_TELEGRAM_GROUP_MEMBERS_FULL_ACCESS:-0}
+      FRIDAY_TELEGRAM_OPEN_REGISTRATION: ${FRIDAY_TELEGRAM_OPEN_REGISTRATION:-0}
+      FRIDAY_OPEN_REGISTRATION_GRANTS_FULL_ACCESS: ${FRIDAY_OPEN_REGISTRATION_GRANTS_FULL_ACCESS:-0}
+      FRIDAY_SHARED_ARCHIVE: ${FRIDAY_SHARED_ARCHIVE:-0}
+      FRIDAY_NEW_ACCOUNT_PRESET: ${FRIDAY_NEW_ACCOUNT_PRESET:-user}
+      FRIDAY_MAX_UPLOAD_BYTES: ${FRIDAY_MAX_UPLOAD_BYTES:-52428800}
+      FRIDAY_LLM_TIMEOUT_SEC: ${FRIDAY_LLM_TIMEOUT_SEC:-240}
+      FRIDAY_OBSIDIAN_ENABLED: ${FRIDAY_OBSIDIAN_ENABLED:-0}
       FRIDAY_WORKERS_ENABLED: "0"
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    volumes: *backend-volumes
+    volumes:
+      - type: volume
+        source: telegram-state
+        target: /runtime/bridge-state
     depends_on:
       backend:
         condition: service_healthy
+
+volumes:
+  telegram-state:

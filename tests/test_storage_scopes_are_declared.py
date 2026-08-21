@@ -84,6 +84,29 @@ PERSON_SCOPED = {
     # Ключи входа принадлежат человеку, а не корпусу.
     "create_api_token",
     "list_api_tokens",
+    # Every Obsidian profile, vault, device, onboarding row and operation belongs
+    # to the individual Android owner, never to a shared archive tenant.
+    "bind_obsidian_android_device",
+    "create_obsidian_bundle",
+    "finalize_obsidian_onboarding",
+    "get_obsidian_device",
+    "get_obsidian_onboarding",
+    "get_obsidian_operation",
+    "get_obsidian_profile",
+    "get_obsidian_vault",
+    "list_obsidian_conflicts",
+    "list_obsidian_pairing_candidates",
+    "prepare_obsidian_operation",
+    "record_obsidian_conflict",
+    "record_obsidian_pairing_candidates",
+    "rotate_obsidian_setup_token",
+    "select_obsidian_pairing_candidate",
+    "transition_obsidian_onboarding",
+    "transition_obsidian_operation",
+    "update_obsidian_device",
+    "update_obsidian_profile",
+    "update_obsidian_vault",
+    "update_obsidian_vault_alias",
 }
 
 #: Feedback хранится в разделе субъекта, который зависит от `target_type`.
@@ -156,7 +179,8 @@ APPROVAL_TENANT_WITH_A_SEPARATE_PERSON = {
 # history; its user_id is the principal even when the archive is shared.
 # 255 → 256: search_owned_files_by_term searches the shared archive tenant;
 # exact uploader/person authority is carried and checked separately.
-EXPECTED_USER_ID_METHODS = 256
+# 256 → 277: the Obsidian storage surface is private to one Android owner.
+EXPECTED_USER_ID_METHODS = 277
 
 
 def _methods_taking_user_id() -> set[str]:

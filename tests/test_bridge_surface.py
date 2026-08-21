@@ -228,6 +228,9 @@ EXPECTED_CALLBACK_NAMESPACES = {
     "relation",
     "mission",
     "mon",
+    # `obs` is the private Android onboarding panel.  Its targets are only the
+    # opaque pending candidate id or the literal current-session sentinel.
+    "obs",
     "remind",
     "research",
     "work",
@@ -249,6 +252,8 @@ EXPECTED_COMMANDS = {
     "/missions",
     "/new",
     "/note",
+    "/obsidian",
+    "/obsidian_alias",
     "/profile",
     "/entity_rename",
     "/entity_alias",

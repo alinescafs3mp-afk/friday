@@ -30,6 +30,7 @@ if TYPE_CHECKING:  # avoid import cycles at module import time
     from fastapi import APIRouter
 
     from friday.config import FridaySettings
+    from friday.execution_kernel import ToolSpec
     from friday.permissions import CapabilityDefinition
 
 LOGGER = logging.getLogger(__name__)
@@ -58,6 +59,9 @@ class ServiceContext:
     # attestation payloads, epochs, prompts, or responses) merely to observe the
     # public model-gate transition.
     model_gate_status: Callable[[], Mapping[str, object]] | None = None
+    # Optional first-party runtime. Disabled installations keep this absent and
+    # therefore neither expose Obsidian tools nor start a sync process.
+    obsidian: Any = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +88,9 @@ class Organ:
     def workers(self, ctx: ServiceContext) -> Sequence[OrganWorker]:
         return ()
 
+    def tools(self, ctx: ServiceContext) -> Sequence[ToolSpec]:
+        return ()
+
     def router(self) -> APIRouter | None:
         return None
 
@@ -108,6 +115,12 @@ class OrganRegistry:
         collected: list[OrganWorker] = []
         for organ in self._organs:
             collected.extend(organ.workers(ctx))
+        return collected
+
+    def tools(self, ctx: ServiceContext) -> list[ToolSpec]:
+        collected: list[ToolSpec] = []
+        for organ in self._organs:
+            collected.extend(organ.tools(ctx))
         return collected
 
     def routers(self) -> list[APIRouter]:
@@ -280,6 +293,7 @@ def build_registry(settings: FridaySettings) -> OrganRegistry:
     from friday.organs.compactor import CompactorOrgan
     from friday.organs.importer import ImporterOrgan
     from friday.organs.monitors import MonitorsOrgan
+    from friday.organs.obsidian import ObsidianOrgan
     from friday.organs.profile import ProfileOrgan
     from friday.organs.reflection import ReflectionOrgan
     from friday.organs.reminders import RemindersOrgan
@@ -295,6 +309,8 @@ def build_registry(settings: FridaySettings) -> OrganRegistry:
         SentinelOrgan(),
         CompactorOrgan(),
     ]
+    if settings.obsidian_enabled:
+        organs.append(ObsidianOrgan())
     return OrganRegistry(organs)
 
 

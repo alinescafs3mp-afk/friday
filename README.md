@@ -81,7 +81,7 @@ Telegram → подписанный durable bridge → Conversation + mode
 ### Администрирование, безопасность и эксплуатация
 
 - Строгая tenant isolation действует на SQL, graph, conversations, files, feedback, Admin API и tools.
-- Opt-in V12 routes `file_read` и `archive_read` используют одни и те же fail-closed evidence-границы: архивный selector принадлежит коду и ограничен собственными файлами actor, авторизация завершается до чтения body, а перед публикацией точный selector и каждый источник повторно проверяются в той же SQLite-транзакции. Idempotency fence ставится через уже удерживаемое соединение атомарно с единственной публикацией. Узкие V12-полномочия не расширены; общая schema теперь **34**.
+- Opt-in V12 routes `file_read` и `archive_read` используют одни и те же fail-closed evidence-границы: архивный selector принадлежит коду и ограничен собственными файлами actor, авторизация завершается до чтения body, а перед публикацией точный selector и каждый источник повторно проверяются в той же SQLite-транзакции. Idempotency fence ставится через уже удерживаемое соединение атомарно с единственной публикацией. Узкие V12-полномочия не расширены; общая schema теперь **35**.
 - В shared archive личное напоминание остаётся данными конкретного человека: durable owner marker создаётся атомарно с событием, а generic retrieval/model/graph/organs/admin исключают полное dependency closure по ID, current и authenticated historical именам/алиасам. Alias containers рекурсивно декодируются в bounded budget, а сравнение NFC → casefold → NFC закрывает иной регистр и NFD. Только точный person-scoped reminder path может вернуть и доставить запись владельцу; person export из одной snapshot отдельно разрешает его непротиворечивые marker/time/source и производные только от них, не открывая чужой или неоднозначный material.
 - Capability-based permissions используют default deny, preset-ы `owner`, `admin`, `moderator`, `user`, `guest`, custom presets и явные allow/deny overrides без обходного повышения прав.
 - В общем архиве надзор за поступлениями одного человека отделяет tenant от точного `uploaded_by`: лента, сводка, ритм, объём, темы и сравнение двух периодов считают один и тот же авторский срез. Материалы без достоверной отметки никому не приписываются и показываются отдельным числом.
@@ -104,6 +104,22 @@ Telegram → подписанный durable bridge → Conversation + mode
 - Online backup SQLite включает `integrity_check`, SHA-256 manifest и повторную верификацию; вместе с БД он сохраняет append-only историю отношений и её completeness floor. Tenant export включает только принадлежащие этому пользователю `relation_revisions`. `restore-backup` требует остановленного backend через эксклюзивный lease, повторно сверяет staged copy, заменяет БД атомарно и возвращает точные DB/WAL/SHM при сбое; для уже повреждённой активной БД сохраняется отдельный явно непроверенный recovery bundle. Опциональная Markdown-проекция пишется только в явном `full_owner`; безопасное умолчание `disabled` не создаёт plaintext-копий.
 - Workers обслуживают всех активных tenants: lifecycle, entity-resolution candidates, ежедневный backup, SQLite optimize, read-only quality report и bounded advisory Inbox refinement. Vault-projector добавляется только в `FRIDAY_MEMORY_VAULT_MODE=full_owner`. Каждая задача публикует состояние, длительность, следующий запуск, timeout и consecutive failures для `status`, `doctor` и Admin UI.
 - Канонический multimodal profile `qwen38-27b-nvfp4-sglang` закрепляет точные model/runtime identities, graph-only 40K/6 launch contract и fail-closed V12 live attestation; прежний Qwen3.6/vLLM profile сохранён для совместимости.
+
+### Obsidian на Android (beta)
+
+Опциональный first-party Organ ведёт один owner-scoped vault через
+изолированный Syncthing и Syncthing-Fork. Есть private-Telegram onboarding
+`/obsidian`, точный copy/paste Device ID, `/obsidian_alias <имя vault>`,
+list/lexical search/read/create/append, typed properties, daily notes, журнал
+операций и раздельные факты local write / scan / Android receipt / open.
+Аккаунт Obsidian, подписка, desktop, QR и companion plugin не нужны.
+
+В ветке есть opt-in env-контракт
+`FRIDAY_OBSIDIAN_ENABLED=1` + `FRIDAY_PUBLIC_BASE_URL=https://...`, но
+операторский enablement/backup runbook ещё не release-сертифицирован. Ручная acceptance-матрица на
+физическом Android ещё не завершена, поэтому это не production-
+сертифицированный релиз. Точные шаги, конфигурация, статусы и
+ограничения: [docs/OBSIDIAN_ANDROID.md](docs/OBSIDIAN_ANDROID.md).
 
 ## Быстрый запуск на Windows
 
@@ -252,7 +268,7 @@ VRAM обнаружился при старте, а не на первом по�
 2. Создайте новый sibling release только из wheel; установленный venv не правьте пофайлово.
 3. Остановите backend и Telegram bridge и сохраните проверенный согласованный снимок SQLite, WAL и Telegram inbox.
 4. Выполните offline migration, переключите общий release anchor атомарно, примите backend и только затем запускайте bridge. При ошибке используйте exact rollback, а не повреждённый прежний каталог.
-5. Схема SQLite — **34**. Schema 31 один раз фиксирует `relation_history_complete_from`; schema 32 добавляет monotonic observed boundary и REPLACE/context guards; schema 33 — неизменяемые transport-id повторной загрузки; schema 34 — проверяемое имя, данное пользователем в конкретном сообщении, без изменения канонического Raw Object. Миграция и backfill выполняются только после проверенной резервной копии и exact message/raw/owner correlation. Остальные авторитетные знания, Inbox и разговоры не переписываются; более новая неизвестная схема отклоняется без изменений.
+5. Схема SQLite — **35**. Schema 31 один раз фиксирует `relation_history_complete_from`; schema 32 добавляет monotonic observed boundary и REPLACE/context guards; schema 33 — неизменяемые transport-id повторной загрузки; schema 34 — проверяемое имя, данное пользователем в конкретном сообщении; schema 35 — изолированные профили, vault, onboarding, журнал операций и конфликты Obsidian. Миграция и backfill выполняются только после проверенной резервной копии и exact message/raw/owner correlation. Остальные авторитетные знания, Inbox и разговоры не переписываются; более новая неизвестная схема отклоняется без изменений.
 
 Перед обновлением можно дополнительно выполнить
 `jericho backup --label before-upgrade` и `jericho verify-backup`. Это SQLite-only
@@ -319,6 +335,8 @@ Bridge допускает только один активный процесс 
 - `/relations` — принять или отклонить ближайшие предложенные связи inline;
 - `/note текст` — явно сохранить заметку;
 - `/search запрос` — прямой поиск по подтверждённым знаниям списком, без ответа модели.
+- `/obsidian` — в личном чате начать, возобновить или проверить Android Obsidian;
+- `/obsidian_alias точное имя` — задать имя Android-vault для open-ссылки.
 
 Ответы получают inline-оценки 👍/👎. В `knowledge_work` и `research` итог можно отправить кнопкой в Inbox; это предложение на review, а не скрытая запись в граф. `/status` показывает сохранённый режим текущего Telegram-канала.
 
@@ -430,6 +448,7 @@ data/state/friday.sqlite3       основная БД новой установ�
 data/state/telegram-inbox.sqlite3 очередь Telegram bridge
 data/files/                      исходные загруженные файлы
 data/memory-vault/               optional full_owner/legacy Markdown-проекция
+data/obsidian/                   private Syncthing-профили, индексы и Markdown-vault
 data/backups/                    SQLite-копии и SHA-256-манифесты
 data/exports/                    JSON-экспорты пользователей
 cache/                           временные кэши
@@ -448,6 +467,9 @@ Runtime-каталоги и секреты исключены из Git и из �
 `jericho backup` создаёт транзакционно согласованную копию **только SQLite-БД**. Полная резервная копия установки должна дополнительно включать:
 
 - `data/files/`;
+- весь `FRIDAY_OBSIDIAN_ROOT` (`data/obsidian/` по умолчанию), если
+  тестируется Obsidian beta; coherent DB-plus-root procedure пока ручная и
+  не release-сертифицирована;
 - `data/memory-vault/` — только если `full_owner` явно включён или legacy-артефакты осознанно сохраняются; это plaintext, шифруйте копию;
 - `.env.local` или `.env` — хранить отдельно и зашифрованно;
 - модельные веса — можно не копировать, если есть проверяемый источник повторного получения.
@@ -507,6 +529,11 @@ P01/P02/P04/P08/P09/P10 **120/120**, после выпуска официаль�
 - RAR/7z поддержка зависит от установленных Python-библиотек и формата архива; опасное содержимое не исполняется и не распаковывается в произвольные пути.
 - `code_run` — ограниченный subprocess executor, а не security boundary; он выключен по умолчанию и не выдан ни одному стандартному preset-у.
 - Встроенный backup/restore охватывает только SQLite. Полный disaster-recovery snapshot файлового хранилища, Telegram queue и секретов выполняется внешней файловой процедурой; optional vault включайте только при осознанном `full_owner`/хранении legacy plaintext. БД резервируется автоматически раз в сутки при включённых workers.
+- Obsidian Android остаётся beta без завершённой физической acceptance-матрицы.
+  Expected-revision writes используют fail-closed conditional publication:
+  гонка с peer сохраняет обе ревизии и даёт `conflict`, но автоматического
+  merge нет. Лимиты Markdown — не filesystem quota. До P5–P9 нет graph/semantic/tasks/Bases,
+  companion и alternate transports.
 
 ## Документация
 
@@ -517,6 +544,8 @@ P01/P02/P04/P08/P09/P10 **120/120**, после выпуска официаль�
 - [Жизненный цикл данных](docs/DATA_LIFECYCLE.md)
 - [Backup и восстановление](docs/BACKUP_AND_RESTORE.md)
 - [Эксплуатация и диагностика](docs/OPERATIONS.md)
+- [Obsidian на Android без подписки](docs/OBSIDIAN_ANDROID.md)
+- [Obsidian implementation tracker](docs/OBSIDIAN_IMPLEMENTATION_TRACKER.md)
 - [Release checklist](docs/RELEASE_CHECKLIST.md)
 - [История изменений](CHANGELOG.md)
 
