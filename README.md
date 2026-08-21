@@ -2,12 +2,13 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.206.4**. Это patch-релиз подробного ревью документов:
-полностью прочитанный аутентифицированный файл получает один содержательный
-разбор без самопроверки той же моделью и без подмены краткой квитанцией, а
-точное имя текущей загрузки сохраняется при content-dedup и Telegram-цитате.
-Строгие запросы и deterministic evidence guards остаются fail-closed.
-Остальные возможности включают code-owned
+Текущая версия: **0.207.0rc0**. Это opt-in beta интеграции одного личного
+Obsidian vault с одним Android-устройством через изолированный Syncthing:
+приватный Telegram-onboarding, нативные операции с Markdown, точные delivery
+facts, preserve-both конфликты и единый crash-safe immutable cutover. Без
+`FRIDAY_OBSIDIAN_ENABLED=1` Organ не запускается. Релиз также включает все
+проверки подробного ревью из 0.206.4; строгие запросы и deterministic evidence
+guards остаются fail-closed. Остальные возможности включают code-owned
 поиск собственной истории по точным временным окнам и тематической
 лексике, bounded-поиском по содержимому и сохранённым именам собственных
 файлов, строгими page/failure-границами поддерживаемых PDF/JPEG/OCR-путей и
@@ -267,7 +268,7 @@ VRAM обнаружился при старте, а не на первом по�
 
 1. Соберите wheel дважды из одного commit и убедитесь, что SHA-256 совпадает.
 2. Создайте новый sibling release только из wheel; установленный venv не правьте пофайлово.
-3. Остановите backend и Telegram bridge и сохраните проверенный согласованный снимок SQLite, WAL и Telegram inbox.
+3. Дайте оператору остановить backend и Telegram bridge и сохранить проверенный согласованный снимок SQLite, WAL, Telegram inbox и exact Obsidian root.
 4. Выполните offline migration, переключите общий release anchor атомарно, примите backend и только затем запускайте bridge. При ошибке используйте exact rollback, а не повреждённый прежний каталог.
 5. Схема SQLite — **35**. Schema 31 один раз фиксирует `relation_history_complete_from`; schema 32 добавляет monotonic observed boundary и REPLACE/context guards; schema 33 — неизменяемые transport-id повторной загрузки; schema 34 — проверяемое имя, данное пользователем в конкретном сообщении; schema 35 — изолированные профили, vault, onboarding, журнал операций и конфликты Obsidian. Миграция и backfill выполняются только после проверенной резервной копии и exact message/raw/owner correlation. Остальные авторитетные знания, Inbox и разговоры не переписываются; более новая неизвестная схема отклоняется без изменений.
 
@@ -312,7 +313,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Успешный canary startup должен показать в `/api/health` версию `0.206.4`,
+Успешный canary startup должен показать в `/api/health` версию `0.207.0rc0`,
 точный profile id, `canary_ready`, `live_attestation_clear` и оба
 зарегистрированных route; простого HTTP `status=ok` недостаточно.
 

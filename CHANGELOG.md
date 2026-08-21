@@ -1,3 +1,36 @@
+## 0.207.0rc0 — 2026-08-22
+
+### Бесплатный Obsidian vault на Android
+
+- Добавлена opt-in интеграция одного личного Markdown-vault с одним
+  Android-устройством через изолированный owner-scoped профиль Syncthing.
+  Серверный бинарник закреплён на 2.1.3, REST работает через private Unix socket,
+  а discovery/relay не требует публиковать GUI или входящий sync-порт.
+- Приватная Telegram-команда `/obsidian` ведёт durable и возобновляемый onboarding:
+  Friday Device ID копируется без QR и второго экрана, pending-устройство не
+  угадывается при неоднозначности, folder offer и точная доставка тестовой
+  заметки проверяются до явного подтверждения открытия в Obsidian.
+- Нативный owner-scoped note API поддерживает list/search/read/create/append,
+  typed properties и daily notes. Каждая мутация идемпотентна по `operation_id`,
+  условная публикация использует Linux `renameat2(RENAME_EXCHANGE)`, durable
+  journal и preserve-both поведение при конкурентной записи.
+- Статусы не смешивают локальную запись, scan, live connection, получение exact
+  ревизии Android и подтверждение открытия. Offline delivery остаётся pending;
+  Syncthing conflict-копии сохраняются, исключаются из обычного поиска и видны в
+  диагностике без автоматического merge.
+- SQLite schema 35 добавляет профили, vault/device bindings, onboarding,
+  operation ledger и конфликты. Runtime проверяет version/config identity
+  Syncthing fail-closed и останавливает недоверенный профиль до публикации
+  диагностики.
+- Immutable cutover включает SQLite/WAL, Telegram inbox и exact Obsidian root в
+  один проверяемый recovery set. Первое включение использует staged ENV1:
+  канонический ENV0 меняется только после проверенного backup, а crash/retry
+  сходятся через тот же activation journal.
+
+Физическая Android/Syncthing-Fork acceptance ещё не записана, поэтому сценарий
+помечен beta. Docker-контур по решению оператора в этот выпуск не
+сертифицировался.
+
 ## 0.206.4 — 2026-08-21
 
 ### Подробное ревью снова остаётся подробным

@@ -62,6 +62,22 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - weather без явного города не идёт в web; diagnostics требует exact
   capability, а MCP status строится из code-owned projection.
 
+Для Obsidian Android beta дополнительно:
+
+- без `FRIDAY_OBSIDIAN_ENABLED=1` Organ, managed Syncthing и его workers не
+  запускаются;
+- pinned Syncthing 2.1.3 проходит version/config/Unix-socket attestation, а
+  identity drift останавливает профиль fail-closed;
+- приватный `/obsidian` возобновляет один owner-scoped onboarding, различает
+  pending candidates и не выдаёт open-confirmation до exact Android receipt;
+- note mutations идемпотентны по `operation_id`, expected revision не допускает
+  lost update, а racing peer generation сохраняет обе стороны как conflict;
+- delivery отдельно доказывает local write, scan, live connection, exact remote
+  availability и user-confirmed open; offline остаётся `delivery_pending`;
+- immutable activation сохраняет SQLite/WAL, Telegram inbox и exact Obsidian
+  root одним recovery set, а staged ENV1 публикуется только после verified
+  backup и удаляется durable после успеха.
+
 Для V12 file/archive slice дополнительно:
 
 - без явных переменных configured/installed mode остаются `legacy`, routes пусты;
@@ -81,7 +97,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 2 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.206.4`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.0rc0`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
@@ -108,8 +124,11 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 
 Проверить:
 
-- schema version = 34;
-- schema 33 → 34 добавляет только message-bound `supplied_filename`; repair
+- schema version = 35;
+- предыдущий release остаётся на schema 34; переход 34 → 35 добавляет только
+  owner-scoped Obsidian profiles, vault/device bindings, onboarding, operation
+  ledger и conflicts, не переписывая canonical Raw или существующие знания;
+- прежний переход 33 → 34 сохраняет message-bound `supplied_filename`; repair
   требует exact owner/message/raw correlation и не переписывает canonical Raw;
 - counts старых строк не изменились без предусмотренной миграции;
 - `integrity_check=ok`, foreign-key violations = 0;

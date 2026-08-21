@@ -1,3 +1,3 @@
 """Friday local-first Knowledge Operating System."""
 
-__version__ = "0.206.4"
+__version__ = "0.207.0rc0"
