@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from friday.agent_runtime import (
+    AgentContext,
     AgentRuntime,
     _file_turn_capability_tools,
     file_turn_authority,
@@ -22,6 +23,7 @@ from friday.agent_runtime import (
 from friday.execution_kernel import ExecutionKernel
 from friday.permissions import AuthorizationService
 from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
+from friday.turn_intent_policy import WEATHER_LOCATION_CLARIFICATION
 
 TENANT = "synthetic-live-shared-archive"
 OWNER = "synthetic-live-owner"
@@ -315,6 +317,132 @@ async def test_live_exact_jbl_file_inventory_is_body_free_and_code_owned(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Не показывай файлы, которые скидывал JBL.",
+        "Пожалуйста, не перечисляй файлы, которые загружал JBL.",
+        "Файлы, которые присылал JBL, не показывай.",
+        "Я просил не показывать документы, которые отправлял JBL.",
+        "Не хочу видеть вложения, которые добавлял JBL.",
+        "Не нужно сейчас перечислять файлы, которые скидывал JBL.",
+        "Не надо мне показывать файлы, которые скидывал JBL.",
+        "Я не хочу, чтобы ты показывала файлы, которые скидывал JBL.",
+        "Давай не будем показывать файлы, которые скидывал JBL.",
+        "Можешь не показывать файлы, которые скидывал JBL.",
+    ],
+)
+async def test_negated_jbl_inventory_is_a_closed_no_read_command(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+) -> None:
+    runtime, kernel, _authorization, actor = _shared_runtime(
+        settings,
+        storage,
+        llm=_NeverModel(),
+        kernel_type=_NoExecuteKernel,
+    )
+    _store_file(storage, uploader=JBL, filename="must-not-be-disclosed.pdf")
+    catalog_calls = _guard_inventory_body_paths(runtime, storage, monkeypatch)
+
+    reply = await runtime.chat(actor.own_id, message, actor=actor, enable_tools=True)
+
+    assert catalog_calls == []
+    assert isinstance(kernel, _NoExecuteKernel) and kernel.calls == []
+    assert "must-not-be-disclosed.pdf" not in reply["message"]
+    assert "не буду" in reply["message"].casefold()
+    assert reply["tools_used"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Ты не показывал файлы, которые скидывал JBL?",
+        "Почему ты не показываешь файлы, которые скидывал JBL?",
+        "Почему не нужно сейчас перечислять файлы, которые скидывал JBL?",
+        "Ты правда просил не показывать файлы, которые скидывал JBL?",
+    ],
+)
+async def test_descriptive_inventory_negation_is_not_rewritten_as_a_new_prohibition(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+) -> None:
+    runtime, kernel, _authorization, actor = _shared_runtime(
+        settings,
+        storage,
+        llm=_NeverModel(),
+        kernel_type=_NoExecuteKernel,
+    )
+
+    async def prepared(user_id, question, conversation_id, **kwargs):  # noqa: ANN001
+        del kwargs
+        return AgentContext(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            person_id=user_id,
+            search_query=question,
+            answer_mode="general_conversation",
+        )
+
+    async def generate(context, question, attachments):  # noqa: ANN001
+        del context, attachments
+        assert question == message
+        return {
+            "content": "Это вопрос о прошлом показе файлов, а не новая команда скрыть их.",
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepared)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+
+    reply = await runtime.chat(actor.own_id, message, actor=actor, enable_tools=False)
+
+    assert "вопрос о прошлом показе" in reply["message"]
+    assert "Хорошо, не буду" not in reply["message"]
+    assert isinstance(kernel, _NoExecuteKernel) and kernel.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Какие файлы скидывал JBL? А потом скажи погоду.",
+        "Какие файлы скидывал JBL, и какая сегодня погода?",
+        "Какая сегодня погода, и какие файлы скидывал JBL?",
+        "Скажи погоду, а потом какие файлы скидывал JBL?",
+    ],
+)
+async def test_jbl_inventory_does_not_swallow_an_independent_weather_clause(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+) -> None:
+    runtime, kernel, _authorization, actor = _shared_runtime(
+        settings,
+        storage,
+        llm=_NeverModel(),
+        kernel_type=_NoExecuteKernel,
+    )
+    _store_file(storage, uploader=JBL, filename="jbl-visible.pdf")
+    catalog_calls = _guard_inventory_body_paths(runtime, storage, monkeypatch)
+
+    reply = await runtime.chat(actor.own_id, message, actor=actor, enable_tools=True)
+
+    assert "jbl-visible.pdf" in reply["message"]
+    assert WEATHER_LOCATION_CLARIFICATION in reply["message"]
+    assert catalog_calls == [(TENANT, JBL, 5_001)]
+    assert isinstance(kernel, _NoExecuteKernel) and kernel.calls == []
+    assert reply["tools_used"] == []
+
+
+@pytest.mark.asyncio
 async def test_live_other_jbl_files_after_7969_does_not_restore_that_attachment(
     settings: Any,
     storage: Any,
@@ -467,7 +595,7 @@ async def test_live_staffing_question_executes_one_authorized_source_search_afte
         storage,
         uploader=OWNER,
         filename="synthetic-staffing.odt",
-        body="В поле второй командир рота указан капитан Орлов.",
+        body="2-я РОТА | командир | капитан Орлов",
     )
 
     authority = file_turn_authority(STAFF_REQUEST)
@@ -498,10 +626,89 @@ async def test_live_staffing_question_executes_one_authorized_source_search_afte
     assert kernel.calls == [
         (
             "source_search",
-            {"query": "второй", "focus": "второй командир рота", "limit": 10},
+            {"query": "2-я рота", "focus": "2-я рота командир рота", "limit": 10},
         )
     ]
     assert reply["tools_used"] == ["source_search"]
     assert "капитан Орлов" in reply["message"]
     assert "локальный поиск недоступен" not in reply["message"].casefold()
     assert len(model.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_1342_staffing_lookup_never_restores_an_unrelated_stale_attachment(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The exact live wording is an archive lookup, not a latest-file follow-up."""
+
+    model = _StaffAnswerModel()
+    runtime, kernel, _authorization, actor = _shared_runtime(
+        settings,
+        storage,
+        llm=model,
+        kernel_type=_RecordingKernel,
+    )
+    _store_file(
+        storage,
+        uploader=OWNER,
+        filename="synthetic-staffing.odt",
+        body="2-я РОТА | командир | капитан Орлов",
+    )
+    stale_raw_id = _store_file(
+        storage,
+        uploader=JBL,
+        filename="7849.odt",
+        body="STALE-ATTACHMENT-BODY-MUST-STAY-OUT",
+    )
+    conversation_id = _record_attachment_backed_7969_turn(storage, stale_raw_id)
+    storage.store_message(
+        conversation_id,
+        OWNER,
+        "user",
+        "STALE-HISTORY-QUESTION-MUST-STAY-OUT",
+        metadata={"private_context_lineage": True},
+    )
+    storage.store_message(
+        conversation_id,
+        OWNER,
+        "assistant",
+        "STALE-HISTORY-ANSWER-MUST-STAY-OUT",
+        metadata={"private_context_lineage": True},
+    )
+
+    async def forbidden_context(*args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        raise AssertionError("exact staffing lookup entered ambient context retrieval")
+
+    def forbidden_restore(*args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        raise AssertionError("exact staffing lookup attempted latest-attachment restoration")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_context)
+    monkeypatch.setattr(runtime, "_restore_conversation_attachments", forbidden_restore)
+
+    reply = await runtime.chat(
+        actor.own_id,
+        STAFF_REQUEST,
+        actor=actor,
+        conversation_id=conversation_id,
+        enable_tools=True,
+    )
+
+    assert isinstance(kernel, _RecordingKernel)
+    assert kernel.calls == [
+        (
+            "source_search",
+            {"query": "2-я рота", "focus": "2-я рота командир рота", "limit": 10},
+        )
+    ]
+    assert reply["tools_used"] == ["source_search"]
+    assert reply["restored_attachment_count"] == 0
+    assert "Командир второй роты — капитан Орлов." in reply["message"]
+    rendered = json.dumps([reply, model.calls], ensure_ascii=False)
+    assert "STALE-ATTACHMENT-BODY-MUST-STAY-OUT" not in rendered
+    assert "STALE-HISTORY-QUESTION-MUST-STAY-OUT" not in rendered
+    assert "STALE-HISTORY-ANSWER-MUST-STAY-OUT" not in rendered
+    assert "защитная проверка отклонила" not in reply["message"].casefold()

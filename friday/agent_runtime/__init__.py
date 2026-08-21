@@ -165,8 +165,20 @@ from friday.time_routing import (
     temporal_routing_text,
 )
 from friday.tts import sanitize_text
-from friday.turn_intent_policy import TurnPolicyDecision, WebDisposition
-from friday.web_surfer import normalize_search_source_class, web_source_matches_class
+from friday.turn_intent_policy import (
+    WEATHER_LOCATION_CLARIFICATION,
+    TurnIntent,
+    TurnPolicyDecision,
+    WebDisposition,
+    decide_turn_policy,
+)
+from friday.web_surfer import (
+    SEARCH_FILTER_ATTESTATION_KEY,
+    normalize_search_freshness,
+    normalize_search_source_class,
+    search_filter_is_attested,
+    web_source_matches_class,
+)
 from friday.workers._blocking import run_blocking
 
 LOGGER = logging.getLogger(__name__)
@@ -321,6 +333,12 @@ _ROUND_TOOL_BUDGET_CHARS = 11_900
 #: 2500 знаков — 15 тысяч, что для судьи с контекстом в десятки тысяч токенов
 #: посильно и стоит одного вызова.
 _TOOL_EVIDENCE_CHARS = 2500
+# The simple public-news lane gives synthesis one already-bounded research
+# envelope.  Its judge and sole repair must see those exact same bytes rather
+# than the ordinary query-focused 2.5k excerpt; otherwise a fluent synthesis
+# can be "verified" against a different subset of the web result.
+_SIMPLE_PUBLIC_NEWS_EVIDENCE_MARKER = "simple_public_news_full"
+_SIMPLE_PUBLIC_NEWS_EVIDENCE_MAX_CHARS = 12_100
 # One deterministic source-text lookup gets one bounded page.  The execution
 # kernel enforces the same upper bound, but keeping the product route narrower
 # leaves enough room for the exact excerpts to reach both synthesis and the
@@ -7389,6 +7407,55 @@ def _supported_claim_matches_evidence(
     )
 
 
+_PASSIVE_INPUT_FILE_STATE = re.compile(
+    r"(?:^|[;:—-]\s*)\W*(?:"
+    r"(?:к|в|по)\s+(?:(?:этому|этому же|данному|исходному)\s+)?"
+    r"(?:документ|файл|материал)\w*[^.!?\n]{0,160}|"
+    r"(?:[A-Za-zА-ЯЁа-яё-]{2,40}\s+){0,3}"
+    r"(?:документ|файл|материал|приложение)\w*[^.!?\n]{0,160})"
+    r"\b(?:готов|создан|сделан|сформирован|сохран[её]н|подготовлен|собран|"
+    r"прикрепл[её]н|приложен|отправлен|выгружен)\w*\b",
+    re.IGNORECASE,
+)
+
+
+def _passive_input_file_state_is_evidenced(
+    clause: str,
+    evidence: Sequence[str],
+) -> bool:
+    """Prove a passive statement about the input, not a new assistant deed."""
+
+    if not evidence or _PASSIVE_INPUT_FILE_STATE.search(clause) is None:
+        return False
+    if (
+        _OUTSIDE_SELF_SUBJECT.search(clause)
+        or _OUTSIDE_DEED_SELF_AGENT.search(clause)
+        or re.search(rf"\b{_SUPPORTED_FILE_ACTIVE_ACTION}\b", clause, re.IGNORECASE)
+        or _SUPPORTED_FILE_BARE_HANDOFF.search(clause)
+        or _SUPPORTED_EXTERNAL_WORKSPACE_COMPLETION.search(clause)
+        or _SUPPORTED_REMINDER_COMPLETION.search(clause)
+        or _SUPPORTED_VOICE_COMPLETION.search(clause)
+    ):
+        return False
+    claim_terms = _supported_deed_terms(clause, generic=_SUPPORTED_FILE_GENERIC_TERMS)
+    if not claim_terms:
+        # ``Документ подготовлен`` is exactly the ambiguous, unsupported form.
+        return False
+    joined = "\n".join(str(item or "") for item in evidence if str(item or "").strip())
+    if not joined:
+        return False
+    descriptors = (joined,)
+    return bool(
+        _supported_file_formats_match_evidence(clause, descriptors)
+        and _supported_claim_matches_evidence(
+            clause,
+            descriptors,
+            generic=_SUPPORTED_FILE_GENERIC_TERMS,
+            format_descriptors=descriptors,
+        )
+    )
+
+
 def _supported_claim_scope(
     clause: str,
     match: re.Match[str],
@@ -7461,6 +7528,7 @@ def _claims_an_unconfirmed_supported_deed(
     reminder_descriptors: list[str] | tuple[str, ...] = (),
     read_only_timeline_file_report: bool = False,
     passive_source_state: bool = False,
+    passive_input_file_state_evidence: Sequence[str] = (),
 ) -> bool:
     for clause in _supported_deed_claim_clauses(answer):
         if clause.rstrip().endswith("?") or _SUPPORTED_DEED_NONACTUAL.search(clause):
@@ -7499,24 +7567,19 @@ def _claims_an_unconfirmed_supported_deed(
             # Other clauses (for example a stray ``PDF готов`` without a
             # historical anchor) are still checked independently.
             file_claim = None
-        if passive_source_state:
-            # The whole response in this narrowly authenticated mode reports
-            # the newly uploaded source.  Only passive states inherit that
-            # source scope.  First-person, implicit/object-first active forms
-            # and bare hand-offs continue to require an effect from this turn.
-            source_clause_is_active = bool(
-                _OUTSIDE_SELF_SUBJECT.search(clause)
-                or _OUTSIDE_DEED_SELF_AGENT.search(clause)
-                or re.search(rf"\b{_SUPPORTED_FILE_ACTIVE_ACTION}\b", clause, re.IGNORECASE)
-                or re.search(rf"\b{_SUPPORTED_REMINDER_ACTIVE_ACTION}\b", clause, re.IGNORECASE)
-                or _SUPPORTED_REMINDER_DELIVERY_PROMISE.search(clause)
-                or _SUPPORTED_VOICE_ACTIVE_ACTION.search(clause)
-                or _SUPPORTED_FILE_BARE_HANDOFF.search(clause)
+        if (
+            passive_source_state
+            and file_claim is not None
+            and _passive_input_file_state_is_evidenced(
+                clause,
+                passive_input_file_state_evidence,
             )
-            if not source_clause_is_active:
-                file_claim = None
-                reminder_claim = None
-                voice_claim = None
+        ):
+            # An explicit complete-file review may repeat a passive state which
+            # is literally supported by that input.  It proves no reminder,
+            # audio or carrier created by Friday, so only this file overlap is
+            # consumed.
+            file_claim = None
         if external_workspace_claim:
             file_scope = clause
             claimed_external_filenames = _attachment_filename_mentions(file_scope)
@@ -8351,16 +8414,164 @@ _PERSON_DOCUMENT_INVENTORY_UPLOAD = re.compile(
     r"\b(?:загруз|загруж|присыл|присла|отправ|скид|прикреп|добав)\w*\b",
     re.IGNORECASE,
 )
+_PERSON_DOCUMENT_INVENTORY_PROHIBITED_INFINITIVE = (
+    r"(?:показывать|перечислять|называть|выводить|искать|находить|проверять)"
+)
+_NEGATED_PERSON_DOCUMENT_INVENTORY_ACTION = re.compile(
+    rf"\b(?:"
+    # A direct negative imperative is authority.  Indicative descriptions such
+    # as ``ты не показывал`` and ``почему ты не показываешь`` deliberately do
+    # not share this ending grammar.
+    r"не\s+(?:покаж(?:и|ите)|показыва(?:й|йте)|перечисл(?:и|ите)|"
+    r"перечисля(?:й|йте)|назов(?:и|ите)|называ(?:й|йте)|вывод(?:и|ите)|"
+    r"ищ(?:и|ите)|наход(?:и|ите)|проверя(?:й|йте))\b|"
+    # Modal/remembered commands may use an infinitive, but the bounded host is
+    # mandatory so an arbitrary report about somebody not showing files is not
+    # reinterpreted as the user's current prohibition.
+    rf"(?:(?:я\s+)?прошу|я\s+просил(?:а|и)?|мож(?:ешь|ете)|лучше|пожалуйста)"
+    rf"\s+(?:меня\s+|мне\s+|нам\s+|тебя\s+){{0,2}}не\s+"
+    rf"{_PERSON_DOCUMENT_INVENTORY_PROHIBITED_INFINITIVE}\b|"
+    rf"не\s+(?:надо|нужно|следует)\s+"
+    rf"(?:(?:мне|нам|сейчас|пока|больше|здесь)\s+){{0,3}}"
+    rf"{_PERSON_DOCUMENT_INVENTORY_PROHIBITED_INFINITIVE}\b|"
+    rf"(?:я\s+)?не\s+хочу\s+(?:(?:сейчас|пока|больше)\s+){{0,2}}"
+    rf"(?:видеть|получать|смотреть)\b|"
+    rf"(?:я\s+)?не\s+хочу\s*,?\s+чтобы\s+"
+    rf"(?:(?:ты|вы|мне|нам)\s+){{1,2}}"
+    r"(?:показыва|перечисля|называ|выводи|иска|находи|проверя)\w*\b|"
+    rf"давай(?:те)?\s+не\s+буд(?:ем|ь|ьте)\s+"
+    rf"{_PERSON_DOCUMENT_INVENTORY_PROHIBITED_INFINITIVE}\b"
+    rf")",
+    re.IGNORECASE,
+)
+_PERSON_DOCUMENT_INVENTORY_NEGATED_MENTION = re.compile(
+    r"\bне\s+(?:(?:надо|нужно|следует|буд(?:ем|у|ешь|ете|ут))\s+)?"
+    r"(?:(?:мне|нам|сейчас|пока|больше|здесь|ещ[её])\s+){0,3}"
+    r"(?:показыва|покаж|перечисл|назов|называ|вывед|выводи|ищ|иска|найд|"
+    r"находи|провер)\w*\b",
+    re.IGNORECASE,
+)
+_PERSON_DOCUMENT_INVENTORY_META_QUESTION_PREFIX = re.compile(
+    r"(?:^|\s)(?:почему|зачем|разве|правда\s+ли|кто\s+сказал|ты\s+правда)\b",
+    re.IGNORECASE,
+)
+_NEGATED_PERSON_DOCUMENT_INVENTORY_ACK = "Хорошо, не буду показывать, перечислять или искать эти файлы."
+
+# Colloquial first-person inventory with an exact calendar day.  The ordinary
+# inventory recogniser deliberately requires an explicit file noun; real chat
+# often omits it in the closed form ``14 числа что я загружал?``.  Keep this
+# exception as a full-match grammar so neighbouring activity/message questions
+# cannot be promoted to a files-only system read.
+_PERSON_DOCUMENT_COMPACT_SELF_UPLOAD = re.compile(
+    r"\s*(?:а\s+)?(?:"
+    r"(?:[1-9]|[12]\d|3[01])(?:-?(?:го|е))?\s+числ(?:а|о|е)\s+"
+    r"(?:что|чего)\s+я\s+"
+    r"(?:загружал(?:а)?|загрузил(?:а)?|присылал(?:а)?|прислал(?:а)?|"
+    r"отправлял(?:а)?|отправил(?:а)?|скидывал(?:а)?|скинул(?:а)?|"
+    r"прикреплял(?:а)?|прикрепил(?:а)?)"
+    r"|(?:что|чего)\s+я\s+"
+    r"(?:загружал(?:а)?|загрузил(?:а)?|присылал(?:а)?|прислал(?:а)?|"
+    r"отправлял(?:а)?|отправил(?:а)?|скидывал(?:а)?|скинул(?:а)?|"
+    r"прикреплял(?:а)?|прикрепил(?:а)?)"
+    r"\s+(?:[1-9]|[12]\d|3[01])(?:-?(?:го|е))?\s+числ(?:а|о|е)"
+    r")"
+    r"\s*[?!.]*\s*",
+    re.IGNORECASE,
+)
 
 
 def _person_document_inventory_request(message: str) -> bool:
     """Linear equivalent of the three-lookahead inventory recogniser."""
 
+    command = _QUOTED_TEXT.sub(" ", _record_source_command_text(message))
+    if _negated_person_document_inventory_request(
+        message
+    ) or _PERSON_DOCUMENT_INVENTORY_NEGATED_MENTION.search(command):
+        return False
     return bool(
-        _PERSON_DOCUMENT_INVENTORY_ACTION.search(message)
-        and _PERSON_DOCUMENT_INVENTORY_SUBJECT.search(message)
-        and _PERSON_DOCUMENT_INVENTORY_UPLOAD.search(message)
+        _PERSON_DOCUMENT_COMPACT_SELF_UPLOAD.fullmatch(command)
+        or (
+            _PERSON_DOCUMENT_INVENTORY_ACTION.search(command)
+            and _PERSON_DOCUMENT_INVENTORY_SUBJECT.search(command)
+            and _PERSON_DOCUMENT_INVENTORY_UPLOAD.search(command)
+        )
     )
+
+
+def _negated_person_document_inventory_request(message: str) -> bool:
+    """A direct prohibition is a closed no-read command, never an inventory."""
+
+    command = _QUOTED_TEXT.sub(" ", _record_source_command_text(message))
+    action = _NEGATED_PERSON_DOCUMENT_INVENTORY_ACTION.search(command)
+    if action is None:
+        return False
+    if command.rstrip().endswith("?") and _PERSON_DOCUMENT_INVENTORY_META_QUESTION_PREFIX.search(
+        command[: action.start()]
+    ):
+        return False
+    return bool(
+        command
+        and _PERSON_DOCUMENT_INVENTORY_SUBJECT.search(command)
+        and _PERSON_DOCUMENT_INVENTORY_UPLOAD.search(command)
+    )
+
+
+_PERSON_DOCUMENT_INVENTORY_REMAINDER_BOUNDARY = re.compile(
+    r"(?P<separator>"
+    r"\?\s*(?:а\s+)?(?:(?:потом|затем)\s+)?|"
+    r"[,;:]\s*(?:а\s+)?(?:(?:потом|затем)\s+)?(?:и\s+)?|"
+    r"\s+(?:а\s+)?(?:потом|затем)\s+|"
+    r"\s+и\s+"
+    r")(?P<remainder>[^\r\n]{1,300})$",
+    re.IGNORECASE,
+)
+_PERSON_DOCUMENT_INVENTORY_WEATHER_REMAINDER = re.compile(
+    r"\b(?:погод|прогноз|температур|weather|forecast|temperature)\w*\b",
+    re.IGNORECASE,
+)
+
+
+def _person_document_inventory_remainder(message: str) -> _LocateClauseDecomposition:
+    """Split one exact inventory from an independently actionable suffix."""
+
+    surface = str(message or "").strip()
+    if not surface or len(surface) > 1_000:
+        return _LocateClauseDecomposition(surface)
+    masked, literals_closed = _masked_locate_literals(surface)
+    if not literals_closed:
+        return _LocateClauseDecomposition(surface, remainder_known=False)
+    for matched in _PERSON_DOCUMENT_INVENTORY_REMAINDER_BOUNDARY.finditer(masked):
+        clause = surface[: matched.start("separator")].rstrip(" \t,;:?!")
+        remainder = surface[matched.start("remainder") :].strip()
+        if (
+            clause
+            and remainder
+            and _person_document_inventory_request(clause)
+            and _PERSON_DOCUMENT_INVENTORY_WEATHER_REMAINDER.search(_record_source_command_text(remainder))
+        ):
+            return _LocateClauseDecomposition(
+                locate_clause=clause,
+                open_remainder=remainder,
+                remainder_known=True,
+                split=True,
+            )
+        if (
+            clause
+            and remainder
+            and _PERSON_DOCUMENT_INVENTORY_WEATHER_REMAINDER.search(_record_source_command_text(clause))
+            and _person_document_inventory_request(remainder)
+        ):
+            # Composition order does not grant either clause ownership over the
+            # other.  Normalize weather-first wording to the same two sealed
+            # lanes as inventory-first: the private catalog is settled locally,
+            # while only the weather clause reaches weather policy.
+            return _LocateClauseDecomposition(
+                locate_clause=remainder,
+                open_remainder=clause,
+                remainder_known=True,
+                split=True,
+            )
+    return _LocateClauseDecomposition(surface)
 
 
 class _PersonDocumentInventoryCompatibility:
@@ -10737,6 +10948,288 @@ _ATTACHMENT_REVIEW_ABSOLUTE_QUALITY_CLAIM = re.compile(
     r"\b(?:безупреч|идеальн)\w*\b|\b(?:flawless|perfect|error[- ]free)\b",
     re.IGNORECASE,
 )
+
+# One filename-free task shared by synthesis hierarchy, judge and repair for a
+# backend-authored bare upload.  The transport notice is not the user's
+# question and must never make a valid review look non-responsive.
+_BARE_UPLOAD_REVIEW_TASK = (
+    "Проведи содержательное подробное ревью текущего вложения: объясни назначение "
+    "и структуру материала, основные тезисы и факты, заметные проблемы, риски или "
+    "противоречия и практические выводы — только по подтверждённому содержимому файла."
+)
+
+
+_BRAINFUCK_SUFFIX_REQUEST = re.compile(
+    r"\s*(?:а\s+)?(?P<target>[^\r\n`]{1,96}?)\s+"
+    r"(?:на|в)\s+(?:язык(?:е|ом)?\s+)?brainfuc?k(?:е|ом)?\s*"
+    r"(?:напиш(?:и|ите|ешь|ете)|сдела(?:й|йте|ешь|ете)|закодиру(?:й|йте|ешь|ете))?"
+    r"\s*[?!.]*\s*",
+    re.IGNORECASE,
+)
+_BRAINFUCK_ACTION_SUFFIX_REQUEST = re.compile(
+    r"\s*(?:а\s+)?(?:напиш(?:и|ите)|сдела(?:й|йте)|закодиру(?:й|йте))\s+"
+    r"(?P<target>[^\r\n`]{1,96}?)\s+(?:на|в)\s+"
+    r"(?:язык(?:е|ом)?\s+)?brainfuc?k(?:е|ом)?\s*[?!.]*\s*",
+    re.IGNORECASE,
+)
+_BRAINFUCK_PREFIX_REQUEST = re.compile(
+    r"\s*(?:а\s+)?(?:напиш(?:и|ите)|сдела(?:й|йте)|закодиру(?:й|йте))\s+"
+    r"(?:на|в)\s+(?:язык(?:е|ом)?\s+)?brainfuc?k(?:е|ом)?\s+"
+    r"(?P<target>[^\r\n`]{1,96}?)\s*[?!.]*\s*",
+    re.IGNORECASE,
+)
+_BRAINFUCK_NON_LITERAL_LEAD = re.compile(
+    r"(?:напиш|сдела|закодиру|покаж|объясн|расскаж|созда|сгенериру|реализу|"
+    r"перепиш|напечат|выдай|мож(?:ешь|ете)|смож(?:ешь|ете)|пожалуйста|код|"
+    r"программ|текст|строк|слов|фраз|сообщени|надпис|вывод|что|как|зачем|"
+    r"почему|сколько|вывед)\w*\b",
+    re.IGNORECASE,
+)
+_BRAINFUCK_LITERAL_QUOTES: dict[str, str] = {
+    '"': '"',
+    "'": "'",
+    "«": "»",
+    "“": "”",
+    "„": "“",
+}
+_BRAINFUCK_LITERAL_CLOSERS = frozenset(_BRAINFUCK_LITERAL_QUOTES.values())
+_BRAINFUCK_PUBLICATION_UTF16_LIMIT = 4_096
+_BRAINFUCK_TOO_LONG_RESPONSE = (
+    "Запрошенная Brainfuck-программа после исполняемой проверки не помещается "
+    "в один безопасный блок сообщения. Сократите буквальный вывод."
+)
+
+
+def _brainfuck_publication_fits_one_message(content: str) -> bool:
+    """Apply Telegram's UTF-16 ceiling without importing the transport layer."""
+
+    units = len(content) + sum(1 for character in content if ord(character) > 0xFFFF)
+    return units <= _BRAINFUCK_PUBLICATION_UTF16_LIMIT
+
+
+def _brainfuck_exact_output_target(message: str) -> bytes | None:
+    """Closed literal postcondition for a small explicit Brainfuck request."""
+
+    matched = (
+        _BRAINFUCK_ACTION_SUFFIX_REQUEST.fullmatch(message)
+        or _BRAINFUCK_SUFFIX_REQUEST.fullmatch(message)
+        or _BRAINFUCK_PREFIX_REQUEST.fullmatch(message)
+    )
+    if matched is None:
+        return None
+    raw_target = str(matched.group("target") or "").strip()
+    quoted_literal = False
+    if raw_target[:1] in _BRAINFUCK_LITERAL_QUOTES:
+        if len(raw_target) < 2 or raw_target[-1] != _BRAINFUCK_LITERAL_QUOTES[raw_target[0]]:
+            return None
+        target = raw_target[1:-1]
+        quoted_literal = True
+    elif raw_target[-1:] in _BRAINFUCK_LITERAL_CLOSERS:
+        # A dangling closer is more likely a malformed literal delimiter than
+        # a byte the user deliberately asked the program to print.
+        return None
+    else:
+        target = raw_target
+    if (
+        not target
+        or any(ord(char) < 32 for char in target)
+        or (not quoted_literal and _BRAINFUCK_NON_LITERAL_LEAD.match(target) is not None)
+    ):
+        return None
+    # In programming usage “hello world on Brainfuck” names the canonical
+    # sample and its observable contract, rather than asking for the lower-case
+    # bytes literally typed in conversational prose.
+    if not quoted_literal and target.casefold().rstrip("!") == "hello world":
+        target = "Hello World!\n"
+    encoded = target.encode("utf-8")
+    return encoded if len(encoded) <= 128 else None
+
+
+def _brainfuck_compile_bytes(target: bytes) -> str:
+    """Compile bytes to a bounded one-cell program, then prove its output."""
+
+    current = 0
+    instructions: list[str] = []
+    for value in target:
+        upward = (value - current) % 256
+        downward = (current - value) % 256
+        instructions.append("+" * upward if upward <= downward else "-" * downward)
+        instructions.append(".")
+        current = value
+    return "".join(instructions)
+
+
+def _brainfuck_bounded_output(program: str, *, max_steps: int = 50_000) -> bytes | None:
+    """Execute a no-input Brainfuck program inside deterministic hard bounds."""
+
+    code = "".join(char for char in program if char in "><+-.,[]")
+    if len(code) > max_steps:
+        return None
+    tape = [0] * 4_096
+    pointer = 0
+    stack: list[int] = []
+    pairs: dict[int, int] = {}
+    for index, instruction in enumerate(code):
+        if instruction == "[":
+            stack.append(index)
+        elif instruction == "]":
+            if not stack:
+                return None
+            opening = stack.pop()
+            pairs[opening] = index
+            pairs[index] = opening
+    if stack:
+        return None
+    output = bytearray()
+    cursor = 0
+    steps = 0
+    while cursor < len(code):
+        steps += 1
+        if steps > max_steps:
+            return None
+        instruction = code[cursor]
+        if instruction == ">":
+            pointer += 1
+            if pointer >= len(tape):
+                return None
+        elif instruction == "<":
+            pointer -= 1
+            if pointer < 0:
+                return None
+        elif instruction == "+":
+            tape[pointer] = (tape[pointer] + 1) % 256
+        elif instruction == "-":
+            tape[pointer] = (tape[pointer] - 1) % 256
+        elif instruction == ".":
+            output.append(tape[pointer])
+            if len(output) > 128:
+                return None
+        elif instruction == ",":
+            # The closed output contract has no input stream.
+            return None
+        elif (instruction == "[" and tape[pointer] == 0) or (instruction == "]" and tape[pointer] != 0):
+            cursor = pairs[cursor]
+        cursor += 1
+    return bytes(output)
+
+
+def _brainfuck_exact_response(message: str) -> str:
+    """Return only a program whose bounded execution proves the requested bytes."""
+
+    target = _brainfuck_exact_output_target(message)
+    if target is None:
+        return ""
+    program = _brainfuck_compile_bytes(target)
+    if _brainfuck_bounded_output(program) != target:
+        return ""
+    response = f"```brainfuck\n{program}\n```"
+    if not _brainfuck_publication_fits_one_message(response):
+        return _BRAINFUCK_TOO_LONG_RESPONSE
+    return response
+
+
+_BRAINFUCK_FENCED_PROGRAM = re.compile(
+    r"^[ \t]{0,3}```(?:brainfuc?k)?[ \t]*\r?\n"
+    r"([+\-<>\[\].,\s]+?)"
+    r"^[ \t]{0,3}```[ \t]*(?:\r?$)",
+    re.IGNORECASE | re.MULTILINE,
+)
+# An intervening Markdown fence changes the referent of a later deictic offer.
+# Detect both CommonMark fence forms, including an unclosed later block; waiting
+# for its closing delimiter would let an offer *inside* that block bind backward.
+_ANY_FENCED_BLOCK = re.compile(r"^[ \t]{0,3}(?:`{3,}|~{3,})[^\r\n]*(?:\r?$)", re.MULTILINE)
+_BRAINFUCK_EXPLANATION_OFFER = re.compile(
+    r"\b(?:раз(?:об|бер)|объясн|поясн)\w*\b[^.!?\n]{0,120}"
+    r"(?:"
+    r"\b(?:этот|данн\w*|предыдущ\w*|привед[её]н\w*|показан\w*)\s+"
+    r"(?:код|программ)\w*\b|"
+    r"\b(?:код|программ)\w*\s+(?:выше|на\s+(?:язык(?:е|ом)?\s+)?brainfuc?k)\b|"
+    r"\bbrainfuc?k\w*\b|"
+    r"\bкак\s+(?:он|она|это)\b"
+    r")",
+    re.IGNORECASE,
+)
+_BRAINFUCK_IMMEDIATE_BARE_EXPLANATION_OFFER = re.compile(
+    r"^\s*(?:(?:если\s+хочешь|хочешь)\s*[,—:-]?\s*)?"
+    r"(?:(?:я\s+)?могу\s+)?"
+    r"(?:раз(?:об|бер)|объясн|поясн)\w*\s+"
+    r"(?:код|программ(?:а|у)?)\s*(?=[.!?\n]|$)",
+    re.IGNORECASE,
+)
+
+
+def _brainfuck_explanation_followup_response(
+    history: Sequence[Mapping[str, Any]],
+) -> str:
+    """Settle an accepted explanation of a prior Brainfuck answer by execution.
+
+    Conversation history is not evidence that executable output is correct.  A
+    stale model answer may be quoted for context, but it must cross the same
+    bounded interpreter as a fresh request before Friday explains or certifies
+    it.  On mismatch, replace it with a compiled-and-proved program and state
+    the correction explicitly.
+    """
+
+    relevant = [item for item in history if str(item.get("role") or "") in {"user", "assistant"}]
+    if len(relevant) < 2:
+        return ""
+    previous_user = str(relevant[-2].get("content") or "")
+    previous_assistant = str(relevant[-1].get("content") or "")
+    if str(relevant[-2].get("role") or "") != "user" or str(relevant[-1].get("role") or "") != "assistant":
+        return ""
+    previous_user_id = str(relevant[-2].get("id") or "")
+    assistant_reply_to = str(relevant[-1].get("reply_to") or "")
+    if previous_user_id and assistant_reply_to and assistant_reply_to != previous_user_id:
+        # Concurrent turns can finish out of order.  Chronological adjacency is
+        # not response ownership when the durable reply edge says otherwise.
+        return ""
+    target = _brainfuck_exact_output_target(previous_user)
+    if target is None:
+        return ""
+    matched = _BRAINFUCK_FENCED_PROGRAM.search(previous_assistant)
+    if matched is None:
+        return ""
+    previous_program = re.sub(r"\s+", "", matched.group(1))
+    if not previous_program:
+        return ""
+    suffix = previous_assistant[matched.end() :]
+    offer_match = _BRAINFUCK_EXPLANATION_OFFER.search(suffix)
+    if offer_match is None:
+        offer_match = _BRAINFUCK_IMMEDIATE_BARE_EXPLANATION_OFFER.match(suffix)
+    if offer_match is None or _ANY_FENCED_BLOCK.search(suffix[: offer_match.start()]) is not None:
+        return ""
+    previous_output = _brainfuck_bounded_output(previous_program)
+    proven_program = _brainfuck_compile_bytes(target)
+    if _brainfuck_bounded_output(proven_program) != target:
+        return ""
+
+    rendered_target = json.dumps(target.decode("utf-8"), ensure_ascii=False)
+    if previous_output == target:
+        opening = f"Проверила код исполнением: он выводит ровно {rendered_target}."
+        program = previous_program
+        explanation = (
+            "Команды `+` и `-` меняют текущий байт, `>` и `<` двигают указатель, "
+            "циклы `[...]` повторяются, пока текущая ячейка не обнулится, а `.` "
+            "печатает очередной байт."
+        )
+    else:
+        opening = (
+            f"Предыдущий код был некорректным: при ограниченном исполнении он не выводит "
+            f"ровно {rendered_target}. Ниже — проверенная замена."
+        )
+        program = proven_program
+        explanation = (
+            "Здесь используется одна 8-битная ячейка: каждая серия `+` или `-` "
+            "доводит её от предыдущего значения до следующего байта UTF-8, а `.` "
+            "сразу печатает этот байт."
+        )
+    response = (
+        f"{opening}\n\n```brainfuck\n{program}\n```\n\n{explanation} "
+        f"Исполняемая проверка результата: {rendered_target}."
+    )
+    if not _brainfuck_publication_fits_one_message(response):
+        return _BRAINFUCK_TOO_LONG_RESPONSE
+    return response
 
 
 def _open_attachment_review_requires_verifier(question: str, answer: str) -> bool:
@@ -13321,7 +13814,7 @@ class _FilenameClueSelection:
 
 
 _FILENAME_INVENTORY_ACTION = re.compile(
-    r"\b(?:есть|найд\w*|покаж\w*|перечисл\w*|какие|сколько|проверь\w*)\b",
+    r"\b(?:есть|найд\w*|покаж\w*|перечисл\w*|как(?:ие|их)|сколько|проверь\w*)\b",
     re.IGNORECASE,
 )
 _FILENAME_INVENTORY_SCOPE = re.compile(
@@ -13330,10 +13823,18 @@ _FILENAME_INVENTORY_SCOPE = re.compile(
     re.IGNORECASE,
 )
 _FILENAME_UNION_SCOPE = re.compile(
+    r"(?:"
     r"\b(?:файл|документ|вложен)\w*[^.!?\n]{0,160}"
     r"\b(?:где|в\s+котор\w*)\b[^.!?\n]{0,80}"
     r"\b(?:содерж|встреч|есть|найд)\w*\b[^.!?\n]{0,48}"
-    r"\b(?:слово|фраз|подстрок)\w*\b",
+    r"\b(?:слово|фраз|подстрок)\w*\b|"
+    r"\b(?:в\s+)?каких\s+(?:моих\s+)?(?:файл|документ|вложен)\w*"
+    r"[^.!?\n]{0,100}\b(?:есть|содерж|встреч|найд)\w*\b[^.!?\n]{0,48}"
+    r"\b(?:слово|фраз|подстрок)\w*\b|"
+    r"\b(?:файл|документ|вложен)\w*\s*[,]?\s*"
+    r"(?:содерж|имеющ|включа)\w*\b[^.!?\n]{0,48}"
+    r"\b(?:слово|фраз|подстрок)\w*\b"
+    r")",
     re.IGNORECASE,
 )
 _FILENAME_OTHER_RESULT_CONTINUATION = re.compile(
@@ -13732,6 +14233,1108 @@ def _attachment_evidence_chunks(
     return chunks[:_ATTACHMENT_EVIDENCE_MAX_CHUNKS]
 
 
+_ATTACHMENT_SENSITIVE_ACRONYM = re.compile(r"(?<![\w-])[A-ZА-ЯЁ]{2,10}(?:-[A-ZА-ЯЁ]{2,10})*(?![\w-])")
+_ATTACHMENT_SENSITIVE_IDENTIFIER = re.compile(
+    r"(?<![\w-])(?=[A-Za-zА-ЯЁа-яё0-9/_:.-]{3,80}(?![\w-]))"
+    r"(?=[A-Za-zА-ЯЁа-яё0-9/_:.-]*\d)"
+    r"[A-Za-zА-ЯЁа-яё0-9]+(?:[-_/.:][A-Za-zА-ЯЁа-яё0-9]+)+(?![\w-])"
+)
+_ATTACHMENT_SENSITIVE_BARE_IDENTIFIER = re.compile(
+    r"(?<![\w-])(?=[A-Za-zА-ЯЁа-яё0-9]{3,80}(?![\w-]))"
+    r"(?=[A-Za-zА-ЯЁа-яё0-9]*[A-Za-zА-ЯЁа-яё])"
+    r"(?=[A-Za-zА-ЯЁа-яё0-9]*\d)"
+    r"[A-Za-zА-ЯЁа-яё0-9]+(?![\w-])"
+)
+_ATTACHMENT_SENSITIVE_EMAIL = re.compile(
+    r"(?<![\w.+-])[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}"
+    r"@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+(?![\w-])"
+)
+_ATTACHMENT_SENSITIVE_TOPONYM = re.compile(r"(?<![\w-])[А-ЯЁ][а-яё-]{5,}(?:ск|цк)(?:а|е|у|ом)?(?![\w-])")
+_ATTACHMENT_SENSITIVE_SURNAME = re.compile(
+    r"(?<![\w-])[А-ЯЁ][а-яё-]{2,24}(?:"
+    r"ов|ев|ёв|ин|ын|ова|ева|ёва|ина|ына|"
+    r"ович|евич|овна|евна"
+    r")(?![\w-])"
+)
+_ATTACHMENT_TITLECASE_VALUE = (
+    r"(?:[А-ЯЁ][а-яё-]{2,31}|[A-Z][a-z][A-Za-z-]{1,31})"
+    r"(?:[ \t]+(?:[А-ЯЁ][а-яё-]{2,31}|[A-Z][a-z][A-Za-z-]{1,31})){0,2}"
+)
+_ATTACHMENT_NAMED_ENTITY_VALUE = re.compile(
+    rf"(?P<label>[A-Za-zА-ЯЁа-яё][A-Za-zА-ЯЁа-яё' -]{{1,60}}?)\s*"
+    rf"(?:—|–|-|:|=)\s*[«\"']?(?P<value>{_ATTACHMENT_TITLECASE_VALUE})[»\"']?"
+    r"(?=$|[\s,;.!?])"
+)
+_ATTACHMENT_NAMED_CUE_VALUE = re.compile(
+    rf"\b(?P<label>(?i:"
+    r"(?:проект|компани|систем|модел|город|село|"
+    r"организаци|ответственн|директор|автор|клиент)\w*|"
+    r"(?:project|company|system|model|city|owner|director|author|client)"
+    rf"))[ \t ]+[«\"']?(?P<value>{_ATTACHMENT_TITLECASE_VALUE})[»\"']?"
+    r"(?=$|[\s,;.!?])",
+)
+_ATTACHMENT_DIGIT_NUMBER = r"[+−-]?(?:\d{1,3}(?:[ \u00a0\u202f]\d{3})+|\d{1,9})(?:[.,]\d{1,6})?"
+_ATTACHMENT_UNSIGNED_INTEGER = r"(?:\d{1,3}(?:[ \u00a0\u202f]\d{3})+|\d{1,9})"
+_ATTACHMENT_NUMBER_WORDS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(rf"(?<![\w-])(?:{forms})(?![\w-])", re.IGNORECASE), number)
+    for forms, number in (
+        (r"один|одна|одно|одну", "1"),
+        (r"два|две", "2"),
+        (r"три", "3"),
+        (r"четыре", "4"),
+        (r"пять", "5"),
+        (r"шесть", "6"),
+        (r"семь", "7"),
+        (r"восемь", "8"),
+        (r"девять", "9"),
+        (r"десять", "10"),
+    )
+)
+_ATTACHMENT_NUMBER = (
+    rf"(?i:{_ATTACHMENT_DIGIT_NUMBER}|один|одна|одно|одну|два|две|три|четыре|пять|"
+    r"шесть|семь|восемь|девять|десять)"
+)
+_ATTACHMENT_UNIT = (
+    r"(?:[$€₽£¥]|"
+    r"(?:(?:тыс(?:\.|\w*)?|млн|миллион\w*|млрд|миллиард\w*)\s+)?"
+    r"(?:°\s*)?[A-Za-zА-ЯЁа-яё]{1,32}"
+    r"(?:-[A-Za-zА-ЯЁа-яё]{1,32})?)"
+)
+_ATTACHMENT_QUANTITY_ACRONYM = re.compile(
+    rf"(?<![\w-])(?P<number>{_ATTACHMENT_NUMBER})[\t \u00a0\u202f]+(?P<unit>[A-ZА-ЯЁ]{{2,10}})(?![\w-])",
+)
+_ATTACHMENT_PARENTHETICAL_QUANTITY = re.compile(
+    rf"(?<![\w-]){_ATTACHMENT_NUMBER}[\t \u00a0\u202f]+(?P<unit>[A-ZА-ЯЁ]{{2,10}})\s*"
+    rf"\(\s*(?P<number>{_ATTACHMENT_NUMBER})(?![\w-])",
+)
+_ATTACHMENT_QUANTITY_UNIT = re.compile(
+    rf"(?<![\w-])(?P<number>{_ATTACHMENT_NUMBER})[\t \u00a0\u202f]+"
+    rf"(?P<unit>{_ATTACHMENT_UNIT})(?![\w-])",
+)
+_ATTACHMENT_LEADER_CLAIM = re.compile(
+    rf"\b(?:лидир\w*|опережа\w*|отрыв\w*)\b[^.!?;\n]{{0,24}}?\bна\s+(?P<number>{_ATTACHMENT_UNSIGNED_INTEGER})(?![\w-])",
+    re.IGNORECASE,
+)
+_ATTACHMENT_ENTITY_VALUE = re.compile(
+    r"(?P<label>[A-Za-zА-ЯЁа-яё][A-Za-zА-ЯЁа-яё' -]{0,60}?)\s*"
+    rf"(?:(?:—|–|:|=)\s*|\s+-\s+)(?P<number>{_ATTACHMENT_DIGIT_NUMBER})(?![\w-])"
+)
+_ATTACHMENT_GROWTH_CLAIM = re.compile(
+    r"\b(?:рост\w*|вырос\w*|увелич\w*)\b[^.!?;\n]{0,32}?"
+    r"(?P<number>\d{1,6})\s*%",
+    re.IGNORECASE,
+)
+_ATTACHMENT_PERCENT_VALUE = re.compile(
+    rf"(?<![\w-])(?P<number>{_ATTACHMENT_DIGIT_NUMBER})\s*%",
+)
+_ATTACHMENT_WAS_BECAME = re.compile(
+    rf"\bбыло\s+(?P<before>{_ATTACHMENT_UNSIGNED_INTEGER})(?![\w-])[^.!?;\n]{{0,40}}?"
+    rf"\bстало\s+(?P<after>{_ATTACHMENT_UNSIGNED_INTEGER})(?![\w-])",
+    re.IGNORECASE,
+)
+_ATTACHMENT_INLINE_METRIC_HEADER = re.compile(
+    r"(?:^|;)\s*(?P<header>[A-Za-zА-ЯЁа-яё][A-Za-zА-ЯЁа-яё' -]{0,60}?)"
+    r":\s*(?=[A-Za-zА-ЯЁа-яё])"
+)
+_ATTACHMENT_HEADER_ONLY = re.compile(r"\s*(?P<header>[A-Za-zА-ЯЁа-яё][A-Za-zА-ЯЁа-яё' -]{0,60}?)\s*:\s*")
+_ATTACHMENT_QUANTIFIED_BOUND = re.compile(
+    rf"\b(?P<operator>не\s+менее|не\s+более|как\s+минимум|"
+    rf"как\s+максимум|минимум|максимум|более|менее|больше|меньше|свыше|до|от)"
+    rf"\s+(?P<number>{_ATTACHMENT_NUMBER})\s+(?P<unit>{_ATTACHMENT_UNIT})(?![\w-])",
+    re.IGNORECASE,
+)
+_ATTACHMENT_PERCENT_DIRECTION = re.compile(
+    r"\b(?P<direction>рост\w*|вырос\w*|увелич\w*|"
+    r"сниз\w*|сократ\w*|уменьш\w*|упал\w*)"
+    r"[^.!?;\n]{0,40}?(?P<number>\d{1,6})\s*%",
+    re.IGNORECASE,
+)
+_ATTACHMENT_DIRECTIONAL_RELATION = re.compile(
+    r"(?P<left>(?:[A-Za-zА-ЯЁа-яё0-9]+(?:[-_/.:][A-Za-zА-ЯЁа-яё0-9]+)+|"
+    r"[A-ZА-ЯЁ]{2,10}(?:-[A-ZА-ЯЁ]{2,10})*))(?![\w-])"
+    r"\s+(?P<relation>зависит\s+от|заменяет|подчиняется|входит\s+в|владеет|опережает)\s+"
+    r"(?P<right>(?:[A-Za-zА-ЯЁа-яё0-9]+(?:[-_/.:][A-Za-zА-ЯЁа-яё0-9]+)+|"
+    r"[A-ZА-ЯЁ]{2,10}(?:-[A-ZА-ЯЁ]{2,10})*))(?![\w-])",
+    re.IGNORECASE,
+)
+_ATTACHMENT_DATE_ISO = re.compile(r"(?<!\d)(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})(?!\d)")
+_ATTACHMENT_DATE_DMY = re.compile(r"(?<!\d)(?P<day>\d{2})\.(?P<month>\d{2})\.(?P<year>\d{4})(?!\d)")
+_ATTACHMENT_DATE_RUSSIAN = re.compile(
+    r"(?<!\d)(?P<day>[0-3]?\d)\s+"
+    r"(?P<month>января|февраля|марта|апреля|мая|июня|июля|августа|"
+    r"сентября|октября|ноября|декабря)\s+"
+    r"(?P<year>\d{4})(?:\s+года?)?(?!\d)",
+    re.IGNORECASE,
+)
+_ATTACHMENT_RUSSIAN_MONTHS = {
+    month: f"{index:02d}"
+    for index, month in enumerate(
+        (
+            "января",
+            "февраля",
+            "марта",
+            "апреля",
+            "мая",
+            "июня",
+            "июля",
+            "августа",
+            "сентября",
+            "октября",
+            "ноября",
+            "декабря",
+        ),
+        start=1,
+    )
+}
+
+
+def _attachment_quantity_normalized(text: str) -> str:
+    normalized = str(text or "").casefold().replace("ё", "е")
+    for pattern, number in _ATTACHMENT_NUMBER_WORDS:
+        normalized = pattern.sub(number, normalized)
+    return normalized
+
+
+def _attachment_exact_token_supported(
+    candidate: str,
+    evidence: str,
+    *,
+    case_sensitive: bool = False,
+) -> bool:
+    needle = candidate if case_sensitive else candidate.casefold().replace("ё", "е")
+    haystack = evidence if case_sensitive else evidence.casefold().replace("ё", "е")
+    return bool(re.search(rf"(?<![\w-]){re.escape(needle)}(?![\w-])", haystack))
+
+
+def _attachment_toponym_supported(candidate: str, evidence: str) -> bool:
+    if _attachment_exact_token_supported(candidate, evidence):
+        return True
+    folded = candidate.casefold().replace("ё", "е")
+    candidate_stem = stem(folded, min_input=4)
+    return bool(
+        candidate_stem
+        and any(
+            stem(token.casefold().replace("ё", "е"), min_input=4) == candidate_stem
+            for token in re.findall(r"[A-Za-zА-ЯЁа-яё-]{4,}", evidence)
+        )
+    )
+
+
+def _attachment_ordinary_name_supported(candidate: str, evidence: str) -> bool:
+    if _attachment_exact_token_supported(candidate, evidence):
+        return True
+    folded = candidate.casefold().replace("ё", "е")
+    if re.fullmatch(r"[а-яе-]{4,}", folded) is None:
+        return False
+    candidate_stem = stem(folded, min_input=5)
+    return bool(
+        candidate_stem
+        and any(
+            stem(token.casefold().replace("ё", "е"), min_input=5) == candidate_stem
+            for token in re.findall(r"[А-ЯЁа-яё-]{4,}", evidence)
+        )
+    )
+
+
+def _attachment_named_value_relations(text: str) -> list[tuple[tuple[str, ...], tuple[str, ...]]]:
+    relations: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
+    occupied: list[tuple[int, int]] = []
+    for pattern in (_ATTACHMENT_NAMED_ENTITY_VALUE, _ATTACHMENT_NAMED_CUE_VALUE):
+        for matched in pattern.finditer(text):
+            if any(start <= matched.start() < end for start, end in occupied):
+                continue
+            label = _attachment_entity_tokens(matched.group("label"))
+            value = tuple(
+                token.casefold().replace("ё", "е")
+                for token in re.findall(r"[A-Za-zА-ЯЁа-яё-]{2,32}", matched.group("value"))
+            )
+            if label and value:
+                relations.append((label, value))
+                occupied.append(matched.span())
+    return relations
+
+
+def _attachment_named_values_supported(answer: str, evidence: str) -> bool:
+    source_relations = _attachment_named_value_relations(evidence)
+    if not source_relations:
+        return True
+    for label, value in _attachment_named_value_relations(answer):
+        source_values = [
+            source_value
+            for source_label, source_value in source_relations
+            if _attachment_entity_matches(label, source_label)
+        ]
+        if source_values and not any(
+            value == source_value
+            or (
+                len(value) == len(source_value)
+                and all(
+                    _attachment_ordinary_name_supported(token, source_token)
+                    for token, source_token in zip(value, source_value, strict=True)
+                )
+            )
+            for source_value in source_values
+        ):
+            return False
+    return True
+
+
+_ATTACHMENT_STRUCTURED_LITERAL_KEYS = frozenset({"text", "value"})
+_ATTACHMENT_STRUCTURED_CONTAINER_KEYS = frozenset(
+    {
+        "attachments",
+        "cells",
+        "columns",
+        "comparisons_to_reference",
+        "common_values",
+        "files",
+        "headers",
+        "items",
+        "ordered_row_matches",
+        "record_samples",
+        "records",
+        "runs",
+    }
+)
+_ATTACHMENT_STRUCTURAL_ACRONYMS = frozenset(
+    {
+        "CSV",
+        "DOC",
+        "DOCX",
+        "FAQ",
+        "HTML",
+        "JSON",
+        "OCR",
+        "PDF",
+        "RTF",
+        "TXT",
+        "URL",
+        "XLS",
+        "XLSX",
+        "XML",
+    }
+)
+_ATTACHMENT_DISCOURSE_HEADINGS = frozenset(
+    {
+        "ВЫВОД",
+        "ВЫВОДЫ",
+        "ЗАКЛЮЧЕНИЕ",
+        "ИТОГ",
+        "ИТОГО",
+        "ОБЗОР",
+        "РЕЗЮМЕ",
+        "РЕЗУЛЬТАТЫ",
+        "РИСКИ",
+        "ТЕЗИСЫ",
+    }
+)
+_ATTACHMENT_DISCOURSE_HEADING_MODIFIERS = frozenset(
+    {
+        "ВАЖНЫЕ",
+        "ГЛАВНЫЕ",
+        "КЛЮЧЕВЫЕ",
+        "КРАТКИЕ",
+        "ОСНОВНЫЕ",
+        "ПРАКТИЧЕСКИЕ",
+    }
+)
+
+
+def _attachment_structured_source_strings(value: Any) -> list[str]:
+    """Extract source literals from a canonical attachment JSON carrier only."""
+
+    strings: list[str] = []
+    if isinstance(value, Mapping):
+        for raw_key, item in value.items():
+            key = str(raw_key or "")
+            if key in _ATTACHMENT_STRUCTURED_LITERAL_KEYS and isinstance(item, str) and item.strip():
+                strings.append(item)
+            elif key in _ATTACHMENT_STRUCTURED_CONTAINER_KEYS:
+                strings.extend(_attachment_structured_source_strings(item))
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        for item in value:
+            strings.extend(_attachment_structured_source_strings(item))
+    elif isinstance(value, str) and value.strip():
+        strings.append(value)
+    return strings
+
+
+def _attachment_drift_evidence_text(evidence_entries: Sequence[Mapping[str, Any]]) -> str:
+    """Remove transport filenames, fragment ordinals and JSON coverage metadata."""
+
+    source_parts: list[str] = []
+    for entry in evidence_entries:
+        if not isinstance(entry, Mapping) or str(entry.get("tool") or "") != "attachment":
+            continue
+        output = str(entry.get("output") or "")
+        if not output.strip():
+            continue
+        prefix = next(
+            (
+                item
+                for item in (
+                    OFFICE_PROMPT_PREFIX,
+                    _ATTACHMENT_MAP_PREFIX,
+                    _ATTACHMENT_TABULAR_PROFILE_PREFIX,
+                )
+                if output.startswith(item)
+            ),
+            "",
+        )
+        if prefix:
+            try:
+                payload = json.loads(output.removeprefix(prefix).strip())
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            source_parts.extend(_attachment_structured_source_strings(payload))
+            continue
+        if output.startswith("Вложение "):
+            _, separator, body = output.partition("\n")
+            if separator and body.strip():
+                source_parts.append(body)
+            continue
+        source_parts.append(output)
+    return "\n".join(source_parts)
+
+
+def _attachment_all_caps_heading(answer: str, start: int, end: int) -> bool:
+    line_start = answer.rfind("\n", 0, start) + 1
+    line_end = answer.find("\n", end)
+    line = answer[line_start : len(answer) if line_end < 0 else line_end]
+    candidate = answer[start:end]
+    line_words = re.findall(r"[A-ZА-ЯЁ]{2,}", line)
+    discourse_line = bool(
+        line_words
+        and any(word in _ATTACHMENT_DISCOURSE_HEADINGS for word in line_words)
+        and all(
+            word in _ATTACHMENT_DISCOURSE_HEADINGS or word in _ATTACHMENT_DISCOURSE_HEADING_MODIFIERS
+            for word in line_words
+        )
+    )
+    if (
+        (candidate in _ATTACHMENT_DISCOURSE_HEADINGS or discourse_line)
+        and line.strip()
+        and re.fullmatch(r"[\s#*`_:\-–—A-ZА-ЯЁ]+", line)
+    ):
+        return True
+    if candidate not in _ATTACHMENT_DISCOURSE_HEADINGS:
+        return False
+    prefix = line[: start - line_start]
+    suffix = line[end - line_start :]
+    return bool(re.fullmatch(r"[\s#*`_\-–—]*", prefix) and suffix.lstrip().startswith(":"))
+
+
+def _attachment_structural_acronym(answer: str, start: int, end: int) -> bool:
+    candidate = answer[start:end]
+    if candidate in _ATTACHMENT_STRUCTURAL_ACRONYMS:
+        return True
+    if re.fullmatch(r"[IVXLCDM]{1,8}", candidate):
+        line_start = answer.rfind("\n", 0, start) + 1
+        prefix = answer[line_start:start]
+        suffix = answer[end : end + 2]
+        return bool(re.fullmatch(r"[\s#*`_(]*", prefix) and suffix.startswith((".", ")", ":")))
+    return False
+
+
+def _attachment_unit_stem(value: str) -> str:
+    folded = str(value or "").casefold().replace("ё", "е")
+    folded = re.sub(r"\bтыс(?:\.|\w*)?\b", "тыс", folded)
+    folded = re.sub(r"\b(?:млн|миллион\w*)\b", "млн", folded)
+    folded = re.sub(r"\b(?:млрд|миллиард\w*)\b", "млрд", folded)
+    tokens = re.findall(r"[A-Za-zА-ЯЁа-яё]+|[$€₽£¥°]", folded)
+    return " ".join(stem(token, min_input=3) or token for token in tokens) or folded.strip()
+
+
+def _attachment_number_canonical(value: str) -> str:
+    normalized = (
+        str(value or "")
+        .casefold()
+        .replace("−", "-")
+        .replace(",", ".")
+        .replace(" ", "")
+        .replace("\u00a0", "")
+        .replace("\u202f", "")
+    )
+    sign = ""
+    if normalized.startswith(("+", "-")):
+        sign, normalized = normalized[0], normalized[1:]
+    if not normalized or re.fullmatch(r"\d+(?:\.\d+)?", normalized) is None:
+        return f"{sign}{normalized}" if sign != "+" else normalized
+    whole, separator, fraction = normalized.partition(".")
+    whole = whole.lstrip("0") or "0"
+    fraction = fraction.rstrip("0") if separator else ""
+    if (whole == "0" and not fraction) or sign == "+":
+        sign = ""
+    return f"{sign}{whole}{'.' + fraction if fraction else ''}"
+
+
+def _attachment_quantity_relations(text: str) -> list[tuple[str, str]]:
+    normalized = _attachment_quantity_normalized(text)
+    return [
+        (_attachment_number_canonical(matched.group("number")), _attachment_unit_stem(matched.group("unit")))
+        for matched in _ATTACHMENT_QUANTITY_UNIT.finditer(normalized)
+    ]
+
+
+def _attachment_text_has_number(text: str, number: str) -> bool:
+    return any(
+        _attachment_number_canonical(matched.group(0)) == number
+        for matched in re.finditer(
+            rf"(?<![\w-]){_ATTACHMENT_DIGIT_NUMBER}(?![\w-])",
+            text,
+        )
+    )
+
+
+def _attachment_clause_has_unit(clause: str, unit: str) -> bool:
+    if not unit:
+        return False
+    units = [matched.group("unit") for matched in _ATTACHMENT_QUANTITY_UNIT.finditer(clause)]
+    if any(_attachment_units_compatible(_attachment_unit_stem(candidate), unit) for candidate in units):
+        return True
+    clause_tokens = _attachment_unit_stem(clause).split()
+    unit_tokens = unit.split()
+    if len(unit_tokens) == 1:
+        return any(_attachment_units_compatible(token, unit) for token in clause_tokens)
+    return any(
+        clause_tokens[index : index + len(unit_tokens)] == unit_tokens
+        for index in range(len(clause_tokens) - len(unit_tokens) + 1)
+    )
+
+
+def _attachment_units_compatible(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    person_units = {"человек", "сотрудник", "работник"}
+    return left in person_units and right in person_units
+
+
+def _attachment_source_supports_quantity(
+    number: str,
+    unit: str,
+    evidence: str,
+    source_relations: Sequence[tuple[str, str]],
+) -> bool:
+    if any(
+        source_number == number and _attachment_units_compatible(source_unit, unit)
+        for source_number, source_unit in source_relations
+    ):
+        return True
+    active_header_has_unit = False
+    for raw_line in evidence.splitlines():
+        line = raw_line.strip()
+        if not line:
+            active_header_has_unit = False
+            continue
+        fragments = re.split(
+            r"[;.!?]+|,\s*(?=[A-Za-zА-ЯЁа-яё][^,:;\n]{0,48}:)",
+            line,
+        )
+        for fragment in fragments:
+            if not _attachment_text_has_number(fragment, number):
+                continue
+            if _attachment_clause_has_unit(fragment, unit) or active_header_has_unit:
+                return True
+        header = _ATTACHMENT_HEADER_ONLY.fullmatch(line)
+        if header is not None:
+            active_header_has_unit = _attachment_clause_has_unit(header.group("header"), unit)
+        elif ":" in line and not any(_attachment_text_has_number(part, number) for part in fragments):
+            # A new typed header ends the preceding header's scope even when it
+            # is not the unit currently being sought.
+            active_header_has_unit = False
+    return False
+
+
+_ATTACHMENT_QUANTITY_ANCHOR_STEMS = frozenset(
+    {
+        "бюджет",
+        "восток",
+        "выручк",
+        "доход",
+        "запад",
+        "затрат",
+        "маркетинг",
+        "прибыл",
+        "продаж",
+        "расход",
+        "рынок",
+        "север",
+        "штат",
+        "юг",
+    }
+)
+
+
+def _attachment_quantity_clause_anchor(text: str, start: int, end: int, unit: str) -> set[str]:
+    left = max(text.rfind(mark, 0, start) for mark in ("\n", ".", "!", "?", ";", ","))
+    right_candidates = [
+        position for mark in ("\n", ".", "!", "?", ";", ",") if (position := text.find(mark, end)) >= 0
+    ]
+    right = min(right_candidates) if right_candidates else len(text)
+    fragment = text[left + 1 : right]
+    unit_tokens = set(unit.split())
+    anchors = {_attachment_unit_stem(token) for token in re.findall(r"[A-Za-zА-ЯЁа-яё]{2,32}", fragment)}
+    return {
+        token for token in anchors if token not in unit_tokens and token in _ATTACHMENT_QUANTITY_ANCHOR_STEMS
+    }
+
+
+def _attachment_quantity_clause_relations_supported(answer: str, evidence: str) -> bool:
+    def observations(text: str) -> list[tuple[str, str, set[str]]]:
+        normalized = _attachment_quantity_normalized(text)
+        return [
+            (
+                _attachment_number_canonical(matched.group("number")),
+                _attachment_unit_stem(matched.group("unit")),
+                _attachment_quantity_clause_anchor(
+                    normalized,
+                    matched.start(),
+                    matched.end(),
+                    _attachment_unit_stem(matched.group("unit")),
+                ),
+            )
+            for matched in _ATTACHMENT_QUANTITY_UNIT.finditer(normalized)
+        ]
+
+    source = observations(evidence)
+    for number, unit, anchors in observations(answer):
+        relevant = [
+            source_anchors
+            for source_number, source_unit, source_anchors in source
+            if source_number == number and _attachment_units_compatible(source_unit, unit)
+        ]
+        if (
+            anchors
+            and relevant
+            and all(source_anchors and anchors.isdisjoint(source_anchors) for source_anchors in relevant)
+        ):
+            return False
+    return True
+
+
+def _attachment_entity_tokens(value: str) -> tuple[str, ...]:
+    tokens = [_attachment_unit_stem(token) for token in re.findall(r"[A-Za-zА-ЯЁа-яё]{2,32}", value)]
+    return tuple(tokens[-4:])
+
+
+def _attachment_entity_matches(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
+    if not left or not right:
+        return False
+    return left == right or (left[-1] == right[-1] and (set(left) <= set(right) or set(right) <= set(left)))
+
+
+def _attachment_metric_entity(label: tuple[str, ...]) -> bool:
+    metadata_prefixes = ("год", "дат", "номер", "верс", "раздел", "страниц", "код", "ид")
+    return bool(label) and not any(token.startswith(metadata_prefixes) for token in label)
+
+
+def _attachment_generic_metric_scope(scope: tuple[str, ...]) -> bool:
+    generic_prefixes = ("ответ", "кратк", "сводк", "итог", "вывод", "обзор", "резюм")
+    return bool(scope) and all(token.startswith(generic_prefixes) for token in scope)
+
+
+def _attachment_entity_value_observations(
+    text: str,
+) -> list[tuple[tuple[str, ...], tuple[str, ...], str]]:
+    """Return ``(metric scope, entity label, value)`` without crossing headers."""
+
+    observations: list[tuple[tuple[str, ...], tuple[str, ...], str]] = []
+    active_header: tuple[str, ...] = ()
+    for raw_line in text.splitlines() or [text]:
+        line = raw_line.strip()
+        if not line:
+            active_header = ()
+            continue
+        header_only = _ATTACHMENT_HEADER_ONLY.fullmatch(line)
+        if header_only is not None:
+            candidate_header = _attachment_entity_tokens(header_only.group("header"))
+            active_header = () if _attachment_generic_metric_scope(candidate_header) else candidate_header
+            continue
+        for sentence in re.split(r"(?<!\d)[.!?]+|[.!?]+(?!\d)", line):
+            inline_headers = []
+            for matched in _ATTACHMENT_INLINE_METRIC_HEADER.finditer(sentence):
+                header = _attachment_entity_tokens(matched.group("header"))
+                if not _attachment_generic_metric_scope(header):
+                    inline_headers.append((matched.start(), header))
+            for matched in _ATTACHMENT_ENTITY_VALUE.finditer(sentence):
+                label = _attachment_entity_tokens(matched.group("label"))
+                if not _attachment_metric_entity(label):
+                    continue
+                scope = active_header
+                for header_start, header in inline_headers:
+                    if header_start > matched.start():
+                        break
+                    scope = header
+                observations.append(
+                    (
+                        scope,
+                        label,
+                        _attachment_number_canonical(matched.group("number")),
+                    )
+                )
+    return observations
+
+
+def _attachment_entity_value_groups(evidence: str) -> list[list[tuple[tuple[str, ...], str]]]:
+    grouped: dict[tuple[str, ...], list[tuple[tuple[str, ...], str]]] = {}
+    for scope, label, value in _attachment_entity_value_observations(evidence):
+        grouped.setdefault(scope, []).append((label, value))
+    return [pairs for pairs in grouped.values() if pairs]
+
+
+def _attachment_entity_values_supported(answer: str, evidence: str) -> bool:
+    source_observations = _attachment_entity_value_observations(evidence)
+    for scope, label, value in _attachment_entity_value_observations(answer):
+        scoped_source = [
+            (source_label, source_value)
+            for source_scope, source_label, source_value in source_observations
+            if not scope or _attachment_entity_matches(scope, source_scope)
+        ]
+        if not scoped_source:
+            if scope and any(
+                _attachment_entity_matches(label, source_label) or value == source_value
+                for _source_scope, source_label, source_value in source_observations
+            ):
+                return False
+            continue
+        matching_values = [
+            source_value
+            for source_label, source_value in scoped_source
+            if _attachment_entity_matches(label, source_label)
+        ]
+        if matching_values:
+            if value not in matching_values:
+                return False
+            continue
+        # Reusing a source value under a novel entity label is the common swap
+        # failure.  A genuinely new derived value remains for the model judge;
+        # this code backstop does not pretend to understand arbitrary prose.
+        if value in {source_value for _, source_value in scoped_source}:
+            return False
+    return True
+
+
+def _attachment_leader_delta_supported(answer: str, evidence: str) -> bool:
+    """Validate every explicit leader delta against labelled source operands."""
+
+    claims = list(_ATTACHMENT_LEADER_CLAIM.finditer(answer))
+    if not claims:
+        return True
+    groups = _attachment_entity_value_groups(evidence)
+    for claim in claims:
+        clause_start = max(answer.rfind(mark, 0, claim.start()) for mark in ("\n", ".", "!", "?", ";", ":"))
+        label = _attachment_entity_tokens(answer[clause_start + 1 : claim.start()])
+        claimed_delta = int(_attachment_number_canonical(claim.group("number")))
+        region_stems = {"север", "юг", "восток", "запад"}
+        supported = False
+        for raw_group in groups:
+            group = [(pair_label, int(value)) for pair_label, value in raw_group if value.isdigit()]
+            if label and label[-1] in region_stems:
+                group = [pair for pair in group if pair[0] and pair[0][-1] in region_stems]
+            matching = [
+                (pair_label, value)
+                for pair_label, value in group
+                if _attachment_entity_matches(label, pair_label)
+            ]
+            if len(group) < 2 or not matching:
+                continue
+            maximum = max(value for _, value in group)
+            if sum(value == maximum for _, value in group) != 1:
+                continue
+            lower_values = [value for _, value in group if value < maximum]
+            runner_up = max(lower_values) if lower_values else None
+            if runner_up is not None and any(
+                value == maximum and value - runner_up == claimed_delta for _, value in matching
+            ):
+                supported = True
+                break
+        if not supported:
+            return False
+    return True
+
+
+def _attachment_growth_supported(answer: str, evidence: str) -> bool:
+    claims = list(_ATTACHMENT_GROWTH_CLAIM.finditer(answer))
+    if not claims:
+        return True
+    operands = list(_ATTACHMENT_WAS_BECAME.finditer(evidence))
+    evidence_growth_claims = list(_ATTACHMENT_GROWTH_CLAIM.finditer(evidence))
+    for claim in claims:
+        number = _attachment_number_canonical(claim.group("number"))
+        anchor = _attachment_percent_anchor(answer, claim.end())
+        explicit = [
+            source
+            for source in evidence_growth_claims
+            if _attachment_number_canonical(source.group("number")) == number
+            and (not anchor or anchor & _attachment_percent_anchor(evidence, source.end()))
+        ]
+        if explicit:
+            continue
+        relevant_operands = [
+            source
+            for source in operands
+            if not anchor or anchor & _attachment_percent_anchor(evidence, source.start())
+        ]
+        if not relevant_operands:
+            return False
+        results = [
+            int(_attachment_number_canonical(source.group("before"))) > 0
+            and (
+                int(_attachment_number_canonical(source.group("after")))
+                - int(_attachment_number_canonical(source.group("before")))
+            )
+            * 100
+            == int(claim.group("number")) * int(_attachment_number_canonical(source.group("before")))
+            for source in relevant_operands
+        ]
+        if (anchor and not any(results)) or (not anchor and not all(results)):
+            return False
+    return True
+
+
+def _attachment_percent_anchor(text: str, start: int) -> set[str]:
+    clause_start = max(text.rfind(mark, 0, start) for mark in ("\n", ".", "!", "?", ";", ","))
+    ignored = (
+        "состав",
+        "равн",
+        "достиг",
+        "около",
+        "примерн",
+        "ровн",
+        "всег",
+        "рост",
+        "вырос",
+        "увелич",
+        "сниз",
+        "сократ",
+        "уменьш",
+        "упал",
+        "был",
+        "стал",
+    )
+    anchors = {
+        _attachment_unit_stem(token)
+        for token in re.findall(r"[A-Za-zА-ЯЁа-яё]{3,32}", text[clause_start + 1 : start])
+    }
+    if not anchors and clause_start >= 0 and text[clause_start] == "\n":
+        previous_lines = [line.strip() for line in text[:clause_start].splitlines() if line.strip()]
+        if previous_lines:
+            header = _ATTACHMENT_HEADER_ONLY.fullmatch(previous_lines[-1])
+            if header is not None:
+                anchors.update(_attachment_entity_tokens(header.group("header")))
+    return {item for item in anchors if not item.startswith(ignored)}
+
+
+def _attachment_percent_supported(answer: str, evidence: str) -> bool:
+    answer_values = list(_ATTACHMENT_PERCENT_VALUE.finditer(answer))
+    evidence_values = list(_ATTACHMENT_PERCENT_VALUE.finditer(evidence))
+    if not answer_values:
+        return True
+    growth_claims = list(_ATTACHMENT_GROWTH_CLAIM.finditer(answer))
+    for answer_value in answer_values:
+        number = _attachment_number_canonical(answer_value.group("number"))
+        if any(claim.start() <= answer_value.start() < claim.end() for claim in growth_claims):
+            continue
+        anchor = _attachment_percent_anchor(answer, answer_value.start())
+        relevant = [
+            source
+            for source in evidence_values
+            if not anchor or anchor & _attachment_percent_anchor(evidence, source.start())
+        ]
+        if not relevant or not any(
+            _attachment_number_canonical(source.group("number")) == number for source in relevant
+        ):
+            return False
+    return True
+
+
+def _attachment_negation_supported(answer: str, evidence: str) -> bool:
+    def propositions(text: str) -> list[tuple[frozenset[str], bool]]:
+        found: list[tuple[frozenset[str], bool]] = []
+        ignored = {"был", "буд", "отдел", "в", "на", "по", "из", "для", "от", "к"}
+        for clause in re.split(r"[.!?;,\n]+", _attachment_quantity_normalized(text)):
+            raw_tokens = re.findall(r"[A-Za-zА-ЯЁа-яё0-9%]+", clause)
+            negated = any(token.casefold().replace("ё", "е") == "не" for token in raw_tokens)
+            signature = frozenset(
+                _attachment_unit_stem(token)
+                for token in raw_tokens
+                if token.casefold().replace("ё", "е") != "не" and _attachment_unit_stem(token) not in ignored
+            )
+            if len(signature) >= 2:
+                found.append((signature, negated))
+        return found
+
+    source = propositions(evidence)
+    for signature, negated in propositions(answer):
+        matching_polarities = [
+            source_negated
+            for source_signature, source_negated in source
+            if signature == source_signature or signature <= source_signature or source_signature <= signature
+        ]
+        if matching_polarities and negated not in matching_polarities:
+            return False
+    return True
+
+
+def _attachment_bound_class(operator: str) -> tuple[str, bool]:
+    folded = " ".join(operator.casefold().replace("ё", "е").split())
+    if folded in {"не менее", "как минимум", "минимум", "от"}:
+        return "lower", True
+    if folded in {"более", "больше", "свыше"}:
+        return "lower", False
+    if folded in {"не более", "как максимум", "максимум", "до"}:
+        return "upper", True
+    return "upper", False
+
+
+def _attachment_bounds_supported(answer: str, evidence: str) -> bool:
+    def bounds(text: str) -> list[tuple[str, str, tuple[str, bool]]]:
+        normalized = _attachment_quantity_normalized(text)
+        return [
+            (
+                _attachment_number_canonical(matched.group("number")),
+                _attachment_unit_stem(matched.group("unit")),
+                _attachment_bound_class(matched.group("operator")),
+            )
+            for matched in _ATTACHMENT_QUANTIFIED_BOUND.finditer(normalized)
+        ]
+
+    source = bounds(evidence)
+    for number, unit, (direction, inclusive) in bounds(answer):
+        source_bounds = [
+            source_bound
+            for source_number, source_unit, source_bound in source
+            if source_number == number and source_unit == unit
+        ]
+        if source_bounds and not any(
+            source_direction == direction and (inclusive or not source_inclusive)
+            for source_direction, source_inclusive in source_bounds
+        ):
+            return False
+    return True
+
+
+def _attachment_percent_direction_supported(answer: str, evidence: str) -> bool:
+    def direction(value: str) -> str:
+        folded = value.casefold().replace("ё", "е")
+        return "up" if folded.startswith(("рост", "вырос", "увелич")) else "down"
+
+    source_claims = list(_ATTACHMENT_PERCENT_DIRECTION.finditer(evidence))
+    for claim in _ATTACHMENT_PERCENT_DIRECTION.finditer(answer):
+        number = _attachment_number_canonical(claim.group("number"))
+        anchor = _attachment_percent_anchor(answer, claim.start())
+        relevant = [
+            source
+            for source in source_claims
+            if _attachment_number_canonical(source.group("number")) == number
+            and (not anchor or anchor & _attachment_percent_anchor(evidence, source.start()))
+        ]
+        if relevant and direction(claim.group("direction")) not in {
+            direction(source.group("direction")) for source in relevant
+        }:
+            return False
+    return True
+
+
+def _attachment_directional_relations_supported(answer: str, evidence: str) -> bool:
+    def relations(text: str) -> set[tuple[str, str, str]]:
+        return {
+            (
+                matched.group("left").casefold().replace("ё", "е"),
+                " ".join(matched.group("relation").casefold().replace("ё", "е").split()),
+                matched.group("right").casefold().replace("ё", "е"),
+            )
+            for matched in _ATTACHMENT_DIRECTIONAL_RELATION.finditer(text)
+        }
+
+    source = relations(evidence)
+    for left, relation, right in relations(answer):
+        if (right, relation, left) in source and (left, relation, right) not in source:
+            return False
+    return True
+
+
+_ATTACHMENT_STRUCTURAL_FORMATS = frozenset(
+    {"CSV", "DOC", "DOCX", "HTML", "JSON", "PDF", "RTF", "TXT", "XLS", "XLSX", "XML"}
+)
+_ATTACHMENT_ACRONYM_EXPANSIONS: Mapping[str, tuple[re.Pattern[str], ...]] = {
+    "БПЛА": (re.compile(r"\bбеспилотн\w*\s+летательн\w*\s+аппарат\w*\b", re.IGNORECASE),),
+}
+
+
+def _attachment_acronym_supported(answer: str, matched: re.Match[str], evidence: str) -> bool:
+    candidate = matched.group(0)
+    if _attachment_all_caps_heading(answer, matched.start(), matched.end()):
+        return True
+    if _attachment_structural_acronym(answer, matched.start(), matched.end()):
+        if candidate not in _ATTACHMENT_STRUCTURAL_FORMATS:
+            return True
+        source_formats = {
+            token.group(0)
+            for token in _ATTACHMENT_SENSITIVE_ACRONYM.finditer(evidence)
+            if token.group(0) in _ATTACHMENT_STRUCTURAL_FORMATS
+        }
+        return not source_formats or candidate in source_formats
+    if _attachment_exact_token_supported(candidate, evidence):
+        return True
+    return any(pattern.search(evidence) for pattern in _ATTACHMENT_ACRONYM_EXPANSIONS.get(candidate, ()))
+
+
+def _attachment_date_canonical(candidate: str) -> str:
+    for pattern in (_ATTACHMENT_DATE_ISO, _ATTACHMENT_DATE_DMY):
+        matched = pattern.fullmatch(candidate)
+        if matched is not None:
+            return f"{matched.group('year')}-{matched.group('month')}-{matched.group('day')}"
+    return ""
+
+
+def _attachment_identifier_supported(candidate: str, evidence: str) -> bool:
+    if re.fullmatch(_ATTACHMENT_DIGIT_NUMBER, candidate):
+        return True
+    if re.fullmatch(r"\d{1,6}-(?:й|я|е|го|ой|ую|м)", candidate, re.IGNORECASE):
+        return True
+    candidate_date = _attachment_date_canonical(candidate)
+    if candidate_date:
+        evidence_dates = {
+            f"{matched.group('year')}-{matched.group('month')}-{matched.group('day')}"
+            for pattern in (_ATTACHMENT_DATE_ISO, _ATTACHMENT_DATE_DMY)
+            for matched in pattern.finditer(evidence)
+        }
+        evidence_dates.update(
+            f"{matched.group('year')}-"
+            f"{_ATTACHMENT_RUSSIAN_MONTHS[matched.group('month').casefold()]}-"
+            f"{int(matched.group('day')):02d}"
+            for matched in _ATTACHMENT_DATE_RUSSIAN.finditer(evidence)
+        )
+        return candidate_date in evidence_dates
+    return _attachment_exact_token_supported(candidate, evidence, case_sensitive=True)
+
+
+def _attachment_deterministic_drift_issues(
+    answer: str,
+    evidence_entries: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    """A conservative code-owned backstop after a model judge says PASSED."""
+
+    evidence = _attachment_drift_evidence_text(evidence_entries)
+    if not str(answer or "").strip() or not evidence.strip():
+        return []
+    issues: list[str] = []
+    unsupported_sensitive = any(
+        not _attachment_acronym_supported(answer, matched, evidence)
+        for matched in _ATTACHMENT_SENSITIVE_ACRONYM.finditer(answer)
+    )
+    answer_identifiers = dict.fromkeys(
+        matched.group(0)
+        for pattern in (
+            _ATTACHMENT_SENSITIVE_IDENTIFIER,
+            _ATTACHMENT_SENSITIVE_BARE_IDENTIFIER,
+            _ATTACHMENT_SENSITIVE_EMAIL,
+        )
+        for matched in pattern.finditer(answer)
+    )
+    unsupported_sensitive = unsupported_sensitive or any(
+        not _attachment_identifier_supported(candidate, evidence) for candidate in answer_identifiers
+    )
+    unsupported_sensitive = unsupported_sensitive or any(
+        not _attachment_toponym_supported(matched.group(0), evidence)
+        for matched in _ATTACHMENT_SENSITIVE_TOPONYM.finditer(answer)
+    )
+    unsupported_sensitive = unsupported_sensitive or any(
+        not _attachment_ordinary_name_supported(matched.group(0), evidence)
+        for matched in _ATTACHMENT_SENSITIVE_SURNAME.finditer(answer)
+    )
+    unsupported_sensitive = unsupported_sensitive or not _attachment_named_values_supported(answer, evidence)
+    if unsupported_sensitive:
+        issues.append("attachment_proper_name_not_in_evidence")
+
+    answer_quantities = _attachment_quantity_normalized(answer)
+    evidence_quantities = _attachment_quantity_normalized(evidence)
+    source_relations = _attachment_quantity_relations(evidence_quantities)
+    source_clauses = [part.strip() for part in re.split(r"[\n;.!?]+", evidence_quantities) if part.strip()]
+    unsupported_number = any(
+        not _attachment_source_supports_quantity(
+            number,
+            unit,
+            evidence_quantities,
+            source_relations,
+        )
+        for number, unit in _attachment_quantity_relations(answer_quantities)
+    )
+    if not _attachment_entity_values_supported(answer_quantities, evidence_quantities):
+        unsupported_number = True
+    if not _attachment_leader_delta_supported(answer_quantities, evidence_quantities):
+        unsupported_number = True
+    if not _attachment_growth_supported(answer_quantities, evidence_quantities):
+        unsupported_number = True
+    if not _attachment_percent_supported(answer_quantities, evidence_quantities):
+        unsupported_number = True
+    if not _attachment_quantity_clause_relations_supported(answer_quantities, evidence_quantities):
+        unsupported_number = True
+    if unsupported_number:
+        issues.append("attachment_quantity_not_in_evidence")
+
+    unsupported_semantic_quantity_relation = bool(
+        not _attachment_bounds_supported(answer_quantities, evidence_quantities)
+        or not _attachment_percent_direction_supported(answer_quantities, evidence_quantities)
+    )
+
+    relations: list[tuple[str, str]] = []
+    for matched in _ATTACHMENT_QUANTITY_ACRONYM.finditer(answer):
+        number = _attachment_quantity_normalized(matched.group("number")).strip()
+        relations.append((number, matched.group("unit").casefold().replace("ё", "е")))
+    for matched in _ATTACHMENT_PARENTHETICAL_QUANTITY.finditer(answer):
+        number = _attachment_quantity_normalized(matched.group("number")).strip()
+        relations.append((number, matched.group("unit").casefold().replace("ё", "е")))
+    if unsupported_semantic_quantity_relation or any(
+        not any(
+            re.search(rf"(?<![\w-]){re.escape(number)}(?![\w-])", clause)
+            and re.search(rf"(?<![\w-]){re.escape(unit)}(?![\w-])", clause)
+            for clause in source_clauses
+        )
+        for number, unit in dict.fromkeys(relations)
+    ):
+        issues.append("attachment_quantity_relation_not_in_evidence")
+    if not _attachment_negation_supported(
+        answer_quantities, evidence_quantities
+    ) or not _attachment_directional_relations_supported(answer, evidence):
+        issues.append("attachment_relation_not_in_evidence")
+    return issues
+
+
+def _attachment_verdict_with_deterministic_drift(
+    verification: Mapping[str, Any],
+    answer: str,
+    evidence_entries: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    status = str(verification.get("status") or "")
+    if status == VERDICT_FAILED:
+        return dict(verification)
+    if status == VERDICT_PASSED:
+        issues = _attachment_deterministic_drift_issues(answer, evidence_entries)
+    else:
+        evidence = _attachment_drift_evidence_text(evidence_entries)
+        answer_quantities = _attachment_quantity_normalized(answer)
+        evidence_quantities = _attachment_quantity_normalized(evidence)
+        issues = []
+        if not _attachment_named_values_supported(answer, evidence):
+            issues.append("attachment_proper_name_not_in_evidence")
+        if not _attachment_entity_values_supported(answer_quantities, evidence_quantities):
+            issues.append("attachment_quantity_not_in_evidence")
+        if not _attachment_bounds_supported(
+            answer_quantities, evidence_quantities
+        ) or not _attachment_percent_direction_supported(answer_quantities, evidence_quantities):
+            issues.append("attachment_quantity_relation_not_in_evidence")
+        if not _attachment_negation_supported(
+            answer_quantities, evidence_quantities
+        ) or not _attachment_directional_relations_supported(answer, evidence):
+            issues.append("attachment_relation_not_in_evidence")
+    if not issues:
+        return dict(verification)
+    return {"status": VERDICT_FAILED, "ok": False, "score": 0.0, "issues": issues}
+
+
 def _split_office_attachment_evidence(
     entries: list[dict[str, str]],
 ) -> tuple[list[str], list[str]]:
@@ -13749,7 +15352,9 @@ def _split_office_attachment_evidence(
         output = str(entry.get("output") or "")
         if not output.strip():
             continue
-        if output.startswith((OFFICE_PROMPT_PREFIX, _ATTACHMENT_MAP_PREFIX)):
+        if output.startswith(
+            (OFFICE_PROMPT_PREFIX, _ATTACHMENT_MAP_PREFIX, _ATTACHMENT_TABULAR_PROFILE_PREFIX)
+        ):
             office_records.append(output)
         else:
             legacy_records.append(output)
@@ -13899,6 +15504,9 @@ _ATTACHMENT_QUERY_FIELD_PREFIXES = (
     "line",
     "title",
     "surname",
+    "командир",
+    "начальник",
+    "руководител",
 )
 _ARCHIVED_SOURCE_CARRIER_WORD = (
     r"(?:файл|документ|вложени|исходник|источник|материал|таблиц|"
@@ -13992,7 +15600,12 @@ def _attachment_query_requires_global_context(message: str) -> bool:
     )
 
 
-def _attachment_body_query_surface(message: str, *, selector_resolved: bool = False) -> str:
+def _attachment_body_query_surface(
+    message: str,
+    *,
+    selector_resolved: bool = False,
+    selected_filenames: Sequence[str] = (),
+) -> str:
     """Return body-query wording after code-owned navigation has selected a file.
 
     Filename/title navigation is not a claim about file contents.  Letting it
@@ -14007,12 +15620,45 @@ def _attachment_body_query_surface(message: str, *, selector_resolved: bool = Fa
         return " ".join(projected.split())
 
     auth = file_turn_authority(message)
+    original_projected = projected
     chars = list(projected)
     for loc in auth.locators:
         if loc.role != "source_identity" or loc.end > len(chars):
             continue
         chars[loc.start : loc.end] = " " * (loc.end - loc.start)
     projected = "".join(chars)
+
+    # The structural selector can resolve a stored filename which contains
+    # ordinary words before the extension.  The shallow authority locator only
+    # owns the suffix in phrases such as ``ШТАТКА ПОЛНАЯ ...xlsx кто ...``;
+    # leaving the earlier filename words in the body query manufactured strong
+    # anchors and a false complete-scan NOT_FOUND.  Remove only an exact name
+    # of an already selected/re-authorised carrier, never a fuzzy clue.
+    for raw_filename in sorted(selected_filenames, key=lambda value: -len(str(value or ""))):
+        filename = str(raw_filename or "").replace("\\", "/").rsplit("/", 1)[-1][:260]
+        parts = filename.split()
+        if not parts:
+            continue
+        exact_name = re.compile(
+            r"(?<![\w])" + r"\s+".join(re.escape(part) for part in parts) + r"(?![\w])",
+            re.IGNORECASE,
+        )
+        selected_match = next(
+            (
+                matched
+                for matched in exact_name.finditer(original_projected)
+                if any(
+                    locator.role == "source_identity"
+                    and matched.start() <= locator.start
+                    and locator.end <= matched.end()
+                    for locator in auth.locators
+                )
+            ),
+            None,
+        )
+        if selected_match is not None:
+            start, end = selected_match.span()
+            projected = projected[:start] + " " * (end - start) + projected[end:]
 
     # A named-uploader relation is navigation too. Once the exact person and
     # uniquely exact/fuzzy filename have been authorized, words such as the
@@ -14123,7 +15769,7 @@ def _attachment_query_terms(message: str) -> tuple[str, ...]:
         + [(candidate, True) for candidate in addresses]
         + [(candidate, False) for candidate in tokens]
     )
-    terms: list[str] = []
+    terms: list[str] = list(_attachment_ordinal_unit_terms(visible))
     for candidate, explicit in candidates:
         folded = _normalise_attachment_query_term(candidate, explicit=explicit)
         if not folded:
@@ -14158,6 +15804,51 @@ def _attachment_query_terms(message: str) -> tuple[str, ...]:
     if not lookup_signal:
         return ()
     return tuple(terms)
+
+
+_ATTACHMENT_ORDINAL_UNIT = re.compile(
+    r"\b(?:(?P<number>[1-9]|[12]\d)(?:\s*[-–—]\s*[яй])?|"
+    r"(?P<word>перв\w*|втор\w*|трет\w*|четв[её]рт\w*|пят\w*|шест\w*|"
+    r"седьм\w*|восьм\w*|девят\w*|десят\w*))\s+рот\w*\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_ORDINAL_WORDS = {
+    "перв": 1,
+    "втор": 2,
+    "трет": 3,
+    "четверт": 4,
+    "пят": 5,
+    "шест": 6,
+    "седьм": 7,
+    "восьм": 8,
+    "девят": 9,
+    "десят": 10,
+}
+
+
+def _attachment_ordinal_unit_terms(message: str) -> tuple[str, ...]:
+    """Canonical retrieval aliases for a numbered company heading.
+
+    These aliases rank the right structural window but are intentionally not
+    absence anchors: a parser/OCR spelling variant must remain UNKNOWN rather
+    than manufacture a conclusive miss.
+    """
+
+    matched = _ATTACHMENT_ORDINAL_UNIT.search(_classification_text(message))
+    if matched is None:
+        return ()
+    raw_number = matched.group("number")
+    if raw_number:
+        number = int(raw_number)
+    else:
+        folded = str(matched.group("word") or "").casefold().replace("ё", "е")
+        number = next(
+            (value for prefix, value in _ATTACHMENT_ORDINAL_WORDS.items() if folded.startswith(prefix)),
+            0,
+        )
+    if not 1 <= number <= 29:
+        return ()
+    return (f"{number}-я рота", f"{number} рота", f"рота №{number}")
 
 
 def _attachment_whole_document_task(message: str, *, file_count: int = 0) -> str:
@@ -14602,6 +16293,17 @@ def _archived_source_search_query(message: str) -> str:
     # multi-person request could otherwise return evidence for only half of the
     # requested facts and still look successful.
     anchors = _attachment_query_anchors(visible, terms)
+    if len(anchors) != 1 and role_question is not None:
+        ordinal_unit = _ATTACHMENT_ORDINAL_UNIT.search(visible)
+        ordinal_anchor = ""
+        if ordinal_unit is not None:
+            # Word and numeric ordinals name the same structural unit. Query
+            # the canonical numbered heading so ``второй роты`` can find a
+            # source row headed ``2-я рота``; ``второй`` need not occur there.
+            ordinal_aliases = _attachment_ordinal_unit_terms(visible)
+            ordinal_anchor = ordinal_aliases[0] if ordinal_aliases else ""
+        if ordinal_anchor:
+            anchors = (ordinal_anchor,)
     if len(anchors) != 1 and role_question is not None:
         # Role-holder questions often end in a lowercase unit/acronym
         # (``кто командиром взвода рэб``).  Within an already proved local
@@ -15082,12 +16784,34 @@ def _secondary_tool_evidence(entry: Mapping[str, Any], query: str) -> str:
 
     output = str(entry.get("output") or "")
     if (
+        str(entry.get("tool") or "") == "web_research"
+        and entry.get("evidence_scope") == _SIMPLE_PUBLIC_NEWS_EVIDENCE_MARKER
+        and 0 < len(output) <= _SIMPLE_PUBLIC_NEWS_EVIDENCE_MAX_CHARS
+    ):
+        return output
+    if (
         str(entry.get("tool") or "") == "source_search"
         and output.startswith(_SOURCE_SEARCH_EVIDENCE_PREFIX)
         and len(output) <= _SOURCE_SEARCH_EVIDENCE_MAX_CHARS
     ):
         return output
     return best_snippet(query, output, max_chars=_TOOL_EVIDENCE_CHARS)
+
+
+def _has_full_simple_public_news_evidence(entries: Any) -> bool:
+    """Whether one complete bounded news envelope is present for secondary passes."""
+
+    if not isinstance(entries, list):
+        return False
+    marked = [
+        entry
+        for entry in entries
+        if isinstance(entry, Mapping)
+        and str(entry.get("tool") or "") == "web_research"
+        and entry.get("evidence_scope") == _SIMPLE_PUBLIC_NEWS_EVIDENCE_MARKER
+        and 0 < len(str(entry.get("output") or "")) <= _SIMPLE_PUBLIC_NEWS_EVIDENCE_MAX_CHARS
+    ]
+    return len(marked) == 1
 
 
 def _attachment_source_complete(item: Mapping[str, Any]) -> bool:
@@ -17487,6 +19211,7 @@ def _project_attachments_for_request(
     *,
     synthetic_document_notice: bool = False,
     selector_resolved: bool = False,
+    selected_filenames: Sequence[str] = (),
 ) -> tuple[list[dict[str, Any]], AttachmentRequestProjection]:
     """Select query-relevant full-file passages under one shared 24k budget.
 
@@ -17496,8 +19221,13 @@ def _project_attachments_for_request(
     “fully searched” by spelling an internal metadata key.
     """
 
-    body_query = _attachment_body_query_surface(message, selector_resolved=selector_resolved)
+    body_query = _attachment_body_query_surface(
+        message,
+        selector_resolved=selector_resolved,
+        selected_filenames=selected_filenames,
+    )
     terms = _attachment_query_terms(body_query)
+    ordinal_unit_terms = _attachment_ordinal_unit_terms(body_query)
     required_anchors = _attachment_query_anchors(body_query, terms)
     field_prefixes = _attachment_query_field_prefixes(body_query)
     sources = [item for item in (attachments or []) if isinstance(item, dict)][
@@ -17589,7 +19319,7 @@ def _project_attachments_for_request(
             _term_spans(
                 text,
                 terms,
-                priority_terms=required_anchors,
+                priority_terms=tuple(dict.fromkeys((*required_anchors, *ordinal_unit_terms))),
                 field_prefixes=field_prefixes,
             )
             if text
@@ -17945,6 +19675,105 @@ def _last_exchange(history: list[dict[str, Any]] | None) -> str:
     if not (asked or answered):
         return ""
     return f"человек: {asked}\nПятница: {answered}".strip()
+
+
+_INFORMATIONAL_CONSENT = re.compile(
+    r"\s*(?:давай|да|ага|угу|ок(?:ей)?|хорошо|поехали|соглас(?:ен|на))"
+    r"(?:\s*[,—:-]?\s*(?:разбер(?:и|ите|ем|ём)|объясн(?:и|ите)|поясн(?:и|ите)|"
+    r"расскаж(?:и|ите)|покаж(?:и|ите)|пройд(?:ем|ём)\s+по\s+шагам))?\s*[?!.]*\s*",
+    re.IGNORECASE,
+)
+_INFORMATIONAL_ACTION = r"(?:объясн|поясн|раз(?:бер|об)|расска(?:ж|з)|раскро|пройд[её]м|покаж\w*\s+детал)\w*"
+_INFORMATIONAL_OFFER = re.compile(
+    rf"(?:^|[.!?]\s+|\n)\s*(?:"
+    rf"(?:(?:если\s+хочешь|хочешь)\s*[,—:-]?\s*(?:(?:я\s+)?могу\s+)?"
+    rf"[^.!?\n]{{0,80}}?\b{_INFORMATIONAL_ACTION}\b)|"
+    rf"(?:(?:я\s+)?могу\s+[^.!?\n]{{0,80}}?\b{_INFORMATIONAL_ACTION}\b)|"
+    rf"(?:давай(?:те)?\s+[^.!?\n]{{0,60}}?\b{_INFORMATIONAL_ACTION}\b)|"
+    r"(?:(?:объяснить|пояснить|разобрать|рассказать|раскрыть)\b[^.!?\n]{0,100}[?])"
+    r")",
+    re.IGNORECASE | re.MULTILINE,
+)
+_INFORMATIONAL_OFFER_EFFECT_COMMITMENT = re.compile(
+    r"(?:^|[,;.!?]\s*|\b(?:и|а\s+также)\s+)"
+    r"(?!как\b|почему\b|зачем\b|что\b)"
+    r"(?:[0-9A-Za-zА-ЯЁа-яё_-]+\s+){0,3}"
+    r"(?:(?:сначала|затем|потом|сразу|после\s+этого)\s+)?(?:я\s+)?"
+    r"(?:могу\s+|давай(?:те)?\s+)?"
+    r"(?:(?:сначала|затем|потом|сразу|после\s+этого)\s+)?"
+    r"(?P<effect>(?:ищ|напомн|постав|созда|сдела|выполн|оформ|отправ|прикреп|загруз|удал|"
+    r"объедин|разреш|скача|куп|закаж|позвон|измен|запуст|запущ|опубли|запиш|сохран|"
+    r"сгенерир|генерир|перешл|вышл|переда|отредактир|редактир|обнов|перенес|перенош|"
+    r"скопир|заброниру|брониру|оплат|оплач|добав|установ|запланир|планиру|созвон|свяж)\w*)\b",
+    re.IGNORECASE,
+)
+_INFORMATIONAL_EFFECT_VERBAL_NOUN = re.compile(
+    r"(?:"
+    r"\w*(?:ни(?:е|я|ю|ем|и|й)|ци(?:я|и|ю|ей|ям|ями|ях))|"
+    r"(?:оплат|установк|передач)(?:а|ы|и|у|ой|е|ам|ами|ах)|"
+    r"созвон(?:а|у|ом|е|ы|ов|ам|ами|ах)?"
+    r")\Z",
+    re.IGNORECASE,
+)
+_INFORMATIONAL_ACTIVE_REFLEXIVE_EFFECT = re.compile(
+    r"(?:созвон|свяж)\w*(?:ся|сь)\Z",
+    re.IGNORECASE,
+)
+_INFORMATIONAL_QUOTED_TEXT = re.compile(
+    r"```.*?```|`[^`]*`|«[^»]*»|\"[^\"\n]*\"",
+    re.DOTALL,
+)
+
+
+def _safe_informational_offer(offer: str) -> bool:
+    direct = _INFORMATIONAL_QUOTED_TEXT.sub(" ", offer)
+    matched = _INFORMATIONAL_OFFER.search(direct)
+    if matched is None:
+        return False
+    if re.search(r"\b(?:не|отнюдь\s+не)\b", matched.group(0), re.IGNORECASE):
+        return False
+    for effect_match in _INFORMATIONAL_OFFER_EFFECT_COMMITMENT.finditer(direct):
+        effect = effect_match.group("effect").casefold()
+        if _INFORMATIONAL_EFFECT_VERBAL_NOUN.fullmatch(effect):
+            # A verbal noun describes the subject of an explanation; it is not
+            # a promise to perform the corresponding action.
+            continue
+        if effect.endswith(("ся", "сь")) and not _INFORMATIONAL_ACTIVE_REFLEXIVE_EFFECT.fullmatch(effect):
+            # Passive/reflexive descriptions (``файл создаётся``) do not grant
+            # Friday authority to create or execute anything.
+            continue
+        prefix = direct[effect_match.start() : effect_match.start("effect")]
+        if re.search(r"\b(?:не|ничего\s+не)\s+(?:\w+\s+){0,2}$", prefix, re.IGNORECASE):
+            # ``объясню, не создавая файл`` explicitly excludes the effect.
+            continue
+        return False
+    return True
+
+
+def _informational_consent_history(
+    message: str,
+    history: Sequence[Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Return only the immediately accepted informational exchange.
+
+    A model-authored offer may determine what prose to continue, but it never
+    grants a tool or mutation.  Effect/search offers intentionally stay on the
+    ordinary authority route.
+    """
+
+    if _INFORMATIONAL_CONSENT.fullmatch(_classification_text(message)) is None:
+        return []
+    relevant = [item for item in (history or []) if str(item.get("role") or "") in {"user", "assistant"}]
+    if (
+        len(relevant) < 2
+        or str(relevant[-2].get("role") or "") != "user"
+        or str(relevant[-1].get("role") or "") != "assistant"
+    ):
+        return []
+    offer = str(relevant[-1].get("content") or "")[:2_000]
+    if not _safe_informational_offer(offer):
+        return []
+    return [dict(relevant[-2]), dict(relevant[-1])]
 
 
 def _what_is_missing_from_this_attachment(item: dict[str, Any]) -> str:
@@ -19066,6 +20895,7 @@ def _project_web_tool_result(
     *,
     transport_success: bool = True,
     limit: int = 5,
+    freshness: str = "",
     source_class: str = "",
 ) -> tuple[str, list[dict[str, str]], dict[str, Any] | None]:
     """Classify a web tool result by usable evidence, not handler transport.
@@ -19077,10 +20907,20 @@ def _project_web_tool_result(
     """
 
     try:
+        freshness = normalize_search_freshness(freshness)
         source_class = normalize_search_source_class(source_class)
     except ValueError:
         return "failed", [], None
     if not transport_success or not isinstance(data, Mapping):
+        return "failed", [], None
+    if freshness and (
+        tool_name not in {"web_search", "web_research"}
+        or data.get("freshness") != freshness
+        or not search_filter_is_attested(data, "freshness", freshness)
+    ):
+        # A transport-successful stale/unattested batch is still not evidence
+        # for the requested window.  This closes custom-kernel and wrapper seams
+        # outside ExecutionKernel's own adapter checks.
         return "failed", [], None
     if "outbound_attempted" not in data:
         return "failed", [], None
@@ -19395,6 +21235,8 @@ def _project_web_tool_result(
                 key: data[key]
                 for key in (
                     "query",
+                    "freshness",
+                    SEARCH_FILTER_ATTESTATION_KEY,
                     "requested_sources",
                     "completed_sources",
                     "timed_out_sources",
@@ -19405,6 +21247,9 @@ def _project_web_tool_result(
             }
             projected_data["sources"] = filtered_items
             projected_data["usable_sources"] = len(filtered_items)
+            if freshness:
+                projected_data["freshness"] = freshness
+                projected_data[SEARCH_FILTER_ATTESTATION_KEY] = {"freshness": freshness}
             if source_class:
                 projected_data["source_class"] = source_class
             projected_data["summary"] = (
@@ -19416,6 +21261,9 @@ def _project_web_tool_result(
                 "query": str(data.get("query") or "")[:1_000],
                 "results": filtered_items,
             }
+            if freshness:
+                projected_data["freshness"] = freshness
+                projected_data[SEARCH_FILTER_ATTESTATION_KEY] = {"freshness": freshness}
         else:
             projected_data = filtered_items[0]
         return ("partial" if incomplete else "sourced"), deduplicated, projected_data
@@ -19524,6 +21372,60 @@ _PUBLIC_NEWS_REQUEST_QUESTION = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# The simple lane can enforce only the four provider windows exposed by
+# ``web_research``.  Explicit calendar dates and relative windows such as
+# “yesterday” are not aliases for the trailing 24 hours; they stay on the
+# ordinary web route instead of being silently narrowed to ``day``.
+_SIMPLE_PUBLIC_NEWS_FRESHNESS_PATTERNS: dict[str, re.Pattern[str]] = {
+    "day": re.compile(
+        r"\b(?:сегодня\w*|за\s+(?:(?:последн|прошедш)\w*\s+)?сут\w*|"
+        r"за\s+(?:(?:последн|прошедш)\w*\s+)?24\s*час\w*|"
+        r"today|(?:past|last)\s+24\s+hours?)\b",
+        re.IGNORECASE,
+    ),
+    "week": re.compile(
+        r"\b(?:(?:за\s+)?последн\w*\s+(?:недел\w*|7\s*(?:дн\w*|сут\w*))|"
+        r"за\s+(?:прошедш\w*\s+)?(?:недел\w*|7\s*(?:дн\w*|сут\w*))|"
+        r"(?:(?:over\s+the\s+)?(?:past|last))\s+(?:week|7\s+days?))\b",
+        re.IGNORECASE,
+    ),
+    "month": re.compile(
+        r"\b(?:(?:за\s+)?последн\w*\s+(?:месяц\w*|(?:30|31)\s*(?:дн\w*|сут\w*))|"
+        r"за\s+(?:прошедш\w*\s+)?(?:месяц\w*|(?:30|31)\s*(?:дн\w*|сут\w*))|"
+        r"(?:(?:over\s+the\s+)?(?:past|last))\s+(?:month|(?:30|31)\s+days?))\b",
+        re.IGNORECASE,
+    ),
+    "year": re.compile(
+        r"\b(?:(?:за\s+)?последн\w*\s+(?:год\w*|365\s*(?:дн\w*|сут\w*))|"
+        r"за\s+(?:прошедш\w*\s+)?(?:год\w*|365\s*(?:дн\w*|сут\w*))|"
+        r"(?:(?:over\s+the\s+)?(?:past|last))\s+(?:year|365\s+days?))\b",
+        re.IGNORECASE,
+    ),
+}
+_SIMPLE_PUBLIC_NEWS_UNSUPPORTED_TIME_SCOPE = re.compile(
+    r"\b(?:вчера\w*|позавчера\w*|yesterday|the\s+day\s+before|"
+    r"понедельник\w*|вторник\w*|сред(?:а|у|ы|е)?|четверг\w*|пятниц\w*|"
+    r"суббот\w*|воскресень\w*|выходн\w*|"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekend|"
+    r"since|until|before|after|"
+    r"(?:январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*|"
+    r"january|february|march|april|june|july|august|september|october|november|december|"
+    r"(?:in|during)\s+may|"
+    r"назад|ago|between|с\s+\d{1,2}\s+по\s+\d{1,2})\b|"
+    r"(?<!\d)(?:19|20)\d{2}(?!\d)|"
+    r"(?<!\d)\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?(?!\d)",
+    re.IGNORECASE,
+)
+_SIMPLE_PUBLIC_NEWS_ANY_TIME_SCOPE = re.compile(
+    r"\b(?:за|в\s+течение|на\s+протяжении)\b[^.!?\n]{0,32}"
+    r"\b(?:час|сут|дн|недел|месяц|год)\w*\b|"
+    r"\b(?:последн|предыдущ|прошл|прошедш|эт|текущ)\w*\s+"
+    r"(?:\d+\s*)?(?:час|сут|дн|недел|месяц|год)\w*\b|"
+    r"\b(?:past|last|previous|this|current|over\s+the\s+last)\b"
+    r"[^.!?\n]{0,24}\b(?:hours?|days?|weeks?|months?|years?)\b",
+    re.IGNORECASE,
+)
+
 # A plain public-news roundup is one read followed by one synthesis, not an
 # open-ended agentic research session.  Keep this deadline local to that route:
 # changing the router-wide timeout would also cut document analysis and every
@@ -19532,6 +21434,11 @@ _PUBLIC_NEWS_REQUEST_QUESTION = re.compile(
 # responsibility.
 _SIMPLE_PUBLIC_NEWS_TIMEOUT_SEC = 60.0
 _SIMPLE_PUBLIC_NEWS_MAX_TOKENS = 900
+_SIMPLE_PUBLIC_NEWS_UNVERIFIED_FALLBACK = (
+    "Поиск завершён и проверяемые источники получены, но сводку не удалось "
+    "подтвердить по полученной выдаче. Ниже оставляю только найденные источники; "
+    "неподтверждённые факты не публикую."
+)
 
 _FOREIGN_PUBLIC_SOURCE_SCOPE = re.compile(
     r"не\s+из\s+ру\w*|не\s+рос\w+|не\s+рунет\w*|вне\s+рунет\w*|"
@@ -19555,6 +21462,30 @@ def _public_news_site_request(speech: str) -> bool:
         and not _FRESH_PUBLIC_NEWS_LOCAL_SCOPE.search(visible)
         and (_PUBLIC_NEWS_REQUEST_COMMAND.search(visible) or _PUBLIC_NEWS_REQUEST_QUESTION.search(visible))
     )
+
+
+def _simple_public_news_freshness(speech: str) -> str | None:
+    """Exact provider window for the closed lane, or ``None`` when unsupported."""
+
+    visible = " ".join(str(speech or "").split())
+    if not _public_news_site_request(visible):
+        return None
+    if _SIMPLE_PUBLIC_NEWS_UNSUPPORTED_TIME_SCOPE.search(visible):
+        return None
+    matched = {
+        freshness
+        for freshness, pattern in _SIMPLE_PUBLIC_NEWS_FRESHNESS_PATTERNS.items()
+        if pattern.search(visible)
+    }
+    if len(matched) > 1:
+        return None
+    if matched:
+        return normalize_search_freshness(next(iter(matched)))
+    if _SIMPLE_PUBLIC_NEWS_ANY_TIME_SCOPE.search(visible):
+        # A numeric/multi-unit window outside the closed enum is not rounded
+        # down.  The ordinary route retains the user's literal query instead.
+        return None
+    return "day"
 
 
 def _web_source_class_on_speech(speech: str) -> str:
@@ -23732,6 +25663,10 @@ class AgentContext:
     #: Обращение в одно-два слова: не болтовня, но и не вопрос — помощник должен
     #: переспросить, что именно нужно, а не гадать по документам.
     terse_request: bool = False
+    #: A terse affirmative accepted only the immediately preceding assistant
+    #: offer to explain/clarify.  It carries history authority for prose, never
+    #: tool or effect authority.
+    informational_consent_continuation: bool = False
     #: Ход — реплика разговора, а не запрос к архиву. Документы в контекст не
     #: подаются, и модели прямо сказано не искать в них повод для ответа.
     small_talk: bool = False
@@ -29399,13 +31334,17 @@ class AgentRuntime:
         message_document_dependency = (
             _message_locate_document_dependency(locate_decomposition) if message_locate_route else None
         )
+        person_inventory_decomposition = _person_document_inventory_remainder(routing_message)
         file_turn = file_turn_authority(routing_message)
         filename_inventory_request = _filename_inventory_request(routing_message)
         filename_clue_request = _filename_clue_request(routing_message)
         data_subject_file_request = _data_subject_file_request(routing_message)
         adjacent_overview_request = _adjacent_attachment_overview_request(routing_message)
         person_effect_message, _ = _file_effect_projection(routing_message, file_turn, "person")
+        if person_inventory_decomposition.split:
+            person_effect_message = person_inventory_decomposition.locate_clause
         file_create_message, _ = _file_effect_projection(routing_message, file_turn, "file_create")
+        negated_person_inventory_turn = _negated_person_document_inventory_request(routing_message)
         # Две разные вещи, которые при обычной настройке совпадают: ЧЬЯ это
         # переписка и В КАКОМ архиве искать. В общем архиве арендатор у всех
         # один — иначе люди не видели бы документы друг друга, — а переписка
@@ -29450,6 +31389,10 @@ class AgentRuntime:
             conversation_id,
             user_id=user_id,
             limit=20,
+        )
+        informational_consent_history = _informational_consent_history(
+            clean_message,
+            [item for item in prior_history if isinstance(item, Mapping)],
         )
         direct_archived_source_query = _archived_source_search_query(routing_message)
         contextual_source_query, contextual_source_focus = (
@@ -30195,8 +32138,17 @@ class AgentRuntime:
             restored_attachment_expected_count = 1
         elif (
             person_inventory_turn
+            or negated_person_inventory_turn
             or filename_inventory_request is not None
             or quoted_file_command_is_data
+            # An explicit archive lookup owns ambient latest-file fallback, but
+            # it must not steal an exact conversation pointer which the current
+            # request explicitly identifies as ``the document``. Those bytes
+            # are re-authorized below and are stronger evidence than a corpus
+            # search. A generic durable carrier such as ``в штатке`` has no
+            # such pointer authority and stays on source_search even when an
+            # unrelated stale attachment exists in history.
+            or (direct_archived_source_query and not attachment_reference_kind)
             or contextual_source_query
         ):
             # A named-uploader inventory is a code-owned body-free/system read.
@@ -30344,11 +32296,12 @@ class AgentRuntime:
             distinct_selected_ids = []
             selected_expected_count = restored_attachment_expected_count
 
-        # A self-contained public-news request is safer and materially cheaper
-        # in a one-way chamber: only the current command becomes the query, one
-        # code-owned public read runs, and one bounded tool-free synthesis sees
-        # its result.  Other web turns retain the ordinary contextual route.
-        simple_public_news_turn = bool(
+        # Every self-contained public-news request stays in a one-way chamber so
+        # only current bytes can become the outbound query.  The narrower simple
+        # synthesis admission below separately requires an exact provider
+        # freshness window; unsupported calendar scopes remain isolated without
+        # being silently rewritten to ``day``.
+        isolated_public_news_turn = bool(
             file_turn.actions == frozenset({"web"})
             and _public_news_site_request(file_turn.speech)
             and not synthetic_document_notice
@@ -30368,7 +32321,6 @@ class AgentRuntime:
         )
         policy_weather_outbound_turn = bool(
             policy_web_query
-            and not inherited_private_context_lineage
             and not synthetic_document_notice
             and not supplied_attachment_count
             and not quoted_attachment_reference
@@ -30386,11 +32338,10 @@ class AgentRuntime:
             and filename_inventory_request is None
             and not contextual_source_query
         )
-        # Public-news isolation can skip context preparation entirely.  The
-        # adjacent-weather lane must still let `_prepare_context` receive its
-        # bounded policy query (an observed compatibility seam), then discards
-        # every contextual carrier before any provider/model call below.
-        isolated_outbound_turn = simple_public_news_turn
+        # Closed outbound contours skip context preparation entirely.  Their
+        # query is fully determined by the current message/policy and no stale
+        # private lineage is allowed to observe or veto it.
+        isolated_outbound_turn = isolated_public_news_turn or policy_weather_outbound_turn
         archived_source_query = direct_archived_source_query or contextual_source_query
         archived_source_focus = (
             _archived_source_search_focus(clean_message, archived_source_query)
@@ -30862,6 +32813,11 @@ class AgentRuntime:
                     and (workspace_inbox_resolution.attachment is not None or strict_attachment_selector)
                     and not attachment_resolution_failed
                 ),
+                selected_filenames=tuple(
+                    str(item.get("filename") or item.get("name") or "")
+                    for item in active_attachment_set
+                    if isinstance(item, Mapping)
+                ),
             )
             if (
                 may_read_files
@@ -30913,6 +32869,11 @@ class AgentRuntime:
                         reverified
                         and (workspace_inbox_resolution.attachment is not None or strict_attachment_selector)
                         and not attachment_resolution_failed
+                    ),
+                    selected_filenames=tuple(
+                        str(item.get("filename") or item.get("name") or "")
+                        for item in reverified
+                        if isinstance(item, Mapping)
                     ),
                 )
             projected_evidence_set = _file_evidence_set_from_attachments(
@@ -31725,6 +33686,22 @@ class AgentRuntime:
                 open_remainder="",
                 remainder_known=True,
             )
+        elif informational_consent_history:
+            # A short affirmative accepts the immediately preceding
+            # informational offer.  Construct the context directly: general
+            # retrieval/graph routing has no role, while a model-authored offer
+            # is never capability authority for tools or effects.
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=informational_consent_history,
+                ingestion={},
+                interaction_mode=interaction_mode,
+                search_query=clean_message,
+                terse_request=True,
+                informational_consent_continuation=True,
+            )
         elif private_web_search_blocked:
             # Sticky private-file lineage intentionally removes every outbound
             # tool.  Without a code-owned outcome the model used to answer from
@@ -31977,6 +33954,8 @@ class AgentRuntime:
                 conversation_history=[],
                 interaction_mode=interaction_mode,
                 search_query=clean_message,
+                outward_verdict=("интернет", policy_web_query) if policy_weather_outbound_turn else None,
+                policy_web_authorized=policy_weather_outbound_turn,
             )
         elif preparse_pure_past_timeline:
             # The current text fully determines one past calendar window. Do
@@ -32009,6 +33988,23 @@ class AgentRuntime:
                 outward_verdict=("архив", archived_source_query),
                 source_search_query=archived_source_query,
                 source_search_focus=archived_source_focus,
+            )
+        elif negated_person_inventory_turn:
+            # A direct prohibition is complete in the current message.  Build
+            # a no-read context so neither general retrieval nor the person
+            # activity prefetch can disclose the very filenames the user told
+            # Friday not to show.
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                ingestion=dict(ingestion_result or {}),
+                interaction_mode=interaction_mode,
+                search_query="",
+                structural_answer=_NEGATED_PERSON_DOCUMENT_INVENTORY_ACK,
+                open_remainder="",
+                remainder_known=True,
             )
         elif person_inventory_turn:
             # A closed cross-account inventory is a system read, including its
@@ -32105,9 +34101,6 @@ class AgentRuntime:
                 policy_web_query=policy_web_query,
                 turn_deadline=turn_deadline,
             )
-
-        if policy_weather_outbound_turn:
-            isolated_outbound_turn = True
 
         # Every construction branch above joins the same request clock.  This
         # assignment is deliberately based on the timestamp captured at method
@@ -32388,6 +34381,11 @@ class AgentRuntime:
             )
             else []
         )
+        if context.terse_request:
+            # One/two-word turns never grant an unrelated capability.  An
+            # informational consent may carry the immediately preceding prose
+            # offer, but model-authored offers are not effect authority.
+            visible_tools = []
         # This is an internal preflight authority bit, captured before the local
         # file capability projection intentionally removes source_search from the
         # model-visible list.  The helper below clears every schema before it
@@ -32588,6 +34586,48 @@ class AgentRuntime:
                     kind_override="человек",
                     ingestion_projection=ingestion_result,
                 )
+                if person_inventory_decomposition.split:
+                    remainder = person_inventory_decomposition.open_remainder
+                    remainder_policy = decide_turn_policy(remainder)
+                    if remainder_policy.intent is TurnIntent.WEATHER_NEEDS_LOCATION:
+                        # The private inventory is already complete.  Preserve
+                        # the independent weather clause with the same closed
+                        # location question as a standalone weather request;
+                        # never bind ``сегодня`` to the inventory or invent a
+                        # city from private history.
+                        context.structural_answer = "\n\n".join(
+                            part
+                            for part in (
+                                context.structural_answer,
+                                WEATHER_LOCATION_CLARIFICATION,
+                            )
+                            if part
+                        )
+                        context.open_remainder = ""
+                        context.remainder_known = True
+                    elif remainder_policy.intent is TurnIntent.WEATHER_WITH_LOCATION:
+                        # A private filename result must never become input to
+                        # a public provider.  Until composite lanes carry two
+                        # independently sealed transcripts, fail closed instead
+                        # of answering current weather from model memory.
+                        context.structural_answer = "\n\n".join(
+                            part
+                            for part in (
+                                context.structural_answer,
+                                "Погодную часть не стала угадывать или отправлять наружу "
+                                "вместе с приватным перечнем. Повтори её отдельным сообщением.",
+                            )
+                            if part
+                        )
+                        context.open_remainder = ""
+                        context.remainder_known = True
+                    else:
+                        # Do not silently consume an independently actionable
+                        # suffix.  It remains model-facing unless the closed
+                        # weather policy above can settle it without outbound
+                        # disclosure.
+                        context.open_remainder = remainder
+                        context.remainder_known = True
         shape_request = (
             message_locate_action
             if message_locate_flow and message_locate_action
@@ -32604,6 +34644,8 @@ class AgentRuntime:
             if file_turn.proved("local_read")
             else shape_request
         )
+        if synthetic_document_notice and authenticated_attachment_scope:
+            authenticated_attachment_model_request = _BARE_UPLOAD_REVIEW_TASK
         workspace_authority_message = clean_message if workspace_reply_attachment_contract else ""
         if private_outbound_restricted and clean_workspace_intent is not None:
             # A source-derived outbox body is forbidden even for the exact
@@ -32915,6 +34957,12 @@ class AgentRuntime:
                 clean_message,
                 active_attachment_set,
             )
+        brainfuck_exact_response = _brainfuck_exact_response(clean_message)
+        brainfuck_followup_response = (
+            _brainfuck_explanation_followup_response(context.conversation_history)
+            if context.informational_consent_continuation
+            else ""
+        )
         response: dict[str, Any]
         if foreign_private_request or dangerous_instruction_request or private_web_search_blocked:
             # The privacy boundary owns the whole turn.  Keep this explicit
@@ -32992,6 +35040,27 @@ class AgentRuntime:
                 "tools_used": [],
                 "_model_generated": False,
                 "_direct_exact_file_body_owned": direct_attachment_exact_body is not None,
+            }
+        elif brainfuck_exact_response:
+            # A program is an executable claim, not prose.  This closed request
+            # has a deterministic stdout postcondition, so compile and execute
+            # it under hard bounds before publication instead of asking a model
+            # (or a fact-only verifier) to guess that the snippet is correct.
+            response = {
+                "content": brainfuck_exact_response,
+                "tools_used": [],
+                "_model_generated": False,
+                "_brainfuck_exact_owned": True,
+            }
+        elif brainfuck_followup_response:
+            # A quoted program from conversation history is untrusted executable
+            # material.  The continuation is answered only after the bounded
+            # interpreter proves its stdout (or a proved replacement is emitted).
+            response = {
+                "content": brainfuck_followup_response,
+                "tools_used": [],
+                "_model_generated": False,
+                "_brainfuck_exact_owned": True,
             }
         elif office_exact is not None:
             # The model is not allowed to nominate the members of an exact set.
@@ -33637,6 +35706,18 @@ class AgentRuntime:
             and not context.successful_reminders
             and context.late_make_file_attempts == 0
         )
+        passive_input_file_state_evidence = (
+            (
+                *(("Исторические файлы сохранены в архиве.",) if named_person_passive_source_scope else ()),
+                *(
+                    str(entry.get("output") or "")
+                    for entry in attachment_evidence
+                    if isinstance(entry, Mapping) and str(entry.get("output") or "").strip()
+                ),
+            )
+            if passive_attachment_summary_scope
+            else ()
+        )
         passive_attachment_preamble_normalized = False
         if explicit_attachment_summary_scope:
             content, passive_attachment_preamble_normalized = (
@@ -34044,6 +36125,7 @@ class AgentRuntime:
                 reminder_descriptors=reminder_deed_descriptors,
                 read_only_timeline_file_report=read_only_timeline_file_report,
                 passive_source_state=passive_attachment_summary_scope,
+                passive_input_file_state_evidence=passive_input_file_state_evidence,
             )
         ):
             # Проверяется модельная часть ДО late builder: иначе выдуманное
@@ -34433,6 +36515,8 @@ class AgentRuntime:
             or response.get("_workspace_create_owned") is True
             or response.get("_direct_exact_file_body_owned") is True
             or response.get("_small_talk_owned") is True
+            or response.get("_brainfuck_exact_owned") is True
+            or response.get("_simple_public_news_fallback_owned") is True
             or direct_file_body_rejected
             or office_model_claim_rejected
             or outside_deed_replaced
@@ -34499,6 +36583,12 @@ class AgentRuntime:
         visible_web_tool_counts = web_tool_counts(
             [str(entry.get("tool") or "") for entry in verification_evidence if isinstance(entry, Mapping)]
         )
+        simple_public_news_full_evidence = bool(
+            response.get("_simple_public_news_owned") is True
+            and _has_full_simple_public_news_evidence(verification_evidence)
+            and accepted_web_tool_counts == {"web_research": 1}
+            and visible_web_tool_counts == {"web_research": 1}
+        )
         web_open_search_evidence = bool(
             context.web_evidence_scope == "open_search"
             or accepted_web_tools.intersection({"web_search", "web_research"})
@@ -34509,6 +36599,7 @@ class AgentRuntime:
         web_exhaustive_ceiling_applied = False
         web_verifier_evidence_incomplete = bool(
             web_evidence_used
+            and not simple_public_news_full_evidence
             and (
                 context.web_synthesis_evidence_incomplete
                 or any(
@@ -34523,11 +36614,15 @@ class AgentRuntime:
             # the resulting body against evidence it never received.
             web_evidence_status = "partial"
             self._record_web_projection(context, "partial", [])
-        if web_evidence_used and any(
-            str(entry.get("tool") or "").startswith("web_")
-            and len(str(entry.get("output") or "")) > _TOOL_EVIDENCE_CHARS
-            for entry in verification_evidence
-            if isinstance(entry, Mapping)
+        if (
+            web_evidence_used
+            and not simple_public_news_full_evidence
+            and any(
+                str(entry.get("tool") or "").startswith("web_")
+                and len(str(entry.get("output") or "")) > _TOOL_EVIDENCE_CHARS
+                for entry in verification_evidence
+                if isinstance(entry, Mapping)
+            )
         ):
             # The verifier independently takes a query-focused 2.5k slice.
             # Even when synthesis saw the full bounded tool result, a judge
@@ -34546,7 +36641,12 @@ class AgentRuntime:
         )
         open_attachment_review_one_pass = bool(
             whole_document_task in {"summary", "analysis"}
-            and (synthetic_document_notice or pure_file_read_turn)
+            # A transport-authored bare-upload review has a concrete evidence
+            # contract and must cross the verifier: fluent prose can still
+            # invert source negation. Keep one-pass latency only for an
+            # explicit, non-synthetic open review.
+            and pure_file_read_turn
+            and not synthetic_document_notice
             and authenticated_attachment_scope
             and attachment_expected_count > 0
             and attachment_context_complete
@@ -34591,6 +36691,36 @@ class AgentRuntime:
             verification = _unknown_verdict("office_summary_non_exhaustive")
         elif office_model_claim_rejected:
             verification = _unknown_verdict("office_model_exhaustive_claim_rejected")
+        elif response.get("_simple_public_news_owned") is True and isinstance(
+            response.get("_simple_public_news_verification"), Mapping
+        ):
+            raw_news_verification = cast(Mapping[str, Any], response["_simple_public_news_verification"])
+            news_status = str(raw_news_verification.get("status") or VERDICT_UNKNOWN)
+            if news_status not in {
+                VERDICT_PASSED,
+                VERDICT_FAILED,
+                VERDICT_UNKNOWN,
+                VERDICT_SKIPPED,
+            }:
+                news_status = VERDICT_UNKNOWN
+            raw_news_score = raw_news_verification.get("score")
+            news_score = (
+                max(0.0, min(1.0, float(raw_news_score)))
+                if isinstance(raw_news_score, (int, float)) and not isinstance(raw_news_score, bool)
+                else None
+            )
+            raw_news_issues = raw_news_verification.get("issues")
+            news_issues = (
+                [str(item).strip() for item in raw_news_issues if str(item).strip()][:10]
+                if isinstance(raw_news_issues, list)
+                else []
+            )
+            verification = {
+                "status": news_status,
+                "ok": news_status == VERDICT_PASSED,
+                "score": news_score,
+                "issues": news_issues,
+            }
         else:
             verification = {
                 "status": VERDICT_SKIPPED,
@@ -34672,6 +36802,12 @@ class AgentRuntime:
                 context,
                 tool_evidence=verification_evidence,
             )
+        if attachment_evidence and attachment_verification_complete and model_said:
+            verification = _attachment_verdict_with_deterministic_drift(
+                verification,
+                model_said,
+                attachment_evidence,
+            )
         if web_verifier_evidence_incomplete:
             # The judge did not receive every accepted fact-bearing web result
             # (or received only its query-focused prefix).  Its verdict cannot
@@ -34718,6 +36854,7 @@ class AgentRuntime:
             verification_status = VERDICT_UNKNOWN
         if (
             not foreign_private_request
+            and response.get("_simple_public_news_owned") is not True
             and shape_contract is None
             and not exact_quote_pipeline_owned
             and verification_status == VERDICT_FAILED
@@ -34772,6 +36909,7 @@ class AgentRuntime:
                     reminder_descriptors=reminder_deed_descriptors,
                     read_only_timeline_file_report=read_only_timeline_file_report,
                     passive_source_state=passive_attachment_summary_scope,
+                    passive_input_file_state_evidence=passive_input_file_state_evidence,
                 ):
                     LOGGER.warning("supported-deed: repair вернул неподтверждённое завершение")
                     repaired_model_said = _UNCONFIRMED_SUPPORTED_DEED
@@ -34818,6 +36956,12 @@ class AgentRuntime:
                         context,
                         tool_evidence=verification_evidence,
                     )
+                    if attachment_verification_complete:
+                        verification = _attachment_verdict_with_deterministic_drift(
+                            verification,
+                            model_said,
+                            attachment_evidence,
+                        )
                     verification_status = str(verification.get("status") or VERDICT_SKIPPED)
                 else:
                     verification = {
@@ -34891,7 +37035,17 @@ class AgentRuntime:
                 attachments,
                 expected_count=attachment_expected_count,
             )
-            replacement = literal_salvage or _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION
+            bare_upload_salvage = (
+                _registered_upload_receipt_answer(
+                    active_attachment_set,
+                    expected_count=attachment_expected_count,
+                    evidence_set=active_source_evidence_set,
+                    intake=False,
+                )
+                if synthetic_document_notice and authenticated_attachment_scope
+                else ""
+            )
+            replacement = literal_salvage or bare_upload_salvage or _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION
             LOGGER.warning("attachment: evidence-mismatching final answer discarded")
             model_said = ""
             content = f"{spoken}\n\n{replacement}".strip() if spoken else replacement
@@ -34903,6 +37057,8 @@ class AgentRuntime:
             response["_attachment_verification_rejection_owned"] = True
             if literal_salvage:
                 response["_advisory_attachment_literal_owned"] = True
+            if bare_upload_salvage:
+                response["_bare_upload_literal_fallback_owned"] = True
             verification = _unknown_verdict("attachment_evidence_mismatch_rejected")
             verification_status = VERDICT_UNKNOWN
         if (
@@ -35359,6 +37515,35 @@ class AgentRuntime:
                 verification = _unknown_verdict("web_source_reconciliation_changed_final_body")
                 verification_status = VERDICT_UNKNOWN
                 answer_verified = False
+
+        if (
+            response.get("_simple_public_news_owned") is True
+            and isinstance(response.get("_simple_public_news_verification"), Mapping)
+            and verification_status != VERDICT_PASSED
+        ):
+            # Final publication boundary for the closed news lane.  Common
+            # deterministic ceilings run after its local judge/repair sequence
+            # and may legitimately downgrade PASSED.  Never leave the model's
+            # factual prose in place below any such final non-PASSED verdict.
+            content = _SIMPLE_PUBLIC_NEWS_UNVERIFIED_FALLBACK
+            model_said = ""
+            response["content"] = content
+            response["file_clips"] = list(structural_file_clips)
+            response["voice_clip"] = None
+            response["knowledge_object_ids"] = []
+            response["_model_generated"] = False
+            response["_simple_public_news_fallback_owned"] = True
+            # Verifier prose is untrusted model output too.  It may explain the
+            # sole repair inside this closed lane, but once the final verdict is
+            # non-PASSED no free-form issue may escape through metadata, API
+            # caution or Telegram beside the deterministic source ledger.
+            verification = {
+                "status": verification_status,
+                "ok": False,
+                "score": None,
+                "issues": [],
+            }
+            answer_verified = False
 
         cited_knowledge_ids = self._extract_cited_knowledge_ids(content, context)
         tool_knowledge_ids = [
@@ -38068,6 +40253,11 @@ class AgentRuntime:
         source_effect_reauth_required = bool(
             source_effect_reauth_required or context.source_effect_reauth_required
         )
+        if context.terse_request:
+            # Defense in depth for direct callers and future outer-route drift.
+            # Clear in place so no prefetch or model-native call can retain a
+            # schema supplied by the caller.
+            tools.clear()
         if context.private_source_boundary_active:
             # Repeat the chat-level projection at this execution seam.  Direct
             # adapters and tests can call `_agentic_loop` without passing
@@ -38384,11 +40574,17 @@ class AgentRuntime:
                 if str((tool.get("function") or {}).get("name") or tool.get("name") or "")
                 not in _OUTBOUND_TOOL_NAMES
             ]
-        if context.isolated_outbound_turn and turn_auth.actions == frozenset({"web"}):
+        if (
+            context.isolated_outbound_turn
+            and turn_auth.actions == frozenset({"web"})
+            and _simple_public_news_freshness(turn_auth.speech) is not None
+        ):
             # The explicit public-news lane owns the whole turn.  Search has
-            # already happened exactly once above; never enter tool rounds,
-            # salvage or the ordinary verifier, each of which could spend the
-            # global 240-second model budget again.
+            # already happened exactly once above.  It never enters tool rounds
+            # or salvage; an accepted synthesis does enter one evidence-bound
+            # judge and, only after FAILED, at most one repair plus one final
+            # judge.  A timed-out synthesis still returns immediately with no
+            # secondary model call.
             if context.web_evidence_status not in {"sourced", "partial"} or not context.web_sources:
                 return {
                     "content": _WEB_EVIDENCE_MISSING,
@@ -38400,6 +40596,7 @@ class AgentRuntime:
                     "file_clips": [],
                     "_structural_file_count": 0,
                     "_simple_public_news_owned": True,
+                    "_simple_public_news_fallback_owned": True,
                 }
             news_timeout = _remaining_deadline_budget(context.turn_deadline)
             if news_timeout is None:
@@ -38435,6 +40632,15 @@ class AgentRuntime:
                     and not synthesis.get("tools_used")
                     and str(synthesis.get("finish_reason") or "stop") == "stop"
                 )
+                if accepted:
+                    # The durable source ledger owns URLs.  Judge exactly the
+                    # factual body which can be delivered, not an earlier draft
+                    # whose model-authored citation will be removed later.
+                    clean, _urls_removed = _strip_model_authored_web_urls(
+                        clean,
+                        attachment_source_owned=False,
+                    )
+                    accepted = bool(clean)
             except TimeoutError:
                 LOGGER.warning(
                     "simple public-news synthesis exceeded %.0fs; returning accepted sources",
@@ -38446,7 +40652,50 @@ class AgentRuntime:
                 LOGGER.warning("simple public-news synthesis failed (%s)", type(exc).__name__)
                 clean = ""
                 accepted = False
-            if not accepted:
+            synthesis_accepted = accepted
+            verification: dict[str, Any] | None = None
+            if accepted and _has_full_simple_public_news_evidence(tool_evidence):
+                verification = await self._verify_response(
+                    message,
+                    clean,
+                    context,
+                    tool_evidence=tool_evidence,
+                )
+                verification_status = str(verification.get("status") or VERDICT_UNKNOWN)
+                if verification_status == VERDICT_FAILED:
+                    repaired = await self._repair_once(
+                        message,
+                        clean,
+                        context,
+                        verification,
+                        tool_evidence=tool_evidence,
+                    )
+                    if repaired:
+                        repaired, _repair_urls_removed = _strip_model_authored_web_urls(
+                            repaired,
+                            attachment_source_owned=False,
+                        )
+                    if repaired:
+                        clean = repaired
+                        verification = await self._verify_response(
+                            message,
+                            clean,
+                            context,
+                            tool_evidence=tool_evidence,
+                        )
+                        verification_status = str(verification.get("status") or VERDICT_UNKNOWN)
+                if verification_status != VERDICT_PASSED:
+                    clean = _SIMPLE_PUBLIC_NEWS_UNVERIFIED_FALLBACK
+                    accepted = False
+            elif accepted:
+                verification = _unknown_verdict("simple_public_news_full_evidence_unavailable")
+                clean = (
+                    "Поиск завершён и проверяемые источники получены, но полная ограниченная "
+                    "выдача недоступна для проверки. Ниже оставляю только найденные источники; "
+                    "непроверенные факты не публикую."
+                )
+                accepted = False
+            else:
                 clean = (
                     "Поиск завершён и проверяемые источники получены, но модель не успела "
                     "подготовить сводку за ограниченное время. Ниже оставляю найденные ссылки; "
@@ -38459,11 +40708,15 @@ class AgentRuntime:
                 "web_query_notice": " ".join(web_notice),
                 "knowledge_object_ids": [],
                 "tool_evidence": tool_evidence,
-                "llm_failed": not accepted,
+                # A rejected synthesis is not a transport outage.  Preserve the
+                # distinction so final metadata reports the verifier verdict.
+                "llm_failed": not synthesis_accepted,
                 "voice_clip": None,
                 "file_clips": [],
                 "_structural_file_count": 0,
                 "_simple_public_news_owned": True,
+                **({"_simple_public_news_verification": verification} if verification is not None else {}),
+                **({"_simple_public_news_fallback_owned": True} if not accepted else {}),
             }
         # Про ЧЕЛОВЕКА — раньше, чем про свою ленту.
         #
@@ -39403,12 +41656,15 @@ class AgentRuntime:
                         if outbound_notice:
                             web_notice.append(outbound_notice)
                     requested_source_class = ""
+                    requested_freshness = ""
                     if isinstance(call_arguments, Mapping):
                         requested_source_class = str(call_arguments.get("source_class") or "")
+                        requested_freshness = str(call_arguments.get("freshness") or "")
                     web_status, web_sources, web_payload = _project_web_tool_result(
                         call.name,
                         tool_result.data,
                         transport_success=tool_result.success,
+                        freshness=requested_freshness,
                         source_class=requested_source_class,
                     )
                     self._record_web_projection(context, web_status, web_sources)
@@ -45061,11 +47317,22 @@ class AgentRuntime:
             query = self.web_query_from(web_message)
         source_class = _web_source_class_on_speech(turn_auth.speech)
         topic_class = ""
+        simple_public_news_freshness = _simple_public_news_freshness(turn_auth.speech)
+        simple_public_news_request = bool(
+            context is not None
+            and context.isolated_outbound_turn
+            and simple_public_news_freshness is not None
+        )
         if context is not None and context.isolated_outbound_turn:
             if source_class == "foreign":
                 topic_class = _web_research_collision_topic_class(turn_auth.speech)
             query = _public_news_search_query(turn_auth.speech, query, source_class)
         web_arguments: dict[str, Any] = {"query": query, "max_sources": 3}
+        if simple_public_news_request:
+            # The lane is admitted only when its exact closed provider window is
+            # known.  Explicit calendar dates/yesterday never arrive here.
+            assert simple_public_news_freshness is not None
+            web_arguments["freshness"] = simple_public_news_freshness
         if source_class:
             web_arguments["source_class"] = source_class
         if topic_class:
@@ -45143,6 +47410,7 @@ class AgentRuntime:
             "web_research",
             result.data,
             transport_success=result.success,
+            freshness=str(web_arguments.get("freshness") or ""),
             source_class=source_class,
         )
         if (
@@ -45237,7 +47505,12 @@ class AgentRuntime:
         if outbound_notice:
             notice.append(outbound_notice)
         if rendered and len(tool_evidence) < _MAX_TOOL_EVIDENCE:
-            tool_evidence.append({"tool": "web_research", "output": str(rendered)})
+            evidence_entry = {"tool": "web_research", "output": str(rendered)}
+            if simple_public_news_request:
+                # Process-private scope marker: synthesis already received this
+                # exact bounded envelope, so judge and repair must not reslice it.
+                evidence_entry["evidence_scope"] = _SIMPLE_PUBLIC_NEWS_EVIDENCE_MARKER
+            tool_evidence.append(evidence_entry)
         # Готовый список ссылок отдельной строкой. URL и так лежат внутри выдачи,
         # но замерено: на десяти вопросах модель приводила источник лишь в 7
         # ответах из 10 — она их видела и не выписывала. Списком копировать проще,
@@ -45382,7 +47655,21 @@ class AgentRuntime:
                 "Для актуальных внешних данных предпочитай web-инструмент; для личных данных используй уже собранный контекст."
             )
         messages: list[dict[str, Any]] = [{"role": "system", "content": prompt}]
-        if context.terse_request:
+        if context.informational_consent_continuation:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Короткое согласие человека принимает только последнее предложение "
+                        "Пятницы объяснить или уточнить уже обсуждаемое. Выполни именно это "
+                        "информационное предложение по двум предыдущим репликам. Не ищи ничего "
+                        "в архиве, графе или интернете, не вызывай инструменты и не выполняй "
+                        "действий. Не переключайся на постороннюю тему. Если в самом предложении "
+                        "нет предмета объяснения, задай один узкий уточняющий вопрос."
+                    ),
+                }
+            )
+        elif context.terse_request:
             # Обращение в одно-два слова. Замерено на живой переписке: на слово
             # из пяти букв приходило десять документов и ответ на килобайт.
             # Порогом счёта это не лечится — у такой реплики совпадение оказалось
@@ -46675,7 +48962,12 @@ class AgentRuntime:
             if repair_timeout is not None and repair_timeout <= 0:
                 LOGGER.info("Repair pass skipped: turn/attachment deadline exhausted")
                 return ""
-            repair_call = self.llm.chat(repair_messages, tools=[])
+            repair_model_kwargs: dict[str, Any] = {"tools": []}
+            if _has_full_simple_public_news_evidence(tool_evidence) and isinstance(self.llm, LLMRouter):
+                # The bounded route owns exactly one repair generation.  A
+                # transport-level retry would silently turn that into two.
+                repair_model_kwargs["allow_retries"] = False
+            repair_call = self.llm.chat(repair_messages, **repair_model_kwargs)
             fixed = (
                 await asyncio.wait_for(repair_call, timeout=repair_timeout)
                 if repair_timeout is not None
@@ -46819,7 +49111,15 @@ class AgentRuntime:
             )
             if verification_timeout is not None and verification_timeout <= 0:
                 return _unknown_verdict("turn or attachment verification budget exhausted")
-            verification_call = self.llm.chat(messages, temperature=0.0, max_tokens=900)
+            verification_model_kwargs: dict[str, Any] = {
+                "temperature": 0.0,
+                "max_tokens": 900,
+            }
+            if _has_full_simple_public_news_evidence(tool_evidence):
+                verification_model_kwargs["tools"] = []
+                if isinstance(self.llm, LLMRouter):
+                    verification_model_kwargs["allow_retries"] = False
+            verification_call = self.llm.chat(messages, **verification_model_kwargs)
             result = (
                 await asyncio.wait_for(
                     verification_call,

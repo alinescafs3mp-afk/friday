@@ -13,7 +13,7 @@ import httpx
 import pytest
 
 import friday.web_surfer as web_surfer_module
-from friday.execution_kernel import ExecutionKernel
+from friday.execution_kernel import ExecutionKernel, _web_research_for_llm
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.permissions import AuthorizationService
@@ -27,6 +27,8 @@ from friday.web_surfer import (
     SearchResult,
     UnsupportedSearchFilterError,
     WebSurfer,
+    attested_search_results,
+    declares_search_filter_support,
     normalize_search_domains,
     normalize_search_filters,
     normalize_search_freshness,
@@ -880,6 +882,7 @@ async def test_kernel_forwards_filters_but_audit_and_logs_keep_no_raw_values(
     calls: list[dict[str, object]] = []
 
     class RefusingWeb:
+        @declares_search_filter_support("freshness")
         async def search(self, outbound_query: str, **options):
             calls.append({"query": outbound_query, **options})
             raise AllProvidersRefusedError("synthetic refusal")
@@ -1071,3 +1074,362 @@ async def test_kernel_sends_canonical_idn_without_archive_name_gate(settings, st
 
     assert checked == []
     assert calls == [{"query": "needle", "max_results": 5, "site": canonical_domain}]
+
+
+def test_web_research_schema_declares_the_same_closed_freshness_enum() -> None:
+    schema = ExecutionKernel()._tools["web_research"].parameters  # noqa: SLF001
+
+    assert schema["additionalProperties"] is False
+    assert schema["required"] == ["query"]
+    assert schema["properties"]["freshness"] == {
+        "type": "string",
+        "enum": list(SEARCH_FRESHNESS_VALUES),
+    }
+
+
+@pytest.mark.asyncio
+async def test_research_normalizes_and_forwards_freshness_to_search(settings) -> None:
+    surfer = WebSurfer(settings)
+    seen: list[tuple[str, dict[str, object]]] = []
+
+    @declares_search_filter_support("freshness")
+    async def filtered_search(query: str, **options: object) -> list[SearchResult]:
+        seen.append((query, dict(options)))
+        return attested_search_results([], freshness=str(options.get("freshness") or ""))
+
+    surfer.search = filtered_search  # type: ignore[method-assign]
+
+    report = await surfer.research("needle", max_sources=3, freshness="week")
+
+    assert seen == [("needle", {"max_results": 6, "freshness": "week"})]
+    assert report["sources"] == []
+    assert report["search_timed_out"] is False
+    assert report["applied_search_filters"] == {"freshness": "week"}
+
+
+@pytest.mark.asyncio
+async def test_research_rejects_invalid_freshness_before_search_adapter(settings) -> None:
+    surfer = WebSurfer(settings)
+    called = False
+
+    async def forbidden_search(query: str, **options: object) -> list[SearchResult]:
+        del query, options
+        nonlocal called
+        called = True
+        raise AssertionError("invalid freshness reached the search adapter")
+
+    surfer.search = forbidden_search  # type: ignore[method-assign]
+
+    with pytest.raises(ValueError, match="freshness must be one of"):
+        await surfer.research("needle", freshness="Week")
+
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_research_fails_closed_before_a_legacy_adapter_can_drop_freshness(settings) -> None:
+    surfer = WebSurfer(settings)
+    calls: list[str] = []
+
+    async def legacy_search(query: str, **options: object) -> list[SearchResult]:
+        del options
+        calls.append(query)
+        return [SearchResult("stale", "https://example.test/2019", "old", "legacy")]
+
+    surfer.search = legacy_search  # type: ignore[method-assign]
+
+    with pytest.raises(FreshnessUnavailableError) as caught:
+        await surfer.research("needle", freshness="day")
+
+    assert calls == []
+    assert caught.value.filter_names == ("freshness",)
+    assert caught.value.unsupported_providers == ("research-search-adapter",)
+    assert caught.value.refused_providers == ()
+
+
+@pytest.mark.asyncio
+async def test_research_rejects_a_declared_but_unattested_stale_batch(settings) -> None:
+    surfer = WebSurfer(settings)
+    calls: list[str] = []
+
+    @declares_search_filter_support("freshness")
+    async def falsely_declared_search(query: str, **options: object) -> list[SearchResult]:
+        del options
+        calls.append(query)
+        return [SearchResult("stale", "https://example.test/2019", "old", "synthetic")]
+
+    surfer.search = falsely_declared_search  # type: ignore[method-assign]
+
+    with pytest.raises(FreshnessUnavailableError) as caught:
+        await surfer.research("needle", freshness="day")
+
+    assert calls == ["needle"]
+    assert caught.value.unsupported_providers == ("research-search-adapter-attestation",)
+    assert caught.value.refused_providers == ("research-search-adapter",)
+
+
+@pytest.mark.asyncio
+async def test_research_preserves_provider_freshness_failure_instead_of_returning_emptiness(
+    settings,
+) -> None:
+    configured = replace(
+        settings,
+        yandex_search_api_key="",
+        brave_search_api_key="",
+        tavily_api_key="",
+        serper_api_key="",
+    )
+    surfer = WebSurfer(configured)
+
+    with pytest.raises(FreshnessUnavailableError) as caught:
+        await surfer.research("needle", freshness="month")
+
+    assert caught.value.filter_names == ("freshness",)
+    assert caught.value.unsupported_providers == (
+        "brave-html",
+        "duckduckgo",
+        "wikipedia",
+    )
+    assert surfer._client is None  # noqa: SLF001
+
+
+def _research_kernel(settings, storage, web):  # noqa: ANN001, ANN202
+    storage.ensure_user("operator", preset_key="owner")
+    authorization = AuthorizationService(storage)
+    graph = KnowledgeGraph(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(
+        storage,
+        graph,
+        web,
+        IngestionPipeline(settings, storage, graph),
+    )
+    return kernel, authorization.actor_for_user("operator", source="test")
+
+
+@pytest.mark.asyncio
+async def test_kernel_fails_closed_before_a_kwargs_search_adapter_can_drop_freshness(
+    settings,
+    storage,
+) -> None:
+    calls: list[str] = []
+
+    class LegacySearch:
+        async def search(self, query: str, **options: object) -> list[SearchResult]:
+            del options
+            calls.append(query)
+            return [SearchResult("stale", "https://example.test/2019", "old", "legacy")]
+
+    kernel, actor = _research_kernel(settings, storage, LegacySearch())
+
+    report = await kernel._web_search(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        freshness="day",
+    )
+
+    assert calls == []
+    assert report["search_failed"] is True
+    assert report["results"] == []
+    assert report["unsupported_filters"] == ["freshness"]
+    assert report["outbound_attempted"] is False
+
+
+@pytest.mark.asyncio
+async def test_kernel_rejects_a_declared_search_adapter_without_returned_attestation(
+    settings,
+    storage,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FalselyDeclaredSearch:
+        @declares_search_filter_support("freshness")
+        async def search(self, query: str, **options: object) -> list[SearchResult]:
+            calls.append({"query": query, **options})
+            return [SearchResult("stale", "https://example.test/2019", "old", "synthetic")]
+
+    kernel, actor = _research_kernel(settings, storage, FalselyDeclaredSearch())
+
+    report = await kernel._web_search(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        freshness="day",
+    )
+
+    assert calls == [{"query": "needle", "max_results": 5, "freshness": "day"}]
+    assert report["search_failed"] is True
+    assert report["results"] == []
+    assert report["unsupported_filters"] == ["freshness"]
+    assert report["outbound_attempted"] is True
+
+
+@pytest.mark.asyncio
+async def test_kernel_threads_research_freshness_and_records_only_the_closed_enum(
+    settings,
+    storage,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FreshnessAwareResearch:
+        @declares_search_filter_support("freshness")
+        async def research(self, query: str, **options: object) -> dict[str, object]:
+            calls.append({"query": query, **options})
+            freshness = str(options.get("freshness") or "")
+            return {
+                "query": query,
+                "freshness": freshness,
+                "applied_search_filters": {"freshness": freshness},
+                "sources": [],
+                "requested_sources": 0,
+                "completed_sources": 0,
+                "timed_out_sources": 0,
+                "failed_sources": 0,
+                "search_timed_out": False,
+                "summary": "No search results found.",
+            }
+
+    kernel, actor = _research_kernel(settings, storage, FreshnessAwareResearch())
+
+    report = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        max_sources=4,
+        freshness="year",
+    )
+
+    assert calls == [{"query": "needle", "max_sources": 4, "freshness": "year"}]
+    assert report["freshness"] == "year"
+    assert (
+        ExecutionKernel._audit_details(  # noqa: SLF001
+            "web_research",
+            {"query": "needle", "max_sources": 4, "freshness": "year"},
+        )["freshness"]
+        == "year"
+    )
+
+
+@pytest.mark.asyncio
+async def test_kernel_rejects_invalid_or_unsupported_research_freshness_without_capture(
+    settings,
+    storage,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class UnsupportedResearch:
+        @declares_search_filter_support("freshness")
+        async def research(self, query: str, **options: object) -> dict[str, object]:
+            calls.append({"query": query, **options})
+            raise FreshnessUnavailableError(
+                unsupported_providers=("synthetic-adapter",),
+            )
+
+    kernel, actor = _research_kernel(settings, storage, UnsupportedResearch())
+
+    invalid = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="private-invalid-canary",
+        freshness="Week",
+    )
+    unsupported = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="private-filtered-canary",
+        freshness="day",
+    )
+
+    assert invalid["error"] == "invalid_freshness"
+    assert invalid["outbound_attempted"] is False
+    assert unsupported["unsupported_filters"] == ["freshness"]
+    assert unsupported["outbound_attempted"] is False
+    assert unsupported["sources"] == []
+    assert "нефильтрован" in unsupported["note"].casefold()
+    assert calls == [
+        {
+            "query": "private-filtered-canary",
+            "max_sources": 3,
+            "freshness": "day",
+        }
+    ]
+    assert storage.list_inbox("operator") == []
+    projected = json.loads(_web_research_for_llm(unsupported)[0])
+    assert projected["search_failed"] is True
+    assert projected["unsupported_filters"] == ["freshness"]
+    assert projected["outbound_attempted"] is False
+    assert "нефильтрован" in projected["note"].casefold()
+
+
+@pytest.mark.asyncio
+async def test_kernel_fails_closed_before_a_legacy_research_adapter_can_drop_freshness(
+    settings,
+    storage,
+) -> None:
+    calls: list[str] = []
+
+    class LegacyResearch:
+        async def research(self, query: str, **options: object) -> dict[str, object]:
+            del options
+            calls.append(query)
+            return {
+                "query": query,
+                "sources": [{"url": "https://example.test/2019", "text": "stale"}],
+            }
+
+    kernel, actor = _research_kernel(settings, storage, LegacyResearch())
+
+    report = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        freshness="week",
+    )
+
+    assert calls == []
+    assert report["search_failed"] is True
+    assert report["unsupported_filters"] == ["freshness"]
+    assert report["outbound_attempted"] is False
+
+
+@pytest.mark.asyncio
+async def test_kernel_rejects_a_declared_research_adapter_without_returned_attestation(
+    settings,
+    storage,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FalselyDeclaredResearch:
+        @declares_search_filter_support("freshness")
+        async def research(self, query: str, **options: object) -> dict[str, object]:
+            calls.append({"query": query, **options})
+            stale = "stale source from 2019"
+            return {
+                "query": query,
+                "sources": [
+                    {
+                        "url": "https://example.test/2019",
+                        "title": "Stale",
+                        "text": stale,
+                        "text_length": len(stale),
+                        "status_code": 200,
+                        "error": "",
+                        "truncated": False,
+                    }
+                ],
+                "requested_sources": 1,
+                "completed_sources": 1,
+                "timed_out_sources": 0,
+                "failed_sources": 0,
+                "search_timed_out": False,
+            }
+
+    kernel, actor = _research_kernel(settings, storage, FalselyDeclaredResearch())
+
+    report = await kernel._web_research(  # noqa: SLF001
+        actor=actor,
+        query="needle",
+        freshness="day",
+    )
+
+    assert calls == [{"query": "needle", "max_sources": 3, "freshness": "day"}]
+    assert report["search_failed"] is True
+    assert report["sources"] == []
+    assert report["unsupported_filters"] == ["freshness"]
+    assert report["outbound_attempted"] is True
+    assert storage.list_inbox("operator") == []

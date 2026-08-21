@@ -117,11 +117,16 @@ class _SyntheticWebKernel:
     async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
         assert tool == "web_research"
         self.calls.append((str(tool), dict(params)))
+        freshness = str(params.get("freshness") or "")
+        filter_proof = (
+            {"freshness": freshness, "applied_search_filters": {"freshness": freshness}} if freshness else {}
+        )
         return ToolResult(
             tool,
             True,
             {
                 "outbound_attempted": True,
+                **filter_proof,
                 "sources": [
                     {
                         "url": PUBLIC_URL,
@@ -483,6 +488,7 @@ async def test_three_complete_bare_docx_summaries_then_isolated_news_excludes_hi
             {
                 "query": runtime.web_query_from(isolated_request),
                 "max_sources": 3,
+                "freshness": "day",
                 "source_class": "foreign",
             },
         )

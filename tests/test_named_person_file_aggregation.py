@@ -662,6 +662,24 @@ async def test_filename_substring_inventory_lists_names_without_hydrating_bodies
     assert "ONLY-IN-BODY" not in union["message"]
     assert union["tools_used"] == []
 
+    for natural_union_request in (
+        'в каких моих файлах есть слово "штатка"?',
+        'покажи мои файлы, содержащие слово "штатка"',
+    ):
+        natural_union = await runtime.chat(
+            actor.own_id,
+            natural_union_request,
+            actor=actor,
+            enable_tools=True,
+        )
+        assert "Полный подтверждённый список получен" in natural_union["message"]
+        assert "ШТАТКА 01.06.2024.docx" in natural_union["message"]
+        assert "штатка_назначение.xlsx" in natural_union["message"]
+        assert "ordinary.txt" in natural_union["message"]
+        assert "JBL-ШТАТКА-DECOY" not in natural_union["message"]
+        assert "ONLY-IN-BODY" not in natural_union["message"]
+        assert natural_union["tools_used"] == []
+
 
 @pytest.mark.asyncio
 async def test_exact_filename_result_continuations_use_only_durable_selected_pointer(

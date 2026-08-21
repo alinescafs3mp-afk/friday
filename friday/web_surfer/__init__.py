@@ -228,6 +228,46 @@ _ASKS_FOR_FOREIGN_SOURCES = re.compile(
 SEARCH_FRESHNESS_VALUES = ("", "day", "week", "month", "year")
 SEARCH_DOMAIN_LIST_MAX = 10
 SEARCH_SOURCE_CLASS_VALUES = ("", "foreign")
+SEARCH_FILTER_ATTESTATION_KEY = "applied_search_filters"
+_SEARCH_FILTER_CAPABILITIES_ATTR = "__friday_search_filter_capabilities__"
+
+
+def declares_search_filter_support(*filter_names: str):  # noqa: ANN201
+    """Mark an in-process adapter as deliberately enforcing closed filters.
+
+    Accepting ``**kwargs`` is not a capability declaration: legacy wrappers do
+    that routinely and may silently discard a newly added filter.  Adapters
+    outside :class:`WebSurfer` must opt in explicitly and must also attest the
+    applied value in their returned batch/report.
+    """
+
+    safe_names = frozenset(
+        name for name in filter_names if name in UnsupportedSearchFilterError._FILTER_NAMES
+    )
+
+    def decorate(function):  # noqa: ANN001, ANN202
+        setattr(function, _SEARCH_FILTER_CAPABILITIES_ATTR, safe_names)
+        return function
+
+    return decorate
+
+
+def search_callable_supports_filter(function: Any, filter_name: str) -> bool:
+    """Whether one exact callable explicitly declared a filter capability."""
+
+    target = getattr(function, "__func__", function)
+    capabilities: object = getattr(target, _SEARCH_FILTER_CAPABILITIES_ATTR, frozenset())
+    return isinstance(capabilities, frozenset) and filter_name in capabilities
+
+
+def search_filter_is_attested(value: Any, filter_name: str, expected: str) -> bool:
+    """Validate the returned, structural proof for one applied filter value."""
+
+    if isinstance(value, Mapping):
+        attestation = value.get(SEARCH_FILTER_ATTESTATION_KEY)
+    else:
+        attestation = getattr(value, SEARCH_FILTER_ATTESTATION_KEY, None)
+    return isinstance(attestation, Mapping) and attestation.get(filter_name) == expected
 
 
 def normalize_search_source_class(value: str) -> str:
@@ -762,6 +802,35 @@ class SearchResult:
         }
 
 
+class AttestedSearchResults(list[SearchResult]):
+    """List-compatible search batch carrying code-owned filter evidence."""
+
+    def __init__(
+        self,
+        values: Sequence[SearchResult] = (),
+        *,
+        applied_search_filters: Mapping[str, str] | None = None,
+    ) -> None:
+        super().__init__(values)
+        setattr(
+            self,
+            SEARCH_FILTER_ATTESTATION_KEY,
+            dict(applied_search_filters or {}),
+        )
+
+
+def attested_search_results(
+    values: Sequence[SearchResult],
+    *,
+    freshness: str = "",
+) -> AttestedSearchResults:
+    """Build a list-compatible result with an exact freshness attestation."""
+
+    freshness = normalize_search_freshness(freshness)
+    applied = {"freshness": freshness} if freshness else {}
+    return AttestedSearchResults(values, applied_search_filters=applied)
+
+
 @dataclass(frozen=True)
 class FetchResult:
     url: str
@@ -1145,6 +1214,7 @@ class WebSurfer:
             await self._client.aclose()
             self._client = None
 
+    @declares_search_filter_support("freshness")
     async def search(
         self,
         query: str,
@@ -1169,7 +1239,7 @@ class WebSurfer:
         query = " ".join(str(query or "").split()).strip()
         source_class = normalize_search_source_class(source_class)
         if not query:
-            return []
+            return attested_search_results([], freshness=freshness)
         limit = max(1, min(int(max_results), 20))
         # Filtering after the provider is the enforcement boundary.  Ask the
         # same provider for bounded headroom so a few forbidden rows do not
@@ -1289,7 +1359,7 @@ class WebSurfer:
             # значило бы выдать чужой отказ за факт об интернете.
             raise AllProvidersRefusedError("поисковые провайдеры не ответили: " + ", ".join(refused))
 
-        return _diversify(results, limit)
+        return attested_search_results(_diversify(results, limit), freshness=freshness)
 
     async def _search_duckduckgo_html(
         self,
@@ -2205,40 +2275,66 @@ class WebSurfer:
                 error=f"fetch_failed:{type(exc).__name__}",
             )
 
+    @declares_search_filter_support("freshness")
     async def research(
         self,
         query: str,
         *,
         max_sources: int = _DEFAULT_MAX_SOURCES,
+        freshness: str = "",
         source_class: str = "",
     ) -> dict[str, Any]:
+        freshness = normalize_search_freshness(freshness)
         source_class = normalize_search_source_class(source_class)
+
+        def attested_report(report: dict[str, Any]) -> dict[str, Any]:
+            if freshness:
+                report["freshness"] = freshness
+                report[SEARCH_FILTER_ATTESTATION_KEY] = {"freshness": freshness}
+            return report
+
         source_limit = max(1, min(int(max_sources), 8))
         loop = asyncio.get_running_loop()
         started_at = loop.time()
         try:
             async with asyncio.timeout(_RESEARCH_TOTAL_BUDGET):
+                search_options: dict[str, Any] = {"max_results": source_limit * 2}
+                if freshness:
+                    search_options["freshness"] = freshness
                 if source_class:
-                    results = await self.search(
-                        query,
-                        max_results=source_limit * 2,
-                        source_class=source_class,
+                    search_options["source_class"] = source_class
+                if freshness and not search_callable_supports_filter(self.search, "freshness"):
+                    # ``**kwargs`` is intentionally insufficient here: old
+                    # wrappers accept it while silently dropping new values.
+                    raise FreshnessUnavailableError(
+                        unsupported_providers=("research-search-adapter",),
                     )
-                else:
-                    # Preserve the legacy override seam used by small local
-                    # adapters and deterministic research harnesses.
-                    results = await self.search(query, max_results=source_limit * 2)
+                # Absent filters remain absent for the legacy override seam.
+                results = await self.search(query, **search_options)
+                if freshness and not search_filter_is_attested(results, "freshness", freshness):
+                    # The adapter claimed capability but did not prove that the
+                    # returned batch actually belongs to the requested window.
+                    raise FreshnessUnavailableError(
+                        unsupported_providers=("research-search-adapter-attestation",),
+                        refused_providers=("research-search-adapter",),
+                    )
+        except SearchFilterUnavailableError:
+            # Keep the provider capability boundary structural for the kernel;
+            # it must not turn an unsupported window into ordinary emptiness.
+            raise
         except TimeoutError:
-            return {
-                "query": query,
-                "sources": [],
-                "requested_sources": 0,
-                "completed_sources": 0,
-                "timed_out_sources": 0,
-                "failed_sources": 0,
-                "search_timed_out": True,
-                "summary": "Public-source search timed out before pages could be fetched.",
-            }
+            return attested_report(
+                {
+                    "query": query,
+                    "sources": [],
+                    "requested_sources": 0,
+                    "completed_sources": 0,
+                    "timed_out_sources": 0,
+                    "failed_sources": 0,
+                    "search_timed_out": True,
+                    "summary": "Public-source search timed out before pages could be fetched.",
+                }
+            )
         except AllProvidersRefusedError as exc:
             # «Ничего не найдено» здесь было бы утверждением о мире, которого
             # никто не проверял: искать не удалось вовсе.
@@ -2247,31 +2343,35 @@ class WebSurfer:
             # персональные данные, а журнал не чистится ни удалением знания, ни
             # `purge`.
             LOGGER.warning("Research search refused (%d chars): %s", len(query), type(exc).__name__)
-            return {
-                "query": query,
-                "sources": [],
-                "requested_sources": 0,
-                "completed_sources": 0,
-                "timed_out_sources": 0,
-                "failed_sources": 0,
-                "search_timed_out": False,
-                "search_failed": True,
-                "summary": (
-                    "Поисковые системы не ответили — доступ к интернету сейчас не работает. "
-                    "Это НЕ значит, что по запросу ничего нет."
-                ),
-            }
+            return attested_report(
+                {
+                    "query": query,
+                    "sources": [],
+                    "requested_sources": 0,
+                    "completed_sources": 0,
+                    "timed_out_sources": 0,
+                    "failed_sources": 0,
+                    "search_timed_out": False,
+                    "search_failed": True,
+                    "summary": (
+                        "Поисковые системы не ответили — доступ к интернету сейчас не работает. "
+                        "Это НЕ значит, что по запросу ничего нет."
+                    ),
+                }
+            )
         if not results:
-            return {
-                "query": query,
-                "sources": [],
-                "requested_sources": 0,
-                "completed_sources": 0,
-                "timed_out_sources": 0,
-                "failed_sources": 0,
-                "search_timed_out": False,
-                "summary": "No search results found.",
-            }
+            return attested_report(
+                {
+                    "query": query,
+                    "sources": [],
+                    "requested_sources": 0,
+                    "completed_sources": 0,
+                    "timed_out_sources": 0,
+                    "failed_sources": 0,
+                    "search_timed_out": False,
+                    "summary": "No search results found.",
+                }
+            )
 
         # Прямые источники — впереди страниц. Котировка и прогноз на обычных
         # сайтах рисуются скриптом, и в тексте их нет: замерено на «сколько
@@ -2280,10 +2380,14 @@ class WebSurfer:
         # не раскрылась». Здесь ЧИСЛА приходят числами, из официальных и
         # общепризнанных источников, со ссылкой для человека.
         direct: list[dict[str, Any]] = []
-        try:
-            direct = await direct_answers(query, await self._get_client())
-        except Exception as exc:  # noqa: BLE001 — прямой источник не должен ронять исследование
-            LOGGER.warning("Прямые источники данных не ответили (%s)", type(exc).__name__)
+        if not freshness:
+            try:
+                direct = await direct_answers(query, await self._get_client())
+            except Exception as exc:  # noqa: BLE001 — прямой источник не должен ронять исследование
+                LOGGER.warning("Прямые источники данных не ответили (%s)", type(exc).__name__)
+        # Direct adapters have no publication-window contract.  A current quote
+        # may look harmless, but mixing an unattested row into an explicitly
+        # filtered report would make the report-wide freshness proof false.
         if source_class:
             # Direct adapters bypass ``search``.  Apply the same DNS contract
             # before their fact rows join the report (for example a rewritten
@@ -2449,16 +2553,18 @@ class WebSurfer:
                 f"{'es' if timed_out_sources != 1 else ''} did not finish before the research deadline."
             )
 
-        return {
-            "query": query,
-            "sources": sources,
-            "requested_sources": requested_sources,
-            "completed_sources": len(sources),
-            "timed_out_sources": timed_out_sources,
-            "failed_sources": failed_sources,
-            "search_timed_out": False,
-            "summary": summary,
-        }
+        return attested_report(
+            {
+                "query": query,
+                "sources": sources,
+                "requested_sources": requested_sources,
+                "completed_sources": len(sources),
+                "timed_out_sources": timed_out_sources,
+                "failed_sources": failed_sources,
+                "search_timed_out": False,
+                "summary": summary,
+            }
+        )
 
     @staticmethod
     def _extract_pdf_text(

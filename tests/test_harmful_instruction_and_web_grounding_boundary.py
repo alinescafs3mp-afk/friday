@@ -34,7 +34,7 @@ from friday.execution_kernel import (
 from friday.ingestion import IngestionPipeline
 from friday.knowledge_graph import KnowledgeGraph
 from friday.permissions import ActorContext, AuthorizationService
-from friday.web_surfer import SearchFilterUnavailableError
+from friday.web_surfer import SearchFilterUnavailableError, declares_search_filter_support
 
 
 def _actor() -> ActorContext:
@@ -159,6 +159,7 @@ class _FilterUnavailableWebSurfer(_SyntheticWebSurfer):
         super().__init__({})
         self.refused_providers = refused_providers
 
+    @declares_search_filter_support("freshness")
     async def search(self, query: str, **kwargs: Any) -> list[Any]:
         del kwargs
         self.queries.append(query)

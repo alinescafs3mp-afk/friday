@@ -38,6 +38,7 @@ from friday.execution_kernel import ExecutionKernel, ToolResult
 from friday.permissions import AuthorizationService
 from friday.server import _current_turn_file_attachment
 from friday.storage.models import RawObject, new_id
+from friday.turn_intent_policy import decide_turn_policy
 
 
 def _stored_file(
@@ -3449,6 +3450,189 @@ async def test_successful_code_owned_private_prefetch_closes_web_before_serializ
         "code_run",
         "data_query",
     ]
+
+
+@pytest.mark.asyncio
+async def test_weather_with_sticky_private_lineage_is_current_query_only_but_current_sources_stay_closed(
+    settings,
+    storage,
+    monkeypatch,
+):
+    """Old lineage may not veto a clean weather turn or leak into its one web call."""
+
+    weather_request = "погода завтра в Донецке какая будет?"
+    private_history = "STICKY-PRIVATE-HISTORY-MUST-STAY-OUT"
+    private_body = "STICKY-PRIVATE-BODY-MUST-STAY-OUT"
+    current_body = "CURRENT-PRIVATE-ATTACHMENT-MUST-STAY-LOCAL"
+    reply_body = "CURRENT-PRIVATE-REPLY-MUST-STAY-LOCAL"
+    storage.ensure_user("alice", preset_key="owner")
+    authorization = AuthorizationService(storage)
+    kernel = ExecutionKernel(authorization, settings)
+    kernel.bind_services(storage, None, None, None)  # type: ignore[arg-type]
+    model_calls: list[dict[str, Any]] = []
+    web_calls: list[tuple[str, dict[str, Any]]] = []
+
+    class _WeatherModel:
+        enabled = True
+        model = "synthetic-private-lineage-weather"
+        total_budget_sec = 10.0
+
+        async def chat(self, messages, tools=None, **kwargs):  # noqa: ANN001, ARG002
+            model_calls.append(
+                {
+                    "messages": [dict(item) for item in messages],
+                    "tools": list(tools or []),
+                }
+            )
+            return {"content": "Синтетический прогноз для Донецка на завтра."}
+
+    async def synthetic_execute(name, arguments, *, actor=None):  # noqa: ANN001
+        del actor
+        web_calls.append((str(name), dict(arguments)))
+        if name != "web_research":
+            raise AssertionError(f"unexpected tool: {name}")
+        return ToolResult(
+            "web_research",
+            True,
+            data={
+                "query": str(arguments.get("query") or ""),
+                "outbound_attempted": True,
+                "sources": [
+                    {
+                        "url": "https://weather.example.test/donetsk",
+                        "title": "Погода в Донецке",
+                        "text": "Завтра синтетическая погода без осадков.",
+                        "text_length": len("Завтра синтетическая погода без осадков."),
+                        "status_code": 200,
+                        "error": "",
+                        "truncated": False,
+                    }
+                ],
+                "requested_sources": 1,
+                "completed_sources": 1,
+                "timed_out_sources": 0,
+                "failed_sources": 0,
+                "search_timed_out": False,
+            },
+        )
+
+    kernel.execute = synthetic_execute  # type: ignore[method-assign]
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_WeatherModel(),
+        kernel=kernel,
+    )
+    actor = authorization.actor_for_user("alice", source="test")
+    policy = decide_turn_policy(weather_request)
+    sticky = storage.create_conversation("alice", title="sticky private lineage")
+    stale_raw = _stored_file(
+        storage,
+        "alice",
+        private_body,
+        filename="old-private.txt",
+    )
+    lineage = {
+        "private_context_lineage": True,
+        "conversation_attachment_raw_ids": [stale_raw.id],
+        "conversation_attachment_uploaders": {stale_raw.id: "alice"},
+    }
+    prior_user = storage.store_message(
+        sticky["id"],
+        "alice",
+        "user",
+        private_history,
+        metadata={"had_attachments": True, "attachment_count": 1, **lineage},
+    )
+    storage.store_message(
+        sticky["id"],
+        "alice",
+        "assistant",
+        "Старый приватный ответ.",
+        metadata={"attachment_context_used": True, **lineage},
+        reply_to=str(prior_user["id"]),
+    )
+    prepare_calls: list[str] = []
+    original_prepare = runtime._prepare_context  # noqa: SLF001
+
+    async def observed_prepare(*args, **kwargs):  # noqa: ANN001
+        prepare_calls.append(str(args[1] if len(args) > 1 else kwargs.get("message") or ""))
+        return await original_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(runtime, "_prepare_context", observed_prepare)
+    positive = await runtime.chat(
+        "alice",
+        weather_request,
+        actor=actor,
+        conversation_id=str(sticky["id"]),
+        attachments=[],
+        enable_tools=True,
+        turn_policy=policy,
+    )
+
+    assert prepare_calls == [], "isolated weather must skip all ambient context preparation"
+    assert web_calls == [
+        (
+            "web_research",
+            {"query": "погода Донецке завтра", "max_sources": 3},
+        )
+    ]
+    assert positive["tools_used"] == ["web_research"]
+    assert positive["restored_attachment_count"] == 0
+    assert len(model_calls) == 1
+    positive_prompt = json.dumps(model_calls[0], ensure_ascii=False)
+    assert weather_request in positive_prompt
+    assert private_history not in positive_prompt
+    assert private_body not in positive_prompt
+    assert stale_raw.id not in positive_prompt
+    assert model_calls[0]["tools"] == []
+
+    current_conversation = storage.create_conversation("alice", title="current private file")
+    current = await runtime.chat(
+        "alice",
+        weather_request,
+        actor=actor,
+        conversation_id=str(current_conversation["id"]),
+        attachments=[_transient_attachment(filename="current-private.txt", text=current_body)],
+        enable_tools=True,
+        turn_policy=policy,
+    )
+    reply_conversation = storage.create_conversation("alice", title="current private reply")
+    replied = await runtime.chat(
+        "alice",
+        weather_request,
+        actor=actor,
+        conversation_id=str(reply_conversation["id"]),
+        attachments=[],
+        enable_tools=True,
+        reply_to=reply_body,
+        quoted_attachment_reference=True,
+        turn_policy=policy,
+    )
+
+    assert web_calls == [
+        (
+            "web_research",
+            {"query": "погода Донецке завтра", "max_sources": 3},
+        )
+    ]
+    for blocked in (current, replied):
+        assert "Синтетический прогноз для Донецка" not in blocked["message"]
+        assert any(
+            marker in blocked["message"]
+            for marker in (
+                "Не могу выполнить внешний интернет-поиск",
+                "Не удалось открыть документ",
+                "не получила проверяемую интернет-выдачу",
+            )
+        )
+
+    rows = storage.get_conversation_messages(sticky["id"], user_id="alice", limit=10)
+    current_user = next(
+        row for row in rows if row.get("role") == "user" and row.get("content") == weather_request
+    )
+    current_metadata = json.loads(str(current_user.get("metadata_json") or "{}"))
+    assert current_metadata["private_context_lineage"] is True
 
 
 def test_private_lineage_scan_is_independent_of_prompt_character_budget():

@@ -68,15 +68,19 @@ from friday.storage.models import (
 from friday.tts import TTSUnavailable, synthesize_speech
 from friday.web_surfer import (
     SEARCH_DOMAIN_LIST_MAX,
+    SEARCH_FILTER_ATTESTATION_KEY,
     SEARCH_FRESHNESS_VALUES,
     SEARCH_SOURCE_CLASS_VALUES,
     AllProvidersRefusedError,
     SearchFilterUnavailableError,
     normalize_search_domains,
     normalize_search_filters,
+    normalize_search_freshness,
     normalize_search_language,
     normalize_search_region,
     normalize_search_source_class,
+    search_callable_supports_filter,
+    search_filter_is_attested,
     web_source_matches_class,
 )
 from friday.workers._blocking import run_blocking
@@ -1548,6 +1552,8 @@ def _web_research_for_llm(data: dict[str, Any]) -> tuple[str, bool]:
     for key in (
         "query",
         "summary",
+        "freshness",
+        SEARCH_FILTER_ATTESTATION_KEY,
         "source_class",
         "source_class_satisfied",
         "requested_sources",
@@ -1555,6 +1561,11 @@ def _web_research_for_llm(data: dict[str, Any]) -> tuple[str, bool]:
         "timed_out_sources",
         "failed_sources",
         "search_timed_out",
+        "search_failed",
+        "unsupported_filters",
+        "outbound_attempted",
+        "error",
+        "note",
     ):
         if key not in data:
             continue
@@ -2064,6 +2075,16 @@ def _source_table_record_projection(
             focus_selected.add(index)
     if not selected:
         return ""
+    if focus_selected and not header_cells:
+        # Headerless extracted tables commonly encode one record as
+        # ``unit | field | value``.  The focus cell is the field label, not its
+        # answer; retain exactly its next non-empty sibling from the same row.
+        # Never cross a row boundary or sweep unrelated neighbouring records.
+        for focus_index in focus_selected:
+            for value_index in range(focus_index + 1, len(row_cells)):
+                if row_cells[value_index]:
+                    selected.add(value_index)
+                    break
     if not focus_selected:
         # Every cell belongs to this one authenticated record.  When the source
         # expresses a value without the requested canonical field label (for
@@ -3785,6 +3806,9 @@ class ExecutionKernel:
                         canonical_source_class = ""
                     if canonical_source_class:
                         details["source_class"] = canonical_source_class
+                freshness = args.get("freshness")
+                if isinstance(freshness, str) and freshness in SEARCH_FRESHNESS_VALUES and freshness:
+                    details["freshness"] = freshness
             return details
         if tool_name == "collect_files":
             # Найдено ревью собственных правок 2026-08-03. Инструмент отдаёт
@@ -5463,7 +5487,20 @@ class ExecutionKernel:
         if region:
             search_options["region"] = region
         try:
+            if freshness and not search_callable_supports_filter(web.search, "freshness"):
+                raise SearchFilterUnavailableError(
+                    filter_name="freshness",
+                    unsupported_providers=("search-adapter",),
+                )
             results = await web.search(query, **search_options)
+            if freshness and not search_filter_is_attested(results, "freshness", freshness):
+                raise SearchFilterUnavailableError(
+                    filter_name="freshness",
+                    unsupported_providers=("search-adapter-attestation",),
+                    # The adapter body already ran and may have disclosed the
+                    # query before returning an unattested batch.
+                    refused_providers=("search-adapter",),
+                )
         except SearchFilterUnavailableError as capability_failure:
             LOGGER.warning(
                 "Web search filter unavailable (%d chars): %s",
@@ -5528,6 +5565,9 @@ class ExecutionKernel:
                 "results": [item.to_dict() for item in results],
                 "outbound_attempted": True,
             }
+            if freshness:
+                response["freshness"] = freshness
+                response[SEARCH_FILTER_ATTESTATION_KEY] = {"freshness": freshness}
         except Exception as exc:  # noqa: BLE001 — provider returned a malformed result
             LOGGER.warning("Web search result normalization failed (%s)", type(exc).__name__)
             return {
@@ -5589,12 +5629,23 @@ class ExecutionKernel:
         actor: ActorContext,
         query: str,
         max_sources: int = 3,
+        freshness: str = "",
         source_class: str = "",
         topic_class: str = "",
     ) -> dict[str, Any]:
         _, _, web, _ = self._require_services()
         query = str(query or "").strip()
         topic_class = str(topic_class or "").strip()
+        try:
+            freshness = normalize_search_freshness(freshness)
+        except ValueError:
+            return {
+                "query": "",
+                "sources": [],
+                "outbound_attempted": False,
+                "search_failed": True,
+                "error": "invalid_freshness",
+            }
         try:
             source_class = normalize_search_source_class(source_class)
         except ValueError:
@@ -5627,26 +5678,61 @@ class ExecutionKernel:
         query = query[:_MAX_OUTBOUND_QUERY_CHARS]
         bounded_sources = max(1, min(int(max_sources), 8))
         try:
+            research_options: dict[str, Any] = {"max_sources": bounded_sources}
+            if freshness:
+                research_options["freshness"] = freshness
             if source_class:
-                raw_report = await web.research(
-                    query,
-                    max_sources=bounded_sources,
-                    source_class=source_class,
+                research_options["source_class"] = source_class
+            # ``inspect.signature(...).bind`` is not capability evidence: a
+            # legacy ``**kwargs`` wrapper binds successfully and may still
+            # discard freshness.  Require an explicit adapter declaration.
+            if freshness and not search_callable_supports_filter(web.research, "freshness"):
+                raise SearchFilterUnavailableError(
+                    filter_name="freshness",
+                    unsupported_providers=("research-adapter",),
                 )
-            else:
-                # Keep compatibility with bounded local WebSurfer wrappers that
-                # predate the closed optional source-class parameter.
-                raw_report = await web.research(query, max_sources=bounded_sources)
+            raw_report = await web.research(query, **research_options)
             if not isinstance(raw_report, Mapping):
                 raise TypeError("web research report is not a mapping")
+            if freshness and not search_filter_is_attested(raw_report, "freshness", freshness):
+                raise SearchFilterUnavailableError(
+                    filter_name="freshness",
+                    unsupported_providers=("research-adapter-attestation",),
+                    # The adapter body already ran.  Conservatively disclose an
+                    # outbound attempt rather than hiding a possibly sent query.
+                    refused_providers=("research-adapter",),
+                )
             # The adapter owns source data, never the disclosure ledger.  Keep
             # the exact bounded string this handler sent even if a malformed
             # adapter returns a different `query` field.
             report = {**raw_report, "query": query, "outbound_attempted": True}
+            if freshness:
+                report["freshness"] = freshness
+                report[SEARCH_FILTER_ATTESTATION_KEY] = {"freshness": freshness}
             if source_class:
                 report["source_class"] = source_class
             if topic_class:
                 report["topic_class"] = topic_class
+        except SearchFilterUnavailableError as capability_failure:
+            LOGGER.warning(
+                "Web research filter unavailable (%d chars): %s",
+                len(query),
+                capability_failure.filter_name,
+            )
+            return {
+                "query": query,
+                "sources": [],
+                "requested_sources": 0,
+                "completed_sources": 0,
+                "timed_out_sources": 0,
+                "failed_sources": 0,
+                "search_timed_out": False,
+                "outbound_attempted": bool(capability_failure.refused_providers),
+                "search_failed": True,
+                "unsupported_filters": list(capability_failure.filter_names),
+                "error": "Доступные поисковые системы не умеют применить все запрошенные фильтры.",
+                "note": "Нефильтрованная выдача не запрашивалась и не использовалась.",
+            }
         except Exception as exc:  # noqa: BLE001 — disclose stage, never provider details
             LOGGER.warning("Web research provider failed after outbound start (%s)", type(exc).__name__)
             return {
@@ -7605,11 +7691,14 @@ class ExecutionKernel:
         )
         spec(
             "web_research",
-            "Поиск и чтение нескольких публичных источников.",
+            "Поиск и чтение нескольких публичных источников. freshness строго ограничивает "
+            "поисковое окно значениями day/week/month/year; если доступный провайдер не умеет "
+            "применить окно, нефильтрованный поиск не выполняется.",
             "web.research",
             {
                 "query": {"type": "string"},
                 "max_sources": {"type": "integer", "minimum": 1, "maximum": 8},
+                "freshness": {"type": "string", "enum": list(SEARCH_FRESHNESS_VALUES)},
                 "source_class": {
                     "type": "string",
                     "enum": list(SEARCH_SOURCE_CLASS_VALUES),

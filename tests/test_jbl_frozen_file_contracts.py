@@ -185,6 +185,18 @@ class _InventoryKernel:
         )
 
 
+class _InventoryWithMessageSearchKernel(_InventoryKernel):
+    """Expose the tempting history route, but reject any attempt to use it."""
+
+    def get_tool_definitions(self, actor, topic=""):  # noqa: ANN001, ARG002
+        return [_tool("user_activity"), _tool("message_search")]
+
+    async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
+        if tool == "message_search":
+            raise AssertionError("the compact upload inventory reached message_search")
+        return await super().execute(tool, params, actor=actor)
+
+
 @pytest.mark.asyncio
 async def test_named_day_inventory_and_its_completeness_followup_are_code_owned(
     settings,
@@ -595,6 +607,66 @@ async def test_live_wording_for_my_files_on_the_thirteenth_never_widens_to_all_t
     assert kernel.calls[0]["until"].startswith("2026-08-13T20:59:59.999999")
     assert "за всё время" not in reply["message"].casefold()
     assert "2026-08-13" in reply["message"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "а 14 числа что я загружал?",
+        "14 числа что я загружал?",
+    ],
+)
+async def test_live_compact_self_upload_inventory_uses_exact_moscow_day_without_history_or_model(
+    settings,
+    storage,
+    monkeypatch,
+    message: str,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner", display_name="Owner")
+    kernel = _InventoryWithMessageSearchKernel(person_name="Owner")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False, local_timezone="Europe/Moscow"),
+        storage,
+        llm=_NeverModel(),
+        kernel=kernel,
+    )
+    fixed = datetime(2026, 8, 17, 16, 25, 54)
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_retrieval)
+    monkeypatch.setattr(runtime, "_local_now", lambda: fixed)
+    monkeypatch.setattr(runtime, "_local_today", lambda: fixed.date())
+
+    def forbidden_message_search(*args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        raise AssertionError("the compact upload inventory searched stored messages")
+
+    monkeypatch.setattr(storage, "search_messages", forbidden_message_search)
+
+    reply = await runtime.chat("alice", message, actor=_actor())
+
+    assert len(kernel.calls) == 1
+    call = kernel.calls[0]
+    assert call["person"] == "alice"
+    assert call["documents_only"] is True
+    assert call["since"].startswith("2026-08-13T21:00:00")
+    assert call["until"].startswith("2026-08-14T20:59:59.999999")
+    assert reply["tools_used"] == ["user_activity"]
+    assert "2026-08-14" in reply["message"]
+    assert "alpha.pdf" in reply["message"] and "beta.docx" in reply["message"]
+    assert "за всё время" not in reply["message"].casefold()
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "а 14 числа что я писал?",
+        "а 14 числа что я скачивал?",
+        "а 14 числа кто загружал документы?",
+        "а 14 числа что было загружено?",
+    ],
+)
+def test_compact_self_upload_inventory_does_not_claim_adjacent_questions(message: str) -> None:
+    assert _PERSON_DOCUMENT_INVENTORY.search(message) is None
 
 
 @pytest.mark.asyncio

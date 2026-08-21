@@ -17,6 +17,7 @@ import pytest
 from openpyxl import Workbook
 
 from friday.agent_runtime import (
+    _BARE_UPLOAD_REVIEW_TASK,
     _FOCUSED_ATTACHMENT_CONTEXT_CHARS,
     _QUICKLOOK_MULTI_MAX_CHARS,
     _QUICKLOOK_MULTI_MAX_SNIPPETS,
@@ -370,7 +371,7 @@ async def test_bare_upload_uses_normal_hierarchy_when_prompt_projection_is_trunc
         del context
         calls["hierarchy"] += 1
         assert task_kind == "summary"
-        assert message.startswith("Загружен документ:")
+        assert message == _BARE_UPLOAD_REVIEW_TASK
         assert len(attachments) == 1
         assert str(attachments[0].get("transient_text") or "") == source
         return None, False
@@ -378,7 +379,7 @@ async def test_bare_upload_uses_normal_hierarchy_when_prompt_projection_is_trunc
     async def answer(context, message, attachments, **kwargs):  # noqa: ANN001
         del context, kwargs
         calls["answer"] += 1
-        assert message.startswith("Загружен документ:")
+        assert message == _BARE_UPLOAD_REVIEW_TASK
         assert len(attachments) == 1
         assert str(attachments[0].get("transient_text") or "") == source
         return {

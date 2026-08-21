@@ -2513,6 +2513,74 @@ async def test_unique_normalized_or_typo_filename_selects_the_file(
 
 
 @pytest.mark.asyncio
+async def test_live_exact_spaced_xlsx_staff_question_uses_the_selected_text_without_false_not_found(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    filename = "ШТАТКА ПОЛНАЯ НАДЕЮСЬ ПОСЛЕДНЯЯ.xlsx"
+    target = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "ШТАТНО-ДОЛЖНОСТНОЙ СПИСОК\n2-я РОТА\nКомандир роты капитан ВОЛКОВ\n",
+        filename=filename,
+    )
+    latest_decoy = _pending_file(
+        storage,
+        "alice",
+        "alice",
+        "2-я РОТА\nКомандир роты капитан ПЕТРОВ\nLATEST-DECOY-MUST-STAY-OUT",
+        filename="другая штатка.xlsx",
+    )
+    conversation = storage.create_conversation("alice")
+    _record_upload(storage, conversation["id"], "alice", target, "target")
+    _record_upload(storage, conversation["id"], "alice", latest_decoy, "latest decoy")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_EnabledButUnusedLLM(),
+    )
+    query = f"{filename} кто командир 2 роты?"
+    seen: list[list[dict]] = []
+
+    async def prepare(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
+        del message, kwargs
+        return AgentContext(conversation_id=conversation_id, user_id=user_id, person_id="alice")
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context
+        assert message == query
+        snapshot = [dict(item) for item in (attachments or [])]
+        seen.append(snapshot)
+        evidence = json.dumps(snapshot, ensure_ascii=False)
+        assert filename in evidence
+        assert "2-я РОТА" in evidence
+        assert "Командир роты капитан ВОЛКОВ" in evidence
+        assert "ПЕТРОВ" not in evidence
+        return {"content": "Командир 2-й роты — капитан ВОЛКОВ.", "tools_used": []}
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+
+    result = await runtime.chat(
+        "alice",
+        query,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+        conversation_id=conversation["id"],
+        attachments=[],
+        enable_tools=False,
+    )
+
+    assert result["attachment_query_status"] == "matched"
+    assert [[item["raw_object_id"] for item in call] for call in seen] == [[target.id]]
+    assert "командир" in result["message"].casefold()
+    assert "ВОЛКОВ" in result["message"]
+    assert "совпадение по запросу не найдено" not in result["message"].casefold()
+    assert "ПЕТРОВ" not in json.dumps([result, seen], ensure_ascii=False)
+
+
+@pytest.mark.asyncio
 async def test_fuzzy_descriptive_filename_is_not_a_required_body_anchor(
     settings,
     storage,

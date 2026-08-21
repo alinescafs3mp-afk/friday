@@ -59,10 +59,23 @@ class _ReviewSpy:
         }
 
 
-class _OneCallReviewSpy(_ReviewSpy):
+class _VerifiedReviewSpy(_ReviewSpy):
     async def chat(self, messages, **kwargs):  # noqa: ANN001
-        if self.calls:
-            raise AssertionError("complete open file review started a second model pass")
+        copied = [dict(item) for item in messages]
+        if any("FRIDAY_VERIFICATION_DATA" in str(item.get("content") or "") for item in copied):
+            self.calls.append({"messages": copied, **kwargs})
+            return {
+                "content": json.dumps(
+                    {
+                        "ok": True,
+                        "request_satisfied": True,
+                        "score": 1.0,
+                        "issues": [],
+                    }
+                ),
+                "tool_calls": None,
+                "finish_reason": "stop",
+            }
         return await super().chat(messages, **kwargs)
 
 
@@ -151,14 +164,14 @@ async def test_bare_upload_runs_one_ordinary_full_review_and_preserves_markdown(
 
 
 @pytest.mark.asyncio
-async def test_production_verification_keeps_complete_open_review_to_one_model_pass(
+async def test_production_verification_runs_the_mandatory_complete_open_review_verifier(
     settings,
     storage,
 ) -> None:
     configured = replace(settings, verify_answers=True, verify_min_answer_chars=1)
     storage.ensure_user("alice", preset_key="owner")
     raw_id = await _registered_text(configured, storage)
-    model = _OneCallReviewSpy()
+    model = _VerifiedReviewSpy()
     runtime = AgentRuntime(configured, storage, llm=model)  # type: ignore[arg-type]
 
     result = await runtime.chat(
@@ -170,9 +183,9 @@ async def test_production_verification_keeps_complete_open_review_to_one_model_p
     )
 
     assert result["message"] == _REVIEW
-    assert len(model.calls) == 1
-    assert result["verified"] is False
-    assert result["verification_status"] == "skipped"
+    assert len(model.calls) == 2
+    assert result["verified"] is True
+    assert result["verification_status"] == "passed"
     assert result["attachment_coverage_complete"] is True
     assert result["attachment_verification_complete"] is True
 
@@ -245,22 +258,26 @@ async def test_token_capped_fragment_without_a_sentence_gets_a_complete_fallback
         ("Дай ревью файла", _REVIEW, 0),
         ("Review this file", _REVIEW, 0),
         ("Could you review this file?", _REVIEW, 0),
-        ("проанализируй файл и посчитай строки", "Всего 7 строк.", 1),
-        ("дай обзор и перечисли всех людей", "Перечислены все 3 человека.", 1),
+        (
+            "проанализируй файл и посчитай строки",
+            "В файле есть строка «Контрольный риск: FULL-REVIEW-RISK-4815».",
+            1,
+        ),
+        ("дай обзор и перечисли всех людей", "Люди в тексте не перечислены.", 1),
         ("проанализируй, есть ли ошибки в файле", "Ошибок не найдено.", 1),
         ("дай обзор файла", "Никаких рисков и ошибок.", 1),
         ("дай обзор файла", "Критичных рисков не вижу.", 1),
         ("дай исчерпывающий обзор файла", "Это исчерпывающий обзор.", 1),
         ("проанализируй весь файл", _REVIEW, 1),
         ("analyze the whole file", _REVIEW, 1),
-        ("дай обзор файла и назови дату договора", "Дата договора — 14 августа 2026.", 1),
+        ("дай обзор файла и назови дату договора", "Дата договора в тексте не указана.", 1),
         ("Дай полный обзор файла", "Обзор: документ безупречен.", 1),
-        ("Дай обзор файла и скажи ИНН", "ИНН 1234567890.", 1),
+        ("Дай обзор файла и скажи ИНН", "Запрошенный реквизит в тексте не указан.", 1),
         ("Дай обзор файла: присутствуют ли опечатки?", "Не обнаружено.", 1),
         ("Give an overview and list every person", "Alice and Bob.", 1),
         (
             "Analyze the file and tell me exactly when the contract starts",
-            "It starts 14 August 2026.",
+            "The document contains no contract start date.",
             1,
         ),
         ("Tell me about this file: who is the director?", "The director is Alice.", 1),

@@ -24,6 +24,8 @@ from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     AttachmentRequestProjection,
+    _attachment_body_query_surface,
+    _attachment_query_terms,
     _bounded_attachment_projection,
     _multi_attachment_open_task_count,
     _project_attachments_for_request,
@@ -184,6 +186,79 @@ def _transient_owned_attachment(*, filename: str, text: str) -> dict[str, Any]:
             },
         },
     )
+
+
+def test_exact_selected_spaced_filename_masks_only_its_navigation_occurrence() -> None:
+    filename = "ШТАТКА ПОЛНАЯ НАДЕЮСЬ ПОСЛЕДНЯЯ.xlsx"
+    request = f"{filename} найди строку «{filename}»"
+
+    unresolved = _attachment_body_query_surface(
+        request,
+        selector_resolved=False,
+        selected_filenames=(filename,),
+    )
+    selected = _attachment_body_query_surface(
+        request,
+        selector_resolved=True,
+        selected_filenames=(filename,),
+    )
+
+    # A filename supplied by a caller is not authority by itself.  Only the
+    # code-owned resolved-selector bit may consume its navigation occurrence.
+    assert unresolved.startswith(filename)
+    assert selected == f"найди строку «{filename}»"
+    # The same spelling after the lookup action is body data, not a second
+    # source selector.  It must remain an exact quoted retrieval target.
+    assert filename.casefold() in _attachment_query_terms(selected)
+
+
+def test_numbered_company_query_prioritizes_its_structural_window() -> None:
+    filename = "synthetic-many-companies.txt"
+    target_company = 19
+    blocks: list[str] = []
+    for company in range(1, 21):
+        blocks.append(
+            "\n".join(
+                (
+                    f"{company}-я РОТА ОХРАНЫ",
+                    "УПРАВЛЕНИЕ РОТЫ",
+                    f"{company * 100} | Командир роты | капитан | COMMANDER-{company:02d}",
+                    "x" * 2_700,
+                )
+            )
+        )
+    source = "\n".join(blocks)
+    target = f"COMMANDER-{target_company:02d}"
+    target_offset = source.index(target)
+    attachment = _transient_owned_attachment(filename=filename, text=source)
+
+    unqualified, unqualified_state = _project_attachments_for_request(
+        "кто командир роты?",
+        [attachment],
+    )
+    assert unqualified_state.status == "matched"
+    assert target not in str(unqualified[0].get("transient_text") or "")
+
+    projected, state = _project_attachments_for_request(
+        f"кто командир {target_company} роты?",
+        [attachment],
+    )
+
+    assert state.status == "matched"
+    assert len(projected) == 1
+    carrier = str(projected[0].get("transient_text") or "")
+    assert target in carrier
+    windows = projected[0].get("_request_projection_windows")
+    assert isinstance(windows, list)
+    assert any(
+        isinstance(window, Mapping)
+        and int(window.get("start", -1)) <= target_offset < int(window.get("end", -1))
+        for window in windows
+    )
+    # The target sits beyond the ordinary 24k prefix and after eighteen
+    # equally plausible company headings.  Its presence therefore proves the
+    # ordinal structural alias won admission rather than matching by position.
+    assert target_offset > 48_000
 
 
 def _canonical_owned_attachment(settings: Any, storage: Any, raw: RawObject) -> dict[str, Any]:

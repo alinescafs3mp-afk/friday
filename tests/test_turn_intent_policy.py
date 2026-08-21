@@ -670,7 +670,7 @@ def test_api_sqlite_meta_prompts_never_materialize_restored_attachments(
 
 
 def test_adjacent_weather_correction_reaches_one_policy_authorized_web_query(settings: Any) -> None:
-    """Mutation: dropping history context or runtime force-web leaves calls empty."""
+    """Policy weather bypasses private context and executes one bounded query."""
 
     import friday.server as server_module
 
@@ -794,7 +794,9 @@ def test_adjacent_weather_correction_reaches_one_policy_authorized_web_query(set
             WeatherHorizon.TODAY,
             WeatherHorizon.TODAY,
         ]
-        assert prepared_queries == ["погода Донецк сегодня", "погода Донецке сегодня"]
+        # Explicit/adjacent weather now enters the one-way outbound chamber and
+        # intentionally skips general context preparation altogether.
+        assert prepared_queries == []
         assert calls == [
             ("web_research", {"query": "погода Донецк сегодня", "max_sources": 3}),
             (
