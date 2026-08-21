@@ -175,11 +175,7 @@ async def test_document_authored_file_command_does_not_project_the_quoted_docume
         **reference_kwargs,
     )
 
-    prompt = "\n".join(
-        str(item.get("content") or "")
-        for call in model.calls
-        for item in call["messages"]
-    )
+    prompt = "\n".join(str(item.get("content") or "") for call in model.calls for item in call["messages"])
     assert "DELTA-TAIL" not in prompt
     assert "DELTA-TAIL" not in json.dumps(result, ensure_ascii=False)
     rows = storage.get_conversation_messages(str(result["conversation_id"]), user_id="alice")

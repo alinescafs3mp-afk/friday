@@ -694,10 +694,7 @@ def _bind_storage_owned_exact_filename_direct_read(
     re-resolved from storage receives the typed filename authority.
     """
 
-    if not (
-        isinstance(item, (_OwnedAttachment, _ProjectedAttachment))
-        or is_trusted_office_attachment(item)
-    ):
+    if not (isinstance(item, (_OwnedAttachment, _ProjectedAttachment)) or is_trusted_office_attachment(item)):
         return item
     raw_id = str(item.get("raw_object_id") or "").strip()
     tenant = str(tenant_id or "").strip()
@@ -10470,10 +10467,7 @@ def _attachment_summary_request(message: str) -> bool:
     """Summary/review intent with the noun-first form kept whole-speech only."""
 
     command = _record_source_command_text(message)
-    return bool(
-        _ATTACHMENT_SUMMARY_REQUEST.search(command)
-        or _noun_first_attachment_review_request(message)
-    )
+    return bool(_ATTACHMENT_SUMMARY_REQUEST.search(command) or _noun_first_attachment_review_request(message))
 
 
 def _unclosed_noun_first_review_fragment(message: str) -> bool:
@@ -10485,6 +10479,8 @@ def _unclosed_noun_first_review_fragment(message: str) -> bool:
         and re.search(_ATTACHMENT_NOUN_FIRST_REVIEW_PATTERN, visible, re.IGNORECASE)
         and not _noun_first_attachment_review_request(message)
     )
+
+
 _ATTACHMENT_COMPARISON_REQUEST = re.compile(
     r"(?:"
     r"\b(?:сравн|сопостав|свер|различ|отлич|разниц)\w*\b[^.!?\n]{0,120}"
@@ -22084,9 +22080,7 @@ def _closed_attachment_read_only_request(message: str) -> bool:
 
     visible = " ".join(_QUOTED_TEXT.sub(" ", _classification_text(message)).split())
     noun_first_open_review = _noun_first_attachment_review_request(message)
-    if not visible or (
-        not _ATTACHMENT_READ_ONLY_ACTION.search(visible) and not noun_first_open_review
-    ):
+    if not visible or (not _ATTACHMENT_READ_ONLY_ACTION.search(visible) and not noun_first_open_review):
         return False
     if (
         _ASKS_ABOUT_PERSONAL_STORAGE.search(visible)
@@ -22929,8 +22923,7 @@ def file_turn_authority(message: str) -> FileTurnAuthority:
     )
     deictic_content_navigation = bool(
         not unclosed_noun_first_review
-        and
-        (
+        and (
             _EXPLICIT_ATTACHMENT_REFERENCE.search(speech)
             or _DEICTIC_SAME_FILE_TOPIC.search(speech)
             or _DEICTIC_ATTACHMENT_CONTINUATION.search(speech)
@@ -33054,10 +33047,7 @@ class AgentRuntime:
         # ordinary questions still receive no ambient old attachment text.
         active_candidates = (
             []
-            if (
-                quoted_file_command_is_data
-                or passive_structural_attachment_turn
-            )
+            if (quoted_file_command_is_data or passive_structural_attachment_turn)
             else [workspace_inbox_resolution.attachment]
             if workspace_inbox_resolution.attachment is not None
             else []
@@ -34585,9 +34575,7 @@ class AgentRuntime:
                 # A passive structural reply is private local context but not
                 # a readable source. Suppress archive retrieval/arbiters without
                 # pretending that an attachment is present in the model prompt.
-                current_attachment_local=(
-                    current_attachment_local or passive_structural_attachment_turn
-                ),
+                current_attachment_local=(current_attachment_local or passive_structural_attachment_turn),
                 policy_web_query=policy_web_query,
                 turn_deadline=turn_deadline,
             )
