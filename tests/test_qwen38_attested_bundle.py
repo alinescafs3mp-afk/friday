@@ -1189,13 +1189,13 @@ def test_transport_manifest_pins_exact_live_predecessors_and_frozen_sources() ->
             "5cfb5177a87881e9411b03f373cc2ccc9df7a034adae888dd5d6e3b4be1f0ea9"
         ),
         "CORE-SHA256SUMS": ("b1378e7524c44b92dd18176a51c45ce403440d1a7dfc20b9193bad633a0488b2"),
-        "ORCHESTRATION-SHA256SUMS": ("bf0bcc2f7a6714e9b0ddd47f646b0470c9d9597978b58eaeb5168a472ac94a1e"),
-        "ORCHESTRATION.md": ("b018227ccaa7fdc69646cd3022d1654e80f737ee90c4b16b6bde2b2b371aac38"),
+        "ORCHESTRATION-SHA256SUMS": ("fd8affdbfae0e20493e37d0d3a617e45359a40572266977cf00758ecad5c9818"),
+        "ORCHESTRATION.md": ("0dea3c5323110c85beba3d1892b97870906b143af77480f266f8a89637cf8701"),
         "README.md": "28e508e658350789a85345ba9748c85028dce8a7806da080096f59495d7520dd",
         "Rollback-Qwen38V12Attested.ps1": (
             "a8e19b2704710f339be8aaf1fff3c0773b8304f27721106ae62a620907013d51"
         ),
-        "Switch-Qwen38V12Attested.ps1": ("f8d6135895dd3ef4d3acb62eba01cf03129ef42c6fa1ccd36059a1857c37ce69"),
+        "Switch-Qwen38V12Attested.ps1": ("eb310176c1980f431798ffb1b25d25a700d40a31320fdcd999924c6c7634b895"),
         "Test-AttestedCleanupProjection.ps1": (
             "d94846c65cc621e74426a436b121b164cb0c533cd03bbf99214e579e3d432dc6"
         ),
@@ -1203,7 +1203,7 @@ def test_transport_manifest_pins_exact_live_predecessors_and_frozen_sources() ->
             "e537898cb72745fadf5300cede4ffe9a247c5348bb2668222189882d86981a2a"
         ),
         "Test-AttestedReceiptSerialization.ps1": (
-            "83930f030a91b62d066ad09a4592fc7b11b559bb2386fc3c88b65dd4e79bd8ea"
+            "07afaa10023ad26be9128923608fb5a37d7cba4d3961c10979c17b4bc975d071"
         ),
     }
     expected_roles = {

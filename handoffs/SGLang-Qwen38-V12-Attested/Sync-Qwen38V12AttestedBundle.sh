@@ -61,7 +61,7 @@ ssh_key='/home/jericho/.ssh/friday_win_audit_ed25519'
 known_hosts='/home/jericho/.ssh/known_hosts'
 expected_client_fingerprint='SHA256:vhJUpURIJLODWZdo8LU8qnTMbLir86/J5tzl8VWp5+A'
 expected_host_fingerprint='SHA256:wfOf57TOtNhTuQ6OAQUcWhMF47C8FWeUhku2gSAe6mY'
-expected_manifest_sha256='5d132824fda4f80bdb09229b05ee4dba18a32fa11814395a4d1c6d370d265827'
+expected_manifest_sha256='8c6f87adb8da0009a2489552587a079d14479cd7ec08e062dbcedd0870a99565'
 expected_applier_sha256='fd76ee17cb2f2d63eefc74c59fc9b0e5ebe079891372407836cb1b5a0a84d0f2'
 expected_replace_test_sha256='64f58fbaeab76ea92308aaf4f93123631684529160d3eccbf3fa1e431776d7c7'
 
