@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+import os
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,8 @@ from friday.storage import FridayStorage
 def _workflow(
     storage: FridayStorage,
     tmp_path: Path,
+    *,
+    timezone_name: str = "",
 ) -> tuple[ObsidianWorkflowService, ObsidianService, str, dict]:
     owner = "alice"
     storage.ensure_user(owner)
@@ -45,6 +48,7 @@ def _workflow(
         operations,
         owner_id=owner,
         context_key=str(conversation["id"]),
+        timezone_name=timezone_name,
     )
     return workflow, notes, str(conversation["id"]), bundle
 
@@ -72,6 +76,81 @@ def test_task_workflow_adds_one_concrete_incomplete_task_and_replays(
     assert first.revision == replay.revision
     assert "Daily/2026-08-22.md" in found.body
     assert "2026-08-23T10:00" in found.body
+
+
+def test_today_note_summary_is_deterministic_and_excludes_other_days(
+    storage: FridayStorage,
+    tmp_path: Path,
+) -> None:
+    workflow, notes, _conversation, _bundle = _workflow(storage, tmp_path)
+    notes.create_note(
+        "Projects/Today.md",
+        (
+            "# Today\n\n## Wins\n\nFriday integration complete.\n\n"
+            "- [ ] Проверить поиск\n- [x] Проверить запись\n"
+        ),
+    )
+    notes.create_note(
+        "Daily/2026-08-22.md",
+        "# 2026-08-22\n\n## Log\n\nCreated by Friday.\n",
+    )
+    notes.create_note("Archive/Old.md", "# Old\n\nMust not appear.\n")
+
+    mtimes = {
+        "Projects/Today.md": datetime(2026, 8, 22, 12, tzinfo=UTC),
+        # A date-named daily note remains in the requested day even when a
+        # sync/import preserved an older filesystem mtime.
+        "Daily/2026-08-22.md": datetime(2026, 8, 1, 9, tzinfo=UTC),
+        "Archive/Old.md": datetime(2026, 8, 21, 18, tzinfo=UTC),
+    }
+    for path, modified_at in mtimes.items():
+        timestamp = modified_at.timestamp()
+        os.utime(notes.store.root / path, (timestamp, timestamp))
+
+    receipt = workflow.execute_read({"action": "summarize_today_notes", "day": "2026-08-22"})
+
+    assert receipt.action == "summarize_today_notes"
+    assert receipt.status == "completed"
+    assert receipt.path is None
+    assert receipt.changed_paths == ()
+    assert receipt.body == (
+        "Обобщение заметок Obsidian за 2026-08-22: 2. Показано: 2.\n"
+        "- Projects/Today.md — Today; разделы: Wins; "
+        "задачи: 1 незавершённых, 1 завершённых; кратко: Friday integration complete. "
+        "- [ ] Проверить поиск - [x] Проверить запись\n"
+        "- Daily/2026-08-22.md — 2026-08-22; разделы: Log; кратко: Created by Friday."
+    )
+    assert "Archive/Old.md" not in receipt.body
+    assert "Must not appear" not in receipt.body
+
+
+def test_today_note_summary_uses_local_timezone_and_exact_daily_basename(
+    storage: FridayStorage,
+    tmp_path: Path,
+) -> None:
+    workflow, notes, _conversation, _bundle = _workflow(
+        storage,
+        tmp_path,
+        timezone_name="Europe/Moscow",
+    )
+    notes.create_note("Projects/Local Midnight.md", "Included after local midnight.\n")
+    notes.create_note("Archive/report-2026-08-22-old.md", "Stale dated substring.\n")
+    notes.create_note("Daily/2026-08-22.md", "Exact daily fallback.\n")
+    mtimes = {
+        "Projects/Local Midnight.md": datetime(2026, 8, 21, 22, 30, tzinfo=UTC),
+        "Archive/report-2026-08-22-old.md": datetime(2026, 8, 1, 9, tzinfo=UTC),
+        "Daily/2026-08-22.md": datetime(2026, 8, 1, 9, tzinfo=UTC),
+    }
+    for path, modified_at in mtimes.items():
+        timestamp = modified_at.timestamp()
+        os.utime(notes.store.root / path, (timestamp, timestamp))
+
+    receipt = workflow.execute_read({"action": "summarize_today_notes", "day": "2026-08-22"})
+
+    assert "Projects/Local Midnight.md" in receipt.body
+    assert "Daily/2026-08-22.md" in receipt.body
+    assert "report-2026-08-22-old.md" not in receipt.body
+    assert "Stale dated substring" not in receipt.body
 
 
 def test_committed_workflow_resumes_projection_tail_without_duplicate_effect(

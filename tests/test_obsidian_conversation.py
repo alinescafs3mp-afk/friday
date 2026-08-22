@@ -230,6 +230,31 @@ def test_compound_research_result_note_is_deferred_instead_of_refused() -> None:
     assert obsidian_conversation_intent(message, today=_TODAY) is None
 
 
+def test_characteristics_result_note_normalizes_the_exact_live_prompt() -> None:
+    message = "Создай заметку в обсидиан с характеристиками qnap TVS-675"
+
+    request = obsidian_result_note_request(message)
+
+    assert request is not None
+    assert request.task == "Характеристики qnap TVS-675?"
+    assert obsidian_conversation_intent(message, today=_TODAY) is None
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Создай заметку в обсидиан с характеристиками этого qnap TVS-675",
+        "Создай заметку в обсидиан с характеристиками моего qnap TVS-675",
+        "Создай заметку в обсидиан с характеристиками qnap TVS-675 из этого файла",
+        "Создай заметку в обсидиан с характеристиками qnap TVS-675 из сообщения",
+    ],
+)
+def test_contextual_or_private_characteristics_result_note_is_not_authorized(
+    message: str,
+) -> None:
+    assert obsidian_result_note_request(message) is None
+
+
 @pytest.mark.parametrize(
     "message",
     [

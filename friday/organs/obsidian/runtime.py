@@ -2202,6 +2202,7 @@ class ObsidianRuntime:
             operations,
             owner_id=owner_id,
             context_key=context_key,
+            timezone_name=str(getattr(self.settings, "local_timezone", "") or ""),
         )
         receipt = await asyncio.to_thread(workflow.execute_read, payload)
         return receipt.as_dict()
@@ -2224,6 +2225,7 @@ class ObsidianRuntime:
                 operations,
                 owner_id=owner_id,
                 context_key=context_key,
+                timezone_name=str(getattr(self.settings, "local_timezone", "") or ""),
             )
             receipt = await asyncio.to_thread(
                 workflow.execute_write,

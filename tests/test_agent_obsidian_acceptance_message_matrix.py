@@ -81,6 +81,8 @@ _RECOVERY_01_APPEND = "Добавь в ежедневную заметку ст�
 _RECOVERY_01_RESUME = "Продолжай предыдущую задачу."
 _DELETE_01 = "Удали тестовую заметку `Scratch/Delete Me.md`."
 _DELETE_01_SEARCH = "Найди заметку Delete Me."
+_LIVE_SUMMARY_CYRILLIC = "Обобщи все мои сегодняшние заметки в обсидиан"
+_LIVE_SUMMARY_LATIN = "Обобщи все мои сегодняшние заметки в obsidian"
 
 
 def _schema(name: str, properties: dict[str, Any]) -> dict[str, Any]:
@@ -373,6 +375,7 @@ class _AcceptanceRoutingKernel:
                 "select_candidate": "Projects/Second.md",
                 "backlinks": str(payload.get("target_path") or "Architecture/Friday.md"),
                 "conflict_preview": "Projects/Friday Test.md",
+                "summarize_today_notes": None,
             }[action]
             changed_paths = (
                 ["Notes/Search.md", "Notes/Obsidian.md"]
@@ -568,6 +571,20 @@ async def test_every_exact_tier_a_b_message_routes_through_full_chat_once(
                 "limit": 20,
             },
             id="live-1654-date-without-year",
+        ),
+        pytest.param(
+            _LIVE_SUMMARY_CYRILLIC,
+            WORKFLOW_READ_TOOL,
+            "summarize_today_notes",
+            {"day": "2026-08-22"},
+            id="live-1940-summarize-today-cyrillic",
+        ),
+        pytest.param(
+            _LIVE_SUMMARY_LATIN,
+            WORKFLOW_READ_TOOL,
+            "summarize_today_notes",
+            {"day": "2026-08-22"},
+            id="live-1940-summarize-today-latin",
         ),
     ],
 )

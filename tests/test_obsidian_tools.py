@@ -197,6 +197,9 @@ def test_tool_metadata_is_closed_and_declares_read_write_risk() -> None:
     assert "user_id" not in schemas
     workflow_actions = tools["obsidian_workflow_write"].parameters["properties"]["action"]["enum"]
     assert "accept_conflict_merge" in workflow_actions
+    workflow_read = tools["obsidian_workflow_read"].parameters["properties"]
+    assert "summarize_today_notes" in workflow_read["action"]["enum"]
+    assert workflow_read["day"] == {"type": "string", "format": "date"}
 
 
 @pytest.mark.asyncio

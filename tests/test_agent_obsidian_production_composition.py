@@ -41,6 +41,7 @@ _DAILY_APPEND = (
 )
 _TASK_ADD = "Добавь в сегодняшнюю заметку задачу проверить поиск в Obsidian завтра в 10 утра."
 _TASK_QUERY = "Покажи незавершённые задачи про Obsidian."
+_LIVE_SUMMARY = "Обобщи все мои сегодняшние заметки в обсидиан"
 _LIVE_META = (
     "У заметки Projects/Friday Test.md поставь статус review, проект Friday и "
     "добавь теги integration, obsidian и test."
@@ -291,6 +292,30 @@ async def test_task_exact_add_and_query_use_the_real_workflow_handler(
     assert "Daily/2026-08-22.md" in queried_receipt["body"]
     assert "2026-08-23T10:00" in queried_receipt["body"]
     assert "Daily/2026-08-21.md" not in queried_receipt["body"]
+
+
+@pytest.mark.asyncio
+async def test_live_today_summary_uses_the_production_schema_and_real_vault(
+    settings: Any,
+    storage: Any,
+    tmp_path: Path,
+) -> None:
+    stack = await _ready_stack(settings, storage, tmp_path)
+    stack.store.write_text(
+        "Projects/Today Summary.md",
+        "# Today Summary\n\n## Result\n\nИнтеграция Obsidian работает.\n",
+        create_only=True,
+    )
+
+    reply = await _chat(stack, _LIVE_SUMMARY)
+    receipt = _receipt(stack, reply)
+
+    assert reply["tools_used"] == ["obsidian_list_vaults", "obsidian_workflow_read"]
+    assert receipt["action"] == "summarize_today_notes"
+    assert receipt["status"] == "completed"
+    assert "Projects/Today Summary.md" in receipt["body"]
+    assert "Интеграция Obsidian работает." in receipt["body"]
+    assert "Projects/Today Summary.md" in reply["message"]
 
 
 @pytest.mark.asyncio

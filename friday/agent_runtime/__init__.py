@@ -24477,6 +24477,55 @@ _FOREIGN_PUBLIC_SOURCE_SCOPE = re.compile(
 )
 
 
+# A sticky private-file lineage is a conversation safety boundary, not proof
+# that every later, self-contained product question depends on those files.
+# Admit only one closed public-spec shape here: a reviewed public vendor, an
+# explicit model identifier containing a digit, and one non-deictic hardware
+# field.  The transport guards at the call site additionally reject every
+# current/reply/replay/restored attachment carrier before this can become an
+# outbound capability.
+_PUBLIC_PRODUCT_SPEC_BRANDS = frozenset({"qnap"})
+_PUBLIC_PRODUCT_SPEC_REQUEST = re.compile(
+    r"^(?:"
+    r"(?:в|у)\s+(?P<brand_first>[a-z][a-z0-9.+-]{1,31})\s+"
+    r"(?P<model_first>[a-z0-9._-]{2,48})\s+"
+    r"какой\s+(?P<field_first>процессор|cpu)"
+    r"|"
+    r"какой\s+(?P<field_last>процессор|cpu)\s+"
+    r"(?:в|у)\s+(?P<brand_last>[a-z][a-z0-9.+-]{1,31})\s+"
+    r"(?P<model_last>[a-z0-9._-]{2,48})"
+    r")[?!.]*$",
+    re.IGNORECASE,
+)
+
+
+def _self_contained_public_product_spec_query(speech: str) -> str:
+    """Return one current-text-only public product query, or an empty string.
+
+    This is deliberately not a semantic classifier.  In particular, pronouns,
+    conversational continuations, filenames, quotes, and unreviewed vendors do
+    not produce a query which could cross the private-source boundary.
+    """
+
+    raw = str(speech or "")
+    if not raw or len(raw) > 160 or any(character in raw for character in "\x00\r\n"):
+        return ""
+    visible = unicodedata.normalize("NFKC", raw).strip()
+    if not visible or any(character in visible for character in "`\"'«»“”"):
+        return ""
+    match = _PUBLIC_PRODUCT_SPEC_REQUEST.fullmatch(visible)
+    if match is None:
+        return ""
+    brand = str(match.group("brand_first") or match.group("brand_last") or "").casefold()
+    if brand not in _PUBLIC_PRODUCT_SPEC_BRANDS:
+        return ""
+    model = str(match.group("model_first") or match.group("model_last") or "")
+    if not any(character.isdigit() for character in model):
+        return ""
+    field = str(match.group("field_first") or match.group("field_last") or "").casefold()
+    return f"{brand} {model} {field}"[:140]
+
+
 def _public_news_site_request(speech: str) -> bool:
     """A command/question for a public-news source set, not a mere mention."""
 
@@ -28858,16 +28907,16 @@ class AgentContext:
     #: Filename text is therefore data only and the product contract is a useful
     #: summary of the current attachment, with no tool/effect authority.
     current_attachment_auto_summary: bool = False
-    #: A direct web request made in a file-tainted conversation after the
-    #: current turn proved it carries no file/replay/reference.  History,
-    #: retrieval and attachment-derived context are removed for this one turn;
-    #: the sticky lineage itself remains persisted for future safety.
+    #: A reviewed public outbound request made in a file-tainted conversation
+    #: after the current turn proved it carries no file/replay/reference.
+    #: History, retrieval and attachment-derived context are removed for this
+    #: one turn; the sticky lineage itself remains persisted for future safety.
     isolated_outbound_turn: bool = False
     #: A private source or its sticky lineage participates in this turn. This
     #: transient code-owned bit closes external/MCP schemas and is repeated at
     #: execution so an unoffered or future hallucinated tool cannot cross the
-    #: boundary. The isolated current-message-only public-news lane is the sole
-    #: exception because it admits no source/history/reply carrier.
+    #: boundary. Reviewed isolated current-message-only lanes are exceptions
+    #: only because they admit no source/history/reply carrier.
     private_source_boundary_active: bool = False
     #: This isolated current-text turn asks for public research followed by one
     #: late code-owned Obsidian write. The marker grants no capability; it keeps
@@ -35656,6 +35705,31 @@ class AgentRuntime:
             and not exact_uploader_file.applies
             and not filename_clue_selection.applies
         )
+        public_product_spec_query = _self_contained_public_product_spec_query(file_turn.speech)
+        isolated_public_product_spec_turn = bool(
+            public_product_spec_query
+            and not synthetic_document_notice
+            and not supplied_attachment_count
+            and not attachments
+            and not quoted_attachment_reference
+            and not reply_assistant_reference
+            and not reply_quote
+            and not replay_source_message_id
+            and not replay_had_attachments
+            and restored_attachment_expected_count == 0
+            and not restored_attachments
+            and not attachment_reference_kind
+            and workspace_inbox_request is None
+            and not message_locate_flow
+            and not named_person_corpus.applies
+            and not exact_uploader_file.applies
+            and not filename_clue_selection.applies
+            and filename_inventory_request is None
+            and not direct_archived_source_query
+            and not contextual_source_query
+            and obsidian_intent is None
+            and obsidian_result_request_candidate is None
+        )
         isolated_obsidian_result_turn = bool(
             obsidian_result_request_candidate is not None
             and not synthetic_document_notice
@@ -35701,7 +35775,10 @@ class AgentRuntime:
         # query is fully determined by the current message/policy and no stale
         # private lineage is allowed to observe or veto it.
         isolated_outbound_turn = bool(
-            isolated_public_news_turn or isolated_obsidian_result_turn or policy_weather_outbound_turn
+            isolated_public_news_turn
+            or isolated_public_product_spec_turn
+            or isolated_obsidian_result_turn
+            or policy_weather_outbound_turn
         )
         archived_source_query = direct_archived_source_query or contextual_source_query
         archived_source_focus = (
@@ -37398,8 +37475,14 @@ class AgentRuntime:
                     if isolated_obsidian_result_turn and obsidian_result_request_candidate is not None
                     else clean_message
                 ),
-                outward_verdict=(("интернет", policy_web_query) if policy_weather_outbound_turn else None),
-                policy_web_authorized=policy_weather_outbound_turn,
+                outward_verdict=(
+                    ("интернет", policy_web_query)
+                    if policy_weather_outbound_turn
+                    else ("интернет", public_product_spec_query)
+                    if isolated_public_product_spec_turn
+                    else None
+                ),
+                policy_web_authorized=bool(policy_weather_outbound_turn or isolated_public_product_spec_turn),
             )
         elif preparse_pure_past_timeline:
             # The current text fully determines one past calendar window. Do

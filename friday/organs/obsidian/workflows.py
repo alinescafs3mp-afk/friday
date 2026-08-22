@@ -8,9 +8,10 @@ import unicodedata
 import urllib.parse
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, time
+from datetime import UTC, date, datetime, time
 from pathlib import PurePosixPath
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .base_spec import evaluate_base, parse_base
 from .contracts import NoteNotFoundError, VaultDeliveryState, validate_revision
@@ -23,7 +24,16 @@ from .structured_service import StructuredNoteRecord, StructuredNoteService
 from .task_index import render_dated_task
 from .wikilinks import build_vault_link_graph
 
-_READ_ACTIONS = frozenset({"search_tasks", "select_candidate", "backlinks", "conflict_preview", "query_base"})
+_READ_ACTIONS = frozenset(
+    {
+        "search_tasks",
+        "select_candidate",
+        "backlinks",
+        "conflict_preview",
+        "query_base",
+        "summarize_today_notes",
+    }
+)
 _WRITE_ACTIONS = frozenset(
     {
         "add_task",
@@ -98,6 +108,7 @@ class ObsidianWorkflowService:
         *,
         owner_id: str,
         context_key: str,
+        timezone_name: str = "",
     ) -> None:
         vault = storage.get_obsidian_vault(owner_id)
         if vault is None or str(vault["id"]) != operations.vault_id:
@@ -107,6 +118,9 @@ class ObsidianWorkflowService:
         self.operations = operations
         self.owner_id = str(owner_id)
         self.context_key = _context_key(context_key)
+        self.local_timezone = (
+            ZoneInfo(timezone_name) if timezone_name else (datetime.now().astimezone().tzinfo or UTC)
+        )
         self.vault = vault
         self.structured = StructuredNoteService()
 
@@ -143,6 +157,58 @@ class ObsidianWorkflowService:
                     for hit in hits
                 )
             return WorkflowReceipt(action, "completed", body)
+        if action == "summarize_today_notes":
+            _keys(data, {"action", "day"}, required={"action", "day"})
+            selected_day = date.fromisoformat(_text(data["day"], "day", maximum=10))
+            summaries = [
+                summary
+                for summary in self.notes.list_notes()
+                if summary.modified_at.astimezone(self.local_timezone).date() == selected_day
+                or _path_names_day(summary.path, selected_day)
+            ]
+            summaries.sort(key=lambda item: (-item.modified_at.timestamp(), item.path.casefold(), item.path))
+            visible = [self.notes.read_note(summary.path) for summary in summaries[:50]]
+            lines = [
+                f"Обобщение заметок Obsidian за {selected_day.isoformat()}: {len(summaries)}. "
+                f"Показано: {len(visible)}."
+            ]
+            for document in visible:
+                headings = [
+                    title for _level, title in markdown_headings(document.body) if title != document.title
+                ]
+                meaningful = []
+                for raw_line in document.body.splitlines():
+                    line = " ".join(raw_line.strip().split())
+                    if (
+                        not line
+                        or line.startswith("#")
+                        or line.startswith("<!-- friday:")
+                        or line in {"---", "..."}
+                    ):
+                        continue
+                    meaningful.append(line)
+                    if len(" ".join(meaningful)) >= 360:
+                        break
+                excerpt = " ".join(meaningful)[:400].rstrip()
+                details = []
+                if headings:
+                    details.append("разделы: " + ", ".join(headings[:4]))
+                pending = sum(1 for line in document.body.splitlines() if line.lstrip().startswith("- [ ]"))
+                completed = sum(
+                    1
+                    for line in document.body.splitlines()
+                    if line.lstrip().casefold().startswith(("- [x]", "- [х]"))
+                )
+                if pending or completed:
+                    details.append(f"задачи: {pending} незавершённых, {completed} завершённых")
+                if excerpt:
+                    details.append("кратко: " + excerpt)
+                path = _summary_scalar(document.path, maximum=2_048)
+                title = _summary_scalar(document.title, maximum=500)
+                lines.append(f"- {path} — {title}" + ("; " + "; ".join(details) if details else ""))
+            if not summaries:
+                lines.append("Заметок, созданных или изменённых сегодня, не найдено.")
+            return WorkflowReceipt(action, "completed", "\n".join(lines)[:40_000])
         if action == "select_candidate":
             _keys(data, {"action", "ordinal"}, required={"action", "ordinal"})
             ordinal = _integer(data["ordinal"], "ordinal", minimum=1, maximum=100)
@@ -1313,6 +1379,18 @@ def _payload(value: Mapping[str, object]) -> dict[str, object]:
     if not isinstance(value, Mapping) or len(value) > 32:
         raise ValueError("workflow payload must be a bounded object")
     return dict(value)
+
+
+def _path_names_day(path: str, selected_day: date) -> bool:
+    """Recognize the exact conventional daily-note basename, never a substring."""
+
+    return PurePosixPath(path).stem == selected_day.isoformat()
+
+
+def _summary_scalar(value: object, *, maximum: int) -> str:
+    """Project synced user text into exactly one bounded receipt line."""
+
+    return " ".join(unicodedata.normalize("NFC", str(value)).split())[:maximum]
 
 
 def _action(data: Mapping[str, object], allowed: frozenset[str]) -> str:

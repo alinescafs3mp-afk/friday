@@ -413,7 +413,7 @@ def build_obsidian_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             name=WORKFLOW_READ_TOOL,
             description=(
                 "Выполнить закрытую контекстную операцию чтения: задачи, сохранённый "
-                "набор кандидатов, backlinks или preview конфликта."
+                "набор кандидатов, backlinks, сводку за день или preview конфликта."
             ),
             parameters=_parameters(
                 {
@@ -425,6 +425,7 @@ def build_obsidian_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
                             "backlinks",
                             "conflict_preview",
                             "query_base",
+                            "summarize_today_notes",
                         ],
                     },
                     "query": {"type": "string", "maxLength": 1_000},
@@ -432,6 +433,7 @@ def build_obsidian_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
                     "ordinal": {"type": "integer", "minimum": 1, "maximum": 100},
                     "target_path": _PATH,
                     "name": {"type": "string", "minLength": 1, "maxLength": 200},
+                    "day": {"type": "string", "format": "date"},
                 },
                 required=("action",),
             ),

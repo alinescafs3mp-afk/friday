@@ -20,6 +20,10 @@ _MESSAGE = (
     "Можно ли развернуть на qnap TVS-675 nextcloud? Создай заметку в obsidian по результатам этой задачи"
 )
 _TASK = "Можно ли развернуть на qnap TVS-675 nextcloud?"
+_CHARACTERISTICS_MESSAGE = "Создай заметку в обсидиан с характеристиками qnap TVS-675"
+_CHARACTERISTICS_HEADING = "Характеристики qnap TVS-675"
+_CHARACTERISTICS_TASK = f"{_CHARACTERISTICS_HEADING}?"
+_CHARACTERISTICS_FACT = "QNAP TVS-675 использует 8-ядерный процессор ZhaoXin KX-U6580 с частотой 2,5 ГГц."
 _FACT = "QNAP TVS-675 поддерживает контейнерный вариант Nextcloud при проверке совместимости пакетов."
 _URL = "https://public.synthetic.example.com/qnap-nextcloud"
 _REVISION = "a" * 64
@@ -87,8 +91,9 @@ class _AllowAll:
 class _Kernel:
     authorization = _AllowAll()
 
-    def __init__(self) -> None:
+    def __init__(self, *, fact: str = _FACT) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.fact = fact
 
     @staticmethod
     def get_tool_definitions(actor, topic=""):  # noqa: ANN001, ARG004
@@ -128,8 +133,8 @@ class _Kernel:
                         {
                             "url": _URL,
                             "title": "Synthetic QNAP source",
-                            "text": _FACT,
-                            "text_length": len(_FACT),
+                            "text": self.fact,
+                            "text_length": len(self.fact),
                             "status_code": 200,
                             "error": "",
                             "truncated": False,
@@ -224,8 +229,10 @@ class _Model:
     model = "synthetic-result-note"
     total_budget_sec = 1.0
 
-    def __init__(self) -> None:
+    def __init__(self, *, task: str = _TASK, fact: str = _FACT) -> None:
         self.tool_names: list[set[str]] = []
+        self.task = task
+        self.fact = fact
 
     async def chat(self, messages, tools=None, **kwargs):  # noqa: ANN001, ARG002
         self.tool_names.append(
@@ -235,7 +242,7 @@ class _Model:
             }
         )
         rendered = json.dumps(messages, ensure_ascii=False)
-        assert _TASK in rendered
+        assert self.task in rendered
         assert "Создай заметку" not in rendered
         assert _PRIVATE_CANARY not in rendered
         if "FRIDAY_VERIFICATION_DATA" in rendered:
@@ -251,15 +258,15 @@ class _Model:
                 "tool_calls": None,
                 "finish_reason": "stop",
             }
-        if _FACT not in rendered:
+        if self.fact not in rendered:
             return {
                 "content": json.dumps(
-                    {"вид": "интернет", "запрос": _TASK, "кто": "", "дни": []},
+                    {"вид": "интернет", "запрос": self.task, "кто": "", "дни": []},
                     ensure_ascii=False,
                 ),
                 "tool_calls": None,
             }
-        return {"content": _FACT, "tool_calls": None, "_queue_wait_sec": 0.0}
+        return {"content": self.fact, "tool_calls": None, "_queue_wait_sec": 0.0}
 
 
 class _RepairingGroundedModel:
@@ -687,6 +694,48 @@ async def test_public_result_is_saved_only_after_the_accepted_answer(settings, s
     assert metadata["structural"]["obsidian_result_note_owned"] is True
     assert reply["message_format"] == "markdown"
     assert reply["obsidian_open_url"].startswith("https://friday.example/")
+
+
+@pytest.mark.asyncio
+async def test_exact_characteristics_prompt_researches_verifies_and_saves_the_answer(
+    settings,
+    storage,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    kernel = _Kernel(fact=_CHARACTERISTICS_FACT)
+    model = _Model(task=_CHARACTERISTICS_TASK, fact=_CHARACTERISTICS_FACT)
+    runtime = AgentRuntime(
+        replace(
+            settings,
+            verify_answers=False,
+            obsidian_public_base_url="https://friday.example",
+        ),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    runtime._local_today = lambda: date(2026, 8, 22)  # type: ignore[method-assign]
+
+    reply = await runtime.chat(
+        "alice",
+        _CHARACTERISTICS_MESSAGE,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+    )
+
+    assert [name for name, _payload in kernel.calls] == [
+        "web_research",
+        "obsidian_list_vaults",
+        "obsidian_create_note",
+    ], (reply, model.tool_names, kernel.calls)
+    assert kernel.calls[0][1]["query"] == _CHARACTERISTICS_TASK
+    create = kernel.calls[-1][1]
+    assert str(create["path"]).startswith("Research/Характеристики qnap TVS-675 — 2026-08-22 (")
+    assert _CHARACTERISTICS_FACT in str(create["content"])
+    assert str(create["content"]).startswith(f"# {_CHARACTERISTICS_HEADING}\n")
+    assert reply["verification_status"] == "passed"
+    assert reply["verified"] is True
+    assert _CHARACTERISTICS_FACT in reply["message"]
+    assert "Заметка создана" in reply["message"]
 
 
 @pytest.mark.asyncio

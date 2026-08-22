@@ -100,7 +100,14 @@ _METHOD_BY_TOOL = {
     WORKFLOW_WRITE_TOOL: "workflow",
 }
 _WORKFLOW_READ_ACTIONS = frozenset(
-    {"search_tasks", "select_candidate", "backlinks", "conflict_preview", "query_base"}
+    {
+        "search_tasks",
+        "select_candidate",
+        "backlinks",
+        "conflict_preview",
+        "query_base",
+        "summarize_today_notes",
+    }
 )
 _WORKFLOW_WRITE_ACTIONS = frozenset(
     {
@@ -249,6 +256,25 @@ _RESULT_NOTE = re.compile(
     r"по\s+результатам\s+(?:этой\s+)?(?:задачи|исследования|поиска)\.?$",
     re.IGNORECASE,
 )
+_RESULT_NOTE_CHARACTERISTICS = re.compile(
+    r"^(?:создай|сохрани|запиши)\s+"
+    r"(?:заметку\s+(?:в|для)\s+(?:obsidian|обсидиан)|"
+    r"в\s+(?:obsidian|обсидиан)\s+заметку)\s+"
+    r"с\s+(?:(?P<actual>актуальн\w+)\s+)?"
+    r"(?P<label>характеристик\w*|спецификаци\w*)\s+"
+    r"(?P<subject>[^\r\n\x00]{2,240}?)\.?$",
+    re.IGNORECASE,
+)
+_PUBLIC_MODEL_TOKEN = re.compile(
+    r"(?:\b(?=[A-Za-zА-Яа-яЁё0-9-]{3,}\b)(?=[A-Za-zА-Яа-яЁё0-9-]*[A-Za-zА-Яа-яЁё])"
+    r"(?=[A-Za-zА-Яа-яЁё0-9-]*\d)[A-Za-zА-Яа-яЁё0-9-]+\b|"
+    r"\b[A-Za-zА-Яа-яЁё]{2,16}\s+\d{2,5}\b)"
+)
+_CONTEXTUAL_RESEARCH_SUBJECT = re.compile(
+    r"\b(?:эт\w*|данн\w*|указанн\w*|упомянут\w*|мо\w*|наш\w*|"
+    r"файл\w*|документ\w*|вложени\w*|сообщени\w*|заметк\w*|архив\w*)\b",
+    re.IGNORECASE,
+)
 
 _OPERATION_MARKER = re.compile(
     r'<!-- friday:(?:create|append) operation="[0-9a-f]{64}" '
@@ -375,9 +401,33 @@ def obsidian_result_note_request(message: object) -> ObsidianResultNoteRequest |
     ):
         return None
     match = _RESULT_NOTE.fullmatch(text)
-    if match is None:
-        return None
-    task = unicodedata.normalize("NFC", match.group("task").strip())
+    if match is not None:
+        task = unicodedata.normalize("NFC", match.group("task").strip())
+    else:
+        characteristics = _RESULT_NOTE_CHARACTERISTICS.fullmatch(text)
+        if characteristics is None:
+            return None
+        subject = unicodedata.normalize(
+            "NFC",
+            characteristics.group("subject").strip(),
+        ).rstrip(" .?!")
+        if (
+            not subject
+            or _CONTEXTUAL_RESEARCH_SUBJECT.search(subject) is not None
+            or _PUBLIC_MODEL_TOKEN.search(subject) is None
+        ):
+            return None
+        noun = (
+            "Характеристики"
+            if characteristics.group("label").casefold().startswith("характеристик")
+            else "Спецификации"
+        )
+        label = f"Актуальные {noun.casefold()}" if characteristics.group("actual") else noun
+        # Keep the deferred task as an explicit question.  The isolated public
+        # research lane admits noun-phrase searches only when their request
+        # shape is unambiguous; punctuation also stays out of the derived path
+        # and heading through their existing canonicalizers.
+        task = f"{label} {subject}?"
     if not task or _has_unsafe_unicode_control(task, multiline=False):
         return None
     return ObsidianResultNoteRequest(task=task)

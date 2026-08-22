@@ -22,6 +22,7 @@ from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     _filename_clue_request,
+    _self_contained_public_product_spec_query,
     asks_for_the_web,
     file_turn_authority,
 )
@@ -44,6 +45,9 @@ NEWS_REQUEST = "Покажешь свежие новости за прошедш
 PUBLIC_URL = "https://public.synthetic.example.com/news"
 PUBLIC_FACT = "Синтетическая публичная новость подтверждена источником."
 PRIVATE_PREFIX = "PRIVATE-SYNTHETIC-DOC-CANARY"
+PRODUCT_URL = "https://public.synthetic.example.com/qnap-tvs-675"
+PRODUCT_FACT = "QNAP TVS-675 uses the synthetic PUBLIC-CPU-675 processor."
+PRIVATE_HISTORY_CANARY = "PRIVATE-PRODUCT-SPEC-HISTORY-CANARY"
 
 
 def test_foreign_news_sites_are_web_authority_without_becoming_a_file_summary() -> None:
@@ -79,6 +83,22 @@ def test_foreign_news_sites_are_web_authority_without_becoming_a_file_summary() 
         assert _filename_clue_request(web_scope) is None
 
 
+def test_public_product_spec_query_is_closed_and_non_deictic() -> None:
+    assert (
+        _self_contained_public_product_spec_query("в qnap TVS-675 какой процессор?")
+        == "qnap TVS-675 процессор"
+    )
+    assert _self_contained_public_product_spec_query("Какой CPU у QNAP TVS-675?") == "qnap TVS-675 cpu"
+    for unsafe_or_contextual in (
+        "а у него какой процессор?",
+        "в этом файле у qnap TVS-675 какой процессор?",
+        "в internal X-1 какой процессор?",
+        "«в qnap TVS-675 какой процессор?»",
+        "в qnap TVS-675 какой процессор?\nPRIVATE-CARRIER",
+    ):
+        assert _self_contained_public_product_spec_query(unsafe_or_contextual) == ""
+
+
 def _actor() -> ActorContext:
     return ActorContext(user_id=OWNER, preset_key="owner", source="synthetic-test")
 
@@ -102,8 +122,17 @@ def _tool(name: str) -> dict[str, Any]:
 class _SyntheticWebKernel:
     authorization = _AllowAll()
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        url: str = PUBLIC_URL,
+        fact: str = PUBLIC_FACT,
+        title: str = "Synthetic public news source",
+    ) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.url = url
+        self.fact = fact
+        self.title = title
 
     def get_tool_definitions(self, actor, topic=""):  # noqa: ANN001, ARG002
         return [_tool("web_research")]
@@ -129,10 +158,10 @@ class _SyntheticWebKernel:
                 **filter_proof,
                 "sources": [
                     {
-                        "url": PUBLIC_URL,
-                        "title": "Synthetic public news source",
-                        "text": PUBLIC_FACT,
-                        "text_length": len(PUBLIC_FACT),
+                        "url": self.url,
+                        "title": self.title,
+                        "text": self.fact,
+                        "text_length": len(self.fact),
                         "status_code": 200,
                         "error": "",
                         "truncated": False,
@@ -152,8 +181,16 @@ class _ScriptedModel:
     model = "synthetic-owner-regression"
     total_budget_sec = 1.0
 
-    def __init__(self, answers: dict[str, str]) -> None:
+    def __init__(
+        self,
+        answers: dict[str, str],
+        *,
+        web_fact: str = PUBLIC_FACT,
+        web_url: str = PUBLIC_URL,
+    ) -> None:
         self.answers = dict(answers)
+        self.web_fact = web_fact
+        self.web_url = web_url
         self.calls: list[dict[str, Any]] = []
 
     async def chat(self, messages, tools=None, **kwargs):  # noqa: ANN001, ARG002
@@ -163,9 +200,9 @@ class _ScriptedModel:
         }
         self.calls.append(snapshot)
         rendered = json.dumps(snapshot, ensure_ascii=False)
-        if PUBLIC_FACT in rendered and PUBLIC_URL in rendered:
+        if self.web_fact in rendered and self.web_url in rendered:
             return {
-                "content": f"{PUBLIC_FACT} {PUBLIC_URL}",
+                "content": f"{self.web_fact} {self.web_url}",
                 "tool_calls": None,
                 "_queue_wait_sec": 0.0,
             }
@@ -511,6 +548,73 @@ async def test_three_complete_bare_docx_summaries_then_isolated_news_excludes_hi
     assert PRIVATE_PREFIX not in public_payload
     assert "Загружен документ" not in public_payload
     assert PRIVATE_PREFIX not in outbound_payload
+
+
+@pytest.mark.asyncio
+async def test_qnap_product_spec_uses_isolated_web_after_private_history(
+    settings,
+    storage,
+) -> None:
+    storage.ensure_user(OWNER, preset_key="owner")
+    conversation = storage.create_conversation(OWNER, title="synthetic private history")
+    conversation_id = str(conversation["id"])
+    storage.store_message(
+        conversation_id,
+        OWNER,
+        "user",
+        f"Загружен документ: {PRIVATE_HISTORY_CANARY}.docx",
+        metadata={"had_attachments": True, "private_context_lineage": True},
+    )
+    storage.store_message(
+        conversation_id,
+        OWNER,
+        "assistant",
+        f"Приватная сводка: {PRIVATE_HISTORY_CANARY}",
+        metadata={"attachment_context_used": True, "private_context_lineage": True},
+    )
+
+    kernel = _SyntheticWebKernel(
+        url=PRODUCT_URL,
+        fact=PRODUCT_FACT,
+        title="Synthetic QNAP TVS-675 specification",
+    )
+    model = _ScriptedModel({}, web_fact=PRODUCT_FACT, web_url=PRODUCT_URL)
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=model,
+        kernel=kernel,
+    )
+    request = "в qnap TVS-675 какой процессор?"
+
+    response = await runtime.chat(
+        OWNER,
+        request,
+        actor=_actor(),
+        conversation_id=conversation_id,
+    )
+
+    assert kernel.calls == [
+        (
+            "web_research",
+            {"query": "qnap TVS-675 процессор", "max_sources": 3},
+        )
+    ]
+    assert response["tools_used"] == ["web_research"]
+    assert response["web_evidence_status"] == "sourced"
+    assert response["web_sources"] == [{"url": PRODUCT_URL, "title": "Synthetic QNAP TVS-675 specification"}]
+    assert PRODUCT_FACT in response["message"]
+    metadata = _stored_metadata(storage, response)
+    assert metadata["private_context_lineage"] is True
+    assert metadata["structural"].get("private_web_search_blocked") is not True
+
+    model_payload = json.dumps(model.calls, ensure_ascii=False)
+    outbound_payload = json.dumps(kernel.calls, ensure_ascii=False)
+    assert request in model_payload
+    assert PRODUCT_FACT in model_payload
+    assert PRIVATE_HISTORY_CANARY not in model_payload
+    assert PRIVATE_HISTORY_CANARY not in outbound_payload
+    assert "Загружен документ" not in model_payload
 
 
 @pytest.mark.asyncio

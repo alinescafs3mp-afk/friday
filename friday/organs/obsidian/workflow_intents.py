@@ -125,6 +125,12 @@ _SUMMARY_LINKS = re.compile(
     r"^добавь\s+туда\s+ссылки\s+на\s+заметки,\s*которые\s+мы\s+сегодня\s+использовали\.?$",
     re.IGNORECASE,
 )
+_SUMMARIZE_TODAY_NOTES = re.compile(
+    r"^(?:обобщи\s+(?:все\s+)?мои\s+(?:сегодняшние\s+заметки|заметки\s+за\s+сегодня)|"
+    r"сделай\s+сводку\s+по\s+(?:всем\s+)?моим\s+заметкам\s+за\s+сегодня)\s+"
+    r"(?:в|из)\s+(?:obsidian|обсидиан)\.?$",
+    re.IGNORECASE,
+)
 _BASE = re.compile(
     r"^создай\s+base\s+`?(?P<name>friday\s+active\s+notes)`?,\s*который\s+показывает\s+"
     r"заметки\s+проекта\s+(?P<project>friday)\s+со\s+статусом\s+не\s+`?(?P<status>done)`?\.\s*"
@@ -289,6 +295,8 @@ def _parse_obsidian_workflow_intent(
             {"action": "save_summary", "path": path, "day": today.isoformat()},
             path,
         )
+    if _SUMMARIZE_TODAY_NOTES.fullmatch(command):
+        return _read("summarize_today_notes", day=today.isoformat())
     if _SUMMARY_LINKS.fullmatch(command):
         return _write("append_summary_links", day=today.isoformat())
     match = _BASE.fullmatch(command)

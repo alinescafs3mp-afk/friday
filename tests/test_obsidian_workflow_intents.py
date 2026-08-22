@@ -181,6 +181,25 @@ def test_live_approximate_date_search_infers_the_current_year() -> None:
 @pytest.mark.parametrize(
     "message",
     [
+        "Обобщи все мои сегодняшние заметки в обсидиан",
+        "Обобщи все мои сегодняшние заметки в obsidian",
+    ],
+)
+def test_live_today_note_summary_phrasings_bind_the_exact_local_day(message: str) -> None:
+    intent = parse_obsidian_workflow_intent(message, today=TODAY)
+
+    assert intent is not None
+    assert intent.tool_name == WORKFLOW_READ_TOOL
+    assert intent.arguments == {
+        "action": "summarize_today_notes",
+        "day": "2026-08-22",
+    }
+    assert intent.explicit_path == ""
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
         "Не удаляй тестовую заметку `Scratch/Delete Me.md`.",
         "Объясни фразу: Открой вторую.",
         "Добавь туда что-нибудь.",
