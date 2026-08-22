@@ -27,7 +27,7 @@ from friday.interaction_control_plane.turn_trace import (
 )
 
 INTERACTION_TRACE_METADATA_KEY = "interaction_trace"
-_ASSISTANT_METADATA_MAX_BYTES = 16_384
+_ASSISTANT_METADATA_MAX_BYTES = 65_536
 
 
 def load_trace_namespace_key(executor: Any) -> bytes:
@@ -175,7 +175,7 @@ def attach_trace_to_metadata(
 ) -> bool:
     """Attach a trace only when the whole stored metadata remains readable.
 
-    Several continuity readers intentionally reject metadata above 16 KiB.
+    Assistant continuity readers accept one bounded 64 KiB metadata object.
     Tracing is observational and must never make attachment lineage or the
     answer itself disappear, so an over-budget trace is omitted atomically.
     """

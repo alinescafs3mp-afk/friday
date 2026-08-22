@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from friday.execution_kernel import track_request_effects
+from friday.file_evidence import stamp_current_turn_file_reference
 from friday.interaction_control_plane import (
     CapabilityClass,
     CompletionDecision,
@@ -27,8 +28,10 @@ from friday.interaction_control_plane import (
 from friday.interaction_control_plane.runtime_trace import INTERACTION_TRACE_METADATA_KEY
 from friday.model_profiles import ModelProfileLease, ModelRequirements
 from friday.orchestration import (
+    OrchestrationRouter,
     ReadOnlyAttachmentReference,
     ReadOnlyRouteRequest,
+    RouteClass,
     TurnInput,
     TurnPlan,
 )
@@ -355,6 +358,44 @@ async def test_file_handler_synthesizes_verifies_and_atomically_publishes(settin
 
 
 @pytest.mark.asyncio
+async def test_router_level_trace_latency_is_clamped_instead_of_omitted(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    from friday.orchestration import file_read as file_read_module
+
+    reference = _register(storage, settings, text="Old router trace source.", filename="old.txt")
+    model = _Model("Источник прочитан. [A1]")
+    handler = _handler(storage, settings, model)
+    request, turn, plan = _request(reference, conversation_id=None)
+    request = replace(
+        request,
+        turn_deadline=None,
+        orchestration_started_at=0.0,
+        planner_model_calls_lower_bound=1,
+    )
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+
+    real_monotonic = time.monotonic
+
+    class _LongRunningClock:
+        @staticmethod
+        def monotonic() -> float:
+            return real_monotonic() + 100_000.0
+
+    monkeypatch.setattr(file_read_module, "time", _LongRunningClock)
+    result = await handler.handle(request, turn, plan, preparation)
+
+    messages = storage.get_conversation_messages(result.conversation_id, user_id="alice")
+    trace = TurnTrace.parse(json.loads(messages[-1]["metadata_json"])[INTERACTION_TRACE_METADATA_KEY])
+    assert trace.budget.latency_ms == 86_400_000
+    assert trace.budget.model_calls == 3
+    assert trace.budget.model_call_accounting is CountAccounting.LOWER_BOUND
+
+
+@pytest.mark.asyncio
 async def test_file_handler_publishes_when_shadow_trace_key_is_unavailable(
     settings,
     storage,
@@ -382,6 +423,88 @@ async def test_file_handler_publishes_when_shadow_trace_key_is_unavailable(
     assistant_metadata = json.loads(messages[-1]["metadata_json"])
     assert INTERACTION_TRACE_METADATA_KEY not in assistant_metadata
     assert assistant_metadata["verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_real_router_trace_includes_planning_and_router_level_latency(settings, storage) -> None:
+    reference = _register(storage, settings, text="Router trace source.", filename="router.txt")
+    raw = storage.get_raw_object(reference.raw_object_id, "alice")
+    assert raw is not None
+
+    class _CurrentTurnCarrier(dict[str, Any]):
+        pass
+
+    attachment = _CurrentTurnCarrier(
+        {
+            "filename": "router.txt",
+            "mime_type": "text/plain",
+            "size_bytes": len("Router trace source."),
+            "raw_object_id": reference.raw_object_id,
+            "persisted": True,
+            "current_turn_only": True,
+            "transient_text": "available",
+        }
+    )
+    stamp_current_turn_file_reference(attachment, raw)
+
+    class _Planner:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def plan(self, turn: TurnInput, *, turn_deadline: float | None = None) -> TurnPlan:
+            del turn, turn_deadline
+            raise AssertionError("V12 router must use attested planning")
+
+        async def plan_attested(
+            self,
+            turn: TurnInput,
+            *,
+            turn_deadline: float | None = None,
+        ) -> TurnPlan:
+            del turn, turn_deadline
+            self.calls += 1
+            await asyncio.sleep(0.03)
+            return _plan()
+
+    class _NeverLegacy:
+        async def chat(self, user_id: str, message: str, **kwargs: Any) -> dict[str, Any]:
+            del user_id, message, kwargs
+            raise AssertionError("eligible V12 route must not fall back to legacy")
+
+    planner = _Planner()
+    model = _Model("Источник прочитан через V12 router. [A1]")
+    handler = _handler(storage, settings, model)
+    router = OrchestrationRouter(
+        _NeverLegacy(),
+        planner,
+        mode="v12",
+        allowed_routes=("file_read",),
+        route_handlers={RouteClass.FILE_READ: handler},
+        planner_timeout_sec=1.0,
+        preparation_timeout_sec=1.0,
+        route_timeout_sec=10.0,
+    )
+
+    result = await router.chat(
+        "alice",
+        "Что сказано в документе?",
+        actor=_actor(),
+        attachments=[attachment],
+        enable_tools=True,
+    )
+
+    assert planner.calls == 1
+    messages = storage.get_conversation_messages(str(result["conversation_id"]), user_id="alice")
+    trace = TurnTrace.parse(json.loads(messages[-1]["metadata_json"])[INTERACTION_TRACE_METADATA_KEY])
+    assert [step.capability for step in trace.steps] == [
+        CapabilityClass.MODEL_PLANNING,
+        CapabilityClass.DOCUMENT_RETRIEVAL,
+        CapabilityClass.MODEL_SYNTHESIS,
+        CapabilityClass.VERIFICATION,
+    ]
+    assert trace.budget.model_calls == 3
+    assert trace.budget.model_call_accounting is CountAccounting.LOWER_BOUND
+    assert trace.budget.latency_ms >= 20
 
 
 @pytest.mark.asyncio

@@ -309,6 +309,22 @@ def test_trace_attachment_is_atomic_and_records_only_assistant_commit_scope() ->
     assert restored.publication is PublicationStatus.ASSISTANT_COMMITTED
 
 
+def test_default_trace_metadata_budget_matches_the_assistant_continuity_ceiling() -> None:
+    metadata = {
+        "conversation_attachment_raw_ids": ["raw_0123456789abcdef"],
+        "padding": "x" * 50_000,
+    }
+
+    assert len(json.dumps(metadata, ensure_ascii=False, sort_keys=True).encode("utf-8")) > 16_384
+    assert attach_trace_to_metadata(metadata, _trace()) is True
+    assert len(json.dumps(metadata, ensure_ascii=False, sort_keys=True).encode("utf-8")) <= 65_536
+
+    oversized = {"padding": "x" * 65_536}
+    before = dict(oversized)
+    assert attach_trace_to_metadata(oversized, _trace()) is False
+    assert oversized == before
+
+
 @pytest.mark.parametrize(
     ("raw_identifier", "namespace_key"),
     [

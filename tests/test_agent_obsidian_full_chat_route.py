@@ -13,6 +13,14 @@ import pytest
 
 from friday.agent_runtime import AgentRuntime
 from friday.execution_kernel import ToolResult
+from friday.interaction_control_plane import (
+    CapabilityClass,
+    CompletionDecision,
+    FailureReason,
+    FailureStage,
+    OutcomeStatus,
+    TurnTrace,
+)
 from friday.permissions import ActorContext
 
 _LIVE_PROMPT = (
@@ -723,7 +731,15 @@ async def test_write_receipt_is_hidden_when_authority_is_revoked_during_call(
     assert "Не могу подтвердить" in reply["message"]
     assert "автоматически его не повторяю" in reply["message"]
     stored = storage.get_message(str(reply["message_id"]), "alice")
+    assert stored is not None
     assert str(stored["content"]) == reply["message"]
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    trace = TurnTrace.parse(metadata["interaction_trace"])
+    outcomes = {step.capability: step.outcome for step in trace.steps}
+    assert outcomes[CapabilityClass.OBSIDIAN] is OutcomeStatus.SUCCEEDED
+    assert trace.failure_stage is FailureStage.PUBLICATION
+    assert trace.failure_reason is FailureReason.AUTHORITY_DENIED
+    assert trace.completion is CompletionDecision.FAILED
 
 
 @pytest.mark.asyncio

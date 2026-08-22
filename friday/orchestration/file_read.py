@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
 import time
 from dataclasses import dataclass, field
@@ -74,6 +75,7 @@ _SYNTHESIS_MAX_TOKENS = 512
 _PREPARATION_BUDGET_SEC = 4.5
 _PUBLICATION_RESERVE_SEC = 2.0
 _MAX_ATTESTED_INPUT_UTF8_BYTES = 5_500
+_MAX_TRACE_LATENCY_MS = 86_400_000
 LOGGER = logging.getLogger(__name__)
 
 
@@ -442,6 +444,7 @@ class V12FileReadHandler:
         *,
         deadline: float,
         trace_started_at: float,
+        trace_planner_model_calls: int,
     ) -> tuple[str, str, str]:
         _require_deadline(
             deadline,
@@ -563,13 +566,21 @@ class V12FileReadHandler:
                         intent=IntentClass.DOCUMENT_WORK,
                         playbook=PlaybookClass.DIRECT,
                         capabilities=(
+                            *((CapabilityClass.MODEL_PLANNING,) if trace_planner_model_calls else ()),
                             CapabilityClass.DOCUMENT_RETRIEVAL,
                             CapabilityClass.MODEL_SYNTHESIS,
                             CapabilityClass.VERIFICATION,
                         ),
-                        latency_ms=max(0, int((time.monotonic() - trace_started_at) * 1_000)),
-                        model_calls=2,
-                        model_call_accounting=CountAccounting.COMPLETE,
+                        latency_ms=min(
+                            _MAX_TRACE_LATENCY_MS,
+                            max(0, int((time.monotonic() - trace_started_at) * 1_000)),
+                        ),
+                        model_calls=2 + trace_planner_model_calls,
+                        model_call_accounting=(
+                            CountAccounting.LOWER_BOUND
+                            if trace_planner_model_calls
+                            else CountAccounting.COMPLETE
+                        ),
                         capability_calls=1,
                         capability_call_accounting=CountAccounting.COMPLETE,
                         authority_rechecked=True,
@@ -605,7 +616,26 @@ class V12FileReadHandler:
         prepared = self._prepared_matches(plan, preparation)
         if prepared is None:
             raise V12FileReadError("file preparation authority is invalid")
-        trace_started_at = time.monotonic()
+        handler_started_at = time.monotonic()
+        raw_orchestration_started_at = request.orchestration_started_at
+        try:
+            trace_start_candidate = (
+                float(raw_orchestration_started_at)
+                if isinstance(raw_orchestration_started_at, (int, float))
+                and not isinstance(raw_orchestration_started_at, bool)
+                else math.nan
+            )
+        except (TypeError, OverflowError, ValueError):
+            trace_start_candidate = math.nan
+        router_trace_scope = bool(
+            math.isfinite(trace_start_candidate)
+            and 0.0 <= trace_start_candidate <= handler_started_at
+            and isinstance(request.planner_model_calls_lower_bound, int)
+            and not isinstance(request.planner_model_calls_lower_bound, bool)
+            and 0 < request.planner_model_calls_lower_bound <= 1_022
+        )
+        trace_started_at = trace_start_candidate if router_trace_scope else handler_started_at
+        trace_planner_model_calls = request.planner_model_calls_lower_bound if router_trace_scope else 0
         deadline = request.turn_deadline or (time.monotonic() + 60.0)
         if not await self._model.lease_is_current(
             prepared.model_lease,
@@ -648,6 +678,7 @@ class V12FileReadHandler:
             answer,
             deadline=deadline,
             trace_started_at=trace_started_at,
+            trace_planner_model_calls=trace_planner_model_calls,
         )
         return ReadOnlyRouteResult(
             message=answer,

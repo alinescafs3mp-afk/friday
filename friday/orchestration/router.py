@@ -90,6 +90,11 @@ class ReadOnlyRouteRequest:
     reply_assistant_reference: bool
     reply_assistant_message_id: str | None
     turn_deadline: float | None
+    # Code-owned observability scope. Direct handler callers leave these at the
+    # defaults; the real router supplies the start preceding its attested
+    # planner call and the planner model-call lower bound.
+    orchestration_started_at: float | None = field(default=None, repr=False, compare=False)
+    planner_model_calls_lower_bound: int = field(default=0, repr=False, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -666,6 +671,8 @@ class OrchestrationRouter:
             reply_assistant_reference=reply_assistant_reference,
             reply_assistant_message_id=reply_assistant_message_id,
             turn_deadline=handler_deadline,
+            orchestration_started_at=started,
+            planner_model_calls_lower_bound=1,
         )
         preparation_deadline = min(handler_deadline, time.monotonic() + preparation_budget)
         try:

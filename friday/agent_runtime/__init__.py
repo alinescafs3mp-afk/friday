@@ -1544,6 +1544,32 @@ _ATTACHMENT_CROSS_CONTEXT_REQUEST = re.compile(
 _WEB_TOOL_NAMES = frozenset({"web_search", "web_fetch", "web_research"})
 _OUTBOUND_TOOL_NAMES = _WEB_TOOL_NAMES | frozenset({"code_run", "data_query"})
 
+# Privacy-safe, process-local accounting for the coarse legacy Turn Trace. The
+# verifier evidence list is deliberately capped and therefore cannot double as
+# an execution ledger: a seventh successful result must not become a durable
+# ``unavailable`` outcome merely because its body did not fit that list.
+_TRACE_DOCUMENT_READ_TOOL_NAMES = frozenset(
+    {
+        "memory_search",
+        "source_search",
+        "user_knowledge_search",
+        "workspace_read",
+    }
+)
+_TRACE_MESSAGE_READ_TOOL_NAMES = frozenset({"message_search", "what_happened"})
+_TRACE_ENTITY_READ_TOOL_NAMES = frozenset({"entity_lookup", "user_activity"})
+_TRACE_COLLECT_FILE_TOOL_NAMES = frozenset({"collect_files"})
+_TRACE_MAKE_FILE_TOOL_NAMES = frozenset({"make_file"})
+_TRACE_FILE_EFFECT_TOOL_NAMES = _TRACE_COLLECT_FILE_TOOL_NAMES | _TRACE_MAKE_FILE_TOOL_NAMES
+_TRACE_CLOSED_TOOL_NAMES = frozenset(
+    {
+        *_TRACE_DOCUMENT_READ_TOOL_NAMES,
+        *_TRACE_MESSAGE_READ_TOOL_NAMES,
+        *_TRACE_ENTITY_READ_TOOL_NAMES,
+        *_TRACE_FILE_EFFECT_TOOL_NAMES,
+    }
+)
+
 # A private-source turn uses a closed tool classification.  The model-facing
 # schema is an authority surface, so an unclassified future connector must not
 # become usable merely because its name is absent from a denylist.  Local tools
@@ -29347,6 +29373,10 @@ class AgentContext:
     #: persisted structurally so a terse “и всё?” can continue only that route,
     #: never an unrelated preceding conversation.
     person_document_inventory_settled: bool = False
+    #: The settled inventory above has a validated result rather than an
+    #: UNKNOWN explanation. Process-local trace aggregation uses this bit to
+    #: distinguish independent code-owned success from a failed tool attempt.
+    person_document_inventory_succeeded: bool = False
     #: The inventory above was proven to target the authenticated speaker.
     #: Terse date-range corrections may inherit only this stronger marker.
     person_document_inventory_self: bool = False
@@ -29548,6 +29578,10 @@ class AgentContext:
     #: успешный инструмент не имеет права превратить сделанное напоминание в
     #: «не подтверждено». Строки живут только в памяти текущего хода.
     successful_reminders: list[dict[str, Any]] = field(default_factory=list)
+    #: Uncapped, process-local terminal outcomes for the closed trace tool set.
+    #: Only allowlisted names and CapabilityStatus values enter this ledger; no
+    #: arguments, result bodies or provider strings can reach durable metadata.
+    trace_tool_outcomes: list[tuple[str, CapabilityStatus]] = field(default_factory=list)
     #: Чего система НЕ решила: остаток реплики, на который отвечает модель.
     #: Пустая строка ЗНАЧИМА только вместе с `remainder_known`.
     open_remainder: str = ""
@@ -29616,6 +29650,115 @@ class AgentContext:
     #: двести. Тот же вопрос, что у `shown` против `total` во всех остальных
     #: местах, только здесь ответ уходил человеку от лица модели.
     matched_at_least: int = 0
+
+
+def _record_trace_tool_outcome(
+    context: AgentContext | None,
+    tool_name: str,
+    outcome: CapabilityStatus,
+) -> None:
+    """Append one private closed outcome without consulting bounded evidence."""
+
+    if (
+        context is None
+        or tool_name not in _TRACE_CLOSED_TOOL_NAMES
+        or not isinstance(outcome, CapabilityStatus)
+        or outcome is CapabilityStatus.INACTIVE
+    ):
+        return
+    ledger = getattr(context, "trace_tool_outcomes", None)
+    if not isinstance(ledger, list):
+        return
+    ledger.append((tool_name, outcome))
+
+
+def _trace_failure_status(error: object) -> CapabilityStatus:
+    """Reduce a private provider error to one closed, content-free status."""
+
+    normalized = " ".join(str(error or "").casefold().split())
+    if normalized.startswith("authorization denied") or ("право" in normalized and "отозван" in normalized):
+        return CapabilityStatus.DENIED
+    if normalized.startswith(("unknown tool", "tool is not initialized")):
+        return CapabilityStatus.UNAVAILABLE
+    if normalized.startswith("invalid tool arguments") or "не запущен" in normalized:
+        return CapabilityStatus.NOT_STARTED
+    return CapabilityStatus.FAILED
+
+
+def _trace_tool_result_status(tool_name: str, result: Any) -> CapabilityStatus:
+    """Project one final ToolResult-like value into the closed trace vocabulary."""
+
+    if tool_name == "collect_files":
+        data = getattr(result, "data", None)
+        payload = data if isinstance(data, Mapping) else {}
+        attachment = getattr(result, "attachment", None)
+        found = payload.get("found")
+        if (
+            getattr(result, "success", False) is True
+            and payload.get("collected") is False
+            and type(found) is int
+            and found == 0
+        ):
+            return CapabilityStatus.EMPTY
+        if getattr(result, "success", False) is True and (
+            payload.get("collected") is True or isinstance(attachment, Mapping)
+        ):
+            return CapabilityStatus.SUCCEEDED
+        if result is None or getattr(result, "success", False) is not True:
+            return _trace_failure_status(getattr(result, "error", ""))
+        return CapabilityStatus.FAILED
+    if result is None or getattr(result, "success", False) is not True:
+        return _trace_failure_status(getattr(result, "error", ""))
+    return CapabilityStatus.SUCCEEDED
+
+
+def _aggregate_trace_tool_outcomes(
+    context: AgentContext,
+    tool_names: frozenset[str],
+) -> CapabilityStatus:
+    """Aggregate terminal attempts for one coarse capability without prose."""
+
+    return _aggregate_trace_statuses(
+        *(
+            outcome
+            for tool_name, outcome in getattr(context, "trace_tool_outcomes", ())
+            if tool_name in tool_names and isinstance(outcome, CapabilityStatus)
+        )
+    )
+
+
+def _aggregate_trace_statuses(*outcomes: CapabilityStatus) -> CapabilityStatus:
+    """Aggregate independent closed outcomes for one coarse capability."""
+
+    active = [outcome for outcome in outcomes if outcome is not CapabilityStatus.INACTIVE]
+    if not active:
+        return CapabilityStatus.INACTIVE
+    unique = set(active)
+    if len(unique) == 1:
+        return active[0]
+    # A policy denial is never softened into a provider failure or an apparent
+    # partial success: retry/privacy semantics depend on preserving it.
+    if CapabilityStatus.DENIED in unique:
+        return CapabilityStatus.DENIED
+    if CapabilityStatus.UNCERTAIN in unique:
+        return CapabilityStatus.UNCERTAIN
+    # EMPTY is a completed, validated read just like SUCCEEDED (with zero
+    # rows). Combining either with an incomplete sibling is therefore PARTIAL,
+    # never an exhaustive empty result.
+    if unique & {
+        CapabilityStatus.SUCCEEDED,
+        CapabilityStatus.PARTIAL,
+        CapabilityStatus.EMPTY,
+    }:
+        return CapabilityStatus.PARTIAL
+    for outcome in (
+        CapabilityStatus.FAILED,
+        CapabilityStatus.UNAVAILABLE,
+        CapabilityStatus.NOT_STARTED,
+    ):
+        if outcome in unique:
+            return outcome
+    return CapabilityStatus.UNAVAILABLE
 
 
 class AgentRuntime:
@@ -42435,6 +42578,21 @@ class AgentRuntime:
         # The provider re-read is the last await before the atomic local
         # authorization+message commit. Keep it here so no later model, parser or
         # renderer can widen the external-file TOCTOU window.
+        trace_attachment_execution_status = (
+            CapabilityStatus.UNAVAILABLE
+            if attachment_expected_count > 0 and attachment_readable_count == 0
+            else CapabilityStatus.PARTIAL
+            if attachment_expected_count > 0
+            and (attachment_readable_count < attachment_expected_count or not attachment_coverage_complete)
+            else CapabilityStatus.SUCCEEDED
+            if attachment_readable_count > 0
+            else CapabilityStatus.INACTIVE
+        )
+        trace_other_document_execution_status = (
+            CapabilityStatus.SUCCEEDED
+            if workspace_inbox_resolution.attachment is not None or bool(context.filename_result_raw_ids)
+            else CapabilityStatus.INACTIVE
+        )
         workspace_publication_authorized = True
         if workspace_inbox_resolution.attachment is not None:
             workspace_publication_authorized = await self._workspace_attachment_still_current(
@@ -42749,31 +42907,57 @@ class AgentRuntime:
                 for item in (raw_trace_evidence if isinstance(raw_trace_evidence, list) else ())
                 if isinstance(item, Mapping)
             }
-            trace_document_tool_names = frozenset(
-                {
-                    "collect_files",
-                    "memory_search",
-                    "source_search",
-                    "user_knowledge_search",
-                    "workspace_read",
-                }
+            trace_document_ledger_status = _aggregate_trace_tool_outcomes(
+                context,
+                _TRACE_DOCUMENT_READ_TOOL_NAMES,
             )
-            trace_message_tool_names = frozenset({"message_search", "what_happened"})
-            trace_entity_tool_names = frozenset({"entity_lookup", "user_activity"})
-            trace_document_tool_attempted = bool(trace_tool_names & trace_document_tool_names)
-            trace_document_tool_succeeded = bool(trace_evidence_tool_names & trace_document_tool_names)
-            trace_message_tool_attempted = bool(trace_tool_names & trace_message_tool_names)
-            trace_message_tool_succeeded = bool(trace_evidence_tool_names & trace_message_tool_names)
-            trace_entity_tool_attempted = bool(trace_tool_names & trace_entity_tool_names)
-            trace_entity_tool_succeeded = bool(trace_evidence_tool_names & trace_entity_tool_names)
-            trace_document_used = bool(
-                assistant_used_attachment
-                or attachment_expected_count > 0
-                or context.source_search_used
-                or context.filename_result_settled
-                or workspace_inbox_resolution.attachment is not None
-                or trace_document_tool_attempted
-                or trace_document_tool_succeeded
+            trace_message_ledger_status = _aggregate_trace_tool_outcomes(
+                context,
+                _TRACE_MESSAGE_READ_TOOL_NAMES,
+            )
+            trace_entity_ledger_status = _aggregate_trace_tool_outcomes(
+                context,
+                _TRACE_ENTITY_READ_TOOL_NAMES,
+            )
+            trace_collect_files_status = _aggregate_trace_tool_outcomes(
+                context,
+                _TRACE_COLLECT_FILE_TOOL_NAMES,
+            )
+            trace_make_file_status = _aggregate_trace_tool_outcomes(
+                context,
+                _TRACE_MAKE_FILE_TOOL_NAMES,
+            )
+            trace_document_tool_attempted = bool(
+                trace_document_ledger_status is not CapabilityStatus.INACTIVE
+                or trace_tool_names & _TRACE_DOCUMENT_READ_TOOL_NAMES
+            )
+            trace_document_tool_succeeded = bool(
+                trace_document_ledger_status is CapabilityStatus.SUCCEEDED
+                or trace_document_ledger_status is CapabilityStatus.INACTIVE
+                and trace_evidence_tool_names & _TRACE_DOCUMENT_READ_TOOL_NAMES
+            )
+            trace_message_tool_attempted = bool(
+                trace_message_ledger_status is not CapabilityStatus.INACTIVE
+                or trace_tool_names & _TRACE_MESSAGE_READ_TOOL_NAMES
+            )
+            trace_message_tool_succeeded = bool(
+                trace_message_ledger_status is CapabilityStatus.SUCCEEDED
+                or trace_message_ledger_status is CapabilityStatus.INACTIVE
+                and trace_evidence_tool_names & _TRACE_MESSAGE_READ_TOOL_NAMES
+            )
+            trace_entity_tool_attempted = bool(
+                trace_entity_ledger_status is not CapabilityStatus.INACTIVE
+                or trace_tool_names & _TRACE_ENTITY_READ_TOOL_NAMES
+            )
+            trace_entity_tool_succeeded = bool(
+                trace_entity_ledger_status is CapabilityStatus.SUCCEEDED
+                or trace_entity_ledger_status is CapabilityStatus.INACTIVE
+                and trace_evidence_tool_names & _TRACE_ENTITY_READ_TOOL_NAMES
+            )
+            trace_message_ambiguity = bool(
+                message_locate_flow
+                and context.message_locate_pending_action
+                and not context.message_locate_evidence_ready
             )
             trace_ambiguity = bool(
                 context.person_activity_resolution_failed
@@ -42783,92 +42967,115 @@ class AgentRuntime:
                     and not context.filename_selected_raw_id
                     and bool(context.filename_pending_action)
                 )
-                or bool(
-                    message_locate_flow
-                    and context.message_locate_pending_action
-                    and not context.message_locate_evidence_ready
-                )
+                or trace_message_ambiguity
             )
-            trace_partial_coverage = bool(
+            trace_document_partial_coverage = bool(
                 context.source_search_page_capped
-                or web_evidence_status == "partial"
-                or (
-                    attachment_expected_count > 0
-                    and (
-                        attachment_readable_count < attachment_expected_count
-                        or not attachment_coverage_complete
-                    )
-                )
+                or trace_attachment_execution_status is CapabilityStatus.PARTIAL
             )
-            trace_document_status = (
-                CapabilityStatus.INACTIVE
-                if not trace_document_used
-                else CapabilityStatus.DENIED
-                if (
-                    attachment_authority_changed_before_publication
-                    or source_search_authority_changed_before_publication
-                )
-                else CapabilityStatus.UNAVAILABLE
-                if attachment_expected_count > 0 and attachment_readable_count == 0
-                else CapabilityStatus.EMPTY
-                if (
-                    context.source_search_used
-                    and context.source_search_result_expected_count == 0
-                    and attachment_expected_count == 0
-                )
-                else CapabilityStatus.PARTIAL
-                if trace_partial_coverage
-                else CapabilityStatus.UNAVAILABLE
-                if trace_document_tool_attempted and not trace_document_tool_succeeded
+            trace_partial_coverage = bool(trace_document_partial_coverage or web_evidence_status == "partial")
+            trace_legacy_document_tool_status = (
+                CapabilityStatus.EMPTY
+                if trace_document_ledger_status is CapabilityStatus.INACTIVE
+                and context.source_search_used
+                and context.source_search_result_expected_count == 0
+                and "source_search" in trace_evidence_tool_names
                 else CapabilityStatus.SUCCEEDED
+                if trace_document_ledger_status is CapabilityStatus.INACTIVE and trace_document_tool_succeeded
+                else CapabilityStatus.UNAVAILABLE
+                if trace_document_ledger_status is CapabilityStatus.INACTIVE
+                and (trace_document_tool_attempted or context.source_search_used)
+                else CapabilityStatus.INACTIVE
             )
-            trace_message_status = (
-                CapabilityStatus.INACTIVE
-                if not message_locate_flow
+            trace_document_status = _aggregate_trace_statuses(
+                trace_document_ledger_status,
+                trace_legacy_document_tool_status,
+                trace_attachment_execution_status,
+                trace_other_document_execution_status,
+            )
+            if trace_document_status is CapabilityStatus.SUCCEEDED and trace_document_partial_coverage:
+                trace_document_status = CapabilityStatus.PARTIAL
+            trace_legacy_message_status = (
+                CapabilityStatus.SUCCEEDED
+                if trace_message_ledger_status is CapabilityStatus.INACTIVE and trace_message_tool_succeeded
+                else CapabilityStatus.UNAVAILABLE
+                if trace_message_ledger_status is CapabilityStatus.INACTIVE and trace_message_tool_attempted
+                else CapabilityStatus.INACTIVE
+            )
+            trace_message_structural_status = (
+                CapabilityStatus.SUCCEEDED
+                if context.message_locate_evidence_ready
+                else CapabilityStatus.PARTIAL
+                if trace_message_ambiguity
+                else CapabilityStatus.EMPTY
+                if message_locate_flow
                 and not trace_message_tool_attempted
                 and not trace_message_tool_succeeded
-                else CapabilityStatus.SUCCEEDED
-                if context.message_locate_evidence_ready or trace_message_tool_succeeded
-                else CapabilityStatus.PARTIAL
-                if trace_ambiguity
+                else CapabilityStatus.INACTIVE
+            )
+            trace_message_status = _aggregate_trace_statuses(
+                trace_message_ledger_status,
+                trace_legacy_message_status,
+                trace_message_structural_status,
+            )
+            trace_legacy_entity_status = (
+                CapabilityStatus.SUCCEEDED
+                if trace_entity_ledger_status is CapabilityStatus.INACTIVE and trace_entity_tool_succeeded
                 else CapabilityStatus.UNAVAILABLE
-                if trace_message_tool_attempted
-                else CapabilityStatus.EMPTY
+                if trace_entity_ledger_status is CapabilityStatus.INACTIVE and trace_entity_tool_attempted
+                else CapabilityStatus.INACTIVE
             )
-            trace_entity_used = bool(
-                trace_structural.get("person_document_inventory") is True
-                or trace_structural.get("person_document_inventory_self") is True
-                or context.person_activity_resolution_failed
-                or trace_entity_tool_attempted
-                or trace_entity_tool_succeeded
-            )
-            trace_entity_status = (
-                CapabilityStatus.INACTIVE
-                if not trace_entity_used
+            trace_entity_structural_status = (
+                CapabilityStatus.SUCCEEDED
+                if context.person_document_inventory_succeeded
                 else CapabilityStatus.UNAVAILABLE
                 if context.person_activity_resolution_failed
-                or trace_entity_tool_attempted
-                and not trace_entity_tool_succeeded
-                else CapabilityStatus.SUCCEEDED
+                else CapabilityStatus.NOT_STARTED
+                if context.person_document_inventory_settled
+                else CapabilityStatus.INACTIVE
+            )
+            trace_entity_status = _aggregate_trace_statuses(
+                trace_entity_ledger_status,
+                trace_legacy_entity_status,
+                trace_entity_structural_status,
             )
             trace_obsidian_status = (
                 CapabilityStatus.INACTIVE
                 if not obsidian_owned_response
-                else CapabilityStatus.DENIED
-                if obsidian_authority_changed_before_publication
                 else CapabilityStatus.fail_closed(response.get("_obsidian_outcome"))
             )
-            trace_file_attempted = bool(
-                response.get("file_clips")
+            trace_non_collect_file_attempted = bool(
+                trace_make_file_status is not CapabilityStatus.INACTIVE
                 or context.late_make_file_attempts > 0
                 or "make_file" in trace_tool_names
             )
-            trace_file_status = (
-                CapabilityStatus.INACTIVE
-                if not trace_file_attempted
+            trace_file_clips_present = bool(response.get("file_clips"))
+            trace_legacy_make_file_status = (
+                CapabilityStatus.SUCCEEDED
+                if trace_make_file_status is CapabilityStatus.INACTIVE
+                and "make_file" in trace_evidence_tool_names
                 else CapabilityStatus.SUCCEEDED
-                if response.get("file_clips")
+                if trace_make_file_status is CapabilityStatus.INACTIVE
+                and trace_non_collect_file_attempted
+                and trace_collect_files_status is CapabilityStatus.INACTIVE
+                and trace_file_clips_present
                 else CapabilityStatus.FAILED
+                if trace_make_file_status is CapabilityStatus.INACTIVE and trace_non_collect_file_attempted
+                else CapabilityStatus.INACTIVE
+            )
+            trace_legacy_file_status = (
+                CapabilityStatus.SUCCEEDED
+                if trace_collect_files_status is CapabilityStatus.INACTIVE
+                and trace_make_file_status is CapabilityStatus.INACTIVE
+                and trace_legacy_make_file_status is CapabilityStatus.INACTIVE
+                and trace_file_clips_present
+                else CapabilityStatus.INACTIVE
+            )
+            trace_file_status = _aggregate_trace_statuses(
+                trace_collect_files_status,
+                trace_make_file_status,
+                trace_legacy_make_file_status,
+                trace_legacy_file_status,
             )
             trace_model_used = bool(
                 trace_structural.get("model_spoke") is True
@@ -42882,8 +43089,50 @@ class AgentRuntime:
                 if response.get("llm_failed")
                 else CapabilityStatus.SUCCEEDED
             )
-            trace_capability_calls = (
-                min(len(raw_trace_tools), 1_024) if isinstance(raw_trace_tools, (list, tuple)) else 0
+            trace_partial_coverage = bool(
+                trace_partial_coverage
+                or CapabilityStatus.PARTIAL
+                in {
+                    trace_document_status,
+                    trace_message_status,
+                    trace_entity_status,
+                    trace_file_status,
+                }
+            )
+            public_tool_counts = Counter(
+                str(name)
+                for name in (raw_trace_tools if isinstance(raw_trace_tools, (list, tuple)) else ())
+                if isinstance(name, str)
+            )
+            closed_tool_terminal_counts = Counter(
+                tool_name
+                for tool_name, outcome in getattr(context, "trace_tool_outcomes", ())
+                if tool_name in _TRACE_CLOSED_TOOL_NAMES
+                and isinstance(outcome, CapabilityStatus)
+                and outcome is not CapabilityStatus.INACTIVE
+            )
+            closed_tool_started_counts = Counter(
+                tool_name
+                for tool_name, outcome in getattr(context, "trace_tool_outcomes", ())
+                if tool_name in _TRACE_CLOSED_TOOL_NAMES
+                and isinstance(outcome, CapabilityStatus)
+                and outcome not in {CapabilityStatus.INACTIVE, CapabilityStatus.NOT_STARTED}
+            )
+            trace_capability_calls = min(
+                1_024,
+                sum(
+                    count
+                    for tool_name, count in public_tool_counts.items()
+                    if tool_name not in _TRACE_CLOSED_TOOL_NAMES
+                )
+                + sum(
+                    closed_tool_started_counts.get(tool_name, 0)
+                    + max(
+                        0,
+                        public_tool_counts.get(tool_name, 0) - closed_tool_terminal_counts.get(tool_name, 0),
+                    )
+                    for tool_name in _TRACE_CLOSED_TOOL_NAMES
+                ),
             )
             trace_signals = LegacyTurnSignals(
                 document=trace_document_status,
@@ -46237,6 +46486,7 @@ class AgentRuntime:
                     # private result and may complete as one atomic read batch.
                     # Acquisition, external and unknown siblings remain closed;
                     # later model rounds see only the projected local schemas.
+                    _record_trace_tool_outcome(context, call.name, CapabilityStatus.NOT_STARTED)
                     total_calls += 1
                     round_results.append(
                         (
@@ -46247,6 +46497,7 @@ class AgentRuntime:
                     )
                     continue
                 if context.turn_deadline is not None and time.monotonic() >= context.turn_deadline:
+                    _record_trace_tool_outcome(context, call.name, CapabilityStatus.NOT_STARTED)
                     total_calls += 1
                     round_results.append(
                         (
@@ -46263,6 +46514,7 @@ class AgentRuntime:
                     # reply and an attempted-tool marker without arguments ever
                     # reaching the kernel.
                     tools_used.append(call.name)
+                    _record_trace_tool_outcome(context, call.name, CapabilityStatus.DENIED)
                     total_calls += 1
                     round_results.append(
                         (
@@ -46296,6 +46548,7 @@ class AgentRuntime:
                         denied_message = "Черновик файла принят для проверки; файл пока не создан."
                     else:
                         denied_message = "Инструмент недоступен в этом ходе."
+                    _record_trace_tool_outcome(context, call.name, CapabilityStatus.NOT_STARTED)
                     total_calls += 1
                     round_results.append((str(openai_call["id"]), denied_message))
                     continue
@@ -46467,7 +46720,7 @@ class AgentRuntime:
                     tool_result = ToolResult(
                         call.name,
                         False,
-                        error="Производный носитель отклонён выходным рубежом",
+                        error="Инструмент не запущен: производный носитель отклонён выходным рубежом",
                     )
                 canonical_tool_evidence = ""
                 if tool_result.success and forced_workspace_call and call.name == "workspace_create":
@@ -46742,6 +46995,11 @@ class AgentRuntime:
                 if tool_result.success:
                     tool_knowledge_ids.extend(self._tool_knowledge_ids(call.name, tool_result.data))
                     tool_knowledge_ids = list(dict.fromkeys(tool_knowledge_ids))[:12]
+                _record_trace_tool_outcome(
+                    context,
+                    call.name,
+                    _trace_tool_result_status(call.name, tool_result),
+                )
                 total_calls += 1
                 if tool_result.success and tool_result.attachment:
                     # Голос и собранный файл — разные вложения и разные способы
@@ -48364,6 +48622,7 @@ class AgentRuntime:
         # Просили присланное, а получили выдумку на пустом месте.
         context.asked_for_an_archive = True
         if _turn_deadline_expired(context.turn_deadline):
+            _record_trace_tool_outcome(context, "collect_files", CapabilityStatus.NOT_STARTED)
             return False
         try:
             result = await _await_with_turn_deadline(
@@ -48373,7 +48632,13 @@ class AgentRuntime:
             )
         except Exception as exc:  # noqa: BLE001 — сборка архива не должна ронять ответ
             LOGGER.warning("Archive assembly failed (%s)", type(exc).__name__)
+            _record_trace_tool_outcome(context, "collect_files", CapabilityStatus.FAILED)
             return False
+        _record_trace_tool_outcome(
+            context,
+            "collect_files",
+            _trace_tool_result_status("collect_files", result),
+        )
         data = result.data or {}
         if not result.success or not result.attachment:
             reason = str(data.get("reason") or result.error or "")
@@ -48713,15 +48978,25 @@ class AgentRuntime:
         if context is not None:
             context.late_make_file_attempts += 1
         turn_deadline = context.turn_deadline if context is not None else None
-        return await _call_with_turn_deadline(
-            self._make_file_from_answer,
-            request,
-            "" if failed else answer,
-            actor,
-            blocks=blocks,
-            turn_deadline=turn_deadline,
-            expired="turn deadline expired during file rendering",
+        try:
+            made = await _call_with_turn_deadline(
+                self._make_file_from_answer,
+                request,
+                "" if failed else answer,
+                actor,
+                blocks=blocks,
+                turn_deadline=turn_deadline,
+                expired="turn deadline expired during file rendering",
+            )
+        except Exception:
+            _record_trace_tool_outcome(context, "make_file", CapabilityStatus.FAILED)
+            raise
+        _record_trace_tool_outcome(
+            context,
+            "make_file",
+            CapabilityStatus.SUCCEEDED if made else CapabilityStatus.FAILED,
         )
+        return made
 
     async def _make_file_from_answer(
         self,
@@ -48917,10 +49192,11 @@ class AgentRuntime:
         )
         turn_deadline = context.turn_deadline
         result: ToolResult | None = None
-        if not _turn_deadline_expired(turn_deadline):
+        source_search_attempted = not _turn_deadline_expired(turn_deadline)
+        if source_search_attempted:
             tools_used.append("source_search")
         try:
-            if not _turn_deadline_expired(turn_deadline):
+            if source_search_attempted:
                 result = await _await_with_turn_deadline(
                     self.kernel.execute(
                         "source_search",
@@ -48950,6 +49226,15 @@ class AgentRuntime:
             else None
         )
         if projection is None:
+            _record_trace_tool_outcome(
+                context,
+                "source_search",
+                CapabilityStatus.NOT_STARTED
+                if not source_search_attempted
+                else _trace_tool_result_status("source_search", result)
+                if result is None or not result.success
+                else CapabilityStatus.UNAVAILABLE,
+            )
             if snapshot_authority is None:
                 context.source_search_result_raw_ids = []
                 context.source_search_result_identities = {}
@@ -48962,6 +49247,7 @@ class AgentRuntime:
             context.remainder_known = True
             return True
         if not self._persist_source_search_private_lineage(context):
+            _record_trace_tool_outcome(context, "source_search", CapabilityStatus.UNAVAILABLE)
             context.source_search_result_raw_ids = []
             context.source_search_result_identities = {}
             context.source_search_result_expected_count = 0
@@ -48975,6 +49261,7 @@ class AgentRuntime:
 
         shown = int(projection["shown"])
         if shown != context.source_search_result_expected_count:
+            _record_trace_tool_outcome(context, "source_search", CapabilityStatus.UNAVAILABLE)
             context.structural_answer = (
                 "Не удалось проверить ранее загруженные источники: локальный поиск не завершился "
                 "с проверяемым результатом. Искомый факт остаётся неизвестным."
@@ -48992,6 +49279,7 @@ class AgentRuntime:
         page_complete = bool((projection.get("scope") or {}).get("page_complete"))
         context.source_search_page_capped = not page_complete
         if shown == 0:
+            _record_trace_tool_outcome(context, "source_search", CapabilityStatus.EMPTY)
             context.structural_answer = (
                 "По ограниченному локальному поиску в доступных ранее загруженных источниках "
                 "совпадений не найдено. Это не доказывает, что таких сведений нет во всех "
@@ -49000,6 +49288,8 @@ class AgentRuntime:
             context.open_remainder = ""
             context.remainder_known = True
             return True
+
+        _record_trace_tool_outcome(context, "source_search", CapabilityStatus.SUCCEEDED)
 
         result_rows = projection.get("results") or []
         context.source_search_advisory_evidence = any(
@@ -49126,14 +49416,27 @@ class AgentRuntime:
         )
         asked_plainly = bool(_ASKS_WHAT_A_PERSON_WROTE.search(message)) or document_inventory
 
-        def settle_inventory_unknown(reason: str) -> bool:
+        def settle_inventory_unknown(
+            reason: str,
+            outcome: CapabilityStatus = CapabilityStatus.UNAVAILABLE,
+        ) -> bool:
             answer = (
                 "Не удалось доказательно проверить точный перечень документов"
                 f" ({reason}). Итог неизвестен; утверждать «это всё» нельзя."
             )
             if context is not None:
+                if (
+                    _aggregate_trace_tool_outcomes(context, _TRACE_ENTITY_READ_TOOL_NAMES)
+                    is CapabilityStatus.INACTIVE
+                ):
+                    _record_trace_tool_outcome(
+                        context,
+                        "user_activity",
+                        outcome,
+                    )
                 context.structural_answer = answer
                 context.person_document_inventory_settled = True
+                context.person_document_inventory_succeeded = False
                 context.person_document_inventory_self = self_document_inventory
                 context.open_remainder = ""
                 context.remainder_known = True
@@ -49345,7 +49648,10 @@ class AgentRuntime:
                 # one provable local day; never turn an ambiguous interval into
                 # “all”.
                 LOGGER.info("person-document-inventory: closed day not resolved")
-                return settle_inventory_unknown("границы дня не определены")
+                return settle_inventory_unknown(
+                    "границы дня не определены",
+                    CapabilityStatus.NOT_STARTED,
+                )
             since, until, requested_day, day_complete = day_window
             if requested_day in {"всё время", "последние"} and since is None and until is None:
                 # An all-time filename inventory needs neither Raw bodies nor a
@@ -49369,7 +49675,10 @@ class AgentRuntime:
                     ).allowed
                 )
                 if not (metadata_allowed and filename_allowed):
-                    return settle_inventory_unknown("нет доступа к перечню имён файлов")
+                    return settle_inventory_unknown(
+                        "нет доступа к перечню имён файлов",
+                        CapabilityStatus.DENIED,
+                    )
                 tenant = actor.user_id if actor.shared_tenant else chosen.user_id
                 try:
                     catalog = self.storage.list_owned_file_catalog(
@@ -49379,7 +49688,10 @@ class AgentRuntime:
                     )
                 except Exception as exc:  # noqa: BLE001 - a failed catalog is UNKNOWN
                     LOGGER.warning("Body-free person inventory failed (%s)", type(exc).__name__)
-                    return settle_inventory_unknown("каталог файлов недоступен")
+                    return settle_inventory_unknown(
+                        "каталог файлов недоступен",
+                        CapabilityStatus.FAILED,
+                    )
                 if len(catalog) > _CONVERSATION_ATTACHMENT_ARCHIVE_CATALOG_MAX_FILES:
                     return settle_inventory_unknown("каталог превышает безопасный предел")
                 answer = _render_body_free_person_document_inventory(
@@ -49392,6 +49704,7 @@ class AgentRuntime:
                 if context is not None:
                     context.structural_answer = answer
                     context.person_document_inventory_settled = True
+                    context.person_document_inventory_succeeded = True
                     context.person_document_inventory_self = self_document_inventory
                     context.open_remainder = ""
                     context.remainder_known = True
@@ -49449,6 +49762,17 @@ class AgentRuntime:
                     expected_until=until,
                 )
             )
+            _record_trace_tool_outcome(
+                context,
+                "user_activity",
+                CapabilityStatus.NOT_STARTED
+                if not activity_attempted
+                else CapabilityStatus.SUCCEEDED
+                if inventory_data_valid
+                else _trace_tool_result_status("user_activity", result)
+                if result is None or not result.success
+                else CapabilityStatus.UNAVAILABLE,
+            )
             if not inventory_data_valid or data is None:
                 answer = (
                     f"Не удалось доказательно проверить полный перечень документов за {requested_day}. "
@@ -49474,6 +49798,7 @@ class AgentRuntime:
             if context is not None:
                 context.structural_answer = answer
                 context.person_document_inventory_settled = True
+                context.person_document_inventory_succeeded = inventory_data_valid
                 context.person_document_inventory_self = self_document_inventory
                 context.open_remainder = ""
                 context.remainder_known = True
@@ -49490,6 +49815,7 @@ class AgentRuntime:
 
         turn_deadline = getattr(context, "turn_deadline", None)
         if _turn_deadline_expired(turn_deadline):
+            _record_trace_tool_outcome(context, "user_activity", CapabilityStatus.NOT_STARTED)
             return False
         try:
             result = await _await_with_turn_deadline(
@@ -49503,8 +49829,10 @@ class AgentRuntime:
             )
         except Exception as exc:  # noqa: BLE001 — надзорный вызов не должен ронять ход
             LOGGER.warning("Prefetch user activity failed (%s)", type(exc).__name__)
+            _record_trace_tool_outcome(context, "user_activity", CapabilityStatus.FAILED)
             return False
         if isinstance(result, ToolResult) and result.success and not _user_activity_fact_bearing(result.data):
+            _record_trace_tool_outcome(context, "user_activity", CapabilityStatus.UNAVAILABLE)
             if context is not None:
                 context.structural_answer = _PERSON_ACTIVITY_UNRESOLVED
                 context.person_activity_resolution_failed = True
@@ -49524,7 +49852,15 @@ class AgentRuntime:
         rendered = result.to_llm_message()
         if not rendered:
             LOGGER.info("person-prefetch: инструмент вернул пустоту")
+            _record_trace_tool_outcome(
+                context,
+                "user_activity",
+                CapabilityStatus.EMPTY
+                if isinstance(result, ToolResult) and result.success
+                else _trace_tool_result_status("user_activity", result),
+            )
             return False
+        _record_trace_tool_outcome(context, "user_activity", CapabilityStatus.SUCCEEDED)
         LOGGER.info("person-prefetch: сработал; данных %d знаков", len(rendered))
         tools_used.append("user_activity")
         if len(tool_evidence) < _MAX_TOOL_EVIDENCE:
@@ -49588,8 +49924,26 @@ class AgentRuntime:
         if not decomposition.remainder_known:
             decomposition = _LocateClauseDecomposition(message, remainder_known=False)
         locate_message = decomposition.locate_clause
+        trace_message_search_attempted = False
+        trace_message_search_recorded = False
+
+        def record_message_search_outcome(outcome: CapabilityStatus) -> None:
+            nonlocal trace_message_search_recorded
+            if trace_message_search_attempted and not trace_message_search_recorded:
+                _record_trace_tool_outcome(context, "message_search", outcome)
+                trace_message_search_recorded = True
 
         def settle_unknown(answer: str) -> bool:
+            nonlocal trace_message_search_recorded
+            if trace_message_search_attempted and not trace_message_search_recorded:
+                record_message_search_outcome(CapabilityStatus.UNAVAILABLE)
+            elif not trace_message_search_recorded:
+                _record_trace_tool_outcome(
+                    context,
+                    "message_search",
+                    CapabilityStatus.NOT_STARTED,
+                )
+                trace_message_search_recorded = True
             if context is None:
                 return False
             context.structural_answer = answer
@@ -49608,6 +49962,7 @@ class AgentRuntime:
             return True
 
         def settle_located(answer: str, *, has_rows: bool) -> bool:
+            record_message_search_outcome(CapabilityStatus.SUCCEEDED if has_rows else CapabilityStatus.EMPTY)
             if context is None:
                 return False
             dependency = _message_locate_document_dependency(decomposition)
@@ -49811,7 +50166,9 @@ class AgentRuntime:
                 **({"role": subject_role} if subject_role is not None else {}),
             }
         window_data: Mapping[str, Any] | None = None
+        result: ToolResult | None = None
         try:
+            trace_message_search_attempted = True
             result = await _await_with_turn_deadline(
                 self.kernel.execute(
                     "message_search",
@@ -49886,6 +50243,7 @@ class AgentRuntime:
                     if full_content_requested and (
                         truncated_rows > 0 or accumulated_chars > analysis_model_char_cap
                     ):
+                        record_message_search_outcome(CapabilityStatus.PARTIAL)
                         return settle_unknown(
                             "Полный анализ всех сообщений не выполнен: их текст превышает "
                             "безопасный предел одного хода. Ни сокращённые фрагменты, ни модельная "
@@ -49922,6 +50280,11 @@ class AgentRuntime:
                     )
         except Exception as exc:  # noqa: BLE001 — поиск по своей переписке не должен ронять ход
             LOGGER.warning("own-messages-prefetch: поиск не удался (%s)", type(exc).__name__)
+            record_message_search_outcome(
+                _trace_tool_result_status("message_search", result)
+                if result is None or not result.success
+                else CapabilityStatus.FAILED
+            )
             return settle_unknown("Не удалось проверить вашу переписку по точной теме; результат неизвестен.")
         if window_data is not None:
             rendered = json.dumps(
@@ -49933,7 +50296,21 @@ class AgentRuntime:
                 sort_keys=True,
             )
         else:
-            rendered = result.to_llm_message() if result.success else ""
+            rendered = result.to_llm_message() if result is not None and result.success else ""
+        trace_message_search_empty = bool(
+            result is not None
+            and result.success
+            and (
+                window_data is not None
+                and type(window_data.get("total")) is int
+                and window_data.get("total") == 0
+                or window_data is None
+                and isinstance(result.data, Mapping)
+                and type(result.data.get("count")) is int
+                and result.data.get("count") == 0
+                and result.data.get("results") == []
+            )
+        )
         tools_used.append("message_search")
         if rendered and len(tool_evidence) < _MAX_TOOL_EVIDENCE:
             tool_evidence.append({"tool": "message_search", "output": str(rendered)})
@@ -49986,6 +50363,9 @@ class AgentRuntime:
                 )
                 context.open_remainder = decomposition.open_remainder
                 context.remainder_known = True
+                record_message_search_outcome(
+                    CapabilityStatus.EMPTY if trace_message_search_empty else CapabilityStatus.SUCCEEDED
+                )
                 return True
             analysis_data = json.dumps(
                 {
@@ -50034,6 +50414,9 @@ class AgentRuntime:
                 )
                 context.open_remainder = decomposition.open_remainder
                 context.remainder_known = True
+            record_message_search_outcome(
+                CapabilityStatus.EMPTY if trace_message_search_empty else CapabilityStatus.SUCCEEDED
+            )
             return True
         if window_data is not None and result.success:
             raw_rows = window_data.get("results")
@@ -50201,6 +50584,13 @@ class AgentRuntime:
             )
             context.open_remainder = decomposition.open_remainder if rendered else ""
             context.remainder_known = True
+        record_message_search_outcome(
+            _trace_tool_result_status("message_search", result)
+            if result is None or not result.success
+            else CapabilityStatus.EMPTY
+            if trace_message_search_empty
+            else CapabilityStatus.SUCCEEDED
+        )
         return True
 
     async def _archive_count_intent_by_arbiter(
@@ -51261,7 +51651,8 @@ class AgentRuntime:
             if requested_end.date() == local_now.date() and requested_end > local_now:
                 requested_until = local_now.isoformat(timespec="seconds")
         turn_deadline = getattr(context, "turn_deadline", None)
-        if tool_name in available and not _turn_deadline_expired(turn_deadline):
+        timeline_attempted = tool_name in available and not _turn_deadline_expired(turn_deadline)
+        if timeline_attempted:
             tools_used.append(tool_name)
             arguments: dict[str, Any] = {"since": requested_since, "until": requested_until}
             if tool_name == "what_happened":
@@ -51274,6 +51665,8 @@ class AgentRuntime:
                 )
             except Exception as exc:  # noqa: BLE001 — лента не должна ронять ход
                 LOGGER.warning("Prefetch %s failed (%s)", tool_name, type(exc).__name__)
+        elif tool_name == "what_happened":
+            _record_trace_tool_outcome(context, tool_name, CapabilityStatus.NOT_STARTED)
 
         result_data = result.data if result is not None and isinstance(result.data, Mapping) else {}
         asked_about = result_data.get("asked_about") if isinstance(result_data, Mapping) else None
@@ -51292,6 +51685,16 @@ class AgentRuntime:
         )
         rendered = result.to_llm_message() if understood and result is not None else ""
         if not rendered:
+            if tool_name == "what_happened" and result is not None:
+                _record_trace_tool_outcome(
+                    context,
+                    tool_name,
+                    _trace_tool_result_status(tool_name, result)
+                    if not result.success
+                    else CapabilityStatus.UNAVAILABLE,
+                )
+            elif tool_name == "what_happened" and timeline_attempted:
+                _record_trace_tool_outcome(context, tool_name, CapabilityStatus.FAILED)
             if context is not None:
                 context.structural_answer = "\n\n".join(
                     part for part in (context.structural_answer, failure) if part
@@ -51309,6 +51712,15 @@ class AgentRuntime:
             )
             return
 
+        if tool_name == "what_happened":
+            events = result_data.get("events")
+            _record_trace_tool_outcome(
+                context,
+                tool_name,
+                CapabilityStatus.EMPTY
+                if isinstance(events, list) and not events
+                else CapabilityStatus.SUCCEEDED,
+            )
         if len(tool_evidence) < _MAX_TOOL_EVIDENCE:
             tool_evidence.append({"tool": tool_name, "output": str(rendered)})
         if context is not None and context.closed_past_timeline_turn and tool_name == "what_happened":

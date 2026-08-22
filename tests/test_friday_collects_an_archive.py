@@ -25,6 +25,7 @@ from datetime import date
 import pytest
 
 from friday.execution_kernel import _MAX_ARCHIVE_BYTES, ExecutionKernel, _pack_archive
+from friday.interaction_control_plane.legacy_trace import CapabilityStatus
 from friday.knowledge_graph import KnowledgeGraph
 from friday.permissions import ActorContext, AuthorizationService
 from friday.storage.models import RawObject
@@ -490,6 +491,7 @@ async def test_the_archive_is_built_without_waiting_for_the_model(verdict, expec
     assert clips and clips[0]["filename"] == "Документы.zip"
     assert tools_used == ["collect_files"], "сборка не попала в основания хода"
     assert evidence and evidence[0]["tool"] == "collect_files"
+    assert context.trace_tool_outcomes == [("collect_files", CapabilityStatus.SUCCEEDED)]
 
 
 @pytest.mark.anyio
@@ -556,7 +558,11 @@ async def test_a_failed_assembly_is_not_promised_as_a_file() -> None:
         async def execute(self, tool: str, params: dict, actor=None):  # noqa: ANN001, ARG002
             class _Result:
                 success = True
-                data = {"collected": False, "reason": "за эти дни файлов не приходило"}
+                data = {
+                    "collected": False,
+                    "found": 0,
+                    "reason": "за эти дни файлов не приходило",
+                }
                 attachment = None
 
                 def to_llm_message(self) -> str:
@@ -589,6 +595,54 @@ async def test_a_failed_assembly_is_not_promised_as_a_file() -> None:
     assert "не обещай" not in said.lower(), said
     # И просьба остаётся просьбой об АРХИВЕ: сочинять вместо него документ нельзя.
     assert context.asked_for_an_archive is True
+    assert context.trace_tool_outcomes == [("collect_files", CapabilityStatus.EMPTY)]
+
+
+@pytest.mark.anyio
+async def test_an_archive_provider_error_is_kept_outside_public_tool_evidence() -> None:
+    from friday.agent_runtime import AgentContext, AgentRuntime
+
+    class _Kernel:
+        async def execute(self, tool: str, params: dict, actor=None):  # noqa: ANN001, ARG002
+            class _Result:
+                success = False
+                # A stale zero-hit payload cannot override the terminal failure.
+                data = {"collected": False, "found": 0}
+                attachment = None
+                error = "provider failed"
+
+                def to_llm_message(self) -> str:
+                    return ""
+
+            return _Result()
+
+    runtime = AgentRuntime.__new__(AgentRuntime)
+    runtime.kernel = _Kernel()
+    runtime.llm = _NoLLM()
+    context = AgentContext(
+        conversation_id="c",
+        user_id="u",
+        outward_verdict=("файл", "13"),
+    )
+    tools_used: list[str] = []
+    evidence: list[dict] = []
+    clips: list[dict] = []
+
+    done = await AgentRuntime._prefetch_the_archive_if_asked(
+        runtime,
+        context,
+        None,
+        [],
+        tools_used,
+        evidence,
+        clips,
+    )
+
+    assert done is False
+    assert tools_used == []
+    assert evidence == []
+    assert clips == []
+    assert context.trace_tool_outcomes == [("collect_files", CapabilityStatus.FAILED)]
 
 
 @pytest.mark.anyio
