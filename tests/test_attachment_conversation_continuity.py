@@ -2723,7 +2723,10 @@ async def test_filename_similarity_finishes_before_content_clue_scoring(
     ("query", "expected_active", "expected_generation"),
     [
         ("В Североградске мне дай информацию по отделу", True, True),
-        ("Поищи в интернете новости о Североградске", False, False),
+        # A self-contained public-web request now enters the current-only lane
+        # even after sticky private lineage. With tools disabled its grounded
+        # fallback may synthesize, but receives neither history nor attachment.
+        ("Поищи в интернете новости о Североградске", False, True),
         ("Как приготовить запеканку?", False, True),
     ],
 )

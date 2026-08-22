@@ -179,13 +179,16 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # 388 → 405: schema 36 adds stable bindings, revision index/link snapshots and
 # expiring candidate/Active Frame CRUD without exposing a cross-owner reader.
 # 405 → 408: owner-scoped operation status plus explicit conflict lookup/resolution.
-EXPECTED_MEMBER_COUNT = 408
+# 408 → 409: bounded owner-scoped legacy-marker migration candidates.
+EXPECTED_MEMBER_COUNT = 409
 EXPECTED_SIGNATURES: dict[str, str] = {
     "bind_owned_file_source_ref_alias": "(self, user_id: 'str', uploaded_by: 'str', source_ref: 'str', raw_object_id: 'str', supplied_filename: 'str' = '') -> 'bool'",
     "find_owned_files_by_filename": "(self, user_id: 'str', uploaded_by: 'str', filename: 'str') -> 'list[dict[str, Any]]'",
     "get_raw_object_descriptors": "(self, raw_ids: 'list[str]', user_id: 'str', *, limit: 'int' = 1000) -> 'list[dict[str, Any]]'",
     "get_searchable_file_sources": "(self, user_id: 'str', raw_ids: 'list[str]', *, uploaded_by: 'str | None' = None, limit: 'int' = 100, include_content: 'bool' = False) -> 'list[dict[str, Any]]'",
     "list_owned_file_catalog": "(self, user_id: 'str', uploaded_by: 'str', *, limit: 'int' = 5000) -> 'list[dict[str, Any]]'",
+    "list_obsidian_legacy_marker_candidates": "(self, user_id: 'str', *, limit: 'int' = 5000) -> 'list[dict[str, Any]]'",
+    "prepare_obsidian_operation": "(self, user_id: 'str', *, operation_id: 'str', vault_id: 'str', method: 'str', arguments_digest: 'str', expected_revision: 'str | None' = None, work_item_id: 'str | None' = None, prepared_result: 'Mapping[str, Any] | None' = None) -> 'tuple[dict[str, Any], bool]'",
     "select_owned_file_corpus": "(self, user_id: 'str', uploaded_by: 'str', *, received_since: 'str | None' = None, received_until: 'str | None' = None, document_since: 'str | None' = None, document_until: 'str | None' = None, limit: 'int' = 13, offset: 'int' = 0) -> 'dict[str, Any]'",
     "search_owned_file_content": "(self, user_id: 'str', uploaded_by: 'str', query: 'str', *, limit: 'int' = 64) -> 'dict[str, Any]'",
     "search_owned_files_by_term": "(self, user_id: 'str', uploaded_by: 'str', query: 'str', *, limit: 'int' = 64) -> 'dict[str, Any]'",

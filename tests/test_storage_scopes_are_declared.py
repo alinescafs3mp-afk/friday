@@ -101,6 +101,7 @@ PERSON_SCOPED = {
     "get_obsidian_profile",
     "get_obsidian_vault",
     "list_obsidian_conflicts",
+    "list_obsidian_legacy_marker_candidates",
     "list_obsidian_operations",
     "list_obsidian_note_bindings",
     "list_obsidian_note_index",
@@ -202,7 +203,9 @@ APPROVAL_TENANT_WITH_A_SEPARATE_PERSON = {
 # 256 → 277: the Obsidian storage surface is private to one Android owner.
 # 277 → 294: schema-36 bindings/index/links and expiring continuation state
 # remain private to that same owner even when Friday uses a shared archive.
-EXPECTED_USER_ID_METHODS = 297
+# 297 → 298: legacy Obsidian marker migration reads only one owner's operation
+# journal; shared-tenant scope would expose private note paths across people.
+EXPECTED_USER_ID_METHODS = 298
 
 
 def _methods_taking_user_id() -> set[str]:

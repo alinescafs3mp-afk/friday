@@ -1443,6 +1443,14 @@ def test_owner_binding_isolated_read_surface_and_same_ids_per_owner(
     bob_row = storage.get_obsidian_operation("bob", "shared-operation-id")
     assert alice_row is not None and alice_row["user_id"] == "alice"
     assert bob_row is not None and bob_row["user_id"] == "bob"
+    assert {
+        (str(item["id"]), str(item["user_id"]))
+        for item in storage.list_obsidian_legacy_marker_candidates("alice")
+    } == {("shared-operation-id", "alice")}
+    assert {
+        (str(item["id"]), str(item["user_id"]))
+        for item in storage.list_obsidian_legacy_marker_candidates("bob")
+    } == {("shared-operation-id", "bob")}
 
     with pytest.raises(ValueError, match="does not match"):
         ObsidianOperationService(storage, bob_notes, owner_id="alice")
