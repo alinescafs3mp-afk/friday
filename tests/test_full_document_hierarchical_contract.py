@@ -20,6 +20,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
+from openpyxl.styles import PatternFill
 
 import friday.agent_runtime as agent_runtime_module
 from friday.agent_runtime import (
@@ -114,6 +115,54 @@ def _synthetic_large_schedule_xlsx(*, version: str) -> dict[str, Any]:
             "verification_eligible": True,
             OFFICE_STRUCTURE_KEY: extracted.office_structure_index,
         }
+    )
+
+
+def _synthetic_wide_unclassified_xlsx() -> dict[str, Any]:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "WIDE"
+    sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=76)
+    sheet.cell(1, 1, "Штатная ведомость")
+    for start in range(1, 77, 10):
+        end = min(76, start + 9)
+        sheet.merge_cells(start_row=2, start_column=start, end_row=2, end_column=end)
+        sheet.cell(2, start, f"Группа {start}")
+    sheet.append([f"Колонка {column}" for column in range(1, 77)])
+    for row in range(1, 6):
+        sheet.append([f"ROW-{row}" if column == 1 else f"V{row}-{column}" for column in range(1, 77)])
+    for row in range(9, 12):
+        for column in range(1, 77):
+            sheet.cell(row, column).fill = PatternFill(fill_type="solid", fgColor="FFFFFF")
+    stream = io.BytesIO()
+    workbook.save(stream)
+    workbook.close()
+    extracted = DocumentExtractor().extract(stream.getvalue(), "wide-unclassified.xlsx")
+    assert extracted.success is True and isinstance(extracted.office_structure_index, dict)
+    assert extracted.office_structure_index["complete"] is False
+    assert "index_budget" in extracted.office_structure_index["coverage"]["reasons"]
+    return trusted_office_attachment(
+        {
+            "filename": "wide-unclassified.xlsx",
+            "transient_text": extracted.text,
+            "extraction_success": True,
+            "verification_eligible": True,
+            OFFICE_STRUCTURE_KEY: extracted.office_structure_index,
+        }
+    )
+
+
+def test_wide_unclassified_xlsx_never_certifies_an_authoritative_zero_record_count() -> None:
+    attachment = _synthetic_wide_unclassified_xlsx()
+    analysis = agent_runtime_module._tabular_file_analysis(0, attachment)
+
+    assert analysis is not None and analysis["records_total"] == 0
+    assert (
+        agent_runtime_module._attachment_tabular_profile_bundle(
+            [attachment],
+            task_kind="summary",
+        )
+        is None
     )
 
 

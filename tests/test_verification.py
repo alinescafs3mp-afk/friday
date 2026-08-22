@@ -531,8 +531,9 @@ class _CapturingLLM:
     enabled = True
     model = "verify-test"
 
-    def __init__(self, verdict: str):
+    def __init__(self, verdict: str, *, finish_reason: str = "stop"):
         self._verdict = verdict
+        self._finish_reason = finish_reason
         self.system: str | None = None
         self.user: str | None = None
 
@@ -540,7 +541,39 @@ class _CapturingLLM:
         del kwargs
         self.system = next((str(m.get("content") or "") for m in messages if m.get("role") == "system"), "")
         self.user = next((str(m.get("content") or "") for m in messages if m.get("role") == "user"), "")
-        return {"content": self._verdict}
+        return {"content": self._verdict, "finish_reason": self._finish_reason}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ok", (True, False))
+async def test_truncated_verifier_json_is_unknown_even_with_a_balanced_object(
+    settings,
+    storage,
+    ok: bool,
+):
+    llm = _CapturingLLM(
+        json.dumps(
+            {
+                "ok": ok,
+                "request_satisfied": ok,
+                "score": 1.0 if ok else 0.0,
+                "issues": [] if ok else ["synthetic mismatch"],
+            }
+        ),
+        finish_reason="length",
+    )
+    storage.ensure_user("alice")
+    runtime = AgentRuntime(settings, storage, llm=llm)
+    verdict = await runtime._verify_response(
+        "Сделай сводку по вложению.",
+        "Сводка готова.",
+        AgentContext(conversation_id="c1", user_id="alice"),
+        tool_evidence=[{"tool": "attachment", "output": "Исходный факт."}],
+    )
+
+    assert verdict["status"] == "unknown"
+    assert verdict["ok"] is False
+    assert verdict["issues"] == ["verifier output truncated"]
 
 
 @pytest.mark.asyncio

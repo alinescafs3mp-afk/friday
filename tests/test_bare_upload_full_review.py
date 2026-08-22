@@ -270,7 +270,8 @@ async def test_bare_upload_wrong_derived_count_gets_one_repair_then_hard_rejecti
     blobs = ["\n".join(str(item.get("content") or "") for item in call["messages"]) for call in model.calls]
     assert result["message"] == _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION
     assert sum("FRIDAY_REPAIR_DATA" in blob for blob in blobs) == 1
-    assert sum("FRIDAY_VERIFICATION_DATA" in blob for blob in blobs) == 1
+    assert sum("FRIDAY_VERIFICATION_DATA" in blob for blob in blobs) == 0
+    assert len(model.calls) == 2
     assert "Быстрый обзор" not in result["message"]
 
 

@@ -2,13 +2,14 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.0**. Это opt-in beta интеграции одного личного
+Текущая версия: **0.207.1rc0**. Это opt-in beta интеграции одного личного
 Obsidian vault с одним Android-устройством через изолированный Syncthing:
 приватный Telegram-onboarding, нативные операции с Markdown, точные delivery
 facts, preserve-both конфликты и единый crash-safe immutable cutover. Без
 `FRIDAY_OBSIDIAN_ENABLED=1` Organ не запускается. Релиз также включает все
-проверки подробного ревью из 0.206.4; строгие запросы и deterministic evidence
-guards остаются fail-closed. Остальные возможности включают code-owned
+проверки подробного ревью из 0.206.4 и исправляет transient-разбор старых
+ODT/XLSX, bounded repair и локальные evidence scopes. Строгие запросы и
+deterministic evidence guards остаются fail-closed. Остальные возможности включают code-owned
 поиск собственной истории по точным временным окнам и тематической
 лексике, bounded-поиском по содержимому и сохранённым именам собственных
 файлов, строгими page/failure-границами поддерживаемых PDF/JPEG/OCR-путей и
@@ -116,10 +117,10 @@ list/lexical search/read/create/append, typed properties, daily notes, журн�
 операций и раздельные факты local write / scan / Android receipt / open.
 Аккаунт Obsidian, подписка, desktop, QR и companion plugin не нужны.
 
-В ветке есть opt-in env-контракт
-`FRIDAY_OBSIDIAN_ENABLED=1` + `FRIDAY_PUBLIC_BASE_URL=https://...`, но
-операторский enablement/backup runbook ещё не release-сертифицирован. Ручная acceptance-матрица на
-физическом Android ещё не завершена, поэтому это не production-
+Opt-in env-контракт `FRIDAY_OBSIDIAN_ENABLED=1` +
+`FRIDAY_PUBLIC_BASE_URL=https://...` и единый immutable cutover для SQLite,
+Telegram inbox и exact vault root прошли автоматическую release-проверку.
+Ручная acceptance-матрица на физическом Android ещё не завершена, поэтому это не production-
 сертифицированный релиз. Точные шаги, конфигурация, статусы и
 ограничения: [docs/OBSIDIAN_ANDROID.md](docs/OBSIDIAN_ANDROID.md).
 
@@ -313,7 +314,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Успешный canary startup должен показать в `/api/health` версию `0.207.0`,
+Успешный canary startup должен показать в `/api/health` версию `0.207.1rc0`,
 точный profile id, `canary_ready`, `live_attestation_clear` и оба
 зарегистрированных route; простого HTTP `status=ok` недостаточно.
 

@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
+from openpyxl import Workbook
 
 from friday.agent_runtime import (
     _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION,
@@ -25,6 +26,11 @@ from friday.agent_runtime import (
     _brainfuck_explanation_followup_response,
     _claims_an_unconfirmed_supported_deed,
     _informational_consent_history,
+)
+from friday.agent_runtime._office_attachments import (
+    OFFICE_STRUCTURE_KEY,
+    is_trusted_office_attachment,
+    validate_runtime_office_index,
 )
 from friday.execution_kernel import ToolResult
 from friday.ingestion import IngestionPipeline
@@ -283,6 +289,131 @@ async def _registered_document(
     return {"raw_object_id": str(outcome["raw_object_id"])}
 
 
+@pytest.mark.asyncio
+async def test_registered_xlsx_without_a_current_index_is_upgraded_only_for_structural_review(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["№", "Подразделение", "ФИО", "По штату", "По списку"])
+    sheet.append([1, "Первая рота", "Иванов Иван Иванович", 20, 17])
+    stream = io.BytesIO()
+    workbook.save(stream)
+    workbook.close()
+    pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
+    outcome = await pipeline.ingest_file(
+        "alice",
+        None,
+        stream.getvalue(),
+        filename="legacy-flat.xlsx",
+        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        metadata={"uploaded_by": "alice"},
+        source_ref="hotfix-02063:legacy-flat-xlsx",
+    )
+    raw_id = str(outcome["raw_object_id"])
+    row = storage.get_raw_object(raw_id, "alice")
+    assert row is not None
+    metadata = json.loads(str(row["metadata_json"]))
+    assert metadata.pop(OFFICE_STRUCTURE_KEY, None) is not None
+    metadata.pop("office_structure_attestation_v1", None)
+    legacy_metadata_json = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+    with storage.transaction() as connection:
+        connection.execute(
+            "UPDATE raw_objects SET metadata_json=? WHERE id=?",
+            (legacy_metadata_json, raw_id),
+        )
+
+    runtime = AgentRuntime(settings, storage, llm=_UnexpectedModel())  # type: ignore[arg-type]
+    runtime.kernel.ingestion = pipeline
+    inspect_calls: list[bool] = []
+    canonical_inspect = pipeline.inspect_file_transient
+
+    async def inspect_spy(*args, **kwargs):  # noqa: ANN002, ANN003
+        inspect_calls.append(True)
+        return await canonical_inspect(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "inspect_file_transient", inspect_spy)
+    flat_source = runtime._owned_file_attachment(  # noqa: SLF001
+        raw_id,
+        tenant_id="alice",
+        person_id="alice",
+    )
+    assert flat_source is not None and not is_trusted_office_attachment(flat_source)
+    cached = await runtime._verify_registered_file_attachments(  # noqa: SLF001
+        [flat_source],
+        tenant_id="alice",
+        person_id="alice",
+    )
+    assert inspect_calls == []
+    assert not is_trusted_office_attachment(cached[0])
+
+    upgraded = await runtime._verify_registered_file_attachments(  # noqa: SLF001
+        [flat_source],
+        tenant_id="alice",
+        person_id="alice",
+        recover_missing_office_index=True,
+    )
+    assert inspect_calls == [True]
+    assert is_trusted_office_attachment(upgraded[0])
+    assert (
+        validate_runtime_office_index(
+            upgraded[0].get(OFFICE_STRUCTURE_KEY),
+            str(upgraded[0].get("transient_text") or ""),
+        )
+        is not None
+    )
+
+    reused = await runtime._verify_registered_file_attachments(  # noqa: SLF001
+        upgraded,
+        tenant_id="alice",
+        person_id="alice",
+        recover_missing_office_index=True,
+    )
+    assert inspect_calls == [True]
+    assert is_trusted_office_attachment(reused[0])
+    persisted = storage.get_raw_object(raw_id, "alice")
+    assert persisted is not None and str(persisted["metadata_json"]) == legacy_metadata_json
+
+    routed_runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_UnexpectedModel(),  # type: ignore[arg-type]
+    )
+    routed_runtime.kernel.ingestion = pipeline
+    routed_flags: list[bool] = []
+    routed_verify = routed_runtime._verify_registered_file_attachments  # noqa: SLF001
+
+    async def routed_verify_spy(attachments, **kwargs):  # noqa: ANN001
+        routed_flags.append(kwargs.get("recover_missing_office_index") is True)
+        return await routed_verify(attachments, **kwargs)
+
+    async def generate(context, question, attachments):  # noqa: ANN001
+        del context, question, attachments
+        return {
+            "content": "В таблице приведены подразделение, ФИО и штатные показатели.",
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    monkeypatch.setattr(routed_runtime, "_prepare_context", _plain_attachment_context)
+    monkeypatch.setattr(routed_runtime, "_verify_registered_file_attachments", routed_verify_spy)
+    monkeypatch.setattr(routed_runtime, "_generate_response", generate)
+    await routed_runtime.chat(
+        "alice",
+        "Загружен документ: legacy-flat.xlsx",
+        actor=_actor(),
+        attachments=[{"raw_object_id": raw_id}],
+        enable_tools=False,
+        synthetic_document_notice=True,
+    )
+
+    assert routed_flags and routed_flags[0] is True
+    assert inspect_calls == [True, True]
+
+
 async def _plain_attachment_context(user_id, message, conversation_id, **kwargs):  # noqa: ANN001
     del message, kwargs
     return AgentContext(
@@ -371,8 +502,9 @@ async def test_bare_document_one_pass_uses_code_drift_then_one_bounded_repair(
     assert generation_questions == [f"Загружен документ: {filename}"]
     # The ordinary bare review never asks the same model to judge its own
     # initial prose. The code-owned high-confidence drift guard catches the
-    # swapped labelled value, then the one permitted repair is rechecked once.
-    assert verification_questions == [_BARE_UPLOAD_REVIEW_TASK]
+    # swapped labelled value, then the one permitted repair is rechecked by the
+    # same deterministic guard rather than a model judging its own rewrite.
+    assert verification_questions == []
     assert repair_questions == [_BARE_UPLOAD_REVIEW_TASK]
     assert filename not in _BARE_UPLOAD_REVIEW_TASK
     assert ".doc" not in _BARE_UPLOAD_REVIEW_TASK.casefold()
@@ -381,6 +513,7 @@ async def test_bare_document_one_pass_uses_code_drift_then_one_bounded_repair(
     assert reply["message"] == _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION
     assert "быстрый обзор" not in str(reply["message"]).casefold()
     assert reply["verification_status"] == "unknown"
+    assert reply["verification"]["issues"] == ["attachment_evidence_mismatch"]
 
 
 @pytest.mark.asyncio
@@ -440,11 +573,69 @@ async def test_bare_upload_cannot_publish_an_inverted_source_negation(
         synthetic_document_notice=True,
     )
 
-    assert [question for question, _answer in verification_calls] == [_BARE_UPLOAD_REVIEW_TASK]
+    assert verification_calls == []
     assert repair_calls == [_BARE_UPLOAD_REVIEW_TASK]
     assert false_positive not in str(reply["message"])
     assert "не подготовлен" not in false_positive
     assert reply["verified"] is False
+
+
+@pytest.mark.asyncio
+async def test_bare_document_publishes_a_deterministically_clean_bounded_repair(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    filename = "CLEAN REPAIR.odt"
+    attachment = await _registered_document(
+        settings,
+        storage,
+        filename=filename,
+        source_text="Продажи по регионам: Север — 120; Юг — 80.",
+    )
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=_UnexpectedModel(),  # type: ignore[arg-type]
+    )
+    repaired = "По данным документа, Север — 120 продаж, Юг — 80 продаж."
+    verification_calls: list[bool] = []
+
+    async def generate(context, question, attachments):  # noqa: ANN001
+        del context, question, attachments
+        return {
+            "content": "По данным документа, Юг — 120 продаж.",
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    async def verify(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        verification_calls.append(True)
+        raise AssertionError("one-pass review called a model verifier")
+
+    async def repair(question, answer, context, verdict, *, tool_evidence):  # noqa: ANN001
+        del answer, context, verdict, tool_evidence
+        assert question == _BARE_UPLOAD_REVIEW_TASK
+        return repaired
+
+    monkeypatch.setattr(runtime, "_prepare_context", _plain_attachment_context)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    monkeypatch.setattr(runtime, "_verify_response", verify)
+    monkeypatch.setattr(runtime, "_repair_once", repair)
+    reply = await runtime.chat(
+        "alice",
+        f"Загружен документ: {filename}",
+        actor=_actor(),
+        attachments=[attachment],
+        enable_tools=False,
+        synthetic_document_notice=True,
+    )
+
+    assert verification_calls == []
+    assert repaired in str(reply["message"])
+    assert reply["verification_status"] == "skipped"
 
 
 _PASSIVE_SOURCE_EVIDENCE = ("Документ «Альфа» подготовлен отделом снабжения.",)
@@ -770,6 +961,151 @@ def test_open_review_allows_a_provable_person_count_and_rejects_the_adjacent_wro
     assert "attachment_derived_record_count_not_in_evidence" in contradicted["issues"]
 
 
+def test_open_review_scoped_staffing_metrics_require_the_same_source_scope() -> None:
+    evidence = (
+        "По штату — 20 человек. По списку — 17 человек. "
+        "В первом подразделении насчитывается 12 сотрудников. "
+        "Во втором подразделении насчитывается 18 сотрудников."
+    )
+    skipped = {"status": "skipped", "ok": True, "score": None, "issues": []}
+
+    grounded_metric = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "По штату — 20 человек; по списку — 17 человек.",
+        [{"tool": "attachment", "output": evidence}],
+        high_confidence_only=True,
+    )
+    scope_swap = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "В первом подразделении насчитывается 18 сотрудников.",
+        [{"tool": "attachment", "output": evidence}],
+        high_confidence_only=True,
+    )
+    novel_people = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "В первом подразделении насчитывается 999 сотрудников.",
+        [{"tool": "attachment", "output": evidence}],
+        high_confidence_only=True,
+    )
+    novel_mass = _attachment_verdict_with_deterministic_drift(
+        skipped,
+        "Масса составляет 999 кг.",
+        [{"tool": "attachment", "output": "Первая масса — 12 кг; вторая — 18 кг."}],
+        high_confidence_only=True,
+    )
+
+    assert grounded_metric["status"] == "skipped"
+    assert scope_swap["status"] == "failed"
+    assert "attachment_derived_record_count_not_in_evidence" in scope_swap["issues"]
+    assert novel_people["status"] == "failed"
+    assert novel_mass["status"] == "failed"
+    assert "attachment_quantity_not_in_evidence" in novel_mass["issues"]
+
+
+@pytest.mark.parametrize(
+    ("source", "answer"),
+    [
+        (
+            "В первой роте было 12 человек. Во второй роте было 18 человек.",
+            "В первой роте было 18 человек.",
+        ),
+        (
+            "В первой роте зафиксировано 12 человек. Во второй роте зафиксировано 18 человек.",
+            "В первой роте зафиксировано 18 человек.",
+        ),
+        (
+            "В первой роте работают 12 человек. Во второй роте работают 18 человек.",
+            "В первой роте работают 18 человек.",
+        ),
+        (
+            "Первая рота (12 человек). Вторая рота (18 человек).",
+            "Первая рота (18 человек).",
+        ),
+        (
+            "Первая рота: штатная численность 12 человек; вторая рота: штатная численность 18 человек.",
+            "Первая рота: штатная численность 18 человек.",
+        ),
+        (
+            "Объект Альфа: по штату 12 человек; объект Бета: по штату 18 человек.",
+            "Объект Альфа: по штату 18 человек.",
+        ),
+        (
+            "Объект Альфа: по штату насчитывается 12 человек. Объект Бета: риски не указаны.",
+            "Объект Бета: по штату насчитывается 12 человек.",
+        ),
+        (
+            "Объект Альфа:\nПо штату насчитывается 12 человек.\nОбъект Бета:\nДанные отсутствуют.",
+            "Объект Бета:\nПо штату насчитывается 12 человек.",
+        ),
+        (
+            "Первая рота: штатная численность 12 человек. Вторая рота: данные отсутствуют.",
+            "Вторая рота: штатная численность 12 человек.",
+        ),
+    ],
+)
+def test_open_review_scoped_people_values_cannot_cross_local_scopes(
+    source: str,
+    answer: str,
+) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_derived_record_count_not_in_evidence" in verdict["issues"]
+
+
+@pytest.mark.parametrize(
+    ("source", "answer"),
+    [
+        (
+            "В первой роте было 12 человек. Во второй роте было 18 человек.",
+            "В первой роте было 12 человек.",
+        ),
+        (
+            "Объект Альфа: по штату насчитывается 12 человек. Объект Бета: риски не указаны.",
+            "Объект Альфа: по штату насчитывается 12 человек.",
+        ),
+        (
+            "Объект Альфа:\nПо штату насчитывается 12 человек.",
+            "Объект Альфа:\nПо штату насчитывается 12 человек.",
+        ),
+    ],
+)
+def test_open_review_accepts_an_unambiguous_exact_local_people_scope(
+    source: str,
+    answer: str,
+) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+def test_open_review_scoped_people_claim_cannot_fall_back_to_global_cardinality() -> None:
+    personnel = "\n".join(["Рядовой, стрелок первого отделения", "Иванов Иван Иванович"] * 18)
+    evidence = f"По штату — 20 человек; по списку — 18 человек.\n{personnel}"
+    entries = [{"tool": "attachment", "output": evidence}]
+
+    assert 18 in _attachment_record_count_candidates(entries)[1]
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "По штату — 18 человек.",
+        entries,
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_derived_record_count_not_in_evidence" in verdict["issues"]
+
+
 def test_open_review_checks_worded_person_counts_above_ten_against_structure() -> None:
     personnel = "\n".join(["Рядовой, стрелок первого отделения", "Иванов Иван Иванович"] * 11)
     evidence = f'Вложение "staff.txt", фрагмент 1:\n{personnel}'
@@ -1018,7 +1354,6 @@ def test_open_review_rejects_every_unproved_exact_count_grammar(answer: str) -> 
         "Количество ограничено 11 записями.",
         "Количество максимум равно 11 записям.",
         "Количество не выше 11 записей.",
-        "Примерно ~11 записей.",
         "2 и 3 записи различаются.",
         "20 записей / 25.",
         "20 записей (20/25).",
@@ -2186,6 +2521,680 @@ def test_bound_evidence_must_logically_entail_the_answer(
     )
 
     assert (verdict == _FALSE_PASS) is passes
+
+
+@pytest.mark.parametrize(
+    ("source", "answer"),
+    [
+        ("Допустимо до 12 сотрудников.", "Допустимо до 999 сотрудников."),
+        ("Допустимо не менее 12 сотрудников.", "Допустимо не менее 999 сотрудников."),
+        ("Указано около 12 сотрудников.", "Указано около 999 сотрудников."),
+        ("Указано от 10 до 12 сотрудников.", "Указано от 900 до 999 сотрудников."),
+        ("Документ описывает проект.", "Указано до 999 сотрудников."),
+        ("Документ описывает проект.", "Указано около 999 сотрудников."),
+        ("Документ описывает проект.", "Примерно ~11 записей."),
+        (
+            "Объект Альфа: до 12 сотрудников. Объект Бета: данных нет.",
+            "Объект Бета: до 12 сотрудников.",
+        ),
+        (
+            "Бюджет Севера — до 12 рублей. Юг упомянут отдельно.",
+            "Общий бюджет Севера и Юга — до 12 рублей.",
+        ),
+        ("Объект Альфа: до 12 сотрудников.", "Всего до 12 сотрудников."),
+        (
+            "Всего до 12 сотрудников. Объект Альфа описан отдельно.",
+            "Объект Альфа: до 12 сотрудников.",
+        ),
+    ],
+)
+def test_open_review_rejects_unsupported_bounded_or_approximate_quantities(
+    source: str,
+    answer: str,
+) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_quantity_relation_not_in_evidence" in verdict["issues"]
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Допустимо до 12 сотрудников.",
+        "Допустимо не менее 12 сотрудников.",
+        "Указано около 12 сотрудников.",
+        "Указано от 10 до 12 сотрудников.",
+    ],
+)
+def test_open_review_accepts_grounded_bounded_and_approximate_quantities(claim: str) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        claim,
+        [{"tool": "attachment", "output": claim}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+@pytest.mark.parametrize(
+    ("source", "answer"),
+    [
+        (
+            "Первый груз весит 12 кг. Второй груз весит 18 кг.",
+            "Первый груз весит 18 кг.",
+        ),
+        (
+            "Комната Альфа: температура 12 °C. Комната Бета: температура 18 °C.",
+            "Комната Альфа: температура 18 °C.",
+        ),
+        (
+            "Бюджет Севера — 12 рублей; бюджет Юга — 18 рублей.",
+            "Бюджет Севера — 18 рублей.",
+        ),
+        (
+            "Груз Альфа весит 12 кг. Груз Бета повреждён.",
+            "Груз Бета весит 12 кг.",
+        ),
+        (
+            "Бюджет Севера — 12 рублей; бюджет Юга упомянут отдельно.",
+            "Бюджет Юга — 12 рублей.",
+        ),
+        (
+            "Груз Альфа тяжелее груза Бета на 12 кг.",
+            "Груз Бета тяжелее груза Альфа на 12 кг.",
+        ),
+        (
+            "Поставка из Альфы в Бету составляет 12 кг.",
+            "Поставка из Беты в Альфу составляет 12 кг.",
+        ),
+        (
+            "Поставка Альфа составляет 12 кг. Поставка Бета упомянута отдельно.",
+            "Совместная поставка Альфа и Бета составляет 12 кг.",
+        ),
+        (
+            "Груз Альфа тяжелее груза Бета на 12 кг.",
+            "Груз Альфа тяжелее груза Бета на 999 кг.",
+        ),
+        (
+            "Первый груз весит 12 кг. Второй груз весит 18 кг.",
+            "Всего 12 кг.",
+        ),
+        (
+            "Всего 12 кг. Груз Альфа описан отдельно.",
+            "Груз Альфа весит 12 кг.",
+        ),
+        (
+            "Приведено 12 кг. Груз Альфа описан отдельно.",
+            "Груз Альфа весит 12 кг.",
+        ),
+        (
+            "Груз Альфа показатель масса нетто после контрольного взвешивания утром "
+            "перед отправкой 12 кг. Груз Бета показатель масса нетто после контрольного "
+            "взвешивания утром перед отправкой 18 кг.",
+            "Груз Альфа показатель масса нетто после контрольного взвешивания утром перед отправкой 18 кг.",
+        ),
+        (
+            "Груз Альфа, масса составляет 12 кг. Груз Бета, повреждён.",
+            "Груз Бета, масса составляет 12 кг.",
+        ),
+        (
+            "Груз Альфа; масса составляет 12 кг. Груз Бета; повреждён.",
+            "Груз Бета; масса составляет 12 кг.",
+        ),
+    ],
+)
+def test_open_review_literal_quantities_cannot_cross_local_scopes(
+    source: str,
+    answer: str,
+) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_quantity_not_in_evidence" in verdict["issues"]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    ["Первый груз весит 12 кг.", "12 кг весит первый груз."],
+)
+def test_open_review_accepts_an_exact_literal_quantity_in_the_same_local_scope(answer: str) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [
+            {
+                "tool": "attachment",
+                "output": "Первый груз весит 12 кг. Второй груз весит 18 кг.",
+            }
+        ],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+@pytest.mark.parametrize("entity", ["Контейнер", "Посылка", "Автомобиль"])
+@pytest.mark.parametrize("separator", [",", ";"])
+def test_open_review_quantity_scope_carry_is_not_limited_to_known_entity_nouns(
+    entity: str,
+    separator: str,
+) -> None:
+    source = f"{entity} Альфа{separator} масса составляет 12 кг. {entity} Бета повреждён."
+    answer = f"{entity} Бета{separator} масса составляет 12 кг."
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_quantity_not_in_evidence" in verdict["issues"]
+
+
+def test_open_review_quantity_scope_carries_across_bounded_introductory_fragments() -> None:
+    source = "Контейнер Альфа, согласно отчёту, масса составляет 12 кг. Контейнер Бета повреждён."
+    answer = "Контейнер Бета, согласно отчёту, масса составляет 12 кг."
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_quantity_not_in_evidence" in verdict["issues"]
+
+
+@pytest.mark.parametrize(
+    ("source", "answer", "issue"),
+    [
+        (
+            "Груз Альфа весит 12 кг и груз Бета весит 18 кг.",
+            "Груз Альфа весит 18 кг.",
+            "attachment_quantity_not_in_evidence",
+        ),
+        (
+            "Груз Альфа весит до 12 кг и груз Бета весит до 18 кг.",
+            "Груз Альфа весит до 18 кг.",
+            "attachment_quantity_relation_not_in_evidence",
+        ),
+        (
+            "Комната Альфа: около 12 градусов и комната Бета: около 18 градусов.",
+            "Комната Альфа: около 18 градусов.",
+            "attachment_quantity_relation_not_in_evidence",
+        ),
+    ],
+)
+def test_open_review_splits_coordinated_quantity_assignments(
+    source: str,
+    answer: str,
+    issue: str,
+) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert issue in verdict["issues"]
+
+
+@pytest.mark.parametrize("separator", ["плюс", "при этом", "также", "/", "—", "–"])
+def test_open_review_splits_explicit_assignment_boundaries(separator: str) -> None:
+    source = f"Груз Альфа весит 12 кг {separator} груз Бета весит 18 кг."
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "Груз Альфа весит 18 кг.",
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_quantity_not_in_evidence" in verdict["issues"]
+
+
+@pytest.mark.parametrize(
+    ("source", "answer"),
+    [
+        (
+            "Совместная поставка Альфа и Бета составляет 12 кг.",
+            "Поставка Альфа составляет 12 кг.",
+        ),
+        (
+            "Грузы Альфа и Бета вместе весят до 12 кг.",
+            "Груз Альфа весит до 12 кг.",
+        ),
+        (
+            "Грузы Альфа и Бета вместе весят около 12 кг.",
+            "Груз Альфа весит около 12 кг.",
+        ),
+        (
+            "Грузы Альфа и Бета весят 12 кг.",
+            "Груз Альфа весит 12 кг.",
+        ),
+        (
+            "Поставка Альфа и Бета составляет до 12 кг.",
+            "Поставка Альфа составляет до 12 кг.",
+        ),
+        (
+            "Грузы Альфа с Бетой весят 12 кг.",
+            "Груз Альфа весит 12 кг.",
+        ),
+    ],
+)
+def test_open_review_does_not_project_a_joint_quantity_onto_one_entity(
+    source: str,
+    answer: str,
+) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    ("source", "answer"),
+    [
+        (
+            "Проект Альфа готов на 12%, а проект Бета готов на 18%.",
+            "Проект Альфа готов на 18%.",
+        ),
+        (
+            "Проект Альфа готов на 12% и проект Бета готов на 18%.",
+            "Проект Альфа готов на 18%.",
+        ),
+        (
+            "Рост Альфы 12%, рост Беты 18%.",
+            "Рост Альфы 18%.",
+        ),
+    ],
+)
+def test_open_review_percentages_cannot_cross_local_assignments(
+    source: str,
+    answer: str,
+) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+
+
+@pytest.mark.parametrize("answer", ["Масса составляет 999 кг.", "Бюджет — 999 рублей."])
+def test_open_review_rejects_a_novel_nonrecord_quantity(answer: str) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": "Документ описывает проект."}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_quantity_not_in_evidence" in verdict["issues"]
+
+
+def test_open_review_accepts_live_shaped_odt_bounds_and_ignores_calendar_from() -> None:
+    source = (
+        "9 августа 2026 г.\nВсего: ж/с — до 58135 чел.\nВ течение ночи потери противника: л/с — до 17 чел."
+    )
+    answer = (
+        "Сводка от 9 августа 2026 года. "
+        "Общая численность — до 58135 чел. "
+        "Потери личного состава — до 17 человек."
+    )
+
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+def test_open_review_accepts_an_exact_russian_date_with_a_source_preamble() -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "По данным файла: Заказ оформлен 11 августа 2026 года.",
+        [{"tool": "attachment", "output": "Заказ оформлен 11 августа 2026 года."}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+def test_open_review_accepts_an_exact_quantity_with_a_source_preamble() -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "По данным файла: Груз Альфа, масса составляет 12 кг.",
+        [{"tool": "attachment", "output": "Груз Альфа, масса составляет 12 кг."}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+@pytest.mark.parametrize(
+    ("source", "answer"),
+    [
+        (
+            "Заказ Альфа оформлен 11 августа 2026 года. Заказ Бета оформлен 12 августа 2026 года.",
+            "Заказ Альфа оформлен 12 августа 2026 года.",
+        ),
+        (
+            "Заказ Альфа оформлен 11 августа 2026 года. Заказ Бета отменён.",
+            "Заказ Бета оформлен 11 августа 2026 года.",
+        ),
+    ],
+)
+def test_open_review_dates_cannot_cross_local_entity_scopes(source: str, answer: str) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_quantity_not_in_evidence" in verdict["issues"]
+
+
+def test_open_review_rejects_a_changed_russian_date_despite_a_source_preamble() -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "По данным файла: Заказ оформлен 12 августа 2026 года.",
+        [{"tool": "attachment", "output": "Заказ оформлен 11 августа 2026 года."}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_quantity_not_in_evidence" in verdict["issues"]
+
+
+@pytest.mark.parametrize(
+    ("source", "answer"),
+    [
+        (
+            "Груз Альфа: масса — 12 кг. Номер документа 999.",
+            "Бюджет — 999 рублей.",
+        ),
+        (
+            "Документ содержит 3 записи.",
+            "Масса составляет 999 кг; документ содержит 3 записи.",
+        ),
+    ],
+)
+def test_open_review_does_not_borrow_authority_from_an_unrelated_number(
+    source: str,
+    answer: str,
+) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_quantity_not_in_evidence" in verdict["issues"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "Контейнер Альфа\nкг:\n12\nКонтейнер Бета\nданных нет",
+        "Контейнер Альфа\nМасса, кг — 12.\nКонтейнер Бета\nПовреждён.",
+    ],
+)
+def test_open_review_does_not_borrow_a_unit_header_across_entity_sections(source: str) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "Контейнер Бета весит 12 кг.",
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_quantity_not_in_evidence" in verdict["issues"]
+
+
+def test_open_review_does_not_launder_answer_scope_through_a_typed_value() -> None:
+    source = "Контейнер Альфа\nкг:\nНетто — 12\nКонтейнер Бета\nПовреждён."
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "Контейнер Бета, Нетто — 12 кг.",
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_quantity_not_in_evidence" in verdict["issues"]
+
+
+def test_open_review_leaves_a_direct_record_total_to_the_record_guard() -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "Всего 3 записи.",
+        [{"tool": "attachment", "output": "Документ содержит 3 записи."}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+def test_open_review_carries_a_bare_office_header_into_quantity_scope() -> None:
+    source = "Контейнер Альфа\nМасса составляет 12 кг.\nКонтейнер Бета\nПовреждён."
+    rejected = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "Контейнер Бета\nМасса составляет 12 кг.",
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+    supported = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "Контейнер Альфа\nМасса составляет 12 кг.",
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert rejected["status"] == "failed"
+    assert "attachment_quantity_not_in_evidence" in rejected["issues"]
+    assert supported["status"] == "skipped"
+
+
+@pytest.mark.parametrize(
+    ("source", "answer"),
+    [
+        (
+            "Контейнер Альфа, масса составляет 12 кг.",
+            "Масса контейнера Альфа — 12 кг.",
+        ),
+        ("Первый груз весит 12 кг.", "Масса первого груза составляет 12 кг."),
+        ("Бюджет Севера — 12 рублей.", "Север имеет бюджет 12 рублей."),
+    ],
+)
+def test_open_review_accepts_safe_metric_fronting_without_reordering_entities(
+    source: str,
+    answer: str,
+) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+def test_open_review_accepts_a_truthful_fronted_russian_date() -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "11 августа 2026 года оформлен заказ Альфа.",
+        [{"tool": "attachment", "output": "Заказ Альфа оформлен 11 августа 2026 года."}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+@pytest.mark.parametrize(
+    ("source", "answer"),
+    [
+        ("Допустимый порог — до 12%.", "Допустимый порог составляет 12%."),
+        ("Доля — около 12%.", "Доля составляет 12%."),
+        ("Рост — не менее 12%.", "Рост составил 12%."),
+        ("Рост — примерно на 12%.", "Рост составил 12%."),
+        (
+            "Готовность находится в диапазоне 10–20%.",
+            "Готовность составляет 20%.",
+        ),
+        (
+            "Готовность находится между 10 и 20%.",
+            "Готовность составляет 20%.",
+        ),
+        ("Готовность ≤ 20%.", "Готовность составляет 20%."),
+        ("Порог — до (20%).", "Порог составляет 20%."),
+    ],
+)
+def test_open_review_does_not_weaken_a_percent_bound_or_approximation(
+    source: str,
+    answer: str,
+) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_quantity_not_in_evidence" in verdict["issues"]
+
+
+@pytest.mark.parametrize(
+    ("source_claim", "answer_claim"),
+    [
+        ("до 12%", "до 12%"),
+        ("до 12%", "не более чем на 12%"),
+        ("примерно на 12%", "около 12%"),
+        ("не менее 12%", "не менее 12%"),
+        ("≤ 12%", "<= 12%"),
+    ],
+)
+def test_open_review_preserves_an_equivalent_percent_relation(
+    source_claim: str,
+    answer_claim: str,
+) -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        f"Порог — {answer_claim}.",
+        [{"tool": "attachment", "output": f"Порог — {source_claim}."}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+def test_open_review_recognizes_a_contextual_percent_lower_bound() -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "Порог составляет 12%.",
+        [{"tool": "attachment", "output": "Порог начинается от 12%."}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "failed"
+    assert "attachment_quantity_not_in_evidence" in verdict["issues"]
+
+
+def test_open_review_preserves_both_endpoints_of_a_percent_range() -> None:
+    source = "Готовность находится в диапазоне 10–20%."
+    supported = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        source,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+    changed = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "Готовность находится в диапазоне 15–20%.",
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert supported["status"] == "skipped"
+    assert changed["status"] == "failed"
+    assert "attachment_quantity_relation_not_in_evidence" in changed["issues"]
+
+
+def test_open_review_does_not_misclassify_a_partitive_percent_as_a_bound() -> None:
+    claim = "Ответы получены от 20% участников."
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        claim,
+        [{"tool": "attachment", "output": claim}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+def test_open_review_preserves_an_exact_growth_derived_from_source_operands() -> None:
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        "Продажи выросли на 20%.",
+        [{"tool": "attachment", "output": "Продажи: было 100, стало 120."}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
+
+
+def test_open_review_accepts_the_exact_live_odt_bound_projection_shape() -> None:
+    source = (
+        "9 августа 2026 г. ВСЕГО: Ж/С — ДО 58135 ЧЕЛ. "
+        "В ТЕЧЕНИЕ НОЧИ ПОТЕРИ ПРОТИВНИКА СОСТАВИЛИ: Л/С — ДО 17 ЧЕЛ., "
+        "УНИЧТОЖЕНЫ — 12 ЧЕЛ."
+    )
+    answer = (
+        "Сводка от 9 августа 2026 года. "
+        "Состав и состояние группировки противника: приведены подробные данные "
+        "о численности личного состава (до 58135 чел.). "
+        "Потери противника за ночь: личный состав — до 17 человек (12 убито)."
+    )
+
+    verdict = _attachment_verdict_with_deterministic_drift(
+        {"status": "skipped", "ok": True, "score": None, "issues": []},
+        answer,
+        [{"tool": "attachment", "output": source}],
+        high_confidence_only=True,
+    )
+
+    assert verdict["status"] == "skipped"
 
 
 @pytest.mark.parametrize("status", ["unknown", "skipped"])

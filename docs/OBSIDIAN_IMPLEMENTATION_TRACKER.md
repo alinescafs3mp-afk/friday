@@ -1,8 +1,9 @@
 # Obsidian free Android integration tracker
 
-- Updated: 2026-08-21
-- Branch: `feature/obsidian-free-android`
-- Baseline: Friday `0.206.3` (`dc727cc`)
+- Updated: 2026-08-22
+- Branch: `release/0.207-obsidian-20260821`
+- Baseline: Friday `0.206.4` (`caa01c23`)
+- Target: Friday `0.207.1`
 - Architecture: `outer_sol/OBSIDIAN_INTEGRATION_ARCHITECTURE_AND_IMPLEMENTATION_PLAN.md`
 
 ## Release boundary and status
@@ -144,3 +145,17 @@ Obsidian release.
   canonical toolchain identity preflight was not used because the host carries
   pre-existing Node/unrar identity drift; Docker certification was deliberately
   excluded by operator direction.
+- 2026-08-22: the two latest live Office-review failures were replayed against
+  their exact authenticated message/raw lineage. Legacy ODT/XLSX documents can
+  now receive a transient current-parser index for whole/exact review without
+  mutating stored provenance; empty tabular XLSX profiles fall back safely.
+  The one-repair review lane is rechecked by code rather than a second
+  same-model judge, and local entity/date/quantity/bound/percent scopes reject
+  cross-record drift while preserving grounded Russian paraphrases.
+- 2026-08-22: sealed release gate on the final functional snapshot: 15,180
+  non-UI tests passed with 2 declared opt-in live/installer skips, 31/31
+  Playwright UI tests passed, and Ruff, format, mypy, compileall, Bandit HIGH
+  plus JavaScript syntax all passed. The pinned Syncthing 2.1.3 live smoke
+  passed separately. Known host-only Node/unrar identity drift remains outside
+  the source checks; Docker certification was deliberately excluded by
+  operator direction.
