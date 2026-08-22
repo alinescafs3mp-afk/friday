@@ -105,6 +105,19 @@ from friday.file_evidence import (
     FileEvidenceView,
     FileRegistrationKind,
 )
+from friday.interaction_control_plane import ContinuationKind, CountAccounting
+from friday.interaction_control_plane.legacy_trace import (
+    CapabilityStatus,
+    LegacyTurnSignals,
+    PublicationAuthorization,
+    VerificationStatus,
+    WebStatus,
+    build_legacy_turn_trace,
+)
+from friday.interaction_control_plane.runtime_trace import (
+    INTERACTION_TRACE_METADATA_KEY,
+    load_trace_namespace_key,
+)
 from friday.knowledge_graph import build_user_model, normalize_event_date
 from friday.morphology import LEXICAL_MIN_STEM_INPUT, stem
 from friday.office_attestation import (
@@ -42683,6 +42696,181 @@ class AgentRuntime:
                     "attachment_query_files_matched",
                 ):
                     assistant_metadata.pop(private_key, None)
+
+            trace_structural = assistant_metadata.get("structural")
+            trace_structural = trace_structural if isinstance(trace_structural, Mapping) else {}
+            trace_continuation = (
+                ContinuationKind.CORRECTION
+                if replay_source_message_id
+                else ContinuationKind.RESUME
+                if message_locate_resume_attempt
+                else ContinuationKind.CANDIDATE_SELECTION
+                if filename_result_continuation_requested
+                else ContinuationKind.REFERENCE
+                if (
+                    reply_assistant_reference
+                    or quoted_attachment_reference
+                    or restored_history_attachment_count > 0
+                )
+                else ContinuationKind.NONE
+            )
+            trace_state_restored = bool(
+                replay_source_message_id
+                or message_locate_resume_attempt
+                or filename_result_continuation_requested
+                or restored_history_attachment_count > 0
+            )
+            trace_document_used = bool(
+                assistant_used_attachment
+                or attachment_expected_count > 0
+                or context.source_search_used
+                or context.filename_result_settled
+                or workspace_inbox_resolution.attachment is not None
+            )
+            trace_ambiguity = bool(
+                context.person_activity_resolution_failed
+                or (
+                    context.filename_result_settled
+                    and len(context.filename_result_raw_ids) > 1
+                    and not context.filename_selected_raw_id
+                    and bool(context.filename_pending_action)
+                )
+                or bool(
+                    message_locate_flow
+                    and context.message_locate_pending_action
+                    and not context.message_locate_evidence_ready
+                )
+            )
+            trace_partial_coverage = bool(
+                context.source_search_page_capped
+                or web_evidence_status == "partial"
+                or (
+                    attachment_expected_count > 0
+                    and (
+                        attachment_readable_count < attachment_expected_count
+                        or not attachment_coverage_complete
+                    )
+                )
+            )
+            trace_document_status = (
+                CapabilityStatus.INACTIVE
+                if not trace_document_used
+                else CapabilityStatus.DENIED
+                if (
+                    attachment_authority_changed_before_publication
+                    or source_search_authority_changed_before_publication
+                )
+                else CapabilityStatus.UNAVAILABLE
+                if attachment_expected_count > 0 and attachment_readable_count == 0
+                else CapabilityStatus.EMPTY
+                if (
+                    context.source_search_used
+                    and context.source_search_result_expected_count == 0
+                    and attachment_expected_count == 0
+                )
+                else CapabilityStatus.PARTIAL
+                if trace_partial_coverage
+                else CapabilityStatus.SUCCEEDED
+            )
+            trace_message_status = (
+                CapabilityStatus.INACTIVE
+                if not message_locate_flow
+                else CapabilityStatus.SUCCEEDED
+                if context.message_locate_evidence_ready
+                else CapabilityStatus.PARTIAL
+                if trace_ambiguity
+                else CapabilityStatus.EMPTY
+            )
+            trace_entity_used = bool(
+                trace_structural.get("person_document_inventory") is True
+                or trace_structural.get("person_document_inventory_self") is True
+                or context.person_activity_resolution_failed
+            )
+            trace_entity_status = (
+                CapabilityStatus.INACTIVE
+                if not trace_entity_used
+                else CapabilityStatus.UNAVAILABLE
+                if context.person_activity_resolution_failed
+                else CapabilityStatus.SUCCEEDED
+            )
+            obsidian_evidence = response.get("tool_evidence")
+            trace_obsidian_status = (
+                CapabilityStatus.INACTIVE
+                if not obsidian_owned_response
+                else CapabilityStatus.DENIED
+                if obsidian_authority_changed_before_publication
+                else CapabilityStatus.SUCCEEDED
+                if isinstance(obsidian_evidence, list) and bool(obsidian_evidence)
+                else CapabilityStatus.UNAVAILABLE
+                if obsidian_tool_ledger
+                else CapabilityStatus.NOT_STARTED
+            )
+            trace_file_attempted = bool(response.get("file_clips") or context.late_make_file_attempts > 0)
+            trace_file_status = (
+                CapabilityStatus.INACTIVE
+                if not trace_file_attempted
+                else CapabilityStatus.SUCCEEDED
+                if response.get("file_clips")
+                else CapabilityStatus.FAILED
+            )
+            trace_model_used = bool(
+                trace_structural.get("model_spoke") is True
+                or response.get("_model_generated") is True
+                or response.get("llm_failed")
+            )
+            trace_model_status = (
+                CapabilityStatus.INACTIVE
+                if not trace_model_used
+                else CapabilityStatus.FAILED
+                if response.get("llm_failed")
+                else CapabilityStatus.SUCCEEDED
+            )
+            raw_trace_tools = response.get("tools_used")
+            trace_capability_calls = (
+                min(len(raw_trace_tools), 1_024) if isinstance(raw_trace_tools, (list, tuple)) else 0
+            )
+            trace_signals = LegacyTurnSignals(
+                document=trace_document_status,
+                message=trace_message_status,
+                web=WebStatus.fail_closed(web_evidence_status),
+                entity=trace_entity_status,
+                obsidian=trace_obsidian_status,
+                file=trace_file_status,
+                personal=(
+                    CapabilityStatus.SUCCEEDED if context.successful_reminders else CapabilityStatus.INACTIVE
+                ),
+                model=trace_model_status,
+                verification=VerificationStatus.fail_closed(verification_status),
+                publication=(
+                    PublicationAuthorization.AUTHORIZED
+                    if publication_authorized
+                    else PublicationAuthorization.DENIED
+                ),
+                small_talk=trace_structural.get("small_talk_owned") is True,
+                continuation=trace_continuation,
+                coverage_partial=trace_partial_coverage,
+                ambiguity_present=trace_ambiguity,
+                state_restored=trace_state_restored,
+                authority_rechecked=publication_reauth_required,
+                latency_ms=min(
+                    86_400_000,
+                    max(0, int((time.monotonic() - turn_started) * 1_000)),
+                ),
+                model_calls=1 if trace_model_used else 0,
+                model_call_accounting=CountAccounting.LOWER_BOUND,
+                capability_calls=trace_capability_calls,
+                capability_call_accounting=CountAccounting.LOWER_BOUND,
+            )
+            try:
+                interaction_trace = build_legacy_turn_trace(
+                    namespace_key=load_trace_namespace_key(publication_conn),
+                    turn_identifier=source_search_lineage_user_message_id,
+                    conversation_identifier=conversation_id,
+                    signals=trace_signals,
+                )
+                assistant_metadata[INTERACTION_TRACE_METADATA_KEY] = interaction_trace.to_payload()
+            except Exception as exc:  # noqa: BLE001 - shadow tracing cannot break chat publication
+                LOGGER.warning("interaction-trace omitted (%s)", type(exc).__name__)
 
             assistant_message = self.storage.store_message(
                 conversation_id,
