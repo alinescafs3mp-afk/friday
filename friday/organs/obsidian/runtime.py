@@ -2187,6 +2187,22 @@ class ObsidianRuntime:
             context_key=context_key,
         )
 
+    async def migrate_legacy_operation_markers(
+        self,
+        owner_id: str,
+        *,
+        max_notes: int = 50,
+    ) -> int:
+        """Remove proven legacy comments and re-enter revision-pinned delivery."""
+
+        lock = await self._owner_lock(owner_id)
+        async with lock:
+            service = await self._operation_service(owner_id, synchronize=True)
+            return await asyncio.to_thread(
+                service.migrate_legacy_operation_markers,
+                max_notes=max_notes,
+            )
+
     async def workflow_read(
         self,
         owner_id: str,
@@ -2391,6 +2407,15 @@ class ObsidianRuntime:
                     if str(panel.get("state") or "") != "ready":
                         return True, 0, 0, False
                     try:
+                        operations = await self._operation_service(
+                            owner_id,
+                            synchronize=True,
+                            readiness_timeout=timeout,
+                        )
+                        await asyncio.to_thread(
+                            operations.migrate_legacy_operation_markers,
+                            max_notes=10,
+                        )
                         indexed = await asyncio.to_thread(self._refresh_index, owner_id)
                     except Exception:  # noqa: BLE001 - isolate a corrupt tenant vault
                         return True, 0, 0, True

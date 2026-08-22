@@ -11,7 +11,12 @@ from typing import Any
 
 import pytest
 
-from friday.agent_runtime import AgentRuntime, _obsidian_result_note_body, _obsidian_result_note_path
+from friday.agent_runtime import (
+    AgentRuntime,
+    _obsidian_result_note_body,
+    _obsidian_result_note_missing_facets,
+    _obsidian_result_note_path,
+)
 from friday.execution_kernel import ToolResult
 from friday.organs.obsidian.conversation import obsidian_result_note_request
 from friday.permissions import ActorContext
@@ -22,8 +27,23 @@ _MESSAGE = (
 _TASK = "Можно ли развернуть на qnap TVS-675 nextcloud?"
 _CHARACTERISTICS_MESSAGE = "Создай заметку в обсидиан с характеристиками qnap TVS-675"
 _CHARACTERISTICS_HEADING = "Характеристики qnap TVS-675"
-_CHARACTERISTICS_TASK = f"{_CHARACTERISTICS_HEADING}?"
-_CHARACTERISTICS_FACT = "QNAP TVS-675 использует 8-ядерный процессор ZhaoXin KX-U6580 с частотой 2,5 ГГц."
+_CHARACTERISTICS_TASK = (
+    "Полные характеристики qnap TVS-675: процессор/CPU, память/RAM/DDR4, "
+    "SATA/M.2, Ethernet, USB/HDMI/PCIe, габариты, питание/энергопотребление?"
+)
+_CHARACTERISTICS_FACT = "\n".join(
+    (
+        "Процессор: ZhaoXin KX-U6580, 8 ядер, 2,5 ГГц.",
+        "Оперативная память: 8 ГБ DDR4, расширение до 64 ГБ.",
+        "Дисковая подсистема: 6 отсеков SATA и 2 слота M.2 2280.",
+        "Сетевые интерфейсы: 2 порта Ethernet 2,5 Гбит/с RJ-45.",
+        "Порты: 2 USB 3.2 Gen 1, 2 USB 3.2 Gen 2 и HDMI 2.0.",
+        "Расширение: 2 слота PCIe Gen 3 x4.",
+        "Габариты: 180,2 × 264,3 × 279,6 мм; масса 7 кг.",
+        "Питание: блок питания 250 Вт.",
+    )
+)
+_CHARACTERISTICS_ONE_FACT = "QNAP TVS-675 использует 8-ядерный процессор ZhaoXin KX-U6580 с частотой 2,5 ГГц."
 _FACT = "QNAP TVS-675 поддерживает контейнерный вариант Nextcloud при проверке совместимости пакетов."
 _URL = "https://public.synthetic.example.com/qnap-nextcloud"
 _REVISION = "a" * 64
@@ -65,6 +85,136 @@ def test_result_note_path_and_heading_redact_friday_api_tokens() -> None:
     body = _obsidian_result_note_body(request, "Безопасный ответ.", date(2026, 8, 22), [])
     assert secret not in path
     assert secret not in body
+
+
+def test_required_characteristics_facet_accepts_explicit_source_unavailability() -> None:
+    request = obsidian_result_note_request(_CHARACTERISTICS_MESSAGE)
+    assert request is not None
+    sourced = "\n".join(
+        line for line in _CHARACTERISTICS_FACT.splitlines() if not line.startswith("Расширение:")
+    )
+    answer = f"{sourced}\nPCIe: в доступном официальном источнике не указано."
+    evidence = ToolResult(
+        "web_research",
+        True,
+        data={
+            "sources": [
+                {
+                    "url": _URL,
+                    "title": "Synthetic QNAP source",
+                    "text": sourced,
+                }
+            ]
+        },
+    ).to_llm_message()
+
+    assert (
+        _obsidian_result_note_missing_facets(
+            request,
+            answer,
+            [{"tool": "web_research", "output": evidence}],
+        )
+        == ()
+    )
+
+
+def test_source_unavailability_does_not_support_a_positive_model_fact() -> None:
+    request = obsidian_result_note_request(_CHARACTERISTICS_MESSAGE)
+    assert request is not None
+    sourced = _CHARACTERISTICS_FACT.replace(
+        "Процессор: ZhaoXin KX-U6580, 8 ядер, 2,5 ГГц.",
+        "Процессор: в источнике не указано.",
+    )
+    evidence = ToolResult(
+        "web_research",
+        True,
+        data={"sources": [{"url": _URL, "text": sourced}]},
+    ).to_llm_message()
+
+    assert _obsidian_result_note_missing_facets(
+        request,
+        _CHARACTERISTICS_FACT,
+        [{"tool": "web_research", "output": evidence}],
+    ) == ("processor",)
+
+
+def _bounded_live_shaped_characteristics_evidence(*, include_pcie: bool = True) -> str:
+    """Mirror a long product page plus two noisy peers in the 11.9k tool slot."""
+
+    records = [
+        "Процессор\nВосьмиядерный ZhaoXin KX-U6580 2,5 ГГц",
+        "Память\n8 ГБ (DDR4)\nМожет быть расширена до 64 ГБ",
+        "Дисковая подсистема\n6 отсеков SATA\nСлоты M.2\n2",
+        "Сетевые интерфейсы\n2 порта Ethernet 2,5 Гбит/с RJ-45",
+        "Порты USB 3.2 Gen2\n2\nHDMI-порт\nHDMI 2.0",
+        "Слоты расширения\n2\nОписание слотов расширения\nPCIe Gen3 x4",
+        "Габариты, (мм.)\n180,2 × 264,3 × 279,6\nМасса, (кг.)\n7",
+        "Электропитание\nБлок питания\nВстроенный\nМощность\n250 Вт",
+    ]
+    if not include_pcie:
+        records = [record for record in records if "PCIe" not in record]
+    navigation = "Навигация каталога, описание серии и условия поставки. " * 22
+    long_product_page = "\n".join(part for record in records for part in (navigation, record))
+    sources = [
+        {
+            "url": "https://qnap.synthetic.example/tvs-675",
+            "title": "QNAP TVS-675",
+            "text": long_product_page,
+        },
+        {
+            "url": "https://shop.synthetic.example/tvs-675",
+            "title": "Store listing",
+            "text": "Меню магазина и условия доставки. " * 600,
+        },
+        {
+            "url": "https://market.synthetic.example/tvs-675",
+            "title": "Marketplace listing",
+            "text": "Карточка продавца без технических характеристик. " * 500,
+        },
+    ]
+    return ToolResult(
+        "web_research",
+        True,
+        data={"query": _CHARACTERISTICS_TASK, "sources": sources},
+    ).to_llm_message()
+
+
+def test_long_multi_record_characteristics_survive_the_actual_bounded_evidence_slot() -> None:
+    request = obsidian_result_note_request(_CHARACTERISTICS_MESSAGE)
+    assert request is not None
+
+    evidence = _bounded_live_shaped_characteristics_evidence()
+    payload = json.loads(evidence.partition("\n")[2])
+
+    assert len(evidence) <= 12_100
+    assert len(payload["sources"]) == 3
+    projected = payload["sources"][0]["text"]
+    assert not [
+        marker
+        for marker in ("KX-U6580", "64 ГБ", "M.2", "RJ-45", "USB", "HDMI", "PCIe", "279,6", "250 Вт")
+        if marker not in projected
+    ]
+    assert (
+        _obsidian_result_note_missing_facets(
+            request,
+            _CHARACTERISTICS_FACT,
+            [{"tool": "web_research", "output": evidence}],
+        )
+        == ()
+    )
+
+
+def test_complete_model_text_cannot_substitute_for_a_facet_missing_from_bounded_evidence() -> None:
+    request = obsidian_result_note_request(_CHARACTERISTICS_MESSAGE)
+    assert request is not None
+
+    evidence = _bounded_live_shaped_characteristics_evidence(include_pcie=False)
+
+    assert _obsidian_result_note_missing_facets(
+        request,
+        _CHARACTERISTICS_FACT,
+        [{"tool": "web_research", "output": evidence}],
+    ) == ("ports_expansion",)
 
 
 def _schema(name: str, properties: dict[str, Any]) -> dict[str, Any]:
@@ -229,10 +379,17 @@ class _Model:
     model = "synthetic-result-note"
     total_budget_sec = 1.0
 
-    def __init__(self, *, task: str = _TASK, fact: str = _FACT) -> None:
+    def __init__(
+        self,
+        *,
+        task: str = _TASK,
+        fact: str = _FACT,
+        evidence_marker: str | None = None,
+    ) -> None:
         self.tool_names: list[set[str]] = []
         self.task = task
         self.fact = fact
+        self.evidence_marker = evidence_marker or fact
 
     async def chat(self, messages, tools=None, **kwargs):  # noqa: ANN001, ARG002
         self.tool_names.append(
@@ -258,7 +415,7 @@ class _Model:
                 "tool_calls": None,
                 "finish_reason": "stop",
             }
-        if self.fact not in rendered:
+        if self.evidence_marker not in rendered:
             return {
                 "content": json.dumps(
                     {"вид": "интернет", "запрос": self.task, "кто": "", "дни": []},
@@ -703,7 +860,11 @@ async def test_exact_characteristics_prompt_researches_verifies_and_saves_the_an
 ) -> None:
     storage.ensure_user("alice", preset_key="owner")
     kernel = _Kernel(fact=_CHARACTERISTICS_FACT)
-    model = _Model(task=_CHARACTERISTICS_TASK, fact=_CHARACTERISTICS_FACT)
+    model = _Model(
+        task=_CHARACTERISTICS_TASK,
+        fact=_CHARACTERISTICS_FACT,
+        evidence_marker="Процессор: ZhaoXin KX-U6580",
+    )
     runtime = AgentRuntime(
         replace(
             settings,
@@ -730,12 +891,49 @@ async def test_exact_characteristics_prompt_researches_verifies_and_saves_the_an
     assert kernel.calls[0][1]["query"] == _CHARACTERISTICS_TASK
     create = kernel.calls[-1][1]
     assert str(create["path"]).startswith("Research/Характеристики qnap TVS-675 — 2026-08-22 (")
-    assert _CHARACTERISTICS_FACT in str(create["content"])
+    missing_lines = [
+        line for line in _CHARACTERISTICS_FACT.splitlines() if line not in str(create["content"])
+    ]
+    assert not missing_lines, (missing_lines, create["content"])
     assert str(create["content"]).startswith(f"# {_CHARACTERISTICS_HEADING}\n")
     assert reply["verification_status"] == "passed"
     assert reply["verified"] is True
-    assert _CHARACTERISTICS_FACT in reply["message"]
+    assert not [line for line in _CHARACTERISTICS_FACT.splitlines() if line not in reply["message"]]
     assert "Заметка создана" in reply["message"]
+
+
+@pytest.mark.asyncio
+async def test_one_fact_characteristics_answer_is_not_written_even_when_verifier_passes(
+    settings,
+    storage,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    kernel = _Kernel(fact=_CHARACTERISTICS_ONE_FACT)
+    model = _Model(task=_CHARACTERISTICS_TASK, fact=_CHARACTERISTICS_ONE_FACT)
+    runtime = AgentRuntime(
+        replace(
+            settings,
+            verify_answers=False,
+            obsidian_public_base_url="https://friday.example",
+        ),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+
+    reply = await runtime.chat(
+        "alice",
+        _CHARACTERISTICS_MESSAGE,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+    )
+
+    assert [name for name, _payload in kernel.calls] == ["web_research"]
+    assert reply["tools_used"] == ["web_research"]
+    assert reply["verification_status"] == "passed"
+    assert reply["verified"] is True
+    assert _CHARACTERISTICS_ONE_FACT in reply["message"]
+    assert "не покрывает обязательные разделы характеристик" in reply["message"]
+    assert "Заметка создана" not in reply["message"]
 
 
 @pytest.mark.asyncio

@@ -37,6 +37,7 @@ from friday.file_delivery import (
     FileRecordUnavailable,
     read_authorized_file_in_transaction,
 )
+from friday.morphology import LEXICAL_MIN_STEM_INPUT, stem
 from friday.organs import local_now
 from friday.oversight_scope import hierarchy_is_configured, may_oversee
 from friday.people import resolve_person, unambiguous
@@ -51,7 +52,7 @@ from friday.private_fs import open_private_text_write
 from friday.raw_metadata import bounded_raw_file_metadata
 from friday.reminder_schedule import reminder_clock, reminder_clock_description, reminder_when_text
 from friday.reports import SUPPORTED_KINDS, render, spec_from_payload
-from friday.retrieval import _public_graph_context, best_snippet, is_relational_query
+from friday.retrieval import _public_graph_context, best_snippet, is_relational_query, tokens_of
 from friday.source_identity import private_source_search_page, raw_source_snapshot
 from friday.storage._core import iso_date
 from friday.storage._oversight import ANALYSES
@@ -1533,6 +1534,147 @@ _WEB_SOURCE_STRING_LIMITS = {
     "error": 200,
 }
 
+_WEB_ENUMERATED_QUERY_NOISE = frozenset(
+    {
+        "and",
+        "full",
+        "official",
+        "specification",
+        "specifications",
+        "the",
+        "и",
+        "полные",
+        "официальные",
+        "характеристики",
+        "спецификации",
+    }
+)
+_WEB_COVERAGE_TOKEN = re.compile(
+    r"[0-9A-Za-zА-Яа-яЁё][0-9A-Za-zА-Яа-яЁё._+#-]*",
+    re.UNICODE,
+)
+
+
+def _web_query_coverage_forms(query: str) -> tuple[str, ...]:
+    """Return forms from an explicit multi-facet query, else an empty tuple.
+
+    A single relevance window is right for an ordinary question but wrong for
+    an enumerated specification request: hardware tables put CPU, memory,
+    ports and power in separate records.  Detect only an explicit list so the
+    established one-answer passage selection remains unchanged elsewhere.
+    """
+
+    raw = str(query or "")
+    focus = raw.rsplit(":", 1)[-1] if ":" in raw else raw
+    if sum(focus.count(separator) for separator in (",", ";", "/", "|")) < 3:
+        return ()
+    forms: list[str] = []
+    for token in tokens_of(focus):
+        folded = token.casefold()
+        if len(folded) < 2 or folded in _WEB_ENUMERATED_QUERY_NOISE:
+            continue
+        form = stem(folded, LEXICAL_MIN_STEM_INPUT)
+        if form and form not in forms:
+            forms.append(form)
+    return tuple(forms[:32]) if len(forms) >= 4 else ()
+
+
+def _web_coverage_excerpt(query: str, text: str, *, max_chars: int) -> str:
+    """Keep several source records that jointly cover an enumerated query.
+
+    The returned text is still a bounded excerpt of the fetched source.  It
+    never copies terms from the query and therefore cannot manufacture support
+    for a facet absent from the page.
+    """
+
+    if max_chars <= 0:
+        return ""
+    body = str(text or "").strip()
+    if len(body) <= max_chars:
+        return body
+    forms = _web_query_coverage_forms(query)
+    if not forms or max_chars < 640:
+        return best_snippet(query, body, max_chars=max_chars)
+
+    wanted = set(forms)
+    occurrences: list[tuple[int, int, str]] = []
+    for match in _WEB_COVERAGE_TOKEN.finditer(body):
+        token = match.group(0).rstrip(".-").casefold()
+        form = stem(token, LEXICAL_MIN_STEM_INPUT)
+        if form in wanted:
+            occurrences.append((match.start(), match.end(), form))
+    present = {form for _start, _end, form in occurrences}
+    if len(present) < 2:
+        return best_snippet(query, body, max_chars=max_chars)
+
+    # Up to ten short records fit a normal three-source tool slot. Aliases such
+    # as RAM/DDR4 and network/Ethernet usually collapse into the same record.
+    # Reserve the join characters up front: without that reservation the last
+    # (power/expansion in the measured hardware page) was always one window too
+    # large for the remaining budget.
+    join_chars = 3  # ``\n…\n`` between records.
+    record_count = min(10, len(present))
+    record_budget = max(
+        160,
+        min(480, (max_chars - join_chars * (record_count - 1)) // record_count),
+    )
+    candidates: list[tuple[int, int, frozenset[str], int]] = []
+    for start, _end, _form in occurrences:
+        left = max(0, start - record_budget // 3)
+        right = min(len(body), left + record_budget)
+        left = max(0, right - record_budget)
+        fragment = body[left:right]
+        covered = frozenset(
+            stem(token.casefold(), LEXICAL_MIN_STEM_INPUT) for token in tokens_of(fragment)
+        ).intersection(present)
+        if not covered:
+            continue
+        substance = min(20, sum(character.isdigit() for character in fragment))
+        substance += 4 if ":" in fragment else 0
+        candidates.append((left, right, covered, substance))
+
+    selected: list[tuple[int, int]] = []
+    uncovered = set(present)
+    remaining = max_chars
+    while uncovered and candidates:
+        eligible = [
+            candidate
+            for candidate in candidates
+            if candidate[2].intersection(uncovered)
+            and (candidate[1] - candidate[0]) <= remaining - (join_chars if selected else 0)
+        ]
+        if not eligible:
+            break
+        chosen = max(
+            eligible,
+            key=lambda item: (
+                len(item[2].intersection(uncovered)),
+                item[3],
+                -(item[1] - item[0]),
+                -item[0],
+            ),
+        )
+        selected.append((chosen[0], chosen[1]))
+        uncovered.difference_update(chosen[2])
+        remaining -= chosen[1] - chosen[0]
+        if len(selected) > 1:
+            remaining -= join_chars
+        # Overlapping windows carry the same source record. Keep the stronger
+        # one chosen above rather than spending the bounded slot twice.
+        candidates = [
+            item
+            for item in candidates
+            if item is not chosen
+            and max(0, min(item[1], chosen[1]) - max(item[0], chosen[0]))
+            < min(item[1] - item[0], chosen[1] - chosen[0]) // 2
+        ]
+
+    if not selected:
+        return best_snippet(query, body, max_chars=max_chars)
+    selected.sort()
+    result = "\n…\n".join(body[left:right].strip() for left, right in selected)
+    return result[:max_chars].rstrip()
+
 
 def _web_research_for_llm(data: dict[str, Any]) -> tuple[str, bool]:
     """Render every research source inside one bounded, valid JSON envelope.
@@ -1634,7 +1776,11 @@ def _web_research_for_llm(data: dict[str, Any]) -> tuple[str, bool]:
     compacted = False
     for source, text in zip(sources, source_texts, strict=False):
         if query_for_snippet and len(text) > per_source:
-            source["text"] = best_snippet(query_for_snippet, text, max_chars=per_source)
+            source["text"] = _web_coverage_excerpt(
+                query_for_snippet,
+                text,
+                max_chars=per_source,
+            )
         else:
             source["text"] = text[:per_source]
         if len(text) > len(source["text"]):
@@ -1651,9 +1797,14 @@ def _web_research_for_llm(data: dict[str, Any]) -> tuple[str, bool]:
     # every source proportionally until the serialized envelope itself fits.
     while len(encoded) > _LLM_TOOL_PAYLOAD_MAX_CHARS and any(source["text"] for source in sources):
         ratio = max(0.1, (_LLM_TOOL_PAYLOAD_MAX_CHARS - 64) / len(encoded))
-        for source in sources:
-            text = str(source["text"])
-            source["text"] = text[: max(0, int(len(text) * ratio) - 4)]
+        for source, original in zip(sources, source_texts, strict=False):
+            current = str(source["text"])
+            reduced_limit = max(0, int(len(current) * ratio) - 4)
+            source["text"] = (
+                _web_coverage_excerpt(query_for_snippet, original, max_chars=reduced_limit)
+                if query_for_snippet and reduced_limit
+                else current[:reduced_limit]
+            )
             source["truncated"] = True
         compacted = True
         encoded = json.dumps(root, ensure_ascii=False, indent=2)

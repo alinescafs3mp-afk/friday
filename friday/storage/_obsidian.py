@@ -1605,6 +1605,7 @@ class ObsidianMixin(StorageShared):
         arguments_digest: str,
         expected_revision: str | None = None,
         work_item_id: str | None = None,
+        prepared_result: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, Any], bool]:
         owner = validate_user_id(user_id)
         op_id = str(operation_id or "").strip()
@@ -1621,6 +1622,8 @@ class ObsidianMixin(StorageShared):
         ):
             raise ValueError("work_item_id must be a bounded non-empty string")
         normalized_work_item = work_item_id.strip() if work_item_id is not None else None
+        prepared_payload = None if prepared_result is None else dict(prepared_result)
+        prepared_json = "{}" if prepared_payload is None else _canonical_json(prepared_payload)
         now = utc_now()
         with self.transaction() as conn:
             existing = conn.execute(
@@ -1645,6 +1648,25 @@ class ObsidianMixin(StorageShared):
                 )
                 if identity != requested:
                     raise ValueError("operation_id was already used for different arguments")
+                if prepared_payload is not None and str(existing["status"]) in {"prepared", "uncertain"}:
+                    current_result = json.loads(str(existing["result_json"] or "{}"))
+                    if not isinstance(current_result, dict):
+                        raise ValueError("prepared Obsidian operation result is invalid")
+                    for key, value in prepared_payload.items():
+                        if key in current_result and current_result[key] != value:
+                            raise ValueError("prepared Obsidian operation target changed")
+                    merged = {**current_result, **prepared_payload}
+                    if merged != current_result:
+                        conn.execute(
+                            """UPDATE obsidian_operations SET result_json=?, updated_at=?
+                               WHERE id=? AND user_id=?""",
+                            (_canonical_json(merged), now, op_id, owner),
+                        )
+                        existing = conn.execute(
+                            "SELECT * FROM obsidian_operations WHERE id=? AND user_id=?",
+                            (op_id, owner),
+                        ).fetchone()
+                        assert existing is not None
                 return dict(existing), False
             vault = conn.execute(
                 "SELECT id FROM obsidian_vaults WHERE id=? AND user_id=?", (str(vault_id), owner)
@@ -1654,8 +1676,8 @@ class ObsidianMixin(StorageShared):
             conn.execute(
                 """INSERT INTO obsidian_operations(
                        id, user_id, work_item_id, vault_id, method, arguments_digest,
-                       expected_revision, status, created_at, updated_at
-                   ) VALUES(?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?)""",
+                       expected_revision, status, result_json, created_at, updated_at
+                   ) VALUES(?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?)""",
                 (
                     op_id,
                     owner,
@@ -1664,6 +1686,7 @@ class ObsidianMixin(StorageShared):
                     str(method),
                     digest,
                     expected_revision,
+                    prepared_json,
                     now,
                     now,
                 ),
@@ -1746,6 +1769,29 @@ class ObsidianMixin(StorageShared):
                )
                ORDER BY updated_at, id LIMIT ?""",
             (capped,),
+        ).fetchall()
+        return [dict(item) for item in rows]
+
+    def list_obsidian_legacy_marker_candidates(
+        self,
+        user_id: str,
+        *,
+        limit: int = 5_000,
+    ) -> list[dict[str, Any]]:
+        """Return bounded rows whose in-note legacy marker can be migrated safely."""
+
+        owner = validate_user_id(user_id)
+        capped = min(5_000, max(1, int(limit)))
+        rows = self.execute(
+            """SELECT * FROM obsidian_operations
+               WHERE user_id=? AND status IN (
+                   'committed', 'scan_pending', 'scan_complete',
+                   'delivery_pending', 'delivered', 'reconciled',
+                   'prepared', 'uncertain'
+               )
+               ORDER BY CASE WHEN status='delivered' THEN 1 ELSE 0 END,
+                        updated_at, id LIMIT ?""",
+            (owner, capped),
         ).fetchall()
         return [dict(item) for item in rows]
 

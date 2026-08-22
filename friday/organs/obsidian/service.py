@@ -9,7 +9,7 @@ import threading
 import unicodedata
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import UTC, date, datetime
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from friday.morphology import LEXICAL_MIN_STEM_INPUT, stem
 
@@ -34,6 +34,7 @@ from .contracts import (
     validate_revision,
 )
 from .frontmatter import parse_frontmatter, set_frontmatter_properties
+from .operation_receipts import NoteOperationReceipt, NoteOperationReceiptStore
 from .structured_notes import append_section_item
 from .vault_store import VaultFile, VaultStore
 
@@ -109,11 +110,21 @@ class ObsidianService:
         *,
         clock: Callable[[], date | datetime] | None = None,
         convention: ObsidianVaultConvention | None = None,
+        operation_receipt_root: str | Path | None = None,
     ) -> None:
         self.store = store
         self._clock = clock or (lambda: datetime.now(tz=UTC))
         self.convention = convention or ObsidianVaultConvention()
         self._lock = threading.RLock()
+        root_stat = self.store.root.stat()
+        receipt_identity = f"{self.store.root.resolve()}\0{root_stat.st_dev}\0{root_stat.st_ino}"
+        identity = hashlib.sha256(receipt_identity.encode("utf-8", errors="strict")).hexdigest()[:24]
+        self._operation_receipt_root = (
+            Path(operation_receipt_root)
+            if operation_receipt_root is not None
+            else self.store.root.parent / ".friday-obsidian-operation-receipts" / identity
+        )
+        self._operation_receipts: NoteOperationReceiptStore | None = None
 
     def list_notes(self) -> tuple[NoteSummary, ...]:
         notes: list[NoteSummary] = []
@@ -169,6 +180,217 @@ class ObsidianService:
         stored = self.store.read(note_path)
         return _note_document(stored)
 
+    def render_create_content(
+        self,
+        content: str,
+        *,
+        properties: Mapping[str, PropertyInput] | None = None,
+    ) -> str:
+        """Render the exact user-visible bytes for a create before publication."""
+
+        self.store.validate_text_size(content)
+        bounded_properties = _bounded_properties(
+            {} if properties is None else properties,
+            maximum_bytes=self.store.limits.max_note_bytes // 4,
+        )
+        rendered = set_frontmatter_properties(content, bounded_properties)
+        self.store.validate_text_size(rendered)
+        return rendered
+
+    def render_append_content(self, content: str, text: str) -> str:
+        """Render one append without adding Friday's legacy operation comment."""
+
+        self.store.validate_text_size(content)
+        self.store.validate_text_size(text)
+        rendered = _append_visible_text(content, text)
+        self.store.validate_text_size(rendered)
+        return rendered
+
+    def render_append_section_content(self, content: str, section: str, item: str) -> str:
+        """Render one structured append without an in-note operation comment."""
+
+        self.store.validate_text_size(content)
+        edit = append_section_item(content, section, item)
+        self.store.validate_text_size(edit.content)
+        return edit.content
+
+    def _idempotent_update(
+        self,
+        note_path: str,
+        operation_id: str,
+        *,
+        receipt_method: str,
+        arguments_payload: str,
+        render: Callable[[str], str],
+        expected_revision: str | None,
+        create_if_missing: bool,
+        legacy_methods: Sequence[str] = ("append",),
+    ) -> NoteWriteResult:
+        operation_digest = _operation_digest(operation_id)
+        arguments_digest = _text_digest(arguments_payload)
+        with self._lock:
+            prior = self._receipt_store().lookup(
+                operation_digest=operation_digest,
+                method=receipt_method,
+                arguments_digest=arguments_digest,
+                note_path=note_path,
+            )
+            if prior is not None and prior.state == "committed":
+                return _receipt_result(prior, operation_id=operation_id, applied=False)
+            try:
+                observed = self.store.read_text(note_path)
+            except NoteNotFoundError:
+                observed = None
+            legacy_clean: str | None = None
+            legacy_method: str | None = None
+            if observed is not None:
+                legacy_method, replay = _find_operation_any(
+                    observed.text(),
+                    operation_id,
+                    methods=legacy_methods,
+                )
+                if replay is not None and replay != arguments_digest:
+                    raise IdempotencyConflictError(
+                        f"{receipt_method} operation ID was reused with different arguments"
+                    )
+                if legacy_method is not None:
+                    legacy_clean = _remove_operation_marker(
+                        observed.text(),
+                        operation_id,
+                        method=legacy_method,
+                        arguments_digest=arguments_digest,
+                        target_revision=None,
+                    )
+                    if legacy_clean is None:
+                        raise IdempotencyConflictError("legacy operation marker is ambiguous")
+
+            if prior is not None:
+                receipt = prior
+                prepared = False
+                base_revision = receipt.base_revision
+                target_revision = receipt.target_revision
+                target_content = ""
+            elif observed is None:
+                if not create_if_missing:
+                    raise NoteNotFoundError(note_path)
+                if expected_revision is not None:
+                    raise RevisionConflictError(expected_revision, None)
+                base_revision = None
+                target_content = render("")
+                created = True
+            elif legacy_clean is not None:
+                base_revision = expected_revision
+                target_content = legacy_clean
+                created = False
+            else:
+                _assert_expected(observed.revision, expected_revision)
+                base_revision = observed.revision
+                target_content = render(observed.text())
+                created = False
+            if prior is None:
+                self.store.validate_text_size(target_content)
+                target_revision = _text_digest(target_content)
+                receipt, prepared = self._receipt_store().prepare(
+                    operation_digest=operation_digest,
+                    method=receipt_method,
+                    arguments_digest=arguments_digest,
+                    note_path=note_path,
+                    base_revision=base_revision,
+                    target_revision=target_revision,
+                    created=created,
+                )
+
+            if not prepared:
+                try:
+                    observed = self.store.read_text(note_path)
+                except NoteNotFoundError:
+                    observed = None
+                if observed is not None and observed.revision == receipt.target_revision:
+                    committed = self._receipt_store().commit(operation_digest)
+                    return _receipt_result(committed, operation_id=operation_id, applied=False)
+                if observed is not None:
+                    legacy_method, replay = _find_operation_any(
+                        observed.text(),
+                        operation_id,
+                        methods=legacy_methods,
+                    )
+                    if replay is not None and replay != arguments_digest:
+                        raise IdempotencyConflictError(
+                            f"{receipt_method} operation ID was reused with different arguments"
+                        )
+                    if legacy_method is not None:
+                        cleaned = _remove_operation_marker(
+                            observed.text(),
+                            operation_id,
+                            method=legacy_method,
+                            arguments_digest=arguments_digest,
+                            target_revision=receipt.target_revision,
+                        )
+                        if cleaned is not None:
+                            written = self.store.write_text(
+                                note_path,
+                                cleaned,
+                                expected_revision=observed.revision,
+                            )
+                            committed = self._receipt_store().commit(operation_digest)
+                            if written.revision != committed.target_revision:
+                                raise RevisionConflictError(
+                                    committed.target_revision,
+                                    written.revision,
+                                )
+                            return _receipt_result(
+                                committed,
+                                operation_id=operation_id,
+                                applied=False,
+                            )
+                if receipt.base_revision is None:
+                    if observed is not None:
+                        raise NoteAlreadyExistsError(note_path)
+                    target_content = render("")
+                    if _text_digest(target_content) != receipt.target_revision:
+                        raise IdempotencyConflictError("prepared operation target changed")
+                    written = self.store.write_text(note_path, target_content, create_only=True)
+                else:
+                    if observed is None or observed.revision != receipt.base_revision:
+                        raise RevisionConflictError(
+                            receipt.base_revision,
+                            None if observed is None else observed.revision,
+                        )
+                    target_content = render(observed.text())
+                    if _text_digest(target_content) != receipt.target_revision:
+                        raise IdempotencyConflictError("prepared operation target changed")
+                    written = self.store.write_text(
+                        note_path,
+                        target_content,
+                        expected_revision=receipt.base_revision,
+                    )
+                committed = self._receipt_store().commit(operation_digest)
+                if written.revision != committed.target_revision:
+                    raise RevisionConflictError(committed.target_revision, written.revision)
+                return _receipt_result(committed, operation_id=operation_id, applied=True)
+
+            if legacy_clean is not None and observed is not None:
+                written = self.store.write_text(
+                    note_path,
+                    legacy_clean,
+                    expected_revision=observed.revision,
+                )
+                applied = False
+            elif base_revision is None:
+                written = self.store.write_text(note_path, target_content, create_only=True)
+                applied = True
+            else:
+                written = self.store.write_text(
+                    note_path,
+                    target_content,
+                    expected_revision=base_revision,
+                )
+                applied = True
+            if written.revision != receipt.target_revision:
+                raise RevisionConflictError(receipt.target_revision, written.revision)
+            committed = self._receipt_store().commit(operation_digest)
+            return _receipt_result(committed, operation_id=operation_id, applied=applied)
+
     def create_note(
         self,
         path: str | PurePosixPath,
@@ -178,40 +400,95 @@ class ObsidianService:
         operation_id: str | None = None,
     ) -> NoteWriteResult:
         note_path = self._note_path(path)
-        self.store.validate_text_size(content)
-        bounded_properties = _bounded_properties(
-            {} if properties is None else properties,
-            maximum_bytes=self.store.limits.max_note_bytes // 4,
-        )
-        rendered = set_frontmatter_properties(content, bounded_properties)
-        self.store.validate_text_size(rendered)
-        marker: str | None = None
-        arguments_digest: str | None = None
-        if operation_id is not None:
-            operation_digest = _operation_digest(operation_id)
-            arguments_digest = _text_digest(rendered)
-            marker = _marker("create", operation_digest, arguments_digest)
-            rendered = _append_visible_text(rendered, marker)
-        self.store.validate_text_size(rendered)
-        with self._lock:
-            try:
+        rendered = self.render_create_content(content, properties=properties)
+        if operation_id is None:
+            with self._lock:
                 written = self.store.write_text(note_path, rendered, create_only=True)
-            except NoteAlreadyExistsError:
-                if marker is None or arguments_digest is None:
-                    raise
-                assert operation_id is not None  # marker creation proves this branch
-                existing = self.store.read_text(note_path)
-                replay = _find_operation(existing.text(), operation_id, method="create")
-                if replay is None:
-                    raise
-                if replay != arguments_digest:
-                    raise IdempotencyConflictError(
-                        "create operation ID was reused with different arguments"
-                    ) from None
-                return _write_result(
-                    existing, previous=None, created=True, applied=False, operation_id=operation_id
+            return _write_result(
+                written,
+                previous=None,
+                created=True,
+                applied=True,
+                operation_id=None,
+            )
+        operation_digest = _operation_digest(operation_id)
+        arguments_digest = _text_digest(rendered)
+        target_revision = _text_digest(rendered)
+        with self._lock:
+            prior = self._receipt_store().lookup(
+                operation_digest=operation_digest,
+                method="create",
+                arguments_digest=arguments_digest,
+                note_path=note_path,
+            )
+            if prior is not None and prior.state == "committed":
+                return _receipt_result(prior, operation_id=operation_id, applied=False)
+            try:
+                observed = self.store.read_text(note_path)
+            except NoteNotFoundError:
+                observed = None
+            legacy_clean: str | None = None
+            if observed is not None:
+                replay = _find_operation(observed.text(), operation_id, method="create")
+                if replay is not None and replay != arguments_digest:
+                    raise IdempotencyConflictError("create operation ID was reused with different arguments")
+                if replay is not None:
+                    legacy_clean = _remove_operation_marker(
+                        observed.text(),
+                        operation_id,
+                        method="create",
+                        arguments_digest=arguments_digest,
+                        target_revision=None if prior is None else prior.target_revision,
+                    )
+                    if legacy_clean is None:
+                        raise IdempotencyConflictError("legacy create operation marker is ambiguous")
+            if prior is None and observed is not None and legacy_clean is None:
+                raise NoteAlreadyExistsError(note_path)
+            base_revision = None
+            if prior is None and legacy_clean is not None:
+                assert observed is not None
+                base_revision = observed.revision
+            if prior is None and legacy_clean is not None:
+                target_revision = _text_digest(legacy_clean)
+            if prior is None:
+                receipt, _prepared = self._receipt_store().prepare(
+                    operation_digest=operation_digest,
+                    method="create",
+                    arguments_digest=arguments_digest,
+                    note_path=note_path,
+                    base_revision=base_revision,
+                    target_revision=target_revision,
+                    created=True,
                 )
-        return _write_result(written, previous=None, created=True, applied=True, operation_id=operation_id)
+            else:
+                receipt = prior
+                base_revision = receipt.base_revision
+                target_revision = receipt.target_revision
+            _assert_receipt_target(
+                receipt,
+                base_revision=base_revision,
+                target_revision=target_revision,
+            )
+            if receipt.base_revision is not None and observed is None:
+                raise RevisionConflictError(receipt.base_revision, None)
+            applied = False
+            if legacy_clean is not None and observed is not None:
+                written = self.store.write_text(
+                    note_path,
+                    legacy_clean,
+                    expected_revision=observed.revision,
+                )
+            elif observed is None:
+                written = self.store.write_text(note_path, rendered, create_only=True)
+                applied = True
+            elif observed.revision == target_revision:
+                written = observed
+            else:
+                raise NoteAlreadyExistsError(note_path)
+            if written.revision != target_revision:
+                raise RevisionConflictError(target_revision, written.revision)
+            receipt = self._receipt_store().commit(operation_digest)
+            return _receipt_result(receipt, operation_id=operation_id, applied=applied)
 
     def append_note(
         self,
@@ -223,37 +500,14 @@ class ObsidianService:
     ) -> NoteWriteResult:
         note_path = self._note_path(path)
         self.store.validate_text_size(text)
-        operation_digest = _operation_digest(operation_id)
-        arguments_digest = _text_digest(text)
-        marker = _marker("append", operation_digest, arguments_digest)
-        with self._lock:
-            existing = self.store.read_text(note_path)
-            replay = _find_operation(existing.text(), operation_id, method="append")
-            if replay is not None:
-                if replay != arguments_digest:
-                    raise IdempotencyConflictError("append operation ID was reused with different text")
-                return _write_result(
-                    existing,
-                    previous=existing.revision,
-                    created=False,
-                    applied=False,
-                    operation_id=operation_id,
-                )
-            _assert_expected(existing.revision, expected_revision)
-            rendered = _append_visible_text(existing.text(), text)
-            rendered = _append_visible_text(rendered, marker)
-            self.store.validate_text_size(rendered)
-            written = self.store.write_text(
-                note_path,
-                rendered,
-                expected_revision=existing.revision,
-            )
-        return _write_result(
-            written,
-            previous=existing.revision,
-            created=False,
-            applied=True,
-            operation_id=operation_id,
+        return self._idempotent_update(
+            note_path,
+            operation_id,
+            receipt_method="append",
+            arguments_payload=text,
+            render=lambda current: self.render_append_content(current, text),
+            expected_revision=expected_revision,
+            create_if_missing=False,
         )
 
     def set_properties(
@@ -308,56 +562,14 @@ class ObsidianService:
 
         note_path = self._note_path(path)
         marker_payload = _section_marker_payload(section, item)
-        operation_digest = _operation_digest(operation_id)
-        arguments_digest = _text_digest(marker_payload)
-        marker = _marker("append", operation_digest, arguments_digest)
-        with self._lock:
-            try:
-                existing = self.store.read_text(note_path)
-            except NoteNotFoundError:
-                if not create_if_missing:
-                    raise
-                if expected_revision is not None:
-                    raise RevisionConflictError(expected_revision, None) from None
-                edit = append_section_item("", section, item)
-                rendered = _append_visible_text(edit.content, marker)
-                self.store.validate_text_size(rendered)
-                written = self.store.write_text(note_path, rendered, create_only=True)
-                return _write_result(
-                    written,
-                    previous=None,
-                    created=True,
-                    applied=True,
-                    operation_id=operation_id,
-                )
-            replay = _find_operation(existing.text(), operation_id, method="append")
-            if replay is not None:
-                if replay != arguments_digest:
-                    raise IdempotencyConflictError(
-                        "append-section operation ID was reused with different arguments"
-                    )
-                return _write_result(
-                    existing,
-                    previous=existing.revision,
-                    created=False,
-                    applied=False,
-                    operation_id=operation_id,
-                )
-            _assert_expected(existing.revision, expected_revision)
-            edit = append_section_item(existing.text(), section, item)
-            rendered = _append_visible_text(edit.content, marker)
-            self.store.validate_text_size(rendered)
-            written = self.store.write_text(
-                note_path,
-                rendered,
-                expected_revision=existing.revision,
-            )
-        return _write_result(
-            written,
-            previous=existing.revision,
-            created=False,
-            applied=True,
-            operation_id=operation_id,
+        return self._idempotent_update(
+            note_path,
+            operation_id,
+            receipt_method="append_section",
+            arguments_payload=marker_payload,
+            render=lambda current: self.render_append_section_content(current, section, item),
+            expected_revision=expected_revision,
+            create_if_missing=create_if_missing,
         )
 
     def daily_note(
@@ -397,40 +609,38 @@ class ObsidianService:
                 expected_revision=expected_revision,
                 create_if_missing=True,
             )
-
-        with self._lock:
-            try:
-                existing = self.store.read_text(note_path)
-            except NoteNotFoundError:
-                return self.create_note(note_path, content, operation_id=operation_id)
-            if not content:
-                return _write_result(
-                    existing,
-                    previous=existing.revision,
-                    created=False,
-                    applied=False,
-                    operation_id=operation_id,
-                )
-            if operation_id is not None:
-                arguments_digest = _text_digest(content)
-                prior = _find_operation(existing.text(), operation_id, method="create")
-                if prior is None:
-                    prior = _find_operation(existing.text(), operation_id, method="append")
-                if prior is not None:
-                    if prior != arguments_digest:
-                        raise IdempotencyConflictError(
-                            "daily-note operation ID was reused with different text"
-                        )
-                    return _write_result(
-                        existing,
-                        previous=existing.revision,
-                        created=False,
-                        applied=False,
-                        operation_id=operation_id,
-                    )
+        try:
+            existing = self.store.read_text(note_path)
+        except NoteNotFoundError:
+            existing = None
+        if not content:
+            if existing is None:
+                return self.create_note(note_path, "", operation_id=operation_id)
+            return _write_result(
+                existing,
+                previous=existing.revision,
+                created=False,
+                applied=False,
+                operation_id=operation_id,
+            )
         if operation_id is None:
-            raise InvalidOperationIdError("operation_id is required when appending to a daily note")
-        return self.append_note(note_path, content, operation_id=operation_id)
+            raise InvalidOperationIdError("operation_id is required when writing a daily note")
+
+        def render(current: str) -> str:
+            if not current:
+                return self.render_create_content(content)
+            return self.render_append_content(current, content)
+
+        return self._idempotent_update(
+            note_path,
+            operation_id,
+            receipt_method="daily_note",
+            arguments_payload=content,
+            render=render,
+            expected_revision=expected_revision,
+            create_if_missing=True,
+            legacy_methods=("create", "append"),
+        )
 
     def _note_path(self, path: str | PurePosixPath) -> str:
         normalized = self.store.normalize_path(path)
@@ -440,6 +650,14 @@ class ObsidianService:
         elif pure.suffix.casefold() != ".md":
             raise VaultPathError("note path must have the .md extension")
         return self.store.normalize_ordinary_note_path(normalized)
+
+    def _receipt_store(self) -> NoteOperationReceiptStore:
+        if self._operation_receipts is None:
+            self._operation_receipts = NoteOperationReceiptStore(
+                self._operation_receipt_root,
+                vault_root=self.store.root,
+            )
+        return self._operation_receipts
 
 
 def _note_document(stored: VaultFile) -> NoteDocument:
@@ -689,6 +907,78 @@ def _find_operation(content: str, operation_id: str, *, method: str) -> str | No
         if match.group("method") == method and match.group("operation") == digest:
             return match.group("arguments")
     return None
+
+
+def _find_operation_any(
+    content: str,
+    operation_id: str,
+    *,
+    methods: Sequence[str],
+) -> tuple[str | None, str | None]:
+    digest = _operation_digest(operation_id)
+    for match in _OPERATION_MARKER.finditer(content):
+        if match.group("method") in methods and match.group("operation") == digest:
+            return match.group("method"), match.group("arguments")
+    return None, None
+
+
+def _remove_operation_marker(
+    content: str,
+    operation_id: str,
+    *,
+    method: str,
+    arguments_digest: str,
+    target_revision: str | None,
+) -> str | None:
+    marker = _marker(method, _operation_digest(operation_id), arguments_digest)
+    if content.count(marker) != 1:
+        return None
+    start = content.index(marker)
+    end = start + len(marker)
+    if start and content[start - 1] not in "\r\n":
+        return None
+    if end < len(content) and content[end] not in "\r\n":
+        return None
+    after = end
+    if content.startswith("\r\n", after):
+        after += 2
+    elif content.startswith(("\n", "\r"), after):
+        after += 1
+    candidates = [content[:start] + content[after:]]
+    if start >= 2 and content[start - 2 : start] == "\r\n":
+        candidates.append(content[: start - 2] + content[after:])
+    elif start and content[start - 1] in "\r\n":
+        candidates.append(content[: start - 1] + content[after:])
+    if target_revision is None:
+        return candidates[0]
+    return next((item for item in candidates if _text_digest(item) == target_revision), None)
+
+
+def _assert_receipt_target(
+    receipt: NoteOperationReceipt,
+    *,
+    base_revision: str | None,
+    target_revision: str,
+) -> None:
+    if receipt.base_revision != base_revision or receipt.target_revision != target_revision:
+        raise IdempotencyConflictError("prepared operation target does not match its durable receipt")
+
+
+def _receipt_result(
+    receipt: NoteOperationReceipt,
+    *,
+    operation_id: str,
+    applied: bool,
+) -> NoteWriteResult:
+    return NoteWriteResult(
+        path=receipt.note_path,
+        revision=receipt.target_revision,
+        previous_revision=receipt.base_revision,
+        created=receipt.created,
+        applied=applied,
+        operation_id=operation_id,
+        delivery=VaultDeliveryState.local_only(),
+    )
 
 
 def _append_visible_text(existing: str, addition: str) -> str:

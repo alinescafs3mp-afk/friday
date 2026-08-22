@@ -22,6 +22,7 @@ from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
     _filename_clue_request,
+    _self_contained_explicit_public_web_query,
     _self_contained_public_product_spec_query,
     asks_for_the_web,
     file_turn_authority,
@@ -48,6 +49,8 @@ PRIVATE_PREFIX = "PRIVATE-SYNTHETIC-DOC-CANARY"
 PRODUCT_URL = "https://public.synthetic.example.com/qnap-tvs-675"
 PRODUCT_FACT = "QNAP TVS-675 uses the synthetic PUBLIC-CPU-675 processor."
 PRIVATE_HISTORY_CANARY = "PRIVATE-PRODUCT-SPEC-HISTORY-CANARY"
+GENERIC_WEB_URL = "https://public.synthetic.example.com/nextcloud"
+GENERIC_WEB_FACT = "The synthetic official Nextcloud project page is public."
 
 
 def test_foreign_news_sites_are_web_authority_without_becoming_a_file_summary() -> None:
@@ -97,6 +100,49 @@ def test_public_product_spec_query_is_closed_and_non_deictic() -> None:
         "в qnap TVS-675 какой процессор?\nPRIVATE-CARRIER",
     ):
         assert _self_contained_public_product_spec_query(unsafe_or_contextual) == ""
+
+
+def test_explicit_public_web_query_is_current_only_and_fail_closed() -> None:
+    for request, expected_query in (
+        (
+            "Найди в интернете официальный сайт проекта Nextcloud",
+            "официальный сайт проекта Nextcloud",
+        ),
+        (
+            "Найди в интернете, пожалуйста, официальный сайт проекта Nextcloud",
+            "официальный сайт проекта Nextcloud",
+        ),
+        ("Найди мне в интернете документацию Python", "документацию Python"),
+        (
+            "Найди в интернете storage capacity Synology DS923+",
+            "storage capacity Synology DS923+",
+        ),
+        ("Найди в интернете биографию Ады Лавлейс", "биографию Ады Лавлейс"),
+        ("Найди в интернете IT-сертификацию ISO 27001", "IT-сертификацию ISO 27001"),
+        ("Google it Nextcloud", "Nextcloud"),
+    ):
+        assert _self_contained_explicit_public_web_query(request) == expected_query
+    for unsafe_or_contextual in (
+        "Найди в интернете это",
+        "Google it",
+        "Найди в интернете данные из этого файла",
+        "Найди в интернете данные из документа",
+        "Найди в интернете сведения из моего архива",
+        "Найди в интернете PRIVATE-CANARY из письма",
+        "Найди в интернете PRIVATE-CANARY из нашей CRM",
+        "Найди в интернете что писал Иванов",
+        "Найди в интернете профиль сотрудника Иванова",
+        "Найди в интернете где он работает",
+        "Найди в интернете Nextcloud и позвони Иванову",
+        "Найди в интернете пароль от моего роутера",
+        "Найди в интернете па\u200bроль от роутера",
+        "Найди в интернете PRIVATE-CANARY-MARKER",
+        "Найди в интернете report.pdf",
+        "Найди в интернете https://example.test/private",
+        "«Найди в интернете официальный сайт проекта Nextcloud»",
+        "Найди в интернете официальный сайт проекта Nextcloud\nPRIVATE-CARRIER",
+    ):
+        assert _self_contained_explicit_public_web_query(unsafe_or_contextual) == ""
 
 
 def _actor() -> ActorContext:
@@ -615,6 +661,226 @@ async def test_qnap_product_spec_uses_isolated_web_after_private_history(
     assert PRIVATE_HISTORY_CANARY not in model_payload
     assert PRIVATE_HISTORY_CANARY not in outbound_payload
     assert "Загружен документ" not in model_payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("query_text", "expected_query"),
+    [
+        (
+            "Найди в интернете официальный сайт проекта Nextcloud",
+            "официальный сайт проекта Nextcloud",
+        ),
+        ("Найди мне в интернете документацию Python", "документацию Python"),
+        (
+            "Найди в интернете storage capacity Synology DS923+",
+            "storage capacity Synology DS923+",
+        ),
+        ("Найди в интернете биографию Ады Лавлейс", "биографию Ады Лавлейс"),
+    ],
+)
+async def test_explicit_public_web_uses_history_free_lane_after_private_lineage(
+    settings,
+    storage,
+    query_text: str,
+    expected_query: str,
+) -> None:
+    storage.ensure_user(OWNER, preset_key="owner")
+    conversation = storage.create_conversation(OWNER, title="synthetic private history")
+    conversation_id = str(conversation["id"])
+    storage.store_message(
+        conversation_id,
+        OWNER,
+        "user",
+        f"Загружен документ: {PRIVATE_HISTORY_CANARY}.docx",
+        metadata={"had_attachments": True, "private_context_lineage": True},
+    )
+    storage.store_message(
+        conversation_id,
+        OWNER,
+        "assistant",
+        f"Приватная сводка: {PRIVATE_HISTORY_CANARY}",
+        metadata={"attachment_context_used": True, "private_context_lineage": True},
+    )
+
+    kernel = _SyntheticWebKernel(
+        url=GENERIC_WEB_URL,
+        fact=GENERIC_WEB_FACT,
+        title="Synthetic official Nextcloud project page",
+    )
+    model = _ScriptedModel({}, web_fact=GENERIC_WEB_FACT, web_url=GENERIC_WEB_URL)
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=model,
+        kernel=kernel,
+    )
+    response = await runtime.chat(
+        OWNER,
+        query_text,
+        actor=_actor(),
+        conversation_id=conversation_id,
+    )
+
+    assert kernel.calls == [
+        (
+            "web_research",
+            {"query": expected_query, "max_sources": 3},
+        )
+    ]
+    assert response["tools_used"] == ["web_research"]
+    assert response["web_evidence_status"] == "sourced"
+    assert response["web_sources"] == [
+        {"url": GENERIC_WEB_URL, "title": "Synthetic official Nextcloud project page"}
+    ]
+    assert GENERIC_WEB_FACT in response["message"]
+    metadata = _stored_metadata(storage, response)
+    assert metadata["private_context_lineage"] is True
+    assert metadata["structural"].get("private_web_search_blocked") is not True
+
+    model_payload = json.dumps(model.calls, ensure_ascii=False)
+    outbound_payload = json.dumps(kernel.calls, ensure_ascii=False)
+    assert query_text in model_payload
+    assert GENERIC_WEB_FACT in model_payload
+    assert PRIVATE_HISTORY_CANARY not in model_payload
+    assert PRIVATE_HISTORY_CANARY not in outbound_payload
+    assert "Загружен документ" not in model_payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query_text",
+    [
+        "Найди в интернете это",
+        "Найди в интернете данные из этого файла",
+        "Найди в интернете данные из документа",
+        "Найди в интернете сведения из моего архива",
+        "Найди в интернете PRIVATE-CANARY из письма",
+        "Найди в интернете PRIVATE-CANARY из нашей CRM",
+        "Найди в интернете что писал Иванов",
+        "Найди в интернете профиль сотрудника Иванова",
+        "Найди в интернете где он работает",
+        "Найди в интернете Nextcloud и позвони Иванову",
+        "Найди в интернете пароль от моего роутера",
+        "Найди в интернете па\u200bроль от роутера",
+        "Найди в интернете PRIVATE-CANARY-MARKER",
+    ],
+)
+async def test_explicit_public_web_private_contours_never_leave_private_conversation(
+    settings,
+    storage,
+    query_text: str,
+) -> None:
+    storage.ensure_user(OWNER, preset_key="owner")
+    conversation = storage.create_conversation(OWNER, title="synthetic private history")
+    conversation_id = str(conversation["id"])
+    storage.store_message(
+        conversation_id,
+        OWNER,
+        "user",
+        f"Загружен документ: {PRIVATE_HISTORY_CANARY}.docx",
+        metadata={"had_attachments": True, "private_context_lineage": True},
+    )
+    kernel = _SyntheticWebKernel()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_NeverModel(),
+        kernel=kernel,
+    )
+
+    assert asks_for_the_web(query_text) is True
+    response = await runtime.chat(
+        OWNER,
+        query_text,
+        actor=_actor(),
+        conversation_id=conversation_id,
+    )
+
+    assert response["tools_used"] == []
+    assert response["web_evidence_status"] == "none"
+    assert kernel.calls == []
+    metadata = _stored_metadata(storage, response)
+    assert metadata["structural"]["private_web_search_blocked"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("carrier", "expected_count", "expected_restored"),
+    [
+        ("current", 1, 0),
+        ("reply", 0, 0),
+        ("replay", 0, 0),
+        ("restored", 1, 1),
+    ],
+)
+async def test_explicit_public_web_attachment_carriers_never_enter_isolated_lane(
+    settings,
+    storage,
+    carrier: str,
+    expected_count: int,
+    expected_restored: int,
+) -> None:
+    storage.ensure_user(OWNER, preset_key="owner")
+    conversation = storage.create_conversation(OWNER, title="synthetic private history")
+    conversation_id = str(conversation["id"])
+    storage.store_message(
+        conversation_id,
+        OWNER,
+        "user",
+        f"Загружен документ: {PRIVATE_HISTORY_CANARY}.docx",
+        metadata={"had_attachments": True, "private_context_lineage": True},
+    )
+    storage.store_message(
+        conversation_id,
+        OWNER,
+        "assistant",
+        f"Приватная сводка: {PRIVATE_HISTORY_CANARY}",
+        metadata={"attachment_context_used": True, "private_context_lineage": True},
+    )
+    document = _store_docx(settings, storage, target_chars=832, document_number=93)
+    model = _ScriptedModel({document.marker: "Синтетическая локальная сводка."})
+    kernel = _SyntheticWebKernel()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=model,
+        kernel=kernel,
+    )
+    query_text = "Найди в интернете официальный сайт проекта Nextcloud"
+    chat_kwargs: dict[str, Any] = {}
+    if carrier == "current":
+        chat_kwargs["attachments"] = [document.attachment]
+    elif carrier == "reply":
+        chat_kwargs["reply_to"] = f"Приватный ответ: {PRIVATE_HISTORY_CANARY}"
+    elif carrier == "replay":
+        replay_source = storage.store_message(
+            conversation_id,
+            OWNER,
+            "user",
+            query_text,
+            metadata={"private_context_lineage": True},
+        )
+        chat_kwargs["replay_source_message_id"] = str(replay_source["id"])
+    else:
+        await _upload_notice(runtime, document, conversation_id=conversation_id)
+        query_text = "Найди в интернете официальные характеристики по этому файлу"
+
+    response = await runtime.chat(
+        OWNER,
+        query_text,
+        actor=_actor(),
+        conversation_id=conversation_id,
+        **chat_kwargs,
+    )
+
+    assert response["tools_used"] == []
+    assert response["web_evidence_status"] == "none"
+    assert response["attachment_context_expected_count"] == expected_count
+    assert response["restored_attachment_count"] == expected_restored
+    assert kernel.calls == []
+    metadata = _stored_metadata(storage, response)
+    assert metadata["structural"]["private_web_search_blocked"] is True
 
 
 @pytest.mark.asyncio

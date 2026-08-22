@@ -24526,6 +24526,184 @@ def _self_contained_public_product_spec_query(speech: str) -> str:
     return f"{brand} {model} {field}"[:140]
 
 
+# Explicit public research can also be isolated after a sticky private-file
+# lineage, but only when the current turn is a complete authority envelope by
+# itself.  These are rejection contours, not a semantic allowlist: an unknown
+# or ambiguous request stays on the existing private-source route and therefore
+# cannot reach an outbound tool.
+_EXPLICIT_PUBLIC_WEB_ENGLISH_DEICTIC = re.compile(
+    r"\b(?:this|that|these|those|he|him|his|she|her|hers|they|them|"
+    r"their|theirs|there|above|below|previous|earlier|aforementioned)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_PUBLIC_WEB_ENGLISH_IT_DEICTIC = re.compile(r"\b(?:it|It|its|Its)\b")
+_EXPLICIT_PUBLIC_WEB_UNRESOLVED_PRONOUN = re.compile(
+    r"\b(?:он|она|оно|они|ему|им|ними|него|не[её]|ней|них|его|е[её]|их)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_PUBLIC_WEB_PRIVATE_SOURCE_CARRIER = re.compile(
+    r"\b(?:из|по|в|внутри|с|со|на\s+основе|from|in|inside|within|based\s+on)\s+"
+    r"(?:(?:мо\w*|наш\w*|сво\w*|эт\w*|данн\w*|присланн\w*|загруженн\w*|"
+    r"прикрепл[её]нн\w*|my|our|this|that|the|a|an|uploaded|attached|sent)\s+)?"
+    r"(?:файл\w*|документ\w*|вложен\w*|архив\w*|заметк\w*|переписк\w*|"
+    r"чат\w*|сообщен\w*|таблиц\w*|скан\w*|изображен\w*|фотограф\w*|фото|"
+    r"письм\w*|презентац\w*|отч[её]т\w*|реестр\w*|список\w*|источник\w*|"
+    r"материал\w*|баз\w*|хранилищ\w*|crm|инбокс\w*|files?|documents?|"
+    r"attachments?|archives?|notes?|messages?|conversation\w*|chat|tables?|"
+    r"spreadsheets?|scans?|images?|photos?|pictures?|emails?|letters?|"
+    r"presentations?|reports?|registr(?:y|ies)|lists?|sources?|materials?|"
+    r"databases?|storage|crm|inboxes?)\b|"
+    r"\b(?:мо\w*|наш\w*|сво\w*|личн\w*|внутренн\w*|private|internal|my|our)\s+"
+    r"(?:файл\w*|документ\w*|вложен\w*|архив\w*|баз\w*|хранилищ\w*|"
+    r"заметк\w*|переписк\w*|чат\w*|сообщен\w*|таблиц\w*|скан\w*|"
+    r"изображен\w*|фотограф\w*|фото|письм\w*|презентац\w*|отч[её]т\w*|"
+    r"реестр\w*|список\w*|источник\w*|материал\w*|crm|инбокс\w*|files?|"
+    r"documents?|attachments?|archives?|databases?|storage|notes?|messages?|"
+    r"conversation\w*|chat|tables?|spreadsheets?|scans?|images?|photos?|"
+    r"pictures?|emails?|letters?|presentations?|reports?|registr(?:y|ies)|"
+    r"lists?|sources?|materials?|crm|inboxes?)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_PUBLIC_WEB_PRIVATE_PERSON_CARRIER = re.compile(
+    r"\b(?:мо\w*|наш\w*|сво\w*|эт\w*|данн\w*|my|our|this|that)\s+"
+    r"(?:человек\w*|сотрудник\w*|коллег\w*|пользовател\w*|person|employee\w*|"
+    r"colleague\w*|coworker\w*|user)\b|"
+    r"\b(?:профил\w*|активност\w*|сообщен\w*|переписк\w*)\s+"
+    r"(?:сотрудник\w*|коллег\w*|пользовател\w*|employee\w*|colleague\w*|user)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_PUBLIC_WEB_SECRET_CARRIER = re.compile(
+    r"\b(?:"
+    r"парол\w*|паспорт\w*|реквизит\w*|секрет\w*|токен\w*|"
+    r"api[-_ ]?ключ\w*|ключ\w*\s+(?:api|ssh|доступ\w*)|логин\w*|пин(?:-?код)?|"
+    r"cookie\w*|сесси\w*|приватн\w*\s+ключ\w*|банковск\w*\s+(?:карт|сч[её]т)\w*|"
+    r"телефон\w*|адрес\w*|e-?mail\w*|почт\w*|canary\w*|маркер\w*|"
+    r"password\w*|passport\w*|credential\w*|secret\w*|tokens?|api[-_ ]?keys?|"
+    r"private\s+keys?|ssh\s+keys?|logins?|pins?|cookies?|sessions?|"
+    r"bank\s+(?:card|account)\w*|phone\w*|addresses?|emails?|markers?"
+    r")\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_PUBLIC_WEB_FILENAME_OR_PATH = re.compile(
+    r"(?:^|\s)(?:[A-Za-z]:[\\/]|/[^\s]+|\.\.?[\\/])|"
+    r"\b[^\s/\\]+\.(?:txt|md|pdf|docx?|xlsx?|csv|json|ya?ml|zip|rar|7z|"
+    r"png|jpe?g|webp|gif|pptx?)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_PUBLIC_WEB_SECRET_VALUE = re.compile(
+    r"\b(?:sk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{12,}\b|"
+    r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,})?\b|"
+    r"\b[A-Za-z0-9_+/=-]{24,}\b|"
+    r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b|"
+    r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)|"
+    r"(?<!\d)\+?\d[\d ()-]{8,}\d(?!\d)",
+    re.IGNORECASE,
+)
+_EXPLICIT_PUBLIC_WEB_VAGUE_QUERY = re.compile(
+    r"^(?:"
+    r"(?:это|этот|эта|эти|там|тут|его|е[её]|их)|"
+    r"(?:дополнительн\w*\s+)?(?:данн\w*|информац\w*|сведени\w*|подробност\w*)|"
+    r"(?:что[- ]?нибудь|вс[её]|подробнее|дальше)|"
+    r"(?:this|that|it|them|there)|(?:more\s+)?(?:data|information|details?)"
+    r")\W*$",
+    re.IGNORECASE,
+)
+_EXPLICIT_PUBLIC_WEB_COMPOUND_CLAUSE = re.compile(
+    r"(?:[,;:—–]|\b(?:и|а|затем|потом|далее|после\s+этого|and|then|also|afterwards)\b)",
+    re.IGNORECASE,
+)
+
+
+def _self_contained_explicit_public_web_query(message: str) -> str:
+    """Return a bounded current-only explicit public query, else fail closed."""
+
+    raw = str(message or "")
+    if not raw or len(raw) > 320 or any(character in raw for character in "\x00\r\n"):
+        return ""
+    normalized = unicodedata.normalize("NFKC", raw)
+    if any(character in normalized for character in "`\"'«»“”„’") or _QUOTED_TEXT.search(normalized):
+        return ""
+    visible = _classification_text(normalized)
+    if not visible or re.search(r"https?://|www\.", visible, flags=re.IGNORECASE):
+        return ""
+    request = _ASKS_FOR_THE_WEB.search(visible)
+    # Only one start-anchored request is admitted.  A second sentence or
+    # coordinator could contain an unrelated private read/effect which cannot
+    # be discarded merely because the final clause mentions the internet.
+    body = visible.rstrip(" \t?!.…")
+    if request is None or request.start() != 0 or re.search(r"[!?;…]|\.(?=\s+\S)", body):
+        return ""
+    query_tail = visible[request.end() :].strip()
+    query_tail = re.sub(r"^[\s,:—–-]+", "", query_tail)
+    query_tail = re.sub(
+        r"^(?:пожалуйста|please)\b[\s,:—–-]*",
+        "",
+        query_tail,
+        flags=re.IGNORECASE,
+    )
+    if _EXPLICIT_PUBLIC_WEB_COMPOUND_CLAUSE.search(query_tail):
+        return ""
+    english_deictic_surface = visible
+    if query_tail and re.match(r"^\s*google\s+it\b", visible, flags=re.IGNORECASE):
+        # Here ``it`` is part of the explicit transport verb and the remaining
+        # current-turn tail supplies the topic.  A bare ``google it`` remains
+        # unresolved and is rejected below.
+        english_deictic_surface = re.sub(
+            r"^\s*google\s+it\b",
+            "google",
+            visible,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+    if (
+        _WEB_ISOLATION_DEICTIC.search(visible)
+        or _WEB_ISOLATION_UNRESOLVED_TOPIC.search(visible)
+        or _EXPLICIT_PUBLIC_WEB_ENGLISH_DEICTIC.search(english_deictic_surface)
+        or _EXPLICIT_PUBLIC_WEB_ENGLISH_IT_DEICTIC.search(english_deictic_surface)
+        or _EXPLICIT_PUBLIC_WEB_UNRESOLVED_PRONOUN.search(visible)
+        or _EXPLICIT_PUBLIC_WEB_PRIVATE_SOURCE_CARRIER.search(visible)
+        or _EXPLICIT_PUBLIC_WEB_PRIVATE_PERSON_CARRIER.search(visible)
+        or _EXPLICIT_PUBLIC_WEB_SECRET_CARRIER.search(visible)
+        or _EXPLICIT_PUBLIC_WEB_FILENAME_OR_PATH.search(visible)
+        or _EXPLICIT_PUBLIC_WEB_SECRET_VALUE.search(visible)
+        or _ASKS_ABOUT_PERSONAL_STORAGE.search(visible)
+        or _ATTACHMENT_CROSS_CONTEXT_REQUEST.search(visible)
+        or _requests_foreign_private_data(visible)
+        or _person_action_on_speech(visible)
+        or _archived_source_search_query(visible)
+        or _is_direct_file_request(visible)
+    ):
+        return ""
+
+    cleaned = _WEB_REQUEST_FILLER.sub(" ", visible)
+    cleaned = " ".join(cleaned.replace(",", " ").split()).strip(" ,.:;—-")
+    cleaned = re.sub(
+        r"^(?:(?:а|и|затем|потом|теперь)\s+)+|"
+        r"\s+(?:(?:а|и|затем|потом|теперь)\s*)+$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+    cleaned = re.sub(r"^(?:о|об|про|по\s+теме)\s+", "", cleaned, flags=re.IGNORECASE)
+    if (
+        not cleaned
+        or len(cleaned.split()) > 14
+        or _EXPLICIT_PUBLIC_WEB_COMPOUND_CLAUSE.search(cleaned)
+        or _EXPLICIT_PUBLIC_WEB_VAGUE_QUERY.fullmatch(cleaned)
+        or _WEB_ISOLATION_DEICTIC.search(cleaned)
+        or _WEB_ISOLATION_UNRESOLVED_TOPIC.search(cleaned)
+        or _EXPLICIT_PUBLIC_WEB_ENGLISH_DEICTIC.search(cleaned)
+        or _EXPLICIT_PUBLIC_WEB_ENGLISH_IT_DEICTIC.search(cleaned)
+        or _EXPLICIT_PUBLIC_WEB_UNRESOLVED_PRONOUN.search(cleaned)
+        or _EXPLICIT_PUBLIC_WEB_PRIVATE_SOURCE_CARRIER.search(cleaned)
+        or _EXPLICIT_PUBLIC_WEB_PRIVATE_PERSON_CARRIER.search(cleaned)
+        or _EXPLICIT_PUBLIC_WEB_SECRET_CARRIER.search(cleaned)
+        or _EXPLICIT_PUBLIC_WEB_SECRET_VALUE.search(cleaned)
+    ):
+        return ""
+    return cleaned[:140]
+
+
 def _public_news_site_request(speech: str) -> bool:
     """A command/question for a public-news source set, not a mere mention."""
 
@@ -25730,6 +25908,201 @@ _OBSIDIAN_RESULT_PATH_STOPWORDS = frozenset(
     }
 )
 
+_OBSIDIAN_RESULT_FACET_COMPONENTS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "processor": (re.compile(r"\b(?:процессор\w*|cpu|soc)\b", re.IGNORECASE),),
+    "memory": (
+        re.compile(
+            r"\b(?:оперативн\w+\s+памят\w*|системн\w+\s+памят\w*|ram|ddr[345]\w*|"
+            r"system\s+memory)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "storage": (
+        re.compile(
+            r"\b(?:дисков\w+\s+(?:отсек\w*|слот\w*|подсистем\w*)|накопител\w*|"
+            r"хранилищ\w*|drive\s+bay\w*|storage|sata|m\.2)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "network": (
+        re.compile(
+            r"\b(?:сетев\w+\s+(?:интерфейс\w*|порт\w*)|ethernet|rj-?45|lan|"
+            r"(?:2\.5|5|10)\s*gbe)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "ports_expansion": (
+        re.compile(r"\b(?:usb|hdmi|thunderbolt|внешн\w+\s+порт\w*|разъ[её]м\w*)\b", re.IGNORECASE),
+        re.compile(
+            r"\b(?:pcie|pci\s+express|слот\w+\s+расширени\w*|карт\w+\s+расширени\w*|"
+            r"expansion\s+slot\w*)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    "dimensions_power": (
+        re.compile(
+            r"\b(?:габарит\w*|размер\w+(?:\s+корпус\w*)?|форм[- ]фактор\w*|вес|масса|"
+            r"dimensions?|form\s+factor|weight)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:блок\s+питани\w*|питани\w*|энергопотреблени\w*|power\s+(?:supply|"
+            r"consumption)|\d+(?:[.,]\d+)?\s*(?:w|вт))\b",
+            re.IGNORECASE,
+        ),
+    ),
+}
+_OBSIDIAN_RESULT_FACET_UNAVAILABLE = re.compile(
+    r"(?:\b(?:нет|не\s+найдено)\s+(?:данных|сведений|информации)\b|"
+    r"\b(?:данн\w*|сведени\w*|информаци\w*)\s+(?:отсутств\w*|не\s+(?:указан\w*|"
+    r"приведен\w*|найден\w*|доступ\w*))\b|"
+    r"\bне\s+(?:указан\w*|приведен\w*|найден\w*|доступ\w*|подтвержд[её]н\w*|"
+    r"применим\w*)\b|\b(?:unknown|unavailable|not\s+(?:available|specified|applicable|"
+    r"found)|n/?a)\b)",
+    re.IGNORECASE,
+)
+_OBSIDIAN_RESULT_FACET_VALUE_VERB = re.compile(
+    r"\b(?:имеет|оснащ[её]н\w*|использует|поддерживает|предусмотрен\w*|встроен\w*|"
+    r"доступен\w*|опциональн\w*|составляет|установлен\w*|includes?|supports?|uses?|has)\b",
+    re.IGNORECASE,
+)
+_OBSIDIAN_RESULT_FACET_MEASUREMENT = re.compile(
+    r"\b\d+(?:[.,]\d+)?\s*(?:[- ]?(?:ядер\w*|core\w*)|гб|мб|тб|gb|mb|tb|"
+    r"ггц|мгц|ghz|mhz|гбит/с|мбит/с|gbps|gbe|порт\w*|слот\w*|отсек\w*|мм|см|"
+    r"kg|кг|w|вт|usb|hdmi|gen\s*\d+)\b",
+    re.IGNORECASE,
+)
+_OBSIDIAN_RESULT_FACET_TECH_VALUE = re.compile(
+    r"\b(?:gen\s*\d+|x(?:1|2|4|8|16|32))\b",
+    re.IGNORECASE,
+)
+
+
+def _obsidian_result_facet_claim(
+    text: str,
+    pattern: re.Pattern[str],
+) -> tuple[bool, bool]:
+    """Return ``(substantive, explicitly_unavailable)`` for one facet component."""
+
+    segments = [
+        " ".join(raw_segment.split())
+        for raw_segment in re.split(r"(?:\r?\n)+|(?<=[.!?;])\s+", str(text or ""))
+        if raw_segment.strip()
+    ]
+    all_components = tuple(
+        component for components in _OBSIDIAN_RESULT_FACET_COMPONENTS.values() for component in components
+    )
+
+    def claim_in(candidate: str) -> tuple[bool, bool]:
+        match = pattern.search(candidate)
+        if match is None:
+            return False, False
+        if _OBSIDIAN_RESULT_FACET_UNAVAILABLE.search(candidate) is not None:
+            return True, True
+        residual = (candidate[: match.start()] + " " + candidate[match.end() :]).strip()
+        return (
+            bool(
+                _OBSIDIAN_RESULT_FACET_MEASUREMENT.search(residual) is not None
+                or _OBSIDIAN_RESULT_FACET_TECH_VALUE.search(residual) is not None
+                or re.search(r"[:—–]\s*[^\s*_#|]{2,}", residual) is not None
+                or _OBSIDIAN_RESULT_FACET_VALUE_VERB.search(residual) is not None
+            ),
+            False,
+        )
+
+    for index, segment in enumerate(segments):
+        match = pattern.search(segment)
+        if match is None:
+            continue
+        direct = claim_in(segment)
+        if direct[0]:
+            return direct
+
+        # Real product specification pages commonly render a two-column table
+        # as consecutive lines (``Процессор\nZhaoXin ...``). Keep a small,
+        # source-order window inside that record; stop at the next *different*
+        # facet or at the excerpt ellipsis so an unrelated later number cannot
+        # lend substance to an empty label.
+        if len(segment) > 100:
+            continue
+        window = segment
+        for adjacent in segments[index + 1 : index + 7]:
+            if adjacent == "…" or any(
+                component is not pattern and component.search(adjacent) is not None
+                for component in all_components
+            ):
+                break
+            window = f"{window} {adjacent}"
+            if len(window) > 360:
+                break
+            combined = claim_in(window)
+            if combined[0]:
+                return combined
+            # Unit-bearing table headers (``Габариты, мм``) put the bare
+            # numeric value on the following line. The number is still inside
+            # the same bounded record and is real source evidence.
+            if re.search(r"\d", adjacent) is not None:
+                return True, False
+    return False, False
+
+
+def _obsidian_result_web_source_text(entries: Sequence[Mapping[str, Any]]) -> str:
+    """Extract only source bodies, excluding the search query's own facet words."""
+
+    source_texts: list[str] = []
+    for entry in entries:
+        if str(entry.get("tool") or "") != "web_research":
+            continue
+        parsed = _extract_json_object(str(entry.get("output") or ""))
+        sources = parsed.get("sources") if isinstance(parsed, Mapping) else None
+        if not isinstance(sources, list):
+            continue
+        for source in sources:
+            if not isinstance(source, Mapping):
+                continue
+            body = str(source.get("text") or "").strip()
+            if body:
+                source_texts.append(body)
+    return "\n".join(source_texts)
+
+
+def _obsidian_result_note_missing_facets(
+    request: ObsidianResultNoteRequest,
+    answer: str,
+    evidence: Sequence[Mapping[str, Any]],
+) -> tuple[str, ...]:
+    """Fail closed when a required facet has neither sourced substance nor explicit UNKNOWN."""
+
+    required = tuple(dict.fromkeys(str(item) for item in request.required_facets if str(item)))
+    if not required:
+        return ()
+    source_text = _obsidian_result_web_source_text(evidence)
+    answer_without_contract = str(answer or "").replace(request.task, "")
+    missing: list[str] = []
+    for facet in required:
+        components = _OBSIDIAN_RESULT_FACET_COMPONENTS.get(facet)
+        if not components:
+            missing.append(facet)
+            continue
+        for component in components:
+            answer_present, answer_unavailable = _obsidian_result_facet_claim(
+                answer_without_contract,
+                component,
+            )
+            if not answer_present:
+                missing.append(facet)
+                break
+            if answer_unavailable:
+                continue
+            source_present, source_unavailable = _obsidian_result_facet_claim(
+                source_text,
+                component,
+            )
+            if not source_present or source_unavailable:
+                missing.append(facet)
+                break
+    return tuple(dict.fromkeys(missing))
+
 
 def _obsidian_result_note_path(
     request: ObsidianResultNoteRequest,
@@ -25738,7 +26111,8 @@ def _obsidian_result_note_path(
 ) -> str:
     """Derive one readable bounded path without a model-selected filename."""
 
-    safe_task = redact_friday_api_tokens(request.task)
+    display_title = request.display_title.strip() or request.task
+    safe_task = redact_friday_api_tokens(display_title)
     tokens = re.findall(r"[^\W_]+(?:[-_][^\W_]+)*", safe_task, flags=re.UNICODE)
     useful = [token for token in tokens if token.casefold() not in _OBSIDIAN_RESULT_PATH_STOPWORDS]
     label = " ".join((useful or tokens)[:12]).strip(" .-_")
@@ -25762,7 +26136,8 @@ def _obsidian_result_note_body(
 ) -> str:
     """Render exactly the accepted answer plus code-owned date/source evidence."""
 
-    heading = redact_friday_api_tokens(request.task).rstrip(" .?!")[:200].strip() or "Результат задачи"
+    display_title = request.display_title.strip() or request.task
+    heading = redact_friday_api_tokens(display_title).rstrip(" .?!")[:200].strip() or "Результат задачи"
     body = f"# {heading}\n\nДата: {day.isoformat()}\n\n{answer.strip()}\n"
     source_lines = [
         f"- {str(item.get('title') or 'Источник').strip()} — {str(item.get('url') or '').strip()}"
@@ -35730,6 +36105,36 @@ class AgentRuntime:
             and obsidian_intent is None
             and obsidian_result_request_candidate is None
         )
+        explicit_public_web_query = _self_contained_explicit_public_web_query(routing_message)
+        isolated_explicit_public_web_turn = bool(
+            inherited_private_context_lineage
+            and explicit_public_web_query
+            and file_turn.proved("web")
+            and file_turn.actions.issubset({"web", "local_read"})
+            and not file_turn.source_filenames()
+            and not synthetic_document_notice
+            and not supplied_attachment_count
+            and not attachments
+            and not quoted_attachment_reference
+            and not reply_assistant_reference
+            and not reply_quote
+            and not replay_source_message_id
+            and not replay_had_attachments
+            and restored_attachment_expected_count == 0
+            and not restored_attachments
+            and not attachment_reference_kind
+            and workspace_inbox_request is None
+            and not message_locate_flow
+            and not person_inventory_turn
+            and not named_person_corpus.applies
+            and not exact_uploader_file.applies
+            and not filename_clue_selection.applies
+            and filename_inventory_request is None
+            and not direct_archived_source_query
+            and not contextual_source_query
+            and obsidian_intent is None
+            and obsidian_result_request_candidate is None
+        )
         isolated_obsidian_result_turn = bool(
             obsidian_result_request_candidate is not None
             and not synthetic_document_notice
@@ -35777,6 +36182,7 @@ class AgentRuntime:
         isolated_outbound_turn = bool(
             isolated_public_news_turn
             or isolated_public_product_spec_turn
+            or isolated_explicit_public_web_turn
             or isolated_obsidian_result_turn
             or policy_weather_outbound_turn
         )
@@ -37480,9 +37886,15 @@ class AgentRuntime:
                     if policy_weather_outbound_turn
                     else ("интернет", public_product_spec_query)
                     if isolated_public_product_spec_turn
+                    else ("интернет", explicit_public_web_query)
+                    if isolated_explicit_public_web_turn
                     else None
                 ),
-                policy_web_authorized=bool(policy_weather_outbound_turn or isolated_public_product_spec_turn),
+                policy_web_authorized=bool(
+                    policy_weather_outbound_turn
+                    or isolated_public_product_spec_turn
+                    or isolated_explicit_public_web_turn
+                ),
             )
         elif preparse_pure_past_timeline:
             # The current text fully determines one past calendar window. Do
@@ -41335,6 +41747,11 @@ class AgentRuntime:
             LOGGER.warning("credential-output: Friday API token removed at final assertion")
 
         if obsidian_result_request is not None:
+            result_note_missing_facets = _obsidian_result_note_missing_facets(
+                obsidian_result_request,
+                content,
+                [item for item in verification_evidence if isinstance(item, Mapping)],
+            )
             result_note_from_model_knowledge = bool(
                 not web_evidence_used
                 and web_evidence_status == "none"
@@ -41358,6 +41775,7 @@ class AgentRuntime:
                 and not outside_deed_replaced
                 and not false_model_outage_replaced
                 and not capability_refusal
+                and not result_note_missing_facets
                 and not _turn_deadline_expired(context.turn_deadline)
             )
             if result_note_ready:
@@ -41452,11 +41870,16 @@ class AgentRuntime:
                         private_context_lineage = True
             if not result_note_ready:
                 result_notice = (
-                    "Заметка в Obsidian не создана: результат интернет-исследования не прошёл "
-                    "проверку по полученным источникам."
-                    if web_evidence_used
-                    else "Заметка в Obsidian не создана: проверяемые результаты "
-                    "интернет-исследования в этом ходе не получены."
+                    "Заметка в Obsidian не создана: ответ не покрывает обязательные "
+                    "разделы характеристик по полученным источникам."
+                    if result_note_missing_facets
+                    else (
+                        "Заметка в Obsidian не создана: результат интернет-исследования "
+                        "не прошёл проверку по полученным источникам."
+                        if web_evidence_used
+                        else "Заметка в Obsidian не создана: проверяемые результаты "
+                        "интернет-исследования в этом ходе не получены."
+                    )
                 )
                 content = "\n\n".join(part for part in (content, result_notice) if part).strip()
                 response["content"] = content

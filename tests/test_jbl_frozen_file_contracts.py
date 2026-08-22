@@ -1714,7 +1714,7 @@ async def test_recent_private_file_then_fresh_news_denies_web_and_history_use(
 
 
 @pytest.mark.asyncio
-async def test_old_private_lineage_web_turn_is_denied_before_provider(
+async def test_old_private_lineage_web_turn_uses_current_only_isolation(
     settings,
     storage,
     monkeypatch,
@@ -1739,16 +1739,23 @@ async def test_old_private_lineage_web_turn_is_denied_before_provider(
         conversation_id=conversation_id,
     )
 
-    assert kernel.calls == []
-    assert reply["tools_used"] == []
-    assert reply["web_evidence_status"] == "none"
+    assert kernel.calls == [
+        (
+            "web_research",
+            {"query": runtime.web_query_from(request), "max_sources": 3},
+        )
+    ]
+    assert reply["tools_used"] == ["web_research"]
+    assert reply["web_evidence_status"] == "sourced"
     exposed = json.dumps(model.calls, ensure_ascii=False)
+    assert request in exposed
+    assert "At normal pressure the synthetic boiling point is 100 C." in exposed
     assert "PRIVATE-HISTORY-CANARY" not in exposed
     assert "PRIVATE-ANSWER-CANARY" not in exposed
-    assert "приватные вложения" in reply["message"].casefold()
     stored = storage.get_message(str(reply["message_id"]), "alice")
     metadata = json.loads(str(stored["metadata_json"] or "{}"))
     assert metadata["private_context_lineage"] is True
+    assert metadata["structural"].get("private_web_search_blocked") is not True
 
 
 @pytest.mark.asyncio
@@ -1810,7 +1817,7 @@ async def test_old_private_lineage_denies_explicit_reference_only_web_requests(
 
 
 @pytest.mark.asyncio
-async def test_recent_attachment_web_turn_denies_even_when_old_literals_leave_prompt_tail(
+async def test_recent_attachment_web_turn_uses_isolation_when_old_literals_leave_prompt_tail(
     settings,
     storage,
 ) -> None:
@@ -1841,14 +1848,24 @@ async def test_recent_attachment_web_turn_denies_even_when_old_literals_leave_pr
         conversation_id=conversation_id,
     )
 
-    assert kernel.calls == []
-    assert reply["tools_used"] == []
-    assert reply["web_evidence_status"] == "none"
+    assert kernel.calls == [
+        (
+            "web_research",
+            {"query": runtime.web_query_from(request), "max_sources": 3},
+        )
+    ]
+    assert reply["tools_used"] == ["web_research"]
+    assert reply["web_evidence_status"] == "sourced"
     exposed = json.dumps(model.calls, ensure_ascii=False)
+    assert request in exposed
+    assert "At normal pressure the synthetic boiling point is 100 C." in exposed
     assert "neutral-20" not in exposed
     assert "PRIVATE-HISTORY-CANARY" not in exposed
     assert "PRIVATE-ANSWER-CANARY" not in exposed
-    assert "приватные вложения" in reply["message"].casefold()
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    assert metadata["private_context_lineage"] is True
+    assert metadata["structural"].get("private_web_search_blocked") is not True
 
 
 def _stored_file(

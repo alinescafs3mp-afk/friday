@@ -22,6 +22,7 @@ from friday.organs.obsidian.contracts import (
     VaultLimitError,
     VaultPathError,
 )
+from friday.organs.obsidian.operation_receipts import NoteOperationReceiptStore
 from friday.organs.obsidian.service import ObsidianService
 from friday.organs.obsidian.vault_store import VaultLimits, VaultStore
 
@@ -318,6 +319,7 @@ def test_append_is_durable_idempotent_and_revision_guarded(service: ObsidianServ
     assert replay.applied is False
     assert replay.revision == appended.revision
     assert service.read_note("Log").body.count("second") == 1
+    assert "<!-- friday:" not in service.read_note("Log").content
 
     with pytest.raises(IdempotencyConflictError):
         service.append_note("Log", "different", operation_id="append-1")
@@ -340,8 +342,180 @@ def test_create_operation_id_is_idempotent_across_service_instances(vault: Path)
 
     assert created.revision == replay.revision
     assert replay.applied is False
+    assert "<!-- friday:" not in (vault / "once.md").read_text(encoding="utf-8")
+    assert not any("receipt" in path.name for path in vault.rglob("*"))
     with pytest.raises(IdempotencyConflictError):
         restarted_service.create_note("once", "other payload", operation_id="create-1")
+
+
+def test_direct_append_recovers_after_file_commit_before_external_receipt(
+    vault: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = ObsidianService(VaultStore(vault))
+    created = service.create_note("receipt-gap", "start")
+    real_commit = NoteOperationReceiptStore.commit
+    fail_once = True
+
+    def lose_receipt(
+        receipt_store: NoteOperationReceiptStore,
+        operation_digest: str,
+    ):  # noqa: ANN202
+        nonlocal fail_once
+        if fail_once:
+            fail_once = False
+            raise OSError("synthetic receipt interruption")
+        return real_commit(receipt_store, operation_digest)
+
+    monkeypatch.setattr(NoteOperationReceiptStore, "commit", lose_receipt)
+    with pytest.raises(OSError, match="receipt interruption"):
+        service.append_note(
+            "receipt-gap",
+            "once only",
+            operation_id="direct-gap",
+            expected_revision=created.revision,
+        )
+
+    restarted = ObsidianService(VaultStore(vault))
+    replay = restarted.append_note(
+        "receipt-gap",
+        "once only",
+        operation_id="direct-gap",
+        expected_revision=created.revision,
+    )
+
+    content = restarted.read_note("receipt-gap").content
+    assert replay.applied is False
+    assert content.count("once only") == 1
+    assert "<!-- friday:" not in content
+
+
+def test_direct_service_recognizes_and_cleans_one_legacy_append_marker(vault: Path) -> None:
+    service = ObsidianService(VaultStore(vault))
+    base = service.create_note("legacy", "first")
+    text = "second"
+    operation_id = "legacy-append"
+    operation_digest = hashlib.sha256(operation_id.encode()).hexdigest()
+    arguments_digest = hashlib.sha256(text.encode()).hexdigest()
+    marker = f'<!-- friday:append operation="{operation_digest}" arguments="{arguments_digest}" -->'
+    clean = service.render_append_content("first", text)
+    service.store.write_text(
+        "legacy.md",
+        service.render_append_content(clean, marker),
+        expected_revision=base.revision,
+    )
+
+    replay = service.append_note(
+        "legacy",
+        text,
+        operation_id=operation_id,
+        expected_revision=base.revision,
+    )
+
+    content = service.read_note("legacy").content
+    assert replay.applied is False
+    assert content == clean
+    assert "<!-- friday:" not in content
+
+
+def test_direct_create_replay_cleans_legacy_marker_after_later_append(vault: Path) -> None:
+    service = ObsidianService(VaultStore(vault))
+    operation_id = "legacy-create-with-later-append"
+    operation = hashlib.sha256(operation_id.encode()).hexdigest()
+    arguments = hashlib.sha256(b"created first").hexdigest()
+    marker = f'<!-- friday:create operation="{operation}" arguments="{arguments}" -->'
+    service.store.write_text(
+        "legacy-create.md",
+        f"created first\n{marker}\nlater user text\n",
+        create_only=True,
+    )
+
+    replay = service.create_note(
+        "legacy-create",
+        "created first",
+        operation_id=operation_id,
+    )
+
+    assert replay.applied is False
+    assert service.read_note("legacy-create").content == "created first\nlater user text\n"
+
+
+def test_direct_legacy_create_receipt_never_resurrects_a_deleted_note(
+    vault: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = ObsidianService(VaultStore(vault))
+    operation_id = "legacy-create-deleted-during-gap"
+    operation = hashlib.sha256(operation_id.encode()).hexdigest()
+    arguments = hashlib.sha256(b"created first").hexdigest()
+    marker = f'<!-- friday:create operation="{operation}" arguments="{arguments}" -->'
+    legacy = service.store.write_text(
+        "legacy-gap.md",
+        f"created first\n{marker}\nlater user text\n",
+        create_only=True,
+    )
+    write_text = service.store.write_text
+
+    class SyntheticCrash(BaseException):
+        pass
+
+    def crash_before_cleanup(*_args: object, **_kwargs: object) -> object:
+        raise SyntheticCrash
+
+    monkeypatch.setattr(service.store, "write_text", crash_before_cleanup)
+    with pytest.raises(SyntheticCrash):
+        service.create_note("legacy-gap", "created first", operation_id=operation_id)
+    monkeypatch.setattr(service.store, "write_text", write_text)
+    service.store.delete("legacy-gap.md", expected_revision=legacy.revision)
+
+    restarted = ObsidianService(VaultStore(vault))
+    with pytest.raises(RevisionConflictError):
+        restarted.create_note("legacy-gap", "created first", operation_id=operation_id)
+    assert not restarted.store.exists("legacy-gap.md")
+
+
+def test_receipt_store_is_private_and_rejects_symlink_targets(vault: Path, tmp_path: Path) -> None:
+    receipt_root = tmp_path / "receipts"
+    receipt_root.mkdir(mode=0o755)
+    store = NoteOperationReceiptStore(receipt_root, vault_root=vault)
+    store.prepare(
+        operation_digest="1" * 64,
+        method="append",
+        arguments_digest="2" * 64,
+        note_path="Note.md",
+        base_revision="3" * 64,
+        target_revision="4" * 64,
+        created=False,
+    )
+
+    assert receipt_root.stat().st_mode & 0o777 == 0o700
+    assert (receipt_root / "receipts.sqlite3").stat().st_mode & 0o777 == 0o600
+
+    linked_root = tmp_path / "linked-receipts"
+    linked_root.symlink_to(receipt_root, target_is_directory=True)
+    with pytest.raises(VaultPathError, match="symbolic link"):
+        NoteOperationReceiptStore(linked_root, vault_root=vault)
+
+    bad_root = tmp_path / "bad-receipts"
+    bad_root.mkdir()
+    outside = tmp_path / "outside.sqlite3"
+    outside.write_bytes(b"")
+    (bad_root / "receipts.sqlite3").symlink_to(outside)
+    with pytest.raises(VaultPathError, match="regular file"):
+        NoteOperationReceiptStore(bad_root, vault_root=vault)
+
+
+def test_default_receipts_do_not_cross_replaced_vault_identity(vault: Path, tmp_path: Path) -> None:
+    first = ObsidianService(VaultStore(vault))
+    first.create_note("identity", "payload", operation_id="same-operation")
+    vault.rename(tmp_path / "retired-vault")
+    vault.mkdir()
+
+    replacement = ObsidianService(VaultStore(vault))
+    result = replacement.create_note("identity", "payload", operation_id="same-operation")
+
+    assert result.applied is True
+    assert replacement.read_note("identity").content == "payload"
 
 
 def test_typed_properties_preserve_unknown_frontmatter_and_body(

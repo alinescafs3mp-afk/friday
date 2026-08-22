@@ -227,6 +227,8 @@ def test_compound_research_result_note_is_deferred_instead_of_refused() -> None:
 
     assert request is not None
     assert request.task == "Можно ли развернуть на qnap TVS-675 nextcloud?"
+    assert request.display_title == ""
+    assert request.required_facets == ()
     assert obsidian_conversation_intent(message, today=_TODAY) is None
 
 
@@ -236,8 +238,29 @@ def test_characteristics_result_note_normalizes_the_exact_live_prompt() -> None:
     request = obsidian_result_note_request(message)
 
     assert request is not None
-    assert request.task == "Характеристики qnap TVS-675?"
+    assert request.display_title == "Характеристики qnap TVS-675"
+    assert request.task == (
+        "Полные характеристики qnap TVS-675: процессор/CPU, память/RAM/DDR4, "
+        "SATA/M.2, Ethernet, USB/HDMI/PCIe, габариты, питание/энергопотребление?"
+    )
+    assert request.required_facets == (
+        "processor",
+        "memory",
+        "storage",
+        "network",
+        "ports_expansion",
+        "dimensions_power",
+    )
     assert obsidian_conversation_intent(message, today=_TODAY) is None
+
+
+def test_non_nas_characteristics_keep_the_generic_product_contract() -> None:
+    request = obsidian_result_note_request("Создай заметку в обсидиан с характеристиками iPhone 15")
+
+    assert request is not None
+    assert request.task == "Характеристики iPhone 15?"
+    assert request.display_title == ""
+    assert request.required_facets == ()
 
 
 @pytest.mark.parametrize(

@@ -55,6 +55,11 @@ _TERMINAL_FAILURES = frozenset({"failed", "conflict", "cancelled"})
 _REPLAYABLE_RESULTS = frozenset(
     {"committed", "scan_pending", "scan_complete", "delivery_pending", "delivered", "reconciled"}
 )
+_LEGACY_OPERATION_MARKER = re.compile(
+    r'<!-- friday:(?P<method>create|append) operation="(?P<operation>[0-9a-f]{64})" '
+    r'arguments="(?P<arguments>[0-9a-f]{64})" -->'
+)
+_LEGACY_MARKER_MIGRATION_KEY = "legacy_marker_cleanup"
 
 
 class OperationLedgerError(RuntimeError):
@@ -239,13 +244,56 @@ class ObsidianOperationService:
             "properties": typed_properties,
         }
 
-        def mutate(_reconcile: bool) -> NoteWriteResult:
-            return self._notes.create_note(
-                canonical_path,
-                content,
-                properties=typed_properties,
-                operation_id=operation_id,
-            )
+        rendered = self._notes.render_create_content(content, properties=typed_properties)
+        target_revision = _content_revision(rendered)
+        context = {"path": canonical_path, "target_revision": target_revision}
+
+        def mutate(reconcile: bool) -> NoteWriteResult:
+            try:
+                current = self._notes.store.read_text(canonical_path)
+            except NoteNotFoundError:
+                written = self._notes.store.write_text(
+                    canonical_path,
+                    rendered,
+                    create_only=True,
+                )
+                return _note_write_result(
+                    canonical_path,
+                    written.revision,
+                    previous_revision=None,
+                    applied=True,
+                    created=True,
+                )
+            if reconcile and current.revision == target_revision:
+                return _note_write_result(
+                    canonical_path,
+                    target_revision,
+                    previous_revision=None,
+                    applied=False,
+                    created=True,
+                )
+            if reconcile:
+                legacy = _legacy_marker_clean_content(
+                    current.text(),
+                    operation_id,
+                    rendered,
+                    methods=("create",),
+                    target_revision=target_revision,
+                )
+                if legacy is not None:
+                    cleaned = self._notes.store.write_text(
+                        canonical_path,
+                        legacy,
+                        expected_revision=current.revision,
+                    )
+                    return _note_write_result(
+                        canonical_path,
+                        cleaned.revision,
+                        previous_revision=None,
+                        applied=False,
+                        created=True,
+                    )
+            raise NoteAlreadyExistsError(canonical_path)
 
         return self._execute(
             operation_id,
@@ -254,6 +302,7 @@ class ObsidianOperationService:
             expected_revision=None,
             work_item_id=work_item_id,
             mutate=mutate,
+            prepared_context=context,
         )
 
     def append_note(
@@ -272,25 +321,110 @@ class ObsidianOperationService:
         _optional_revision(expected_revision)
         arguments = {"method": "append", "path": canonical_path, "text": text}
 
+        existing_operation = self._existing_operation(
+            operation_id,
+            method="append",
+            arguments=arguments,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+        )
+        closed = self._closed_note_result(
+            existing_operation,
+            operation_id=operation_id,
+            method="append",
+            arguments=arguments,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+        )
+        if closed is not None:
+            return closed
+
+        observed = self._notes.store.read_text(canonical_path)
+        base_revision: str | None
+        target_content: str | None
+        frozen_target = _prepared_target_revision(existing_operation)
+        frozen_base = _prepared_base_revision(existing_operation)
+        legacy_clean = _legacy_marker_clean_content(
+            observed.text(),
+            operation_id,
+            text,
+            methods=("append",),
+            target_revision=frozen_target,
+        )
+        if frozen_target is None:
+            if legacy_clean is not None:
+                target_content = legacy_clean
+                target_revision = _content_revision(target_content)
+                base_revision = expected_revision or observed.revision
+            else:
+                base_revision = expected_revision or observed.revision
+                target_content = self._notes.render_append_content(observed.text(), text)
+                target_revision = _content_revision(target_content)
+        else:
+            target_revision = frozen_target
+            base_revision = frozen_base or expected_revision
+            if base_revision is not None and observed.revision == base_revision:
+                target_content = self._notes.render_append_content(observed.text(), text)
+                if _content_revision(target_content) != target_revision:
+                    raise OperationLedgerError("prepared append target changed")
+            elif legacy_clean is not None and _content_revision(legacy_clean) == target_revision:
+                target_content = legacy_clean
+            else:
+                target_content = None
+        context = {
+            "path": canonical_path,
+            "target_revision": target_revision,
+            "base_revision": base_revision,
+        }
+        self._freeze_existing_context(existing_operation, operation_id, context)
+
         def mutate(reconcile: bool) -> NoteWriteResult:
-            try:
-                return self._notes.append_note(
+            current = self._notes.store.read_text(canonical_path)
+            if reconcile and current.revision == target_revision:
+                return _note_write_result(
                     canonical_path,
-                    text,
-                    operation_id=operation_id,
-                    expected_revision=expected_revision,
+                    target_revision,
+                    previous_revision=base_revision,
+                    applied=False,
                 )
-            except RevisionConflictError:
-                if not reconcile:
-                    raise
-                # A concurrent executor may have committed the same marker
-                # between this service's read and expected-revision replace.
-                return self._notes.append_note(
-                    canonical_path,
+            if reconcile:
+                cleaned = _legacy_marker_clean_content(
+                    current.text(),
+                    operation_id,
                     text,
-                    operation_id=operation_id,
-                    expected_revision=expected_revision,
+                    methods=("append",),
+                    target_revision=target_revision,
                 )
+                if cleaned is not None and _content_revision(cleaned) == target_revision:
+                    written = self._notes.store.write_text(
+                        canonical_path,
+                        cleaned,
+                        expected_revision=current.revision,
+                    )
+                    return _note_write_result(
+                        canonical_path,
+                        written.revision,
+                        previous_revision=base_revision,
+                        applied=False,
+                    )
+            if base_revision is None:
+                raise OperationLedgerError("prepared append base revision is missing")
+            if current.revision != base_revision:
+                raise RevisionConflictError(base_revision, current.revision)
+            if target_content is None or _content_revision(target_content) != target_revision:
+                raise OperationCommitUncertain("prepared append content cannot be reconstructed safely")
+            note_result = self._notes.append_note(
+                canonical_path,
+                text,
+                operation_id=operation_id,
+                expected_revision=base_revision,
+            )
+            return _note_write_result(
+                canonical_path,
+                note_result.revision,
+                previous_revision=base_revision,
+                applied=True,
+            )
 
         return self._execute(
             operation_id,
@@ -299,6 +433,7 @@ class ObsidianOperationService:
             expected_revision=expected_revision,
             work_item_id=work_item_id,
             mutate=mutate,
+            prepared_context=context,
         )
 
     def set_properties(
@@ -351,6 +486,7 @@ class ObsidianOperationService:
             expected_revision=expected_revision,
             work_item_id=work_item_id,
             mutate=mutate,
+            prepared_context={"path": canonical_path},
             claim_prepared_reconciliation=True,
         )
 
@@ -424,7 +560,7 @@ class ObsidianOperationService:
         target_revision = hashlib.sha256(rendered.encode("utf-8", errors="strict")).hexdigest()
         if frozen_revision is not None and frozen_revision != target_revision:
             raise OperationLedgerError("prepared section replacement target changed")
-        context = {"target_revision": target_revision}
+        context = {"path": canonical_path, "target_revision": target_revision}
         self._freeze_existing_context(existing, operation_id, context)
 
         def mutate(_reconcile: bool) -> NoteWriteResult:
@@ -635,6 +771,7 @@ class ObsidianOperationService:
         self._notes.store.validate_text_size(merged_content)
         target_revision = hashlib.sha256(merged_content.encode("utf-8", errors="strict")).hexdigest()
         context = {
+            "path": canonical,
             "target_revision": target_revision,
             "conflict_id": frozen_conflict_id,
             "conflict_path": artifact,
@@ -807,7 +944,7 @@ class ObsidianOperationService:
         if closed is not None:
             return closed
         target_revision = hashlib.sha256(content.encode("utf-8", errors="strict")).hexdigest()
-        context = {"target_revision": target_revision}
+        context = {"path": canonical_path, "target_revision": target_revision}
         self._freeze_existing_context(existing, operation_id, context)
 
         def mutate(reconcile: bool) -> NoteWriteResult:
@@ -896,45 +1033,160 @@ class ObsidianOperationService:
             content if section is None else f"section:{len(section)}:{section}item:{len(item or '')}:{item}"
         )
 
-        def mutate(_reconcile: bool) -> NoteWriteResult:
-            try:
-                current = self._notes.read_note(canonical_path)
-            except NoteNotFoundError:
+        existing_operation = self._existing_operation(
+            operation_id,
+            method="daily_note",
+            arguments=arguments,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+        )
+        closed = self._closed_note_result(
+            existing_operation,
+            operation_id=operation_id,
+            method="daily_note",
+            arguments=arguments,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+        )
+        if closed is not None:
+            return closed
+
+        try:
+            observed = self._notes.store.read_text(canonical_path)
+        except NoteNotFoundError:
+            observed = None
+        frozen_target = _prepared_target_revision(existing_operation)
+        frozen_base = _prepared_base_revision(existing_operation)
+        legacy_clean = (
+            None
+            if observed is None
+            else _legacy_marker_clean_content(
+                observed.text(),
+                operation_id,
+                marker_payload,
+                methods=("create", "append"),
+                target_revision=frozen_target,
+            )
+        )
+        base_revision: str | None
+        target_content: str | None
+        if frozen_target is None:
+            if observed is None:
                 if expected_revision is not None:
-                    raise RevisionConflictError(expected_revision, None) from None
-                return self._notes.daily_note(
-                    selected,
+                    raise RevisionConflictError(expected_revision, None)
+                base_revision = None
+                target_content = _render_daily_target(
+                    self._notes,
+                    "",
                     content=content,
                     section=section,
                     item=item,
-                    operation_id=operation_id,
-                    expected_revision=expected_revision,
                 )
-            if _core_operation_applied(current.content, operation_id, marker_payload):
-                return self._notes.daily_note(
-                    selected,
+            elif legacy_clean is not None:
+                base_revision = expected_revision or observed.revision
+                target_content = legacy_clean
+            else:
+                base_revision = expected_revision or observed.revision
+                if expected_revision is not None and observed.revision != expected_revision:
+                    raise RevisionConflictError(expected_revision, observed.revision)
+                target_content = _render_daily_target(
+                    self._notes,
+                    observed.text(),
                     content=content,
                     section=section,
                     item=item,
-                    operation_id=operation_id,
-                    expected_revision=expected_revision,
                 )
-            if expected_revision is not None and current.revision != expected_revision:
-                raise RevisionConflictError(expected_revision, current.revision)
-            if not content:
-                return self._notes.daily_note(
-                    selected,
-                    content="",
+            target_revision = _content_revision(target_content)
+        else:
+            target_revision = frozen_target
+            base_revision = frozen_base
+            if observed is None and base_revision is None:
+                target_content = _render_daily_target(
+                    self._notes,
+                    "",
+                    content=content,
                     section=section,
                     item=item,
-                    operation_id=operation_id,
-                    expected_revision=expected_revision,
                 )
-            return self._notes.append_note(
-                canonical_path,
-                content,
+            elif observed is not None and base_revision is not None and observed.revision == base_revision:
+                target_content = _render_daily_target(
+                    self._notes,
+                    observed.text(),
+                    content=content,
+                    section=section,
+                    item=item,
+                )
+            elif legacy_clean is not None and _content_revision(legacy_clean) == target_revision:
+                target_content = legacy_clean
+            else:
+                target_content = None
+            if target_content is not None and _content_revision(target_content) != target_revision:
+                raise OperationLedgerError("prepared daily-note target changed")
+        context = {
+            "path": canonical_path,
+            "resolved_day": selected.isoformat(),
+            "target_revision": target_revision,
+            "base_revision": base_revision,
+        }
+        self._freeze_existing_context(existing_operation, operation_id, context)
+
+        def mutate(reconcile: bool) -> NoteWriteResult:
+            try:
+                current = self._notes.store.read_text(canonical_path)
+            except NoteNotFoundError:
+                current = None
+            if reconcile and current is not None and current.revision == target_revision:
+                return _note_write_result(
+                    canonical_path,
+                    target_revision,
+                    previous_revision=base_revision,
+                    applied=False,
+                    created=base_revision is None,
+                )
+            if reconcile and current is not None:
+                cleaned = _legacy_marker_clean_content(
+                    current.text(),
+                    operation_id,
+                    marker_payload,
+                    methods=("create", "append"),
+                    target_revision=target_revision,
+                )
+                if cleaned is not None:
+                    cleaned_file = self._notes.store.write_text(
+                        canonical_path,
+                        cleaned,
+                        expected_revision=current.revision,
+                    )
+                    return _note_write_result(
+                        canonical_path,
+                        cleaned_file.revision,
+                        previous_revision=base_revision,
+                        applied=False,
+                        created=base_revision is None,
+                    )
+            actual_revision = None if current is None else current.revision
+            if base_revision is None and actual_revision is not None:
+                raise NoteAlreadyExistsError(canonical_path)
+            if base_revision is not None and actual_revision != base_revision:
+                raise RevisionConflictError(base_revision, actual_revision)
+            if target_content is None or _content_revision(target_content) != target_revision:
+                raise OperationCommitUncertain("prepared daily-note content cannot be reconstructed safely")
+            note_result = self._notes.daily_note(
+                selected,
+                content=content,
+                section=section,
+                item=item,
                 operation_id=operation_id,
-                expected_revision=expected_revision,
+                expected_revision=base_revision,
+            )
+            if note_result.revision != target_revision:
+                raise OperationCommitUncertain("daily-note write did not reach its frozen target")
+            return _note_write_result(
+                canonical_path,
+                note_result.revision,
+                previous_revision=base_revision,
+                applied=note_result.applied,
+                created=note_result.created,
             )
 
         return self._execute(
@@ -944,7 +1196,197 @@ class ObsidianOperationService:
             expected_revision=expected_revision,
             work_item_id=work_item_id,
             mutate=mutate,
-            prepared_context={"resolved_day": selected.isoformat()},
+            prepared_context=context,
+        )
+
+    def migrate_legacy_operation_markers(self, *, max_notes: int = 50) -> int:
+        """Create one separate CAS cleanup operation for each affected note."""
+
+        if isinstance(max_notes, bool) or not isinstance(max_notes, int) or not 1 <= max_notes <= 500:
+            raise ValueError("max_notes must be between 1 and 500")
+        self._assert_owner_vault()
+        rows = self._storage.list_obsidian_legacy_marker_candidates(self._owner_id)
+        by_digest = {
+            hashlib.sha256(str(row["id"]).encode("utf-8", errors="strict")).hexdigest(): row for row in rows
+        }
+        blocked_paths: set[str] = set()
+        cleanup_rows: list[Mapping[str, Any]] = []
+        cleanup_paths: set[str] = set()
+        global_block = False
+        for row in rows:
+            if str(row.get("status") or "") == "delivered":
+                continue
+            cleanup = _legacy_marker_cleanup_from_row(row)
+            if cleanup is not None:
+                cleanup_rows.append(row)
+                cleanup_paths.add(str(cleanup["path"]))
+                continue
+            pending_paths = _pending_operation_paths(row)
+            if pending_paths is None:
+                global_block = True
+            else:
+                blocked_paths.update(pending_paths)
+        migrated = 0
+        with self._lock:
+            if global_block:
+                return 0
+            for cleanup_row in cleanup_rows:
+                if migrated >= max_notes:
+                    return migrated
+                cleanup = _legacy_marker_cleanup_from_row(cleanup_row)
+                assert cleanup is not None
+                if str(cleanup["path"]) in blocked_paths:
+                    continue
+                if self._resume_legacy_marker_cleanup_operation(cleanup_row):
+                    migrated += 1
+            blocked_paths.update(cleanup_paths)
+            for stored in self._notes.store.iter_markdown_files():
+                if migrated >= max_notes:
+                    break
+                if stored.path in blocked_paths:
+                    continue
+                content = stored.text()
+                selected: list[tuple[re.Match[str], Mapping[str, Any]]] = []
+                seen_operations: set[str] = set()
+                pending_marker = False
+                for match in _LEGACY_OPERATION_MARKER.finditer(content):
+                    proof_row = by_digest.get(match.group("operation"))
+                    if proof_row is None:
+                        continue
+                    if str(proof_row.get("status") or "") != "delivered":
+                        pending_marker = True
+                        break
+                    if not _legacy_marker_is_own_line(content, match):
+                        continue
+                    operation_id = str(proof_row["id"])
+                    if operation_id in seen_operations:
+                        continue
+                    status = str(proof_row["status"])
+                    if status != "delivered":
+                        continue
+                    if not _legacy_marker_row_proves_note(
+                        proof_row,
+                        path=stored.path,
+                        revision=stored.revision,
+                        content=content,
+                        marker=match,
+                    ):
+                        continue
+                    selected.append((match, proof_row))
+                    seen_operations.add(operation_id)
+                    if len(selected) > 100:
+                        selected.clear()
+                        break
+                if pending_marker or not selected:
+                    continue
+                try:
+                    cleaned = _remove_legacy_marker_matches(
+                        content,
+                        tuple(match for match, _ in selected),
+                    )
+                except OperationLedgerError:
+                    # An inline/duplicate/malformed legacy marker is never a
+                    # reason to stop migration of unrelated notes.
+                    continue
+                target_revision = _content_revision(cleaned)
+                cleanup = {
+                    "path": stored.path,
+                    "source_revision": stored.revision,
+                    "target_revision": target_revision,
+                    "markers": [match.group(0) for match, _row in selected],
+                    "proof_operation_ids": sorted(str(row["id"]) for _match, row in selected),
+                }
+                self._execute_legacy_marker_cleanup(cleanup, cleaned_content=cleaned)
+                migrated += 1
+        return migrated
+
+    def _resume_legacy_marker_cleanup_operation(self, row: Mapping[str, Any]) -> bool:
+        cleanup = _legacy_marker_cleanup_from_row(row)
+        if cleanup is None:
+            return False
+        path = str(cleanup["path"])
+        source = str(cleanup["source_revision"])
+        target = str(cleanup["target_revision"])
+        try:
+            current = self._notes.store.read_text(path)
+        except (NoteNotFoundError, VaultPathError):
+            return False
+        if current.revision == target:
+            cleaned = current.text()
+        elif current.revision == source:
+            cleaned = _remove_exact_legacy_markers(
+                current.text(),
+                tuple(cleanup["markers"]),  # type: ignore[arg-type]
+            )
+            if _content_revision(cleaned) != target:
+                raise OperationLedgerError("legacy marker cleanup target cannot be reconstructed")
+        else:
+            return False
+        self._execute_legacy_marker_cleanup(
+            cleanup,
+            cleaned_content=cleaned,
+            operation_id=str(row["id"]),
+        )
+        return True
+
+    def _execute_legacy_marker_cleanup(
+        self,
+        cleanup: Mapping[str, object],
+        *,
+        cleaned_content: str,
+        operation_id: str | None = None,
+    ) -> DurableNoteResult:
+        frozen = _legacy_marker_cleanup_context(cleanup)
+        path = str(frozen["path"])
+        source = str(frozen["source_revision"])
+        target = str(frozen["target_revision"])
+        markers: tuple[str, ...] = tuple(frozen["markers"])  # type: ignore[arg-type]
+        proof_ids: tuple[str, ...] = tuple(frozen["proof_operation_ids"])  # type: ignore[arg-type]
+        if _content_revision(cleaned_content) != target:
+            raise OperationLedgerError("legacy marker cleanup content does not match its target")
+        arguments = {
+            "method": "legacy_marker_cleanup",
+            "path": path,
+            "source_revision": source,
+            "target_revision": target,
+            "markers": markers,
+            "proof_operation_ids": proof_ids,
+        }
+        if operation_id is None:
+            identity = canonical_arguments_digest(arguments)
+            operation_id = f"legacy-marker-cleanup:{identity}"
+
+        def mutate(reconcile: bool) -> NoteWriteResult:
+            current = self._notes.store.read_text(path)
+            if current.revision == target:
+                return _note_write_result(
+                    path,
+                    target,
+                    previous_revision=source,
+                    applied=False,
+                )
+            if current.revision != source:
+                raise RevisionConflictError(source, current.revision)
+            rebuilt = _remove_exact_legacy_markers(current.text(), markers)
+            if rebuilt != cleaned_content or _content_revision(rebuilt) != target:
+                raise OperationLedgerError("legacy marker cleanup source changed")
+            written = self._notes.store.write_text(path, rebuilt, expected_revision=source)
+            return _note_write_result(
+                path,
+                written.revision,
+                previous_revision=source,
+                applied=not reconcile,
+            )
+
+        return self._execute(
+            operation_id,
+            method="replace",
+            arguments=arguments,
+            expected_revision=source,
+            work_item_id=None,
+            mutate=mutate,
+            prepared_context={_LEGACY_MARKER_MIGRATION_KEY: dict(frozen)},
+            claim_prepared_reconciliation=True,
         )
 
     def get_operation(self, operation_id: str) -> DurableNoteResult | DurableWorkflowResult:
@@ -1332,6 +1774,7 @@ class ObsidianOperationService:
     ) -> DurableNoteResult:
         work_item_id = _optional_work_item_id(work_item_id)
         digest = canonical_arguments_digest(arguments)
+        prepared_payload = None if not prepared_context else {"schema": _RESULT_SCHEMA, **prepared_context}
         with self._lock:
             try:
                 row, prepared = self._storage.prepare_obsidian_operation(
@@ -1342,6 +1785,7 @@ class ObsidianOperationService:
                     arguments_digest=digest,
                     expected_revision=expected_revision,
                     work_item_id=work_item_id,
+                    prepared_result=prepared_payload,
                 )
             except ValueError as exc:
                 if "operation_id was already used" in str(exc):
@@ -1367,20 +1811,6 @@ class ObsidianOperationService:
                     raise OperationLedgerError(f"unsupported Obsidian operation state: {status}")
             else:
                 status = "prepared"
-
-            if prepared and prepared_context:
-                prepared_payload = {"schema": _RESULT_SCHEMA, **prepared_context}
-                try:
-                    row = self._storage.transition_obsidian_operation(
-                        self._owner_id,
-                        operation_id,
-                        "prepared",
-                        result=prepared_payload,
-                    )
-                except Exception as exc:
-                    raise OperationLedgerError(
-                        "could not durably freeze Obsidian operation arguments"
-                    ) from exc
 
             if not prepared and status == "prepared" and claim_prepared_reconciliation:
                 # Property writes have no in-file operation marker. Close a row
@@ -2485,6 +2915,11 @@ def _optional_revision(expected_revision: str | None) -> None:
         validate_revision(expected_revision)
 
 
+def _assert_revision(actual_revision: str, expected_revision: str | None) -> None:
+    if expected_revision is not None and actual_revision != expected_revision:
+        raise RevisionConflictError(expected_revision, actual_revision)
+
+
 def _operation_id(value: object) -> str:
     if not isinstance(value, str):
         raise InvalidOperationIdError("operation_id must be a string")
@@ -2527,13 +2962,221 @@ def _optional_work_item_id(value: object) -> str | None:
     return normalized
 
 
-def _core_operation_applied(content: str, operation_id: str, arguments: str) -> bool:
-    operation_digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()
-    arguments_digest = hashlib.sha256(arguments.encode("utf-8")).hexdigest()
-    return any(
-        (f'<!-- friday:{method} operation="{operation_digest}" arguments="{arguments_digest}" -->') in content
-        for method in ("create", "append")
-    )
+def _content_revision(content: str) -> str:
+    _validate_text(content, label="note content")
+    return hashlib.sha256(content.encode("utf-8", errors="strict")).hexdigest()
+
+
+def _prepared_base_revision(row: Mapping[str, Any] | None) -> str | None:
+    if row is None or str(row.get("status") or "") not in {"prepared", "uncertain"}:
+        return None
+    payload = _json_object(row.get("result_json"), label="operation result")
+    base = payload.get("base_revision")
+    if base is None:
+        return None
+    try:
+        return validate_revision(base)  # type: ignore[arg-type]
+    except ValueError as exc:
+        raise OperationLedgerError("prepared base revision is invalid") from exc
+
+
+def _legacy_marker_clean_content(
+    content: str,
+    operation_id: str,
+    arguments: str,
+    *,
+    methods: Sequence[str],
+    target_revision: str | None,
+) -> str | None:
+    """Return a marker-free legacy postcondition without touching other text."""
+
+    operation_digest = hashlib.sha256(operation_id.encode("utf-8", errors="strict")).hexdigest()
+    arguments_digest = hashlib.sha256(arguments.encode("utf-8", errors="strict")).hexdigest()
+    for method in methods:
+        marker = f'<!-- friday:{method} operation="{operation_digest}" arguments="{arguments_digest}" -->'
+        if content.count(marker) != 1:
+            continue
+        start = content.index(marker)
+        end = start + len(marker)
+        if start and content[start - 1] not in "\r\n":
+            continue
+        if end < len(content) and content[end] not in "\r\n":
+            continue
+        after = end
+        if content.startswith("\r\n", after):
+            after += 2
+        elif content.startswith("\n", after) or content.startswith("\r", after):
+            after += 1
+        preserve_separator = content[:start] + content[after:]
+        candidates = [preserve_separator]
+        if start >= 2 and content[start - 2 : start] == "\r\n":
+            candidates.append(content[: start - 2] + content[after:])
+        elif start >= 1 and content[start - 1] in "\r\n":
+            candidates.append(content[: start - 1] + content[after:])
+        if target_revision is not None:
+            return next(
+                (candidate for candidate in candidates if _content_revision(candidate) == target_revision),
+                None,
+            )
+        return preserve_separator
+    return None
+
+
+def _remove_legacy_marker_matches(
+    content: str,
+    matches: Sequence[re.Match[str]],
+) -> str:
+    return _remove_exact_legacy_markers(content, tuple(match.group(0) for match in matches))
+
+
+def _legacy_marker_is_own_line(content: str, marker: re.Match[str]) -> bool:
+    start, end = marker.span()
+    return (start == 0 or content[start - 1] in "\r\n") and (end == len(content) or content[end] in "\r\n")
+
+
+def _legacy_marker_cleanup_from_row(row: Mapping[str, Any]) -> dict[str, object] | None:
+    status = str(row.get("status") or "")
+    if str(row.get("method") or "") != "replace" or status not in {"prepared", "uncertain"}:
+        return None
+    try:
+        result = _json_object(row.get("result_json"), label="operation result")
+        raw_cleanup = result.get(_LEGACY_MARKER_MIGRATION_KEY)
+        if not isinstance(raw_cleanup, Mapping):
+            return None
+        return _legacy_marker_cleanup_context(raw_cleanup)
+    except (OperationLedgerError, ValueError, TypeError):
+        return None
+
+
+def _pending_operation_paths(row: Mapping[str, Any]) -> frozenset[str] | None:
+    """Return every safely parsed path, or None to require a global migration fence."""
+
+    try:
+        payload = _json_object(row.get("result_json"), label="operation result")
+        schema = payload.get("schema")
+        if schema == _RESULT_SCHEMA:
+            return frozenset({_durable_path(payload.get("path"), label="pending operation path")})
+        if schema == _WORKFLOW_RESULT_SCHEMA:
+            phase = payload.get("phase")
+            if phase not in {"prepared", "result"}:
+                return None
+            parsed = _workflow_result_from_payload(
+                payload,
+                operation_id=str(row.get("id") or ""),
+                method=str(row.get("method") or ""),
+                status=str(row.get("status") or ""),
+                replayed=True,
+                require_result=phase == "result",
+                delivery=VaultDeliveryState.local_only(),
+            )
+            return frozenset(change.path for change in parsed.changes)
+        if str(row.get("method") or "") == "verification_note":
+            if set(payload) != {"path", "revision", "applied"} or not isinstance(
+                payload.get("applied"), bool
+            ):
+                return None
+            validate_revision(payload.get("revision"))  # type: ignore[arg-type]
+            return frozenset({_durable_path(payload.get("path"), label="pending verification path")})
+    except (OperationLedgerError, ValueError, TypeError):
+        return None
+    return None
+
+
+def _legacy_marker_row_proves_note(
+    row: Mapping[str, Any],
+    *,
+    path: str,
+    revision: str,
+    content: str,
+    marker: re.Match[str],
+) -> bool:
+    try:
+        result = _json_object(row.get("result_json"), label="operation result")
+    except OperationLedgerError:
+        return False
+    if result.get("schema") == _RESULT_SCHEMA:
+        return result.get("path") == path
+    if str(row.get("method") or "") != "verification_note" or marker.group("method") != "create":
+        return False
+    if set(result) != {"path", "revision", "applied"}:
+        return False
+    if result.get("path") != path or result.get("revision") != revision:
+        return False
+    if not isinstance(result.get("applied"), bool):
+        return False
+    try:
+        cleaned = _remove_legacy_marker_matches(content, (marker,))
+    except OperationLedgerError:
+        return False
+    return _content_revision(cleaned) == marker.group("arguments")
+
+
+def _remove_exact_legacy_markers(content: str, markers: Sequence[str]) -> str:
+    cleaned = content
+    for marker in markers:
+        if _LEGACY_OPERATION_MARKER.fullmatch(marker) is None or cleaned.count(marker) != 1:
+            raise OperationLedgerError("legacy operation marker is ambiguous")
+        start = cleaned.index(marker)
+        end = start + len(marker)
+        if start and cleaned[start - 1] not in "\r\n":
+            raise OperationLedgerError("legacy operation marker is not on its own line")
+        if end < len(cleaned) and cleaned[end] not in "\r\n":
+            raise OperationLedgerError("legacy operation marker is not on its own line")
+        if cleaned.startswith("\r\n", end):
+            end += 2
+        elif cleaned.startswith(("\n", "\r"), end):
+            end += 1
+        cleaned = cleaned[:start] + cleaned[end:]
+    return cleaned
+
+
+def _legacy_marker_cleanup_context(value: Mapping[str, object]) -> dict[str, object]:
+    if set(value) != {
+        "path",
+        "source_revision",
+        "target_revision",
+        "markers",
+        "proof_operation_ids",
+    }:
+        raise OperationLedgerError("legacy marker cleanup context fields are invalid")
+    path = _durable_path(value.get("path"), label="legacy marker cleanup path")
+    try:
+        source = validate_revision(value.get("source_revision"))  # type: ignore[arg-type]
+        target = validate_revision(value.get("target_revision"))  # type: ignore[arg-type]
+    except ValueError as exc:
+        raise OperationLedgerError("legacy marker cleanup revision is invalid") from exc
+    raw_markers = value.get("markers")
+    if (
+        not isinstance(raw_markers, Sequence)
+        or isinstance(raw_markers, (str, bytes))
+        or not raw_markers
+        or len(raw_markers) > 100
+        or any(
+            not isinstance(marker, str) or _LEGACY_OPERATION_MARKER.fullmatch(marker) is None
+            for marker in raw_markers
+        )
+    ):
+        raise OperationLedgerError("legacy marker cleanup markers are invalid")
+    raw_proofs = value.get("proof_operation_ids")
+    if (
+        not isinstance(raw_proofs, Sequence)
+        or isinstance(raw_proofs, (str, bytes))
+        or len(raw_proofs) != len(raw_markers)
+        or len(raw_proofs) > 100
+        or any(not isinstance(item, str) for item in raw_proofs)
+    ):
+        raise OperationLedgerError("legacy marker cleanup proofs are invalid")
+    markers = [str(item) for item in raw_markers]
+    proofs = sorted(_operation_id(item) for item in raw_proofs)
+    if len(set(markers)) != len(markers) or len(set(proofs)) != len(proofs):
+        raise OperationLedgerError("legacy marker cleanup identities are not unique")
+    return {
+        "path": path,
+        "source_revision": source,
+        "target_revision": target,
+        "markers": markers,
+        "proof_operation_ids": proofs,
+    }
 
 
 def _note_path(notes: ObsidianService, path: str | PurePosixPath) -> str:
@@ -2563,6 +3206,23 @@ def _daily_path(notes: ObsidianService, day: date) -> str:
     if not path.casefold().endswith(".md"):
         path += ".md"
     return _note_path(notes, path)
+
+
+def _render_daily_target(
+    notes: ObsidianService,
+    current: str,
+    *,
+    content: str,
+    section: str | None,
+    item: str | None,
+) -> str:
+    if section is not None and item is not None:
+        return notes.render_append_section_content(current, section, item)
+    if not content:
+        return current
+    if current:
+        return notes.render_append_content(current, content)
+    return notes.render_create_content(content)
 
 
 def _result_json(result: NoteWriteResult) -> dict[str, object]:

@@ -275,6 +275,19 @@ _CONTEXTUAL_RESEARCH_SUBJECT = re.compile(
     r"файл\w*|документ\w*|вложени\w*|сообщени\w*|заметк\w*|архив\w*)\b",
     re.IGNORECASE,
 )
+_HARDWARE_CHARACTERISTICS_REQUIRED_FACETS = (
+    "processor",
+    "memory",
+    "storage",
+    "network",
+    "ports_expansion",
+    "dimensions_power",
+)
+_NAS_CHARACTERISTICS_SUBJECT = re.compile(
+    r"\b(?:nas|qnap|synology|asustor|terramaster|"
+    r"сетев\w+\s+(?:накопител\w*|хранилищ\w*))\b",
+    re.IGNORECASE,
+)
 
 _OPERATION_MARKER = re.compile(
     r'<!-- friday:(?:create|append) operation="[0-9a-f]{64}" '
@@ -309,9 +322,15 @@ class ObsidianConversationIntent:
 
 @dataclass(frozen=True, slots=True)
 class ObsidianResultNoteRequest:
-    """One current-turn task whose accepted final answer must become a note."""
+    """One answer-then-save request with separate research and display contracts.
+
+    ``required_facets`` contains stable code-owned identifiers, never model text;
+    an empty tuple preserves the generic compound-request contract.
+    """
 
     task: str
+    display_title: str = ""
+    required_facets: tuple[str, ...] = ()
 
 
 def _refusal(reason: str) -> ObsidianConversationIntent:
@@ -403,6 +422,7 @@ def obsidian_result_note_request(message: object) -> ObsidianResultNoteRequest |
     match = _RESULT_NOTE.fullmatch(text)
     if match is not None:
         task = unicodedata.normalize("NFC", match.group("task").strip())
+        request = ObsidianResultNoteRequest(task=task)
     else:
         characteristics = _RESULT_NOTE_CHARACTERISTICS.fullmatch(text)
         if characteristics is None:
@@ -423,14 +443,31 @@ def obsidian_result_note_request(message: object) -> ObsidianResultNoteRequest |
             else "Спецификации"
         )
         label = f"Актуальные {noun.casefold()}" if characteristics.group("actual") else noun
-        # Keep the deferred task as an explicit question.  The isolated public
-        # research lane admits noun-phrase searches only when their request
-        # shape is unambiguous; punctuation also stays out of the derived path
-        # and heading through their existing canonicalizers.
-        task = f"{label} {subject}?"
+        display_title = f"{label} {subject}"
+        if _NAS_CHARACTERISTICS_SUBJECT.search(subject) is not None:
+            scope = (
+                "процессор/CPU, память/RAM/DDR4, SATA/M.2, Ethernet, "
+                "USB/HDMI/PCIe, габариты, питание/энергопотребление"
+            )
+            completeness = "Актуальные" if characteristics.group("actual") else "Полные"
+            # The deterministic web prefetch has a 140-character query envelope.
+            # Keep every required facet inside it instead of silently cutting the
+            # latter fields (the old long form ended halfway through ``Ethernet``).
+            task = f"{completeness} {noun.casefold()} {subject}: {scope}?"
+            request = ObsidianResultNoteRequest(
+                task=task,
+                display_title=display_title,
+                required_facets=_HARDWARE_CHARACTERISTICS_REQUIRED_FACETS,
+            )
+        else:
+            # Preserve the established generic product contract. A phone,
+            # camera or other numbered model must not be forced through NAS
+            # concepts such as drive bays and PCIe expansion slots.
+            task = f"{label} {subject}?"
+            request = ObsidianResultNoteRequest(task=task)
     if not task or _has_unsafe_unicode_control(task, multiline=False):
         return None
-    return ObsidianResultNoteRequest(task=task)
+    return request
 
 
 def obsidian_conversation_intent(

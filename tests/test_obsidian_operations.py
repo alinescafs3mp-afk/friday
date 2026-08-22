@@ -348,6 +348,663 @@ def test_prepared_append_reconciles_after_receipt_commit_failure(
     assert recovered.status == "scan_pending"
     assert recovered.replayed is True
     assert notes.read_note("Recovery").body.count("once only") == 1
+    assert "<!-- friday:" not in notes.read_note("Recovery").content
+
+
+def test_legacy_marker_migration_cas_cleans_body_and_restarts_delivery(
+    storage: FridayStorage,
+    tmp_path: Path,
+) -> None:
+    sync = FakeSync()
+    operations, notes, bundle = _make_operations(storage, tmp_path, "alice", sync=sync)
+    operation_id = "legacy-create"
+    operation_digest = hashlib.sha256(operation_id.encode()).hexdigest()
+    arguments_digest = hashlib.sha256(b"legacy body").hexdigest()
+    marker = f'<!-- friday:create operation="{operation_digest}" arguments="{arguments_digest}" -->'
+    legacy = notes.store.write_text(
+        "Legacy.md",
+        f"legacy body\n{marker}\n",
+        create_only=True,
+    )
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id=operation_id,
+        vault_id=str(bundle["vault"]["id"]),
+        method="create",
+        arguments_digest="a" * 64,
+    )
+    local = {
+        "local_write_complete": True,
+        "server_scan_complete": False,
+        "android_connected": False,
+        "android_completion": None,
+        "android_received": False,
+        "obsidian_opened": False,
+    }
+    storage.transition_obsidian_operation(
+        "alice",
+        operation_id,
+        "committed",
+        result={
+            "schema": "friday.obsidian-note-operation.v1",
+            "path": "Legacy.md",
+            "revision": legacy.revision,
+            "previous_revision": None,
+            "created": True,
+            "applied": True,
+        },
+        delivery=local,
+    )
+    storage.transition_obsidian_operation("alice", operation_id, "scan_pending")
+    delivered = {
+        "local_write_complete": True,
+        "server_scan_complete": True,
+        "android_connected": True,
+        "android_completion": 100.0,
+        "android_received": True,
+        "obsidian_opened": False,
+    }
+    storage.transition_obsidian_operation(
+        "alice",
+        operation_id,
+        "scan_complete",
+        delivery=delivered,
+    )
+    storage.transition_obsidian_operation(
+        "alice",
+        operation_id,
+        "delivered",
+        delivery=delivered,
+    )
+    historical = storage.get_obsidian_operation("alice", operation_id)
+    assert historical is not None
+
+    migrated = operations.migrate_legacy_operation_markers()
+
+    current = notes.read_note("Legacy.md")
+    row = storage.get_obsidian_operation("alice", operation_id)
+    cleanup_rows = [
+        item for item in storage.list_obsidian_operations("alice", limit=20) if item["method"] == "replace"
+    ]
+    assert migrated == 1
+    assert current.content == "legacy body\n"
+    assert "<!-- friday:" not in current.content
+    assert row == historical
+    assert len(cleanup_rows) == 1
+    assert cleanup_rows[0]["status"] == "scan_pending"
+    assert json.loads(cleanup_rows[0]["result_json"])["revision"] == current.revision
+    assert sync.requests[-1].revision == current.revision
+
+
+def test_multi_marker_cleanup_is_one_new_operation_and_preserves_historical_receipts(
+    storage: FridayStorage,
+    tmp_path: Path,
+) -> None:
+    operations, notes, bundle = _make_operations(storage, tmp_path, "alice")
+    first_id, second_id = "legacy-first", "legacy-second"
+
+    def marker(operation_id: str, method: str, payload: str) -> str:
+        operation = hashlib.sha256(operation_id.encode()).hexdigest()
+        arguments = hashlib.sha256(payload.encode()).hexdigest()
+        return f'<!-- friday:{method} operation="{operation}" arguments="{arguments}" -->'
+
+    first_marker = marker(first_id, "create", "first")
+    second_marker = marker(second_id, "append", "second")
+    first = notes.store.write_text(
+        "History.md",
+        f"first\n{first_marker}\n",
+        create_only=True,
+    )
+    second = notes.store.write_text(
+        "History.md",
+        f"first\n{first_marker}\nsecond\n{second_marker}\n",
+        expected_revision=first.revision,
+    )
+    delivered = {
+        "local_write_complete": True,
+        "server_scan_complete": True,
+        "android_connected": True,
+        "android_completion": 100.0,
+        "android_received": True,
+        "obsidian_opened": False,
+    }
+
+    def delivered_row(operation_id: str, method: str, revision: str, previous: str | None) -> dict:
+        storage.prepare_obsidian_operation(
+            "alice",
+            operation_id=operation_id,
+            vault_id=str(bundle["vault"]["id"]),
+            method=method,
+            arguments_digest=hashlib.sha256(f"ledger:{operation_id}".encode()).hexdigest(),
+            expected_revision=previous,
+        )
+        result = {
+            "schema": "friday.obsidian-note-operation.v1",
+            "path": "History.md",
+            "revision": revision,
+            "previous_revision": previous,
+            "created": method == "create",
+            "applied": True,
+        }
+        storage.transition_obsidian_operation(
+            "alice", operation_id, "committed", result=result, delivery=delivered
+        )
+        storage.transition_obsidian_operation("alice", operation_id, "scan_pending")
+        storage.transition_obsidian_operation("alice", operation_id, "scan_complete", delivery=delivered)
+        return storage.transition_obsidian_operation("alice", operation_id, "delivered", delivery=delivered)
+
+    first_history = delivered_row(first_id, "create", first.revision, None)
+    second_history = delivered_row(second_id, "append", second.revision, first.revision)
+
+    assert operations.migrate_legacy_operation_markers() == 1
+    clean_revision = notes.read_note("History.md").revision
+    stable_content = notes.read_note("History.md").content
+    assert operations.migrate_legacy_operation_markers() == 0
+
+    assert stable_content == "first\nsecond\n"
+    assert notes.read_note("History.md").content == stable_content
+    assert storage.get_obsidian_operation("alice", first_id) == first_history
+    assert storage.get_obsidian_operation("alice", second_id) == second_history
+    cleanup_rows = [
+        item for item in storage.list_obsidian_operations("alice", limit=20) if item["method"] == "replace"
+    ]
+    assert len(cleanup_rows) == 1
+    assert json.loads(cleanup_rows[0]["result_json"])["revision"] == clean_revision
+
+
+def test_marker_cleanup_recovers_file_to_ledger_receipt_gap_without_second_write(
+    storage: FridayStorage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operations, notes, bundle = _make_operations(storage, tmp_path, "alice")
+    operation_id = "legacy-gap-proof"
+    operation = hashlib.sha256(operation_id.encode()).hexdigest()
+    arguments = hashlib.sha256(b"body").hexdigest()
+    marker = f'<!-- friday:create operation="{operation}" arguments="{arguments}" -->'
+    legacy = notes.store.write_text("Gap.md", f"body\n{marker}\n", create_only=True)
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id=operation_id,
+        vault_id=str(bundle["vault"]["id"]),
+        method="create",
+        arguments_digest="b" * 64,
+    )
+    result = {
+        "schema": "friday.obsidian-note-operation.v1",
+        "path": "Gap.md",
+        "revision": legacy.revision,
+        "previous_revision": None,
+        "created": True,
+        "applied": True,
+    }
+    storage.transition_obsidian_operation(
+        "alice",
+        operation_id,
+        "committed",
+        result=result,
+        delivery={
+            "local_write_complete": True,
+            "server_scan_complete": False,
+            "android_connected": False,
+            "android_completion": None,
+            "android_received": False,
+            "obsidian_opened": False,
+        },
+    )
+    storage.transition_obsidian_operation("alice", operation_id, "scan_pending")
+    delivered = {
+        "local_write_complete": True,
+        "server_scan_complete": True,
+        "android_connected": True,
+        "android_completion": 100.0,
+        "android_received": True,
+        "obsidian_opened": False,
+    }
+    storage.transition_obsidian_operation(
+        "alice",
+        operation_id,
+        "scan_complete",
+        delivery=delivered,
+    )
+    storage.transition_obsidian_operation(
+        "alice",
+        operation_id,
+        "delivered",
+        delivery=delivered,
+    )
+    historical = storage.get_obsidian_operation("alice", operation_id)
+    transition = storage.transition_obsidian_operation
+    fail_once = True
+
+    def lose_cleanup_receipt(owner_id: str, op_id: str, state: str, **kwargs: Any) -> dict:
+        nonlocal fail_once
+        if op_id.startswith("legacy-marker-cleanup:") and state == "committed" and fail_once:
+            fail_once = False
+            raise OSError("synthetic cleanup receipt interruption")
+        return transition(owner_id, op_id, state, **kwargs)
+
+    monkeypatch.setattr(storage, "transition_obsidian_operation", lose_cleanup_receipt)
+    with pytest.raises(OperationCommitUncertain):
+        operations.migrate_legacy_operation_markers()
+    clean = notes.read_note("Gap.md")
+    assert clean.content == "body\n"
+
+    recovered = operations.migrate_legacy_operation_markers()
+    cleanup_rows = [
+        item for item in storage.list_obsidian_operations("alice", limit=20) if item["method"] == "replace"
+    ]
+    assert recovered == 1
+    assert len(cleanup_rows) == 1
+    assert cleanup_rows[0]["status"] == "scan_pending"
+    assert notes.read_note("Gap.md").revision == clean.revision
+    assert storage.get_obsidian_operation("alice", operation_id) == historical
+
+
+def test_missing_prepared_cleanup_is_skipped_while_another_cleanup_recovers(
+    storage: FridayStorage,
+    tmp_path: Path,
+) -> None:
+    operations, notes, bundle = _make_operations(storage, tmp_path, "alice")
+
+    def prepare_cleanup(path: str, proof_id: str) -> tuple[str, str]:
+        operation = hashlib.sha256(proof_id.encode()).hexdigest()
+        arguments_digest = hashlib.sha256(path.encode()).hexdigest()
+        marker = f'<!-- friday:create operation="{operation}" arguments="{arguments_digest}" -->'
+        source = notes.store.write_text(path, f"body\n{marker}\n", create_only=True)
+        cleaned = "body\n"
+        cleanup = {
+            "path": path,
+            "source_revision": source.revision,
+            "target_revision": hashlib.sha256(cleaned.encode()).hexdigest(),
+            "markers": [marker],
+            "proof_operation_ids": [proof_id],
+        }
+        arguments = {"method": "legacy_marker_cleanup", **cleanup}
+        digest = canonical_arguments_digest(arguments)
+        cleanup_id = f"legacy-marker-cleanup:{digest}"
+        storage.prepare_obsidian_operation(
+            "alice",
+            operation_id=cleanup_id,
+            vault_id=str(bundle["vault"]["id"]),
+            method="replace",
+            arguments_digest=digest,
+            expected_revision=source.revision,
+            prepared_result={
+                "schema": "friday.obsidian-note-operation.v1",
+                "legacy_marker_cleanup": cleanup,
+            },
+        )
+        return cleanup_id, source.revision
+
+    missing_id, missing_revision = prepare_cleanup("Missing.md", "missing-proof")
+    surviving_id, _ = prepare_cleanup("Surviving.md", "surviving-proof")
+    notes.store.delete("Missing.md", expected_revision=missing_revision)
+
+    assert operations.migrate_legacy_operation_markers() == 1
+    assert not notes.store.exists("Missing.md")
+    assert notes.read_note("Surviving.md").content == "body\n"
+    missing_row = storage.get_obsidian_operation("alice", missing_id)
+    surviving_row = storage.get_obsidian_operation("alice", surviving_id)
+    assert missing_row is not None and missing_row["status"] == "prepared"
+    assert surviving_row is not None and surviving_row["status"] == "scan_pending"
+
+    later_id = "later-delivered-proof"
+    operation = hashlib.sha256(later_id.encode()).hexdigest()
+    arguments_digest = hashlib.sha256(b"later").hexdigest()
+    marker = f'<!-- friday:create operation="{operation}" arguments="{arguments_digest}" -->'
+    later = notes.store.write_text("Later.md", f"later\n{marker}\n", create_only=True)
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id=later_id,
+        vault_id=str(bundle["vault"]["id"]),
+        method="create",
+        arguments_digest="9" * 64,
+    )
+    delivered = {
+        "local_write_complete": True,
+        "server_scan_complete": True,
+        "android_connected": True,
+        "android_completion": 100.0,
+        "android_received": True,
+        "obsidian_opened": False,
+    }
+    storage.transition_obsidian_operation(
+        "alice",
+        later_id,
+        "committed",
+        result={
+            "schema": "friday.obsidian-note-operation.v1",
+            "path": later.path,
+            "revision": later.revision,
+            "previous_revision": None,
+            "created": True,
+            "applied": True,
+        },
+        delivery=delivered,
+    )
+    storage.transition_obsidian_operation("alice", later_id, "scan_pending")
+    storage.transition_obsidian_operation("alice", later_id, "scan_complete", delivery=delivered)
+    storage.transition_obsidian_operation("alice", later_id, "delivered", delivery=delivered)
+
+    assert operations.migrate_legacy_operation_markers() == 1
+    assert notes.read_note("Later.md").content == "later\n"
+    assert storage.get_obsidian_operation("alice", missing_id) == missing_row
+
+
+def test_migration_cleans_delivered_legacy_verification_note_without_schema(
+    storage: FridayStorage,
+    tmp_path: Path,
+) -> None:
+    operations, notes, bundle = _make_operations(storage, tmp_path, "alice")
+    operation_id = "verify:obssetup_production"
+    clean = "# Friday Connection Test\n\nConnection works.\n"
+    operation = hashlib.sha256(operation_id.encode()).hexdigest()
+    arguments = hashlib.sha256(clean.encode()).hexdigest()
+    marker = f'<!-- friday:create operation="{operation}" arguments="{arguments}" -->'
+    legacy = notes.store.write_text(
+        "Friday Connection Test.md",
+        f"{clean}{marker}\n",
+        create_only=True,
+    )
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id=operation_id,
+        vault_id=str(bundle["vault"]["id"]),
+        method="verification_note",
+        arguments_digest="c" * 64,
+    )
+    delivered = {
+        "local_write_complete": True,
+        "server_scan_complete": True,
+        "android_connected": True,
+        "android_completion": 100.0,
+        "android_received": True,
+        "obsidian_opened": True,
+    }
+    storage.transition_obsidian_operation(
+        "alice",
+        operation_id,
+        "committed",
+        result={"path": legacy.path, "revision": legacy.revision, "applied": True},
+        delivery=delivered,
+    )
+    storage.transition_obsidian_operation("alice", operation_id, "scan_pending")
+    storage.transition_obsidian_operation("alice", operation_id, "scan_complete", delivery=delivered)
+    storage.transition_obsidian_operation("alice", operation_id, "delivered", delivery=delivered)
+
+    assert operations.migrate_legacy_operation_markers() == 1
+    assert notes.read_note("Friday Connection Test.md").content == clean
+
+
+def test_migration_leaves_pending_marker_revision_reachable(
+    storage: FridayStorage,
+    tmp_path: Path,
+) -> None:
+    operations, notes, bundle = _make_operations(storage, tmp_path, "alice")
+    operation_id = "pending-legacy"
+    operation = hashlib.sha256(operation_id.encode()).hexdigest()
+    arguments = hashlib.sha256(b"pending").hexdigest()
+    marker = f'<!-- friday:create operation="{operation}" arguments="{arguments}" -->'
+    legacy = notes.store.write_text("Pending.md", f"pending\n{marker}\n", create_only=True)
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id=operation_id,
+        vault_id=str(bundle["vault"]["id"]),
+        method="create",
+        arguments_digest="d" * 64,
+    )
+    storage.transition_obsidian_operation(
+        "alice",
+        operation_id,
+        "committed",
+        result={
+            "schema": "friday.obsidian-note-operation.v1",
+            "path": legacy.path,
+            "revision": legacy.revision,
+            "previous_revision": None,
+            "created": True,
+            "applied": True,
+        },
+        delivery={
+            "local_write_complete": True,
+            "server_scan_complete": False,
+            "android_connected": False,
+            "android_completion": None,
+            "android_received": False,
+            "obsidian_opened": False,
+        },
+    )
+    storage.transition_obsidian_operation("alice", operation_id, "scan_pending")
+    historical = storage.get_obsidian_operation("alice", operation_id)
+
+    assert operations.migrate_legacy_operation_markers() == 0
+    assert marker in notes.read_note("Pending.md").content
+    assert storage.get_obsidian_operation("alice", operation_id) == historical
+
+
+def test_migration_skips_whole_note_with_delivered_and_pending_markers(
+    storage: FridayStorage,
+    tmp_path: Path,
+) -> None:
+    operations, notes, bundle = _make_operations(storage, tmp_path, "alice")
+
+    def marker(operation_id: str, method: str, payload: str) -> str:
+        operation = hashlib.sha256(operation_id.encode()).hexdigest()
+        arguments = hashlib.sha256(payload.encode()).hexdigest()
+        return f'<!-- friday:{method} operation="{operation}" arguments="{arguments}" -->'
+
+    delivered_id, pending_id = "mixed-delivered", "mixed-pending"
+    delivered_marker = marker(delivered_id, "create", "first")
+    pending_marker = marker(pending_id, "append", "second")
+    first = notes.store.write_text("Mixed.md", f"first\n{delivered_marker}\n", create_only=True)
+    current = notes.store.write_text(
+        "Mixed.md",
+        f"first\n{delivered_marker}\nsecond\n{pending_marker}\n",
+        expected_revision=first.revision,
+    )
+    local = {
+        "local_write_complete": True,
+        "server_scan_complete": False,
+        "android_connected": False,
+        "android_completion": None,
+        "android_received": False,
+        "obsidian_opened": False,
+    }
+    complete = {
+        **local,
+        "server_scan_complete": True,
+        "android_connected": True,
+        "android_completion": 100.0,
+        "android_received": True,
+    }
+
+    for operation_id, method, revision, previous in (
+        (delivered_id, "create", first.revision, None),
+        (pending_id, "append", current.revision, first.revision),
+    ):
+        storage.prepare_obsidian_operation(
+            "alice",
+            operation_id=operation_id,
+            vault_id=str(bundle["vault"]["id"]),
+            method=method,
+            arguments_digest=hashlib.sha256(f"ledger:{operation_id}".encode()).hexdigest(),
+            expected_revision=previous,
+        )
+        storage.transition_obsidian_operation(
+            "alice",
+            operation_id,
+            "committed",
+            result={
+                "schema": "friday.obsidian-note-operation.v1",
+                "path": "Mixed.md",
+                "revision": revision,
+                "previous_revision": previous,
+                "created": method == "create",
+                "applied": True,
+            },
+            delivery=local,
+        )
+        storage.transition_obsidian_operation("alice", operation_id, "scan_pending")
+    storage.transition_obsidian_operation(
+        "alice",
+        delivered_id,
+        "scan_complete",
+        delivery=complete,
+    )
+    storage.transition_obsidian_operation(
+        "alice",
+        delivered_id,
+        "delivered",
+        delivery=complete,
+    )
+    before = notes.read_note("Mixed.md")
+
+    assert operations.migrate_legacy_operation_markers() == 0
+    after = notes.read_note("Mixed.md")
+    assert after.content == before.content
+    assert after.revision == before.revision == current.revision
+
+
+def test_migration_skips_legacy_note_with_new_marker_free_pending_append(
+    storage: FridayStorage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operations, notes, bundle = _make_operations(storage, tmp_path, "alice")
+    legacy_id = "legacy-before-marker-free-append"
+    operation = hashlib.sha256(legacy_id.encode()).hexdigest()
+    arguments = hashlib.sha256(b"legacy").hexdigest()
+    marker = f'<!-- friday:create operation="{operation}" arguments="{arguments}" -->'
+    legacy = notes.store.write_text("MixedMarkerFree.md", f"legacy\n{marker}\n", create_only=True)
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id=legacy_id,
+        vault_id=str(bundle["vault"]["id"]),
+        method="create",
+        arguments_digest="e" * 64,
+    )
+    delivered = {
+        "local_write_complete": True,
+        "server_scan_complete": True,
+        "android_connected": True,
+        "android_completion": 100.0,
+        "android_received": True,
+        "obsidian_opened": False,
+    }
+    storage.transition_obsidian_operation(
+        "alice",
+        legacy_id,
+        "committed",
+        result={
+            "schema": "friday.obsidian-note-operation.v1",
+            "path": legacy.path,
+            "revision": legacy.revision,
+            "previous_revision": None,
+            "created": True,
+            "applied": True,
+        },
+        delivery=delivered,
+    )
+    storage.transition_obsidian_operation("alice", legacy_id, "scan_pending")
+    storage.transition_obsidian_operation("alice", legacy_id, "scan_complete", delivery=delivered)
+    storage.transition_obsidian_operation("alice", legacy_id, "delivered", delivery=delivered)
+
+    transition = storage.transition_obsidian_operation
+    fail_once = True
+
+    def lose_main_receipt(owner_id: str, op_id: str, state: str, **values: Any) -> dict:
+        nonlocal fail_once
+        if op_id == "new-marker-free-append" and state == "committed" and fail_once:
+            fail_once = False
+            raise OSError("synthetic main-ledger interruption")
+        return transition(owner_id, op_id, state, **values)
+
+    monkeypatch.setattr(storage, "transition_obsidian_operation", lose_main_receipt)
+    with pytest.raises(OperationCommitUncertain):
+        operations.append_note(
+            "new-marker-free-append",
+            legacy.path,
+            "new text",
+            expected_revision=legacy.revision,
+        )
+    before = notes.read_note(legacy.path)
+    prepared = storage.get_obsidian_operation("alice", "new-marker-free-append")
+    assert prepared is not None and prepared["status"] == "prepared"
+    assert before.content.count("<!-- friday:") == 1
+
+    assert operations.migrate_legacy_operation_markers() == 0
+    replay = operations.append_note(
+        "new-marker-free-append",
+        legacy.path,
+        "new text",
+        expected_revision=legacy.revision,
+    )
+    assert replay.status == "scan_pending"
+    assert replay.replayed is True
+    assert operations.migrate_legacy_operation_markers() == 0
+    after = notes.read_note(legacy.path)
+    assert after.content == before.content
+    assert after.revision == before.revision == replay.revision
+    assert after.content.count("new text") == 1
+    assert not any(row["method"] == "replace" for row in storage.list_obsidian_operations("alice", limit=20))
+
+
+def test_stale_pending_create_and_delete_do_not_block_cleanup_of_another_path(
+    storage: FridayStorage,
+    tmp_path: Path,
+) -> None:
+    operations, notes, bundle = _make_operations(storage, tmp_path, "alice")
+    legacy_id = "production-legacy-note"
+    operation = hashlib.sha256(legacy_id.encode()).hexdigest()
+    arguments = hashlib.sha256(b"research").hexdigest()
+    marker = f'<!-- friday:create operation="{operation}" arguments="{arguments}" -->'
+    legacy = notes.store.write_text("Research.md", f"research\n{marker}\n", create_only=True)
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id=legacy_id,
+        vault_id=str(bundle["vault"]["id"]),
+        method="create",
+        arguments_digest="f" * 64,
+    )
+    delivered = {
+        "local_write_complete": True,
+        "server_scan_complete": True,
+        "android_connected": True,
+        "android_completion": 100.0,
+        "android_received": True,
+        "obsidian_opened": False,
+    }
+    storage.transition_obsidian_operation(
+        "alice",
+        legacy_id,
+        "committed",
+        result={
+            "schema": "friday.obsidian-note-operation.v1",
+            "path": legacy.path,
+            "revision": legacy.revision,
+            "previous_revision": None,
+            "created": True,
+            "applied": True,
+        },
+        delivery=delivered,
+    )
+    storage.transition_obsidian_operation("alice", legacy_id, "scan_pending")
+    storage.transition_obsidian_operation("alice", legacy_id, "scan_complete", delivery=delivered)
+    storage.transition_obsidian_operation("alice", legacy_id, "delivered", delivery=delivered)
+
+    stale = operations.create_note("stale-create", "Deleted.md", "temporary")
+    deleted = operations.delete_note(
+        "stale-delete",
+        stale.path,
+        expected_revision=stale.revision,
+    )
+    assert stale.status == "scan_pending"
+    assert deleted.status == "committed"
+    assert not notes.store.exists(stale.path)
+
+    assert operations.migrate_legacy_operation_markers() == 1
+    assert notes.read_note("Research.md").content == "research\n"
 
 
 def test_prepared_property_write_reconciles_by_typed_postcondition(
@@ -555,6 +1212,58 @@ def test_structured_daily_operation_is_durable_and_exactly_once(
     assert body.count("- Проверена интеграция с Obsidian") == 1
 
 
+@pytest.mark.parametrize("mode", ["create", "append", "section"])
+def test_daily_note_recovers_file_to_main_ledger_gap_without_duplicates(
+    storage: FridayStorage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+) -> None:
+    operations, notes, _ = _make_operations(storage, tmp_path, "alice")
+    selected = date(2026, 8, 22)
+    operation_id = f"daily-gap-{mode}"
+    kwargs: dict[str, Any] = {}
+    expected_text: str
+    if mode == "create":
+        kwargs["content"] = "created once"
+        expected_text = "created once"
+    else:
+        base = operations.daily_note("daily-gap-seed", selected, content="seed")
+        kwargs["expected_revision"] = base.revision
+        if mode == "append":
+            kwargs["content"] = "appended once"
+            expected_text = "appended once"
+        else:
+            kwargs.update(section="Friday", item="- section once")
+            expected_text = "- section once"
+
+    transition = storage.transition_obsidian_operation
+    fail_once = True
+
+    def lose_main_receipt(owner_id: str, op_id: str, state: str, **values: Any) -> dict:
+        nonlocal fail_once
+        if op_id == operation_id and state == "committed" and fail_once:
+            fail_once = False
+            raise OSError("synthetic main-ledger interruption")
+        return transition(owner_id, op_id, state, **values)
+
+    monkeypatch.setattr(storage, "transition_obsidian_operation", lose_main_receipt)
+    with pytest.raises(OperationCommitUncertain):
+        operations.daily_note(operation_id, selected, **kwargs)
+    first_content = notes.read_note("Daily/2026-08-22.md").content
+    row = storage.get_obsidian_operation("alice", operation_id)
+    assert row is not None and row["status"] == "prepared"
+
+    replay = operations.daily_note(operation_id, selected, **kwargs)
+
+    final_content = notes.read_note("Daily/2026-08-22.md").content
+    assert replay.replayed is True
+    assert replay.status == "scan_pending"
+    assert final_content == first_content
+    assert final_content.count(expected_text) == 1
+    assert "<!-- friday:" not in final_content
+
+
 def test_implicit_daily_day_remains_frozen_when_retry_crosses_midnight(
     storage: FridayStorage,
     tmp_path: Path,
@@ -584,12 +1293,12 @@ def test_uncertain_daily_retry_keeps_stale_revision_guard(
 ) -> None:
     operations, notes, _ = _make_operations(storage, tmp_path, "alice")
     initial = operations.daily_note("daily-initial", content="initial")
-    original_append = notes.append_note
+    original_daily_note = notes.daily_note
 
     def fail_before_append(*_args: Any, **_kwargs: Any) -> Any:
         raise OSError("synthetic filesystem interruption")
 
-    monkeypatch.setattr(notes, "append_note", fail_before_append)
+    monkeypatch.setattr(notes, "daily_note", fail_before_append)
     with pytest.raises(OperationCommitUncertain):
         operations.daily_note(
             "daily-stale",
@@ -599,7 +1308,7 @@ def test_uncertain_daily_retry_keeps_stale_revision_guard(
     uncertain = storage.get_obsidian_operation("alice", "daily-stale")
     assert uncertain is not None and uncertain["status"] == "uncertain"
 
-    monkeypatch.setattr(notes, "append_note", original_append)
+    monkeypatch.setattr(notes, "daily_note", original_daily_note)
     external = notes.append_note(
         initial.path,
         "external edit",
