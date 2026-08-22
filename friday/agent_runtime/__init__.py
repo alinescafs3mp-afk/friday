@@ -7096,12 +7096,81 @@ _SUPPORTED_FILE_COMPLETION = re.compile(
     re.IGNORECASE,
 )
 _PASSIVE_ATTACHMENT_PREPARATION_PREAMBLE = re.compile(
-    r"^\s*(?:#{1,6}\s*)?(?:\*\*|__)?(?:структурированн\w*\s+)?"
-    r"(?:файл|документ|материал)\w*\s+подготовлен\w*"
+    r"(?:#{1,6}\s*)?(?:\*\*|__)?(?:структурированн\w*\s+)?"
+    r"(?P<subject>(?:файл|документ|материал)\w*)\s+подготовлен\w*"
     r"(?:\s+и\s+структурирован\w*)?(?:\*\*|__)?\s*"
-    r"(?P<link>(?:в\s+виде|как)\s+|(?:[.!:;—-]\s*))",
+    r"(?P<link>(?:в\s+(?:виде|форме)|как)\s+|"
+    r"(?:следующим\s+образом\s*:\s*)|(?:[.!:;—-]\s*))",
     re.IGNORECASE,
 )
+_PASSIVE_ATTACHMENT_READY_DESCRIPTION = re.compile(
+    r"(?:#{1,6}\s*)?(?:\*\*|__)?"
+    r"(?P<subject>(?:файл|документ|материал)\w*)\s+"
+    r"представля\w*\s+собой\s+(?:\*\*|__)?готов\w*(?:\*\*|__)?\s+",
+    re.IGNORECASE,
+)
+_PASSIVE_ATTACHMENT_FORMAT_HEADING = re.compile(
+    r"(?:[-*+]\s+)?(?:"
+    r"(?:\*\*|__)[^\n]{1,160}(?:\*\*|__)|"
+    r"#{1,6}\s+[^\n]{1,160}"
+    r")",
+)
+_PASSIVE_ATTACHMENT_PLAIN_HEADING = re.compile(
+    r"(?:\d{1,2}[.)]\s*)?(?:"
+    r"назначение(?:\s+документа)?(?:\s+и\s+структура)?|"
+    r"структура(?:\s+и\s+содержание)?|формат\s+и\s+структура|"
+    r"тип\s+документа|кратк(?:ий\s+вывод|ое\s+(?:содержание|описание))|"
+    r"основные\s+сведения|"
+    r"общая\s+информация|описание\s+документа|ключевые\s+моменты|"
+    r"обзор|содержание|итоги|резюме|вывод"
+    r")[.:]?",
+    re.IGNORECASE,
+)
+
+
+def _bounded_passive_attachment_heading(prefix: str) -> bool:
+    clean = str(prefix or "").strip()
+    if not clean:
+        return True
+    if len(clean) > 512:
+        return False
+    lines = [line.strip() for line in clean.splitlines() if line.strip()]
+    if not (
+        0 < len(lines) <= 3
+        and all(
+            _PASSIVE_ATTACHMENT_FORMAT_HEADING.fullmatch(line)
+            or _PASSIVE_ATTACHMENT_PLAIN_HEADING.fullmatch(line)
+            for line in lines
+        )
+    ):
+        return False
+    for line in lines:
+        visible = re.sub(r"^(?:[-*+]\s+|#{1,6}\s+)", "", line).strip("*_ ")
+        if (
+            _PASSIVE_ATTACHMENT_PLAIN_HEADING.fullmatch(visible) is None
+            or _SUPPORTED_FILE_COMPLETION.search(visible)
+            or _SUPPORTED_REMINDER_COMPLETION.search(visible)
+            or _SUPPORTED_VOICE_COMPLETION.search(visible)
+            or _candidate_claims_an_outside_deed(visible)
+        ):
+            return False
+    return True
+
+
+def _passive_attachment_normalization_candidate(
+    answer: str,
+) -> tuple[str, re.Match[str]] | None:
+    original = str(answer or "")
+    candidates = [
+        (kind, match)
+        for kind, pattern in (
+            ("preparation", _PASSIVE_ATTACHMENT_PREPARATION_PREAMBLE),
+            ("ready-description", _PASSIVE_ATTACHMENT_READY_DESCRIPTION),
+        )
+        if (match := pattern.search(original)) is not None
+        and _bounded_passive_attachment_heading(original[: match.start()])
+    ]
+    return min(candidates, key=lambda item: item[1].start(), default=None)
 
 
 def _normalize_passive_attachment_preparation_preamble(answer: str) -> tuple[str, bool]:
@@ -7116,16 +7185,31 @@ def _normalize_passive_attachment_preparation_preamble(answer: str) -> tuple[str
     """
 
     original = str(answer or "")
-    match = _PASSIVE_ATTACHMENT_PREPARATION_PREAMBLE.match(original)
-    if match is None:
+    candidate = _passive_attachment_normalization_candidate(original)
+    if candidate is None:
         return original, False
+    kind, match = candidate
     remainder = re.sub(r"^(?:\*\*|__)\s*", "", original[match.end() :].strip())
     if len(remainder) < 12:
         return original, False
-    link = str(match.group("link") or "").strip().casefold()
-    if link in {"в виде", "как"}:
-        return f"Структура документа представлена {link} {remainder}", True
-    return f"Структура документа: {remainder}", True
+    heading = original[: match.start()].strip()
+    prefix = f"{heading}\n\n" if heading else ""
+    raw_subject = str(match.group("subject") or "").casefold()
+    subject = (
+        "Файл"
+        if raw_subject.startswith("файл")
+        else "Материал"
+        if raw_subject.startswith("материал")
+        else "Документ"
+    )
+    if kind == "ready-description":
+        return f"{prefix}{subject} представляет собой {remainder}", True
+    link = " ".join(str(match.group("link") or "").split()).casefold().replace(" :", ":")
+    if link in {"в виде", "в форме", "как"}:
+        return f"{prefix}{subject} представлен {link} {remainder}", True
+    if link == "следующим образом:":
+        return f"{prefix}{subject} представлен следующим образом: {remainder}", True
+    return f"{prefix}{subject} представлен: {remainder}", True
 
 
 _SUPPORTED_EXTERNAL_WORKSPACE_COMPLETION = re.compile(
@@ -7562,6 +7646,153 @@ def _supported_deed_claim_clauses(answer: str) -> list[str]:
         else:
             claims.append(clause)
     return claims
+
+
+_READ_ONLY_ATTACHMENT_SOURCE_DESCRIPTION = re.compile(
+    r"^\W*(?:структурированн\w*\s+)?"
+    r"(?:файл|документ|материал)\w*\s+подготовлен\w*\b"
+    r"(?:\s+и\s+структурирован\w*)?\s*"
+    r"(?:в\s+(?:виде|форме)|как|следующим\s+образом\s*:|[:;—-])",
+    re.IGNORECASE,
+)
+_READ_ONLY_ATTACHMENT_READY_SOURCE_DESCRIPTION = re.compile(
+    r"^\W*(?:файл|документ|материал)\w*\s+"
+    r"представля\w*\s+собой\s+(?:\*\*|__)?готов\w*(?:\*\*|__)?\s+",
+    re.IGNORECASE,
+)
+_READ_ONLY_ATTACHMENT_CARRIER_CLAIM = re.compile(
+    r"\bво\s+вложени\w*\b|\b(?:уже|теперь|наход\w*|леж\w*)\s+в\s+чат\w*\b|"
+    r"\bготов\w*\s+к\s+скачивани\w*\b|"
+    r"\bдоступ\w*\s+(?:(?:по|через)\s+ссылк\w*|"
+    r"(?:для|к)\s+(?:скачиван|загрузк)\w*)\b|"
+    r"\b(?:его|е[её]|их)?\s*можно\s+(?:скачат|загрузит|открыт|получит)\w*\b|"
+    r"\b(?:опубликован|размещ[её]н|загружен)\w*[^.!?\n]{0,48}"
+    r"\b(?:ссылк|облак|диск|сайт|чат|хранилищ)\w*\b|"
+    r"\bссылк\w*[^.!?\n]{0,32}\b(?:скачиван|загрузк)\w*\b",
+    re.IGNORECASE,
+)
+_READ_ONLY_ATTACHMENT_UNSAFE_DESCRIPTION_SUFFIX = re.compile(
+    # Finite first-person delivery verbs, not similarly rooted content nouns
+    # such as «отправка», «загрузка» or «хранение».
+    r"\b(?:прикрепля(?:ю|ем)|прикладыва(?:ю|ем)|прилага(?:ю|ем)|"
+    r"отправля(?:ю|ем)|выгружа(?:ю|ем)|загружа(?:ю|ем)|переда(?:ю|[её]м)|"
+    r"высыла(?:ю|ем)|направля(?:ю|ем)|доставля(?:ю|ем)|отда(?:ю|[её]м)|выда(?:ю|[её]м)|"
+    r"вруча(?:ю|ем)|посыла(?:ю|ем)|сохраня(?:ю|ем)|записыва(?:ю|ем)|"
+    r"добавля(?:ю|ем)|публику(?:ю|ем)|размеща(?:ю|ем)|выкладыва(?:ю|ем)|"
+    r"делюсь|делимся|шлю)\b|"
+    r"\b(?:передал|выслал|направил|доставил|отдал|выдал|вручил|послал|"
+    r"загрузил|сохранил|записал|добавил|опубликовал|разместил|выложил)"
+    r"(?:а|и)?\b\s+(?:вам|тебе|в\s+чат\w*)\b|"
+    r"\bподелил(?:ся|ась|ись)\s+с\s+(?:вами|тобой)\b|"
+    # A direct hand-off or permission to take the alleged carrier.
+    r"\b(?:держи(?:те)?|забирай(?:те)?|заберите|возьми(?:те)?|бери(?:те)?|"
+    r"лови(?:те)?|скачай(?:те)?|загрузи(?:те)?|открой(?:те)?|получи(?:те)?)\b|"
+    r"\b(?:можете?|можно)\s+(?:(?:его|е[её]|их)\s+)?"
+    r"(?:взять|забрать|скачать|загрузить|открыть|получить)\b|"
+    r"\b(?:взять|забрать|скачать|загрузить|открыть|получить)\s+можно"
+    r"(?:\s+(?:здесь|тут|ниже))?\b|"
+    r"\b(?:скачивани|загрузк)\w*\s+(?:доступн\w*|здесь|ниже)\b|"
+    # Predicative carrier state. Requiring a clause boundary/conjunction keeps
+    # grounded descriptions like «журнал отправленных писем» read-only.
+    r"(?:\bи\s+|[,;:—-]\s*)(?:уже\s+)?"
+    r"(?:прикрепл[её]н|приложен|отправлен|выгружен|загружен|передан|выслан|"
+    r"направлен|отдан|выдан|вручен|послан|сохран[её]н|записан|добавлен|"
+    r"выложен|опубликован|размещ[её]н|доступен)\w*\b|"
+    r"\b(?:прикрепл[её]н|приложен|отправлен|выгружен|загружен|передан|выслан|"
+    r"направлен|отдан|выдан|вручен|послан)\w*\s+(?:вам|тебе|в\s+чат\w*)\b|"
+    # A trailing recipient/ownership hand-off is a carrier claim too.
+    r"(?:[,;:—-]\s*|\bи\s+)(?:это\s+)?"
+    r"(?:(?:(?:уже|теперь)\s+)?(?:он|она|оно|они)?\s*"
+    r"(?:(?:уже|теперь)\s+)?(?:у\s+(?:вас|тебя)|ваш\w*|тво\w*)|"
+    r"для\s+(?:вас|тебя)|вам|тебе)(?=\s*(?:[.!?]|$))|"
+    r"\b(?:(?:уже|теперь)\s+(?:(?:он|она|оно|они)\s+)?|"
+    r"(?:он|она|оно|они)\s+(?:уже|теперь)\s+)"
+    r"(?:у\s+(?:вас|тебя)|ваш\w*|тво\w*)(?=\s*(?:[.!?]|$))|"
+    r"\b(?:ботом|системой|моделью|нейросетью|ии|ассистентом|пятницей)\b|"
+    r"\bвот\s+(?:вам|тебе)\b|"
+    r"\bискусственн\w*\s+интеллект\w*\b|"
+    r"\bпо\s+(?:ваш|тво)\w*\s+(?:запрос|просьб|задани)\w*\b|"
+    # A derivative/carrier adjective is unsafe only when it starts the direct
+    # descriptor; mentions inside a grounded review remain ordinary content.
+    r"^\W*(?:\*\*|__)?(?:(?:нов|исправлен|обновл[её]н|измен[её]н|дополн[её]н|"
+    r"доработан|переработан|финальн)\w*\s+(?:верси|редакци)\w*|"
+    r"(?:перевод|копи|редакци|готов)\w*)\b",
+    re.IGNORECASE,
+)
+_READ_ONLY_ATTACHMENT_GROUNDING_GENERIC_TERMS = frozenset(
+    {
+        *_SUPPORTED_FILE_GENERIC_TERMS,
+        "представля",
+        "соб",
+        "табличн",
+        "один",
+        "два",
+        "двух",
+        "три",
+        "нескольк",
+    }
+)
+
+
+def _read_only_attachment_passive_file_description(
+    clause: str,
+    evidence: Sequence[str],
+) -> bool:
+    """Do not mistake a read-only review description for a new carrier effect."""
+
+    source_match = _READ_ONLY_ATTACHMENT_SOURCE_DESCRIPTION.search(
+        clause
+    ) or _READ_ONLY_ATTACHMENT_READY_SOURCE_DESCRIPTION.search(clause)
+    if not evidence or _SUPPORTED_FILE_COMPLETION.search(clause) is None or source_match is None:
+        return False
+    if (
+        _OUTSIDE_SELF_SUBJECT.search(clause)
+        or _OUTSIDE_DEED_SELF_AGENT.search(clause)
+        or re.search(rf"\b{_SUPPORTED_FILE_ACTIVE_ACTION}\b", clause, re.IGNORECASE)
+        or _SUPPORTED_FILE_BARE_HANDOFF.search(clause)
+        or _READ_ONLY_ATTACHMENT_CARRIER_CLAIM.search(clause)
+        or _READ_ONLY_ATTACHMENT_UNSAFE_DESCRIPTION_SUFFIX.search(clause[source_match.end() :])
+        or _SUPPORTED_EXTERNAL_WORKSPACE_COMPLETION.search(clause)
+    ):
+        return False
+    descriptors = tuple(str(item or "") for item in evidence if str(item or "").strip())
+    if not descriptors or not _supported_file_formats_match_evidence(clause, descriptors):
+        return False
+    claim_terms = _supported_deed_terms(
+        clause,
+        generic=_READ_ONLY_ATTACHMENT_GROUNDING_GENERIC_TERMS,
+    )
+    evidence_terms = {
+        term
+        for descriptor in descriptors
+        for term in _supported_deed_terms(
+            descriptor,
+            generic=_READ_ONLY_ATTACHMENT_GROUNDING_GENERIC_TERMS,
+        )
+    }
+    return bool(claim_terms and claim_terms.issubset(evidence_terms))
+
+
+def _read_only_attachment_preamble_is_grounded(
+    answer: str,
+    evidence: Sequence[str],
+) -> bool:
+    """Ground only the clause the start-of-answer normalizer will rewrite."""
+
+    candidate = _passive_attachment_normalization_candidate(str(answer or ""))
+    if candidate is None:
+        return False
+    _kind, match = candidate
+    clauses = _supported_deed_claim_clauses(str(answer or "")[match.start() :])
+    tail = str(answer or "")[match.end() :]
+    return bool(
+        clauses
+        and _read_only_attachment_passive_file_description(clauses[0], evidence)
+        and _READ_ONLY_ATTACHMENT_CARRIER_CLAIM.search(tail) is None
+        and _READ_ONLY_ATTACHMENT_UNSAFE_DESCRIPTION_SUFFIX.search(tail) is None
+        and _SUPPORTED_FILE_BARE_HANDOFF.search(tail) is None
+        and _SUPPORTED_EXTERNAL_WORKSPACE_COMPLETION.search(tail) is None
+    )
 
 
 def _claims_an_unconfirmed_supported_deed(
@@ -38547,6 +38778,16 @@ class AgentRuntime:
             and not context.successful_reminders
             and context.late_make_file_attempts == 0
         )
+        read_only_attachment_review_scope = bool(
+            explicit_attachment_summary_scope
+            or (
+                passive_attachment_summary_scope
+                and authenticated_attachment_scope
+                and attachment_context_complete
+                and attachment_coverage_complete
+                and attachment_verification_complete
+            )
+        )
         passive_input_file_state_evidence = (
             (
                 *(("Исторические файлы сохранены в архиве.",) if named_person_passive_source_scope else ()),
@@ -38556,11 +38797,14 @@ class AgentRuntime:
                     if isinstance(entry, Mapping) and str(entry.get("output") or "").strip()
                 ),
             )
-            if passive_attachment_summary_scope
+            if read_only_attachment_review_scope
             else ()
         )
         passive_attachment_preamble_normalized = False
-        if explicit_attachment_summary_scope or passive_attachment_summary_scope:
+        if read_only_attachment_review_scope and _read_only_attachment_preamble_is_grounded(
+            content,
+            passive_input_file_state_evidence,
+        ):
             content, passive_attachment_preamble_normalized = (
                 _normalize_passive_attachment_preparation_preamble(content)
             )
@@ -39769,8 +40013,13 @@ class AgentRuntime:
                     passive_source_state=passive_attachment_summary_scope,
                 )
                 if (
-                    explicit_attachment_summary_scope or passive_attachment_summary_scope
-                ) and repaired_has_model_content:
+                    read_only_attachment_review_scope
+                    and repaired_has_model_content
+                    and _read_only_attachment_preamble_is_grounded(
+                        repaired_model_said,
+                        passive_input_file_state_evidence,
+                    )
+                ):
                     repaired_model_said, repaired_preamble_normalized = (
                         _normalize_passive_attachment_preparation_preamble(repaired_model_said)
                     )

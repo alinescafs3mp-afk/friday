@@ -14,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from openpyxl import Workbook
 
 from friday.agent_runtime import (
     _CANNOT_ACT_OUTSIDE,
@@ -148,6 +149,35 @@ async def _registered_docx_attachment(
     return {"raw_object_id": str(outcome["raw_object_id"])}
 
 
+async def _registered_xlsx_attachment(
+    settings,
+    storage,
+    *,
+    filename: str,
+    source_text: str,
+) -> dict[str, str]:
+    """Create a real trusted XLSX Raw like the second live reproduction."""
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "График"
+    sheet.append(["Раздел", "Содержание"])
+    sheet.append(["Источник", source_text])
+    payload = io.BytesIO()
+    workbook.save(payload)
+    workbook.close()
+    outcome = await IngestionPipeline(settings, storage, KnowledgeGraph(storage)).ingest_file(
+        "alice",
+        None,
+        payload.getvalue(),
+        filename=filename,
+        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        metadata={"uploaded_by": "alice"},
+        source_ref=f"test-xlsx:{filename}",
+    )
+    return {"raw_object_id": str(outcome["raw_object_id"])}
+
+
 @pytest.mark.parametrize(
     ("source_text", "truthful_summary"),
     [
@@ -271,6 +301,97 @@ async def test_a_bare_upload_keeps_a_passive_preparation_preamble_with_substanti
     assert output_guards.get("supported_deed_replaced") is not True
 
 
+@pytest.mark.parametrize(
+    ("kind", "filename", "source_text", "model_answer"),
+    [
+        pytest.param(
+            "docx",
+            "Анкета Артемьев.docx",
+            "Анкета Артемьева содержит дату рождения, место рождения и учётные поля.",
+            "**Назначение и структура**\n\nДокумент подготовлен в виде анкеты Артемьева. "
+            "В ней перечислены дата рождения, место рождения и учётные поля.",
+            id="headed-docx-questionnaire",
+        ),
+        pytest.param(
+            "xlsx",
+            "график отпусков 2025-2026.xlsx",
+            "График отпусков содержит периоды и строки личного состава.",
+            "**Назначение и структура**\n\nФайл подготовлен как табличный график отпусков. "
+            "Строки содержат периоды и сведения о личном составе.",
+            id="headed-xlsx-schedule",
+        ),
+        pytest.param(
+            "docx",
+            "Анкета Артемьев.docx",
+            "Анкета Артемьева содержит дату рождения, место рождения и учётные поля.",
+            "**Назначение и структура**\n\nДокумент представляет собой готовую анкету Артемьева. "
+            "В ней перечислены дата рождения, место рождения и учётные поля.",
+            id="ready-docx-questionnaire",
+        ),
+        pytest.param(
+            "xlsx",
+            "график отпусков 2025-2026.xlsx",
+            "График отпусков содержит периоды и строки личного состава.",
+            "**Назначение и структура**\n\nФайл представляет собой готовый табличный график отпусков. "
+            "Строки содержат периоды и сведения о личном составе.",
+            id="ready-xlsx-schedule",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_headed_read_only_office_review_is_never_replaced_as_a_deed(
+    settings,
+    storage,
+    monkeypatch,
+    kind: str,
+    filename: str,
+    source_text: str,
+    model_answer: str,
+) -> None:
+    """Regression for the two readable live turns at 09:42 and 09:43."""
+
+    runtime = _runtime(settings, storage, monkeypatch)
+    register = _registered_docx_attachment if kind == "docx" else _registered_xlsx_attachment
+    attachment = await register(
+        settings,
+        storage,
+        filename=filename,
+        source_text=source_text,
+    )
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {"content": model_answer, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        f"Загружен документ: {filename}",
+        actor=_actor(),
+        attachments=[attachment],
+        enable_tools=False,
+        synthetic_document_notice=True,
+    )
+
+    assert reply["message"] == model_answer.replace(
+        "Документ подготовлен",
+        "Документ представлен",
+    ).replace("Файл подготовлен", "Файл представлен").replace(
+        "представляет собой готовую",
+        "представляет собой",
+    ).replace(
+        "представляет собой готовый",
+        "представляет собой",
+    )
+    assert reply["attachment_coverage_complete"] is True
+    assert reply["attachment_verification_complete"] is True
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    assert stored is not None
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    assert metadata["attachment_context_readable_count"] == 1
+    assert metadata["structural"].get("output_guards", {}).get("supported_deed_replaced") is not True
+
+
 @pytest.mark.asyncio
 async def test_an_explicit_structure_request_keeps_passive_source_summary(
     settings,
@@ -309,9 +430,7 @@ async def test_an_explicit_structure_request_keeps_passive_source_summary(
         enable_tools=False,
     )
 
-    assert reply["message"] == (
-        "Структура документа представлена в виде двух разделов: статус проекта и следующие шаги."
-    )
+    assert reply["message"] == ("Документ представлен в виде двух разделов: статус проекта и следующие шаги.")
     stored = storage.get_message(str(reply["message_id"]), "alice")
     metadata = json.loads(str(stored["metadata_json"] or "{}"))
     output_guards = metadata["structural"].get("output_guards", {})
@@ -319,16 +438,65 @@ async def test_an_explicit_structure_request_keeps_passive_source_summary(
     assert output_guards["passive_attachment_preamble_normalized"] is True
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "heading_prefix",
+    [
+        pytest.param("**Назначение и структура**\n\n", id="bold-newline"),
+        pytest.param("**Назначение и структура** ", id="bold-same-line"),
+        pytest.param("Назначение и структура\n\n", id="plain-newline"),
+        pytest.param("# Обзор\n\n## Структура\n\n", id="two-markdown-headings"),
+        pytest.param("- **Назначение и структура**\n\n", id="bullet-heading"),
+        pytest.param("**Тип документа**\n\n", id="live-document-type-heading"),
+        pytest.param("**Краткое описание**\n\n", id="short-description-heading"),
+        pytest.param("**Формат и структура**\n\n", id="format-and-structure-heading"),
+    ],
+)
+async def test_an_explicit_structure_request_keeps_a_headed_passive_source_summary(
+    settings,
+    storage,
+    monkeypatch,
+    heading_prefix: str,
+) -> None:
+    """A Markdown heading must not disable the proven read-only normalization."""
+
+    runtime = _runtime(settings, storage, monkeypatch)
+    attachment = await _registered_docx_attachment(
+        settings,
+        storage,
+        filename="headed-structure.docx",
+        source_text="Раздел один: статус. Раздел два: следующие шаги.",
+    )
+    model_answer = f"{heading_prefix}Документ подготовлен в виде двух разделов: статус и следующие шаги."
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {"content": model_answer, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Структурируй инфу пожалуйста",
+        actor=_actor(),
+        attachments=[attachment],
+        enable_tools=False,
+    )
+
+    assert reply["message"] == (
+        f"{heading_prefix.strip()}\n\nДокумент представлен в виде двух разделов: статус и следующие шаги."
+    )
+
+
 @pytest.mark.parametrize(
     ("model_answer", "expected"),
     [
         (
             "**Документ подготовлен:** ниже приведены основные разделы и выводы.",
-            "Структура документа: ниже приведены основные разделы и выводы.",
+            "Документ представлен: ниже приведены основные разделы и выводы.",
         ),
         (
             "Структурированный документ подготовлен: ниже основные разделы и выводы.",
-            "Структура документа: ниже основные разделы и выводы.",
+            "Документ представлен: ниже основные разделы и выводы.",
         ),
     ],
 )
@@ -385,7 +553,49 @@ async def test_an_explicit_structure_request_does_not_hide_an_active_file_deed(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "unsupported_claim",
-    ["PDF готов.", "Напоминание установлено.", "Аудио готово."],
+    [
+        "PDF готов.",
+        "Напоминание установлено.",
+        "Аудио готово.",
+        "Документ подготовлен мной.",
+        "Документ создан Пятницей.",
+        "Документ подготовлен ботом.",
+        "Документ подготовлен как другой отчёт.",
+        "Документ подготовлен и готов к скачиванию.",
+        "Документ подготовлен и доступен по ссылке.",
+        "Документ подготовлен как анкета и доступен для скачивания.",
+        "Документ подготовлен как анкета, её можно скачать.",
+        "Документ подготовлен как анкета и опубликован по ссылке.",
+        "Документ подготовлен как анкета и размещён в облаке.",
+        "Документ подготовлен как анкета моделью.",
+        "Документ подготовлен как анкета искусственным интеллектом.",
+        "Документ подготовлен как анкета и сохранён на диске.",
+        "Документ подготовлен как анкета и записан на диск.",
+        "Документ подготовлен как анкета и добавлен в чат.",
+        "Документ подготовлен как анкета и выслан вам.",
+        "Документ подготовлен как анкета — можете скачать.",
+        "Документ подготовлен как анкета — скачайте здесь.",
+        "Документ подготовлен как анкета, ссылка ниже.",
+        "Документ подготовлен как анкета, доступ к ней открыт.",
+        "Документ подготовлен как анкета, лежит по ссылке.",
+        "Документ подготовлен как анкета, находится в облаке.",
+        "Документ подготовлен как анкета, вот ссылка.",
+        "Документ представляет собой готовую анкету — скачать можно здесь.",
+        "Документ представляет собой готовую анкету, загрузка доступна здесь.",
+        "Документ представляет собой готовую анкету, доступ к ней предоставлен.",
+        "Документ представляет собой готовую анкету, высылаю вам.",
+        "Документ представляет собой готовую анкету, можете забрать.",
+        "Документ представляет собой готовую анкету и хранится в облаке.",
+        "Документ подготовлен как новая исправленная версия анкеты.",
+        "Документ подготовлен как перевод анкеты на английский.",
+        "Документ подготовлен как новая версия анкеты.",
+        "Документ подготовлен как изменённая версия анкеты.",
+        "Документ подготовлен как дополненная редакция анкеты.",
+        "Документ подготовлен как анкета и направлен вам.",
+        "Документ представляет собой готовую анкету и отдан вам.",
+        "**PDF готов**\n\nДокумент подготовлен как анкета.",
+        "Документ подготовлен как новый догов Газпрома.\n\nДокумент подготовлен как анкета.",
+    ],
 )
 async def test_an_explicit_structure_request_does_not_hide_other_passive_deeds(
     settings,
@@ -398,7 +608,7 @@ async def test_an_explicit_structure_request_does_not_hide_other_passive_deeds(
         settings,
         storage,
         filename="structure-passive-deed.txt",
-        source_text="Нейтральное содержимое источника.",
+        source_text="Нейтральное содержимое источника. Анкета содержит поля.",
     )
 
     async def generate(context, message, attachments):  # noqa: ANN001
@@ -415,6 +625,150 @@ async def test_an_explicit_structure_request_does_not_hide_other_passive_deeds(
     )
 
     assert reply["message"] == _UNCONFIRMED_SUPPORTED_DEED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "model_answer",
+    [
+        "Документ подготовлен как анкета — передаю вам.",
+        "Документ подготовлен как анкета — высылаю вам.",
+        "Документ подготовлен как анкета — забирайте.",
+        "Документ подготовлен как анкета — скачивание здесь.",
+        "Документ подготовлен как анкета — прикладываю к ответу.",
+        "Файл представляет собой готовую анкету — передаю вам.",
+        "Документ подготовлен как анкета Артемьева — держите.",
+        "Документ подготовлен как анкета Артемьева — держи.",
+        "Документ подготовлен как анкета Артемьева — шлю вам.",
+        "Документ подготовлен как анкета Артемьева — вот вам.",
+        "Документ подготовлен как анкета Артемьева — уже у вас.",
+        "Документ подготовлен как анкета Артемьева — теперь ваш.",
+        "Документ подготовлен как анкета Артемьева — он ваш.",
+        "Документ подготовлен как анкета Артемьева — для вас.",
+        "Документ подготовлен как анкета Артемьева — вам.",
+        "Документ подготовлен как анкета Артемьева — у тебя.",
+        "Документ подготовлен как анкета Артемьева — можете забрать.",
+        "Документ подготовлен как анкета Артемьева — возьмите.",
+        "Документ подготовлен как анкета Артемьева — выдаю вам.",
+        "Документ подготовлен как анкета Артемьева — вручаю вам.",
+        "Документ подготовлен как анкета Артемьева — посылаю вам.",
+        "Документ подготовлен как анкета Артемьева — делюсь с вами.",
+        "Документ подготовлен как анкета Артемьева — это вам.",
+        "Документ подготовлен как анкета Артемьева — это для вас.",
+        "Документ подготовлен как анкета Артемьева — теперь у вас.",
+        "Документ подготовлен как анкета Артемьева — уже ваш.",
+        "Документ подготовлен как анкета Артемьева — теперь он у вас.",
+        "Документ подготовлен как анкета Артемьева — уже он ваш.",
+        "Документ подготовлен как анкета Артемьева — она ваша.",
+        "Документ подготовлен как анкета Артемьева — она уже ваша.",
+        "Документ подготовлен как анкета Артемьева — теперь она ваша.",
+        "Документ подготовлен как анкета Артемьева, она у вас.",
+        "Документ подготовлен как анкета Артемьева уже у вас.",
+        "Документ подготовлен как анкета Артемьева — можно взять.",
+        "Документ подготовлен как анкета Артемьева — скачать можно здесь.",
+        "Документ подготовлен как анкета Артемьева — забрать можно здесь.",
+        "Документ подготовлен как анкета Артемьева — передал вам.",
+        "Документ подготовлен как анкета Артемьева — передала вам.",
+        "Документ подготовлен как анкета Артемьева — выслал вам.",
+        "Документ подготовлен как анкета Артемьева — выдала вам.",
+        "Документ подготовлен как анкета Артемьева — вручила вам.",
+        "Документ подготовлен как анкета Артемьева — доставил вам.",
+        "Документ подготовлен как анкета Артемьева. Прикрепляю.",
+        "Документ подготовлен как анкета Артемьева. Отправляю вам.",
+        "Документ подготовлен как анкета Артемьева. Держите.",
+        "Документ подготовлен как анкета Артемьева. Он уже у вас.",
+        "Файл представляет собой готовую анкету Артемьева. Высылаю вам.",
+        "Документ подготовлен как анкета Артемьева. Вот вам.",
+    ],
+)
+async def test_untrusted_attachment_text_cannot_authorize_a_carrier_suffix(
+    settings,
+    storage,
+    monkeypatch,
+    model_answer: str,
+) -> None:
+    runtime = _runtime(settings, storage, monkeypatch)
+    attachment = await _registered_text_attachment(
+        settings,
+        storage,
+        filename="quoted-carrier.txt",
+        source_text=f"Цитата: {model_answer} Анкета содержит поля.",
+    )
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {"content": model_answer, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Структурируй инфу пожалуйста",
+        actor=_actor(),
+        attachments=[attachment],
+        enable_tools=False,
+    )
+
+    assert reply["message"] == _UNCONFIRMED_SUPPORTED_DEED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source_text", "model_answer", "expected"),
+    [
+        (
+            "Анкета для получения допуска с обязательными полями.",
+            "Документ подготовлен как анкета для получения допуска с обязательными полями.",
+            "Документ представлен как анкета для получения допуска с обязательными полями.",
+        ),
+        (
+            "Инструкция по отправке отчёта, загрузке данных на сервер и хранению копий.",
+            "Документ подготовлен как инструкция по отправке отчёта, загрузке данных "
+            "на сервер и хранению копий.",
+            "Документ представлен как инструкция по отправке отчёта, загрузке данных "
+            "на сервер и хранению копий.",
+        ),
+        (
+            "Журнал записей чат-бота и схема облака тегов.",
+            "Документ представляет собой готовый журнал записей чат-бота и схему облака тегов.",
+            "Документ представляет собой журнал записей чат-бота и схему облака тегов.",
+        ),
+    ],
+)
+async def test_grounded_attachment_content_nouns_are_not_carrier_claims(
+    settings,
+    storage,
+    monkeypatch,
+    source_text: str,
+    model_answer: str,
+    expected: str,
+) -> None:
+    runtime = _runtime(settings, storage, monkeypatch)
+    attachment = await _registered_text_attachment(
+        settings,
+        storage,
+        filename="grounded-description.txt",
+        source_text=source_text,
+    )
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {"content": model_answer, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Структурируй инфу пожалуйста",
+        actor=_actor(),
+        attachments=[attachment],
+        enable_tools=False,
+    )
+
+    assert reply["message"] == expected
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    output_guards = metadata["structural"].get("output_guards", {})
+    assert output_guards.get("supported_deed_replaced") is not True
+    assert output_guards["passive_attachment_preamble_normalized"] is True
 
 
 @pytest.mark.asyncio
