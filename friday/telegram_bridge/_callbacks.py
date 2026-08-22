@@ -13,7 +13,7 @@ import ipaddress
 import re
 import unicodedata
 from contextlib import suppress
-from urllib.parse import urlunsplit
+from urllib.parse import parse_qs, urlunsplit
 
 from friday.telegram_bridge._base import (
     CALLBACK_TARGET_RE,
@@ -1206,6 +1206,38 @@ class CallbacksMixin(BridgeShared):
         return buttons
 
     @staticmethod
+    def _obsidian_open_button(response: dict[str, Any]) -> dict[str, str] | None:
+        raw = response.get("obsidian_open_url")
+        if not isinstance(raw, str) or not raw or len(raw) > 4_096:
+            return None
+        try:
+            parsed = urlsplit(raw)
+            fragment = parse_qs(parsed.fragment, strict_parsing=True)
+        except ValueError:
+            return None
+        vault = fragment.get("vault", [])
+        note = fragment.get("file", [])
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or not parsed.path.endswith("/obsidian/open")
+            or set(fragment) != {"vault", "file"}
+            or len(vault) != 1
+            or len(note) != 1
+            or not vault[0].strip()
+            or not note[0].endswith(".md")
+            or note[0].startswith("/")
+            or "\\" in note[0]
+            or any(part in {"", ".", ".."} for part in note[0].split("/"))
+            or any(character in "\r\n\x00" for character in vault[0] + note[0])
+        ):
+            return None
+        return {"text": "Open in Obsidian", "url": raw}
+
+    @staticmethod
     def _response_reply_markup(response: dict[str, Any], *, external_user_id: str) -> dict[str, Any] | None:
         message_id = str(response.get("message_id") or "")
         if not message_id:
@@ -1226,6 +1258,9 @@ class CallbacksMixin(BridgeShared):
         # Telegram сжимает в нечитаемое.
         for index in range(0, len(source_buttons), 4):
             keyboard.append(source_buttons[index : index + 4])
+        obsidian_button = CallbacksMixin._obsidian_open_button(response)
+        if obsidian_button is not None:
+            keyboard.append([obsidian_button])
         raw_context = response.get("context")
         context: dict[str, Any] = dict(raw_context) if isinstance(raw_context, dict) else {}
         interaction_mode = str(context.get("interaction_mode") or "")

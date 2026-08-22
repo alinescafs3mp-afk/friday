@@ -78,6 +78,52 @@ def obsidian_panel(response: dict[str, Any]) -> tuple[str, dict[str, Any] | None
         sections.append(
             "Если имя vault в Obsidian отличается от Friday, задайте его командой /obsidian_alias точное имя"
         )
+    raw_operations = response.get("operations")
+    operations = raw_operations if isinstance(raw_operations, list) else []
+    operation_lines: list[str] = []
+    for raw_operation in operations[:5]:
+        if not isinstance(raw_operation, dict):
+            continue
+        operation_id = _one_line(raw_operation.get("operation_id"), limit=200)
+        work_item_id = _one_line(raw_operation.get("work_item_id"), limit=200)
+        path = _one_line(raw_operation.get("path"), limit=512)
+        status = _one_line(raw_operation.get("status"), limit=64)
+        if not operation_id or not status:
+            continue
+        target = path or _one_line(raw_operation.get("method"), limit=64) or "операция"
+        scan = "готов" if raw_operation.get("server_scan_complete") is True else "ожидается"
+        android = "доставлено" if raw_operation.get("android_received") is True else "ожидается"
+        work_item = f"; Work Item {work_item_id}" if work_item_id else ""
+        operation_lines.append(
+            f"- {target}: {status}; server scan — {scan}; Android — {android}; ID {operation_id}{work_item}"
+        )
+    if operation_lines:
+        sections.append("Последние операции:\n" + "\n".join(operation_lines))
+
+    raw_conflicts = response.get("conflicts")
+    conflicts = raw_conflicts if isinstance(raw_conflicts, list) else []
+    conflict_lines: list[str] = []
+    for raw_conflict in conflicts[:5]:
+        if not isinstance(raw_conflict, dict):
+            continue
+        conflict_id = _one_line(raw_conflict.get("id"), limit=200)
+        canonical_path = _one_line(raw_conflict.get("canonical_path"), limit=512)
+        artifact_path = _one_line(raw_conflict.get("conflict_path"), limit=512)
+        if not conflict_id or not canonical_path or not artifact_path:
+            continue
+        conflict_lines.append(
+            f"- Основная заметка: {canonical_path}\n  Конфликтная копия: {artifact_path}\n  ID: {conflict_id}"
+        )
+    if conflict_lines:
+        raw_count = response.get("conflict_count")
+        count = (
+            raw_count if isinstance(raw_count, int) and not isinstance(raw_count, bool) else len(conflicts)
+        )
+        count = max(len(conflict_lines), count)
+        sections.append(
+            f"Открытые конфликты: {count}. Обе версии сохранены; конфликтные копии "
+            "не удаляются автоматически.\n" + "\n".join(conflict_lines)
+        )
 
     keyboard: list[list[dict[str, Any]]] = []
     if server_device_id:

@@ -65,6 +65,12 @@ class _Scope:
 # target's entity set.  ``relation_revisions`` is counted separately and blocks:
 # its append-only trigger correctly refuses ordinary DELETE.
 _DELETE_SCOPES: tuple[_Scope, ...] = (
+    _Scope("obsidian_active_frames", "obsidian_active_frames", "user_id=?"),
+    _Scope("obsidian_candidate_set_items", "obsidian_candidate_set_items", "user_id=?"),
+    _Scope("obsidian_candidate_sets", "obsidian_candidate_sets", "user_id=?"),
+    _Scope("obsidian_note_links", "obsidian_note_links", "user_id=?"),
+    _Scope("obsidian_note_index", "obsidian_note_index", "user_id=?"),
+    _Scope("obsidian_note_bindings", "obsidian_note_bindings", "user_id=?"),
     _Scope("obsidian_conflicts", "obsidian_conflicts", "user_id=?"),
     _Scope("obsidian_operations", "obsidian_operations", "user_id=?"),
     _Scope("obsidian_pairing_candidates", "obsidian_pairing_candidates", "user_id=?"),

@@ -15,6 +15,7 @@ import json
 import math
 import re
 import unicodedata
+import urllib.parse
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -23,12 +24,19 @@ from typing import Any
 
 from friday.audit_privacy import decode_audit_privacy_key
 
+from .workflow_intents import (
+    WORKFLOW_READ_TOOL,
+    WORKFLOW_WRITE_TOOL,
+    parse_obsidian_workflow_intent,
+)
+
 OBSIDIAN_READ_TOOL_NAMES = frozenset(
     {
         "obsidian_list_vaults",
         "obsidian_list_notes",
         "obsidian_search_notes",
         "obsidian_read_note",
+        WORKFLOW_READ_TOOL,
     }
 )
 OBSIDIAN_WRITE_TOOL_NAMES = frozenset(
@@ -37,6 +45,7 @@ OBSIDIAN_WRITE_TOOL_NAMES = frozenset(
         "obsidian_append_note",
         "obsidian_set_properties",
         "obsidian_daily_note",
+        WORKFLOW_WRITE_TOOL,
     }
 )
 OBSIDIAN_TOOL_NAMES = OBSIDIAN_READ_TOOL_NAMES | OBSIDIAN_WRITE_TOOL_NAMES
@@ -67,13 +76,48 @@ _VAULT_STATES = frozenset(
 _OPERATION_STATUSES = frozenset(
     {"committed", "reconciled", "scan_pending", "scan_complete", "delivery_pending", "delivered"}
 )
-_SEARCH_CHANNELS = frozenset({"exact_path", "exact_title", "path_title", "lexical"})
+_SEARCH_CHANNELS = frozenset(
+    {
+        "exact_path",
+        "exact_title",
+        "path_title",
+        "lexical",
+        "semantic",
+        "property_date_created",
+        "tag",
+        "link",
+        "tombstone",
+    }
+)
+_NOTE_ORIGINS = frozenset({"user", "android", "friday", "syncthing", "projection", "imported", "unknown"})
+_NOTE_OWNERSHIP_MODES = frozenset({"user_owned", "linked", "friday_managed", "projection", "inbox"})
+_INDEX_COVERAGE_STATES = frozenset({"none", "partial", "complete"})
 _METHOD_BY_TOOL = {
     "obsidian_create_note": "create",
     "obsidian_append_note": "append",
     "obsidian_set_properties": "set_properties",
     "obsidian_daily_note": "daily_note",
+    WORKFLOW_WRITE_TOOL: "workflow",
 }
+_WORKFLOW_READ_ACTIONS = frozenset(
+    {"search_tasks", "select_candidate", "backlinks", "conflict_preview", "query_base"}
+)
+_WORKFLOW_WRITE_ACTIONS = frozenset(
+    {
+        "update_metadata",
+        "add_task",
+        "append_active_section",
+        "move_note",
+        "create_from_template",
+        "save_summary",
+        "append_summary_links",
+        "create_base",
+        "replace_active_section",
+        "accept_conflict_merge",
+        "resume_previous",
+        "delete_note",
+    }
+)
 
 _REFUSE_AMBIGUOUS = (
     "Не удалось однозначно разобрать прямую команду Obsidian; укажите действие, путь и данные явно."
@@ -149,7 +193,8 @@ _READ_TRAILING_CHANNEL = re.compile(
     re.IGNORECASE,
 )
 _CREATE_EXACT = re.compile(
-    r"^создай\s+в\s+obsidian\s+заметку\s+(?P<path>.+?\.md)\.\s*"
+    r"^создай\s+в\s+obsidian\s+заметку\s+"
+    r"(?P<path>`[^`\r\n]+\.md`|«[^»\r\n]+\.md»|\"[^\"\r\n]+\.md\"|.+?\.md)\.\s*"
     r"заголовок:\s*«(?P<heading>[^»\r\n]{1,200})»\.\s*"
     r"внутри\s+напиши,\s+что\s+(?P<body>[^,\r\n]{1,2000}),\s+"
     r"и\s+добавь\s+текущую\s+дату\.?$",
@@ -169,6 +214,14 @@ _APPEND = re.compile(
     r"\"[^\"\r\n]+\")\.?$",
     re.IGNORECASE,
 )
+_APPEND_SECTION = re.compile(
+    r"^добавь\s+в\s+конец\s+заметки\s+"
+    r"(?P<path>`[^`\r\n]+\.md`|«[^»\r\n]+\.md»|\"[^\"\r\n]+\.md\"|.+?\.md)\s+"
+    r"раздел\s+(?P<section>`[^`\r\n]+`|«[^»\r\n]+»|\"[^\"\r\n]+\")\s+"
+    r"и\s+одну\s+строку:\s*"
+    r"(?P<line>`[^`\r\n]+`|«[^»\r\n]+»|\"[^\"\r\n]+\")\.?$",
+    re.IGNORECASE,
+)
 _SET_PROPERTY = re.compile(
     r"^установи\s+в\s+obsidian\s+у\s+заметки\s+"
     r"(?P<path>`[^`\r\n]+`|«[^»\r\n]+»|\"[^\"\r\n]+\")\s+"
@@ -181,6 +234,12 @@ _DAILY = re.compile(
     r"заметку|в\s+(?:сегодняшнюю\s+)?ежедневную\s+заметку\s+obsidian)\s+"
     r"(?:текст|запись)\s*:?\s*(?P<text>`[^`\r\n]+`|«[^»\r\n]+»|"
     r"\"[^\"\r\n]+\")\.?$",
+    re.IGNORECASE,
+)
+_DAILY_SECTION = re.compile(
+    r"^добавь\s+в\s+(?:сегодняшнюю\s+)?ежедневную\s+заметку\s+"
+    r"раздел\s+(?P<section>`[^`\r\n]+`|«[^»\r\n]+»|\"[^\"\r\n]+\")\s+"
+    r"и\s+пункт:\s*(?P<item>`[^`\r\n]+`|«[^»\r\n]+»|\"[^\"\r\n]+\")\.?$",
     re.IGNORECASE,
 )
 
@@ -212,6 +271,7 @@ class ObsidianConversationIntent:
     explicit_path: str = ""
     direct_arguments: Mapping[str, Any] | None = None
     error: str = ""
+    resolved_local_date: str = ""
 
 
 def _refusal(reason: str) -> ObsidianConversationIntent:
@@ -304,10 +364,39 @@ def obsidian_conversation_intent(
         return None
     if not text:
         return _refusal(_REFUSE_AMBIGUOUS)
-    if "obsidian" not in text.casefold() or _ACTION.search(text) is None:
+
+    try:
+        workflow = parse_obsidian_workflow_intent(text, today=_today(today))
+    except TypeError:
+        workflow = None
+    if workflow is not None:
+        authority = _mask_quoted(text)
+        if (
+            text.lstrip().startswith(">")
+            or _META.search(authority) is not None
+            or _NEGATED.search(authority) is not None
+            or _ATTACHMENT_DERIVED.search(authority) is not None
+        ):
+            return None
+        return ObsidianConversationIntent(
+            workflow.tool_name,
+            explicit_path=workflow.explicit_path,
+            direct_arguments=workflow.arguments,
+            resolved_local_date=str(workflow.arguments.get("day") or ""),
+        )
+    if _ACTION.search(text) is None:
         return None
 
+    command = _POLITE_PREFIX.sub("", text).strip()
+    append_section = _APPEND_SECTION.fullmatch(command)
+    daily_section = _DAILY_SECTION.fullmatch(command)
     authority = _mask_quoted(text)
+    # The acceptance append intentionally omits the channel name after an
+    # explicit Markdown-note path.  Admit only this complete, narrow grammar;
+    # every other vault effect still requires ``Obsidian`` in the current text.
+    if "obsidian" not in authority.casefold() and append_section is None and daily_section is None:
+        return None
+
     if (
         text.lstrip().startswith(">")
         or (_ACTION.search(text) is not None and _ACTION.search(authority) is None)
@@ -319,7 +408,6 @@ def obsidian_conversation_intent(
     if _ATTACHMENT_DERIVED.search(authority) is not None:
         return None
 
-    command = _POLITE_PREFIX.sub("", text).strip()
     if _LIST_VAULTS.fullmatch(command):
         return ObsidianConversationIntent("obsidian_list_vaults", direct_arguments={})
     if _LIST_NOTES.fullmatch(command):
@@ -368,6 +456,7 @@ def obsidian_conversation_intent(
             "obsidian_create_note",
             explicit_path=path,
             direct_arguments={"path": path, "content": content},
+            resolved_local_date=selected_day.isoformat(),
         )
 
     match = _CREATE_WITH_TEXT.fullmatch(command)
@@ -383,6 +472,28 @@ def obsidian_conversation_intent(
             "obsidian_create_note",
             explicit_path=path,
             direct_arguments={"path": path, "content": content},
+        )
+
+    match = append_section
+    if match is not None:
+        try:
+            path = _validate_path(_unquote(match.group("path")))
+        except (TypeError, ValueError):
+            return _refusal(_REFUSE_AMBIGUOUS)
+        section = _unquote(match.group("section"))
+        line = _unquote(match.group("line"))
+        if (
+            not section
+            or not line
+            or len(section) > 200
+            or len(line) > _MAX_NOTE_TEXT_CHARS
+            or _has_unsafe_unicode_control(section + line, multiline=False)
+        ):
+            return _refusal(_REFUSE_AMBIGUOUS)
+        return ObsidianConversationIntent(
+            "obsidian_append_note",
+            explicit_path=path,
+            direct_arguments={"path": path, "text": f"## {section}\n\n{line}"},
         )
 
     match = _APPEND.fullmatch(command)
@@ -421,6 +532,32 @@ def obsidian_conversation_intent(
             direct_arguments={"path": path, "properties": {key: value}},
         )
 
+    match = daily_section
+    if match is not None:
+        try:
+            selected_day = _today(today)
+        except TypeError:
+            return _refusal(_REFUSE_AMBIGUOUS)
+        section = _unquote(match.group("section"))
+        item = _unquote(match.group("item"))
+        if (
+            not section
+            or not item
+            or len(section) > 500
+            or len(item) > _MAX_NOTE_TEXT_CHARS
+            or _has_unsafe_unicode_control(section + item, multiline=False)
+        ):
+            return _refusal(_REFUSE_AMBIGUOUS)
+        return ObsidianConversationIntent(
+            "obsidian_daily_note",
+            direct_arguments={
+                "day": selected_day.isoformat(),
+                "section": section,
+                "item": f"- {item}",
+            },
+            resolved_local_date=selected_day.isoformat(),
+        )
+
     match = _DAILY.fullmatch(command)
     if match is not None:
         try:
@@ -433,6 +570,7 @@ def obsidian_conversation_intent(
         return ObsidianConversationIntent(
             "obsidian_daily_note",
             direct_arguments={"day": selected_day.isoformat(), "content": addition},
+            resolved_local_date=selected_day.isoformat(),
         )
 
     return _refusal(_REFUSE_AMBIGUOUS)
@@ -632,7 +770,13 @@ def _render_notes(data: object) -> str:
 
 
 def _render_search(data: object) -> str:
-    result = _strict_object(data, frozenset({"matches", "count"}))
+    base_result_fields = frozenset({"matches", "count"})
+    if not isinstance(data, Mapping) or set(data) not in {
+        base_result_fields,
+        base_result_fields | {"coverage"},
+    }:
+        raise ValueError("search result fields do not match the contract")
+    result = _strict_object(data, frozenset(data))
     matches = result["matches"]
     if not isinstance(matches, list) or len(matches) > 100:
         raise ValueError("invalid search result list")
@@ -641,10 +785,16 @@ def _render_search(data: object) -> str:
         raise ValueError("search count does not match the result")
     normalized: list[dict[str, object]] = []
     for raw in matches:
-        item = _strict_object(
-            raw,
-            frozenset({"path", "title", "revision", "modified_at", "excerpt", "score", "match_channels"}),
+        base_match_fields = frozenset(
+            {"path", "title", "revision", "modified_at", "excerpt", "score", "match_channels"}
         )
+        provenance_fields = frozenset({"origin", "ownership_mode", "index_coverage"})
+        if not isinstance(raw, Mapping) or set(raw) not in {
+            base_match_fields,
+            base_match_fields | provenance_fields,
+        }:
+            raise ValueError("search match fields do not match the contract")
+        item = _strict_object(raw, frozenset(raw))
         score = item["score"]
         if (
             isinstance(score, bool)
@@ -662,26 +812,93 @@ def _render_search(data: object) -> str:
             or len(channels) != len(set(channels))
         ):
             raise ValueError("invalid search channels")
-        normalized.append(
-            {
-                "path": _validate_path(item["path"]),
-                "title": _line(item["title"], maximum=1_000),
-                "revision": _revision(item["revision"]),
-                "modified_at": _timestamp(item["modified_at"]),
-                "excerpt": _line(item["excerpt"], maximum=500, allow_empty=True),
-                "score": float(score),
-                "channels": ", ".join(channels),
-            }
-        )
+        normalized_item: dict[str, object] = {
+            "path": _validate_path(item["path"]),
+            "title": _line(item["title"], maximum=1_000),
+            "revision": _revision(item["revision"]),
+            "modified_at": _timestamp(item["modified_at"]),
+            "excerpt": _line(item["excerpt"], maximum=500, allow_empty=True),
+            "score": float(score),
+            "channels": ", ".join(channels),
+        }
+        if provenance_fields <= set(item):
+            origin = item["origin"]
+            ownership = item["ownership_mode"]
+            index_coverage = item["index_coverage"]
+            if not isinstance(origin, str) or origin not in _NOTE_ORIGINS:
+                raise ValueError("invalid note origin")
+            if not isinstance(ownership, str) or ownership not in _NOTE_OWNERSHIP_MODES:
+                raise ValueError("invalid note ownership mode")
+            if not isinstance(index_coverage, str) or index_coverage not in _INDEX_COVERAGE_STATES:
+                raise ValueError("invalid note index coverage")
+            normalized_item.update(
+                {
+                    "origin": origin,
+                    "ownership_mode": ownership,
+                    "index_coverage": index_coverage,
+                }
+            )
+        normalized.append(normalized_item)
     paths = [str(item["path"]) for item in normalized]
     if len(paths) != len(set(paths)):
         raise ValueError("duplicate search paths")
     visible = normalized[:20]
-    lines = [f"Совпадения в Obsidian: {count}. Показано: {len(visible)}."]
+    deleted_only = bool(visible) and all(item["channels"] == "tombstone" for item in visible)
+    lines = (
+        [f"Активных заметок не найдено. Ранее известные удалённые заметки: {count}."]
+        if deleted_only
+        else [f"Совпадения в Obsidian: {count}. Показано: {len(visible)}."]
+    )
+    coverage = result.get("coverage")
+    if coverage is not None:
+        item = _strict_object(
+            coverage,
+            frozenset({"state", "known_notes", "indexed_notes", "complete_notes", "semantic_lane"}),
+        )
+        state = item["state"]
+        semantic_lane = item["semantic_lane"]
+        if not isinstance(state, str) or state not in {"complete", "partial"}:
+            raise ValueError("invalid aggregate index coverage")
+        if semantic_lane != "local_approximate":
+            raise ValueError("invalid semantic search lane")
+        known = _strict_int(item["known_notes"], minimum=0, maximum=5_000)
+        indexed = _strict_int(item["indexed_notes"], minimum=0, maximum=known)
+        complete = _strict_int(item["complete_notes"], minimum=0, maximum=indexed)
+        if state == "complete" and complete != known:
+            raise ValueError("complete index coverage does not cover every known note")
+        if state == "partial":
+            lines.append(
+                f"Покрытие индекса неполное: полностью {complete} из {known}, "
+                f"проиндексировано хотя бы частично {indexed}. Отсутствие совпадения не доказывает, "
+                "что заметки нет."
+            )
+    origin_labels = {
+        "android": "Android",
+        "syncthing": "Syncthing",
+        "friday": "Friday",
+        "user": "пользователь",
+        "projection": "проекция Friday",
+        "imported": "импорт",
+        "unknown": "неизвестно",
+    }
+    ownership_labels = {
+        "user_owned": "обычная пользовательская заметка",
+        "linked": "связанная пользовательская заметка",
+        "friday_managed": "заметка под управлением Friday",
+        "projection": "проекция Friday",
+        "inbox": "входящая заметка",
+    }
     for item in visible:
+        provenance = ""
+        if "origin" in item:
+            provenance = (
+                f"\n  Источник: {origin_labels[str(item['origin'])]}; "
+                f"тип: {ownership_labels[str(item['ownership_mode'])]}; "
+                f"покрытие индекса: {item['index_coverage']}."
+            )
         lines.append(
             f"- {item['path']} — {item['title']} [score {item['score']:g}; {item['channels']}]\n"
-            f"  {item['excerpt']}"
+            f"  {item['excerpt']}{provenance}"
         )
     return "\n".join(lines)
 
@@ -734,22 +951,25 @@ def _render_mutation(
     expected_operation_id: str,
     expected_path: str,
 ) -> str:
+    base_fields = frozenset(
+        {
+            "operation_id",
+            "method",
+            "status",
+            "path",
+            "revision",
+            "previous_revision",
+            "created",
+            "applied",
+            "replayed",
+            "delivery",
+        }
+    )
+    if not isinstance(data, Mapping) or set(data) not in {base_fields, base_fields | {"open_uri"}}:
+        raise ValueError("result fields do not match the contract")
     item = _strict_object(
         data,
-        frozenset(
-            {
-                "operation_id",
-                "method",
-                "status",
-                "path",
-                "revision",
-                "previous_revision",
-                "created",
-                "applied",
-                "replayed",
-                "delivery",
-            }
-        ),
+        frozenset(data),
     )
     operation_id = _line(item["operation_id"], maximum=200)
     if expected_operation_id and operation_id != _line(expected_operation_id, maximum=200):
@@ -769,6 +989,7 @@ def _render_mutation(
     created = _strict_bool(item["created"])
     applied = _strict_bool(item["applied"])
     replayed = _strict_bool(item["replayed"])
+    open_uri = _workflow_open_uri(item.get("open_uri"), path=path)
     if tool_name in {"obsidian_append_note", "obsidian_set_properties"} and created:
         raise ValueError("update receipt unexpectedly claims file creation")
     if tool_name == "obsidian_create_note" and not created:
@@ -834,7 +1055,192 @@ def _render_mutation(
     ]
     if previous is not None:
         lines.insert(3, f"Предыдущая revision: {previous}")
+    if open_uri is not None:
+        lines.append("Действие: Open in Obsidian.")
     return "\n".join(lines)
+
+
+def _workflow_path(value: object) -> str:
+    if not isinstance(value, str) or not value or len(value) > _MAX_NOTE_PATH_CHARS:
+        raise ValueError("invalid workflow path")
+    normalized = unicodedata.normalize("NFC", value)
+    pure = PurePosixPath(normalized)
+    if (
+        normalized.startswith("/")
+        or "\\" in normalized
+        or any(part in {"", ".", ".."} for part in pure.parts)
+        or pure.suffix.casefold() not in {".md", ".base"}
+        or _has_unsafe_unicode_control(normalized, multiline=False)
+    ):
+        raise ValueError("invalid workflow path")
+    return normalized
+
+
+def _workflow_open_uri(value: object, *, path: str | None) -> str | None:
+    if value is None:
+        return None
+    uri = _line(value, maximum=4_096)
+    parsed = urllib.parse.urlparse(uri)
+    query = urllib.parse.parse_qs(parsed.query, strict_parsing=True)
+    if (
+        parsed.scheme != "obsidian"
+        or parsed.netloc != "open"
+        or parsed.path not in {"", "/"}
+        or set(query) != {"vault", "file"}
+        or len(query["vault"]) != 1
+        or len(query["file"]) != 1
+        or not query["vault"][0].strip()
+        or path is None
+        or query["file"][0] != path
+    ):
+        raise ValueError("invalid Obsidian open URI")
+    return uri
+
+
+def _render_workflow(
+    tool_name: str,
+    data: object,
+    *,
+    expected_operation_id: str,
+    expected_path: str,
+) -> str:
+    item = _strict_object(
+        data,
+        frozenset(
+            {
+                "action",
+                "status",
+                "path",
+                "revision",
+                "operation_id",
+                "changed_paths",
+                "body",
+                "open_uri",
+                "delivery",
+            }
+        ),
+    )
+    write = tool_name == WORKFLOW_WRITE_TOOL
+    allowed_actions = _WORKFLOW_WRITE_ACTIONS if write else _WORKFLOW_READ_ACTIONS
+    action = item["action"]
+    if not isinstance(action, str) or action not in allowed_actions:
+        raise ValueError("invalid workflow action")
+    status = item["status"]
+    if status not in {"completed", "selected", "preview", "resumed", "pending"}:
+        raise ValueError("invalid workflow status")
+    path = None if item["path"] is None else _workflow_path(item["path"])
+    if expected_path and path != _workflow_path(expected_path):
+        raise ValueError("workflow result path does not match the request")
+    revision = None if item["revision"] is None else _revision(item["revision"])
+    operation_id = item["operation_id"]
+    if write:
+        operation_id = _line(operation_id, maximum=200)
+        if (
+            expected_operation_id
+            and operation_id != _line(expected_operation_id, maximum=200)
+            and action != "resume_previous"
+        ):
+            # A resume action intentionally reuses the earlier durable identity.
+            raise ValueError("workflow operation does not match the request")
+    elif operation_id is not None:
+        raise ValueError("read workflow returned a mutation identity")
+    raw_paths = item["changed_paths"]
+    if not isinstance(raw_paths, list) or len(raw_paths) > 500:
+        raise ValueError("invalid workflow changed paths")
+    changed_paths = [_workflow_path(value) for value in raw_paths]
+    if len(changed_paths) != len(set(changed_paths)):
+        raise ValueError("duplicate workflow changed path")
+    body = _multiline(item["body"], maximum=40_000).strip()
+    if not body:
+        raise ValueError("workflow body is empty")
+    open_uri = _workflow_open_uri(item["open_uri"], path=path)
+    delivery = item["delivery"]
+    delivery_lines: list[str] = []
+    if write:
+        facts = _strict_object(
+            delivery,
+            frozenset(
+                {
+                    "local_write_complete",
+                    "server_scan_complete",
+                    "android_connected",
+                    "android_completion",
+                    "android_received",
+                    "obsidian_opened",
+                }
+            ),
+        )
+        local = _strict_bool(facts["local_write_complete"])
+        server_scan = _strict_bool(facts["server_scan_complete"])
+        connected = _strict_bool(facts["android_connected"])
+        received = _strict_bool(facts["android_received"])
+        opened = _strict_bool(facts["obsidian_opened"])
+        completion = facts["android_completion"]
+        if completion is not None and (
+            isinstance(completion, bool)
+            or not isinstance(completion, (int, float))
+            or not math.isfinite(float(completion))
+            or not 0 <= float(completion) <= 100
+        ):
+            raise ValueError("invalid workflow Android completion")
+        if not local or opened or (received and (not server_scan or not connected)):
+            raise ValueError("inconsistent workflow delivery facts")
+        delivery_lines = [
+            "Локальная запись: подтверждена.",
+            f"Сканирование серверной копии: {'подтверждено' if server_scan else 'ожидается'}.",
+            f"Android подключён: {'да' if connected else 'нет'}.",
+            f"Получение на Android: {'подтверждено' if received else 'ожидается'}.",
+        ]
+    elif delivery is not None:
+        raise ValueError("read workflow returned delivery claims")
+
+    visible = (
+        body if len(body) <= _MAX_RENDERED_BODY_CHARS else body[:_MAX_RENDERED_BODY_CHARS].rstrip() + "\n…"
+    )
+    lines = [visible]
+    if path is not None:
+        lines.append(f"Путь: {path}")
+    if revision is not None:
+        lines.append(f"Revision: {revision}")
+    if write:
+        lines.append(f"Operation ID: {operation_id}")
+    if changed_paths:
+        lines.append("Изменённые/затронутые пути: " + ", ".join(changed_paths))
+    lines.extend(delivery_lines)
+    if open_uri is not None:
+        lines.append("Действие: Open in Obsidian.")
+    return "\n".join(lines)
+
+
+def obsidian_open_action_url(data: object, public_base_url: object) -> str:
+    """Project a validated custom URI through Friday's HTTPS launcher."""
+
+    try:
+        if not isinstance(data, Mapping):
+            return ""
+        path = _workflow_path(data.get("path"))
+        if not path.endswith(".md"):
+            return ""
+        custom_uri = _workflow_open_uri(data.get("open_uri"), path=path)
+        if custom_uri is None or not isinstance(public_base_url, str):
+            return ""
+        base = urllib.parse.urlparse(public_base_url.strip())
+        if (
+            base.scheme != "https"
+            or not base.netloc
+            or base.username is not None
+            or base.password is not None
+            or base.query
+            or base.fragment
+        ):
+            return ""
+        parsed = urllib.parse.urlparse(custom_uri)
+        query = urllib.parse.parse_qs(parsed.query, strict_parsing=True)
+        fragment = urllib.parse.urlencode({"vault": query["vault"][0], "file": query["file"][0]})
+        prefix = urllib.parse.urlunparse((base.scheme, base.netloc, base.path.rstrip("/"), "", "", ""))
+        return f"{prefix}/obsidian/open#{fragment}"
+    except Exception:  # noqa: BLE001 - malformed tool output has no open action
+        return ""
 
 
 def render_obsidian_tool_result(
@@ -857,6 +1263,13 @@ def render_obsidian_tool_result(
             return _render_search(data)
         if tool_name == "obsidian_read_note":
             return _render_read(data, expected_path=expected_path)
+        if tool_name in {WORKFLOW_READ_TOOL, WORKFLOW_WRITE_TOOL}:
+            return _render_workflow(
+                tool_name,
+                data,
+                expected_operation_id=expected_operation_id,
+                expected_path=expected_path,
+            )
         return _render_mutation(
             tool_name,
             data,
@@ -873,6 +1286,7 @@ __all__ = [
     "OBSIDIAN_WRITE_TOOL_NAMES",
     "ObsidianConversationIntent",
     "obsidian_conversation_intent",
+    "obsidian_open_action_url",
     "obsidian_operation_id",
     "render_obsidian_tool_result",
 ]

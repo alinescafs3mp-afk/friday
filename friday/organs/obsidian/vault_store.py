@@ -38,6 +38,7 @@ _INTERNAL_VAULT_ROOTS = frozenset({".stfolder", ".stignore", ".stversions", ".tr
 _RENAME_NOREPLACE = 1
 _RENAME_EXCHANGE = 2
 _TRANSACTION_SCHEMA = "friday.vault-cas.v1"
+_MUTATION_TRANSACTION_SCHEMA = "friday.vault-mutation.v1"
 _MAX_TRANSACTION_BYTES = 8 * 1024
 _TRANSACTION_ID = re.compile(r"^[0-9a-f]{32}$")
 _LEASE_REFUSED = frozenset(
@@ -120,6 +121,51 @@ class VaultFile:
             return self.content.decode("utf-8", errors="strict")
         except UnicodeDecodeError as exc:
             raise ValueError("vault note is not valid UTF-8") from exc
+
+
+@dataclass(frozen=True, slots=True)
+class VaultDeleteResult:
+    """The locally durable effect of deleting one observed revision."""
+
+    path: str
+    deleted_revision: str
+    applied: bool = True
+
+    @property
+    def revision(self) -> str:
+        """Compatibility spelling for callers recording the removed revision."""
+
+        return self.deleted_revision
+
+    @property
+    def changed_paths(self) -> tuple[str, ...]:
+        return (self.path,)
+
+    @property
+    def changed_revisions(self) -> tuple[tuple[str, str | None], ...]:
+        return ((self.path, None),)
+
+
+@dataclass(frozen=True, slots=True)
+class VaultMoveResult:
+    """The locally durable effect of moving one observed revision."""
+
+    source_path: str
+    destination_path: str
+    revision: str
+    applied: bool = True
+
+    @property
+    def path(self) -> str:
+        return self.destination_path
+
+    @property
+    def changed_paths(self) -> tuple[str, ...]:
+        return (self.source_path, self.destination_path)
+
+    @property
+    def changed_revisions(self) -> tuple[tuple[str, str | None], ...]:
+        return ((self.source_path, None), (self.destination_path, self.revision))
 
 
 class VaultStore:
@@ -315,6 +361,274 @@ class VaultStore:
             generation=self._generation(written_stat),
         )
 
+    def delete(
+        self,
+        relative_path: str | PurePosixPath,
+        *,
+        expected_revision: str,
+    ) -> VaultDeleteResult:
+        """Durably delete exactly one observed file revision.
+
+        The source is leased and copied to a durable recovery file before its
+        directory entry is moved.  A peer replacement is therefore never
+        unlinked by mistake: recovery restores the peer entry and preserves the
+        observed Friday revision as a conflict copy.
+        """
+
+        validate_revision(expected_revision)
+        normalized = self.normalize_path(relative_path)
+        parts = PurePosixPath(normalized).parts
+        lease: _LeasedFile | None = None
+        transaction: dict[str, object] | None = None
+        with (
+            self._lock,
+            self._vault_guard() as (_root_fd, journal_fd),
+            self._parent_fd(parts, create=False) as (parent_fd, leaf),
+        ):
+            try:
+                lease, source_identity, source_mode = self._lease_expected_at(
+                    parent_fd,
+                    leaf,
+                    normalized,
+                    expected_revision,
+                )
+                transaction_id = secrets.token_hex(16)
+                backup_name, capture_name = self._mutation_staging_names(
+                    transaction_id,
+                    kind="delete",
+                )
+                self._write_durable_file(journal_fd, backup_name, lease.content, source_mode)
+                os.fsync(journal_fd)
+                transaction = {
+                    "schema": _MUTATION_TRANSACTION_SCHEMA,
+                    "kind": "delete",
+                    "transaction_id": transaction_id,
+                    "phase": "prepared",
+                    "source_path": normalized,
+                    "backup_name": backup_name,
+                    "capture_name": capture_name,
+                    "source_device": source_identity[0],
+                    "source_inode": source_identity[1],
+                    "expected_revision": expected_revision,
+                }
+                self._write_transaction(journal_fd, transaction, replace=False)
+                try:
+                    self._rename_noreplace(parent_fd, leaf, journal_fd, capture_name)
+                except FileNotFoundError:
+                    actual = self._revision_or_none(parent_fd, leaf, normalized)
+                    self._recover_mutation_transaction(journal_fd, transaction)
+                    raise RevisionConflictError(expected_revision, actual) from None
+                except FileExistsError as exc:
+                    self._recover_mutation_transaction(journal_fd, transaction)
+                    raise VaultPathError("vault delete staging entry already exists") from exc
+                os.fsync(parent_fd)
+                os.fsync(journal_fd)
+                if not self._entry_has_identity(journal_fd, capture_name, source_identity):
+                    actual = self._revision_or_none(journal_fd, capture_name, normalized)
+                    self._recover_mutation_transaction(journal_fd, transaction)
+                    raise RevisionConflictError(expected_revision, actual)
+
+                transaction["phase"] = "commit"
+                self._write_transaction(journal_fd, transaction, replace=True)
+                if not self._entry_has_identity(journal_fd, capture_name, source_identity):
+                    actual = self._revision_or_none(journal_fd, capture_name, normalized)
+                    self._recover_mutation_transaction(journal_fd, transaction)
+                    raise RevisionConflictError(expected_revision, actual)
+                os.unlink(capture_name, dir_fd=journal_fd)
+                os.fsync(journal_fd)
+                self._discard_mutation_backup(
+                    journal_fd,
+                    backup_name,
+                    expected_revision=expected_revision,
+                    conflict_parent_fd=parent_fd,
+                    conflict_leaf=leaf,
+                    transaction_id=transaction_id,
+                )
+                self._remove_transaction(journal_fd)
+                transaction = None
+            except BaseException:
+                if transaction is not None and self._entry_exists(journal_fd, self._transaction_name):
+                    try:
+                        self._recover_mutation_transaction(journal_fd, transaction)
+                    except Exception as recovery_exc:
+                        raise OSError("conditional note delete recovery failed") from recovery_exc
+                raise
+            finally:
+                if lease is not None:
+                    self._release_lease(lease)
+        return VaultDeleteResult(path=normalized, deleted_revision=expected_revision)
+
+    def move(
+        self,
+        source_path: str | PurePosixPath,
+        destination_path: str | PurePosixPath,
+        *,
+        expected_revision: str,
+    ) -> VaultMoveResult:
+        """Durably move exactly one observed revision without clobbering a peer."""
+
+        validate_revision(expected_revision)
+        source = self.normalize_path(source_path)
+        destination = self.normalize_path(destination_path)
+        if source == destination:
+            raise ValueError("source and destination paths must differ")
+        source_parts = PurePosixPath(source).parts
+        destination_parts = PurePosixPath(destination).parts
+        lease: _LeasedFile | None = None
+        transaction: dict[str, object] | None = None
+        with (
+            self._lock,
+            self._vault_guard() as (_root_fd, journal_fd),
+            self._parent_fd(source_parts, create=False) as (source_fd, source_leaf),
+            self._parent_fd(destination_parts, create=True) as (destination_fd, destination_leaf),
+        ):
+            try:
+                self._assert_move_destination_available(
+                    destination_fd,
+                    destination_leaf,
+                    destination,
+                )
+                lease, source_identity, source_mode = self._lease_expected_at(
+                    source_fd,
+                    source_leaf,
+                    source,
+                    expected_revision,
+                )
+                transaction_id = secrets.token_hex(16)
+                backup_name, _unused_capture = self._mutation_staging_names(
+                    transaction_id,
+                    kind="move",
+                )
+                self._write_durable_file(journal_fd, backup_name, lease.content, source_mode)
+                os.fsync(journal_fd)
+                transaction = {
+                    "schema": _MUTATION_TRANSACTION_SCHEMA,
+                    "kind": "move",
+                    "transaction_id": transaction_id,
+                    "phase": "prepared",
+                    "source_path": source,
+                    "destination_path": destination,
+                    "backup_name": backup_name,
+                    "source_device": source_identity[0],
+                    "source_inode": source_identity[1],
+                    "expected_revision": expected_revision,
+                }
+                self._write_transaction(journal_fd, transaction, replace=False)
+                try:
+                    self._rename_noreplace(
+                        source_fd,
+                        source_leaf,
+                        destination_fd,
+                        destination_leaf,
+                    )
+                except FileNotFoundError:
+                    actual = self._revision_or_none(source_fd, source_leaf, source)
+                    self._recover_mutation_transaction(journal_fd, transaction)
+                    raise RevisionConflictError(expected_revision, actual) from None
+                except FileExistsError as exc:
+                    self._recover_mutation_transaction(journal_fd, transaction)
+                    try:
+                        self._assert_move_destination_available(
+                            destination_fd,
+                            destination_leaf,
+                            destination,
+                        )
+                    except (NoteAlreadyExistsError, VaultPathError):
+                        raise
+                    raise NoteAlreadyExistsError(destination) from exc
+                os.fsync(source_fd)
+                if destination_fd != source_fd:
+                    os.fsync(destination_fd)
+                if not self._entry_has_identity(
+                    destination_fd,
+                    destination_leaf,
+                    source_identity,
+                ):
+                    actual = self._revision_or_none(destination_fd, destination_leaf, destination)
+                    self._recover_mutation_transaction(journal_fd, transaction)
+                    raise RevisionConflictError(expected_revision, actual)
+
+                transaction["phase"] = "commit"
+                self._write_transaction(journal_fd, transaction, replace=True)
+                if not self._entry_has_identity(
+                    destination_fd,
+                    destination_leaf,
+                    source_identity,
+                ):
+                    actual = self._revision_or_none(destination_fd, destination_leaf, destination)
+                    self._recover_mutation_transaction(journal_fd, transaction)
+                    raise RevisionConflictError(expected_revision, actual)
+                self._discard_mutation_backup(
+                    journal_fd,
+                    backup_name,
+                    expected_revision=expected_revision,
+                    conflict_parent_fd=source_fd,
+                    conflict_leaf=source_leaf,
+                    transaction_id=transaction_id,
+                )
+                self._remove_transaction(journal_fd)
+                transaction = None
+            except BaseException:
+                if transaction is not None and self._entry_exists(journal_fd, self._transaction_name):
+                    try:
+                        self._recover_mutation_transaction(journal_fd, transaction)
+                    except Exception as recovery_exc:
+                        raise OSError("conditional note move recovery failed") from recovery_exc
+                raise
+            finally:
+                if lease is not None:
+                    self._release_lease(lease)
+        return VaultMoveResult(
+            source_path=source,
+            destination_path=destination,
+            revision=expected_revision,
+        )
+
+    def delete_postcondition(
+        self,
+        relative_path: str | PurePosixPath,
+        *,
+        expected_revision: str | None = None,
+    ) -> bool:
+        """Reconcile an uncertain delete without replaying the destructive call."""
+
+        if expected_revision is not None:
+            validate_revision(expected_revision)
+        try:
+            self.read(relative_path)
+        except NoteNotFoundError:
+            return True
+        return False
+
+    def move_postcondition(
+        self,
+        source_path: str | PurePosixPath,
+        destination_path: str | PurePosixPath,
+        *,
+        expected_revision: str,
+    ) -> bool:
+        """Return whether one uncertain move reached its exact no-copy state."""
+
+        validate_revision(expected_revision)
+        source = self.normalize_path(source_path)
+        destination = self.normalize_path(destination_path)
+        if source == destination:
+            return False
+        try:
+            self.read(source)
+        except NoteNotFoundError:
+            pass
+        else:
+            return False
+        try:
+            moved = self.read(destination)
+        except NoteNotFoundError:
+            return False
+        return moved.revision == expected_revision
+
+    delete_postcondition_met = delete_postcondition
+    move_postcondition_met = move_postcondition
+
     @staticmethod
     def _generation(value: os.stat_result) -> tuple[int, int, int, int, int]:
         return (
@@ -489,6 +803,7 @@ class VaultStore:
                 raise NoteNotFoundError(component) from None
             with suppress(FileExistsError):
                 os.mkdir(component, mode=0o700, dir_fd=parent_fd)
+                os.fsync(parent_fd)
             try:
                 child_stat = os.stat(component, dir_fd=parent_fd, follow_symlinks=False)
             except OSError as exc:
@@ -503,6 +818,55 @@ class VaultStore:
             raise VaultPathError("vault directory cannot be opened safely") from exc
         os.close(parent_fd)
         return child_fd
+
+    def _lease_expected_at(
+        self,
+        parent_fd: int,
+        leaf: str,
+        relative_path: str,
+        expected_revision: str,
+    ) -> tuple[_LeasedFile, tuple[int, int], int]:
+        """Lease one exact regular-file entry and validate its observed bytes."""
+
+        try:
+            candidate = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            raise RevisionConflictError(expected_revision, None) from None
+        except OSError as exc:
+            raise VaultPathError("vault source cannot be inspected safely") from exc
+        if stat.S_ISLNK(candidate.st_mode) or not stat.S_ISREG(candidate.st_mode):
+            raise VaultPathError("vault source is a symlink or non-regular file")
+        lease = self._lease_and_read(parent_fd, leaf)
+        if lease is None:
+            actual = self._revision_or_none(parent_fd, leaf, relative_path)
+            raise RevisionConflictError(expected_revision, actual)
+        opened = os.fstat(lease.descriptor)
+        identity = (int(opened.st_dev), int(opened.st_ino))
+        actual_revision = hashlib.sha256(lease.content).hexdigest()
+        if actual_revision != expected_revision or not self._entry_has_identity(
+            parent_fd,
+            leaf,
+            identity,
+        ):
+            self._release_lease(lease)
+            raise RevisionConflictError(expected_revision, actual_revision)
+        return lease, identity, stat.S_IMODE(opened.st_mode)
+
+    @staticmethod
+    def _assert_move_destination_available(
+        parent_fd: int,
+        leaf: str,
+        relative_path: str,
+    ) -> None:
+        try:
+            destination = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise VaultPathError("vault move destination cannot be inspected safely") from exc
+        if stat.S_ISLNK(destination.st_mode):
+            raise VaultPathError("vault move destination is a symlink")
+        raise NoteAlreadyExistsError(relative_path)
 
     def _read_at(self, parent_fd: int, leaf: str, relative_path: str) -> tuple[bytes, os.stat_result]:
         try:
@@ -799,6 +1163,15 @@ class VaultStore:
         base = self._transaction_name.removesuffix(".txn")
         return f"{base}-{transaction_id}.swap", f"{base}-{transaction_id}.proposal"
 
+    def _mutation_staging_names(self, transaction_id: str, *, kind: str) -> tuple[str, str]:
+        if kind not in {"delete", "move"}:
+            raise ValueError("unsupported vault mutation kind")
+        base = self._transaction_name.removesuffix(".txn")
+        return (
+            f"{base}-{transaction_id}.{kind}.backup",
+            f"{base}-{transaction_id}.{kind}.capture",
+        )
+
     @staticmethod
     def _write_durable_file(directory_fd: int, name: str, content: bytes, mode: int) -> os.stat_result:
         descriptor: int | None = None
@@ -871,6 +1244,8 @@ class VaultStore:
             raise VaultPathError("vault transaction metadata is invalid") from exc
         if not isinstance(raw, dict):
             raise VaultPathError("vault transaction metadata is not an object")
+        if raw.get("schema") == _MUTATION_TRANSACTION_SCHEMA:
+            return self._validate_mutation_transaction(raw)
         required = {
             "schema",
             "transaction_id",
@@ -907,9 +1282,67 @@ class VaultStore:
             validate_revision(value)
         return dict(raw)
 
+    def _validate_mutation_transaction(self, raw: dict[object, object]) -> dict[str, object]:
+        kind = raw.get("kind")
+        common = {
+            "schema",
+            "kind",
+            "transaction_id",
+            "phase",
+            "source_path",
+            "backup_name",
+            "source_device",
+            "source_inode",
+            "expected_revision",
+        }
+        if kind == "delete":
+            required = common | {"capture_name"}
+        elif kind == "move":
+            required = common | {"destination_path"}
+        else:
+            raise VaultPathError("vault mutation kind is invalid")
+        if set(raw) != required:
+            raise VaultPathError("vault mutation metadata has an unsupported shape")
+        transaction_id = raw.get("transaction_id")
+        if not isinstance(transaction_id, str) or _TRANSACTION_ID.fullmatch(transaction_id) is None:
+            raise VaultPathError("vault mutation identifier is invalid")
+        if raw.get("phase") not in {"prepared", "commit"}:
+            raise VaultPathError("vault mutation phase is invalid")
+        source_path = raw.get("source_path")
+        if not isinstance(source_path, str) or self.normalize_path(source_path) != source_path:
+            raise VaultPathError("vault mutation source path is invalid")
+        if kind == "move":
+            destination_path = raw.get("destination_path")
+            if (
+                not isinstance(destination_path, str)
+                or self.normalize_path(destination_path) != destination_path
+                or destination_path == source_path
+            ):
+                raise VaultPathError("vault mutation destination path is invalid")
+        backup_name, capture_name = self._mutation_staging_names(transaction_id, kind=str(kind))
+        if raw.get("backup_name") != backup_name:
+            raise VaultPathError("vault mutation backup name is invalid")
+        if kind == "delete" and raw.get("capture_name") != capture_name:
+            raise VaultPathError("vault mutation capture name is invalid")
+        for field in ("source_device", "source_inode"):
+            value = raw.get(field)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise VaultPathError("vault mutation inode identity is invalid")
+        expected_revision = raw.get("expected_revision")
+        if not isinstance(expected_revision, str):
+            raise VaultPathError("vault mutation revision is invalid")
+        try:
+            validate_revision(expected_revision)
+        except ValueError as exc:
+            raise VaultPathError("vault mutation revision is invalid") from exc
+        return {str(key): value for key, value in raw.items()}
+
     def _recover_transaction(self, journal_fd: int) -> None:
         transaction = self._read_transaction(journal_fd)
         if transaction is None:
+            return
+        if transaction.get("schema") == _MUTATION_TRANSACTION_SCHEMA:
+            self._recover_mutation_transaction(journal_fd, transaction)
             return
         path = str(transaction["path"])
         parts = PurePosixPath(path).parts
@@ -919,6 +1352,322 @@ class VaultStore:
                 self._recover_transaction_at(journal_fd, parent_fd, leaf, transaction)
         except NoteNotFoundError as exc:
             raise VaultPathError("vault transaction parent directory disappeared") from exc
+
+    def _recover_mutation_transaction(
+        self,
+        journal_fd: int,
+        transaction: dict[str, object],
+    ) -> None:
+        source = str(transaction["source_path"])
+        source_parts = PurePosixPath(source).parts
+        with self._parent_fd(source_parts, create=True) as (source_fd, source_leaf):
+            if transaction["kind"] == "delete":
+                self._recover_delete_transaction(
+                    journal_fd,
+                    source_fd,
+                    source_leaf,
+                    transaction,
+                )
+                return
+            destination = str(transaction["destination_path"])
+            destination_parts = PurePosixPath(destination).parts
+            with self._parent_fd(destination_parts, create=True) as (
+                destination_fd,
+                destination_leaf,
+            ):
+                self._recover_move_transaction(
+                    journal_fd,
+                    source_fd,
+                    source_leaf,
+                    destination_fd,
+                    destination_leaf,
+                    transaction,
+                )
+
+    def _recover_delete_transaction(
+        self,
+        journal_fd: int,
+        source_fd: int,
+        source_leaf: str,
+        transaction: dict[str, object],
+    ) -> None:
+        expected_revision = str(transaction["expected_revision"])
+        transaction_id = str(transaction["transaction_id"])
+        backup_name = str(transaction["backup_name"])
+        capture_name = str(transaction["capture_name"])
+        source_identity = self._mutation_identity(transaction)
+        capture_exists = self._entry_exists(journal_fd, capture_name)
+        capture_is_source = self._entry_has_identity(
+            journal_fd,
+            capture_name,
+            source_identity,
+        )
+        source_exists = self._entry_exists(source_fd, source_leaf)
+
+        if transaction["phase"] == "commit":
+            if capture_exists:
+                if capture_is_source:
+                    self._unlink_staging_identity(journal_fd, capture_name, source_identity)
+                elif not source_exists:
+                    self._require_regular_staging(journal_fd, capture_name)
+                    self._rename_noreplace(journal_fd, capture_name, source_fd, source_leaf)
+                    os.fsync(source_fd)
+                    os.fsync(journal_fd)
+                else:
+                    self._move_to_conflict(
+                        journal_fd,
+                        capture_name,
+                        source_fd,
+                        source_leaf,
+                        kind="delete-race",
+                        transaction_id=transaction_id,
+                    )
+            self._discard_mutation_backup(
+                journal_fd,
+                backup_name,
+                expected_revision=expected_revision,
+                conflict_parent_fd=source_fd,
+                conflict_leaf=source_leaf,
+                transaction_id=transaction_id,
+            )
+            self._remove_transaction(journal_fd)
+            return
+
+        if capture_is_source:
+            if not source_exists:
+                self._rename_noreplace(journal_fd, capture_name, source_fd, source_leaf)
+                os.fsync(source_fd)
+                os.fsync(journal_fd)
+            else:
+                self._move_to_conflict(
+                    journal_fd,
+                    capture_name,
+                    source_fd,
+                    source_leaf,
+                    kind="delete-rollback",
+                    transaction_id=transaction_id,
+                )
+            self._discard_mutation_backup(
+                journal_fd,
+                backup_name,
+                expected_revision=expected_revision,
+                conflict_parent_fd=source_fd,
+                conflict_leaf=source_leaf,
+                transaction_id=transaction_id,
+            )
+        elif capture_exists:
+            self._require_regular_staging(journal_fd, capture_name)
+            if not source_exists:
+                self._rename_noreplace(journal_fd, capture_name, source_fd, source_leaf)
+                os.fsync(source_fd)
+                os.fsync(journal_fd)
+            else:
+                self._move_to_conflict(
+                    journal_fd,
+                    capture_name,
+                    source_fd,
+                    source_leaf,
+                    kind="delete-race",
+                    transaction_id=transaction_id,
+                )
+            self._restore_or_preserve_mutation_backup(
+                journal_fd,
+                backup_name,
+                source_fd,
+                source_leaf,
+                expected_revision=expected_revision,
+                transaction_id=transaction_id,
+                kind="delete-observed",
+            )
+        elif (
+            self._revision_or_none(source_fd, source_leaf, str(transaction["source_path"]))
+            == expected_revision
+        ):
+            self._discard_mutation_backup(
+                journal_fd,
+                backup_name,
+                expected_revision=expected_revision,
+                conflict_parent_fd=source_fd,
+                conflict_leaf=source_leaf,
+                transaction_id=transaction_id,
+            )
+        else:
+            self._restore_or_preserve_mutation_backup(
+                journal_fd,
+                backup_name,
+                source_fd,
+                source_leaf,
+                expected_revision=expected_revision,
+                transaction_id=transaction_id,
+                kind="delete-observed",
+            )
+        self._remove_transaction(journal_fd)
+
+    def _recover_move_transaction(
+        self,
+        journal_fd: int,
+        source_fd: int,
+        source_leaf: str,
+        destination_fd: int,
+        destination_leaf: str,
+        transaction: dict[str, object],
+    ) -> None:
+        expected_revision = str(transaction["expected_revision"])
+        transaction_id = str(transaction["transaction_id"])
+        backup_name = str(transaction["backup_name"])
+        source_identity = self._mutation_identity(transaction)
+        source_is_observed = self._entry_has_identity(source_fd, source_leaf, source_identity)
+        destination_is_observed = self._entry_has_identity(
+            destination_fd,
+            destination_leaf,
+            source_identity,
+        )
+
+        if destination_is_observed and transaction["phase"] == "prepared":
+            if not self._entry_exists(source_fd, source_leaf):
+                self._rename_noreplace(
+                    destination_fd,
+                    destination_leaf,
+                    source_fd,
+                    source_leaf,
+                )
+                os.fsync(source_fd)
+                if destination_fd != source_fd:
+                    os.fsync(destination_fd)
+            else:
+                self._move_to_conflict(
+                    destination_fd,
+                    destination_leaf,
+                    source_fd,
+                    source_leaf,
+                    kind="move-rollback",
+                    transaction_id=transaction_id,
+                )
+            self._discard_mutation_backup(
+                journal_fd,
+                backup_name,
+                expected_revision=expected_revision,
+                conflict_parent_fd=source_fd,
+                conflict_leaf=source_leaf,
+                transaction_id=transaction_id,
+            )
+        elif destination_is_observed or source_is_observed:
+            self._discard_mutation_backup(
+                journal_fd,
+                backup_name,
+                expected_revision=expected_revision,
+                conflict_parent_fd=source_fd,
+                conflict_leaf=source_leaf,
+                transaction_id=transaction_id,
+            )
+        else:
+            self._restore_or_preserve_mutation_backup(
+                journal_fd,
+                backup_name,
+                source_fd,
+                source_leaf,
+                expected_revision=expected_revision,
+                transaction_id=transaction_id,
+                kind="move-observed",
+            )
+        self._remove_transaction(journal_fd)
+
+    @staticmethod
+    def _mutation_identity(transaction: dict[str, object]) -> tuple[int, int]:
+        device = transaction.get("source_device")
+        inode = transaction.get("source_inode")
+        if (
+            isinstance(device, bool)
+            or not isinstance(device, int)
+            or isinstance(inode, bool)
+            or not isinstance(inode, int)
+        ):
+            raise VaultPathError("vault mutation inode identity is invalid")
+        return device, inode
+
+    def _restore_or_preserve_mutation_backup(
+        self,
+        journal_fd: int,
+        backup_name: str,
+        source_fd: int,
+        source_leaf: str,
+        *,
+        expected_revision: str,
+        transaction_id: str,
+        kind: str,
+    ) -> None:
+        if not self._entry_exists(journal_fd, backup_name):
+            raise VaultPathError("vault mutation lost its durable observed revision")
+        if self._revision_or_none(source_fd, source_leaf, source_leaf) == expected_revision:
+            self._discard_mutation_backup(
+                journal_fd,
+                backup_name,
+                expected_revision=expected_revision,
+                conflict_parent_fd=source_fd,
+                conflict_leaf=source_leaf,
+                transaction_id=transaction_id,
+            )
+            return
+        if not self._entry_exists(source_fd, source_leaf):
+            self._require_regular_staging(journal_fd, backup_name)
+            self._rename_noreplace(journal_fd, backup_name, source_fd, source_leaf)
+            os.fsync(source_fd)
+            os.fsync(journal_fd)
+            return
+        self._move_to_conflict(
+            journal_fd,
+            backup_name,
+            source_fd,
+            source_leaf,
+            kind=kind,
+            transaction_id=transaction_id,
+        )
+
+    def _discard_mutation_backup(
+        self,
+        journal_fd: int,
+        backup_name: str,
+        *,
+        expected_revision: str,
+        conflict_parent_fd: int,
+        conflict_leaf: str,
+        transaction_id: str,
+    ) -> None:
+        if not self._entry_exists(journal_fd, backup_name):
+            return
+        if self._unlink_exact_under_lease(journal_fd, backup_name, expected_revision):
+            return
+        self._move_to_conflict(
+            journal_fd,
+            backup_name,
+            conflict_parent_fd,
+            conflict_leaf,
+            kind="mutation-backup",
+            transaction_id=transaction_id,
+        )
+        raise VaultPathError("vault mutation backup changed before cleanup")
+
+    @staticmethod
+    def _require_regular_staging(directory_fd: int, name: str) -> os.stat_result:
+        try:
+            item = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        except OSError as exc:
+            raise VaultPathError("vault mutation staging entry cannot be inspected safely") from exc
+        if not stat.S_ISREG(item.st_mode):
+            raise VaultPathError("vault mutation staging entry is not a regular file")
+        return item
+
+    def _unlink_staging_identity(
+        self,
+        directory_fd: int,
+        name: str,
+        identity: tuple[int, int],
+    ) -> None:
+        self._require_regular_staging(directory_fd, name)
+        if not self._entry_has_identity(directory_fd, name, identity):
+            raise VaultPathError("vault mutation staging identity changed")
+        os.unlink(name, dir_fd=directory_fd)
+        os.fsync(directory_fd)
 
     def _recover_transaction_at(
         self,
@@ -1293,4 +2042,10 @@ class VaultStore:
         os.fsync(journal_fd)
 
 
-__all__ = ["VaultFile", "VaultLimits", "VaultStore"]
+__all__ = [
+    "VaultDeleteResult",
+    "VaultFile",
+    "VaultLimits",
+    "VaultMoveResult",
+    "VaultStore",
+]

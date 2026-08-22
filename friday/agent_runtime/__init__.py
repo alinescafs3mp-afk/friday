@@ -117,6 +117,7 @@ from friday.organs.obsidian.conversation import (
     OBSIDIAN_WRITE_TOOL_NAMES,
     ObsidianConversationIntent,
     obsidian_conversation_intent,
+    obsidian_open_action_url,
     obsidian_operation_id,
     render_obsidian_tool_result,
 )
@@ -41847,6 +41848,7 @@ class AgentRuntime:
             "grounding_warning": grounding_warning,
             "citation_check": citation_check,
             "tools_used": response.get("tools_used", []),
+            "obsidian_open_url": str(response.get("_obsidian_open_url") or ""),
             "web_evidence_status": web_evidence_status,
             "web_evidence_scope": web_evidence_scope,
             "web_sources": web_sources,
@@ -43639,6 +43641,7 @@ class AgentRuntime:
         used: list[str] = []
         evidence: list[dict[str, str]] = []
         publication_tool = ""
+        open_action_url = ""
         lineage_persisted = False
         lineage_expected = bool(
             re.fullmatch(
@@ -43661,6 +43664,7 @@ class AgentRuntime:
                 "_model_generated": False,
                 "_obsidian_owned": True,
                 "_obsidian_publication_tool": publication_tool,
+                **({"_obsidian_open_url": open_action_url} if open_action_url else {}),
                 **({"_obsidian_private_lineage_owned": True} if private else {}),
             }
 
@@ -43784,6 +43788,11 @@ class AgentRuntime:
         fresh_actor = self._fresh_obsidian_actor(actor, selected_name)
         if fresh_actor is None:
             return response("Право на эту операцию Obsidian больше не подтверждено; изменений не было.")
+        conversation_key = str(context.conversation_id or "").strip()
+        if conversation_key and len(conversation_key) <= 200:
+            # Tool handlers use this opaque key only to bind candidate sets and
+            # active frames to the current conversation. It grants no rights.
+            fresh_actor = replace(fresh_actor, session_id=conversation_key)
         if _turn_deadline_expired(context.turn_deadline):
             return response("Время этого хода закончилось до обращения к Obsidian; изменений не было.")
         result = await self.kernel.execute(selected_name, arguments, actor=fresh_actor)
@@ -43812,6 +43821,12 @@ class AgentRuntime:
                 "Obsidian вернул неполную проверяемую квитанцию. Автоматически операцию не повторяю; "
                 "проверьте vault и статус /obsidian."
             )
+        if intent.resolved_local_date:
+            rendered = f"{rendered}\nЛокальная дата: {intent.resolved_local_date}."
+        open_action_url = obsidian_open_action_url(
+            result.data,
+            self.settings.obsidian_public_base_url,
+        )
         # Persist the private-source boundary before any note bytes or vault
         # metadata can enter the durable assistant turn and future history.
         if not lineage_persisted:

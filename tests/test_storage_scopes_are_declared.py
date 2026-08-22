@@ -89,24 +89,44 @@ PERSON_SCOPED = {
     "bind_obsidian_android_device",
     "create_obsidian_bundle",
     "finalize_obsidian_onboarding",
+    "create_obsidian_candidate_set",
+    "get_obsidian_active_frame",
+    "get_obsidian_candidate_set",
+    "get_obsidian_conflict",
     "get_obsidian_device",
+    "get_obsidian_note_binding",
+    "get_obsidian_note_index",
     "get_obsidian_onboarding",
     "get_obsidian_operation",
     "get_obsidian_profile",
     "get_obsidian_vault",
     "list_obsidian_conflicts",
+    "list_obsidian_operations",
+    "list_obsidian_note_bindings",
+    "list_obsidian_note_index",
+    "list_obsidian_note_links",
     "list_obsidian_pairing_candidates",
     "prepare_obsidian_operation",
+    "replace_obsidian_note_links",
+    "resolve_obsidian_conflict",
     "record_obsidian_conflict",
     "record_obsidian_pairing_candidates",
     "rotate_obsidian_setup_token",
     "select_obsidian_pairing_candidate",
+    "select_obsidian_candidate",
+    "invalidate_obsidian_active_frame",
+    "invalidate_obsidian_candidate_set",
+    "invalidate_obsidian_note_index",
+    "tombstone_obsidian_note_binding",
     "transition_obsidian_onboarding",
     "transition_obsidian_operation",
     "update_obsidian_device",
     "update_obsidian_profile",
     "update_obsidian_vault",
     "update_obsidian_vault_alias",
+    "upsert_obsidian_active_frame",
+    "upsert_obsidian_note_binding",
+    "upsert_obsidian_note_index",
 }
 
 #: Feedback хранится в разделе субъекта, который зависит от `target_type`.
@@ -180,7 +200,9 @@ APPROVAL_TENANT_WITH_A_SEPARATE_PERSON = {
 # 255 → 256: search_owned_files_by_term searches the shared archive tenant;
 # exact uploader/person authority is carried and checked separately.
 # 256 → 277: the Obsidian storage surface is private to one Android owner.
-EXPECTED_USER_ID_METHODS = 277
+# 277 → 294: schema-36 bindings/index/links and expiring continuation state
+# remain private to that same owner even when Friday uses a shared archive.
+EXPECTED_USER_ID_METHODS = 297
 
 
 def _methods_taking_user_id() -> set[str]:

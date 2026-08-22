@@ -28,9 +28,25 @@ class FakeRuntime:
         self._record("list_notes", owner_id)
         return [{"path": "note.md"}]
 
-    async def search_notes(self, owner_id: str, query: str, limit: int = 20) -> list[dict[str, Any]]:
-        self._record("search_notes", owner_id, query, limit=limit)
+    async def search_notes(
+        self,
+        owner_id: str,
+        query: str,
+        limit: int = 20,
+        *,
+        context_key: str | None = None,
+    ) -> list[dict[str, Any]]:
+        self._record("search_notes", owner_id, query, limit=limit, context_key=context_key)
         return [{"path": "match.md"}]
+
+    async def search_index_coverage(self, _owner_id: str) -> dict[str, Any]:
+        return {
+            "state": "partial",
+            "known_notes": 2,
+            "indexed_notes": 1,
+            "complete_notes": 1,
+            "semantic_lane": "local_approximate",
+        }
 
     async def read_note(self, owner_id: str, path: str) -> dict[str, Any]:
         self._record("read_note", owner_id, path)
@@ -44,6 +60,7 @@ class FakeRuntime:
         content: str = "",
         properties: dict[str, object] | None = None,
         work_item_id: str | None = None,
+        context_key: str | None = None,
     ) -> dict[str, Any]:
         self._record(
             "create_note",
@@ -53,6 +70,7 @@ class FakeRuntime:
             content=content,
             properties=properties,
             work_item_id=work_item_id,
+            context_key=context_key,
         )
         return {"operation_id": operation_id, "status": "scan_pending"}
 
@@ -64,6 +82,7 @@ class FakeRuntime:
         text: str,
         expected_revision: str | None = None,
         work_item_id: str | None = None,
+        context_key: str | None = None,
     ) -> dict[str, Any]:
         self._record(
             "append_note",
@@ -73,6 +92,7 @@ class FakeRuntime:
             text,
             expected_revision=expected_revision,
             work_item_id=work_item_id,
+            context_key=context_key,
         )
         return {"operation_id": operation_id, "status": "scan_pending"}
 
@@ -84,6 +104,7 @@ class FakeRuntime:
         properties: dict[str, object],
         expected_revision: str | None = None,
         work_item_id: str | None = None,
+        context_key: str | None = None,
     ) -> dict[str, Any]:
         self._record(
             "set_properties",
@@ -93,6 +114,7 @@ class FakeRuntime:
             properties,
             expected_revision=expected_revision,
             work_item_id=work_item_id,
+            context_key=context_key,
         )
         return {"operation_id": operation_id, "status": "scan_pending"}
 
@@ -104,6 +126,7 @@ class FakeRuntime:
         content: str = "",
         expected_revision: str | None = None,
         work_item_id: str | None = None,
+        context_key: str | None = None,
     ) -> dict[str, Any]:
         self._record(
             "daily_note",
@@ -113,6 +136,7 @@ class FakeRuntime:
             content=content,
             expected_revision=expected_revision,
             work_item_id=work_item_id,
+            context_key=context_key,
         )
         return {"operation_id": operation_id, "status": "scan_pending"}
 
@@ -146,18 +170,22 @@ def test_tool_metadata_is_closed_and_declares_read_write_risk() -> None:
         "obsidian_append_note",
         "obsidian_set_properties",
         "obsidian_daily_note",
+        "obsidian_workflow_read",
+        "obsidian_workflow_write",
     }
     assert {name for name, tool in tools.items() if tool.risk == "observe"} == {
         "obsidian_list_vaults",
         "obsidian_list_notes",
         "obsidian_search_notes",
         "obsidian_read_note",
+        "obsidian_workflow_read",
     }
     assert {name for name, tool in tools.items() if tool.risk == "mutate"} == {
         "obsidian_create_note",
         "obsidian_append_note",
         "obsidian_set_properties",
         "obsidian_daily_note",
+        "obsidian_workflow_write",
     }
     assert all(
         tool.security_id == ("obsidian.read" if tool.risk == "observe" else "obsidian.write")
@@ -167,6 +195,8 @@ def test_tool_metadata_is_closed_and_declares_read_write_risk() -> None:
     schemas = json.dumps({name: tool.parameters for name, tool in tools.items()}, sort_keys=True)
     assert "owner_id" not in schemas
     assert "user_id" not in schemas
+    workflow_actions = tools["obsidian_workflow_write"].parameters["properties"]["action"]["enum"]
+    assert "accept_conflict_merge" in workflow_actions
 
 
 @pytest.mark.asyncio
@@ -188,7 +218,7 @@ async def test_every_handler_uses_actor_own_id_and_forwards_closed_arguments() -
 
     await tools["obsidian_list_vaults"].handler(actor=actor)  # type: ignore[misc]
     await tools["obsidian_list_notes"].handler(actor=actor)  # type: ignore[misc]
-    await tools["obsidian_search_notes"].handler(  # type: ignore[misc]
+    search_result = await tools["obsidian_search_notes"].handler(  # type: ignore[misc]
         actor=actor, query="Friday", limit=7
     )
     await tools["obsidian_read_note"].handler(actor=actor, path="Notes/Friday.md")  # type: ignore[misc]
@@ -236,10 +266,19 @@ async def test_every_handler_uses_actor_own_id_and_forwards_closed_arguments() -
         "set_properties",
         "daily_note",
     ]
-    assert runtime.calls[2][2:] == (("Friday",), {"limit": 7})
+    assert runtime.calls[2][2:] == (
+        ("Friday",),
+        {"limit": 7, "context_key": "person-alice"},
+    )
+    assert search_result["coverage"]["state"] == "partial"
     assert runtime.calls[4][2:] == (
         ("create-1", "Notes/New.md"),
-        {"content": "created", "properties": properties, "work_item_id": "work-1"},
+        {
+            "content": "created",
+            "properties": properties,
+            "work_item_id": "work-1",
+            "context_key": "person-alice",
+        },
     )
     assert runtime.calls[6][2][2] == properties
     assert runtime.calls[7][3]["day"] == date(2026, 8, 21)

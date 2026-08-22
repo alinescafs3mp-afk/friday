@@ -396,6 +396,34 @@ def test_search_has_exact_and_lexical_lanes_without_operation_markers(
     assert "friday:append" not in lexical[0].excerpt
 
 
+def test_search_finds_the_battery_paraphrase_and_uses_the_created_date(
+    service: ObsidianService,
+) -> None:
+    service.create_note(
+        "Projects/Retrieval Problem",
+        (
+            "Старые документы иногда исчезали из семантической выдачи, потому что "
+            "набор кандидатов ограничивался сравнительно свежими объектами."
+        ),
+        properties={"created": date(2026, 8, 4)},
+    )
+    service.create_note(
+        "Projects/Lexical Noise",
+        "Поиск файлов в начале августа. Поиск, список, файлы, список, поиск.",
+        properties={"created": date(2026, 7, 18)},
+    )
+
+    paraphrase = service.search_notes(
+        "старые файлы не попадали в поиск из-за слишком маленького списка кандидатов"
+    )
+    dated = service.search_notes("проблемы поиска, которую я делал примерно в начале августа 2026 года")
+
+    assert paraphrase[0].path == "Projects/Retrieval Problem.md"
+    assert "semantic" in paraphrase[0].match_channels
+    assert dated[0].path == "Projects/Retrieval Problem.md"
+    assert "property_date_created" in dated[0].match_channels
+
+
 def test_daily_note_uses_convention_and_appends_once(vault: Path) -> None:
     convention = ObsidianVaultConvention(daily_folder="Journal", daily_format="YYYY_MM_DD")
     service = ObsidianService(
@@ -415,6 +443,33 @@ def test_daily_note_uses_convention_and_appends_once(vault: Path) -> None:
 
     with pytest.raises(InvalidOperationIdError):
         service.daily_note(content="Ещё строка")
+
+
+def test_acceptance_daily_section_reuses_heading_and_replays_byte_identically(vault: Path) -> None:
+    service = ObsidianService(
+        VaultStore(vault),
+        clock=lambda: date(2026, 8, 22),
+        convention=ObsidianVaultConvention(daily_folder="Daily", daily_format="YYYY-MM-DD"),
+    )
+
+    first = service.daily_note(
+        section="Friday",
+        item="- Проверена интеграция с Obsidian",
+        operation_id="battery-daily",
+    )
+    first_bytes = (vault / first.path).read_bytes()
+    replay = service.daily_note(
+        section="Friday",
+        item="- Проверена интеграция с Obsidian",
+        operation_id="battery-daily",
+    )
+
+    assert replay.applied is False
+    assert replay.revision == first.revision
+    assert (vault / first.path).read_bytes() == first_bytes
+    body = service.read_note(first.path).body
+    assert body.count("## Friday") == 1
+    assert body.count("- Проверена интеграция с Obsidian") == 1
 
 
 def test_local_write_result_does_not_invent_remote_delivery(service: ObsidianService) -> None:

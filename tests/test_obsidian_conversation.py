@@ -13,6 +13,7 @@ from friday.organs.obsidian.conversation import (
     OBSIDIAN_TOOL_NAMES,
     OBSIDIAN_WRITE_TOOL_NAMES,
     obsidian_conversation_intent,
+    obsidian_open_action_url,
     obsidian_operation_id,
     render_obsidian_tool_result,
 )
@@ -27,20 +28,33 @@ _EXACT_CREATE = (
     "Заголовок: «Тест интеграции Friday». Внутри напиши, что заметка создана "
     "через Telegram, и добавь текущую дату."
 )
+_BATTERY_CREATE = _EXACT_CREATE.replace(
+    "Projects/Friday Test.md",
+    "`Projects/Friday Test.md`",
+)
+_BATTERY_APPEND = (
+    "Добавь в конец заметки `Projects/Friday Test.md` раздел «Проверка дополнения» "
+    "и одну строку: «Этот текст был добавлен отдельной командой»."
+)
+_BATTERY_DAILY = (
+    "Добавь в сегодняшнюю ежедневную заметку раздел «Friday» и пункт: «Проверена интеграция с Obsidian»."
+)
 
 
-def test_tool_sets_pin_all_eight_shipped_capabilities() -> None:
+def test_tool_sets_pin_all_shipped_capabilities() -> None:
     assert {
         "obsidian_list_vaults",
         "obsidian_list_notes",
         "obsidian_search_notes",
         "obsidian_read_note",
+        "obsidian_workflow_read",
     } == OBSIDIAN_READ_TOOL_NAMES
     assert {
         "obsidian_create_note",
         "obsidian_append_note",
         "obsidian_set_properties",
         "obsidian_daily_note",
+        "obsidian_workflow_write",
     } == OBSIDIAN_WRITE_TOOL_NAMES
     assert OBSIDIAN_TOOL_NAMES == OBSIDIAN_READ_TOOL_NAMES | OBSIDIAN_WRITE_TOOL_NAMES
 
@@ -117,6 +131,55 @@ def test_exact_create_request_has_only_user_literals_and_local_date() -> None:
         "path": _PATH,
         "content": ("# Тест интеграции Friday\n\nЗаметка создана через Telegram.\n\n2026-08-22\n"),
     }
+    assert intent.resolved_local_date == "2026-08-22"
+
+
+@pytest.mark.parametrize("message", [_EXACT_CREATE, _BATTERY_CREATE])
+def test_acceptance_create_accepts_plain_and_backtick_paths(message: str) -> None:
+    intent = obsidian_conversation_intent(message, today=_TODAY)
+
+    assert intent is not None
+    assert intent.tool_name == "obsidian_create_note"
+    assert intent.explicit_path == _PATH
+
+
+def test_acceptance_append_section_is_one_closed_append_without_channel_repetition() -> None:
+    intent = obsidian_conversation_intent(_BATTERY_APPEND, today=_TODAY)
+
+    assert intent is not None
+    assert intent.error == ""
+    assert intent.tool_name == "obsidian_append_note"
+    assert intent.explicit_path == _PATH
+    assert intent.direct_arguments == {
+        "path": _PATH,
+        "text": "## Проверка дополнения\n\nЭтот текст был добавлен отдельной командой",
+    }
+
+
+def test_acceptance_daily_section_uses_today_and_one_structured_item() -> None:
+    intent = obsidian_conversation_intent(_BATTERY_DAILY, today=_TODAY)
+
+    assert intent is not None
+    assert intent.error == ""
+    assert intent.tool_name == "obsidian_daily_note"
+    assert intent.direct_arguments == {
+        "day": "2026-08-22",
+        "section": "Friday",
+        "item": "- Проверена интеграция с Obsidian",
+    }
+    assert intent.resolved_local_date == "2026-08-22"
+
+
+def test_conflict_merge_requires_the_explicit_closed_acceptance_action() -> None:
+    accepted = obsidian_conversation_intent(
+        "Прими эту объединённую версию.",
+        today=_TODAY,
+    )
+
+    assert accepted is not None
+    assert accepted.tool_name == "obsidian_workflow_write"
+    assert accepted.direct_arguments == {"action": "accept_conflict_merge"}
+    assert obsidian_conversation_intent("Да, применяй.", today=_TODAY) is None
 
 
 @pytest.mark.parametrize(
@@ -289,6 +352,66 @@ def test_render_note_list_and_search_validate_counts_and_channels() -> None:
     broken = copy.deepcopy(matches)
     broken["matches"][0]["match_channels"] = ["model_guess"]  # type: ignore[index]
     assert render_obsidian_tool_result("obsidian_search_notes", broken) is None
+
+
+def test_render_search_exposes_android_provenance_and_partial_coverage() -> None:
+    rendered = render_obsidian_tool_result(
+        "obsidian_search_notes",
+        {
+            "matches": [
+                {
+                    "path": "Mobile/Created On Phone.md",
+                    "title": "Created On Phone",
+                    "revision": _REVISION,
+                    "modified_at": "2026-08-22T06:42:00+00:00",
+                    "excerpt": "Фиолетовый маршрутизатор.",
+                    "score": 42.0,
+                    "match_channels": ["semantic"],
+                    "origin": "android",
+                    "ownership_mode": "user_owned",
+                    "index_coverage": "partial",
+                }
+            ],
+            "count": 1,
+            "coverage": {
+                "state": "partial",
+                "known_notes": 3,
+                "indexed_notes": 2,
+                "complete_notes": 1,
+                "semantic_lane": "local_approximate",
+            },
+        },
+    )
+
+    assert rendered is not None
+    assert "Покрытие индекса неполное" in rendered
+    assert "Отсутствие совпадения не доказывает" in rendered
+    assert "Источник: Android" in rendered
+    assert "обычная пользовательская заметка" in rendered
+
+
+def test_deleted_search_result_is_explicitly_a_tombstone_not_a_live_note() -> None:
+    result = render_obsidian_tool_result(
+        "obsidian_search_notes",
+        {
+            "matches": [
+                {
+                    "path": "Scratch/Delete Me.md",
+                    "title": "Delete Me",
+                    "revision": _REVISION,
+                    "modified_at": "2026-08-22T06:42:00+00:00",
+                    "excerpt": "Ранее известная заметка с этой identity была удалена.",
+                    "score": 2.0,
+                    "match_channels": ["tombstone"],
+                }
+            ],
+            "count": 1,
+        },
+    )
+
+    assert result is not None
+    assert result.startswith("Активных заметок не найдено")
+    assert "удалена" in result
 
 
 def test_render_read_binds_path_size_and_hides_internal_operation_marker() -> None:
@@ -481,7 +604,10 @@ def _mutation(tool_name: str, *, delivered: bool = True) -> dict[str, object]:
     }
 
 
-@pytest.mark.parametrize("tool_name", sorted(OBSIDIAN_WRITE_TOOL_NAMES))
+@pytest.mark.parametrize(
+    "tool_name",
+    sorted(OBSIDIAN_WRITE_TOOL_NAMES - {"obsidian_workflow_write"}),
+)
 def test_mutation_receipt_binds_request_and_separates_delivery_facts(tool_name: str) -> None:
     rendered = render_obsidian_tool_result(
         tool_name,
@@ -496,6 +622,68 @@ def test_mutation_receipt_binds_request_and_separates_delivery_facts(tool_name: 
     assert "Android подключён: да" in rendered
     assert "Получение этой revision на Android: подтверждено" in rendered
     assert "откры" not in rendered.casefold()
+
+
+def test_workflow_receipts_are_code_owned_and_include_exact_open_action() -> None:
+    receipt = {
+        "action": "update_metadata",
+        "status": "completed",
+        "path": _PATH,
+        "revision": _REVISION,
+        "operation_id": _OPERATION_ID,
+        "changed_paths": [_PATH],
+        "body": "Свойства атомарно обновлены.",
+        "open_uri": ("obsidian://open?vault=Friday-Test&file=Projects%2FFriday+Test.md"),
+        "delivery": {
+            "local_write_complete": True,
+            "server_scan_complete": True,
+            "android_connected": True,
+            "android_completion": 100.0,
+            "android_received": True,
+            "obsidian_opened": False,
+        },
+    }
+    rendered = render_obsidian_tool_result(
+        "obsidian_workflow_write",
+        receipt,
+        expected_operation_id=_OPERATION_ID,
+        expected_path=_PATH,
+    )
+
+    assert rendered is not None
+    assert "Свойства атомарно обновлены" in rendered
+    assert "Open in Obsidian" in rendered
+    assert _PATH in rendered
+    assert obsidian_open_action_url(receipt, "https://friday.example") == (
+        "https://friday.example/obsidian/open#vault=Friday-Test&file=Projects%2FFriday+Test.md"
+    )
+    assert obsidian_open_action_url(receipt, "http://friday.example") == ""
+    assert (
+        obsidian_open_action_url(
+            {**receipt, "open_uri": "obsidian://open?vault=Friday-Test&file=Other.md"},
+            "https://friday.example",
+        )
+        == ""
+    )
+
+
+def test_read_workflow_cannot_claim_delivery_or_mutation_identity() -> None:
+    valid = {
+        "action": "backlinks",
+        "status": "completed",
+        "path": "Projects/Friday.md",
+        "revision": None,
+        "operation_id": None,
+        "changed_paths": ["Notes/Search.md", "Notes/Obsidian.md"],
+        "body": "Обратные ссылки: 2",
+        "open_uri": "obsidian://open?vault=Friday-Test&file=Projects%2FFriday.md",
+        "delivery": None,
+    }
+    assert render_obsidian_tool_result("obsidian_workflow_read", valid) is not None
+
+    invalid = copy.deepcopy(valid)
+    invalid["operation_id"] = "invented"
+    assert render_obsidian_tool_result("obsidian_workflow_read", invalid) is None
 
 
 def test_pending_receipt_never_upgrades_android_delivery_or_opening() -> None:

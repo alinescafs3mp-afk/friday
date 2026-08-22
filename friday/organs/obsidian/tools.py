@@ -10,6 +10,8 @@ from friday.execution_kernel import ToolSpec
 from friday.organs import ServiceContext
 from friday.permissions import ActorContext
 
+from .workflow_intents import WORKFLOW_READ_TOOL, WORKFLOW_WRITE_TOOL
+
 _MAX_NOTE_PATH_CHARS = 2_048
 _MAX_NOTE_TEXT_CHARS = 200_000
 _MAX_OPERATION_ID_CHARS = 200
@@ -23,7 +25,16 @@ class ObsidianToolRuntime(Protocol):
 
     async def list_notes(self, owner_id: str) -> list[dict[str, Any]]: ...
 
-    async def search_notes(self, owner_id: str, query: str, limit: int = 20) -> list[dict[str, Any]]: ...
+    async def search_notes(
+        self,
+        owner_id: str,
+        query: str,
+        limit: int = 20,
+        *,
+        context_key: str | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+    async def search_index_coverage(self, owner_id: str) -> dict[str, Any]: ...
 
     async def read_note(self, owner_id: str, path: str) -> dict[str, Any]: ...
 
@@ -35,6 +46,7 @@ class ObsidianToolRuntime(Protocol):
         content: str = "",
         properties: Mapping[str, object] | None = None,
         work_item_id: str | None = None,
+        context_key: str | None = None,
     ) -> dict[str, Any]: ...
 
     async def append_note(
@@ -45,6 +57,7 @@ class ObsidianToolRuntime(Protocol):
         text: str,
         expected_revision: str | None = None,
         work_item_id: str | None = None,
+        context_key: str | None = None,
     ) -> dict[str, Any]: ...
 
     async def set_properties(
@@ -55,6 +68,7 @@ class ObsidianToolRuntime(Protocol):
         properties: Mapping[str, object],
         expected_revision: str | None = None,
         work_item_id: str | None = None,
+        context_key: str | None = None,
     ) -> dict[str, Any]: ...
 
     async def daily_note(
@@ -63,8 +77,28 @@ class ObsidianToolRuntime(Protocol):
         operation_id: str,
         day: date | None = None,
         content: str = "",
+        section: str | None = None,
+        item: str | None = None,
         expected_revision: str | None = None,
         work_item_id: str | None = None,
+        context_key: str | None = None,
+    ) -> dict[str, Any]: ...
+
+    async def workflow_read(
+        self,
+        owner_id: str,
+        payload: Mapping[str, object],
+        *,
+        context_key: str,
+    ) -> dict[str, Any]: ...
+
+    async def workflow_write(
+        self,
+        owner_id: str,
+        operation_id: str,
+        payload: Mapping[str, object],
+        *,
+        context_key: str,
     ) -> dict[str, Any]: ...
 
 
@@ -141,8 +175,17 @@ def build_obsidian_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
         return {"notes": notes, "count": len(notes)}
 
     async def search_notes(*, actor: ActorContext, query: str, limit: int = 20) -> dict[str, Any]:
-        matches = await runtime.search_notes(actor.own_id, query, limit=limit)
-        return {"matches": matches, "count": len(matches)}
+        matches = await runtime.search_notes(
+            actor.own_id,
+            query,
+            limit=limit,
+            context_key=_context_key(actor),
+        )
+        result: dict[str, Any] = {"matches": matches, "count": len(matches)}
+        coverage_reader = getattr(runtime, "search_index_coverage", None)
+        if coverage_reader is not None:
+            result["coverage"] = await coverage_reader(actor.own_id)
+        return result
 
     async def read_note(*, actor: ActorContext, path: str) -> dict[str, Any]:
         return await runtime.read_note(actor.own_id, path)
@@ -163,6 +206,7 @@ def build_obsidian_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             content=content,
             properties=properties,
             work_item_id=work_item_id,
+            context_key=_context_key(actor),
         )
 
     async def append_note(
@@ -181,6 +225,7 @@ def build_obsidian_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             text,
             expected_revision=expected_revision,
             work_item_id=work_item_id,
+            context_key=_context_key(actor),
         )
 
     async def set_properties(
@@ -199,6 +244,7 @@ def build_obsidian_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             properties,
             expected_revision=expected_revision,
             work_item_id=work_item_id,
+            context_key=_context_key(actor),
         )
 
     async def daily_note(
@@ -207,17 +253,44 @@ def build_obsidian_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
         operation_id: str,
         day: str | None = None,
         content: str = "",
+        section: str | None = None,
+        item: str | None = None,
         expected_revision: str | None = None,
         work_item_id: str | None = None,
     ) -> dict[str, Any]:
         selected_day = None if day is None else date.fromisoformat(day)
-        return await runtime.daily_note(
+        arguments: dict[str, Any] = {
+            "day": selected_day,
+            "content": content,
+            "expected_revision": expected_revision,
+            "work_item_id": work_item_id,
+            "context_key": _context_key(actor),
+        }
+        # Preserve compatibility with runtime adapters which implement the
+        # original daily-note protocol while keeping the structured extension
+        # explicit whenever it is actually requested.
+        if section is not None or item is not None:
+            arguments.update({"section": section, "item": item})
+        return await runtime.daily_note(actor.own_id, operation_id, **arguments)
+
+    async def workflow_read(*, actor: ActorContext, **payload: object) -> dict[str, Any]:
+        return await runtime.workflow_read(
+            actor.own_id,
+            payload,
+            context_key=_context_key(actor),
+        )
+
+    async def workflow_write(
+        *,
+        actor: ActorContext,
+        operation_id: str,
+        **payload: object,
+    ) -> dict[str, Any]:
+        return await runtime.workflow_write(
             actor.own_id,
             operation_id,
-            day=selected_day,
-            content=content,
-            expected_revision=expected_revision,
-            work_item_id=work_item_id,
+            payload,
+            context_key=_context_key(actor),
         )
 
     operation_properties = {
@@ -325,6 +398,8 @@ def build_obsidian_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
                     "operation_id": _OPERATION_ID,
                     "day": {"type": "string", "format": "date"},
                     "content": {"type": "string", "maxLength": _MAX_NOTE_TEXT_CHARS},
+                    "section": {"type": "string", "minLength": 1, "maxLength": 500},
+                    "item": {"type": "string", "minLength": 1, "maxLength": _MAX_NOTE_TEXT_CHARS},
                     "expected_revision": _EXPECTED_REVISION,
                     "work_item_id": _WORK_ITEM_ID,
                 },
@@ -334,7 +409,108 @@ def build_obsidian_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             risk="mutate",
             handler=daily_note,
         ),
+        ToolSpec(
+            name=WORKFLOW_READ_TOOL,
+            description=(
+                "Выполнить закрытую контекстную операцию чтения: задачи, сохранённый "
+                "набор кандидатов, backlinks или preview конфликта."
+            ),
+            parameters=_parameters(
+                {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "search_tasks",
+                            "select_candidate",
+                            "backlinks",
+                            "conflict_preview",
+                            "query_base",
+                        ],
+                    },
+                    "query": {"type": "string", "maxLength": 1_000},
+                    "incomplete_only": {"type": "boolean"},
+                    "ordinal": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "target_path": _PATH,
+                    "name": {"type": "string", "minLength": 1, "maxLength": 200},
+                },
+                required=("action",),
+            ),
+            security_id="obsidian.read",
+            risk="observe",
+            handler=workflow_read,
+        ),
+        ToolSpec(
+            name=WORKFLOW_WRITE_TOOL,
+            description=(
+                "Выполнить закрытый многошаговый workflow над собственным vault с "
+                "идемпотентной operation ID и revision-проверками."
+            ),
+            parameters=_parameters(
+                {
+                    "operation_id": _OPERATION_ID,
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "add_task",
+                            "update_metadata",
+                            "append_active_section",
+                            "move_note",
+                            "create_from_template",
+                            "save_summary",
+                            "append_summary_links",
+                            "create_base",
+                            "replace_active_section",
+                            "accept_conflict_merge",
+                            "resume_previous",
+                            "delete_note",
+                        ],
+                    },
+                    "path": _PATH,
+                    "source_path": _PATH,
+                    "destination_path": _PATH,
+                    "update_links": {"type": "boolean"},
+                    "day": {"type": "string", "format": "date"},
+                    "due_date": {"type": "string", "format": "date"},
+                    "due_time": {"type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$"},
+                    "text": {"type": "string", "maxLength": _MAX_NOTE_TEXT_CHARS},
+                    "section": {"type": "string", "maxLength": 500},
+                    "item": {"type": "string", "maxLength": _MAX_NOTE_TEXT_CHARS},
+                    "template_name": {"type": "string", "maxLength": 200},
+                    "title": {"type": "string", "maxLength": 500},
+                    "project": {"type": "string", "maxLength": 500},
+                    "status": {"type": "string", "maxLength": 500},
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string", "maxLength": 128},
+                        "maxItems": 128,
+                    },
+                    "participants": {
+                        "type": "array",
+                        "items": {"type": "string", "maxLength": 500},
+                        "maxItems": 100,
+                    },
+                    "discussion": {"type": "string", "maxLength": _MAX_NOTE_TEXT_CHARS},
+                    "actions": {"type": "string", "maxLength": _MAX_NOTE_TEXT_CHARS},
+                    "name": {"type": "string", "maxLength": 200},
+                    "excluded_status": {"type": "string", "maxLength": 500},
+                    "columns": {
+                        "type": "array",
+                        "items": {"type": "string", "maxLength": 100},
+                        "maxItems": 32,
+                    },
+                },
+                required=("operation_id", "action"),
+            ),
+            security_id="obsidian.write",
+            risk="mutate",
+            handler=workflow_write,
+        ),
     )
+
+
+def _context_key(actor: ActorContext) -> str:
+    raw = str(actor.session_id or actor.person_id or actor.own_id).strip()
+    return raw[:200] or str(actor.own_id)[:200]
 
 
 __all__ = ["ObsidianToolRuntime", "build_obsidian_tools"]

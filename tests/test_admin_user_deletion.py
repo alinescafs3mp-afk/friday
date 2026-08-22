@@ -1416,6 +1416,47 @@ def test_obsidian_rows_are_counted_deleted_and_empty_owner_directory_is_removed(
         canonical_path="Notes/A.md",
         conflict_path="Notes/A.sync-conflict.md",
     )
+    binding = storage.upsert_obsidian_note_binding(
+        target,
+        vault_id=bundle["vault"]["id"],
+        integration_id="obnote-delete-target",
+        current_path="Notes/Delete.md",
+        current_revision="a" * 64,
+        origin="user",
+    )
+    storage.upsert_obsidian_note_index(
+        target,
+        binding_id=binding["id"],
+        revision="a" * 64,
+        body_text="delete lifecycle",
+    )
+    storage.replace_obsidian_note_links(
+        target,
+        binding_id=binding["id"],
+        revision="a" * 64,
+        links=[
+            {
+                "kind": "wikilink",
+                "target_text": "Notes/Delete",
+                "resolved_binding_id": binding["id"],
+            }
+        ],
+    )
+    candidate_set = storage.create_obsidian_candidate_set(
+        target,
+        vault_id=bundle["vault"]["id"],
+        query={"text": "delete"},
+        candidates=[{"binding_id": binding["id"]}],
+        expires_at="2030-01-01T00:00:00+00:00",
+    )
+    storage.select_obsidian_candidate(target, candidate_set["id"], 1)
+    storage.upsert_obsidian_active_frame(
+        target,
+        vault_id=bundle["vault"]["id"],
+        frame_id="delete-frame",
+        candidate_set_id=candidate_set["id"],
+        expires_at="2030-01-01T00:00:00+00:00",
+    )
     storage.update_user(target, status="disabled")
 
     plan = _verified_plan(storage, target)
@@ -1429,6 +1470,12 @@ def test_obsidian_rows_are_counted_deleted_and_empty_owner_directory_is_removed(
         "obsidian_pairing_candidates",
         "obsidian_operations",
         "obsidian_conflicts",
+        "obsidian_note_bindings",
+        "obsidian_note_index",
+        "obsidian_note_links",
+        "obsidian_candidate_sets",
+        "obsidian_candidate_set_items",
+        "obsidian_active_frames",
     ):
         assert plan["counts"][table] == 1
 
@@ -1450,6 +1497,12 @@ def test_obsidian_rows_are_counted_deleted_and_empty_owner_directory_is_removed(
         "obsidian_pairing_candidates",
         "obsidian_operations",
         "obsidian_conflicts",
+        "obsidian_note_bindings",
+        "obsidian_note_index",
+        "obsidian_note_links",
+        "obsidian_candidate_sets",
+        "obsidian_candidate_set_items",
+        "obsidian_active_frames",
     ):
         remaining = storage.execute(
             f'SELECT COUNT(*) FROM "{table}" WHERE user_id=?',  # nosec B608 - closed test table tuple

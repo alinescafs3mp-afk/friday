@@ -999,6 +999,30 @@ class MaintenanceMixin(StorageShared):
                     "SELECT * FROM obsidian_conflicts WHERE user_id=?",
                     (user_id,),
                 ),
+                "obsidian_note_bindings": (
+                    "SELECT * FROM obsidian_note_bindings WHERE user_id=?",
+                    (user_id,),
+                ),
+                "obsidian_note_index": (
+                    "SELECT * FROM obsidian_note_index WHERE user_id=?",
+                    (user_id,),
+                ),
+                "obsidian_note_links": (
+                    "SELECT * FROM obsidian_note_links WHERE user_id=?",
+                    (user_id,),
+                ),
+                "obsidian_candidate_sets": (
+                    "SELECT * FROM obsidian_candidate_sets WHERE user_id=?",
+                    (user_id,),
+                ),
+                "obsidian_candidate_set_items": (
+                    "SELECT * FROM obsidian_candidate_set_items WHERE user_id=?",
+                    (user_id,),
+                ),
+                "obsidian_active_frames": (
+                    "SELECT * FROM obsidian_active_frames WHERE user_id=?",
+                    (user_id,),
+                ),
                 "user_identities": ("SELECT * FROM user_identities WHERE user_id=?", (user_id,)),
                 "raw_objects": ("SELECT * FROM raw_objects WHERE user_id=?", (user_id,)),
                 "knowledge_objects": ("SELECT * FROM knowledge_objects WHERE user_id=?", (user_id,)),

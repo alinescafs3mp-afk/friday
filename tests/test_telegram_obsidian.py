@@ -6,9 +6,59 @@ from typing import Any
 import pytest
 
 from friday.telegram_bridge import TelegramBridge, TelegramConfig
+from friday.telegram_bridge._obsidian import obsidian_panel
 
 FRIDAY_DEVICE_ID = "AAAAAAA-BBBBBBB-CCCCCCC-DDDDDDD-EEEEEEE-FFFFFFF-GGGGGGG-HHHHHHH"
 SETUP_URL = "https://setup.friday.example/obsidian/session_opaque"
+
+
+def test_panel_reports_the_exact_recent_operation_delivery_state() -> None:
+    text, _markup = obsidian_panel(
+        {
+            "state": "ready",
+            "message": "Vault подключён; Android сейчас офлайн.",
+            "operations": [
+                {
+                    "operation_id": "offline-panel-op",
+                    "method": "create",
+                    "status": "delivery_pending",
+                    "path": "Offline/Pending Delivery.md",
+                    "server_scan_complete": True,
+                    "android_connected": False,
+                    "android_received": False,
+                }
+            ],
+        }
+    )
+
+    assert "Offline/Pending Delivery.md" in text
+    assert "delivery_pending" in text
+    assert "server scan — готов" in text
+    assert "Android — ожидается" in text
+    assert "offline-panel-op" in text
+
+
+def test_ready_panel_surfaces_open_conflict_and_preserved_artifact_paths() -> None:
+    text, _markup = obsidian_panel(
+        {
+            "state": "ready",
+            "message": "Vault подключён; Android сейчас на связи.",
+            "conflict_count": 1,
+            "conflicts": [
+                {
+                    "id": "obsconf_0123456789abcdef",
+                    "canonical_path": "Projects/Friday Test.md",
+                    "conflict_path": "Projects/Friday Test.sync-conflict-20260822.md",
+                    "detected_at": "2026-08-22T06:42:00+00:00",
+                }
+            ],
+        }
+    )
+
+    assert "Открытые конфликты: 1" in text
+    assert "Projects/Friday Test.md" in text
+    assert "Projects/Friday Test.sync-conflict-20260822.md" in text
+    assert "не удаляются автоматически" in text
 
 
 class _Response:

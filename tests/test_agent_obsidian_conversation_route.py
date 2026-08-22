@@ -29,6 +29,10 @@ _EXACT_CREATE = (
     "Заголовок: «Тест интеграции Friday». Внутри напиши, что заметка создана "
     "через Telegram, и добавь текущую дату."
 )
+_BATTERY_APPEND = (
+    "Добавь в конец заметки `Projects/Friday Test.md` раздел «Проверка дополнения» "
+    "и одну строку: «Этот текст был добавлен отдельной командой»."
+)
 _ROOT_MESSAGE_ID = "msg_0123456789abcdef"
 _REVISION = "a" * 64
 
@@ -412,6 +416,33 @@ async def test_exact_russian_create_is_two_code_owned_calls_without_a_model(sett
     )
     assert result["_obsidian_owned"] is True
     assert result["tools_used"] == ["obsidian_list_vaults", "obsidian_create_note"]
+
+
+@pytest.mark.asyncio
+async def test_acceptance_append_is_one_code_owned_mutation_without_a_model(settings, storage) -> None:
+    kernel = _ConversationKernel()
+    llm = _ConversationLLM()
+    runtime = _runtime(settings, storage, kernel, llm)
+
+    result = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        _BATTERY_APPEND,
+        _actor(),
+        _all_tools(),
+        None,
+    )
+
+    assert llm.calls == 0
+    assert [name for name, _ in kernel.executed] == [
+        "obsidian_list_vaults",
+        "obsidian_append_note",
+    ]
+    append = kernel.executed[1][1]
+    assert append["path"] == "Projects/Friday Test.md"
+    assert append["text"] == ("## Проверка дополнения\n\nЭтот текст был добавлен отдельной командой")
+    assert str(append["operation_id"]).startswith("obsop_")
+    assert result["_obsidian_owned"] is True
+    assert result["tools_used"] == ["obsidian_list_vaults", "obsidian_append_note"]
 
 
 @pytest.mark.asyncio

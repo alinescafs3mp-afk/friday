@@ -6,9 +6,12 @@ import hashlib
 import heapq
 import re
 import threading
+import unicodedata
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import UTC, date, datetime
 from pathlib import PurePosixPath
+
+from friday.morphology import LEXICAL_MIN_STEM_INPUT, stem
 
 from .contracts import (
     IdempotencyConflictError,
@@ -31,6 +34,7 @@ from .contracts import (
     validate_revision,
 )
 from .frontmatter import parse_frontmatter, set_frontmatter_properties
+from .structured_notes import append_section_item
 from .vault_store import VaultFile, VaultStore
 
 _MAX_QUERY_CHARS = 1_000
@@ -43,6 +47,56 @@ _OPERATION_MARKER = re.compile(
     r'arguments="(?P<arguments>[0-9a-f]{64})" -->'
 )
 _DAILY_TOKEN = re.compile(r"YYYY|YY|MM|DD")
+_SEARCH_STOPWORDS = frozenset(
+    {
+        "в",
+        "где",
+        "и",
+        "из",
+        "которую",
+        "который",
+        "мы",
+        "на",
+        "найди",
+        "о",
+        "об",
+        "по",
+        "примерно",
+        "про",
+        "что",
+        "я",
+    }
+)
+_SEMANTIC_GROUPS = (
+    frozenset({"документ", "файл", "заметк", "материал"}),
+    frozenset({"поиск", "выдач", "наход", "индекс"}),
+    frozenset({"список", "набор", "кандидат", "пул", "выборк"}),
+    frozenset({"маленьк", "огранич", "недостат", "коротк", "узк"}),
+    frozenset({"стар", "давн", "архивн"}),
+    frozenset({"исчез", "непопад", "пропуск", "теря"}),
+)
+_EARLY_MONTH = re.compile(
+    r"\b(?:в\s+)?начал\w*\s+"
+    r"(?P<month>январ\w*|феврал\w*|март\w*|апрел\w*|ма[йя]\w*|июн\w*|"
+    r"июл\w*|август\w*|сентябр\w*|октябр\w*|ноябр\w*|декабр\w*)\s+"
+    r"(?P<year>20\d{2})",
+    re.IGNORECASE,
+)
+_MONTHS = {
+    "январ": 1,
+    "феврал": 2,
+    "март": 3,
+    "апрел": 4,
+    "май": 5,
+    "мая": 5,
+    "июн": 6,
+    "июл": 7,
+    "август": 8,
+    "сентябр": 9,
+    "октябр": 10,
+    "ноябр": 11,
+    "декабр": 12,
+}
 
 
 class ObsidianService:
@@ -85,11 +139,19 @@ class ObsidianService:
         terms = tuple(dict.fromkeys(part for part in re.findall(r"\w+", folded_query) if part))
         if len(terms) > _MAX_QUERY_TERMS:
             raise ValueError(f"search query must contain at most {_MAX_QUERY_TERMS} distinct terms")
+        query_features = _semantic_features(folded_query)
+        date_window = _approximate_date_window(folded_query)
 
         def candidates() -> Iterator[NoteSearchResult]:
             for stored in self.store.iter_markdown_files():
                 note = _note_document(stored)
-                result = _search_match(note, folded_query, terms)
+                result = _search_match(
+                    note,
+                    folded_query,
+                    terms,
+                    query_features=query_features,
+                    date_window=date_window,
+                )
                 if result is not None:
                     yield result
 
@@ -231,12 +293,81 @@ class ObsidianService:
             operation_id=None,
         )
 
+    def append_section(
+        self,
+        path: str | PurePosixPath,
+        section: str,
+        item: str,
+        *,
+        operation_id: str,
+        expected_revision: str | None = None,
+        create_if_missing: bool = False,
+    ) -> NoteWriteResult:
+        """Idempotently add one item under one exact Markdown section."""
+
+        note_path = self._note_path(path)
+        marker_payload = _section_marker_payload(section, item)
+        operation_digest = _operation_digest(operation_id)
+        arguments_digest = _text_digest(marker_payload)
+        marker = _marker("append", operation_digest, arguments_digest)
+        with self._lock:
+            try:
+                existing = self.store.read_text(note_path)
+            except NoteNotFoundError:
+                if not create_if_missing:
+                    raise
+                if expected_revision is not None:
+                    raise RevisionConflictError(expected_revision, None) from None
+                edit = append_section_item("", section, item)
+                rendered = _append_visible_text(edit.content, marker)
+                self.store.validate_text_size(rendered)
+                written = self.store.write_text(note_path, rendered, create_only=True)
+                return _write_result(
+                    written,
+                    previous=None,
+                    created=True,
+                    applied=True,
+                    operation_id=operation_id,
+                )
+            replay = _find_operation(existing.text(), operation_id, method="append")
+            if replay is not None:
+                if replay != arguments_digest:
+                    raise IdempotencyConflictError(
+                        "append-section operation ID was reused with different arguments"
+                    )
+                return _write_result(
+                    existing,
+                    previous=existing.revision,
+                    created=False,
+                    applied=False,
+                    operation_id=operation_id,
+                )
+            _assert_expected(existing.revision, expected_revision)
+            edit = append_section_item(existing.text(), section, item)
+            rendered = _append_visible_text(edit.content, marker)
+            self.store.validate_text_size(rendered)
+            written = self.store.write_text(
+                note_path,
+                rendered,
+                expected_revision=existing.revision,
+            )
+        return _write_result(
+            written,
+            previous=existing.revision,
+            created=False,
+            applied=True,
+            operation_id=operation_id,
+        )
+
     def daily_note(
         self,
         day: date | datetime | None = None,
         *,
         content: str = "",
+        section: str | None = None,
+        item: str | None = None,
         operation_id: str | None = None,
+        expected_revision: str | None = None,
     ) -> NoteWriteResult:
         selected = day or self._clock()
         if isinstance(selected, datetime):
@@ -249,6 +380,22 @@ class ObsidianService:
         if not path.casefold().endswith(".md"):
             path += ".md"
         note_path = self._note_path(path)
+
+        if (section is None) != (item is None):
+            raise ValueError("daily note section and item must be supplied together")
+        if section is not None and item is not None:
+            if content:
+                raise ValueError("daily note accepts either content or a structured section item")
+            if operation_id is None:
+                raise InvalidOperationIdError("operation_id is required for a daily-note section")
+            return self.append_section(
+                note_path,
+                section,
+                item,
+                operation_id=operation_id,
+                expected_revision=expected_revision,
+                create_if_missing=True,
+            )
 
         with self._lock:
             try:
@@ -313,6 +460,9 @@ def _search_match(
     note: NoteDocument,
     folded_query: str,
     terms: tuple[str, ...],
+    *,
+    query_features: frozenset[str] = frozenset(),
+    date_window: tuple[date, date] | None = None,
 ) -> NoteSearchResult | None:
     folded_path = note.path.removesuffix(".md").casefold()
     folded_title = note.title.casefold()
@@ -336,6 +486,20 @@ def _search_match(
         if "lexical" not in channels:
             channels.append("lexical")
         score += float(term_hits)
+    note_features = _semantic_features(f"{note.path} {note.title} {note.body}")
+    semantic_overlap = query_features & note_features
+    if semantic_overlap:
+        coverage = len(semantic_overlap) / max(1, len(query_features))
+        # A single ordinary word remains lexical evidence.  Two independent
+        # concepts or strong coverage make the approximate lane explicit.
+        if len(semantic_overlap) >= 2 or coverage >= 0.6:
+            channels.append("semantic")
+            score += 18.0 * coverage + 2.5 * len(semantic_overlap)
+    if date_window is not None:
+        created = _created_property(note)
+        if created is not None and date_window[0] <= created <= date_window[1]:
+            channels.append("property_date_created")
+            score += 40.0
     if not channels:
         return None
     return NoteSearchResult(
@@ -347,6 +511,41 @@ def _search_match(
         match_channels=tuple(channels),
         modified_at=note.modified_at,
     )
+
+
+def _semantic_features(text: str) -> frozenset[str]:
+    tokens: set[str] = set()
+    for raw in re.findall(r"[\w-]+", unicodedata.normalize("NFC", text).casefold()):
+        if len(raw) < 2 or raw in _SEARCH_STOPWORDS:
+            continue
+        tokens.add(stem(raw, LEXICAL_MIN_STEM_INPUT))
+    features = set(tokens)
+    for index, group in enumerate(_SEMANTIC_GROUPS):
+        if tokens & group:
+            features.add(f"$concept:{index}")
+    return frozenset(features)
+
+
+def _approximate_date_window(query: str) -> tuple[date, date] | None:
+    match = _EARLY_MONTH.search(query)
+    if match is None:
+        return None
+    raw_month = match.group("month").casefold().replace("ё", "е")
+    month = next((number for prefix, number in _MONTHS.items() if raw_month.startswith(prefix)), None)
+    if month is None:
+        return None
+    year = int(match.group("year"))
+    return date(year, month, 1), date(year, month, 10)
+
+
+def _created_property(note: NoteDocument) -> date | None:
+    value = note.properties.get("created")
+    if not isinstance(value, PropertyValue):
+        return None
+    raw = value.value
+    if isinstance(raw, datetime):
+        return raw.date()
+    return raw if isinstance(raw, date) else None
 
 
 def _bounded_properties(
@@ -457,6 +656,12 @@ def _text_digest(text: str) -> str:
     except UnicodeEncodeError as exc:
         raise ValueError("note text must be valid UTF-8") from exc
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _section_marker_payload(section: str, item: str) -> str:
+    if not isinstance(section, str) or not isinstance(item, str):
+        raise TypeError("section and item must be text")
+    return f"section:{len(section)}:{section}item:{len(item)}:{item}"
 
 
 def _marker(method: str, operation_digest: str, arguments_digest: str) -> str:

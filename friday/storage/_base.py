@@ -138,7 +138,10 @@ LOGGER = logging.getLogger("friday.storage")
 # 35 — isolated Syncthing/Obsidian identity, onboarding, operation-delivery and
 # conflict records. Note bodies remain in the contained per-user vault checkout;
 # API keys remain in private Syncthing config files and never enter SQLite.
-SCHEMA_VERSION = 35
+# 36 — stable Obsidian note bindings, revision-aware lexical/metadata projection,
+# link graph and expiring continuation state.  The released schema-35 operation
+# table is rebuilt only after its exact old shape has passed fail-closed validation.
+SCHEMA_VERSION = 36
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно

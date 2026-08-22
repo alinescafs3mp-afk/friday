@@ -10,6 +10,7 @@ import ipaddress
 import os
 import platform
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypeVar, overload
@@ -887,6 +888,7 @@ class FridaySettings:
     # not spawn a sync daemon or create plaintext vaults without owner consent.
     obsidian_enabled: bool = False
     obsidian_root: Path | None = None
+    obsidian_vault_name: str = "Friday"
     obsidian_syncthing_binary: str = "/usr/local/bin/syncthing"
     obsidian_syncthing_min_version: str = "2.1.3"
     obsidian_syncthing_max_version: str = "2.2.0"
@@ -1052,6 +1054,7 @@ class FridaySettings:
             "obsidian": {
                 "enabled": self.obsidian_enabled,
                 "root": str(self.obsidian_effective_root),
+                "vault_name": self.obsidian_vault_name,
                 "transport_mode": self.obsidian_transport_mode,
                 "public_setup_configured": bool(self.obsidian_public_base_url),
                 "syncthing_version_range": [
@@ -1464,6 +1467,7 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         obsidian_root=Path(env("FRIDAY_OBSIDIAN_ROOT", "").strip() or home / "data" / "obsidian")
         .expanduser()
         .absolute(),
+        obsidian_vault_name=env("FRIDAY_OBSIDIAN_VAULT_NAME", "Friday").strip(),
         obsidian_syncthing_binary=env("FRIDAY_SYNCTHING_BINARY", "/usr/local/bin/syncthing").strip(),
         obsidian_syncthing_min_version=env("FRIDAY_SYNCTHING_MIN_VERSION", "2.1.3").strip(),
         obsidian_syncthing_max_version=env("FRIDAY_SYNCTHING_MAX_VERSION", "2.2.0").strip(),
@@ -1857,6 +1861,16 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
     if settings.mcp_enabled:
         errors.extend(_mcp_workspace_errors(settings))
     if settings.obsidian_enabled:
+        vault_name = settings.obsidian_vault_name
+        if (
+            not vault_name
+            or vault_name != unicodedata.normalize("NFC", vault_name).strip()
+            or len(vault_name) > 100
+            or vault_name in {".", ".."}
+            or any(character in "/\\\r\n\x00" for character in vault_name)
+            or any(ord(character) < 32 for character in vault_name)
+        ):
+            errors.append("FRIDAY_OBSIDIAN_VAULT_NAME must be one safe NFC directory segment")
         binary = Path(settings.obsidian_syncthing_binary)
         if not binary.is_absolute() or binary.is_symlink() or not binary.is_file():
             errors.append("FRIDAY_SYNCTHING_BINARY must be an existing absolute file")

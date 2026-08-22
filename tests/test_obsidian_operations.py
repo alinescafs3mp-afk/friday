@@ -121,6 +121,88 @@ def test_create_persists_exact_state_chain_and_local_only_truth(
     }
 
 
+def test_workflow_delete_tracks_and_delivers_the_exact_syncthing_tombstone(
+    storage: FridayStorage,
+    tmp_path: Path,
+) -> None:
+    delivered = VaultDeliveryState(
+        local_write_complete=True,
+        server_scan_complete=True,
+        android_connected=True,
+        android_completion=100.0,
+        android_received=True,
+        obsidian_opened=False,
+    )
+    sync = FakeSync(observed=delivered)
+    operations, notes, bundle = _make_operations(storage, tmp_path, "alice", sync=sync)
+    created = notes.create_note("Scratch/Delete Me.md", "temporary")
+
+    committed = operations.delete_note(
+        "delete-delivery",
+        created.path,
+        expected_revision=created.revision,
+    )
+    refreshed = operations.refresh_delivery("delete-delivery")
+
+    assert committed.status == "committed"
+    assert refreshed.status == "delivered"
+    assert refreshed.delivery == delivered
+    assert sync.requests
+    tombstones = [request for request in sync.requests if request.deleted]
+    assert tombstones
+    assert tombstones[-1] == NoteSyncRequest(
+        owner_id="alice",
+        vault_id=bundle["vault"]["id"],
+        folder_id="friday-alice",
+        note_path="Scratch/Delete Me.md",
+        revision=created.revision,
+        deleted=True,
+    )
+
+
+def test_move_delivery_waits_for_every_changed_path(
+    storage: FridayStorage,
+    tmp_path: Path,
+) -> None:
+    delivered = VaultDeliveryState(
+        local_write_complete=True,
+        server_scan_complete=True,
+        android_connected=True,
+        android_completion=100.0,
+        android_received=True,
+        obsidian_opened=False,
+    )
+
+    @dataclass
+    class PerPathSync(FakeSync):
+        pending_path: str = "Notes/Search.md"
+
+        def observe_delivery(self, request: NoteSyncRequest) -> VaultDeliveryState:
+            return VaultDeliveryState.local_only() if request.note_path == self.pending_path else delivered
+
+    sync = PerPathSync()
+    operations, notes, _bundle = _make_operations(storage, tmp_path, "alice", sync=sync)
+    target = notes.create_note("Projects/Friday.md", "target")
+    notes.create_note("Notes/Search.md", "[[Projects/Friday]]")
+    moved = operations.move_note(
+        "move-delivery",
+        target.path,
+        "Architecture/Friday.md",
+        expected_revision=target.revision,
+    )
+
+    pending = operations.refresh_delivery(moved.operation_id)
+    assert pending.status == "scan_pending"
+    assert pending.delivery.android_received is False
+    assert {request.note_path for request in sync.requests} == set(moved.changed_paths)
+    assert any(request.note_path == target.path and request.deleted for request in sync.requests)
+
+    sync.pending_path = ""
+    completed = operations.refresh_delivery(moved.operation_id)
+    assert completed.status == "delivered"
+    assert completed.delivery == delivered
+
+
 def test_identical_canonical_arguments_replay_without_a_second_mutation(
     storage: FridayStorage,
     tmp_path: Path,
@@ -445,6 +527,32 @@ def test_daily_note_is_frozen_to_one_day_and_replayed_once(
     assert replay.replayed is True
     assert replay.revision == first.revision
     assert notes.read_note(first.path).body.count("Итог дня") == 1
+
+
+def test_structured_daily_operation_is_durable_and_exactly_once(
+    storage: FridayStorage,
+    tmp_path: Path,
+) -> None:
+    operations, notes, _ = _make_operations(storage, tmp_path, "alice")
+
+    first = operations.daily_note(
+        "battery-daily",
+        date(2026, 8, 22),
+        section="Friday",
+        item="- Проверена интеграция с Obsidian",
+    )
+    replay = operations.daily_note(
+        "battery-daily",
+        date(2026, 8, 22),
+        section="Friday",
+        item="- Проверена интеграция с Obsidian",
+    )
+
+    assert replay.replayed is True
+    assert replay.revision == first.revision
+    body = notes.read_note(first.path).body
+    assert body.count("## Friday") == 1
+    assert body.count("- Проверена интеграция с Obsidian") == 1
 
 
 def test_implicit_daily_day_remains_frozen_when_retry_crosses_midnight(

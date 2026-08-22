@@ -273,6 +273,31 @@ async def test_telegram_bridge_exposes_modes_inbox_and_feedback_callbacks(tmp_pa
             "inbox:promote:inbox_abc.4242",
             "inbox:ignore:inbox_abc.4242",
         }
+        open_markup = bridge._response_reply_markup(
+            {
+                "message_id": "msg_open",
+                "obsidian_open_url": (
+                    "https://friday.example/obsidian/open#vault=Friday-Test&file=Projects%2FFriday+Test.md"
+                ),
+            },
+            external_user_id="4242",
+        )
+        assert open_markup["inline_keyboard"][-1] == [
+            {
+                "text": "Open in Obsidian",
+                "url": (
+                    "https://friday.example/obsidian/open#vault=Friday-Test&file=Projects%2FFriday+Test.md"
+                ),
+            }
+        ]
+        unsafe_markup = bridge._response_reply_markup(
+            {
+                "message_id": "msg_unsafe",
+                "obsidian_open_url": "https://evil.example/not-obsidian#vault=x&file=Safe.md",
+            },
+            external_user_id="4242",
+        )
+        assert all("url" not in button for row in unsafe_markup["inline_keyboard"] for button in row)
 
         backend_calls_before = len(backend.calls)
         telegram_calls_before = len(telegram.calls)

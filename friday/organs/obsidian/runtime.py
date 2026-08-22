@@ -13,7 +13,7 @@ from contextlib import suppress
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .contracts import (
@@ -25,7 +25,13 @@ from .contracts import (
     PropertyValue,
     VaultDeliveryState,
 )
-from .operations import DurableNoteResult, NoteSyncRequest, ObsidianOperationService
+from .indexing import IncrementalIndexResult, refresh_incremental_index
+from .operations import (
+    DurableNoteResult,
+    DurableWorkflowResult,
+    NoteSyncRequest,
+    ObsidianOperationService,
+)
 from .service import ObsidianService
 from .syncthing import (
     SyncthingError,
@@ -34,6 +40,7 @@ from .syncthing import (
     SyncthingProfileSpec,
 )
 from .vault_store import VaultStore
+from .workflows import ObsidianWorkflowService
 
 _VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 _DELIVERY_FILE = "Friday Connection Test.md"
@@ -59,6 +66,8 @@ class _SyncthingNoteSyncAdapter:
         self._client.scan_folder(request.folder_id, subpath=request.note_path)
 
     def observe_delivery(self, request: NoteSyncRequest) -> VaultDeliveryState:
+        if request.deleted:
+            return self._observe_deletion(request)
         try:
             current = self._store.read(request.note_path)
         except (ObsidianNoteError, ValueError):
@@ -125,6 +134,61 @@ class _SyncthingNoteSyncAdapter:
             android_received=received,
             obsidian_opened=self._obsidian_opened,
         )
+
+    def _observe_deletion(self, request: NoteSyncRequest) -> VaultDeliveryState:
+        if self._store.exists(request.note_path):
+            return VaultDeliveryState.local_only()
+        file_state_before = self._client.file_status(request.folder_id, request.note_path)
+        connected = False
+        completion = None
+        if self._device_id is not None:
+            connected = any(
+                item.device_id == self._device_id and item.connected and not item.paused
+                for item in self._client.connections()
+            )
+            completion = self._client.remote_completion(request.folder_id, self._device_id)
+        file_state = self._client.file_status(request.folder_id, request.note_path)
+        if (
+            self._store.exists(request.note_path)
+            or file_state != file_state_before
+            or not _syncthing_deletion_is_scanned(file_state)
+        ):
+            return VaultDeliveryState.local_only()
+        received = bool(
+            self._device_id is not None
+            and connected
+            and completion is not None
+            and completion.is_complete
+            and str(completion.remote_state or "").casefold() == "valid"
+        )
+        return VaultDeliveryState(
+            local_write_complete=True,
+            server_scan_complete=True,
+            android_connected=connected,
+            android_completion=(None if completion is None else completion.completion_percent),
+            android_received=received,
+            obsidian_opened=self._obsidian_opened,
+        )
+
+
+def _syncthing_deletion_is_scanned(state: Any) -> bool:
+    local = state.local
+    global_file = state.global_file
+    return bool(
+        local is not None
+        and global_file is not None
+        and local.version == global_file.version
+        and local.deleted
+        and global_file.deleted
+        and not local.invalid
+        and not global_file.invalid
+        and not local.ignored
+        and not global_file.ignored
+        and not local.must_rescan
+        and not global_file.must_rescan
+        and not local.no_permissions
+        and not global_file.no_permissions
+    )
 
 
 class ObsidianCompatibilityError(RuntimeError):
@@ -193,6 +257,146 @@ def _search_result(item: NoteSearchResult) -> dict[str, Any]:
     }
 
 
+def _search_index_coverage(index: Mapping[str, Any] | None, *, revision: str, path: str) -> str:
+    """Describe only the revision-pinned projection used for search diagnostics."""
+
+    if index is None:
+        return "none"
+    if (
+        str(index.get("state") or "") != "ready"
+        or str(index.get("revision") or "") != revision
+        or str(index.get("path") or "") != path
+    ):
+        return "none"
+    if (
+        str(index.get("metadata_coverage") or "") == "complete"
+        and str(index.get("body_coverage") or "") == "complete"
+    ):
+        return "complete"
+    return "partial"
+
+
+def _aggregate_search_index_coverage(
+    storage: Any,
+    owner_id: str,
+    vault_id: str,
+) -> dict[str, Any]:
+    bindings = storage.list_obsidian_note_bindings(
+        owner_id,
+        vault_id=vault_id,
+        limit=5_000,
+    )
+    states = [
+        _search_index_coverage(
+            storage.get_obsidian_note_index(
+                owner_id,
+                str(binding["id"]),
+                include_stale=True,
+            ),
+            revision=str(binding["current_revision"]),
+            path=str(binding["current_path"]),
+        )
+        for binding in bindings
+    ]
+    complete = sum(state == "complete" for state in states)
+    indexed = sum(state != "none" for state in states)
+    # Exactly hitting the bounded binding read cannot prove that the vault has
+    # no additional notes, so report partial coverage conservatively.
+    truncated = len(bindings) == 5_000
+    state = "complete" if complete == len(bindings) and not truncated else "partial"
+    return {
+        "state": state,
+        "known_notes": len(bindings),
+        "indexed_notes": indexed,
+        "complete_notes": complete,
+        "semantic_lane": "local_approximate",
+    }
+
+
+def _deleted_search_results(
+    storage: Any,
+    owner_id: str,
+    vault_id: str,
+    query: str,
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    query_terms = set(re.findall(r"[\w-]+", query.casefold()))
+    if not query_terms:
+        return []
+    bindings = storage.list_obsidian_note_bindings(
+        owner_id,
+        vault_id=vault_id,
+        include_deleted=True,
+        limit=5_000,
+    )
+    active_paths = {str(binding["current_path"]) for binding in bindings if binding.get("deleted_at") is None}
+    matches: list[dict[str, Any]] = []
+    for binding in bindings:
+        if binding.get("deleted_at") is None:
+            continue
+        path = str(binding["current_path"])
+        if path in active_paths:
+            continue
+        searchable = path.casefold().replace("/", " ").replace(".", " ")
+        target_terms = set(re.findall(r"[\w-]+", searchable))
+        overlap = query_terms & target_terms
+        if not overlap and query.casefold().strip() not in searchable:
+            continue
+        exact_identity_match = query_terms <= target_terms
+        matches.append(
+            {
+                "path": path,
+                "title": PurePosixPath(path).stem,
+                "revision": str(binding["current_revision"]),
+                "modified_at": str(binding["updated_at"]),
+                "excerpt": "Ранее известная заметка с этой identity была удалена.",
+                "score": float((1_000 if exact_identity_match else 0) + (len(overlap) or 1)),
+                "match_channels": ["tombstone"],
+            }
+        )
+    matches.sort(key=lambda item: (-float(item["score"]), str(item["path"]).casefold()))
+    return matches[:limit]
+
+
+def _annotate_search_results(
+    storage: Any,
+    owner_id: str,
+    vault_id: str,
+    matches: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    bindings = storage.list_obsidian_note_bindings(
+        owner_id,
+        vault_id=vault_id,
+        include_deleted=True,
+        limit=5_000,
+    )
+    by_path = {str(item["current_path"]): item for item in bindings}
+    for match in matches:
+        if "tombstone" in match.get("match_channels", ()):
+            continue
+        binding = by_path.get(str(match["path"]))
+        if binding is None:
+            raise ValueError("search result has no current stable note binding")
+        index = storage.get_obsidian_note_index(
+            owner_id,
+            str(binding["id"]),
+            include_stale=True,
+        )
+        match.update(
+            {
+                "origin": str(binding["origin"]),
+                "ownership_mode": str(binding["ownership_mode"]),
+                "index_coverage": _search_index_coverage(
+                    index,
+                    revision=str(match["revision"]),
+                    path=str(match["path"]),
+                ),
+            }
+        )
+    return matches
+
+
 def _note_document(item: NoteDocument) -> dict[str, Any]:
     return {
         "path": item.path,
@@ -206,8 +410,34 @@ def _note_document(item: NoteDocument) -> dict[str, Any]:
     }
 
 
-def _operation_result(item: DurableNoteResult) -> dict[str, Any]:
-    return {
+def _operation_result(
+    item: DurableNoteResult | DurableWorkflowResult,
+    *,
+    open_uri: str | None = None,
+) -> dict[str, Any]:
+    if isinstance(item, DurableWorkflowResult):
+        return {
+            "operation_id": item.operation_id,
+            "method": item.method,
+            "status": item.status,
+            "path": item.path,
+            "revision": item.revision,
+            "previous_revision": item.previous_revision,
+            "changed_paths": list(item.changed_paths),
+            "tombstones": list(item.tombstones),
+            "applied": item.applied,
+            "replayed": item.replayed,
+            "open_uri": open_uri if item.revision is not None else None,
+            "delivery": {
+                "local_write_complete": item.delivery.local_write_complete,
+                "server_scan_complete": item.delivery.server_scan_complete,
+                "android_connected": item.delivery.android_connected,
+                "android_completion": item.delivery.android_completion,
+                "android_received": item.delivery.android_received,
+                "obsidian_opened": item.delivery.obsidian_opened,
+            },
+        }
+    result = {
         "operation_id": item.operation_id,
         "method": item.method,
         "status": item.status,
@@ -226,6 +456,9 @@ def _operation_result(item: DurableNoteResult) -> dict[str, Any]:
             "obsidian_opened": item.delivery.obsidian_opened,
         },
     }
+    if open_uri is not None:
+        result["open_uri"] = open_uri
+    return result
 
 
 def _daily_day(value: date | datetime | str | None) -> date | datetime | None:
@@ -282,6 +515,13 @@ class ObsidianRuntime:
     async def _owner_lock(self, owner_id: str) -> asyncio.Lock:
         async with self._locks_guard:
             return self._locks.setdefault(str(owner_id), asyncio.Lock())
+
+    def _open_uri(self, owner_id: str, path: str) -> str:
+        vault = self.storage.get_obsidian_vault(owner_id)
+        if vault is None:
+            raise ValueError("Obsidian vault is not configured")
+        alias = str(vault.get("android_vault_name") or "Friday")
+        return "obsidian://open?" + urllib.parse.urlencode({"vault": alias, "file": path})
 
     def _prototype(self, owner_id: str, *, profile_id: str | None = None) -> SyncthingProfileSpec:
         return SyncthingProfileSpec.for_owner(
@@ -425,6 +665,7 @@ class ObsidianRuntime:
 
     async def _start_locked(self, owner_id: str) -> dict[str, Any]:
         prototype = self._prototype(owner_id)
+        vault_name = str(self.settings.obsidian_vault_name)
         token = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
         expires_at = _iso(_now() + timedelta(seconds=self.settings.obsidian_pairing_ttl_sec))
@@ -435,10 +676,13 @@ class ObsidianRuntime:
                 database_root=str(prototype.data_root),
                 api_endpoint=prototype.gui_address,
                 api_key_ref=f"file:{prototype.config_file}#gui.apikey",
-                server_path=str(prototype.vault_root / "Friday"),
+                server_path=str(prototype.vault_root / vault_name),
                 folder_id=f"friday-{prototype.owner_fs_key.removeprefix('owner-')[:32]}",
                 setup_token_hash=token_hash,
                 expires_at=expires_at,
+                display_name=vault_name,
+                android_vault_name=vault_name,
+                android_path_hint=f"Documents/Obsidian/{vault_name}",
                 convention={"daily_folder": "Daily", "daily_format": "YYYY-MM-DD"},
                 max_profiles=self.settings.obsidian_max_profiles,
             )
@@ -1265,6 +1509,14 @@ class ObsidianRuntime:
             if state == "multiple_pending_devices"
             else []
         )
+        # `/obsidian` is the normal operational panel, so it must expose new
+        # conflict artifacts too, not only the separate diagnostics endpoint.
+        # Discovery is deliberately non-destructive: `_scan_conflicts` only
+        # records artifacts and never removes or rewrites either file.
+        if vault is not None:
+            with suppress(ObsidianNoteError, OSError, ValueError):
+                await asyncio.to_thread(self._scan_conflicts, owner_id)
+        conflicts = self.storage.list_obsidian_conflicts(owner_id, limit=20)
         result: dict[str, Any] = {
             "state": state,
             "message": message,
@@ -1303,8 +1555,55 @@ class ObsidianRuntime:
                 "state": str(device["state"]),
                 "last_seen_at": device["last_seen_at"],
             },
+            "operations": self._operation_panel_rows(owner_id),
+            "conflict_count": len(conflicts),
+            "conflicts": [
+                {
+                    "id": str(item["id"]),
+                    "canonical_path": str(item["canonical_path"]),
+                    "conflict_path": str(item["conflict_path"]),
+                    "detected_at": str(item["detected_at"]),
+                }
+                for item in conflicts
+            ],
         }
         return result
+
+    def _operation_panel_rows(self, owner_id: str) -> list[dict[str, Any]]:
+        """Project recent durable operation state without note content."""
+
+        projected: list[dict[str, Any]] = []
+        for row in self.storage.list_obsidian_operations(owner_id, limit=20):
+            if str(row.get("id") or "").startswith("verify:"):
+                continue
+            try:
+                result = json.loads(str(row.get("result_json") or "{}"))
+                delivery = json.loads(str(row.get("delivery_json") or "{}"))
+            except (json.JSONDecodeError, TypeError):
+                result, delivery = {}, {}
+            if not isinstance(result, Mapping):
+                result = {}
+            if not isinstance(delivery, Mapping):
+                delivery = {}
+            operation_id = str(row.get("id") or "")[:200]
+            path = str(result.get("path") or "")[:2_048]
+            revision = str(result.get("revision") or "")
+            projected.append(
+                {
+                    "operation_id": operation_id,
+                    "work_item_id": str(row.get("work_item_id") or "")[:200],
+                    "method": str(row.get("method") or "")[:64],
+                    "status": str(row.get("status") or "")[:64],
+                    "path": path,
+                    "revision": revision if re.fullmatch(r"[0-9a-f]{64}", revision) else "",
+                    "server_scan_complete": delivery.get("server_scan_complete") is True,
+                    "android_connected": delivery.get("android_connected") is True,
+                    "android_received": delivery.get("android_received") is True,
+                }
+            )
+            if len(projected) == 5:
+                break
+        return projected
 
     async def vaults(self, owner_id: str) -> list[dict[str, Any]]:
         vault = self.storage.get_obsidian_vault(owner_id)
@@ -1431,6 +1730,229 @@ class ObsidianRuntime:
             convention=ObsidianVaultConvention(**values),
         )
 
+    def _refresh_index(
+        self,
+        owner_id: str,
+        notes: ObsidianService | None = None,
+        *,
+        discovered_origin: str = "android",
+    ) -> IncrementalIndexResult:
+        vault = self.storage.get_obsidian_vault(owner_id)
+        if vault is None:
+            raise ValueError("Obsidian vault is not configured")
+        return refresh_incremental_index(
+            self.storage,
+            notes or self._note_service(owner_id),
+            owner_id=owner_id,
+            vault_id=str(vault["id"]),
+            discovered_origin=discovered_origin,
+        )
+
+    async def search_index_coverage(self, owner_id: str) -> dict[str, Any]:
+        """Return bounded, owner-scoped coverage facts for the latest search."""
+
+        vault = self.storage.get_obsidian_vault(owner_id)
+        if vault is None:
+            raise ValueError("Obsidian vault is not configured")
+        return await asyncio.to_thread(
+            _aggregate_search_index_coverage,
+            self.storage,
+            owner_id,
+            str(vault["id"]),
+        )
+
+    def _persist_search_context(
+        self,
+        owner_id: str,
+        context_key: str,
+        query: str,
+        matches: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        vault = self.storage.get_obsidian_vault(owner_id)
+        if vault is None:
+            raise ValueError("Obsidian vault is not configured")
+        bindings = self.storage.list_obsidian_note_bindings(
+            owner_id,
+            vault_id=str(vault["id"]),
+            limit=5_000,
+        )
+        by_path = {str(item["current_path"]): item for item in bindings}
+        candidates: list[dict[str, Any]] = []
+        for match in matches:
+            if "tombstone" in match.get("match_channels", ()):
+                continue
+            binding = by_path.get(str(match.get("path") or ""))
+            if binding is None:
+                raise ValueError("search result has no current stable note binding")
+            candidates.append(
+                {
+                    "binding_id": str(binding["id"]),
+                    "observed_revision": str(match["revision"]),
+                    "observed_path": str(match["path"]),
+                    "title": str(match["title"]),
+                    "score": float(match["score"]),
+                    "match_channels": list(match["match_channels"]),
+                    "excerpt": str(match["excerpt"]),
+                }
+            )
+        candidate_set = self.storage.create_obsidian_candidate_set(
+            owner_id,
+            vault_id=str(vault["id"]),
+            query={"text": query},
+            candidates=candidates,
+            coverage={
+                "lexical": "complete",
+                "semantic": "local_approximate",
+                "indexed_notes": len(bindings),
+            },
+            ttl_seconds=900,
+        )
+        return self.storage.upsert_obsidian_active_frame(
+            owner_id,
+            vault_id=str(vault["id"]),
+            frame_id=context_key,
+            candidate_set_id=str(candidate_set["id"]),
+            frame={
+                "kind": "search",
+                "query": query,
+                "used_paths": [
+                    str(match["path"])
+                    for match in matches
+                    if "tombstone" not in match.get("match_channels", ())
+                ],
+            },
+            ttl_seconds=900,
+        )
+
+    def _record_active_note(
+        self,
+        owner_id: str,
+        context_key: str,
+        path: str,
+        operation_id: str,
+        method: str,
+        replay: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        vault = self.storage.get_obsidian_vault(owner_id)
+        if vault is None:
+            raise ValueError("Obsidian vault is not configured")
+        binding = next(
+            (
+                item
+                for item in self.storage.list_obsidian_note_bindings(
+                    owner_id,
+                    vault_id=str(vault["id"]),
+                    limit=5_000,
+                )
+                if str(item["current_path"]) == path
+            ),
+            None,
+        )
+        if binding is None:
+            raise ValueError("mutated note has no current stable binding")
+        existing = self.storage.get_obsidian_active_frame(
+            owner_id,
+            context_key,
+            include_inactive=True,
+        )
+        used_paths: list[str] = []
+        if existing is not None:
+            try:
+                frame_payload = json.loads(str(existing.get("frame_json") or "{}"))
+            except json.JSONDecodeError:
+                frame_payload = {}
+            if isinstance(frame_payload, Mapping):
+                raw_paths = frame_payload.get("used_paths")
+                if isinstance(raw_paths, list):
+                    used_paths.extend(str(item) for item in raw_paths if isinstance(item, str))
+        used_paths.append(path)
+        return self.storage.upsert_obsidian_active_frame(
+            owner_id,
+            vault_id=str(vault["id"]),
+            frame_id=context_key,
+            active_binding_id=str(binding["id"]),
+            last_operation_id=operation_id,
+            frame={
+                "kind": "mutation",
+                "method": method,
+                "path": path,
+                "used_paths": list(dict.fromkeys(used_paths))[-100:],
+                "replay": dict(replay),
+            },
+            ttl_seconds=24 * 60 * 60,
+        )
+
+    def _record_pending_operation(
+        self,
+        owner_id: str,
+        context_key: str,
+        operation_id: str,
+        method: str,
+        replay: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        vault = self.storage.get_obsidian_vault(owner_id)
+        if vault is None:
+            raise ValueError("Obsidian vault is not configured")
+        existing = self.storage.get_obsidian_active_frame(
+            owner_id,
+            context_key,
+        )
+        frame_payload: dict[str, Any] = {}
+        if existing is not None:
+            try:
+                decoded = json.loads(str(existing.get("frame_json") or "{}"))
+            except json.JSONDecodeError:
+                decoded = {}
+            if isinstance(decoded, dict):
+                frame_payload = decoded
+        return self.storage.upsert_obsidian_active_frame(
+            owner_id,
+            vault_id=str(vault["id"]),
+            frame_id=context_key,
+            active_binding_id=(
+                str(existing["active_binding_id"])
+                if existing is not None and existing.get("active_binding_id")
+                else None
+            ),
+            candidate_set_id=(
+                str(existing["candidate_set_id"])
+                if existing is not None and existing.get("candidate_set_id")
+                else None
+            ),
+            selected_binding_id=(
+                str(existing["selected_binding_id"])
+                if existing is not None and existing.get("selected_binding_id")
+                else None
+            ),
+            frame={
+                "kind": "pending_mutation",
+                "method": method,
+                "pending_operation_id": operation_id,
+                "replay": dict(replay),
+                "used_paths": frame_payload.get("used_paths", []),
+            },
+            ttl_seconds=24 * 60 * 60,
+        )
+
+    @staticmethod
+    def _mutation_replay(
+        method: str,
+        args: tuple[Any, ...],
+        kwargs: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        positional = {
+            "create_note": ("path", "content"),
+            "append_note": ("path", "text"),
+            "set_properties": ("path", "properties"),
+            "daily_note": ("day",),
+        }.get(method)
+        if positional is None or len(args) > len(positional):
+            raise ValueError("unsupported Obsidian mutation replay")
+        replay: dict[str, Any] = {"method": method}
+        replay.update({name: _json_value(value) for name, value in zip(positional, args, strict=False)})
+        replay.update({str(name): _json_value(value) for name, value in kwargs.items() if value is not None})
+        return replay
+
     async def _operation_service(
         self,
         owner_id: str,
@@ -1469,10 +1991,42 @@ class ObsidianRuntime:
         owner_id: str,
         query: str,
         limit: int = 20,
+        *,
+        context_key: str | None = None,
     ) -> list[dict[str, Any]]:
-        service = await self._operation_service(owner_id, synchronize=False)
-        items = await asyncio.to_thread(service.search_notes, query, limit=limit)
-        return [_search_result(item) for item in items]
+        notes = await asyncio.to_thread(self._note_service, owner_id)
+        await asyncio.to_thread(self._refresh_index, owner_id, notes)
+        items = await asyncio.to_thread(notes.search_notes, query, limit=limit)
+        rendered = [_search_result(item) for item in items]
+        vault = self.storage.get_obsidian_vault(owner_id)
+        if vault is None:
+            raise ValueError("Obsidian vault is not configured")
+        deleted = await asyncio.to_thread(
+            _deleted_search_results,
+            self.storage,
+            owner_id,
+            str(vault["id"]),
+            query,
+            limit=limit,
+        )
+        if deleted and (not rendered or float(deleted[0]["score"]) >= 1_000):
+            rendered = deleted
+        rendered = await asyncio.to_thread(
+            _annotate_search_results,
+            self.storage,
+            owner_id,
+            str(vault["id"]),
+            rendered,
+        )
+        if context_key:
+            await asyncio.to_thread(
+                self._persist_search_context,
+                owner_id,
+                context_key,
+                query,
+                rendered,
+            )
+        return rendered
 
     async def read_note(self, owner_id: str, path: str) -> dict[str, Any]:
         service = await self._operation_service(owner_id, synchronize=False)
@@ -1485,12 +2039,24 @@ class ObsidianRuntime:
         method: str,
         operation_id: str,
         *args: Any,
+        context_key: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         lock = await self._owner_lock(owner_id)
         async with lock:
             service = await self._operation_service(owner_id, synchronize=True)
             mutation = getattr(service, method)
+            replay = self._mutation_replay(method, args, kwargs)
+            if context_key:
+                with suppress(Exception):
+                    await asyncio.to_thread(
+                        self._record_pending_operation,
+                        owner_id,
+                        context_key,
+                        operation_id,
+                        method,
+                        replay,
+                    )
             result = await asyncio.to_thread(
                 mutation,
                 operation_id,
@@ -1502,7 +2068,32 @@ class ObsidianRuntime:
                 result = await asyncio.to_thread(service.refresh_delivery, operation_id)
             if result.replayed != replayed:
                 result = replace(result, replayed=replayed)
-            return _operation_result(result)
+            try:
+                notes = await asyncio.to_thread(self._note_service, owner_id)
+                await asyncio.to_thread(
+                    self._refresh_index,
+                    owner_id,
+                    notes,
+                    discovered_origin="friday",
+                )
+                if context_key:
+                    await asyncio.to_thread(
+                        self._record_active_note,
+                        owner_id,
+                        context_key,
+                        result.path,
+                        result.operation_id,
+                        method,
+                        replay,
+                    )
+            except Exception:
+                # The durable mutation receipt remains authoritative.  A
+                # later index/reconcile tick can rebuild continuation state.
+                pass
+            return _operation_result(
+                result,
+                open_uri=self._open_uri(owner_id, result.path),
+            )
 
     async def create_note(
         self,
@@ -1513,6 +2104,7 @@ class ObsidianRuntime:
         *,
         properties: Mapping[str, Any] | None = None,
         work_item_id: str | None = None,
+        context_key: str | None = None,
     ) -> dict[str, Any]:
         return await self._run_mutation(
             owner_id,
@@ -1522,6 +2114,7 @@ class ObsidianRuntime:
             content,
             properties=_property_inputs(properties),
             work_item_id=work_item_id,
+            context_key=context_key,
         )
 
     async def append_note(
@@ -1533,6 +2126,7 @@ class ObsidianRuntime:
         *,
         expected_revision: str | None = None,
         work_item_id: str | None = None,
+        context_key: str | None = None,
     ) -> dict[str, Any]:
         return await self._run_mutation(
             owner_id,
@@ -1542,6 +2136,7 @@ class ObsidianRuntime:
             text,
             expected_revision=expected_revision,
             work_item_id=work_item_id,
+            context_key=context_key,
         )
 
     async def set_properties(
@@ -1553,6 +2148,7 @@ class ObsidianRuntime:
         *,
         expected_revision: str | None = None,
         work_item_id: str | None = None,
+        context_key: str | None = None,
     ) -> dict[str, Any]:
         return await self._run_mutation(
             owner_id,
@@ -1562,6 +2158,7 @@ class ObsidianRuntime:
             _property_inputs(properties),
             expected_revision=expected_revision,
             work_item_id=work_item_id,
+            context_key=context_key,
         )
 
     async def daily_note(
@@ -1571,8 +2168,11 @@ class ObsidianRuntime:
         day: date | datetime | str | None = None,
         *,
         content: str = "",
+        section: str | None = None,
+        item: str | None = None,
         expected_revision: str | None = None,
         work_item_id: str | None = None,
+        context_key: str | None = None,
     ) -> dict[str, Any]:
         return await self._run_mutation(
             owner_id,
@@ -1580,9 +2180,68 @@ class ObsidianRuntime:
             operation_id,
             _daily_day(day),
             content=content,
+            section=section,
+            item=item,
             expected_revision=expected_revision,
             work_item_id=work_item_id,
+            context_key=context_key,
         )
+
+    async def workflow_read(
+        self,
+        owner_id: str,
+        payload: Mapping[str, object],
+        *,
+        context_key: str,
+    ) -> dict[str, Any]:
+        notes = await asyncio.to_thread(self._note_service, owner_id)
+        operations = await self._operation_service(owner_id, synchronize=False)
+        workflow = ObsidianWorkflowService(
+            self.storage,
+            notes,
+            operations,
+            owner_id=owner_id,
+            context_key=context_key,
+        )
+        receipt = await asyncio.to_thread(workflow.execute_read, payload)
+        return receipt.as_dict()
+
+    async def workflow_write(
+        self,
+        owner_id: str,
+        operation_id: str,
+        payload: Mapping[str, object],
+        *,
+        context_key: str,
+    ) -> dict[str, Any]:
+        lock = await self._owner_lock(owner_id)
+        async with lock:
+            notes = await asyncio.to_thread(self._note_service, owner_id)
+            operations = await self._operation_service(owner_id, synchronize=True)
+            workflow = ObsidianWorkflowService(
+                self.storage,
+                notes,
+                operations,
+                owner_id=owner_id,
+                context_key=context_key,
+            )
+            receipt = await asyncio.to_thread(
+                workflow.execute_write,
+                operation_id,
+                payload,
+            )
+            if receipt.operation_id:
+                with suppress(Exception):
+                    durable = await asyncio.to_thread(
+                        operations.refresh_delivery,
+                        receipt.operation_id,
+                    )
+                    receipt = replace(
+                        receipt,
+                        revision=durable.revision,
+                        delivery=durable.delivery,
+                    )
+            return receipt.as_dict()
 
     async def get_operation(
         self,
@@ -1602,7 +2261,10 @@ class ObsidianRuntime:
                 result = await asyncio.to_thread(service.refresh_delivery, operation_id)
             except SyncthingError:
                 result = await asyncio.to_thread(service.get_operation, operation_id)
-            return _operation_result(result)
+            return _operation_result(
+                result,
+                open_uri=self._open_uri(owner_id, result.path),
+            )
 
     async def execute_operation(
         self,
@@ -1690,6 +2352,8 @@ class ObsidianRuntime:
                 "operation_id",
                 "day",
                 "content",
+                "section",
+                "item",
                 "expected_revision",
                 "work_item_id",
             }
@@ -1700,6 +2364,8 @@ class ObsidianRuntime:
                 operation_id,
                 payload.get("day"),
                 content=payload.get("content", ""),
+                section=payload.get("section"),
+                item=payload.get("item"),
                 expected_revision=common["expected_revision"],
                 work_item_id=common["work_item_id"],
             )
@@ -1712,19 +2378,28 @@ class ObsidianRuntime:
         semaphore = asyncio.Semaphore(concurrency)
         timeout = min(5.0, float(self.settings.obsidian_rest_timeout_sec))
 
-        async def check_owner(owner_id: str) -> bool:
+        async def check_owner(owner_id: str) -> tuple[bool, int, int, bool]:
             async with semaphore:
                 lock = await self._owner_lock(owner_id)
                 async with lock:
                     try:
-                        await self._check_locked(owner_id, readiness_timeout=timeout)
+                        panel = await self._check_locked(owner_id, readiness_timeout=timeout)
                     except Exception:  # noqa: BLE001 - tenant-isolated sweep
-                        return False
-                    return True
+                        return False, 0, 0, False
+                    if str(panel.get("state") or "") != "ready":
+                        return True, 0, 0, False
+                    try:
+                        indexed = await asyncio.to_thread(self._refresh_index, owner_id)
+                    except Exception:  # noqa: BLE001 - isolate a corrupt tenant vault
+                        return True, 0, 0, True
+                    return True, indexed.indexed, indexed.tombstoned, False
 
         checks = await asyncio.gather(*(check_owner(str(profile["user_id"])) for profile in profiles))
-        checked = sum(checks)
-        failed = len(checks) - checked
+        checked = sum(item[0] for item in checks)
+        notes_indexed = sum(item[1] for item in checks)
+        notes_tombstoned = sum(item[2] for item in checks)
+        index_failed = sum(item[3] for item in checks)
+        failed = len(checks) - checked + index_failed
 
         # One oldest operation per owner per tick prevents a noisy tenant from
         # starving every later owner while still draining each ledger over time.
@@ -1762,6 +2437,9 @@ class ObsidianRuntime:
             "checked": checked,
             "failed": failed,
             "operations_refreshed": operations_refreshed,
+            "notes_indexed": notes_indexed,
+            "notes_tombstoned": notes_tombstoned,
+            "index_failed": index_failed,
         }
 
     async def close(self) -> None:

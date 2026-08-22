@@ -41,6 +41,7 @@ staged-копия после успешного cutover удаляется. По
 | Параметр | По умолчанию / контракт |
 | --- | --- |
 | `FRIDAY_OBSIDIAN_ROOT` | `<FRIDAY_HOME>/data/obsidian`; отдельный private root |
+| `FRIDAY_OBSIDIAN_VAULT_NAME` | `Friday`; имя нового logical/Android vault и его server-каталога; задаётся до первого onboarding |
 | `FRIDAY_SYNCTHING_BINARY` | `/usr/local/bin/syncthing`; существующий absolute executable, не symlink |
 | `FRIDAY_SYNCTHING_MIN_VERSION` / `MAX_VERSION` | `2.1.3` / `2.2.0`; полуинтервал `[2.1.3, 2.2.0)` |
 | `FRIDAY_OBSIDIAN_PAIRING_TTL_SEC` | `900`, от 300 до 3600 |

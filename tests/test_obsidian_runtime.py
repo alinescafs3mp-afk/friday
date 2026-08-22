@@ -143,6 +143,29 @@ class _Client:
         return SyncthingFileStatus(folder_id, path, info, info, availability)
 
 
+class _DeletionAwareClient(_Client):
+    def __init__(self) -> None:
+        super().__init__()
+        self.deleted_paths: set[str] = set()
+
+    def file_status(self, folder_id: str, path: str) -> SyncthingFileStatus:
+        if path not in self.deleted_paths:
+            return super().file_status(folder_id, path)
+        tombstone = SyncthingFileInfo(
+            path,
+            0,
+            None,
+            True,
+            False,
+            False,
+            False,
+            False,
+            "FILE_INFO_TYPE_FILE",
+            ("AAAAAAA:2",),
+        )
+        return SyncthingFileStatus(folder_id, path, tombstone, tombstone, ())
+
+
 class _Manager:
     def __init__(
         self,
@@ -233,6 +256,23 @@ def _runtime(settings, storage, tmp_path, client: _Client | None = None, *, vers
 
 
 @pytest.mark.asyncio
+async def test_clean_onboarding_uses_the_configured_logical_vault_name(settings, storage, tmp_path) -> None:
+    storage.ensure_user("alice")
+    runtime, _client = _runtime(settings, storage, tmp_path)
+    runtime.settings = replace(runtime.settings, obsidian_vault_name="Friday-Test")
+
+    started = await runtime.start("alice")
+    vault = storage.get_obsidian_vault("alice")
+
+    assert started["state"] == "awaiting_android_device"
+    assert vault is not None
+    assert vault["display_name"] == "Friday-Test"
+    assert vault["android_vault_name"] == "Friday-Test"
+    assert vault["android_path_hint"] == "Documents/Obsidian/Friday-Test"
+    assert Path(vault["server_path"]).name == "Friday-Test"
+
+
+@pytest.mark.asyncio
 async def test_one_phone_flow_uses_fragment_token_and_exact_delivery_evidence(
     settings, storage, tmp_path
 ) -> None:
@@ -271,6 +311,11 @@ async def test_one_phone_flow_uses_fragment_token_and_exact_delivery_evidence(
     vault_root = storage.get_obsidian_vault("alice")["server_path"]
     conflict = Path(vault_root) / "Note.sync-conflict-20260821.md"
     conflict.write_text("both versions stay", encoding="utf-8")
+    panel = await runtime.status("alice")
+    assert panel["conflict_count"] == 1
+    assert panel["conflicts"][0]["canonical_path"] == "Note.md"
+    assert panel["conflicts"][0]["conflict_path"] == conflict.name
+    assert conflict.exists()
     diagnostics = await runtime.diagnostics("alice")
     assert diagnostics["conflict_count"] == 1
     assert diagnostics["connection"]["transport"] == "relay"
@@ -402,11 +447,46 @@ async def test_ready_panel_never_claims_live_sync_when_android_or_daemon_is_offl
     await runtime.check("alice")
     assert (await runtime.confirm_open("alice"))["state"] == "ready"
 
+    vault = storage.get_obsidian_vault("alice")
+    assert vault is not None
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id="offline-panel-op",
+        vault_id=str(vault["id"]),
+        method="create",
+        arguments_digest="a" * 64,
+    )
+    storage.transition_obsidian_operation(
+        "alice",
+        "offline-panel-op",
+        "committed",
+        result={"path": "Offline/Pending Delivery.md", "revision": "b" * 64},
+        delivery={
+            "local_write_complete": True,
+            "server_scan_complete": False,
+            "android_connected": False,
+            "android_completion": None,
+            "android_received": False,
+            "obsidian_opened": False,
+        },
+    )
+
     client.connected = False
     offline = await runtime.check("alice")
     assert offline["sync_state"] == "android_offline"
     assert "офлайн" in offline["message"]
     assert "синхронизируются" not in offline["message"]
+    assert offline["operations"][0] == {
+        "operation_id": "offline-panel-op",
+        "work_item_id": "",
+        "method": "create",
+        "status": "committed",
+        "path": "Offline/Pending Delivery.md",
+        "revision": "b" * 64,
+        "server_scan_complete": False,
+        "android_connected": False,
+        "android_received": False,
+    }
 
     runtime.manager.version = "v2.2.0"
     unavailable = await runtime.check("alice")
@@ -692,6 +772,12 @@ async def test_ready_vault_exposes_durable_native_note_operations(settings, stor
     assert created["replayed"] is False
     assert created["delivery"]["android_received"] is True
     assert created["delivery"]["obsidian_opened"] is False
+    created_binding = next(
+        item
+        for item in storage.list_obsidian_note_bindings("alice")
+        if item["current_path"] == created["path"]
+    )
+    assert created_binding["origin"] == "friday"
 
     replay = await runtime.create_note(
         "alice",
@@ -737,6 +823,239 @@ async def test_ready_vault_exposes_durable_native_note_operations(settings, stor
 
 
 @pytest.mark.asyncio
+async def test_deleted_note_search_returns_only_an_explicit_tombstone(settings, storage, tmp_path) -> None:
+    storage.ensure_user("alice")
+    runtime, _client = _runtime(settings, storage, tmp_path)
+    await runtime.start("alice")
+    await runtime.check("alice")
+    assert (await runtime.confirm_open("alice"))["state"] == "ready"
+    created = await runtime.create_note(
+        "alice",
+        "create-delete-me",
+        "Scratch/Delete Me.md",
+        "temporary",
+    )
+    assert (await runtime.search_notes("alice", "Delete Me"))[0]["path"] == created["path"]
+    vault = storage.get_obsidian_vault("alice")
+    store = VaultStore(Path(vault["server_path"]))
+    store.delete(created["path"], expected_revision=created["revision"])
+
+    matches = await runtime.search_notes(
+        "alice",
+        "Delete Me",
+        context_key="conv-delete-lifecycle",
+    )
+
+    assert matches == [
+        {
+            "path": "Scratch/Delete Me.md",
+            "title": "Delete Me",
+            "revision": created["revision"],
+            "modified_at": matches[0]["modified_at"],
+            "excerpt": "Ранее известная заметка с этой identity была удалена.",
+            "score": 1002.0,
+            "match_channels": ["tombstone"],
+        }
+    ]
+    frame = storage.get_obsidian_active_frame("alice", "conv-delete-lifecycle")
+    assert frame is not None and frame["active_binding_id"] is None
+
+    recreated = await runtime.create_note(
+        "alice",
+        "recreate-delete-me",
+        "Scratch/Delete Me.md",
+        "new active identity",
+    )
+    live = await runtime.search_notes("alice", "Delete Me")
+    assert live[0]["path"] == recreated["path"]
+    assert live[0]["revision"] == recreated["revision"]
+    assert "tombstone" not in live[0]["match_channels"]
+
+
+@pytest.mark.asyncio
+async def test_resume_reuses_daily_operation_identity_without_duplicate_text(
+    settings, storage, tmp_path
+) -> None:
+    storage.ensure_user("alice")
+    runtime, client = _runtime(settings, storage, tmp_path)
+    await runtime.start("alice")
+    await runtime.check("alice")
+    assert (await runtime.confirm_open("alice"))["state"] == "ready"
+    client.connected = False
+    client.available = False
+    original = await runtime.daily_note(
+        "alice",
+        "daily-interrupted",
+        "2026-08-22",
+        content="Проверка идемпотентности",
+        context_key="conv-recovery",
+    )
+    assert original["status"] == "delivery_pending"
+
+    restarted, _ = _runtime(settings, storage, tmp_path, client)
+    client.connected = True
+    client.available = True
+
+    resumed = await restarted.workflow_write(
+        "alice",
+        "new-transport-operation",
+        {"action": "resume_previous"},
+        context_key="conv-recovery",
+    )
+
+    assert resumed["status"] == "resumed"
+    assert resumed["operation_id"] == original["operation_id"] == "daily-interrupted"
+    assert resumed["delivery"]["android_received"] is True
+    assert storage.get_obsidian_operation("alice", "new-transport-operation") is None
+    assert (await restarted.get_operation("alice", "daily-interrupted"))["status"] == "delivered"
+    document = await restarted.read_note("alice", original["path"])
+    assert document["content"].count("Проверка идемпотентности") == 1
+
+
+@pytest.mark.asyncio
+async def test_reconcile_incrementally_indexes_an_android_originated_note(
+    settings, storage, tmp_path
+) -> None:
+    storage.ensure_user("alice")
+    runtime, _client = _runtime(settings, storage, tmp_path)
+    await runtime.start("alice")
+    await runtime.check("alice")
+    assert (await runtime.confirm_open("alice"))["state"] == "ready"
+    vault = storage.get_obsidian_vault("alice")
+    store = VaultStore(Path(vault["server_path"]))
+    store.write_text(
+        "Mobile/Created On Phone.md",
+        "Фиолетовый маршрутизатор и тест обратной синхронизации.",
+        create_only=True,
+    )
+
+    report = await runtime.reconcile()
+
+    assert report["notes_indexed"] >= 1
+    binding = next(
+        item
+        for item in storage.list_obsidian_note_bindings("alice")
+        if item["current_path"] == "Mobile/Created On Phone.md"
+    )
+    assert binding["origin"] == "android"
+    matches = await runtime.search_notes("alice", "фиолетовый маршрутизатор")
+    match = next(item for item in matches if item["path"] == "Mobile/Created On Phone.md")
+    assert match["origin"] == "android"
+    assert match["ownership_mode"] == "user_owned"
+    assert match["index_coverage"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_search_reports_partial_revision_pinned_index_coverage(settings, storage, tmp_path) -> None:
+    storage.ensure_user("alice")
+    runtime, _client = _runtime(settings, storage, tmp_path)
+    await runtime.start("alice")
+    await runtime.check("alice")
+    assert (await runtime.confirm_open("alice"))["state"] == "ready"
+    vault = storage.get_obsidian_vault("alice")
+    store = VaultStore(Path(vault["server_path"]))
+    body = "Фиолетовый маршрутизатор и длинное описание поиска."
+    created = store.write_text("Mobile/Partial Index.md", body, create_only=True)
+    await runtime.search_notes("alice", "фиолетовый маршрутизатор")
+    binding = next(
+        item for item in storage.list_obsidian_note_bindings("alice") if item["current_path"] == created.path
+    )
+    storage.upsert_obsidian_note_index(
+        "alice",
+        binding_id=str(binding["id"]),
+        revision=created.revision,
+        metadata={},
+        metadata_coverage="complete",
+        body_text="Фиолетовый",
+        body_coverage="partial",
+        source_size_bytes=len(body.encode("utf-8")),
+        title="Partial Index",
+        source_modified_at=created.modified_at.isoformat(),
+    )
+
+    matches = await runtime.search_notes("alice", "фиолетовый маршрутизатор")
+    match = next(item for item in matches if item["path"] == created.path)
+    coverage = await runtime.search_index_coverage("alice")
+
+    assert match["index_coverage"] == "partial"
+    assert coverage["state"] == "partial"
+    assert coverage["complete_notes"] < coverage["known_notes"]
+
+
+@pytest.mark.asyncio
+async def test_workflow_delete_reports_delivery_only_after_syncthing_tombstone(
+    settings, storage, tmp_path
+) -> None:
+    storage.ensure_user("alice")
+    client = _DeletionAwareClient()
+    runtime, _ = _runtime(settings, storage, tmp_path, client)
+    await runtime.start("alice")
+    await runtime.check("alice")
+    assert (await runtime.confirm_open("alice"))["state"] == "ready"
+    vault = storage.get_obsidian_vault("alice")
+    store = VaultStore(Path(vault["server_path"]))
+    created = store.write_text("Scratch/Delete Me.md", "temporary", create_only=True)
+    assert (await runtime.search_notes("alice", "Delete Me"))[0]["path"] == created.path
+    client.deleted_paths.add(created.path)
+
+    receipt = await runtime.workflow_write(
+        "alice",
+        "delete-through-runtime",
+        {"action": "delete_note", "path": created.path},
+        context_key="conv-delete-runtime",
+    )
+
+    assert receipt["delivery"]["server_scan_complete"] is True
+    assert receipt["delivery"]["android_received"] is True
+    assert receipt["open_uri"] is None
+    assert not store.exists(created.path)
+
+
+@pytest.mark.asyncio
+async def test_runtime_continuation_uses_persisted_second_candidate_and_active_note(
+    settings, storage, tmp_path
+) -> None:
+    storage.ensure_user("alice")
+    runtime, _client = _runtime(settings, storage, tmp_path)
+    await runtime.start("alice")
+    await runtime.check("alice")
+    assert (await runtime.confirm_open("alice"))["state"] == "ready"
+    vault = storage.get_obsidian_vault("alice")
+    store = VaultStore(Path(vault["server_path"]))
+    store.write_text("Projects/First.md", "Friday поиск first", create_only=True)
+    store.write_text("Projects/Second.md", "Friday поиск second", create_only=True)
+    context_key = "conv-stable-candidates"
+    matches = await runtime.search_notes(
+        "alice",
+        "Friday поиск",
+        context_key=context_key,
+    )
+    assert len(matches) >= 2
+    expected = matches[1]["path"]
+
+    selected = await runtime.workflow_read(
+        "alice",
+        {"action": "select_candidate", "ordinal": 2},
+        context_key=context_key,
+    )
+    changed = await runtime.workflow_write(
+        "alice",
+        "append-to-selected",
+        {
+            "action": "append_active_section",
+            "section": "Следующие шаги",
+            "item": "- Проверка семантического индекса",
+        },
+        context_key=context_key,
+    )
+
+    assert selected["path"] == changed["path"] == expected
+    assert "## Следующие шаги" in store.read_text(expected).text()
+    other = matches[0]["path"]
+    assert "## Следующие шаги" not in store.read_text(other).text()
+
+
+@pytest.mark.asyncio
 async def test_offline_android_keeps_local_commit_pending_without_false_delivery(
     settings, storage, tmp_path
 ) -> None:
@@ -763,7 +1082,28 @@ async def test_offline_android_keeps_local_commit_pending_without_false_delivery
         "android_received": False,
         "obsidian_opened": False,
     }
-    assert Path(storage.get_obsidian_vault("alice")["server_path"], "Offline.md").exists()
+    vault = storage.get_obsidian_vault("alice")
+    path = Path(vault["server_path"], "Offline.md")
+    before = path.read_bytes()
+    assert path.exists()
+
+    client.connected = True
+    client.available = True
+    delivered = await runtime.get_operation("alice", "offline-create")
+    repeated_observation = await runtime.get_operation("alice", "offline-create")
+    panel = await runtime.status("alice")
+
+    assert delivered["status"] == repeated_observation["status"] == "delivered"
+    assert delivered["revision"] == repeated_observation["revision"] == result["revision"]
+    assert delivered["delivery"]["android_received"] is True
+    assert delivered["open_uri"] == "obsidian://open?vault=Friday&file=Offline.md"
+    assert path.read_bytes() == before
+    assert path.read_text(encoding="utf-8").count("Saved locally.") == 1
+    assert [item["path"] for item in await runtime.list_notes("alice")].count("Offline.md") == 1
+    assert (
+        next(item for item in panel["operations"] if item["operation_id"] == "offline-create")["status"]
+        == "delivered"
+    )
 
 
 @pytest.mark.asyncio

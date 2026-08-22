@@ -176,7 +176,10 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # person instead of issuing one request for each of five conversations.
 # 364 → 388: schema 35 adds the owner-scoped Obsidian onboarding, operation,
 # delivery, conflict, vault-alias and atomic-finalization storage surface.
-EXPECTED_MEMBER_COUNT = 388
+# 388 → 405: schema 36 adds stable bindings, revision index/link snapshots and
+# expiring candidate/Active Frame CRUD without exposing a cross-owner reader.
+# 405 → 408: owner-scoped operation status plus explicit conflict lookup/resolution.
+EXPECTED_MEMBER_COUNT = 408
 EXPECTED_SIGNATURES: dict[str, str] = {
     "bind_owned_file_source_ref_alias": "(self, user_id: 'str', uploaded_by: 'str', source_ref: 'str', raw_object_id: 'str', supplied_filename: 'str' = '') -> 'bool'",
     "find_owned_files_by_filename": "(self, user_id: 'str', uploaded_by: 'str', filename: 'str') -> 'list[dict[str, Any]]'",

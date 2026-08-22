@@ -17,6 +17,7 @@ def test_obsidian_is_disabled_by_default_and_public_config_contains_no_secret(se
     assert settings.obsidian_enabled is False
     published = settings.public_dict()["obsidian"]
     assert published["enabled"] is False
+    assert published["vault_name"] == "Friday"
     assert "binary" not in published
     assert "api_key" not in published
 
@@ -41,6 +42,11 @@ def test_enabled_obsidian_configuration_is_fail_closed_and_creates_private_roots
     assert any("existing absolute file" in item for item in _obsidian_errors(missing_binary))
     wrong_transport = replace(configured, obsidian_transport_mode="direct")
     assert any("discovery_relay" in item for item in _obsidian_errors(wrong_transport))
+    assert any(
+        "VAULT_NAME" in item
+        for item in _obsidian_errors(replace(configured, obsidian_vault_name="../Friday"))
+    )
+    assert _obsidian_errors(replace(configured, obsidian_vault_name="Friday-Test")) == []
 
 
 def test_documented_obsidian_root_under_data_dir_is_supported(settings) -> None:

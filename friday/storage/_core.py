@@ -59,7 +59,11 @@ from friday.storage._base import (
     time,
     utc_now,
 )
-from friday.storage._obsidian import OBSIDIAN_SCHEMA, validate_obsidian_schema
+from friday.storage._obsidian import (
+    OBSIDIAN_SCHEMA,
+    upgrade_obsidian_schema_35_to_36,
+    validate_obsidian_schema,
+)
 from friday.storage._privacy import (
     PRIVATE_DERIVATIVE_CACHE_REBUILD_SQL,
     PRIVATE_MATERIAL_CACHE_REBUILD_SQL,
@@ -2435,8 +2439,10 @@ class CoreMixin(StorageShared):
                     self._validate_relation_history_schema(conn, SCHEMA_VERSION)
             if parsed_version is not None and parsed_version >= 34:
                 self._validate_file_source_alias_schema(conn)
-            if parsed_version is not None and parsed_version >= 35:
-                validate_obsidian_schema(conn)
+            if parsed_version == 35:
+                upgrade_obsidian_schema_35_to_36(conn)
+            elif parsed_version is not None and parsed_version >= 36:
+                validate_obsidian_schema(conn, parsed_version)
             self._execute_statements(conn, CORE_TABLE_SCHEMA)
             self._execute_statements(conn, OBSIDIAN_SCHEMA)
             if not already_current:
