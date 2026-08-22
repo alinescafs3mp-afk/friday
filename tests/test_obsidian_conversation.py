@@ -15,6 +15,7 @@ from friday.organs.obsidian.conversation import (
     obsidian_conversation_intent,
     obsidian_open_action_url,
     obsidian_operation_id,
+    obsidian_result_note_request,
     render_obsidian_tool_result,
 )
 
@@ -215,6 +216,30 @@ def test_quoted_append_body_is_data_not_authority() -> None:
 
 def test_unrelated_obsidian_discussion_is_not_an_action() -> None:
     assert obsidian_conversation_intent("Мне нравится Obsidian для личных заметок.") is None
+
+
+def test_compound_research_result_note_is_deferred_instead_of_refused() -> None:
+    message = (
+        "Можно ли развернуть на qnap TVS-675 nextcloud? Создай заметку в obsidian по результатам этой задачи"
+    )
+
+    request = obsidian_result_note_request(message)
+
+    assert request is not None
+    assert request.task == "Можно ли развернуть на qnap TVS-675 nextcloud?"
+    assert obsidian_conversation_intent(message, today=_TODAY) is None
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Не создавай заметку в Obsidian по результатам этой задачи.",
+        "Объясни фразу: «Создай заметку в Obsidian по результатам этой задачи».",
+        "Разбери этот файл и создай заметку в Obsidian по результатам этой задачи.",
+    ],
+)
+def test_incomplete_negated_or_source_derived_result_note_is_not_authorized(message: str) -> None:
+    assert obsidian_result_note_request(message) is None
 
 
 class _Cursor:
@@ -661,6 +686,39 @@ def test_workflow_receipts_are_code_owned_and_include_exact_open_action() -> Non
     assert (
         obsidian_open_action_url(
             {**receipt, "open_uri": "obsidian://open?vault=Friday-Test&file=Other.md"},
+            "https://friday.example",
+        )
+        == ""
+    )
+
+
+def test_query_base_receipt_projects_an_exact_https_open_action() -> None:
+    path = "Bases/Friday Active Notes.base"
+    receipt = {
+        "action": "query_base",
+        "status": "completed",
+        "path": path,
+        "revision": _REVISION,
+        "operation_id": None,
+        "changed_paths": [],
+        "body": "Base вычислен Friday server-side.",
+        "open_uri": ("obsidian://open?vault=Friday-Test&file=Bases%2FFriday+Active+Notes.base"),
+        "delivery": None,
+    }
+
+    rendered = render_obsidian_tool_result("obsidian_workflow_read", receipt)
+
+    assert rendered is not None and "Open in Obsidian" in rendered
+    assert obsidian_open_action_url(receipt, "https://friday.example") == (
+        "https://friday.example/obsidian/open#vault=Friday-Test&file=Bases%2FFriday+Active+Notes.base"
+    )
+    assert (
+        obsidian_open_action_url(
+            {
+                **receipt,
+                "path": "Bases/Unsafe.canvas",
+                "open_uri": "obsidian://open?vault=Friday-Test&file=Bases%2FUnsafe.canvas",
+            },
             "https://friday.example",
         )
         == ""

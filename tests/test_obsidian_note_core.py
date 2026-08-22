@@ -424,6 +424,26 @@ def test_search_finds_the_battery_paraphrase_and_uses_the_created_date(
     assert "property_date_created" in dated[0].match_channels
 
 
+def test_search_accepts_android_text_created_date_with_safe_separator(
+    service: ObsidianService,
+) -> None:
+    service.create_note(
+        "Projects/Retrival Problem",
+        "Старые документы исчезали из поиска из-за списка кандидатов.",
+        properties={"created": "2026_08_04"},
+    )
+    service.create_note(
+        "Projects/Noise",
+        "Проблемы поиска и список кандидатов.",
+        properties={"created": "2026_07_18"},
+    )
+
+    dated = service.search_notes("проблемы поиска в начале августа 2026 года")
+
+    assert dated[0].path == "Projects/Retrival Problem.md"
+    assert "property_date_created" in dated[0].match_channels
+
+
 def test_daily_note_uses_convention_and_appends_once(vault: Path) -> None:
     convention = ObsidianVaultConvention(daily_folder="Journal", daily_format="YYYY_MM_DD")
     service = ObsidianService(

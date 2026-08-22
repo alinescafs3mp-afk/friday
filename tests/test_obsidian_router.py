@@ -229,7 +229,8 @@ def test_public_open_launcher_uses_only_a_fragment_and_accepts_a_safe_exact_note
     assert 'const fileParts = file.split("/")' in script.text
     assert 'file.startsWith("/")' in script.text
     assert 'part === ".."' in script.text
-    assert 'endsWith(".md")' in script.text
+    assert 'lowerFile.endsWith(".md")' in script.text
+    assert 'lowerFile.endsWith(".base")' in script.text
     assert 'file !== "Friday Connection Test.md"' not in script.text
     assert "link.textContent" in script.text
     assert auth.calls == auth_before

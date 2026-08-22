@@ -169,11 +169,12 @@ _OPEN_JS = r""""use strict";
   const unsafeVault = /[\\/\u0000-\u001f\u007f]/u;
   const unsafeFile = /[\\\u0000-\u001f\u007f]/u;
   const fileParts = file.split("/");
+  const lowerFile = file.toLocaleLowerCase("en-US");
   if (!vault || vault.length > 100 || new TextEncoder().encode(vault).length > 256
       || unsafeVault.test(vault) || !file || file.length > 2048
       || new TextEncoder().encode(file).length > 4096 || file.startsWith("/")
       || unsafeFile.test(file) || fileParts.some((part) => !part || part === "." || part === "..")
-      || !file.toLocaleLowerCase("en-US").endsWith(".md")) {
+      || !(lowerFile.endsWith(".md") || lowerFile.endsWith(".base"))) {
     status.textContent = "Ссылка открытия недействительна.";
     return;
   }

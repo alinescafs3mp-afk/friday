@@ -82,6 +82,7 @@ _EARLY_MONTH = re.compile(
     r"(?P<year>20\d{2})",
     re.IGNORECASE,
 )
+_TEXT_CREATED_DATE = re.compile(r"(?P<year>20\d{2})[-_./](?P<month>\d{1,2})[-_./](?P<day>\d{1,2})")
 _MONTHS = {
     "январ": 1,
     "феврал": 2,
@@ -545,7 +546,21 @@ def _created_property(note: NoteDocument) -> date | None:
     raw = value.value
     if isinstance(raw, datetime):
         return raw.date()
-    return raw if isinstance(raw, date) else None
+    if isinstance(raw, date):
+        return raw
+    if value.type is not PropertyType.TEXT or not isinstance(raw, str):
+        return None
+    match = _TEXT_CREATED_DATE.fullmatch(raw.strip())
+    if match is None:
+        return None
+    try:
+        return date(
+            int(match.group("year")),
+            int(match.group("month")),
+            int(match.group("day")),
+        )
+    except ValueError:
+        return None
 
 
 def _bounded_properties(

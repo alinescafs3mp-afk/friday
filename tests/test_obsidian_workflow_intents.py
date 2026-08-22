@@ -118,6 +118,24 @@ def test_metadata_is_one_atomic_structured_workflow() -> None:
     }
 
 
+def test_live_metadata_wording_accepts_safe_unquoted_literals() -> None:
+    intent = parse_obsidian_workflow_intent(
+        "У заметки Projects/Friday Test.md поставь статус review, проект Friday и "
+        "добавь теги integration, obsidian и test.",
+        today=TODAY,
+    )
+
+    assert intent is not None
+    assert intent.tool_name == WORKFLOW_WRITE_TOOL
+    assert intent.arguments == {
+        "action": "update_metadata",
+        "path": "Projects/Friday Test.md",
+        "status": "review",
+        "project": "Friday",
+        "tags": ["integration", "obsidian", "test"],
+    }
+
+
 def test_temporal_task_and_recovery_daily_values_are_concrete() -> None:
     task = parse_obsidian_workflow_intent(
         "Добавь в сегодняшнюю заметку задачу проверить поиск в Obsidian завтра в 10 утра.",
@@ -137,6 +155,19 @@ def test_temporal_task_and_recovery_daily_values_are_concrete() -> None:
 def test_approximate_date_search_preserves_the_date_constraint() -> None:
     intent = parse_obsidian_workflow_intent(
         "Найди заметку про проблемы поиска, которую я делал примерно в начале августа 2026 года.",
+        today=TODAY,
+    )
+
+    assert intent is not None and intent.tool_name == "obsidian_search_notes"
+    assert intent.arguments == {
+        "query": "проблемы поиска, которую я делал примерно в начале августа 2026 года",
+        "limit": 20,
+    }
+
+
+def test_live_approximate_date_search_infers_the_current_year() -> None:
+    intent = parse_obsidian_workflow_intent(
+        "Найди заметку про проблемы поиска, которую я делал примерно в начале августа.",
         today=TODAY,
     )
 

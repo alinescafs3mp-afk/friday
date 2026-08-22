@@ -116,9 +116,11 @@ from friday.organs.obsidian.conversation import (
     OBSIDIAN_TOOL_NAMES,
     OBSIDIAN_WRITE_TOOL_NAMES,
     ObsidianConversationIntent,
+    ObsidianResultNoteRequest,
     obsidian_conversation_intent,
     obsidian_open_action_url,
     obsidian_operation_id,
+    obsidian_result_note_request,
     render_obsidian_tool_result,
 )
 from friday.people import unambiguous
@@ -25601,7 +25603,8 @@ def file_turn_authority(message: str) -> FileTurnAuthority:
     if _explicit_workspace_create_intent(message) is not None:
         actions.add("workspace")
     obsidian_intent = obsidian_conversation_intent(message)
-    if obsidian_intent is not None:
+    obsidian_result_request = obsidian_result_note_request(message)
+    if obsidian_intent is not None or obsidian_result_request is not None:
         actions.add("obsidian")
     if _attachment_temporal_read_clause(speech):
         actions.add("temporal")
@@ -25609,7 +25612,7 @@ def file_turn_authority(message: str) -> FileTurnAuthority:
     # request for a second Telegram attachment.  Give the explicit Obsidian
     # channel sole ownership of that carrier so the generic late make_file
     # builder cannot duplicate or contradict the vault operation.
-    if obsidian_intent is None and _is_direct_file_request(speech):
+    if obsidian_intent is None and obsidian_result_request is None and _is_direct_file_request(speech):
         actions.add("file_create")
     if any(item.kind == "host_path" and item.role == "source_identity" for item in locators):
         actions.add("host_path")
@@ -25625,6 +25628,142 @@ def file_turn_authority(message: str) -> FileTurnAuthority:
         locators=locators,
         actions=frozenset(actions),
     )
+
+
+_OBSIDIAN_RESULT_PATH_STOPWORDS = frozenset(
+    {
+        "можно",
+        "ли",
+        "как",
+        "что",
+        "какой",
+        "какая",
+        "какие",
+        "нужно",
+        "стоит",
+        "развернуть",
+        "установить",
+        "на",
+        "в",
+        "во",
+        "для",
+        "про",
+        "о",
+        "об",
+    }
+)
+
+
+def _obsidian_result_note_path(
+    request: ObsidianResultNoteRequest,
+    day: date,
+    root_message_id: str,
+) -> str:
+    """Derive one readable bounded path without a model-selected filename."""
+
+    safe_task = redact_friday_api_tokens(request.task)
+    tokens = re.findall(r"[^\W_]+(?:[-_][^\W_]+)*", safe_task, flags=re.UNICODE)
+    useful = [token for token in tokens if token.casefold() not in _OBSIDIAN_RESULT_PATH_STOPWORDS]
+    label = " ".join((useful or tokens)[:12]).strip(" .-_")
+    label = re.sub(r"\s+", " ", label)[:120].rstrip(" .-_")
+    if not label:
+        label = "Research " + hashlib.sha256(safe_task.encode("utf-8")).hexdigest()[:12]
+    identity = str(root_message_id or "").removeprefix("msg_")
+    if re.fullmatch(r"[0-9a-f]{16}", identity) is None:
+        identity = hashlib.sha256(
+            f"{request.task}\0{day.isoformat()}\0{root_message_id}".encode()
+        ).hexdigest()[:16]
+    return f"Research/{label} — {day.isoformat()} ({identity[-8:]}).md"
+
+
+def _obsidian_result_note_body(
+    request: ObsidianResultNoteRequest,
+    answer: str,
+    day: date,
+    web_sources: Sequence[Mapping[str, Any]],
+    limitations: Sequence[str] = (),
+) -> str:
+    """Render exactly the accepted answer plus code-owned date/source evidence."""
+
+    heading = redact_friday_api_tokens(request.task).rstrip(" .?!")[:200].strip() or "Результат задачи"
+    body = f"# {heading}\n\nДата: {day.isoformat()}\n\n{answer.strip()}\n"
+    source_lines = [
+        f"- {str(item.get('title') or 'Источник').strip()} — {str(item.get('url') or '').strip()}"
+        for item in web_sources[:5]
+        if isinstance(item, Mapping) and str(item.get("url") or "").strip()
+    ]
+    if source_lines:
+        body += "\n## Источники\n\n" + "\n".join(source_lines) + "\n"
+    bounded_limitations = [str(item).strip() for item in limitations[:5] if str(item).strip()]
+    if bounded_limitations:
+        body += "\n## Ограничения\n\n" + "\n".join(f"- {item}" for item in bounded_limitations) + "\n"
+    if len(body) > 180_000 or "\x00" in body:
+        raise ValueError("accepted result is too large for one Obsidian note")
+    return body
+
+
+def _obsidian_replayed_result_note_receipt(
+    row: object,
+    *,
+    expected_operation_id: str,
+    expected_path: str,
+) -> dict[str, Any] | None:
+    """Project one already-committed create row without retrying changed arguments."""
+
+    if not isinstance(row, Mapping):
+        return None
+    if str(row.get("id") or "") != expected_operation_id or str(row.get("method") or "") != "create":
+        return None
+    try:
+        result = json.loads(str(row.get("result_json") or ""))
+        delivery = json.loads(str(row.get("delivery_json") or ""))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(result, dict) or set(result) != {
+        "schema",
+        "path",
+        "revision",
+        "previous_revision",
+        "created",
+        "applied",
+    }:
+        return None
+    if result.get("schema") != "friday.obsidian-note-operation.v1":
+        return None
+    if str(result.get("path") or "") != expected_path:
+        return None
+    if not isinstance(delivery, dict) or set(delivery) != {
+        "local_write_complete",
+        "server_scan_complete",
+        "android_connected",
+        "android_completion",
+        "android_received",
+        "obsidian_opened",
+    }:
+        return None
+    projected = {
+        "operation_id": expected_operation_id,
+        "method": "create",
+        "status": row.get("status"),
+        "path": result.get("path"),
+        "revision": result.get("revision"),
+        "previous_revision": result.get("previous_revision"),
+        "created": result.get("created"),
+        "applied": result.get("applied"),
+        "replayed": True,
+        "delivery": delivery,
+    }
+    if (
+        render_obsidian_tool_result(
+            "obsidian_create_note",
+            projected,
+            expected_operation_id=expected_operation_id,
+            expected_path=expected_path,
+        )
+        is None
+    ):
+        return None
+    return projected
 
 
 def _file_turn_capability_tools(
@@ -34442,6 +34581,7 @@ class AgentRuntime:
             routing_message,
             today=obsidian_effect_local_date,
         )
+        obsidian_result_request_candidate = obsidian_result_note_request(routing_message)
         filename_inventory_request = _filename_inventory_request(routing_message)
         filename_clue_request = _filename_clue_request(routing_message)
         data_subject_file_request = _data_subject_file_request(routing_message)
@@ -35166,6 +35306,19 @@ class AgentRuntime:
         if workspace_reply_attachment_contract:
             attachment_selector_message = _workspace_reply_attachment_selector_message(clean_message)
             attachment_reference_kind = _attachment_reference_kind(attachment_selector_message)
+        replay_source_parent: Mapping[str, Any] | None = None
+        replay_source_validated = False
+        replay_source_id = str(replay_source_message_id or "").strip()
+        if re.fullmatch(r"msg_[0-9a-f]{16}", replay_source_id):
+            replay_candidate = self.storage.get_message(replay_source_id, user_id)
+            if (
+                isinstance(replay_candidate, Mapping)
+                and str(replay_candidate.get("role") or "") == "user"
+                and str(replay_candidate.get("conversation_id") or "") == conversation_id
+                and str(replay_candidate.get("content") or "").strip() == clean_message
+            ):
+                replay_source_parent = replay_candidate
+                replay_source_validated = True
         (
             replay_had_attachments,
             replay_attachment_count,
@@ -35470,6 +35623,28 @@ class AgentRuntime:
             and not exact_uploader_file.applies
             and not filename_clue_selection.applies
         )
+        isolated_obsidian_result_turn = bool(
+            obsidian_result_request_candidate is not None
+            and not synthetic_document_notice
+            and not supplied_attachment_count
+            and not quoted_attachment_reference
+            and not reply_assistant_reference
+            and not reply_quote
+            and (not replay_source_message_id or replay_source_validated)
+            and not replay_had_attachments
+            and restored_attachment_expected_count == 0
+            and not restored_attachments
+            and not attachment_reference_kind
+            and workspace_inbox_request is None
+            and not named_person_corpus.applies
+            and not exact_uploader_file.applies
+            and not filename_clue_selection.applies
+            and filename_inventory_request is None
+            and not contextual_source_query
+        )
+        obsidian_result_request_blocked = bool(
+            obsidian_result_request_candidate is not None and not isolated_obsidian_result_turn
+        )
         policy_weather_outbound_turn = bool(
             policy_web_query
             and not synthetic_document_notice
@@ -35492,7 +35667,9 @@ class AgentRuntime:
         # Closed outbound contours skip context preparation entirely.  Their
         # query is fully determined by the current message/policy and no stale
         # private lineage is allowed to observe or veto it.
-        isolated_outbound_turn = isolated_public_news_turn or policy_weather_outbound_turn
+        isolated_outbound_turn = bool(
+            isolated_public_news_turn or isolated_obsidian_result_turn or policy_weather_outbound_turn
+        )
         archived_source_query = direct_archived_source_query or contextual_source_query
         archived_source_focus = (
             _archived_source_search_focus(clean_message, archived_source_query)
@@ -35665,32 +35842,23 @@ class AgentRuntime:
             # жить он должен на ходе, а не в памяти одного запроса.
             user_metadata = {**(user_metadata or {}), "synthetic_document_notice": True}
         replay_root_id = ""
-        if replay_source_message_id:
-            replay_parent_id = str(replay_source_message_id)
+        if replay_source_message_id and replay_source_validated and replay_source_parent is not None:
+            replay_parent_id = replay_source_id
             replay_root_id = replay_parent_id
-            replay_parent = self.storage.get_message(replay_parent_id, user_id)
-            if (
-                isinstance(replay_parent, Mapping)
-                and str(replay_parent.get("role") or "") == "user"
-                and str(replay_parent.get("conversation_id") or "") == conversation_id
-                and str(replay_parent.get("content") or "").strip() == clean_message
-            ):
-                replay_parent_metadata = _bounded_json_mapping(
-                    replay_parent.get("metadata_json"),
-                    max_chars=16_384,
-                )
-                candidate_root = str(
-                    replay_parent_metadata.get("regenerate_root_user_message_id") or ""
-                ).strip()
-                if re.fullmatch(r"msg_[0-9a-f]{16}", candidate_root):
-                    replay_root_id = candidate_root
-                frozen_date = str(replay_parent_metadata.get("obsidian_effect_local_date") or "")
-                try:
-                    parsed_frozen_date = date.fromisoformat(frozen_date)
-                except ValueError:
-                    parsed_frozen_date = None
-                if parsed_frozen_date is not None and parsed_frozen_date.isoformat() == frozen_date:
-                    obsidian_effect_local_date = parsed_frozen_date
+            replay_parent_metadata = _bounded_json_mapping(
+                replay_source_parent.get("metadata_json"),
+                max_chars=16_384,
+            )
+            candidate_root = str(replay_parent_metadata.get("regenerate_root_user_message_id") or "").strip()
+            if re.fullmatch(r"msg_[0-9a-f]{16}", candidate_root):
+                replay_root_id = candidate_root
+            frozen_date = str(replay_parent_metadata.get("obsidian_effect_local_date") or "")
+            try:
+                parsed_frozen_date = date.fromisoformat(frozen_date)
+            except ValueError:
+                parsed_frozen_date = None
+            if parsed_frozen_date is not None and parsed_frozen_date.isoformat() == frozen_date:
+                obsidian_effect_local_date = parsed_frozen_date
             # Parent binds a crash retry to the request which appended this row;
             # root keeps attachment authority stable across deliberate repeated
             # alternatives without making every click replay the first answer.
@@ -35699,7 +35867,7 @@ class AgentRuntime:
                 "regenerate_parent_user_message_id": replay_parent_id,
                 "regenerate_root_user_message_id": replay_root_id,
             }
-        if obsidian_intent is not None:
+        if obsidian_intent is not None or obsidian_result_request_candidate is not None:
             user_metadata = {
                 **(user_metadata or {}),
                 "obsidian_effect_local_date": obsidian_effect_local_date.isoformat(),
@@ -36827,6 +36995,25 @@ class AgentRuntime:
                 open_remainder="",
                 remainder_known=True,
             )
+        elif obsidian_result_request_blocked:
+            # A result-note request may use only its own current text.  Reply,
+            # attachment and restored-source carriers would otherwise let
+            # private bytes reach public search or a durable note.
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                ingestion={},
+                interaction_mode=interaction_mode,
+                structural_answer=(
+                    "Задачу с сохранением результата в Obsidian нужно отправить отдельным "
+                    "сообщением без вложения, цитаты или ссылки на предыдущую реплику. "
+                    "Интернет-поиск и запись заметки не запускались."
+                ),
+                open_remainder="",
+                remainder_known=True,
+            )
         elif obsidian_intent is not None:
             # A direct current-message vault command already has one closed
             # Organ capability and, for the deterministic forms, all of its
@@ -37173,8 +37360,12 @@ class AgentRuntime:
                 person_id=person_id,
                 conversation_history=[],
                 interaction_mode=interaction_mode,
-                search_query=clean_message,
-                outward_verdict=("интернет", policy_web_query) if policy_weather_outbound_turn else None,
+                search_query=(
+                    obsidian_result_request_candidate.task
+                    if isolated_obsidian_result_turn and obsidian_result_request_candidate is not None
+                    else clean_message
+                ),
+                outward_verdict=(("интернет", policy_web_query) if policy_weather_outbound_turn else None),
                 policy_web_authorized=policy_weather_outbound_turn,
             )
         elif preparse_pure_past_timeline:
@@ -37342,6 +37533,7 @@ class AgentRuntime:
         context.source_search_lineage_user_message_id = source_search_lineage_user_message_id
         context.effect_root_user_message_id = effect_root_user_message_id
         context.effect_local_date = obsidian_effect_local_date
+        obsidian_result_request = obsidian_result_request_candidate if isolated_obsidian_result_turn else None
         context.source_search_lineage_message_owner_id = user_id
         context.source_effect_authority = attachment_source_effect_authority
         context.source_effect_reauth_required = bool(active_attachment_set and attachment_expected_count > 0)
@@ -37475,7 +37667,11 @@ class AgentRuntime:
             context.previous_user_turn = ""
             context.previous_answer = ""
             context.ingestion = {}
-            context.search_query = clean_message
+            context.search_query = (
+                obsidian_result_request.task
+                if isolated_obsidian_result_turn and obsidian_result_request is not None
+                else clean_message
+            )
 
         if archived_source_lookup_turn:
             # This text is a request to the source index, never new archival
@@ -37605,6 +37801,13 @@ class AgentRuntime:
                 and (not synthetic_document_notice or message_locate_flow)
             )
             else []
+        )
+        # Keep the authorized Obsidian schemas for the late code-owned write.
+        # The isolated model lane below is then reduced to web_research only.
+        compound_obsidian_tools = tuple(
+            tool
+            for tool in visible_tools
+            if str((tool.get("function") or {}).get("name") or tool.get("name") or "") in OBSIDIAN_TOOL_NAMES
         )
         if context.terse_request:
             # One/two-word turns never grant an unrelated capability.  An
@@ -37862,6 +38065,10 @@ class AgentRuntime:
             if context.remainder_known
             else clean_message
         )
+        if obsidian_result_request is not None:
+            # The model and any public-search arbiter see only the task.  The
+            # carrier instruction is code-owned and runs after final guards.
+            shape_request = obsidian_result_request.task
         authenticated_attachment_model_request = (
             context.open_remainder.strip()
             if authenticated_attachment_scope and context.remainder_known
@@ -41001,6 +41208,131 @@ class AgentRuntime:
             response["voice_clip"] = None
             LOGGER.warning("credential-output: Friday API token removed at final assertion")
 
+        if obsidian_result_request is not None:
+            result_note_from_model_knowledge = bool(
+                not web_evidence_used
+                and web_evidence_status == "none"
+                and str((context.outward_verdict or ("", None))[0] or "").startswith("знание")
+            )
+            result_note_ready = bool(
+                content
+                and (
+                    web_evidence_status in {"sourced", "partial"}
+                    and web_evidence_used
+                    or result_note_from_model_knowledge
+                )
+                and not response.get("llm_failed")
+                and response.get("_model_generated") is True
+                and not foreign_private_request
+                and not dangerous_instruction_request
+                and not dangerous_output_replaced
+                and not private_web_search_blocked
+                and not web_evidence_replaced
+                and not outside_deed_replaced
+                and not false_model_outage_replaced
+                and not capability_refusal
+                and verification_status != VERDICT_FAILED
+                and not _turn_deadline_expired(context.turn_deadline)
+            )
+            if result_note_ready:
+                result_day = context.effect_local_date or obsidian_effect_local_date
+                try:
+                    result_path = _obsidian_result_note_path(
+                        obsidian_result_request,
+                        result_day,
+                        context.effect_root_user_message_id,
+                    )
+                    result_body = _obsidian_result_note_body(
+                        obsidian_result_request,
+                        content,
+                        result_day,
+                        web_sources,
+                        [
+                            *(
+                                [
+                                    "Часть веб-источников не удалось получить; вывод опирается "
+                                    "только на перечисленные источники."
+                                ]
+                                if web_evidence_status == "partial"
+                                else []
+                            ),
+                            *(
+                                [
+                                    "Открытый веб-поиск даёт ограниченную выборку и не доказывает "
+                                    "отсутствие других результатов."
+                                ]
+                                if web_open_search_evidence
+                                else []
+                            ),
+                            *(
+                                ["Ответ не получил статус полностью проверенного."]
+                                if verification_status != VERDICT_PASSED
+                                else []
+                            ),
+                            *(
+                                [
+                                    "Ответ сформирован по знаниям модели без интернет-проверки; "
+                                    "перед практическим применением проверьте актуальные источники."
+                                ]
+                                if result_note_from_model_knowledge
+                                else []
+                            ),
+                        ],
+                    )
+                except (TypeError, ValueError):
+                    result_note_ready = False
+                else:
+                    result_intent = ObsidianConversationIntent(
+                        "obsidian_create_note",
+                        explicit_path=result_path,
+                        direct_arguments={"path": result_path, "content": result_body},
+                        resolved_local_date=result_day.isoformat(),
+                    )
+                    result_receipt = await self._explicit_obsidian_response(
+                        context,
+                        clean_message,
+                        actor,
+                        compound_obsidian_tools,
+                        result_intent,
+                        reuse_existing=replay_source_validated,
+                    )
+                    receipt_text = str(result_receipt.get("content") or "").strip()
+                    content = "\n\n".join(part for part in (content, receipt_text) if part).strip()
+                    response["content"] = content
+                    response["tools_used"] = list(
+                        dict.fromkeys(
+                            [
+                                *(str(name) for name in (response.get("tools_used") or []) if str(name)),
+                                *(
+                                    str(name)
+                                    for name in (result_receipt.get("tools_used") or [])
+                                    if str(name)
+                                ),
+                            ]
+                        )
+                    )
+                    response["tool_evidence"] = [
+                        *(response.get("tool_evidence") or []),
+                        *(result_receipt.get("tool_evidence") or []),
+                    ]
+                    response["_obsidian_result_note_owned"] = True
+                    response["_obsidian_publication_tool"] = str(
+                        result_receipt.get("_obsidian_publication_tool") or ""
+                    )
+                    if result_receipt.get("_obsidian_open_url"):
+                        response["_obsidian_open_url"] = result_receipt["_obsidian_open_url"]
+                    if result_receipt.get("_obsidian_private_lineage_owned") is True:
+                        response["_obsidian_private_lineage_owned"] = True
+                        private_context_lineage = True
+            if not result_note_ready:
+                result_notice = (
+                    "Заметка в Obsidian не создана: проверяемые результаты интернет-исследования "
+                    "в этом ходе не получены."
+                )
+                content = "\n\n".join(part for part in (content, result_notice) if part).strip()
+                response["content"] = content
+                response["_obsidian_result_note_owned"] = True
+
         # Deterministic companion to the LLM judge: does the sentence carrying [K#]
         # share vocabulary with the object it cites? Advisory — it never edits the
         # answer, the citations or the grounding verdict.
@@ -41334,17 +41666,25 @@ class AgentRuntime:
                     if response.get("_office_exact_owned") is True
                     else "obsidian"
                     if response.get("_obsidian_owned") is True
+                    else "obsidian_result_note"
+                    if response.get("_obsidian_result_note_owned") is True
                     else str((effective_outward_verdict or ("", None))[0] or "")
                 ),
                 "answer_present": (
                     bool(spoken)
                     or response.get("_office_exact_owned") is True
                     or response.get("_obsidian_owned") is True
+                    or response.get("_obsidian_result_note_owned") is True
                     or response.get("_small_talk_owned") is True
                 ),
                 "model_spoke": bool(model_said),
                 **({"office_summary_downgraded": True} if office_summary_downgraded else {}),
                 **({"obsidian_owned": True} if response.get("_obsidian_owned") is True else {}),
+                **(
+                    {"obsidian_result_note_owned": True}
+                    if response.get("_obsidian_result_note_owned") is True
+                    else {}
+                ),
                 **({"small_talk_owned": True} if response.get("_small_talk_owned") is True else {}),
                 **(
                     {"readable_attachment_refusal_replaced": True}
@@ -41371,6 +41711,7 @@ class AgentRuntime:
                     context.remainder_known
                     or response.get("_office_exact_owned") is True
                     or response.get("_obsidian_owned") is True
+                    or response.get("_obsidian_result_note_owned") is True
                     or response.get("_small_talk_owned") is True
                 ),
                 "rule_learned": bool(context.rule_learned),
@@ -41480,6 +41821,7 @@ class AgentRuntime:
             or response.get("_attachment_guard_rejection_owned") is True
             or response.get("_attachment_verification_rejection_owned") is True
             or response.get("_obsidian_owned") is True
+            or response.get("_obsidian_result_note_owned") is True
             or adjacent_overview_unresolved_terminal
             or _turn_deadline_expired(context.turn_deadline)
         ):
@@ -41527,6 +41869,7 @@ class AgentRuntime:
 
         attachment_publication_reauth_required = bool(
             response.get("_obsidian_owned") is not True
+            and response.get("_obsidian_result_note_owned") is not True
             and (
                 attachment_snapshot_changed_before_admission
                 or (
@@ -41548,7 +41891,9 @@ class AgentRuntime:
         # Even a valid zero-hit page is a source-derived conclusion. A late
         # knowledge.read revocation must therefore close it before publication.
         source_search_publication_reauth_required = bool(context.source_search_used)
-        obsidian_owned_response = response.get("_obsidian_owned") is True
+        obsidian_owned_response = bool(
+            response.get("_obsidian_owned") is True or response.get("_obsidian_result_note_owned") is True
+        )
         obsidian_publication_tool = str(response.get("_obsidian_publication_tool") or "")
         obsidian_tool_ledger = [
             str(name) for name in (response.get("tools_used") or []) if str(name) in OBSIDIAN_TOOL_NAMES
@@ -41678,6 +42023,7 @@ class AgentRuntime:
                 response["web_query_notice"] = ""
                 response["knowledge_object_ids"] = []
                 response["tool_evidence"] = []
+                response.pop("_obsidian_open_url", None)
                 response["_model_generated"] = False
                 response["_publication_authority_changed_owned"] = True
                 if attachment_authority_changed_before_publication:
@@ -43635,6 +43981,8 @@ class AgentRuntime:
         actor: ActorContext,
         tools: Sequence[dict[str, Any]],
         intent: ObsidianConversationIntent,
+        *,
+        reuse_existing: bool = False,
     ) -> dict[str, Any]:
         """Execute one explicit current-message Obsidian operation and own its receipt."""
 
@@ -43784,6 +44132,54 @@ class AgentRuntime:
                 LOGGER.error("Obsidian operation identity unavailable (%s)", type(exc).__name__)
                 return response("Не удалось безопасно закрепить идентификатор операции; изменений не было.")
             arguments["operation_id"] = expected_operation_id
+
+        if reuse_existing and expected_operation_id:
+            try:
+                existing_row = self.storage.get_obsidian_operation(
+                    actor.own_id,
+                    expected_operation_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - a broken ledger never licenses a retry
+                LOGGER.warning("Obsidian replay lookup failed (%s)", type(exc).__name__)
+                return response(
+                    "Не удалось проверить журнал предыдущей операции Obsidian. "
+                    "Повторную запись не запускала.",
+                    private=lineage_persisted,
+                )
+            if existing_row is not None:
+                projected = _obsidian_replayed_result_note_receipt(
+                    existing_row,
+                    expected_operation_id=expected_operation_id,
+                    expected_path=intent.explicit_path,
+                )
+                if projected is None:
+                    return response(
+                        "Предыдущая операция Obsidian уже существует, но её итог нельзя "
+                        "подтвердить безопасной квитанцией. Повторную запись не запускала.",
+                        private=lineage_persisted,
+                    )
+                rendered = render_obsidian_tool_result(
+                    selected_name,
+                    projected,
+                    expected_operation_id=expected_operation_id,
+                    expected_path=intent.explicit_path,
+                )
+                if not rendered:
+                    return response(
+                        "Предыдущая операция Obsidian уже существует, но её итог нельзя "
+                        "подтвердить безопасной квитанцией. Повторную запись не запускала.",
+                        private=lineage_persisted,
+                    )
+                if intent.resolved_local_date:
+                    rendered = f"{rendered}\nЛокальная дата: {intent.resolved_local_date}."
+                context.private_source_boundary_active = bool(
+                    context.private_source_boundary_active or lineage_persisted
+                )
+                return response(rendered, private=lineage_persisted)
+            return response(
+                "Предыдущая операция Obsidian не найдена в журнале; повторной записи не было.",
+                private=lineage_persisted,
+            )
 
         fresh_actor = self._fresh_obsidian_actor(actor, selected_name)
         if fresh_actor is None:
@@ -50913,6 +51309,12 @@ class AgentRuntime:
                     turn_deadline=context.turn_deadline if context is not None else None,
                     expired="turn deadline expired during web intent arbitration",
                 )
+        if context is not None and context.isolated_outbound_turn and context.outward_verdict is None:
+            # This bounded current-text arbiter is the only source
+            # classification on an isolated result-note turn. Preserve it for
+            # the late write gate: ``знание`` may be saved with an explicit
+            # no-internet limitation; private-source kinds remain fail-closed.
+            context.outward_verdict = (kind, second)
         # Второе поле вердикта — поисковая строка ТОЛЬКО у вида «интернет».
         #
         # У остальных видов оно значит другое: у «человека» — ИМЯ участника, у

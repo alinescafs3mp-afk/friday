@@ -1228,7 +1228,7 @@ class CallbacksMixin(BridgeShared):
             or len(vault) != 1
             or len(note) != 1
             or not vault[0].strip()
-            or not note[0].endswith(".md")
+            or not note[0].casefold().endswith((".md", ".base"))
             or note[0].startswith("/")
             or "\\" in note[0]
             or any(part in {"", ".", ".."} for part in note[0].split("/"))

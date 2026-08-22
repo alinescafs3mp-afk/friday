@@ -543,6 +543,64 @@ async def test_every_exact_tier_a_b_message_routes_through_full_chat_once(
     assert metadata["structural"]["obsidian_owned"] is True
 
 
+@pytest.mark.parametrize(
+    ("message", "expected_tool", "expected_action", "expected_arguments"),
+    [
+        pytest.param(
+            "У заметки Projects/Friday Test.md поставь статус review, проект Friday и "
+            "добавь теги integration, obsidian и test.",
+            WORKFLOW_WRITE_TOOL,
+            "update_metadata",
+            {
+                "path": "Projects/Friday Test.md",
+                "status": "review",
+                "project": "Friday",
+                "tags": ["integration", "obsidian", "test"],
+            },
+            id="live-1642-unquoted-metadata",
+        ),
+        pytest.param(
+            "Найди заметку про проблемы поиска, которую я делал примерно в начале августа.",
+            "obsidian_search_notes",
+            None,
+            {
+                "query": "проблемы поиска, которую я делал примерно в начале августа 2026 года",
+                "limit": 20,
+            },
+            id="live-1654-date-without-year",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_live_failed_phrasings_take_the_code_owned_obsidian_route(
+    settings,
+    storage,
+    message: str,
+    expected_tool: str,
+    expected_action: str | None,
+    expected_arguments: dict[str, object],
+) -> None:
+    kernel = _AcceptanceRoutingKernel(((expected_tool, expected_action),))
+    runtime = _runtime(settings, storage, kernel)
+
+    reply = await runtime.chat(
+        "alice",
+        message,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+    )
+
+    kernel.assert_complete()
+    payload = dict(kernel.target_calls[0][1])
+    payload.pop("operation_id", None)
+    payload.pop("action", None)
+    assert payload == expected_arguments
+    assert reply["tools_used"] == ["obsidian_list_vaults", expected_tool]
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    assert metadata["structural"]["model_spoke"] is False
+    assert metadata["structural"]["obsidian_owned"] is True
+
+
 @pytest.mark.asyncio
 async def test_obs_cont_01_keeps_all_three_exact_messages_in_one_full_chat_session(
     settings,

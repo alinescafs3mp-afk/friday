@@ -56,9 +56,18 @@ _META = re.compile(
     ),
     re.IGNORECASE,
 )
+_META_PLAIN = re.compile(
+    r"^у\s+заметки\s+(?P<path>[^`\u00ab\u00bb\"\r\n]{1,2048}?\.md)\s+"
+    r"поставь\s+статус\s+(?P<status>[^,`\u00ab\u00bb\"\r\n]{1,200}?),\s*"
+    r"проект\s+(?P<project>[^,`\u00ab\u00bb\"\r\n]{1,200}?)\s+и\s+"
+    r"добавь\s+теги\s+(?P<tag1>[\w-]{1,200}),\s*"
+    r"(?P<tag2>[\w-]{1,200})\s+и\s+(?P<tag3>[\w-]{1,200})\.?$",
+    re.IGNORECASE,
+)
 _SEARCH_DATED = re.compile(
     r"^найди\s+заметку\s+про\s+(?P<query>проблемы\s+поиска),\s*которую\s+я\s+"
-    r"делал\s+примерно\s+в\s+начале\s+августа\s+2026\s+года\.?$",
+    r"делал\s+примерно\s+в\s+начале\s+августа"
+    r"(?:\s+(?P<year>20\d{2})(?:\s+года)?)?\.?$",
     re.IGNORECASE,
 )
 _SEARCH_ALL = re.compile(
@@ -196,15 +205,31 @@ def _parse_obsidian_workflow_intent(
             },
             path,
         )
+    match = _META_PLAIN.fullmatch(command)
+    if match:
+        path = _note_path(_canonical(match.group("path")))
+        tags = _deduplicate([match.group(f"tag{index}") for index in range(1, 4)])
+        return WorkflowConversationIntent(
+            WORKFLOW_WRITE_TOOL,
+            {
+                "action": "update_metadata",
+                "path": path,
+                "status": _canonical(match.group("status")),
+                "project": _canonical(match.group("project")),
+                "tags": tags,
+            },
+            path,
+        )
     match = _SEARCH_DATED.fullmatch(command)
     if match:
         # Preserve both semantic and temporal constraints.  Passing only the
         # captured topic silently disabled the property-date ranking channel.
+        year = int(match.group("year") or today.year)
         return WorkflowConversationIntent(
             "obsidian_search_notes",
             {
                 "query": (
-                    f"{_canonical(match.group('query'))}, которую я делал примерно в начале августа 2026 года"
+                    f"{_canonical(match.group('query'))}, которую я делал примерно в начале августа {year} года"
                 ),
                 "limit": 20,
             },

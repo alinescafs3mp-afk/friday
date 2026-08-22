@@ -242,6 +242,13 @@ _DAILY_SECTION = re.compile(
     r"и\s+пункт:\s*(?P<item>`[^`\r\n]+`|«[^»\r\n]+»|\"[^\"\r\n]+\")\.?$",
     re.IGNORECASE,
 )
+_RESULT_NOTE = re.compile(
+    r"^(?P<task>[^\r\n\x00]{3,8000}?[?!.])\s*"
+    r"(?:создай|сохрани|запиши)\s+"
+    r"(?:заметку\s+в\s+obsidian|в\s+obsidian\s+заметку)\s+"
+    r"по\s+результатам\s+(?:этой\s+)?(?:задачи|исследования|поиска)\.?$",
+    re.IGNORECASE,
+)
 
 _OPERATION_MARKER = re.compile(
     r'<!-- friday:(?:create|append) operation="[0-9a-f]{64}" '
@@ -272,6 +279,13 @@ class ObsidianConversationIntent:
     direct_arguments: Mapping[str, Any] | None = None
     error: str = ""
     resolved_local_date: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ObsidianResultNoteRequest:
+    """One current-turn task whose accepted final answer must become a note."""
+
+    task: str
 
 
 def _refusal(reason: str) -> ObsidianConversationIntent:
@@ -347,6 +361,28 @@ def _bounded_current_text(message: object) -> str | None:
     return text
 
 
+def obsidian_result_note_request(message: object) -> ObsidianResultNoteRequest | None:
+    """Recognize a compound answer-then-save request without granting model write authority."""
+
+    text = _bounded_current_text(message)
+    if text is None or not text or text.lstrip().startswith(">"):
+        return None
+    authority = _mask_quoted(text)
+    if (
+        _META.search(authority) is not None
+        or _NEGATED.search(authority) is not None
+        or _ATTACHMENT_DERIVED.search(authority) is not None
+    ):
+        return None
+    match = _RESULT_NOTE.fullmatch(text)
+    if match is None:
+        return None
+    task = unicodedata.normalize("NFC", match.group("task").strip())
+    if not task or _has_unsafe_unicode_control(task, multiline=False):
+        return None
+    return ObsidianResultNoteRequest(task=task)
+
+
 def obsidian_conversation_intent(
     message: object,
     *,
@@ -384,6 +420,11 @@ def obsidian_conversation_intent(
             direct_arguments=workflow.arguments,
             resolved_local_date=str(workflow.arguments.get("day") or ""),
         )
+    # This request owns two stages: first produce the accepted answer, then
+    # persist exactly that final body through a code-owned Obsidian effect.
+    # Returning a direct intent here would execute too early and save no result.
+    if obsidian_result_note_request(text) is not None:
+        return None
     if _ACTION.search(text) is None:
         return None
 
@@ -1219,7 +1260,7 @@ def obsidian_open_action_url(data: object, public_base_url: object) -> str:
         if not isinstance(data, Mapping):
             return ""
         path = _workflow_path(data.get("path"))
-        if not path.endswith(".md"):
+        if PurePosixPath(path).suffix.casefold() not in {".md", ".base"}:
             return ""
         custom_uri = _workflow_open_uri(data.get("open_uri"), path=path)
         if custom_uri is None or not isinstance(public_base_url, str):
@@ -1285,7 +1326,9 @@ __all__ = [
     "OBSIDIAN_TOOL_NAMES",
     "OBSIDIAN_WRITE_TOOL_NAMES",
     "ObsidianConversationIntent",
+    "ObsidianResultNoteRequest",
     "obsidian_conversation_intent",
+    "obsidian_result_note_request",
     "obsidian_open_action_url",
     "obsidian_operation_id",
     "render_obsidian_tool_result",

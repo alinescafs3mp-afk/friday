@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 _LIVE_PROMPT = (
@@ -11,9 +12,20 @@ _LIVE_PROMPT = (
     "Заголовок: «Тест интеграции Friday». Внутри напиши, что заметка создана "
     "через Telegram, и добавь текущую дату."
 )
+_COMPOUND_PROMPT = (
+    "Можно ли развернуть на qnap TVS-675 nextcloud? Создай заметку в obsidian по результатам этой задачи"
+)
 
 
-def test_live_obsidian_command_bypasses_ingestion_and_reaches_agent_as_transient(settings) -> None:
+@pytest.mark.parametrize(
+    "prompt",
+    [_LIVE_PROMPT, _COMPOUND_PROMPT],
+    ids=["direct-note", "compound-public-result-note"],
+)
+def test_live_obsidian_command_bypasses_ingestion_and_reaches_agent_as_transient(
+    settings,
+    prompt: str,
+) -> None:
     # Import after the settings fixture has installed the isolated FRIDAY_HOME;
     # importing create_app at module collection time binds process-global env.
     from friday.server import create_app
@@ -53,7 +65,7 @@ def test_live_obsidian_command_bypasses_ingestion_and_reaches_agent_as_transient
         response = client.post(
             "/api/chat",
             json={
-                "message": _LIVE_PROMPT,
+                "message": prompt,
                 # Caller promotion preference must not turn an effect request
                 # into knowledge or a review card.
                 "force_knowledge": True,
@@ -74,7 +86,7 @@ def test_live_obsidian_command_bypasses_ingestion_and_reaches_agent_as_transient
     assert raw_after == raw_before
     assert len(agent_calls) == 1
     _user_id, forwarded_message, forwarded = agent_calls[0]
-    assert forwarded_message == _LIVE_PROMPT
+    assert forwarded_message == prompt
     assert forwarded["ingestion_result"] == {
         "promoted": False,
         "queued_for_review": False,

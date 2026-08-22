@@ -290,6 +290,26 @@ async def test_telegram_bridge_exposes_modes_inbox_and_feedback_callbacks(tmp_pa
                 ),
             }
         ]
+        base_open_url = (
+            "https://friday.example/obsidian/open#vault=Friday-Test&file=Bases%2FFriday+Active+Notes.base"
+        )
+        base_open_markup = bridge._response_reply_markup(
+            {"message_id": "msg_open_base", "obsidian_open_url": base_open_url},
+            external_user_id="4242",
+        )
+        assert base_open_markup["inline_keyboard"][-1] == [{"text": "Open in Obsidian", "url": base_open_url}]
+        unsupported_open_markup = bridge._response_reply_markup(
+            {
+                "message_id": "msg_open_canvas",
+                "obsidian_open_url": (
+                    "https://friday.example/obsidian/open#vault=Friday-Test&file=Boards%2FUnsafe.canvas"
+                ),
+            },
+            external_user_id="4242",
+        )
+        assert all(
+            "url" not in button for row in unsupported_open_markup["inline_keyboard"] for button in row
+        )
         unsafe_markup = bridge._response_reply_markup(
             {
                 "message_id": "msg_unsafe",
