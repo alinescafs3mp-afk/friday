@@ -52,6 +52,21 @@ def test_the_default_itself_is_above_it_too(monkeypatch, tmp_path):
     assert load_settings().dedup_threshold > _MEASURED_NON_DUPLICATE_CEILING
 
 
+@pytest.mark.parametrize("name", ["FRIDAY_VERIFY_ANSWERS", "JERICHO_VERIFY_ANSWERS"])
+def test_the_same_model_judge_cannot_be_reenabled_from_runtime_config(
+    monkeypatch,
+    tmp_path,
+    name,
+):
+    monkeypatch.setenv("FRIDAY_HOME", str(tmp_path))
+    monkeypatch.setenv("FRIDAY_DATABASE_PATH", str(tmp_path / "state.sqlite3"))
+    monkeypatch.delenv("FRIDAY_VERIFY_ANSWERS", raising=False)
+    monkeypatch.delenv("JERICHO_VERIFY_ANSWERS", raising=False)
+    monkeypatch.setenv(name, "1")
+
+    assert load_settings().verify_answers is False
+
+
 @pytest.mark.parametrize("k", [1, 5, 10])
 def test_mrr_is_measured_over_the_same_window_as_recall(k):
     """A hit outside k contributes nothing to a metric published as @k."""
