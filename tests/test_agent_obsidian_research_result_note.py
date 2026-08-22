@@ -24,6 +24,19 @@ _FACT = "QNAP TVS-675 поддерживает контейнерный вари
 _URL = "https://public.synthetic.example.com/qnap-nextcloud"
 _REVISION = "a" * 64
 _PRIVATE_CANARY = "PRIVATE-OBSIDIAN-HISTORY-CANARY"
+_LONG_WEB_HEAD = "QNAP-OFFICIAL-EVIDENCE-HEAD"
+_LONG_WEB_TAIL = (
+    "QNAP-OFFICIAL-EVIDENCE-TAIL: TVS-675 uses ZhaoXin KX-U6580, 8 cores, 2.5 GHz; "
+    "Container Station runs Docker containers; Nextcloud publishes a community Docker image."
+)
+_UNSUPPORTED_CPU = (
+    "Да, Nextcloud можно запустить через Container Station/Docker. "
+    "TVS-675 обычно оснащается процессором Intel Core i5 или i7."
+)
+_REPAIRED_CPU = (
+    "Да, Nextcloud можно запустить через Container Station/Docker. "
+    "TVS-675 оснащён 8-ядерным процессором ZhaoXin KX-U6580 с частотой 2,5 ГГц."
+)
 
 
 def test_result_note_path_is_stable_for_replay_and_unique_for_a_new_turn() -> None:
@@ -173,6 +186,39 @@ class _Kernel:
         )
 
 
+class _LongEvidenceKernel(_Kernel):
+    async def execute(self, name, arguments, *, actor=None):  # noqa: ANN001
+        if name != "web_research":
+            return await super().execute(name, arguments, actor=actor)
+        payload = dict(arguments)
+        self.calls.append((str(name), payload))
+        source_text = f"{_LONG_WEB_HEAD}\n{'Проверяемые сведения QNAP. ' * 140}\n{_LONG_WEB_TAIL}"
+        return ToolResult(
+            name,
+            True,
+            data={
+                "outbound_attempted": True,
+                "query": _TASK,
+                "sources": [
+                    {
+                        "url": _URL,
+                        "title": "Synthetic official QNAP specification",
+                        "text": source_text,
+                        "text_length": len(source_text),
+                        "status_code": 200,
+                        "error": "",
+                        "truncated": False,
+                    }
+                ],
+                "requested_sources": 1,
+                "completed_sources": 1,
+                "failed_sources": 0,
+                "timed_out_sources": 0,
+                "search_timed_out": False,
+            },
+        )
+
+
 class _Model:
     enabled = True
     model = "synthetic-result-note"
@@ -192,6 +238,19 @@ class _Model:
         assert _TASK in rendered
         assert "Создай заметку" not in rendered
         assert _PRIVATE_CANARY not in rendered
+        if "FRIDAY_VERIFICATION_DATA" in rendered:
+            return {
+                "content": json.dumps(
+                    {
+                        "ok": True,
+                        "request_satisfied": True,
+                        "score": 1.0,
+                        "issues": [],
+                    }
+                ),
+                "tool_calls": None,
+                "finish_reason": "stop",
+            }
         if _FACT not in rendered:
             return {
                 "content": json.dumps(
@@ -201,6 +260,67 @@ class _Model:
                 "tool_calls": None,
             }
         return {"content": _FACT, "tool_calls": None, "_queue_wait_sec": 0.0}
+
+
+class _RepairingGroundedModel:
+    enabled = True
+    model = "synthetic-grounded-result-note"
+    total_budget_sec = 1.0
+
+    def __init__(self) -> None:
+        self.verifier_calls = 0
+        self.repair_calls = 0
+
+    async def chat(self, messages, tools=None, **kwargs):  # noqa: ANN001, ARG002
+        rendered = json.dumps(messages, ensure_ascii=False)
+        assert _TASK in rendered
+        assert "Создай заметку" not in rendered
+        if "FRIDAY_VERIFICATION_DATA" in rendered:
+            self.verifier_calls += 1
+            assert _LONG_WEB_HEAD in rendered
+            assert _LONG_WEB_TAIL in rendered
+            assert "похожая модель" in rendered
+            passed = self.verifier_calls == 2
+            return {
+                "content": json.dumps(
+                    {
+                        "ok": passed,
+                        "request_satisfied": True,
+                        "score": 1.0 if passed else 0.0,
+                        "issues": [] if passed else ["Intel CPU is unsupported by the evidence"],
+                    }
+                ),
+                "finish_reason": "stop",
+            }
+        if "FRIDAY_REPAIR_DATA" in rendered:
+            self.repair_calls += 1
+            assert _LONG_WEB_HEAD in rendered
+            assert _LONG_WEB_TAIL in rendered
+            assert "похожая модель" in rendered
+            return {"content": _REPAIRED_CPU, "finish_reason": "stop"}
+        if _LONG_WEB_TAIL in rendered:
+            return {"content": _UNSUPPORTED_CPU, "finish_reason": "stop"}
+        return {
+            "content": json.dumps(
+                {"вид": "интернет", "запрос": _TASK, "кто": "", "дни": []},
+                ensure_ascii=False,
+            ),
+            "tool_calls": None,
+        }
+
+
+class _UnknownGroundingModel(_Model):
+    def __init__(self) -> None:
+        super().__init__()
+        self.verifier_calls = 0
+
+    async def chat(self, messages, tools=None, **kwargs):  # noqa: ANN001, ARG002
+        rendered = json.dumps(messages, ensure_ascii=False)
+        if "FRIDAY_VERIFICATION_DATA" in rendered:
+            self.verifier_calls += 1
+            self.tool_names.append(set())
+            return {"content": "verifier unavailable", "finish_reason": "stop"}
+        return await super().chat(messages, tools=tools, **kwargs)
 
 
 class _ForbiddenModel:
@@ -231,6 +351,19 @@ class _ChangingAnswerModel(_Model):
         rendered = json.dumps(messages, ensure_ascii=False)
         assert _TASK in rendered
         assert "Создай заметку" not in rendered
+        if "FRIDAY_VERIFICATION_DATA" in rendered:
+            return {
+                "content": json.dumps(
+                    {
+                        "ok": True,
+                        "request_satisfied": True,
+                        "score": 1.0,
+                        "issues": [],
+                    }
+                ),
+                "tool_calls": None,
+                "finish_reason": "stop",
+            }
         if _FACT not in rendered:
             return {
                 "content": json.dumps(
@@ -554,6 +687,78 @@ async def test_public_result_is_saved_only_after_the_accepted_answer(settings, s
     assert metadata["structural"]["obsidian_result_note_owned"] is True
     assert reply["message_format"] == "markdown"
     assert reply["obsidian_open_url"].startswith("https://friday.example/")
+
+
+@pytest.mark.asyncio
+async def test_long_web_envelope_is_shared_with_judge_and_repair_before_note_write(
+    settings,
+    storage,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    kernel = _LongEvidenceKernel()
+    model = _RepairingGroundedModel()
+    runtime = AgentRuntime(
+        replace(
+            settings,
+            verify_answers=False,
+            obsidian_public_base_url="https://friday.example",
+        ),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+    runtime._local_today = lambda: date(2026, 8, 22)  # type: ignore[method-assign]
+
+    reply = await runtime.chat(
+        "alice",
+        _MESSAGE,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+    )
+
+    assert model.verifier_calls == 2
+    assert model.repair_calls == 1
+    assert [name for name, _payload in kernel.calls] == [
+        "web_research",
+        "obsidian_list_vaults",
+        "obsidian_create_note",
+    ]
+    create = kernel.calls[-1][1]
+    assert _REPAIRED_CPU in str(create["content"])
+    assert "Intel Core" not in str(create["content"])
+    assert "не получил статус полностью проверенного" not in str(create["content"])
+    assert reply["verification_status"] == "passed"
+    assert reply["verified"] is True
+    assert "Заметка создана" in reply["message"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_scoped_verifier_blocks_durable_web_result_note_even_when_global_judge_is_off(
+    settings,
+    storage,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    kernel = _Kernel()
+    model = _UnknownGroundingModel()
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=model,  # type: ignore[arg-type]
+        kernel=kernel,  # type: ignore[arg-type]
+    )
+
+    reply = await runtime.chat(
+        "alice",
+        _MESSAGE,
+        actor=ActorContext(user_id="alice", preset_key="owner", source="test"),
+    )
+
+    assert model.verifier_calls == 1
+    assert [name for name, _payload in kernel.calls] == ["web_research"]
+    assert reply["tools_used"] == ["web_research"]
+    assert reply["verification_status"] == "unknown"
+    assert reply["verified"] is False
+    assert "не прошёл проверку" in reply["message"]
+    assert "Заметка создана" not in reply["message"]
 
 
 @pytest.mark.asyncio
