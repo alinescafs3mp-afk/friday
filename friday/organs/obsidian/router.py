@@ -139,9 +139,9 @@ _OPEN_HTML = """<!doctype html>
 </head>
 <body>
   <main>
-    <h1>Открыть тестовую заметку</h1>
+    <h1>Открыть заметку в Obsidian</h1>
     <p id="open-status">Проверяю ссылку…</p>
-    <a id="open-note" href="#" hidden>Открыть Friday Connection Test.md в Obsidian</a>
+    <a id="open-note" href="#" hidden>Открыть заметку в Obsidian</a>
     <p id="open-fallback" hidden>Если приложение не открылось автоматически, нажмите ссылку выше или откройте заметку вручную.</p>
     <noscript>Для безопасного перехода в приложение нужен JavaScript.</noscript>
   </main>
@@ -165,15 +165,21 @@ _OPEN_JS = r""""use strict";
   }
   fragment = "";
   const vault = String(parameters.get("vault") || "").normalize("NFC").trim();
-  const file = String(parameters.get("file") || "");
-  const unsafe = /[\\/\u0000-\u001f\u007f]/u;
-  if (!vault || vault.length > 100 || new TextEncoder().encode(vault).length > 256 || unsafe.test(vault)
-      || file !== "Friday Connection Test.md") {
+  const file = String(parameters.get("file") || "").normalize("NFC");
+  const unsafeVault = /[\\/\u0000-\u001f\u007f]/u;
+  const unsafeFile = /[\\\u0000-\u001f\u007f]/u;
+  const fileParts = file.split("/");
+  if (!vault || vault.length > 100 || new TextEncoder().encode(vault).length > 256
+      || unsafeVault.test(vault) || !file || file.length > 2048
+      || new TextEncoder().encode(file).length > 4096 || file.startsWith("/")
+      || unsafeFile.test(file) || fileParts.some((part) => !part || part === "." || part === "..")
+      || !file.toLocaleLowerCase("en-US").endsWith(".md")) {
     status.textContent = "Ссылка открытия недействительна.";
     return;
   }
   parameters = new URLSearchParams({vault, file});
   link.href = `obsidian://open?${parameters.toString()}`;
+  link.textContent = `Открыть ${file} в Obsidian`;
   link.hidden = false;
   fallback.hidden = false;
   status.textContent = `Vault: ${vault}`;

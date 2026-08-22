@@ -211,7 +211,7 @@ def test_public_setup_body_and_token_are_strictly_bounded(surface) -> None:
     assert runtime.calls == before
 
 
-def test_public_open_launcher_uses_only_a_fragment_and_builds_a_fixed_obsidian_uri(surface) -> None:
+def test_public_open_launcher_uses_only_a_fragment_and_accepts_a_safe_exact_note_path(surface) -> None:
     client, _app, _runtime, auth, _actor = surface
     auth_before = list(auth.calls)
     page = client.get("/obsidian/open")
@@ -226,7 +226,12 @@ def test_public_open_launcher_uses_only_a_fragment_and_builds_a_fixed_obsidian_u
     assert "location.search" not in script.text
     assert "window.location.assign" in script.text
     assert "obsidian://open?" in script.text
-    assert "Friday Connection Test.md" in script.text
+    assert 'const fileParts = file.split("/")' in script.text
+    assert 'file.startsWith("/")' in script.text
+    assert 'part === ".."' in script.text
+    assert 'endsWith(".md")' in script.text
+    assert 'file !== "Friday Connection Test.md"' not in script.text
+    assert "link.textContent" in script.text
     assert auth.calls == auth_before
 
 
