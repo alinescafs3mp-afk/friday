@@ -386,3 +386,13 @@ not contact live HTTP, model or service interfaces.
 - Confirm service health, restart/OOM/error state, empty bridge/outbound queues,
   MCP availability, embeddings/reranker availability and a short model-speed
   smoke after deployment.
+
+## Recorded release evidence
+
+The document contour completed its required two-run operator gate for immutable
+commit `0c61fe0b4dfde5f27c875d37631060893eaf0cd4`.  The sanitized operator report
+has `status=passed`, no failure codes and SHA-256
+`2c06ab34bf463da3141603836f27d879a9714fc9cb34a2d656ad6e80dc6efe04`.
+Its clean run receipts are bound by SHA-256
+`36d918a8eac4d964fad1a6d224842dbb9331096e1cf76bfb3e6b3744f6cdc87f` and
+`654b9cbf22a66013a177455b1194133582f4284621e91e32c77dd98dc5a4e95b`.

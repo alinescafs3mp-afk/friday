@@ -2216,6 +2216,31 @@ def test_dense_anchor_contract_checks_parenthetical_finite_or_adverse_clause(par
 
 
 @pytest.mark.parametrize(
+    "predicate",
+    ["расходятся", "изменяются", "отличаются", "колеблются", "разошёлся"],
+)
+def test_dense_anchor_contract_rejects_parenthetical_adverse_profile_predicate(
+    predicate: str,
+) -> None:
+    message = (
+        "Фиксация временной зоны гарантирует детерминизм результатов, "
+        f"(результаты {predicate}), исключая сбои из-за смещения часовых поясов."
+    )
+
+    assert battery._a09_12_affirmative_fallback_relation(message) is False
+
+
+@pytest.mark.parametrize("parenthetical", ["например, расчёты дат", "результаты совпадают"])
+def test_dense_anchor_contract_keeps_benign_parenthetical(parenthetical: str) -> None:
+    message = (
+        "Фиксация временной зоны гарантирует детерминизм результатов "
+        f"({parenthetical}), исключая сбои из-за смещения часовых поясов."
+    )
+
+    assert battery._a09_12_affirmative_fallback_relation(message) is True
+
+
+@pytest.mark.parametrize(
     ("index", "base", "negated", "predicate"),
     [
         (

@@ -2561,18 +2561,32 @@ def _p09_dense_adverse_outcome_modifier(token: str) -> bool:
     )
 
 
+def _p09_adverse_outcome_predicate(token: str) -> bool:
+    """Recognise a closed set of finite predicates that contradict stable output."""
+
+    return bool(
+        re.fullmatch(
+            r"(?:"
+            r"расход(?:иться|ится|ятся|ился|илась|илось|ились)|"
+            r"разош(?:ёлся|елся|лась|лось|лись)|"
+            r"различ(?:аться|ается|аются|ался|алась|алось|ались)|"
+            r"отлич(?:аться|ается|аются|ался|алась|алось|ались)|"
+            r"варьир(?:оваться|уется|уются|овался|овалась|овалось|овались)|"
+            r"(?:из)?меня(?:ться|ется|ются|лся|лась|лось|лись)|"
+            r"измен(?:яет|яют|ил|ила|ило|или)|"
+            r"колебл(?:аться|ется|ются|ался|алась|алось|ались)"
+            r")",
+            token,
+        )
+    )
+
+
 def _p09_dense_adverse_outcome_token(token: str, *, profile: str) -> bool:
     if _p09_dense_adverse_outcome_modifier(token):
         return True
     if (
         _p09_has_closed_stem(token, ("расхождени", "изменчив"))
-        or re.fullmatch(
-            r"(?:расход(?:иться|ится|ятся|ился|илась|ились)|"
-            r"различ(?:аться|ается|аются|ался|алась|ались)|"
-            r"варьир(?:оваться|уется|уются|овался|овалась|овались)|"
-            r"меня(?:ться|ется|ются|лась|лись|лось))",
-            token,
-        )
+        or _p09_adverse_outcome_predicate(token)
         or re.fullmatch(r"хаос(?:а|у|ом|е)?", token)
     ):
         return True
@@ -2622,6 +2636,14 @@ def _p09_has_local_adverse_outcome(
         ):
             return True
     return False
+
+
+def _p09_parenthetical_has_adverse_predicate(message: str, tokens: Sequence[str]) -> bool:
+    parenthetical_words = _p09_parenthetical_word_indices(message)
+    return any(
+        index in parenthetical_words and _p09_adverse_outcome_predicate(token)
+        for index, token in enumerate(tokens)
+    )
 
 
 def _p09_coarse_find(
@@ -4162,6 +4184,8 @@ def _p09_coarse_affirmative_relation(message: str, profile: str) -> bool:
         allow_boundary_negation=profile == "a09_04",
     )
     if tokens is None:
+        return False
+    if _p09_parenthetical_has_adverse_predicate(message, tokens):
         return False
     if _p09_dense_explicit_stance_or_meta(tokens):
         return False

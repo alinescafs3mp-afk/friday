@@ -347,47 +347,61 @@ class ConversationsMixin(StorageShared):
             )
             params.extend((before, user_id))
         where = " AND ".join(clauses)
-        rows: list[sqlite3.Row] = []
-        term_groups = _fts_term_groups(text)
-        if self._fts_available and term_groups:
 
-            def atom(term: str) -> str:
-                lexical = term[:-1] if term.endswith("*") else term
-                return f'"{lexical.replace(chr(34), chr(34) * 2)}"*'
+        def search_once(candidate: str, *, require_all_terms: bool) -> list[sqlite3.Row]:
+            rows: list[sqlite3.Row] = []
+            term_groups = _fts_term_groups(candidate)
+            if self._fts_available and term_groups:
 
-            if match_all_terms is True:
-                grouped = [
-                    "(" + " OR ".join(atom(term) for term in group) + ")"
-                    if len(group) > 1
-                    else atom(group[0])
-                    for group in term_groups
-                    if group
-                ]
-                match_query = " AND ".join(grouped)
-            else:
-                match_query = " OR ".join(atom(term) for group in term_groups for term in group)
-            try:
+                def atom(term: str) -> str:
+                    lexical = term[:-1] if term.endswith("*") else term
+                    return f'"{lexical.replace(chr(34), chr(34) * 2)}"*'
+
+                if require_all_terms:
+                    grouped = [
+                        "(" + " OR ".join(atom(term) for term in group) + ")"
+                        if len(group) > 1
+                        else atom(group[0])
+                        for group in term_groups
+                        if group
+                    ]
+                    match_query = " AND ".join(grouped)
+                else:
+                    match_query = " OR ".join(atom(term) for group in term_groups for term in group)
+                try:
+                    rows = self.execute(
+                        f"""SELECT m.*, bm25(messages_fts) AS _rank
+                               FROM messages_fts
+                               JOIN messages m ON m.rowid=messages_fts.rowid
+                              WHERE {where} AND messages_fts MATCH ?
+                              ORDER BY _rank ASC, m.created_at DESC, m.rowid DESC
+                              LIMIT ?""",  # nosec B608 - clauses are selected only by fixed branches
+                        (*params, match_query, window),
+                    ).fetchall()
+                except sqlite3.OperationalError:
+                    rows = []
+            if not rows:
+                escaped = candidate.replace("%", r"\%").replace("_", r"\_")
+                like = f"%{escaped}%"
                 rows = self.execute(
-                    f"""SELECT m.*, bm25(messages_fts) AS _rank
-                           FROM messages_fts
-                           JOIN messages m ON m.rowid=messages_fts.rowid
-                          WHERE {where} AND messages_fts MATCH ?
-                          ORDER BY _rank ASC, m.created_at DESC, m.rowid DESC
+                    f"""SELECT m.* FROM messages m
+                          WHERE {where} AND m.content LIKE ? ESCAPE '\\'
+                          ORDER BY m.created_at DESC, m.rowid DESC
                           LIMIT ?""",  # nosec B608 - clauses are selected only by fixed branches
-                    (*params, match_query, window),
+                    (*params, like, window),
                 ).fetchall()
-            except sqlite3.OperationalError:
-                rows = []
+            return rows
+
+        rows = search_once(text, require_all_terms=match_all_terms is True)
         if not rows:
-            escaped = text.replace("%", r"\%").replace("_", r"\_")
-            like = f"%{escaped}%"
-            rows = self.execute(
-                f"""SELECT m.* FROM messages m
-                      WHERE {where} AND m.content LIKE ? ESCAPE '\\'
-                      ORDER BY m.created_at DESC, m.rowid DESC
-                      LIMIT ?""",  # nosec B608 - clauses are selected only by fixed branches
-                (*params, like, window),
-            ).fetchall()
+            # The retry is earned by an empty, already tenant-scoped search.  It
+            # never broadens a successful query and requires every repaired term,
+            # so a partial hit cannot manufacture recall for a multi-term query.
+            from friday.retrieval._keyboard import looks_mistyped, switched
+
+            repaired = switched(text) if looks_mistyped(text) else text
+            if repaired != text:
+                rows = search_once(repaired, require_all_terms=True)
         return [dict(row) for row in rows]
 
     def list_messages_window(

@@ -78,6 +78,56 @@ def test_search_messages_empty_query_is_safe(settings):
         storage.close(final=True)
 
 
+def test_search_messages_retries_a_wrong_keyboard_layout_without_crossing_tenants(settings):
+    storage = init_storage(settings)
+    try:
+        storage.ensure_user("alice")
+        storage.ensure_user("bob")
+        own = storage.create_conversation("alice")
+        foreign = storage.create_conversation("bob")
+        target = storage.store_message(
+            own["id"],
+            "alice",
+            "user",
+            "График дежурств на август утверждён",
+        )
+        storage.store_message(
+            foreign["id"],
+            "bob",
+            "user",
+            "График дежурств другого участника",
+        )
+
+        found = storage.search_messages("alice", "Uhfabr lt;ehcnd", limit=10)
+
+        assert [row["id"] for row in found] == [target["id"]]
+        assert (
+            storage.search_messages(
+                "alice",
+                "Uhfabr lt;ehcnd",
+                conversation_id=foreign["id"],
+            )
+            == []
+        )
+    finally:
+        storage.close(final=True)
+
+
+def test_search_messages_never_reinterprets_a_query_that_already_matches(settings):
+    storage = init_storage(settings)
+    try:
+        storage.ensure_user("alice")
+        conversation = storage.create_conversation("alice")
+        intended = storage.store_message(conversation["id"], "alice", "user", "hello from chat")
+        storage.store_message(conversation["id"], "alice", "user", "руддщ — раскладка")
+
+        found = storage.search_messages("alice", "hello", limit=10)
+
+        assert [row["id"] for row in found] == [intended["id"]]
+    finally:
+        storage.close(final=True)
+
+
 def test_match_all_terms_ors_yo_variants_inside_each_lexical_group(settings) -> None:
     storage = init_storage(settings)
     try:
