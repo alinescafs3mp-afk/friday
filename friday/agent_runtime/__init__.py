@@ -111,6 +111,15 @@ from friday.office_attestation import (
     OFFICE_STRUCTURE_ATTESTATION_METADATA_KEY,
     verify_office_structure_attestation,
 )
+from friday.organs.obsidian.conversation import (
+    OBSIDIAN_READ_TOOL_NAMES,
+    OBSIDIAN_TOOL_NAMES,
+    OBSIDIAN_WRITE_TOOL_NAMES,
+    ObsidianConversationIntent,
+    obsidian_conversation_intent,
+    obsidian_operation_id,
+    render_obsidian_tool_result,
+)
 from friday.people import unambiguous
 from friday.permissions import ActorContext, AuthorizationService
 from friday.reports import SUPPORTED_KINDS, sheet_title_from_report_title, spec_from_payload
@@ -1520,6 +1529,7 @@ _OUTBOUND_TOOL_NAMES = _WEB_TOOL_NAMES | frozenset({"code_run", "data_query"})
 # lineage participates in the turn.
 _PRIVATE_SOURCE_LOCAL_TOOL_NAMES = frozenset(
     {
+        *OBSIDIAN_TOOL_NAMES,
         "collect_files",
         "conflict_decide",
         "conflict_list",
@@ -4439,6 +4449,7 @@ _TOOLS_THAT_READ_THE_ARCHIVE = frozenset(
 _PRIVATE_SOURCE_RESULT_TOOL_NAMES = frozenset(
     {
         *_TOOLS_THAT_READ_THE_ARCHIVE,
+        *OBSIDIAN_READ_TOOL_NAMES,
         "memory_search",
         *_PRIVATE_SOURCE_ACQUISITION_TOOL_NAMES,
     }
@@ -7226,6 +7237,24 @@ _SUPPORTED_EXTERNAL_WORKSPACE_CARRIER_CLAIM = re.compile(
     r"\b(?:в|into)\s+чат\w*\b|\b(?:вам|тебе|to\s+you)\b",
     re.IGNORECASE,
 )
+_UNCONFIRMED_OBSIDIAN_CHANNEL = re.compile(
+    r"\b(?:obsidian|vault)\w*\b",
+    re.IGNORECASE,
+)
+_UNCONFIRMED_OBSIDIAN_NOTE = re.compile(r"\b(?:markdown[- ]?)?заметк\w*\b", re.IGNORECASE)
+_UNCONFIRMED_OBSIDIAN_CURRENT_EFFECT = re.compile(
+    r"(?:\b(?:я|мы)\s+(?:создал|сохранил|записал|добавил|дописал|обновил|изменил)\w*\b|"
+    r"\bготово\b|\b(?:ваш|тво)\w*\s+(?:vault|хранилищ|заметк)\w*\b|"
+    r"(?:^|[\s`«\"])[^\s`«\"]+\.md(?:$|[\s`»\".,;:]))",
+    re.IGNORECASE,
+)
+_UNCONFIRMED_OBSIDIAN_COMPLETION = re.compile(
+    r"\b(?:создан|сохран[её]н|записан|добавлен|дописан|обновл[её]н|измен[её]н|"
+    r"доставлен|синхронизирован|открыт)(?:а|о|ы)?\b|\bготово\b|"
+    r"\b(?:создал|сохранил|записал|добавил|дописал|обновил|изменил|доставил|"
+    r"синхронизировал|открыл)(?:а|и)?\b",
+    re.IGNORECASE,
+)
 _SUPPORTED_REMINDER_COMPLETION = re.compile(
     r"\b(?:напоминани\w*|уведомлени\w*)\b[^.!?\n]{0,256}"
     r"\b(?:поставлен\w*|создан\w*|сохран[её]н\w*|установлен\w*|добавлен\w*|"
@@ -7948,6 +7977,25 @@ def _claims_an_unconfirmed_supported_deed(
     return False
 
 
+def _claims_an_unconfirmed_obsidian_deed(answer: str) -> bool:
+    """Reject model-authored vault completion without a validated Organ receipt."""
+
+    current_effect_marker = _UNCONFIRMED_OBSIDIAN_CURRENT_EFFECT.search(answer) is not None
+    for clause in _model_authored_clauses(answer):
+        if clause.rstrip().endswith("?") or _SUPPORTED_DEED_NONACTUAL.search(clause):
+            continue
+        if _SUPPORTED_DEED_NEGATED.search(clause) or _SUPPORTED_DEED_ACTIVE_NEGATED.search(clause):
+            continue
+        if (
+            _UNCONFIRMED_OBSIDIAN_CHANNEL.search(clause)
+            and _UNCONFIRMED_OBSIDIAN_NOTE.search(clause)
+            and current_effect_marker
+            and _UNCONFIRMED_OBSIDIAN_COMPLETION.search(clause)
+        ):
+            return True
+    return False
+
+
 #: Служебный отрицательный статус внутреннего поиска не отвечает на обычный
 #: вопрос. Два признака нужны одновременно: КАКОЕ хранилище и ЧТО в нём не
 #: нашлось. Одного слова «архив» недостаточно — публичный архив бывает предметом
@@ -8422,6 +8470,14 @@ _UNREADABLE_ATTACHMENT_ANSWER = (
 _ATTACHMENT_AUTHORITY_CHANGED_BEFORE_PUBLICATION = (
     "Источник стал недоступен или изменился во время обработки. Ответ по нему "
     "и производные файлы не опубликованы; повторите запрос после проверки доступа."
+)
+_OBSIDIAN_READ_AUTHORITY_CHANGED_BEFORE_PUBLICATION = (
+    "Право на чтение Obsidian было отозвано до публикации; приватный результат не показан."
+)
+_OBSIDIAN_WRITE_AUTHORITY_CHANGED_BEFORE_PUBLICATION = (
+    "Право на запись в Obsidian было отозвано до публикации результата. "
+    "Не могу подтвердить, применилось ли изменение; автоматически его не повторяю. "
+    "Проверьте vault перед ручным повтором."
 )
 _ADVISORY_ATTACHMENT_CAUTION = (
     "⚠️ Ниже — результат локального распознавания вложения; он может содержать "
@@ -24753,6 +24809,7 @@ _FILE_TURN_EFFECTS = frozenset(
         "archive",
         "person",
         "mutation",
+        "obsidian",
         "workspace",
         "temporal",
         "file_create",
@@ -24771,6 +24828,7 @@ _FILE_TURN_EFFECT_TOOL_NAMES: dict[str, frozenset[str]] = {
     "archive": frozenset({"kg_stats", "list_tags"}),
     "person": frozenset({"message_search", "user_activity", "user_knowledge_search"}),
     "workspace": frozenset({"workspace_create"}),
+    "obsidian": OBSIDIAN_TOOL_NAMES,
 }
 _FILE_MEMORY_WRITE_ACTION = re.compile(
     r"\b(?:сохрани|запомни|запиши|добавь|remember|store|save)\w*\b"
@@ -25541,9 +25599,16 @@ def file_turn_authority(message: str) -> FileTurnAuthority:
         actions.add("mutation")
     if _explicit_workspace_create_intent(message) is not None:
         actions.add("workspace")
+    obsidian_intent = obsidian_conversation_intent(message)
+    if obsidian_intent is not None:
+        actions.add("obsidian")
     if _attachment_temporal_read_clause(speech):
         actions.add("temporal")
-    if _is_direct_file_request(speech):
+    # ``Projects/note.md`` is the destination inside the owner vault, not a
+    # request for a second Telegram attachment.  Give the explicit Obsidian
+    # channel sole ownership of that carrier so the generic late make_file
+    # builder cannot duplicate or contradict the vault operation.
+    if obsidian_intent is None and _is_direct_file_request(speech):
         actions.add("file_create")
     if any(item.kind == "host_path" and item.role == "source_identity" for item in locators):
         actions.add("host_path")
@@ -28742,6 +28807,14 @@ class AgentContext:
     #: must atomically add the sticky lineage marker before any later model call.
     #: This identifier is process-private and never enters prompts or responses.
     source_search_lineage_user_message_id: str = ""
+    #: Immutable root user row for idempotent conversational effects. A deliberate
+    #: regenerate inherits the original row, so the same Obsidian operation is
+    #: reconciled instead of being emitted under a fresh caller-controlled key.
+    effect_root_user_message_id: str = ""
+    #: Local calendar day frozen on the immutable root turn. Dynamic words such
+    #: as "today" must resolve to the same arguments on a regenerate after
+    #: midnight, otherwise one idempotency key would name two effects.
+    effect_local_date: date | None = None
     #: Owner of the durable message row above. In a shared tenant this is the
     #: person, while ``AgentContext.user_id`` intentionally remains the corpus
     #: tenant; conflating them would make every shared-corpus source read fail.
@@ -30093,6 +30166,37 @@ class AgentRuntime:
             ):
                 return False
         return True
+
+    def _obsidian_publication_authorized(
+        self,
+        conn: Any,
+        *,
+        actor: ActorContext,
+        tool_name: str,
+    ) -> bool:
+        """Re-authorize the exact Organ capability inside the message commit."""
+
+        if tool_name not in OBSIDIAN_TOOL_NAMES:
+            return False
+        expected_security_id = "obsidian.write" if tool_name in OBSIDIAN_WRITE_TOOL_NAMES else "obsidian.read"
+        expected_risk = "mutate" if tool_name in OBSIDIAN_WRITE_TOOL_NAMES else "observe"
+        get_tool = getattr(self.kernel, "get_tool", None)
+        tool_spec = get_tool(tool_name) if callable(get_tool) else None
+        if (
+            str(getattr(tool_spec, "security_id", "") or "") != expected_security_id
+            or str(getattr(tool_spec, "risk", "") or "") != expected_risk
+        ):
+            return False
+        principal = str(actor.own_id or "").strip()
+        principal_row = conn.execute(
+            "SELECT preset_key, status FROM users WHERE id=?",
+            (principal,),
+        ).fetchone()
+        authorization = getattr(self.kernel, "authorization", None)
+        if principal_row is None or str(principal_row["status"] or "") != "active" or authorization is None:
+            return False
+        fresh_actor = replace(actor, preset_key=str(principal_row["preset_key"] or "user"))
+        return bool(authorization.authorize(fresh_actor, expected_security_id).allowed)
 
     def _final_voice_tool_authorized(
         self,
@@ -34332,6 +34436,11 @@ class AgentRuntime:
         )
         person_inventory_decomposition = _person_document_inventory_remainder(routing_message)
         file_turn = file_turn_authority(routing_message)
+        obsidian_effect_local_date = self._local_today()
+        obsidian_intent = obsidian_conversation_intent(
+            routing_message,
+            today=obsidian_effect_local_date,
+        )
         filename_inventory_request = _filename_inventory_request(routing_message)
         filename_clue_request = _filename_clue_request(routing_message)
         data_subject_file_request = _data_subject_file_request(routing_message)
@@ -35554,6 +35663,7 @@ class AgentRuntime:
             # которого первый ход не получал. Признак — свойство хода, значит
             # жить он должен на ходе, а не в памяти одного запроса.
             user_metadata = {**(user_metadata or {}), "synthetic_document_notice": True}
+        replay_root_id = ""
         if replay_source_message_id:
             replay_parent_id = str(replay_source_message_id)
             replay_root_id = replay_parent_id
@@ -35573,6 +35683,13 @@ class AgentRuntime:
                 ).strip()
                 if re.fullmatch(r"msg_[0-9a-f]{16}", candidate_root):
                     replay_root_id = candidate_root
+                frozen_date = str(replay_parent_metadata.get("obsidian_effect_local_date") or "")
+                try:
+                    parsed_frozen_date = date.fromisoformat(frozen_date)
+                except ValueError:
+                    parsed_frozen_date = None
+                if parsed_frozen_date is not None and parsed_frozen_date.isoformat() == frozen_date:
+                    obsidian_effect_local_date = parsed_frozen_date
             # Parent binds a crash retry to the request which appended this row;
             # root keeps attachment authority stable across deliberate repeated
             # alternatives without making every click replay the first answer.
@@ -35580,6 +35697,11 @@ class AgentRuntime:
                 **(user_metadata or {}),
                 "regenerate_parent_user_message_id": replay_parent_id,
                 "regenerate_root_user_message_id": replay_root_id,
+            }
+        if obsidian_intent is not None:
+            user_metadata = {
+                **(user_metadata or {}),
+                "obsidian_effect_local_date": obsidian_effect_local_date.isoformat(),
             }
         if not mark_request_effect_possible():
             raise RuntimeError("Request idempotency fence could not be committed before message storage")
@@ -35594,6 +35716,11 @@ class AgentRuntime:
         source_search_lineage_user_message_id = str(stored_user_message.get("id") or "").strip()
         if not re.fullmatch(r"msg_[0-9a-f]{16}", source_search_lineage_user_message_id):
             raise RuntimeError("Stored user message has no valid durable identity")
+        effect_root_user_message_id = (
+            replay_root_id
+            if re.fullmatch(r"msg_[0-9a-f]{16}", replay_root_id)
+            else source_search_lineage_user_message_id
+        )
         workspace_inbox_resolution = _WorkspaceInboxResolution()
         if workspace_inbox_request is not None:
             workspace_inbox_resolution = (
@@ -36527,6 +36654,7 @@ class AgentRuntime:
         )
         if (
             not quoted_file_command_is_data
+            and obsidian_intent is None
             and not foreign_private_request
             and not document_metadata_owned
             and not dangerous_instruction_request
@@ -36697,6 +36825,22 @@ class AgentRuntime:
                 structural_answer=_DANGEROUS_INSTRUCTIONS_REFUSAL,
                 open_remainder="",
                 remainder_known=True,
+            )
+        elif obsidian_intent is not None:
+            # A direct current-message vault command already has one closed
+            # Organ capability and, for the deterministic forms, all of its
+            # arguments.  General retrieval and semantic intent arbiters can
+            # add neither evidence nor authority here; they can only consume
+            # the turn deadline or misroute the command as web/person work.
+            context = AgentContext(
+                conversation_id=conversation_id,
+                user_id=tenant_id,
+                person_id=person_id,
+                conversation_history=[],
+                ingestion={},
+                interaction_mode=interaction_mode,
+                search_query=clean_message,
+                outward_verdict=("действие", None),
             )
         elif prior_web_source_followup:
             # A provenance follow-up is answered from the exact bounded ledger
@@ -37195,6 +37339,8 @@ class AgentRuntime:
             workspace_exact_content = None
             workspace_exact_direct_authorized = False
         context.source_search_lineage_user_message_id = source_search_lineage_user_message_id
+        context.effect_root_user_message_id = effect_root_user_message_id
+        context.effect_local_date = obsidian_effect_local_date
         context.source_search_lineage_message_owner_id = user_id
         context.source_effect_authority = attachment_source_effect_authority
         context.source_effect_reauth_required = bool(active_attachment_set and attachment_expected_count > 0)
@@ -38210,6 +38356,7 @@ class AgentRuntime:
         elif (
             message_locate_flow
             or workspace_exact_direct_authorized
+            or obsidian_intent is not None
             or (
                 self.llm.enabled
                 and (
@@ -38271,7 +38418,11 @@ class AgentRuntime:
         # the turn's initial lineage snapshot. Taint every downstream verifier,
         # metadata and transport guard immediately; otherwise a judge issue could
         # durably quote the private excerpt as if this were a public turn.
-        private_context_lineage = bool(private_context_lineage or context.source_search_used)
+        private_context_lineage = bool(
+            private_context_lineage
+            or context.source_search_used
+            or response.get("_obsidian_private_lineage_owned") is True
+        )
 
         if workspace_inbox_resolution.tools_used:
             response["tools_used"] = list(
@@ -38606,6 +38757,7 @@ class AgentRuntime:
         if (
             attachment_evidence
             and response.get("_office_exact_owned") is not True
+            and response.get("_obsidian_owned") is not True
             and response.get("_advisory_vision_summary_owned") is not True
             and not web_evidence_used
             and not file_web
@@ -38660,6 +38812,7 @@ class AgentRuntime:
             # Markdown-shaped text; that is file data, not a claim that this
             # turn searched the web.
             and response.get("_office_exact_owned") is not True
+            and response.get("_obsidian_owned") is not True
             and response.get("_advisory_attachment_literal_owned") is not True
             and not attachment_web_literal_grounded
             and not web_evidence_used
@@ -38850,8 +39003,10 @@ class AgentRuntime:
         )
         person_grounding_replaced = False
         if (
-            effective_topic.startswith("человек") or context.person_activity_resolution_failed
-        ) and not person_answer_has_evidence:
+            response.get("_obsidian_owned") is not True
+            and (effective_topic.startswith("человек") or context.person_activity_resolution_failed)
+            and not person_answer_has_evidence
+        ):
             # `user_model` is an orientation hint (top people/projects/tags),
             # not evidence for a dossier. A live turn reached this branch with
             # zero records/entities/tools/citations and still published a long,
@@ -38890,7 +39045,11 @@ class AgentRuntime:
         # своих сведений о себе у модели нет, есть память обучения. Поэтому текст
         # не правится и не дополняется, а ЗАМЕНЯЕТСЯ: рядом с правдой ложь о
         # собственном устройстве читалась бы как разногласие двух источников.
-        if response.get("_office_exact_owned") is not True and _CALLS_ITSELF_SOMEONE_ELSE.search(content):
+        if (
+            response.get("_office_exact_owned") is not True
+            and response.get("_obsidian_owned") is not True
+            and _CALLS_ITSELF_SOMEONE_ELSE.search(content)
+        ):
             LOGGER.warning("self-description: ответ назвал себя чужим продуктом, заменён")
             content = _self_description(self.settings, served_name=self._served_model_name())
             response["content"] = content
@@ -38906,6 +39065,7 @@ class AgentRuntime:
         outside_deed_detected = bool(
             response.get("_attachment_model_failure_owned") is not True
             and response.get("_attachment_guard_rejection_owned") is not True
+            and response.get("_obsidian_owned") is not True
             and not (
                 _has_explicit_external_deed_agent(clean_message)
                 and _has_explicit_external_deed_agent(content)
@@ -38930,6 +39090,7 @@ class AgentRuntime:
             response["knowledge_object_ids"] = []
         archive_status_applicable = bool(
             response.get("_office_exact_owned") is not True
+            and response.get("_obsidian_owned") is not True
             and context.answer_mode == "general_conversation"
             and not context.asked_for_an_archive
             # «Файл» описывает формат результата, а не источник сведений.
@@ -39194,23 +39355,27 @@ class AgentRuntime:
         )
         if (
             response.get("_office_exact_owned") is not True
+            and response.get("_obsidian_owned") is not True
             and response.get("_attachment_model_failure_owned") is not True
             and response.get("_attachment_guard_rejection_owned") is not True
             and not outside_deed_replaced
-            and _claims_an_unconfirmed_supported_deed(
-                content,
-                has_file=bool(file_deed_descriptors),
-                reminder_succeeded=bool(context.successful_reminders),
-                reminder_delivery_scheduled=reminder_delivery_scheduled,
-                # Mid-turn speak is discarded and resynthesised later; it is not
-                # evidence that the final voice attachment already exists.
-                voice_succeeded=False,
-                file_descriptors=file_deed_descriptors,
-                external_file_descriptors=external_file_deed_descriptors,
-                reminder_descriptors=reminder_deed_descriptors,
-                read_only_timeline_file_report=read_only_timeline_file_report,
-                passive_source_state=passive_attachment_summary_scope,
-                passive_input_file_state_evidence=passive_input_file_state_evidence,
+            and (
+                _claims_an_unconfirmed_obsidian_deed(content)
+                or _claims_an_unconfirmed_supported_deed(
+                    content,
+                    has_file=bool(file_deed_descriptors),
+                    reminder_succeeded=bool(context.successful_reminders),
+                    reminder_delivery_scheduled=reminder_delivery_scheduled,
+                    # Mid-turn speak is discarded and resynthesised later; it is not
+                    # evidence that the final voice attachment already exists.
+                    voice_succeeded=False,
+                    file_descriptors=file_deed_descriptors,
+                    external_file_descriptors=external_file_deed_descriptors,
+                    reminder_descriptors=reminder_deed_descriptors,
+                    read_only_timeline_file_report=read_only_timeline_file_report,
+                    passive_source_state=passive_attachment_summary_scope,
+                    passive_input_file_state_evidence=passive_input_file_state_evidence,
+                )
             )
         ):
             # Проверяется модельная часть ДО late builder: иначе выдуманное
@@ -39245,6 +39410,7 @@ class AgentRuntime:
             response["_source_search_exhaustive_rejected"] = True
         office_summary_downgraded = bool(
             response.get("_office_exact_owned") is not True
+            and response.get("_obsidian_owned") is not True
             and not synthetic_document_notice
             and not office_exact_request_detected(clean_message)
             and office_exhaustive_scope(clean_message)
@@ -39301,6 +39467,7 @@ class AgentRuntime:
             )
         office_model_claim_rejected = bool(
             response.get("_office_exact_owned") is not True
+            and response.get("_obsidian_owned") is not True
             # A bare upload notice is backend-authored and means “summarise the
             # attached source”, never “prove an exact list/count”.  Complete
             # sources may support ordinary complete-sounding prose; incomplete
@@ -39400,6 +39567,7 @@ class AgentRuntime:
             and not private_web_search_blocked
             and not web_evidence_replaced
             and response.get("_office_exact_owned") is not True
+            and response.get("_obsidian_owned") is not True
             and not office_summary_downgraded
             and not office_model_claim_rejected
             and not outside_deed_replaced
@@ -39592,6 +39760,7 @@ class AgentRuntime:
         model_said = (
             ""
             if response.get("_office_exact_owned") is True
+            or response.get("_obsidian_owned") is True
             or response.get("_unreadable_attachment_owned") is True
             or response.get("_attachment_model_failure_owned") is True
             or response.get("_attachment_guard_rejection_owned") is True
@@ -39844,6 +40013,7 @@ class AgentRuntime:
             not foreign_private_request
             and response.get("_office_exact_owned") is not True
             and response.get("_workspace_create_owned") is not True
+            and response.get("_obsidian_owned") is not True
             and response.get("_simple_public_news_owned") is not True
             and not office_summary_downgraded
             and shape_contract is None
@@ -40380,10 +40550,11 @@ class AgentRuntime:
         # subsequently rewrite. Citation cleanup and web-source reconciliation
         # therefore run before the late builder (and remain idempotent at the
         # legacy last-hop checks below).
-        content = _strip_invented_citations(
-            content,
-            (context.knowledge_citations or {}).keys(),
-        )
+        if response.get("_obsidian_owned") is not True:
+            content = _strip_invented_citations(
+                content,
+                (context.knowledge_citations or {}).keys(),
+            )
         if web_evidence_used:
             spoken_prefix = f"{spoken}\n\n" if spoken else ""
             pre_file_model_content = (
@@ -40592,7 +40763,8 @@ class AgentRuntime:
         # Список поданных источников передаётся сюда: без него номерная метка
         # неотличима от настоящей, и `[K1]` при нуле документов доезжала до
         # человека как ссылка на его собственный архив.
-        content = _strip_invented_citations(content, (context.knowledge_citations or {}).keys())
+        if response.get("_obsidian_owned") is not True:
+            content = _strip_invented_citations(content, (context.knowledge_citations or {}).keys())
 
         # Owned shape answers are checked again at the last mutation boundary.
         # If any later guard ever changes their structure, publish the exact
@@ -41159,15 +41331,19 @@ class AgentRuntime:
                 "verdict_kind": (
                     "office_exact"
                     if response.get("_office_exact_owned") is True
+                    else "obsidian"
+                    if response.get("_obsidian_owned") is True
                     else str((effective_outward_verdict or ("", None))[0] or "")
                 ),
                 "answer_present": (
                     bool(spoken)
                     or response.get("_office_exact_owned") is True
+                    or response.get("_obsidian_owned") is True
                     or response.get("_small_talk_owned") is True
                 ),
                 "model_spoke": bool(model_said),
                 **({"office_summary_downgraded": True} if office_summary_downgraded else {}),
+                **({"obsidian_owned": True} if response.get("_obsidian_owned") is True else {}),
                 **({"small_talk_owned": True} if response.get("_small_talk_owned") is True else {}),
                 **(
                     {"readable_attachment_refusal_replaced": True}
@@ -41193,6 +41369,7 @@ class AgentRuntime:
                 "remainder_known": (
                     context.remainder_known
                     or response.get("_office_exact_owned") is True
+                    or response.get("_obsidian_owned") is True
                     or response.get("_small_talk_owned") is True
                 ),
                 "rule_learned": bool(context.rule_learned),
@@ -41301,6 +41478,7 @@ class AgentRuntime:
             or false_model_outage_replaced
             or response.get("_attachment_guard_rejection_owned") is True
             or response.get("_attachment_verification_rejection_owned") is True
+            or response.get("_obsidian_owned") is True
             or adjacent_overview_unresolved_terminal
             or _turn_deadline_expired(context.turn_deadline)
         ):
@@ -41347,27 +41525,45 @@ class AgentRuntime:
             assistant_metadata["tools_used"] = workspace_ledger
 
         attachment_publication_reauth_required = bool(
-            attachment_snapshot_changed_before_admission
-            or (
-                active_attachment_set
-                and attachment_expected_count > 0
-                and (
-                    assistant_used_attachment
-                    or attachment_readable_count > 0
-                    or bool(attachment_evidence)
-                    or response.get("_document_metadata_owned") is True
-                    or response.get("_office_exact_owned") is True
-                    or bool(response.get("file_clips"))
-                    or bool(response.get("voice_clip"))
-                    or final_voice is not None
+            response.get("_obsidian_owned") is not True
+            and (
+                attachment_snapshot_changed_before_admission
+                or (
+                    active_attachment_set
+                    and attachment_expected_count > 0
+                    and (
+                        assistant_used_attachment
+                        or attachment_readable_count > 0
+                        or bool(attachment_evidence)
+                        or response.get("_document_metadata_owned") is True
+                        or response.get("_office_exact_owned") is True
+                        or bool(response.get("file_clips"))
+                        or bool(response.get("voice_clip"))
+                        or final_voice is not None
+                    )
                 )
             )
         )
         # Even a valid zero-hit page is a source-derived conclusion. A late
         # knowledge.read revocation must therefore close it before publication.
         source_search_publication_reauth_required = bool(context.source_search_used)
+        obsidian_owned_response = response.get("_obsidian_owned") is True
+        obsidian_publication_tool = str(response.get("_obsidian_publication_tool") or "")
+        obsidian_tool_ledger = [
+            str(name) for name in (response.get("tools_used") or []) if str(name) in OBSIDIAN_TOOL_NAMES
+        ]
+        obsidian_publication_marker_valid = bool(
+            not obsidian_owned_response
+            or not obsidian_tool_ledger
+            and not obsidian_publication_tool
+            or obsidian_tool_ledger
+            and obsidian_publication_tool == obsidian_tool_ledger[-1]
+        )
+        obsidian_publication_reauth_required = bool(obsidian_owned_response and obsidian_tool_ledger)
         publication_reauth_required = bool(
-            attachment_publication_reauth_required or source_search_publication_reauth_required
+            attachment_publication_reauth_required
+            or source_search_publication_reauth_required
+            or obsidian_owned_response
         )
         with self.storage.transaction() as publication_conn:
             attachment_publication_authorized = bool(
@@ -41397,10 +41593,23 @@ class AgentRuntime:
                     expected_count=context.source_search_result_expected_count,
                 )
             )
+            obsidian_publication_authorized = bool(
+                not obsidian_owned_response
+                or obsidian_publication_marker_valid
+                and (
+                    not obsidian_publication_reauth_required
+                    or self._obsidian_publication_authorized(
+                        publication_conn,
+                        actor=actor,
+                        tool_name=obsidian_publication_tool,
+                    )
+                )
+            )
             publication_authorized = bool(
                 not publication_reauth_required
                 or attachment_publication_authorized
                 and source_search_publication_authorized
+                and obsidian_publication_authorized
             )
             final_voice_publication_authorized = bool(
                 final_voice is None
@@ -41419,6 +41628,9 @@ class AgentRuntime:
             source_search_authority_changed_before_publication = bool(
                 source_search_publication_reauth_required and not source_search_publication_authorized
             )
+            obsidian_authority_changed_before_publication = bool(
+                obsidian_owned_response and not obsidian_publication_authorized
+            )
             if not publication_authorized:
                 LOGGER.warning("source-publication: authority changed before assistant commit")
                 publication_authority_issues = [
@@ -41431,6 +41643,10 @@ class AgentRuntime:
                         (
                             "source_search_authority_changed_before_publication",
                             source_search_authority_changed_before_publication,
+                        ),
+                        (
+                            "obsidian_authority_changed_before_publication",
+                            obsidian_authority_changed_before_publication,
                         ),
                     )
                     if changed
@@ -41447,14 +41663,14 @@ class AgentRuntime:
                         if _has_scheduled_reminder_delivery(context.successful_reminders)
                         else "Напоминание было сохранено; автоматическая доставка сейчас недоступна."
                     )
-                content = "\n\n".join(
-                    part
-                    for part in (
-                        safe_effect_notice,
-                        _ATTACHMENT_AUTHORITY_CHANGED_BEFORE_PUBLICATION,
+                authority_changed_notice = _ATTACHMENT_AUTHORITY_CHANGED_BEFORE_PUBLICATION
+                if obsidian_authority_changed_before_publication:
+                    authority_changed_notice = (
+                        _OBSIDIAN_WRITE_AUTHORITY_CHANGED_BEFORE_PUBLICATION
+                        if obsidian_publication_tool in OBSIDIAN_WRITE_TOOL_NAMES
+                        else _OBSIDIAN_READ_AUTHORITY_CHANGED_BEFORE_PUBLICATION
                     )
-                    if part
-                )
+                content = "\n\n".join(part for part in (safe_effect_notice, authority_changed_notice) if part)
                 response["content"] = content
                 response["file_clips"] = []
                 response["voice_clip"] = None
@@ -41467,6 +41683,8 @@ class AgentRuntime:
                     response["_attachment_authority_changed_owned"] = True
                 if source_search_authority_changed_before_publication:
                     response["_source_search_authority_changed_owned"] = True
+                if obsidian_authority_changed_before_publication:
+                    response["_obsidian_authority_changed_owned"] = True
                 response.pop("_document_metadata_owned", None)
                 response.pop("_office_exact_owned", None)
                 model_said = ""
@@ -41578,6 +41796,7 @@ class AgentRuntime:
         publication_authority_changed_before_publication = bool(
             attachment_authority_changed_before_publication
             or source_search_authority_changed_before_publication
+            or obsidian_authority_changed_before_publication
         )
         if attributed_knowledge_ids:
             self.storage.record_knowledge_usage(
@@ -41595,6 +41814,7 @@ class AgentRuntime:
             "source_search_authority_changed_before_publication": (
                 source_search_authority_changed_before_publication
             ),
+            "obsidian_authority_changed_before_publication": (obsidian_authority_changed_before_publication),
             "exact_text_shape_owned": exact_text_shape_delivery,
             # Exact Office answers contain authenticated cell literals, not
             # model-authored Markdown.  Preserve that provenance as a closed
@@ -41607,6 +41827,7 @@ class AgentRuntime:
                     exact_text_shape_delivery
                     or publication_authority_changed_before_publication
                     or response.get("_office_exact_owned") is True
+                    or response.get("_obsidian_owned") is True
                     or response.get("_document_metadata_owned") is True
                     or bool(adjacent_overview_unresolved_answer)
                 )
@@ -43367,6 +43588,246 @@ class AgentRuntime:
             "_attachment_hierarchy_complete": complete,
         }
 
+    def _fresh_obsidian_actor(
+        self,
+        actor: ActorContext,
+        tool_name: str,
+    ) -> ActorContext | None:
+        """Re-read account status, preset and the exact Organ capability."""
+
+        if tool_name not in OBSIDIAN_TOOL_NAMES:
+            return None
+        get_tool = getattr(self.kernel, "get_tool", None)
+        tool_spec = get_tool(tool_name) if callable(get_tool) else None
+        expected_security_id = "obsidian.write" if tool_name in OBSIDIAN_WRITE_TOOL_NAMES else "obsidian.read"
+        expected_risk = "mutate" if tool_name in OBSIDIAN_WRITE_TOOL_NAMES else "observe"
+        if (
+            str(getattr(tool_spec, "security_id", "") or "") != expected_security_id
+            or str(getattr(tool_spec, "risk", "") or "") != expected_risk
+        ):
+            return None
+        authorization = getattr(self.kernel, "authorization", None)
+        if authorization is None:
+            return None
+        principal = str(actor.own_id or "").strip()
+        try:
+            with self.storage.transaction() as connection:
+                row = connection.execute(
+                    "SELECT preset_key, status FROM users WHERE id=?",
+                    (principal,),
+                ).fetchone()
+                if row is None or str(row["status"] or "") != "active":
+                    return None
+                fresh_actor = replace(actor, preset_key=str(row["preset_key"] or "user"))
+                if not authorization.authorize(fresh_actor, expected_security_id).allowed:
+                    return None
+                return fresh_actor
+        except Exception as exc:  # noqa: BLE001 - an unavailable proof denies the effect
+            LOGGER.warning("Obsidian capability recheck failed (%s)", type(exc).__name__)
+            return None
+
+    async def _explicit_obsidian_response(
+        self,
+        context: AgentContext,
+        message: str,
+        actor: ActorContext,
+        tools: Sequence[dict[str, Any]],
+        intent: ObsidianConversationIntent,
+    ) -> dict[str, Any]:
+        """Execute one explicit current-message Obsidian operation and own its receipt."""
+
+        used: list[str] = []
+        evidence: list[dict[str, str]] = []
+        publication_tool = ""
+        lineage_persisted = False
+        lineage_expected = bool(
+            re.fullmatch(
+                r"msg_[0-9a-f]{16}",
+                str(context.source_search_lineage_user_message_id or "").strip(),
+            )
+            and str(context.source_search_lineage_message_owner_id or "").strip()
+        )
+
+        def response(content: str, *, private: bool = False) -> dict[str, Any]:
+            return {
+                "content": content,
+                "tools_used": used,
+                "web_query_notice": "",
+                "knowledge_object_ids": [],
+                "tool_evidence": evidence,
+                "voice_clip": None,
+                "file_clips": [],
+                "_structural_file_count": 0,
+                "_model_generated": False,
+                "_obsidian_owned": True,
+                "_obsidian_publication_tool": publication_tool,
+                **({"_obsidian_private_lineage_owned": True} if private else {}),
+            }
+
+        if intent.error:
+            return response(intent.error)
+        selected_name = intent.tool_name
+        schemas = {
+            str((item.get("function") or {}).get("name") or item.get("name") or ""): item
+            for item in tools
+            if isinstance(item, Mapping)
+        }
+        selected_schema = schemas.get(selected_name)
+        if selected_name not in OBSIDIAN_TOOL_NAMES or selected_schema is None:
+            return response(
+                "Команда Obsidian распознана, но нужная возможность сейчас недоступна. "
+                "Проверьте подключение командой /obsidian."
+            )
+        if _turn_deadline_expired(context.turn_deadline):
+            return response("Время этого хода закончилось до обращения к Obsidian; изменений не было.")
+
+        # Every note operation is gated by the Organ's own vault state. This
+        # avoids starting a mutator merely to discover that onboarding has not
+        # reached its explicit ready postcondition.
+        if selected_name != "obsidian_list_vaults":
+            if "obsidian_list_vaults" not in schemas:
+                return response(
+                    "Не удалось проверить готовность Obsidian vault: контрольная возможность "
+                    "недоступна. Операция не запускалась."
+                )
+            preflight_actor = self._fresh_obsidian_actor(actor, "obsidian_list_vaults")
+            if preflight_actor is None:
+                return response("Доступ к личному Obsidian vault больше не подтверждён; изменений не было.")
+            preflight = await self.kernel.execute(
+                "obsidian_list_vaults",
+                {},
+                actor=preflight_actor,
+            )
+            used.append("obsidian_list_vaults")
+            publication_tool = "obsidian_list_vaults"
+            raw_vaults = preflight.data if preflight.success and isinstance(preflight.data, Mapping) else {}
+            vaults = raw_vaults.get("vaults") if isinstance(raw_vaults, Mapping) else None
+            vault_count = raw_vaults.get("count")
+            if (
+                not isinstance(vaults, list)
+                or not isinstance(vault_count, int)
+                or isinstance(vault_count, bool)
+                or vault_count != len(vaults)
+                or len(vaults) > 8
+                or not all(isinstance(item, Mapping) for item in vaults)
+            ):
+                return response(
+                    "Не удалось проверить готовность Obsidian vault; операция не запускалась. "
+                    "Откройте /obsidian и обновите статус."
+                )
+            # Vault metadata is private too.  On a real chat turn its durable
+            # user row must be tainted before any note operation starts.
+            lineage_persisted = self._persist_source_search_private_lineage(context)
+            if lineage_expected and not lineage_persisted:
+                return response(
+                    "Готовность Obsidian проверена, но приватный контекст не удалось "
+                    "безопасно закрепить; операция не запускалась."
+                )
+            context.private_source_boundary_active = bool(
+                context.private_source_boundary_active or lineage_persisted
+            )
+            ready = [item for item in vaults if str(item.get("state") or "") == "ready"]
+            if len(vaults) != 1 or len(ready) != 1:
+                state = str(vaults[0].get("state") or "not_configured") if len(vaults) == 1 else "ambiguous"
+                return response(
+                    "Obsidian ещё не готов к операциям с заметками "
+                    f"(состояние: {state}). Завершите шаги в /obsidian; операция не запускалась.",
+                    private=lineage_persisted,
+                )
+
+        if intent.direct_arguments is None:
+            return response("Не удалось однозначно разобрать параметры команды; изменений не было.")
+        arguments = dict(intent.direct_arguments)
+
+        schema_function = selected_schema.get("function") if isinstance(selected_schema, Mapping) else None
+        schema_parameters: Mapping[str, Any] = {}
+        if isinstance(schema_function, Mapping):
+            raw_schema_parameters = schema_function.get("parameters")
+            if isinstance(raw_schema_parameters, Mapping):
+                schema_parameters = raw_schema_parameters
+        schema_properties = schema_parameters.get("properties")
+        allowed_arguments = set(schema_properties) if isinstance(schema_properties, Mapping) else set()
+        if set(arguments) - allowed_arguments:
+            return response("Команда содержала неподдерживаемые параметры; изменений не было.")
+        if intent.explicit_path:
+            arguments["path"] = intent.explicit_path
+        if "expected_revision" in arguments:
+            revision = str(arguments.get("expected_revision") or "").casefold()
+            if not re.fullmatch(r"[0-9a-f]{64}", revision) or revision not in message.casefold():
+                arguments.pop("expected_revision", None)
+        arguments.pop("work_item_id", None)
+
+        expected_operation_id = ""
+        if selected_name in OBSIDIAN_WRITE_TOOL_NAMES:
+            root_message_id = str(
+                context.effect_root_user_message_id or context.source_search_lineage_user_message_id or ""
+            ).strip()
+            if not re.fullmatch(r"msg_[0-9a-f]{16}", root_message_id):
+                synthetic = hashlib.sha256(
+                    f"{context.user_id}\0{context.conversation_id}\0{message}".encode(
+                        "utf-8", errors="replace"
+                    )
+                ).hexdigest()[:16]
+                root_message_id = f"msg_{synthetic}"
+            try:
+                expected_operation_id = obsidian_operation_id(
+                    self.storage,
+                    actor.own_id,
+                    root_message_id,
+                    selected_name,
+                )
+            except Exception as exc:  # noqa: BLE001 - missing local HMAC proof fails closed
+                LOGGER.error("Obsidian operation identity unavailable (%s)", type(exc).__name__)
+                return response("Не удалось безопасно закрепить идентификатор операции; изменений не было.")
+            arguments["operation_id"] = expected_operation_id
+
+        fresh_actor = self._fresh_obsidian_actor(actor, selected_name)
+        if fresh_actor is None:
+            return response("Право на эту операцию Obsidian больше не подтверждено; изменений не было.")
+        if _turn_deadline_expired(context.turn_deadline):
+            return response("Время этого хода закончилось до обращения к Obsidian; изменений не было.")
+        result = await self.kernel.execute(selected_name, arguments, actor=fresh_actor)
+        used.append(selected_name)
+        publication_tool = selected_name
+        if not result.success:
+            no_effect = str(result.error or "").startswith(
+                ("Invalid tool arguments", "Authorization denied", "Unknown tool", "Tool is not initialized")
+            )
+            return response(
+                "Операция Obsidian не запускалась: параметры или доступ не прошли проверку."
+                if no_effect
+                else (
+                    "Не удалось подтвердить итог операции Obsidian. Автоматически её не повторяю; "
+                    "проверьте vault и статус /obsidian перед повтором."
+                )
+            )
+        rendered = render_obsidian_tool_result(
+            selected_name,
+            result.data,
+            expected_operation_id=expected_operation_id,
+            expected_path=intent.explicit_path,
+        )
+        if not rendered:
+            return response(
+                "Obsidian вернул неполную проверяемую квитанцию. Автоматически операцию не повторяю; "
+                "проверьте vault и статус /obsidian."
+            )
+        # Persist the private-source boundary before any note bytes or vault
+        # metadata can enter the durable assistant turn and future history.
+        if not lineage_persisted:
+            lineage_persisted = self._persist_source_search_private_lineage(context)
+        if not lineage_persisted and (selected_name in OBSIDIAN_READ_TOOL_NAMES or lineage_expected):
+            return response(
+                "Результат Obsidian получен, но его приватный контекст не удалось безопасно "
+                "закрепить. Автоматически операцию не повторяйте."
+            )
+        context.private_source_boundary_active = bool(
+            context.private_source_boundary_active or lineage_persisted
+        )
+        encoded_evidence = json.dumps(result.data, ensure_ascii=False, sort_keys=True, default=str)
+        evidence.append({"tool": selected_name, "output": encoded_evidence[:8_000]})
+        return response(rendered, private=lineage_persisted)
+
     async def _agentic_loop(
         self,
         context: AgentContext,
@@ -43399,6 +43860,30 @@ class AgentRuntime:
             # through chat, and a schema removed only by the outer route is not
             # a security boundary against a hallucinated native call.
             tools[:] = _project_private_source_tool_schemas(tools)
+
+        obsidian_intent = obsidian_conversation_intent(
+            message,
+            today=context.effect_local_date or self._local_today(),
+        )
+        if obsidian_intent is None:
+            # Owner-vault schemas are capabilities, not general suggestions.
+            # They are exposed only when the current unquoted message itself
+            # proves one Obsidian operation; history and source text cannot
+            # turn an unrelated dialogue into a vault read or mutation.
+            tools[:] = [
+                tool
+                for tool in tools
+                if str((tool.get("function") or {}).get("name") or tool.get("name") or "")
+                not in OBSIDIAN_TOOL_NAMES
+            ]
+        else:
+            return await self._explicit_obsidian_response(
+                context,
+                message,
+                actor,
+                tools,
+                obsidian_intent,
+            )
 
         def outward_tool_is_allowed(tool_name: str) -> bool:
             if context.private_source_boundary_active and _private_source_tool_policy(tool_name) != "local":

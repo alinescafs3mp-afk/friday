@@ -184,7 +184,10 @@ def test_real_pinned_amd64_archive_installs_when_cached_or_opted_in(tmp_path: Pa
     """Run with a cache or FRIDAY_TEST_SYNCTHING_INSTALLER_LIVE=1; never network by default."""
 
     filename = installer._filename("amd64")
-    explicit = os.environ.get("FRIDAY_SYNCTHING_AMD64_TARBALL", "").strip()
+    explicit = (
+        os.environ.get("FRIDAY_SYNCTHING_AMD64_TARBALL", "").strip()
+        or os.environ.get("QUALITY_GATE_SYNCTHING_AMD64_TARBALL", "").strip()
+    )
     cache_home = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
     cached = Path(explicit) if explicit else cache_home / "friday" / "test-assets" / filename
     if cached.is_file():

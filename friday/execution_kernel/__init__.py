@@ -3019,7 +3019,17 @@ class ExecutionKernel:
     #: цена недостающего — несделанное дело.
     _RELEVANT_TOOLS = {
         "интернет": {"web_search", "web_fetch", "web_research", "speak", "make_file", "remind"},
-        "знание": {"speak", "make_file", "remind", "memory_search", "source_search"},
+        "знание": {
+            "speak",
+            "make_file",
+            "remind",
+            "memory_search",
+            "source_search",
+            "obsidian_list_vaults",
+            "obsidian_list_notes",
+            "obsidian_search_notes",
+            "obsidian_read_note",
+        },
         "архив": {
             "memory_search",
             "source_search",
@@ -3036,6 +3046,10 @@ class ExecutionKernel:
             "collect_files",
             "speak",
             "remind",
+            "obsidian_list_vaults",
+            "obsidian_list_notes",
+            "obsidian_search_notes",
+            "obsidian_read_note",
         },
         "материал": {"memory_save", "entity_create", "entity_link", "inbox_list", "make_file"},
         # Поручение: человек просит СДЕЛАТЬ. Подробные описания получают те
@@ -3055,6 +3069,14 @@ class ExecutionKernel:
             "workspace_list",
             "workspace_read",
             "workspace_search",
+            "obsidian_list_vaults",
+            "obsidian_list_notes",
+            "obsidian_search_notes",
+            "obsidian_read_note",
+            "obsidian_create_note",
+            "obsidian_append_note",
+            "obsidian_set_properties",
+            "obsidian_daily_note",
         },
         # Просьба о файле — это и «сочини документ» (make_file), и «собери
         # присланное» (collect_files). Какой из двух, решает модель по формулировке.
@@ -3069,6 +3091,14 @@ class ExecutionKernel:
             "workspace_list",
             "workspace_read",
             "workspace_search",
+            "obsidian_list_vaults",
+            "obsidian_list_notes",
+            "obsidian_search_notes",
+            "obsidian_read_note",
+            "obsidian_create_note",
+            "obsidian_append_note",
+            "obsidian_set_properties",
+            "obsidian_daily_note",
         },
         # Быт: человек говорит о себе, а не спрашивает систему.
         #

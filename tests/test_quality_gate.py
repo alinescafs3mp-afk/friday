@@ -132,6 +132,12 @@ def test_run_command_passes_an_explicit_environment_to_the_child(
 def test_pytest_phases_share_one_private_non_live_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    test_assets = {
+        "FRIDAY_REAL_SYNCTHING_BINARY": "/test-assets/syncthing",
+        "FRIDAY_SYNCTHING_AMD64_TARBALL": "/test-assets/syncthing.tar.gz",
+    }
+    for name, value in test_assets.items():
+        monkeypatch.setenv(name, value)
     for prefix in quality_gate._RUNTIME_ENV_PREFIXES:
         monkeypatch.setenv(prefix + "SECRET_SENTINEL", "must-not-survive")
         monkeypatch.setenv(prefix + "HOME", "/sentinel/live-home")
@@ -187,6 +193,9 @@ def test_pytest_phases_share_one_private_non_live_environment(
             assert prefix + "SECRET_SENTINEL" not in environment
             for suffix in quality_gate._RUNTIME_PATH_SELECTOR_SUFFIXES:
                 assert prefix + suffix not in environment
+        for source, alias in quality_gate._TEST_ASSET_ENV_ALIASES.items():
+            assert source not in environment
+            assert environment[alias] == test_assets[source]
         if command.name == "all-tests collection":
             _write_collection(_collection_argument(command), (non_ui_nodeid, ui_nodeid))
         elif command.name == "non-UI tests":

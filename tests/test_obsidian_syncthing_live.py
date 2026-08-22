@@ -11,18 +11,19 @@ from friday.organs.obsidian.syncthing import (
 )
 
 PHONE_ID = "YZJBJFX-RDBL7WY-6ZGKJ2D-4MJB4E7-ZATSDUY-LD6Y3L3-MLFUYWE-AEMXJAC"
+_BINARY = os.environ.get("FRIDAY_REAL_SYNCTHING_BINARY") or os.environ.get("QUALITY_GATE_SYNCTHING_BINARY")
 
 
 @pytest.mark.skipif(
-    not os.environ.get("FRIDAY_REAL_SYNCTHING_BINARY"),
+    not _BINARY,
     reason="set FRIDAY_REAL_SYNCTHING_BINARY for the pinned-binary smoke",
 )
 def test_pinned_syncthing_generates_and_accepts_the_managed_rest_contract(tmp_path: Path) -> None:
-    binary = os.environ["FRIDAY_REAL_SYNCTHING_BINARY"]
+    assert _BINARY is not None
     spec = SyncthingProfileSpec.for_owner(
         tmp_path / "obs",
         "live-smoke-owner",
-        binary=binary,
+        binary=_BINARY,
     )
     supervisor = SyncthingProcessSupervisor(spec)
     try:

@@ -1,9 +1,9 @@
 # Obsidian free Android integration tracker
 
 - Updated: 2026-08-22
-- Branch: `release/0.207-obsidian-20260821`
+- Branch: `hotfix/0.207.4-obsidian-chat`
 - Baseline: Friday `0.206.4` (`caa01c23`)
-- Target: Friday `0.207.1`
+- Target: Friday `0.207.4`
 - Architecture: `outer_sol/OBSIDIAN_INTEGRATION_ARCHITECTURE_AND_IMPLEMENTATION_PLAN.md`
 
 ## Release boundary and status
@@ -64,6 +64,8 @@ Obsidian release.
 - [x] P4 minimum: preserve/detect conflict copies, exclude them from ordinary
   note results, report them in diagnostics and enable bounded staggered versioning.
 - [x] Register the optional first-party Organ, capabilities, tools, router and reconciler.
+- [x] Route all eight shipped operations from an explicit current-message
+  Telegram command with code-owned idempotency, private lineage and receipt text.
 - [x] Add focused automated coverage for configuration, storage, paths, routes,
   onboarding, operations, runtime, Syncthing adapter/process and Telegram transport.
 - [x] Run and record the repository-wide isolated Python/static/UI release gate

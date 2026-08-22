@@ -108,6 +108,7 @@ from friday.orchestration import (
 from friday.orchestration.archive_read import V12ArchiveReadHandler
 from friday.orchestration.file_read import V12FileReadHandler
 from friday.organs import ServiceContext, build_registry, local_now, resolve_chat_id
+from friday.organs.obsidian.conversation import obsidian_conversation_intent
 from friday.permissions import (
     LEGACY_OWNER_USER_ID,
     ActorContext,
@@ -4127,6 +4128,24 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             if policy_is_web
                             else "code-owned meta/diagnostic turn — команда, а не материал"
                         ),
+                    }
+                elif (
+                    obsidian_conversation_intent(
+                        message,
+                        today=local_now(state.settings).date(),
+                    )
+                    is not None
+                ):
+                    # A vault command is an effect request, not a fact to learn
+                    # or a review-card candidate.  The AgentRuntime re-parses
+                    # the same current text and retains sole authority for the
+                    # actual Obsidian capability.
+                    ingestion_result = {
+                        "promoted": False,
+                        "queued_for_review": False,
+                        "action": "transient",
+                        "category": "obsidian_request",
+                        "reason": "явная команда Obsidian — действие, а не материал",
                     }
                 elif asks_for_the_web(message):
                     # «Найди в интернете курс доллара» — это команда, а не факт,

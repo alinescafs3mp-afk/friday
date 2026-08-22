@@ -33,6 +33,7 @@ import pytest
 
 from friday.agent_runtime import AgentRuntime
 from friday.execution_kernel import ExecutionKernel
+from friday.organs.obsidian.conversation import OBSIDIAN_WRITE_TOOL_NAMES
 
 
 def test_the_arbiter_knows_the_action_kind() -> None:
@@ -108,19 +109,23 @@ def test_the_action_kind_does_not_offer_the_web() -> None:
 
 def test_every_named_tool_exists() -> None:
     """Опечатка в списке молча лишила бы инструмент подробного описания."""
-    known = set(ExecutionKernel._RELEVANT_TOOLS["архив"]) | {
-        "remind",
-        "memory_save",
-        "entity_create",
-        "entity_link",
-        "relation_end",
-        "speak",
-        "make_file",
-        "collect_files",
-        "mission_propose",
-        "workspace_create",
-        "workspace_list",
-        "workspace_read",
-        "workspace_search",
-    }
+    known = (
+        set(ExecutionKernel._RELEVANT_TOOLS["архив"])
+        | set(OBSIDIAN_WRITE_TOOL_NAMES)
+        | {
+            "remind",
+            "memory_save",
+            "entity_create",
+            "entity_link",
+            "relation_end",
+            "speak",
+            "make_file",
+            "collect_files",
+            "mission_propose",
+            "workspace_create",
+            "workspace_list",
+            "workspace_read",
+            "workspace_search",
+        }
+    )
     assert ExecutionKernel._RELEVANT_TOOLS["действие"] <= known

@@ -69,6 +69,10 @@ _RUNTIME_PATH_SELECTOR_SUFFIXES = (
     "WHISPER_DOWNLOAD_ROOT",
 )
 _RUNTIME_ENV_PREFIXES = ("FRIDAY_", "JERICHO_")
+_TEST_ASSET_ENV_ALIASES = {
+    "FRIDAY_REAL_SYNCTHING_BINARY": "QUALITY_GATE_SYNCTHING_BINARY",
+    "FRIDAY_SYNCTHING_AMD64_TARBALL": "QUALITY_GATE_SYNCTHING_AMD64_TARBALL",
+}
 _SCHEMA_FIXTURE_DIRECTORY = ROOT / "tests" / "fixtures" / "schemas"
 _SCHEMA_FIXTURE_MANIFEST = "manifest.json"
 _SCHEMA_FIXTURE_NAME = re.compile(r"schema-[0-9]+\.sqlite3\.gz").fullmatch
@@ -463,6 +467,11 @@ def _isolated_test_environment() -> Iterator[dict[str, str]]:
         backup_directory = _prepare_synthetic_backup_rehearsal(home)
 
         environment = dict(os.environ)
+        test_assets = {
+            alias: value
+            for source, alias in _TEST_ASSET_ENV_ALIASES.items()
+            if (value := environment.get(source, "").strip())
+        }
         for name in tuple(environment):
             if name.startswith(_RUNTIME_ENV_PREFIXES):
                 environment.pop(name, None)
@@ -496,6 +505,7 @@ def _isolated_test_environment() -> Iterator[dict[str, str]]:
                 # tracked synthetic databases.  Never inherit or inspect an
                 # operator's real backup directory in an offline quality run.
                 "FRIDAY_TEST_BACKUPS_DIR": str(backup_directory),
+                **test_assets,
             }
         )
         yield environment

@@ -32,6 +32,7 @@ _INGESTION_CATEGORIES = frozenset(
         "command",
         "greeting",
         "knowledge",
+        "obsidian_request",
         "private_transient",
         "question",
         "system_notice",
@@ -62,6 +63,7 @@ _INGESTION_REASONS = frozenset(
         "telegram command",
         "uploaded file has no extractable text; kept as a source, needs a human verdict",
         "явная просьба поискать в интернете — команда, а не материал",
+        "явная команда Obsidian — действие, а не материал",
     }
 )
 _INGESTION_BOOL_FIELDS = (
