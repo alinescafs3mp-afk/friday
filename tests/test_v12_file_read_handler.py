@@ -15,6 +15,16 @@ from typing import Any
 import pytest
 
 from friday.execution_kernel import track_request_effects
+from friday.interaction_control_plane import (
+    CapabilityClass,
+    CompletionDecision,
+    CountAccounting,
+    IntentClass,
+    PublicationStatus,
+    TokenAccounting,
+    TurnTrace,
+)
+from friday.interaction_control_plane.runtime_trace import INTERACTION_TRACE_METADATA_KEY
 from friday.model_profiles import ModelProfileLease, ModelRequirements
 from friday.orchestration import (
     ReadOnlyAttachmentReference,
@@ -314,6 +324,34 @@ async def test_file_handler_synthesizes_verifies_and_atomically_publishes(settin
     assert assistant_metadata["evidence_identity_sha256"] == result.evidence_identity_sha256
     assert assistant_metadata["conversation_attachment_raw_ids"] == [reference.raw_object_id]
     assert assistant_metadata["verified"] is True
+    trace = TurnTrace.parse(assistant_metadata[INTERACTION_TRACE_METADATA_KEY])
+    assert trace.intent is IntentClass.DOCUMENT_WORK
+    assert [step.capability for step in trace.steps] == [
+        CapabilityClass.DOCUMENT_RETRIEVAL,
+        CapabilityClass.MODEL_SYNTHESIS,
+        CapabilityClass.VERIFICATION,
+    ]
+    assert trace.completion is CompletionDecision.COMPLETE
+    assert trace.publication is PublicationStatus.PUBLISHED
+    assert trace.authority_rechecked is True
+    assert trace.budget.model_calls == 2
+    assert trace.budget.model_call_accounting is CountAccounting.COMPLETE
+    assert trace.budget.capability_calls == 1
+    assert trace.budget.capability_call_accounting is CountAccounting.COMPLETE
+    assert trace.budget.token_accounting is TokenAccounting.UNAVAILABLE
+    serialized_trace = trace.to_json()
+    for private_value in (
+        str(conversation["id"]),
+        str(messages[0]["id"]),
+        str(messages[-1]["id"]),
+        reference.raw_object_id,
+        "alice",
+        "a.txt",
+        "Дата договора: 18 августа.",
+        "Что сказано в документе?",
+        "В договоре указано 18 августа. [A1]",
+    ):
+        assert private_value not in serialized_trace
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,17 @@ from friday.file_evidence_reader import (
     prepared_file_evidence_is_process_owned,
     reauthorize_prepared_file_evidence_in_transaction,
 )
+from friday.interaction_control_plane import (
+    CapabilityClass,
+    CountAccounting,
+    IntentClass,
+    PlaybookClass,
+)
+from friday.interaction_control_plane.runtime_trace import (
+    INTERACTION_TRACE_METADATA_KEY,
+    build_published_direct_trace,
+    load_trace_namespace_key,
+)
 from friday.model_input_hygiene import (
     model_messages_are_secret_free,
     model_visible_text_is_secret_free,
@@ -428,6 +439,7 @@ class V12FileReadHandler:
         answer: str,
         *,
         deadline: float,
+        trace_started_at: float,
     ) -> tuple[str, str, str]:
         _require_deadline(
             deadline,
@@ -505,13 +517,34 @@ class V12FileReadHandler:
                         raw_id: evidence.person_id for raw_id in evidence.raw_ids
                     }
                 _require_deadline(deadline, stage="before durable messages")
-                store_message_in_transaction(
+                user_message = store_message_in_transaction(
                     conn,
                     conversation_id,
                     request.actor.own_id,
                     "user",
                     turn.message,
                     metadata=user_metadata,
+                )
+                user_message_id = str(user_message.get("id") or "")
+                if not re.fullmatch(r"msg_[0-9a-f]{16}", user_message_id):
+                    raise V12FileReadError("user publication has no durable identity")
+                trace = build_published_direct_trace(
+                    namespace_key=load_trace_namespace_key(conn),
+                    turn_identifier=user_message_id,
+                    conversation_identifier=conversation_id,
+                    intent=IntentClass.DOCUMENT_WORK,
+                    playbook=PlaybookClass.DIRECT,
+                    capabilities=(
+                        CapabilityClass.DOCUMENT_RETRIEVAL,
+                        CapabilityClass.MODEL_SYNTHESIS,
+                        CapabilityClass.VERIFICATION,
+                    ),
+                    latency_ms=max(0, int((time.monotonic() - trace_started_at) * 1_000)),
+                    model_calls=2,
+                    model_call_accounting=CountAccounting.COMPLETE,
+                    capability_calls=1,
+                    capability_call_accounting=CountAccounting.COMPLETE,
+                    authority_rechecked=True,
                 )
                 assistant_metadata = {
                     "answer_mode": route_mode,
@@ -530,6 +563,7 @@ class V12FileReadHandler:
                     },
                     "evidence_identity_sha256": evidence.identity_sha256,
                     "interaction_mode": interaction_mode,
+                    INTERACTION_TRACE_METADATA_KEY: trace.to_payload(),
                     "knowledge_citations": {},
                     "private_context_lineage": True,
                     "tools_used": [],
@@ -566,6 +600,7 @@ class V12FileReadHandler:
         prepared = self._prepared_matches(plan, preparation)
         if prepared is None:
             raise V12FileReadError("file preparation authority is invalid")
+        trace_started_at = time.monotonic()
         deadline = request.turn_deadline or (time.monotonic() + 60.0)
         if not await self._model.lease_is_current(
             prepared.model_lease,
@@ -607,6 +642,7 @@ class V12FileReadHandler:
             prepared,
             answer,
             deadline=deadline,
+            trace_started_at=trace_started_at,
         )
         return ReadOnlyRouteResult(
             message=answer,
