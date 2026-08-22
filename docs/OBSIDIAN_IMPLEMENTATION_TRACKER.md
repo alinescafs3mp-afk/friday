@@ -2,8 +2,8 @@
 
 - Updated: 2026-08-22
 - Branch: `hotfix/obsidian-acceptance-battery`
-- Source baseline: `main` at `9cc53d7`
-- Deployed baseline: Friday `0.207.4` at `8121407`
+- Source baseline: `main` at `3cc5cdf`
+- Deployed baseline: Friday `0.207.4` at `3cc5cdf`
 - Target: Friday `0.207.4`, schema 36
 - Architecture: `outer_sol/OBSIDIAN_INTEGRATION_ARCHITECTURE_AND_IMPLEMENTATION_PLAN.md`
 - Acceptance: `outer_sol/OBSIDIAN_INTEGRATION_ACCEPTANCE_BATTERY.md`
@@ -30,6 +30,8 @@ offline reconnect delivery and a real concurrent-edit conflict.
   vault.
 - [x] Owner/vault containment, atomic Markdown writes, expected-revision checks,
   durable adjacent journals and operation-ledger idempotency.
+- [x] Markerless user-visible Markdown. Operation identity and arguments live in
+  a private external SQLite receipt store; legacy HTML markers are migrated out.
 - [x] Distinct `server_committed`, `server_scan_complete`,
   `android_delivered` and `obsidian_open_confirmed` facts. Offline delivery is
   pending, never reported as a permanent write failure or a false phone receipt.
@@ -89,6 +91,13 @@ offline reconnect delivery and a real concurrent-edit conflict.
 - 2026-08-22: full isolated Python gate on 24 workers: 15,591 passed, 2 declared
   opt-in skips. Ruff, format, mypy (195 files), compileall and `git diff --check`
   passed. Docker was deliberately excluded by operator direction.
+- 2026-08-22: final acceptance hotfix gate: 15,672 non-UI and 31 UI tests
+  passed; Ruff, format, mypy (196 files), compileall, Bandit HIGH and browser
+  preflight passed. Docker remained deliberately excluded.
+- 2026-08-22: signed production `/api/chat` smoke passed create, read, append,
+  search, properties, move and delete. Temporary notes and legacy markers both
+  returned to zero; mutations correctly remained `scan_pending` until Android
+  synchronization can prove delivery.
 - 2026-08-22: calendar-boundary proof checks 2026-08-21 22:30 UTC as
   2026-08-22 in `Europe/Berlin`, including the NOTE-01 content and receipt.
 - 2026-08-22: offline and recovery tests prove pending→delivered transition,
@@ -132,5 +141,6 @@ offline reconnect delivery and a real concurrent-edit conflict.
 - [ ] Multi-device/shared-vault topology and alternate transports.
 - [ ] Optional companion plugin for foreground selection/cursor actions; it may
   never become a dependency of the Syncthing-backed core.
-- [ ] Interaction Control Plane / operational-memory work tracked separately;
-  its implementation checkpoint remains paused until this release is complete.
+- [x] Interaction Control Plane work resumed after this acceptance release;
+  P0A structural tracing is tracked separately in
+  `outer_sol/INTERACTION_CONTROL_PLANE_IMPLEMENTATION_STATUS.md`.

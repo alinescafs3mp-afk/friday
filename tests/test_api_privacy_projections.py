@@ -136,6 +136,20 @@ def test_ingestion_receipts_are_allowlists_even_for_adversarial_internal_results
     assert "raw_object_id" not in wrong_person
 
 
+def test_chat_projection_never_publishes_internal_interaction_trace() -> None:
+    projected = public_chat_ingestion(
+        {
+            "content": "Visible synthetic answer.",
+            "interaction_trace": {
+                "schema": "friday.interaction-turn-trace.v1",
+                "conversation_digest": "a" * 64,
+            },
+        }
+    )
+
+    assert projected == {"content": "Visible synthetic answer."}
+
+
 def test_shared_owner_projection_accepts_full_bounded_metadata_without_exposing_office_index() -> None:
     raw_id = "raw_0123456789abcdef"
     sentinel = "SYNTHETIC-OFFICE-INDEX-PRIVATE-9c22b1"

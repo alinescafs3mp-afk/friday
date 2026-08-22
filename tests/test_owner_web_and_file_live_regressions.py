@@ -103,6 +103,9 @@ def test_public_product_spec_query_is_closed_and_non_deictic() -> None:
 
 
 def test_explicit_public_web_query_is_current_only_and_fail_closed() -> None:
+    numeric_version_request = "Найди в интернете официальную документацию Python 3.14 о pathlib"
+    assert file_turn_authority(numeric_version_request).source_filenames() == ()
+    assert file_turn_authority("Прочитай файл 3.14").source_filenames() == ("3.14",)
     for request, expected_query in (
         (
             "Найди в интернете официальный сайт проекта Nextcloud",
@@ -113,6 +116,10 @@ def test_explicit_public_web_query_is_current_only_and_fail_closed() -> None:
             "официальный сайт проекта Nextcloud",
         ),
         ("Найди мне в интернете документацию Python", "документацию Python"),
+        (
+            "Найди в интернете официальную документацию Python 3.14 о pathlib",
+            "официальную документацию Python 3.14 о pathlib",
+        ),
         (
             "Найди в интернете storage capacity Synology DS923+",
             "storage capacity Synology DS923+",
@@ -672,6 +679,10 @@ async def test_qnap_product_spec_uses_isolated_web_after_private_history(
             "официальный сайт проекта Nextcloud",
         ),
         ("Найди мне в интернете документацию Python", "документацию Python"),
+        (
+            "Найди в интернете официальную документацию Python 3.14 о pathlib",
+            "официальную документацию Python 3.14 о pathlib",
+        ),
         (
             "Найди в интернете storage capacity Synology DS923+",
             "storage capacity Synology DS923+",

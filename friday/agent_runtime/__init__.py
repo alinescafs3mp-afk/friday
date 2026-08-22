@@ -115,7 +115,7 @@ from friday.interaction_control_plane.legacy_trace import (
     build_legacy_turn_trace,
 )
 from friday.interaction_control_plane.runtime_trace import (
-    INTERACTION_TRACE_METADATA_KEY,
+    attach_trace_to_metadata,
     load_trace_namespace_key,
 )
 from friday.knowledge_graph import build_user_model, normalize_event_date
@@ -10373,6 +10373,7 @@ _ATTACHMENT_FILENAME_REFERENCE = re.compile(
     rf"{_ATTACHMENT_FILE_EXTENSION}(?![\w-]|\.[\w]))",
     re.IGNORECASE,
 )
+_UNQUOTED_DOTTED_NUMERIC_VERSION = re.compile(r"\d{1,6}(?:\.\d{1,6}){1,3}")
 # A host path is never the name of a registered upload.  In particular,
 # ``прочитай файл /tmp/a.pdf`` must not fall through to the generic
 # explicit-file branch and silently open the newest Telegram document.  The
@@ -25321,6 +25322,18 @@ def _locator_role(
         and not quoted
         and _unquoted_machine_literal_is_query_data(classified, match)
     ):
+        return "body_literal"
+    if (
+        kind == "filename"
+        and match is not None
+        and not quoted
+        and _UNQUOTED_DOTTED_NUMERIC_VERSION.fullmatch(str(match.group("filename") or ""))
+        and _SOURCE_IDENTITY_LEAD.search(prefix_speech) is None
+    ):
+        # Arbitrary upload suffixes remain supported, but a bare product/runtime
+        # version (``Python 3.14``, ``v 2.5``) is not private-file authority.
+        # Numeric filenames stay available when quoted or explicitly introduced
+        # by a file/document/name carrier (``файл 3.14``).
         return "body_literal"
     if quoted and (
         _SOURCE_IDENTITY_LEAD.search(prefix_speech)
@@ -41873,6 +41886,9 @@ class AgentRuntime:
                         *(result_receipt.get("tool_evidence") or []),
                     ]
                     response["_obsidian_result_note_owned"] = True
+                    response["_obsidian_outcome"] = str(
+                        result_receipt.get("_obsidian_outcome") or CapabilityStatus.UNAVAILABLE.value
+                    )
                     response["_obsidian_publication_tool"] = str(
                         result_receipt.get("_obsidian_publication_tool") or ""
                     )
@@ -41897,6 +41913,7 @@ class AgentRuntime:
                 content = "\n\n".join(part for part in (content, result_notice) if part).strip()
                 response["content"] = content
                 response["_obsidian_result_note_owned"] = True
+                response["_obsidian_outcome"] = CapabilityStatus.NOT_STARTED.value
 
         # Deterministic companion to the LLM judge: does the sentence carrying [K#]
         # share vocabulary with the object it cites? Advisory — it never edits the
@@ -42720,12 +42737,43 @@ class AgentRuntime:
                 or filename_result_continuation_requested
                 or restored_history_attachment_count > 0
             )
+            raw_trace_tools = response.get("tools_used")
+            trace_tool_names = {
+                str(name)
+                for name in (raw_trace_tools if isinstance(raw_trace_tools, (list, tuple)) else ())
+                if isinstance(name, str)
+            }
+            raw_trace_evidence = response.get("tool_evidence")
+            trace_evidence_tool_names = {
+                str(item.get("tool") or "")
+                for item in (raw_trace_evidence if isinstance(raw_trace_evidence, list) else ())
+                if isinstance(item, Mapping)
+            }
+            trace_document_tool_names = frozenset(
+                {
+                    "collect_files",
+                    "memory_search",
+                    "source_search",
+                    "user_knowledge_search",
+                    "workspace_read",
+                }
+            )
+            trace_message_tool_names = frozenset({"message_search", "what_happened"})
+            trace_entity_tool_names = frozenset({"entity_lookup", "user_activity"})
+            trace_document_tool_attempted = bool(trace_tool_names & trace_document_tool_names)
+            trace_document_tool_succeeded = bool(trace_evidence_tool_names & trace_document_tool_names)
+            trace_message_tool_attempted = bool(trace_tool_names & trace_message_tool_names)
+            trace_message_tool_succeeded = bool(trace_evidence_tool_names & trace_message_tool_names)
+            trace_entity_tool_attempted = bool(trace_tool_names & trace_entity_tool_names)
+            trace_entity_tool_succeeded = bool(trace_evidence_tool_names & trace_entity_tool_names)
             trace_document_used = bool(
                 assistant_used_attachment
                 or attachment_expected_count > 0
                 or context.source_search_used
                 or context.filename_result_settled
                 or workspace_inbox_resolution.attachment is not None
+                or trace_document_tool_attempted
+                or trace_document_tool_succeeded
             )
             trace_ambiguity = bool(
                 context.person_activity_resolution_failed
@@ -42770,42 +42818,51 @@ class AgentRuntime:
                 )
                 else CapabilityStatus.PARTIAL
                 if trace_partial_coverage
+                else CapabilityStatus.UNAVAILABLE
+                if trace_document_tool_attempted and not trace_document_tool_succeeded
                 else CapabilityStatus.SUCCEEDED
             )
             trace_message_status = (
                 CapabilityStatus.INACTIVE
                 if not message_locate_flow
+                and not trace_message_tool_attempted
+                and not trace_message_tool_succeeded
                 else CapabilityStatus.SUCCEEDED
-                if context.message_locate_evidence_ready
+                if context.message_locate_evidence_ready or trace_message_tool_succeeded
                 else CapabilityStatus.PARTIAL
                 if trace_ambiguity
+                else CapabilityStatus.UNAVAILABLE
+                if trace_message_tool_attempted
                 else CapabilityStatus.EMPTY
             )
             trace_entity_used = bool(
                 trace_structural.get("person_document_inventory") is True
                 or trace_structural.get("person_document_inventory_self") is True
                 or context.person_activity_resolution_failed
+                or trace_entity_tool_attempted
+                or trace_entity_tool_succeeded
             )
             trace_entity_status = (
                 CapabilityStatus.INACTIVE
                 if not trace_entity_used
                 else CapabilityStatus.UNAVAILABLE
                 if context.person_activity_resolution_failed
+                or trace_entity_tool_attempted
+                and not trace_entity_tool_succeeded
                 else CapabilityStatus.SUCCEEDED
             )
-            obsidian_evidence = response.get("tool_evidence")
             trace_obsidian_status = (
                 CapabilityStatus.INACTIVE
                 if not obsidian_owned_response
                 else CapabilityStatus.DENIED
                 if obsidian_authority_changed_before_publication
-                else CapabilityStatus.SUCCEEDED
-                if isinstance(obsidian_evidence, list) and bool(obsidian_evidence)
-                else CapabilityStatus.UNAVAILABLE
-                if obsidian_tool_ledger
-                else CapabilityStatus.NOT_STARTED
+                else CapabilityStatus.fail_closed(response.get("_obsidian_outcome"))
             )
-            trace_file_attempted = bool(response.get("file_clips") or context.late_make_file_attempts > 0)
+            trace_file_attempted = bool(
+                response.get("file_clips")
+                or context.late_make_file_attempts > 0
+                or "make_file" in trace_tool_names
+            )
             trace_file_status = (
                 CapabilityStatus.INACTIVE
                 if not trace_file_attempted
@@ -42825,7 +42882,6 @@ class AgentRuntime:
                 if response.get("llm_failed")
                 else CapabilityStatus.SUCCEEDED
             )
-            raw_trace_tools = response.get("tools_used")
             trace_capability_calls = (
                 min(len(raw_trace_tools), 1_024) if isinstance(raw_trace_tools, (list, tuple)) else 0
             )
@@ -42837,7 +42893,11 @@ class AgentRuntime:
                 obsidian=trace_obsidian_status,
                 file=trace_file_status,
                 personal=(
-                    CapabilityStatus.SUCCEEDED if context.successful_reminders else CapabilityStatus.INACTIVE
+                    CapabilityStatus.SUCCEEDED
+                    if context.successful_reminders
+                    else CapabilityStatus.UNCERTAIN
+                    if "remind" in trace_tool_names
+                    else CapabilityStatus.INACTIVE
                 ),
                 model=trace_model_status,
                 verification=VerificationStatus.fail_closed(verification_status),
@@ -42868,7 +42928,7 @@ class AgentRuntime:
                     conversation_identifier=conversation_id,
                     signals=trace_signals,
                 )
-                assistant_metadata[INTERACTION_TRACE_METADATA_KEY] = interaction_trace.to_payload()
+                attach_trace_to_metadata(assistant_metadata, interaction_trace)
             except Exception as exc:  # noqa: BLE001 - shadow tracing cannot break chat publication
                 LOGGER.warning("interaction-trace omitted (%s)", type(exc).__name__)
 
@@ -44731,6 +44791,7 @@ class AgentRuntime:
         publication_tool = ""
         open_action_url = ""
         lineage_persisted = False
+        obsidian_outcome = CapabilityStatus.NOT_STARTED
         lineage_expected = bool(
             re.fullmatch(
                 r"msg_[0-9a-f]{16}",
@@ -44751,6 +44812,7 @@ class AgentRuntime:
                 "_structural_file_count": 0,
                 "_model_generated": False,
                 "_obsidian_owned": True,
+                "_obsidian_outcome": obsidian_outcome.value,
                 "_obsidian_publication_tool": publication_tool,
                 **({"_obsidian_open_url": open_action_url} if open_action_url else {}),
                 **({"_obsidian_private_lineage_owned": True} if private else {}),
@@ -44766,6 +44828,7 @@ class AgentRuntime:
         }
         selected_schema = schemas.get(selected_name)
         if selected_name not in OBSIDIAN_TOOL_NAMES or selected_schema is None:
+            obsidian_outcome = CapabilityStatus.UNAVAILABLE
             return response(
                 "Команда Obsidian распознана, но нужная возможность сейчас недоступна. "
                 "Проверьте подключение командой /obsidian."
@@ -44778,12 +44841,14 @@ class AgentRuntime:
         # reached its explicit ready postcondition.
         if selected_name != "obsidian_list_vaults":
             if "obsidian_list_vaults" not in schemas:
+                obsidian_outcome = CapabilityStatus.UNAVAILABLE
                 return response(
                     "Не удалось проверить готовность Obsidian vault: контрольная возможность "
                     "недоступна. Операция не запускалась."
                 )
             preflight_actor = self._fresh_obsidian_actor(actor, "obsidian_list_vaults")
             if preflight_actor is None:
+                obsidian_outcome = CapabilityStatus.DENIED
                 return response("Доступ к личному Obsidian vault больше не подтверждён; изменений не было.")
             preflight = await self.kernel.execute(
                 "obsidian_list_vaults",
@@ -44803,6 +44868,7 @@ class AgentRuntime:
                 or len(vaults) > 8
                 or not all(isinstance(item, Mapping) for item in vaults)
             ):
+                obsidian_outcome = CapabilityStatus.UNAVAILABLE
                 return response(
                     "Не удалось проверить готовность Obsidian vault; операция не запускалась. "
                     "Откройте /obsidian и обновите статус."
@@ -44811,6 +44877,7 @@ class AgentRuntime:
             # user row must be tainted before any note operation starts.
             lineage_persisted = self._persist_source_search_private_lineage(context)
             if lineage_expected and not lineage_persisted:
+                obsidian_outcome = CapabilityStatus.UNAVAILABLE
                 return response(
                     "Готовность Obsidian проверена, но приватный контекст не удалось "
                     "безопасно закрепить; операция не запускалась."
@@ -44820,6 +44887,7 @@ class AgentRuntime:
             )
             ready = [item for item in vaults if str(item.get("state") or "") == "ready"]
             if len(vaults) != 1 or len(ready) != 1:
+                obsidian_outcome = CapabilityStatus.UNAVAILABLE
                 state = str(vaults[0].get("state") or "not_configured") if len(vaults) == 1 else "ambiguous"
                 return response(
                     "Obsidian ещё не готов к операциям с заметками "
@@ -44870,6 +44938,7 @@ class AgentRuntime:
                 )
             except Exception as exc:  # noqa: BLE001 - missing local HMAC proof fails closed
                 LOGGER.error("Obsidian operation identity unavailable (%s)", type(exc).__name__)
+                obsidian_outcome = CapabilityStatus.UNAVAILABLE
                 return response("Не удалось безопасно закрепить идентификатор операции; изменений не было.")
             arguments["operation_id"] = expected_operation_id
 
@@ -44881,6 +44950,7 @@ class AgentRuntime:
                 )
             except Exception as exc:  # noqa: BLE001 - a broken ledger never licenses a retry
                 LOGGER.warning("Obsidian replay lookup failed (%s)", type(exc).__name__)
+                obsidian_outcome = CapabilityStatus.UNCERTAIN
                 return response(
                     "Не удалось проверить журнал предыдущей операции Obsidian. "
                     "Повторную запись не запускала.",
@@ -44893,6 +44963,7 @@ class AgentRuntime:
                     expected_path=intent.explicit_path,
                 )
                 if projected is None:
+                    obsidian_outcome = CapabilityStatus.UNCERTAIN
                     return response(
                         "Предыдущая операция Obsidian уже существует, но её итог нельзя "
                         "подтвердить безопасной квитанцией. Повторную запись не запускала.",
@@ -44905,6 +44976,7 @@ class AgentRuntime:
                     expected_path=intent.explicit_path,
                 )
                 if not rendered:
+                    obsidian_outcome = CapabilityStatus.UNCERTAIN
                     return response(
                         "Предыдущая операция Obsidian уже существует, но её итог нельзя "
                         "подтвердить безопасной квитанцией. Повторную запись не запускала.",
@@ -44915,7 +44987,9 @@ class AgentRuntime:
                 context.private_source_boundary_active = bool(
                     context.private_source_boundary_active or lineage_persisted
                 )
+                obsidian_outcome = CapabilityStatus.SUCCEEDED
                 return response(rendered, private=lineage_persisted)
+            obsidian_outcome = CapabilityStatus.EMPTY
             return response(
                 "Предыдущая операция Obsidian не найдена в журнале; повторной записи не было.",
                 private=lineage_persisted,
@@ -44923,6 +44997,7 @@ class AgentRuntime:
 
         fresh_actor = self._fresh_obsidian_actor(actor, selected_name)
         if fresh_actor is None:
+            obsidian_outcome = CapabilityStatus.DENIED
             return response("Право на эту операцию Obsidian больше не подтверждено; изменений не было.")
         conversation_key = str(context.conversation_id or "").strip()
         if conversation_key and len(conversation_key) <= 200:
@@ -44935,9 +45010,16 @@ class AgentRuntime:
         used.append(selected_name)
         publication_tool = selected_name
         if not result.success:
-            no_effect = str(result.error or "").startswith(
-                ("Invalid tool arguments", "Authorization denied", "Unknown tool", "Tool is not initialized")
-            )
+            tool_error = str(result.error or "")
+            if tool_error.startswith("Authorization denied"):
+                obsidian_outcome = CapabilityStatus.DENIED
+            elif tool_error.startswith(("Unknown tool", "Tool is not initialized")):
+                obsidian_outcome = CapabilityStatus.UNAVAILABLE
+            elif tool_error.startswith("Invalid tool arguments"):
+                obsidian_outcome = CapabilityStatus.NOT_STARTED
+            else:
+                obsidian_outcome = CapabilityStatus.UNCERTAIN
+            no_effect = obsidian_outcome is not CapabilityStatus.UNCERTAIN
             return response(
                 "Операция Obsidian не запускалась: параметры или доступ не прошли проверку."
                 if no_effect
@@ -44953,6 +45035,7 @@ class AgentRuntime:
             expected_path=intent.explicit_path,
         )
         if not rendered:
+            obsidian_outcome = CapabilityStatus.UNCERTAIN
             return response(
                 "Obsidian вернул неполную проверяемую квитанцию. Автоматически операцию не повторяю; "
                 "проверьте vault и статус /obsidian."
@@ -44968,6 +45051,7 @@ class AgentRuntime:
         if not lineage_persisted:
             lineage_persisted = self._persist_source_search_private_lineage(context)
         if not lineage_persisted and (selected_name in OBSIDIAN_READ_TOOL_NAMES or lineage_expected):
+            obsidian_outcome = CapabilityStatus.UNCERTAIN
             return response(
                 "Результат Obsidian получен, но его приватный контекст не удалось безопасно "
                 "закрепить. Автоматически операцию не повторяйте."
@@ -44977,6 +45061,7 @@ class AgentRuntime:
         )
         encoded_evidence = json.dumps(result.data, ensure_ascii=False, sort_keys=True, default=str)
         evidence.append({"tool": selected_name, "output": encoded_evidence[:8_000]})
+        obsidian_outcome = CapabilityStatus.SUCCEEDED
         return response(rendered, private=lineage_persisted)
 
     async def _agentic_loop(

@@ -26,6 +26,7 @@ from friday.interaction_control_plane import (
     WorkRelation,
     derive_trace_identifier,
 )
+from friday.interaction_control_plane.runtime_trace import attach_trace_to_metadata
 
 _KEY = bytes(range(32))
 
@@ -53,7 +54,7 @@ def _trace() -> TurnTrace:
             ),
         ),
         completion=CompletionDecision.COMPLETE,
-        publication=PublicationStatus.PUBLISHED,
+        publication=PublicationStatus.ASSISTANT_COMMITTED,
         failure_stage=FailureStage.NONE,
         failure_reason=FailureReason.NONE,
         ambiguity_present=False,
@@ -250,6 +251,38 @@ def test_direct_constructor_rejects_mutable_steps_and_incoherent_closed_states()
         replace(trace, failure_stage=FailureStage.CAPABILITY)
     with pytest.raises(TurnTraceError, match="step digests must be unique"):
         replace(trace, steps=(trace.steps[0], trace.steps[0]))
+    with pytest.raises(TurnTraceError, match="partial coverage"):
+        replace(trace, partial_coverage=True)
+    with pytest.raises(TurnTraceError, match="retain ambiguity"):
+        replace(trace, ambiguity_present=True)
+    with pytest.raises(TurnTraceError, match="required step"):
+        replace(
+            trace,
+            steps=(replace(trace.steps[0], outcome=OutcomeStatus.FAILED),),
+        )
+    with pytest.raises(TurnTraceError, match="failure stage"):
+        replace(
+            trace,
+            failure_stage=FailureStage.CAPABILITY,
+            failure_reason=FailureReason.PROVIDER_FAILURE,
+        )
+    with pytest.raises(TurnTraceError, match="failed completion"):
+        replace(trace, completion=CompletionDecision.FAILED)
+    with pytest.raises(TurnTraceError, match="publication failure"):
+        replace(trace, publication=PublicationStatus.FAILED)
+
+
+def test_optional_failed_step_does_not_make_an_otherwise_complete_trace_incoherent() -> None:
+    trace = _trace()
+    optional = CapabilityStepTrace(
+        step_digest=_digest(TraceIdentifierDomain.STEP, "optional-observation"),
+        capability=CapabilityClass.OTHER_READ,
+        outcome=OutcomeStatus.FAILED,
+        attempts=1,
+        required=False,
+    )
+
+    assert replace(trace, steps=(*trace.steps, optional)).completion is CompletionDecision.COMPLETE
 
 
 def test_legacy_continuation_can_be_observed_without_inventing_a_work_item() -> None:
@@ -258,6 +291,22 @@ def test_legacy_continuation_can_be_observed_without_inventing_a_work_item() -> 
     assert trace.work_relation is WorkRelation.DIRECT
     assert trace.work_item_digest is None
     assert TurnTrace.parse(trace.to_json()) == trace
+
+
+def test_trace_attachment_never_pushes_message_metadata_past_the_continuity_budget() -> None:
+    metadata = {"conversation_attachment_raw_ids": ["raw_0123456789abcdef"], "padding": "x" * 15_000}
+    before = dict(metadata)
+
+    assert attach_trace_to_metadata(metadata, _trace(), max_serialized_bytes=15_200) is False
+    assert metadata == before
+
+
+def test_trace_attachment_is_atomic_and_records_only_assistant_commit_scope() -> None:
+    metadata = {"private_context_lineage": True}
+
+    assert attach_trace_to_metadata(metadata, _trace()) is True
+    restored = TurnTrace.parse(metadata["interaction_trace"])
+    assert restored.publication is PublicationStatus.ASSISTANT_COMMITTED
 
 
 @pytest.mark.parametrize(

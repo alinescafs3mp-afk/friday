@@ -181,9 +181,11 @@ class _ConversationKernel:
         vault_state: str = "ready",
         receipt_kind: str = "delivered",
         denied_capabilities: frozenset[str] = frozenset(),
+        selected_error: str = "",
     ) -> None:
         self.vault_state = vault_state
         self.receipt_kind = receipt_kind
+        self.selected_error = selected_error
         self.executed: list[tuple[str, dict[str, Any]]] = []
         self.authorization = _Authorization(denied_capabilities)
 
@@ -210,6 +212,8 @@ class _ConversationKernel:
         self.executed.append((str(name), arguments))
         if name == "obsidian_list_vaults":
             return ToolResult(str(name), True, data=_vaults(self.vault_state))
+        if self.selected_error:
+            return ToolResult(str(name), False, error=self.selected_error)
         if name == "obsidian_list_notes":
             return ToolResult(str(name), True, data={"notes": [_note_summary()], "count": 1})
         if name == "obsidian_search_notes":
@@ -415,6 +419,7 @@ async def test_exact_russian_create_is_two_code_owned_calls_without_a_model(sett
         "# Тест интеграции Friday\n\nЗаметка создана через Telegram.\n\n2026-08-22\n"
     )
     assert result["_obsidian_owned"] is True
+    assert result["_obsidian_outcome"] == "succeeded"
     assert result["tools_used"] == ["obsidian_list_vaults", "obsidian_create_note"]
 
 
@@ -517,6 +522,7 @@ async def test_not_ready_vault_is_preflight_only_and_never_claims_creation(
     assert llm.calls == 0
     assert kernel.executed == [("obsidian_list_vaults", {})]
     assert result["_obsidian_owned"] is True
+    assert result["_obsidian_outcome"] == "unavailable"
     assert result["tools_used"] == ["obsidian_list_vaults"]
     assert "заметка создана" not in str(result["content"]).casefold()
 
@@ -592,6 +598,7 @@ async def test_delivered_receipt_may_report_android_receipt_but_not_opening(sett
 
     assert llm.calls == 0
     assert result["_obsidian_owned"] is True
+    assert result["_obsidian_outcome"] == "succeeded"
     folded = str(result["content"]).casefold()
     assert "android" in folded
     assert "получ" in folded
@@ -632,10 +639,47 @@ async def test_invalid_mutation_receipt_never_becomes_a_success_claim(
         "obsidian_create_note",
     ]
     assert result["_obsidian_owned"] is True
+    assert result["_obsidian_outcome"] == "uncertain"
     folded = str(result["content"]).casefold()
     assert "квитанц" in folded
     assert "не повтор" in folded
     assert "заметка создана" not in folded
+
+
+@pytest.mark.parametrize(
+    ("error", "outcome"),
+    [
+        ("Invalid tool arguments: synthetic", "not_started"),
+        ("Authorization denied", "denied"),
+        ("Unknown tool", "unavailable"),
+        ("Tool is not initialized", "unavailable"),
+        ("synthetic timeout after dispatch", "uncertain"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_failed_obsidian_execution_preserves_the_closed_failure_class(
+    settings,
+    storage,
+    error: str,
+    outcome: str,
+) -> None:
+    kernel = _ConversationKernel(selected_error=error)
+    runtime = _runtime(settings, storage, kernel, _ConversationLLM())
+
+    result = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        _EXACT_CREATE,
+        _actor(),
+        _tools(),
+        None,
+    )
+
+    assert [name for name, _arguments in kernel.executed] == [
+        "obsidian_list_vaults",
+        "obsidian_create_note",
+    ]
+    assert result["_obsidian_outcome"] == outcome
+    assert "заметка создана" not in str(result["content"]).casefold()
 
 
 _SHIPPED_OPERATION_CASES = (
@@ -750,6 +794,7 @@ async def test_every_other_shipped_operation_is_preflighted_rendered_and_taints_
     assert result["tools_used"] == expected_names
     assert [item["tool"] for item in result["tool_evidence"]] == [tool_name]
     assert result["_obsidian_owned"] is True
+    assert result["_obsidian_outcome"] == "succeeded"
     assert result["_obsidian_private_lineage_owned"] is True
     assert context.private_source_boundary_active is True
     stored = storage.get_message(message_id, "alice")
@@ -780,6 +825,7 @@ async def test_fresh_write_revocation_after_preflight_blocks_the_mutator(setting
     ]
     assert result["tools_used"] == ["obsidian_list_vaults"]
     assert result["_obsidian_owned"] is True
+    assert result["_obsidian_outcome"] == "denied"
     assert "право" in result["content"].casefold()
     assert "заметка создана" not in result["content"].casefold()
 
@@ -803,6 +849,7 @@ async def test_selected_schema_absence_blocks_before_preflight_or_model(settings
     assert kernel.executed == []
     assert result["tools_used"] == []
     assert result["_obsidian_owned"] is True
+    assert result["_obsidian_outcome"] == "unavailable"
     assert "недоступ" in result["content"].casefold()
 
 
@@ -825,6 +872,7 @@ async def test_preflight_schema_absence_blocks_a_note_mutation(settings, storage
     assert kernel.executed == []
     assert result["tools_used"] == []
     assert result["_obsidian_owned"] is True
+    assert result["_obsidian_outcome"] == "unavailable"
     assert "недоступ" in result["content"].casefold()
 
 
@@ -852,6 +900,7 @@ async def test_private_lineage_failure_blocks_a_mutation_after_preflight(
     assert llm.calls == 0
     assert kernel.executed == [("obsidian_list_vaults", {})]
     assert result["tools_used"] == ["obsidian_list_vaults"]
+    assert result["_obsidian_outcome"] == "unavailable"
     assert "операция не запускалась" in result["content"].casefold()
 
 

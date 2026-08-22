@@ -60,7 +60,7 @@ def test_success_projection_is_complete_closed_and_accounted() -> None:
     assert trace.intent is IntentClass.PERSONAL_ORGANIZATION
     assert trace.playbook is PlaybookClass.DIRECT
     assert trace.completion is CompletionDecision.COMPLETE
-    assert trace.publication is PublicationStatus.PUBLISHED
+    assert trace.publication is PublicationStatus.ASSISTANT_COMMITTED
     assert trace.failure_stage is FailureStage.NONE
     assert trace.failure_reason is FailureReason.NONE
     assert trace.authority_rechecked is True
@@ -120,7 +120,7 @@ def test_denied_source_answer_records_publication_failure_but_safe_notice_is_pub
     assert trace.failure_stage is FailureStage.PUBLICATION
     assert trace.failure_reason is FailureReason.AUTHORITY_DENIED
     assert trace.completion is CompletionDecision.FAILED
-    assert trace.publication is PublicationStatus.PUBLISHED
+    assert trace.publication is PublicationStatus.ASSISTANT_COMMITTED
 
 
 @pytest.mark.parametrize(
@@ -163,6 +163,21 @@ def test_uncertain_mutation_is_neither_failed_nor_complete() -> None:
     assert trace.completion is CompletionDecision.UNCERTAIN
     assert trace.failure_stage is FailureStage.NONE
     assert trace.failure_reason is FailureReason.NONE
+
+
+def test_one_successful_effect_cannot_hide_an_empty_required_branch() -> None:
+    trace = _build(
+        LegacyTurnSignals(
+            obsidian=CapabilityStatus.SUCCEEDED,
+            web=WebStatus.EMPTY,
+        )
+    )
+
+    assert trace.completion is CompletionDecision.NOT_EVALUATED
+    assert {step.capability: step.outcome for step in trace.steps} == {
+        CapabilityClass.WEB_RESEARCH: OutcomeStatus.EMPTY,
+        CapabilityClass.OBSIDIAN: OutcomeStatus.SUCCEEDED,
+    }
 
 
 @pytest.mark.parametrize(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from friday.audit_privacy import decode_audit_privacy_key
@@ -26,6 +27,7 @@ from friday.interaction_control_plane.turn_trace import (
 )
 
 INTERACTION_TRACE_METADATA_KEY = "interaction_trace"
+_ASSISTANT_METADATA_MAX_BYTES = 16_384
 
 
 def load_trace_namespace_key(executor: Any) -> bytes:
@@ -99,7 +101,7 @@ def build_direct_trace(
         playbook=playbook,
         steps=steps,
         completion=completion,
-        publication=PublicationStatus.PUBLISHED,
+        publication=PublicationStatus.ASSISTANT_COMMITTED,
         failure_stage=failure_stage,
         failure_reason=failure_reason,
         ambiguity_present=ambiguity_present,
@@ -119,7 +121,7 @@ def build_direct_trace(
     )
 
 
-def build_published_direct_trace(
+def build_committed_direct_trace(
     *,
     namespace_key: bytes,
     turn_identifier: str,
@@ -137,7 +139,7 @@ def build_published_direct_trace(
     token_accounting: TokenAccounting = TokenAccounting.UNAVAILABLE,
     authority_rechecked: bool,
 ) -> TurnTrace:
-    """Build the closed success projection for work completed in one turn."""
+    """Build the closed success projection stored with a committed assistant row."""
 
     return build_direct_trace(
         namespace_key=namespace_key,
@@ -165,9 +167,41 @@ def build_published_direct_trace(
     )
 
 
+def attach_trace_to_metadata(
+    metadata: dict[str, Any],
+    trace: TurnTrace,
+    *,
+    max_serialized_bytes: int = _ASSISTANT_METADATA_MAX_BYTES,
+) -> bool:
+    """Attach a trace only when the whole stored metadata remains readable.
+
+    Several continuity readers intentionally reject metadata above 16 KiB.
+    Tracing is observational and must never make attachment lineage or the
+    answer itself disappear, so an over-budget trace is omitted atomically.
+    """
+
+    if not isinstance(metadata, dict) or not isinstance(trace, TurnTrace):
+        return False
+    if not isinstance(max_serialized_bytes, int) or isinstance(max_serialized_bytes, bool):
+        return False
+    if max_serialized_bytes <= 0:
+        return False
+    candidate = dict(metadata)
+    candidate[INTERACTION_TRACE_METADATA_KEY] = trace.to_payload()
+    try:
+        encoded = json.dumps(candidate, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError, RecursionError):
+        return False
+    if len(encoded.encode("utf-8")) > max_serialized_bytes:
+        return False
+    metadata[INTERACTION_TRACE_METADATA_KEY] = candidate[INTERACTION_TRACE_METADATA_KEY]
+    return True
+
+
 __all__ = [
     "INTERACTION_TRACE_METADATA_KEY",
+    "attach_trace_to_metadata",
     "build_direct_trace",
-    "build_published_direct_trace",
+    "build_committed_direct_trace",
     "load_trace_namespace_key",
 ]

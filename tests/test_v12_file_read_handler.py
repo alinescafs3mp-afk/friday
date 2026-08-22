@@ -332,7 +332,7 @@ async def test_file_handler_synthesizes_verifies_and_atomically_publishes(settin
         CapabilityClass.VERIFICATION,
     ]
     assert trace.completion is CompletionDecision.COMPLETE
-    assert trace.publication is PublicationStatus.PUBLISHED
+    assert trace.publication is PublicationStatus.ASSISTANT_COMMITTED
     assert trace.authority_rechecked is True
     assert trace.budget.model_calls == 2
     assert trace.budget.model_call_accounting is CountAccounting.COMPLETE
@@ -352,6 +352,36 @@ async def test_file_handler_synthesizes_verifies_and_atomically_publishes(settin
         "В договоре указано 18 августа. [A1]",
     ):
         assert private_value not in serialized_trace
+
+
+@pytest.mark.asyncio
+async def test_file_handler_publishes_when_shadow_trace_key_is_unavailable(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    from friday.orchestration import file_read as file_read_module
+
+    conversation = storage.create_conversation("alice", mode="knowledge_work")
+    reference = _register(storage, settings, text="Trace is observational.", filename="trace.txt")
+    model = _Model("Источник прочитан. [A1]")
+    handler = _handler(storage, settings, model)
+    request, turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+
+    def unavailable(_executor: Any) -> bytes:
+        raise RuntimeError("synthetic trace key outage")
+
+    monkeypatch.setattr(file_read_module, "load_trace_namespace_key", unavailable)
+    result = await handler.handle(request, turn, plan, preparation)
+
+    assert result.message == "Источник прочитан. [A1]"
+    messages = storage.get_conversation_messages(str(conversation["id"]), user_id="alice")
+    assert [item["role"] for item in messages] == ["user", "assistant"]
+    assistant_metadata = json.loads(messages[-1]["metadata_json"])
+    assert INTERACTION_TRACE_METADATA_KEY not in assistant_metadata
+    assert assistant_metadata["verified"] is True
 
 
 @pytest.mark.asyncio

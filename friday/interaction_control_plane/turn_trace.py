@@ -136,9 +136,15 @@ class CompletionDecision(StrEnum):
 
 
 class PublicationStatus(StrEnum):
+    """Durable publication state known at the message-store boundary.
+
+    ``ASSISTANT_COMMITTED`` deliberately does not claim HTTP delivery,
+    Telegram delivery, or that any client rendered the response.
+    """
+
     NOT_ATTEMPTED = "not_attempted"
     SUPPRESSED = "suppressed"
-    PUBLISHED = "published"
+    ASSISTANT_COMMITTED = "assistant_committed"
     FAILED = "failed"
     DENIED = "denied"
 
@@ -476,6 +482,21 @@ class TurnTrace:
         has_reason = self.failure_reason is not FailureReason.NONE
         if has_stage != has_reason:
             raise TurnTraceError("failure stage and reason must either both be none or both be set")
+        if self.completion is CompletionDecision.COMPLETE:
+            if has_stage:
+                raise TurnTraceError("complete work cannot carry a failure stage or reason")
+            if self.partial_coverage:
+                raise TurnTraceError("complete work cannot declare partial coverage")
+            if self.ambiguity_present:
+                raise TurnTraceError("complete work cannot retain ambiguity")
+            if any(step.required and step.outcome is not OutcomeStatus.SUCCEEDED for step in self.steps):
+                raise TurnTraceError("complete work requires every required step to succeed")
+        if self.completion is CompletionDecision.FAILED and not has_stage:
+            raise TurnTraceError("failed completion requires a closed failure stage and reason")
+        if self.publication in {PublicationStatus.FAILED, PublicationStatus.DENIED} and (
+            self.failure_stage is not FailureStage.PUBLICATION
+        ):
+            raise TurnTraceError("failed or denied publication requires a publication failure")
 
     @classmethod
     def parse(cls, value: str | Mapping[str, object]) -> TurnTrace:

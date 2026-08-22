@@ -44,6 +44,15 @@ class CapabilityStatus(StrEnum):
     FAILED = "failed"
     UNCERTAIN = "uncertain"
 
+    @classmethod
+    def fail_closed(cls, value: object) -> Self:
+        """Parse a private runtime signal without reflecting unknown input."""
+
+        try:
+            return cls(value) if isinstance(value, str) else cls.UNAVAILABLE
+        except ValueError:
+            return cls.UNAVAILABLE
+
 
 class WebStatus(StrEnum):
     """Closed legacy web-evidence states."""
@@ -263,8 +272,9 @@ def build_legacy_turn_trace(
 ) -> TurnTrace:
     """Build the final legacy trace after a durable assistant publication.
 
-    A denied source-derived response becomes a safe denial notice, which is why
-    the trace publication itself remains ``PUBLISHED``.
+    A denied source-derived response becomes a safe denial notice. The stored
+    trace therefore records only that the assistant row committed; transport
+    delivery is outside this boundary.
     """
 
     if not isinstance(signals, LegacyTurnSignals):
@@ -272,6 +282,7 @@ def build_legacy_turn_trace(
     outcomes = _capability_outcomes(signals)
     partial_coverage = bool(signals.coverage_partial or signals.web is WebStatus.PARTIAL)
     uncertain_outcome = any(outcome is OutcomeStatus.UNCERTAIN for _, outcome in outcomes)
+    all_outcomes_succeeded = all(outcome is OutcomeStatus.SUCCEEDED for _, outcome in outcomes)
 
     if signals.publication is PublicationAuthorization.DENIED:
         failure_stage = FailureStage.PUBLICATION
@@ -322,7 +333,7 @@ def build_legacy_turn_trace(
         else CompletionDecision.PARTIAL
         if partial_coverage
         else CompletionDecision.COMPLETE
-        if signals.small_talk or signals.obsidian is CapabilityStatus.SUCCEEDED
+        if all_outcomes_succeeded and (signals.small_talk or signals.obsidian is CapabilityStatus.SUCCEEDED)
         else CompletionDecision.NOT_EVALUATED
     )
 

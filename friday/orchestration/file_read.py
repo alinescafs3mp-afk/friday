@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass, field
@@ -29,8 +30,8 @@ from friday.interaction_control_plane import (
     PlaybookClass,
 )
 from friday.interaction_control_plane.runtime_trace import (
-    INTERACTION_TRACE_METADATA_KEY,
-    build_published_direct_trace,
+    attach_trace_to_metadata,
+    build_committed_direct_trace,
     load_trace_namespace_key,
 )
 from friday.model_input_hygiene import (
@@ -73,6 +74,7 @@ _SYNTHESIS_MAX_TOKENS = 512
 _PREPARATION_BUDGET_SEC = 4.5
 _PUBLICATION_RESERVE_SEC = 2.0
 _MAX_ATTESTED_INPUT_UTF8_BYTES = 5_500
+LOGGER = logging.getLogger(__name__)
 
 
 class V12FileReadError(RuntimeError):
@@ -528,24 +530,6 @@ class V12FileReadHandler:
                 user_message_id = str(user_message.get("id") or "")
                 if not re.fullmatch(r"msg_[0-9a-f]{16}", user_message_id):
                     raise V12FileReadError("user publication has no durable identity")
-                trace = build_published_direct_trace(
-                    namespace_key=load_trace_namespace_key(conn),
-                    turn_identifier=user_message_id,
-                    conversation_identifier=conversation_id,
-                    intent=IntentClass.DOCUMENT_WORK,
-                    playbook=PlaybookClass.DIRECT,
-                    capabilities=(
-                        CapabilityClass.DOCUMENT_RETRIEVAL,
-                        CapabilityClass.MODEL_SYNTHESIS,
-                        CapabilityClass.VERIFICATION,
-                    ),
-                    latency_ms=max(0, int((time.monotonic() - trace_started_at) * 1_000)),
-                    model_calls=2,
-                    model_call_accounting=CountAccounting.COMPLETE,
-                    capability_calls=1,
-                    capability_call_accounting=CountAccounting.COMPLETE,
-                    authority_rechecked=True,
-                )
                 assistant_metadata = {
                     "answer_mode": route_mode,
                     "attachment_context_used": True,
@@ -563,7 +547,6 @@ class V12FileReadHandler:
                     },
                     "evidence_identity_sha256": evidence.identity_sha256,
                     "interaction_mode": interaction_mode,
-                    INTERACTION_TRACE_METADATA_KEY: trace.to_payload(),
                     "knowledge_citations": {},
                     "private_context_lineage": True,
                     "tools_used": [],
@@ -572,6 +555,28 @@ class V12FileReadHandler:
                     "verification_status": "verified",
                     "verified": True,
                 }
+                try:
+                    trace = build_committed_direct_trace(
+                        namespace_key=load_trace_namespace_key(conn),
+                        turn_identifier=user_message_id,
+                        conversation_identifier=conversation_id,
+                        intent=IntentClass.DOCUMENT_WORK,
+                        playbook=PlaybookClass.DIRECT,
+                        capabilities=(
+                            CapabilityClass.DOCUMENT_RETRIEVAL,
+                            CapabilityClass.MODEL_SYNTHESIS,
+                            CapabilityClass.VERIFICATION,
+                        ),
+                        latency_ms=max(0, int((time.monotonic() - trace_started_at) * 1_000)),
+                        model_calls=2,
+                        model_call_accounting=CountAccounting.COMPLETE,
+                        capability_calls=1,
+                        capability_call_accounting=CountAccounting.COMPLETE,
+                        authority_rechecked=True,
+                    )
+                    attach_trace_to_metadata(assistant_metadata, trace)
+                except Exception as exc:  # noqa: BLE001 - shadow tracing cannot abort publication
+                    LOGGER.warning("interaction-trace omitted (%s)", type(exc).__name__)
                 assistant = store_message_in_transaction(
                     conn,
                     conversation_id,
