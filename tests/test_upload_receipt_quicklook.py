@@ -29,6 +29,7 @@ from friday.agent_runtime import (
     AgentRuntime,
     FileBodyKind,
     FileRegistrationKind,
+    _bounded_attachment_projection,
     _build_file_evidence_view,
     _file_evidence_set_from_attachments,
     _maybe_bounded_file_overview,
@@ -409,6 +410,165 @@ async def test_bare_upload_uses_normal_hierarchy_when_prompt_projection_is_trunc
     assert receipt["message_format"] == "markdown"
     assert receipt["tools_used"] == []
     assert calls == {"hierarchy": 1, "answer": 1}
+
+
+@pytest.mark.asyncio
+async def test_nine_complete_office_uploads_use_hierarchy_when_prompt_projection_reads_only_two(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    """Prompt capacity is not source readability for a complete nine-file set."""
+
+    configured = replace(settings, verify_answers=False)
+    storage.ensure_user("alice", preset_key="owner")
+    pipeline = IngestionPipeline(configured, storage, KnowledgeGraph(storage))
+    raw_ids: list[str] = []
+    source_texts: list[str] = []
+    # File one fits, file two partially fills the 24k Office envelope, and the
+    # remaining seven are content-free in that *prompt projection*.  All nine
+    # registered sources themselves remain fully parsed and readable.
+    row_counts = [2, 80, 100, 100, 100, 100, 100, 100, 100]
+    for file_index, row_count in enumerate(row_counts, start=1):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = f"SOURCE-{file_index}"
+        sheet.append(["№", "Значение", "Описание"])
+        for row_index in range(1, row_count + 1):
+            sheet.append(
+                [
+                    row_index,
+                    f"FILE-{file_index}-VALUE-{row_index}",
+                    f"FILE-{file_index}-ROW-{row_index}-" + ("данные " * 12),
+                ]
+            )
+        stream = io.BytesIO()
+        workbook.save(stream)
+        workbook.close()
+        outcome = await pipeline.ingest_file(
+            "alice",
+            None,
+            stream.getvalue(),
+            filename=f"projection-heavy-{file_index}.xlsx",
+            mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            metadata={"uploaded_by": "alice"},
+            source_ref=f"telegram-file:RESULT20-NINE-{file_index}",
+        )
+        raw_id = str(outcome["raw_object_id"])
+        raw_ids.append(raw_id)
+        raw = storage.get_raw_object(raw_id, "alice")
+        assert raw is not None
+        source_texts.append(str(raw["raw_content"]))
+
+    assert sum(map(len, source_texts)) > _FOCUSED_ATTACHMENT_CONTEXT_CHARS
+    runtime = AgentRuntime(configured, storage, llm=_NoQuicklookLLM())  # type: ignore[arg-type]
+    owned = [
+        runtime._owned_file_attachment(  # noqa: SLF001
+            raw_id,
+            tenant_id="alice",
+            person_id="alice",
+        )
+        for raw_id in raw_ids
+    ]
+    assert all(item is not None for item in owned)
+    verified = await runtime._verify_registered_file_attachments(  # noqa: SLF001
+        [item for item in owned if item is not None],
+        tenant_id="alice",
+        person_id="alice",
+    )
+    projection = _bounded_attachment_projection(verified)
+    projected_set = _file_evidence_set_from_attachments(projection, expected_count=9)
+    source_set = _file_evidence_set_from_attachments(verified, expected_count=9)
+    assert source_set is not None
+    assert source_set.source_readable_count == 9
+    assert source_set.coverage_complete is True
+    assert source_set.verification_complete is True
+    assert projected_set is not None
+    assert projected_set.source_readable_count == 2
+    assert projected_set.coverage_complete is False
+
+    calls = {"hierarchy": 0, "answer": 0}
+
+    async def hierarchy(context, message, attachments, *, task_kind):  # noqa: ANN001
+        del context
+        calls["hierarchy"] += 1
+        assert message == _BARE_UPLOAD_REVIEW_TASK
+        assert task_kind == "summary"
+        assert len(attachments) == 9
+        assert [str(item.get("transient_text") or "") for item in attachments] == source_texts
+        return None, False
+
+    async def answer(context, message, attachments, **kwargs):  # noqa: ANN001
+        del context, kwargs
+        calls["answer"] += 1
+        assert message == _BARE_UPLOAD_REVIEW_TASK
+        assert len(attachments) == 9
+        return {
+            "content": "Содержательное ревью полного набора из девяти источников.",
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    monkeypatch.setattr(runtime, "_build_attachment_hierarchy_bundle", hierarchy)
+    monkeypatch.setattr(runtime, "_hierarchical_attachment_response", answer)
+    receipt = await runtime.chat(
+        "alice",
+        "Загружено документов: 9",
+        actor=_actor(),
+        attachments=[{"raw_object_id": raw_id} for raw_id in raw_ids],
+        synthetic_document_notice=True,
+    )
+
+    assert calls == {"hierarchy": 1, "answer": 1}
+    assert "Содержательное ревью полного набора" in receipt["message"]
+    assert "доступно для 2 из 9" not in receipt["message"]
+
+    corrupt = await pipeline.ingest_file(
+        "alice",
+        None,
+        b"not-an-xlsx-container",
+        filename="unreadable-9.xlsx",
+        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        metadata={"uploaded_by": "alice"},
+        source_ref="telegram-file:RESULT20-NINE-UNREADABLE",
+    )
+    corrupt_raw_id = str(corrupt["raw_object_id"])
+    corrupt_owned = runtime._owned_file_attachment(  # noqa: SLF001
+        corrupt_raw_id,
+        tenant_id="alice",
+        person_id="alice",
+    )
+    assert corrupt_owned is not None
+    corrupt_verified = await runtime._verify_registered_file_attachments(  # noqa: SLF001
+        [corrupt_owned],
+        tenant_id="alice",
+        person_id="alice",
+    )
+    assert len(corrupt_verified) == 1
+    mixed_sources = [*verified[:-1], corrupt_verified[0]]
+    mixed_projection = _bounded_attachment_projection(mixed_sources)
+    mixed_projected_set = _file_evidence_set_from_attachments(mixed_projection, expected_count=9)
+    mixed_source_set = _file_evidence_set_from_attachments(mixed_sources, expected_count=9)
+    assert mixed_projected_set is not None and mixed_projected_set.source_readable_count == 2
+    assert mixed_source_set is not None and mixed_source_set.source_readable_count == 8
+
+    mixed_runtime = AgentRuntime(configured, storage, llm=_NoQuicklookLLM())  # type: ignore[arg-type]
+
+    mixed_receipt = await mixed_runtime.chat(
+        "alice",
+        "Загружено документов: 9",
+        actor=_actor(),
+        attachments=[
+            *({"raw_object_id": raw_id} for raw_id in raw_ids[:-1]),
+            {"raw_object_id": corrupt_raw_id},
+        ],
+        synthetic_document_notice=True,
+    )
+
+    assert "доступно для 8 из 9" in mixed_receipt["message"]
+    assert "доступно для 2 из 9" not in mixed_receipt["message"]
+    assert mixed_receipt["attachment_context_readable_count"] == 8
+    assert mixed_receipt["context"]["attachment_context_readable_count"] == 8
 
 
 _XLSX_INTRO = "XLSX-CANARY-INTRO-ALPHA"

@@ -442,7 +442,7 @@ class _UnexpectedModel:
         pytest.param("STRICT LIVE REVIEW.odt", id="odt"),
     ],
 )
-async def test_bare_document_one_pass_uses_code_drift_then_one_bounded_repair(
+async def test_bare_document_one_pass_publishes_synthesis_without_drift_repair_or_rejection(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -461,35 +461,25 @@ async def test_bare_document_one_pass_uses_code_drift_then_one_bounded_repair(
         llm=_UnexpectedModel(),  # type: ignore[arg-type]
     )
     generation_questions: list[str] = []
-    verification_questions: list[str] = []
-    repair_questions: list[str] = []
     initial_mismatch = "По данным документа, Юг — 120 продаж."
-    repaired_mismatch = "По данным документа, Север — 80 продаж."
 
     async def generate(context, question, attachments):  # noqa: ANN001
         del context, attachments
         generation_questions.append(str(question))
         return {"content": initial_mismatch, "tools_used": [], "_model_generated": True}
 
-    async def verify(question, answer, context, *, tool_evidence):  # noqa: ANN001
-        del answer, context, tool_evidence
-        verification_questions.append(str(question))
-        return {
-            "status": "failed",
-            "ok": False,
-            "score": 0.0,
-            "issues": ["synthetic evidence mismatch"],
-        }
+    async def forbidden_verify(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("an open bare-upload review called the removed judge")
 
-    async def repair(question, answer, context, verdict, *, tool_evidence):  # noqa: ANN001
-        del answer, context, verdict, tool_evidence
-        repair_questions.append(str(question))
-        return repaired_mismatch
+    async def forbidden_repair(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("an open bare-upload review entered model repair")
 
     monkeypatch.setattr(runtime, "_prepare_context", _plain_attachment_context)
     monkeypatch.setattr(runtime, "_generate_response", generate)
-    monkeypatch.setattr(runtime, "_verify_response", verify)
-    monkeypatch.setattr(runtime, "_repair_once", repair)
+    monkeypatch.setattr(runtime, "_verify_response", forbidden_verify)
+    monkeypatch.setattr(runtime, "_repair_once", forbidden_repair)
     reply = await runtime.chat(
         "alice",
         f"Загружен документ: {filename}",
@@ -500,29 +490,26 @@ async def test_bare_document_one_pass_uses_code_drift_then_one_bounded_repair(
     )
 
     assert generation_questions == [f"Загружен документ: {filename}"]
-    # The ordinary bare review never asks the same model to judge its own
-    # initial prose. The code-owned high-confidence drift guard catches the
-    # swapped labelled value, then the one permitted repair is rechecked by the
-    # same deterministic guard rather than a model judging its own rewrite.
-    assert verification_questions == []
-    assert repair_questions == [_BARE_UPLOAD_REVIEW_TASK]
+    # Open review is an availability lane: the one synthesis is delivered as
+    # unverified prose even when the broad offline drift heuristic would mark a
+    # labelled value as suspicious.  Strict/exact questions retain that guard in
+    # the regression below.
     assert filename not in _BARE_UPLOAD_REVIEW_TASK
     assert ".doc" not in _BARE_UPLOAD_REVIEW_TASK.casefold()
-    assert initial_mismatch not in str(reply["message"])
-    assert repaired_mismatch not in str(reply["message"])
-    assert reply["message"] == _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION
+    assert reply["message"] == initial_mismatch
+    assert _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION not in str(reply["message"])
     assert "быстрый обзор" not in str(reply["message"]).casefold()
-    assert reply["verification_status"] == "unknown"
-    assert reply["verification"]["issues"] == ["attachment_evidence_mismatch"]
+    assert reply["verification_status"] == "skipped"
+    assert reply["verification"]["issues"] == []
 
 
 @pytest.mark.asyncio
-async def test_bare_upload_cannot_publish_an_inverted_source_negation(
+async def test_strict_attachment_question_keeps_drift_repair_and_hard_rejection(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A fluent open review still crosses the evidence verifier."""
+    """Removing the open-review judge does not weaken an explicit exact query."""
 
     storage.ensure_user("alice", preset_key="owner")
     filename = "NEGATED RELATION.odt"
@@ -548,12 +535,7 @@ async def test_bare_upload_cannot_publish_an_inverted_source_negation(
     async def verify(question, answer, context, *, tool_evidence):  # noqa: ANN001
         del context, tool_evidence
         verification_calls.append((str(question), str(answer)))
-        return {
-            "status": "failed",
-            "ok": False,
-            "score": 0.0,
-            "issues": ["source negation inverted"],
-        }
+        return {"status": "passed", "ok": True, "score": 1.0, "issues": []}
 
     async def repair(question, answer, context, verdict, *, tool_evidence):  # noqa: ANN001
         del answer, context, verdict, tool_evidence
@@ -564,24 +546,27 @@ async def test_bare_upload_cannot_publish_an_inverted_source_negation(
     monkeypatch.setattr(runtime, "_generate_response", generate)
     monkeypatch.setattr(runtime, "_verify_response", verify)
     monkeypatch.setattr(runtime, "_repair_once", repair)
+    strict_question = "Проверь точно по файлу: документ Альфа подготовлен отделом снабжения?"
     reply = await runtime.chat(
         "alice",
-        f"Загружен документ: {filename}",
+        strict_question,
         actor=_actor(),
         attachments=[attachment],
         enable_tools=False,
-        synthetic_document_notice=True,
     )
 
-    assert verification_calls == []
-    assert repair_calls == [_BARE_UPLOAD_REVIEW_TASK]
+    assert len(verification_calls) == 2
+    assert all(question.endswith(strict_question) for question, _answer in verification_calls)
+    assert len(repair_calls) == 1 and repair_calls[0].endswith(strict_question)
     assert false_positive not in str(reply["message"])
     assert "не подготовлен" not in false_positive
+    assert reply["message"] == _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION
+    assert reply["verification_status"] == "unknown"
     assert reply["verified"] is False
 
 
 @pytest.mark.asyncio
-async def test_bare_document_publishes_a_deterministically_clean_bounded_repair(
+async def test_bare_document_does_not_replace_open_synthesis_with_model_repair(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -599,26 +584,23 @@ async def test_bare_document_publishes_a_deterministically_clean_bounded_repair(
         storage,
         llm=_UnexpectedModel(),  # type: ignore[arg-type]
     )
-    repaired = "По данным документа, Север — 120 продаж, Юг — 80 продаж."
-    verification_calls: list[bool] = []
+    initial = "По данным документа, Юг — 120 продаж."
 
     async def generate(context, question, attachments):  # noqa: ANN001
         del context, question, attachments
         return {
-            "content": "По данным документа, Юг — 120 продаж.",
+            "content": initial,
             "tools_used": [],
             "_model_generated": True,
         }
 
     async def verify(*args, **kwargs):  # noqa: ANN002, ANN003
         del args, kwargs
-        verification_calls.append(True)
         raise AssertionError("one-pass review called a model verifier")
 
-    async def repair(question, answer, context, verdict, *, tool_evidence):  # noqa: ANN001
-        del answer, context, verdict, tool_evidence
-        assert question == _BARE_UPLOAD_REVIEW_TASK
-        return repaired
+    async def repair(*args, **kwargs):  # noqa: ANN002, ANN003
+        del args, kwargs
+        raise AssertionError("one-pass review called model repair")
 
     monkeypatch.setattr(runtime, "_prepare_context", _plain_attachment_context)
     monkeypatch.setattr(runtime, "_generate_response", generate)
@@ -633,8 +615,7 @@ async def test_bare_document_publishes_a_deterministically_clean_bounded_repair(
         synthetic_document_notice=True,
     )
 
-    assert verification_calls == []
-    assert repaired in str(reply["message"])
+    assert reply["message"] == initial
     assert reply["verification_status"] == "skipped"
 
 
@@ -678,7 +659,7 @@ def test_passive_source_scope_does_not_legalize_an_unsupported_deed(claim: str) 
 
 
 @pytest.mark.asyncio
-async def test_a_hostile_repair_cannot_add_a_supported_deed_to_a_bare_upload_review(
+async def test_a_hostile_strict_repair_cannot_add_an_unsupported_deed(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -719,26 +700,26 @@ async def test_a_hostile_repair_cannot_add_a_supported_deed_to_a_bare_upload_rev
 
     async def repair(question, answer, context, verdict, *, tool_evidence):  # noqa: ANN001
         del answer, context, verdict, tool_evidence
-        assert question == _BARE_UPLOAD_REVIEW_TASK
+        assert str(question).endswith(strict_question)
         return repaired_deed
 
     monkeypatch.setattr(runtime, "_prepare_context", _plain_attachment_context)
     monkeypatch.setattr(runtime, "_generate_response", generate)
     monkeypatch.setattr(runtime, "_verify_response", verify)
     monkeypatch.setattr(runtime, "_repair_once", repair)
+    strict_question = "Проверь точно: подготовлен ли документ Альфа отделом снабжения?"
     reply = await runtime.chat(
         "alice",
-        f"Загружен документ: {filename}",
+        strict_question,
         actor=_actor(),
         attachments=[attachment],
         enable_tools=False,
-        synthetic_document_notice=True,
     )
 
-    # The deterministic polarity guard owns the first rejection; the hostile
-    # repair is removed by the supported-deed guard before it can be judged or
-    # published.
-    assert verification_calls == []
+    # The explicit factual question retains its verifier/repair path.  The
+    # hostile replacement is removed by the independent supported-deed guard
+    # before it can be published.
+    assert len(verification_calls) == 1 and verification_calls[0].endswith(strict_question)
     assert reply["message"] == _UNCONFIRMED_SUPPORTED_DEED
     assert repaired_deed not in repr(reply)
 

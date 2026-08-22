@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 import pytest
 
@@ -84,7 +85,9 @@ class _Searcher:
 
 def _turn(settings, storage, answer: str) -> dict:
     storage.ensure_user("alice", preset_key="owner")
-    agent = AgentRuntime(settings, storage)
+    # Verification is intentionally opt-in in production.  This module tests
+    # the verifier's own semantics, so enable it explicitly.
+    agent = AgentRuntime(replace(settings, verify_answers=True), storage)
     agent.llm = _Model(answer)
     actor = ActorContext(user_id="alice", preset_key="owner", source="test")
     return asyncio.run(

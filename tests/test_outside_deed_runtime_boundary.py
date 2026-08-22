@@ -228,6 +228,50 @@ async def test_a_bare_upload_summary_keeps_a_truthful_state_from_its_source(
 
 
 @pytest.mark.asyncio
+async def test_a_bare_upload_keeps_a_passive_preparation_preamble_with_substantive_review(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    """A review preamble is not a claim that Friday created a new file."""
+
+    runtime = _runtime(settings, storage, monkeypatch)
+    attachment = await _registered_text_attachment(
+        settings,
+        storage,
+        filename="synthetic-passive-preparation.txt",
+        source_text="Материал описывает структуру проекта, текущий статус и следующие шаги.",
+    )
+    model_answer = (
+        "Документ подготовлен: материал описывает структуру проекта, текущий статус "
+        "и следующие шаги. Ниже приведено содержательное ревью исходного текста."
+    )
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {"content": model_answer, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Загружен документ: synthetic-passive-preparation.txt",
+        actor=_actor(),
+        attachments=[attachment],
+        enable_tools=False,
+        synthetic_document_notice=True,
+    )
+
+    assert reply["message"] != _UNCONFIRMED_SUPPORTED_DEED
+    assert "материал описывает структуру проекта" in reply["message"].casefold()
+    assert "содержательное ревью" in reply["message"].casefold()
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    assert stored is not None
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    output_guards = metadata["structural"].get("output_guards", {})
+    assert output_guards.get("supported_deed_replaced") is not True
+
+
+@pytest.mark.asyncio
 async def test_an_explicit_structure_request_keeps_passive_source_summary(
     settings,
     storage,

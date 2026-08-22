@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 
 from friday.agent_runtime import AgentContext, AgentRuntime
 from friday.execution_kernel import ToolSpec
@@ -530,7 +531,12 @@ def test_the_judge_hears_only_the_model(settings, storage) -> None:
 
     AgentRuntime._verify_response = _spy
     try:
-        _answer(settings, storage, llm, "напомни про отчёт в пятницу, и как там дела с проектом")
+        _answer(
+            replace(settings, verify_answers=True),
+            storage,
+            llm,
+            "напомни про отчёт в пятницу, и как там дела с проектом",
+        )
     finally:
         AgentRuntime._verify_response = original
 

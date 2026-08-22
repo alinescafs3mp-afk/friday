@@ -380,7 +380,7 @@ _ATTACHMENT_MAP_CHUNK_CHARS = 20_000
 _ATTACHMENT_MAP_WIDE_CHUNK_CHARS = 64_000
 _ATTACHMENT_MAP_MAX_CHUNK_CHARS = 64_000
 _ATTACHMENT_MAP_TARGET_WAVES = 2
-_ATTACHMENT_MAP_MODEL_OUTPUT_TOKENS = 500
+_ATTACHMENT_MAP_MODEL_OUTPUT_TOKENS = 900
 # A document answer is delivered over one non-streaming request behind the
 # 90-second primary deadline.  Leaving the ordinary call at the global
 # 2,048-token default let a cancelled generation keep running remotely and
@@ -399,7 +399,7 @@ _ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS = 2_048
 # request and framing.  Reserve this independently of the separately bounded
 # request text; an exact serialized-size guard below remains the final gate.
 _ATTACHMENT_MAP_FIXED_PROMPT_RESERVE_CHARS = 12_000
-_ATTACHMENT_MAP_OUTPUT_CHARS = 1_600
+_ATTACHMENT_MAP_OUTPUT_CHARS = 3_200
 _ATTACHMENT_MAP_REDUCE_INPUT_CHARS = 18_000
 _ATTACHMENT_MAP_REDUCE_OUTPUT_CHARS = 2_400
 _ATTACHMENT_MAP_FINAL_EVIDENCE_CHARS = 44_000
@@ -35577,6 +35577,12 @@ class AgentRuntime:
             active_attachment_set,
             expected_count=attachment_expected_count,
         )
+        (
+            source_attachment_readable_count,
+            source_attachment_context_complete,
+            source_attachment_coverage_complete,
+            source_attachment_verification_complete,
+        ) = _file_evidence_set_public_metrics(active_source_evidence_set)
         document_metadata_answer = (
             _document_metadata_answer(
                 active_attachment_set,
@@ -35899,15 +35905,15 @@ class AgentRuntime:
                 advisory_body_count += 1
                 if isinstance(item, Mapping) and item.get("_prompt_projection_complete") is False:
                     advisory_projection_incomplete = True
-        terminal_cardinality_closed = bool(
-            terminal_evidence_set is not None
-            and terminal_evidence_set.expected_count == attachment_expected_count
-            and len(terminal_evidence_set.items) == attachment_expected_count
+        source_cardinality_closed = bool(
+            active_source_evidence_set is not None
+            and active_source_evidence_set.expected_count == attachment_expected_count
+            and len(active_source_evidence_set.items) == attachment_expected_count
         )
         unreadable_attachment_answer = bool(
             attachment_expected_count
             and attachment_expected_count <= _CONVERSATION_ATTACHMENT_MAX_FILES
-            and attachment_readable_count == 0
+            and source_attachment_readable_count == 0
             and advisory_body_count == 0
             # A blank visible prefix plus a proven unread tail is partial
             # extraction, not proof that the file is wholly unreadable.  Keep
@@ -35917,16 +35923,16 @@ class AgentRuntime:
             and not empty_attachment_answer
             and not attachment_resolution_failed
             and not multi_attachment_incomplete
-            and (terminal_cardinality_closed or (not uses_source_terminal and terminal_evidence_set is None))
+            and (source_cardinality_closed or (not uses_source_terminal and terminal_evidence_set is None))
             # Prefer the explicit "will not guess" contract over a generic
             # query-scan UNKNOWN when every selected file has zero body — neither
             # verified text nor advisory OCR/transcription.
         )
         partially_unreadable_attachment_answer = bool(
-            terminal_cardinality_closed
+            source_cardinality_closed
             and attachment_expected_count > 1
             and attachment_expected_count <= _CONVERSATION_ATTACHMENT_MAX_FILES
-            and 0 < attachment_readable_count < attachment_expected_count
+            and 0 < source_attachment_readable_count < attachment_expected_count
             and not attachment_resolution_failed
             and not multi_attachment_incomplete
             # This count is availability, not evidentiary authority. Advisory
@@ -35934,6 +35940,12 @@ class AgentRuntime:
             # partially missing; the separate verification ceiling and visible
             # caution carry its weaker authority.
         )
+        if unreadable_attachment_answer or partially_unreadable_attachment_answer:
+            # A bounded prompt projection is not source availability.  This is
+            # a terminal code-owned answer, so expose the authenticated source
+            # count in both its text and the public receipt instead of a stale
+            # projected count such as the live false ``2 из 9``.
+            attachment_readable_count = source_attachment_readable_count
         advisory_caution_needed = bool(
             advisory_body_count > 0
             and not unreadable_attachment_answer
@@ -38059,31 +38071,25 @@ class AgentRuntime:
             # source authority/cardinality: derive that half of the proof from
             # the original private evidence set.  Caller dictionaries still
             # produce ``None`` here and remain fail-closed.
-            (
-                source_readable_count,
-                source_context_complete,
-                source_coverage_complete,
-                source_verification_complete,
-            ) = _file_evidence_set_public_metrics(active_source_evidence_set)
             attachment_readable_count = min(
                 max(0, int(hierarchy_bundle_value.files_readable)),
-                source_readable_count,
+                source_attachment_readable_count,
             )
             attachment_context_complete = bool(
-                source_context_complete
+                source_attachment_context_complete
                 and attachment_expected_count
                 and hierarchy_bundle_value.files_total == attachment_expected_count
                 and attachment_readable_count == attachment_expected_count
             )
             attachment_coverage_complete = bool(
-                source_coverage_complete
+                source_attachment_coverage_complete
                 and attachment_context_complete
                 and hierarchy_bundle_value.source_complete
                 and hierarchy_bundle_value.map_complete
                 and hierarchy_complete
             )
             attachment_verification_complete = bool(
-                source_verification_complete and attachment_coverage_complete
+                source_attachment_verification_complete and attachment_coverage_complete
             )
             if attachment_coverage_complete and bounded_incomplete_source_notice_added:
                 # The earlier warning described only the bounded prompt view.
@@ -38554,7 +38560,7 @@ class AgentRuntime:
             else ()
         )
         passive_attachment_preamble_normalized = False
-        if explicit_attachment_summary_scope:
+        if explicit_attachment_summary_scope or passive_attachment_summary_scope:
             content, passive_attachment_preamble_normalized = (
                 _normalize_passive_attachment_preparation_preamble(content)
             )
@@ -39499,8 +39505,9 @@ class AgentRuntime:
             # complete, parser-owned open review therefore uses one synthesis
             # pass for both explicit requests and backend-authored bare-upload
             # notices. Exact/count/exhaustive requests still leave this lane,
-            # while code-owned high-confidence relation/value drift checks
-            # remain active for every answer.
+            # The authenticated parser and coverage guards remain authoritative;
+            # neither the model judge nor its derivative drift/repair path runs
+            # in this open lane.
             and (synthetic_document_notice or pure_file_read_turn)
             and authenticated_attachment_scope
             and attachment_expected_count > 0
@@ -39518,9 +39525,15 @@ class AgentRuntime:
             and not file_create
             and not clean_workspace_channel_requested
             and not workspace_authority_message
-            and not _open_attachment_review_requires_verifier(
-                verification_question,
-                model_said,
+            and (
+                # A backend-authored bare-upload notice is never a strict
+                # question from the user.  Claims introduced by synthesis must
+                # not promote that turn into judge/repair/rejudge.
+                synthetic_document_notice
+                or not _open_attachment_review_requires_verifier(
+                    verification_question,
+                    model_said,
+                )
             )
         )
         if verification_attachment_evidence:
@@ -39660,12 +39673,17 @@ class AgentRuntime:
                 context,
                 tool_evidence=verification_evidence,
             )
-        if verification_attachment_evidence and attachment_verification_complete and model_said:
+        if (
+            self.settings.verify_answers
+            and verification_attachment_evidence
+            and attachment_verification_complete
+            and model_said
+            and not open_attachment_review_one_pass
+        ):
             verification = _attachment_verdict_with_deterministic_drift(
                 verification,
                 model_said,
                 verification_attachment_evidence,
-                high_confidence_only=open_attachment_review_one_pass,
             )
         if web_verifier_evidence_incomplete:
             # The judge did not receive every accepted fact-bearing web result
@@ -39750,7 +39768,9 @@ class AgentRuntime:
                     archive_status_guarded=archive_status_guarded,
                     passive_source_state=passive_attachment_summary_scope,
                 )
-                if explicit_attachment_summary_scope and repaired_has_model_content:
+                if (
+                    explicit_attachment_summary_scope or passive_attachment_summary_scope
+                ) and repaired_has_model_content:
                     repaired_model_said, repaired_preamble_normalized = (
                         _normalize_passive_attachment_preparation_preamble(repaired_model_said)
                     )
@@ -39830,12 +39850,16 @@ class AgentRuntime:
                             context,
                             tool_evidence=verification_evidence,
                         )
-                    if verification_attachment_evidence and attachment_verification_complete:
+                    if (
+                        self.settings.verify_answers
+                        and verification_attachment_evidence
+                        and attachment_verification_complete
+                        and not open_attachment_review_one_pass
+                    ):
                         verification = _attachment_verdict_with_deterministic_drift(
                             verification,
                             model_said,
                             verification_attachment_evidence,
-                            high_confidence_only=open_attachment_review_one_pass,
                         )
                     verification_status = str(verification.get("status") or VERDICT_SKIPPED)
                 else:
@@ -39898,14 +39922,9 @@ class AgentRuntime:
             and model_said
             and verification_status == VERDICT_FAILED
         ):
-            # This is the final attachment provenance boundary, after the one
-            # permitted repair and its one re-verification.  A warning below
-            # prose which the judge still found inconsistent republishes the
-            # very contradiction the verifier detected.  Keep an independently
-            # completed structural deed, but discard the model body and every
-            # response-derived carrier.  A complete current-turn advisory OCR
-            # set may be shown literally and labelled as such; it is never
-            # promoted back to a verified model answer.
+            # This path is opt-in only: the release default keeps the model judge
+            # out of publication entirely.  Operators which explicitly enable
+            # it retain the strict legacy contract for exact attachment claims.
             literal_salvage = _advisory_attachment_literal_salvage(
                 attachments,
                 expected_count=attachment_expected_count,
@@ -42539,9 +42558,10 @@ class AgentRuntime:
     def _attachment_hierarchy_text(result: Any, *, max_chars: int) -> tuple[str, bool]:
         """Accept and bound one answer-only hierarchy stage.
 
-        The boolean reports deterministic carrier loss.  A clipped map/reduce
-        note remains useful partial evidence, but it can no longer certify that
-        the corresponding hierarchy stage was complete.
+        The boolean reports deterministic carrier loss, including a truthful
+        transport ``finish_reason=length`` below the character ceiling.  A
+        clipped map/reduce note remains useful partial evidence, but it can no
+        longer certify that the corresponding hierarchy stage was complete.
         """
 
         if not isinstance(result, Mapping) or result.get("tool_calls"):
@@ -42550,7 +42570,8 @@ class AgentRuntime:
         if turn.kind != "answer":
             return "", False
         text = _strip_tool_call_markup(turn.text).strip()
-        return text[:max_chars], len(text) > max_chars
+        transport_clipped = str(result.get("finish_reason") or "stop").strip().casefold() == "length"
+        return text[:max_chars], bool(len(text) > max_chars or transport_clipped)
 
     async def _reduce_attachment_map_records(
         self,

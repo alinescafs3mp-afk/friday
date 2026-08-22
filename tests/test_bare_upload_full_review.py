@@ -11,7 +11,6 @@ import pytest
 from openpyxl import Workbook
 
 from friday.agent_runtime import (
-    _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION,
     _ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS,
     _MODEL_LENGTH_LIMIT_FALLBACK,
     _MODEL_LENGTH_LIMIT_NOTICE,
@@ -236,7 +235,7 @@ async def test_bare_upload_detailed_review_keeps_a_source_derived_record_count(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("claimed", ["3", "одиннадцать"])
-async def test_bare_upload_wrong_derived_count_gets_one_repair_then_hard_rejection(
+async def test_bare_upload_suspicious_derived_count_keeps_the_one_synthesis_pass(
     settings,
     storage,
     claimed: str,
@@ -268,10 +267,13 @@ async def test_bare_upload_wrong_derived_count_gets_one_repair_then_hard_rejecti
     )
 
     blobs = ["\n".join(str(item.get("content") or "") for item in call["messages"]) for call in model.calls]
-    assert result["message"] == _ATTACHMENT_EVIDENCE_MISMATCH_REJECTION
-    assert sum("FRIDAY_REPAIR_DATA" in blob for blob in blobs) == 1
+    assert result["message"] == (
+        f"Документ содержит {claimed} записей: проекты Альфа, Бета и Гамма; структура записей краткая."
+    )
+    assert sum("FRIDAY_REPAIR_DATA" in blob for blob in blobs) == 0
     assert sum("FRIDAY_VERIFICATION_DATA" in blob for blob in blobs) == 0
-    assert len(model.calls) == 2
+    assert len(model.calls) == 1
+    assert result["verification_status"] == "skipped"
     assert "Быстрый обзор" not in result["message"]
 
 

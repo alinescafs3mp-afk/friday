@@ -1192,7 +1192,9 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         llm_timeout_sec=_float_env("FRIDAY_LLM_TIMEOUT_SEC", 240.0, minimum=1.0),
         llm_max_tokens=_int_env("FRIDAY_LLM_MAX_TOKENS", 2048, minimum=64),
         llm_api_key=env("FRIDAY_LLM_API_KEY", "").strip(),
-        verify_answers=_bool_env("FRIDAY_VERIFY_ANSWERS", True),
+        # The model judge is opt-in.  It is not an independent authority and a
+        # false negative must not sit in the default publication path.
+        verify_answers=_bool_env("FRIDAY_VERIFY_ANSWERS", False),
         verify_min_answer_chars=_int_env("FRIDAY_VERIFY_MIN_ANSWER_CHARS", 300, minimum=1),
         embeddings_enabled=_bool_env("FRIDAY_EMBEDDINGS_ENABLED", False),
         embeddings_base_url=env("FRIDAY_EMBEDDINGS_BASE_URL", llm_base_url).rstrip("/"),

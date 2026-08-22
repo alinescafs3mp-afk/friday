@@ -70,7 +70,7 @@ backend-клиентом.
 | `ingestion` | moderate classification, Raw Object, Inbox, promotion, deterministic enrichment, advisory model refinement |
 | `knowledge_graph` | сущности, связи, links к знаниям, graph context, duplicate suggestions, merge history и единая timeline событий/valid-time границ отношений |
 | `retrieval` | FTS, lexical similarity, persistent dense embeddings (corpus-wide recall), field/quality/graph/feedback/lifecycle ranking |
-| `agent_runtime` | диалог, сборка контекста, режим ответа, planning/tool calls, fail-closed автопроверка ответа (`passed`/`failed`/`unknown`/`skipped` + предупреждение), легенда источников `[K#]` и пометка неподкреплённых ответов, и ответ |
+| `agent_runtime` | диалог, сборка контекста, режим ответа, planning/tool calls, опциональная автопроверка обычных ответов (`passed`/`failed`/`unknown`/`skipped` + предупреждение; по умолчанию выключена, bare-upload всегда однопроходный), легенда источников `[K#]` и пометка неподкреплённых ответов, и ответ |
 | `executive` | миссии: планирование цели в ациклический план задач, фоновое пошаговое выполнение, управляемая автономия |
 | `memory` | Markdown-vault как локальное переносимое представление знаний |
 | `documents` | безопасное извлечение текста/метаданных и bounded visual assets; нераспознаваемые медиа (аудио/видео) хранятся как raw с провенансом |

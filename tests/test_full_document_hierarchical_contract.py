@@ -1788,6 +1788,28 @@ async def test_clipped_map_and_reduce_notes_stay_useful_but_never_complete(
     assert result["verification_status"] == "unknown"
     assert result["verified"] is False
 
+    class LengthMapLLM(_HierarchyLLM):
+        async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+            if any(str(item.get("content") or "").startswith(CHUNK_PREFIX) for item in messages):
+                self.calls.append({"messages": [dict(item) for item in messages], "kwargs": dict(kwargs)})
+                return {"content": "Полезная, но оборванная MAP-заметка.", "finish_reason": "length"}
+            return await super().chat(messages, **kwargs)
+
+    length_map_llm = LengthMapLLM("Частичный итог после оборванного MAP.")
+    length_result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question="Обобщи весь документ целиком.",
+        attachments=[_owned("length-map.txt", source)],
+        llm=length_map_llm,
+    )
+    length_synthesis, _length_verification = _canonical_map_blocks(length_map_llm)
+    length_mapped = _payload(length_synthesis[0], MAP_PREFIX)
+    assert length_mapped["coverage"]["clipped_chunks"]
+    assert length_mapped["coverage"]["map_complete"] is False
+    assert length_result["attachment_coverage_complete"] is False
+
     class LongReduceLLM(_HierarchyLLM):
         async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
             if any(str(item.get("content") or "").startswith(REDUCE_PREFIX) for item in messages):
@@ -1825,6 +1847,23 @@ async def test_clipped_map_and_reduce_notes_stay_useful_but_never_complete(
     assert reduced[0]["available"] is True
     assert reduced[0]["summary_complete"] is False
     assert len(reduced[0]["summary"]) == agent_runtime_module._ATTACHMENT_MAP_REDUCE_OUTPUT_CHARS
+
+    class LengthReduceLLM(_HierarchyLLM):
+        async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+            if any(str(item.get("content") or "").startswith(REDUCE_PREFIX) for item in messages):
+                return {"content": "Полезная, но оборванная reduce-заметка.", "finish_reason": "length"}
+            return await super().chat(messages, **kwargs)
+
+    length_reduce_runtime = AgentRuntime(settings, storage, llm=LengthReduceLLM("unused"))
+    length_reduced, length_reduction_complete = await length_reduce_runtime._reduce_attachment_map_records(
+        reduce_context,
+        "Обобщи весь документ.",
+        records,
+    )
+    assert length_reduction_complete is False
+    assert len(length_reduced) == 1
+    assert length_reduced[0]["available"] is True
+    assert length_reduced[0]["summary_complete"] is False
 
 
 @pytest.mark.asyncio

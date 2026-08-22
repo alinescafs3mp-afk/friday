@@ -2,14 +2,15 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.1**. Это opt-in beta интеграции одного личного
+Текущая версия: **0.207.2**. Это opt-in beta интеграции одного личного
 Obsidian vault с одним Android-устройством через изолированный Syncthing:
 приватный Telegram-onboarding, нативные операции с Markdown, точные delivery
 facts, preserve-both конфликты и единый crash-safe immutable cutover. Без
 `FRIDAY_OBSIDIAN_ENABLED=1` Organ не запускается. Релиз также включает все
 проверки подробного ревью из 0.206.4 и исправляет transient-разбор старых
-ODT/XLSX, bounded repair и локальные evidence scopes. Строгие запросы и
-deterministic evidence guards остаются fail-closed. Остальные возможности включают code-owned
+ODT/XLSX и локальные evidence scopes. Автосудья теперь opt-in и выключен по
+умолчанию; обычное ревью вложения выполняется одним synthesis-проходом, а
+точные Office-ответы остаются code-owned. Остальные возможности включают code-owned
 поиск собственной истории по точным временным окнам и тематической
 лексике, bounded-поиском по содержимому и сохранённым именам собственных
 файлов, строгими page/failure-границами поддерживаемых PDF/JPEG/OCR-путей и
@@ -314,7 +315,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Успешный canary startup должен показать в `/api/health` версию `0.207.1`,
+Успешный canary startup должен показать в `/api/health` версию `0.207.2`,
 точный profile id, `canary_ready`, `live_attestation_clear` и оба
 зарегистрированных route; простого HTTP `status=ok` недостаточно.
 
