@@ -955,8 +955,17 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
         "test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe"
     )
     assert (ROOT / current_only_proof.split("::", maxsplit=1)[0]).is_file()
+    repository_root = subprocess.run(
+        ["git", "rev-list", "--max-parents=0", identity.source_commit],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    root_commits = repository_root.stdout.splitlines()
+    assert repository_root.returncode == 0 and len(root_commits) == 1
     with pytest.raises(RegistryValidationError, match="missing or not a file at the manifest commit"):
-        _exact_git_test_source(current_only_proof, source_commit=identity.source_commit)
+        _exact_git_test_source(current_only_proof, source_commit=root_commits[0])
 
     manifest_journey_id = "conversation_recall"
     manifest_evidence_class = "deterministic contract"

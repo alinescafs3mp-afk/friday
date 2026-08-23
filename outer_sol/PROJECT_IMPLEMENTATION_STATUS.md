@@ -6,10 +6,10 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-23
 - Branch: `main`
-- Deployed implementation head: `c91260d6f8f74e3276851ebfd42916a2af4396db`
-- Live: Friday `0.207.4` / `c91260d6f8f74e3276851ebfd42916a2af4396db`;
-  tree `fc48dbf365865ac2b5e0230c9320c0c2b2fd76f7cf0856d4e822c29900c2f519`;
-  wheel `bec63678e23965754529b93673a32796d99a2d371b1c2693b5990a855526886d`
+- Deployed implementation head: `ec8be1d164ce3fb93bffd02395cfe5851a125ee5`
+- Live: Friday `0.207.5` / `ec8be1d164ce3fb93bffd02395cfe5851a125ee5`;
+  tree `1e2c04b2dc08c461824bff54e9b4e7f78b209fa56ef201dbc194e1ea112cc3f3`;
+  wheel `50fa52b71af2b4d8767f7a199801aa0bafe59078be1f51d5f5f6485ae8410b3d`
 - Schema-capable fallback: `cb1b3f71166afe0a1a6fd277dfe0440ef292ed0b`;
   tree `0363a0646158001b574e9bca468e2fc480fbd9e30f00b1d1f4ac08f32d6ce15f`
 - Database schema: 38
@@ -96,7 +96,7 @@ course, with these repository-specific constraints:
 2. Keep every lane capability-scoped, late-reauthorized and explicit about
    partial, capped, stale, incompatible and unavailable coverage.
 
-## Completed in source; awaiting immutable activation
+## Completed and deployed (current package)
 
 ### Retrieval identity and coverage foundation (`0.207.5`)
 
@@ -117,6 +117,9 @@ course, with these repository-specific constraints:
 - Independent schema/privacy review passed; 52 focused adversarial tests and the
   complete 16-worker quality gate are green. No database migration or runtime
   route was introduced.
+- The wheel was reproduced byte-for-byte, activated through the immutable
+  operator and accepted by exact backend/bridge process-root, trusted-CA health,
+  SQLite integrity/FK and schema-38 checks.
 
 ## Canonical golden-journey/evidence registry
 
@@ -160,12 +163,12 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- 16,175 non-UI Python tests passed on 16 workers with no failures or skips.
+- 16,235 non-UI Python tests passed on 16 workers with no failures or skips.
 - The pinned Syncthing `v2.1.3` managed-REST smoke passed; this is not evidence
   of an Android round trip.
 - Schema-38 fixture, lifecycle/privacy, store adversarial, runtime continuation,
   migration-chain and existing named-inventory compatibility checks are green.
-- Ruff, release-surface format (871 files), mypy (210 source files), compileall,
+- Ruff, release-surface format (884 files), mypy (217 source files), compileall,
   Bandit HIGH, JavaScript syntax and toolchain preflight passed.
 - The release wheel was built twice from the clean commit archive and matched
   byte-for-byte. Immutable activation completed `clear`; schema-38 fallback,
@@ -174,21 +177,19 @@ claims at this checkpoint.
 
 ## Next order
 
-1. Activate the schema-free retrieval-identity foundation as `0.207.5` and
-   record its exact source/tree/wheel identity.
-2. Release one read-only federated `archive_search` facade with deterministic
+1. Release one read-only federated `archive_search` facade with deterministic
    continuation, neighboring message context and explicit per-lane coverage.
-3. Extend the proven recall Work Item across document and message evidence only
+2. Extend the proven recall Work Item across document and message evidence only
    through stable source/passage references and fresh authorization/revision
    checks.
-4. Add one uncertainty-aware common effect envelope and prove one idempotent,
+3. Add one uncertainty-aware common effect envelope and prove one idempotent,
    receipt-backed Obsidian mutation/reconciliation vertical.
-5. Extend existing immutable-release evidence into machine-reconcilable
+4. Extend existing immutable-release evidence into machine-reconcilable
    source/wheel/schema/activation/fallback manifests, then register exact-release
    journey evidence without promoting generic component gates.
-6. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
+5. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
    certification; simulations remain labelled separately.
-7. Evaluate generic WorkGraph, broader effects, connectors or companion work
+6. Evaluate generic WorkGraph, broader effects, connectors or companion work
    only from the golden journeys still failing after the preceding packages.
 
 ## Open source/document issue
