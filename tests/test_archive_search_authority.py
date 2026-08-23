@@ -27,6 +27,7 @@ from friday.retrieval.archive_search_authority import (
     AuthorizedArchiveBatch,
     IssuedArchiveContinuation,
     RedeemedArchiveContinuation,
+    abandon_empty_archive_model_batch_ledger,
     attest_archive_search_before_publication,
     authorize_archive_search_before_model,
     authorize_archive_search_resumed_before_model,
@@ -1334,9 +1335,7 @@ def test_backend_capped_lane_without_cursor_warns_beside_other_lane_child() -> N
         authority_context=CONTEXT,
     )
     first_payload = first.public_tool_result_payload
-    first_coverage = {
-        item["lane"]: item for item in cast(list[dict[str, object]], first_payload["coverage"])
-    }
+    first_coverage = {item["lane"]: item for item in cast(list[dict[str, object]], first_payload["coverage"])}
     child = cast(str, first_payload["continuation"])
 
     assert first_payload["warnings"] == ["backfill_pending", "continuation_unavailable"]
@@ -1597,14 +1596,13 @@ def test_model_batch_ledger_is_exact_bounded_frozen_and_one_use(
     with pytest.raises(TypeError, match="process-private"):
         pickle.dumps(ledger)
 
-    assert (
+    with pytest.raises(ArchiveSearchAuthorityError):
         create_archive_model_batch_ledger(
             tenant_id=TENANT,
             principal_id=PRINCIPAL,
             turn_discriminator=turn_id,
         )
-        is ledger
-    )
+    assert all(candidate is not ledger for candidate in authority_module._TURN_LEDGER_REGISTRY.values())
     with pytest.raises(ArchiveSearchAuthorityError):
         _run(ledger=ledger, run="cannot-restart-consumed-ledger")
 
@@ -1613,19 +1611,22 @@ def test_model_batch_ledger_is_exact_bounded_frozen_and_one_use(
         principal_id=PRINCIPAL,
         turn_discriminator=f"bounded-turn-{next(_TURN_SEQUENCE)}",
     )
-    bounded_run = _run(ledger=bounded, run="bounded-run")
     monkeypatch.setattr(authority_module, "ARCHIVE_AUTHORITY_MAX_MODEL_BYTES", 10_000_000)
-    for _index in range(ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES):
+    accepted: list[tuple[ArchiveSearchRunBinding, AuthorizedArchiveBatch]] = []
+    for index in range(ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES):
+        bounded_run = _run(ledger=bounded, run=f"bounded-run-{index}")
         current = _batch(bounded_run)
         bounded.admit_model_tool_bytes(
             bounded_run,
             current,
             current.model_visible_canonical_bytes,
         )
-    overflow = _batch(bounded_run)
+        accepted.append((bounded_run, current))
+    duplicate_run, _accepted_batch = accepted[0]
+    overflow = _batch(duplicate_run)
     with pytest.raises(ArchiveSearchAuthorityError):
         bounded.admit_model_tool_bytes(
-            bounded_run,
+            duplicate_run,
             overflow,
             overflow.model_visible_canonical_bytes,
         )
@@ -1637,10 +1638,10 @@ def test_model_batch_ledger_enforces_aggregate_byte_cap() -> None:
         principal_id=PRINCIPAL,
         turn_discriminator=f"aggregate-turn-{next(_TURN_SEQUENCE)}",
     )
-    run = _run(ledger=ledger, run="aggregate-run")
     accepted_bytes = 0
     rejected_size = 0
-    for _index in range(ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES):
+    for index in range(ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES):
+        run = _run(ledger=ledger, run=f"aggregate-run-{index}")
         batch = _batch(run)
         body = batch.model_visible_canonical_bytes
         try:
@@ -1707,6 +1708,116 @@ def test_turn_ledger_attests_every_run_and_one_late_revoke_denies_all() -> None:
     assert seen_runs.count(second_run) == 2
 
 
+def test_turn_ledger_assigns_disjoint_monotonic_public_labels_to_three_runs() -> None:
+    ledger = create_archive_model_batch_ledger(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        turn_discriminator=f"label-ordinal-turn-{next(_TURN_SEQUENCE)}",
+    )
+    batches: list[tuple[ArchiveSearchRunBinding, AuthorizedArchiveBatch]] = []
+    for index in range(1, 4):
+        run = _run(ledger=ledger, run=f"label-ordinal-run-{index}")
+        candidate = _candidate(
+            f"raw_{index + 2:016d}",
+            ArchiveMatchChannel.LEXICAL,
+            title=f"Page {index}",
+        )
+        batch = _batch(
+            run,
+            candidates=(candidate,),
+            coverage=_coverage(run),
+        )
+        payload = batch.public_tool_result_payload
+        public_ordinal = (index - 1) * 20 + 1
+        assert payload["candidates"][0]["label"] == f"A{public_ordinal}"  # type: ignore[index]
+        assert payload["candidates"][0]["passages"][0]["label"] == (  # type: ignore[index]
+            f"A{public_ordinal}.1"
+        )
+        assert "model_page_index" not in payload
+        batches.append((run, batch))
+
+    bodies = [batch.model_visible_canonical_bytes for _run_binding, batch in batches]
+    assert len(set(bodies)) == 3
+    for run, batch in batches:
+        ledger.admit_model_tool_bytes(run, batch, batch.model_visible_canonical_bytes)
+    ledger.freeze_for_publication()
+    attestation = attest_archive_search_before_publication(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        ledger=ledger,
+        answer="Page one [A1.1], page two [A21.1], page three [A41.1].",
+        candidate_reauthorizer=_allow_candidate,
+        coverage_reauthorizer=_allow_coverage,
+        authority_context=CONTEXT,
+    )
+    assert attestation.attests_answer("Page one [A1.1], page two [A21.1], page three [A41.1].")
+
+
+def test_failed_run_ordinal_is_never_reused_by_a_later_page() -> None:
+    ledger = create_archive_model_batch_ledger(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        turn_discriminator=f"label-gap-turn-{next(_TURN_SEQUENCE)}",
+    )
+    first_run = _run(ledger=ledger, run="label-gap-first")
+    _failed_run = _run(ledger=ledger, run="label-gap-failed")
+    third_run = _run(ledger=ledger, run="label-gap-third")
+    first = _batch(first_run, candidates=(_candidates()[0],), coverage=_coverage(first_run))
+    third = _batch(third_run, candidates=(_candidates()[1],), coverage=_coverage(third_run))
+
+    assert first.public_tool_result_payload["candidates"][0]["label"] == "A1"  # type: ignore[index]
+    assert third.public_tool_result_payload["candidates"][0]["label"] == "A41"  # type: ignore[index]
+    abandon_empty_archive_model_batch_ledger(ledger)
+
+
+def test_same_run_page_ordinal_can_be_admitted_only_once_under_lock() -> None:
+    ledger = create_archive_model_batch_ledger(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        turn_discriminator=f"label-race-turn-{next(_TURN_SEQUENCE)}",
+    )
+    run = _run(ledger=ledger, run="label-race-first")
+    batches = (_batch(run), _batch(run))
+    barrier = threading.Barrier(3)
+    outcomes: list[str] = []
+    outcomes_lock = threading.Lock()
+
+    def admit(batch: AuthorizedArchiveBatch) -> None:
+        barrier.wait()
+        try:
+            ledger.admit_model_tool_bytes(run, batch, batch.model_visible_canonical_bytes)
+        except ArchiveSearchAuthorityError:
+            outcome = "rejected"
+        else:
+            outcome = "admitted"
+        with outcomes_lock:
+            outcomes.append(outcome)
+
+    threads = [threading.Thread(target=admit, args=(batch,)) for batch in batches]
+    for thread in threads:
+        thread.start()
+    barrier.wait()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert sorted(outcomes) == ["admitted", "rejected"]
+    second_run = _run(ledger=ledger, run="label-race-second")
+    second = _batch(second_run)
+    assert second.public_tool_result_payload["candidates"][0]["label"] == "A21"  # type: ignore[index]
+    ledger.admit_model_tool_bytes(second_run, second, second.model_visible_canonical_bytes)
+    ledger.freeze_for_publication()
+    attestation = attest_archive_search_before_publication(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        ledger=ledger,
+        answer="Unique page labels [A1.1] [A21.1].",
+        candidate_reauthorizer=_allow_candidate,
+        coverage_reauthorizer=_allow_coverage,
+        authority_context=CONTEXT,
+    )
+    assert attestation.attests_answer("Unique page labels [A1.1] [A21.1].")
+
+
 def test_turn_ledger_cannot_omit_an_admitted_batch_or_move_it_to_an_alternate() -> None:
     turn_id = f"no-omission-turn-{next(_TURN_SEQUENCE)}"
     ledger = create_archive_model_batch_ledger(
@@ -1714,11 +1825,12 @@ def test_turn_ledger_cannot_omit_an_admitted_batch_or_move_it_to_an_alternate() 
         principal_id=PRINCIPAL,
         turn_discriminator=turn_id,
     )
-    run = _run(ledger=ledger, run="no-omission-run")
-    first = _batch(run)
-    second = _batch(run)
-    ledger.admit_model_tool_bytes(run, first, first.model_visible_canonical_bytes)
-    ledger.admit_model_tool_bytes(run, second, second.model_visible_canonical_bytes)
+    first_run = _run(ledger=ledger, run="no-omission-run-first")
+    second_run = _run(ledger=ledger, run="no-omission-run-second")
+    first = _batch(first_run)
+    second = _batch(second_run)
+    ledger.admit_model_tool_bytes(first_run, first, first.model_visible_canonical_bytes)
+    ledger.admit_model_tool_bytes(second_run, second, second.model_visible_canonical_bytes)
     ledger.freeze_for_publication()
     assert (
         create_archive_model_batch_ledger(
@@ -1804,3 +1916,48 @@ def test_projector_exception_is_body_free_and_has_no_private_cause(
     assert error.value.__cause__ is None
     rendered = str(error.value) + repr(error.value)
     assert QUERY not in rendered and RAW_ONE not in rendered and TENANT not in rendered
+
+
+def test_empty_open_ledger_can_only_be_abandoned_once_and_is_replay_closed() -> None:
+    turn = f"abandoned-empty-turn-{next(_TURN_SEQUENCE)}"
+    ledger = create_archive_model_batch_ledger(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        turn_discriminator=turn,
+    )
+    _run(ledger=ledger, run="abandoned-empty-run")
+
+    abandon_empty_archive_model_batch_ledger(ledger)
+
+    with pytest.raises(ArchiveSearchAuthorityError):
+        abandon_empty_archive_model_batch_ledger(ledger)
+    with pytest.raises(ArchiveSearchAuthorityError):
+        create_archive_model_batch_ledger(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            turn_discriminator=turn,
+        )
+
+
+def test_consumed_turn_filter_rotates_after_replay_retention() -> None:
+    now = [0.0]
+    replay_filter = authority_module._RotatingTurnReplayFilter(
+        filter_bytes=8,
+        retain_seconds=6.0,
+        bucket_count=3,
+        clock=lambda: now[0],
+    )
+    handle = "a" * 64
+
+    now[0] = 2.99
+    replay_filter.add(handle)
+    now[0] = 8.98
+    assert replay_filter.contains(handle) is True
+    now[0] = 9.01
+    assert replay_filter.contains(handle) is False
+
+    for epoch in range(32):
+        replay_filter.add(f"{epoch:064x}")
+        now[0] += 3.01
+    now[0] += 10.0
+    assert replay_filter.contains("f" * 64) is False

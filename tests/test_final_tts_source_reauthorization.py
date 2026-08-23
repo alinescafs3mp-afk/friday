@@ -742,3 +742,42 @@ async def test_unchanged_workspace_voice_has_one_tts_and_final_provider_reread_a
     assert names[-1] == "workspace_read", "provider reread must remain the last await before commit"
     assert response["voice"]["audio_base64"] == "c3ludGhldGljLW9nZw=="
     assert _SOURCE_CANARY in response["message"]
+
+
+@pytest.mark.asyncio
+async def test_archive_backed_turn_never_starts_tts_before_consuming_phase2_ledger(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.test_archive_search_runtime_publication import (
+        _chat as archive_chat,
+    )
+    from tests.test_archive_search_runtime_publication import (
+        _runtime as archive_runtime,
+    )
+    from tests.test_archive_search_runtime_publication import (
+        _seed_document as seed_archive_document,
+    )
+
+    seed_archive_document(storage)
+    runtime, kernel, actor, _model, web, contexts = await archive_runtime(
+        settings,
+        storage,
+        monkeypatch,
+    )
+
+    async def forbidden_tts(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        raise AssertionError("archive-backed answer entered TTS before phase-2 publication")
+
+    monkeypatch.setattr(runtime, "_voice_of_the_final_answer", forbidden_tts)
+    try:
+        response = await archive_chat(runtime, actor)
+    finally:
+        await web.close()
+
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert contexts[0].archive_search_ledger_frozen is True
+    assert response["archive_search_authority_changed_before_publication"] is False
+    assert response["voice"] is None

@@ -495,9 +495,7 @@ class ArchiveMessageLaneProjection(_ProcessPrivate):
         reason_by_incomplete: dict[IndexIncompleteReason | None, CoverageState] = {
             IndexIncompleteReason.BACKFILL_PENDING: CoverageState.BACKFILL_PENDING,
             IndexIncompleteReason.SOURCE_CHANGED: CoverageState.STALE,
-            IndexIncompleteReason.EMBEDDING_INCOMPATIBLE: (
-                CoverageState.EMBEDDING_INCOMPATIBLE
-            ),
+            IndexIncompleteReason.EMBEDDING_INCOMPATIBLE: (CoverageState.EMBEDDING_INCOMPATIBLE),
         }
         reason = reason_by_incomplete.get(
             self.index_state.incomplete_reason,
@@ -569,24 +567,18 @@ def project_archive_message_page(
             or page.context_after != request.context.after
         ):
             raise ArchiveMessageAdapterError("archive message selection controls drifted")
-        if request.conversation_scope is ConversationScope.CURRENT:
-            current = _actor(current_conversation_id)
-            boundary = _actor(boundary_user_message_id)
-            if (
-                page.conversation_id != current
-                or page.boundary_user_message_id != boundary
-                or page.boundary_identity_sha256 is None
-                or any(hit.message.conversation_id != current for hit in page.hits)
-            ):
-                raise ArchiveMessageAdapterError("archive current conversation drifted")
-        elif (
-            current_conversation_id is not None
-            or boundary_user_message_id is not None
-            or page.conversation_id is not None
-            or page.boundary_user_message_id is not None
-            or page.boundary_identity_sha256 is not None
+        current = _actor(current_conversation_id)
+        boundary = _actor(boundary_user_message_id)
+        if (
+            page.conversation_id != current
+            or page.boundary_user_message_id != boundary
+            or page.boundary_identity_sha256 is None
+            or (
+                request.conversation_scope is ConversationScope.CURRENT
+                and any(hit.message.conversation_id != current for hit in page.hits)
+            )
         ):
-            raise ArchiveMessageAdapterError("archive all-conversation scope is invalid")
+            raise ArchiveMessageAdapterError("archive accepted-turn boundary drifted")
         if any(
             hit.message.principal_id != principal
             or any(

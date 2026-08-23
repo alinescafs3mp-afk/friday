@@ -76,9 +76,7 @@ _RAW_ID = re.compile(r"raw_[0-9a-f]{16}\Z")
 _KO_ID = re.compile(r"ko_[A-Za-z0-9_-]{8,120}\Z")
 _INBOX_ID = re.compile(r"inbox_[0-9a-f]{16}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
-_SUPPORTED_CORPORA = frozenset(
-    {ArchiveSearchCorpus.DOCUMENTS, ArchiveSearchCorpus.KNOWLEDGE}
-)
+_SUPPORTED_CORPORA = frozenset({ArchiveSearchCorpus.DOCUMENTS, ArchiveSearchCorpus.KNOWLEDGE})
 _SUPPORTED_LANES = frozenset({SearchLane.CATALOG, SearchLane.LEXICAL})
 _SEARCH_CORPUS = {
     ArchiveSearchCorpus.DOCUMENTS: SearchCorpus.RAW_DOCUMENTS,
@@ -143,10 +141,7 @@ def _snapshot(value: object) -> str:
 
 
 def _limit(value: object) -> int:
-    if (
-        type(value) is not int
-        or not 1 <= value <= MAX_ARCHIVE_DOCUMENT_RESULTS
-    ):
+    if type(value) is not int or not 1 <= value <= MAX_ARCHIVE_DOCUMENT_RESULTS:
         raise _fail("archive document page limit is invalid")
     return value
 
@@ -185,6 +180,32 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
         )
     except sqlite3.Error:
         raise _fail("archive document storage is unavailable") from None
+
+
+def _ensure_archive_search_fold(conn: sqlite3.Connection) -> None:
+    """Install the deterministic fold once without re-registering mid-snapshot."""
+
+    probe = "Ёж-Archive-Probe"
+    expected = _archive_search_fold(probe)
+    try:
+        cursor = conn.execute("SELECT friday_archive_fold(?)", (probe,))
+        row = cursor.fetchone()
+        cursor.close()
+    except sqlite3.Error:
+        try:
+            conn.create_function(
+                "friday_archive_fold",
+                1,
+                _archive_search_fold,
+                deterministic=True,
+            )
+            cursor = conn.execute("SELECT friday_archive_fold(?)", (probe,))
+            row = cursor.fetchone()
+            cursor.close()
+        except sqlite3.Error:
+            raise _fail("archive document lexical fold is unavailable") from None
+    if row is None or len(row) != 1 or type(row[0]) is not str or row[0] != expected:
+        raise _fail("archive document lexical fold is unavailable")
 
 
 def _authority_is_active(
@@ -303,27 +324,17 @@ def _scope_suffix(
     if states:
         placeholders = ",".join("?" for _item in states)
         condition = f"{lifecycle_expression} IN ({placeholders})"
-        clauses.append(
-            f"({lifecycle_expression} IS NULL OR {condition})"
-            if include_unknown
-            else condition
-        )
+        clauses.append(f"({lifecycle_expression} IS NULL OR {condition})" if include_unknown else condition)
         parameters.extend(states)
     if request.review_scope is ReviewScope.CONFIRMED_ONLY:
         condition = f"{review_expression}='confirmed'"
-        clauses.append(
-            f"({review_expression} IS NULL OR {condition})"
-            if include_unknown
-            else condition
-        )
+        clauses.append(f"({review_expression} IS NULL OR {condition})" if include_unknown else condition)
     for constraint in _temporal_constraints(request, corpus):
         expression = temporal_expressions.get(constraint.role)
         if expression is None:
             raise _fail("archive document temporal role is unavailable")
         ready = _canonical_utc_sql(expression)
-        clauses.append(
-            f"(NOT {ready} OR ({expression}>=? AND {expression}<?))"
-        )
+        clauses.append(f"(NOT {ready} OR ({expression}>=? AND {expression}<?))")
         parameters.extend((constraint.start, constraint.end))
     return ("" if not clauses else " AND " + " AND ".join(clauses), tuple(parameters))
 
@@ -333,19 +344,14 @@ def _temporal_ready_expression(
     corpus: ArchiveSearchCorpus,
     temporal_expressions: dict[TemporalRole, str],
 ) -> str:
-    expressions = tuple(
-        temporal_expressions[item.role]
-        for item in _temporal_constraints(request, corpus)
-    )
+    expressions = tuple(temporal_expressions[item.role] for item in _temporal_constraints(request, corpus))
     if not expressions:
         return "1"
     return " AND ".join(_canonical_utc_sql(item) for item in expressions)
 
 
 def _actor_handle(tenant_id: str, owner_id: str) -> bytes:
-    material = json.dumps(
-        [tenant_id, owner_id], ensure_ascii=True, separators=(",", ":")
-    ).encode("ascii")
+    material = json.dumps([tenant_id, owner_id], ensure_ascii=True, separators=(",", ":")).encode("ascii")
     return hmac.digest(_PAGE_KEY, b"friday/archive-document-actor/v1\0" + material, "sha256")
 
 
@@ -364,16 +370,14 @@ def _request_handle(request: ArchiveSearchRequest) -> bytes:
 def _snapshot_handle(snapshot_discriminator: str) -> bytes:
     return hmac.digest(
         _PAGE_KEY,
-        b"friday/archive-document-snapshot/v1\0"
-        + snapshot_discriminator.encode("utf-8", errors="strict"),
+        b"friday/archive-document-snapshot/v1\0" + snapshot_discriminator.encode("utf-8", errors="strict"),
         "sha256",
     )
 
 
 def _page_seal_material(page: ArchiveDocumentLanePage) -> bytes:
     candidate_digests = [
-        hashlib.sha256(item.to_private_json().encode("ascii")).hexdigest()
-        for item in page.candidates
+        hashlib.sha256(item.to_private_json().encode("ascii")).hexdigest() for item in page.candidates
     ]
     payload = {
         "actor": page._actor_handle.hex(),
@@ -394,9 +398,7 @@ def _page_seal_material(page: ArchiveDocumentLanePage) -> bytes:
         "snapshot_handle": page._snapshot_handle.hex(),
         "total": page.total,
     }
-    return json.dumps(
-        payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")
-    ).encode("ascii")
+    return json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
 
 
 @dataclass(frozen=True, slots=True, repr=False, init=False)
@@ -451,10 +453,7 @@ class ArchiveDocumentLanePage:
             or type(self.authority_scope_complete) is not bool
             or type(self.authority_rechecked) is not bool
             or type(self.snapshot_current) is not bool
-            or (
-                self.derivative_current is not None
-                and type(self.derivative_current) is not bool
-            )
+            or (self.derivative_current is not None and type(self.derivative_current) is not bool)
         ):
             raise _fail("archive document page is inconsistent")
         if self.lane is SearchLane.CATALOG and self.derivative_current is not None:
@@ -462,16 +461,11 @@ class ArchiveDocumentLanePage:
         if self.lane is SearchLane.LEXICAL and type(self.derivative_current) is not bool:
             raise _fail("archive lexical page requires derivative health")
         if not self.available and (
-            self.total is not None
-            or self.examined
-            or self.matched
-            or self.returned
-            or self.has_more
+            self.total is not None or self.examined or self.matched or self.returned or self.has_more
         ):
             raise _fail("unavailable archive document page claims search work")
         if self.available and (
-            not self.authority_rechecked
-            or self.authority_scope_complete is (self.total is None)
+            not self.authority_rechecked or self.authority_scope_complete is (self.total is None)
         ):
             raise _fail("available archive document page lacks authority evidence")
         if (
@@ -532,12 +526,9 @@ class ArchiveDocumentLanePage:
                 type(request) is not ArchiveSearchRequest
                 or type(execution_binding) is not SearchExecutionBinding
                 or not execution_binding.is_live_private_request_binding
-                or execution_binding.authority_scope
-                is not AuthorityScope.TENANT_PRINCIPAL
+                or execution_binding.authority_scope is not AuthorityScope.TENANT_PRINCIPAL
                 or target not in execution_binding.requested_targets
-                or not execution_binding.attests_private_request(
-                    request.to_identity_json()
-                )
+                or not execution_binding.attests_private_request(request.to_identity_json())
                 or not execution_binding.attests_authority(
                     authority_scope=AuthorityScope.TENANT_PRINCIPAL,
                     tenant_id=tenant,
@@ -729,8 +720,7 @@ def _catalog_metadata_valid(alias: str = "r") -> str:
     keys = ("filename", "mime_type", "mime", "content_type", "media_kind")
     quoted = ",".join(f"'{key}'" for key in keys)
     shape = " AND ".join(
-        f"(json_type({metadata},'$.{key}') IS NULL "
-        f"OR json_type({metadata},'$.{key}') IN ('text','null'))"
+        f"(json_type({metadata},'$.{key}') IS NULL OR json_type({metadata},'$.{key}') IN ('text','null'))"
         for key in keys
     )
     return f"""(
@@ -807,12 +797,10 @@ def _raw_owner_attribution_valid(
 ) -> str:
     metadata = _safe_raw_metadata(alias)
     fields = tuple(
-        f"json_extract({metadata},'$.{name}')"
-        for name in ("uploaded_by", "requested_by", "generated_for")
+        f"json_extract({metadata},'$.{name}')" for name in ("uploaded_by", "requested_by", "generated_for")
     )
     types = tuple(
-        f"json_type({metadata},'$.{name}')"
-        for name in ("uploaded_by", "requested_by", "generated_for")
+        f"json_type({metadata},'$.{name}')" for name in ("uploaded_by", "requested_by", "generated_for")
     )
     anchor = f"COALESCE({fields[0]},{fields[1]},{fields[2]})"
     duplicate_guard = f"""NOT EXISTS (
@@ -823,9 +811,7 @@ def _raw_owner_attribution_valid(
     )"""
     # json_type(path) returns SQL NULL for an absent field, while the closed
     # owner shape treats absent and explicit JSON null identically.
-    shape = " AND ".join(
-        f"({item} IS NULL OR {item} IN ('text','null'))" for item in types
-    )
+    shape = " AND ".join(f"({item} IS NULL OR {item} IN ('text','null'))" for item in types)
     agrees = " AND ".join(
         f"({kind} IS NULL OR {kind}='null' OR ({kind}='text' AND {value}={anchor}))"
         for kind, value in zip(types, fields, strict=True)
@@ -834,13 +820,9 @@ def _raw_owner_attribution_valid(
         attribution = f"{types[0]}='text' AND {fields[0]}={anchor}"
     else:
         attribution = (
-            f"({anchor} IS NOT NULL OR "
-            f"({alias}.user_id=principal_authority.owner_id AND {anchor} IS NULL))"
+            f"({anchor} IS NOT NULL OR ({alias}.user_id=principal_authority.owner_id AND {anchor} IS NULL))"
         )
-    return (
-        f"({_raw_metadata_shape(alias)} AND {duplicate_guard} "
-        f"AND {shape} AND {agrees} AND {attribution})"
-    )
+    return f"({_raw_metadata_shape(alias)} AND {duplicate_guard} AND {shape} AND {agrees} AND {attribution})"
 
 
 def _raw_attribution_valid(
@@ -848,10 +830,7 @@ def _raw_attribution_valid(
     *,
     alias: str = "r",
 ) -> str:
-    return (
-        f"({_raw_owner_attribution_valid(corpus, alias=alias)} "
-        f"AND {_catalog_metadata_valid(alias)})"
-    )
+    return f"({_raw_owner_attribution_valid(corpus, alias=alias)} AND {_catalog_metadata_valid(alias)})"
 
 
 def _common_raw_authority(
@@ -867,11 +846,7 @@ def _common_raw_authority(
         else ""
     )
     tenant_scope = "AND r.content_type='file'" if corpus is ArchiveSearchCorpus.DOCUMENTS else ""
-    principal_scope = (
-        f"AND {_not_audio_document('r')}"
-        if corpus is ArchiveSearchCorpus.DOCUMENTS
-        else ""
-    )
+    principal_scope = f"AND {_not_audio_document('r')}" if corpus is ArchiveSearchCorpus.DOCUMENTS else ""
     raw_backfill = (
         f"(NOT {_raw_owner_attribution_valid(corpus)} OR "
         f"({_principal_raw_authority(corpus)} AND NOT {_raw_attribution_valid(corpus)}))"
@@ -1139,11 +1114,7 @@ def _like_escape(value: str) -> str:
 
 
 def _catalog_needles(request: ArchiveSearchRequest) -> str:
-    values = tuple(
-        dict.fromkeys(
-            (request.query, *request.filename_hints, *request.title_hints)
-        )
-    )
+    values = tuple(dict.fromkeys((request.query, *request.filename_hints, *request.title_hints)))
     return json.dumps(
         [{"exact": item, "like": _like_escape(item)} for item in values],
         ensure_ascii=False,
@@ -1227,9 +1198,7 @@ def _lexical_sql(
         # body scan below remains authoritative; report derivative coverage as
         # pending until a lifecycle-filtered archive derivative exists.
         derivative_expression = "0"
-        folded_fields = (
-            "friday_archive_fold(s.passage_body)",
-        )
+        folded_fields = ("friday_archive_fold(s.passage_body)",)
         score = """CASE WHEN instr(
             friday_archive_fold(s.passage_body),
             friday_archive_fold(?)
@@ -1260,13 +1229,13 @@ def _lexical_sql(
         if corpus is ArchiveSearchCorpus.DOCUMENTS
         else (request.query, request.query, request.query)
     )
-    direct_match = "EXISTS (SELECT 1 FROM lexical_needles n WHERE " + " OR ".join(
-        f"instr({field}, friday_archive_fold(n.value))>0"
-        for field in folded_fields
-    ) + ")"
+    direct_match = (
+        "EXISTS (SELECT 1 FROM lexical_needles n WHERE "
+        + " OR ".join(f"instr({field}, friday_archive_fold(n.value))>0" for field in folded_fields)
+        + ")"
+    )
     source_choice_order = (
-        "CASE m.knowledge_lifecycle WHEN 'active' THEN 0 "
-        "WHEN 'archived' THEN 1 ELSE 2 END, "
+        "CASE m.knowledge_lifecycle WHEN 'active' THEN 0 WHEN 'archived' THEN 1 ELSE 2 END, "
         if corpus is ArchiveSearchCorpus.KNOWLEDGE
         else ""
     )
@@ -1321,14 +1290,14 @@ def _lexical_sql(
         {_page_select()}"""
     terms = _fts_terms(request.query)
     match_query = " OR ".join(
-        f'"{term.replace(chr(34), chr(34) * 2)}"*' if not term.endswith("*") else f'"{term[:-1].replace(chr(34), chr(34) * 2)}"*'
+        f'"{term.replace(chr(34), chr(34) * 2)}"*'
+        if not term.endswith("*")
+        else f'"{term[:-1].replace(chr(34), chr(34) * 2)}"*'
         for term in terms
     )
     direct_terms = tuple(
         dict.fromkeys(
-            term.rstrip("*").strip('"').strip()
-            for term in terms
-            if term.rstrip("*").strip('"').strip()
+            term.rstrip("*").strip('"').strip() for term in terms if term.rstrip("*").strip('"').strip()
         )
     )
     parameters = (
@@ -1378,8 +1347,7 @@ def _catalog_sql(
                           AND {folded_alias} LIKE '%'||{folded_like}||'%' ESCAPE '\\')
     )"""
     source_choice_order = (
-        "CASE m.knowledge_lifecycle WHEN 'active' THEN 0 "
-        "WHEN 'archived' THEN 1 ELSE 2 END, "
+        "CASE m.knowledge_lifecycle WHEN 'active' THEN 0 WHEN 'archived' THEN 1 ELSE 2 END, "
         if corpus is ArchiveSearchCorpus.KNOWLEDGE
         else ""
     )
@@ -1540,11 +1508,7 @@ def _excerpt(body: object, query: str) -> tuple[str, int, int] | None:
     ):
         text = body[match_start:match_end]
         start, end = match_start, match_end
-    if (
-        not text
-        or text != text.strip()
-        or any(unicodedata.category(char).startswith("C") for char in text)
-    ):
+    if not text or text != text.strip() or any(unicodedata.category(char).startswith("C") for char in text):
         return None
     return text, start, end
 
@@ -1652,9 +1616,7 @@ def _resolved_source(
         revisions=revisions,
         revalidation_targets=targets,
     )
-    selected_revision = (
-        knowledge_revision if corpus is ArchiveSearchCorpus.KNOWLEDGE else raw_revision
-    )
+    selected_revision = knowledge_revision if corpus is ArchiveSearchCorpus.KNOWLEDGE else raw_revision
     assert selected_revision is not None
     return resolved, selected_revision, raw_revision, knowledge_revision
 
@@ -1729,11 +1691,7 @@ def _candidate(
         raw_lane_rank = row["lane_rank"]
     except KeyError:
         raise _fail("archive document candidate state is invalid") from None
-    if (
-        type(raw_review) is not str
-        or type(raw_lifecycle) is not str
-        or type(raw_lane_rank) is not int
-    ):
+    if type(raw_review) is not str or type(raw_lifecycle) is not str or type(raw_lane_rank) is not int:
         raise _fail("archive document candidate state is invalid")
     try:
         review_state = ArchiveReviewState(raw_review)
@@ -1813,15 +1771,7 @@ def search_archive_document_lane(
         raise _fail("archive document connection is invalid")
     if not conn.in_transaction:
         raise _fail("archive document search requires a caller-owned snapshot")
-    try:
-        conn.create_function(
-            "friday_archive_fold",
-            1,
-            _archive_search_fold,
-            deterministic=True,
-        )
-    except sqlite3.Error:
-        raise _fail("archive document lexical fold is unavailable") from None
+    _ensure_archive_search_fold(conn)
     if type(request) is not ArchiveSearchRequest:
         raise _fail("archive document request is invalid")
     if (
@@ -1897,9 +1847,7 @@ def search_archive_document_lane(
                 authority_rechecked=True,
             )
         derivative_available = (
-            False
-            if corpus is ArchiveSearchCorpus.DOCUMENTS
-            else _table_exists(conn, "knowledge_fts")
+            False if corpus is ArchiveSearchCorpus.DOCUMENTS else _table_exists(conn, "knowledge_fts")
         )
         sql, lane_parameters = _lexical_sql(
             corpus,
@@ -1968,9 +1916,7 @@ def search_archive_document_lane(
         has_more=len(hits) > page_limit,
         available=True,
         derivative_current=(
-            derivative_available and derivative_mismatches == 0
-            if lane is SearchLane.LEXICAL
-            else None
+            derivative_available and derivative_mismatches == 0 if lane is SearchLane.LEXICAL else None
         ),
         authority_scope_complete=scope_complete,
         authority_rechecked=True,

@@ -102,6 +102,17 @@ def _ledger(*, principal: str = PRINCIPAL):
     )
 
 
+def _message_boundary(storage: Any) -> tuple[str, str]:
+    conversation = storage.create_conversation(PRINCIPAL, "Archive request boundary")
+    message = storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "current archive request",
+    )
+    return conversation["id"], message["id"]
+
+
 def _payload(prepared: Any) -> dict[str, Any]:
     return json.loads(prepared.authorized_batch.model_visible_canonical_bytes)
 
@@ -279,6 +290,12 @@ def test_message_history_uses_authorized_context_and_leaves_other_lanes_unavaila
         "assistant",
         "Adjacent context",
     )
+    boundary = storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "current archive request",
+    )
     request = ArchiveSearchRequest.create(
         query="Needle",
         corpora=(ArchiveSearchCorpus.MESSAGES,),
@@ -295,12 +312,155 @@ def test_message_history_uses_authorized_context_and_leaves_other_lanes_unavaila
             snapshot_discriminator=SNAPSHOT,
             run_discriminator="messages-live",
             turn_ledger=_ledger(),
+            current_conversation_id=conversation["id"],
+            boundary_user_message_id=boundary["id"],
         )
     payload = _payload(prepared)
     assert len(payload["candidates"]) == 1
     assert _coverage(payload, SearchLane.MESSAGE_HISTORY)["states"] == ["complete"]
     assert _coverage(payload, SearchLane.LEXICAL)["states"] == ["unavailable"]
     assert _coverage(payload, SearchLane.DENSE)["states"] == ["unavailable"]
+
+
+def test_message_continuation_is_bound_to_the_original_accepted_turn(
+    storage: Any,
+) -> None:
+    authorization = _seed_authority(storage)
+    for index in range(2):
+        conversation = storage.create_conversation(PRINCIPAL, f"Archive source {index}")
+        storage.store_message(
+            conversation["id"],
+            PRINCIPAL,
+            "user",
+            f"boundary-continuation-needle source {index}",
+        )
+    boundary_conversation = storage.create_conversation(PRINCIPAL, "Current turn")
+    boundary = storage.store_message(
+        boundary_conversation["id"],
+        PRINCIPAL,
+        "user",
+        "current archive request",
+    )
+    request = ArchiveSearchRequest.create(
+        query="boundary-continuation-needle",
+        corpora=(ArchiveSearchCorpus.MESSAGES,),
+        limit=1,
+    )
+    ledger = _ledger()
+    with storage.transaction() as conn:
+        first = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="message-boundary-first",
+            turn_ledger=ledger,
+            current_conversation_id=boundary_conversation["id"],
+            boundary_user_message_id=boundary["id"],
+        )
+    token = _payload(first)["continuation"]
+    assert isinstance(token, str)
+    resumed = ArchiveSearchRequest.create(
+        query="boundary-continuation-needle",
+        corpora=(ArchiveSearchCorpus.MESSAGES,),
+        limit=1,
+        continuation=token,
+    )
+    later_boundary = storage.store_message(
+        boundary_conversation["id"],
+        PRINCIPAL,
+        "user",
+        "later archive request",
+    )
+    with storage.transaction() as conn, pytest.raises(ArchiveSearchServiceError):
+        prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=resumed,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="message-boundary-drift",
+            turn_ledger=ledger,
+            current_conversation_id=boundary_conversation["id"],
+            boundary_user_message_id=later_boundary["id"],
+        )
+
+
+@pytest.mark.parametrize("mutation", ("update", "delete"))
+def test_message_publication_refresh_rejects_pre_boundary_drift(
+    storage: Any,
+    mutation: str,
+) -> None:
+    authorization = _seed_authority(storage)
+    conversation = storage.create_conversation(PRINCIPAL, "Mutable source")
+    source = storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "refresh-boundary-needle private body",
+    )
+    boundary = storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "current archive request",
+    )
+    request = ArchiveSearchRequest.create(
+        query="refresh-boundary-needle",
+        corpora=(ArchiveSearchCorpus.MESSAGES,),
+    )
+    ledger = _ledger()
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator=f"message-refresh-{mutation}",
+            turn_ledger=ledger,
+            current_conversation_id=conversation["id"],
+            boundary_user_message_id=boundary["id"],
+        )
+    body = prepared.authorized_batch.model_visible_canonical_bytes
+    ledger.admit_model_tool_bytes(prepared.run_binding, prepared.authorized_batch, body)
+    ledger.freeze_for_publication()
+    with storage.transaction() as conn:
+        if mutation == "update":
+            conn.execute("DROP TRIGGER messages_are_never_rewritten")
+            conn.execute(
+                "UPDATE messages SET content='changed after model admission' WHERE id=?",
+                (source["id"],),
+            )
+        else:
+            conn.execute("DROP TRIGGER messages_are_never_deleted")
+            conn.execute("DELETE FROM messages WHERE id=?", (source["id"],))
+    with storage.transaction() as conn:
+        context = refresh_archive_search_reauthorization_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            prepared_searches=(prepared,),
+        )
+    with pytest.raises(ArchiveSearchPublicationDenied):
+        attest_archive_search_before_publication(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            ledger=ledger,
+            answer="Stale answer",
+            candidate_reauthorizer=reauthorize_archive_search_candidate,
+            coverage_reauthorizer=reauthorize_archive_search_coverage,
+            authority_context=context,
+        )
 
 
 def test_obsidian_lanes_verify_exact_bytes_and_merge_one_stable_source(storage: Any) -> None:
@@ -402,6 +562,7 @@ def test_initial_explicit_corpus_denial_is_honest_and_reads_no_lane(
     monkeypatch.setattr(service_module, "_collect_message_target", forbidden)
     monkeypatch.setattr(service_module, "_collect_obsidian_target", forbidden)
     request = ArchiveSearchRequest.create(query="private denied", corpora=(corpus,))
+    boundary = _message_boundary(storage) if corpus is ArchiveSearchCorpus.MESSAGES else (None, None)
     with storage.transaction() as conn:
         prepared = prepare_archive_search_in_transaction(
             conn,
@@ -413,14 +574,15 @@ def test_initial_explicit_corpus_denial_is_honest_and_reads_no_lane(
             snapshot_discriminator=SNAPSHOT,
             run_discriminator=f"initial-deny-{corpus.value}",
             turn_ledger=_ledger(),
+            current_conversation_id=boundary[0],
+            boundary_user_message_id=boundary[1],
         )
     payload = _payload(prepared)
     assert lane_calls == []
     assert payload["candidates"] == []
     assert payload["absence"] == "not_established"
     assert all(
-        set(item["states"])
-        == {CoverageState.PARTIAL.value, CoverageState.PERMISSION_FILTERED.value}
+        set(item["states"]) == {CoverageState.PARTIAL.value, CoverageState.PERMISSION_FILTERED.value}
         and item["authority_rechecked"] is True
         and item["snapshot_current"] is True
         for item in payload["coverage"]
@@ -463,8 +625,7 @@ def test_external_archive_corpus_is_unavailable_and_never_reaches_a_lane(
     assert payload["candidates"] == []
     assert all(item["states"] == [CoverageState.UNAVAILABLE.value] for item in payload["coverage"])
     assert all(
-        item.capability is None and item.allowed is False
-        for item in prepared._recipe.target_authority
+        item.capability is None and item.allowed is False for item in prepared._recipe.target_authority
     )
 
 
@@ -548,6 +709,7 @@ def test_between_phase_explicit_deny_blocks_publication(
     authorization = _seed_authority(storage)
     request = ArchiveSearchRequest.create(query="private late deny", corpora=(corpus,))
     ledger = _ledger()
+    boundary = _message_boundary(storage) if corpus is ArchiveSearchCorpus.MESSAGES else (None, None)
     with storage.transaction() as conn:
         prepared = prepare_archive_search_in_transaction(
             conn,
@@ -559,6 +721,8 @@ def test_between_phase_explicit_deny_blocks_publication(
             snapshot_discriminator=SNAPSHOT,
             run_discriminator=f"late-deny-{corpus.value}",
             turn_ledger=ledger,
+            current_conversation_id=boundary[0],
+            boundary_user_message_id=boundary[1],
         )
     ledger.admit_model_tool_bytes(
         prepared.run_binding,
@@ -697,9 +861,9 @@ def _synthetic_federation(_conn: sqlite3.Connection, **values: Any):
     binding = run.execution_binding
     targets = canonical_archive_search_targets(recipe.request)
     candidates = tuple(_synthetic_candidate(index, index) for index in range(1, 4))
-    by_target: dict[
-        tuple[SearchCorpus, SearchLane], tuple[ArchiveSearchCandidate, ...]
-    ] = {target: () for target in targets}
+    by_target: dict[tuple[SearchCorpus, SearchLane], tuple[ArchiveSearchCandidate, ...]] = {
+        target: () for target in targets
+    }
     by_target[(SearchCorpus.RAW_DOCUMENTS, SearchLane.CATALOG)] = candidates
     coverage: list[SearchCoverage] = []
     for target in targets:
@@ -794,11 +958,7 @@ def test_continuation_cannot_widen_a_previously_denied_corpus(
             corpus=target[0],
             lane=target[1],
             execution_binding=binding,
-            states=(
-                (CoverageState.COMPLETE,)
-                if candidates
-                else (CoverageState.UNAVAILABLE,)
-            ),
+            states=((CoverageState.COMPLETE,) if candidates else (CoverageState.UNAVAILABLE,)),
             eligible_authorized=3 if candidates else None,
             examined=3 if candidates else 0,
             matched_at_least=3 if candidates else 0,
@@ -876,8 +1036,7 @@ def test_continuation_cannot_widen_a_previously_denied_corpus(
         if item.corpus is SearchCorpus.OBSIDIAN
     )
     assert all(
-        item["corpus"] == ArchiveSearchCorpus.DOCUMENTS.value
-        for item in _payload(second)["candidates"]
+        item["corpus"] == ArchiveSearchCorpus.DOCUMENTS.value for item in _payload(second)["candidates"]
     )
 
 
@@ -935,6 +1094,8 @@ def test_deterministic_continuation_reauthorizes_against_fresh_full_universe(
     assert len(second_payload["candidates"]) == 1
     assert second_payload["continuation"] is not None
     assert first_payload["candidates"][0] != second_payload["candidates"][0]
+    assert first_payload["candidates"][0]["label"] == "A1"
+    assert second_payload["candidates"][0]["label"] == "A21"
     for prepared in (first, second):
         ledger.admit_model_tool_bytes(
             prepared.run_binding,

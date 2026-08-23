@@ -14,7 +14,12 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from friday.retrieval.archive_search_obsidian_reader import (
+        BoundArchiveObsidianExactFileReader,
+    )
 
 from .contracts import (
     NoteDocument,
@@ -1993,6 +1998,26 @@ class ObsidianRuntime:
             owner_id=owner_id,
             sync=adapter,
         )
+
+    async def bind_archive_exact_file_reader(
+        self,
+        owner_id: str,
+    ) -> BoundArchiveObsidianExactFileReader | None:
+        """Bind archive reads to the owner's current canonical vault service."""
+
+        from friday.retrieval.archive_search_obsidian_reader import (
+            bind_archive_obsidian_exact_file_reader,
+        )
+
+        try:
+            service = await self._operation_service(owner_id, synchronize=False)
+            return bind_archive_obsidian_exact_file_reader(
+                service,
+                owner_id=owner_id,
+                vault_id=service.vault_id,
+            )
+        except Exception:  # noqa: BLE001 - unavailable/mismatched vault must stay body-free
+            return None
 
     async def list_notes(self, owner_id: str) -> list[dict[str, Any]]:
         service = await self._operation_service(owner_id, synchronize=False)

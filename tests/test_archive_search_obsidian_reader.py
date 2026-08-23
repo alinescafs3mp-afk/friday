@@ -66,6 +66,8 @@ def test_bound_reader_returns_only_exact_canonical_utf8_bytes(
     )
 
     assert reader(vault_id, written.path, written.revision) == PRIVATE_BODY.encode("utf-8")
+    assert reader.attests_owner(OWNER) is True
+    assert reader.attests_owner("foreign-owner") is False
     assert repr(reader) == "<BoundArchiveObsidianExactFileReader sealed private>"
 
 

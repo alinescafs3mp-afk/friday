@@ -34,6 +34,7 @@ from friday.account_gate import AccountActivityGate, AccountGateClosed
 from friday.admin_api import router as admin_router
 from friday.agent_runtime import (
     AgentRuntime,
+    _archive_search_private_turn_requested,
     _bind_storage_owned_exact_filename_direct_read,
     _historical_direct_read_attachment,
     _is_file_provenance_stub,
@@ -1860,6 +1861,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                         max_profiles=settings.obsidian_max_profiles,
                         supervisor_factory=make_obsidian_supervisor,
                     ),
+                )
+                kernel.bind_archive_obsidian_exact_file_reader_factory(
+                    obsidian_runtime.bind_archive_exact_file_reader
                 )
 
             # Organs (JOP): register their capabilities, mount their routers, and
@@ -4187,6 +4191,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     user_id=actor.own_id,
                     limit=4,
                 )
+            archive_search_current_text = _archive_search_private_turn_requested(message)
             turn_policy: TurnPolicyDecision = decide_turn_policy(
                 message,
                 context=_turn_policy_context_from_history(policy_history),
@@ -4198,6 +4203,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 ),
                 integrations=_live_integration_projection(state.settings, state.mcp),
             )
+            if archive_search_current_text:
+                # Private-store current-text authority wins before any
+                # history-aware weather/meta policy can emit a public response,
+                # drop carriers or authorize a sibling web path.
+                turn_policy = TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH)
             if turn_policy.intent is TurnIntent.LOCAL_DIAGNOSTICS:
                 try:
                     diagnostic_report = await run_blocking(
@@ -4245,6 +4255,18 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             if policy_is_web
                             else "code-owned meta/diagnostic turn — команда, а не материал"
                         ),
+                    }
+                elif archive_search_current_text:
+                    # A private-store read command is transient regardless of
+                    # whether search.use is currently available.  Persisting
+                    # the command through Raw/Inbox/KO would both self-match
+                    # the search and turn a denied read into durable knowledge.
+                    ingestion_result = {
+                        "promoted": False,
+                        "queued_for_review": False,
+                        "action": "transient",
+                        "category": "archive_search_request",
+                        "reason": "явная просьба прочитать личный архив — команда, а не материал",
                     }
                 elif (
                     obsidian_conversation_intent(

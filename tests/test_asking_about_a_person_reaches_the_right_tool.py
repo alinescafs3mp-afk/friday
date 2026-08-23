@@ -223,4 +223,6 @@ def test_a_person_question_wins_over_the_owners_own_timeline() -> None:
     person_at = ordinary_lane.index("_prefetch_person_activity(")
     timeline_at = ordinary_lane.index("_prefetch_the_timeline_if_asked(")
     assert person_at < timeline_at, "лента владельца снова отвечает раньше вопроса о человеке"
-    assert "and not about_a_person:" in ordinary_lane, "лента поднимается даже когда вопрос был про человека"
+    assert "and not about_a_person" in " ".join(ordinary_lane.split()), (
+        "лента поднимается даже когда вопрос был про человека"
+    )

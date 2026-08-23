@@ -206,6 +206,33 @@ class BoundArchiveObsidianExactFileReader:
     def __reduce_ex__(self, _protocol: SupportsIndex) -> NoReturn:
         raise TypeError("archive Obsidian exact reader is process-private")
 
+    def attests_owner(self, owner_id: object) -> bool:
+        """Attest this exact live composition and its process-bound owner."""
+
+        try:
+            owner = _identity(owner_id)
+            return bool(
+                type(self) is BoundArchiveObsidianExactFileReader
+                and type(self._service) is ObsidianOperationService
+                and type(self._storage) is FridayStorage
+                and type(self._notes) is ObsidianService
+                and type(self._store) is VaultStore
+                and hmac.compare_digest(owner, self._owner_id)
+                and hmac.compare_digest(
+                    self._seal,
+                    _seal(
+                        service=self._service,
+                        storage=self._storage,
+                        notes=self._notes,
+                        store=self._store,
+                        owner_id=self._owner_id,
+                        vault_id=self._vault_id,
+                    ),
+                )
+            )
+        except Exception:
+            return False
+
     def __call__(
         self,
         vault_id: str,

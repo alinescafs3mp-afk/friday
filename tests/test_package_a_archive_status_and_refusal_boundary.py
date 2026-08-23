@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from friday.agent_runtime import (
+    _ARCHIVE_SEARCH_UNAVAILABLE,
     _ARCHIVE_STATUS_FALLBACK,
     _REFUSAL_ALTERNATIVE,
     AgentContext,
@@ -187,11 +188,11 @@ async def test_k17_runtime_is_mode_gated_and_persists_exactly_what_it_returns(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "question",
+    "question,expected",
     [
-        "Что означает статус личной базы знаний?",
-        "Что в моём архиве?",
-        "Что в моем архиве?",
+        ("Что означает статус личной базы знаний?", _K17_STRIP[0]),
+        ("Что в моём архиве?", _ARCHIVE_SEARCH_UNAVAILABLE),
+        ("Что в моем архиве?", _ARCHIVE_SEARCH_UNAVAILABLE),
     ],
 )
 async def test_k17_keeps_an_archive_status_when_the_question_itself_is_about_storage(
@@ -199,6 +200,7 @@ async def test_k17_keeps_an_archive_status_when_the_question_itself_is_about_sto
     storage,
     monkeypatch,
     question: str,
+    expected: str,
 ) -> None:
     runtime = _runtime(settings, storage, monkeypatch, mode="general_conversation")
 
@@ -214,8 +216,8 @@ async def test_k17_keeps_an_archive_status_when_the_question_itself_is_about_sto
         enable_tools=False,
     )
 
-    assert reply["message"] == _K17_STRIP[0]
-    assert _stored_assistant_content(storage, reply) == _K17_STRIP[0]
+    assert reply["message"] == expected
+    assert _stored_assistant_content(storage, reply) == expected
 
 
 def test_k17_keeps_general_statements_quotes_and_non_retrieval_negatives() -> None:

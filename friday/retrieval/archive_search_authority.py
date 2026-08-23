@@ -61,7 +61,8 @@ _CONTINUATION_MAX_TOTAL_CANDIDATES = 4_096
 _CONTINUATION_MAX_ISSUANCE_KEYS = 16_384
 _TURN_LEDGER_MAX_RECORDS = 8_192
 _TURN_LEDGER_RETAIN_SECONDS = 6 * 60 * 60
-_TURN_LEDGER_REPLAY_FILTER_BYTES = 131_072
+_TURN_LEDGER_REPLAY_FILTER_BYTES = 262_144
+_TURN_LEDGER_REPLAY_FILTER_BUCKETS = 7
 
 _CORPUS_TARGET = {
     ArchiveSearchCorpus.DOCUMENTS: SearchCorpus.RAW_DOCUMENTS,
@@ -295,6 +296,7 @@ class ArchiveSearchRunBinding(_ProcessPrivate):
         "_request",
         "_request_handle",
         "_seal",
+        "_snapshot_handle",
         "_tenant_id",
         "_turn_ledger",
         "_turn_ledger_handle",
@@ -308,6 +310,7 @@ class ArchiveSearchRunBinding(_ProcessPrivate):
     _request: ArchiveSearchRequest
     _request_handle: str
     _seal: str
+    _snapshot_handle: str
     _tenant_id: str
     _turn_ledger: ArchiveModelBatchLedger
     _turn_ledger_handle: str
@@ -346,6 +349,7 @@ def _run_material(run: ArchiveSearchRunBinding) -> bytes:
             ),
             "request_handle": run._request_handle,
             "schema": _RUN_SCHEMA,
+            "snapshot_handle": run._snapshot_handle,
             "turn_ledger_handle": run._turn_ledger_handle,
         }
     )
@@ -380,6 +384,7 @@ def _run_is_valid(
             or not run._execution_binding.attests_private_request(run._request.to_identity_json())
             or _DIGEST.fullmatch(run._actor_handle) is None
             or _DIGEST.fullmatch(run._request_handle) is None
+            or _DIGEST.fullmatch(run._snapshot_handle) is None
             or _DIGEST.fullmatch(run._seal) is None
         ):
             return False
@@ -461,6 +466,13 @@ def create_archive_search_run_binding(
             ("_request", request),
             ("_request_handle", _request_handle(request)),
             ("_seal", "0" * 64),
+            (
+                "_snapshot_handle",
+                _mac(
+                    b"friday/archive-search-snapshot-discriminator/v1",
+                    snapshot_discriminator.encode("utf-8"),
+                ),
+            ),
             ("_tenant_id", tenant),
             ("_turn_ledger", turn_ledger),
             ("_turn_ledger_handle", turn_ledger._identity_handle),
@@ -815,6 +827,7 @@ class AuthorizedArchiveBatch(_ProcessPrivate):
     __slots__ = (
         "_candidate_handles",
         "_coverage_handles",
+        "_model_page_index",
         "_model_visible_bytes",
         "_nonce",
         "_page",
@@ -824,6 +837,7 @@ class AuthorizedArchiveBatch(_ProcessPrivate):
 
     _candidate_handles: tuple[str, ...]
     _coverage_handles: tuple[str, ...]
+    _model_page_index: int
     _model_visible_bytes: bytes
     _nonce: bytes
     _page: ArchiveSearchPage
@@ -863,6 +877,7 @@ def _batch_material(batch: AuthorizedArchiveBatch) -> bytes:
         {
             "candidate_handles": list(batch._candidate_handles),
             "coverage_handles": list(batch._coverage_handles),
+            "model_page_index": batch._model_page_index,
             "model_visible_sha256": _sha256(batch._model_visible_bytes),
             "nonce": batch._nonce.hex(),
             "run_handle": batch._run_handle,
@@ -871,9 +886,71 @@ def _batch_material(batch: AuthorizedArchiveBatch) -> bytes:
     )
 
 
+def _run_model_page_index_unlocked(run: ArchiveSearchRunBinding) -> int:
+    """Return the append-only run ordinal already sealed by the turn ledger."""
+
+    ledger = run._turn_ledger
+    positions = tuple(index for index, current in enumerate(ledger._runs, 1) if current is run)
+    if len(positions) != 1 or not 1 <= positions[0] <= ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES:
+        raise ArchiveSearchAuthorityError("archive model page index is unavailable")
+    return positions[0]
+
+
+def _run_model_page_index(run: ArchiveSearchRunBinding) -> int:
+    ledger = run._turn_ledger
+    with ledger._lock:
+        if not _ledger_is_valid(ledger):
+            raise ArchiveSearchAuthorityError("archive model page index is unavailable")
+        return _run_model_page_index_unlocked(run)
+
+
+def _project_model_visible_page(
+    run: ArchiveSearchRunBinding,
+    page: ArchiveSearchPage,
+    *,
+    model_page_index: int,
+) -> bytes:
+    """Project one page with turn-unique labels and no private ordinal carrier."""
+
+    if type(model_page_index) is not int or not 1 <= model_page_index <= ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES:
+        raise ArchiveSearchAuthorityError("archive model page index is invalid")
+    try:
+        payload = json.loads(page.to_public_json(run._privacy_key))
+        if type(payload) is not dict:
+            raise TypeError
+        candidates = payload["candidates"]
+        if type(candidates) is not list:
+            raise TypeError
+        label_offset = (model_page_index - 1) * ARCHIVE_AUTHORITY_MAX_CANDIDATES
+        for local_index, raw_candidate in enumerate(candidates, 1):
+            if type(raw_candidate) is not dict:
+                raise TypeError
+            candidate = cast(dict[str, object], raw_candidate)
+            passages = candidate.get("passages")
+            if candidate.get("label") != f"A{local_index}" or type(passages) is not list:
+                raise TypeError
+            public_ordinal = label_offset + local_index
+            candidate["label"] = f"A{public_ordinal}"
+            for passage_index, raw_passage in enumerate(passages, 1):
+                if type(raw_passage) is not dict:
+                    raise TypeError
+                passage = cast(dict[str, object], raw_passage)
+                if passage.get("label") != f"A{local_index}.{passage_index}":
+                    raise TypeError
+                passage["label"] = f"A{public_ordinal}.{passage_index}"
+        return _canonical_json(payload)
+    except Exception:
+        raise ArchiveSearchAuthorityError("archive public projection failed") from None
+
+
 def _new_batch(run: ArchiveSearchRunBinding, page: ArchiveSearchPage) -> AuthorizedArchiveBatch:
     try:
-        model_bytes = page.to_public_json(run._privacy_key).encode("ascii")
+        model_page_index = _run_model_page_index(run)
+        model_bytes = _project_model_visible_page(
+            run,
+            page,
+            model_page_index=model_page_index,
+        )
     except Exception:
         raise ArchiveSearchAuthorityError("archive public projection failed") from None
     if not model_bytes or len(model_bytes) > _MAX_MODEL_BYTES:
@@ -882,6 +959,7 @@ def _new_batch(run: ArchiveSearchRunBinding, page: ArchiveSearchPage) -> Authori
     for name, item in (
         ("_candidate_handles", tuple(_candidate_handle(result.candidate) for result in page.results)),
         ("_coverage_handles", tuple(_coverage_handle(coverage) for coverage in page.coverage)),
+        ("_model_page_index", model_page_index),
         ("_model_visible_bytes", model_bytes),
         ("_nonce", secrets.token_bytes(_NONCE_BYTES)),
         ("_page", page),
@@ -907,6 +985,8 @@ def _batch_is_valid(batch: object, run: ArchiveSearchRunBinding) -> bool:
             or value._page.request is not run._request
             or type(value._candidate_handles) is not tuple
             or type(value._coverage_handles) is not tuple
+            or type(value._model_page_index) is not int
+            or not 1 <= value._model_page_index <= ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES
             or type(value._model_visible_bytes) is not bytes
             or not value._model_visible_bytes
             or len(value._model_visible_bytes) > _MAX_MODEL_BYTES
@@ -923,8 +1003,14 @@ def _batch_is_valid(batch: object, run: ArchiveSearchRunBinding) -> bool:
         candidates = tuple(result.candidate for result in value._page.results)
         current_candidates = tuple(_candidate_handle(candidate) for candidate in candidates)
         current_coverages = tuple(_coverage_handle(coverage) for coverage in value._page.coverage)
-        projected = value._page.to_public_json(run._privacy_key).encode("ascii")
+        model_page_index = _run_model_page_index_unlocked(run)
+        projected = _project_model_visible_page(
+            run,
+            value._page,
+            model_page_index=model_page_index,
+        )
         checks = (
+            value._model_page_index == model_page_index,
             hmac.compare_digest(
                 _canonical_json(list(value._candidate_handles)),
                 _canonical_json(list(current_candidates)),
@@ -1015,6 +1101,7 @@ class ArchiveModelBatchLedger(_ProcessPrivate):
                         existing_run is run_binding and existing_batch._nonce == batch._nonce
                         for existing_run, existing_batch, _body in self._entries
                     )
+                    or any(existing_run is run_binding for existing_run, _batch, _body in self._entries)
                     or any(
                         existing_batch._nonce == batch._nonce for _run, existing_batch, _body in self._entries
                     )
@@ -1111,6 +1198,7 @@ def _ledger_is_valid(value: object) -> bool:
                 for entry in ledger._entries
             )
             and len({entry[1]._nonce for entry in ledger._entries}) == len(ledger._entries)
+            and len({id(entry[0]) for entry in ledger._entries}) == len(ledger._entries)
             and type(ledger._runs) is tuple
             and len(ledger._runs) <= ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES
             and len({run._seal for run in ledger._runs}) == len(ledger._runs)
@@ -1135,32 +1223,108 @@ def _ledger_is_valid(value: object) -> bool:
 
 _TURN_LEDGER_REGISTRY_LOCK = threading.Lock()
 _TURN_LEDGER_REGISTRY: OrderedDict[tuple[str, str], ArchiveModelBatchLedger] = OrderedDict()
-_TURN_LEDGER_CONSUMED_FILTER = bytearray(_TURN_LEDGER_REPLAY_FILTER_BYTES)
 
 
-def _turn_replay_filter_offsets(turn_handle: str) -> tuple[int, int, int, int]:
-    digest = hashlib.sha256(
-        b"friday/archive-search-consumed-turn/v2\0" + turn_handle.encode("ascii")
-    ).digest()
-    bit_count = len(_TURN_LEDGER_CONSUMED_FILTER) * 8
-    return (
-        int.from_bytes(digest[0:4], "big") % bit_count,
-        int.from_bytes(digest[4:8], "big") % bit_count,
-        int.from_bytes(digest[8:12], "big") % bit_count,
-        int.from_bytes(digest[12:16], "big") % bit_count,
+class _RotatingTurnReplayFilter:
+    """Bounded Bloom epochs which retain replays without lifetime saturation."""
+
+    __slots__ = (
+        "_bucket_count",
+        "_clock",
+        "_current",
+        "_epoch_seconds",
+        "_epoch_started",
+        "_filters",
     )
+
+    def __init__(
+        self,
+        *,
+        filter_bytes: int,
+        retain_seconds: float,
+        bucket_count: int,
+        clock: Callable[[], float],
+    ) -> None:
+        if (
+            type(filter_bytes) is not int
+            or filter_bytes <= 0
+            or not isinstance(retain_seconds, (int, float))
+            or isinstance(retain_seconds, bool)
+            or retain_seconds <= 0
+            or type(bucket_count) is not int
+            or bucket_count < 2
+            or not callable(clock)
+        ):
+            raise ValueError("archive replay filter configuration is invalid")
+        self._bucket_count = bucket_count
+        self._clock = clock
+        self._current = 0
+        self._epoch_seconds = float(retain_seconds) / float(bucket_count - 1)
+        self._epoch_started = float(clock())
+        self._filters = [bytearray(filter_bytes) for _ in range(bucket_count)]
+
+    def _rotate(self) -> None:
+        now = float(self._clock())
+        if now < self._epoch_started:
+            for bucket in self._filters:
+                bucket[:] = b"\0" * len(bucket)
+            self._current = 0
+            self._epoch_started = now
+            return
+        steps = int((now - self._epoch_started) // self._epoch_seconds)
+        if steps <= 0:
+            return
+        if steps >= self._bucket_count:
+            for bucket in self._filters:
+                bucket[:] = b"\0" * len(bucket)
+            self._current = 0
+        else:
+            for _ in range(steps):
+                self._current = (self._current + 1) % self._bucket_count
+                bucket = self._filters[self._current]
+                bucket[:] = b"\0" * len(bucket)
+        self._epoch_started += steps * self._epoch_seconds
+
+    def _offsets(self, turn_handle: str) -> tuple[int, int, int, int]:
+        digest = hashlib.sha256(
+            b"friday/archive-search-consumed-turn/v3\0" + turn_handle.encode("ascii")
+        ).digest()
+        bit_count = len(self._filters[0]) * 8
+        return (
+            int.from_bytes(digest[0:4], "big") % bit_count,
+            int.from_bytes(digest[4:8], "big") % bit_count,
+            int.from_bytes(digest[8:12], "big") % bit_count,
+            int.from_bytes(digest[12:16], "big") % bit_count,
+        )
+
+    def contains(self, turn_handle: str) -> bool:
+        self._rotate()
+        offsets = self._offsets(turn_handle)
+        return any(
+            all(bucket[offset // 8] & (1 << (offset % 8)) for offset in offsets) for bucket in self._filters
+        )
+
+    def add(self, turn_handle: str) -> None:
+        self._rotate()
+        bucket = self._filters[self._current]
+        for offset in self._offsets(turn_handle):
+            bucket[offset // 8] |= 1 << (offset % 8)
+
+
+_TURN_LEDGER_CONSUMED_FILTER = _RotatingTurnReplayFilter(
+    filter_bytes=_TURN_LEDGER_REPLAY_FILTER_BYTES,
+    retain_seconds=_TURN_LEDGER_RETAIN_SECONDS,
+    bucket_count=_TURN_LEDGER_REPLAY_FILTER_BUCKETS,
+    clock=time.monotonic,
+)
 
 
 def _turn_was_consumed_locked(turn_handle: str) -> bool:
-    return all(
-        _TURN_LEDGER_CONSUMED_FILTER[offset // 8] & (1 << (offset % 8))
-        for offset in _turn_replay_filter_offsets(turn_handle)
-    )
+    return _TURN_LEDGER_CONSUMED_FILTER.contains(turn_handle)
 
 
 def _mark_turn_consumed_locked(turn_handle: str) -> None:
-    for offset in _turn_replay_filter_offsets(turn_handle):
-        _TURN_LEDGER_CONSUMED_FILTER[offset // 8] |= 1 << (offset % 8)
+    _TURN_LEDGER_CONSUMED_FILTER.add(turn_handle)
 
 
 def _ledger_registry_key(ledger: ArchiveModelBatchLedger) -> tuple[str, str]:
@@ -1314,6 +1478,72 @@ def create_archive_model_batch_ledger(
         raise ArchiveSearchAuthorityError("archive model ledger creation failed") from None
 
 
+def abandon_empty_archive_model_batch_ledger(ledger: ArchiveModelBatchLedger) -> None:
+    """Consume and unregister one valid OPEN turn ledger that admitted no bytes.
+
+    A handler can fail after its run has been bound but before a model-visible
+    batch exists.  Such a turn must remain replay-closed without leaving an
+    immortal OPEN entry in the process registry.  Non-empty, frozen, consumed,
+    copied or foreign ledgers are deliberately outside this narrow transition.
+    """
+
+    try:
+        if type(ledger) is not ArchiveModelBatchLedger:
+            raise ArchiveSearchAuthorityError("archive model ledger cannot be abandoned")
+        with ledger._lock:
+            if (
+                not _ledger_is_valid(ledger)
+                or ledger._state is not _ArchiveModelLedgerState.OPEN
+                or ledger._entries
+            ):
+                raise ArchiveSearchAuthorityError("archive model ledger cannot be abandoned")
+            object.__setattr__(ledger, "_state", _ArchiveModelLedgerState.CONSUMED)
+            _reseal_ledger(ledger)
+            with _TURN_LEDGER_REGISTRY_LOCK:
+                key = _ledger_registry_key(ledger)
+                if _TURN_LEDGER_REGISTRY.get(key) is not ledger:
+                    raise ArchiveSearchAuthorityError("archive model ledger cannot be abandoned")
+                _mark_turn_consumed_locked(ledger._turn_handle)
+                del _TURN_LEDGER_REGISTRY[key]
+    except ArchiveSearchAuthorityError:
+        raise
+    except Exception:
+        raise ArchiveSearchAuthorityError("archive model ledger cannot be abandoned") from None
+
+
+def consume_archive_model_batch_ledger_fail_closed(ledger: ArchiveModelBatchLedger) -> None:
+    """Replay-close and unregister a non-empty unpublished turn ledger.
+
+    Cancellation after exact bytes reached a model has no answer to attest, but
+    the same bytes and turn discriminator must never remain reusable.  This is
+    intentionally not a publication shortcut: it returns no entries or
+    attestation and accepts only the canonical registered OPEN/FROZEN ledger.
+    """
+
+    try:
+        if type(ledger) is not ArchiveModelBatchLedger:
+            raise ArchiveSearchAuthorityError("archive model ledger cannot be consumed")
+        with ledger._lock:
+            if (
+                not _ledger_is_valid(ledger)
+                or ledger._state not in {_ArchiveModelLedgerState.OPEN, _ArchiveModelLedgerState.FROZEN}
+                or not ledger._entries
+            ):
+                raise ArchiveSearchAuthorityError("archive model ledger cannot be consumed")
+            with _TURN_LEDGER_REGISTRY_LOCK:
+                key = _ledger_registry_key(ledger)
+                if _TURN_LEDGER_REGISTRY.get(key) is not ledger:
+                    raise ArchiveSearchAuthorityError("archive model ledger cannot be consumed")
+                object.__setattr__(ledger, "_state", _ArchiveModelLedgerState.CONSUMED)
+                _reseal_ledger(ledger)
+                _mark_turn_consumed_locked(ledger._turn_handle)
+                del _TURN_LEDGER_REGISTRY[key]
+    except ArchiveSearchAuthorityError:
+        raise
+    except Exception:
+        raise ArchiveSearchAuthorityError("archive model ledger cannot be consumed") from None
+
+
 def _ledger_identity_is_valid_without_registry(ledger: ArchiveModelBatchLedger) -> bool:
     try:
         return bool(
@@ -1363,6 +1593,33 @@ def _consume_model_batch_ledger(
         with _TURN_LEDGER_REGISTRY_LOCK:
             _mark_turn_consumed_locked(ledger._turn_handle)
         return entries
+
+
+def _unregister_consumed_model_batch_ledger(ledger: ArchiveModelBatchLedger) -> None:
+    """Drop private admitted bytes after the last publication callback.
+
+    Replay closure lives in the rotating consumed-turn filter, not in a
+    six-hour registry copy of the exact batches.  Keep the registered object
+    alive through every phase-2 callback and attestation calculation because
+    run validation depends on that process-private identity; remove it only
+    once that transaction has completed (successfully or fail-closed).
+    """
+
+    try:
+        if type(ledger) is not ArchiveModelBatchLedger:
+            return
+        with ledger._lock:
+            if ledger._state is not _ArchiveModelLedgerState.CONSUMED:
+                return
+            key = _ledger_registry_key(ledger)
+            with _TURN_LEDGER_REGISTRY_LOCK:
+                if _TURN_LEDGER_REGISTRY.get(key) is ledger:
+                    del _TURN_LEDGER_REGISTRY[key]
+    except Exception:
+        # Publication has already consumed the turn and replay-closed it.  A
+        # cleanup failure must never manufacture a successful attestation or
+        # replace the code-owned denial reason exposed to the caller.
+        return
 
 
 def _authorized_archive_search_page(
@@ -1477,9 +1734,7 @@ def _new_live_archive_batch(
         continuation_token,
         actor_handle=run._actor_handle,
         request_identity_handle=_request_identity_handle(run._request),
-        expected_targets={
-            (item.corpus, item.lane) for item in page.coverage if item.next_cursor_available
-        },
+        expected_targets={(item.corpus, item.lane) for item in page.coverage if item.next_cursor_available},
     ):
         raise ArchiveSearchAuthorityError("archive continuation is unavailable")
     return _new_batch(run, page)
@@ -1621,6 +1876,7 @@ class _ArchiveContinuationRecord(_ProcessPrivate):
         "registry_generation",
         "request_identity_handle",
         "seal",
+        "snapshot_handle",
         "token",
         "token_handle",
         "warnings",
@@ -1636,6 +1892,7 @@ class _ArchiveContinuationRecord(_ProcessPrivate):
     registry_generation: bytes
     request_identity_handle: str
     seal: str
+    snapshot_handle: str
     token: str
     token_handle: str
     warnings: tuple[ArchiveSearchWarning, ...]
@@ -1658,6 +1915,7 @@ def _continuation_record_material(record: _ArchiveContinuationRecord) -> bytes:
             "registry_generation": record.registry_generation.hex(),
             "request_identity_handle": record.request_identity_handle,
             "schema": _CONTINUATION_RECORD_SCHEMA,
+            "snapshot_handle": record.snapshot_handle,
             "token_handle": record.token_handle,
             "warnings": [item.value for item in record.warnings],
         }
@@ -1690,6 +1948,7 @@ def _continuation_record_is_valid(
             and hmac.compare_digest(record.registry_generation, generation)
             and _DIGEST.fullmatch(record.actor_handle)
             and _DIGEST.fullmatch(record.request_identity_handle)
+            and _DIGEST.fullmatch(record.snapshot_handle)
             and _DIGEST.fullmatch(record.token_handle)
             and _DIGEST.fullmatch(record.seal)
             and _continuation_token_has_public_shape(record.token)
@@ -1882,6 +2141,7 @@ class _ArchiveContinuationRegistry(_ProcessPrivate):
         *,
         actor_handle: str,
         request_identity_handle: str,
+        snapshot_handle: str,
         candidates: tuple[ArchiveSearchCandidate, ...],
         coverage: tuple[SearchCoverage, ...],
         warnings: tuple[ArchiveSearchWarning, ...],
@@ -1902,8 +2162,7 @@ class _ArchiveContinuationRegistry(_ProcessPrivate):
                 continue
             token_handle = _continuation_token_handle(token)
             if token_handle not in self._records and (
-                exclude_token_handle is None
-                or not hmac.compare_digest(token_handle, exclude_token_handle)
+                exclude_token_handle is None or not hmac.compare_digest(token_handle, exclude_token_handle)
             ):
                 break
         else:
@@ -1920,6 +2179,7 @@ class _ArchiveContinuationRegistry(_ProcessPrivate):
             ("registry_generation", self._generation),
             ("request_identity_handle", request_identity_handle),
             ("seal", "0" * 64),
+            ("snapshot_handle", snapshot_handle),
             ("token", token),
             ("token_handle", token_handle),
             ("warnings", warnings),
@@ -1965,6 +2225,7 @@ class _ArchiveContinuationRegistry(_ProcessPrivate):
             record = self._mint_record_locked(
                 actor_handle=run._actor_handle,
                 request_identity_handle=_request_identity_handle(run._request),
+                snapshot_handle=run._snapshot_handle,
                 candidates=candidates,
                 coverage=coverage,
                 warnings=warnings,
@@ -2018,6 +2279,7 @@ class _ArchiveContinuationRegistry(_ProcessPrivate):
                     record.request_identity_handle,
                     _request_identity_handle(run._request),
                 )
+                or not hmac.compare_digest(record.snapshot_handle, run._snapshot_handle)
             ):
                 raise ArchiveSearchAuthorityError("archive continuation issue is unavailable")
             self._records.move_to_end(issue._token_handle)
@@ -2055,6 +2317,7 @@ class _ArchiveContinuationRegistry(_ProcessPrivate):
                 return self._mint_record_locked(
                     actor_handle=run._actor_handle,
                     request_identity_handle=_request_identity_handle(run._request),
+                    snapshot_handle=run._snapshot_handle,
                     candidates=selection._candidates,
                     coverage=selection._coverage,
                     warnings=selection._warnings,
@@ -2152,6 +2415,7 @@ class _ArchiveContinuationRegistry(_ProcessPrivate):
                     record.request_identity_handle,
                     _request_identity_handle(run_value._request),
                 )
+                or not hmac.compare_digest(record.snapshot_handle, run_value._snapshot_handle)
                 or not _stored_coverage_matches_resumed_run(record.coverage, run_value)
             ):
                 raise ArchiveSearchAuthorityError("archive continuation redemption failed")
@@ -2505,9 +2769,7 @@ def _selection_lease_is_valid(
     lease = cast(_ArchiveContinuationSelectionLease, value)
     try:
         expected_state = (
-            _ArchiveRedemptionState.CONSUMED
-            if lease._claimed
-            else _ArchiveRedemptionState.SELECTING
+            _ArchiveRedemptionState.CONSUMED if lease._claimed else _ArchiveRedemptionState.SELECTING
         )
         return bool(
             type(lease._claimed) is bool
@@ -2894,10 +3156,7 @@ def _terminal_continuation_warnings(
     page_coverage: tuple[SearchCoverage, ...],
 ) -> tuple[ArchiveSearchWarning, ...]:
     result = set(warnings)
-    if any(
-        CoverageState.CAPPED in item.states and not item.next_cursor_available
-        for item in page_coverage
-    ):
+    if any(CoverageState.CAPPED in item.states and not item.next_cursor_available for item in page_coverage):
         result.add(ArchiveSearchWarning.CONTINUATION_UNAVAILABLE)
     return tuple(sorted(result, key=lambda item: item.value))
 
@@ -2907,7 +3166,11 @@ def _page_fits_public_contract(
     page: ArchiveSearchPage,
 ) -> bool:
     try:
-        model_bytes = page.to_public_json(run._privacy_key).encode("ascii")
+        model_bytes = _project_model_visible_page(
+            run,
+            page,
+            model_page_index=_run_model_page_index(run),
+        )
     except Exception:
         return False
     return bool(model_bytes and len(model_bytes) <= _MAX_MODEL_BYTES)
@@ -3288,6 +3551,8 @@ def attest_archive_search_before_publication(
         raise ArchiveSearchPublicationDenied(reason) from None
     except Exception:
         raise ArchiveSearchPublicationDenied(ArchiveSearchPublicationDenialReason.CARRIER_INVALID) from None
+    finally:
+        _unregister_consumed_model_batch_ledger(ledger)
 
 
 __all__ = [
@@ -3312,10 +3577,12 @@ __all__ = [
     "AuthorizedArchiveBatch",
     "IssuedArchiveContinuation",
     "RedeemedArchiveContinuation",
+    "abandon_empty_archive_model_batch_ledger",
     "attest_archive_search_before_publication",
     "authorize_archive_search_before_model",
     "authorize_archive_search_resumed_before_model",
     "canonical_archive_search_targets",
+    "consume_archive_model_batch_ledger_fail_closed",
     "create_archive_model_batch_ledger",
     "create_archive_search_run_binding",
     "issue_archive_search_continuation",

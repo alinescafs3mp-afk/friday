@@ -17,6 +17,7 @@ from friday.agent_runtime import (
     _UNCONFIRMED_SUPPORTED_DEED,
     AgentContext,
     AgentRuntime,
+    _claims_an_unconfirmed_supported_deed,
     _data_subject_file_request,
     _filename_clue_request,
     _named_person_aggregation_scope,
@@ -1673,6 +1674,35 @@ async def test_chat_synthesis_receives_tails_from_each_selected_file(
     assert seen and "FIRST-TAIL" in seen[0] and "SECOND-TAIL" in seen[0]
     assert "Сводка по двум файлам" in result["message"]
     assert "FOREIGN" not in result["message"]
+
+
+def test_historical_archive_passive_deed_exemption_is_exact_and_evidence_bounded() -> None:
+    evidence = (
+        "Исторические файлы сохранены в архиве.",
+        'Вложение "first.txt", фрагмент 1:\nOMEGA-915',
+        'Вложение "second.txt", фрагмент 1:\nSIGMA-482',
+        'Вложение "third.txt", фрагмент 1:\nKAPPA-731',
+    )
+
+    def rejected(answer: str, *, bounded: bool = True) -> bool:
+        return _claims_an_unconfirmed_supported_deed(
+            answer,
+            has_file=False,
+            reminder_succeeded=False,
+            passive_source_state=True,
+            passive_input_file_state_evidence=evidence,
+            bounded_historical_archive_report=bounded,
+        )
+
+    assert not rejected("Исторические файлы сохранены в архиве: OMEGA-915, SIGMA-482, KAPPA-731.")
+    assert rejected("Исторические файлы сохранены в архиве: OMEGA-915, SIGMA-482, KAPPA-731, UNKNOWN-004.")
+    assert rejected(
+        "Исторические файлы сохранены в архиве: OMEGA-915, SIGMA-482, KAPPA-731.",
+        bounded=False,
+    )
+    assert rejected("Я создала и прикрепила файл с итогами.")
+    assert rejected("Исторические файлы прикреплены в чат: OMEGA-915, SIGMA-482, KAPPA-731.")
+    assert rejected("Файл сохранён.")
 
 
 @pytest.mark.asyncio

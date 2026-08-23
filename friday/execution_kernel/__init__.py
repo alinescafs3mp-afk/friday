@@ -25,7 +25,7 @@ from collections import Counter
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any, cast
@@ -59,6 +59,22 @@ from friday.raw_metadata import bounded_raw_file_metadata
 from friday.reminder_schedule import reminder_clock, reminder_clock_description, reminder_when_text
 from friday.reports import SUPPORTED_KINDS, render, spec_from_payload
 from friday.retrieval import _public_graph_context, best_snippet, is_relational_query, tokens_of
+from friday.retrieval.archive_search_authority import ArchiveModelBatchLedger
+from friday.retrieval.archive_search_contract import ArchiveSearchCorpus, ArchiveSearchRequest
+from friday.retrieval.archive_search_obsidian_reader import (
+    BoundArchiveObsidianExactFileReader,
+)
+from friday.retrieval.archive_search_service import (
+    PreparedArchiveSearch,
+    prepare_archive_search_in_transaction,
+)
+from friday.retrieval.contracts import (
+    LifecycleState,
+    MessageRole,
+    TemporalPrecision,
+    TemporalRole,
+    TemporalValueKind,
+)
 from friday.source_identity import private_source_search_page, raw_source_snapshot
 from friday.storage._conversations import (
     select_promoted_current_conversation_window_in_transaction,
@@ -416,6 +432,105 @@ _MAX_ARCHIVE_FILES = 300
 
 LOGGER = logging.getLogger(__name__)
 Handler = Callable[..., Awaitable[dict[str, Any]]]
+ArchiveObsidianExactFileReaderFactory = Callable[
+    [str],
+    Awaitable[BoundArchiveObsidianExactFileReader | None],
+]
+
+_ARCHIVE_SEARCH_INVOCATION_AUTHORITY = object()
+_ARCHIVE_SEARCH_RESULT_AUTHORITY = object()
+
+
+def _archive_private_identity(value: object, *, optional: bool = False) -> str | None:
+    if value is None and optional:
+        return None
+    if type(value) is not str or not value or value != value.strip():
+        raise ValueError("archive search execution identity is unavailable")
+    try:
+        encoded = value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError:
+        raise ValueError("archive search execution identity is unavailable") from None
+    if len(encoded) > 256 or any(unicodedata.category(char).startswith("C") for char in value):
+        raise ValueError("archive search execution identity is unavailable")
+    return value
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _ArchiveSearchInvocation:
+    """Process-owned actor/turn boundary which model JSON cannot construct."""
+
+    tenant_id: str
+    principal_id: str
+    turn_ledger: ArchiveModelBatchLedger
+    current_conversation_id: str | None
+    boundary_user_message_id: str | None
+    snapshot_discriminator: str
+    authority: object
+
+    def __repr__(self) -> str:
+        return "<_ArchiveSearchInvocation sealed private>"
+
+    def is_valid_for(self, actor: ActorContext) -> bool:
+        try:
+            return bool(
+                type(self) is _ArchiveSearchInvocation
+                and self.authority is _ARCHIVE_SEARCH_INVOCATION_AUTHORITY
+                and type(actor) is ActorContext
+                and self.tenant_id == actor.user_id
+                and self.principal_id == actor.own_id
+                and type(self.turn_ledger) is ArchiveModelBatchLedger
+                and _archive_private_identity(self.tenant_id) == self.tenant_id
+                and _archive_private_identity(self.principal_id) == self.principal_id
+                and _archive_private_identity(
+                    self.current_conversation_id,
+                    optional=True,
+                )
+                == self.current_conversation_id
+                and _archive_private_identity(
+                    self.boundary_user_message_id,
+                    optional=True,
+                )
+                == self.boundary_user_message_id
+                and _archive_private_identity(self.snapshot_discriminator) == self.snapshot_discriminator
+                and (self.boundary_user_message_id is None or self.current_conversation_id is not None)
+            )
+        except Exception:
+            return False
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _ArchiveSearchHandlerResult:
+    """Private hand-off from the handler to ``ToolResult`` construction."""
+
+    prepared: PreparedArchiveSearch
+    exact_file_reader: BoundArchiveObsidianExactFileReader | None
+    reader_owner_id: str
+    authority: object
+
+    def __repr__(self) -> str:
+        return "<_ArchiveSearchHandlerResult sealed private>"
+
+    def is_valid(self) -> bool:
+        try:
+            # Accessing both properties revalidates the service's process seal.
+            prepared = self.prepared
+            run = prepared.run_binding
+            batch = prepared.authorized_batch
+            return bool(
+                type(self) is _ArchiveSearchHandlerResult
+                and self.authority is _ARCHIVE_SEARCH_RESULT_AUTHORITY
+                and type(prepared) is PreparedArchiveSearch
+                and run is not None
+                and batch is not None
+                and (
+                    self.exact_file_reader is None
+                    and self.reader_owner_id == ""
+                    or type(self.exact_file_reader) is BoundArchiveObsidianExactFileReader
+                    and self.exact_file_reader.attests_owner(self.reader_owner_id)
+                )
+            )
+        except Exception:
+            return False
 
 
 def _machine_zone() -> Any:
@@ -1141,11 +1256,59 @@ class ToolResult:
     # that need it (the agentic loop, for delivery to the user) read this field
     # directly instead.
     attachment: dict[str, Any] | None = None
+    # Exact archive evidence is a process-private carrier, never a JSON field.
+    # AgentRuntime consumes it for final reauthorization; only the already-safe
+    # canonical public page in ``data`` may cross the model boundary.
+    prepared_archive_search: PreparedArchiveSearch | None = None
+    archive_exact_file_reader: BoundArchiveObsidianExactFileReader | None = None
+    archive_exact_file_reader_owner_id: str = ""
+
+    def archive_model_visible_bytes(self) -> bytes:
+        """Return the exact sealed archive bytes, or reject a copied envelope."""
+
+        try:
+            prepared = self.prepared_archive_search
+            if (
+                self.tool_name != "archive_search"
+                or self.success is not True
+                or type(prepared) is not PreparedArchiveSearch
+                or type(self.data) is not str
+                or (
+                    self.archive_exact_file_reader is not None
+                    and (
+                        type(self.archive_exact_file_reader) is not BoundArchiveObsidianExactFileReader
+                        or not self.archive_exact_file_reader.attests_owner(
+                            self.archive_exact_file_reader_owner_id
+                        )
+                    )
+                )
+                or (self.archive_exact_file_reader is None and self.archive_exact_file_reader_owner_id)
+            ):
+                raise ValueError
+            body = prepared.authorized_batch.model_visible_canonical_bytes
+            encoded = self.data.encode("ascii", errors="strict")
+            if type(body) is not bytes or not body or encoded != body:
+                raise ValueError
+            return body
+        except Exception:
+            raise ValueError("archive search result is unavailable") from None
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {"tool": self.tool_name, "success": self.success}
         if self.data is not None:
-            encoded = self.data if isinstance(self.data, str) else json.dumps(self.data, ensure_ascii=False)
+            if self.prepared_archive_search is not None:
+                try:
+                    encoded = self.archive_model_visible_bytes().decode("ascii", errors="strict")
+                except ValueError:
+                    return {
+                        "tool": self.tool_name,
+                        "success": False,
+                        "error": "Archive search result failed private validation",
+                    }
+            else:
+                encoded = (
+                    self.data if isinstance(self.data, str) else json.dumps(self.data, ensure_ascii=False)
+                )
             if len(encoded) > 8_000:
                 encoded = encoded[:7_900] + "\n… (truncated)"
                 self.truncated = True
@@ -1157,6 +1320,14 @@ class ToolResult:
     def to_llm_message(self) -> str:
         if not self.success:
             return f"Ошибка инструмента {self.tool_name}: {self.error}"
+        if self.tool_name == "archive_search" and self.prepared_archive_search is not None:
+            try:
+                # This body is admitted to the private turn ledger byte-for-byte.
+                # Prefixing, pretty-printing or generic round-budget truncation
+                # would invalidate the evidence carried into final publication.
+                return self.archive_model_visible_bytes().decode("ascii", errors="strict")
+            except ValueError:
+                return "Ошибка инструмента archive_search: результат не прошёл приватную проверку"
         if self.tool_name == "web_research" and isinstance(self.data, dict):
             encoded, compacted = _web_research_for_llm(self.data)
             self.truncated = self.truncated or compacted
@@ -3043,8 +3214,50 @@ class ExecutionKernel:
         self.ingestion: IngestionPipeline | None = None
         self.executive: ExecutiveService | None = None
         self.searcher: Any = None
+        self._archive_obsidian_exact_file_reader_factory: ArchiveObsidianExactFileReaderFactory | None = None
         self._tools: dict[str, ToolSpec] = {}
         self._register_specs()
+
+    def bind_archive_obsidian_exact_file_reader_factory(
+        self,
+        factory: ArchiveObsidianExactFileReaderFactory,
+    ) -> None:
+        """Bind the trusted async owner-to-vault exact-reader composition once."""
+
+        if not callable(factory):
+            raise TypeError("archive Obsidian exact reader factory must be callable")
+        if self._archive_obsidian_exact_file_reader_factory is not None:
+            raise RuntimeError("archive Obsidian exact reader factory is already bound")
+        self._archive_obsidian_exact_file_reader_factory = factory
+
+    def create_archive_search_invocation(
+        self,
+        *,
+        actor: ActorContext,
+        turn_ledger: ArchiveModelBatchLedger,
+        current_conversation_id: str | None = None,
+        boundary_user_message_id: str | None = None,
+    ) -> object:
+        """Seal one actor/turn scope for hidden ``archive_search`` arguments."""
+
+        if type(actor) is not ActorContext or type(turn_ledger) is not ArchiveModelBatchLedger:
+            raise ValueError("archive search invocation authority is unavailable")
+        tenant_id = _archive_private_identity(actor.user_id)
+        principal_id = _archive_private_identity(actor.own_id)
+        conversation_id = _archive_private_identity(current_conversation_id, optional=True)
+        boundary_id = _archive_private_identity(boundary_user_message_id, optional=True)
+        if boundary_id is not None and conversation_id is None:
+            raise ValueError("archive search message boundary requires a conversation")
+        assert tenant_id is not None and principal_id is not None
+        return _ArchiveSearchInvocation(
+            tenant_id=tenant_id,
+            principal_id=principal_id,
+            turn_ledger=turn_ledger,
+            current_conversation_id=conversation_id,
+            boundary_user_message_id=boundary_id,
+            snapshot_discriminator=str(new_id("archive_snapshot")),
+            authority=_ARCHIVE_SEARCH_INVOCATION_AUTHORITY,
+        )
 
     def bind_services(
         self,
@@ -3069,6 +3282,7 @@ class ExecutionKernel:
             # ровно тем сборкам, где служба не поднята.
             "mission_compensation": self._mission_compensation,
             "memory_search": self._memory_search,
+            "archive_search": cast(Handler, self._archive_search),
             "source_search": self._source_search,
             # The promoted internal lane returns an opaque process-owned
             # snapshot rather than a public JSON mapping.  The ordinary tool
@@ -3184,6 +3398,7 @@ class ExecutionKernel:
     _RELEVANT_TOOLS = {
         "интернет": {"web_search", "web_fetch", "web_research", "speak", "make_file", "remind"},
         "знание": {
+            "archive_search",
             "speak",
             "make_file",
             "remind",
@@ -3196,6 +3411,7 @@ class ExecutionKernel:
             "obsidian_read_note",
         },
         "архив": {
+            "archive_search",
             "memory_search",
             "source_search",
             "message_search",
@@ -3248,6 +3464,7 @@ class ExecutionKernel:
         # Просьба о файле — это и «сочини документ» (make_file), и «собери
         # присланное» (collect_files). Какой из двух, решает модель по формулировке.
         "файл": {
+            "archive_search",
             "make_file",
             "collect_files",
             "memory_search",
@@ -3307,6 +3524,7 @@ class ExecutionKernel:
     #: `memory_save` остаются на месте.
     _WITHHELD_TOOLS = {
         "быт": {
+            "archive_search",
             "what_happened",
             "upcoming",
             "memory_search",
@@ -3497,8 +3715,20 @@ class ExecutionKernel:
             await self._audit(actor, name, True, "started", details=details)
         try:
             async with asyncio.timeout(timeout):
-                data = await tool.handler(actor=actor, **(arguments or {}))
-            await self._audit(actor, name, True, "ok", details=details)
+                data: Any = await tool.handler(actor=actor, **(arguments or {}))
+            prepared_archive_search = None
+            archive_exact_file_reader = None
+            archive_exact_file_reader_owner_id = ""
+            if name == "archive_search":
+                if type(data) is not _ArchiveSearchHandlerResult or not data.is_valid():
+                    raise RuntimeError("archive search handler returned an invalid private carrier")
+                prepared_archive_search = data.prepared
+                archive_exact_file_reader = data.exact_file_reader
+                archive_exact_file_reader_owner_id = data.reader_owner_id
+                data = prepared_archive_search.authorized_batch.model_visible_canonical_bytes.decode(
+                    "ascii",
+                    errors="strict",
+                )
             attachment = None
             # A handler that produces a binary side artifact (currently only
             # `speak`) marks it with this key instead of returning it as part of
@@ -3506,7 +3736,16 @@ class ExecutionKernel:
             if isinstance(data, dict) and "_attachment" in data:
                 data = dict(data)
                 attachment = data.pop("_attachment")
-            return ToolResult(name, True, data=data, attachment=attachment)
+            await self._audit(actor, name, True, "ok", details=details)
+            return ToolResult(
+                name,
+                True,
+                data=data,
+                attachment=attachment,
+                prepared_archive_search=prepared_archive_search,
+                archive_exact_file_reader=archive_exact_file_reader,
+                archive_exact_file_reader_owner_id=archive_exact_file_reader_owner_id,
+            )
         except TimeoutError:
             # Таймаут наступает ПОСЛЕ начала работы, а значит эффект мог случиться.
             #
@@ -4614,6 +4853,120 @@ class ExecutionKernel:
                 "includes_latest": bool(events) or total_events == 0,
             },
         }
+
+    async def _archive_search(
+        self,
+        *,
+        actor: ActorContext,
+        query: str,
+        corpora: list[str],
+        title_hints: list[str] | None = None,
+        filename_hints: list[str] | None = None,
+        entity_hints: list[str] | None = None,
+        temporal_constraints: list[dict[str, Any]] | None = None,
+        lifecycle_constraints: list[dict[str, Any]] | None = None,
+        conversation_scope: str = "all",
+        roles: list[str] | None = None,
+        review_scope: str = "discoverable",
+        limit: int = 10,
+        context: dict[str, Any] | None = None,
+        continuation: str | None = None,
+        _archive_invocation: object | None = None,
+    ) -> _ArchiveSearchHandlerResult:
+        """Run the federated archive facade inside one private turn scope."""
+
+        storage = self.storage
+        authorization = self.authorization
+        invocation = _archive_invocation
+        if (
+            storage is None
+            or authorization is None
+            or type(invocation) is not _ArchiveSearchInvocation
+            or not invocation.is_valid_for(actor)
+        ):
+            raise ValueError("archive search private invocation is unavailable")
+        payload: dict[str, object] = {
+            "query": query,
+            "corpora": corpora,
+            "conversation_scope": conversation_scope,
+            "review_scope": review_scope,
+            "limit": limit,
+        }
+        for key, value in (
+            ("title_hints", title_hints),
+            ("filename_hints", filename_hints),
+            ("entity_hints", entity_hints),
+            ("temporal_constraints", temporal_constraints),
+            ("lifecycle_constraints", lifecycle_constraints),
+            ("roles", roles),
+            ("context", context),
+            ("continuation", continuation),
+        ):
+            if value is not None:
+                payload[key] = value
+        request = ArchiveSearchRequest.from_model_payload(payload)
+
+        exact_file_reader: BoundArchiveObsidianExactFileReader | None = None
+        reader_factory = self._archive_obsidian_exact_file_reader_factory
+        if ArchiveSearchCorpus.OBSIDIAN in request.corpora and reader_factory is not None:
+            try:
+                candidate_reader = await reader_factory(actor.own_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - unavailable lane remains explicit coverage
+                LOGGER.warning(
+                    "Archive Obsidian exact reader unavailable (%s)",
+                    type(exc).__name__,
+                )
+            else:
+                if type(
+                    candidate_reader
+                ) is BoundArchiveObsidianExactFileReader and candidate_reader.attests_owner(actor.own_id):
+                    exact_file_reader = candidate_reader
+                elif candidate_reader is not None:
+                    LOGGER.warning("Archive Obsidian exact reader failed owner/composition attestation")
+
+        with storage.transaction() as conn:
+            # The generic execute gate ran before the optional awaited vault
+            # reader binding.  Re-resolve the principal and the global search
+            # capability in this same source snapshot immediately before any
+            # archive lane is collected.
+            principal_row = conn.execute(
+                "SELECT preset_key, status FROM users WHERE id=?",
+                (invocation.principal_id,),
+            ).fetchone()
+            fresh_actor = (
+                replace(actor, preset_key=str(principal_row["preset_key"] or "guest"))
+                if principal_row is not None and str(principal_row["status"] or "") == "active"
+                else None
+            )
+            if (
+                fresh_actor is None
+                or fresh_actor.user_id != invocation.tenant_id
+                or fresh_actor.own_id != invocation.principal_id
+                or not authorization.authorize(fresh_actor, "search.use").allowed
+            ):
+                raise ValueError("archive search authority changed before collection")
+            prepared = prepare_archive_search_in_transaction(
+                conn,
+                authorization=authorization,
+                actor=fresh_actor,
+                tenant_id=invocation.tenant_id,
+                principal_id=invocation.principal_id,
+                request=request,
+                snapshot_discriminator=invocation.snapshot_discriminator,
+                run_discriminator=str(new_id("archive_run")),
+                turn_ledger=invocation.turn_ledger,
+                current_conversation_id=invocation.current_conversation_id,
+                boundary_user_message_id=invocation.boundary_user_message_id,
+                exact_file_reader=exact_file_reader,
+            )
+        return _ArchiveSearchHandlerResult(
+            prepared=prepared,
+            exact_file_reader=exact_file_reader,
+            reader_owner_id=actor.own_id if exact_file_reader is not None else "",
+            authority=_ARCHIVE_SEARCH_RESULT_AUTHORITY,
+        )
 
     async def _memory_search(
         self,
@@ -7763,6 +8116,132 @@ class ExecutionKernel:
                 )
             )
 
+        archive_temporal_constraint = {
+            "type": "object",
+            "properties": {
+                "corpus": {
+                    "type": "string",
+                    "enum": [item.value for item in ArchiveSearchCorpus],
+                },
+                "role": {
+                    "type": "string",
+                    "enum": [item.value for item in TemporalRole],
+                },
+                "value_kind": {
+                    "type": "string",
+                    "enum": [item.value for item in TemporalValueKind],
+                },
+                "precision": {
+                    "type": "string",
+                    "enum": [item.value for item in TemporalPrecision],
+                },
+                "start": {"type": "string"},
+                "end": {"type": "string"},
+            },
+            "required": ["corpus", "role", "value_kind", "precision", "start", "end"],
+            "additionalProperties": False,
+        }
+        archive_lifecycle_constraint = {
+            "type": "object",
+            "properties": {
+                "corpus": {
+                    "type": "string",
+                    "enum": [item.value for item in ArchiveSearchCorpus],
+                },
+                "states": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [item.value for item in LifecycleState],
+                    },
+                    "minItems": 1,
+                    "uniqueItems": True,
+                },
+            },
+            "required": ["corpus", "states"],
+            "additionalProperties": False,
+        }
+        spec(
+            "archive_search",
+            "Единый поиск по личному архиву: документам, подтверждённым знаниям, "
+            "переписке и Obsidian. Это только локальный read-only поиск: он никогда "
+            "не отправляет запрос в интернет. Проверяй coverage и absence: неполная, "
+            "недоступная или ограниченная полоса не доказывает отсутствие сведений. "
+            "Для следующей страницы передай выданный opaque continuation без изменений.",
+            "search.use",
+            {
+                "query": {"type": "string", "minLength": 1, "maxLength": 1000},
+                "corpora": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [item.value for item in ArchiveSearchCorpus],
+                    },
+                    "minItems": 1,
+                    "maxItems": len(ArchiveSearchCorpus),
+                    "uniqueItems": True,
+                },
+                "title_hints": {
+                    "type": "array",
+                    "items": {"type": "string", "maxLength": 260},
+                    "maxItems": 8,
+                    "uniqueItems": True,
+                },
+                "filename_hints": {
+                    "type": "array",
+                    "items": {"type": "string", "maxLength": 260},
+                    "maxItems": 8,
+                    "uniqueItems": True,
+                },
+                "entity_hints": {
+                    "type": "array",
+                    "items": {"type": "string", "maxLength": 260},
+                    "maxItems": 8,
+                    "uniqueItems": True,
+                },
+                "temporal_constraints": {
+                    "type": "array",
+                    "items": archive_temporal_constraint,
+                    "maxItems": 8,
+                },
+                "lifecycle_constraints": {
+                    "type": "array",
+                    "items": archive_lifecycle_constraint,
+                    "maxItems": len(ArchiveSearchCorpus),
+                },
+                "conversation_scope": {"type": "string", "enum": ["all", "current"]},
+                "roles": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [MessageRole.USER.value, MessageRole.ASSISTANT.value],
+                    },
+                    "maxItems": 2,
+                    "uniqueItems": True,
+                },
+                "review_scope": {
+                    "type": "string",
+                    "enum": ["confirmed_only", "discoverable"],
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+                "context": {
+                    "type": "object",
+                    "properties": {
+                        "before": {"type": "integer", "minimum": 0, "maximum": 3},
+                        "after": {"type": "integer", "minimum": 0, "maximum": 3},
+                    },
+                    "required": ["before", "after"],
+                    "additionalProperties": False,
+                },
+                "continuation": {
+                    "type": "string",
+                    "maxLength": 512,
+                    "pattern": r"^[A-Za-z0-9_-]+$",
+                },
+            },
+            ["query", "corpora"],
+            risk="observe",
+        )
         spec(
             "memory_search",
             # Про `filtered_out` сказано ЗДЕСЬ, потому что это единственный текст об

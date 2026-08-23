@@ -3345,7 +3345,8 @@ async def test_chat_does_not_regenerate_after_any_first_generation_evidence(
 def test_runtime_seam_suppresses_tools_and_revalidates_before_store() -> None:
     source = inspect.getsource(AgentRuntime.chat)
 
-    parse = source.index("parsed_shape_contract = regenerable_text_shape_contract")
+    parse = source.index("parsed_shape_contract = (")
+    parse_generator = source.index("regenerable_text_shape_contract(", parse)
     isolate = source.index("generation_context = (", parse)
     suppress = source.index("visible_tools = []", parse)
     generate = source.index("await self._generate_response(generation_context", suppress)
@@ -3353,4 +3354,4 @@ def test_runtime_seam_suppresses_tools_and_revalidates_before_store() -> None:
     final_validate = source.index("text-shape: final validation failed", repair)
     store = source.index("self.storage.store_message(", final_validate)
 
-    assert parse < isolate < suppress < generate < repair < final_validate < store
+    assert parse < parse_generator < isolate < suppress < generate < repair < final_validate < store

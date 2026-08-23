@@ -382,22 +382,9 @@ class ArchiveMessageSearchPage(_ProcessPrivate):
             or self.principal_id != _private_scope(self.principal_id, label="stored principal")
             or self.query != _query(self.query)
             or type(self.scope) is not ArchiveMessageScope
-            or (
-                self.scope is ArchiveMessageScope.CURRENT
-                and (
-                    _CONVERSATION_ID.fullmatch(self.conversation_id or "") is None
-                    or _MESSAGE_ID.fullmatch(self.boundary_user_message_id or "") is None
-                    or self.boundary_identity_sha256 is None
-                )
-            )
-            or (
-                self.scope is ArchiveMessageScope.ALL
-                and (
-                    self.conversation_id is not None
-                    or self.boundary_user_message_id is not None
-                    or self.boundary_identity_sha256 is not None
-                )
-            )
+            or _CONVERSATION_ID.fullmatch(self.conversation_id or "") is None
+            or _MESSAGE_ID.fullmatch(self.boundary_user_message_id or "") is None
+            or self.boundary_identity_sha256 is None
             or type(self.roles) is not tuple
             or self.roles != _roles(self.roles)
             or type(self.lifecycle_states) is not tuple
@@ -629,9 +616,15 @@ def _require_active_principal_and_current_lexical_index(
     try:
         # ``rank=1`` compares an external-content index with its source table,
         # rather than checking only the internal FTS b-tree structure.
-        conn.execute(
+        integrity_cursor = conn.execute(
             "INSERT INTO messages_fts(messages_fts, rank) VALUES('integrity-check', 1)"
         )
+        # Python 3.14 may keep the write-shaped FTS statement active until the
+        # temporary cursor is collected.  A following archive corpus then
+        # cannot register its deterministic SQLite fold function, making two
+        # identical federations disagree.  Finalize this read-attestation
+        # statement at the exact boundary instead of relying on GC timing.
+        integrity_cursor.close()
     except sqlite3.DatabaseError:
         raise ArchiveMessageStorageError("message lexical index is unavailable") from None
     return expected
@@ -666,9 +659,8 @@ def _validate_authorized_scope_timestamps(
                      FROM messages b
                      JOIN owned_conversations c
                        ON c.id=b.conversation_id AND c.user_id=b.user_id
-                    WHERE ?='current' AND b.id=? AND b.user_id=? AND b.role='user'
-                   UNION ALL
-                   SELECT NULL, NULL WHERE ?='all'
+                    WHERE b.id=? AND b.user_id=? AND b.role='user'
+                      AND b.conversation_id=?
                )
                SELECT m.created_at
                  FROM messages m
@@ -677,20 +669,17 @@ def _validate_authorized_scope_timestamps(
                  CROSS JOIN scope_gate gate
                 WHERE m.user_id=?
                   AND m.role IN ('user', 'assistant')
-                  AND (?='all' OR (
-                       m.conversation_id=gate.boundary_conversation_id
-                       AND m.rowid<gate.boundary_rowid
-                  ))""",
+                  AND m.rowid<gate.boundary_rowid
+                  AND (?='all' OR m.conversation_id=gate.boundary_conversation_id)""",
         (
             principal_id,
             scope.value,
             conversation_id,
             include_active,
             include_archived,
-            scope.value,
             boundary_user_message_id,
             principal_id,
-            scope.value,
+            conversation_id,
             principal_id,
             scope.value,
         ),
@@ -804,7 +793,8 @@ def _ledger_evidence(
                         AND m.role IN ('user', 'assistant')
                         AND (? IS NULL OR julianday(m.created_at) >= julianday(?))
                         AND (? IS NULL OR julianday(m.created_at) < julianday(?))
-                        AND (?='all' OR (m.conversation_id=? AND m.rowid<?))
+                        AND m.rowid<?
+                        AND (?='all' OR m.conversation_id=?)
                       ORDER BY m.conversation_id ASC,
                                julianday(m.created_at) ASC, m.rowid ASC"""  # nosec B608
     cursor = conn.execute(
@@ -817,9 +807,9 @@ def _ledger_evidence(
             since,
             until,
             until,
+            boundary_rowid,
             scope.value,
             boundary_conversation_id,
-            boundary_rowid,
         ),
     )
     columns = tuple(item[0] for item in (cursor.description or ()))
@@ -881,7 +871,7 @@ def _select_authorized_archive_message_page_in_transaction(
 ) -> ArchiveMessageSearchPage | None:
     """Select one authorized lexical page and exact context in the caller's transaction.
 
-    ``None`` is reserved for a missing/foreign current-conversation boundary.
+    ``None`` is reserved for a missing/foreign accepted-turn boundary.
     An authorized search with zero matches returns an empty typed page.
     """
 
@@ -912,14 +902,11 @@ def _select_authorized_archive_message_page_in_transaction(
         low=0,
         high=_MAX_NEIGHBORS,
     )
-    if scope is ArchiveMessageScope.CURRENT:
-        current_conversation = _conversation_id(conversation_id, label="current conversation identity")
-        boundary_id = _message_id(boundary_user_message_id, label="current message boundary")
-    else:
-        if conversation_id is not None or boundary_user_message_id is not None:
-            raise ArchiveMessageStorageError("all-conversation scope cannot carry a current boundary")
-        current_conversation = None
-        boundary_id = None
+    current_conversation = _conversation_id(
+        conversation_id,
+        label="current conversation identity",
+    )
+    boundary_id = _message_id(boundary_user_message_id, label="current message boundary")
     include_user = int(MessageRole.USER in selected_roles)
     include_assistant = int(MessageRole.ASSISTANT in selected_roles)
     include_active = int(LifecycleState.ACTIVE in selected_lifecycles)
@@ -967,9 +954,8 @@ def _select_authorized_archive_message_page_in_transaction(
                      FROM messages b
                      JOIN owned_conversations c
                        ON c.id=b.conversation_id AND c.user_id=b.user_id
-                    WHERE ?='current' AND b.id=? AND b.user_id=? AND b.role='user'
-                   UNION ALL
-                   SELECT NULL, NULL, NULL, NULL, NULL, NULL WHERE ?='all'
+                    WHERE b.id=? AND b.user_id=? AND b.role='user'
+                      AND b.conversation_id=?
                ),
                authorized_scope_rows AS MATERIALIZED (
                    SELECT m.id, m.conversation_id, m.user_id, m.role, m.content,
@@ -981,10 +967,8 @@ def _select_authorized_archive_message_page_in_transaction(
                      CROSS JOIN scope_gate gate
                     WHERE m.user_id=?
                       AND m.role IN ('user', 'assistant')
-                      AND (?='all' OR (
-                           m.conversation_id=gate.boundary_conversation_id
-                           AND m.rowid<gate.boundary_rowid
-                      ))
+                      AND m.rowid<gate.boundary_rowid
+                      AND (?='all' OR m.conversation_id=gate.boundary_conversation_id)
                ),
                authorized_context AS MATERIALIZED (
                    SELECT scoped.*,
@@ -1074,10 +1058,9 @@ def _select_authorized_archive_message_page_in_transaction(
             current_conversation,
             include_active,
             include_archived,
-            scope.value,
             boundary_id,
             principal,
-            scope.value,
+            current_conversation,
             principal,
             scope.value,
             start,
@@ -1102,12 +1085,11 @@ def _select_authorized_archive_message_page_in_transaction(
         raise ArchiveMessageStorageError("stored message timestamp is invalid")
     examined = int(first["examined"])
     total = int(first["total"])
-    boundary_digest = _boundary_identity(first) if scope is ArchiveMessageScope.CURRENT else None
-    boundary_rowid = int(first["boundary_rowid"]) if scope is ArchiveMessageScope.CURRENT else None
-    boundary_conversation = (
-        _conversation_id(first["boundary_conversation_id"], label="stored boundary conversation")
-        if scope is ArchiveMessageScope.CURRENT
-        else None
+    boundary_digest = _boundary_identity(first)
+    boundary_rowid = int(first["boundary_rowid"])
+    boundary_conversation = _conversation_id(
+        first["boundary_conversation_id"],
+        label="stored boundary conversation",
     )
 
     grouped: dict[int, list[dict[str, Any]]] = {}
@@ -1211,7 +1193,10 @@ def select_authorized_archive_message_page_in_transaction(
 ) -> ArchiveMessageSearchPage | None:
     """Select one authorized lexical page in the caller's transaction.
 
-    ``None`` is reserved for a missing/foreign current-conversation boundary.
+    ``None`` is reserved for a missing/foreign accepted-turn boundary.  Both
+    scopes require that owned current user row: ``current`` admits only older
+    rows from its conversation, while ``all`` admits every owned conversation
+    only up to the same global SQLite rowid snapshot.
     An authorized search with zero matches returns an empty typed page.  The
     archive authority callback must rerun this exact selector, with the same
     normalized controls, inside its publication ``BEGIN IMMEDIATE`` and compare

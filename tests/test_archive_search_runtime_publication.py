@@ -1,0 +1,2498 @@
+"""AgentRuntime admits and publishes only phase-2-attested archive pages."""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import unicodedata
+from collections.abc import Callable
+from dataclasses import replace
+from typing import Any
+
+import httpx
+import pytest
+
+from friday.agent_runtime import (
+    AgentContext,
+    AgentRuntime,
+    _archive_definitive_absence_claim,
+    _archive_search_code_owned_corpora,
+    _archive_search_literal_shape_is_safe,
+    _archive_search_public_summary,
+    _archive_search_semantic_content,
+    _ArchiveSearchPublicSummary,
+    is_archive_search_current_text,
+)
+from friday.agent_runtime.llm import LLMRouter
+from friday.execution_kernel import ExecutionKernel, ToolResult
+from friday.ingestion import IngestionPipeline
+from friday.interaction_control_plane.legacy_trace import CapabilityStatus
+from friday.knowledge_graph import KnowledgeGraph
+from friday.permissions import ActorContext, AuthorizationService
+from friday.retrieval.archive_search_authority import (
+    ArchiveSearchAuthorityError,
+    ArchiveSearchPublicationDenialReason,
+    ArchiveSearchPublicationDenied,
+    attest_archive_search_before_publication,
+    create_archive_model_batch_ledger,
+)
+from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
+from friday.turn_intent_policy import (
+    WEATHER_LOCATION_CLARIFICATION,
+    TurnIntent,
+    TurnPolicyDecision,
+)
+from friday.web_surfer import WebSurfer
+
+_OWNER = "archive-runtime-owner"
+_QUERY = "ARCHIVE-RUNTIME-PRIVATE-CANARY-7421"
+_ANSWER = f"В личном архиве найдено значение {_QUERY} [A1.1]."
+
+
+class _ArchiveModel:
+    enabled = True
+    model = "archive-runtime-publication-model"
+    total_budget_sec = 3.0
+
+    def __init__(
+        self,
+        *,
+        before_answer: Callable[[], None] | None = None,
+        second_round_calls: list[dict[str, Any]] | None = None,
+        final_answer: str = _ANSWER,
+        first_arguments: dict[str, Any] | None = None,
+    ) -> None:
+        self.before_answer = before_answer
+        self.second_round_calls = second_round_calls
+        self.final_answer = final_answer
+        self.first_arguments = first_arguments or {
+            "query": _QUERY,
+            "corpora": ["documents"],
+            "limit": 5,
+        }
+        self.calls = 0
+        self.archive_tool_body = ""
+        self.second_round_tool_names: list[str] = []
+        self.call_payloads: list[str] = []
+        self.call_kwargs: list[dict[str, Any]] = []
+
+    async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+        self.calls += 1
+        self.call_payloads.append(json.dumps(messages, ensure_ascii=False, sort_keys=True))
+        self.call_kwargs.append(dict(kwargs))
+        tools = kwargs.get("tools") or []
+        tool_names = [
+            str((item.get("function") or {}).get("name") or item.get("name") or "") for item in tools
+        ]
+        if self.calls == 1:
+            assert "archive_search" in tool_names
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "archive-first",
+                        "type": "function",
+                        "function": {
+                            "name": "archive_search",
+                            "arguments": json.dumps(self.first_arguments),
+                        },
+                    }
+                ],
+                "finish_reason": "tool_calls",
+            }
+
+        tool_messages = [item for item in messages if item.get("role") == "tool"]
+        assert tool_messages
+        self.archive_tool_body = str(tool_messages[0].get("content") or "")
+        public_page = json.loads(self.archive_tool_body)
+        assert public_page["schema"] == "friday.archive-search-page.public.v1"
+        if public_page.get("candidates"):
+            assert _QUERY in self.archive_tool_body
+        self.second_round_tool_names = tool_names
+
+        if self.calls == 2 and self.second_round_calls is not None:
+            return {
+                "content": "",
+                "tool_calls": self.second_round_calls,
+                "finish_reason": "tool_calls",
+            }
+        if self.before_answer is not None:
+            self.before_answer()
+        return {
+            "content": self.final_answer,
+            "tool_calls": None,
+            "finish_reason": "stop",
+        }
+
+
+class _SpyKernel(ExecutionKernel):
+    def __init__(self, authorization: AuthorizationService, settings: Any) -> None:
+        super().__init__(authorization, settings)
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def execute(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        actor: ActorContext | None = None,
+        execution_scope: str = "dialogue",
+    ) -> ToolResult:
+        # Never retain the process-private invocation itself in test output.
+        self.calls.append(
+            (
+                name,
+                {key: value for key, value in arguments.items() if key != "_archive_invocation"},
+            )
+        )
+        return await super().execute(
+            name,
+            arguments,
+            actor=actor,
+            execution_scope=execution_scope,
+        )
+
+
+class _CopiedPayloadKernel(_SpyKernel):
+    """Simulate a broken adapter returning plausible JSON without its carrier."""
+
+    async def execute(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        actor: ActorContext | None = None,
+        execution_scope: str = "dialogue",
+    ) -> ToolResult:
+        del actor, execution_scope
+        self.calls.append(
+            (
+                name,
+                {key: value for key, value in arguments.items() if key != "_archive_invocation"},
+            )
+        )
+        return ToolResult(
+            name,
+            True,
+            data=json.dumps(
+                {
+                    "copied_private_value": _QUERY,
+                    "schema": "friday.archive-search-page.public.v1",
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+
+
+class _AdversarialArchiveModel:
+    enabled = True
+    model = "archive-runtime-adversarial-model"
+    total_budget_sec = 3.0
+
+    def __init__(
+        self,
+        first_arguments: dict[str, Any],
+        *,
+        tool_name: str = "archive_search",
+    ) -> None:
+        self.first_arguments = first_arguments
+        self.tool_name = tool_name
+        self.calls = 0
+        self.tool_body = ""
+        self.first_offered_tool_names: list[str] = []
+
+    async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+        self.calls += 1
+        if self.calls == 1:
+            self.first_offered_tool_names = [
+                str((item.get("function") or {}).get("name") or item.get("name") or "")
+                for item in (kwargs.get("tools") or [])
+            ]
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "archive-adversarial",
+                        "type": "function",
+                        "function": {
+                            "name": self.tool_name,
+                            "arguments": json.dumps(self.first_arguments),
+                        },
+                    }
+                ],
+                "finish_reason": "tool_calls",
+            }
+        tool_messages = [item for item in messages if item.get("role") == "tool"]
+        assert tool_messages
+        self.tool_body = str(tool_messages[-1].get("content") or "")
+        return {
+            "content": "Приватный результат не был принят.",
+            "tool_calls": None,
+            "finish_reason": "stop",
+        }
+
+
+class _DirectAnswerModel:
+    enabled = True
+    model = "archive-runtime-direct-answer-model"
+    total_budget_sec = 3.0
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.call_kwargs: list[dict[str, Any]] = []
+
+    async def chat(self, _messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+        self.calls += 1
+        self.call_kwargs.append(dict(kwargs))
+        return {
+            "content": f"По памяти в архиве якобы есть {_QUERY}.",
+            "tool_calls": None,
+            "finish_reason": "stop",
+        }
+
+
+class _WebThenArchiveModel:
+    enabled = True
+    model = "archive-runtime-web-then-archive-model"
+    total_budget_sec = 3.0
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.first_offered_tool_names: list[str] = []
+
+    async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+        self.calls += 1
+        tools = kwargs.get("tools") or []
+        offered = [str((item.get("function") or {}).get("name") or item.get("name") or "") for item in tools]
+        if self.calls == 1:
+            self.first_offered_tool_names = offered
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "forbidden-web-first",
+                        "type": "function",
+                        "function": {
+                            "name": "web_search",
+                            "arguments": json.dumps({"query": _QUERY}),
+                        },
+                    }
+                ],
+                "finish_reason": "tool_calls",
+            }
+        if self.calls == 2:
+            assert offered == ["archive_search"]
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "archive-after-denied-web",
+                        "type": "function",
+                        "function": {
+                            "name": "archive_search",
+                            "arguments": json.dumps({"query": _QUERY, "corpora": ["documents"], "limit": 5}),
+                        },
+                    }
+                ],
+                "finish_reason": "tool_calls",
+            }
+        archive_bodies = [
+            str(item.get("content") or "")
+            for item in messages
+            if item.get("role") == "tool" and str(item.get("content") or "").startswith("{")
+        ]
+        assert archive_bodies and _QUERY in archive_bodies[-1]
+        return {"content": _ANSWER, "tool_calls": None, "finish_reason": "stop"}
+
+
+class _CancelAfterFirstPageModel:
+    enabled = True
+    model = "archive-runtime-cancel-after-page-model"
+    total_budget_sec = 30.0
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.second_call_started = asyncio.Event()
+
+    async def chat(self, _messages: list[dict[str, Any]], **_kwargs: Any) -> dict[str, Any]:
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "archive-before-cancel",
+                        "type": "function",
+                        "function": {
+                            "name": "archive_search",
+                            "arguments": json.dumps({"query": _QUERY, "corpora": ["documents"], "limit": 5}),
+                        },
+                    }
+                ],
+                "finish_reason": "tool_calls",
+            }
+        self.second_call_started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
+class _CancelDuringArchiveKernel(_SpyKernel):
+    def __init__(self, authorization: AuthorizationService, settings: Any) -> None:
+        super().__init__(authorization, settings)
+        self.archive_call_started = asyncio.Event()
+
+    async def execute(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        actor: ActorContext | None = None,
+        execution_scope: str = "dialogue",
+    ) -> ToolResult:
+        if name == "archive_search":
+            self.archive_call_started.set()
+            await asyncio.Event().wait()
+        return await super().execute(
+            name,
+            arguments,
+            actor=actor,
+            execution_scope=execution_scope,
+        )
+
+
+def _seed_document(storage: Any, *, suffix: str = "") -> str:
+    raw_id = new_id("raw")
+    storage.store_raw_object(
+        RawObject(
+            id=raw_id,
+            user_id=_OWNER,
+            source="upload",
+            source_ref=f"telegram-file:archive-runtime-publication{suffix}",
+            raw_content=f"Закрытый документ{suffix}. Контрольное значение: {_QUERY}.",
+            content_type="file",
+            metadata_json={
+                "filename": "archive-runtime.txt",
+                "mime_type": "text/plain",
+                "media_kind": "document",
+                "uploaded_by": _OWNER,
+            },
+            content_hash=hashlib.sha256(f"archive-runtime-source{suffix}".encode()).hexdigest(),
+        )
+    )
+    storage.store_inbox_item(
+        InboxItem(
+            id=new_id("inbox"),
+            user_id=_OWNER,
+            raw_object_id=raw_id,
+            status=InboxStatus.PENDING,
+        )
+    )
+    return raw_id
+
+
+async def _runtime(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    before_answer: Callable[[], None] | None = None,
+    second_round_calls: list[dict[str, Any]] | None = None,
+    model_override: Any = None,
+    kernel_factory: type[_SpyKernel] = _SpyKernel,
+    verify_answers: bool = False,
+    outward_kind: str = "архив",
+    context_initializer: Callable[[AgentContext], None] | None = None,
+) -> tuple[AgentRuntime, _SpyKernel, ActorContext, Any, WebSurfer, list[AgentContext]]:
+    configured = replace(settings, verify_answers=verify_answers)
+    storage.ensure_user(_OWNER, preset_key="user")
+    authorization = AuthorizationService(storage)
+    actor = authorization.actor_for_user(_OWNER, source="archive-runtime-test")
+    graph = KnowledgeGraph(storage)
+    ingestion = IngestionPipeline(configured, storage, graph)
+    web = WebSurfer(configured)
+    kernel = kernel_factory(authorization, configured)
+    kernel.bind_services(storage, graph, web, ingestion)
+    model = model_override or _ArchiveModel(
+        before_answer=before_answer,
+        second_round_calls=second_round_calls,
+    )
+    runtime = AgentRuntime(configured, storage, llm=model, kernel=kernel)  # type: ignore[arg-type]
+    contexts: list[AgentContext] = []
+
+    def remember_context(context: AgentContext) -> None:
+        if any(item is context for item in contexts):
+            return
+        if context_initializer is not None:
+            context_initializer(context)
+        contexts.append(context)
+
+    async def narrow_context(
+        user_id: str,
+        message: str,
+        conversation_id: str,
+        **kwargs: Any,
+    ) -> AgentContext:
+        del message
+        context = AgentContext(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            person_id=str(kwargs.get("person_id") or user_id),
+            search_query=_QUERY,
+            outward_verdict=(outward_kind, _QUERY) if outward_kind else None,
+            interaction_mode="dialogue",
+            turn_deadline=kwargs.get("turn_deadline"),
+        )
+        remember_context(context)
+        return context
+
+    monkeypatch.setattr(runtime, "_prepare_context", narrow_context)
+    original_isolate = runtime._isolate_archive_search_context
+
+    def observe_archive_isolation(context: AgentContext, message: str) -> None:
+        remember_context(context)
+        original_isolate(context, message)
+
+    monkeypatch.setattr(runtime, "_isolate_archive_search_context", observe_archive_isolation)
+    return runtime, kernel, actor, model, web, contexts
+
+
+async def _chat(
+    runtime: AgentRuntime,
+    actor: ActorContext,
+    *,
+    answer_with_voice: bool = False,
+    message: str = "Найди контрольное значение в моём личном архиве.",
+) -> dict[str, Any]:
+    return await runtime.chat(
+        _OWNER,
+        message,
+        actor=actor,
+        enable_tools=True,
+        answer_with_voice=answer_with_voice,
+    )
+
+
+def _assert_archive_ledger_consumed(context: AgentContext) -> None:
+    def forbidden_reauthorizer(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("consumed archive ledger reached a reauthorizer")
+
+    with pytest.raises(ArchiveSearchPublicationDenied) as denied:
+        attest_archive_search_before_publication(
+            tenant_id=_OWNER,
+            principal_id=_OWNER,
+            ledger=context.archive_model_batch_ledger,  # type: ignore[arg-type]
+            answer=_ANSWER,
+            candidate_reauthorizer=forbidden_reauthorizer,
+            coverage_reauthorizer=forbidden_reauthorizer,
+            authority_context=object(),
+        )
+    assert denied.value.reason is ArchiveSearchPublicationDenialReason.LEDGER_UNAVAILABLE
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("Найди договор в моём архиве.", True),
+        ("Покажи, что есть в моём архиве.", True),
+        ("Есть ли в моём архиве договор?", True),
+        ("Какие документы в моём архиве?", True),
+        ("Не ищи в моём архиве.", False),
+        ("Мне нравятся мои документы.", False),
+        ("Мои документы лежат в шкафу.", False),
+        ("Расскажи шутку про мой архив.", False),
+        ("Удали договор из моего архива.", False),
+        ("Сохрани это в мой архив.", False),
+        ("Найди в моём архиве документы от пользователя Yato.", False),
+        ("Не ищи в интернете, найди договор в моём архиве.", True),
+        ("Не надо искать в интернете — покажи, что есть в моём архиве.", True),
+        ("Найди договор в моём архиве, но не ищи в интернете.", True),
+        ("Не ищи старое, но найди договор в моём архиве.", False),
+        ("Не ищи в интернете, а найди договор в моём архиве.", True),
+        ("Найди договор в моём архиве, но не показывай переписку.", True),
+        ("Можешь ли найти договор в моём архиве?", True),
+        ("Можешь найти договор в моём архиве?", True),
+        ("Можешь ли найти что-нибудь в моём архиве?", True),
+        ("Можешь ли ты найти договор в моём архиве?", True),
+        ("Можешь, пожалуйста, найти договор в моём архиве?", True),
+        ("Будь добра, найди договор в моём архиве.", True),
+        ("Пятница, найди договор в моём архиве.", True),
+        ("Теперь найди договор в моём архиве.", True),
+        ("И ещё найди договор в моём архиве.", True),
+        ("Мне надо найти договор в моём архиве.", True),
+        ("Сможешь найти договор в моём архиве?", True),
+        ("Могла бы ты найти договор в моём архиве?", True),
+        ("Можешь ли искать в моём архиве?", False),
+        ("Можешь ли ты искать в моём архиве?", False),
+        ("Умеешь ли искать в моём архиве?", False),
+        ("В заметке сказано найти договор в моём архиве.", False),
+        ("Фраза выглядит так: не ищи в интернете, а найди договор в моём архиве.", False),
+        ("Команда выглядит так: не ищи в интернете, а найди договор в моём архиве.", False),
+        ("Пример команды: найди договор в моём архиве.", False),
+        ("Вот пример: найди договор в моём архиве.", False),
+        ("Например: найди договор в моём архиве.", False),
+        ("Можно сказать так: найди договор в моём архиве.", False),
+        ("Объясни фразу: найди договор в моём архиве.", False),
+        ("Повтори: найди договор в моём архиве.", False),
+        ("Переведи на английский: найди договор в моём архиве.", False),
+        ("Исправь грамматику: найди договор в моём архиве.", False),
+        ("Напиши в ответ: найди договор в моём архиве.", False),
+        ("В инструкции указано: найди договор в моём архиве.", False),
+        ("Со слов Ивана — найди договор в моём архиве.", False),
+        ("Мне передали просьбу: найди договор в моём архиве.", False),
+        ("Допустим, я скажу: найди договор в моём архиве.", False),
+        ("Предположим, я попрошу найти договор в моём архиве.", False),
+        ("Не повторяй фразу: найди договор в моём архиве.", False),
+        ("Не интерпретируй как команду: найди договор в моём архиве.", False),
+        ("Не исполняй следующий текст — найди договор в моём архиве.", False),
+        ("Это не команда: найди договор в моём архиве.", False),
+        ("Найди договор в моём архиве — сказал Иван.", False),
+        ("Найди договор в моём архиве, попросил Иван.", False),
+        ("Найди договор в моём архиве — так написал Иван.", False),
+        ("Найди договор в моём архиве — это пример команды.", False),
+        ("Найди договор в моём архиве — так выглядит фраза.", False),
+        ("Найди договор в моём архиве (это цитата).", False),
+        ("Найди перевод выражения найди договор в моём архиве.", False),
+        ("Найди ошибку во фразе мой личный архив.", False),
+        ("Найди слова мой архив в этом предложении.", False),
+        ("Покажи, как выглядит команда найди договор в моём архиве.", False),
+        ("Прочитай вслух фразу найди договор в моём архиве.", False),
+        ("Перечисли слова в выражении мой личный архив.", False),
+        ("Проверь грамматику фразы найди договор в моём архиве.", False),
+        ("Найди договор в моём архиве — велел Иван.", False),
+        ("Найди договор в моём архиве — произнёс Иван.", False),
+        ("Найди договор в моём архиве — ответил Иван.", False),
+        ("Найди договор в моём архиве — скомандовал Иван.", False),
+        ("Найди договор в моём архиве — передал Иван.", False),
+        ("Найди договор в моём архиве — это не команда.", False),
+        ("Найди договор в моём архиве — не просьба.", False),
+        ("Найди договор в моём архиве — просто текст.", False),
+        ("Найди синоним для команды найди договор в моём архиве.", False),
+        ("Найди смысл команды найди договор в моём архиве.", False),
+        ("Найди различия между командами найди и покажи договор в моём архиве.", False),
+        ("Найди в строке найди договор в моём архиве глагол.", False),
+        ("Покажи синтаксис команды найди договор в моём архиве.", False),
+        ("Прочитай текст найди договор в моём архиве задом наперёд.", False),
+        ("Посмотри на предложение найди договор в моём архиве.", False),
+        ("Открой кавычки: найди договор в моём архиве.", False),
+        ("Найди пример договора в моём архиве.", True),
+        ("Найди цитату Иванова в моём архиве.", True),
+        ("Найди фразу про расторжение в моём архиве.", True),
+        ("Найди договор в моём архиве. Это пример команды.", False),
+        ("Найди договор в моём архиве. Так сказал Иван.", False),
+        ("Найди договор в моём архиве. Это не команда.", False),
+        ("Найди договор в моём архиве! Просто повтори текст.", False),
+        ("Найди договор в моём архиве\nэто цитата", False),
+        ("Найди договор в моём архиве … это просто пример", False),
+        ("Найди договор в моём архиве сказал Иван.", False),
+        ("Что есть в моём архиве — спросил Иван.", False),
+        ("Что есть в моём архиве? Это пример вопроса.", False),
+        ("Что есть в моём архиве? Так спросил Иван.", False),
+        ("Какие документы есть в моём архиве — это не вопрос.", False),
+        ("Есть ли договор в моём архиве? — спросил Иван.", False),
+        ("Есть ли договор в моём архиве? Это пример вопроса.", False),
+        ("Какие документы есть в моём архиве; это пример.", False),
+        ("Найди ошибку в тексте договор в моём архиве.", False),
+        ("Найди опечатку в тексте договор в моём архиве.", False),
+        ("Найди количество букв в строке договор в моём архиве.", False),
+        ("Покажи число слов в предложении договор в моём архиве.", False),
+        ("Проверь грамматику текста договор в моём архиве.", False),
+        ("Прочитай задом наперёд текст договор в моём архиве.", False),
+        ("Найди подлежащее в предложении договор в моём архиве.", False),
+        ("Найди слово договор во фразе договор в моём архиве.", False),
+        ("Какие слова во фразе что есть в моём архиве?", False),
+        ("Сколько букв в предложении что есть в моём архиве?", False),
+        ("Кто автор текста что есть в моём архиве?", False),
+        ("Где ошибка в строке что есть в моём архиве?", False),
+        ("Какая грамматика у фразы что есть в моём архиве?", False),
+        ("Что означает предложение что есть в моём архиве?", False),
+        ("Есть ли ошибка во фразе что есть в моём архиве?", False),
+        ("Найди договор в моём архиве。 Это пример команды。", False),
+        ("Найди договор в моём архиве\u2028Это пример команды.", False),
+        ("Найди договор в моём архиве\u2029Это пример команды.", False),
+        ("Найди договор в моём архиве\vЭто пример команды.", False),
+        ("Найди договор в моём архиве\fЭто пример команды.", False),
+        ("Что есть в моём архиве？ Это пример вопроса．", False),
+        ("Найди договор в моём архиве ‐ это пример команды.", False),
+        ("Найди договор в моём архиве ‑ это пример команды.", False),
+        ("Найди договор в моём архиве ‒ это пример команды.", False),
+        ("Найди договор в моём архиве – это пример команды.", False),
+        ("Найди договор в моём архиве ― это пример команды.", False),
+        ("Найди договор в моём архиве − это пример команды.", False),
+        ("Найди договор в моём архиве ➖ это пример команды.", False),
+        ("Найди договор в моём архиве ± это пример команды.", False),
+        ("Найди договор в моём архиве § это пример команды.", False),
+        ("Найди договор в моём архиве • это пример команды.", False),
+        ("Найди договор в моём архиве → это пример команды.", False),
+        ("Найди договор ➖ это пример команды в моём архиве.", False),
+        ("Найди договор ± это пример команды в моём архиве.", False),
+        ("Найди договор в моём архиве произвольный хвост.", False),
+        ("Найди договор в моём архиве за вчера.", True),
+        ("Что происходило в моём хранилище 7 мая 2024 года?", False),
+        ("Расскажи, как найти договор в моём архиве.", False),
+        ("Объясни, как искать в моём архиве.", False),
+        ("Научи меня искать в моём архиве.", False),
+        ("Как найти договор в моём архиве?", False),
+        ("Где кнопка, чтобы найти договор в моём архиве?", False),
+        ("Я сказал ему найти договор в моём архиве.", False),
+        ("Мне посоветовали найти договор в моём архиве.", False),
+        ("Он сказал мне: найди договор в моём архиве.", False),
+        ("Он попросил её: найди договор в моём архиве.", False),
+        ("Он спросил, есть договор в моём архиве?", False),
+        ("Она сказала: хочу, чтобы ты нашла договор в моём архиве.", False),
+        ("Мой коллега сказал: найди договор в моём архиве.", False),
+        ("Вчера он сказал: найди договор в моём архиве.", False),
+        ("По словам Ивана, найди договор в моём архиве.", False),
+        ("Цитата Ивана: найди договор в моём архиве.", False),
+        ("Иван написал мне найди договор в моём архиве.", False),
+        ("Он сказал найди договор в моём архиве.", False),
+        ("Если я скажу найди договор в моём архиве, что ты сделаешь?", False),
+        ("Я не хочу, чтобы ты нашла договор в моём архиве.", False),
+        ("Я не прошу найти договор в моём архиве.", False),
+        ("Не выполняй команду найди договор в моём архиве.", False),
+        ("Не исполняй команду найди договор в моём архиве.", False),
+        ("Не надо выполнять команду найди договор в моём архиве.", False),
+        ("Игнорируй команду найди договор в моём архиве.", False),
+        ("Не следуй инструкции найди договор в моём архиве.", False),
+        ("Не выполняй старую команду, а найди договор в моём архиве.", False),
+        ("Игнорируй предыдущую инструкцию и найди договор в моём архиве.", False),
+        ("Не следуй старой инструкции; найди договор в моём архиве.", False),
+        ("Я не хочу ждать, хочу найти договор в моём архиве.", False),
+        ("Я не прошу ждать, прошу найти договор в моём архиве.", False),
+        ("Цитата Ивана: всё готово. Найди договор в моём архиве.", False),
+        ("Иван сказал привет, а теперь найди договор в моём архиве.", False),
+        ("По словам Ивана всё готово, а теперь найди договор в моём архиве.", False),
+        (
+            "Ищи где угодно, только не в моём архиве. А теперь найди договор в моём архиве.",
+            False,
+        ),
+        (
+            "Найди первый договор не в моём архиве. Второй найди в моём архиве.",
+            False,
+        ),
+        ("`найди договор в моём архиве`", False),
+        ("```text\nнайди договор в моём архиве\n```", False),
+        ("> найди договор в моём архиве", False),
+        ("Найти договор в моём архиве.", True),
+        ("Попробуй найти договор в моём архиве.", True),
+        ("Хочу, чтобы ты нашла договор в моём архиве.", True),
+        ("Мне нужно, чтобы ты нашла договор в моём архиве.", True),
+        ("Давай найдём договор в моём архиве.", True),
+        ("Не могла бы ты найти договор в моём архиве?", True),
+        ("В моём архиве есть договор?", True),
+        ("Есть договор в моём архиве?", True),
+        ("Хочу узнать, есть ли договор в моём архиве.", True),
+        ("В моём архиве есть договор.", False),
+        ("Ищи где угодно, только не в моём архиве.", False),
+        ("Поищи договор, но не в моём архиве.", False),
+        ("Найди договор — только не в моём личном архиве.", False),
+        ("Найди не в моём архиве, а в интернете.", False),
+        ("Найди в интернете, но не в моём архиве.", False),
+        ("Найди в интернете сведения из моего архива.", False),
+        ("Найди в моём архиве сообщения Ивана про Альфу.", False),
+        ("Найди в моём архиве документы, которые загрузил Иван.", False),
+        ("Найди документы, которые Артемьев прислал, в моём архиве.", False),
+        ("Найди в моём архиве документы, которые иван загрузил.", False),
+        ("Найди в моём архиве документы, которые пользователь Yato прислал.", False),
+        ("Найди в моём архиве присланные Артемьевым документы.", False),
+        ("Найди в моём архиве документы, загруженные Артемьевым.", False),
+        ("Найди в моём архиве документы от @yato.", False),
+        ("Найди в моём архиве документы пользователя Yato.", False),
+        ("Найди в моём архиве материалы участника Артемьев.", False),
+        ("Найди в моём архиве присланный Иваном договор.", False),
+        ("Найди в моём архиве договор, присланный Иваном.", False),
+        ("Найди в моём архиве загруженный вчера Иваном файл.", False),
+        ("Найди в моём архиве то, что прислал Иван.", False),
+        ("Найди в моём архиве то, что Иван загрузил.", False),
+        ("Найди в моём архиве документы, полученные от Ивана.", False),
+        ("Найди в моём архиве документы про пользователя Yato.", True),
+        ("Найди в моём архиве договор про Ивана.", True),
+        ("Найди в моём архиве упоминания участника Артемьев.", True),
+        ("Найди в моём архиве договор с пользователем Yato.", True),
+        ("Найди договор №42 в моём архиве.", True),
+        ("Найди документы по C++ в моём архиве.", True),
+        ("Найди договор (редакция 2024) в моём архиве.", True),
+        ("Найди «Альфа» в моём архиве.", True),
+        ("Найди цену $100 в моём архиве.", True),
+        ("Найди отчёт ISO–9001 в моём архиве.", True),
+    ],
+)
+def test_archive_current_text_classifier_requires_positive_generic_read(
+    message: str,
+    expected: bool,
+) -> None:
+    assert is_archive_search_current_text(message) is expected
+
+
+_UNSAFE_UNICODE_DASHES = tuple(
+    character
+    for character in map(chr, range(0x110000))
+    if character != "-" and unicodedata.category(character) == "Pd"
+)
+
+
+@pytest.mark.parametrize("separator", _UNSAFE_UNICODE_DASHES + ("\u2212",))
+def test_archive_classifier_rejects_every_non_ascii_dash_separator(separator: str) -> None:
+    assert not is_archive_search_current_text(f"Найди договор в моём архиве {separator} это пример команды.")
+
+
+@pytest.mark.parametrize(
+    "unsafe_character",
+    _UNSAFE_UNICODE_DASHES
+    + ("\u200b", "\u200e", "\u2066", "\ufeff", "\x01", "\x7f", "\ud800", "\ue000", "、", "؛", "【"),
+    ids=lambda character: f"U+{ord(character):04X}",
+)
+def test_archive_safe_outbound_prefix_never_hides_unsafe_characters(
+    unsafe_character: str,
+) -> None:
+    assert not is_archive_search_current_text(
+        f"Не ищи{unsafe_character} в интернете, а найди договор в моём архиве."
+    )
+    assert not is_archive_search_current_text(
+        f"Не ищи в интернете, а найди договор в моём архиве{unsafe_character}."
+    )
+
+
+@pytest.mark.parametrize(
+    "unsafe_character",
+    ("\x00", "\x1f", "\x7f", "\x85", "\u200b", "\u2060", "\ufeff", "\u202a"),
+)
+def test_archive_classifier_rejects_unicode_control_categories(unsafe_character: str) -> None:
+    assert unicodedata.category(unsafe_character).startswith("C")
+    assert not _archive_search_literal_shape_is_safe(unsafe_character)
+    assert not is_archive_search_current_text(f"Найди договор в моём архиве{unsafe_character}.")
+
+
+@pytest.mark.parametrize("terminal", ("。", "．", "！", "？", "：", "；", "…", "‥"))
+def test_archive_classifier_rejects_non_ascii_terminal_punctuation(terminal: str) -> None:
+    assert unicodedata.category(terminal).startswith("P")
+    assert not is_archive_search_current_text(f"Найди договор в моём архиве{terminal} Это пример команды.")
+
+
+def test_archive_classifier_keeps_machine_filename_punctuation_allowlist() -> None:
+    assert is_archive_search_current_text("Найди Infrastructure/QNAP_v2-archive.txt в моём архиве.")
+
+
+@pytest.mark.asyncio
+async def test_current_text_archive_route_skips_prepare_context_and_persists_private_lineage(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+
+    async def forbidden_prepare(*_args: Any, **_kwargs: Any) -> AgentContext:
+        raise AssertionError("archive current text reached ambient context preparation")
+
+    async def forbidden_arbiter(*_args: Any, **_kwargs: Any) -> str:
+        raise AssertionError("archive current text reached a semantic arbiter")
+
+    monkeypatch.setattr(runtime, "_prepare_context", forbidden_prepare)
+    monkeypatch.setattr(runtime, "_office_intent_arbiter", forbidden_arbiter)
+    storage.set_permission_override(_OWNER, "search.use", "deny")
+    try:
+        response = await _chat(runtime, actor)
+    finally:
+        await web.close()
+
+    assert model.calls == 0
+    assert kernel.calls == []
+    assert "недоступ" in response["message"].casefold()
+    context = contexts[0]
+    assert context.archive_search_isolated_turn is True
+    assert context.outward_verdict == ("архив", None)
+    assert context.conversation_history == []
+    assert context.ingestion == {}
+    user_row = storage.get_message(context.source_search_lineage_user_message_id, _OWNER)
+    assert user_row is not None
+    raw_metadata = user_row.get("metadata_json")
+    metadata = json.loads(raw_metadata) if isinstance(raw_metadata, str) else dict(raw_metadata or {})
+    assert metadata.get("private_context_lineage") is True
+
+
+@pytest.mark.asyncio
+async def test_archive_with_current_attachment_rejects_before_any_source_read(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_id = _seed_document(storage, suffix="-mixed-carrier")
+    runtime, kernel, actor, model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+    )
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("mixed archive turn read or projected an attachment")
+
+    async def forbidden_async(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("mixed archive turn reached an external source reader")
+
+    monkeypatch.setattr(runtime, "_validated_current_attachment_ids", forbidden)
+    monkeypatch.setattr(runtime, "_owned_file_attachment", forbidden)
+    monkeypatch.setattr(runtime, "_verify_registered_file_attachments", forbidden_async)
+    monkeypatch.setattr(runtime, "_hydrate_legacy_document_metadata", forbidden_async)
+    monkeypatch.setattr(runtime, "_resolve_workspace_inbox_request", forbidden_async)
+    monkeypatch.setattr("friday.agent_runtime._project_attachments_for_request", forbidden)
+
+    try:
+        response = await runtime.chat(
+            _OWNER,
+            "Найди контрольное значение в моём личном архиве.",
+            actor=actor,
+            enable_tools=True,
+            attachments=[
+                {
+                    "raw_object_id": raw_id,
+                    "filename": "mixed-private.txt",
+                    "transient_text": "MIXED-ATTACHMENT-BODY-MUST-NOT-BE-READ",
+                }
+            ],
+        )
+    finally:
+        await web.close()
+
+    assert model.calls == 0
+    assert kernel.calls == []
+    assert response["files"] == [] and response["voice"] is None
+    assert "отдельн" in response["message"].casefold()
+    assert "MIXED-ATTACHMENT" not in json.dumps(response, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("search_denied", [False, True], ids=["available", "denied"])
+async def test_current_archive_intent_overrides_history_aware_weather_policy(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    search_denied: bool,
+) -> None:
+    if not search_denied:
+        _seed_document(storage, suffix="-weather-policy")
+    runtime, kernel, actor, model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    if search_denied:
+        storage.set_permission_override(_OWNER, "search.use", "deny")
+    try:
+        response = await runtime.chat(
+            _OWNER,
+            "Что в моём личном архиве про погоду?",
+            actor=actor,
+            enable_tools=True,
+            turn_policy=TurnPolicyDecision(
+                intent=TurnIntent.WEATHER_NEEDS_LOCATION,
+                public_response=WEATHER_LOCATION_CLARIFICATION,
+            ),
+        )
+    finally:
+        await web.close()
+
+    assert response["message"] != WEATHER_LOCATION_CLARIFICATION
+    if search_denied:
+        assert model.calls == 0 and kernel.calls == []
+        assert "недоступ" in response["message"].casefold()
+    else:
+        assert model.calls == 2
+        assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+
+
+@pytest.mark.asyncio
+async def test_exact_archive_bytes_are_admitted_and_committed_in_phase2_transaction(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_document(storage)
+    runtime, kernel, actor, model, web, contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    committed_in_transaction: list[bool] = []
+    from friday import agent_runtime as runtime_module
+
+    original_store = runtime_module.store_message_in_transaction
+
+    def observe_store(conn: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        committed_in_transaction.append(bool(conn.in_transaction))
+        return original_store(conn, *args, **kwargs)
+
+    monkeypatch.setattr(runtime_module, "store_message_in_transaction", observe_store)
+    try:
+        response = await _chat(runtime, actor)
+    finally:
+        await web.close()
+
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert model.calls == 2
+    assert all(call.get("require_full_context") is True for call in model.call_kwargs)
+    assert "[A#]" in model.call_payloads[0] and "[A#.N]" in model.call_payloads[0]
+    assert model.call_kwargs[0].get("tool_choice") == "archive_search"
+    assert model.call_kwargs[1].get("tool_choice") is None
+    assert model.second_round_tool_names == ["archive_search"]
+    assert model.archive_tool_body.startswith("{") and model.archive_tool_body.endswith("}")
+    assert (
+        model.archive_tool_body.encode("ascii")
+        == contexts[0].archive_prepared_searches[0].authorized_batch.model_visible_canonical_bytes
+    )
+    assert response["message"] == _ANSWER
+    assert response["archive_search_authority_changed_before_publication"] is False
+    assert response["voice"] is None, "archive-backed turns must not enter TTS before phase-2"
+    assert committed_in_transaction == [True]
+    assert contexts[0].archive_search_ledger_frozen is True
+    _assert_archive_ledger_consumed(contexts[0])
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None and stored["content"] == _ANSWER
+
+
+@pytest.mark.asyncio
+async def test_incomplete_empty_archive_page_cannot_publish_confident_absence(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rejected = "В моём архиве ничего нет."
+    model = _ArchiveModel(final_answer=rejected)
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+    try:
+        response = await _chat(runtime, actor)
+    finally:
+        await web.close()
+
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert response["message"] != rejected
+    assert "отсутствие результатов не подтверждено" in response["message"]
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None and stored["content"] == response["message"]
+    raw_metadata = stored.get("metadata_json")
+    metadata = json.loads(raw_metadata) if isinstance(raw_metadata, str) else dict(raw_metadata or {})
+    assert metadata["interaction_trace"]["partial_coverage"] is True
+
+
+@pytest.mark.asyncio
+async def test_documents_only_zero_never_claims_global_archive_absence_with_message_hit(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage.ensure_user(_OWNER, preset_key="user")
+    seeded_conversation = storage.create_conversation(_OWNER, title="cross-corpus hit")
+    storage.store_message(
+        str(seeded_conversation["id"]),
+        _OWNER,
+        "user",
+        f"Сообщение другого корпуса содержит {_QUERY}",
+    )
+    global_absence = "По вашему запросу в личном архиве ничего не найдено."
+    model = _ArchiveModel(
+        final_answer=global_absence,
+        first_arguments={"query": _QUERY, "corpora": ["documents"], "limit": 5},
+    )
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+    try:
+        response = await _chat(runtime, actor)
+    finally:
+        await web.close()
+
+    assert kernel.calls[0][1]["corpora"] == [
+        "documents",
+        "knowledge",
+        "messages",
+        "obsidian",
+    ]
+    assert response["message"] != global_absence
+    assert (
+        "проверенных в этом ходе разделах" in response["message"]
+        or "отсутствие результатов не подтверждено" in response["message"]
+        or "найдены результаты" in response["message"]
+    )
+
+
+def test_code_owned_archive_absence_allows_only_confirmed_exhaustive_zero() -> None:
+    inactive = CapabilityStatus.INACTIVE
+    confirmed = _ArchiveSearchPublicSummary(
+        candidate_count=0,
+        allowed_labels=frozenset(),
+        authorized_absence_confirmed=True,
+        exhaustive=True,
+        partial_coverage=False,
+        document_status=CapabilityStatus.EMPTY,
+        message_status=inactive,
+        obsidian_status=inactive,
+    )
+    content, replaced = _archive_search_semantic_content(
+        confirmed,
+        "Модель не смогла ответить.",
+    )
+    assert replaced is True
+    assert "совпадений не найдено" in content
+    assert "проверенных в этом ходе разделах" in content
+    assert "по выполненному поисковому запросу" in content.casefold()
+    assert "пределах применённых условий" in content
+
+    evidence_found = replace(
+        confirmed,
+        candidate_count=1,
+        allowed_labels=frozenset({"A1", "A1.1"}),
+        authorized_absence_confirmed=False,
+        document_status=CapabilityStatus.SUCCEEDED,
+    )
+    assert _archive_search_semantic_content(evidence_found, _ANSWER) == (_ANSWER, False)
+    guarded, guarded_replaced = _archive_search_semantic_content(
+        evidence_found,
+        "В архиве ничего не найдено.",
+    )
+    assert guarded_replaced is True
+    assert "найдены результаты" in guarded
+
+
+@pytest.mark.parametrize(
+    "claim",
+    (
+        "В моём архиве ничего не найдено [A1].",
+        "Договор отсутствует [A1].",
+        "Совпадений нет [A1].",
+        "Результатов поиска нет [A1].",
+        "Ни одного совпадения [A1].",
+        "Не найден договор [A1].",
+        "Договоров не обнаружено [A1].",
+        "Нет совпадений [A1].",
+        "Релевантные материалы отсутствуют [A1].",
+        "Таких данных не оказалось [A1].",
+        "По документам договор не найден [A1.1].",
+        "По найденным документам договор не найден [A1.1].",
+        "По материалам таких данных не оказалось [A1.1].",
+        "Договора здесь нет [A1.1].",
+        "Результаты отсутствуют [A1].",
+        "Архив не содержит договора [A1.1].",
+        "Мне не удалось обнаружить договор [A1.1].",
+        "No contract was found in the archive [A1.1].",
+        "No matching documents were found [A1].",
+        "There are no results [A1].",
+        "The archive contains no contract [A1.1].",
+        "I found no relevant materials [A1.1].",
+        "В источнике указано, что результатов поиска нет. [A1.1]",
+        "The source states that there are no results. [A1.1]",
+        "В документе написано: «Совпадений нет», поэтому в архиве договора нет [A1.1].",
+        'The document states "No matches", therefore there is no contract in the archive [A1.1].',
+        "В документе написано: «Совпадений нет». [A1.1]",
+        'The document says: "No matching documents were found." [A1.1]',
+        "I couldn't find any relevant documents [A1.1].",
+        "I could not find any relevant documents [A1.1].",
+        "Nothing was found in the archive [A1.1].",
+        "Nothing relevant was found [A1.1].",
+        "The search returned no results [A1.1].",
+        "The contract is absent from the archive [A1.1].",
+        "The archive does not contain a contract [A1.1].",
+        "We did not find any matches [A1.1].",
+        "Unable to find a contract [A1.1].",
+        "The contract could not be found [A1.1].",
+        "No relevant materials could be located [A1.1].",
+        "The requested contract is absent [A1.1].",
+        "The results are empty [A1.1].",
+        "Не получилось найти договор [A1.1].",
+        "Найти договор не удалось [A1.1].",
+        "Поиск не вернул результатов [A1.1].",
+        "Совпадений обнаружить не удалось [A1.1].",
+        "Договор найти не удалось [A1.1].",
+        "Искомого договора в архиве не оказалось [A1.1].",
+        "Поиск не выявил договор [A1.1].",
+        "Запрошенный договор найден не был [A1.1].",
+        "No hits [A1.1].",
+        "Zero results [A1.1].",
+        "Search returned zero results [A1.1].",
+        "Search came back empty [A1.1].",
+        "Search failed to locate the contract [A1.1].",
+        "Contract is not present [A1.1].",
+        "Contract is missing [A1.1].",
+        "We found nothing [A1.1].",
+        "None of the documents matched [A1.1].",
+        "No documents matched [A1.1].",
+        "Zero results were returned [A1.1].",
+        "Search found zero hits [A1.1].",
+        "Archive empty [A1.1].",
+        "Archive lacks a contract [A1.1].",
+        "Search did not find any results [A1.1].",
+        "I found nothing relevant [A1.1].",
+        "Query produced zero matches [A1.1].",
+        "Ноль совпадений [A1.1].",
+        "Поиск пуст [A1.1].",
+        "Поиск безрезультатен [A1.1].",
+        "Договор не нашёлся [A1.1].",
+        "Договор не присутствует [A1.1].",
+        "Документов не имеется [A1.1].",
+        "Ни один документ не подошёл [A1.1].",
+        "Поиск результатов не дал [A1.1].",
+        "Совпадений не было [A1.1].",
+        "Поиск оказался пустым [A1.1].",
+        "Договора в выдаче нет [A1.1].",
+        "Архив пуст [A1.1].",
+        "Не нашлось ни одного договора [A1.1].",
+        "Договор не удалось отыскать [A1.1].",
+        "No relevant records were located [A1.1].",
+        "The requested item was not found [A1.1].",
+        "We failed to retrieve the requested item [A1.1].",
+        "The lookup yielded zero matches [A1.1].",
+        "The archive has no matching record [A1.1].",
+        "Запись не обнаружена [A1.1].",
+        "Материал не найден [A1.1].",
+        "Не удалось отыскать нужную запись [A1.1].",
+        "Запрос ничего не выявил [A1.1].",
+        "Выдача оказалась пустой [A1.1].",
+        "Результатов нет [A1.1].",
+        "Ни одной записи не найдено [A1.1].",
+        "Nothing could be located [A1.1].",
+        "We could not discover the requested entry [A1.1].",
+        "The requested record was not located [A1.1].",
+        "The requested record could not be retrieved [A1.1].",
+        "The requested record does not exist [A1.1].",
+        "The query has no matching record [A1.1].",
+        "The search yielded nothing [A1.1].",
+        "The results came up empty [A1.1].",
+        "There were not any results [A1.1].",
+        "Not a single match was returned [A1.1].",
+        "The search was unsuccessful [A1.1].",
+        "There is no contract in the archive [A1.1].",
+        "No contract exists [A1.1].",
+        "The contract does not exist [A1.1].",
+        "The contract wasn't found [A1.1].",
+        "The files weren't located [A1.1].",
+        "The contract isn't present [A1.1].",
+        "The requested item is unavailable [A1.1].",
+        "The requested item is not available [A1.1].",
+        "Nothing turned up [A1.1].",
+        "No relevant entries surfaced [A1.1].",
+        "Not one result was returned [A1.1].",
+        "We did not get any results [A1.1].",
+        "No matching source appears in the archive [A1.1].",
+        "The archive contains nothing relevant [A1.1].",
+        "No contract [A1.1].",
+        "None were found [A1.1].",
+        "None [A1.1].",
+        "Nothing in the archive [A1.1].",
+        "The query came up with nothing [A1.1].",
+        "The search drew a blank [A1.1].",
+        "The archive is devoid of the contract [A1.1].",
+        "The query hasn't found it [A1.1].",
+        "We haven't found it [A1.1].",
+        "It was nowhere to be found [A1.1].",
+        "Нужный файл не отыскался [A1.1].",
+        "Нужная запись не существует [A1.1].",
+        "Ни одной записи в выдаче [A1.1].",
+        "Никаких совпадений [A1.1].",
+        "Запрос оказался безрезультатным [A1.1].",
+        "Выдача была пустой [A1.1].",
+        "Архив не имеет нужной записи [A1.1].",
+        "Поиск не принёс результатов [A1.1].",
+        "Поиск завершился без совпадений [A1.1].",
+        "Не нашли договор [A1.1].",
+        "Мы не смогли найти договор [A1.1].",
+        "Договор недоступен [A1.1].",
+        "Искомая запись недоступна [A1.1].",
+        "Нужная запись не доступна [A1.1].",
+        "Ничего не отыскалось [A1.1].",
+        "Совпадения не встретились [A1.1].",
+        "Нужной записи в архиве не существует [A1.1].",
+        "Ничего [A1.1].",
+        "Ничего в архиве [A1.1].",
+        "Без совпадений [A1.1].",
+        "Найти не смогли [A1.1].",
+    ),
+)
+def test_evidence_found_archive_rejects_common_broad_absence_claims(claim: str) -> None:
+    summary = _ArchiveSearchPublicSummary(
+        candidate_count=1,
+        allowed_labels=frozenset({"A1", "A1.1"}),
+        authorized_absence_confirmed=False,
+        exhaustive=False,
+        partial_coverage=True,
+        document_status=CapabilityStatus.PARTIAL,
+        message_status=CapabilityStatus.INACTIVE,
+        obsidian_status=CapabilityStatus.INACTIVE,
+    )
+    guarded, replaced = _archive_search_semantic_content(summary, claim)
+    assert replaced is True
+    assert "найдены результаты" in guarded
+
+
+def test_archive_document_scope_is_not_a_quoted_source_absence() -> None:
+    assert _archive_definitive_absence_claim("По документам договор не найден [A1.1].")
+
+
+@pytest.mark.parametrize(
+    "supported_claim",
+    (
+        "I found a relevant document [A1.1].",
+        "The contract is present in the archive [A1.1].",
+        "The search returned three results [A1.1].",
+        "The contract is not signed [A1.1].",
+        "The archive is not empty [A1.1].",
+        "The contract is not missing [A1.1].",
+        "The contract was found and is not signed [A1.1].",
+        "The document is missing a signature [A1.1].",
+        "The archive does not lack the contract [A1.1].",
+        "The search was not unsuccessful [A1.1].",
+        "No later than 2024, the contract was signed [A1.1].",
+        "No doubt the contract exists [A1.1].",
+        "No more than three results were returned [A1.1].",
+        "Not nothing was found [A1.1].",
+        "Нашла договор в архиве [A1.1].",
+        "Поиск вернул три результата [A1.1].",
+        "Договор присутствует в архиве [A1.1].",
+        "Договор не подписан [A1.1].",
+        "Архив не пуст [A1.1].",
+        "Договор не просрочен [A1.1].",
+        "Запрос не безрезультатен [A1.1].",
+        "Договор не отсутствует [A1.1].",
+        "Материал доступен в архиве [A1.1].",
+    ),
+)
+def test_archive_absence_guard_preserves_bounded_positive_claims(
+    supported_claim: str,
+) -> None:
+    summary = _ArchiveSearchPublicSummary(
+        candidate_count=1,
+        allowed_labels=frozenset({"A1", "A1.1"}),
+        authorized_absence_confirmed=False,
+        exhaustive=False,
+        partial_coverage=True,
+        document_status=CapabilityStatus.PARTIAL,
+        message_status=CapabilityStatus.INACTIVE,
+        obsidian_status=CapabilityStatus.INACTIVE,
+    )
+    assert not _archive_definitive_absence_claim(supported_claim)
+    assert _archive_search_semantic_content(summary, supported_claim) == (
+        supported_claim,
+        False,
+    )
+
+
+@pytest.mark.parametrize(
+    "ungrounded",
+    (
+        "В архиве найден договор.",
+        "В архиве найден договор [A999].",
+    ),
+)
+def test_evidence_found_archive_requires_an_exact_admitted_label(ungrounded: str) -> None:
+    summary = _ArchiveSearchPublicSummary(
+        candidate_count=1,
+        allowed_labels=frozenset({"A1", "A1.1"}),
+        authorized_absence_confirmed=False,
+        exhaustive=False,
+        partial_coverage=True,
+        document_status=CapabilityStatus.PARTIAL,
+        message_status=CapabilityStatus.INACTIVE,
+        obsidian_status=CapabilityStatus.INACTIVE,
+    )
+    guarded, replaced = _archive_search_semantic_content(summary, ungrounded)
+    assert replaced is True
+    assert "надёжно сформулировать" in guarded
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ["search_revoked", "source_deleted"])
+async def test_late_archive_denial_or_source_drift_consumes_and_fails_closed(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    raw_id = _seed_document(storage)
+
+    def mutate() -> None:
+        if mutation == "search_revoked":
+            storage.set_permission_override(_OWNER, "search.use", "deny")
+        else:
+            with storage.transaction() as conn:
+                changed = conn.execute(
+                    "UPDATE raw_objects SET deleted_at='2026-08-23T17:35:00Z' WHERE id=?",
+                    (raw_id,),
+                )
+            assert changed.rowcount == 1
+
+    runtime, kernel, actor, model, web, contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        before_answer=mutate,
+    )
+    try:
+        response = await _chat(runtime, actor)
+    finally:
+        await web.close()
+
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert model.calls == 2
+    assert response["archive_search_authority_changed_before_publication"] is True
+    assert response["voice"] is None
+    assert response["files"] == []
+    assert _QUERY not in json.dumps(response, ensure_ascii=False, sort_keys=True)
+    assert contexts[0].archive_search_ledger_frozen is True
+    _assert_archive_ledger_consumed(contexts[0])
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None
+    assert _QUERY not in str(stored["content"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("seeded", [False, True], ids=["zero-hit", "seeded-hit"])
+async def test_late_archive_denial_durable_trace_is_existence_indistinguishable(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    seeded: bool,
+) -> None:
+    if seeded:
+        _seed_document(storage, suffix="-trace-denial")
+
+    def revoke() -> None:
+        storage.set_permission_override(_OWNER, "search.use", "deny")
+
+    runtime, _kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        before_answer=revoke,
+    )
+    try:
+        response = await _chat(runtime, actor)
+    finally:
+        await web.close()
+
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None
+    raw_metadata = stored.get("metadata_json")
+    metadata = json.loads(raw_metadata) if isinstance(raw_metadata, str) else dict(raw_metadata or {})
+    trace = metadata["interaction_trace"]
+    assert trace["partial_coverage"] is False
+    assert trace["budget"]["model_calls"] == 0
+    assert trace["budget"]["capability_calls"] == 0
+    assert trace["budget"]["latency_ms"] == 0
+    assert response["tools_used"] == []
+    source_capabilities = {
+        str(step.get("capability") or "") for step in trace["steps"] if isinstance(step, dict)
+    }
+    assert source_capabilities.isdisjoint({"document_retrieval", "message_retrieval", "obsidian"})
+
+
+@pytest.mark.asyncio
+async def test_late_archive_denial_hides_multi_page_operational_shape(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_document(storage, suffix="-denied-page-1")
+    _seed_document(storage, suffix="-denied-page-2")
+
+    class _TwoPageThenRevoke:
+        enabled = True
+        model = "archive-two-page-denial-model"
+        total_budget_sec = 3.0
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, messages: list[dict[str, Any]], **_kwargs: Any) -> dict[str, Any]:
+            self.calls += 1
+            if self.calls == 1:
+                arguments = {"query": _QUERY, "corpora": ["documents"], "limit": 1}
+            elif self.calls == 2:
+                pages = [
+                    json.loads(str(item.get("content") or ""))
+                    for item in messages
+                    if item.get("role") == "tool"
+                ]
+                continuation = pages[-1].get("continuation")
+                assert isinstance(continuation, str) and continuation
+                arguments = {
+                    "query": _QUERY,
+                    "corpora": ["documents"],
+                    "limit": 1,
+                    "continuation": continuation,
+                }
+            else:
+                storage.set_permission_override(_OWNER, "search.use", "deny")
+                return {"content": _ANSWER, "tool_calls": None, "finish_reason": "stop"}
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": f"archive-page-{self.calls}",
+                        "type": "function",
+                        "function": {
+                            "name": "archive_search",
+                            "arguments": json.dumps(arguments),
+                        },
+                    }
+                ],
+                "finish_reason": "tool_calls",
+            }
+
+    model = _TwoPageThenRevoke()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+    try:
+        response = await _chat(runtime, actor)
+    finally:
+        await web.close()
+
+    assert model.calls == 3
+    assert [name for name, _arguments in kernel.calls] == ["archive_search", "archive_search"]
+    assert response["archive_search_authority_changed_before_publication"] is True
+    assert response["tools_used"] == []
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None
+    raw_metadata = stored.get("metadata_json")
+    metadata = json.loads(raw_metadata) if isinstance(raw_metadata, str) else dict(raw_metadata or {})
+    trace = metadata["interaction_trace"]
+    assert trace["partial_coverage"] is False
+    assert trace["budget"]["model_calls"] == 0
+    assert trace["budget"]["capability_calls"] == 0
+    assert trace["budget"]["latency_ms"] == 0
+
+
+@pytest.mark.asyncio
+async def test_after_first_archive_page_only_a_cursor_continuation_can_run(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_document(storage)
+    second_round_calls = [
+        {
+            "id": "forbidden-speak",
+            "type": "function",
+            "function": {
+                "name": "speak",
+                "arguments": json.dumps({"text": _ANSWER}),
+            },
+        },
+        {
+            "id": "fresh-search-without-cursor",
+            "type": "function",
+            "function": {
+                "name": "archive_search",
+                "arguments": json.dumps(
+                    {
+                        "query": "unrelated fresh query",
+                        "corpora": ["documents"],
+                    }
+                ),
+            },
+        },
+    ]
+    runtime, kernel, actor, model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        second_round_calls=second_round_calls,
+    )
+    try:
+        response = await _chat(runtime, actor)
+    finally:
+        await web.close()
+
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert model.calls == 3
+    assert response["archive_search_authority_changed_before_publication"] is False
+    assert response["voice"] is None
+
+
+@pytest.mark.asyncio
+async def test_copied_archive_json_without_typed_carrier_never_reaches_model(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _AdversarialArchiveModel({"query": _QUERY, "corpora": ["documents"], "limit": 5})
+    runtime, kernel, actor, _model, web, contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+        kernel_factory=_CopiedPayloadKernel,
+    )
+    try:
+        response = await _chat(runtime, actor, answer_with_voice=False)
+    finally:
+        await web.close()
+
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert _QUERY not in model.tool_body
+    assert "непроверяем" in model.tool_body.casefold()
+    assert contexts[0].archive_search_used is False
+    assert contexts[0].archive_model_batch_ledger is None
+    with pytest.raises(ArchiveSearchAuthorityError):
+        create_archive_model_batch_ledger(
+            tenant_id=_OWNER,
+            principal_id=_OWNER,
+            turn_discriminator=contexts[0].source_search_lineage_user_message_id,
+        )
+    assert response["archive_search_authority_changed_before_publication"] is False
+    assert response["voice"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "private_argument",
+    ["_archive_invocation", "actor", "turn_ledger"],
+)
+async def test_model_supplied_archive_authority_arguments_are_rejected_before_kernel(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    private_argument: str,
+) -> None:
+    model = _AdversarialArchiveModel(
+        {
+            "query": _QUERY,
+            "corpora": ["documents"],
+            private_argument: {"spoof": _QUERY},
+        }
+    )
+    runtime, kernel, actor, _model, web, contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+    try:
+        response = await _chat(runtime, actor, answer_with_voice=False)
+    finally:
+        await web.close()
+
+    assert kernel.calls == []
+    assert "отклон" in model.tool_body.casefold()
+    assert contexts[0].archive_model_batch_ledger is None
+    assert contexts[0].archive_search_used is False
+    assert response["archive_search_authority_changed_before_publication"] is False
+
+
+@pytest.mark.asyncio
+async def test_archive_turn_is_one_synthesis_pass_even_when_generic_verifier_is_enabled(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from friday import agent_runtime as runtime_module
+
+    _seed_document(storage)
+    runtime, _kernel, actor, model, web, contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        verify_answers=True,
+    )
+    try:
+        response = await _chat(runtime, actor)
+    finally:
+        await web.close()
+
+    assert response["message"] == _ANSWER
+    assert model.calls == 2, "archive evidence must not enter judge/repair generations"
+    exact_body = (
+        contexts[0]
+        .archive_prepared_searches[0]
+        .authorized_batch.model_visible_canonical_bytes.decode("ascii")
+    )
+    assert model.archive_tool_body == exact_body
+    assert all(exact_body not in payload for payload in model.call_payloads[2:])
+    assert (
+        runtime_module._secondary_tool_evidence(  # noqa: SLF001 - defense-in-depth seam
+            {"tool": "archive_search", "output": exact_body},
+            _QUERY,
+        )
+        == ""
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("outward_kind", "message"),
+    [
+        ("архив", "Найди контрольное значение в моём личном архиве."),
+        ("знание", "Найди контрольное значение в моём личном архиве."),
+    ],
+)
+async def test_archive_intent_closes_web_before_first_model_result(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    outward_kind: str,
+    message: str,
+) -> None:
+    model = _AdversarialArchiveModel(
+        {"query": _QUERY},
+        tool_name="web_search",
+    )
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+        outward_kind=outward_kind,
+    )
+    leaked_queries: list[str] = []
+
+    async def forbidden_web_search(query: str, **_kwargs: Any) -> list[dict[str, Any]]:
+        leaked_queries.append(query)
+        raise AssertionError("private archive query reached WebSurfer")
+
+    monkeypatch.setattr(web, "search", forbidden_web_search)
+    try:
+        if outward_kind == "знание":
+            context = AgentContext(
+                conversation_id="archive-personal-wording-conversation",
+                user_id=_OWNER,
+                person_id=_OWNER,
+                search_query=_QUERY,
+                outward_verdict=(outward_kind, _QUERY),
+                interaction_mode="dialogue",
+            )
+            response = await runtime._agentic_loop(  # noqa: SLF001 - first-token seam
+                context,
+                message,
+                actor,
+                kernel.get_tool_definitions(actor, topic=outward_kind),
+                None,
+            )
+        else:
+            response = await _chat(
+                runtime,
+                actor,
+                answer_with_voice=False,
+                message=message,
+            )
+    finally:
+        await web.close()
+
+    assert "archive_search" in model.first_offered_tool_names
+    assert "web_search" not in model.first_offered_tool_names
+    assert not any(name == "web_search" for name, _arguments in kernel.calls)
+    assert leaked_queries == []
+    assert _QUERY not in model.tool_body
+    assert response.get("archive_search_authority_changed_before_publication", False) is False
+
+
+@pytest.mark.asyncio
+async def test_archive_backed_file_request_has_no_second_model_or_file_carrier(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_document(storage)
+    runtime, kernel, actor, model, web, contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        verify_answers=True,
+    )
+    try:
+        response = await _chat(runtime, actor, answer_with_voice=False)
+        made = await runtime._file_for_a_request_that_wanted_one(  # noqa: SLF001
+            "Оформи результат в документ PDF.",
+            response["message"],
+            actor,
+            evidence=[
+                {
+                    "tool": "archive_search",
+                    "output": model.archive_tool_body,
+                }
+            ],
+            context=contexts[0],
+        )
+    finally:
+        await web.close()
+
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert made is None
+    assert response["files"] == []
+    assert response["voice"] is None
+
+
+@pytest.mark.asyncio
+async def test_web_first_then_archive_later_never_executes_or_discloses_to_web(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_document(storage)
+    model = _WebThenArchiveModel()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+    leaked_queries: list[str] = []
+
+    async def forbidden_web_search(query: str, **_kwargs: Any) -> list[dict[str, Any]]:
+        leaked_queries.append(query)
+        raise AssertionError("archive query reached WebSurfer")
+
+    monkeypatch.setattr(web, "search", forbidden_web_search)
+    try:
+        response = await _chat(runtime, actor, answer_with_voice=False)
+    finally:
+        await web.close()
+
+    assert model.first_offered_tool_names == ["archive_search"]
+    assert model.calls == 3
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert leaked_queries == []
+    assert response["message"] == _ANSWER
+
+
+@pytest.mark.asyncio
+async def test_direct_archive_answer_without_admitted_result_is_never_published(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+    try:
+        response = await _chat(runtime, actor, answer_with_voice=False)
+    finally:
+        await web.close()
+
+    assert model.calls == 1
+    assert model.call_kwargs[0]["tool_choice"] == "archive_search"
+    assert model.call_kwargs[0]["require_full_context"] is True
+    assert kernel.calls == []
+    assert contexts[0].archive_search_used is False
+    assert contexts[0].archive_model_batch_ledger is None
+    assert _QUERY not in response["message"]
+    assert "недоступ" in response["message"].casefold()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    (
+        "Найди контрольное значение в моём личном архиве.",
+        "Попробуй найти договор в моём личном архиве.",
+        "Есть договор в моём личном архиве?",
+    ),
+)
+async def test_archive_intent_with_search_permission_denied_has_zero_model_or_outbound_calls(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+) -> None:
+    model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+    storage.set_permission_override(_OWNER, "search.use", "deny")
+    leaked_queries: list[str] = []
+
+    async def forbidden_web_search(query: str, **_kwargs: Any) -> list[dict[str, Any]]:
+        leaked_queries.append(query)
+        raise AssertionError("denied archive query reached WebSurfer")
+
+    monkeypatch.setattr(web, "search", forbidden_web_search)
+    try:
+        response = await _chat(runtime, actor, answer_with_voice=False, message=message)
+    finally:
+        await web.close()
+
+    assert model.calls == 0
+    assert kernel.calls == []
+    assert leaked_queries == []
+    assert contexts[0].archive_search_isolated_turn is True
+    assert _QUERY not in response["message"]
+    assert response["voice"] is None
+    assert response["files"] == []
+
+
+@pytest.mark.asyncio
+async def test_direct_agentic_archive_intent_without_schema_is_private_deterministic_denial(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+    context = AgentContext(
+        conversation_id="archive-no-schema-direct",
+        user_id=_OWNER,
+        person_id=_OWNER,
+        outward_verdict=("архив", _QUERY),
+    )
+    tools = [
+        item
+        for item in kernel.get_tool_definitions(actor)
+        if str((item.get("function") or {}).get("name") or "") != "archive_search"
+    ]
+    try:
+        response = await runtime._agentic_loop(  # noqa: SLF001 - direct security seam
+            context,
+            "Найди значение в моём личном архиве.",
+            actor,
+            tools,
+            None,
+        )
+    finally:
+        await web.close()
+
+    assert model.calls == 0
+    assert kernel.calls == []
+    assert context.archive_search_isolated_turn is True
+    assert _QUERY not in str(response)
+
+
+@pytest.mark.asyncio
+async def test_mixed_obsidian_and_archive_request_runs_neither_route(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+    try:
+        response = await _chat(
+            runtime,
+            actor,
+            answer_with_voice=False,
+            message=(
+                "Найди контрольное значение в моём личном архиве и создай в Obsidian "
+                "заметку Projects/Leak.md с результатом."
+            ),
+        )
+    finally:
+        await web.close()
+
+    assert model.calls == 0
+    assert kernel.calls == []
+    assert len(contexts) == 1
+    assert contexts[0].archive_search_isolated_turn is True
+    assert "отдельн" in response["message"].casefold()
+    assert response["files"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "answer_with_voice"),
+    [
+        ("Найди договор в моём архиве и создай файл report.pdf.", False),
+        ("Найди договор в моём архиве и поставь напоминание завтра.", False),
+        ("Сохрани X в моём архиве и покажи мои документы.", False),
+        ("Что я писал про Альфу и проверь договор в моём архиве.", False),
+        ("Найди договор в моём архиве.", True),
+    ],
+)
+async def test_archive_read_with_second_effect_runs_no_model_or_tool(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+    answer_with_voice: bool,
+) -> None:
+    model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+    try:
+        response = await _chat(
+            runtime,
+            actor,
+            message=message,
+            answer_with_voice=answer_with_voice,
+        )
+    finally:
+        await web.close()
+
+    assert model.calls == 0
+    assert kernel.calls == []
+    assert "отдельн" in response["message"].casefold()
+    assert response["files"] == []
+    assert response["voice"] is None
+
+
+@pytest.mark.asyncio
+async def test_archive_read_with_reply_quote_runs_no_model_or_tool(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _DirectAnswerModel()
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+    try:
+        response = await runtime.chat(
+            _OWNER,
+            "Найди договор в моём архиве.",
+            actor=actor,
+            enable_tools=True,
+            answer_with_voice=False,
+            reply_to="AMBIENT-REPLY-PRIVATE-CARRIER",
+        )
+    finally:
+        await web.close()
+
+    assert model.calls == 0
+    assert kernel.calls == []
+    assert "отдельн" in response["message"].casefold()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Найди в моём личном архиве файл archive-runtime.txt.",
+        "Покажи из моего архива файл archive-runtime.txt.",
+        "Что в моём архиве в файле archive-runtime.txt?",
+        "Найди archive-runtime.txt в моём личном архиве.",
+        "Найди в моём личном архиве сообщения про проект Альфа.",
+        "Покажи в моём личном архиве переписку про проект Альфа.",
+        "Найди в моём личном архиве знания про проект Альфа.",
+        "В моём архиве покажи все мои сообщения за вчера.",
+        "Не ищи в интернете, найди договор в моём архиве.",
+        "Не надо искать в интернете — покажи, что есть в моём архиве.",
+        "Найди договор в моём архиве, но не ищи в интернете.",
+        "Можешь ли найти договор в моём архиве?",
+        "Попробуй найти договор в моём архиве.",
+        "Хочу, чтобы ты нашла договор в моём архиве.",
+        "Давай найдём договор в моём архиве.",
+        "Не могла бы ты найти договор в моём архиве?",
+        "В моём архиве есть договор?",
+        "Есть договор в моём архиве?",
+        "Хочу узнать, есть ли договор в моём архиве.",
+    ],
+)
+async def test_archive_query_nouns_and_filenames_stay_on_facade(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+) -> None:
+    _seed_document(storage)
+    runtime, kernel, actor, model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    try:
+        response = await _chat(runtime, actor, message=message)
+    finally:
+        await web.close()
+
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert model.calls == 2
+    assert "недоступен" not in response["message"].casefold()
+    assert "отдельном ходе" not in response["message"].casefold()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "expected_corpora"),
+    [
+        (
+            "Найди договор в моём личном архиве.",
+            ["documents", "knowledge", "messages", "obsidian"],
+        ),
+        ("Найди файл в моём личном архиве.", ["documents"]),
+        (
+            "Найди сообщения и знания в моём личном архиве.",
+            ["knowledge", "messages"],
+        ),
+        ("Найди заметки в моём личном архиве.", ["obsidian"]),
+        (
+            "Найди договор в моём архиве, только не в сообщениях.",
+            ["documents", "knowledge", "obsidian"],
+        ),
+        (
+            "Найди документы в моём архиве, но не заметки.",
+            ["documents"],
+        ),
+        (
+            "Найди всё кроме сообщений в моём архиве.",
+            ["documents", "knowledge", "obsidian"],
+        ),
+        (
+            "Найди в моём архиве не сообщения, а документы.",
+            ["documents"],
+        ),
+        (
+            "Найди в моём архиве только документы, не сообщения.",
+            ["documents"],
+        ),
+        ("Найди не старые сообщения в моём архиве.", ["messages"]),
+        ("Найди не все сообщения в моём архиве.", ["messages"]),
+        ("Найди не удалённые сообщения в моём архиве.", ["messages"]),
+        ("Найди не более пяти сообщений в моём архиве.", ["messages"]),
+        (
+            "Найди в моём архиве не только сообщения, но и документы.",
+            ["documents", "messages"],
+        ),
+    ],
+)
+async def test_archive_corpus_scope_is_code_owned_from_current_text(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+    expected_corpora: list[str],
+) -> None:
+    _seed_document(storage, suffix="-code-owned-scope")
+    model = _ArchiveModel(
+        first_arguments={"query": _QUERY, "corpora": ["documents"], "limit": 5},
+    )
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+    try:
+        await _chat(runtime, actor, message=message)
+    finally:
+        await web.close()
+
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert kernel.calls[0][1]["corpora"] == expected_corpora
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Не забудь найти сообщения в моём архиве.",
+        "Найди не старые сообщения в моём архиве.",
+        "Найди не все сообщения в моём архиве.",
+        "Найди не удалённые сообщения в моём архиве.",
+        "Найди не более пяти сообщений в моём архиве.",
+    ],
+)
+def test_archive_corpus_qualifier_is_not_misread_as_scope_exclusion(message: str) -> None:
+    assert _archive_search_code_owned_corpora(message) == ("messages",)
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (
+            "Не ищи переписку; найди договор в моём архиве.",
+            ("documents", "knowledge", "obsidian"),
+        ),
+        (
+            "Не ищи в моём архиве сообщения, но найди документы в моём архиве.",
+            ("documents",),
+        ),
+    ],
+)
+def test_archive_negated_corpus_scope_is_derived_fail_closed(
+    message: str,
+    expected: tuple[str, ...],
+) -> None:
+    assert _archive_search_code_owned_corpora(message) == expected
+
+
+@pytest.mark.asyncio
+async def test_explicit_uploader_scope_never_broadens_into_archive_facade(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _AdversarialArchiveModel(
+        {"query": _QUERY, "corpora": ["documents"]},
+    )
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+    context = AgentContext(
+        conversation_id="archive-uploader-direct",
+        user_id=_OWNER,
+        person_id=_OWNER,
+        outward_verdict=("архив", _QUERY),
+    )
+    try:
+        await runtime._agentic_loop(  # noqa: SLF001 - current-text authority seam
+            context,
+            "Найди в моём архиве документы от пользователя Yato.",
+            actor,
+            kernel.get_tool_definitions(actor, topic="архив"),
+            None,
+        )
+    finally:
+        await web.close()
+
+    assert "archive_search" not in model.first_offered_tool_names
+    assert not any(name == "archive_search" for name, _arguments in kernel.calls)
+    assert context.archive_search_used is False
+
+
+@pytest.mark.asyncio
+async def test_archive_isolation_removes_ambient_canaries_from_model_and_metadata(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ambient = "AMBIENT-PRIVATE-CANARY-9137"
+    late = "LATE-AMBIENT-MUTATION-6274"
+    context_box: list[AgentContext] = []
+
+    def initialize(context: AgentContext) -> None:
+        context_box.append(context)
+        context.knowledge_hits = [{"id": "ko_ambient", "title": ambient, "content": ambient, "_score": 1.0}]
+        context.entity_hits = [{"id": "entity_ambient", "name": ambient}]
+        context.conversation_history = [
+            {"role": "user", "content": ambient},
+            {"role": "assistant", "content": ambient},
+        ]
+        context.reply_quote = ambient
+        context.retrieval_trace = [{"title": ambient, "reason": ambient}]
+        context.graph_context = {"paths": [{"label": ambient}], "entities": [{"name": ambient}]}
+        context.proactive_suggestions = [ambient]
+        context.feedback_summary = {"canary": ambient}
+        context.document_metadata_evidence = ambient
+        context.standing_rules = [ambient]
+        context.corrections = [ambient]
+        context.previous_user_turn = ambient
+        context.previous_answer = ambient
+        context.ingestion = {"action": "review", "canary": ambient}
+        context.kb_size = 77
+        context.entity_count = 66
+        context.relation_count = 55
+        context.pending_inbox = 44
+        context.pending_resolutions = 33
+        context.rerank_dropped = 22
+        context.matched_at_least = 11
+        context.retrieval_confidence = 0.99
+
+    def mutate_after_admission() -> None:
+        context = context_box[0]
+        context.knowledge_hits = [{"id": "ko_late", "title": late, "content": late}]
+        context.entity_hits = [{"name": late}]
+        context.conversation_history = [{"role": "assistant", "content": late}]
+        context.graph_context = {"paths": [{"label": late}]}
+        context.standing_rules = [late]
+        context.corrections = [late]
+        context.feedback_summary = {"late": late}
+        storage.set_permission_override(_OWNER, "web.research", "deny")
+
+    _seed_document(storage)
+    model = _ArchiveModel(before_answer=mutate_after_admission)
+    runtime, kernel, actor, _model, web, contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+        context_initializer=initialize,
+    )
+    monkeypatch.setattr(runtime, "_user_model_payload", lambda _user_id: {"canary": ambient})
+    monkeypatch.setattr(runtime, "_custom_instructions", lambda _user_id: [ambient])
+    monkeypatch.setattr(runtime, "_standing_rules", lambda _user_id: [ambient])
+    monkeypatch.setattr(runtime, "_corrections", lambda _user_id: [ambient])
+    try:
+        response = await _chat(runtime, actor, answer_with_voice=False)
+    finally:
+        await web.close()
+
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert response["message"] == _ANSWER
+    assert all(ambient not in payload and late not in payload for payload in model.call_payloads)
+    context = contexts[0]
+    assert context.knowledge_hits == []
+    assert context.entity_hits == []
+    assert context.conversation_history == []
+    assert context.graph_context == {}
+    assert context.standing_rules == []
+    assert context.corrections == []
+    stored = storage.get_message(str(response["message_id"]), _OWNER)
+    assert stored is not None
+    durable = str(stored.get("metadata_json") or "")
+    assert ambient not in durable and late not in durable
+
+
+@pytest.mark.asyncio
+async def test_cancellation_before_archive_admission_abandons_empty_turn_ledger(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _ArchiveModel()
+    runtime, kernel, actor, _model, web, contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+        kernel_factory=_CancelDuringArchiveKernel,
+    )
+    assert isinstance(kernel, _CancelDuringArchiveKernel)
+    task = asyncio.create_task(_chat(runtime, actor, answer_with_voice=False))
+    try:
+        await asyncio.wait_for(kernel.archive_call_started.wait(), timeout=3.0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        if not task.done():
+            task.cancel()
+        await web.close()
+
+    context = contexts[0]
+    assert context.archive_search_used is False
+    assert context.archive_model_batch_ledger is None
+    with pytest.raises(ArchiveSearchAuthorityError):
+        create_archive_model_batch_ledger(
+            tenant_id=_OWNER,
+            principal_id=_OWNER,
+            turn_discriminator=context.source_search_lineage_user_message_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_cancellation_after_archive_admission_consumes_turn_ledger(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_document(storage)
+    model = _CancelAfterFirstPageModel()
+    runtime, kernel, actor, _model, web, contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+    )
+    task = asyncio.create_task(_chat(runtime, actor, answer_with_voice=False))
+    try:
+        await asyncio.wait_for(model.second_call_started.wait(), timeout=3.0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        if not task.done():
+            task.cancel()
+        await web.close()
+
+    context = contexts[0]
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert context.archive_search_used is True
+    assert context.archive_search_ledger_frozen is True
+    _assert_archive_ledger_consumed(context)
+
+
+@pytest.mark.asyncio
+async def test_real_router_preserves_two_exact_archive_pages_through_final_answer(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_document(storage, suffix="-page-1")
+    _seed_document(storage, suffix="-page-2")
+    page_two_answer = f"Во второй странице найдено значение {_QUERY} [A21.1]."
+    router = LLMRouter(replace(settings, llm_enabled=True))
+    payloads: list[dict[str, Any]] = []
+
+    class _Client:
+        async def __aenter__(self) -> _Client:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> bool:
+            return False
+
+        async def post(self, url: str, **kwargs: Any) -> httpx.Response:
+            payload = kwargs.get("json")
+            assert isinstance(payload, dict)
+            payloads.append(payload)
+            call_number = len(payloads)
+            if call_number == 1:
+                message = {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "router-archive-page-1",
+                            "type": "function",
+                            "function": {
+                                "name": "archive_search",
+                                "arguments": json.dumps(
+                                    {"query": _QUERY, "corpora": ["documents"], "limit": 1}
+                                ),
+                            },
+                        }
+                    ],
+                }
+                finish_reason = "tool_calls"
+            elif call_number == 2:
+                first_pages = [
+                    json.loads(str(item.get("content") or ""))
+                    for item in payload.get("messages", [])
+                    if item.get("role") == "tool"
+                ]
+                assert len(first_pages) == 1
+                continuation = first_pages[0].get("continuation")
+                assert isinstance(continuation, str) and continuation
+                message = {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "router-archive-page-2",
+                            "type": "function",
+                            "function": {
+                                "name": "archive_search",
+                                "arguments": json.dumps(
+                                    {
+                                        "query": _QUERY,
+                                        "corpora": ["documents"],
+                                        "limit": 1,
+                                        "continuation": continuation,
+                                    }
+                                ),
+                            },
+                        }
+                    ],
+                }
+                finish_reason = "tool_calls"
+            else:
+                message = {"content": page_two_answer, "tool_calls": None}
+                finish_reason = "stop"
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json={
+                    "model": router.model,
+                    "choices": [{"message": message, "finish_reason": finish_reason}],
+                    "usage": {},
+                },
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *args, **kwargs: _Client())
+    runtime, kernel, actor, _model, web, contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=router,
+    )
+    try:
+        response = await _chat(runtime, actor, answer_with_voice=False)
+    finally:
+        await web.close()
+
+    assert response["message"] == page_two_answer
+    assert [name for name, _arguments in kernel.calls] == ["archive_search", "archive_search"]
+    assert len(payloads) == 3
+    assert payloads[0]["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "archive_search"},
+    }
+    prepared = contexts[0].archive_prepared_searches
+    assert len(prepared) == 2
+    exact_pages = [item.authorized_batch.model_visible_canonical_bytes.decode("ascii") for item in prepared]
+    public_pages = [json.loads(item) for item in exact_pages]
+    assert public_pages[0]["candidates"][0]["label"] == "A1"
+    assert public_pages[0]["candidates"][0]["passages"][0]["label"] == "A1.1"
+    assert public_pages[1]["candidates"][0]["label"] == "A21"
+    assert public_pages[1]["candidates"][0]["passages"][0]["label"] == "A21.1"
+    summary = _archive_search_public_summary(prepared)
+    assert {"A1", "A1.1", "A21", "A21.1"}.issubset(summary.allowed_labels)
+    assert _archive_search_semantic_content(summary, page_two_answer) == (
+        page_two_answer,
+        False,
+    )
+    wrong_page, replaced = _archive_search_semantic_content(
+        summary,
+        f"Во второй странице найдено значение {_QUERY} [A2.1].",
+    )
+    assert replaced is True
+    assert "надёжно сформулировать" in wrong_page
+    for payload_index, expected_count in ((1, 1), (2, 2)):
+        transmitted = [
+            str(item.get("content") or "")
+            for item in payloads[payload_index]["messages"]
+            if item.get("role") == "tool"
+        ]
+        assert transmitted == exact_pages[:expected_count]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outward_kind", ["", "знание", "архив"])
+async def test_archive_call_without_current_turn_archive_authority_is_rejected(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    outward_kind: str,
+) -> None:
+    model = _AdversarialArchiveModel(
+        {"query": _QUERY, "corpora": ["documents"]},
+    )
+    runtime, kernel, actor, _model, web, contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+        outward_kind=outward_kind,
+    )
+    try:
+        response = await _chat(
+            runtime,
+            actor,
+            answer_with_voice=False,
+            message="А что там?",
+        )
+    finally:
+        await web.close()
+
+    assert "archive_search" not in model.first_offered_tool_names
+    assert kernel.calls == []
+    assert contexts[0].archive_model_batch_ledger is None
+    assert contexts[0].archive_search_used is False
+    assert response["archive_search_authority_changed_before_publication"] is False

@@ -145,6 +145,20 @@ def _current(conn: sqlite3.Connection, **overrides: object) -> ArchiveMessageSea
     return select_authorized_archive_message_page_in_transaction(conn, **values)  # type: ignore[arg-type]
 
 
+def _all(conn: sqlite3.Connection, **overrides: object) -> ArchiveMessageSearchPage | None:
+    values: dict[str, object] = {
+        "principal_id": "alice",
+        "query": "needle",
+        "scope": ArchiveMessageScope.ALL,
+        "conversation_id": _CURRENT,
+        "boundary_user_message_id": _BOUNDARY,
+        "since": _SINCE,
+        "until": _UNTIL,
+    }
+    values.update(overrides)
+    return select_authorized_archive_message_page_in_transaction(conn, **values)  # type: ignore[arg-type]
+
+
 def test_current_scope_authorizes_before_recall_and_returns_exact_bounded_context() -> None:
     with _database() as conn:
         _insert(conn, 10, content="first private row", created_at="2026-08-23T08:10:00+00:00")
@@ -251,13 +265,8 @@ def test_all_scope_has_exact_totals_stable_ties_and_never_crosses_conversations(
         )
         _insert(conn, 40, content="needle excluded boundary instant", created_at=_UNTIL)
 
-        first = select_authorized_archive_message_page_in_transaction(
+        first = _all(
             conn,
-            principal_id="alice",
-            query="needle",
-            scope=ArchiveMessageScope.ALL,
-            since=_SINCE,
-            until=_UNTIL,
             limit=1,
             context_before=1,
             context_after=1,
@@ -273,13 +282,8 @@ def test_all_scope_has_exact_totals_stable_ties_and_never_crosses_conversations(
         assert {item.row.conversation_id for item in first.hits[0].context} == {_OTHER}
         assert len(first.ledgers) == 1
 
-        complete = select_authorized_archive_message_page_in_transaction(
+        complete = _all(
             conn,
-            principal_id="alice",
-            query="needle",
-            scope=ArchiveMessageScope.ALL,
-            since=_SINCE,
-            until=_UNTIL,
             limit=2,
         )
         assert complete is not None
@@ -304,13 +308,9 @@ def test_foreign_corpus_cannot_change_principal_local_lexical_ranks_or_scores() 
         _insert(conn, 20, content="beta", created_at=shared_time)
 
         def ranked() -> list[tuple[str, float]]:
-            page = select_authorized_archive_message_page_in_transaction(
+            page = _all(
                 conn,
-                principal_id="alice",
                 query="alpha beta",
-                scope=ArchiveMessageScope.ALL,
-                since=_SINCE,
-                until=_UNTIL,
             )
             assert page is not None
             return [(item.message.content, item.lexical_score) for item in page.hits]
@@ -346,13 +346,8 @@ def test_lifecycle_is_applied_before_ranking_limit_and_coverage_counts() -> None
             created_at="2026-08-23T08:50:00+00:00",
         )
 
-        active = select_authorized_archive_message_page_in_transaction(
+        active = _all(
             conn,
-            principal_id="alice",
-            query="needle",
-            scope=ArchiveMessageScope.ALL,
-            since=_SINCE,
-            until=_UNTIL,
             limit=1,
             lifecycle_states=(LifecycleState.ACTIVE,),
         )
@@ -362,13 +357,8 @@ def test_lifecycle_is_applied_before_ranking_limit_and_coverage_counts() -> None
         assert active.examined == active.total == active.returned == 1
         assert active.has_more is False
 
-        archived = select_authorized_archive_message_page_in_transaction(
+        archived = _all(
             conn,
-            principal_id="alice",
-            query="needle",
-            scope=ArchiveMessageScope.ALL,
-            since=_SINCE,
-            until=_UNTIL,
             limit=1,
             lifecycle_states=(LifecycleState.ARCHIVED,),
         )
@@ -383,11 +373,10 @@ def test_lifecycle_is_applied_before_ranking_limit_and_coverage_counts() -> None
         assert excluded_current is not None
         assert excluded_current.examined == excluded_current.total == excluded_current.returned == 0
 
-        deleted = select_authorized_archive_message_page_in_transaction(
+        deleted = _all(
             conn,
-            principal_id="alice",
-            query="needle",
-            scope=ArchiveMessageScope.ALL,
+            since=None,
+            until=None,
             lifecycle_states=(LifecycleState.DELETED,),
         )
         assert deleted is not None
@@ -423,14 +412,8 @@ def test_current_boundary_fail_closed_empty_is_distinct_and_controls_are_closed(
             _current(conn, context_before=4)
         with pytest.raises(ArchiveMessageStorageError, match="roles"):
             _current(conn, roles=(MessageRole.SYSTEM,))
-        with pytest.raises(ArchiveMessageStorageError, match="all-conversation"):
-            select_authorized_archive_message_page_in_transaction(
-                conn,
-                principal_id="alice",
-                query="needle",
-                scope=ArchiveMessageScope.ALL,
-                conversation_id=_CURRENT,
-            )
+        with pytest.raises(ArchiveMessageStorageError, match="current message boundary"):
+            _all(conn, boundary_user_message_id=None)
 
     conn = sqlite3.connect(":memory:")
     try:
@@ -462,6 +445,51 @@ def test_current_ledger_changes_only_for_rows_admitted_before_exact_boundary() -
         assert later is not None
         assert later.hits[0].ledger.row_ledger_sha256 == admitted.hits[0].ledger.row_ledger_sha256
         assert later.boundary_identity_sha256 == admitted.boundary_identity_sha256
+
+
+def test_all_scope_is_globally_frozen_at_owned_current_user_boundary() -> None:
+    with _database() as conn:
+        _insert(
+            conn,
+            20,
+            conversation_id=_OTHER,
+            content="old-global-needle survives",
+        )
+        self_match = _all(
+            conn,
+            query="current private question",
+            since=None,
+            until=None,
+        )
+        assert self_match is not None
+        assert self_match.total == 0
+
+        before = _all(
+            conn,
+            query="old-global-needle",
+            since=None,
+            until=None,
+        )
+        assert before is not None
+        assert [item.message.content for item in before.hits] == ["old-global-needle survives"]
+
+        _insert(
+            conn,
+            110,
+            conversation_id=_OTHER,
+            content="post-boundary-needle excluded globally",
+        )
+        after = _all(
+            conn,
+            query="post-boundary-needle",
+            since=None,
+            until=None,
+        )
+        assert after is not None
+        assert after.total == 0
+
+        assert _all(conn, boundary_user_message_id=_message_id(20)) is None
+        assert _all(conn, boundary_user_message_id=_message_id(999)) is None
 
 
 def test_interrupted_selector_leaves_caller_transaction_and_rows_untouched() -> None:
@@ -521,12 +549,8 @@ def test_principal_and_index_attestations_block_false_authorized_absence() -> No
             "INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', 10, ?)",
             ("needle indexed content drift",),
         )
-        conn.execute(
-            "INSERT INTO messages_fts(rowid, content) VALUES(10, 'bogus replacement tokens')"
-        )
-        assert conn.execute(
-            "SELECT 1 FROM messages_fts_docsize WHERE id=10"
-        ).fetchone() == (1,)
+        conn.execute("INSERT INTO messages_fts(rowid, content) VALUES(10, 'bogus replacement tokens')")
+        assert conn.execute("SELECT 1 FROM messages_fts_docsize WHERE id=10").fetchone() == (1,)
         with pytest.raises(ArchiveMessageStorageError, match="lexical index"):
             _current(conn, query="needle")
 

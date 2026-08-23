@@ -158,8 +158,7 @@ def _same_exact_graph(left: object, right: object) -> bool:
         )
     if is_dataclass(left) and not isinstance(left, type):
         return all(
-            _same_exact_graph(getattr(left, field.name), getattr(right, field.name))
-            for field in fields(left)
+            _same_exact_graph(getattr(left, field.name), getattr(right, field.name)) for field in fields(left)
         )
     try:
         return bool(left == right)
@@ -214,14 +213,8 @@ def _canonical_coverage(value: object) -> SearchCoverage | None:
             or not _binding_has_exact_graph(item.execution_binding)
             or type(item.states) is not tuple
             or any(type(state) is not CoverageState for state in item.states)
-            or (
-                item.eligible_authorized is not None
-                and type(item.eligible_authorized) is not int
-            )
-            or any(
-                type(count) is not int
-                for count in (item.examined, item.matched_at_least, item.returned)
-            )
+            or (item.eligible_authorized is not None and type(item.eligible_authorized) is not int)
+            or any(type(count) is not int for count in (item.examined, item.matched_at_least, item.returned))
             or (item.limit is not None and type(item.limit) is not int)
             or any(
                 type(flag) is not bool
@@ -291,6 +284,32 @@ def _identity(value: object) -> str:
     if len(encoded) > 256 or any(ord(character) < 32 for character in value):
         raise _fail()
     return value
+
+
+def _accepted_turn_snapshot(
+    snapshot: str,
+    request: ArchiveSearchRequest,
+    *,
+    current_conversation_id: str | None,
+    boundary_user_message_id: str | None,
+) -> str:
+    """Bind message continuations to the exact accepted current-user row."""
+
+    if ArchiveSearchCorpus.MESSAGES not in request.corpora:
+        return snapshot
+    conversation = _identity(current_conversation_id)
+    boundary = _identity(boundary_user_message_id)
+    return (
+        "archive-message-boundary:"
+        + _mac(
+            b"friday/archive-search-accepted-turn-snapshot/v1",
+            {
+                "boundary_user_message_id": boundary,
+                "current_conversation_id": conversation,
+                "snapshot_discriminator": snapshot,
+            },
+        ).hex()
+    )
 
 
 def _storage_request(request: ArchiveSearchRequest) -> ArchiveSearchRequest:
@@ -367,10 +386,7 @@ def _authority_projection_is_valid(
                 type(item) is _ArchiveTargetAuthority and item.is_valid()
                 for item in cast(tuple[_ArchiveTargetAuthority, ...], value)
             )
-            and tuple(
-                item.target for item in cast(tuple[_ArchiveTargetAuthority, ...], value)
-            )
-            == targets
+            and tuple(item.target for item in cast(tuple[_ArchiveTargetAuthority, ...], value)) == targets
         )
     except Exception:
         return False
@@ -460,11 +476,7 @@ def _fresh_target_authority_in_transaction(
 
         decisions: dict[str, bool] = {}
         for capability in sorted(
-            {
-                value
-                for target in targets
-                if (value := _CORPUS_CAPABILITY.get(target[0])) is not None
-            }
+            {value for target in targets if (value := _CORPUS_CAPABILITY.get(target[0])) is not None}
         ):
             decision = authorization.authorize(fresh_actor, capability)
             if (
@@ -486,10 +498,7 @@ def _fresh_target_authority_in_transaction(
             for target in targets
             for capability in (_CORPUS_CAPABILITY.get(target[0]),)
         )
-        if (
-            not conn.in_transaction
-            or not _authority_projection_is_valid(projection, targets)
-        ):
+        if not conn.in_transaction or not _authority_projection_is_valid(projection, targets):
             raise _fail()
         return projection
     except ArchiveSearchServiceError:
@@ -550,8 +559,7 @@ def _continued_authority_projection(
                 capability,
                 bool(
                     capability is not None
-                    and CoverageState.PERMISSION_FILTERED
-                    not in by_target[target].states
+                    and CoverageState.PERMISSION_FILTERED not in by_target[target].states
                 ),
             )
             for target in targets
@@ -590,9 +598,8 @@ class _ArchiveSearchRecipe:
 
     def is_valid(self) -> bool:
         try:
-            frozen_request = ArchiveSearchRequest.parse_private(
-                self.request.to_private_json()
-            )
+            frozen_request = ArchiveSearchRequest.parse_private(self.request.to_private_json())
+            messages_requested = ArchiveSearchCorpus.MESSAGES in self.request.corpora
             return bool(
                 type(self) is _ArchiveSearchRecipe
                 and type(self.request) is ArchiveSearchRequest
@@ -606,13 +613,14 @@ class _ArchiveSearchRecipe:
                 and type(self.tenant_id) is str
                 and type(self.principal_id) is str
                 and type(self.snapshot_discriminator) is str
+                and (self.current_conversation_id is None or type(self.current_conversation_id) is str)
+                and (self.boundary_user_message_id is None or type(self.boundary_user_message_id) is str)
                 and (
-                    self.current_conversation_id is None
-                    or type(self.current_conversation_id) is str
-                )
-                and (
-                    self.boundary_user_message_id is None
-                    or type(self.boundary_user_message_id) is str
+                    not messages_requested
+                    or (
+                        type(self.current_conversation_id) is str
+                        and type(self.boundary_user_message_id) is str
+                    )
                 )
                 and type(self.seal) is bytes
                 and len(self.seal) == 32
@@ -679,9 +687,7 @@ class PreparedArchiveSearch(_ProcessPrivate):
 
     def _material(self) -> dict[str, object]:
         return {
-            "batch_sha256": hashlib.sha256(
-                self._batch.model_visible_canonical_bytes
-            ).hexdigest(),
+            "batch_sha256": hashlib.sha256(self._batch.model_visible_canonical_bytes).hexdigest(),
             "execution_handle": self._run.execution_binding.opaque_handle,
             "recipe_seal": self._recipe.seal.hex(),
         }
@@ -698,9 +704,7 @@ class PreparedArchiveSearch(_ProcessPrivate):
                 and self._run.execution_binding.attests_private_request(
                     self._recipe.request.to_identity_json()
                 )
-                and self._run.execution_binding.attests_snapshot(
-                    self._recipe.snapshot_discriminator
-                )
+                and self._run.execution_binding.attests_snapshot(self._recipe.snapshot_discriminator)
                 and hmac.compare_digest(
                     self._seal,
                     _mac(b"friday/archive-search-service-prepared/v1", self._material()),
@@ -892,9 +896,7 @@ def _collect_message_target(
 def _obsidian_phase(phase: ArchiveSearchAuthorityPhase) -> ArchiveObsidianReadPhase:
     return {
         ArchiveSearchAuthorityPhase.BEFORE_MODEL: ArchiveObsidianReadPhase.BEFORE_MODEL,
-        ArchiveSearchAuthorityPhase.BEFORE_PUBLICATION: (
-            ArchiveObsidianReadPhase.BEFORE_PUBLICATION
-        ),
+        ArchiveSearchAuthorityPhase.BEFORE_PUBLICATION: (ArchiveObsidianReadPhase.BEFORE_PUBLICATION),
     }[phase]
 
 
@@ -975,9 +977,7 @@ def _collect_federated_in_transaction(
     if not _authority_projection_is_valid(authority, targets):
         raise _fail()
     authority_by_target = {item.target: item for item in authority}
-    candidates_by_target: dict[
-        tuple[SearchCorpus, SearchLane], tuple[ArchiveSearchCandidate, ...]
-    ] = {}
+    candidates_by_target: dict[tuple[SearchCorpus, SearchLane], tuple[ArchiveSearchCandidate, ...]] = {}
     coverage_by_target: dict[tuple[SearchCorpus, SearchLane], SearchCoverage] = {}
     for target in targets:
         candidates: tuple[ArchiveSearchCandidate, ...] = ()
@@ -1086,9 +1086,7 @@ class ArchiveSearchReauthorizationContext(_ProcessPrivate):
                     "execution_handle": item.run.execution_binding.opaque_handle,
                     "federation": _federation_material(item.federation),
                     "recipe_seal": item.recipe.seal.hex(),
-                    "target_authority": [
-                        authority.material() for authority in item.target_authority
-                    ],
+                    "target_authority": [authority.material() for authority in item.target_authority],
                 }
                 for item in self._entries
             ],
@@ -1161,11 +1159,7 @@ def _context_entry(
     ):
         return None
     return next(
-        (
-            item
-            for item in cast(ArchiveSearchReauthorizationContext, context)._entries
-            if item.run is run
-        ),
+        (item for item in cast(ArchiveSearchReauthorizationContext, context)._entries if item.run is run),
         None,
     )
 
@@ -1207,8 +1201,7 @@ def _same_continuation_candidate_evidence(
     if observed_value is None or fresh_value is None:
         return False
     if (
-        observed_value.resolved_source.source_ref
-        != fresh_value.resolved_source.source_ref
+        observed_value.resolved_source.source_ref != fresh_value.resolved_source.source_ref
         or len(observed_value.matches) != len(fresh_value.matches)
         or any(
             left.channel is not right.channel or left.rank > right.rank
@@ -1244,11 +1237,7 @@ def _fresh_coverage(
     *,
     terminal: bool,
 ) -> SearchCoverage | None:
-    values = (
-        evidence.federation.terminal_coverage
-        if terminal
-        else evidence.federation.coverage
-    )
+    values = evidence.federation.terminal_coverage if terminal else evidence.federation.coverage
     return next(
         (item for item in values if (item.corpus, item.lane) == target),
         None,
@@ -1277,9 +1266,7 @@ def _expected_degraded_coverage(value: SearchCoverage) -> SearchCoverage | None:
         failures.add(CoverageState.STALE)
     if not failures:
         return None
-    states: set[CoverageState] = {
-        item for item in value.states if item is not CoverageState.COMPLETE
-    }
+    states: set[CoverageState] = {item for item in value.states if item is not CoverageState.COMPLETE}
     states.add(CoverageState.PARTIAL)
     states.update(failures)
     try:
@@ -1320,18 +1307,12 @@ def _continuation_coverage_attested(
         ):
             return False
         if observed.next_cursor_available:
-            states: set[CoverageState] = {
-                item for item in fresh.states if item is not CoverageState.COMPLETE
-            }
+            states: set[CoverageState] = {item for item in fresh.states if item is not CoverageState.COMPLETE}
             states.update({CoverageState.PARTIAL, CoverageState.CAPPED})
             expected_limit: int | None = limit
         else:
             states = set(fresh.states)
-            expected_limit = (
-                fresh.limit
-                if fresh.limit is None or fresh.limit >= observed.returned
-                else limit
-            )
+            expected_limit = fresh.limit if fresh.limit is None or fresh.limit >= observed.returned else limit
         expected = SearchCoverage.create(
             corpus=fresh.corpus,
             lane=fresh.lane,
@@ -1406,9 +1387,7 @@ def reauthorize_archive_search_candidate(
 
     evidence = _context_entry(authority_context, phase, run_binding)
     if evidence is None or type(candidate) is not ArchiveSearchCandidate:
-        return ArchiveSearchCandidateReauthorization.rejected(
-            ArchiveSearchReauthorizationStatus.UNAVAILABLE
-        )
+        return ArchiveSearchCandidateReauthorization.rejected(ArchiveSearchReauthorizationStatus.UNAVAILABLE)
     try:
         corpus = {
             ArchiveSearchCorpus.DOCUMENTS: SearchCorpus.RAW_DOCUMENTS,
@@ -1419,24 +1398,14 @@ def reauthorize_archive_search_candidate(
             ArchiveSearchCorpus.WEB: SearchCorpus.WEB_CAPTURES,
             ArchiveSearchCorpus.EXTERNAL: SearchCorpus.EXTERNAL,
         }[candidate.corpus]
-        candidate_targets = tuple(
-            (corpus, match.channel.search_lane) for match in candidate.matches
-        )
-        target_permissions = tuple(
-            _target_authority(evidence, target) for target in candidate_targets
-        )
+        candidate_targets = tuple((corpus, match.channel.search_lane) for match in candidate.matches)
+        target_permissions = tuple(_target_authority(evidence, target) for target in candidate_targets)
     except Exception:
-        return ArchiveSearchCandidateReauthorization.rejected(
-            ArchiveSearchReauthorizationStatus.UNAVAILABLE
-        )
+        return ArchiveSearchCandidateReauthorization.rejected(ArchiveSearchReauthorizationStatus.UNAVAILABLE)
     if any(item is None or item.capability is None for item in target_permissions):
-        return ArchiveSearchCandidateReauthorization.rejected(
-            ArchiveSearchReauthorizationStatus.UNAVAILABLE
-        )
+        return ArchiveSearchCandidateReauthorization.rejected(ArchiveSearchReauthorizationStatus.UNAVAILABLE)
     if any(not item.allowed for item in target_permissions if item is not None):
-        return ArchiveSearchCandidateReauthorization.rejected(
-            ArchiveSearchReauthorizationStatus.DENIED
-        )
+        return ArchiveSearchCandidateReauthorization.rejected(ArchiveSearchReauthorizationStatus.DENIED)
     fresh_candidates = (
         *evidence.federation.candidates,
         *evidence.federation.tail_candidates,
@@ -1450,10 +1419,7 @@ def reauthorize_archive_search_candidate(
     if (
         phase is ArchiveSearchAuthorityPhase.BEFORE_PUBLICATION
         and evidence.recipe.continuation
-        and any(
-            _same_continuation_candidate_evidence(candidate, item)
-            for item in fresh_candidates
-        )
+        and any(_same_continuation_candidate_evidence(candidate, item) for item in fresh_candidates)
     ):
         return ArchiveSearchCandidateReauthorization.authorized(candidate)
     target_coverages = tuple(
@@ -1486,9 +1452,7 @@ def reauthorize_archive_search_coverage(
 
     evidence = _context_entry(authority_context, phase, run_binding)
     if evidence is None or type(coverage) is not SearchCoverage:
-        return ArchiveSearchCoverageReauthorization.rejected(
-            ArchiveSearchReauthorizationStatus.UNAVAILABLE
-        )
+        return ArchiveSearchCoverageReauthorization.rejected(ArchiveSearchReauthorizationStatus.UNAVAILABLE)
     target = coverage.corpus, coverage.lane
     target_permission = _target_authority(evidence, target)
     current_fresh = _fresh_coverage(
@@ -1497,21 +1461,14 @@ def reauthorize_archive_search_coverage(
         terminal=evidence.recipe.continuation,
     )
     if target_permission is None or current_fresh is None:
-        return ArchiveSearchCoverageReauthorization.rejected(
-            ArchiveSearchReauthorizationStatus.UNAVAILABLE
-        )
+        return ArchiveSearchCoverageReauthorization.rejected(ArchiveSearchReauthorizationStatus.UNAVAILABLE)
     if target_permission.capability is None:
         if CoverageState.UNAVAILABLE not in current_fresh.states:
             return ArchiveSearchCoverageReauthorization.rejected(
                 ArchiveSearchReauthorizationStatus.UNAVAILABLE
             )
-    elif (
-        not target_permission.allowed
-        and CoverageState.PERMISSION_FILTERED not in current_fresh.states
-    ):
-        return ArchiveSearchCoverageReauthorization.rejected(
-            ArchiveSearchReauthorizationStatus.DENIED
-        )
+    elif not target_permission.allowed and CoverageState.PERMISSION_FILTERED not in current_fresh.states:
+        return ArchiveSearchCoverageReauthorization.rejected(ArchiveSearchReauthorizationStatus.DENIED)
     if _coverage_attested(evidence, coverage, phase=phase):
         if phase is ArchiveSearchAuthorityPhase.BEFORE_PUBLICATION or evidence.recipe.continuation:
             current: SearchCoverage | None = coverage
@@ -1523,9 +1480,7 @@ def reauthorize_archive_search_coverage(
             )
         if current is not None:
             return ArchiveSearchCoverageReauthorization.authorized(current)
-    return ArchiveSearchCoverageReauthorization.rejected(
-        _rejection_for_coverage(current_fresh)
-    )
+    return ArchiveSearchCoverageReauthorization.rejected(_rejection_for_coverage(current_fresh))
 
 
 def prepare_archive_search_in_transaction(
@@ -1556,6 +1511,12 @@ def prepare_archive_search_in_transaction(
             raise _fail()
         request_value = ArchiveSearchRequest.parse_private(request.to_private_json())
         storage_request = _storage_request(request_value)
+        snapshot = _accepted_turn_snapshot(
+            snapshot,
+            storage_request,
+            current_conversation_id=current_conversation_id,
+            boundary_user_message_id=boundary_user_message_id,
+        )
         continuation = request_value.continuation is not None
         targets = canonical_archive_search_targets(storage_request)
         current_authority = _fresh_target_authority_in_transaction(

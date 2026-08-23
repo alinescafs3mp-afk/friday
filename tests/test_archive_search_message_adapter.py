@@ -248,10 +248,8 @@ def _page(
         principal_id=principal_id,
         query=request.query,
         scope=ArchiveMessageScope(request.conversation_scope.value),
-        conversation_id=CURRENT if request.conversation_scope is ConversationScope.CURRENT else None,
-        boundary_user_message_id=(
-            BOUNDARY if request.conversation_scope is ConversationScope.CURRENT else None
-        ),
+        conversation_id=CURRENT,
+        boundary_user_message_id=BOUNDARY,
         roles=controls["roles"],  # type: ignore[arg-type]
         lifecycle_states=controls["lifecycle_states"],  # type: ignore[arg-type]
         since=controls["since"],  # type: ignore[arg-type]
@@ -353,6 +351,8 @@ def test_all_scope_merges_passages_by_conversation_and_keeps_unique_lane_ranks()
             request=request,
             page=page,
             index_state=_current_index(),
+            current_conversation_id=CURRENT,
+            boundary_user_message_id=BOUNDARY,
         )
 
     assert len(projection.candidates) == 2
@@ -573,6 +573,8 @@ def test_internal_message_materialization_can_exceed_public_request_limit() -> N
             request=request,
             page=page,
             index_state=_current_index(),
+            current_conversation_id=CURRENT,
+            boundary_user_message_id=BOUNDARY,
         )
 
     assert request.limit == 1
@@ -768,6 +770,18 @@ def test_real_schema_storage_snapshot_projects_without_a_test_only_path(settings
             "user",
             "real-schema-needle durable discussion",
         )
+        boundary = storage.store_message(
+            conversation["id"],
+            "alice",
+            "user",
+            "current archive search boundary",
+        )
+        storage.store_message(
+            conversation["id"],
+            "alice",
+            "assistant",
+            "post-boundary text must be excluded",
+        )
         request = ArchiveSearchRequest.create(
             query="real-schema-needle",
             corpora=(ArchiveSearchCorpus.MESSAGES,),
@@ -783,6 +797,8 @@ def test_real_schema_storage_snapshot_projects_without_a_test_only_path(settings
                 principal_id="alice",
                 query=request.query,
                 scope=ArchiveMessageScope.ALL,
+                conversation_id=conversation["id"],
+                boundary_user_message_id=boundary["id"],
                 roles=controls["roles"],  # type: ignore[arg-type]
                 lifecycle_states=controls["lifecycle_states"],  # type: ignore[arg-type]
                 limit=5,
@@ -795,6 +811,8 @@ def test_real_schema_storage_snapshot_projects_without_a_test_only_path(settings
             request=request,
             page=page,
             index_state=_current_index(),
+            current_conversation_id=conversation["id"],
+            boundary_user_message_id=boundary["id"],
         )
         assert len(projection.candidates) == 1
         assert projection.candidates[0].title == "Real Friday archive"
