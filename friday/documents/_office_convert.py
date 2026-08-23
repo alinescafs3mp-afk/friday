@@ -29,6 +29,10 @@ _MAX_CONVERSION_OUTPUT_BYTES = 128 * 1024 * 1024
 _TARGET_BY_SOURCE = {
     "doc": "docx",
     "dot": "docx",
+    # Microsoft Works/Mac Works `.wps` is intentionally not forced into the
+    # Writer or Calc family.  Both services have registered import filters;
+    # their common, parser-bounded carrier is PDF.
+    "wps": "pdf",
     "wpt": "docx",
     "wpd": "docx",
     "pages": "docx",

@@ -12,6 +12,7 @@ import pytest
 from docx import Document
 from openpyxl import Workbook
 from pptx import Presentation
+from reportlab.pdfgen.canvas import Canvas
 
 from friday.agent_runtime._office_attachments import _OFFICE_SUFFIXES
 from friday.documents import DocumentExtractor
@@ -61,6 +62,14 @@ def _odf(marker: str = "ODF FAMILY MARKER") -> bytes:
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
         archive.writestr("content.xml", f"<office><text>{marker}</text></office>")
+    return output.getvalue()
+
+
+def _pdf(marker: str = "PDF FAMILY MARKER") -> bytes:
+    output = io.BytesIO()
+    canvas = Canvas(output)
+    canvas.drawString(72, 720, marker)
+    canvas.save()
     return output.getvalue()
 
 
@@ -130,6 +139,7 @@ _FIRST_EXPANSION_TARGETS = {
 }
 _ALL_CONVERSION_TARGETS = {
     "doc": "docx",
+    "wps": "pdf",
     "xls": "xlsx",
     "xlsb": "xlsx",
     "ppt": "pptx",
@@ -510,18 +520,24 @@ def test_relative_libreoffice_executable_fails_closed(monkeypatch: pytest.Monkey
     assert converted.error == "libreoffice_unavailable"
 
 
-def test_ambiguous_works_family_remains_excluded_from_conversion_and_dispatch() -> None:
-    converted = convert_legacy_office(b"synthetic", "wps")
+def test_ambiguous_works_family_uses_the_common_bounded_pdf_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = "WORKS FAMILY MARKER"
+    executable = _fake_libreoffice(tmp_path / "soffice")
+    monkeypatch.setenv("FRIDAY_LIBREOFFICE_PATH", str(executable))
     extracted = DocumentExtractor(secret_values=()).extract(
-        b"synthetic",
+        _pdf(marker),
         "ambiguous.wps",
         "application/vnd.ms-works",
     )
 
-    assert converted.success is False
-    assert converted.error == "legacy_office_conversion_unsupported"
-    assert extracted.success is False
-    assert extracted.error == "unsupported_document_format"
+    assert extracted.success is True, extracted.error
+    assert marker in extracted.text
+    assert extracted.metadata["format"] == "wps"
+    assert extracted.metadata["converted_format"] == "pdf"
+    assert extracted.office_structure_index is None
     assert ".wps" not in _STRUCTURED_OFFICE_SUFFIXES
     assert ".wps" not in _OFFICE_SUFFIXES
 

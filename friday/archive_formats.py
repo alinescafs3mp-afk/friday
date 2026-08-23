@@ -91,6 +91,7 @@ _NATIVE_DOCUMENT_SUFFIXES = frozenset(
         ".vstx",
         ".webp",
         ".wpd",
+        ".wps",
         ".wpt",
         ".xls",
         ".xlsb",

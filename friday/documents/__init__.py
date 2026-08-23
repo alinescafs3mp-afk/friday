@@ -178,6 +178,7 @@ _MSG_MIME_TYPES = frozenset({"application/vnd.ms-outlook", "application/x-msg"})
 _CONVERTED_OFFICE_FORMATS = {
     ".doc": "doc",
     ".dot": "dot",
+    ".wps": "wps",
     ".wpt": "wpt",
     ".wpd": "wpd",
     ".pages": "pages",
@@ -202,6 +203,7 @@ _CONVERTED_OFFICE_FORMATS = {
 }
 _CONVERTED_OFFICE_MIME_FORMATS = {
     "application/msword": "doc",
+    "application/vnd.ms-works": "wps",
     "application/vnd.wordperfect": "wpd",
     "application/x-iwork-pages-sffpages": "pages",
     "application/vnd.ms-excel": "xls",
@@ -3026,6 +3028,11 @@ class DocumentExtractor:
                 "content.xml",
                 "odg",
             )
+        elif converted.target_format == "pdf":
+            # `.wps` is shared by Writer and Calc import filters.  PDF is the
+            # one bounded target both document services can export without
+            # guessing a source family from attacker-controlled MIME data.
+            parsed = self._extract_pdf(converted.content, deadline=deadline)
         else:
             parser = {
                 "docx": self._extract_docx,
