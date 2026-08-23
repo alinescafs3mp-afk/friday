@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import secrets
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from friday.retrieval._contract_utils import (
@@ -21,6 +24,17 @@ from friday.retrieval.identity_contract import AuthorityScope
 
 SEARCH_COVERAGE_SCHEMA = "friday.search-coverage.v1"
 SEARCH_EXECUTION_BINDING_SCHEMA = "friday.search-execution-binding.v1"
+_MAX_PRIVATE_REQUEST_BYTES = 32_768
+_PROCESS_REQUEST_ATTESTATION_KEY = secrets.token_bytes(32)
+_PROCESS_BINDING_AUTHORITY = object()
+
+
+def _private_request_attestation(value: str) -> str:
+    return hmac.new(
+        _PROCESS_REQUEST_ATTESTATION_KEY,
+        b"friday/search-execution-private-request/v1\0" + value.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def _count(value: object, *, label: str, optional: bool = False) -> int | None:
@@ -72,16 +86,35 @@ class SearchExecutionBinding:
     authority_scope: AuthorityScope
     requested_targets: tuple[SearchTarget, ...]
     opaque_handle: str
+    _private_request_attestation: str | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _process_authority: object | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.authority_scope, AuthorityScope):
             raise RetrievalContractError("execution binding requires a closed authority scope")
-        if self.requested_targets != _targets(self.requested_targets):
+        if type(self.requested_targets) is not tuple or self.requested_targets != _targets(
+            self.requested_targets
+        ):
             raise RetrievalContractError("execution binding targets must be canonical")
         lowercase_sha256(self.opaque_handle, label="opaque execution handle")
+        if self._private_request_attestation is not None:
+            lowercase_sha256(
+                self._private_request_attestation,
+                label="private request attestation",
+            )
 
     def __repr__(self) -> str:
-        return "SearchExecutionBinding(private_request_bound=True)"
+        return "SearchExecutionBinding(private=True)"
 
     @classmethod
     def create(
@@ -102,7 +135,7 @@ class SearchExecutionBinding:
             normalized_private_request_json,
             label="normalized private search request",
         )
-        if len(normalized_private_request_json.encode("utf-8")) > 8_192:
+        if len(normalized_private_request_json.encode("utf-8")) > _MAX_PRIVATE_REQUEST_BYTES:
             raise RetrievalContractError("normalized private search request is too large")
         if tenant_id is not None:
             bounded_text(tenant_id, label="binding tenant_id", maximum_bytes=200)
@@ -131,7 +164,7 @@ class SearchExecutionBinding:
             "snapshot_discriminator": snapshot,
             "tenant_id": tenant_id,
         }
-        return cls(
+        binding = cls(
             authority_scope=authority_scope,
             requested_targets=targets,
             opaque_handle=keyed_digest(
@@ -140,6 +173,41 @@ class SearchExecutionBinding:
                 privacy_key,
             ),
         )
+        object.__setattr__(
+            binding,
+            "_private_request_attestation",
+            _private_request_attestation(normalized_private_request_json),
+        )
+        object.__setattr__(binding, "_process_authority", _PROCESS_BINDING_AUTHORITY)
+        return binding
+
+    @property
+    def is_live_private_request_binding(self) -> bool:
+        return bool(
+            type(self) is SearchExecutionBinding
+            and self._process_authority is _PROCESS_BINDING_AUTHORITY
+            and self._private_request_attestation is not None
+        )
+
+    def attests_private_request(self, normalized_private_request_json: object) -> bool:
+        """Match the exact canonical private request only for a live-created binding."""
+
+        expected = self._private_request_attestation
+        if expected is None or not isinstance(normalized_private_request_json, str):
+            return False
+        if not self.is_live_private_request_binding:
+            return False
+        try:
+            parse_canonical_object(
+                normalized_private_request_json,
+                label="normalized private search request",
+            )
+            if len(normalized_private_request_json.encode("utf-8")) > _MAX_PRIVATE_REQUEST_BYTES:
+                return False
+        except (RetrievalContractError, UnicodeEncodeError):
+            return False
+        actual = _private_request_attestation(normalized_private_request_json)
+        return hmac.compare_digest(expected, actual)
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -238,7 +306,7 @@ class SearchCoverage:
         if not isinstance(self.corpus, SearchCorpus) or not isinstance(self.lane, SearchLane):
             raise RetrievalContractError("search corpus and lane must be closed enums")
         if (
-            not isinstance(self.execution_binding, SearchExecutionBinding)
+            type(self.execution_binding) is not SearchExecutionBinding
             or (
                 self.corpus,
                 self.lane,
@@ -349,6 +417,7 @@ class SearchCoverage:
     def absence_decision(self) -> AbsenceDecision:
         if (
             self.matched_at_least > 0
+            and self.execution_binding.is_live_private_request_binding
             and self.authority_rechecked
             and self.snapshot_current
             and not (set(self.states) & _INVALID_EVIDENCE_STATES)
@@ -357,6 +426,7 @@ class SearchCoverage:
         if (
             self.states == (CoverageState.COMPLETE,)
             and self.matched_at_least == 0
+            and self.execution_binding.is_live_private_request_binding
             and self.authority_rechecked
             and self.snapshot_current
         ):
@@ -461,7 +531,7 @@ def aggregate_absence_decision(
         return AbsenceDecision.NOT_ESTABLISHED
     if (
         not results
-        or any(not isinstance(item, SearchCoverage) for item in results)
+        or any(type(item) is not SearchCoverage for item in results)
         or len(results) != len(requested)
         or {(item.corpus, item.lane) for item in results} != set(requested)
         or len({(item.corpus, item.lane) for item in results}) != len(results)

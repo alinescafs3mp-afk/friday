@@ -75,7 +75,9 @@ def _coverage(
 def test_complete_absence_requires_full_exact_authorized_corpus() -> None:
     coverage = _coverage()
     assert coverage.absence_decision() is AbsenceDecision.AUTHORIZED_ABSENCE_CONFIRMED
-    assert SearchCoverage.parse(coverage.to_json()) == coverage
+    restored = SearchCoverage.parse(coverage.to_json())
+    assert restored == coverage
+    assert restored.absence_decision() is AbsenceDecision.NOT_ESTABLISHED
 
     with pytest.raises(RetrievalContractError, match="eligible==examined"):
         _coverage(eligible=20, examined=12)
@@ -239,6 +241,23 @@ def test_aggregate_rejects_mixed_execution_batches() -> None:
         aggregate_absence_decision(coverages, requested_targets=requested) is AbsenceDecision.NOT_ESTABLISHED
     )
 
+    live = _coverage(
+        corpus=SearchCorpus.RAW_DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+        binding=first,
+    )
+    restored = SearchCoverage.parse(
+        _coverage(
+            corpus=SearchCorpus.KNOWLEDGE,
+            lane=SearchLane.LEXICAL,
+            binding=first,
+        ).to_json()
+    )
+    assert (
+        aggregate_absence_decision((live, restored), requested_targets=requested)
+        is AbsenceDecision.NOT_ESTABLISHED
+    )
+
 
 def test_execution_binding_is_opaque_and_binds_every_private_discriminator() -> None:
     targets = ((SearchCorpus.RAW_DOCUMENTS, SearchLane.LEXICAL),)
@@ -260,10 +279,60 @@ def test_execution_binding_is_opaque_and_binds_every_private_discriminator() -> 
     assert "run-0123456789abcdef" not in serialized
 
 
+def test_execution_binding_attestation_is_exact_process_private_and_not_deserializable() -> None:
+    targets = ((SearchCorpus.RAW_DOCUMENTS, SearchLane.LEXICAL),)
+    request = '{"query":"quarterly report"}'
+    binding = _binding(targets, request=request)
+
+    assert binding.attests_private_request(request) is True
+    assert binding.attests_private_request('{"query":"other"}') is False
+    assert binding.attests_private_request('{"query": "quarterly report"}') is False
+    assert binding.attests_private_request({"query": "quarterly report"}) is False
+
+    restored = SearchExecutionBinding.from_payload(binding.to_payload())
+    assert restored == binding
+    assert restored.attests_private_request(request) is False
+    assert "query" not in repr(binding)
+    serialized = json.dumps(binding.to_payload(), sort_keys=True)
+    assert "quarterly report" not in serialized
+    assert "sha256" not in serialized.casefold()
+
+    class StatefulTargets(tuple[object, ...]):
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            yield from super().__iter__()
+            yield {"private_query": "must-not-be-serialized"}
+
+    with pytest.raises(RetrievalContractError, match="targets must be canonical"):
+        SearchExecutionBinding(
+            binding.authority_scope,
+            StatefulTargets(binding.requested_targets),  # type: ignore[arg-type]
+            binding.opaque_handle,
+        )
+
+
 def test_coverage_rejects_unrelated_execution_target() -> None:
     binding = _binding(((SearchCorpus.KNOWLEDGE, SearchLane.DENSE),))
     with pytest.raises(RetrievalContractError, match="absent from"):
         _coverage(binding=binding)
+
+
+def test_coverage_rejects_execution_binding_subclasses() -> None:
+    baseline = _binding(((SearchCorpus.RAW_DOCUMENTS, SearchLane.LEXICAL),))
+
+    class ForgedBinding(SearchExecutionBinding):
+        def attests_private_request(self, normalized_private_request_json: object) -> bool:
+            return True
+
+        def to_payload(self) -> dict[str, object]:
+            return {**super().to_payload(), "private_query": "must-not-leak"}
+
+    forged = ForgedBinding(
+        baseline.authority_scope,
+        baseline.requested_targets,
+        baseline.opaque_handle,
+    )
+    with pytest.raises(RetrievalContractError, match="execution binding"):
+        _coverage(binding=forged)
 
 
 def test_contract_does_not_claim_dense_passage_citability() -> None:
