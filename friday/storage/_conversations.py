@@ -10,6 +10,10 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 
+from friday.interaction_control_plane.failure_store import (
+    observe_owned_conversation,
+    observe_owned_message_candidate,
+)
 from friday.storage._base import (
     Any,
     StorageShared,
@@ -72,6 +76,7 @@ def create_conversation_in_transaction(
         "SELECT * FROM conversations WHERE id=? AND user_id=?",
         (conversation_id, user_id),
     ).fetchone()
+    observe_owned_conversation(user_id, conversation_id)
     return dict(row) if row else {}
 
 
@@ -122,6 +127,9 @@ def store_message_in_transaction(
         (content[:200], now, conversation_id, user_id),
     )
     row = conn.execute("SELECT * FROM messages WHERE id=? AND user_id=?", (message_id, user_id)).fetchone()
+    # These are only in-memory candidates. The P0B recorder re-reads ownership
+    # and assistant durability after rollback/commit before retaining a failure.
+    observe_owned_message_candidate(user_id, conversation_id, role, message_id)
     return dict(row) if row else {}
 
 
@@ -195,12 +203,23 @@ class ConversationsMixin(StorageShared):
                 "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND user_id=?",
                 (conversation_id, user_id),
             ).fetchone()[0]
+            failures = conn.execute(
+                "DELETE FROM interaction_failure_traces WHERE user_id=? AND conversation_id=?",
+                (user_id, conversation_id),
+            )
         return {
             "existed": True,
             "conversation_id": conversation_id,
             "archived": True,
             "messages_kept": int(kept),
-            "deleted": {"channel_sessions": sessions.rowcount} if sessions.rowcount else {},
+            "deleted": {
+                key: count
+                for key, count in (
+                    ("channel_sessions", sessions.rowcount),
+                    ("interaction_failure_traces", failures.rowcount),
+                )
+                if count
+            },
         }
 
     def set_conversation_mode(self, conversation_id: str, user_id: str, mode: str) -> dict[str, Any] | None:

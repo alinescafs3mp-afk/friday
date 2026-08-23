@@ -64,6 +64,7 @@ def build_direct_trace(
     output_tokens: int = 0,
     token_accounting: TokenAccounting = TokenAccounting.UNAVAILABLE,
     authority_rechecked: bool,
+    publication: PublicationStatus = PublicationStatus.ASSISTANT_COMMITTED,
 ) -> TurnTrace:
     """Build one published legacy/direct trace without inventing a Work Item."""
 
@@ -101,7 +102,7 @@ def build_direct_trace(
         playbook=playbook,
         steps=steps,
         completion=completion,
-        publication=PublicationStatus.ASSISTANT_COMMITTED,
+        publication=publication,
         failure_stage=failure_stage,
         failure_reason=failure_reason,
         ambiguity_present=ambiguity_present,

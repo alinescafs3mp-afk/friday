@@ -91,6 +91,12 @@ from friday.ingestion import (
     IdempotencyInProgressError,
     IngestionPipeline,
 )
+from friday.interaction_control_plane.failure_store import (
+    FailureEntrypoint,
+    FailureTraceScope,
+    bind_failure_trace_scope,
+    record_precommit_failure,
+)
 from friday.knowledge_graph import KnowledgeGraph, normalize_event_date
 from friday.mcp_runtime import MCPClientManager
 from friday.mcp_runtime.tools import bind_workspace_mcp_tools, workspace_server_definition
@@ -2447,29 +2453,35 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 ),
             )
         )
+        failure_scope = FailureTraceScope(
+            user_id=actor.own_id,
+            entrypoint=FailureEntrypoint.REGENERATE,
+            conversation_id=conversation_id,
+        )
         try:
-            result = await state.agent.chat(
-                actor.user_id,
-                message,
-                actor=actor,
-                conversation_id=conversation_id,
-                attachments=[],
-                enable_tools=True,
-                kg=state.kg,
-                hybrid_searcher=state.hybrid_searcher,
-                ingestion_result=None,
-                # Повтор не превращает сгенерированный текст в вопрос человека:
-                # признак берётся с самого хода, а не выводится заново из его
-                # букв. Иначе «Загружен документ: с кем работал иван отчёт.pdf»
-                # на повторе получал бы графовое расширение, которого первый ход
-                # не получал, — при одном и том же тексте.
-                synthetic_document_notice=bool(last_meta.get("synthetic_document_notice")),
-                # Exact immutable source, not caption equality. Repeated plain
-                # text such as «сделай сводку» must never bind itself to an old
-                # or newer private file merely because the words match.
-                replay_source_message_id=str(last_user.get("id") or ""),
-                turn_deadline=_turn_deadline,
-            )
+            with bind_failure_trace_scope(failure_scope):
+                result = await state.agent.chat(
+                    actor.user_id,
+                    message,
+                    actor=actor,
+                    conversation_id=conversation_id,
+                    attachments=[],
+                    enable_tools=True,
+                    kg=state.kg,
+                    hybrid_searcher=state.hybrid_searcher,
+                    ingestion_result=None,
+                    # Повтор не превращает сгенерированный текст в вопрос человека:
+                    # признак берётся с самого хода, а не выводится заново из его
+                    # букв. Иначе «Загружен документ: с кем работал иван отчёт.pdf»
+                    # на повторе получал бы графовое расширение, которого первый ход
+                    # не получал, — при одном и том же тексте.
+                    synthetic_document_notice=bool(last_meta.get("synthetic_document_notice")),
+                    # Exact immutable source, not caption equality. Repeated plain
+                    # text such as «сделай сводку» must never bind itself to an old
+                    # or newer private file merely because the words match.
+                    replay_source_message_id=str(last_user.get("id") or ""),
+                    turn_deadline=_turn_deadline,
+                )
             if _generated_file_persistence_eligible(result):
                 if time.monotonic() >= _turn_deadline:
                     raise TimeoutError("turn budget exhausted before generated-file persistence")
@@ -2520,7 +2532,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             if not state.storage.idempotency_complete(actor.own_id, request_key, lease_token, public_result):
                 raise RuntimeError("Lost regenerate idempotency lease before response commit")
             return public_result
-        except BaseException:
+        except BaseException as exc:
             if lease_token:
                 if request_effects is not None and (request_effects.possible or request_effects.staged):
                     state.storage.idempotency_complete(
@@ -2531,6 +2543,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     )
                 else:
                     state.storage.idempotency_release(actor.own_id, request_key, lease_token)
+            record_precommit_failure(state.storage, failure_scope, exc)
             raise
         finally:
             effect_stack.close()
@@ -3128,6 +3141,14 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 raise RuntimeError("Request idempotency fence could not be committed before persistence")
             effect_fence_committed = True
 
+        failure_scope = FailureTraceScope(
+            user_id=actor.own_id,
+            entrypoint=(
+                FailureEntrypoint.TELEGRAM_CHAT
+                if actor.source == "telegram-bridge"
+                else FailureEntrypoint.API_CHAT
+            ),
+        )
         try:
             file_ingestion = None
             file_ingestions: list[dict[str, Any]] = []
@@ -3143,6 +3164,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     conversation_id = str(session["conversation_id"])
                     if requested_mode is None:
                         requested_mode = normalize_conversation_mode(str(session.get("mode") or "dialogue"))
+            failure_scope.bind_conversation(conversation_id)
             if staged_document_message_ids:
                 # Staging persisted exact sibling bytes without running the
                 # model.  Rebuild this one final turn solely from authenticated
@@ -4200,32 +4222,33 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                             "private_material_refused": True,
                         }
 
-            result = await state.agent.chat(
-                actor.user_id,
-                message,
-                actor=actor,
-                conversation_id=conversation_id,
-                attachments=attachments,
-                enable_tools=enable_tools,
-                kg=state.kg,
-                hybrid_searcher=state.hybrid_searcher,
-                ingestion_result=ingestion_result,
-                synthetic_document_notice=synthetic_document_notice,
-                mode=requested_mode,
-                answer_with_voice=spoken_question,
-                # На что человек показал репликой. Едет ОТДЕЛЬНЫМ полем до самой
-                # сборки контекста: приклеенная к тексту хода цитата попала бы и в
-                # архив как слова человека, и в классификатор, решающий про граф.
-                reply_to=str(body.get("reply_to") or "").strip() or None,
-                quoted_attachment_reference=quoted_attachment_reference,
-                reply_assistant_reference=reply_assistant_reference,
-                # Exact assistant row for multi-citation fan-out. Runtime rechecks
-                # role/conversation/emitted knowledge_citations; caller JSON is
-                # never a citation map grant.
-                reply_assistant_message_id=reply_source_message_id or None,
-                turn_policy=turn_policy if turn_policy.handled else None,
-                turn_deadline=_turn_deadline,
-            )
+            with bind_failure_trace_scope(failure_scope):
+                result = await state.agent.chat(
+                    actor.user_id,
+                    message,
+                    actor=actor,
+                    conversation_id=conversation_id,
+                    attachments=attachments,
+                    enable_tools=enable_tools,
+                    kg=state.kg,
+                    hybrid_searcher=state.hybrid_searcher,
+                    ingestion_result=ingestion_result,
+                    synthetic_document_notice=synthetic_document_notice,
+                    mode=requested_mode,
+                    answer_with_voice=spoken_question,
+                    # На что человек показал репликой. Едет ОТДЕЛЬНЫМ полем до самой
+                    # сборки контекста: приклеенная к тексту хода цитата попала бы и в
+                    # архив как слова человека, и в классификатор, решающий про граф.
+                    reply_to=str(body.get("reply_to") or "").strip() or None,
+                    quoted_attachment_reference=quoted_attachment_reference,
+                    reply_assistant_reference=reply_assistant_reference,
+                    # Exact assistant row for multi-citation fan-out. Runtime rechecks
+                    # role/conversation/emitted knowledge_citations; caller JSON is
+                    # never a citation map grant.
+                    reply_assistant_message_id=reply_source_message_id or None,
+                    turn_policy=turn_policy if turn_policy.handled else None,
+                    turn_deadline=_turn_deadline,
+                )
             if staged_duplicate_count:
                 duplicate_notice = (
                     "⚠️ В альбоме обнаружены одинаковые по содержимому файлы: "
@@ -4301,7 +4324,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             ):
                 raise RuntimeError("Lost idempotency lease before response commit")
             return public_result
-        except BaseException:
+        except BaseException as exc:
             if source_ref and lease_token:
                 if effect_fence_committed or (
                     request_effects is not None and (request_effects.possible or request_effects.staged)
@@ -4314,6 +4337,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     )
                 else:
                     state.storage.idempotency_release(actor.own_id, source_ref, lease_token)
+            record_precommit_failure(state.storage, failure_scope, exc)
             raise
         finally:
             effect_stack.close()
