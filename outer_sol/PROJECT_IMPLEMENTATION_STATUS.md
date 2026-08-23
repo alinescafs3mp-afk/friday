@@ -4,15 +4,15 @@ This is the canonical short status register for the active Friday work. Detailed
 design and acceptance evidence remains in the linked documents; this file owns
 the current production identity, completed packages, active work and next order.
 
-- Updated: 2026-08-23
+- Updated: 2026-08-24
 - Branch: `main`
-- Deployed implementation head: `3d2bef322c8069d2a5f8a708d59094e6a6ac0eb3`
-- Live: Friday `0.207.7` / `3d2bef322c8069d2a5f8a708d59094e6a6ac0eb3`;
-  tree `b363b73ce155a706b85c4fa2dfd8eb9d81839b3c48eca5f79c341109158aa8ba`;
-  wheel `61a446ebf3973455320752952530936161a47939cbbd5986c2cdb995697c71e8`
-- Schema-capable fallback: Friday `0.207.6` /
-  `61cb15fa70aa8c0e23eab7dbd2dbaebf92882ace`;
-  tree `1402a4c389e6fbb509df3621afbbacd78189c9f9a12a3bd199c4d2ae64fbbcc5`
+- Deployed implementation head: `da8d11e2ac3c8982e43fa1f104076e922426ac25`
+- Live: Friday `0.207.8` / `da8d11e2ac3c8982e43fa1f104076e922426ac25`;
+  tree `c80959299f0a6dac89f3288a742e668a8f575b855de1bbed55b32cf45d33ed45`;
+  wheel `51c1008dd4ee432de75be294b46cb42fce879df8d6786f1a8e316819ac2d642b`
+- Schema-capable fallback: Friday `0.207.7` /
+  `3d2bef322c8069d2a5f8a708d59094e6a6ac0eb3`;
+  tree `b363b73ce155a706b85c4fa2dfd8eb9d81839b3c48eca5f79c341109158aa8ba`
 - Database schema: 38
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean
@@ -21,10 +21,10 @@ the current production identity, completed packages, active work and next order.
 
 ## Active objective
 
-Measure progress by complete, recoverable user journeys rather than isolated
-adapters: define the journey/evidence registry, establish stable retrieval and
-passage identity with honest coverage, expose one read-only archive facade, and
-only then extend durable recall to documents. Keep `main` and the live release
+Continue from the deployed golden-journey, retrieval-identity and federated
+archive-search foundation. First reconcile the locally recovered
+document-contour WIP audit, then extend the Interaction Control Plane by
+one complete durable vertical at a time. Keep `main` and the live release
 healthy after every package.
 
 ## Convergence decision
@@ -92,11 +92,11 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Publish the implemented read-only federated `archive_search` through the
-   runtime with private exact-byte carriers and same-transaction late
-   reauthorization.
-2. Keep every lane capability-scoped, late-reauthorized and explicit about
-   partial, capped, stale, incompatible and unavailable coverage.
+1. Review and reconcile the requested
+   `DOCUMENT_FILE_CONTOUR_WIP_AUDIT_2026-08-22.md`; retain only useful,
+   release-compatible unfinished work and remove superseded residue.
+2. Resume `INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md` from the
+   deployed TurnTrace/failure/RecallConversation checkpoint.
 
 ## Completed and deployed (current package)
 
@@ -156,6 +156,29 @@ course, with these repository-specific constraints:
   message loss. Subsequent gates explicitly unset that path and use an isolated
   temporary Friday home.
 
+### Authorized federated archive search (`0.207.8`)
+
+- The runtime now exposes one read-only `archive_search` facade across current
+  authorized documents, Knowledge Objects, accepted owner messages and the
+  exact configured Obsidian vault. Explicit corpus selection and all-corpus
+  union both retain deterministic source labels and per-corpus coverage.
+- Invocation and result carriers are process-private and exact-byte bound.
+  Authority, preset, capability, source revision and coverage are rechecked in
+  the final database transaction; drift, cancellation, replay or late denial
+  produces a source-free failure and cannot publish archive claims.
+- Archive absence is code-owned and requires complete current coverage. Partial,
+  capped, stale, incompatible, unavailable and backfill-pending lanes cannot be
+  presented as an empty archive.
+- Current private archive requests remain isolated from public web search.
+  Negative, reported and pasted archive commands do not spuriously route, while
+  ordinary punctuation, Unicode and technical identifiers remain accepted.
+- Document intake now rejects arbitrary renamed legacy-DOC bytes, treats
+  malformed Pages as unreadable rather than unsupported, keeps PDF page labels
+  out of the nested-JSON quarantine, and reports the actual final OCR outcome.
+- The deterministic wheel was built twice byte-for-byte, activated `clear`, and
+  accepted by exact process-root, trusted-CA HTTPS `ok`/`0.207.8`, schema-38,
+  SQLite quick-check, foreign-key and clean post-cutover journal gates.
+
 ## Canonical golden-journey/evidence registry
 
 This is the single source of truth for product-level journey states. The
@@ -198,25 +221,21 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- 16,235 non-UI Python tests passed on 16 workers with no failures or skips.
-- The pinned Syncthing `v2.1.3` managed-REST smoke passed; this is not evidence
-  of an Android round trip.
-- Schema-38 fixture, lifecycle/privacy, store adversarial, runtime continuation,
-  migration-chain and existing named-inventory compatibility checks are green.
-- Ruff, release-surface format (884 files), mypy (217 source files), compileall,
-  Bandit HIGH, JavaScript syntax and toolchain preflight passed.
-- The release wheel was built twice from the clean commit archive and matched
-  byte-for-byte. Immutable activation completed `clear`; schema-38 fallback,
-  database/inbox backups, trusted-CA health, exact process roots, SQLite
-  quick-check, foreign keys and Work Item DDL were verified.
-- The newer `0.207.7` scoped regression gate adds 1,198 clean Office, OCR,
-  current-upload, archive, web-search and security scenarios; its immutable
-  wheel and current production process roots match the identities above.
+- Full isolated Python gate: 17,367 passed; the two skips require explicitly
+  configured real Syncthing and real backup-migration environments.
+- Ruff, mypy for all changed source files, compileall and diff checks are clean.
+- The `0.207.8` wheel was built twice with one `SOURCE_DATE_EPOCH` and matched
+  byte-for-byte. Immutable activation completed `clear`; exact candidate and
+  fallback identities, database/inbox/Obsidian backup receipts, trusted-CA
+  health, process roots, schema 38, SQLite quick-check and foreign keys passed.
+- No warning-or-higher backend or bridge journal entries were emitted during
+  the post-cutover verification window.
 
 ## Next order
 
-1. Release one read-only federated `archive_search` facade with deterministic
-   continuation, neighboring message context and explicit per-lane coverage.
+1. Recover and review the named document-contour WIP audit before new control
+   plane implementation; merge useful compatible work and delete only proven
+   superseded residue.
 2. Extend the proven recall Work Item across document and message evidence only
    through stable source/passage references and fresh authorization/revision
    checks.
@@ -232,10 +251,11 @@ claims at this checkpoint.
 
 ## Open source/document issue
 
-The operator-referenced
-`outer_sol/DOCUMENT_FILE_CONTOUR_WIP_AUDIT_2026-08-22.md` is not present in this
-repository or local workspace at the current checkpoint. Its recommendations
-must not be claimed as reviewed until the source is recovered or supplied.
+`DOCUMENT_FILE_CONTOUR_WIP_AUDIT_2026-08-22.md` was recovered at
+`/home/jericho/DOCUMENT_FILE_CONTOUR_WIP_AUDIT_2026-08-22.md`, outside the
+repository location named by the operator. It is a stale 0.207.4 inventory, so
+every salvage or cleanup recommendation must be revalidated against current
+`main` before code is retained or residue is removed.
 
 ## Update rule
 
