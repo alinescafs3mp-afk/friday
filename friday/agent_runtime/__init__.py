@@ -37137,8 +37137,9 @@ class AgentRuntime:
         )
         promoted_temporal_update: MessageWindowTemporalUpdate | None = None
         promoted_continued_work_item: RecallConversationWorkItem | None = None
-        promoted_temporal_reference_recognized = is_recall_conversation_temporal_followup_syntax(
-            clean_message
+        promoted_temporal_reference_recognized = bool(
+            person_inventory_followup is None
+            and is_recall_conversation_temporal_followup_syntax(clean_message)
         )
         if promoted_temporal_reference_recognized:
             try:
