@@ -21,25 +21,121 @@ import time
 import pytest
 
 from friday.documents import DocumentExtractor
-from friday.documents._ole import OleError, OleFile, extract_doc_text
+from friday.documents._ole import OleError, OleFile, extract_doc_text, extract_msg_text
 
 _SECTOR = 512
 _ENDOFCHAIN = 0xFFFFFFFE
 _FREESECT = 0xFFFFFFFF
 
 
-def _dir_entry(name: str, kind: int, start: int, size: int) -> bytes:
+def _dir_entry(
+    name: str,
+    kind: int,
+    start: int,
+    size: int,
+    *,
+    left: int = _FREESECT,
+    right: int = _FREESECT,
+    child: int = _FREESECT,
+) -> bytes:
     raw = name.encode("utf-16-le") + b"\x00\x00"
     entry = bytearray(128)
     entry[: len(raw)] = raw
     struct.pack_into("<H", entry, 0x40, len(raw))
     entry[0x42] = kind
-    struct.pack_into("<I", entry, 0x44, _FREESECT)  # left sibling
-    struct.pack_into("<I", entry, 0x48, _FREESECT)  # right sibling
-    struct.pack_into("<I", entry, 0x4C, _FREESECT)  # child
+    struct.pack_into("<I", entry, 0x44, left)
+    struct.pack_into("<I", entry, 0x48, right)
+    struct.pack_into("<I", entry, 0x4C, child)
     struct.pack_into("<I", entry, 0x74, start)
     struct.pack_into("<Q", entry, 0x78, size)
     return bytes(entry)
+
+
+def _build_ole_streams(
+    streams_by_name: dict[str, bytes],
+    *,
+    storage_names: tuple[str, ...] = (),
+) -> bytes:
+    """Build a bounded OLE container with a valid root sibling tree."""
+
+    names_and_kinds = [(name, 2) for name in streams_by_name]
+    names_and_kinds.extend((name, 1) for name in storage_names)
+    streams = [payload.ljust(4096, b"\x00") for payload in streams_by_name.values()]
+    sizes = [len(payload) for payload in streams_by_name.values()]
+    sectors: list[bytes] = []
+    starts: list[int] = []
+    # Reserve enough contiguous sectors for the directory before stream starts.
+    directory_bytes = (1 + len(names_and_kinds)) * 128
+    directory_sector_count = max(1, (directory_bytes + _SECTOR - 1) // _SECTOR)
+    data_start = directory_sector_count
+    for stream in streams:
+        starts.append(data_start + len(sectors))
+        for offset in range(0, len(stream), _SECTOR):
+            sectors.append(stream[offset : offset + _SECTOR])
+
+    directory_parts = [
+        _dir_entry(
+            "Root Entry",
+            5,
+            _ENDOFCHAIN,
+            0,
+            child=1 if names_and_kinds else _FREESECT,
+        )
+    ]
+    stream_index = 0
+    for index, (name, kind) in enumerate(names_and_kinds, start=1):
+        if kind == 2:
+            start = starts[stream_index]
+            size = sizes[stream_index]
+            stream_index += 1
+        else:
+            start = _ENDOFCHAIN
+            size = 0
+        directory_parts.append(
+            _dir_entry(
+                name,
+                kind,
+                start,
+                size,
+                right=index + 1 if index < len(names_and_kinds) else _FREESECT,
+            )
+        )
+    directory = b"".join(directory_parts).ljust(directory_sector_count * _SECTOR, b"\x00")
+    directory_sectors = [
+        directory[offset : offset + _SECTOR]
+        for offset in range(0, len(directory), _SECTOR)
+    ]
+
+    body = list(directory_sectors) + sectors
+    fat_sector_index = len(body)
+    if fat_sector_index >= _SECTOR // 4:
+        raise ValueError("synthetic OLE fixture exceeds its single FAT sector")
+    fat = [_FREESECT] * (_SECTOR // 4)
+    for index in range(len(directory_sectors)):
+        fat[index] = index + 1 if index + 1 < len(directory_sectors) else _ENDOFCHAIN
+    for position, start in enumerate(starts):
+        count = len(streams[position]) // _SECTOR
+        for step in range(count):
+            sector = start + step
+            fat[sector] = sector + 1 if step + 1 < count else _ENDOFCHAIN
+    fat[fat_sector_index] = 0xFFFFFFFD
+    body.append(struct.pack(f"<{_SECTOR // 4}I", *fat))
+
+    header = bytearray(512)
+    header[0:8] = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+    struct.pack_into("<H", header, 0x1A, 0x003E)
+    struct.pack_into("<H", header, 0x1C, 0xFFFE)
+    struct.pack_into("<H", header, 0x1E, 9)
+    struct.pack_into("<H", header, 0x20, 6)
+    struct.pack_into("<I", header, 0x2C, 1)
+    struct.pack_into("<I", header, 0x30, 0)
+    struct.pack_into("<I", header, 0x38, 4096)
+    struct.pack_into("<I", header, 0x3C, _ENDOFCHAIN)
+    struct.pack_into("<I", header, 0x44, _ENDOFCHAIN)
+    for index in range(109):
+        struct.pack_into("<I", header, 0x4C + index * 4, _FREESECT)
+    struct.pack_into("<I", header, 0x4C, fat_sector_index)
+    return bytes(header) + b"".join(body)
 
 
 def build_doc(text: str, *, compressed: bool = True, codepage: str = "cp1251") -> bytes:
@@ -61,59 +157,7 @@ def build_doc(text: str, *, compressed: bool = True, codepage: str = "cp1251") -
     struct.pack_into("<II", word, 0x01A2, 0, len(clx))  # fcClx / lcbClx
     table = bytearray(clx)
 
-    # Both streams padded past the 4096-byte mini-stream cutoff, so every read goes
-    # through the normal FAT and the fixture exercises the same path a real file does.
-    streams = [bytes(word).ljust(8192, b"\x00"), bytes(table).ljust(8192, b"\x00")]
-    sizes = [len(bytes(word)), len(bytes(table))]
-
-    directory_sector = 0
-    data_start = 1
-    sectors: list[bytes] = []
-    starts: list[int] = []
-    for stream in streams:
-        starts.append(data_start + len(sectors))
-        for offset in range(0, len(stream), _SECTOR):
-            sectors.append(stream[offset : offset + _SECTOR])
-
-    directory = (
-        _dir_entry("Root Entry", 5, _ENDOFCHAIN, 0)
-        + _dir_entry("WordDocument", 2, starts[0], sizes[0])
-        + _dir_entry("1Table", 2, starts[1], sizes[1])
-        + bytes(128)
-    )
-    directory_sectors = [
-        directory[offset : offset + _SECTOR].ljust(_SECTOR, b"\x00")
-        for offset in range(0, len(directory), _SECTOR)
-    ]
-
-    body = list(directory_sectors) + sectors
-    fat_sector_index = len(body)
-    fat = [_FREESECT] * (_SECTOR // 4)
-    for index in range(len(directory_sectors)):
-        fat[index] = index + 1 if index + 1 < len(directory_sectors) else _ENDOFCHAIN
-    for position, start in enumerate(starts):
-        count = len(streams[position]) // _SECTOR
-        for step in range(count):
-            sector = start + step
-            fat[sector] = sector + 1 if step + 1 < count else _ENDOFCHAIN
-    fat[fat_sector_index] = 0xFFFFFFFD  # the FAT sector describes itself
-    body.append(struct.pack(f"<{_SECTOR // 4}I", *fat))
-
-    header = bytearray(512)
-    header[0:8] = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
-    struct.pack_into("<H", header, 0x1A, 0x003E)  # minor/major version
-    struct.pack_into("<H", header, 0x1C, 0xFFFE)  # little endian
-    struct.pack_into("<H", header, 0x1E, 9)  # sector shift: 512
-    struct.pack_into("<H", header, 0x20, 6)  # mini sector shift: 64
-    struct.pack_into("<I", header, 0x2C, 1)  # FAT sector count
-    struct.pack_into("<I", header, 0x30, directory_sector)
-    struct.pack_into("<I", header, 0x38, 4096)  # mini stream cutoff
-    struct.pack_into("<I", header, 0x3C, _ENDOFCHAIN)  # no mini FAT
-    struct.pack_into("<I", header, 0x44, _ENDOFCHAIN)  # no extra DIFAT
-    for index in range(109):
-        struct.pack_into("<I", header, 0x4C + index * 4, _FREESECT)
-    struct.pack_into("<I", header, 0x4C, fat_sector_index)
-    return bytes(header) + b"".join(body)
+    return _build_ole_streams({"WordDocument": bytes(word), "1Table": bytes(table)})
 
 
 RUSSIAN = "Ведомость на выдачу. Пункт первый: проверить наличие.\rПункт второй: доложить."
@@ -192,14 +236,127 @@ def test_field_instructions_are_dropped_and_results_kept():
     assert "До ссылка после." in text
 
 
-def test_a_file_that_is_not_a_compound_document_is_reported_as_unsupported():
-    """Five of the owner's 206 `.doc` files are not compound files at all.
-
-    "Friday cannot read this format" and "this file is damaged" have to stay
-    different sentences for whoever is looking at the Inbox.
-    """
+def test_the_low_level_doc_parser_still_rejects_a_non_compound_file():
     with pytest.raises(OleError):
         extract_doc_text(b"{\\rtf1\\ansi this is really an RTF file}")
+
+
+def test_an_rtf_exported_with_a_doc_suffix_is_read_by_its_own_magic():
+    result = DocumentExtractor(secret_values=()).extract(
+        b"{\\rtf1\\ansi Synthetic legacy body}",
+        "legacy-export.doc",
+        "application/msword",
+    )
+
+    assert result.success is True
+    assert "Synthetic legacy body" in result.text
+    assert result.metadata["format"] == "rtf"
+    assert result.metadata["declared_format"] == "doc"
+
+
+def test_an_outlook_msg_reads_root_headers_and_plain_body() -> None:
+    def unicode_property(value: str) -> bytes:
+        return value.encode("utf-16-le") + b"\x00\x00"
+
+    message = _build_ole_streams(
+        {
+            "__substg1.0_0037001F": unicode_property("A"),
+            "__substg1.0_0C1A001F": unicode_property("Иван Петров"),
+            "__substg1.0_0E04001F": unicode_property("Мария Сидорова"),
+            "__substg1.0_1000001F": unicode_property("Смета согласована."),
+        },
+        storage_names=("__attach_version1.0_#00000000",),
+    )
+
+    text, metadata = extract_msg_text(message)
+    dispatched = DocumentExtractor(secret_values=()).extract(
+        message,
+        "message.bin",
+        "application/vnd.ms-outlook",
+    )
+
+    assert "Тема: A" in text  # one ASCII UTF-16 character must survive its terminator
+    assert "От: Иван Петров" in text
+    assert "Кому: Мария Сидорова" in text
+    assert text.endswith("Смета согласована.")
+    assert metadata["body_format"] == "plain"
+    assert metadata["attachment_streams"] == 1
+    assert metadata["source_truncated_for_parse"] is True
+    assert dispatched.success is True
+    assert dispatched.text == text
+
+
+def test_an_outlook_msg_uses_its_declared_ansi_codepage() -> None:
+    message = _build_ole_streams(
+        {
+            "__substg1.0_3FDE0003": struct.pack("<I", 1251),
+            "__substg1.0_0037001E": "Кириллическая тема".encode("cp1251") + b"\x00",
+            "__substg1.0_1000001E": "Письмо прочитано верно.".encode("cp1251") + b"\x00",
+        }
+    )
+
+    text, metadata = extract_msg_text(message)
+
+    assert "Тема: Кириллическая тема" in text
+    assert text.endswith("Письмо прочитано верно.")
+    assert metadata["ansi_codepage"] == 1251
+    assert metadata["body_format"] == "plain"
+    assert "source_truncated_for_parse" not in metadata
+
+
+def test_an_outlook_msg_reads_visible_html_and_drops_active_content() -> None:
+    html_body = (
+        "<html><body><h1>Отчёт</h1><p>Сумма &amp; статус согласованы.</p>"
+        "<script>SECRET_SCRIPT_SENTINEL</script><style>.hidden{display:none}</style>"
+        "</body></html>"
+    ).encode("cp1251")
+    message = _build_ole_streams(
+        {
+            "__substg1.0_3FDE0003": struct.pack("<I", 1251),
+            "__substg1.0_10130102": html_body,
+        }
+    )
+
+    text, metadata = extract_msg_text(message)
+
+    assert "Отчёт" in text
+    assert "Сумма & статус согласованы." in text
+    assert "SECRET_SCRIPT_SENTINEL" not in text
+    assert "display:none" not in text
+    assert metadata["body_read"] is True
+    assert metadata["body_format"] == "html"
+    assert "source_truncated_for_parse" not in metadata
+
+
+def _truncate_ole_stream_after_first_sector(content: bytes, stream_name: str) -> bytes:
+    damaged = bytearray(content)
+    encoded_name = stream_name.encode("utf-16-le")
+    name_offset = damaged.find(encoded_name, 512)
+    assert name_offset >= 512
+    directory_entry = 512 + ((name_offset - 512) // 128) * 128
+    stream_start = struct.unpack_from("<I", damaged, directory_entry + 0x74)[0]
+    fat_sector = struct.unpack_from("<I", damaged, 0x4C)[0]
+    fat_offset = 512 + fat_sector * _SECTOR + stream_start * 4
+    struct.pack_into("<I", damaged, fat_offset, _ENDOFCHAIN)
+    return bytes(damaged)
+
+
+def test_a_truncated_msg_stream_returns_only_a_marked_partial_prefix() -> None:
+    body_name = "__substg1.0_1000001F"
+    message = _build_ole_streams(
+        {
+            body_name: ("Видимый префикс. " + "Продолжение " * 120).encode("utf-16-le")
+            + b"\x00\x00",
+        }
+    )
+    damaged = _truncate_ole_stream_after_first_sector(message, body_name)
+
+    text, metadata = extract_msg_text(damaged)
+
+    assert text.startswith("Видимый префикс.")
+    assert metadata["body_read"] is True
+    assert metadata["body_format"] == "plain"
+    assert metadata["source_truncated_for_parse"] is True
 
 
 def test_a_truncated_compound_file_does_not_raise_something_unexpected():

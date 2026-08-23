@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass
+from html.parser import HTMLParser
 
 OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
@@ -50,6 +51,25 @@ _PARAGRAPH_MARKS = {"\r", "\x0b", "\x0c", "\x07"}
 _CYRILLIC_RUN_MIN = 3
 _CYRILLIC_RUNS_MIN = 4
 _DROPPED = {"\x01", "\x02", "\x03", "\x04", "\x05", "\x06", "\x08", "\x1e", "\x1f", "\x00"}
+_MAX_MSG_HEADER_PROPERTY_BYTES = 64 * 1024
+_MAX_MSG_BODY_PROPERTY_BYTES = 8 * 1024 * 1024
+_MSG_HTML_BODY_PROPERTY = "__substg1.0_10130102"
+_MSG_CODEPAGE_PROPERTIES = ("__substg1.0_3FDE0003", "__substg1.0_3FFD0003")
+_MSG_CODEPAGES = {
+    866: "cp866",
+    1200: "utf-16-le",
+    1201: "utf-16-be",
+    1250: "cp1250",
+    1251: "cp1251",
+    1252: "cp1252",
+    1253: "cp1253",
+    1254: "cp1254",
+    1255: "cp1255",
+    1256: "cp1256",
+    1257: "cp1257",
+    1258: "cp1258",
+    65001: "utf-8",
+}
 
 
 class OleError(ValueError):
@@ -58,10 +78,14 @@ class OleError(ValueError):
 
 @dataclass(frozen=True)
 class _DirEntry:
+    index: int
     name: str
     kind: int
     start: int
     size: int
+    left: int
+    right: int
+    child: int
 
 
 class OleFile:
@@ -155,9 +179,12 @@ class OleFile:
             if kind not in (1, 2, 5) or not 2 <= name_bytes <= 64:
                 continue
             name = block[: name_bytes - 2].decode("utf-16-le", "replace")
+            left = struct.unpack_from("<I", block, 0x44)[0]
+            right = struct.unpack_from("<I", block, 0x48)[0]
+            child = struct.unpack_from("<I", block, 0x4C)[0]
             start = struct.unpack_from("<I", block, 0x74)[0]
             size = struct.unpack_from("<Q", block, 0x78)[0] & 0xFFFFFFFF
-            entries.append(_DirEntry(name, kind, start, size))
+            entries.append(_DirEntry(offset // _DIR_ENTRY_SIZE, name, kind, start, size, left, right, child))
         return entries
 
     def stream_names(self) -> list[str]:
@@ -167,6 +194,67 @@ class OleFile:
         entry = next((item for item in self._directory if item.kind == 2 and item.name == name), None)
         if entry is None:
             raise OleError(f"no stream named {name!r}")
+        return self._read_stream_entry(entry)
+
+    def _root_entries(self) -> list[_DirEntry]:
+        """Return only children of the root storage, excluding nested MSG data."""
+
+        root = next((entry for entry in self._directory if entry.kind == 5), None)
+        if root is None or root.child in (_ENDOFCHAIN, _FREESECT):
+            return []
+        by_index = {entry.index: entry for entry in self._directory}
+        pending = [root.child]
+        seen: set[int] = set()
+        output: list[_DirEntry] = []
+        while pending and len(seen) <= len(self._directory):
+            index = pending.pop()
+            if index in seen or index in (_ENDOFCHAIN, _FREESECT):
+                continue
+            seen.add(index)
+            entry = by_index.get(index)
+            if entry is None:
+                continue
+            output.append(entry)
+            pending.extend((entry.left, entry.right))
+        return output
+
+    def root_entry_names(self) -> list[str]:
+        return [entry.name for entry in self._root_entries()]
+
+    def root_stream_names(self) -> list[str]:
+        return [entry.name for entry in self._root_entries() if entry.kind == 2]
+
+    def read_root_stream(self, name: str) -> bytes:
+        content, _truncated = self.read_root_stream_bounded(name, max_bytes=None)
+        return content
+
+    def read_root_stream_bounded(
+        self,
+        name: str,
+        *,
+        max_bytes: int | None,
+    ) -> tuple[bytes, bool]:
+        entry = next(
+            (item for item in self._root_entries() if item.kind == 2 and item.name == name),
+            None,
+        )
+        if entry is None:
+            raise OleError(f"no root stream named {name!r}")
+        size = entry.size if max_bytes is None else min(entry.size, max(0, int(max_bytes)))
+        bounded = _DirEntry(
+            entry.index,
+            entry.name,
+            entry.kind,
+            entry.start,
+            size,
+            entry.left,
+            entry.right,
+            entry.child,
+        )
+        content = self._read_stream_entry(bounded)
+        return content, size < entry.size or len(content) < size
+
+    def _read_stream_entry(self, entry: _DirEntry) -> bytes:
         if entry.size < self._mini_cutoff and self._mini_fat:
             return self._read_chain(entry.start, entry.size, self._mini_fat, self._mini_size)
         return self._read_chain(entry.start, entry.size, self._fat, self._sector_size)
@@ -327,4 +415,214 @@ def extract_doc_text(content: bytes) -> tuple[str, dict[str, object]]:
     return text, metadata
 
 
-__all__ = ["OleError", "OleFile", "extract_doc_text"]
+_MSG_TEXT_PROPERTIES = {
+    "subject": ("__substg1.0_0037001F", "__substg1.0_0037001E"),
+    "sender": ("__substg1.0_0C1A001F", "__substg1.0_0C1A001E"),
+    "sender_email": ("__substg1.0_0C1F001F", "__substg1.0_0C1F001E"),
+    "to": ("__substg1.0_0E04001F", "__substg1.0_0E04001E"),
+    "cc": ("__substg1.0_0E03001F", "__substg1.0_0E03001E"),
+    "body": ("__substg1.0_1000001F", "__substg1.0_1000001E"),
+}
+
+
+def _decode_msg_property(
+    raw: bytes,
+    *,
+    unicode_value: bool,
+    ansi_encoding: str | None = None,
+) -> str:
+    if unicode_value:
+        while raw.endswith(b"\x00\x00"):
+            raw = raw[:-2]
+        raw = raw[: len(raw) - len(raw) % 2]
+        if not raw:
+            return ""
+        try:
+            return _clean(raw.decode("utf-16-le", errors="strict"))
+        except UnicodeDecodeError as exc:
+            raise OleError("invalid Unicode MSG property") from exc
+    raw = raw.rstrip(b"\x00")
+    if not raw:
+        return ""
+    if ansi_encoding is not None:
+        return _clean(raw.decode(ansi_encoding, errors="replace"))
+    return _clean(_decode_pieces([(True, raw)]))
+
+
+class _VisibleHtml(HTMLParser):
+    """Small fail-closed projection of visible text from an MSG HTML body."""
+
+    _BLOCK_TAGS = frozenset(
+        {
+            "address",
+            "article",
+            "aside",
+            "blockquote",
+            "br",
+            "div",
+            "footer",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "header",
+            "li",
+            "main",
+            "p",
+            "section",
+            "table",
+            "td",
+            "th",
+            "tr",
+        }
+    )
+    _HIDDEN_TAGS = frozenset({"noscript", "script", "style", "svg", "template"})
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._hidden_depth = 0
+        self._parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        del attrs
+        normalized = tag.casefold()
+        if normalized in self._HIDDEN_TAGS:
+            self._hidden_depth += 1
+        elif not self._hidden_depth and normalized in self._BLOCK_TAGS:
+            self._parts.append("\n")
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+        if tag.casefold() in self._HIDDEN_TAGS:
+            self._hidden_depth = max(0, self._hidden_depth - 1)
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized = tag.casefold()
+        if normalized in self._HIDDEN_TAGS:
+            self._hidden_depth = max(0, self._hidden_depth - 1)
+        elif not self._hidden_depth and normalized in self._BLOCK_TAGS:
+            self._parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self._hidden_depth:
+            self._parts.append(data)
+
+    def text(self) -> str:
+        lines = [" ".join(line.split()) for line in "".join(self._parts).splitlines()]
+        return "\n".join(line for line in lines if line)
+
+
+def _decode_msg_html(raw: bytes, *, ansi_encoding: str | None) -> str:
+    raw = raw.rstrip(b"\x00")
+    if not raw:
+        return ""
+    if raw.startswith(b"\xef\xbb\xbf"):
+        source = raw.decode("utf-8-sig", errors="replace")
+    elif raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        source = raw.decode("utf-16", errors="replace")
+    else:
+        try:
+            source = raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            source = raw.decode(ansi_encoding or "cp1252", errors="replace")
+    parser = _VisibleHtml()
+    try:
+        parser.feed(source)
+        parser.close()
+    except (AssertionError, ValueError) as exc:
+        raise OleError("invalid HTML MSG property") from exc
+    return _clean(parser.text())
+
+
+def extract_msg_text(content: bytes) -> tuple[str, dict[str, object]]:
+    """Read bounded ordinary header/body properties from an Outlook MSG.
+
+    Rich-text compression and attachment bodies deliberately remain outside
+    this projection; their presence is reported as incomplete coverage instead
+    of guessing from arbitrary printable OLE bytes.
+    """
+
+    ole = OleFile(content)
+    root_names = ole.root_entry_names()
+    names = set(ole.root_stream_names())
+    values: dict[str, str] = {}
+    property_truncated = False
+    ansi_codepage: int | None = None
+    ansi_encoding: str | None = None
+    for codepage_name in _MSG_CODEPAGE_PROPERTIES:
+        if codepage_name not in names:
+            continue
+        raw_codepage, truncated = ole.read_root_stream_bounded(codepage_name, max_bytes=4)
+        property_truncated = property_truncated or truncated
+        if len(raw_codepage) == 4:
+            candidate = struct.unpack_from("<I", raw_codepage)[0]
+            encoding = _MSG_CODEPAGES.get(candidate)
+            if encoding is not None:
+                ansi_codepage = candidate
+                ansi_encoding = encoding
+        break
+    for key, (unicode_name, ansi_name) in _MSG_TEXT_PROPERTIES.items():
+        selected = unicode_name if unicode_name in names else ansi_name if ansi_name in names else ""
+        if selected:
+            raw, truncated = ole.read_root_stream_bounded(
+                selected,
+                max_bytes=(
+                    _MAX_MSG_BODY_PROPERTY_BYTES
+                    if key == "body"
+                    else _MAX_MSG_HEADER_PROPERTY_BYTES
+                ),
+            )
+            property_truncated = property_truncated or truncated
+            values[key] = _decode_msg_property(
+                raw,
+                unicode_value=selected.endswith("001F"),
+                ansi_encoding=ansi_encoding,
+            )
+
+    plain_body = values.get("body", "").strip()
+    html_body = ""
+    html_truncated = False
+    if not plain_body and _MSG_HTML_BODY_PROPERTY in names:
+        raw_html, html_truncated = ole.read_root_stream_bounded(
+            _MSG_HTML_BODY_PROPERTY,
+            max_bytes=_MAX_MSG_BODY_PROPERTY_BYTES,
+        )
+        property_truncated = property_truncated or html_truncated
+        html_body = _decode_msg_html(raw_html, ansi_encoding=ansi_encoding).strip()
+    body = plain_body or html_body
+    body_format = "plain" if plain_body else "html" if html_body else "none"
+    lines: list[str] = []
+    for key, label in (
+        ("subject", "Тема"),
+        ("sender", "От"),
+        ("sender_email", "Адрес отправителя"),
+        ("to", "Кому"),
+        ("cc", "Копия"),
+    ):
+        value = values.get(key, "").strip()
+        if value:
+            lines.append(f"{label}: {value}")
+    if body:
+        lines.append(body)
+    if not lines:
+        raise OleError("MSG has no readable text properties")
+
+    html_body_unread = _MSG_HTML_BODY_PROPERTY in names and not plain_body and not html_body
+    rich_body_unread = "__substg1.0_10090102" in names and not body
+    attachment_streams = sum(name.startswith("__attach_version1.0_") for name in root_names)
+    metadata: dict[str, object] = {
+        "format": "msg",
+        "body_read": bool(body),
+        "body_format": body_format,
+        "attachment_streams": attachment_streams,
+    }
+    if ansi_codepage is not None:
+        metadata["ansi_codepage"] = ansi_codepage
+    if rich_body_unread or html_body_unread or attachment_streams or property_truncated:
+        metadata["source_truncated_for_parse"] = True
+    return "\n".join(lines), metadata
+
+
+__all__ = ["OleError", "OleFile", "extract_doc_text", "extract_msg_text"]

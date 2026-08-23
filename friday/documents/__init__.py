@@ -41,6 +41,7 @@ from bs4 import BeautifulSoup
 
 from friday.archive_formats import archive_dispatch_kind
 from friday.archive_passwords import archive_password_candidates
+from friday.documents._ocr import LocalOcrResult, extract_local_ocr, local_ocr_available
 from friday.documents._office_structure import (
     build_docx_text_and_structure,
     build_xlsx_text_and_structure,
@@ -119,22 +120,76 @@ _TEXT_EXTENSIONS = {
     ".rst",
 }
 _HTML_EXTENSIONS = {".html", ".htm"}
-#: Семья OpenDocument: текст лежит в `content.xml` у всех трёх, разборщик один.
-#: Принят был только `.odt` — не решение, а недосмотр.
-_OPENDOCUMENT_EXTENSIONS = {".odt": "odt", ".ods": "ods", ".odp": "odp"}
+#: Семья OpenDocument: текст лежит в `content.xml` и у документов, и у их
+#: шаблонов.  Расширение выбирает формат результата, но не отдельный parser.
+_OPENDOCUMENT_EXTENSIONS = {
+    ".odt": "odt",
+    ".ott": "odt",
+    ".odm": "odt",
+    ".oth": "odt",
+    ".ods": "ods",
+    ".ots": "ods",
+    ".odp": "odp",
+    ".otp": "odp",
+    ".odg": "odg",
+    ".otg": "odg",
+}
 _OPENDOCUMENT_MIME_TYPES = {
     "application/vnd.oasis.opendocument.text",
+    "application/vnd.oasis.opendocument.text-template",
+    "application/vnd.oasis.opendocument.text-master",
+    "application/vnd.oasis.opendocument.text-web",
     "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.oasis.opendocument.spreadsheet-template",
     "application/vnd.oasis.opendocument.presentation",
+    "application/vnd.oasis.opendocument.presentation-template",
+    "application/vnd.oasis.opendocument.graphics",
+    "application/vnd.oasis.opendocument.graphics-template",
 }
-_OOXML_EXTENSIONS = {".docx": "docx", ".xlsx": "xlsx", ".pptx": "pptx"}
+_WORDPROCESSING_EXTENSIONS = frozenset({".docx", ".docm", ".dotx", ".dotm"})
+_SPREADSHEET_EXTENSIONS = frozenset({".xlsx", ".xlsm", ".xltx", ".xltm"})
+_PRESENTATION_EXTENSIONS = frozenset(
+    {".pptx", ".pptm", ".potx", ".potm", ".ppsx", ".ppsm"}
+)
+_OOXML_EXTENSIONS = {
+    **{extension: "docx" for extension in _WORDPROCESSING_EXTENSIONS},
+    **{extension: "xlsx" for extension in _SPREADSHEET_EXTENSIONS},
+    **{extension: "pptx" for extension in _PRESENTATION_EXTENSIONS},
+}
 _OOXML_MIME_FORMATS = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.template": "docx",
+    "application/vnd.ms-word.document.macroenabled.12": "docx",
+    "application/vnd.ms-word.template.macroenabled.12": "docx",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.template": "xlsx",
+    "application/vnd.ms-excel.sheet.macroenabled.12": "xlsx",
+    "application/vnd.ms-excel.template.macroenabled.12": "xlsx",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+    "application/vnd.openxmlformats-officedocument.presentationml.template": "pptx",
+    "application/vnd.openxmlformats-officedocument.presentationml.slideshow": "pptx",
+    "application/vnd.ms-powerpoint.presentation.macroenabled.12": "pptx",
+    "application/vnd.ms-powerpoint.template.macroenabled.12": "pptx",
+    "application/vnd.ms-powerpoint.slideshow.macroenabled.12": "pptx",
 }
 _OOXML_MIME_TYPES = frozenset(_OOXML_MIME_FORMATS)
 _EMAIL_METADATA_EXTENSIONS = {".eml": "eml", ".mht": "mhtml", ".mhtml": "mhtml"}
+_MSG_MIME_TYPES = frozenset({"application/vnd.ms-outlook", "application/x-msg"})
+_LEGACY_OFFICE_FORMATS = {
+    ".doc": "doc",
+    ".xls": "xls",
+    ".xlsb": "xlsb",
+    ".ppt": "ppt",
+}
+_LEGACY_OFFICE_MIME_FORMATS = {
+    "application/msword": "doc",
+    "application/vnd.ms-excel": "xls",
+    "application/x-msexcel": "xls",
+    "application/vnd.ms-excel.sheet.binary.macroenabled.12": "xlsb",
+    "application/vnd.ms-powerpoint": "ppt",
+    "application/mspowerpoint": "ppt",
+    "application/x-mspowerpoint": "ppt",
+}
 _ODF_META_MEMBER = "meta.xml"
 _MAX_ODF_METADATA_BYTES = 256 * 1024
 _MAX_ODF_SIGNATURE_BYTES = 512 * 1024
@@ -184,8 +239,58 @@ _ODF_STATISTIC_ATTRIBUTES = {
     f"{{{_ODF_META_NS}}}object-count": "object_count",
     f"{{{_ODF_META_NS}}}ole-object-count": "ole_object_count",
 }
-_OFFICE_EXTENSIONS = {".docx", ".xlsx", ".pptx", ".odt", ".rtf"}
+_OFFICE_EXTENSIONS = {
+    *_OOXML_EXTENSIONS,
+    *_OPENDOCUMENT_EXTENSIONS,
+    ".doc",
+    ".xls",
+    ".xlsb",
+    ".ppt",
+    ".rtf",
+}
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+_KNOWN_DOCUMENT_EXTENSIONS = frozenset(
+    {
+        *_TEXT_EXTENSIONS,
+        *_HTML_EXTENSIONS,
+        *_OOXML_EXTENSIONS,
+        *_OPENDOCUMENT_EXTENSIONS,
+        *_LEGACY_OFFICE_FORMATS,
+        *_EMAIL_METADATA_EXTENSIONS,
+        *_IMAGE_EXTENSIONS,
+        ".epub",
+        ".msg",
+        ".pdf",
+        ".rtf",
+        ".sldm",
+        ".sldx",
+    }
+)
+_CONTENT_TYPES_MEMBER = "[Content_Types].xml"
+_MAX_OOXML_CONTENT_TYPES_BYTES = 512 * 1024
+_WORD_MAIN_PART = "/word/document.xml"
+_WORD_CANONICAL_MAIN_TYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
+)
+_WORD_ALIAS_MAIN_TYPES = frozenset(
+    {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml",
+        "application/vnd.ms-word.document.macroEnabled.main+xml",
+        "application/vnd.ms-word.template.macroEnabledTemplate.main+xml",
+    }
+)
+_PRESENTATION_MAIN_PART = "/ppt/presentation.xml"
+_PRESENTATION_CANONICAL_MAIN_TYPE = (
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"
+)
+_PRESENTATION_ALIAS_MAIN_TYPES = frozenset(
+    {
+        "application/vnd.openxmlformats-officedocument.presentationml.template.main+xml",
+        "application/vnd.openxmlformats-officedocument.presentationml.slideshow.main+xml",
+        "application/vnd.ms-powerpoint.template.macroEnabled.main+xml",
+        "application/vnd.ms-powerpoint.slideshow.macroEnabled.main+xml",
+    }
+)
 _MAX_NESTING_DEPTH = 2
 _MAX_ARCHIVE_PREVIEW_FILES = 24
 _MAX_STRUCTURED_PARSE_BYTES = 2 * 1024 * 1024
@@ -259,7 +364,7 @@ def _office_document_date(content: bytes) -> str | None:
 
 
 # Форматы, у которых внутри zip лежит docProps/core.xml.
-_OFFICE_DATE_EXTENSIONS = {".docx", ".xlsx", ".pptx"}
+_OFFICE_DATE_EXTENSIONS = set(_OOXML_EXTENSIONS)
 
 
 def _email_iso_date(raw: str) -> str:
@@ -591,6 +696,16 @@ class DocumentExtractor:
         lowered = safe_name.casefold()
         ext = self._compound_extension(lowered)
         detected_mime = mime_type or mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+        normalized_mime = detected_mime.split(";", 1)[0].strip().casefold()
+        suffix_known = ext in _KNOWN_DOCUMENT_EXTENSIONS
+        ooxml_format = _OOXML_EXTENSIONS.get(ext)
+        legacy_office_format = _LEGACY_OFFICE_FORMATS.get(ext)
+        odf_format = _OPENDOCUMENT_EXTENSIONS.get(ext)
+        if not suffix_known:
+            ooxml_format = _OOXML_MIME_FORMATS.get(normalized_mime)
+            legacy_office_format = _LEGACY_OFFICE_MIME_FORMATS.get(normalized_mime)
+            if normalized_mime in _OPENDOCUMENT_MIME_TYPES:
+                odf_format = "opendocument"
         archive_kind = archive_dispatch_kind(safe_name, detected_mime)
         try:
             if archive_kind is not None:
@@ -621,34 +736,45 @@ class DocumentExtractor:
                     raise ArchivePasswordInvalid
             elif ext in _TEXT_EXTENSIONS:
                 result = self._extract_text(content, ext)
-            elif ext in _HTML_EXTENSIONS or detected_mime in {"text/html", "application/xhtml+xml"}:
+            elif ext in _HTML_EXTENSIONS or (
+                not suffix_known and normalized_mime in {"text/html", "application/xhtml+xml"}
+            ):
                 result = self._extract_html(content)
-            elif ext == ".pdf" or detected_mime == "application/pdf":
+            elif ext == ".pdf" or (not suffix_known and normalized_mime == "application/pdf"):
                 result = self._extract_pdf(content, deadline=deadline)
-            elif ext == ".docx":
+            elif ooxml_format == "docx":
                 result = self._extract_docx(content)
-            elif ext == ".doc" or detected_mime == "application/msword":
-                result = self._extract_doc(content)
-            elif ext == ".xlsx":
+            elif legacy_office_format == "doc":
+                result = self._extract_doc(content, deadline=deadline)
+            elif ext == ".msg" or (not suffix_known and normalized_mime in _MSG_MIME_TYPES):
+                result = self._extract_msg(content)
+            elif legacy_office_format in {"xls", "xlsb", "ppt"}:
+                result = self._extract_converted_office(
+                    content,
+                    legacy_office_format,
+                    deadline=deadline,
+                )
+            elif ooxml_format == "xlsx":
                 result = self._extract_xlsx(content)
-            elif ext == ".pptx":
+            elif ooxml_format == "pptx":
                 result = self._extract_pptx(content)
-            elif ext in _OPENDOCUMENT_EXTENSIONS or detected_mime in _OPENDOCUMENT_MIME_TYPES:
+            elif odf_format is not None:
                 # Таблица и презентация OpenDocument держат текст ровно там же,
                 # где документ, — в `content.xml`. Принят был только `.odt`, и
                 # это не решение, а недосмотр: у семьи форматов один разборщик.
-                odf_format = _OPENDOCUMENT_EXTENSIONS.get(ext, "opendocument")
                 result = self._extract_xml_zip_text(content, "content.xml", odf_format)
-            elif ext == ".epub" or detected_mime == "application/epub+zip":
+            elif ext == ".epub" or (
+                not suffix_known and normalized_mime == "application/epub+zip"
+            ):
                 result = self._extract_epub(content)
-            elif ext in {".eml", ".mht", ".mhtml"} or detected_mime in {
-                "message/rfc822",
-                "multipart/related",
-            }:
+            elif ext in {".eml", ".mht", ".mhtml"} or (
+                not suffix_known
+                and normalized_mime in {"message/rfc822", "multipart/related"}
+            ):
                 result = self._extract_email(content)
             elif ext == ".rtf":
                 result = self._extract_rtf(content)
-            elif detected_mime.startswith("text/"):
+            elif not suffix_known and normalized_mime.startswith("text/"):
                 result = self._extract_text(content, ext or ".txt")
             else:
                 result = DocumentResult(
@@ -751,7 +877,7 @@ class DocumentExtractor:
         if "document_date" not in metadata:
             own_date = (
                 _pdf_document_date_from_bytes(content)
-                if ext == ".pdf" or detected_mime == "application/pdf"
+                if ext == ".pdf" or (not suffix_known and normalized_mime == "application/pdf")
                 else (_office_document_date(content) if ext in _OFFICE_DATE_EXTENSIONS else None)
             )
             if own_date:
@@ -792,26 +918,35 @@ class DocumentExtractor:
         detected_mime = (
             (mime_type or mimetypes.guess_type(safe_name)[0] or "").split(";", 1)[0].strip().casefold()
         )
+        suffix_known = ext in _KNOWN_DOCUMENT_EXTENSIONS
         parser: Any
-        if ext in _OPENDOCUMENT_EXTENSIONS or detected_mime in _OPENDOCUMENT_MIME_TYPES:
+        if ext in _OPENDOCUMENT_EXTENSIONS or (
+            not suffix_known and detected_mime in _OPENDOCUMENT_MIME_TYPES
+        ):
             format_name = _OPENDOCUMENT_EXTENSIONS.get(ext, "opendocument")
             parser = self._extract_opendocument_metadata
-        elif ext in _OOXML_EXTENSIONS or detected_mime in _OOXML_MIME_TYPES:
+        elif ext in _OOXML_EXTENSIONS or (
+            not suffix_known and detected_mime in _OOXML_MIME_TYPES
+        ):
             format_name = _OOXML_EXTENSIONS.get(ext, _OOXML_MIME_FORMATS.get(detected_mime, "ooxml"))
             parser = self._extract_ooxml_metadata
-        elif ext == ".pdf" or detected_mime == "application/pdf":
+        elif ext == ".pdf" or (not suffix_known and detected_mime == "application/pdf"):
             format_name = "pdf"
             parser = self._extract_pdf_metadata
-        elif ext in _EMAIL_METADATA_EXTENSIONS or detected_mime in {
-            "message/rfc822",
-            "multipart/related",
-        }:
+        elif ext in _EMAIL_METADATA_EXTENSIONS or (
+            not suffix_known
+            and detected_mime in {"message/rfc822", "multipart/related"}
+        ):
             format_name = _EMAIL_METADATA_EXTENSIONS.get(ext, "eml")
             parser = self._extract_email_metadata
-        elif ext == ".epub" or detected_mime == "application/epub+zip":
+        elif ext == ".epub" or (
+            not suffix_known and detected_mime == "application/epub+zip"
+        ):
             format_name = "epub"
             parser = self._extract_epub_metadata
-        elif ext in _IMAGE_EXTENSIONS or detected_mime.startswith("image/"):
+        elif ext in _IMAGE_EXTENSIONS or (
+            not suffix_known and detected_mime.startswith("image/")
+        ):
             format_name = "image"
             parser = self._extract_image_metadata
         else:
@@ -2007,14 +2142,22 @@ class DocumentExtractor:
         max_images = max(1, min(int(max_images), 4))
         safe_name = Path(str(filename or "document")).name
         ext = self._compound_extension(safe_name.casefold())
-        detected_mime = (mime_type or mimetypes.guess_type(safe_name)[0] or "").split(";", 1)[0]
+        detected_mime = (
+            (mime_type or mimetypes.guess_type(safe_name)[0] or "")
+            .split(";", 1)[0]
+            .strip()
+            .casefold()
+        )
+        suffix_known = ext in _KNOWN_DOCUMENT_EXTENSIONS
         candidates: list[tuple[bytes, str]] = []
 
-        if ext in _IMAGE_EXTENSIONS or detected_mime.startswith("image/"):
+        if ext in _IMAGE_EXTENSIONS or (
+            not suffix_known and detected_mime.startswith("image/")
+        ):
             candidates.append((content, safe_name))
-        elif ext == ".pdf" or detected_mime == "application/pdf":
+        elif ext == ".pdf" or (not suffix_known and detected_mime == "application/pdf"):
             candidates.extend(self._pdf_embedded_images(content, max_candidates=max_images * 3))
-        elif ext in {".docx", ".pptx", ".xlsx", ".odt"}:
+        elif ext in _OOXML_EXTENSIONS or ext in _OPENDOCUMENT_EXTENSIONS:
             candidates.extend(self._office_embedded_images(content, max_candidates=max_images * 3))
 
         assets: list[VisualAsset] = []
@@ -2038,6 +2181,28 @@ class DocumentExtractor:
             if len(assets) >= max_images:
                 break
         return assets
+
+    @staticmethod
+    def local_ocr_available() -> bool:
+        """Whether the optional bounded local OCR backend is installed."""
+
+        return local_ocr_available()
+
+    def ocr_visual_assets(
+        self,
+        assets: Sequence[VisualAsset],
+        *,
+        deadline: float | None = None,
+        executable: str | None = None,
+    ) -> LocalOcrResult:
+        """Run deterministic local OCR over an already-normalized prefix."""
+
+        return extract_local_ocr(
+            assets,
+            max_text_chars=self.max_text_chars,
+            deadline=deadline,
+            executable=executable,
+        )
 
     def render_pdf_pages(
         self,
@@ -2067,8 +2232,14 @@ class DocumentExtractor:
 
         safe_name = Path(str(filename or "document.pdf")).name
         ext = self._compound_extension(safe_name.casefold())
-        detected_mime = (mime_type or mimetypes.guess_type(safe_name)[0] or "").split(";", 1)[0]
-        if ext != ".pdf" and detected_mime != "application/pdf":
+        detected_mime = (
+            (mime_type or mimetypes.guess_type(safe_name)[0] or "")
+            .split(";", 1)[0]
+            .strip()
+            .casefold()
+        )
+        suffix_known = ext in _KNOWN_DOCUMENT_EXTENSIONS
+        if ext != ".pdf" and (suffix_known or detected_mime != "application/pdf"):
             return VisualPageRender((), 0, 0, False, False, False, "not_pdf")
         if not isinstance(content, bytes) or len(content) > self.max_input_bytes:
             return VisualPageRender((), 0, 0, False, False, False, "invalid_pdf_input")
@@ -2227,10 +2398,18 @@ class DocumentExtractor:
             return 0
         safe_name = Path(str(filename or "document")).name
         ext = self._compound_extension(safe_name.casefold())
-        detected_mime = (mime_type or mimetypes.guess_type(safe_name)[0] or "").split(";", 1)[0]
-        if ext in _IMAGE_EXTENSIONS or detected_mime.startswith("image/"):
+        detected_mime = (
+            (mime_type or mimetypes.guess_type(safe_name)[0] or "")
+            .split(";", 1)[0]
+            .strip()
+            .casefold()
+        )
+        suffix_known = ext in _KNOWN_DOCUMENT_EXTENSIONS
+        if ext in _IMAGE_EXTENSIONS or (
+            not suffix_known and detected_mime.startswith("image/")
+        ):
             return 1
-        if ext == ".pdf" or detected_mime == "application/pdf":
+        if ext == ".pdf" or (not suffix_known and detected_mime == "application/pdf"):
             with suppress(Exception):
                 from pypdf import PdfReader
 
@@ -2241,7 +2420,7 @@ class DocumentExtractor:
                             return 0
                 return len(reader.pages)
             return 0
-        if ext in {".docx", ".pptx", ".xlsx", ".odt"}:
+        if ext in _OOXML_EXTENSIONS or ext in _OPENDOCUMENT_EXTENSIONS:
             with suppress(Exception), zipfile.ZipFile(io.BytesIO(content)) as archive:
                 return sum(
                     1
@@ -2602,6 +2781,80 @@ class DocumentExtractor:
             member_limit=min(self.max_archive_uncompressed_bytes, _MAX_OFFICE_MEMBER_BYTES),
         )
 
+    def _normalized_ooxml_main_type(
+        self,
+        content: bytes,
+        *,
+        main_part: str,
+        canonical_type: str,
+        alias_types: frozenset[str],
+    ) -> tuple[bytes, bool]:
+        """Normalize one allowlisted OOXML main type for strict Python readers.
+
+        DOCX/PPTX libraries reject valid template, slideshow and macro-enabled
+        containers before reading their otherwise identical main XML.  Rewrite
+        only the exact main-part override, after validating the whole ZIP.  No
+        other relationship or content-type declaration is inferred or changed.
+        """
+
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            members = self._validate_office_zip(archive)
+            type_members = [
+                member for member in members if member.filename == _CONTENT_TYPES_MEMBER
+            ]
+            if len(type_members) != 1:
+                raise ValueError("OOXML content types member must be unique")
+            type_member = type_members[0]
+            if type_member.file_size > _MAX_OOXML_CONTENT_TYPES_BYTES:
+                raise ArchiveLimitError("OOXML content types member exceeds limit")
+            with archive.open(type_member) as source:
+                raw_types, truncated = self._read_stream_preview(
+                    source,
+                    _MAX_OOXML_CONTENT_TYPES_BYTES,
+                )
+            if truncated:
+                raise ArchiveLimitError("OOXML content types member exceeds limit")
+            root = self._metadata_xml_root(raw_types)
+            overrides = [
+                node
+                for node in root.iter()
+                if self._metadata_local_name(getattr(node, "tag", "")) == "Override"
+                and str(node.get("PartName") or "") == main_part
+            ]
+            if len(overrides) != 1:
+                raise ValueError("OOXML main content type must be unique")
+            override = overrides[0]
+            content_type = str(override.get("ContentType") or "")
+            if content_type == canonical_type:
+                return content, False
+            if content_type not in alias_types:
+                return content, False
+
+            from lxml import etree  # type: ignore[import-untyped]
+
+            override.set("ContentType", canonical_type)
+            normalized_types = etree.tostring(
+                root,
+                encoding="UTF-8",
+                xml_declaration=True,
+            )
+            if len(normalized_types) > _MAX_OOXML_CONTENT_TYPES_BYTES:
+                raise ArchiveLimitError("normalized OOXML content types member exceeds limit")
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w") as normalized:
+                normalized.comment = archive.comment
+                for member in members:
+                    payload = (
+                        normalized_types
+                        if member.filename == _CONTENT_TYPES_MEMBER
+                        else archive.read(member)
+                    )
+                    normalized.writestr(member, payload)
+        normalized_content = output.getvalue()
+        with zipfile.ZipFile(io.BytesIO(normalized_content)) as archive:
+            self._validate_office_zip(archive)
+        return normalized_content, True
+
     def _archive_member_limit(self, budget: _ArchiveBudget) -> int:
         """Bytes one nested member may consume at this point in the upload.
 
@@ -2648,22 +2901,28 @@ class DocumentExtractor:
         return b"".join(chunks), bool(stream.read(1))
 
     def _extract_docx(self, content: bytes) -> DocumentResult:
-        with zipfile.ZipFile(io.BytesIO(content)) as archive:
-            self._validate_office_zip(archive)
+        normalized_content, main_type_normalized = self._normalized_ooxml_main_type(
+            content,
+            main_part=_WORD_MAIN_PART,
+            canonical_type=_WORD_CANONICAL_MAIN_TYPE,
+            alias_types=_WORD_ALIAS_MAIN_TYPES,
+        )
         try:
             from docx import Document
 
-            document = Document(io.BytesIO(content))
+            document = Document(io.BytesIO(normalized_content))
             text, office_structure_index, extraction_truncated = build_docx_text_and_structure(
                 document,
                 max_text_chars=self.max_text_chars,
-                content=content,
+                content=normalized_content,
             )
             metadata: dict[str, Any] = {
                 "format": "docx",
                 "paragraphs": len(document.paragraphs),
                 "tables": len(document.tables),
             }
+            if main_type_normalized:
+                metadata["main_content_type_normalized"] = True
             if extraction_truncated:
                 metadata["extraction_truncated"] = True
                 metadata["text_truncated"] = True
@@ -2673,9 +2932,13 @@ class DocumentExtractor:
                 office_structure_index=office_structure_index,
             )
         except ImportError:
-            return self._extract_xml_zip_text(content, "word/document.xml", "docx")
+            return self._extract_xml_zip_text(
+                normalized_content,
+                "word/document.xml",
+                "docx",
+            )
 
-    def _extract_doc(self, content: bytes) -> DocumentResult:
+    def _extract_doc(self, content: bytes, *, deadline: float | None = None) -> DocumentResult:
         """Legacy Word 97-2003. Parsed from bytes; see `friday.documents._ole`.
 
         Measured on a real 3.19 GB working folder: 206 files in this format, 130 MB,
@@ -2683,17 +2946,78 @@ class DocumentExtractor:
         nothing in it to review. 197 of the 206 now read, all recognisably Russian
         text, no replacement characters and no control characters left behind.
 
-        A file that is not a compound document at all (five of those 206) still
-        reports unsupported: the reviewer needs "Friday cannot read this format"
-        and "the file is damaged" to stay different sentences.
+        Several deployed ``.doc`` files are actually RTF exported under Word's
+        legacy suffix.  Their own magic is unambiguous, so route those bytes to
+        the existing bounded RTF parser; arbitrary non-OLE data still fails.
         """
         from friday.documents._ole import OleError, extract_doc_text
 
+        if content.lstrip().startswith(b"{\\rtf"):
+            result = self._extract_rtf(content)
+            return DocumentResult(
+                result.text,
+                {**result.metadata, "declared_format": "doc", "format": "rtf"},
+                result.success,
+                result.error,
+            )
         try:
             text, metadata = extract_doc_text(content)
         except OleError:
-            return DocumentResult("", {"format": "doc"}, False, "unsupported_legacy_doc")
+            converted = self._extract_converted_office(content, "doc", deadline=deadline)
+            if converted.success:
+                return converted
+            return DocumentResult(
+                "",
+                {"format": "doc", "conversion_error": converted.error},
+                False,
+                "unsupported_legacy_doc",
+            )
         return DocumentResult(text, metadata)
+
+    def _extract_converted_office(
+        self,
+        content: bytes,
+        source_format: str,
+        *,
+        deadline: float | None,
+    ) -> DocumentResult:
+        """Convert one closed legacy Office family member, then parse OOXML."""
+
+        from friday.documents._office_convert import convert_legacy_office
+
+        converted = convert_legacy_office(
+            content,
+            source_format,
+            deadline=deadline,
+            max_output_bytes=_MAX_OFFICE_EXPANDED_BYTES,
+        )
+        conversion_metadata: dict[str, Any] = {
+            "format": source_format,
+            "converted_format": converted.target_format,
+            "parser": "libreoffice",
+        }
+        if not converted.success:
+            return DocumentResult("", conversion_metadata, False, converted.error)
+        parser = {
+            "docx": self._extract_docx,
+            "xlsx": self._extract_xlsx,
+            "pptx": self._extract_pptx,
+        }.get(converted.target_format)
+        if parser is None:  # closed mapping invariant
+            return DocumentResult(
+                "",
+                conversion_metadata,
+                False,
+                "legacy_office_conversion_unsupported",
+            )
+        parsed = parser(converted.content)
+        return DocumentResult(
+            parsed.text,
+            {**parsed.metadata, **conversion_metadata},
+            parsed.success,
+            parsed.error,
+            parsed.office_structure_index,
+        )
 
     def _extract_xlsx(self, content: bytes) -> DocumentResult:
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
@@ -2814,13 +3138,17 @@ class DocumentExtractor:
         return built, metadata, index
 
     def _extract_pptx(self, content: bytes) -> DocumentResult:
-        with zipfile.ZipFile(io.BytesIO(content)) as archive:
-            self._validate_office_zip(archive)
+        normalized_content, main_type_normalized = self._normalized_ooxml_main_type(
+            content,
+            main_part=_PRESENTATION_MAIN_PART,
+            canonical_type=_PRESENTATION_CANONICAL_MAIN_TYPE,
+            alias_types=_PRESENTATION_ALIAS_MAIN_TYPES,
+        )
         try:
             from pptx import Presentation
         except ImportError:
             return DocumentResult("", {"format": "pptx"}, False, "python-pptx is not installed")
-        presentation = Presentation(io.BytesIO(content))
+        presentation = Presentation(io.BytesIO(normalized_content))
         slides: list[str] = []
         used = 0
         extraction_truncated = False
@@ -2839,6 +3167,8 @@ class DocumentExtractor:
                     extraction_truncated = True
                     break
         metadata: dict[str, Any] = {"format": "pptx", "slides": len(presentation.slides)}
+        if main_type_normalized:
+            metadata["main_content_type_normalized"] = True
         if extraction_truncated:
             metadata["extraction_truncated"] = True
         return DocumentResult("\n\n".join(slides), metadata)
@@ -2859,6 +3189,16 @@ class DocumentExtractor:
             return DocumentResult(" ".join(source.split()), metadata)
         metadata["parser"] = "striprtf"
         return DocumentResult(rtf_to_text(source), metadata)
+
+    @staticmethod
+    def _extract_msg(content: bytes) -> DocumentResult:
+        from friday.documents._ole import OleError, extract_msg_text
+
+        try:
+            text, metadata = extract_msg_text(content)
+        except OleError:
+            return DocumentResult("", {"format": "msg"}, False, "unsupported_outlook_msg")
+        return DocumentResult(text, metadata)
 
     def _extract_email(self, content: bytes) -> DocumentResult:
         """Письмо целиком: заголовки, которые человек читает, и тело.

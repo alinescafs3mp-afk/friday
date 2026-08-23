@@ -124,6 +124,37 @@ class _TruncatedThenCompactVision:
         return {"content": '{"pages":[{"asset_id":"A1","text":"truncated'}
 
 
+class _LowConfidenceReadableVision:
+    enabled = True
+    model = "offline-low-confidence-vision"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, messages, **kwargs):
+        del kwargs
+        self.calls += 1
+        content = messages[-1]["content"]
+        assert sum(item.get("type") == "image_url" for item in content) == 1
+        return {
+            "content": json.dumps(
+                {
+                    "pages": [{"asset_id": "A1", "text": "BLURRY BUT READABLE OCR"}],
+                    "text": "",
+                    "title": "",
+                    "summary": "",
+                    "document_type": "scan",
+                    # A model may honestly rate a difficult scan below the
+                    # former 0.2 gate while still returning useful visible text.
+                    "confidence": 0.0,
+                    "entities": [],
+                    "evidence": [],
+                    "warnings": ["low visual confidence"],
+                }
+            )
+        }
+
+
 class _InvalidAggregateVision(_PageVision):
     async def chat(self, messages, **kwargs):
         content = messages[-1]["content"]
@@ -404,6 +435,28 @@ async def test_truncated_jpeg_json_gets_one_compact_bounded_ocr_retry(settings, 
     assert {call["max_tokens"] for call in llm.calls} == {8_192}
     assert "only full OCR carrier" in str(llm.calls[0]["prompt"])
     assert "TARGETED OCR REREAD" in str(llm.calls[1]["prompt"])
+
+
+@pytest.mark.asyncio
+async def test_low_confidence_does_not_discard_a_complete_ocr_carrier(settings, storage) -> None:
+    image = Image.new("RGB", (640, 480), "white")
+    encoded = io.BytesIO()
+    image.save(encoded, format="JPEG")
+    llm = _LowConfidenceReadableVision()
+
+    result = await _pipeline(settings, storage, llm)._extract_visual_document(  # noqa: SLF001
+        encoded.getvalue(),
+        filename="difficult-scan.jpg",
+        mime_type="image/jpeg",
+    )
+
+    assert result is not None and result["success"] is True
+    assert result["text"].endswith("BLURRY BUT READABLE OCR")
+    assert result["confidence"] == 0.0
+    assert result["pages_read"] == result["pages_total"] == 1
+    assert result["pages_truncated"] is False
+    assert result["warnings"] == ["low visual confidence"]
+    assert llm.calls == 1
 
 
 @pytest.mark.asyncio

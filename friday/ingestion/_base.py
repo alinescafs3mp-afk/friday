@@ -1239,6 +1239,7 @@ EVIDENCE_ONLY_ENTITY_METHODS = frozenset(
         "capitalized_person_name",
         "identifier_syntax",
         "local_model_advice",
+        "local_tesseract_ocr",
         "local_vision_advice",
         "location_preposition",
         "vision_ocr_advisory",

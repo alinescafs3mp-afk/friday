@@ -19,7 +19,7 @@ from friday.document_metadata_codec import (
     decode_technical_metadata_text,
     encode_technical_metadata_text,
 )
-from friday.documents import VisualAsset
+from friday.documents import LocalOcrResult, VisualAsset
 from friday.documents._office_structure import validate_office_structure_index
 from friday.file_delivery import (
     LEGACY_UNREGISTERED,
@@ -75,11 +75,32 @@ from friday.workers._blocking import run_blocking
 _OFFICE_STRUCTURE_METADATA_KEY = "office_structure_v1"
 _OFFICE_STRUCTURE_ATTESTATION_KEY = OFFICE_STRUCTURE_ATTESTATION_METADATA_KEY
 _OFFICE_SOURCE_TEXT_KEY = "_office_source_text"
-_STRUCTURED_OFFICE_SUFFIXES = frozenset({".docx", ".xlsx"})
+_STRUCTURED_OFFICE_SUFFIXES = frozenset(
+    {
+        ".docm",
+        ".docx",
+        ".dotm",
+        ".dotx",
+        ".xls",
+        ".xlsb",
+        ".xlsm",
+        ".xlsx",
+        ".xltm",
+        ".xltx",
+    }
+)
 _STRUCTURED_OFFICE_MIME_TYPES = frozenset(
     {
+        "application/vnd.ms-excel",
+        "application/vnd.ms-excel.sheet.binary.macroenabled.12",
+        "application/vnd.ms-excel.sheet.macroenabled.12",
+        "application/vnd.ms-excel.template.macroenabled.12",
+        "application/vnd.ms-word.document.macroenabled.12",
+        "application/vnd.ms-word.template.macroenabled.12",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
     }
 )
 _VISION_BATCH_SIZE = 4
@@ -107,6 +128,7 @@ _VISION_OCR_OUTPUT_TOKEN_FLOOR = 8_192
 _VISION_PAGE_MAX_PIXELS = 1_048_576
 _VISION_BATCH_MAX_PIXELS = 1_048_576
 _VISION_PDF_RENDER_BUDGET_FLOOR_SEC = 30.0
+_LOCAL_OCR_FALLBACK_RESERVE_SEC = 30.0
 _VISION_SUMMARY_LANGUAGES = {
     "en": "English",
     "ru": "Russian",
@@ -326,6 +348,88 @@ _DOCUMENT_METADATA_FORMATS = frozenset(
 def _visual_page_number(asset: VisualAsset) -> int | None:
     match = _PDF_RENDER_SOURCE_RE.fullmatch(asset.source)
     return int(match.group(1)) if match else None
+
+
+async def _local_ocr_projection(
+    pipeline: Any,
+    assets: Sequence[VisualAsset],
+    *,
+    pages_total: int,
+    is_pdf: bool,
+    deadline: float,
+    prior_warnings: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Run optional OCR without changing IngestionPipeline's pinned surface."""
+
+    result: LocalOcrResult = await asyncio.to_thread(
+        pipeline._doc_extractor.ocr_visual_assets,
+        assets,
+        deadline=deadline,
+    )
+    text_parts: list[str] = []
+    for asset, page_text in zip(assets, result.page_texts, strict=False):
+        page_number = _visual_page_number(asset)
+        label = f"Страница {page_number}" if is_pdf and page_number is not None else asset.source
+        text_parts.append(f"[{label}]\n{page_text}")
+    joined = "\n\n".join(text_parts)
+    text_truncated = result.text_truncated or len(joined) > pipeline.settings.max_extracted_text_chars
+    text = _bounded_text(joined, pipeline.settings.max_extracted_text_chars)
+    pages_total = max(0, int(pages_total), result.pages_total)
+    pages_read = min(result.pages_read, len(assets))
+    pages_truncated = pages_read < pages_total
+    page_cap_reached = result.page_cap_reached or pages_total > len(assets)
+    carrier_readable = bool(text.strip())
+    warnings = list(dict.fromkeys(str(item) for item in prior_warnings if str(item)))
+    warnings.append("local_ocr_fallback")
+    if result.error:
+        warnings.append(result.error)
+    if result.deadline_reached:
+        warnings.append("vision_deadline_reached")
+    if pages_truncated:
+        warnings.append("vision_pages_truncated")
+    if page_cap_reached:
+        warnings.append("vision_page_cap_reached")
+    if text_truncated:
+        warnings.append("vision_text_truncated")
+    if not carrier_readable:
+        warnings.append("vision_page_text_empty")
+    warnings = list(dict.fromkeys(warnings))[:20]
+    return {
+        "success": carrier_readable,
+        "error": "" if carrier_readable and not result.error else result.error or "local_ocr_page_text_empty",
+        "confidence": 0.4 if carrier_readable else 0.0,
+        "text": text,
+        "title": "",
+        "summary": "",
+        "summary_language": "",
+        "document_type": "scan",
+        "entities": [],
+        "evidence": [],
+        "warnings": warnings,
+        "grounded_evidence_count": 0,
+        "asset_coverage": round(pages_read / max(1, pages_total), 3),
+        "pages_total": pages_total,
+        "pages_read": pages_read,
+        "pages_truncated": pages_truncated,
+        "partial": pages_truncated or page_cap_reached or bool(result.error) or text_truncated,
+        "deadline_reached": result.deadline_reached,
+        "page_cap_reached": page_cap_reached,
+        "text_truncated": text_truncated,
+        "batches_total": 0,
+        "batches_read": 0,
+        "batch_fallback_used": True,
+        "evidence_reread_attempted": False,
+        "evidence_reread_confirmed": False,
+        "evidence_text_inconsistent": False,
+        "assets": [
+            {"asset_id": f"A{index}", **asset.to_dict()}
+            for index, asset in enumerate(assets, start=1)
+        ],
+        "reported_asset_ids": [f"A{index}" for index in range(1, pages_read + 1)],
+        "model": "local-tesseract",
+        "method": "local_tesseract_ocr",
+        "advisory_only": True,
+    }
 
 
 def _text_extraction_was_truncated(metadata: Mapping[str, Any]) -> bool:
@@ -940,7 +1044,15 @@ class FilesMixin(PipelineShared):
                 "_page_text": page_text,
             }
         return {
-            "success": confidence >= 0.2,
+            # ``pages[].text`` is the bounded source carrier; confidence is
+            # merely the vision model's advisory assessment of how legible the
+            # scan was.  Treating a low self-rating as a failed batch discarded
+            # the very transcription it qualified, so a blurry-but-readable
+            # one-page scan became ``vision_batch_failed`` without receiving
+            # the missing-carrier reread above.  Preserve the carrier and its
+            # low confidence: downstream already keeps every vision result
+            # advisory/verifier-ineligible and exposes the review warning.
+            "success": carrier_readable,
             "error": "",
             "confidence": confidence,
             "text": text,
@@ -1027,7 +1139,18 @@ class FilesMixin(PipelineShared):
         preferred_language: str = "",
     ) -> dict[str, Any] | None:
         """Render and OCR a bounded document in ordered, at-most-four-page batches."""
-        if not self.llm or not self.llm.enabled or not self.settings.profile.vision_capable:
+        vision_enabled = bool(
+            self.llm and self.llm.enabled and self.settings.profile.vision_capable
+        )
+        local_ocr_probe = getattr(self._doc_extractor, "local_ocr_available", None)
+        # The first availability check asks the exact binary for its effective
+        # language set.  Keep that bounded subprocess off the async request
+        # loop; subsequent checks are cached, but the cold path is the one a
+        # freshly deployed backend actually sees.
+        local_ocr_enabled = bool(
+            callable(local_ocr_probe) and await asyncio.to_thread(local_ocr_probe)
+        )
+        if not vision_enabled and not local_ocr_enabled:
             return None
 
         safe_mime = str(mime_type or "").split(";", 1)[0].strip().casefold()
@@ -1147,6 +1270,16 @@ class FilesMixin(PipelineShared):
                 "advisory_only": True,
             }
 
+        if not vision_enabled:
+            return await _local_ocr_projection(
+                self,
+                assets,
+                pages_total=pages_total,
+                is_pdf=is_pdf,
+                deadline=common_deadline,
+                prior_warnings=("vision_model_unavailable",),
+            )
+
         # Keep concurrent requests similarly sized.  Every page is already
         # normalized to `_VISION_PAGE_MAX_PIXELS`; the second cap turns the
         # aggregate request into a real bound rather than merely limiting the
@@ -1180,12 +1313,16 @@ class FilesMixin(PipelineShared):
             batch_specs = [(index, (asset,)) for index, asset in enumerate(assets)]
 
         fallback_reserve = min(
-            max(0.0, _VISION_OCR_FALLBACK_RESERVE_SEC),
+            max(
+                0.0,
+                _VISION_OCR_FALLBACK_RESERVE_SEC,
+                _LOCAL_OCR_FALLBACK_RESERVE_SEC if local_ocr_enabled else 0.0,
+            ),
             _VISION_OCR_BUDGET_SEC / 2.0,
         )
         initial_deadline = (
             common_deadline - fallback_reserve
-            if any(len(batch) > 1 for _offset, batch in batch_specs)
+            if local_ocr_enabled or any(len(batch) > 1 for _offset, batch in batch_specs)
             else common_deadline
         )
         batch_attempts = 0
@@ -1544,7 +1681,7 @@ class FilesMixin(PipelineShared):
             entities = []
             grounded_evidence_count = 0
             warnings = list(dict.fromkeys((*warnings, "vision_page_text_empty")))[:20]
-        return {
+        combined: dict[str, Any] = {
             "success": bool(successful) and carrier_readable,
             "error": error,
             "confidence": confidence,
@@ -1578,6 +1715,16 @@ class FilesMixin(PipelineShared):
             "model": self.settings.llm_model,
             "advisory_only": True,
         }
+        if not combined["success"] and local_ocr_enabled and loop.time() < common_deadline:
+            return await _local_ocr_projection(
+                self,
+                assets,
+                pages_total=pages_total,
+                is_pdf=is_pdf,
+                deadline=common_deadline,
+                prior_warnings=tuple(str(item) for item in combined["warnings"]),
+            )
+        return combined
 
     async def _transcribe_audio(
         self,
