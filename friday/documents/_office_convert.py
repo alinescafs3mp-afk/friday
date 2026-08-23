@@ -2,9 +2,9 @@
 
 LibreOffice cannot consume an upload through stdin, so this is the one document
 parser that uses disk.  It receives a private, mode-0700 temporary root, a fixed
-basename, no inherited environment, and one caller-owned deadline.  Only four
+basename, no inherited environment, and one caller-owned deadline.  Only the
 declared source/target pairs are accepted; the converted container is parsed by
-Friday's existing bounded OOXML readers before any text is trusted.
+Friday's existing bounded OOXML/ODG readers before any text is trusted.
 """
 
 from __future__ import annotations
@@ -28,9 +28,28 @@ _MAX_CONVERSION_INPUT_BYTES = 64 * 1024 * 1024
 _MAX_CONVERSION_OUTPUT_BYTES = 128 * 1024 * 1024
 _TARGET_BY_SOURCE = {
     "doc": "docx",
+    "dot": "docx",
+    "wpt": "docx",
+    "wpd": "docx",
+    "pages": "docx",
     "xls": "xlsx",
     "xlsb": "xlsx",
+    "xlt": "xlsx",
+    "et": "xlsx",
+    "ett": "xlsx",
+    "numbers": "xlsx",
     "ppt": "pptx",
+    "pot": "pptx",
+    "pps": "pptx",
+    "dpt": "pptx",
+    "dps": "pptx",
+    "key": "pptx",
+    "pub": "odg",
+    "vdx": "odg",
+    "vsd": "odg",
+    "vsdm": "odg",
+    "vsdx": "odg",
+    "vstx": "odg",
 }
 
 
@@ -114,7 +133,7 @@ def convert_legacy_office(
     max_output_bytes: int = _MAX_CONVERSION_OUTPUT_BYTES,
     executable: str | None = None,
 ) -> OfficeConversionResult:
-    """Convert one allowlisted legacy format into its OOXML counterpart."""
+    """Convert one allowlisted Office format into its fixed safe target."""
 
     normalized_source = str(source_format or "").strip().casefold().lstrip(".")
     target_format = _TARGET_BY_SOURCE.get(normalized_source, "")

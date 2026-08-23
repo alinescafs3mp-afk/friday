@@ -13,8 +13,10 @@ from docx import Document
 from openpyxl import Workbook
 from pptx import Presentation
 
+from friday.agent_runtime._office_attachments import _OFFICE_SUFFIXES
 from friday.documents import DocumentExtractor
 from friday.documents._office_convert import convert_legacy_office, libreoffice_available
+from friday.ingestion._files import _STRUCTURED_OFFICE_MIME_TYPES, _STRUCTURED_OFFICE_SUFFIXES
 
 
 @pytest.fixture(autouse=True)
@@ -104,6 +106,34 @@ _PRESENTATION_TYPES = {
     "potm": "application/vnd.ms-powerpoint.template.macroEnabled.main+xml",
     "ppsx": "application/vnd.openxmlformats-officedocument.presentationml.slideshow.main+xml",
     "ppsm": "application/vnd.ms-powerpoint.slideshow.macroEnabled.main+xml",
+}
+_FIRST_EXPANSION_TARGETS = {
+    "dot": "docx",
+    "wpt": "docx",
+    "wpd": "docx",
+    "pages": "docx",
+    "xlt": "xlsx",
+    "et": "xlsx",
+    "ett": "xlsx",
+    "numbers": "xlsx",
+    "pot": "pptx",
+    "pps": "pptx",
+    "dpt": "pptx",
+    "dps": "pptx",
+    "key": "pptx",
+    "pub": "odg",
+    "vdx": "odg",
+    "vsd": "odg",
+    "vsdm": "odg",
+    "vsdx": "odg",
+    "vstx": "odg",
+}
+_ALL_CONVERSION_TARGETS = {
+    "doc": "docx",
+    "xls": "xlsx",
+    "xlsb": "xlsx",
+    "ppt": "pptx",
+    **_FIRST_EXPANSION_TARGETS,
 }
 
 
@@ -265,7 +295,7 @@ if any(item not in arguments for item in required):
 if os.environ.get('LD_LIBRARY_PATH') != {expected_library_path!r}:
     raise SystemExit(3)
 source = pathlib.Path(arguments[-1])
-target = {{'doc': 'docx', 'xls': 'xlsx', 'xlsb': 'xlsx', 'ppt': 'pptx'}}[source.suffix[1:]]
+target = {_ALL_CONVERSION_TARGETS!r}[source.suffix[1:]]
 output = pathlib.Path(arguments[arguments.index('--outdir') + 1]) / ('source.' + target)
 output.write_bytes(source.read_bytes())
 """,
@@ -331,6 +361,123 @@ def test_legacy_office_families_use_one_closed_libreoffice_fallback(
     assert result.metadata["parser"] == "libreoffice"
 
 
+@pytest.mark.parametrize(("source_format", "target_format"), tuple(_FIRST_EXPANSION_TARGETS.items()))
+def test_confirmed_uncommon_office_families_use_only_their_fixed_safe_target(
+    source_format: str,
+    target_format: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = f"CONFIRMED {source_format.upper()} MARKER"
+    payload = {
+        "docx": _docx,
+        "xlsx": _xlsx,
+        "pptx": _pptx,
+        "odg": _odf,
+    }[target_format](marker)
+    executable = _fake_libreoffice(tmp_path / "soffice")
+    monkeypatch.setenv("FRIDAY_LIBREOFFICE_PATH", str(executable))
+
+    result = DocumentExtractor(secret_values=()).extract(
+        payload,
+        f"confirmed.{source_format}",
+        "application/zip",
+    )
+
+    assert result.success is True, result.error
+    assert marker in result.text
+    assert result.metadata["format"] == source_format
+    assert result.metadata["converted_format"] == target_format
+    assert result.metadata["parser"] == "libreoffice"
+    if target_format in {"docx", "xlsx"}:
+        assert result.office_structure_index is not None
+    else:
+        assert result.office_structure_index is None
+
+
+@pytest.mark.parametrize(
+    ("mime_type", "source_format", "target_format"),
+    [
+        ("application/vnd.wordperfect", "wpd", "docx"),
+        ("application/x-iwork-pages-sffpages", "pages", "docx"),
+        ("application/x-iwork-numbers-sffnumbers", "numbers", "xlsx"),
+        ("application/x-iwork-keynote-sffkey", "key", "pptx"),
+        ("application/x-mspublisher", "pub", "odg"),
+        ("application/vnd.visio", "vsd", "odg"),
+    ],
+)
+def test_confirmed_mime_fallback_uses_one_canonical_source_family(
+    mime_type: str,
+    source_format: str,
+    target_format: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = f"MIME {source_format.upper()} MARKER"
+    payload = {
+        "docx": _docx,
+        "xlsx": _xlsx,
+        "pptx": _pptx,
+        "odg": _odf,
+    }[target_format](marker)
+    executable = _fake_libreoffice(tmp_path / "soffice")
+    monkeypatch.setenv("FRIDAY_LIBREOFFICE_PATH", str(executable))
+
+    result = DocumentExtractor(secret_values=()).extract(
+        payload,
+        "neutral.bin",
+        mime_type,
+    )
+
+    assert result.success is True, result.error
+    assert marker in result.text
+    assert result.metadata["format"] == source_format
+    assert result.metadata["converted_format"] == target_format
+
+
+def test_converted_word_and_sheet_families_are_registered_as_structured() -> None:
+    structured_suffixes = {
+        ".dot",
+        ".wpt",
+        ".wpd",
+        ".pages",
+        ".xlt",
+        ".et",
+        ".ett",
+        ".numbers",
+    }
+
+    assert structured_suffixes <= _STRUCTURED_OFFICE_SUFFIXES
+    assert structured_suffixes <= _OFFICE_SUFFIXES
+    assert {
+        "application/vnd.wordperfect",
+        "application/x-iwork-pages-sffpages",
+        "application/x-iwork-numbers-sffnumbers",
+    } <= _STRUCTURED_OFFICE_MIME_TYPES
+
+
+def test_converted_odg_output_uses_the_bounded_xml_reader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = "BOUNDED ODG MARKER"
+    payload = _odf(marker + " " + "0123456789abcdef" * 140_000)
+    executable = _fake_libreoffice(tmp_path / "soffice")
+    monkeypatch.setenv("FRIDAY_LIBREOFFICE_PATH", str(executable))
+
+    result = DocumentExtractor(secret_values=()).extract(
+        payload,
+        "drawing.pub",
+        "application/x-mspublisher",
+    )
+
+    assert result.success is True, result.error
+    assert result.text.startswith(marker)
+    assert result.metadata["format"] == "pub"
+    assert result.metadata["converted_format"] == "odg"
+    assert result.metadata["source_truncated_for_parse"] is True
+
+
 def test_libreoffice_rootless_loader_path_is_explicit_and_ambient_state_is_stripped(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -363,11 +510,20 @@ def test_relative_libreoffice_executable_fails_closed(monkeypatch: pytest.Monkey
     assert converted.error == "libreoffice_unavailable"
 
 
-def test_libreoffice_converter_accepts_only_the_declared_legacy_family() -> None:
-    converted = convert_legacy_office(b"synthetic", "pub")
+def test_ambiguous_works_family_remains_excluded_from_conversion_and_dispatch() -> None:
+    converted = convert_legacy_office(b"synthetic", "wps")
+    extracted = DocumentExtractor(secret_values=()).extract(
+        b"synthetic",
+        "ambiguous.wps",
+        "application/vnd.ms-works",
+    )
 
     assert converted.success is False
     assert converted.error == "legacy_office_conversion_unsupported"
+    assert extracted.success is False
+    assert extracted.error == "unsupported_document_format"
+    assert ".wps" not in _STRUCTURED_OFFICE_SUFFIXES
+    assert ".wps" not in _OFFICE_SUFFIXES
 
 
 def test_libreoffice_timeout_kills_the_whole_converter_process_group(tmp_path: Path) -> None:

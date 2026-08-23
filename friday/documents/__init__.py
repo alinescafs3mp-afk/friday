@@ -175,20 +175,45 @@ _OOXML_MIME_FORMATS = {
 _OOXML_MIME_TYPES = frozenset(_OOXML_MIME_FORMATS)
 _EMAIL_METADATA_EXTENSIONS = {".eml": "eml", ".mht": "mhtml", ".mhtml": "mhtml"}
 _MSG_MIME_TYPES = frozenset({"application/vnd.ms-outlook", "application/x-msg"})
-_LEGACY_OFFICE_FORMATS = {
+_CONVERTED_OFFICE_FORMATS = {
     ".doc": "doc",
+    ".dot": "dot",
+    ".wpt": "wpt",
+    ".wpd": "wpd",
+    ".pages": "pages",
     ".xls": "xls",
     ".xlsb": "xlsb",
+    ".xlt": "xlt",
+    ".et": "et",
+    ".ett": "ett",
+    ".numbers": "numbers",
     ".ppt": "ppt",
+    ".pot": "pot",
+    ".pps": "pps",
+    ".dpt": "dpt",
+    ".dps": "dps",
+    ".key": "key",
+    ".pub": "pub",
+    ".vdx": "vdx",
+    ".vsd": "vsd",
+    ".vsdm": "vsdm",
+    ".vsdx": "vsdx",
+    ".vstx": "vstx",
 }
-_LEGACY_OFFICE_MIME_FORMATS = {
+_CONVERTED_OFFICE_MIME_FORMATS = {
     "application/msword": "doc",
+    "application/vnd.wordperfect": "wpd",
+    "application/x-iwork-pages-sffpages": "pages",
     "application/vnd.ms-excel": "xls",
     "application/x-msexcel": "xls",
     "application/vnd.ms-excel.sheet.binary.macroenabled.12": "xlsb",
+    "application/x-iwork-numbers-sffnumbers": "numbers",
     "application/vnd.ms-powerpoint": "ppt",
     "application/mspowerpoint": "ppt",
     "application/x-mspowerpoint": "ppt",
+    "application/x-iwork-keynote-sffkey": "key",
+    "application/x-mspublisher": "pub",
+    "application/vnd.visio": "vsd",
 }
 _ODF_META_MEMBER = "meta.xml"
 _MAX_ODF_METADATA_BYTES = 256 * 1024
@@ -242,10 +267,7 @@ _ODF_STATISTIC_ATTRIBUTES = {
 _OFFICE_EXTENSIONS = {
     *_OOXML_EXTENSIONS,
     *_OPENDOCUMENT_EXTENSIONS,
-    ".doc",
-    ".xls",
-    ".xlsb",
-    ".ppt",
+    *_CONVERTED_OFFICE_FORMATS,
     ".rtf",
 }
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
@@ -255,7 +277,7 @@ _KNOWN_DOCUMENT_EXTENSIONS = frozenset(
         *_HTML_EXTENSIONS,
         *_OOXML_EXTENSIONS,
         *_OPENDOCUMENT_EXTENSIONS,
-        *_LEGACY_OFFICE_FORMATS,
+        *_CONVERTED_OFFICE_FORMATS,
         *_EMAIL_METADATA_EXTENSIONS,
         *_IMAGE_EXTENSIONS,
         ".epub",
@@ -699,11 +721,11 @@ class DocumentExtractor:
         normalized_mime = detected_mime.split(";", 1)[0].strip().casefold()
         suffix_known = ext in _KNOWN_DOCUMENT_EXTENSIONS
         ooxml_format = _OOXML_EXTENSIONS.get(ext)
-        legacy_office_format = _LEGACY_OFFICE_FORMATS.get(ext)
+        converted_office_format = _CONVERTED_OFFICE_FORMATS.get(ext)
         odf_format = _OPENDOCUMENT_EXTENSIONS.get(ext)
         if not suffix_known:
             ooxml_format = _OOXML_MIME_FORMATS.get(normalized_mime)
-            legacy_office_format = _LEGACY_OFFICE_MIME_FORMATS.get(normalized_mime)
+            converted_office_format = _CONVERTED_OFFICE_MIME_FORMATS.get(normalized_mime)
             if normalized_mime in _OPENDOCUMENT_MIME_TYPES:
                 odf_format = "opendocument"
         archive_kind = archive_dispatch_kind(safe_name, detected_mime)
@@ -744,14 +766,14 @@ class DocumentExtractor:
                 result = self._extract_pdf(content, deadline=deadline)
             elif ooxml_format == "docx":
                 result = self._extract_docx(content)
-            elif legacy_office_format == "doc":
+            elif converted_office_format == "doc":
                 result = self._extract_doc(content, deadline=deadline)
             elif ext == ".msg" or (not suffix_known and normalized_mime in _MSG_MIME_TYPES):
                 result = self._extract_msg(content)
-            elif legacy_office_format in {"xls", "xlsb", "ppt"}:
+            elif converted_office_format is not None:
                 result = self._extract_converted_office(
                     content,
-                    legacy_office_format,
+                    converted_office_format,
                     deadline=deadline,
                 )
             elif ooxml_format == "xlsx":
@@ -2981,7 +3003,7 @@ class DocumentExtractor:
         *,
         deadline: float | None,
     ) -> DocumentResult:
-        """Convert one closed legacy Office family member, then parse OOXML."""
+        """Convert one closed Office import family, then parse its safe target."""
 
         from friday.documents._office_convert import convert_legacy_office
 
@@ -2998,19 +3020,26 @@ class DocumentExtractor:
         }
         if not converted.success:
             return DocumentResult("", conversion_metadata, False, converted.error)
-        parser = {
-            "docx": self._extract_docx,
-            "xlsx": self._extract_xlsx,
-            "pptx": self._extract_pptx,
-        }.get(converted.target_format)
-        if parser is None:  # closed mapping invariant
-            return DocumentResult(
-                "",
-                conversion_metadata,
-                False,
-                "legacy_office_conversion_unsupported",
+        if converted.target_format == "odg":
+            parsed = self._extract_xml_zip_text(
+                converted.content,
+                "content.xml",
+                "odg",
             )
-        parsed = parser(converted.content)
+        else:
+            parser = {
+                "docx": self._extract_docx,
+                "xlsx": self._extract_xlsx,
+                "pptx": self._extract_pptx,
+            }.get(converted.target_format)
+            if parser is None:  # closed mapping invariant
+                return DocumentResult(
+                    "",
+                    conversion_metadata,
+                    False,
+                    "legacy_office_conversion_unsupported",
+                )
+            parsed = parser(converted.content)
         return DocumentResult(
             parsed.text,
             {**parsed.metadata, **conversion_metadata},
