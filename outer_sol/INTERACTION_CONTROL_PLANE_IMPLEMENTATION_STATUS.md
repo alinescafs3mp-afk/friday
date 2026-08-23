@@ -1,36 +1,80 @@
 # Interaction Control Plane implementation status
 
-Status: **P0A IMPLEMENTED / RELEASE VERIFICATION IN PROGRESS**
-Date: 2026-08-22  
-Branch: `feature/interaction-control-plane-v2`
-Base: Friday `0.207.4` / `3cc5cdf`
+Status: **P0A + P0B + FIRST P1 READ SLICE IMPLEMENTED AND DEPLOYED**
+Date: 2026-08-23
+Branch: `main`
+Source: `main` / `321f8fa`
+Live: Friday `0.207.4` / `6a25cda`, schema 37
 
-Implemented in this release slice:
+## Release checkpoint
 
-- closed immutable privacy-safe `TurnTrace v1`;
-- installation-local domain-separated HMAC identifiers;
-- honest token/call accounting coverage;
-- legacy and V12 file publication traces stored atomically in owned assistant metadata;
-- publication is scoped honestly as `assistant_committed`, not HTTP/Telegram delivery;
-- tracing is best-effort and omitted before it can break an answer or attachment-lineage metadata budget;
-- trace fields are stripped from HTTP/Telegram projections and idempotency caches;
-- closed outcomes for Obsidian, document, message, entity, web, file and reminder capability classes;
-- restart linkage, continuation, concurrency, privacy and fail-closed contract tests;
-- no schema change and no runtime-event retention coupling.
+- P0A structural tracing was completed through `4ba65f1` on schema 36.
+- `f99d889` introduced the schema-37-capable failure-store foundation and remains
+  an available sealed schema-capable release.
+- `2614e69` added the durable pre-assistant-commit failure path.
+- `478378f` added the privacy-safe admin baseline.
+- `ba53e2b`/`fc0c6c1` added the first typed read completion gate and
+  `search_explain`; `b50e63b` made accepted outcomes durable and atomic.
+- The live anchor resolves to `6a25cda`, with `b50e63b` as its current
+  previous/schema-capable fallback. Backend and bridge are active, health is
+  `ok`, the database is schema 37 and `PRAGMA integrity_check` is `ok`.
 
-Explicit boundary:
+## P0A implemented
 
-- P0A observes the legacy mainline and V12 file turns that reach a durable
-  assistant row; complete route coverage remains P0B work;
-- failures before assistant commit are intentionally not written into `runtime_events`;
-- P0B needs a dedicated user-scoped/deletion-scoped failure store before those failures can be retained;
-- this is the first safe observability layer, not the complete P0-P9 control plane.
+- Closed immutable privacy-safe `TurnTrace v1`.
+- Installation-local, domain-separated HMAC identifiers.
+- Honest token/call accounting and closed capability outcomes for the observed
+  Obsidian, document, message, entity, web, file and reminder paths.
+- Legacy and V12 file publication traces stored atomically in owned assistant
+  metadata; publication means `assistant_committed`, not HTTP/Telegram delivery.
+- Trace fields stripped from public HTTP/Telegram projections and idempotency
+  caches. Tracing remains best-effort and cannot break the user response.
+- Restart, continuation, concurrency, privacy and fail-closed contract coverage.
 
-Next implementation order:
+## P0B implemented
 
-1. P0B user-scoped failure traces and episode-level baseline reports.
-2. P1 typed `CapabilityOutcome` adapters for document, message and web reads.
-3. P2 durable Work Items and Active Frame only after P0/P1 contracts stabilize.
-4. Use the next schema revision after current schema 36; do not reuse 36.
+- Schema 37 adds a dedicated user-scoped and conversation-scoped
+  `interaction_failure_traces` store for failures before assistant commit.
+- Failure traces contain only closed structural fields and HMAC identifiers: no
+  prompt, body, path, query, provider payload or raw exception text.
+- Retention is bounded by TTL, per-user and global caps. Account deletion and
+  conversation deletion count and remove their owned rows.
+- `/api/chat` and regenerate establish the request scope; conversation/message
+  ownership hooks and route/stage observations cover the admitted legacy/V12
+  paths without borrowing `runtime_events`.
+- `interaction_episode_baseline` aggregates committed and precommit turns into
+  counts for intent, completion, publication, failure stage/reason, route and the
+  ambiguity/partial/state-restored/authority-rechecked signals.
+- `GET /api/admin/eval/interaction-episode-baseline` exposes only that bounded
+  aggregate. It requires `admin.all_data.read`, a canonical target user, optional
+  canonical UTC `since`, a bounded limit, cross-tenant audit, and returns 404 for
+  a missing user. Raw traces, bodies and digests have no response field.
 
-This slice is intentionally bounded and does not claim the full P0-P9 architecture.
+## Explicit boundary
+
+- P0A/P0B are the completed structural observability baseline, not the complete
+  P0-P9 control plane.
+- P0B records a structural failure only when no owned assistant row committed;
+  committed traces remain attached to the assistant row.
+- The V12 `FILE_READ`/`ARCHIVE_READ` `CapabilityOutcome v1`, completion gate and
+  atomic accepted-outcome receipt are deployed. The wider P1 adapter set is not
+  complete; see `outer_sol/V12_FURTHER_REFINEMENT_STATUS.md`.
+- Durable Work Items, general Active Frames and WorkGraphs have not started in
+  this contour and must not be inferred from the tracing layer.
+
+## Next implementation order
+
+1. Extend typed outcomes to the remaining highest-value document, message and
+   web read capabilities without migrating every legacy tool at once.
+2. Start P2 lightweight durable Work Items and Active Frame only after the P1
+   contracts and receipt boundary are stable.
+3. Keep generic autonomous WorkGraphs behind those prerequisites.
+
+## Current cumulative gate
+
+- Focused accepted-receipt gate: 190 passed.
+- Full non-UI Python gate: 15,874 passed, zero skipped, including pinned
+  Syncthing `v2.1.3`.
+- Toolchain preflight, Ruff, format, mypy, compileall, Bandit HIGH and JavaScript
+  syntax checks passed. Docker and the separate unchanged browser/UI phase were
+  deliberately outside this checkpoint.

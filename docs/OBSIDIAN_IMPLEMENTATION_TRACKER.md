@@ -1,10 +1,10 @@
 # Obsidian free Android integration tracker
 
-- Updated: 2026-08-22
-- Branch: `hotfix/obsidian-acceptance-battery`
-- Source baseline: `main` at `3cc5cdf`
-- Deployed baseline: Friday `0.207.4` at `3cc5cdf`
-- Target: Friday `0.207.4`, schema 36
+- Updated: 2026-08-23
+- Branch: `main`
+- Source baseline: `main` at `321f8fa`
+- Deployed baseline: Friday `0.207.4` at `6a25cda`
+- Target: Friday `0.207.4`, schema 37
 - Architecture: `outer_sol/OBSIDIAN_INTEGRATION_ARCHITECTURE_AND_IMPLEMENTATION_PLAN.md`
 - Acceptance: `outer_sol/OBSIDIAN_INTEGRATION_ACCEPTANCE_BATTERY.md`
 
@@ -37,6 +37,11 @@ offline reconnect delivery and a real concurrent-edit conflict.
   pending, never reported as a permanent write failure or a false phone receipt.
 - [x] Exact-path create, append, daily-note append, typed properties and tags,
   section replacement, move and delete.
+- [x] Exact-path prepend to the Markdown body while preserving frontmatter, and
+  complete note-content replacement behind mandatory `expected_revision` CAS.
+- [x] Prepend/replace operation-ID idempotency, frozen targets and receipt-gap
+  crash reconciliation; retries cannot duplicate a prepend or overwrite a
+  revision that changed concurrently.
 - [x] Markdown-aware section handling that ignores headings inside YAML,
   fenced code and HTML comments.
 - [x] Dated tasks and incomplete-task lookup with source path and concrete local
@@ -49,6 +54,9 @@ offline reconnect delivery and a real concurrent-edit conflict.
   “there” continuation without re-running an ambiguous search.
 - [x] Template rendering, structured conversation summaries with stable Work
   Item IDs, and continuation that appends links without replacing the body.
+- [x] Body-free recursive template listing from the configured template folder,
+  with deterministic caps, revision/modified metadata and symlink-safe
+  containment; missing template folders return an empty list.
 - [x] `.base` generation plus a server-side `BaseSpec` evaluator over current
   indexed revisions; property changes affect the next query.
 - [x] Revision-pinned deletion/tombstone lifecycle, stale-passage invalidation,
@@ -61,7 +69,7 @@ offline reconnect delivery and a real concurrent-edit conflict.
   operation/Work Item identity and reconciles the postcondition before retrying.
 - [x] HTTPS Telegram `Open in Obsidian` action for the exact arbitrary note path;
   Friday does not claim the app opened without an explicit confirmation.
-- [x] Account deletion covers schema-36 Obsidian projections and owner-scoped
+- [x] Account deletion covers schema-37 Obsidian projections and owner-scoped
   operational state.
 
 ## Acceptance coverage
@@ -80,6 +88,12 @@ offline reconnect delivery and a real concurrent-edit conflict.
 - [x] OBS-RECOVERY-01: runtime/service reconstruction with the same operation ID
   and exactly one durable line.
 - [x] OBS-DELETE-01: synchronized tombstone and closed search lifecycle.
+- [x] Post-battery prepend/replace extension: closed conversational grammar,
+  tool schemas, path containment, frontmatter-at-EOF preservation, revision CAS,
+  exactly-once replay and server registration.
+- [x] Post-battery template-list extension: exact Russian conversational route,
+  read-only tool/kernel registration, bounded deterministic subtree scan and a
+  closed body-free result projection.
 - [ ] OBS-ONB-01 and the physical portions of SYNC/OFFLINE/CONFLICT: record on a
   real Android phone before claiming physical-device certification.
 
@@ -103,6 +117,28 @@ offline reconnect delivery and a real concurrent-edit conflict.
 - 2026-08-22: offline and recovery tests prove pending→delivered transition,
   runtime reconstruction, original operation reuse and absence of duplicate
   bytes, paths or ledger rows.
+- 2026-08-23: prepend/replace landed in `253963d`. Blocker-focused verification
+  passed 199 tests; the expanded Obsidian/agent-route set passed 256; isolated
+  server tool registration passed. Ruff check/format, scoped mypy and
+  `git diff --check` passed.
+- 2026-08-23: the broader Obsidian invocation produced 516 passes and one
+  expected live Syncthing skip. It is not recorded as a full-suite pass because
+  12 collection errors came from the workstation's deliberately ambiguous pair
+  of local databases, not from an exercised Obsidian assertion.
+- 2026-08-23: `b50e63b` added atomic accepted-outcome receipts for the V12 read
+  routes; its focused gate passed 190 tests. `6a25cda` added safe template
+  listing; two independent focused runs passed 227 tests, Ruff/format/scoped
+  mypy and review were green.
+- 2026-08-23: cumulative non-UI Python gate on source `321f8fa` passed all
+  15,874 selected tests, including the pinned Syncthing `v2.1.3` smoke, with
+  zero skips. Toolchain preflight, Ruff, format (856 files), mypy (204 source
+  files), compileall, Bandit HIGH and both JavaScript syntax checks passed.
+  Docker and the separate unchanged browser/UI phase were not run.
+- 2026-08-23: current live lineage is `b50e63b` (previous/schema-capable
+  fallback) → `6a25cda` (template listing). The activation journal is clear;
+  backend and bridge are active, health is `ok`, database schema is 37 and
+  `integrity_check` is `ok`. `main` at `321f8fa` differs only by gate-required
+  formatting in the already deployed interaction-trace code.
 
 ## Physical-device acceptance still required
 
@@ -142,5 +178,5 @@ offline reconnect delivery and a real concurrent-edit conflict.
 - [ ] Optional companion plugin for foreground selection/cursor actions; it may
   never become a dependency of the Syncthing-backed core.
 - [x] Interaction Control Plane work resumed after this acceptance release;
-  P0A structural tracing is tracked separately in
+  P0A/P0B structural tracing and the aggregate admin baseline are tracked in
   `outer_sol/INTERACTION_CONTROL_PLANE_IMPLEMENTATION_STATUS.md`.
