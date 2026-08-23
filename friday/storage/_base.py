@@ -141,7 +141,10 @@ LOGGER = logging.getLogger("friday.storage")
 # 36 — stable Obsidian note bindings, revision-aware lexical/metadata projection,
 # link graph and expiring continuation state.  The released schema-35 operation
 # table is rebuilt only after its exact old shape has passed fail-closed validation.
-SCHEMA_VERSION = 36
+# 37 — bounded person-owned interaction failures which occur before an assistant
+# message can own the ordinary Turn Trace.  Bodies and exception text are excluded;
+# account/conversation deletion can remove the dedicated structural rows directly.
+SCHEMA_VERSION = 37
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно

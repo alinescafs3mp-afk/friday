@@ -29,6 +29,11 @@ from friday.audit_privacy import (
     sanitize_audit_request_id,
     sanitize_audit_target,
 )
+from friday.interaction_control_plane.failure_schema import (
+    INTERACTION_FAILURE_SCHEMA,
+    INTERACTION_FAILURE_SCHEMA_VERSION,
+    validate_interaction_failure_schema,
+)
 from friday.private_fs import prepare_private_sqlite, restrict_sqlite_files
 from friday.storage._base import (
     CORE_INDEX_SCHEMA,
@@ -2442,9 +2447,20 @@ class CoreMixin(StorageShared):
             if parsed_version == 35:
                 upgrade_obsidian_schema_35_to_36(conn)
             elif parsed_version is not None and parsed_version >= 36:
-                validate_obsidian_schema(conn, parsed_version)
+                # Obsidian's sub-schema remains v36 while the core database
+                # advances independently. Never pass an unrelated core marker
+                # into the exact Obsidian DDL validator.
+                validate_obsidian_schema(conn)
+            if parsed_version is not None and parsed_version >= INTERACTION_FAILURE_SCHEMA_VERSION:
+                validate_interaction_failure_schema(conn)
+            elif parsed_version is not None and parsed_version < INTERACTION_FAILURE_SCHEMA_VERSION:
+                # A previous interrupted schema-37 attempt may have committed no
+                # marker. Accept only its exact ownership shape before retrying
+                # idempotent DDL; never let IF NOT EXISTS conceal a weaker table.
+                validate_interaction_failure_schema(conn, required=False)
             self._execute_statements(conn, CORE_TABLE_SCHEMA)
             self._execute_statements(conn, OBSIDIAN_SCHEMA)
+            self._execute_statements(conn, INTERACTION_FAILURE_SCHEMA)
             if not already_current:
                 self._migrate_legacy_schema(conn)
                 self._retire_outdated_indexes(conn)
@@ -2466,6 +2482,7 @@ class CoreMixin(StorageShared):
             self._execute_statements(conn, PRIVATE_MATERIAL_RUNTIME_SCHEMA)
             self._execute_statements(conn, PRIVATE_MATERIAL_CACHE_REBUILD_SQL)
             validate_obsidian_schema(conn)
+            validate_interaction_failure_schema(conn)
             _validate_private_material_cache(
                 conn,
                 fresh_entity_rebuild_from_live=True,
