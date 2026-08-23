@@ -15,6 +15,7 @@ from pptx import Presentation
 from reportlab.pdfgen.canvas import Canvas
 
 from friday.agent_runtime._office_attachments import _OFFICE_SUFFIXES
+from friday.archive_formats import archive_dispatch_kind
 from friday.documents import DocumentExtractor
 from friday.documents._office_convert import convert_legacy_office, libreoffice_available
 from friday.ingestion._files import _STRUCTURED_OFFICE_MIME_TYPES, _STRUCTURED_OFFICE_SUFFIXES
@@ -137,13 +138,76 @@ _FIRST_EXPANSION_TARGETS = {
     "vsdx": "odg",
     "vstx": "odg",
 }
+_SECOND_EXPANSION_TARGETS = {
+    "abw": "docx",
+    "hwp": "docx",
+    "lwp": "docx",
+    "psw": "docx",
+    "sdw": "docx",
+    "stw": "docx",
+    "sxw": "docx",
+    "wri": "docx",
+    "zabw": "docx",
+    "123": "xlsx",
+    "dif": "xlsx",
+    "gnm": "xlsx",
+    "gnumeric": "xlsx",
+    "mp": "xlsx",
+    "stc": "xlsx",
+    "sxc": "xlsx",
+    "wb1": "xlsx",
+    "wb2": "xlsx",
+    "wdb": "xlsx",
+    "wk1": "xlsx",
+    "wk3": "xlsx",
+    "wk4": "xlsx",
+    "wks": "xlsx",
+    "wq1": "xlsx",
+    "wq2": "xlsx",
+    "xlc": "xlsx",
+    "xlk": "xlsx",
+    "xlm": "xlsx",
+    "xlw": "xlsx",
+    "sdd": "pptx",
+    "sti": "pptx",
+    "sxi": "pptx",
+    "cdr": "odg",
+    "cmx": "odg",
+    "fh": "odg",
+    "fh1": "odg",
+    "fh2": "odg",
+    "fh3": "odg",
+    "fh4": "odg",
+    "fh5": "odg",
+    "fh6": "odg",
+    "fh7": "odg",
+    "fh8": "odg",
+    "fh9": "odg",
+    "fh10": "odg",
+    "fh11": "odg",
+    "p65": "odg",
+    "pm": "odg",
+    "pm6": "odg",
+    "pmd": "odg",
+    "qxd": "odg",
+    "qxt": "odg",
+    "sda": "odg",
+    "std": "odg",
+    "sxd": "odg",
+    "wpg": "odg",
+    "zmf": "odg",
+}
+_REGISTERED_EXPANSION_TARGETS = {
+    **_FIRST_EXPANSION_TARGETS,
+    **_SECOND_EXPANSION_TARGETS,
+}
 _ALL_CONVERSION_TARGETS = {
     "doc": "docx",
     "wps": "pdf",
     "xls": "xlsx",
     "xlsb": "xlsx",
     "ppt": "pptx",
-    **_FIRST_EXPANSION_TARGETS,
+    **_REGISTERED_EXPANSION_TARGETS,
 }
 
 
@@ -371,8 +435,11 @@ def test_legacy_office_families_use_one_closed_libreoffice_fallback(
     assert result.metadata["parser"] == "libreoffice"
 
 
-@pytest.mark.parametrize(("source_format", "target_format"), tuple(_FIRST_EXPANSION_TARGETS.items()))
-def test_confirmed_uncommon_office_families_use_only_their_fixed_safe_target(
+@pytest.mark.parametrize(
+    ("source_format", "target_format"),
+    tuple(_REGISTERED_EXPANSION_TARGETS.items()),
+)
+def test_registered_uncommon_office_families_use_only_their_fixed_safe_target(
     source_format: str,
     target_format: str,
     tmp_path: Path,
@@ -447,23 +514,26 @@ def test_confirmed_mime_fallback_uses_one_canonical_source_family(
 
 def test_converted_word_and_sheet_families_are_registered_as_structured() -> None:
     structured_suffixes = {
-        ".dot",
-        ".wpt",
-        ".wpd",
-        ".pages",
-        ".xlt",
-        ".et",
-        ".ett",
-        ".numbers",
+        f".{source_format}"
+        for source_format, target_format in _REGISTERED_EXPANSION_TARGETS.items()
+        if target_format in {"docx", "xlsx"}
     }
 
     assert structured_suffixes <= _STRUCTURED_OFFICE_SUFFIXES
     assert structured_suffixes <= _OFFICE_SUFFIXES
     assert {
+        "application/vnd.lotus-1-2-3",
         "application/vnd.wordperfect",
+        "application/x-abiword",
+        "application/x-gnumeric",
         "application/x-iwork-pages-sffpages",
         "application/x-iwork-numbers-sffnumbers",
     } <= _STRUCTURED_OFFICE_MIME_TYPES
+
+
+@pytest.mark.parametrize("source_format", tuple(_REGISTERED_EXPANSION_TARGETS))
+def test_registered_office_container_is_never_misrouted_as_an_archive(source_format: str) -> None:
+    assert archive_dispatch_kind(f"document.{source_format}", "application/zip") is None
 
 
 def test_converted_odg_output_uses_the_bounded_xml_reader(
