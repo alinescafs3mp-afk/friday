@@ -752,9 +752,11 @@ def _inbox_dependency_expression(
             SELECT 1 FROM json_tree({alias}.suggestions_json) nested_suggestion_json
              WHERE (nested_suggestion_json.type='text'
                     AND substr(ltrim(CAST(nested_suggestion_json.value AS TEXT)),1,1)
-                          IN ('{{','[','"'))
-                OR substr(ltrim(CAST(nested_suggestion_json.key AS TEXT)),1,1)
+                          IN ('{{','[','"')
+                    AND json_valid(CAST(nested_suggestion_json.value AS TEXT)))
+                OR (substr(ltrim(CAST(nested_suggestion_json.key AS TEXT)),1,1)
                      IN ('{{','[','"')
+                    AND json_valid(CAST(nested_suggestion_json.key AS TEXT)))
         )
         AND ({alias}.suggested_entity_id IS NULL OR EXISTS (
             SELECT 1 FROM entities suggested_dependency_entity

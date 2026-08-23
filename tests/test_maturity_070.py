@@ -454,7 +454,9 @@ async def test_vision_exception_text_is_not_persisted_or_returned(settings, stor
     encoded_result = json.dumps(result, ensure_ascii=False)
     assert private not in encoded_result
     vision = result["extraction"]["vision"]
-    assert vision["error"] == "vision_request_failed:RuntimeError"
+    # Model vision failure is followed by bounded local OCR. An empty OCR page
+    # is the final physical outcome; private exception text remains absent.
+    assert vision["error"] == "local_ocr_page_text_empty"
     raw = storage.get_raw_object(result["raw_object_id"], "alice")
     assert private not in json.dumps(raw, ensure_ascii=False)
 

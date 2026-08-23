@@ -90,6 +90,22 @@ def test_the_raw_object_behind_a_wide_suggestion_stays_visible(storage) -> None:
     assert _raw_visible(storage, raw.id), "исходная запись исчезла вслед за разбором"
 
 
+def test_bracketed_document_prose_is_not_mistaken_for_nested_json(storage) -> None:
+    raw = _raw(storage)
+    item = _inbox(storage, raw, {"summary": "[Страница 1] Обычный текст документа."})
+
+    assert _inbox_visible(storage, item.id)
+    assert _raw_visible(storage, raw.id)
+
+
+def test_an_actual_nested_json_string_still_fails_closed(storage) -> None:
+    raw = _raw(storage)
+    item = _inbox(storage, raw, {"summary": '[{"hidden": "carrier"}]'})
+
+    assert not _inbox_visible(storage, item.id)
+    assert not _raw_visible(storage, raw.id)
+
+
 def test_a_wide_suggestion_copying_a_private_name_is_still_hidden(storage) -> None:
     """Размер ничего не отменяет: копия чужой приватной личности прячется."""
 

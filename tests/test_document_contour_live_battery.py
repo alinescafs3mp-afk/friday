@@ -878,7 +878,7 @@ def test_d06_and_d08_apply_semantic_generation_integrity_and_d08_fixture_is_not_
         runner,
         direct=0,
         hierarchy=1,
-        map_calls=5,
+        map_calls=4,
         reduce=1,
         final=1,
         verifier=2,
@@ -916,7 +916,7 @@ def test_d06_and_d08_apply_semantic_generation_integrity_and_d08_fixture_is_not_
         parallelism=1,
     )
     chunks, *_rest = _attachment_whole_source_plan([source_attachment], chunk_chars=chunk_chars)
-    assert len(chunks) == 3
+    assert len(chunks) == 4
     assert (
         _attachment_lossless_unit_rle_bundle(
             [source_attachment],

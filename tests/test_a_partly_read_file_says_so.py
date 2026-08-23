@@ -214,14 +214,17 @@ def test_a_photo_is_not_called_an_unknown_format(settings, storage) -> None:
     from friday.ingestion import IngestionPipeline
     from friday.knowledge_graph import KnowledgeGraph
 
-    def _unsupported(payload: bytes, name: str, mime: str) -> bool:
+    def _extraction(payload: bytes, name: str, mime: str) -> dict:
         pipeline = IngestionPipeline(settings, storage, KnowledgeGraph(storage))
         result = asyncio.run(
             pipeline.ingest_file(
                 "alice", None, payload, filename=name, mime_type=mime, source_ref=f"test:{name}"
             )
         )
-        return bool(result["extraction"].get("unsupported_format"))
+        return result["extraction"]
 
-    assert _unsupported(b"\x00\x01binary", "макет.pages", "application/vnd.apple.pages") is True
-    assert _unsupported(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64, "снимок.png", "image/png") is False
+    broken_pages = _extraction(b"\x00\x01binary", "макет.pages", "application/vnd.apple.pages")
+    assert broken_pages.get("success") is False
+    assert broken_pages.get("unsupported_format") is False
+    photo = _extraction(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64, "снимок.png", "image/png")
+    assert photo.get("unsupported_format") is False

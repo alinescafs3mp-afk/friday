@@ -128,6 +128,7 @@ def _bounded_export_json_shape(
     expected_type: type[dict] | type[list],
     max_bytes: int,
     reject_nested_json: bool = True,
+    reject_only_valid_nested_json: bool = False,
 ) -> bool:
     """Mirror public-view JSON shape checks without applying global person scope."""
 
@@ -144,6 +145,18 @@ def _bounded_export_json_shape(
         return False
     if not reject_nested_json:
         return True
+
+    def nested_json_text(item: object) -> bool:
+        if not isinstance(item, str) or not item.lstrip().startswith(("{", "[", '"')):
+            return False
+        if not reject_only_valid_nested_json:
+            return True
+        try:
+            json.loads(item)
+        except (TypeError, ValueError, RecursionError):
+            return False
+        return True
+
     pending = [decoded]
     visited = 0
     while pending:
@@ -153,12 +166,12 @@ def _bounded_export_json_shape(
         item = pending.pop()
         if isinstance(item, dict):
             for key, nested in item.items():
-                if str(key).lstrip().startswith(("{", "[", '"')):
+                if nested_json_text(str(key)):
                     return False
                 pending.append(nested)
         elif isinstance(item, list):
             pending.extend(item)
-        elif isinstance(item, str) and item.lstrip().startswith(("{", "[", '"')):
+        elif nested_json_text(item):
             return False
     return True
 
@@ -220,6 +233,7 @@ def _export_inbox_material_shape_is_valid(row: dict[str, Any]) -> bool:
             row.get("suggestions_json"),
             expected_type=dict,
             max_bytes=_EXPORT_INBOX_JSON_MAX_BYTES,
+            reject_only_valid_nested_json=True,
         )
         and _bounded_export_json_shape(
             row.get("suggested_tags_json"),

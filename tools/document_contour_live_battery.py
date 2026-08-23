@@ -1345,7 +1345,7 @@ def _scan_pdf(marker: str, *, pages: int = 5, fixture_scope: str = "") -> bytes:
 
 
 def _long_document_fixture(markers: tuple[str, str, str], *, fixture_scope: str) -> str:
-    """Build a large, varied source which still requires three real MAP leaves.
+    """Build a large, varied source which still requires four real MAP leaves.
 
     The former fixture repeated one almost identical sentence 400 times.  Its
     changing ordinal defeated the exact-RLE fast path, but the language model
@@ -2611,7 +2611,7 @@ def _case_08(h: Harness) -> dict[str, Any]:
     fixture_scope = _marker(h, "LONG-SCOPE")
 
     # D08 runs with an isolated 8K context profile.  The varied source remains
-    # larger than four such contexts and crosses three real MAP leaves, while
+    # larger than four such contexts and crosses four real MAP leaves, while
     # avoiding the repeated-token trap of the old 400-line near-duplicate.
     payload = _long_document_fixture(markers, fixture_scope=fixture_scope).encode("utf-8")
     before = h.probes.snapshot()

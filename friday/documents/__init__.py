@@ -148,9 +148,7 @@ _OPENDOCUMENT_MIME_TYPES = {
 }
 _WORDPROCESSING_EXTENSIONS = frozenset({".docx", ".docm", ".dotx", ".dotm"})
 _SPREADSHEET_EXTENSIONS = frozenset({".xlsx", ".xlsm", ".xltx", ".xltm"})
-_PRESENTATION_EXTENSIONS = frozenset(
-    {".pptx", ".pptm", ".potx", ".potm", ".ppsx", ".ppsm"}
-)
+_PRESENTATION_EXTENSIONS = frozenset({".pptx", ".pptm", ".potx", ".potm", ".ppsx", ".ppsm"})
 _OOXML_EXTENSIONS = {
     **{extension: "docx" for extension in _WORDPROCESSING_EXTENSIONS},
     **{extension: "xlsx" for extension in _SPREADSHEET_EXTENSIONS},
@@ -396,9 +394,7 @@ _KNOWN_DOCUMENT_EXTENSIONS = frozenset(
 _CONTENT_TYPES_MEMBER = "[Content_Types].xml"
 _MAX_OOXML_CONTENT_TYPES_BYTES = 512 * 1024
 _WORD_MAIN_PART = "/word/document.xml"
-_WORD_CANONICAL_MAIN_TYPE = (
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
-)
+_WORD_CANONICAL_MAIN_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
 _WORD_ALIAS_MAIN_TYPES = frozenset(
     {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml",
@@ -890,18 +886,13 @@ class DocumentExtractor:
                 # где документ, — в `content.xml`. Принят был только `.odt`, и
                 # это не решение, а недосмотр: у семьи форматов один разборщик.
                 result = self._extract_xml_zip_text(content, "content.xml", odf_format)
-            elif ext == ".epub" or (
-                not suffix_known and normalized_mime == "application/epub+zip"
-            ):
+            elif ext == ".epub" or (not suffix_known and normalized_mime == "application/epub+zip"):
                 result = self._extract_epub(content)
             elif ext in {".eml", ".mht", ".mhtml"} or (
-                not suffix_known
-                and normalized_mime in {"message/rfc822", "multipart/related"}
+                not suffix_known and normalized_mime in {"message/rfc822", "multipart/related"}
             ):
                 result = self._extract_email(content)
-            elif ext == ".rtf" or (
-                not suffix_known and normalized_mime in {"application/rtf", "text/rtf"}
-            ):
+            elif ext == ".rtf" or (not suffix_known and normalized_mime in {"application/rtf", "text/rtf"}):
                 result = self._extract_rtf(content)
             elif not suffix_known and normalized_mime.startswith("text/"):
                 result = self._extract_text(content, ext or ".txt")
@@ -1054,23 +1045,18 @@ class DocumentExtractor:
         ):
             format_name = _OPENDOCUMENT_EXTENSIONS.get(ext, "opendocument")
             parser = self._extract_opendocument_metadata
-        elif ext in _OOXML_EXTENSIONS or (
-            not suffix_known and detected_mime in _OOXML_MIME_TYPES
-        ):
+        elif ext in _OOXML_EXTENSIONS or (not suffix_known and detected_mime in _OOXML_MIME_TYPES):
             format_name = _OOXML_EXTENSIONS.get(ext, _OOXML_MIME_FORMATS.get(detected_mime, "ooxml"))
             parser = self._extract_ooxml_metadata
         elif ext == ".pdf" or (not suffix_known and detected_mime == "application/pdf"):
             format_name = "pdf"
             parser = self._extract_pdf_metadata
         elif ext in _EMAIL_METADATA_EXTENSIONS or (
-            not suffix_known
-            and detected_mime in {"message/rfc822", "multipart/related"}
+            not suffix_known and detected_mime in {"message/rfc822", "multipart/related"}
         ):
             format_name = _EMAIL_METADATA_EXTENSIONS.get(ext, "eml")
             parser = self._extract_email_metadata
-        elif ext == ".epub" or (
-            not suffix_known and detected_mime == "application/epub+zip"
-        ):
+        elif ext == ".epub" or (not suffix_known and detected_mime == "application/epub+zip"):
             format_name = "epub"
             parser = self._extract_epub_metadata
         elif ext in _IMAGE_EXTENSIONS or (
@@ -2274,10 +2260,7 @@ class DocumentExtractor:
         safe_name = Path(str(filename or "document")).name
         ext = self._compound_extension(safe_name.casefold())
         detected_mime = (
-            (mime_type or mimetypes.guess_type(safe_name)[0] or "")
-            .split(";", 1)[0]
-            .strip()
-            .casefold()
+            (mime_type or mimetypes.guess_type(safe_name)[0] or "").split(";", 1)[0].strip().casefold()
         )
         suffix_known = ext in _KNOWN_DOCUMENT_EXTENSIONS
         candidates: list[tuple[bytes, str]] = []
@@ -2366,10 +2349,7 @@ class DocumentExtractor:
         safe_name = Path(str(filename or "document.pdf")).name
         ext = self._compound_extension(safe_name.casefold())
         detected_mime = (
-            (mime_type or mimetypes.guess_type(safe_name)[0] or "")
-            .split(";", 1)[0]
-            .strip()
-            .casefold()
+            (mime_type or mimetypes.guess_type(safe_name)[0] or "").split(";", 1)[0].strip().casefold()
         )
         suffix_known = ext in _KNOWN_DOCUMENT_EXTENSIONS
         if ext != ".pdf" and (suffix_known or detected_mime != "application/pdf"):
@@ -2532,10 +2512,7 @@ class DocumentExtractor:
         safe_name = Path(str(filename or "document")).name
         ext = self._compound_extension(safe_name.casefold())
         detected_mime = (
-            (mime_type or mimetypes.guess_type(safe_name)[0] or "")
-            .split(";", 1)[0]
-            .strip()
-            .casefold()
+            (mime_type or mimetypes.guess_type(safe_name)[0] or "").split(";", 1)[0].strip().casefold()
         )
         suffix_known = ext in _KNOWN_DOCUMENT_EXTENSIONS
         if ext in _IMAGE_EXTENSIONS or (
@@ -2934,9 +2911,7 @@ class DocumentExtractor:
 
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             members = self._validate_office_zip(archive)
-            type_members = [
-                member for member in members if member.filename == _CONTENT_TYPES_MEMBER
-            ]
+            type_members = [member for member in members if member.filename == _CONTENT_TYPES_MEMBER]
             if len(type_members) != 1:
                 raise ValueError("OOXML content types member must be unique")
             type_member = type_members[0]
@@ -2980,9 +2955,7 @@ class DocumentExtractor:
                 normalized.comment = archive.comment
                 for member in members:
                     payload = (
-                        normalized_types
-                        if member.filename == _CONTENT_TYPES_MEMBER
-                        else archive.read(member)
+                        normalized_types if member.filename == _CONTENT_TYPES_MEMBER else archive.read(member)
                     )
                     normalized.writestr(member, payload)
         normalized_content = output.getvalue()
@@ -3081,11 +3054,13 @@ class DocumentExtractor:
         nothing in it to review. 197 of the 206 now read, all recognisably Russian
         text, no replacement characters and no control characters left behind.
 
-        Several deployed ``.doc`` files are actually RTF exported under Word's
-        legacy suffix.  Their own magic is unambiguous, so route those bytes to
-        the existing bounded RTF parser; arbitrary non-OLE data still fails.
+        Several deployed ``.doc`` files are actually RTF or OOXML exported under
+        Word's legacy suffix. Their container magic is unambiguous, so route RTF
+        directly and allow a real ZIP container through the bounded converter;
+        arbitrary non-OLE bytes still fail before LibreOffice can reinterpret
+        renamed plain text as a successful Word document.
         """
-        from friday.documents._ole import OleError, extract_doc_text
+        from friday.documents._ole import OLE_SIGNATURE, OleError, extract_doc_text
 
         if content.lstrip().startswith(b"{\\rtf"):
             result = self._extract_rtf(content)
@@ -3094,6 +3069,19 @@ class DocumentExtractor:
                 {**result.metadata, "declared_format": "doc", "format": "rtf"},
                 result.success,
                 result.error,
+            )
+        zip_container = content.startswith(b"PK") and zipfile.is_zipfile(io.BytesIO(content))
+        if not content.startswith(OLE_SIGNATURE) and not zip_container:
+            # LibreOffice deliberately accepts plain text under a misleading
+            # ``.doc`` suffix. That is not format attestation: arbitrary bytes
+            # would otherwise be promoted as a successfully read Word file.
+            # Legacy Word 97-2003 is OLE2; the only admitted non-OLE variant is
+            # the explicit RTF magic above.
+            return DocumentResult(
+                "",
+                {"format": "doc"},
+                False,
+                "unsupported_legacy_doc",
             )
         try:
             text, metadata = extract_doc_text(content)
