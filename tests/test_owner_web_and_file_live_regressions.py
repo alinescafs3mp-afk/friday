@@ -193,7 +193,11 @@ class _SyntheticWebKernel:
     @staticmethod
     def get_tool(name: str) -> Any:
         if name == "web_research":
-            return SimpleNamespace(risk="mutate", security_id="web.research")
+            return SimpleNamespace(
+                name="web_research",
+                risk="mutate",
+                security_id="web.research",
+            )
         return None
 
     async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
@@ -208,6 +212,7 @@ class _SyntheticWebKernel:
             True,
             {
                 "outbound_attempted": True,
+                "query": str(params.get("query") or ""),
                 **filter_proof,
                 "sources": [
                     {

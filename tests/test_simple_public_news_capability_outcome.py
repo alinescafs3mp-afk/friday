@@ -511,6 +511,23 @@ def test_query_binding_and_empty_proof_fail_closed() -> None:
             model_envelope="",
             sources=[],
         )
+    for report_query in (None, "substituted query"):
+        report = _report()
+        if report_query is None:
+            report.pop("query")
+        else:
+            report["query"] = report_query
+        with pytest.raises(SimplePublicNewsOutcomeError, match="news report query"):
+            SimplePublicNewsEvidence.from_projection(
+                _plan(),
+                status=SimplePublicNewsEvidenceStatus.SOURCED,
+                executed_query=QUERY,
+                outbound_attempted=True,
+                research_call_count=1,
+                report=report,
+                model_envelope=BODY,
+                sources=SOURCES,
+            )
     failed = _report(requested=0, completed=0)
     failed["search_failed"] = True
     with pytest.raises(SimplePublicNewsOutcomeError, match="validated complete zero"):
