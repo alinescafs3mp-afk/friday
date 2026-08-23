@@ -296,5 +296,5 @@ def test_search_explain_api_rejects_unknown_corpus_and_date_role(settings) -> No
             params={"q": "x", "date_role": "received_at"},
             headers=headers,
         )
-    assert unknown.status_code == 400 and unknown.json()["detail"] == "corpus_unknown"
-    assert bad_date.status_code == 400 and bad_date.json()["detail"] == "date_role_unknown"
+    assert unknown.status_code == 400 and unknown.json()["detail"] == "Неизвестный корпус поиска"
+    assert bad_date.status_code == 400 and bad_date.json()["detail"] == "Неизвестная роль даты"

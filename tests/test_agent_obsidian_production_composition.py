@@ -9,8 +9,9 @@ physical Android delivery belongs to the manual acceptance battery.
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -306,6 +307,8 @@ async def test_live_today_summary_uses_the_production_schema_and_real_vault(
         "# Today Summary\n\n## Result\n\nИнтеграция Obsidian работает.\n",
         create_only=True,
     )
+    stable_mtime = datetime(_TODAY.year, _TODAY.month, _TODAY.day, 12, tzinfo=UTC).timestamp()
+    os.utime(stack.store.root / "Projects/Today Summary.md", (stable_mtime, stable_mtime))
 
     reply = await _chat(stack, _LIVE_SUMMARY)
     receipt = _receipt(stack, reply)

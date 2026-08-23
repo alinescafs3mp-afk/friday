@@ -8,6 +8,7 @@ owns ``/api/admin`` and the order these modules are included in.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Never
 
 from fastapi import APIRouter
 
@@ -86,6 +87,24 @@ def _public_episode_baseline(report: dict[str, Any]) -> dict[str, Any]:
     """Project only aggregate fields; trace rows and identifiers have no API path."""
 
     return {field: report[field] for field in _EPISODE_BASELINE_REPORT_FIELDS}
+
+
+def _raise_search_explain_bad_request(code: str) -> Never:
+    """Translate closed internal validation codes at the HTTP boundary."""
+
+    if code == "corpora_empty":
+        raise HTTPException(status_code=400, detail="Нужно выбрать хотя бы один корпус поиска")
+    if code == "corpus_unknown":
+        raise HTTPException(status_code=400, detail="Неизвестный корпус поиска")
+    if code == "date_role_unknown":
+        raise HTTPException(status_code=400, detail="Неизвестная роль даты")
+    if code == "date_range_invalid":
+        raise HTTPException(status_code=400, detail="Диапазон дат задан некорректно")
+    if code == "date_role_required_for_range":
+        raise HTTPException(status_code=400, detail="Для диапазона нужно выбрать роль даты")
+    if code == "date_range_reversed":
+        raise HTTPException(status_code=400, detail="Начало диапазона дат позже его конца")
+    raise HTTPException(status_code=400, detail="Некорректные параметры объяснения поиска")
 
 
 def _embedding_index_health(state: Any, user_id: str) -> dict[str, Any]:
@@ -232,7 +251,7 @@ async def interaction_episode_baseline_report(
     try:
         target = validate_user_id(user_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Некорректный идентификатор пользователя") from exc
     if target != user_id:
         raise HTTPException(status_code=400, detail="user_id должен быть каноническим")
     normalized_since = _canonical_episode_since(since)
@@ -322,10 +341,10 @@ async def retrieval_explain(
     try:
         selected_corpora = parse_search_explain_corpora(corpora)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_search_explain_bad_request(str(exc))
     normalized_date_role = date_role.strip().casefold()
     if normalized_date_role not in SEARCH_EXPLAIN_DATE_ROLES:
-        raise HTTPException(status_code=400, detail="date_role_unknown")
+        _raise_search_explain_bad_request("date_role_unknown")
     try:
         normalized_date_role, since, until = validate_search_explain_date_range(
             normalized_date_role,
@@ -333,7 +352,7 @@ async def retrieval_explain(
             until,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        _raise_search_explain_bad_request(str(exc))
 
     target = _target_user(request, user_id)
     _audit_cross_tenant_read(request, "admin.eval.read", target)
