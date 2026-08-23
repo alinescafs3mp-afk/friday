@@ -1,0 +1,1386 @@
+"""One-snapshot application facade for read-only private archive search.
+
+The facade deliberately owns neither a database connection nor a transaction.
+It closes the requested lane plan inside the caller's live SQLite transaction,
+federates only authorized storage projections, and crosses the archive authority
+gate before returning any model-visible carrier.  Unsupported and failed lanes
+remain explicit coverage entries; private queries are never routed outbound.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import secrets
+import sqlite3
+from dataclasses import dataclass, fields, is_dataclass
+from typing import NoReturn, SupportsIndex, cast
+
+from friday.retrieval.archive_search_authority import (
+    ARCHIVE_AUTHORITY_MAX_CANDIDATES,
+    ArchiveModelBatchLedger,
+    ArchiveSearchAuthorityPhase,
+    ArchiveSearchCandidateReauthorization,
+    ArchiveSearchCoverageReauthorization,
+    ArchiveSearchReauthorizationStatus,
+    ArchiveSearchRunBinding,
+    AuthorizedArchiveBatch,
+    canonical_archive_search_targets,
+    create_archive_search_run_binding,
+    issue_archive_search_continuation,
+    redeem_archive_search_continuation,
+)
+from friday.retrieval.archive_search_authority import (
+    authorize_archive_search_before_model as _authorize_before_model,
+)
+from friday.retrieval.archive_search_authority import (
+    authorize_archive_search_resumed_before_model as _authorize_resumed_before_model,
+)
+from friday.retrieval.archive_search_contract import (
+    ArchiveSearchCandidate,
+    ArchiveSearchCorpus,
+    ArchiveSearchPage,
+    ArchiveSearchRequest,
+    ArchiveSearchResult,
+    ArchiveSearchWarning,
+)
+from friday.retrieval.archive_search_federation import (
+    FederatedArchiveSearch,
+    federate_archive_search,
+)
+from friday.retrieval.archive_search_message_adapter import (
+    archive_message_storage_controls,
+    project_archive_message_page,
+)
+from friday.retrieval.archive_search_obsidian_adapter import (
+    project_archive_obsidian_lane_page_in_transaction,
+)
+from friday.retrieval.catalog_contract import (
+    CatalogIndexLane,
+    CatalogIndexState,
+    CatalogIndexStatus,
+)
+from friday.retrieval.contracts import (
+    AuthorityScope,
+    CoverageState,
+    LifecycleState,
+    MessageRole,
+    SearchCorpus,
+    SearchCoverage,
+    SearchExecutionBinding,
+    SearchLane,
+)
+from friday.storage._archive_search_documents import search_archive_document_lane
+from friday.storage._archive_search_messages import (
+    ArchiveMessageScope,
+    select_authorized_archive_message_page_in_transaction,
+)
+from friday.storage._archive_search_obsidian import (
+    ArchiveObsidianExactFileReader,
+    ArchiveObsidianReadPhase,
+    ArchiveObsidianUnavailableReason,
+    select_archive_obsidian_lane_in_transaction,
+)
+
+_PROCESS_KEY = secrets.token_bytes(32)
+_PROCESS_AUTHORITY = object()
+_INTERNAL_LANE_LIMIT = ARCHIVE_AUTHORITY_MAX_CANDIDATES
+
+_DOCUMENT_CORPUS = {
+    SearchCorpus.RAW_DOCUMENTS: ArchiveSearchCorpus.DOCUMENTS,
+    SearchCorpus.KNOWLEDGE: ArchiveSearchCorpus.KNOWLEDGE,
+}
+_DOCUMENT_LANES = frozenset({SearchLane.CATALOG, SearchLane.LEXICAL})
+_OBSIDIAN_LANES = frozenset(
+    {
+        SearchLane.CATALOG,
+        SearchLane.EXACT_IDENTITY,
+        SearchLane.LEXICAL,
+        SearchLane.APPROXIMATE_IDENTITY,
+    }
+)
+
+
+class ArchiveSearchServiceError(RuntimeError):
+    """Body-free failure at the application facade boundary."""
+
+
+def _fail() -> ArchiveSearchServiceError:
+    return ArchiveSearchServiceError("archive search service is unavailable")
+
+
+def _canonical_bytes(value: object) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeError):
+        raise _fail() from None
+
+
+def _mac(domain: bytes, value: object) -> bytes:
+    return hmac.new(
+        _PROCESS_KEY,
+        domain + b"\0" + _canonical_bytes(value),
+        hashlib.sha256,
+    ).digest()
+
+
+def _same_exact_graph(left: object, right: object) -> bool:
+    """Compare canonical values without accepting same-value foreign subclasses."""
+
+    if type(left) is not type(right):
+        return False
+    if type(left) is tuple:
+        left_items = cast(tuple[object, ...], left)
+        right_items = cast(tuple[object, ...], right)
+        return len(left_items) == len(right_items) and all(
+            _same_exact_graph(left_item, right_item)
+            for left_item, right_item in zip(left_items, right_items, strict=True)
+        )
+    if is_dataclass(left) and not isinstance(left, type):
+        return all(
+            _same_exact_graph(getattr(left, field.name), getattr(right, field.name))
+            for field in fields(left)
+        )
+    try:
+        return bool(left == right)
+    except Exception:
+        return False
+
+
+def _canonical_candidate(value: object) -> ArchiveSearchCandidate | None:
+    if type(value) is not ArchiveSearchCandidate:
+        return None
+    try:
+        item = cast(ArchiveSearchCandidate, value)
+        encoded = item.to_private_json()
+        frozen = ArchiveSearchCandidate.parse_private(encoded)
+        if frozen.to_private_json() != encoded or not _same_exact_graph(item, frozen):
+            return None
+        return frozen
+    except Exception:
+        return None
+
+
+def _binding_has_exact_graph(value: object) -> bool:
+    if type(value) is not SearchExecutionBinding:
+        return False
+    binding = cast(SearchExecutionBinding, value)
+    try:
+        return bool(
+            type(binding.authority_scope) is AuthorityScope
+            and type(binding.requested_targets) is tuple
+            and all(
+                type(target) is tuple
+                and len(target) == 2
+                and type(target[0]) is SearchCorpus
+                and type(target[1]) is SearchLane
+                for target in binding.requested_targets
+            )
+            and type(binding.opaque_handle) is str
+            and binding.is_live_private_request_binding
+        )
+    except Exception:
+        return False
+
+
+def _canonical_coverage(value: object) -> SearchCoverage | None:
+    if type(value) is not SearchCoverage:
+        return None
+    item = cast(SearchCoverage, value)
+    try:
+        if (
+            type(item.corpus) is not SearchCorpus
+            or type(item.lane) is not SearchLane
+            or not _binding_has_exact_graph(item.execution_binding)
+            or type(item.states) is not tuple
+            or any(type(state) is not CoverageState for state in item.states)
+            or (
+                item.eligible_authorized is not None
+                and type(item.eligible_authorized) is not int
+            )
+            or any(
+                type(count) is not int
+                for count in (item.examined, item.matched_at_least, item.returned)
+            )
+            or (item.limit is not None and type(item.limit) is not int)
+            or any(
+                type(flag) is not bool
+                for flag in (
+                    item.next_cursor_available,
+                    item.authority_rechecked,
+                    item.snapshot_current,
+                )
+            )
+        ):
+            return None
+        frozen = SearchCoverage.create(
+            corpus=item.corpus,
+            lane=item.lane,
+            execution_binding=item.execution_binding,
+            states=item.states,
+            eligible_authorized=item.eligible_authorized,
+            examined=item.examined,
+            matched_at_least=item.matched_at_least,
+            returned=item.returned,
+            authority_rechecked=item.authority_rechecked,
+            snapshot_current=item.snapshot_current,
+            limit=item.limit,
+            next_cursor_available=item.next_cursor_available,
+        )
+        if not _same_exact_graph(item, frozen):
+            return None
+        return frozen
+    except Exception:
+        return None
+
+
+def _batch_contract_is_canonical(value: object) -> bool:
+    if type(value) is not AuthorizedArchiveBatch:
+        return False
+    try:
+        page = cast(AuthorizedArchiveBatch, value)._page
+        frozen_request = ArchiveSearchRequest.parse_private(page.request.to_private_json())
+        return bool(
+            type(page) is ArchiveSearchPage
+            and type(page.request) is ArchiveSearchRequest
+            and _same_exact_graph(page.request, frozen_request)
+            and type(page.results) is tuple
+            and all(
+                type(result) is ArchiveSearchResult
+                and type(result.ordinal) is int
+                and _canonical_candidate(result.candidate) is not None
+                for result in page.results
+            )
+            and type(page.coverage) is tuple
+            and all(_canonical_coverage(item) is not None for item in page.coverage)
+            and type(page.warnings) is tuple
+            and all(type(item) is ArchiveSearchWarning for item in page.warnings)
+            and (page.continuation is None or type(page.continuation) is str)
+        )
+    except Exception:
+        return False
+
+
+def _identity(value: object) -> str:
+    if type(value) is not str or not value or value != value.strip():
+        raise _fail()
+    try:
+        encoded = value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError:
+        raise _fail() from None
+    if len(encoded) > 256 or any(ord(character) < 32 for character in value):
+        raise _fail()
+    return value
+
+
+def _storage_request(request: ArchiveSearchRequest) -> ArchiveSearchRequest:
+    """Drop only transport state; storage and execution identity stay exact."""
+
+    try:
+        payload = request.to_private_payload()
+        payload["continuation"] = None
+        result = ArchiveSearchRequest.from_private_payload(payload)
+        if result.to_identity_json() != request.to_identity_json():
+            raise _fail()
+        return result
+    except ArchiveSearchServiceError:
+        raise
+    except Exception:
+        raise _fail() from None
+
+
+class _ProcessPrivate:
+    __slots__ = ()
+
+    def __copy__(self) -> NoReturn:
+        raise TypeError("archive search service value is process-private")
+
+    def __deepcopy__(self, _memo: object) -> NoReturn:
+        raise TypeError("archive search service value is process-private")
+
+    def __reduce_ex__(self, _protocol: SupportsIndex) -> NoReturn:
+        raise TypeError("archive search service value is process-private")
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _ArchiveSearchRecipe:
+    tenant_id: str
+    principal_id: str
+    request: ArchiveSearchRequest
+    snapshot_discriminator: str
+    current_conversation_id: str | None
+    boundary_user_message_id: str | None
+    continuation: bool
+    seal: bytes
+
+    def material(self) -> dict[str, object]:
+        return {
+            "boundary_user_message_id": self.boundary_user_message_id,
+            "continuation": self.continuation,
+            "current_conversation_id": self.current_conversation_id,
+            "principal_id": self.principal_id,
+            "request": self.request.to_private_payload(),
+            "snapshot_discriminator": self.snapshot_discriminator,
+            "tenant_id": self.tenant_id,
+        }
+
+    def is_valid(self) -> bool:
+        try:
+            frozen_request = ArchiveSearchRequest.parse_private(
+                self.request.to_private_json()
+            )
+            return bool(
+                type(self) is _ArchiveSearchRecipe
+                and type(self.request) is ArchiveSearchRequest
+                and _same_exact_graph(self.request, frozen_request)
+                and self.request.continuation is None
+                and type(self.continuation) is bool
+                and type(self.tenant_id) is str
+                and type(self.principal_id) is str
+                and type(self.snapshot_discriminator) is str
+                and (
+                    self.current_conversation_id is None
+                    or type(self.current_conversation_id) is str
+                )
+                and (
+                    self.boundary_user_message_id is None
+                    or type(self.boundary_user_message_id) is str
+                )
+                and type(self.seal) is bytes
+                and len(self.seal) == 32
+                and hmac.compare_digest(
+                    self.seal,
+                    _mac(b"friday/archive-search-service-recipe/v1", self.material()),
+                )
+            )
+        except Exception:
+            return False
+
+
+def _new_recipe(
+    *,
+    tenant_id: str,
+    principal_id: str,
+    request: ArchiveSearchRequest,
+    snapshot_discriminator: str,
+    current_conversation_id: str | None,
+    boundary_user_message_id: str | None,
+    continuation: bool,
+) -> _ArchiveSearchRecipe:
+    recipe = _ArchiveSearchRecipe(
+        tenant_id,
+        principal_id,
+        request,
+        snapshot_discriminator,
+        current_conversation_id,
+        boundary_user_message_id,
+        continuation,
+        b"0" * 32,
+    )
+    object.__setattr__(
+        recipe,
+        "seal",
+        _mac(b"friday/archive-search-service-recipe/v1", recipe.material()),
+    )
+    if not recipe.is_valid():
+        raise _fail()
+    return recipe
+
+
+class PreparedArchiveSearch(_ProcessPrivate):
+    """Sealed run/batch plus the minimal recipe required for phase-2 refresh."""
+
+    __slots__ = ("_batch", "_process_authority", "_recipe", "_run", "_seal")
+
+    _batch: AuthorizedArchiveBatch
+    _process_authority: object
+    _recipe: _ArchiveSearchRecipe
+    _run: ArchiveSearchRunBinding
+    _seal: bytes
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise _fail()
+
+    def __setattr__(self, _name: str, _value: object) -> NoReturn:
+        raise TypeError("prepared archive search is immutable")
+
+    def __repr__(self) -> str:
+        return "<PreparedArchiveSearch sealed private>"
+
+    def _material(self) -> dict[str, object]:
+        return {
+            "batch_sha256": hashlib.sha256(
+                self._batch.model_visible_canonical_bytes
+            ).hexdigest(),
+            "execution_handle": self._run.execution_binding.opaque_handle,
+            "recipe_seal": self._recipe.seal.hex(),
+        }
+
+    def _is_valid(self) -> bool:
+        try:
+            return bool(
+                type(self) is PreparedArchiveSearch
+                and self._process_authority is _PROCESS_AUTHORITY
+                and type(self._run) is ArchiveSearchRunBinding
+                and type(self._batch) is AuthorizedArchiveBatch
+                and _batch_contract_is_canonical(self._batch)
+                and self._recipe.is_valid()
+                and self._run.execution_binding.attests_private_request(
+                    self._recipe.request.to_identity_json()
+                )
+                and self._run.execution_binding.attests_snapshot(
+                    self._recipe.snapshot_discriminator
+                )
+                and hmac.compare_digest(
+                    self._seal,
+                    _mac(b"friday/archive-search-service-prepared/v1", self._material()),
+                )
+            )
+        except Exception:
+            return False
+
+    @property
+    def run_binding(self) -> ArchiveSearchRunBinding:
+        if not self._is_valid():
+            raise _fail()
+        return self._run
+
+    @property
+    def authorized_batch(self) -> AuthorizedArchiveBatch:
+        if not self._is_valid():
+            raise _fail()
+        return self._batch
+
+
+def _new_prepared(
+    run: ArchiveSearchRunBinding,
+    batch: AuthorizedArchiveBatch,
+    recipe: _ArchiveSearchRecipe,
+) -> PreparedArchiveSearch:
+    result = cast(PreparedArchiveSearch, object.__new__(PreparedArchiveSearch))
+    for name, value in (
+        ("_batch", batch),
+        ("_process_authority", _PROCESS_AUTHORITY),
+        ("_recipe", recipe),
+        ("_run", run),
+        ("_seal", b"0" * 32),
+    ):
+        object.__setattr__(result, name, value)
+    object.__setattr__(
+        result,
+        "_seal",
+        _mac(b"friday/archive-search-service-prepared/v1", result._material()),
+    )
+    if not result._is_valid():
+        raise _fail()
+    return result
+
+
+def _coverage(
+    target: tuple[SearchCorpus, SearchLane],
+    binding: SearchExecutionBinding,
+    *,
+    states: tuple[CoverageState, ...],
+    authority_rechecked: bool,
+    snapshot_current: bool,
+) -> SearchCoverage:
+    return SearchCoverage.create(
+        corpus=target[0],
+        lane=target[1],
+        execution_binding=binding,
+        states=states,
+        eligible_authorized=None,
+        examined=0,
+        matched_at_least=0,
+        returned=0,
+        authority_rechecked=authority_rechecked,
+        snapshot_current=snapshot_current,
+    )
+
+
+def _unsupported(
+    target: tuple[SearchCorpus, SearchLane],
+    binding: SearchExecutionBinding,
+) -> SearchCoverage:
+    return _coverage(
+        target,
+        binding,
+        states=(CoverageState.UNAVAILABLE,),
+        authority_rechecked=True,
+        snapshot_current=True,
+    )
+
+
+def _permission_filtered(
+    target: tuple[SearchCorpus, SearchLane],
+    binding: SearchExecutionBinding,
+) -> SearchCoverage:
+    return _coverage(
+        target,
+        binding,
+        states=(CoverageState.PARTIAL, CoverageState.PERMISSION_FILTERED),
+        authority_rechecked=True,
+        snapshot_current=True,
+    )
+
+
+def _storage_unavailable(
+    target: tuple[SearchCorpus, SearchLane],
+    binding: SearchExecutionBinding,
+) -> SearchCoverage:
+    return _coverage(
+        target,
+        binding,
+        states=(CoverageState.UNAVAILABLE,),
+        authority_rechecked=False,
+        snapshot_current=False,
+    )
+
+
+def _collect_document_target(
+    conn: sqlite3.Connection,
+    *,
+    recipe: _ArchiveSearchRecipe,
+    run: ArchiveSearchRunBinding,
+    target: tuple[SearchCorpus, SearchLane],
+) -> tuple[tuple[ArchiveSearchCandidate, ...], SearchCoverage]:
+    page = search_archive_document_lane(
+        conn,
+        tenant_id=recipe.tenant_id,
+        owner_id=recipe.principal_id,
+        request=recipe.request,
+        corpus=_DOCUMENT_CORPUS[target[0]],
+        lane=target[1],
+        execution_binding=run.execution_binding,
+        snapshot_discriminator=recipe.snapshot_discriminator,
+        snapshot_current=True,
+        limit=_INTERNAL_LANE_LIMIT,
+    )
+    if not page.available and not page.authority_rechecked:
+        return (), _permission_filtered(target, run.execution_binding)
+    coverage = page.to_coverage(
+        execution_binding=run.execution_binding,
+        tenant_id=recipe.tenant_id,
+        owner_id=recipe.principal_id,
+        request=recipe.request,
+        snapshot_discriminator=recipe.snapshot_discriminator,
+    )
+    return page.candidates, coverage
+
+
+def _collect_message_target(
+    conn: sqlite3.Connection,
+    *,
+    recipe: _ArchiveSearchRecipe,
+    run: ArchiveSearchRunBinding,
+    target: tuple[SearchCorpus, SearchLane],
+) -> tuple[tuple[ArchiveSearchCandidate, ...], SearchCoverage]:
+    controls = archive_message_storage_controls(recipe.request)
+    page = select_authorized_archive_message_page_in_transaction(
+        conn,
+        principal_id=recipe.principal_id,
+        query=recipe.request.query,
+        scope=cast(ArchiveMessageScope, controls["scope"]),
+        conversation_id=recipe.current_conversation_id,
+        boundary_user_message_id=recipe.boundary_user_message_id,
+        roles=cast(tuple[MessageRole, ...], controls["roles"]),
+        lifecycle_states=cast(tuple[LifecycleState, ...], controls["lifecycle_states"]),
+        since=cast(str | None, controls["since"]),
+        until=cast(str | None, controls["until"]),
+        limit=_INTERNAL_LANE_LIMIT,
+        context_before=cast(int, controls["context_before"]),
+        context_after=cast(int, controls["context_after"]),
+    )
+    if page is None:
+        return (), _permission_filtered(target, run.execution_binding)
+    projection = project_archive_message_page(
+        tenant_id=recipe.tenant_id,
+        principal_id=recipe.principal_id,
+        request=recipe.request,
+        page=page,
+        index_state=CatalogIndexState(
+            CatalogIndexLane.LEXICAL,
+            CatalogIndexStatus.CURRENT,
+            None,
+        ),
+        execution_binding=run.execution_binding,
+        snapshot_discriminator=recipe.snapshot_discriminator,
+        current_conversation_id=recipe.current_conversation_id,
+        boundary_user_message_id=recipe.boundary_user_message_id,
+    )
+    candidates = projection.candidates
+    coverage = projection.to_coverage(
+        run.execution_binding,
+        tenant_id=recipe.tenant_id,
+        principal_id=recipe.principal_id,
+        snapshot_discriminator=recipe.snapshot_discriminator,
+        returned=len(candidates),
+    )
+    return candidates, coverage
+
+
+def _obsidian_phase(phase: ArchiveSearchAuthorityPhase) -> ArchiveObsidianReadPhase:
+    return {
+        ArchiveSearchAuthorityPhase.BEFORE_MODEL: ArchiveObsidianReadPhase.BEFORE_MODEL,
+        ArchiveSearchAuthorityPhase.BEFORE_PUBLICATION: (
+            ArchiveObsidianReadPhase.BEFORE_PUBLICATION
+        ),
+    }[phase]
+
+
+def _collect_obsidian_target(
+    conn: sqlite3.Connection,
+    *,
+    recipe: _ArchiveSearchRecipe,
+    run: ArchiveSearchRunBinding,
+    target: tuple[SearchCorpus, SearchLane],
+    phase: ArchiveSearchAuthorityPhase,
+    exact_file_reader: ArchiveObsidianExactFileReader | None,
+) -> tuple[tuple[ArchiveSearchCandidate, ...], SearchCoverage]:
+    page = select_archive_obsidian_lane_in_transaction(
+        conn,
+        tenant_id=recipe.tenant_id,
+        principal_id=recipe.principal_id,
+        request=recipe.request,
+        snapshot_discriminator=recipe.snapshot_discriminator,
+        execution_binding=run.execution_binding,
+        lane=target[1],
+        limit=_INTERNAL_LANE_LIMIT,
+    )
+    reason = page.unavailable_reason
+    if reason is ArchiveObsidianUnavailableReason.PRINCIPAL_DENIED:
+        return (), _permission_filtered(target, run.execution_binding)
+    if reason in {
+        ArchiveObsidianUnavailableReason.TEMPORAL_UNSUPPORTED,
+        ArchiveObsidianUnavailableReason.LIFECYCLE_UNSUPPORTED,
+        ArchiveObsidianUnavailableReason.LANE_UNSUPPORTED,
+    }:
+        return (), _unsupported(target, run.execution_binding)
+    if reason is ArchiveObsidianUnavailableReason.STORAGE_UNAVAILABLE:
+        return (), _storage_unavailable(target, run.execution_binding)
+    projection = project_archive_obsidian_lane_page_in_transaction(
+        conn,
+        tenant_id=recipe.tenant_id,
+        principal_id=recipe.principal_id,
+        request=recipe.request,
+        snapshot_discriminator=recipe.snapshot_discriminator,
+        execution_binding=run.execution_binding,
+        page=page,
+        phase=_obsidian_phase(phase),
+        exact_file_reader=exact_file_reader,
+    )
+    coverage = projection.to_coverage(
+        execution_binding=run.execution_binding,
+        tenant_id=recipe.tenant_id,
+        principal_id=recipe.principal_id,
+        request=recipe.request,
+        snapshot_discriminator=recipe.snapshot_discriminator,
+        phase=_obsidian_phase(phase),
+    )
+    return projection.candidates, coverage
+
+
+def _collect_federated_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    recipe: _ArchiveSearchRecipe,
+    run: ArchiveSearchRunBinding,
+    phase: ArchiveSearchAuthorityPhase,
+    exact_file_reader: ArchiveObsidianExactFileReader | None,
+) -> FederatedArchiveSearch:
+    if (
+        type(conn) is not sqlite3.Connection
+        or not conn.in_transaction
+        or not recipe.is_valid()
+        or type(run) is not ArchiveSearchRunBinding
+        or type(phase) is not ArchiveSearchAuthorityPhase
+    ):
+        raise _fail()
+    binding = run.execution_binding
+    targets = canonical_archive_search_targets(recipe.request)
+    if binding.requested_targets != targets:
+        raise _fail()
+    candidates_by_target: dict[
+        tuple[SearchCorpus, SearchLane], tuple[ArchiveSearchCandidate, ...]
+    ] = {}
+    coverage_by_target: dict[tuple[SearchCorpus, SearchLane], SearchCoverage] = {}
+    for target in targets:
+        candidates: tuple[ArchiveSearchCandidate, ...] = ()
+        coverage = _unsupported(target, binding)
+        try:
+            if target[0] in _DOCUMENT_CORPUS and target[1] in _DOCUMENT_LANES:
+                candidates, coverage = _collect_document_target(
+                    conn,
+                    recipe=recipe,
+                    run=run,
+                    target=target,
+                )
+            elif target == (SearchCorpus.CONVERSATION, SearchLane.MESSAGE_HISTORY):
+                candidates, coverage = _collect_message_target(
+                    conn,
+                    recipe=recipe,
+                    run=run,
+                    target=target,
+                )
+            elif target[0] is SearchCorpus.OBSIDIAN and target[1] in _OBSIDIAN_LANES:
+                candidates, coverage = _collect_obsidian_target(
+                    conn,
+                    recipe=recipe,
+                    run=run,
+                    target=target,
+                    phase=phase,
+                    exact_file_reader=exact_file_reader,
+                )
+        except Exception:
+            candidates = ()
+            coverage = _storage_unavailable(target, binding)
+        candidates_by_target[target] = candidates
+        coverage_by_target[target] = coverage
+    if not conn.in_transaction:
+        raise _fail()
+    try:
+        return federate_archive_search(
+            request=recipe.request,
+            execution_binding=binding,
+            coverage=tuple(coverage_by_target[target] for target in targets),
+            candidates_by_target=candidates_by_target,
+        )
+    except Exception:
+        raise _fail() from None
+
+
+def _federation_material(value: FederatedArchiveSearch) -> dict[str, object]:
+    return {
+        "candidates": [item.to_private_payload() for item in value.candidates],
+        "coverage": [item.to_payload() for item in value.coverage],
+        "tail": [item.to_private_payload() for item in value.tail_candidates],
+        "terminal_coverage": [item.to_payload() for item in value.terminal_coverage],
+        "warnings": [item.value for item in value.warnings],
+    }
+
+
+def _same_federation(
+    left: FederatedArchiveSearch,
+    right: FederatedArchiveSearch,
+) -> bool:
+    try:
+        return hmac.compare_digest(
+            hashlib.sha256(_canonical_bytes(_federation_material(left))).digest(),
+            hashlib.sha256(_canonical_bytes(_federation_material(right))).digest(),
+        )
+    except Exception:
+        return False
+
+
+@dataclass(frozen=True, slots=True)
+class _FreshEvidence:
+    run: ArchiveSearchRunBinding
+    recipe: _ArchiveSearchRecipe
+    federation: FederatedArchiveSearch
+
+
+class ArchiveSearchReauthorizationContext(_ProcessPrivate):
+    """Sealed fresh full-universe evidence for authority callbacks."""
+
+    __slots__ = ("_entries", "_phase", "_process_authority", "_seal")
+
+    _entries: tuple[_FreshEvidence, ...]
+    _phase: ArchiveSearchAuthorityPhase
+    _process_authority: object
+    _seal: bytes
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise _fail()
+
+    def __setattr__(self, _name: str, _value: object) -> NoReturn:
+        raise TypeError("archive reauthorization context is immutable")
+
+    def __repr__(self) -> str:
+        return "<ArchiveSearchReauthorizationContext sealed private>"
+
+    def _material(self) -> dict[str, object]:
+        return {
+            "entries": [
+                {
+                    "execution_handle": item.run.execution_binding.opaque_handle,
+                    "federation": _federation_material(item.federation),
+                    "recipe_seal": item.recipe.seal.hex(),
+                }
+                for item in self._entries
+            ],
+            "phase": self._phase.value,
+        }
+
+    def _is_valid(self) -> bool:
+        try:
+            return bool(
+                type(self) is ArchiveSearchReauthorizationContext
+                and self._process_authority is _PROCESS_AUTHORITY
+                and type(self._phase) is ArchiveSearchAuthorityPhase
+                and type(self._entries) is tuple
+                and self._entries
+                and all(
+                    type(item) is _FreshEvidence
+                    and type(item.run) is ArchiveSearchRunBinding
+                    and item.recipe.is_valid()
+                    and type(item.federation) is FederatedArchiveSearch
+                    for item in self._entries
+                )
+                and len({id(item.run) for item in self._entries}) == len(self._entries)
+                and hmac.compare_digest(
+                    self._seal,
+                    _mac(b"friday/archive-search-service-context/v1", self._material()),
+                )
+            )
+        except Exception:
+            return False
+
+
+def _new_context(
+    phase: ArchiveSearchAuthorityPhase,
+    entries: tuple[_FreshEvidence, ...],
+) -> ArchiveSearchReauthorizationContext:
+    context = cast(
+        ArchiveSearchReauthorizationContext,
+        object.__new__(ArchiveSearchReauthorizationContext),
+    )
+    for name, value in (
+        ("_entries", entries),
+        ("_phase", phase),
+        ("_process_authority", _PROCESS_AUTHORITY),
+        ("_seal", b"0" * 32),
+    ):
+        object.__setattr__(context, name, value)
+    object.__setattr__(
+        context,
+        "_seal",
+        _mac(b"friday/archive-search-service-context/v1", context._material()),
+    )
+    if not context._is_valid():
+        raise _fail()
+    return context
+
+
+def _context_entry(
+    context: object,
+    phase: ArchiveSearchAuthorityPhase,
+    run: ArchiveSearchRunBinding,
+) -> _FreshEvidence | None:
+    if (
+        type(context) is not ArchiveSearchReauthorizationContext
+        or not cast(ArchiveSearchReauthorizationContext, context)._is_valid()
+        or cast(ArchiveSearchReauthorizationContext, context)._phase is not phase
+    ):
+        return None
+    return next(
+        (
+            item
+            for item in cast(ArchiveSearchReauthorizationContext, context)._entries
+            if item.run is run
+        ),
+        None,
+    )
+
+
+def _same_candidate(left: ArchiveSearchCandidate, right: ArchiveSearchCandidate) -> bool:
+    try:
+        frozen_left = _canonical_candidate(left)
+        frozen_right = _canonical_candidate(right)
+        return bool(
+            frozen_left is not None
+            and frozen_right is not None
+            and hmac.compare_digest(
+                frozen_left.to_private_json(),
+                frozen_right.to_private_json(),
+            )
+        )
+    except Exception:
+        return False
+
+
+def _same_continuation_candidate_evidence(
+    observed: ArchiveSearchCandidate,
+    fresh: ArchiveSearchCandidate,
+) -> bool:
+    """Allow only authority-produced page-relative rank rebasing on resume."""
+
+    observed_value = _canonical_candidate(observed)
+    fresh_value = _canonical_candidate(fresh)
+    if observed_value is None or fresh_value is None:
+        return False
+    if (
+        observed_value.resolved_source.source_ref
+        != fresh_value.resolved_source.source_ref
+        or len(observed_value.matches) != len(fresh_value.matches)
+        or any(
+            left.channel is not right.channel or left.rank > right.rank
+            for left, right in zip(
+                observed_value.matches,
+                fresh_value.matches,
+                strict=True,
+            )
+        )
+    ):
+        return False
+    try:
+        rebased = ArchiveSearchCandidate.create(
+            corpus=observed_value.corpus,
+            resolved_source=observed_value.resolved_source,
+            title=observed_value.title,
+            filename=observed_value.filename,
+            review_state=observed_value.review_state,
+            evidence_authority=observed_value.evidence_authority,
+            lifecycle_state=observed_value.lifecycle_state,
+            matches=fresh_value.matches,
+            temporal_facts=observed_value.temporal_facts,
+            passages=observed_value.passages,
+        )
+        return _same_candidate(rebased, fresh_value)
+    except Exception:
+        return False
+
+
+def _fresh_coverage(
+    evidence: _FreshEvidence,
+    target: tuple[SearchCorpus, SearchLane],
+    *,
+    terminal: bool,
+) -> SearchCoverage | None:
+    values = (
+        evidence.federation.terminal_coverage
+        if terminal
+        else evidence.federation.coverage
+    )
+    return next(
+        (item for item in values if (item.corpus, item.lane) == target),
+        None,
+    )
+
+
+def _same_coverage(left: SearchCoverage, right: SearchCoverage) -> bool:
+    try:
+        frozen_left = _canonical_coverage(left)
+        frozen_right = _canonical_coverage(right)
+        return bool(
+            left.execution_binding is right.execution_binding
+            and frozen_left is not None
+            and frozen_right is not None
+            and hmac.compare_digest(frozen_left.to_json(), frozen_right.to_json())
+        )
+    except Exception:
+        return False
+
+
+def _expected_degraded_coverage(value: SearchCoverage) -> SearchCoverage | None:
+    failures: set[CoverageState] = set()
+    if not value.authority_rechecked:
+        failures.add(CoverageState.UNAVAILABLE)
+    elif not value.snapshot_current:
+        failures.add(CoverageState.STALE)
+    if not failures:
+        return None
+    states: set[CoverageState] = {
+        item for item in value.states if item is not CoverageState.COMPLETE
+    }
+    states.add(CoverageState.PARTIAL)
+    states.update(failures)
+    try:
+        return SearchCoverage.create(
+            corpus=value.corpus,
+            lane=value.lane,
+            execution_binding=value.execution_binding,
+            states=states,
+            eligible_authorized=None,
+            examined=0,
+            matched_at_least=0,
+            returned=0,
+            authority_rechecked=CoverageState.UNAVAILABLE not in failures,
+            snapshot_current=False,
+            limit=value.limit,
+            next_cursor_available=False,
+        )
+    except Exception:
+        return None
+
+
+def _continuation_coverage_attested(
+    observed: SearchCoverage,
+    fresh: SearchCoverage,
+    *,
+    limit: int,
+) -> bool:
+    try:
+        if (
+            observed.execution_binding is not fresh.execution_binding
+            or (observed.corpus, observed.lane) != (fresh.corpus, fresh.lane)
+            or observed.eligible_authorized != fresh.eligible_authorized
+            or observed.examined != fresh.examined
+            or observed.matched_at_least != fresh.matched_at_least
+            or observed.authority_rechecked is not fresh.authority_rechecked
+            or observed.snapshot_current is not fresh.snapshot_current
+            or observed.returned > fresh.matched_at_least
+        ):
+            return False
+        if observed.next_cursor_available:
+            states: set[CoverageState] = {
+                item for item in fresh.states if item is not CoverageState.COMPLETE
+            }
+            states.update({CoverageState.PARTIAL, CoverageState.CAPPED})
+            expected_limit: int | None = limit
+        else:
+            states = set(fresh.states)
+            expected_limit = (
+                fresh.limit
+                if fresh.limit is None or fresh.limit >= observed.returned
+                else limit
+            )
+        expected = SearchCoverage.create(
+            corpus=fresh.corpus,
+            lane=fresh.lane,
+            execution_binding=fresh.execution_binding,
+            states=states,
+            eligible_authorized=fresh.eligible_authorized,
+            examined=fresh.examined,
+            matched_at_least=fresh.matched_at_least,
+            returned=observed.returned,
+            authority_rechecked=fresh.authority_rechecked,
+            snapshot_current=fresh.snapshot_current,
+            limit=expected_limit,
+            next_cursor_available=observed.next_cursor_available,
+        )
+        return _same_coverage(observed, expected)
+    except Exception:
+        return False
+
+
+def _coverage_attested(
+    evidence: _FreshEvidence,
+    coverage: SearchCoverage,
+    *,
+    phase: ArchiveSearchAuthorityPhase,
+) -> bool:
+    target = coverage.corpus, coverage.lane
+    fresh = _fresh_coverage(evidence, target, terminal=evidence.recipe.continuation)
+    if fresh is None:
+        return False
+    if evidence.recipe.continuation:
+        direct = _continuation_coverage_attested(
+            coverage,
+            fresh,
+            limit=evidence.recipe.request.limit,
+        )
+        if direct:
+            return True
+        degraded = _expected_degraded_coverage(fresh)
+        return bool(
+            phase is ArchiveSearchAuthorityPhase.BEFORE_PUBLICATION
+            and degraded is not None
+            and _same_coverage(coverage, degraded)
+        )
+    if _same_coverage(coverage, fresh):
+        return True
+    degraded = _expected_degraded_coverage(fresh)
+    return bool(
+        phase is ArchiveSearchAuthorityPhase.BEFORE_PUBLICATION
+        and degraded is not None
+        and _same_coverage(coverage, degraded)
+    )
+
+
+def _rejection_for_coverage(value: SearchCoverage | None) -> ArchiveSearchReauthorizationStatus:
+    if value is None:
+        return ArchiveSearchReauthorizationStatus.UNAVAILABLE
+    if CoverageState.PERMISSION_FILTERED in value.states:
+        return ArchiveSearchReauthorizationStatus.DENIED
+    if not value.authority_rechecked or CoverageState.UNAVAILABLE in value.states:
+        return ArchiveSearchReauthorizationStatus.UNAVAILABLE
+    return ArchiveSearchReauthorizationStatus.DRIFTED
+
+
+def reauthorize_archive_search_candidate(
+    phase: ArchiveSearchAuthorityPhase,
+    run_binding: ArchiveSearchRunBinding,
+    candidate: ArchiveSearchCandidate,
+    authority_context: object,
+    /,
+) -> ArchiveSearchCandidateReauthorization:
+    """Canonical callback for both model admission and publication attestation."""
+
+    evidence = _context_entry(authority_context, phase, run_binding)
+    if evidence is None or type(candidate) is not ArchiveSearchCandidate:
+        return ArchiveSearchCandidateReauthorization.rejected(
+            ArchiveSearchReauthorizationStatus.UNAVAILABLE
+        )
+    fresh_candidates = (
+        *evidence.federation.candidates,
+        *evidence.federation.tail_candidates,
+    )
+    current = next(
+        (item for item in fresh_candidates if _same_candidate(item, candidate)),
+        None,
+    )
+    if current is not None:
+        return ArchiveSearchCandidateReauthorization.authorized(current)
+    if (
+        phase is ArchiveSearchAuthorityPhase.BEFORE_PUBLICATION
+        and evidence.recipe.continuation
+        and any(
+            _same_continuation_candidate_evidence(candidate, item)
+            for item in fresh_candidates
+        )
+    ):
+        return ArchiveSearchCandidateReauthorization.authorized(candidate)
+    target_coverages = tuple(
+        _fresh_coverage(
+            evidence,
+            (
+                {
+                    ArchiveSearchCorpus.DOCUMENTS: SearchCorpus.RAW_DOCUMENTS,
+                    ArchiveSearchCorpus.KNOWLEDGE: SearchCorpus.KNOWLEDGE,
+                    ArchiveSearchCorpus.MESSAGES: SearchCorpus.CONVERSATION,
+                    ArchiveSearchCorpus.OBSIDIAN: SearchCorpus.OBSIDIAN,
+                    ArchiveSearchCorpus.GENERATED: SearchCorpus.GENERATED_ARTIFACTS,
+                    ArchiveSearchCorpus.WEB: SearchCorpus.WEB_CAPTURES,
+                    ArchiveSearchCorpus.EXTERNAL: SearchCorpus.EXTERNAL,
+                }[candidate.corpus],
+                match.channel.search_lane,
+            ),
+            terminal=evidence.recipe.continuation,
+        )
+        for match in candidate.matches
+    )
+    statuses = {_rejection_for_coverage(item) for item in target_coverages}
+    status = (
+        ArchiveSearchReauthorizationStatus.DENIED
+        if ArchiveSearchReauthorizationStatus.DENIED in statuses
+        else ArchiveSearchReauthorizationStatus.UNAVAILABLE
+        if ArchiveSearchReauthorizationStatus.UNAVAILABLE in statuses
+        else ArchiveSearchReauthorizationStatus.DRIFTED
+    )
+    return ArchiveSearchCandidateReauthorization.rejected(status)
+
+
+def reauthorize_archive_search_coverage(
+    phase: ArchiveSearchAuthorityPhase,
+    run_binding: ArchiveSearchRunBinding,
+    coverage: SearchCoverage,
+    authority_context: object,
+    /,
+) -> ArchiveSearchCoverageReauthorization:
+    """Attest page-shaped coverage only after reproducing its full lane baseline."""
+
+    evidence = _context_entry(authority_context, phase, run_binding)
+    if evidence is None or type(coverage) is not SearchCoverage:
+        return ArchiveSearchCoverageReauthorization.rejected(
+            ArchiveSearchReauthorizationStatus.UNAVAILABLE
+        )
+    if _coverage_attested(evidence, coverage, phase=phase):
+        if phase is ArchiveSearchAuthorityPhase.BEFORE_PUBLICATION or evidence.recipe.continuation:
+            current: SearchCoverage | None = coverage
+        else:
+            current = _fresh_coverage(
+                evidence,
+                (coverage.corpus, coverage.lane),
+                terminal=False,
+            )
+        if current is not None:
+            return ArchiveSearchCoverageReauthorization.authorized(current)
+    current_fresh = _fresh_coverage(
+        evidence,
+        (coverage.corpus, coverage.lane),
+        terminal=evidence.recipe.continuation,
+    )
+    return ArchiveSearchCoverageReauthorization.rejected(
+        _rejection_for_coverage(current_fresh)
+    )
+
+
+def prepare_archive_search_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    principal_id: str,
+    request: ArchiveSearchRequest,
+    snapshot_discriminator: str,
+    run_discriminator: str,
+    turn_ledger: ArchiveModelBatchLedger,
+    current_conversation_id: str | None = None,
+    boundary_user_message_id: str | None = None,
+    exact_file_reader: ArchiveObsidianExactFileReader | None = None,
+) -> PreparedArchiveSearch:
+    """Build and authorize one fresh or resumed archive page in one transaction."""
+
+    try:
+        if type(conn) is not sqlite3.Connection or not conn.in_transaction:
+            raise _fail()
+        tenant = _identity(tenant_id)
+        principal = _identity(principal_id)
+        snapshot = _identity(snapshot_discriminator)
+        run_id = _identity(run_discriminator)
+        if type(request) is not ArchiveSearchRequest:
+            raise _fail()
+        request_value = ArchiveSearchRequest.parse_private(request.to_private_json())
+        storage_request = _storage_request(request_value)
+        continuation = request_value.continuation is not None
+        recipe = _new_recipe(
+            tenant_id=tenant,
+            principal_id=principal,
+            request=storage_request,
+            snapshot_discriminator=snapshot,
+            current_conversation_id=current_conversation_id,
+            boundary_user_message_id=boundary_user_message_id,
+            continuation=continuation,
+        )
+        targets = canonical_archive_search_targets(storage_request)
+        run = create_archive_search_run_binding(
+            tenant_id=tenant,
+            principal_id=principal,
+            request=request_value,
+            requested_targets=targets,
+            snapshot_discriminator=snapshot,
+            run_discriminator=run_id,
+            turn_ledger=turn_ledger,
+        )
+        if continuation:
+            fresh = _collect_federated_in_transaction(
+                conn,
+                recipe=recipe,
+                run=run,
+                phase=ArchiveSearchAuthorityPhase.BEFORE_MODEL,
+                exact_file_reader=exact_file_reader,
+            )
+            context = _new_context(
+                ArchiveSearchAuthorityPhase.BEFORE_MODEL,
+                (_FreshEvidence(run, recipe, fresh),),
+            )
+            redemption = redeem_archive_search_continuation(
+                tenant_id=tenant,
+                principal_id=principal,
+                run_binding=run,
+            )
+            batch = _authorize_resumed_before_model(
+                tenant_id=tenant,
+                principal_id=principal,
+                run_binding=run,
+                redemption=redemption,
+                candidate_reauthorizer=reauthorize_archive_search_candidate,
+                coverage_reauthorizer=reauthorize_archive_search_coverage,
+                authority_context=context,
+            )
+        else:
+            initial = _collect_federated_in_transaction(
+                conn,
+                recipe=recipe,
+                run=run,
+                phase=ArchiveSearchAuthorityPhase.BEFORE_MODEL,
+                exact_file_reader=exact_file_reader,
+            )
+            fresh = _collect_federated_in_transaction(
+                conn,
+                recipe=recipe,
+                run=run,
+                phase=ArchiveSearchAuthorityPhase.BEFORE_MODEL,
+                exact_file_reader=exact_file_reader,
+            )
+            if not _same_federation(initial, fresh):
+                raise _fail()
+            context = _new_context(
+                ArchiveSearchAuthorityPhase.BEFORE_MODEL,
+                (_FreshEvidence(run, recipe, fresh),),
+            )
+            issue = (
+                issue_archive_search_continuation(
+                    tenant_id=tenant,
+                    principal_id=principal,
+                    run_binding=run,
+                    tail_candidates=initial.tail_candidates,
+                    terminal_coverage=initial.terminal_coverage,
+                    warnings=initial.warnings,
+                )
+                if initial.continuation_available
+                else None
+            )
+            batch = _authorize_before_model(
+                tenant_id=tenant,
+                principal_id=principal,
+                run_binding=run,
+                candidates=initial.candidates,
+                coverage=initial.coverage,
+                warnings=initial.warnings,
+                continuation=issue,
+                candidate_reauthorizer=reauthorize_archive_search_candidate,
+                coverage_reauthorizer=reauthorize_archive_search_coverage,
+                authority_context=context,
+            )
+        if not conn.in_transaction:
+            raise _fail()
+        return _new_prepared(run, batch, recipe)
+    except ArchiveSearchServiceError:
+        raise
+    except Exception:
+        raise _fail() from None
+
+
+def refresh_archive_search_reauthorization_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    principal_id: str,
+    prepared_searches: tuple[PreparedArchiveSearch, ...],
+    exact_file_reader: ArchiveObsidianExactFileReader | None = None,
+) -> ArchiveSearchReauthorizationContext:
+    """Reproduce every prepared run for the final publication transaction."""
+
+    try:
+        if (
+            type(conn) is not sqlite3.Connection
+            or not conn.in_transaction
+            or type(prepared_searches) is not tuple
+            or not prepared_searches
+        ):
+            raise _fail()
+        tenant = _identity(tenant_id)
+        principal = _identity(principal_id)
+        entries: list[_FreshEvidence] = []
+        for prepared in prepared_searches:
+            if type(prepared) is not PreparedArchiveSearch or not prepared._is_valid():
+                raise _fail()
+            recipe = prepared._recipe
+            if recipe.tenant_id != tenant or recipe.principal_id != principal:
+                raise _fail()
+            fresh = _collect_federated_in_transaction(
+                conn,
+                recipe=recipe,
+                run=prepared._run,
+                phase=ArchiveSearchAuthorityPhase.BEFORE_PUBLICATION,
+                exact_file_reader=exact_file_reader,
+            )
+            entries.append(_FreshEvidence(prepared._run, recipe, fresh))
+        if not conn.in_transaction:
+            raise _fail()
+        return _new_context(
+            ArchiveSearchAuthorityPhase.BEFORE_PUBLICATION,
+            tuple(entries),
+        )
+    except ArchiveSearchServiceError:
+        raise
+    except Exception:
+        raise _fail() from None
+
+
+__all__ = [
+    "ArchiveSearchReauthorizationContext",
+    "ArchiveSearchServiceError",
+    "PreparedArchiveSearch",
+    "prepare_archive_search_in_transaction",
+    "reauthorize_archive_search_candidate",
+    "reauthorize_archive_search_coverage",
+    "refresh_archive_search_reauthorization_in_transaction",
+]
