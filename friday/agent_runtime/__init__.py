@@ -39807,18 +39807,20 @@ class AgentRuntime:
         restricted_outbound_turn = bool(topic.startswith("человек") or private_outbound_restricted)
         web_intent_authorized = bool(
             # A current private source cannot enter the isolated public-web
-            # lane.  Still retain the code-owned policy verdict (weather,
-            # news, prices, or another explicit public request) so the turn
+            # lane.  Retain only fresh, utterance-bound web intent so the turn
             # closes with the private-source refusal instead of silently
-            # asking the model to answer a current fact from memory.  This bit
-            # authorizes only that refusal: the projection below has already
-            # removed every outbound capability.
+            # asking the model to answer a current fact from memory.  A stale
+            # policy bit must not relabel an ordinary local-file answer as a
+            # new outward request.  This bit authorizes only that refusal: the
+            # projection below has already removed every outbound capability.
             (
                 private_outbound_restricted
                 and (
                     asks_for_the_web(clean_message)
-                    or context.policy_web_authorized
-                    or topic.startswith("интернет")
+                    or bool(policy_web_query)
+                    or bool(public_product_spec_query)
+                    or bool(public_market_query)
+                    or bool(explicit_public_web_query)
                 )
             )
             or file_web

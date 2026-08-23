@@ -1222,12 +1222,11 @@ def _lexical_sql(
     source_cte, scope_parameters = _source_cte(corpus, request, include_body=True)
     folded_fields: tuple[str, ...]
     if corpus is ArchiveSearchCorpus.DOCUMENTS:
-        derivative_expression = (
-            "EXISTS (SELECT 1 FROM raw_fts "
-            "WHERE raw_fts.rowid=s.raw_rowid AND raw_fts MATCH ?)"
-            if derivative_available
-            else "0"
-        )
+        # The global raw-object index intentionally contains rejected rows and
+        # therefore cannot be consulted by this archive facade.  The authorized
+        # body scan below remains authoritative; report derivative coverage as
+        # pending until a lifecycle-filtered archive derivative exists.
+        derivative_expression = "0"
         folded_fields = (
             "friday_archive_fold(s.passage_body)",
         )
@@ -1884,7 +1883,6 @@ def search_archive_document_lane(
         )
 
     if lane is SearchLane.LEXICAL:
-        table = "raw_fts" if corpus is ArchiveSearchCorpus.DOCUMENTS else "knowledge_fts"
         terms = _fts_terms(request.query)
         if not terms:
             return _unavailable_page(
@@ -1898,7 +1896,11 @@ def search_archive_document_lane(
                 snapshot_current=snapshot_current,
                 authority_rechecked=True,
             )
-        derivative_available = _table_exists(conn, table)
+        derivative_available = (
+            False
+            if corpus is ArchiveSearchCorpus.DOCUMENTS
+            else _table_exists(conn, "knowledge_fts")
+        )
         sql, lane_parameters = _lexical_sql(
             corpus,
             request,

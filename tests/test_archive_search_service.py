@@ -255,7 +255,10 @@ def test_document_lanes_are_federated_from_the_authoritative_store(storage: Any)
     payload = _payload(prepared)
     assert len(payload["candidates"]) == 1
     assert _coverage(payload, SearchLane.CATALOG)["states"] == ["complete"]
-    assert _coverage(payload, SearchLane.LEXICAL)["states"] == ["complete"]
+    assert _coverage(payload, SearchLane.LEXICAL)["states"] == [
+        "backfill_pending",
+        "partial",
+    ]
     assert _coverage(payload, SearchLane.DENSE)["states"] == ["unavailable"]
 
 

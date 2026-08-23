@@ -267,7 +267,8 @@ def test_lexical_lanes_authorize_before_counts_and_return_exact_revision_passage
     assert storage.conn.total_changes == before_changes
 
     assert (documents.total, documents.examined, documents.matched, documents.returned) == (2, 2, 2, 2)
-    assert documents.derivative_current is True
+    assert documents.derivative_current is False
+    assert CoverageState.BACKFILL_PENDING in _coverage(documents, request).states
     assert documents.has_more is False and documents.available is True
     states = {item.review_state: item for item in documents.candidates}
     assert set(states) == {ArchiveReviewState.CONFIRMED, ArchiveReviewState.PENDING}
@@ -1090,6 +1091,64 @@ def test_empty_fts_derivative_cannot_create_false_absence(storage) -> None:
     assert _coverage(page, request).absence_decision().value == "evidence_found"
 
 
+def test_raw_derivative_cannot_borrow_ignored_or_cross_tenant_hits(storage) -> None:
+    target_body = "Needle exact authorized target"
+    target_raw, _ = _seed(
+        storage,
+        42,
+        body=target_body,
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    _seed(
+        storage,
+        43,
+        body="Needle IGNORED-DERIVATIVE-CANARY",
+        inbox_status=InboxStatus.IGNORED,
+    )
+    _seed(
+        storage,
+        44,
+        tenant=FOREIGN_TENANT,
+        owner=OTHER_OWNER,
+        body="Needle FOREIGN-DERIVATIVE-CANARY",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    _seed(
+        storage,
+        45,
+        owner=OTHER_OWNER,
+        body="Needle OTHER-OWNER-DERIVATIVE-CANARY",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    with storage.transaction() as conn:
+        row = conn.execute(
+            "SELECT rowid, raw_content FROM raw_objects WHERE id=? AND user_id=?",
+            (target_raw, TENANT),
+        ).fetchone()
+        assert row is not None
+        conn.execute(
+            "INSERT INTO raw_fts(raw_fts,rowid,raw_content) VALUES('delete',?,?)",
+            (row["rowid"], row["raw_content"]),
+        )
+
+    request = _request(corpora=(ArchiveSearchCorpus.DOCUMENTS,))
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    )
+
+    assert (page.total, page.examined, page.matched, page.returned) == (1, 1, 1, 1)
+    assert page.derivative_current is False
+    assert page.candidates[0].resolved_source.source_ref.canonical_object_id == target_raw
+    rendered = json.dumps(page.candidates[0].to_private_json(), ensure_ascii=False)
+    assert "exact authorized target" in rendered
+    assert "IGNORED-DERIVATIVE-CANARY" not in rendered
+    assert "FOREIGN-DERIVATIVE-CANARY" not in rendered
+    assert "OTHER-OWNER-DERIVATIVE-CANARY" not in rendered
+
+
 def test_unicode_folded_match_keeps_an_exact_raw_text_locator(storage) -> None:
     raw_id, _ = _seed(
         storage,
@@ -1291,9 +1350,11 @@ def test_diacritic_fold_matches_fts_and_keeps_coverage_honest(storage) -> None:
 
     for page in (documents, knowledge):
         assert page.matched == page.returned == 1
-        assert page.derivative_current is True
         assert "Café" in page.candidates[0].passages[0].excerpt
         assert _coverage(page, request).absence_decision().value == "evidence_found"
+    assert documents.derivative_current is False
+    assert CoverageState.BACKFILL_PENDING in _coverage(documents, request).states
+    assert knowledge.derivative_current is True
 
 
 def test_missing_fts_cannot_confirm_absence(storage) -> None:
