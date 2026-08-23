@@ -7,6 +7,8 @@ owns ``/api/admin`` and the order these modules are included in.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter
 
 from friday.admin_api._deps import (
@@ -22,11 +24,68 @@ from friday.admin_api._deps import (
     _require,
     _services,
     _target_user,
+    validate_user_id,
+)
+from friday.interaction_control_plane.failure_store import (
+    INTERACTION_FAILURE_REPORT_LIMIT,
+    interaction_episode_baseline,
 )
 from friday.storage._base import _SEARCH_TEXT_LEN_SQL
 from friday.storage._privacy import _not_private_knowledge_dependency
 
 router = APIRouter()
+
+_EPISODE_BASELINE_QUERY_FIELDS = frozenset({"user_id", "since", "limit"})
+_CANONICAL_UTC_SECOND = (
+    r"^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T"
+    r"(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d\+00:00$"
+)
+_EPISODE_BASELINE_REPORT_FIELDS = (
+    "schema",
+    "observed_turns",
+    "observed_episodes",
+    "assistant_committed",
+    "precommit_failures",
+    "assistant_commit_rate_milli",
+    "intent",
+    "completion",
+    "publication",
+    "signals",
+    "failure_stages",
+    "failure_reasons",
+    "precommit_routes",
+    "bounded",
+)
+
+
+def _closed_episode_baseline_query(request: Request) -> None:
+    fields = [name for name, _value in request.query_params.multi_items()]
+    if len(fields) != len(set(fields)) or not set(fields) <= _EPISODE_BASELINE_QUERY_FIELDS:
+        raise HTTPException(status_code=400, detail="Неподдерживаемые или повторяющиеся параметры запроса")
+
+
+def _canonical_episode_since(value: str | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="since должен быть корректным UTC ISO timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise HTTPException(status_code=400, detail="since должен включать UTC offset")
+    canonical = parsed.astimezone(UTC).isoformat(timespec="seconds")
+    if value != canonical:
+        raise HTTPException(
+            status_code=400,
+            detail="since должен быть каноническим UTC ISO timestamp с точностью до секунды",
+        )
+    return canonical
+
+
+def _public_episode_baseline(report: dict[str, Any]) -> dict[str, Any]:
+    """Project only aggregate fields; trace rows and identifiers have no API path."""
+
+    return {field: report[field] for field in _EPISODE_BASELINE_REPORT_FIELDS}
 
 
 def _embedding_index_health(state: Any, user_id: str) -> dict[str, Any]:
@@ -147,6 +206,57 @@ async def knowledge_quality_dashboard(
         "lifecycle_total": lifecycle_total,
         "lifecycle_limit": lifecycle_limit,
         "lifecycle_offset": lifecycle_offset,
+    }
+
+
+@router.get("/eval/interaction-episode-baseline")
+async def interaction_episode_baseline_report(
+    request: Request,
+    user_id: str = Query(..., min_length=1, max_length=200),
+    since: str | None = Query(
+        None,
+        min_length=25,
+        max_length=25,
+        pattern=_CANONICAL_UTC_SECOND,
+    ),
+    limit: int = Query(
+        INTERACTION_FAILURE_REPORT_LIMIT,
+        ge=1,
+        le=INTERACTION_FAILURE_REPORT_LIMIT,
+    ),
+) -> dict[str, Any]:
+    """Return a bounded structural baseline without exposing retained traces."""
+
+    _require(request, "admin.all_data.read")
+    _closed_episode_baseline_query(request)
+    try:
+        target = validate_user_id(user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if target != user_id:
+        raise HTTPException(status_code=400, detail="user_id должен быть каноническим")
+    normalized_since = _canonical_episode_since(since)
+    state = _services(request)
+    _audit_cross_tenant_read(
+        request,
+        "admin.eval.read",
+        target,
+        since=normalized_since,
+        limit=limit,
+    )
+    if not state.storage.get_user(target):
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    report = interaction_episode_baseline(
+        state.storage,
+        target,
+        since=normalized_since,
+        limit=limit,
+    )
+    return {
+        "user_id": target,
+        "since": normalized_since,
+        "limit": limit,
+        "report": _public_episode_baseline(report),
     }
 
 

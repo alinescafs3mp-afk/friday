@@ -264,7 +264,11 @@ def test_every_admin_read_of_another_account_is_audited(settings, monkeypatch, t
                 continue
 
             before = audit_count()
-            response = client.get(concrete, params={"user_id": "victim", "q": "проба"}, headers=owner)
+            parameters = inspect.signature(endpoint).parameters
+            query = {"user_id": "victim"}
+            if "q" in parameters:
+                query["q"] = "проба"
+            response = client.get(concrete, params=query, headers=owner)
             if response.status_code >= 400:
                 expected_status = _INTENTIONALLY_UNAVAILABLE_READS.get(path)
                 if response.status_code == expected_status:

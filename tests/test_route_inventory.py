@@ -70,11 +70,12 @@ from friday.server import create_app
 #: транзакционной сверкой плана.
 # 191 → 192: one bounded person-level transcript replaces the admin UI's
 # serialized conversation-list + five-message-page request waterfall.
-EXPECTED_OPERATIONS = 192
+# 192 → 193: one bounded, aggregate-only interaction episode baseline report.
+EXPECTED_OPERATIONS = 193
 # Areas that are mounted through include_router, i.e. exactly the ones app.routes
 # cannot see. Pinning their sizes catches a router that quietly stops being included.
 EXPECTED_BY_PREFIX = {
-    "/api/admin": 97,
+    "/api/admin": 98,
     "/api/kg": 24,
     "/api/missions": 4,
 }
