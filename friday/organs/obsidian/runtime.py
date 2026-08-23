@@ -23,6 +23,7 @@ from .contracts import (
     ObsidianNoteError,
     ObsidianVaultConvention,
     PropertyValue,
+    TemplateSummary,
     VaultDeliveryState,
 )
 from .indexing import IncrementalIndexResult, refresh_incremental_index
@@ -241,6 +242,16 @@ def _note_summary(item: NoteSummary) -> dict[str, Any]:
         "title": item.title,
         "revision": item.revision,
         "size_bytes": item.size_bytes,
+        "modified_at": item.modified_at.isoformat(),
+    }
+
+
+def _template_summary(item: TemplateSummary) -> dict[str, Any]:
+    return {
+        "name": item.name,
+        "path": item.path,
+        "title": item.title,
+        "revision": item.revision,
         "modified_at": item.modified_at.isoformat(),
     }
 
@@ -1987,6 +1998,11 @@ class ObsidianRuntime:
         service = await self._operation_service(owner_id, synchronize=False)
         items = await asyncio.to_thread(service.list_notes)
         return [_note_summary(item) for item in items]
+
+    async def list_templates(self, owner_id: str) -> list[dict[str, Any]]:
+        service = await self._operation_service(owner_id, synchronize=False)
+        items = await asyncio.to_thread(service.list_templates)
+        return [_template_summary(item) for item in items]
 
     async def search_notes(
         self,

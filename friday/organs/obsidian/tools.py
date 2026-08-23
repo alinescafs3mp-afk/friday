@@ -25,6 +25,8 @@ class ObsidianToolRuntime(Protocol):
 
     async def list_notes(self, owner_id: str) -> list[dict[str, Any]]: ...
 
+    async def list_templates(self, owner_id: str) -> list[dict[str, Any]]: ...
+
     async def search_notes(
         self,
         owner_id: str,
@@ -195,6 +197,10 @@ def build_obsidian_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
     async def list_notes(*, actor: ActorContext) -> dict[str, Any]:
         notes = await runtime.list_notes(actor.own_id)
         return {"notes": notes, "count": len(notes)}
+
+    async def list_templates(*, actor: ActorContext) -> dict[str, Any]:
+        templates = await runtime.list_templates(actor.own_id)
+        return {"templates": templates, "count": len(templates)}
 
     async def search_notes(*, actor: ActorContext, query: str, limit: int = 20) -> dict[str, Any]:
         matches = await runtime.search_notes(
@@ -375,6 +381,17 @@ def build_obsidian_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             security_id="obsidian.read",
             risk="observe",
             handler=list_notes,
+        ),
+        ToolSpec(
+            name="obsidian_list_templates",
+            description=(
+                "Показать Markdown-шаблоны из настроенной папки шаблонов собственного "
+                "Obsidian vault, не возвращая их содержимое."
+            ),
+            parameters=_parameters({}),
+            security_id="obsidian.read",
+            risk="observe",
+            handler=list_templates,
         ),
         ToolSpec(
             name="obsidian_search_notes",

@@ -28,6 +28,7 @@ from .contracts import (
     PropertyType,
     PropertyValue,
     RevisionConflictError,
+    TemplateSummary,
     VaultDeliveryState,
     VaultLimitError,
     VaultPathError,
@@ -140,6 +141,34 @@ class ObsidianService:
                 )
             )
         return tuple(notes)
+
+    def list_templates(self) -> tuple[TemplateSummary, ...]:
+        """List body-free metadata for templates in the configured folder."""
+
+        folder = self.store.normalize_path(self.convention.template_folder)
+        prefix = f"{folder}/"
+        templates: list[TemplateSummary] = []
+        for stored in self.store.iter_markdown_files_under(
+            folder,
+            max_results=self.store.limits.max_list_results,
+        ):
+            note = _note_document(stored)
+            if not note.path.startswith(prefix):
+                raise VaultPathError("template escaped the configured folder")
+            relative = note.path[len(prefix) :]
+            name = relative[:-3]
+            if not name:
+                continue
+            templates.append(
+                TemplateSummary(
+                    name=name,
+                    path=note.path,
+                    title=note.title,
+                    revision=note.revision,
+                    modified_at=note.modified_at,
+                )
+            )
+        return tuple(templates)
 
     def search_notes(self, query: str, *, limit: int = 20) -> tuple[NoteSearchResult, ...]:
         if not isinstance(query, str) or not query.strip() or len(query) > _MAX_QUERY_CHARS:

@@ -221,6 +221,17 @@ class NoteSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class TemplateSummary:
+    """Body-free metadata for one Markdown template below the configured folder."""
+
+    name: str
+    path: str
+    title: str
+    revision: str
+    modified_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class NoteSearchResult:
     path: str
     title: str
@@ -283,6 +294,7 @@ __all__ = [
     "PropertyType",
     "PropertyValue",
     "RevisionConflictError",
+    "TemplateSummary",
     "VaultDeliveryState",
     "VaultLimitError",
     "VaultPathError",

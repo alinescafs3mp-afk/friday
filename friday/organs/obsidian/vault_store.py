@@ -684,11 +684,49 @@ class VaultStore:
                 )
             yield stored
 
+    def iter_markdown_files_under(
+        self,
+        relative_directory: str | PurePosixPath,
+        *,
+        max_results: int | None = None,
+    ) -> Iterator[VaultFile]:
+        """Read ordinary Markdown files below one contained directory.
+
+        Directory components and entries are opened with ``O_NOFOLLOW``.  A
+        missing directory is an empty collection; a symlink in its path is a
+        containment error rather than an alias to another tree.
+        """
+
+        if max_results is not None and (
+            isinstance(max_results, bool) or not isinstance(max_results, int) or max_results <= 0
+        ):
+            raise ValueError("max_results must be a positive integer")
+        normalized = self.normalize_path(relative_directory)
+        probe = self.normalize_ordinary_note_path(f"{normalized}/.friday-template-probe.md")
+        directory = PurePosixPath(probe).parent.as_posix()
+        entries = self._markdown_entries(conflicts_only=False, directory=directory)
+        if max_results is not None:
+            entries = entries[:max_results]
+        consumed = 0
+        for entry in entries:
+            try:
+                stored = self.read(entry.path)
+            except NoteNotFoundError:
+                continue
+            consumed += stored.size_bytes
+            if consumed > self.limits.max_total_markdown_bytes:
+                raise VaultLimitError(
+                    "vault Markdown exceeds the aggregate read budget of "
+                    f"{self.limits.max_total_markdown_bytes} bytes"
+                )
+            yield stored
+
     def _markdown_entries(
         self,
         *,
         conflicts_only: bool,
         max_results: int | None = None,
+        directory: str | None = None,
     ) -> tuple[_MarkdownEntry, ...]:
         """Discover bounded Markdown metadata without materializing a wide directory."""
 
@@ -770,15 +808,21 @@ class VaultStore:
                         )
                     entries.append(_MarkdownEntry(path=path, size_bytes=entry_stat.st_size))
 
+        directory_parts = () if directory is None else PurePosixPath(directory).parts
         with self._lock, self._vault_guard():
             try:
-                root_fd = os.open(self.root, _OPEN_DIRECTORY_FLAGS)
+                directory_fd = os.open(self.root, _OPEN_DIRECTORY_FLAGS)
             except OSError as exc:
                 raise VaultPathError("vault root cannot be opened safely") from exc
             try:
-                visit(root_fd, ())
+                try:
+                    for component in directory_parts:
+                        directory_fd = self._descend(directory_fd, component, create=False)
+                except NoteNotFoundError:
+                    return ()
+                visit(directory_fd, directory_parts)
             finally:
-                os.close(root_fd)
+                os.close(directory_fd)
         entries.sort(key=lambda entry: (entry.path.casefold(), entry.path))
         return tuple(entries)
 

@@ -757,6 +757,28 @@ async def test_ready_vault_exposes_durable_native_note_operations(settings, stor
     await runtime.check("alice")
     assert (await runtime.confirm_open("alice"))["state"] == "ready"
 
+    vault = storage.get_obsidian_vault("alice")
+    assert vault is not None
+    vault_store = VaultStore(str(vault["server_path"]))
+    vault_store.write_text(
+        "Templates/Meeting.md",
+        "---\ntitle: Meeting template\n---\nprivate template body",
+        create_only=True,
+    )
+    templates = await runtime.list_templates("alice")
+    assert templates == [
+        {
+            "name": "Meeting",
+            "path": "Templates/Meeting.md",
+            "title": "Meeting template",
+            "revision": hashlib.sha256(
+                b"---\ntitle: Meeting template\n---\nprivate template body"
+            ).hexdigest(),
+            "modified_at": templates[0]["modified_at"],
+        }
+    ]
+    assert "body" not in templates[0] and "content" not in templates[0]
+
     created = await runtime.create_note(
         "alice",
         "create-architecture",
@@ -804,7 +826,7 @@ async def test_ready_vault_exposes_durable_native_note_operations(settings, stor
     assert "Implementation started." in document["body"]
     assert document["properties"]["due"] == {"type": "date", "value": "2026-08-22"}
 
-    assert len(await runtime.list_notes("alice")) == 2  # includes the connection test
+    assert len(await runtime.list_notes("alice")) == 3  # connection test, template, project note
     matches = await runtime.search_notes("alice", "Implementation", limit=5)
     assert matches[0]["path"] == created["path"]
     assert client.scans[-1] == (

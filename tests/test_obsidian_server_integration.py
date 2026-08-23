@@ -97,6 +97,7 @@ def test_enabled_server_registers_tools_and_only_setup_is_public(settings) -> No
         assert {
             "obsidian_list_vaults",
             "obsidian_list_notes",
+            "obsidian_list_templates",
             "obsidian_search_notes",
             "obsidian_read_note",
             "obsidian_create_note",

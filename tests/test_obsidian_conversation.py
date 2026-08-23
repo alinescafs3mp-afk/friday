@@ -46,6 +46,7 @@ def test_tool_sets_pin_all_shipped_capabilities() -> None:
     assert {
         "obsidian_list_vaults",
         "obsidian_list_notes",
+        "obsidian_list_templates",
         "obsidian_search_notes",
         "obsidian_read_note",
         "obsidian_workflow_read",
@@ -67,6 +68,7 @@ def test_tool_sets_pin_all_shipped_capabilities() -> None:
     [
         ("Покажи хранилища Obsidian.", "obsidian_list_vaults", {}),
         ("Покажи список заметок в Obsidian.", "obsidian_list_notes", {}),
+        ("Покажи шаблоны в Obsidian", "obsidian_list_templates", {}),
         (
             "Найди в Obsidian заметки по запросу «архитектура».",
             "obsidian_search_notes",
@@ -440,6 +442,38 @@ def test_render_note_list_and_search_validate_counts_and_channels() -> None:
     broken = copy.deepcopy(matches)
     broken["matches"][0]["match_channels"] = ["model_guess"]  # type: ignore[index]
     assert render_obsidian_tool_result("obsidian_search_notes", broken) is None
+
+
+def test_render_template_list_is_body_free_sorted_and_closed() -> None:
+    template = {
+        "name": "Nested/Meeting",
+        "path": "Templates/Nested/Meeting.md",
+        "title": "Meeting template",
+        "revision": _REVISION,
+        "modified_at": "2026-08-22T06:42:00+00:00",
+    }
+
+    rendered = render_obsidian_tool_result(
+        "obsidian_list_templates",
+        {"templates": [template], "count": 1},
+    )
+
+    assert rendered is not None and "Nested/Meeting" in rendered
+    assert "body" not in rendered.casefold() and "content" not in rendered.casefold()
+    assert (
+        render_obsidian_tool_result(
+            "obsidian_list_templates",
+            {"templates": [{**template, "content": "secret"}], "count": 1},
+        )
+        is None
+    )
+    assert (
+        render_obsidian_tool_result(
+            "obsidian_list_templates",
+            {"templates": [{**template, "name": "Other"}], "count": 1},
+        )
+        is None
+    )
 
 
 def test_render_search_exposes_android_provenance_and_partial_coverage() -> None:

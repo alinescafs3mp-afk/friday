@@ -30,6 +30,7 @@ from .contracts import (
     PropertyInput,
     PropertyValue,
     RevisionConflictError,
+    TemplateSummary,
     VaultDeliveryState,
     VaultPathError,
     validate_revision,
@@ -214,6 +215,10 @@ class ObsidianOperationService:
     def list_notes(self) -> tuple[NoteSummary, ...]:
         self._assert_owner_vault()
         return self._notes.list_notes()
+
+    def list_templates(self) -> tuple[TemplateSummary, ...]:
+        self._assert_owner_vault()
+        return self._notes.list_templates()
 
     def search_notes(self, query: str, *, limit: int = 20) -> tuple[NoteSearchResult, ...]:
         self._assert_owner_vault()

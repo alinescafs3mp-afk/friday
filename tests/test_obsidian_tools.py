@@ -28,6 +28,10 @@ class FakeRuntime:
         self._record("list_notes", owner_id)
         return [{"path": "note.md"}]
 
+    async def list_templates(self, owner_id: str) -> list[dict[str, Any]]:
+        self._record("list_templates", owner_id)
+        return [{"name": "Meeting", "path": "Templates/Meeting.md"}]
+
     async def search_notes(
         self,
         owner_id: str,
@@ -208,6 +212,7 @@ def test_tool_metadata_is_closed_and_declares_read_write_risk() -> None:
     assert set(tools) == {
         "obsidian_list_vaults",
         "obsidian_list_notes",
+        "obsidian_list_templates",
         "obsidian_search_notes",
         "obsidian_read_note",
         "obsidian_create_note",
@@ -222,6 +227,7 @@ def test_tool_metadata_is_closed_and_declares_read_write_risk() -> None:
     assert {name for name, tool in tools.items() if tool.risk == "observe"} == {
         "obsidian_list_vaults",
         "obsidian_list_notes",
+        "obsidian_list_templates",
         "obsidian_search_notes",
         "obsidian_read_note",
         "obsidian_workflow_read",
@@ -269,6 +275,7 @@ async def test_every_handler_uses_actor_own_id_and_forwards_closed_arguments() -
 
     await tools["obsidian_list_vaults"].handler(actor=actor)  # type: ignore[misc]
     await tools["obsidian_list_notes"].handler(actor=actor)  # type: ignore[misc]
+    template_result = await tools["obsidian_list_templates"].handler(actor=actor)  # type: ignore[misc]
     search_result = await tools["obsidian_search_notes"].handler(  # type: ignore[misc]
         actor=actor, query="Friday", limit=7
     )
@@ -326,6 +333,7 @@ async def test_every_handler_uses_actor_own_id_and_forwards_closed_arguments() -
     assert [call[0] for call in runtime.calls] == [
         "vaults",
         "list_notes",
+        "list_templates",
         "search_notes",
         "read_note",
         "create_note",
@@ -335,12 +343,13 @@ async def test_every_handler_uses_actor_own_id_and_forwards_closed_arguments() -
         "set_properties",
         "daily_note",
     ]
-    assert runtime.calls[2][2:] == (
+    assert runtime.calls[3][2:] == (
         ("Friday",),
         {"limit": 7, "context_key": "person-alice"},
     )
     assert search_result["coverage"]["state"] == "partial"
-    assert runtime.calls[4][2:] == (
+    assert template_result["count"] == 1
+    assert runtime.calls[5][2:] == (
         ("create-1", "Notes/New.md"),
         {
             "content": "created",
@@ -349,8 +358,8 @@ async def test_every_handler_uses_actor_own_id_and_forwards_closed_arguments() -
             "context_key": "person-alice",
         },
     )
-    assert runtime.calls[8][2][2] == properties
-    assert runtime.calls[9][3]["day"] == date(2026, 8, 21)
+    assert runtime.calls[9][2][2] == properties
+    assert runtime.calls[10][3]["day"] == date(2026, 8, 21)
     assert "expected_revision" in tools["obsidian_replace_note"].parameters["required"]
 
 

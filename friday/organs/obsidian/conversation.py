@@ -34,6 +34,7 @@ OBSIDIAN_READ_TOOL_NAMES = frozenset(
     {
         "obsidian_list_vaults",
         "obsidian_list_notes",
+        "obsidian_list_templates",
         "obsidian_search_notes",
         "obsidian_read_note",
         WORKFLOW_READ_TOOL,
@@ -142,7 +143,7 @@ _ACTION = re.compile(
     r"\b(?:покажи|перечисли|выведи|найди|поищи|прочитай|создай|создавай|создать|"
     r"добавь|добавляй|добавить|установи|устанавливай|установить|измени|изменить|"
     r"замени|заменяй|заменить|"
-    r"obsidian_(?:list_vaults|list_notes|search_notes|read_note|create_note|"
+    r"obsidian_(?:list_vaults|list_notes|list_templates|search_notes|read_note|create_note|"
     r"append_note|prepend_note|replace_note|set_properties|daily_note))\b",
     re.IGNORECASE,
 )
@@ -184,6 +185,11 @@ _LIST_VAULTS = re.compile(
 )
 _LIST_NOTES = re.compile(
     r"^(?:покажи|перечисли|выведи)\s+(?:список\s+)?замет(?:ок|ки)\s+"
+    r"(?:в\s+)?obsidian\.?$",
+    re.IGNORECASE,
+)
+_LIST_TEMPLATES = re.compile(
+    r"^(?:покажи|перечисли|выведи)\s+(?:список\s+)?шаблон(?:ы|ов)\s+"
     r"(?:в\s+)?obsidian\.?$",
     re.IGNORECASE,
 )
@@ -560,6 +566,8 @@ def obsidian_conversation_intent(
         return ObsidianConversationIntent("obsidian_list_vaults", direct_arguments={})
     if _LIST_NOTES.fullmatch(command):
         return ObsidianConversationIntent("obsidian_list_notes", direct_arguments={})
+    if _LIST_TEMPLATES.fullmatch(command):
+        return ObsidianConversationIntent("obsidian_list_templates", direct_arguments={})
 
     match = _SEARCH.fullmatch(command)
     if match is not None:
@@ -943,6 +951,48 @@ def _render_notes(data: object) -> str:
         lines.append(
             f"- {item['path']} — {item['title']} ({item['size_bytes']} байт; "
             f"изменена {item['modified_at']}; revision {item['revision']})"
+        )
+    return "\n".join(lines)
+
+
+def _render_templates(data: object) -> str:
+    result = _strict_object(data, frozenset({"templates", "count"}))
+    templates = result["templates"]
+    if not isinstance(templates, list) or len(templates) > 1_000:
+        raise ValueError("invalid template list")
+    count = _strict_int(result["count"], minimum=0, maximum=1_000)
+    if count != len(templates):
+        raise ValueError("template count does not match the result")
+    normalized: list[dict[str, str]] = []
+    for raw in templates:
+        item = _strict_object(
+            raw,
+            frozenset({"name", "path", "title", "revision", "modified_at"}),
+        )
+        name = _line(item["name"], maximum=2_048)
+        path = _validate_path(item["path"])
+        name_path = _validate_path(f"{name}.md")
+        if not path.casefold().endswith(".md") or not path[:-3].endswith(f"/{name_path[:-3]}"):
+            raise ValueError("invalid template identity")
+        normalized.append(
+            {
+                "name": name,
+                "path": path,
+                "title": _line(item["title"], maximum=1_000),
+                "revision": _revision(item["revision"]),
+                "modified_at": _timestamp(item["modified_at"]),
+            }
+        )
+    paths = [item["path"] for item in normalized]
+    if len(paths) != len(set(paths)):
+        raise ValueError("template paths are duplicate")
+    normalized.sort(key=lambda item: (item["path"].casefold(), item["path"]))
+    visible = normalized[:50]
+    lines = [f"Шаблоны Obsidian: {count}. Показано: {len(visible)}."]
+    for item in visible:
+        lines.append(
+            f"- {item['name']} — {item['title']} ({item['path']}; "
+            f"изменён {item['modified_at']}; revision {item['revision']})"
         )
     return "\n".join(lines)
 
@@ -1448,6 +1498,8 @@ def render_obsidian_tool_result(
             return _render_vaults(data)
         if tool_name == "obsidian_list_notes":
             return _render_notes(data)
+        if tool_name == "obsidian_list_templates":
+            return _render_templates(data)
         if tool_name == "obsidian_search_notes":
             return _render_search(data)
         if tool_name == "obsidian_read_note":

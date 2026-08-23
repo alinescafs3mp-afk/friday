@@ -83,6 +83,64 @@ def test_create_read_list_and_sha256_revision(service: ObsidianService, vault: P
         service.create_note("Projects/Friday.md", "replacement")
 
 
+def test_template_listing_is_recursive_body_free_sorted_and_symlink_safe(
+    vault: Path,
+    tmp_path: Path,
+) -> None:
+    store = VaultStore(vault, limits=VaultLimits(max_list_results=2))
+    store.write_text("Templates/zeta.md", "secret zeta", create_only=True)
+    store.write_text(
+        "Templates/Nested/Alpha.MD",
+        "---\ntitle: Alpha template\n---\nsecret alpha",
+        create_only=True,
+    )
+    store.write_text("Templates/beta.md", "secret beta", create_only=True)
+    store.write_text("Notes/not-a-template.md", "outside template folder", create_only=True)
+    store.write_text("Templates/ignored.sync-conflict-copy.md", "conflict", create_only=True)
+    outside = tmp_path / "outside-templates"
+    outside.mkdir()
+    (outside / "escaped.md").write_text("outside secret", encoding="utf-8")
+    (vault / "Templates" / "linked").symlink_to(outside, target_is_directory=True)
+    (vault / "Templates" / "leaf.md").symlink_to(outside / "escaped.md")
+    service = ObsidianService(store)
+
+    templates = service.list_templates()
+
+    assert [item.path for item in templates] == [
+        "Templates/beta.md",
+        "Templates/Nested/Alpha.MD",
+    ]
+    assert [item.name for item in templates] == ["beta", "Nested/Alpha"]
+    assert [item.title for item in templates] == ["beta", "Alpha template"]
+    assert all(len(item.revision) == 64 and item.modified_at.tzinfo is not None for item in templates)
+    assert all(not hasattr(item, "content") and not hasattr(item, "body") for item in templates)
+
+
+def test_template_listing_absent_folder_is_empty_and_unsafe_configuration_fails(
+    vault: Path,
+    tmp_path: Path,
+) -> None:
+    assert ObsidianService(VaultStore(vault)).list_templates() == ()
+
+    escaped = ObsidianService(
+        VaultStore(vault),
+        convention=ObsidianVaultConvention(template_folder="../outside"),
+    )
+    with pytest.raises(VaultPathError):
+        escaped.list_templates()
+
+    outside = tmp_path / "linked-template-target"
+    outside.mkdir()
+    (outside / "secret.md").write_text("outside", encoding="utf-8")
+    (vault / "LinkedTemplates").symlink_to(outside, target_is_directory=True)
+    linked = ObsidianService(
+        VaultStore(vault),
+        convention=ObsidianVaultConvention(template_folder="LinkedTemplates"),
+    )
+    with pytest.raises(VaultPathError):
+        linked.list_templates()
+
+
 def test_atomic_replace_leaves_original_note_after_replace_failure(
     service: ObsidianService,
     vault: Path,

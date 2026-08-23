@@ -212,6 +212,7 @@ class _ConversationKernel:
         if name in {
             "obsidian_list_vaults",
             "obsidian_list_notes",
+            "obsidian_list_templates",
             "obsidian_search_notes",
             "obsidian_read_note",
         }:
@@ -236,6 +237,23 @@ class _ConversationKernel:
             return ToolResult(str(name), False, error=self.selected_error)
         if name == "obsidian_list_notes":
             return ToolResult(str(name), True, data={"notes": [_note_summary()], "count": 1})
+        if name == "obsidian_list_templates":
+            return ToolResult(
+                str(name),
+                True,
+                data={
+                    "templates": [
+                        {
+                            "name": "Meeting",
+                            "path": "Templates/Meeting.md",
+                            "title": "Meeting template",
+                            "revision": _REVISION,
+                            "modified_at": "2026-08-22T09:00:00+03:00",
+                        }
+                    ],
+                    "count": 1,
+                },
+            )
         if name == "obsidian_search_notes":
             summary = _note_summary()
             return ToolResult(
@@ -334,6 +352,7 @@ def _all_tools() -> list[dict[str, Any]]:
         for name in (
             "obsidian_list_vaults",
             "obsidian_list_notes",
+            "obsidian_list_templates",
             "obsidian_search_notes",
             "obsidian_read_note",
             "obsidian_create_note",
@@ -722,6 +741,14 @@ _SHIPPED_OPERATION_CASES = (
         "Заметки Obsidian: 1.",
         False,
         id="list-notes",
+    ),
+    pytest.param(
+        "Покажи шаблоны в Obsidian.",
+        "obsidian_list_templates",
+        {},
+        "Шаблоны Obsidian: 1.",
+        False,
+        id="list-templates",
     ),
     pytest.param(
         "Найди в Obsidian заметки по запросу «Friday».",
