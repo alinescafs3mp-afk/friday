@@ -362,6 +362,11 @@ class ConversationsMixin(StorageShared):
         указатель «куда писать дальше», и очистить его нужно, иначе следующее
         сообщение из Telegram продолжит убранный разговор.
 
+        Короткая операционная память разговора тоже больше не может продолжаться:
+        открытые Work Items атомарно переходят в ``cancelled``. Строка, уже
+        исчерпавшая конечный revision-space, удаляется как disposable control
+        state вместо переполнения revision и отказа архивировать разговор.
+
         Имя метода сохранено: его зовёт маршрут `DELETE /api/conversations/{id}`
         и обе панели. Снаружи смысл прежний — «убрать из списка», — а история
         остаётся и находится поиском по переписке.
@@ -370,9 +375,10 @@ class ConversationsMixin(StorageShared):
         if not current:
             return {"existed": False, "conversation_id": conversation_id}
         with self.transaction() as conn:
+            now = utc_now()
             conn.execute(
                 "UPDATE conversations SET is_archived=1, updated_at=? WHERE id=? AND user_id=?",
-                (utc_now(), conversation_id, user_id),
+                (now, conversation_id, user_id),
             )
             sessions = conn.execute(
                 "DELETE FROM channel_sessions WHERE user_id=? AND conversation_id=?",
@@ -386,6 +392,24 @@ class ConversationsMixin(StorageShared):
                 "DELETE FROM interaction_failure_traces WHERE user_id=? AND conversation_id=?",
                 (user_id, conversation_id),
             )
+            exhausted_work_items = conn.execute(
+                """DELETE FROM work_items
+                    WHERE user_id=? AND conversation_id=?
+                      AND state IN ('active','suspended')
+                      AND revision>=2147483647""",
+                (user_id, conversation_id),
+            )
+            cancelled_work_items = conn.execute(
+                """UPDATE work_items
+                      SET state='cancelled', transition='cancelled',
+                          revision=revision+1,
+                          updated_at=MAX(updated_at, ?),
+                          closed_at=MAX(updated_at, ?)
+                    WHERE user_id=? AND conversation_id=?
+                      AND state IN ('active','suspended')
+                      AND revision<2147483647""",
+                (now, now, user_id, conversation_id),
+            )
         return {
             "existed": True,
             "conversation_id": conversation_id,
@@ -396,9 +420,11 @@ class ConversationsMixin(StorageShared):
                 for key, count in (
                     ("channel_sessions", sessions.rowcount),
                     ("interaction_failure_traces", failures.rowcount),
+                    ("work_items", exhausted_work_items.rowcount),
                 )
                 if count
             },
+            "cancelled": {"work_items": max(0, int(cancelled_work_items.rowcount))},
         }
 
     def set_conversation_mode(self, conversation_id: str, user_id: str, mode: str) -> dict[str, Any] | None:

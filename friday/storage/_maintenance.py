@@ -1072,6 +1072,7 @@ class MaintenanceMixin(StorageShared):
                     "SELECT * FROM knowledge_conflicts WHERE user_id=?",
                     (user_id,),
                 ),
+                "work_items": ("SELECT * FROM work_items WHERE user_id=?", (user_id,)),
                 "conversations": ("SELECT * FROM conversations WHERE user_id=?", (user_id,)),
                 "messages": ("SELECT * FROM messages WHERE user_id=?", (user_id,)),
                 "channel_sessions": ("SELECT * FROM channel_sessions WHERE user_id=?", (user_id,)),
@@ -1863,6 +1864,28 @@ class MaintenanceMixin(StorageShared):
                 if str(row.get("conversation_id") or "") in conversation_ids
             ]
             message_ids = {str(row["id"]) for row in rows_by_table["messages"]}
+            # Import the transaction-local validator only on this export path.
+            # Keeping it out of storage package initialisation avoids coupling
+            # schema bootstrap to the orchestration/store dependency graph.
+            from friday.interaction_control_plane.work_item_store import (
+                get_recall_conversation_work_item_for_export_in_transaction,
+            )
+
+            exported_work_items: list[dict[str, object]] = []
+            for row in rows_by_table["work_items"]:
+                try:
+                    item = get_recall_conversation_work_item_for_export_in_transaction(
+                        conn,
+                        work_item_id=str(row.get("id") or ""),
+                        user_id=user_id,
+                        conversation_id=str(row.get("conversation_id") or ""),
+                    )
+                except (TypeError, ValueError):
+                    continue
+                if item is None or item.conversation_id not in conversation_ids:
+                    continue
+                exported_work_items.append(item.to_payload())
+            rows_by_table["work_items"] = exported_work_items
             rows_by_table["channel_sessions"] = [
                 row
                 for row in rows_by_table["channel_sessions"]

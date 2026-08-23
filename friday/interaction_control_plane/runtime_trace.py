@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any
 
 from friday.audit_privacy import decode_audit_privacy_key
@@ -168,6 +169,74 @@ def build_committed_direct_trace(
     )
 
 
+def build_work_trace(
+    *,
+    namespace_key: bytes,
+    turn_identifier: str,
+    conversation_identifier: str,
+    work_item_identifier: str,
+    work_relation: WorkRelation,
+    intent: IntentClass,
+    playbook: PlaybookClass,
+    capability_outcomes: tuple[tuple[CapabilityClass, OutcomeStatus], ...],
+    continuation: ContinuationKind,
+    completion: CompletionDecision,
+    failure_stage: FailureStage,
+    failure_reason: FailureReason,
+    ambiguity_present: bool,
+    partial_coverage: bool,
+    state_restored: bool,
+    latency_ms: int,
+    model_calls: int,
+    model_call_accounting: CountAccounting = CountAccounting.UNAVAILABLE,
+    capability_calls: int,
+    capability_call_accounting: CountAccounting = CountAccounting.UNAVAILABLE,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    token_accounting: TokenAccounting = TokenAccounting.UNAVAILABLE,
+    authority_rechecked: bool,
+    publication: PublicationStatus = PublicationStatus.ASSISTANT_COMMITTED,
+) -> TurnTrace:
+    """Build one Work Item trace while retaining only its opaque HMAC identity."""
+
+    if work_relation not in {WorkRelation.NEW, WorkRelation.CONTINUED}:
+        raise ValueError("work trace relation must be new or continued")
+    direct = build_direct_trace(
+        namespace_key=namespace_key,
+        turn_identifier=turn_identifier,
+        conversation_identifier=conversation_identifier,
+        intent=intent,
+        playbook=playbook,
+        capability_outcomes=capability_outcomes,
+        continuation=continuation,
+        completion=completion,
+        failure_stage=failure_stage,
+        failure_reason=failure_reason,
+        ambiguity_present=ambiguity_present,
+        partial_coverage=partial_coverage,
+        state_restored=state_restored,
+        latency_ms=latency_ms,
+        model_calls=model_calls,
+        model_call_accounting=model_call_accounting,
+        capability_calls=capability_calls,
+        capability_call_accounting=capability_call_accounting,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        token_accounting=token_accounting,
+        authority_rechecked=authority_rechecked,
+        publication=publication,
+    )
+    return replace(
+        direct,
+        work_item_digest=derive_trace_identifier(
+            domain=TraceIdentifierDomain.WORK_ITEM,
+            raw_identifier=work_item_identifier,
+            namespace_key=namespace_key,
+        ),
+        work_relation=work_relation,
+    )
+
+
 def attach_trace_to_metadata(
     metadata: dict[str, Any],
     trace: TurnTrace,
@@ -204,5 +273,6 @@ __all__ = [
     "attach_trace_to_metadata",
     "build_direct_trace",
     "build_committed_direct_trace",
+    "build_work_trace",
     "load_trace_namespace_key",
 ]

@@ -65,6 +65,7 @@ class _Scope:
 # target's entity set.  ``relation_revisions`` is counted separately and blocks:
 # its append-only trigger correctly refuses ordinary DELETE.
 _DELETE_SCOPES: tuple[_Scope, ...] = (
+    _Scope("work_items", "work_items", "user_id=?"),
     _Scope("interaction_failure_traces", "interaction_failure_traces", "user_id=?"),
     _Scope("obsidian_active_frames", "obsidian_active_frames", "user_id=?"),
     _Scope("obsidian_candidate_set_items", "obsidian_candidate_set_items", "user_id=?"),
@@ -655,6 +656,7 @@ def _non_fk_object_reference_counts(conn: sqlite3.Connection, user_id: str) -> d
 
 
 _CROSS_ACCOUNT_JSON_SCOPES = (
+    ("work_items", "active_frame_json", "user_id"),
     ("users", "metadata_json", "id"),
     ("raw_objects", "metadata_json", "user_id"),
     ("knowledge_objects", "metadata_json", "user_id"),

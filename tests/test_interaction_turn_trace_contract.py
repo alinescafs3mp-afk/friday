@@ -26,7 +26,7 @@ from friday.interaction_control_plane import (
     WorkRelation,
     derive_trace_identifier,
 )
-from friday.interaction_control_plane.runtime_trace import attach_trace_to_metadata
+from friday.interaction_control_plane.runtime_trace import attach_trace_to_metadata, build_work_trace
 
 _KEY = bytes(range(32))
 
@@ -291,6 +291,82 @@ def test_legacy_continuation_can_be_observed_without_inventing_a_work_item() -> 
     assert trace.work_relation is WorkRelation.DIRECT
     assert trace.work_item_digest is None
     assert TurnTrace.parse(trace.to_json()) == trace
+
+
+@pytest.mark.parametrize(
+    ("relation", "continuation"),
+    (
+        (WorkRelation.NEW, ContinuationKind.NONE),
+        (WorkRelation.CONTINUED, ContinuationKind.CONSTRAINT_UPDATE),
+    ),
+)
+def test_work_trace_keeps_only_a_domain_separated_work_item_digest(
+    relation: WorkRelation,
+    continuation: ContinuationKind,
+) -> None:
+    raw_work_item = "wi_0123456789abcdef01234567"
+    trace = build_work_trace(
+        namespace_key=_KEY,
+        turn_identifier="msg_0123456789abcdef",
+        conversation_identifier="conv_0123456789abcdef",
+        work_item_identifier=raw_work_item,
+        work_relation=relation,
+        intent=IntentClass.MESSAGE_RECALL,
+        playbook=PlaybookClass.RECALL_CONVERSATION,
+        capability_outcomes=((CapabilityClass.MESSAGE_RETRIEVAL, OutcomeStatus.SUCCEEDED),),
+        continuation=continuation,
+        completion=CompletionDecision.COMPLETE,
+        failure_stage=FailureStage.NONE,
+        failure_reason=FailureReason.NONE,
+        ambiguity_present=False,
+        partial_coverage=False,
+        state_restored=relation is WorkRelation.CONTINUED,
+        latency_ms=1,
+        model_calls=0,
+        capability_calls=1,
+        capability_call_accounting=CountAccounting.COMPLETE,
+        authority_rechecked=True,
+    )
+
+    assert trace.work_relation is relation
+    assert trace.work_item_digest == _digest(TraceIdentifierDomain.WORK_ITEM, raw_work_item)
+    assert raw_work_item not in trace.to_json()
+    assert TurnTrace.parse(trace.to_json()) == trace
+
+
+def test_work_trace_rejects_a_direct_relation_or_missing_continuation() -> None:
+    common = {
+        "namespace_key": _KEY,
+        "turn_identifier": "msg_0123456789abcdef",
+        "conversation_identifier": "conv_0123456789abcdef",
+        "work_item_identifier": "wi_0123456789abcdef01234567",
+        "intent": IntentClass.MESSAGE_RECALL,
+        "playbook": PlaybookClass.RECALL_CONVERSATION,
+        "capability_outcomes": ((CapabilityClass.MESSAGE_RETRIEVAL, OutcomeStatus.SUCCEEDED),),
+        "completion": CompletionDecision.COMPLETE,
+        "failure_stage": FailureStage.NONE,
+        "failure_reason": FailureReason.NONE,
+        "ambiguity_present": False,
+        "partial_coverage": False,
+        "state_restored": False,
+        "latency_ms": 1,
+        "model_calls": 0,
+        "capability_calls": 1,
+        "capability_call_accounting": CountAccounting.COMPLETE,
+        "authority_rechecked": True,
+    }
+    with pytest.raises(ValueError, match="relation"):
+        build_work_trace(
+            **common,
+            work_relation=WorkRelation.DIRECT,
+            continuation=ContinuationKind.NONE,
+        )
+    with pytest.raises(TurnTraceError, match="must declare a continuation"):
+        build_work_trace(
+            **common,
+            work_relation=WorkRelation.CONTINUED,
+            continuation=ContinuationKind.NONE,
+        )
 
 
 def test_trace_attachment_never_pushes_message_metadata_past_the_continuity_budget() -> None:

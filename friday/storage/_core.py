@@ -34,6 +34,11 @@ from friday.interaction_control_plane.failure_schema import (
     INTERACTION_FAILURE_SCHEMA_VERSION,
     validate_interaction_failure_schema,
 )
+from friday.interaction_control_plane.work_item_schema import (
+    WORK_ITEM_SCHEMA,
+    WORK_ITEM_SCHEMA_VERSION,
+    validate_work_item_schema,
+)
 from friday.private_fs import prepare_private_sqlite, restrict_sqlite_files
 from friday.storage._base import (
     CORE_INDEX_SCHEMA,
@@ -2458,9 +2463,17 @@ class CoreMixin(StorageShared):
                 # marker. Accept only its exact ownership shape before retrying
                 # idempotent DDL; never let IF NOT EXISTS conceal a weaker table.
                 validate_interaction_failure_schema(conn, required=False)
+            if parsed_version is not None and parsed_version >= WORK_ITEM_SCHEMA_VERSION:
+                validate_work_item_schema(conn)
+            elif parsed_version is None or parsed_version < WORK_ITEM_SCHEMA_VERSION:
+                # A failed schema-38 attempt may have installed the Work Item
+                # table without publishing its marker.  Retry only when every
+                # object already present has the exact released contract.
+                validate_work_item_schema(conn, required=False)
             self._execute_statements(conn, CORE_TABLE_SCHEMA)
             self._execute_statements(conn, OBSIDIAN_SCHEMA)
             self._execute_statements(conn, INTERACTION_FAILURE_SCHEMA)
+            self._execute_statements(conn, WORK_ITEM_SCHEMA)
             if not already_current:
                 self._migrate_legacy_schema(conn)
                 self._retire_outdated_indexes(conn)
@@ -2483,6 +2496,7 @@ class CoreMixin(StorageShared):
             self._execute_statements(conn, PRIVATE_MATERIAL_CACHE_REBUILD_SQL)
             validate_obsidian_schema(conn)
             validate_interaction_failure_schema(conn)
+            validate_work_item_schema(conn)
             _validate_private_material_cache(
                 conn,
                 fresh_entity_rebuild_from_live=True,

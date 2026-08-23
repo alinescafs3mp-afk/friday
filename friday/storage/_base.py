@@ -144,7 +144,11 @@ LOGGER = logging.getLogger("friday.storage")
 # 37 — bounded person-owned interaction failures which occur before an assistant
 # message can own the ordinary Turn Trace.  Bodies and exception text are excluded;
 # account/conversation deletion can remove the dedicated structural rows directly.
-SCHEMA_VERSION = 37
+# 38 — lightweight person-owned interactive Work Items and their bounded Active
+# Frame.  The first slice persists only RecallConversation control state; bodies
+# remain in messages, while exact DDL validation and revision CAS make restart and
+# continuation state fail closed.
+SCHEMA_VERSION = 38
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно

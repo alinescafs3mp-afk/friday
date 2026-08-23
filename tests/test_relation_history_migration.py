@@ -123,9 +123,9 @@ def test_known_at_normalization_requires_a_real_offset_aware_instant() -> None:
 
 
 def test_schema_32_installs_the_full_snapshot_context_indexes_and_guards(storage) -> None:
-    assert SCHEMA_VERSION == 37
+    assert SCHEMA_VERSION == 38
     marker = storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
-    assert marker and marker[0] == "37"
+    assert marker and marker[0] == "38"
 
     columns = {row[1]: row[2] for row in storage.execute("PRAGMA table_info(relation_revisions)").fetchall()}
     assert tuple(columns) == (

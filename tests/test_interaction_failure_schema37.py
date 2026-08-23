@@ -12,8 +12,8 @@ from friday.storage import SCHEMA_VERSION, FridayStorage
 
 
 def test_schema_37_installs_a_separate_exact_failure_store(storage) -> None:
-    assert SCHEMA_VERSION == 37
-    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "37"
+    assert SCHEMA_VERSION == 38
+    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "38"
     objects = {
         (str(row[0]), str(row[1]))
         for row in storage.execute(
@@ -40,7 +40,7 @@ def test_schema_37_reopens_without_treating_37_as_an_obsidian_schema(settings, t
     reopened = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
         assert (
-            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "37"
+            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "38"
         )
         assert reopened.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     finally:
