@@ -567,6 +567,27 @@ def test_alias_typo_and_keyboard_layout_are_bounded_after_native_identity_matche
     assert all(hit.rank == 1 for hit in (exact.hits[0], typo.hits[0], layout.hits[0]))
 
 
+def test_internal_obsidian_materialization_can_exceed_public_request_limit(storage) -> None:
+    bundle = _bundle(storage, OWNER)
+    vault = str(bundle["vault"]["id"])
+    for number in range(42, 45):
+        _seed(
+            storage,
+            owner=OWNER,
+            vault_id=vault,
+            number=number,
+            path=f"Notes/Needle {number}.md",
+            body=f"Needle body {number}",
+            title=f"Needle {number}",
+        )
+    request = _request("Needle", limit=1)
+
+    page = _search(storage, request, SearchLane.LEXICAL, limit=3)
+
+    assert request.limit == 1
+    assert page.returned == len(page.hits) == 3
+
+
 def test_navigation_hit_requires_exact_reauthorization_and_denies_drift(storage) -> None:
     bundle = _bundle(storage, OWNER)
     vault = str(bundle["vault"]["id"])

@@ -142,11 +142,10 @@ def _snapshot(value: object) -> str:
     return value
 
 
-def _limit(value: object, request: ArchiveSearchRequest) -> int:
+def _limit(value: object) -> int:
     if (
         type(value) is not int
         or not 1 <= value <= MAX_ARCHIVE_DOCUMENT_RESULTS
-        or value > request.limit
     ):
         raise _fail("archive document page limit is invalid")
     return value
@@ -1839,7 +1838,7 @@ def search_archive_document_lane(
     tenant = _actor(tenant_id)
     owner = _actor(owner_id)
     snapshot = _snapshot(snapshot_discriminator)
-    page_limit = _limit(request.limit if limit is None else limit, request)
+    page_limit = _limit(request.limit if limit is None else limit)
     target = (_SEARCH_CORPUS[corpus], lane)
     if (
         type(execution_binding) is not SearchExecutionBinding

@@ -467,6 +467,29 @@ def test_catalog_navigation_is_body_free_stably_ordered_and_honestly_capped(stor
     assert coverage.next_cursor_available is False
 
 
+def test_internal_document_materialization_can_exceed_public_request_limit(storage) -> None:
+    for number in range(30, 33):
+        _seed(
+            storage,
+            number,
+            filename=f"Needle {number}.md",
+            body=f"Needle body {number}",
+            inbox_status=InboxStatus.CLASSIFIED,
+        )
+    request = _request(corpora=(ArchiveSearchCorpus.DOCUMENTS,), limit=1)
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+        limit=3,
+    )
+
+    assert request.limit == 1
+    assert page.returned == len(page.candidates) == 3
+
+
 def test_review_and_lifecycle_filters_are_applied_to_the_authorized_total(storage) -> None:
     _seed(
         storage,

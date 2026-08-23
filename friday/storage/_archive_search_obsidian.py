@@ -219,12 +219,11 @@ def _fold(value: str) -> str:
     return unicodedata.normalize("NFC", value).casefold().replace("ё", "е")
 
 
-def _limit(value: object, request: ArchiveSearchRequest) -> int:
+def _limit(value: object) -> int:
     if (
         isinstance(value, bool)
         or not isinstance(value, int)
         or not 1 <= value <= MAX_ARCHIVE_OBSIDIAN_RESULTS
-        or value > request.limit
     ):
         raise _fail("archive Obsidian page limit is invalid")
     return value
@@ -1514,7 +1513,7 @@ def select_archive_obsidian_lane_in_transaction(
             request=request,
             snapshot_discriminator=snapshot_discriminator,
         )
-        page_limit = _limit(request.limit if limit is None else limit, request)
+        page_limit = _limit(request.limit if limit is None else limit)
         if not _execution_binding_attests(
             execution_binding,
             tenant_id=tenant,

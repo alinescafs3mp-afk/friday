@@ -340,7 +340,7 @@ def test_current_page_projects_exact_ledger_windows_and_honest_complete_coverage
     assert coverage.states == (CoverageState.COMPLETE,)
     assert coverage.authority_rechecked is coverage.snapshot_current is True
     assert coverage.eligible_authorized == coverage.examined == 3
-    assert coverage.matched_at_least == 2 and coverage.returned == 1
+    assert coverage.matched_at_least == coverage.returned == 1
 
 
 def test_all_scope_merges_passages_by_conversation_and_keeps_unique_lane_ranks() -> None:
@@ -561,6 +561,23 @@ def test_exact_rerun_identity_includes_boundary_and_selector_overfetch_controls(
             boundary_user_message_id=BOUNDARY,
         )
         assert not original.same_evidence_as(changed_boundary)
+
+
+def test_internal_message_materialization_can_exceed_public_request_limit() -> None:
+    request = _request(scope=ConversationScope.ALL, limit=1)
+    with _database() as conn:
+        page = _page(conn, request, selector_limit=20)
+        assert page is not None
+        projection = project_archive_message_page(
+            principal_id="alice",
+            request=request,
+            page=page,
+            index_state=_current_index(),
+        )
+
+    assert request.limit == 1
+    assert projection.applied_limit == 20
+    assert len(projection.candidates) == 2
 
 
 def test_backend_cap_has_no_cursor_until_a_real_tail_exists() -> None:

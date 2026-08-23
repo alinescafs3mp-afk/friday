@@ -623,10 +623,14 @@ def project_archive_message_page(
                 )
                 for rank, values in enumerate(ordered, 1)
             )
-            candidates = all_candidates[: request.limit]
+            candidates = all_candidates[: page.limit]
             eligible = page.examined
             examined = page.examined
-            matched = page.total
+            # Coverage ranks and returned values count stable conversation
+            # candidates, not the individual matching rows grouped into them.
+            # Otherwise two hits in one conversation would claim an invisible
+            # second result and make a COMPLETE lane falsely non-exhaustive.
+            matched = len(all_candidates)
             backend_capped = page.has_more or len(all_candidates) > len(candidates)
         actor_handle = _digest(
             b"friday/archive-message-projection-actor/v1",
@@ -642,7 +646,7 @@ def project_archive_message_page(
             examined,
             matched,
             backend_capped,
-            request.limit,
+            page.limit,
             derivative,
             request_identity,
             actor_handle,
