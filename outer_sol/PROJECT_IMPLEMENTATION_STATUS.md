@@ -6,12 +6,13 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-23
 - Branch: `main`
-- Deployed implementation head: `ec8be1d164ce3fb93bffd02395cfe5851a125ee5`
-- Live: Friday `0.207.5` / `ec8be1d164ce3fb93bffd02395cfe5851a125ee5`;
-  tree `1e2c04b2dc08c461824bff54e9b4e7f78b209fa56ef201dbc194e1ea112cc3f3`;
-  wheel `50fa52b71af2b4d8767f7a199801aa0bafe59078be1f51d5f5f6485ae8410b3d`
-- Schema-capable fallback: `cb1b3f71166afe0a1a6fd277dfe0440ef292ed0b`;
-  tree `0363a0646158001b574e9bca468e2fc480fbd9e30f00b1d1f4ac08f32d6ce15f`
+- Deployed implementation head: `3d2bef322c8069d2a5f8a708d59094e6a6ac0eb3`
+- Live: Friday `0.207.7` / `3d2bef322c8069d2a5f8a708d59094e6a6ac0eb3`;
+  tree `b363b73ce155a706b85c4fa2dfd8eb9d81839b3c48eca5f79c341109158aa8ba`;
+  wheel `61a446ebf3973455320752952530936161a47939cbbd5986c2cdb995697c71e8`
+- Schema-capable fallback: Friday `0.207.6` /
+  `61cb15fa70aa8c0e23eab7dbd2dbaebf92882ace`;
+  tree `1402a4c389e6fbb509df3621afbbacd78189c9f9a12a3bd199c4d2ae64fbbcc5`
 - Database schema: 38
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean
@@ -91,8 +92,9 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Map the frozen retrieval contracts read-only onto authoritative document,
-   Obsidian and conversation stores and expose the federated archive facade.
+1. Publish the implemented read-only federated `archive_search` through the
+   runtime with private exact-byte carriers and same-transaction late
+   reauthorization.
 2. Keep every lane capability-scoped, late-reauthorized and explicit about
    partial, capped, stale, incompatible and unavailable coverage.
 
@@ -120,6 +122,39 @@ course, with these repository-specific constraints:
 - The wheel was reproduced byte-for-byte, activated through the immutable
   operator and accepted by exact backend/bridge process-root, trusted-CA health,
   SQLite integrity/FK and schema-38 checks.
+
+### Federated retrieval foundation and document hotfixes (`0.207.6`–`0.207.7`)
+
+- The read-only archive service, authority contract, stable source/passage
+  identity and honest per-lane coverage are implemented. Runtime publication is
+  deliberately still closed until its private exact-byte carrier and final
+  same-transaction reauthorization are complete.
+- Current-upload replay now uses the full Office document candidate matrix and
+  a process-owned capability pinned to the source identity. Local attachment
+  answers no longer inherit stale web-search authorization, while fresh web
+  requests remain fail-closed.
+- Rootless Tesseract OCR (`rus+eng`) and sealed rootless LibreOffice conversion
+  are provisioned without Docker or system-package mutation. Common OOXML/ODF,
+  legacy DOC/XLS/PPT, StarOffice XML and the LibreOffice registry's supported
+  uncommon Office families enter the deterministic extraction contour;
+  MIME-only RTF and neutral-carrier Office MIME types are covered.
+- Archive lexical reads no longer bypass lifecycle/authorization through the
+  global `raw_fts`; unavailable lifecycle-filtered derivatives report honest
+  `BACKFILL_PENDING`/partial coverage instead.
+- The scoped Office/OCR/replay/search/security gate passed 1,198 tests from a
+  clean temporary Friday home. Ruff, mypy, compileall and diff checks are clean.
+  Registry support is not a promise to recover corrupt, encrypted or malformed
+  third-party files.
+- `0.207.7` was reproduced byte-for-byte and activated `clear`; backend and
+  Telegram bridge run from the exact candidate root, HTTPS health reports
+  `ok`/`0.207.7`, SQLite quick-check and foreign keys are clean, schema remains
+  38, and both local document toolchains are discoverable by the live runtime.
+- During validation, an inherited production database path reached a test
+  process. Execution was stopped, the verified immutable `0.207.6` pre-test
+  snapshot was restored through the standard backup operator, and post-restore
+  identity, counts, integrity, FTS and services were verified with no real
+  message loss. Subsequent gates explicitly unset that path and use an isolated
+  temporary Friday home.
 
 ## Canonical golden-journey/evidence registry
 
@@ -174,6 +209,9 @@ claims at this checkpoint.
   byte-for-byte. Immutable activation completed `clear`; schema-38 fallback,
   database/inbox backups, trusted-CA health, exact process roots, SQLite
   quick-check, foreign keys and Work Item DDL were verified.
+- The newer `0.207.7` scoped regression gate adds 1,198 clean Office, OCR,
+  current-upload, archive, web-search and security scenarios; its immutable
+  wheel and current production process roots match the identities above.
 
 ## Next order
 
