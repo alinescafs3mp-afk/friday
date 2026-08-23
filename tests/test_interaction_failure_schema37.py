@@ -39,9 +39,9 @@ def test_schema_37_reopens_without_treating_37_as_an_obsidian_schema(settings, t
 
     reopened = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
-        assert reopened.execute(
-            "SELECT value FROM schema_meta WHERE key='schema_version'"
-        ).fetchone()[0] == "37"
+        assert (
+            reopened.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "37"
+        )
         assert reopened.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     finally:
         reopened.close()

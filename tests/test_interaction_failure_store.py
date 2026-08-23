@@ -164,9 +164,12 @@ def test_retention_is_bounded_and_episode_report_contains_closed_signals(storage
     for ordinal in range(1, 6):
         assert record_precommit_failure(storage, _scope(user_id, ordinal=ordinal), TimeoutError())
 
-    assert storage.execute(
-        "SELECT COUNT(*) FROM interaction_failure_traces WHERE user_id=?", (user_id,)
-    ).fetchone()[0] == 3
+    assert (
+        storage.execute(
+            "SELECT COUNT(*) FROM interaction_failure_traces WHERE user_id=?", (user_id,)
+        ).fetchone()[0]
+        == 3
+    )
     report = interaction_episode_baseline(storage, user_id)
     assert report["precommit_failures"] == 3
     assert report["assistant_committed"] == 0

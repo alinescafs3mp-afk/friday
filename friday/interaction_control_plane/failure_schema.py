@@ -39,9 +39,7 @@ class FailureRoute(StrEnum):
 
 _ENTRYPOINT_SQL = ", ".join(f"'{value.value}'" for value in FailureEntrypoint)
 _ROUTE_SQL = ", ".join(f"'{value.value}'" for value in FailureRoute)
-_FAILURE_STAGE_SQL = ", ".join(
-    f"'{value.value}'" for value in FailureStage if value is not FailureStage.NONE
-)
+_FAILURE_STAGE_SQL = ", ".join(f"'{value.value}'" for value in FailureStage if value is not FailureStage.NONE)
 _FAILURE_REASON_SQL = ", ".join(
     f"'{value.value}'" for value in FailureReason if value is not FailureReason.NONE
 )
@@ -132,8 +130,7 @@ def validate_interaction_failure_schema(
         raise sqlite3.DatabaseError("Schema 37 interaction failure DDL is incomplete or altered")
     named_index_columns = {
         str(index_name): tuple(
-            str(column[2])
-            for column in conn.execute(f'PRAGMA index_info("{index_name}")')
+            str(column[2]) for column in conn.execute(f'PRAGMA index_info("{index_name}")')
         )
         for (object_type, index_name) in expected_objects
         if object_type == "index"

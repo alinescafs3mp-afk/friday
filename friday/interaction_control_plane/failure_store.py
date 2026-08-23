@@ -50,6 +50,7 @@ class FailureStorage(Protocol):
 
     def transaction(self) -> AbstractContextManager[sqlite3.Connection]: ...
 
+
 LOGGER = logging.getLogger(__name__)
 
 INTERACTION_FAILURE_TRACE_SCHEMA = "friday.interaction-failure-trace.v1"
@@ -308,9 +309,7 @@ def record_precommit_failure(
         trace = _build_failure_trace(storage, scope, reason=reason)
         now_dt = datetime.now(UTC)
         now = now_dt.isoformat(timespec="seconds")
-        expires_at = (now_dt + timedelta(days=INTERACTION_FAILURE_TTL_DAYS)).isoformat(
-            timespec="seconds"
-        )
+        expires_at = (now_dt + timedelta(days=INTERACTION_FAILURE_TTL_DAYS)).isoformat(timespec="seconds")
         with storage.transaction() as conn:
             owner = conn.execute("SELECT 1 FROM users WHERE id=?", (scope.user_id,)).fetchone()
             if owner is None:
