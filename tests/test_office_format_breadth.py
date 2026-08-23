@@ -16,7 +16,7 @@ from reportlab.pdfgen.canvas import Canvas
 
 from friday.agent_runtime._office_attachments import _OFFICE_SUFFIXES
 from friday.archive_formats import archive_dispatch_kind
-from friday.documents import DocumentExtractor
+from friday.documents import DocumentExtractor, office_document_candidate
 from friday.documents._office_convert import convert_legacy_office, libreoffice_available
 from friday.ingestion._files import _STRUCTURED_OFFICE_MIME_TYPES, _STRUCTURED_OFFICE_SUFFIXES
 
@@ -64,6 +64,45 @@ def _odf(marker: str = "ODF FAMILY MARKER") -> bytes:
     with zipfile.ZipFile(output, "w") as archive:
         archive.writestr("content.xml", f"<office><text>{marker}</text></office>")
     return output.getvalue()
+
+
+def _staroffice_xml(kind: str, marker: str) -> tuple[bytes, str, str]:
+    """Build a genuine, minimal OpenOffice.org 1.0 Writer/Calc package."""
+
+    document_class, body, extension = {
+        "writer": ("text", f"<text:p>{marker}</text:p>", "sxw"),
+        "calc": (
+            "spreadsheet",
+            (
+                '<table:table table:name="Sheet1"><table:table-row>'
+                f"<table:table-cell><text:p>{marker}</text:p></table:table-cell>"
+                "</table:table-row></table:table>"
+            ),
+            "sxc",
+        ),
+    }[kind]
+    mime_type = f"application/vnd.sun.xml.{kind}"
+    content = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<office:document-content xmlns:office="http://openoffice.org/2000/office" '
+        'xmlns:text="http://openoffice.org/2000/text" '
+        'xmlns:table="http://openoffice.org/2000/table" '
+        f'office:class="{document_class}" office:version="1.0">'
+        f"<office:body>{body}</office:body></office:document-content>"
+    )
+    manifest = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<manifest:manifest xmlns:manifest="http://openoffice.org/2001/manifest">'
+        f'<manifest:file-entry manifest:media-type="{mime_type}" manifest:full-path="/"/>'
+        '<manifest:file-entry manifest:media-type="text/xml" '
+        'manifest:full-path="content.xml"/></manifest:manifest>'
+    )
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("mimetype", mime_type, compress_type=zipfile.ZIP_STORED)
+        archive.writestr("content.xml", content)
+        archive.writestr("META-INF/manifest.xml", manifest)
+    return output.getvalue(), mime_type, extension
 
 
 def _pdf(marker: str = "PDF FAMILY MARKER") -> bytes:
@@ -481,6 +520,23 @@ def test_registered_uncommon_office_families_use_only_their_fixed_safe_target(
         ("application/x-iwork-keynote-sffkey", "key", "pptx"),
         ("application/x-mspublisher", "pub", "odg"),
         ("application/vnd.visio", "vsd", "odg"),
+        ("application/vnd.lotus-wordpro", "lwp", "docx"),
+        ("application/vnd.sun.xml.writer", "sxw", "docx"),
+        ("application/vnd.sun.xml.writer.template", "stw", "docx"),
+        ("application/vnd.sun.xml.writer.web", "stw", "docx"),
+        ("application/x-hwp", "hwp", "docx"),
+        ("application/x-mswrite", "wri", "docx"),
+        ("application/x-pocket-word", "psw", "docx"),
+        ("application/vnd.sun.xml.calc", "sxc", "xlsx"),
+        ("application/vnd.sun.xml.calc.template", "stc", "xlsx"),
+        ("application/vnd.sun.xml.impress", "sxi", "pptx"),
+        ("application/vnd.sun.xml.impress.template", "sti", "pptx"),
+        ("application/vnd.sun.xml.draw", "sxd", "odg"),
+        ("application/vnd.sun.xml.draw.template", "std", "odg"),
+        ("application/x-pagemaker", "pmd", "odg"),
+        ("image/x-cmx", "cmx", "odg"),
+        ("image/x-freehand", "fh", "odg"),
+        ("image/x-wpg", "wpg", "odg"),
     ],
 )
 def test_confirmed_mime_fallback_uses_one_canonical_source_family(
@@ -523,17 +579,93 @@ def test_converted_word_and_sheet_families_are_registered_as_structured() -> Non
     assert structured_suffixes <= _OFFICE_SUFFIXES
     assert {
         "application/vnd.lotus-1-2-3",
+        "application/vnd.lotus-wordpro",
+        "application/vnd.sun.xml.calc",
+        "application/vnd.sun.xml.calc.template",
+        "application/vnd.sun.xml.writer",
+        "application/vnd.sun.xml.writer.template",
+        "application/vnd.sun.xml.writer.web",
         "application/vnd.wordperfect",
         "application/x-abiword",
         "application/x-gnumeric",
+        "application/x-hwp",
         "application/x-iwork-pages-sffpages",
         "application/x-iwork-numbers-sffnumbers",
+        "application/x-mswrite",
+        "application/x-pocket-word",
     } <= _STRUCTURED_OFFICE_MIME_TYPES
 
 
 @pytest.mark.parametrize("source_format", tuple(_REGISTERED_EXPANSION_TARGETS))
 def test_registered_office_container_is_never_misrouted_as_an_archive(source_format: str) -> None:
+    assert office_document_candidate(f"document.{source_format}", "application/octet-stream")
     assert archive_dispatch_kind(f"document.{source_format}", "application/zip") is None
+
+
+@pytest.mark.parametrize(
+    "mime_type",
+    [
+        "application/vnd.lotus-wordpro",
+        "application/vnd.sun.xml.writer",
+        "application/vnd.sun.xml.writer.template",
+        "application/vnd.sun.xml.writer.web",
+        "application/x-hwp",
+        "application/x-mswrite",
+        "application/x-pocket-word",
+        "application/vnd.sun.xml.calc",
+        "application/vnd.sun.xml.calc.template",
+        "application/vnd.sun.xml.impress",
+        "application/vnd.sun.xml.impress.template",
+        "application/vnd.sun.xml.draw",
+        "application/vnd.sun.xml.draw.template",
+        "application/x-pagemaker",
+        "image/x-cmx",
+        "image/x-freehand",
+        "image/x-wpg",
+    ],
+)
+def test_registry_mime_only_office_carriers_enter_the_closed_document_matrix(
+    mime_type: str,
+) -> None:
+    assert office_document_candidate("neutral.bin", mime_type) is True
+    assert office_document_candidate("declared.txt", mime_type) is False
+    assert office_document_candidate("declared.zip", mime_type) is False
+    assert archive_dispatch_kind("neutral.bin", mime_type) is None
+
+
+@pytest.mark.parametrize("mime_type", ["application/rtf", "text/rtf"])
+def test_suffixless_rtf_mime_uses_the_native_rtf_parser(mime_type: str) -> None:
+    result = DocumentExtractor(secret_values=()).extract(
+        b"{\\rtf1\\ansi MIME RTF MARKER}",
+        "neutral.bin",
+        mime_type,
+    )
+
+    assert result.success is True, result.error
+    assert "MIME RTF MARKER" in result.text
+    assert result.metadata["format"] == "rtf"
+    assert office_document_candidate("neutral.bin", mime_type) is True
+
+
+@pytest.mark.parametrize("kind", ["writer", "calc"])
+def test_real_libreoffice_imports_genuine_staroffice_xml_through_mime_only_dispatch(
+    kind: str,
+) -> None:
+    if not libreoffice_available():
+        pytest.skip("real LibreOffice backend is not installed")
+    marker = f"GENUINE {kind.upper()} LEGACY CANARY 2026"
+    payload, mime_type, extension = _staroffice_xml(kind, marker)
+
+    result = DocumentExtractor(secret_values=(), parse_budget_sec=30).extract(
+        payload,
+        "neutral.bin",
+        mime_type,
+    )
+
+    assert result.success is True, result.error
+    assert marker in result.text
+    assert result.metadata["format"] == extension
+    assert result.metadata["parser"] == "libreoffice"
 
 
 def test_converted_odg_output_uses_the_bounded_xml_reader(

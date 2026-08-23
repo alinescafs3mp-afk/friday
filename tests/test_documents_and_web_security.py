@@ -60,11 +60,22 @@ def test_parser_exceptions_cannot_become_durable_extraction_text(monkeypatch):
     assert private not in archive.error
 
     from friday.documents import _ole
+    from friday.documents._office_convert import OfficeConversionResult
 
     def ole_failure(_content):
         raise _ole.OleError(f"private stream {private}")
 
     monkeypatch.setattr(_ole, "extract_doc_text", ole_failure)
+    # This test owns exception sanitization, not the optional LibreOffice
+    # recovery path.  Pin that independent backend closed so an installed
+    # converter cannot turn the synthetic byte string into a successful file.
+    monkeypatch.setattr(
+        "friday.documents._office_convert.convert_legacy_office",
+        lambda *_args, **_kwargs: OfficeConversionResult(
+            target_format="docx",
+            error="libreoffice_conversion_failed",
+        ),
+    )
     legacy = extractor.extract(b"synthetic", "synthetic.doc", "application/msword")
     assert legacy.error == "unsupported_legacy_doc"
     assert private not in legacy.error

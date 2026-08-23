@@ -78,6 +78,7 @@ from friday.config import (
 )
 from friday.diagnostics import collect_diagnostics
 from friday.diagnostics.runtime_lease import ProcessLease
+from friday.documents import office_document_candidate
 from friday.execution_kernel import ExecutionKernel, mark_request_effect_possible, track_request_effects
 from friday.executive import ExecutiveService
 from friday.executive.api import admin_router as missions_admin_router
@@ -762,33 +763,9 @@ def _current_replay_needs_reinspection(
         )
     )
     structured_document_candidate = bool(
-        mime_type
-        in {
-            "application/msword",
-            "application/rtf",
-            "application/vnd.ms-excel",
-            "application/vnd.ms-excel.sheet.binary.macroenabled.12",
-            "application/vnd.ms-outlook",
-            "application/vnd.ms-powerpoint",
-        }
-        or mime_type.startswith("application/vnd.openxmlformats-officedocument.")
-        or mime_type.startswith("application/vnd.oasis.opendocument.")
-        or lowered_filename.endswith(
-            (
-                ".doc",
-                ".docx",
-                ".msg",
-                ".odp",
-                ".ods",
-                ".odt",
-                ".ppt",
-                ".pptx",
-                ".rtf",
-                ".xls",
-                ".xlsb",
-                ".xlsx",
-            )
-        )
+        office_document_candidate(lowered_filename, mime_type)
+        or mime_type in {"application/vnd.ms-outlook", "application/x-msg"}
+        or lowered_filename.endswith(".msg")
     )
     extracted_chars = max(count("extraction_chars"), len(raw_text.strip()) if usable_text else 0)
     if (visual_candidate or structured_document_candidate) and extracted_chars < 160:

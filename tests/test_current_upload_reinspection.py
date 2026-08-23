@@ -287,10 +287,21 @@ def test_failed_duplicate_requests_current_upload_reinspection() -> None:
     assert token.reinspect_current_upload is True
 
 
-def test_sparse_legacy_office_duplicate_requests_current_upload_reinspection() -> None:
+@pytest.mark.parametrize(
+    ("filename", "mime_type"),
+    [
+        ("legacy.doc", "application/msword"),
+        ("legacy.fh11", "application/octet-stream"),
+        ("neutral.bin", "application/vnd.sun.xml.draw"),
+    ],
+)
+def test_sparse_legacy_office_duplicate_requests_current_upload_reinspection(
+    filename: str,
+    mime_type: str,
+) -> None:
     raw_id = "raw_0000000000000003"
     attachment = _current_turn_file_attachment(
-        filename="legacy.doc",
+        filename=filename,
         file_ingestion={
             "idempotent_replay": True,
             "raw_object_id": raw_id,
@@ -304,8 +315,8 @@ def test_sparse_legacy_office_duplicate_requests_current_upload_reinspection() -
             "content_hash": hashlib.sha256(b"legacy-doc").hexdigest(),
             "raw_content": "Старый огрызок",
             "metadata_json": {
-                "filename": "legacy.doc",
-                "mime_type": "application/msword",
+                "filename": filename,
+                "mime_type": mime_type,
                 "uploaded_by": "alice",
                 "extraction_receipt_version": 1,
                 "extraction_success": True,

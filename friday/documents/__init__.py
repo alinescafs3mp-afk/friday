@@ -262,21 +262,38 @@ _CONVERTED_OFFICE_MIME_FORMATS = {
     "application/msword": "doc",
     "application/vnd.ms-works": "wps",
     "application/vnd.wordperfect": "wpd",
+    "application/vnd.lotus-wordpro": "lwp",
+    "application/vnd.sun.xml.writer": "sxw",
+    "application/vnd.sun.xml.writer.template": "stw",
+    "application/vnd.sun.xml.writer.web": "stw",
     "application/x-abiword": "abw",
+    "application/x-hwp": "hwp",
     "application/x-iwork-pages-sffpages": "pages",
+    "application/x-mswrite": "wri",
+    "application/x-pocket-word": "psw",
     "application/vnd.ms-excel": "xls",
     "application/x-msexcel": "xls",
     "application/vnd.ms-excel.sheet.binary.macroenabled.12": "xlsb",
+    "application/vnd.sun.xml.calc": "sxc",
+    "application/vnd.sun.xml.calc.template": "stc",
     "application/x-iwork-numbers-sffnumbers": "numbers",
     "application/x-gnumeric": "gnumeric",
     "application/vnd.lotus-1-2-3": "123",
     "application/vnd.ms-powerpoint": "ppt",
     "application/mspowerpoint": "ppt",
     "application/x-mspowerpoint": "ppt",
+    "application/vnd.sun.xml.impress": "sxi",
+    "application/vnd.sun.xml.impress.template": "sti",
     "application/x-iwork-keynote-sffkey": "key",
     "application/x-mspublisher": "pub",
     "application/vnd.corel-draw": "cdr",
+    "application/vnd.sun.xml.draw": "sxd",
+    "application/vnd.sun.xml.draw.template": "std",
     "application/vnd.visio": "vsd",
+    "application/x-pagemaker": "pmd",
+    "image/x-cmx": "cmx",
+    "image/x-freehand": "fh",
+    "image/x-wpg": "wpg",
 }
 _ODF_META_MEMBER = "meta.xml"
 _MAX_ODF_METADATA_BYTES = 256 * 1024
@@ -333,6 +350,31 @@ _OFFICE_EXTENSIONS = {
     *_CONVERTED_OFFICE_FORMATS,
     ".rtf",
 }
+_OFFICE_MIME_TYPES = frozenset(
+    {
+        *_OOXML_MIME_TYPES,
+        *_OPENDOCUMENT_MIME_TYPES,
+        *_CONVERTED_OFFICE_MIME_FORMATS,
+        "application/rtf",
+        "text/rtf",
+    }
+)
+
+
+def office_document_candidate(filename: str, mime_type: str = "") -> bool:
+    """Whether Friday's suffix-first dispatch selects the closed Office matrix."""
+
+    suffix = Path(str(filename or "")).suffix.casefold()
+    normalized_mime = str(mime_type or "").split(";", 1)[0].strip().casefold()
+    if suffix in _OFFICE_EXTENSIONS:
+        return True
+    if suffix in _KNOWN_DOCUMENT_EXTENSIONS:
+        return False
+    if archive_dispatch_kind(filename, normalized_mime) is not None:
+        return False
+    return normalized_mime in _OFFICE_MIME_TYPES
+
+
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 _KNOWN_DOCUMENT_EXTENSIONS = frozenset(
     {
@@ -857,7 +899,9 @@ class DocumentExtractor:
                 and normalized_mime in {"message/rfc822", "multipart/related"}
             ):
                 result = self._extract_email(content)
-            elif ext == ".rtf":
+            elif ext == ".rtf" or (
+                not suffix_known and normalized_mime in {"application/rtf", "text/rtf"}
+            ):
                 result = self._extract_rtf(content)
             elif not suffix_known and normalized_mime.startswith("text/"):
                 result = self._extract_text(content, ext or ".txt")
@@ -1030,7 +1074,9 @@ class DocumentExtractor:
             format_name = "epub"
             parser = self._extract_epub_metadata
         elif ext in _IMAGE_EXTENSIONS or (
-            not suffix_known and detected_mime.startswith("image/")
+            not suffix_known
+            and detected_mime.startswith("image/")
+            and detected_mime not in _CONVERTED_OFFICE_MIME_FORMATS
         ):
             format_name = "image"
             parser = self._extract_image_metadata
@@ -2237,7 +2283,9 @@ class DocumentExtractor:
         candidates: list[tuple[bytes, str]] = []
 
         if ext in _IMAGE_EXTENSIONS or (
-            not suffix_known and detected_mime.startswith("image/")
+            not suffix_known
+            and detected_mime.startswith("image/")
+            and detected_mime not in _CONVERTED_OFFICE_MIME_FORMATS
         ):
             candidates.append((content, safe_name))
         elif ext == ".pdf" or (not suffix_known and detected_mime == "application/pdf"):
@@ -2491,7 +2539,9 @@ class DocumentExtractor:
         )
         suffix_known = ext in _KNOWN_DOCUMENT_EXTENSIONS
         if ext in _IMAGE_EXTENSIONS or (
-            not suffix_known and detected_mime.startswith("image/")
+            not suffix_known
+            and detected_mime.startswith("image/")
+            and detected_mime not in _CONVERTED_OFFICE_MIME_FORMATS
         ):
             return 1
         if ext == ".pdf" or (not suffix_known and detected_mime == "application/pdf"):
