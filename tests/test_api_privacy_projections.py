@@ -136,7 +136,8 @@ def test_ingestion_receipts_are_allowlists_even_for_adversarial_internal_results
     assert "raw_object_id" not in wrong_person
 
 
-def test_chat_projection_never_publishes_internal_interaction_trace() -> None:
+def test_chat_projection_never_publishes_internal_control_metadata() -> None:
+    sentinel = "SYNTHETIC-CACHED-OUTCOME-PRIVATE-f9487c"
     projected = public_chat_ingestion(
         {
             "content": "Visible synthetic answer.",
@@ -144,10 +145,43 @@ def test_chat_projection_never_publishes_internal_interaction_trace() -> None:
                 "schema": "friday.interaction-turn-trace.v1",
                 "conversation_digest": "a" * 64,
             },
+            "accepted_capability_outcome": {
+                "schema": "friday.accepted-capability-outcome-receipt.v1",
+                "private_sentinel": sentinel,
+            },
         }
     )
 
     assert projected == {"content": "Visible synthetic answer."}
+    assert sentinel not in json.dumps(projected, ensure_ascii=False)
+
+
+def test_conversation_projection_never_publishes_accepted_capability_outcome() -> None:
+    sentinel = "SYNTHETIC-ACCEPTED-OUTCOME-PRIVATE-74cf81"
+    projected = public_conversation_message(
+        {
+            "id": "msg_0123456789abcdef",
+            "role": "assistant",
+            "content": "Visible synthetic answer.",
+            "created_at": "2026-08-23T12:00:00+00:00",
+            "metadata_json": json.dumps(
+                {
+                    "accepted_capability_outcome": {
+                        "schema": "friday.accepted-capability-outcome-receipt.v1",
+                        "private_sentinel": sentinel,
+                    }
+                }
+            ),
+        }
+    )
+
+    assert projected == {
+        "id": "msg_0123456789abcdef",
+        "role": "assistant",
+        "content": "Visible synthetic answer.",
+        "created_at": "2026-08-23T12:00:00+00:00",
+    }
+    assert sentinel not in json.dumps(projected, ensure_ascii=False)
 
 
 def test_shared_owner_projection_accepts_full_bounded_metadata_without_exposing_office_index() -> None:
@@ -354,6 +388,10 @@ def test_self_and_admin_conversation_messages_never_return_raw_metadata(settings
                 "search_query": "safe synthetic query",
                 "verification_status": "passed",
                 "verified": True,
+                "accepted_capability_outcome": {
+                    "schema": "friday.accepted-capability-outcome-receipt.v1",
+                    "outcome_sha256": sentinel,
+                },
                 "knowledge_citations": {
                     "K1": knowledge.id,
                     "K2": raw.id,
@@ -443,6 +481,7 @@ def test_self_and_admin_conversation_messages_never_return_raw_metadata(settings
         assert sentinel not in encoded
         assert raw.id not in encoded
         assert "/home/private/" not in encoded
+        assert "accepted_capability_outcome" not in encoded
 
 
 def test_http_intake_and_chat_project_before_serialising_or_caching(settings) -> None:

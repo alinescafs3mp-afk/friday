@@ -35,7 +35,13 @@ from friday.orchestration import (
     TurnInput,
     TurnPlan,
 )
-from friday.orchestration.capability_outcome import CapabilityOutcome, CapabilityOutcomeStatus
+from friday.orchestration.capability_outcome import (
+    ACCEPTED_CAPABILITY_OUTCOME_METADATA_KEY,
+    CapabilityOutcome,
+    CapabilityOutcomeStatus,
+    attach_accepted_capability_outcome_receipt,
+    load_accepted_capability_outcome_receipt,
+)
 from friday.orchestration.file_read import V12FileReadError, V12FileReadHandler
 from friday.permissions import ActorContext, AuthorizationService
 from friday.source_identity import raw_source_identity_sha256
@@ -328,6 +334,12 @@ async def test_file_handler_synthesizes_verifies_and_atomically_publishes(settin
     assert assistant_metadata["evidence_identity_sha256"] == result.evidence_identity_sha256
     assert assistant_metadata["conversation_attachment_raw_ids"] == [reference.raw_object_id]
     assert assistant_metadata["verified"] is True
+    receipt = load_accepted_capability_outcome_receipt(
+        assistant_metadata,
+        expected_outcome=result.outcome,
+    )
+    assert receipt.outcome == result.outcome
+    assert receipt.outcome_sha256 == result.outcome.canonical_sha256()
     trace = TurnTrace.parse(assistant_metadata[INTERACTION_TRACE_METADATA_KEY])
     assert trace.intent is IntentClass.DOCUMENT_WORK
     assert [step.capability for step in trace.steps] == [
@@ -424,6 +436,85 @@ async def test_file_handler_publishes_when_shadow_trace_key_is_unavailable(
     assistant_metadata = json.loads(messages[-1]["metadata_json"])
     assert INTERACTION_TRACE_METADATA_KEY not in assistant_metadata
     assert assistant_metadata["verified"] is True
+    assert (
+        load_accepted_capability_outcome_receipt(
+            assistant_metadata,
+            expected_outcome=result.outcome,
+        ).outcome
+        == result.outcome
+    )
+
+
+@pytest.mark.asyncio
+async def test_file_handler_rolls_back_when_accepted_outcome_receipt_exceeds_budget(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    from friday.orchestration import file_read as file_read_module
+
+    conversation = storage.create_conversation("alice")
+    reference = _register(storage, settings, text="Receipt is mandatory.", filename="receipt.txt")
+    handler = _handler(storage, settings, _Model("Источник прочитан. [A1]"))
+    request, turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+
+    def reject_for_size(metadata: dict[str, Any], outcome: CapabilityOutcome):
+        return attach_accepted_capability_outcome_receipt(
+            metadata,
+            outcome,
+            max_serialized_bytes=1,
+        )
+
+    monkeypatch.setattr(
+        file_read_module,
+        "attach_accepted_capability_outcome_receipt",
+        reject_for_size,
+    )
+
+    with pytest.raises(V12FileReadError, match="receipt rejected publication"):
+        await handler.handle(request, turn, plan, preparation)
+
+    assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
+
+
+@pytest.mark.asyncio
+async def test_file_handler_rolls_back_when_durable_outcome_receipt_is_missing(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    from friday.orchestration import file_read as file_read_module
+
+    conversation = storage.create_conversation("alice")
+    reference = _register(storage, settings, text="Durable receipt.", filename="durable.txt")
+    handler = _handler(storage, settings, _Model("Источник прочитан. [A1]"))
+    request, turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+    original_store = file_read_module.store_message_in_transaction
+
+    def strip_durable_receipt(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        row = original_store(*args, **kwargs)
+        if len(args) >= 4 and args[3] == "assistant":
+            conn = args[0]
+            conn.execute("UPDATE messages SET metadata_json='{}' WHERE id=?", (row["id"],))
+            durable = conn.execute("SELECT * FROM messages WHERE id=?", (row["id"],)).fetchone()
+            assert durable is not None
+            return dict(durable)
+        return row
+
+    monkeypatch.setattr(
+        file_read_module,
+        "store_message_in_transaction",
+        strip_durable_receipt,
+    )
+
+    with pytest.raises(V12FileReadError, match="not stored durably"):
+        await handler.handle(request, turn, plan, preparation)
+
+    assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
 
 
 @pytest.mark.asyncio
@@ -575,6 +666,7 @@ async def test_file_handler_creates_conversation_and_two_messages_in_one_commit(
     assert result.outcome.evidence_identity_sha256 == result.evidence_identity_sha256
     assert result.outcome.citation_labels == result.citation_labels
     assert "outcome" not in result.response(conversation_mode="dialogue")
+    assert ACCEPTED_CAPABILITY_OUTCOME_METADATA_KEY not in result.response(conversation_mode="dialogue")
 
 
 @pytest.mark.asyncio

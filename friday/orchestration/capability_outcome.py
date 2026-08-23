@@ -19,10 +19,14 @@ from friday.orchestration.contracts import RouteClass
 from friday.orchestration.file_read_contract import validate_file_synthesis_answer
 
 CAPABILITY_OUTCOME_SCHEMA = "friday.capability-outcome.v1"
+CAPABILITY_OUTCOME_RECEIPT_SCHEMA = "friday.accepted-capability-outcome-receipt.v1"
+ACCEPTED_CAPABILITY_OUTCOME_METADATA_KEY = "accepted_capability_outcome"
 
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _CITATION = re.compile(r"A[1-9][0-9]{0,2}")
 _MAX_SERIALIZED_BYTES = 4_096
+_MAX_RECEIPT_SERIALIZED_BYTES = 8_192
+_MAX_ASSISTANT_METADATA_BYTES = 65_536
 _MAX_CITATIONS = 32
 _PROMOTED_ROUTES = frozenset({RouteClass.FILE_READ, RouteClass.ARCHIVE_READ})
 
@@ -260,6 +264,159 @@ class CapabilityOutcome:
         return outcome
 
 
+@dataclass(frozen=True, slots=True)
+class AcceptedCapabilityOutcomeReceipt:
+    """Durable private receipt for one outcome accepted for publication.
+
+    The receipt repeats no evidence body, path, object identifier, or prose.  Its
+    digest binds the exact closed outcome payload that was accepted in the same
+    transaction as the assistant message.
+    """
+
+    outcome: CapabilityOutcome
+    outcome_sha256: str
+
+    def __post_init__(self) -> None:
+        if type(self.outcome) is not CapabilityOutcome:
+            raise CapabilityOutcomeError("accepted outcome receipt requires CapabilityOutcome v1")
+        digest = _digest(self.outcome_sha256, label="outcome_sha256")
+        if digest != self.outcome.canonical_sha256():
+            raise CapabilityOutcomeError("accepted outcome receipt digest does not match its outcome")
+
+    @classmethod
+    def from_outcome(cls, outcome: CapabilityOutcome) -> AcceptedCapabilityOutcomeReceipt:
+        if type(outcome) is not CapabilityOutcome:
+            raise CapabilityOutcomeError("accepted outcome receipt requires CapabilityOutcome v1")
+        return cls(outcome=outcome, outcome_sha256=outcome.canonical_sha256())
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "schema": CAPABILITY_OUTCOME_RECEIPT_SCHEMA,
+            "outcome": self.outcome.to_payload(),
+            "outcome_sha256": self.outcome_sha256,
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(
+            self.to_payload(),
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def canonical_sha256(self) -> str:
+        return hashlib.sha256(self.to_json().encode("ascii")).hexdigest()
+
+    @classmethod
+    def parse(
+        cls,
+        value: str | Mapping[str, object],
+    ) -> AcceptedCapabilityOutcomeReceipt:
+        if isinstance(value, str):
+            try:
+                encoded = value.encode("utf-8", errors="strict")
+            except UnicodeEncodeError as exc:
+                raise CapabilityOutcomeError("accepted outcome receipt JSON must be valid UTF-8") from exc
+            if len(encoded) > _MAX_RECEIPT_SERIALIZED_BYTES:
+                raise CapabilityOutcomeError("accepted outcome receipt JSON is too large")
+            try:
+                decoded = json.loads(value, object_pairs_hook=_closed_object)
+            except json.JSONDecodeError as exc:
+                raise CapabilityOutcomeError("accepted outcome receipt must be one JSON object") from exc
+        else:
+            decoded = value
+        if not isinstance(decoded, Mapping):
+            raise CapabilityOutcomeError("accepted outcome receipt must be an object")
+        expected = {"schema", "outcome", "outcome_sha256"}
+        if any(not isinstance(key, str) for key in decoded) or set(decoded) != expected:
+            raise CapabilityOutcomeError("accepted outcome receipt keys do not match the closed contract")
+        if decoded["schema"] != CAPABILITY_OUTCOME_RECEIPT_SCHEMA:
+            raise CapabilityOutcomeError("accepted outcome receipt schema is not supported")
+        raw_outcome = decoded["outcome"]
+        if not isinstance(raw_outcome, Mapping):
+            raise CapabilityOutcomeError("accepted outcome receipt has no outcome object")
+        return cls(
+            outcome=CapabilityOutcome.parse(raw_outcome),
+            outcome_sha256=str(_digest(decoded["outcome_sha256"], label="outcome_sha256")),
+        )
+
+
+def attach_accepted_capability_outcome_receipt(
+    metadata: dict[str, Any],
+    outcome: CapabilityOutcome,
+    *,
+    max_serialized_bytes: int = _MAX_ASSISTANT_METADATA_BYTES,
+) -> AcceptedCapabilityOutcomeReceipt:
+    """Attach one mandatory receipt without overwriting state or exceeding budget."""
+
+    if type(metadata) is not dict:
+        raise CapabilityOutcomeError("accepted outcome metadata carrier must be a dictionary")
+    if ACCEPTED_CAPABILITY_OUTCOME_METADATA_KEY in metadata:
+        raise CapabilityOutcomeError("accepted outcome receipt is already attached")
+    if (
+        not isinstance(max_serialized_bytes, int)
+        or isinstance(max_serialized_bytes, bool)
+        or max_serialized_bytes <= 0
+        or max_serialized_bytes > _MAX_ASSISTANT_METADATA_BYTES
+    ):
+        raise CapabilityOutcomeError("accepted outcome metadata budget is outside the closed limit")
+    receipt = AcceptedCapabilityOutcomeReceipt.from_outcome(outcome)
+    candidate = dict(metadata)
+    candidate[ACCEPTED_CAPABILITY_OUTCOME_METADATA_KEY] = receipt.to_payload()
+    try:
+        encoded = json.dumps(candidate, ensure_ascii=False, sort_keys=True).encode("utf-8", errors="strict")
+    except (TypeError, ValueError, UnicodeEncodeError, RecursionError) as exc:
+        raise CapabilityOutcomeError("accepted outcome metadata cannot be serialized") from exc
+    if len(encoded) > max_serialized_bytes:
+        raise CapabilityOutcomeError("accepted outcome metadata exceeds the bounded carrier")
+    metadata[ACCEPTED_CAPABILITY_OUTCOME_METADATA_KEY] = receipt.to_payload()
+    return receipt
+
+
+def load_accepted_capability_outcome_receipt(
+    metadata: object,
+    *,
+    expected_outcome: CapabilityOutcome | None = None,
+) -> AcceptedCapabilityOutcomeReceipt:
+    """Load and validate the receipt retained in private assistant metadata."""
+
+    if isinstance(metadata, str):
+        try:
+            encoded = metadata.encode("utf-8", errors="strict")
+        except UnicodeEncodeError as exc:
+            raise CapabilityOutcomeError("accepted outcome metadata must be valid UTF-8") from exc
+        if len(encoded) > _MAX_ASSISTANT_METADATA_BYTES:
+            raise CapabilityOutcomeError("accepted outcome metadata exceeds the bounded carrier")
+        try:
+            decoded = json.loads(metadata, object_pairs_hook=_closed_object)
+        except json.JSONDecodeError as exc:
+            raise CapabilityOutcomeError("accepted outcome metadata must be one JSON object") from exc
+    else:
+        decoded = metadata
+    if not isinstance(decoded, Mapping) or any(not isinstance(key, str) for key in decoded):
+        raise CapabilityOutcomeError("accepted outcome metadata must be an object")
+    if not isinstance(metadata, str):
+        try:
+            encoded = json.dumps(decoded, ensure_ascii=False, sort_keys=True).encode("utf-8", errors="strict")
+        except (TypeError, ValueError, UnicodeEncodeError, RecursionError) as exc:
+            raise CapabilityOutcomeError("accepted outcome metadata cannot be serialized") from exc
+        if len(encoded) > _MAX_ASSISTANT_METADATA_BYTES:
+            raise CapabilityOutcomeError("accepted outcome metadata exceeds the bounded carrier")
+    raw_receipt = decoded.get(ACCEPTED_CAPABILITY_OUTCOME_METADATA_KEY)
+    if not isinstance(raw_receipt, Mapping):
+        raise CapabilityOutcomeError("accepted outcome metadata has no receipt")
+    receipt = AcceptedCapabilityOutcomeReceipt.parse(raw_receipt)
+    if expected_outcome is not None:
+        if type(expected_outcome) is not CapabilityOutcome:
+            raise CapabilityOutcomeError("expected accepted outcome must be CapabilityOutcome v1")
+        if (
+            receipt.outcome != expected_outcome
+            or receipt.outcome_sha256 != expected_outcome.canonical_sha256()
+        ):
+            raise CapabilityOutcomeError("accepted outcome receipt does not match expected outcome")
+    return receipt
+
+
 def evaluate_read_only_completion(
     outcome: CapabilityOutcome,
     *,
@@ -317,12 +474,17 @@ def require_complete_read_only_publication(
 
 
 __all__ = [
+    "ACCEPTED_CAPABILITY_OUTCOME_METADATA_KEY",
+    "CAPABILITY_OUTCOME_RECEIPT_SCHEMA",
     "CAPABILITY_OUTCOME_SCHEMA",
+    "AcceptedCapabilityOutcomeReceipt",
     "CapabilityOutcome",
     "CapabilityOutcomeError",
     "CapabilityOutcomeReason",
     "CapabilityOutcomeStatus",
     "CompletionGateDecision",
+    "attach_accepted_capability_outcome_receipt",
     "evaluate_read_only_completion",
+    "load_accepted_capability_outcome_receipt",
     "require_complete_read_only_publication",
 ]

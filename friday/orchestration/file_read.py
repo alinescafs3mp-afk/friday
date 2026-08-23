@@ -49,6 +49,8 @@ from friday.orchestration.capability_outcome import (
     CapabilityOutcome,
     CapabilityOutcomeError,
     CapabilityOutcomeStatus,
+    attach_accepted_capability_outcome_receipt,
+    load_accepted_capability_outcome_receipt,
     require_complete_read_only_publication,
 )
 from friday.orchestration.contracts import RouteClass, ToolEffect, TurnInput, TurnPlan
@@ -599,6 +601,12 @@ class V12FileReadHandler:
                     "verified": True,
                 }
                 try:
+                    attach_accepted_capability_outcome_receipt(assistant_metadata, outcome)
+                except CapabilityOutcomeError:
+                    raise V12FileReadError(
+                        "accepted capability outcome receipt rejected publication"
+                    ) from None
+                try:
                     trace = build_committed_direct_trace(
                         namespace_key=load_trace_namespace_key(conn),
                         turn_identifier=user_message_id,
@@ -628,6 +636,15 @@ class V12FileReadHandler:
                     attach_trace_to_metadata(assistant_metadata, trace)
                 except Exception as exc:  # noqa: BLE001 - shadow tracing cannot abort publication
                     LOGGER.warning("interaction-trace omitted (%s)", type(exc).__name__)
+                try:
+                    load_accepted_capability_outcome_receipt(
+                        assistant_metadata,
+                        expected_outcome=outcome,
+                    )
+                except CapabilityOutcomeError:
+                    raise V12FileReadError(
+                        "accepted capability outcome receipt rejected publication"
+                    ) from None
                 assistant = store_message_in_transaction(
                     conn,
                     conversation_id,
@@ -639,6 +656,15 @@ class V12FileReadHandler:
                 message_id = str(assistant.get("id") or "")
                 if not re.fullmatch(r"msg_[0-9a-f]{16}", message_id):
                     raise V12FileReadError("assistant publication has no durable identity")
+                try:
+                    load_accepted_capability_outcome_receipt(
+                        assistant.get("metadata_json"),
+                        expected_outcome=outcome,
+                    )
+                except CapabilityOutcomeError:
+                    raise V12FileReadError(
+                        "accepted capability outcome receipt was not stored durably"
+                    ) from None
                 _require_deadline(deadline, stage="before transaction commit")
                 publication = (conversation_id, message_id, interaction_mode, outcome)
         except BaseException:

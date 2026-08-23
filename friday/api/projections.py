@@ -424,10 +424,11 @@ def public_chat_ingestion(
     """Sanitize ingestion sub-results, including already-cached legacy replies."""
 
     public = dict(response)
-    # Structural traces belong to durable operator-facing metadata. They must
-    # never widen the HTTP or Telegram response contract, including replays of
-    # historical cached responses that may already contain the internal key.
+    # Structural traces and accepted outcome receipts belong to durable private
+    # metadata. They must never widen HTTP or Telegram responses, including
+    # replays of historical cached responses containing an internal key.
     public.pop("interaction_trace", None)
+    public.pop("accepted_capability_outcome", None)
     if "ingestion" in public:
         ingestion = public.get("ingestion")
         public["ingestion"] = (

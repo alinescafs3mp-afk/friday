@@ -6,13 +6,18 @@ from dataclasses import FrozenInstanceError, replace
 import pytest
 
 from friday.orchestration.capability_outcome import (
+    ACCEPTED_CAPABILITY_OUTCOME_METADATA_KEY,
+    CAPABILITY_OUTCOME_RECEIPT_SCHEMA,
     CAPABILITY_OUTCOME_SCHEMA,
+    AcceptedCapabilityOutcomeReceipt,
     CapabilityOutcome,
     CapabilityOutcomeError,
     CapabilityOutcomeReason,
     CapabilityOutcomeStatus,
     CompletionGateDecision,
+    attach_accepted_capability_outcome_receipt,
     evaluate_read_only_completion,
+    load_accepted_capability_outcome_receipt,
     require_complete_read_only_publication,
 )
 from friday.orchestration.contracts import RouteClass
@@ -86,6 +91,102 @@ def test_capability_outcome_is_immutable_canonical_closed_and_round_trips() -> N
     payload = json.dumps(outcome.to_payload(), ensure_ascii=False, sort_keys=True)
     for forbidden in ("Проверенный ответ", "/private/path", "raw_0123456789abcdef"):
         assert forbidden not in payload
+
+
+def test_accepted_outcome_receipt_is_immutable_canonical_closed_and_round_trips() -> None:
+    outcome = _outcome(CapabilityOutcomeStatus.COMPLETE)
+    receipt = AcceptedCapabilityOutcomeReceipt.from_outcome(outcome)
+
+    assert AcceptedCapabilityOutcomeReceipt.parse(receipt.to_json()) == receipt
+    assert AcceptedCapabilityOutcomeReceipt.parse(receipt.to_payload()) == receipt
+    assert receipt.to_payload()["schema"] == CAPABILITY_OUTCOME_RECEIPT_SCHEMA
+    assert receipt.outcome_sha256 == outcome.canonical_sha256()
+    assert len(receipt.canonical_sha256()) == 64
+    with pytest.raises(FrozenInstanceError):
+        receipt.outcome_sha256 = "c" * 64  # type: ignore[misc]
+
+    serialized = receipt.to_json()
+    for forbidden in ("Проверенный ответ", "/private/path", "raw_0123456789abcdef"):
+        assert forbidden not in serialized
+
+
+def test_accepted_outcome_receipt_attaches_and_loads_from_mapping_and_json() -> None:
+    outcome = _outcome(CapabilityOutcomeStatus.COMPLETE)
+    metadata: dict[str, object] = {"answer_mode": "v12_file_read"}
+
+    receipt = attach_accepted_capability_outcome_receipt(metadata, outcome)
+
+    assert metadata[ACCEPTED_CAPABILITY_OUTCOME_METADATA_KEY] == receipt.to_payload()
+    assert load_accepted_capability_outcome_receipt(metadata, expected_outcome=outcome) == receipt
+    assert (
+        load_accepted_capability_outcome_receipt(
+            json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+            expected_outcome=outcome,
+        )
+        == receipt
+    )
+
+
+def test_accepted_outcome_receipt_rejects_tamper_unknown_keys_and_wrong_expected_outcome() -> None:
+    outcome = _outcome(CapabilityOutcomeStatus.COMPLETE)
+    receipt = AcceptedCapabilityOutcomeReceipt.from_outcome(outcome)
+
+    wrong_digest = receipt.to_payload()
+    wrong_digest["outcome_sha256"] = "c" * 64
+    with pytest.raises(CapabilityOutcomeError, match="digest"):
+        AcceptedCapabilityOutcomeReceipt.parse(wrong_digest)
+
+    widened = receipt.to_payload()
+    widened["private_body"] = "secret"
+    with pytest.raises(CapabilityOutcomeError, match="closed contract"):
+        AcceptedCapabilityOutcomeReceipt.parse(widened)
+
+    metadata = {ACCEPTED_CAPABILITY_OUTCOME_METADATA_KEY: receipt.to_payload()}
+    expected = replace(outcome, plan_sha256="d" * 64)
+    with pytest.raises(CapabilityOutcomeError, match="expected outcome"):
+        load_accepted_capability_outcome_receipt(metadata, expected_outcome=expected)
+
+
+def test_accepted_outcome_receipt_budget_and_single_attachment_are_fail_closed() -> None:
+    outcome = _outcome(CapabilityOutcomeStatus.COMPLETE)
+    metadata: dict[str, object] = {"answer_mode": "v12_file_read"}
+    original = dict(metadata)
+
+    with pytest.raises(CapabilityOutcomeError, match="bounded carrier"):
+        attach_accepted_capability_outcome_receipt(
+            metadata,
+            outcome,
+            max_serialized_bytes=1,
+        )
+    assert metadata == original
+
+    attach_accepted_capability_outcome_receipt(metadata, outcome)
+    with pytest.raises(CapabilityOutcomeError, match="already attached"):
+        attach_accepted_capability_outcome_receipt(metadata, outcome)
+
+    with pytest.raises(CapabilityOutcomeError, match="closed limit"):
+        attach_accepted_capability_outcome_receipt(
+            {"padding": "X" * 65_536},
+            outcome,
+            max_serialized_bytes=100_000,
+        )
+
+
+def test_accepted_outcome_loader_rejects_oversized_and_nonserializable_mappings() -> None:
+    receipt = AcceptedCapabilityOutcomeReceipt.from_outcome(_outcome(CapabilityOutcomeStatus.COMPLETE))
+    oversized = {
+        ACCEPTED_CAPABILITY_OUTCOME_METADATA_KEY: receipt.to_payload(),
+        "padding": "X" * 65_536,
+    }
+    with pytest.raises(CapabilityOutcomeError, match="bounded carrier"):
+        load_accepted_capability_outcome_receipt(oversized)
+
+    nonserializable = {
+        ACCEPTED_CAPABILITY_OUTCOME_METADATA_KEY: receipt.to_payload(),
+        "invalid": object(),
+    }
+    with pytest.raises(CapabilityOutcomeError, match="cannot be serialized"):
+        load_accepted_capability_outcome_receipt(nonserializable)
 
 
 @pytest.mark.parametrize(

@@ -16,7 +16,10 @@ import friday.file_evidence_reader as file_evidence_reader
 from friday.model_profiles import ModelProfileLease, ModelRequirements
 from friday.orchestration import ReadOnlyRouteRequest, RouteClass, TurnInput, TurnPlan
 from friday.orchestration.archive_read import V12ArchiveReadHandler
-from friday.orchestration.capability_outcome import CapabilityOutcomeStatus
+from friday.orchestration.capability_outcome import (
+    CapabilityOutcomeStatus,
+    load_accepted_capability_outcome_receipt,
+)
 from friday.orchestration.file_read import V12FileReadError
 from friday.permissions import ActorContext, AuthorizationService
 from friday.storage.models import RawObject, new_id
@@ -316,6 +319,12 @@ async def test_exact_filename_selects_one_unique_registered_file(settings, stora
     assert request_metadata["conversation_attachment_raw_ids"] == [wanted]
     metadata = json.loads(messages[-1]["metadata_json"])
     assert metadata["conversation_attachment_raw_ids"] == [wanted]
+    receipt = load_accepted_capability_outcome_receipt(
+        metadata,
+        expected_outcome=result.outcome,
+    )
+    assert receipt.outcome.route is RouteClass.ARCHIVE_READ
+    assert receipt.outcome_sha256 == result.outcome.canonical_sha256()
 
 
 @pytest.mark.asyncio
