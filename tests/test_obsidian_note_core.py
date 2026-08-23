@@ -333,6 +333,105 @@ def test_append_is_durable_idempotent_and_revision_guarded(service: ObsidianServ
     assert conflict.value.actual_revision == appended.revision
 
 
+def test_prepend_preserves_frontmatter_and_is_exactly_once(service: ObsidianService) -> None:
+    created = service.create_note(
+        "Projects/Friday",
+        "---\nstatus: active\n---\n# Friday\n\nExisting.\n",
+    )
+    prepended = service.prepend_note(
+        "Projects/Friday",
+        "Context.",
+        operation_id="prepend-1",
+        expected_revision=created.revision,
+    )
+    replay = service.prepend_note(
+        "Projects/Friday",
+        "Context.",
+        operation_id="prepend-1",
+        expected_revision=created.revision,
+    )
+
+    document = service.read_note("Projects/Friday")
+    assert document.content == "---\nstatus: active\n---\nContext.\n# Friday\n\nExisting.\n"
+    assert document.properties["status"].value == "active"
+    assert prepended.applied is True
+    assert replay.applied is False
+    assert replay.revision == prepended.revision
+    assert document.body.count("Context.") == 1
+    with pytest.raises(IdempotencyConflictError):
+        service.prepend_note(
+            "Projects/Friday",
+            "Context.",
+            operation_id="prepend-1",
+            expected_revision=prepended.revision,
+        )
+
+
+@pytest.mark.parametrize(
+    ("label", "newline", "content"),
+    [
+        ("lf", "\n", "---\nstatus: active\n---"),
+        ("crlf", "\r\n", "---\r\nstatus: active\r\n---"),
+    ],
+)
+def test_prepend_separates_frontmatter_closing_at_eof_with_its_native_newline(
+    service: ObsidianService,
+    label: str,
+    newline: str,
+    content: str,
+) -> None:
+    created = service.create_note("Frontmatter EOF", content)
+
+    service.prepend_note(
+        "Frontmatter EOF",
+        "Context.",
+        operation_id=f"prepend-eof-{label}",
+        expected_revision=created.revision,
+    )
+
+    assert service.read_note("Frontmatter EOF").content == f"{content}{newline}Context.{newline}"
+
+
+def test_full_replace_requires_cas_and_replaces_every_note_byte(
+    service: ObsidianService,
+) -> None:
+    created = service.create_note("Replace", "---\nstatus: old\n---\nOld body.\n")
+    replacement = "# New\n\nOnly the requested content.\n"
+    replaced = service.replace_note(
+        "Replace",
+        replacement,
+        operation_id="replace-1",
+        expected_revision=created.revision,
+    )
+    replay = service.replace_note(
+        "Replace",
+        replacement,
+        operation_id="replace-1",
+        expected_revision=created.revision,
+    )
+
+    assert service.read_note("Replace").content == replacement
+    assert service.read_note("Replace").properties == {}
+    assert replaced.applied is True
+    assert replay.applied is False
+    assert replay.revision == replaced.revision
+    with pytest.raises(IdempotencyConflictError):
+        service.replace_note(
+            "Replace",
+            replacement,
+            operation_id="replace-1",
+            expected_revision=replaced.revision,
+        )
+    with pytest.raises(RevisionConflictError):
+        service.replace_note(
+            "Replace",
+            "must not win",
+            operation_id="replace-stale",
+            expected_revision=created.revision,
+        )
+    assert service.read_note("Replace").content == replacement
+
+
 def test_create_operation_id_is_idempotent_across_service_instances(vault: Path) -> None:
     first_service = ObsidianService(VaultStore(vault))
     created = first_service.create_note("once", "payload", operation_id="create-1")

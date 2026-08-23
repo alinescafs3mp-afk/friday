@@ -436,6 +436,202 @@ class ObsidianOperationService:
             prepared_context=context,
         )
 
+    def prepend_note(
+        self,
+        operation_id: str,
+        path: str | PurePosixPath,
+        text: str,
+        *,
+        expected_revision: str | None = None,
+        work_item_id: str | None = None,
+    ) -> DurableNoteResult:
+        """Prepend body text with a frozen target for crash reconciliation."""
+
+        operation_id = _operation_id(operation_id)
+        self._assert_owner_vault()
+        canonical_path = _note_path(self._notes, path)
+        _validate_text(text, label="text")
+        _optional_revision(expected_revision)
+        arguments = {"method": "prepend", "path": canonical_path, "text": text}
+
+        existing = self._existing_operation(
+            operation_id,
+            method="prepend",
+            arguments=arguments,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+        )
+        closed = self._closed_note_result(
+            existing,
+            operation_id=operation_id,
+            method="prepend",
+            arguments=arguments,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+        )
+        if closed is not None:
+            return closed
+
+        observed = self._notes.store.read_text(canonical_path)
+        frozen_target = _prepared_target_revision(existing)
+        frozen_base = _prepared_base_revision(existing)
+        base_revision: str | None
+        target_content: str | None
+        if frozen_target is None:
+            base_revision = expected_revision or observed.revision
+            rendered_target = self._notes.render_prepend_content(
+                observed.text(),
+                text,
+            )
+            target_content = rendered_target
+            target_revision = _content_revision(rendered_target)
+        else:
+            target_revision = frozen_target
+            base_revision = frozen_base or expected_revision
+            if base_revision is not None and observed.revision == base_revision:
+                target_content = self._notes.render_prepend_content(observed.text(), text)
+                if _content_revision(target_content) != target_revision:
+                    raise OperationLedgerError("prepared prepend target changed")
+            else:
+                target_content = None
+        context = {
+            "path": canonical_path,
+            "target_revision": target_revision,
+            "base_revision": base_revision,
+        }
+        self._freeze_existing_context(existing, operation_id, context)
+
+        def mutate(reconcile: bool) -> NoteWriteResult:
+            current = self._notes.store.read_text(canonical_path)
+            if reconcile and current.revision == target_revision:
+                return _note_write_result(
+                    canonical_path,
+                    target_revision,
+                    previous_revision=base_revision,
+                    applied=False,
+                )
+            if base_revision is None:
+                raise OperationLedgerError("prepared prepend base revision is missing")
+            if current.revision != base_revision:
+                raise RevisionConflictError(base_revision, current.revision)
+            if target_content is None or _content_revision(target_content) != target_revision:
+                raise OperationCommitUncertain("prepared prepend content cannot be reconstructed safely")
+            note_result = self._notes.prepend_note(
+                canonical_path,
+                text,
+                operation_id=operation_id,
+                expected_revision=base_revision,
+            )
+            return _note_write_result(
+                canonical_path,
+                note_result.revision,
+                previous_revision=base_revision,
+                applied=True,
+            )
+
+        return self._execute(
+            operation_id,
+            method="prepend",
+            arguments=arguments,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+            mutate=mutate,
+            prepared_context=context,
+        )
+
+    def replace_note(
+        self,
+        operation_id: str,
+        path: str | PurePosixPath,
+        content: str,
+        *,
+        expected_revision: str,
+        work_item_id: str | None = None,
+    ) -> DurableNoteResult:
+        """Replace every note byte under a mandatory, replayable revision CAS."""
+
+        operation_id = _operation_id(operation_id)
+        self._assert_owner_vault()
+        canonical_path = _note_path(self._notes, path)
+        validate_revision(expected_revision)
+        _validate_text(content, label="content")
+        rendered = self._notes.render_replace_content(content)
+        target_revision = _content_revision(rendered)
+        arguments = {"method": "replace_note", "path": canonical_path, "content": content}
+
+        existing = self._existing_operation(
+            operation_id,
+            method="replace",
+            arguments=arguments,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+        )
+        closed = self._closed_note_result(
+            existing,
+            operation_id=operation_id,
+            method="replace",
+            arguments=arguments,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+        )
+        if closed is not None:
+            return closed
+
+        frozen_target = _prepared_target_revision(existing)
+        if frozen_target is not None and frozen_target != target_revision:
+            raise OperationLedgerError("prepared full replacement target changed")
+        frozen_base = _prepared_base_revision(existing)
+        if frozen_base is not None and frozen_base != expected_revision:
+            raise OperationLedgerError("prepared full replacement base changed")
+        context = {
+            "path": canonical_path,
+            "target_revision": target_revision,
+            "base_revision": expected_revision,
+        }
+        self._freeze_existing_context(existing, operation_id, context)
+
+        def mutate(reconcile: bool) -> NoteWriteResult:
+            current = self._notes.store.read_text(canonical_path)
+            if reconcile and current.revision == target_revision:
+                return _note_write_result(
+                    canonical_path,
+                    target_revision,
+                    previous_revision=expected_revision,
+                    applied=False,
+                )
+            if current.revision != expected_revision:
+                raise RevisionConflictError(expected_revision, current.revision)
+            if current.revision == target_revision:
+                return _note_write_result(
+                    canonical_path,
+                    target_revision,
+                    previous_revision=expected_revision,
+                    applied=False,
+                )
+            note_result = self._notes.replace_note(
+                canonical_path,
+                rendered,
+                operation_id=operation_id,
+                expected_revision=expected_revision,
+            )
+            return _note_write_result(
+                canonical_path,
+                note_result.revision,
+                previous_revision=expected_revision,
+                applied=True,
+            )
+
+        return self._execute(
+            operation_id,
+            method="replace",
+            arguments=arguments,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+            mutate=mutate,
+            prepared_context=context,
+            claim_prepared_reconciliation=True,
+        )
+
     def set_properties(
         self,
         operation_id: str,
@@ -2133,7 +2329,9 @@ def _conflict_artifact_path(
     notes: ObsidianService,
     path: str | PurePosixPath,
 ) -> str:
-    normalized = _note_path(notes, path)
+    normalized = _vault_note_path(notes, path)
+    if ".obsidian" in tuple(part.casefold() for part in PurePosixPath(normalized).parts):
+        raise VaultPathError("conflict artifact enters an internal vault directory")
     if ".sync-conflict-" not in PurePosixPath(normalized).name.casefold():
         raise VaultPathError("conflict artifact must be an explicit sync-conflict Markdown file")
     return normalized
@@ -3180,6 +3378,10 @@ def _legacy_marker_cleanup_context(value: Mapping[str, object]) -> dict[str, obj
 
 
 def _note_path(notes: ObsidianService, path: str | PurePosixPath) -> str:
+    return notes.store.normalize_ordinary_note_path(_vault_note_path(notes, path))
+
+
+def _vault_note_path(notes: ObsidianService, path: str | PurePosixPath) -> str:
     normalized = notes.store.normalize_path(path)
     pure = PurePosixPath(normalized)
     if pure.suffix == "":

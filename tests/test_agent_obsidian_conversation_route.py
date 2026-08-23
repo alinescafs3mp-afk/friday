@@ -49,6 +49,20 @@ def _schema(name: str) -> dict[str, Any]:
             "expected_revision",
             "work_item_id",
         ),
+        "obsidian_prepend_note": (
+            "operation_id",
+            "path",
+            "text",
+            "expected_revision",
+            "work_item_id",
+        ),
+        "obsidian_replace_note": (
+            "operation_id",
+            "path",
+            "content",
+            "expected_revision",
+            "work_item_id",
+        ),
         "obsidian_set_properties": (
             "operation_id",
             "path",
@@ -69,6 +83,8 @@ def _schema(name: str) -> dict[str, Any]:
         "obsidian_read_note": ("path",),
         "obsidian_create_note": ("operation_id", "path"),
         "obsidian_append_note": ("operation_id", "path", "text"),
+        "obsidian_prepend_note": ("operation_id", "path", "text"),
+        "obsidian_replace_note": ("operation_id", "path", "content", "expected_revision"),
         "obsidian_set_properties": ("operation_id", "path", "properties"),
         "obsidian_daily_note": ("operation_id",),
     }
@@ -116,6 +132,8 @@ def _receipt(
     methods = {
         "obsidian_create_note": "create",
         "obsidian_append_note": "append",
+        "obsidian_prepend_note": "prepend",
+        "obsidian_replace_note": "replace",
         "obsidian_set_properties": "set_properties",
         "obsidian_daily_note": "daily_note",
     }
@@ -201,6 +219,8 @@ class _ConversationKernel:
         if name in {
             "obsidian_create_note",
             "obsidian_append_note",
+            "obsidian_prepend_note",
+            "obsidian_replace_note",
             "obsidian_set_properties",
             "obsidian_daily_note",
         }:
@@ -255,6 +275,8 @@ class _ConversationKernel:
         if name in {
             "obsidian_create_note",
             "obsidian_append_note",
+            "obsidian_prepend_note",
+            "obsidian_replace_note",
             "obsidian_set_properties",
             "obsidian_daily_note",
         }:
@@ -316,6 +338,8 @@ def _all_tools() -> list[dict[str, Any]]:
             "obsidian_read_note",
             "obsidian_create_note",
             "obsidian_append_note",
+            "obsidian_prepend_note",
+            "obsidian_replace_note",
             "obsidian_set_properties",
             "obsidian_daily_note",
             "web_search",
@@ -724,6 +748,22 @@ _SHIPPED_OPERATION_CASES = (
         id="append-note",
     ),
     pytest.param(
+        "Добавь в Obsidian в начало заметки «Projects/Friday Test.md» текст: «Контекст».",
+        "obsidian_prepend_note",
+        {"path": "Projects/Friday Test.md", "text": "Контекст"},
+        "Текст добавлен в начало локальной серверной копии заметки.",
+        True,
+        id="prepend-note",
+    ),
+    pytest.param(
+        "Замени в Obsidian содержимое заметки «Projects/Friday Test.md» целиком на текст: «Новая версия».",
+        "obsidian_replace_note",
+        {"path": "Projects/Friday Test.md", "content": "Новая версия"},
+        "Содержимое локальной серверной копии заметки заменено.",
+        True,
+        id="replace-note",
+    ),
+    pytest.param(
         "Установи в Obsidian у заметки «Projects/Friday Test.md» свойство «status» = «done».",
         "obsidian_set_properties",
         {"path": "Projects/Friday Test.md", "properties": {"status": "done"}},
@@ -772,6 +812,8 @@ async def test_every_other_shipped_operation_is_preflighted_rendered_and_taints_
     expected_names = (
         ["obsidian_list_vaults"]
         if tool_name == "obsidian_list_vaults"
+        else ["obsidian_list_vaults", "obsidian_read_note", tool_name]
+        if tool_name == "obsidian_replace_note"
         else ["obsidian_list_vaults", tool_name]
     )
     assert llm.calls == 0
@@ -788,6 +830,8 @@ async def test_every_other_shipped_operation_is_preflighted_rendered_and_taints_
             tool_name,
         )
         expected_selected_arguments["operation_id"] = expected_operation_id
+        if tool_name == "obsidian_replace_note":
+            expected_selected_arguments["expected_revision"] = _REVISION
         assert f"Operation ID: {expected_operation_id}" in result["content"]
     assert selected_arguments == expected_selected_arguments
     assert rendered_fragment in result["content"]
@@ -800,6 +844,73 @@ async def test_every_other_shipped_operation_is_preflighted_rendered_and_taints_
     stored = storage.get_message(message_id, "alice")
     metadata = json.loads(str(stored["metadata_json"] or "{}"))
     assert metadata["private_context_lineage"] is True
+
+
+@pytest.mark.asyncio
+async def test_replace_resumes_with_the_frozen_ledger_revision_without_a_second_read(
+    settings,
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompt = (
+        "Замени в Obsidian содержимое заметки «Projects/Friday Test.md» целиком на текст: «Новая версия»."
+    )
+    kernel = _ConversationKernel()
+    runtime = _runtime(settings, storage, kernel, _ConversationLLM())
+    context, message_id = _durable_context(storage, prompt)
+    operation_id = obsidian_operation_id(storage, "alice", message_id, "obsidian_replace_note")
+    frozen_revision = "b" * 64
+
+    def continuation(owner_id: str, requested_operation_id: str) -> dict[str, Any] | None:
+        assert (owner_id, requested_operation_id) == ("alice", operation_id)
+        return {"method": "replace", "expected_revision": frozen_revision}
+
+    monkeypatch.setattr(storage, "get_obsidian_operation", continuation)
+
+    result = await runtime._agentic_loop(  # noqa: SLF001
+        context,
+        prompt,
+        _actor(),
+        _all_tools(),
+        None,
+    )
+
+    assert [name for name, _ in kernel.executed] == [
+        "obsidian_list_vaults",
+        "obsidian_replace_note",
+    ]
+    assert kernel.executed[-1][1]["expected_revision"] == frozen_revision
+    assert result["_obsidian_outcome"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_replace_without_the_code_owned_read_capability_never_mutates(
+    settings,
+    storage,
+) -> None:
+    prompt = (
+        "Замени в Obsidian содержимое заметки «Projects/Friday Test.md» целиком на текст: «Новая версия»."
+    )
+    kernel = _ConversationKernel()
+    llm = _ConversationLLM()
+    runtime = _runtime(settings, storage, kernel, llm)
+
+    result = await runtime._agentic_loop(  # noqa: SLF001
+        _context(),
+        prompt,
+        _actor(),
+        [
+            _schema("obsidian_list_vaults"),
+            _schema("obsidian_replace_note"),
+            _schema("web_search"),
+        ],
+        None,
+    )
+
+    assert llm.calls == 0
+    assert kernel.executed == [("obsidian_list_vaults", {})]
+    assert result["_obsidian_outcome"] == "unavailable"
+    assert "изменений не было" in result["content"].casefold()
 
 
 @pytest.mark.asyncio

@@ -43,6 +43,8 @@ OBSIDIAN_WRITE_TOOL_NAMES = frozenset(
     {
         "obsidian_create_note",
         "obsidian_append_note",
+        "obsidian_prepend_note",
+        "obsidian_replace_note",
         "obsidian_set_properties",
         "obsidian_daily_note",
         WORKFLOW_WRITE_TOOL,
@@ -95,6 +97,8 @@ _INDEX_COVERAGE_STATES = frozenset({"none", "partial", "complete"})
 _METHOD_BY_TOOL = {
     "obsidian_create_note": "create",
     "obsidian_append_note": "append",
+    "obsidian_prepend_note": "prepend",
+    "obsidian_replace_note": "replace",
     "obsidian_set_properties": "set_properties",
     "obsidian_daily_note": "daily_note",
     WORKFLOW_WRITE_TOOL: "workflow",
@@ -137,14 +141,15 @@ _QUOTED_SPAN = re.compile(
 _ACTION = re.compile(
     r"\b(?:покажи|перечисли|выведи|найди|поищи|прочитай|создай|создавай|создать|"
     r"добавь|добавляй|добавить|установи|устанавливай|установить|измени|изменить|"
+    r"замени|заменяй|заменить|"
     r"obsidian_(?:list_vaults|list_notes|search_notes|read_note|create_note|"
-    r"append_note|set_properties|daily_note))\b",
+    r"append_note|prepend_note|replace_note|set_properties|daily_note))\b",
     re.IGNORECASE,
 )
 _META = re.compile(
     r"(?:\b(?:пример|фраза|цитат[аыуе]?|пересказ|шаблон|формулировк[ауы]|"
     r"мета[- ]?инструкци[яию]|тестов(?:ая|ый)\s+фраза)\b|"
-    r"^\s*как\s+(?:показать|найти|прочитать|создать|добавить|установить|изменить)\b|"
+    r"^\s*как\s+(?:показать|найти|прочитать|создать|добавить|установить|изменить|заменить)\b|"
     r"\b(?:объясни|расскажи|покажи|напиши|приведи)\b.{0,80}\bкак\b|"
     r"\b(?:он|она|они|пользователь|ассистент|пятница|сообщение)\b.{0,50}"
     r"\b(?:сказал[аи]?|написал[аи]?|просил[аи]?)\b|"
@@ -155,7 +160,7 @@ _NEGATED = re.compile(
     r"(?:\bне\s+(?:надо\s+|нужно\s+|следует\s+|хочу\s+)?"
     r"(?:показывай|показывать|ищи|искать|читай|читать|создавай|создавать|создать|"
     r"добавляй|добавлять|добавить|устанавливай|устанавливать|установить|"
-    r"изменяй|изменять|трогай)|"
+    r"изменяй|изменять|заменяй|заменять|заменить|трогай)|"
     r"\bбез\s+(?:показа|поиска|чтения|создания|добавления|изменения)|"
     r"\b(?:отмени|забудь|игнорируй)\b)",
     re.IGNORECASE,
@@ -219,6 +224,21 @@ _APPEND = re.compile(
     r"(?P<path>`[^`\r\n]+`|«[^»\r\n]+»|\"[^\"\r\n]+\")\s+"
     r"(?:текст|запись)\s*:?\s*(?P<text>`[^`\r\n]+`|«[^»\r\n]+»|"
     r"\"[^\"\r\n]+\")\.?$",
+    re.IGNORECASE,
+)
+_PREPEND = re.compile(
+    r"^добавь\s+в\s+obsidian\s+в\s+начало\s+заметки\s+"
+    r"(?P<path>`[^`\r\n]+`|«[^»\r\n]+»|\"[^\"\r\n]+\")\s+"
+    r"(?:текст|запись)\s*:?\s*(?P<text>`[^`\r\n]+`|«[^»\r\n]+»|"
+    r"\"[^\"\r\n]+\")\.?$",
+    re.IGNORECASE,
+)
+_REPLACE = re.compile(
+    r"^(?:(?:полностью\s+замени|замени\s+(?:полностью|целиком))\s+в\s+obsidian\s+"
+    r"(?:содержимое\s+)?заметки|замени\s+в\s+obsidian\s+(?:содержимое\s+)?заметки)\s+"
+    r"(?P<path>`[^`\r\n]+`|«[^»\r\n]+»|\"[^\"\r\n]+\")\s+"
+    r"(?:(?:полностью|целиком)\s+)?на(?:\s+(?:текст|содержимое))?\s*:?\s*"
+    r"(?P<content>`[^`\r\n]+`|«[^»\r\n]+»|\"[^\"\r\n]+\")\.?$",
     re.IGNORECASE,
 )
 _APPEND_SECTION = re.compile(
@@ -637,6 +657,36 @@ def obsidian_conversation_intent(
             "obsidian_append_note",
             explicit_path=path,
             direct_arguments={"path": path, "text": addition},
+        )
+
+    match = _PREPEND.fullmatch(command)
+    if match is not None:
+        try:
+            path = _validate_path(_unquote(match.group("path")))
+        except (TypeError, ValueError):
+            return _refusal(_REFUSE_AMBIGUOUS)
+        addition = _unquote(match.group("text"))
+        if not addition or len(addition) > _MAX_NOTE_TEXT_CHARS:
+            return _refusal(_REFUSE_AMBIGUOUS)
+        return ObsidianConversationIntent(
+            "obsidian_prepend_note",
+            explicit_path=path,
+            direct_arguments={"path": path, "text": addition},
+        )
+
+    match = _REPLACE.fullmatch(command)
+    if match is not None:
+        try:
+            path = _validate_path(_unquote(match.group("path")))
+        except (TypeError, ValueError):
+            return _refusal(_REFUSE_AMBIGUOUS)
+        content = _unquote(match.group("content"))
+        if not content or len(content) > _MAX_NOTE_TEXT_CHARS or "\x00" in content:
+            return _refusal(_REFUSE_AMBIGUOUS)
+        return ObsidianConversationIntent(
+            "obsidian_replace_note",
+            explicit_path=path,
+            direct_arguments={"path": path, "content": content},
         )
 
     match = _SET_PROPERTY.fullmatch(command)
@@ -1118,7 +1168,16 @@ def _render_mutation(
     applied = _strict_bool(item["applied"])
     replayed = _strict_bool(item["replayed"])
     open_uri = _workflow_open_uri(item.get("open_uri"), path=path)
-    if tool_name in {"obsidian_append_note", "obsidian_set_properties"} and created:
+    if (
+        tool_name
+        in {
+            "obsidian_append_note",
+            "obsidian_prepend_note",
+            "obsidian_replace_note",
+            "obsidian_set_properties",
+        }
+        and created
+    ):
         raise ValueError("update receipt unexpectedly claims file creation")
     if tool_name == "obsidian_create_note" and not created:
         raise ValueError("create receipt does not prove file creation")
@@ -1166,6 +1225,8 @@ def _render_mutation(
         result_line = {
             "obsidian_create_note": "Заметка создана в локальной серверной копии vault.",
             "obsidian_append_note": "Текст добавлен в локальную серверную копию заметки.",
+            "obsidian_prepend_note": "Текст добавлен в начало локальной серверной копии заметки.",
+            "obsidian_replace_note": "Содержимое локальной серверной копии заметки заменено.",
             "obsidian_set_properties": "Свойства изменены в локальной серверной копии заметки.",
             "obsidian_daily_note": "Ежедневная заметка изменена в локальной серверной копии vault.",
         }[tool_name]

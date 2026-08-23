@@ -60,6 +60,28 @@ class ObsidianToolRuntime(Protocol):
         context_key: str | None = None,
     ) -> dict[str, Any]: ...
 
+    async def prepend_note(
+        self,
+        owner_id: str,
+        operation_id: str,
+        path: str,
+        text: str,
+        expected_revision: str | None = None,
+        work_item_id: str | None = None,
+        context_key: str | None = None,
+    ) -> dict[str, Any]: ...
+
+    async def replace_note(
+        self,
+        owner_id: str,
+        operation_id: str,
+        path: str,
+        content: str,
+        expected_revision: str,
+        work_item_id: str | None = None,
+        context_key: str | None = None,
+    ) -> dict[str, Any]: ...
+
     async def set_properties(
         self,
         owner_id: str,
@@ -228,6 +250,44 @@ def build_obsidian_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             context_key=_context_key(actor),
         )
 
+    async def prepend_note(
+        *,
+        actor: ActorContext,
+        operation_id: str,
+        path: str,
+        text: str,
+        expected_revision: str | None = None,
+        work_item_id: str | None = None,
+    ) -> dict[str, Any]:
+        return await runtime.prepend_note(
+            actor.own_id,
+            operation_id,
+            path,
+            text,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+            context_key=_context_key(actor),
+        )
+
+    async def replace_note(
+        *,
+        actor: ActorContext,
+        operation_id: str,
+        path: str,
+        content: str,
+        expected_revision: str,
+        work_item_id: str | None = None,
+    ) -> dict[str, Any]:
+        return await runtime.replace_note(
+            actor.own_id,
+            operation_id,
+            path,
+            content,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+            context_key=_context_key(actor),
+        )
+
     async def set_properties(
         *,
         actor: ActorContext,
@@ -375,6 +435,40 @@ def build_obsidian_tools(ctx: ServiceContext) -> tuple[ToolSpec, ...]:
             security_id="obsidian.write",
             risk="mutate",
             handler=append_note,
+        ),
+        ToolSpec(
+            name="obsidian_prepend_note",
+            description=(
+                "Добавить текст в начало тела заметки, сохранив YAML-свойства; "
+                "повтор требует прежний operation_id."
+            ),
+            parameters=_parameters(
+                {
+                    **revision_properties,
+                    "text": {"type": "string", "maxLength": _MAX_NOTE_TEXT_CHARS},
+                },
+                required=("operation_id", "path", "text"),
+            ),
+            security_id="obsidian.write",
+            risk="mutate",
+            handler=prepend_note,
+        ),
+        ToolSpec(
+            name="obsidian_replace_note",
+            description=(
+                "Полностью заменить содержимое заметки только для явно прочитанной "
+                "expected_revision; операция удаляет прежний текст и свойства."
+            ),
+            parameters=_parameters(
+                {
+                    **revision_properties,
+                    "content": {"type": "string", "maxLength": _MAX_NOTE_TEXT_CHARS},
+                },
+                required=("operation_id", "path", "content", "expected_revision"),
+            ),
+            security_id="obsidian.write",
+            risk="mutate",
+            handler=replace_note,
         ),
         ToolSpec(
             name="obsidian_set_properties",

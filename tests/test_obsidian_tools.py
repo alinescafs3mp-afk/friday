@@ -96,6 +96,50 @@ class FakeRuntime:
         )
         return {"operation_id": operation_id, "status": "scan_pending"}
 
+    async def prepend_note(
+        self,
+        owner_id: str,
+        operation_id: str,
+        path: str,
+        text: str,
+        expected_revision: str | None = None,
+        work_item_id: str | None = None,
+        context_key: str | None = None,
+    ) -> dict[str, Any]:
+        self._record(
+            "prepend_note",
+            owner_id,
+            operation_id,
+            path,
+            text,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+            context_key=context_key,
+        )
+        return {"operation_id": operation_id, "status": "scan_pending"}
+
+    async def replace_note(
+        self,
+        owner_id: str,
+        operation_id: str,
+        path: str,
+        content: str,
+        expected_revision: str,
+        work_item_id: str | None = None,
+        context_key: str | None = None,
+    ) -> dict[str, Any]:
+        self._record(
+            "replace_note",
+            owner_id,
+            operation_id,
+            path,
+            content,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+            context_key=context_key,
+        )
+        return {"operation_id": operation_id, "status": "scan_pending"}
+
     async def set_properties(
         self,
         owner_id: str,
@@ -168,6 +212,8 @@ def test_tool_metadata_is_closed_and_declares_read_write_risk() -> None:
         "obsidian_read_note",
         "obsidian_create_note",
         "obsidian_append_note",
+        "obsidian_prepend_note",
+        "obsidian_replace_note",
         "obsidian_set_properties",
         "obsidian_daily_note",
         "obsidian_workflow_read",
@@ -183,6 +229,8 @@ def test_tool_metadata_is_closed_and_declares_read_write_risk() -> None:
     assert {name for name, tool in tools.items() if tool.risk == "mutate"} == {
         "obsidian_create_note",
         "obsidian_append_note",
+        "obsidian_prepend_note",
+        "obsidian_replace_note",
         "obsidian_set_properties",
         "obsidian_daily_note",
         "obsidian_workflow_write",
@@ -241,6 +289,22 @@ async def test_every_handler_uses_actor_own_id_and_forwards_closed_arguments() -
         expected_revision=revision,
         work_item_id="work-2",
     )
+    await tools["obsidian_prepend_note"].handler(  # type: ignore[misc]
+        actor=actor,
+        operation_id="prepend-1",
+        path="Notes/New.md",
+        text="prepended",
+        expected_revision=revision,
+        work_item_id="work-prepend",
+    )
+    await tools["obsidian_replace_note"].handler(  # type: ignore[misc]
+        actor=actor,
+        operation_id="replace-1",
+        path="Notes/New.md",
+        content="replacement",
+        expected_revision=revision,
+        work_item_id="work-replace",
+    )
     await tools["obsidian_set_properties"].handler(  # type: ignore[misc]
         actor=actor,
         operation_id="properties-1",
@@ -266,6 +330,8 @@ async def test_every_handler_uses_actor_own_id_and_forwards_closed_arguments() -
         "read_note",
         "create_note",
         "append_note",
+        "prepend_note",
+        "replace_note",
         "set_properties",
         "daily_note",
     ]
@@ -283,8 +349,9 @@ async def test_every_handler_uses_actor_own_id_and_forwards_closed_arguments() -
             "context_key": "person-alice",
         },
     )
-    assert runtime.calls[6][2][2] == properties
-    assert runtime.calls[7][3]["day"] == date(2026, 8, 21)
+    assert runtime.calls[8][2][2] == properties
+    assert runtime.calls[9][3]["day"] == date(2026, 8, 21)
+    assert "expected_revision" in tools["obsidian_replace_note"].parameters["required"]
 
 
 @pytest.mark.asyncio

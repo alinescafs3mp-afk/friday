@@ -53,6 +53,8 @@ def test_tool_sets_pin_all_shipped_capabilities() -> None:
     assert {
         "obsidian_create_note",
         "obsidian_append_note",
+        "obsidian_prepend_note",
+        "obsidian_replace_note",
         "obsidian_set_properties",
         "obsidian_daily_note",
         "obsidian_workflow_write",
@@ -94,6 +96,17 @@ def test_tool_sets_pin_all_shipped_capabilities() -> None:
             "Добавь в Obsidian в заметку `Projects/Architecture.md` текст «Новый пункт».",
             "obsidian_append_note",
             {"path": "Projects/Architecture.md", "text": "Новый пункт"},
+        ),
+        (
+            "Добавь в Obsidian в начало заметки `Projects/Architecture.md` текст «Контекст».",
+            "obsidian_prepend_note",
+            {"path": "Projects/Architecture.md", "text": "Контекст"},
+        ),
+        (
+            "Замени в Obsidian содержимое заметки `Projects/Architecture.md` целиком "
+            "на текст «Новая версия».",
+            "obsidian_replace_note",
+            {"path": "Projects/Architecture.md", "content": "Новая версия"},
         ),
         (
             "Установи в Obsidian у заметки `Projects/Architecture.md` свойство «status» в «done».",
@@ -187,7 +200,9 @@ def test_conflict_merge_requires_the_explicit_closed_acceptance_action() -> None
     "message",
     [
         "Не создавай в Obsidian заметку Projects/Friday Test.md.",
+        "Не заменяй в Obsidian содержимое заметки `Projects/Friday Test.md` целиком на текст «Нельзя».",
         "Как создать в Obsidian заметку Projects/Friday Test.md?",
+        "Как заменить в Obsidian содержимое заметки `Projects/Friday Test.md`?",
         "Объясни команду «Создай в Obsidian заметку Projects/Friday Test.md».",
         "`Создай в Obsidian заметку Projects/Friday Test.md.`",
         "Фраза для документа: Создай в Obsidian заметку Projects/Friday Test.md.",
@@ -653,6 +668,8 @@ def _mutation(tool_name: str, *, delivered: bool = True) -> dict[str, object]:
     method = {
         "obsidian_create_note": "create",
         "obsidian_append_note": "append",
+        "obsidian_prepend_note": "prepend",
+        "obsidian_replace_note": "replace",
         "obsidian_set_properties": "set_properties",
         "obsidian_daily_note": "daily_note",
     }[tool_name]

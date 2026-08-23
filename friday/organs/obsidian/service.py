@@ -206,6 +206,30 @@ class ObsidianService:
         self.store.validate_text_size(rendered)
         return rendered
 
+    def render_prepend_content(self, content: str, text: str) -> str:
+        """Prepend to the Markdown body while retaining frontmatter at byte zero."""
+
+        self.store.validate_text_size(content)
+        self.store.validate_text_size(text)
+        parsed = parse_frontmatter(content)
+        rendered_body = _prepend_visible_text(parsed.body, text, newline=parsed.newline)
+        if parsed.has_frontmatter:
+            header_end = len(content) - len(parsed.body)
+            header = content[:header_end]
+            if not header.endswith(("\n", "\r")):
+                header += parsed.newline
+            rendered = header + rendered_body
+        else:
+            rendered = rendered_body
+        self.store.validate_text_size(rendered)
+        return rendered
+
+    def render_replace_content(self, content: str) -> str:
+        """Validate and return the exact bytes requested for a full replacement."""
+
+        self.store.validate_text_size(content)
+        return content
+
     def render_append_section_content(self, content: str, section: str, item: str) -> str:
         """Render one structured append without an in-note operation comment."""
 
@@ -235,6 +259,14 @@ class ObsidianService:
                 arguments_digest=arguments_digest,
                 note_path=note_path,
             )
+            if (
+                prior is not None
+                and expected_revision is not None
+                and prior.base_revision != expected_revision
+            ):
+                raise IdempotencyConflictError(
+                    f"{receipt_method} operation ID was reused with a different expected revision"
+                )
             if prior is not None and prior.state == "committed":
                 return _receipt_result(prior, operation_id=operation_id, applied=False)
             try:
@@ -508,6 +540,51 @@ class ObsidianService:
             render=lambda current: self.render_append_content(current, text),
             expected_revision=expected_revision,
             create_if_missing=False,
+        )
+
+    def prepend_note(
+        self,
+        path: str | PurePosixPath,
+        text: str,
+        *,
+        operation_id: str,
+        expected_revision: str | None = None,
+    ) -> NoteWriteResult:
+        note_path = self._note_path(path)
+        self.store.validate_text_size(text)
+        return self._idempotent_update(
+            note_path,
+            operation_id,
+            receipt_method="prepend",
+            arguments_payload=text,
+            render=lambda current: self.render_prepend_content(current, text),
+            expected_revision=expected_revision,
+            create_if_missing=False,
+            legacy_methods=(),
+        )
+
+    def replace_note(
+        self,
+        path: str | PurePosixPath,
+        content: str,
+        *,
+        operation_id: str,
+        expected_revision: str,
+    ) -> NoteWriteResult:
+        """Replace the complete note only under an explicit revision CAS."""
+
+        note_path = self._note_path(path)
+        validate_revision(expected_revision)
+        rendered = self.render_replace_content(content)
+        return self._idempotent_update(
+            note_path,
+            operation_id,
+            receipt_method="replace",
+            arguments_payload=rendered,
+            render=lambda _current: rendered,
+            expected_revision=expected_revision,
+            create_if_missing=False,
+            legacy_methods=(),
         )
 
     def set_properties(
@@ -991,6 +1068,19 @@ def _append_visible_text(existing: str, addition: str) -> str:
         combined = f"{existing}\n{addition}"
     if combined and not combined.endswith(("\n", "\r")):
         combined += "\n"
+    return combined
+
+
+def _prepend_visible_text(existing: str, addition: str, *, newline: str) -> str:
+    _text_digest(addition)
+    if not existing:
+        combined = addition
+    elif addition.endswith(("\n", "\r")) or existing.startswith(("\n", "\r")):
+        combined = addition + existing
+    else:
+        combined = f"{addition}{newline}{existing}"
+    if combined and not combined.endswith(("\n", "\r")):
+        combined += newline
     return combined
 
 

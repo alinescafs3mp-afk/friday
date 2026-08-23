@@ -812,6 +812,45 @@ async def test_ready_vault_exposes_durable_native_note_operations(settings, stor
         created["path"],
     )
 
+    prepended = await runtime.execute_operation(
+        "alice",
+        {
+            "method": "prepend",
+            "operation_id": "prepend-architecture",
+            "path": created["path"],
+            "text": "Current context.",
+            "expected_revision": appended["revision"],
+        },
+    )
+    prepended_document = await runtime.read_note("alice", created["path"])
+    assert prepended_document["body"].startswith("Current context.\n# Architecture")
+    assert prepended_document["properties"]["status"] == {"type": "text", "value": "review"}
+
+    with pytest.raises(ValueError, match="invalid replace operation fields"):
+        await runtime.execute_operation(
+            "alice",
+            {
+                "method": "replace",
+                "operation_id": "replace-without-cas",
+                "path": created["path"],
+                "content": "unsafe",
+            },
+        )
+    assert storage.get_obsidian_operation("alice", "replace-without-cas") is None
+
+    replace_payload = {
+        "method": "replace",
+        "operation_id": "replace-architecture",
+        "path": created["path"],
+        "content": "# Architecture v2\n\nExact replacement.\n",
+        "expected_revision": prepended["revision"],
+    }
+    replaced = await runtime.execute_operation("alice", replace_payload)
+    replaced_replay = await runtime.execute_operation("alice", replace_payload)
+    assert replaced["applied"] is True
+    assert replaced_replay["replayed"] is True
+    assert (await runtime.read_note("alice", created["path"]))["content"] == replace_payload["content"]
+
     daily = await runtime.daily_note(
         "alice",
         "daily-2026-08-21",

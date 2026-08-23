@@ -12,6 +12,7 @@ from friday.organs.obsidian.contracts import (
     IdempotencyConflictError,
     NoteAlreadyExistsError,
     RevisionConflictError,
+    VaultPathError,
 )
 from friday.organs.obsidian.note_merge import build_preserve_both_preview
 from friday.organs.obsidian.operations import (
@@ -45,6 +46,115 @@ def _operations(
         expires_at="2030-01-01T00:00:00+00:00",
     )
     return ObsidianOperationService(storage, notes, owner_id=owner), notes
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("prepend", "Projects/.obsidian/private.md"),
+        ("prepend", "Projects/Friday.sync-conflict-20260823.md"),
+        ("replace", "Projects/.obsidian/private.md"),
+        ("replace", "Projects/Friday.sync-conflict-20260823.md"),
+    ],
+)
+def test_ordinary_mutations_reject_reserved_paths_before_creating_a_ledger_row(
+    storage: FridayStorage,
+    tmp_path: Path,
+    method: str,
+    path: str,
+) -> None:
+    operations, _notes = _operations(storage, tmp_path)
+    operation_id = f"reserved-{method}-{hashlib.sha256(path.encode()).hexdigest()[:12]}"
+
+    with pytest.raises(VaultPathError):
+        if method == "prepend":
+            operations.prepend_note(operation_id, path, "unsafe")
+        else:
+            operations.replace_note(
+                operation_id,
+                path,
+                "unsafe",
+                expected_revision="a" * 64,
+            )
+
+    assert storage.get_obsidian_operation("workflow-owner", operation_id) is None
+
+
+def test_prepend_reconciles_receipt_gap_without_duplicate_text(
+    storage: FridayStorage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operations, notes = _operations(storage, tmp_path)
+    created = notes.create_note("Projects/Friday.md", "existing\n")
+    transition = storage.transition_obsidian_operation
+    fail_once = True
+
+    def lose_receipt(owner: str, operation_id: str, state: str, **kwargs: Any) -> dict:
+        nonlocal fail_once
+        if operation_id == "prepend-gap" and state == "committed" and fail_once:
+            fail_once = False
+            raise OSError("synthetic receipt gap")
+        return transition(owner, operation_id, state, **kwargs)
+
+    monkeypatch.setattr(storage, "transition_obsidian_operation", lose_receipt)
+    with pytest.raises(OperationCommitUncertain):
+        operations.prepend_note(
+            "prepend-gap",
+            "Projects/Friday.md",
+            "once only",
+            expected_revision=created.revision,
+        )
+
+    recovered = operations.prepend_note(
+        "prepend-gap",
+        "Projects/Friday.md",
+        "once only",
+        expected_revision=created.revision,
+    )
+
+    assert recovered.replayed is True
+    assert recovered.applied is False
+    assert notes.read_note("Projects/Friday.md").content == "once only\nexisting\n"
+
+
+def test_full_replace_reconciles_receipt_gap_and_preserves_frozen_target(
+    storage: FridayStorage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operations, notes = _operations(storage, tmp_path)
+    created = notes.create_note("Replace.md", "old\n")
+    transition = storage.transition_obsidian_operation
+    fail_once = True
+
+    def lose_receipt(owner: str, operation_id: str, state: str, **kwargs: Any) -> dict:
+        nonlocal fail_once
+        if operation_id == "replace-note-gap" and state == "committed" and fail_once:
+            fail_once = False
+            raise OSError("synthetic receipt gap")
+        return transition(owner, operation_id, state, **kwargs)
+
+    monkeypatch.setattr(storage, "transition_obsidian_operation", lose_receipt)
+    with pytest.raises(OperationCommitUncertain):
+        operations.replace_note(
+            "replace-note-gap",
+            "Replace.md",
+            "new exact bytes\n",
+            expected_revision=created.revision,
+        )
+
+    recovered = operations.replace_note(
+        "replace-note-gap",
+        "Replace.md",
+        "new exact bytes\n",
+        expected_revision=created.revision,
+    )
+
+    assert recovered.replayed is True
+    assert recovered.applied is False
+    assert recovered.previous_revision == created.revision
+    assert notes.read_note("Replace.md").content == "new exact bytes\n"
 
 
 def test_replace_section_reconciles_the_receipt_gap_without_a_second_edit(

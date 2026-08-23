@@ -1943,6 +1943,8 @@ class ObsidianRuntime:
         positional = {
             "create_note": ("path", "content"),
             "append_note": ("path", "text"),
+            "prepend_note": ("path", "text"),
+            "replace_note": ("path", "content"),
             "set_properties": ("path", "properties"),
             "daily_note": ("day",),
         }.get(method)
@@ -2134,6 +2136,50 @@ class ObsidianRuntime:
             operation_id,
             path,
             text,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+            context_key=context_key,
+        )
+
+    async def prepend_note(
+        self,
+        owner_id: str,
+        operation_id: str,
+        path: str,
+        text: str,
+        *,
+        expected_revision: str | None = None,
+        work_item_id: str | None = None,
+        context_key: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._run_mutation(
+            owner_id,
+            "prepend_note",
+            operation_id,
+            path,
+            text,
+            expected_revision=expected_revision,
+            work_item_id=work_item_id,
+            context_key=context_key,
+        )
+
+    async def replace_note(
+        self,
+        owner_id: str,
+        operation_id: str,
+        path: str,
+        content: str,
+        *,
+        expected_revision: str,
+        work_item_id: str | None = None,
+        context_key: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._run_mutation(
+            owner_id,
+            "replace_note",
+            operation_id,
+            path,
+            content,
             expected_revision=expected_revision,
             work_item_id=work_item_id,
             context_key=context_key,
@@ -2339,6 +2385,53 @@ class ObsidianRuntime:
                 str(payload["path"]),
                 str(payload["text"]),
                 expected_revision=common["expected_revision"],
+                work_item_id=common["work_item_id"],
+            )
+        if method == "prepend":
+            allowed = {
+                "method",
+                "operation_id",
+                "path",
+                "text",
+                "expected_revision",
+                "work_item_id",
+            }
+            if (
+                set(payload) - allowed
+                or not isinstance(payload.get("path"), str)
+                or not isinstance(payload.get("text"), str)
+            ):
+                raise ValueError("invalid prepend operation fields")
+            return await self.prepend_note(
+                owner_id,
+                operation_id,
+                str(payload["path"]),
+                str(payload["text"]),
+                expected_revision=common["expected_revision"],
+                work_item_id=common["work_item_id"],
+            )
+        if method == "replace":
+            allowed = {
+                "method",
+                "operation_id",
+                "path",
+                "content",
+                "expected_revision",
+                "work_item_id",
+            }
+            if (
+                set(payload) - allowed
+                or not isinstance(payload.get("path"), str)
+                or not isinstance(payload.get("content"), str)
+                or not isinstance(payload.get("expected_revision"), str)
+            ):
+                raise ValueError("invalid replace operation fields")
+            return await self.replace_note(
+                owner_id,
+                operation_id,
+                str(payload["path"]),
+                str(payload["content"]),
+                expected_revision=str(payload["expected_revision"]),
                 work_item_id=common["work_item_id"],
             )
         if method == "set_properties":

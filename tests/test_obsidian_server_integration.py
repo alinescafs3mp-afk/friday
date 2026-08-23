@@ -101,6 +101,8 @@ def test_enabled_server_registers_tools_and_only_setup_is_public(settings) -> No
             "obsidian_read_note",
             "obsidian_create_note",
             "obsidian_append_note",
+            "obsidian_prepend_note",
+            "obsidian_replace_note",
             "obsidian_set_properties",
             "obsidian_daily_note",
         } <= names

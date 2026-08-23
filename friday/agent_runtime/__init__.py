@@ -45191,6 +45191,101 @@ class AgentRuntime:
                 return response("Не удалось безопасно закрепить идентификатор операции; изменений не было.")
             arguments["operation_id"] = expected_operation_id
 
+        if selected_name == "obsidian_replace_note":
+            # Full-note replacement never accepts a model/user supplied CAS.
+            # Resume an already fenced operation with its frozen base revision;
+            # otherwise read the exact path now and bind the mutation to that
+            # code-owned current revision.
+            required_arguments = schema_parameters.get("required")
+            if (
+                "expected_revision" not in allowed_arguments
+                or not isinstance(required_arguments, list)
+                or "expected_revision" not in required_arguments
+            ):
+                obsidian_outcome = CapabilityStatus.UNAVAILABLE
+                return response(
+                    "Контракт полной замены Obsidian не требует безопасную revision; изменений не было.",
+                    private=lineage_persisted,
+                )
+            try:
+                continuation = self.storage.get_obsidian_operation(
+                    actor.own_id,
+                    expected_operation_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - a broken ledger cannot license replacement
+                LOGGER.warning("Obsidian replacement continuation lookup failed (%s)", type(exc).__name__)
+                obsidian_outcome = CapabilityStatus.UNCERTAIN
+                return response(
+                    "Не удалось проверить журнал замены Obsidian; содержимое не изменялось.",
+                    private=lineage_persisted,
+                )
+            if continuation is not None:
+                continued_revision = str(continuation.get("expected_revision") or "").casefold()
+                if (
+                    str(continuation.get("method") or "") != "replace"
+                    or re.fullmatch(r"[0-9a-f]{64}", continued_revision) is None
+                ):
+                    obsidian_outcome = CapabilityStatus.UNCERTAIN
+                    return response(
+                        "Журнал замены Obsidian не содержит безопасного продолжения; "
+                        "повторная запись не запускалась.",
+                        private=lineage_persisted,
+                    )
+                arguments["expected_revision"] = continued_revision
+            else:
+                if "obsidian_read_note" not in schemas:
+                    obsidian_outcome = CapabilityStatus.UNAVAILABLE
+                    return response(
+                        "Полная замена требует прочитать текущую revision заметки, "
+                        "но эта возможность недоступна; изменений не было.",
+                        private=lineage_persisted,
+                    )
+                read_actor = self._fresh_obsidian_actor(actor, "obsidian_read_note")
+                if read_actor is None:
+                    obsidian_outcome = CapabilityStatus.DENIED
+                    return response(
+                        "Право прочитать текущую revision заметки не подтверждено; изменений не было.",
+                        private=lineage_persisted,
+                    )
+                if _turn_deadline_expired(context.turn_deadline):
+                    return response(
+                        "Время этого хода закончилось до чтения текущей revision; изменений не было.",
+                        private=lineage_persisted,
+                    )
+                current = await self.kernel.execute(
+                    "obsidian_read_note",
+                    {"path": intent.explicit_path},
+                    actor=read_actor,
+                )
+                used.append("obsidian_read_note")
+                if not current.success:
+                    tool_error = str(current.error or "")
+                    obsidian_outcome = (
+                        CapabilityStatus.DENIED
+                        if tool_error.startswith("Authorization denied")
+                        else CapabilityStatus.UNAVAILABLE
+                        if tool_error.startswith(("Unknown tool", "Tool is not initialized"))
+                        else CapabilityStatus.UNCERTAIN
+                    )
+                    return response(
+                        "Не удалось получить текущую revision заметки; полная замена не запускалась.",
+                        private=lineage_persisted,
+                    )
+                rendered_current = render_obsidian_tool_result(
+                    "obsidian_read_note",
+                    current.data,
+                    expected_path=intent.explicit_path,
+                )
+                current_payload = current.data if isinstance(current.data, Mapping) else {}
+                current_revision = str(current_payload.get("revision") or "").casefold()
+                if not rendered_current or re.fullmatch(r"[0-9a-f]{64}", current_revision) is None:
+                    obsidian_outcome = CapabilityStatus.UNCERTAIN
+                    return response(
+                        "Obsidian вернул непроверяемую текущую revision; полная замена не запускалась.",
+                        private=lineage_persisted,
+                    )
+                arguments["expected_revision"] = current_revision
+
         if reuse_existing and expected_operation_id:
             try:
                 existing_row = self.storage.get_obsidian_operation(
