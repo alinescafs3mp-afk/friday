@@ -6,7 +6,8 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-23
 - Branch: `main`
-- Source: `e4d4a46` (`main`; implementation live code remains `4c02ab8`)
+- Repository head: `0f47870` (dormant schema-38 Work Item foundation);
+  convergence brief: `ed50d38`; implementation live code remains `4c02ab8`
 - Live: Friday `0.207.4` / `4c02ab8e3bbfac4f56d9e838dd016afb7c55711e`
 - Previous/fallback: `272b64c4dcd2aa80ea368a70efe6cd6083d70095`
 - Database schema: 37
@@ -17,10 +18,34 @@ the current production identity, completed packages, active work and next order.
 
 ## Active objective
 
-Finish the highest-value read-only CapabilityOutcome/completion-gate/accepted-
-receipt adapters, verify the cumulative non-Docker baseline, then begin the
-smallest useful P2 durable Work Item and Active Frame slice. Keep `main` and the
-live release healthy after every package.
+Finish the current narrow P2 `RecallConversation` Work Item and temporal
+follow-up canary as Friday's first durable golden journey. Then measure progress
+by complete, recoverable user journeys rather than by isolated adapters: define
+the journey/evidence registry, establish stable retrieval and passage identity
+with honest coverage, expose one read-only archive facade, and only then extend
+durable recall to documents. Keep `main` and the live release healthy after
+every package.
+
+## Convergence decision
+
+`PROJECT_CONVERGENCE_ARCHITECT_BRIEF.md` is adopted as the current architectural
+course, with these repository-specific constraints:
+
+- The schema-38 canary stays deliberately narrow. It will not pre-bake generic
+  WorkGraph, candidate-set, `SourceRef` or `PassageRef` columns before their
+  contracts are proved.
+- The next unit of completion is a golden user journey with named evidence
+  classes and an honest readiness state, not another locally green component.
+- Retrieval identity is a rebuildable projection over authoritative stores;
+  it never replaces their lifecycle or authorization decisions.
+- `archive_search` is initially a read-only facade over existing specialized
+  lanes. Partial, stale, capped, incompatible and unavailable coverage must be
+  visible and can never support a confident archive-absence claim.
+- The release-evidence package should extend the immutable operator's existing
+  journals/manifests instead of creating a competing release path.
+- Android/Syncthing, restore and external-service claims remain `UNVERIFIED`
+  until direct evidence exists. Docker and companion-plugin work remain out of
+  the current contour.
 
 ## Completed and deployed
 
@@ -60,21 +85,37 @@ live release healthy after every package.
 
 ## In progress
 
-1. P2 schema-38 foundation for one generic durable `RecallConversation` Work
-   Item and bounded Active Frame; no runtime behavior in the foundation release.
-2. Schema-38-capable foundation release so it can serve as the rollback-safe
-   fallback for the later behavior candidate.
+1. Publish the implemented schema-38 foundation (`0f47870`) as a dormant
+   immutable release for one narrowly scoped durable `RecallConversation` Work
+   Item and bounded Active Frame.
+2. Establish that schema-38 release as the rollback-safe fallback for the later
+   behavior candidate.
 3. Narrow behavior canary over the typed exact message-window lane: a full
    request creates the current Work Item; an immediate closed temporal follow-up
    such as `А вчера?` updates only its window while retaining the authorized
    conversation and role.
 
+## Provisional golden-journey view
+
+No journey is currently declared `READY` merely from component tests.
+
+| Journey | State | Missing decisive evidence |
+|---|---|---|
+| Conversation recall | `DEGRADED` | durable follow-up release; semantic recall and coverage; restart/rollback journey proof |
+| Document recall and answer | `DEGRADED` | stable source/passage identity; cross-lane coverage; durable continuation |
+| Obsidian write and synchronization | `UNVERIFIED` | common effect envelope; reconciliation; actual Android round trip/conflict evidence |
+| Durable scheduled work | `UNVERIFIED` | current-code journey audit and at-most-once/recovery evidence |
+| Honest degradation | `DEGRADED` | product-level multi-lane coverage and fault evidence |
+
 ## Current cumulative gate
 
 - 16,022 selected non-UI Python tests passed on 20 workers.
+- The current P2 focused matrix adds 983 passed tests and one declared real-
+  backup skip; schema-38 fixture, lifecycle/privacy, store adversarial, runtime
+  continuation and migration-chain checks are green.
 - One declared opt-in migration drill over copies of real operator backups was
   skipped; production backups were not used as a test playground.
-- Ruff, release-surface format (862 files), mypy (206 source files), compileall,
+- Ruff, release-surface format (871 files), mypy (210 source files), compileall,
   Bandit HIGH, JavaScript syntax and toolchain preflight passed.
 - Two initial failures were stale synthetic web-kernel fixtures. `e4d4a46`
   updated them to emit the same exact query/tool identity attestation as the
@@ -83,16 +124,27 @@ live release healthy after every package.
 
 ## Next order
 
-1. Complete and release the schema-38 Work Item/Active Frame foundation.
-2. Release the exact message-window continuation canary with restart, expiry,
-   cancellation, ownership, revision-CAS, receipt and atomic-rollback coverage.
-   Generic WorkGraphs and candidate sets remain deferred.
-3. Continue V12 refinement only through independently releasable, typed,
-   read-only slices before considering broader effects.
-4. Perform the physical Android/Syncthing-Fork evidence matrix when an actual
-   device run is available; backend simulations are not recorded as physical
-   certification.
-5. Consider the optional companion plugin only after explicit operator approval.
+1. Complete and release the schema-38 foundation, then the exact message-window
+   continuation canary with restart, expiry, cancellation, ownership,
+   revision-CAS, receipt, atomic rollback and immutable fallback evidence.
+2. Add one concise canonical golden-journey/evidence registry with strict
+   `READY`, `DEGRADED`, `UNVERIFIED`, `BLOCKED` and `OUT_OF_SCOPE` states.
+3. Design and release the retrieval-identity foundation: `SourceRef`, rebuildable
+   `CatalogItem`, `PassageRef`, typed `TemporalFact` and `SearchCoverage`, with
+   authoritative revalidation and no date-role substitution.
+4. Release one read-only federated `archive_search` facade with deterministic
+   continuation, neighboring message context and explicit per-lane coverage.
+5. Extend the proven recall Work Item across document and message evidence only
+   through stable source/passage references and fresh authorization/revision
+   checks.
+6. Add one uncertainty-aware common effect envelope and prove one idempotent,
+   receipt-backed Obsidian mutation/reconciliation vertical.
+7. Extend existing immutable-release evidence into a machine-reconcilable
+   source/wheel/schema/activation/fallback manifest and clean-artifact proof.
+8. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
+   certification; simulations remain labelled separately.
+9. Evaluate generic WorkGraph, broader effects, connectors or companion work
+   only from the golden journeys still failing after the preceding packages.
 
 ## Open source/document issue
 
