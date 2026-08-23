@@ -22,10 +22,9 @@ the current production identity, completed packages, active work and next order.
 ## Active objective
 
 Continue from the deployed golden-journey, retrieval-identity and federated
-archive-search foundation. First reconcile the locally recovered
-document-contour WIP audit, then extend the Interaction Control Plane by
-one complete durable vertical at a time. Keep `main` and the live release
-healthy after every package.
+archive-search foundation and the reconciled document-contour WIP audit. Extend
+the Interaction Control Plane by one complete durable vertical at a time. Keep
+`main` and the live release healthy after every package.
 
 ## Convergence decision
 
@@ -92,11 +91,11 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Review and reconcile the requested
-   `DOCUMENT_FILE_CONTOUR_WIP_AUDIT_2026-08-22.md`; retain only useful,
-   release-compatible unfinished work and remove superseded residue.
-2. Resume `INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md` from the
+1. Resume `INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md` from the
    deployed TurnTrace/failure/RecallConversation checkpoint.
+2. Extend durable recall only through the released source/passage identity,
+   coverage and late-reauthorization contracts; keep a generic WorkGraph behind
+   that product proof.
 
 ## Completed and deployed (current package)
 
@@ -179,6 +178,28 @@ course, with these repository-specific constraints:
   accepted by exact process-root, trusted-CA HTTPS `ok`/`0.207.8`, schema-38,
   SQLite quick-check, foreign-key and clean post-cutover journal gates.
 
+## Document-contour WIP audit disposition
+
+The recovered 0.207.4 inventory was revalidated against current `main`; no old
+blob or migration is a release candidate:
+
+- embedding backlog/freshness observability is already stronger in diagnostics,
+  tenant-scoped search explain and worker indexing than the stale global
+  `embeddings_pending` proposal;
+- filename and alias search is already authority-scoped in owned-file lookup and
+  the archive catalog lane; indexing arbitrary `metadata_json` in `raw_fts` is
+  rejected as a privacy, migration and WAL regression;
+- the useful message-layout recall and synthetic P09 parenthetical/adverse
+  predicates were already absorbed and strengthened by `acda581`; the archived
+  aggregate recall test is weaker than the current focused contracts;
+- five clean merged feature worktrees, 23 clean ancestor worktrees carrying
+  false `pending` locks, three obsolete gate caches and stale missing-worktree
+  registrations were removed. Current `main`, live immutable releases,
+  rollback/evidence roots and companion code were untouched;
+- ambiguous forensic refs (`document-file-contour-wip`, `de37c64` and G45) remain
+  retained until their separate semantic/retention review; cleanup did not trade
+  recoverability for disk space.
+
 ## Canonical golden-journey/evidence registry
 
 This is the single source of truth for product-level journey states. The
@@ -233,12 +254,11 @@ claims at this checkpoint.
 
 ## Next order
 
-1. Recover and review the named document-contour WIP audit before new control
-   plane implementation; merge useful compatible work and delete only proven
-   superseded residue.
-2. Extend the proven recall Work Item across document and message evidence only
+1. Extend the proven recall Work Item across document and message evidence only
    through stable source/passage references and fresh authorization/revision
    checks.
+2. Add durable candidate selection/pending-question state only when it preserves
+   exact archive coverage and survives restart without persisting model prose.
 3. Add one uncertainty-aware common effect envelope and prove one idempotent,
    receipt-backed Obsidian mutation/reconciliation vertical.
 4. Extend existing immutable-release evidence into machine-reconcilable
@@ -249,13 +269,13 @@ claims at this checkpoint.
 6. Evaluate generic WorkGraph, broader effects, connectors or companion work
    only from the golden journeys still failing after the preceding packages.
 
-## Open source/document issue
+## WIP source retention
 
 `DOCUMENT_FILE_CONTOUR_WIP_AUDIT_2026-08-22.md` was recovered at
 `/home/jericho/DOCUMENT_FILE_CONTOUR_WIP_AUDIT_2026-08-22.md`, outside the
-repository location named by the operator. It is a stale 0.207.4 inventory, so
-every salvage or cleanup recommendation must be revalidated against current
-`main` before code is retained or residue is removed.
+repository location named by the operator. Its recommendations are now
+reconciled above; the external source and compact forensic refs remain retained
+until an explicit evidence-retention decision.
 
 ## Update rule
 

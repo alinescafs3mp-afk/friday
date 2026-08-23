@@ -1,10 +1,10 @@
 # Interaction Control Plane implementation status
 
 Status: **P0A + P0B + P1 READ SLICES + NARROW P2 RECALL CANARY DEPLOYED**
-Date: 2026-08-23
+Date: 2026-08-24
 Branch: `main`
-Source: `main` / `c91260d`
-Live: Friday `0.207.4` / `c91260d`, schema 38
+Source: `main` / `4b27be8`
+Live: Friday `0.207.8` / `da8d11e`, schema 38
 
 ## Release checkpoint
 
@@ -13,13 +13,16 @@ Live: Friday `0.207.4` / `c91260d`, schema 38
 - Typed `FILE_READ`, `ARCHIVE_READ` and bounded `WEB_READ` outcomes use a
   deterministic completion gate and atomic private accepted-outcome receipts.
 - `0f47870` introduced the dormant schema-38 Work Item foundation; `cb1b3f7`
-  established it as the sealed schema-capable fallback.
+  established its first sealed schema-capable fallback.
 - `d1c5d6f` added the exact message-window continuation canary; `4b6bc49`
   preserved the existing named-inventory follow-up lane and `c91260d` is the
   current deployed source.
-- The live anchor resolves to `c91260d`, with `cb1b3f7` as fallback. Backend and
-  bridge are active, trusted-CA health is `ok`, and schema 38, SQLite quick-check,
-  foreign keys and exact Work Item DDL are clean.
+- `0.207.8` adds the authorized read-only federated `archive_search` foundation:
+  stable source/passage identity, explicit per-corpus coverage, process-private
+  carriers and same-transaction reauthorization/publication.
+- The live anchor resolves to `da8d11e`, with `3d2bef3` (`0.207.7`) as fallback.
+  Backend and bridge are active, trusted-CA health is `ok`, and schema 38,
+  SQLite quick-check, foreign keys and exact Work Item DDL are clean.
 
 ## P0A implemented
 
@@ -70,18 +73,20 @@ Live: Friday `0.207.4` / `c91260d`, schema 38
 1. Use the canonical golden-journey/evidence registry in
    `outer_sol/PROJECT_IMPLEMENTATION_STATUS.md`; its machine validator owns the
    strict readiness and evidence rules.
-2. Establish stable retrieval and passage identity plus honest coverage, then a
-   read-only federated `archive_search` facade.
-3. Extend durable recall to documents/messages only through those stable
-   references; keep generic autonomous WorkGraphs behind that proof.
+2. Use the now-deployed retrieval identity, honest coverage and federated
+   `archive_search` foundation to extend durable recall across documents and
+   messages through exact current references.
+3. Add durable candidate selection and pending questions only after that narrow
+   vertical proves restart, expiry, authority and revision behavior; keep generic
+   autonomous WorkGraphs behind the proof.
 
 ## Current cumulative gate
 
-- Full non-UI Python gate: 16,175 passed, zero skipped, including pinned
-  Syncthing `v2.1.3` managed-REST smoke.
+- Full isolated Python gate: 17,367 passed; two skips require explicitly
+  configured real Syncthing and real backup-migration environments.
 - Schema-38 migration, lifecycle/privacy, revision-CAS, restart, temporal
   continuation, receipt/plan binding and named-inventory compatibility checks
   passed.
-- Toolchain preflight, Ruff, format, mypy, compileall, Bandit HIGH and JavaScript
-  syntax checks passed. Docker and the separate unchanged browser/UI phase were
-  deliberately outside this checkpoint.
+- Ruff, mypy for changed source, compileall and release diff checks passed. The
+  `0.207.8` wheel reproduced byte-for-byte and immutable activation completed
+  `clear`; Docker and companion-plugin work remained outside the checkpoint.
