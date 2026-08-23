@@ -14,9 +14,10 @@ import hmac
 import json
 import secrets
 import sqlite3
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass, replace
 from typing import NoReturn, SupportsIndex, cast
 
+from friday.permissions import ActorContext, AuthorizationDecision, AuthorizationService
 from friday.retrieval.archive_search_authority import (
     ARCHIVE_AUTHORITY_MAX_CANDIDATES,
     ArchiveModelBatchLedger,
@@ -26,6 +27,7 @@ from friday.retrieval.archive_search_authority import (
     ArchiveSearchReauthorizationStatus,
     ArchiveSearchRunBinding,
     AuthorizedArchiveBatch,
+    RedeemedArchiveContinuation,
     canonical_archive_search_targets,
     create_archive_search_run_binding,
     issue_archive_search_continuation,
@@ -100,6 +102,17 @@ _OBSIDIAN_LANES = frozenset(
         SearchLane.APPROXIMATE_IDENTITY,
     }
 )
+_CORPUS_CAPABILITY: dict[SearchCorpus, str | None] = {
+    SearchCorpus.RAW_DOCUMENTS: "knowledge.read",
+    SearchCorpus.KNOWLEDGE: "knowledge.read",
+    SearchCorpus.CONVERSATION: "conversations.read",
+    SearchCorpus.OBSIDIAN: "obsidian.read",
+    SearchCorpus.GENERATED_ARTIFACTS: "knowledge.read",
+    SearchCorpus.WEB_CAPTURES: "knowledge.read",
+    # Registered external sources deliberately have no execution lane here.
+    # In particular, an archive request can never become outbound authority.
+    SearchCorpus.EXTERNAL: None,
+}
 
 
 class ArchiveSearchServiceError(RuntimeError):
@@ -309,6 +322,248 @@ class _ProcessPrivate:
         raise TypeError("archive search service value is process-private")
 
 
+@dataclass(frozen=True, slots=True)
+class _ArchiveTargetAuthority:
+    corpus: SearchCorpus
+    lane: SearchLane
+    capability: str | None
+    allowed: bool
+
+    @property
+    def target(self) -> tuple[SearchCorpus, SearchLane]:
+        return self.corpus, self.lane
+
+    def material(self) -> dict[str, object]:
+        return {
+            "allowed": self.allowed,
+            "capability": self.capability,
+            "corpus": self.corpus.value,
+            "lane": self.lane.value,
+        }
+
+    def is_valid(self) -> bool:
+        expected = _CORPUS_CAPABILITY.get(self.corpus)
+        return bool(
+            type(self) is _ArchiveTargetAuthority
+            and type(self.corpus) is SearchCorpus
+            and type(self.lane) is SearchLane
+            and (self.capability is None or type(self.capability) is str)
+            and self.capability == expected
+            and type(self.allowed) is bool
+            and (expected is not None or not self.allowed)
+        )
+
+
+def _authority_projection_is_valid(
+    value: object,
+    targets: tuple[tuple[SearchCorpus, SearchLane], ...],
+) -> bool:
+    try:
+        return bool(
+            type(value) is tuple
+            and type(targets) is tuple
+            and len(cast(tuple[object, ...], value)) == len(targets)
+            and all(
+                type(item) is _ArchiveTargetAuthority and item.is_valid()
+                for item in cast(tuple[_ArchiveTargetAuthority, ...], value)
+            )
+            and tuple(
+                item.target for item in cast(tuple[_ArchiveTargetAuthority, ...], value)
+            )
+            == targets
+        )
+    except Exception:
+        return False
+
+
+def _actor_is_exactly_bound(
+    actor: object,
+    *,
+    tenant_id: str,
+    principal_id: str,
+) -> bool:
+    if type(actor) is not ActorContext:
+        return False
+    value = cast(ActorContext, actor)
+    try:
+        return bool(
+            type(value.user_id) is str
+            and type(value.preset_key) is str
+            and type(value.source) is str
+            and (value.identity_id is None or type(value.identity_id) is str)
+            and (value.session_id is None or type(value.session_id) is str)
+            and type(value.shared_tenant) is bool
+            and type(value.person_id) is str
+            and value.user_id == tenant_id
+            and value.own_id == principal_id
+        )
+    except Exception:
+        return False
+
+
+def _fresh_target_authority_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    authorization: AuthorizationService,
+    actor: ActorContext,
+    tenant_id: str,
+    principal_id: str,
+    targets: tuple[tuple[SearchCorpus, SearchLane], ...],
+) -> tuple[_ArchiveTargetAuthority, ...]:
+    """Resolve exact per-corpus authority from the caller's live transaction."""
+
+    if (
+        type(conn) is not sqlite3.Connection
+        or not conn.in_transaction
+        or type(authorization) is not AuthorizationService
+        or not _actor_is_exactly_bound(
+            actor,
+            tenant_id=tenant_id,
+            principal_id=principal_id,
+        )
+        or type(targets) is not tuple
+    ):
+        raise _fail()
+    storage = authorization.storage
+    try:
+        if storage is None or storage.conn is not conn:
+            raise _fail()
+        principal_row = conn.execute(
+            "SELECT preset_key, status FROM users WHERE id=?",
+            (principal_id,),
+        ).fetchone()
+        tenant_row = (
+            principal_row
+            if tenant_id == principal_id
+            else conn.execute(
+                "SELECT status FROM users WHERE id=?",
+                (tenant_id,),
+            ).fetchone()
+        )
+        if (
+            principal_row is None
+            or tenant_row is None
+            or str(principal_row["status"] or "") != "active"
+            or str(tenant_row["status"] or "") != "active"
+        ):
+            raise _fail()
+        fresh_actor = replace(
+            actor,
+            preset_key=str(principal_row["preset_key"] or "guest"),
+        )
+        if not _actor_is_exactly_bound(
+            fresh_actor,
+            tenant_id=tenant_id,
+            principal_id=principal_id,
+        ):
+            raise _fail()
+
+        decisions: dict[str, bool] = {}
+        for capability in sorted(
+            {
+                value
+                for target in targets
+                if (value := _CORPUS_CAPABILITY.get(target[0])) is not None
+            }
+        ):
+            decision = authorization.authorize(fresh_actor, capability)
+            if (
+                type(decision) is not AuthorizationDecision
+                or decision.security_id != capability
+                or decision.user_id != principal_id
+                or decision.preset_key != fresh_actor.preset_key
+                or decision.effect not in {"allow", "deny"}
+            ):
+                raise _fail()
+            decisions[capability] = decision.allowed
+        projection = tuple(
+            _ArchiveTargetAuthority(
+                target[0],
+                target[1],
+                capability,
+                False if capability is None else decisions[capability],
+            )
+            for target in targets
+            for capability in (_CORPUS_CAPABILITY.get(target[0]),)
+        )
+        if (
+            not conn.in_transaction
+            or not _authority_projection_is_valid(projection, targets)
+        ):
+            raise _fail()
+        return projection
+    except ArchiveSearchServiceError:
+        raise
+    except Exception:
+        raise _fail() from None
+
+
+def _narrow_authority_projection(
+    original: tuple[_ArchiveTargetAuthority, ...],
+    current: tuple[_ArchiveTargetAuthority, ...],
+    targets: tuple[tuple[SearchCorpus, SearchLane], ...],
+) -> tuple[_ArchiveTargetAuthority, ...]:
+    if not _authority_projection_is_valid(
+        original,
+        targets,
+    ) or not _authority_projection_is_valid(current, targets):
+        raise _fail()
+    result = tuple(
+        _ArchiveTargetAuthority(
+            old.corpus,
+            old.lane,
+            old.capability,
+            old.allowed and fresh.allowed,
+        )
+        for old, fresh in zip(original, current, strict=True)
+        if old.target == fresh.target and old.capability == fresh.capability
+    )
+    if not _authority_projection_is_valid(result, targets):
+        raise _fail()
+    return result
+
+
+def _continued_authority_projection(
+    redemption: RedeemedArchiveContinuation,
+    current: tuple[_ArchiveTargetAuthority, ...],
+    targets: tuple[tuple[SearchCorpus, SearchLane], ...],
+) -> tuple[_ArchiveTargetAuthority, ...]:
+    """Recover the parent page's closed authority without accepting a new grant."""
+
+    if type(redemption) is not RedeemedArchiveContinuation:
+        raise _fail()
+    try:
+        coverage = redemption._coverage
+        if (
+            type(coverage) is not tuple
+            or len(coverage) != len(targets)
+            or any(type(item) is not SearchCoverage for item in coverage)
+        ):
+            raise _fail()
+        by_target = {(item.corpus, item.lane): item for item in coverage}
+        if set(by_target) != set(targets) or len(by_target) != len(targets):
+            raise _fail()
+        parent = tuple(
+            _ArchiveTargetAuthority(
+                target[0],
+                target[1],
+                capability,
+                bool(
+                    capability is not None
+                    and CoverageState.PERMISSION_FILTERED
+                    not in by_target[target].states
+                ),
+            )
+            for target in targets
+            for capability in (_CORPUS_CAPABILITY.get(target[0]),)
+        )
+        return _narrow_authority_projection(parent, current, targets)
+    except ArchiveSearchServiceError:
+        raise
+    except Exception:
+        raise _fail() from None
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class _ArchiveSearchRecipe:
     tenant_id: str
@@ -318,6 +573,7 @@ class _ArchiveSearchRecipe:
     current_conversation_id: str | None
     boundary_user_message_id: str | None
     continuation: bool
+    target_authority: tuple[_ArchiveTargetAuthority, ...]
     seal: bytes
 
     def material(self) -> dict[str, object]:
@@ -328,6 +584,7 @@ class _ArchiveSearchRecipe:
             "principal_id": self.principal_id,
             "request": self.request.to_private_payload(),
             "snapshot_discriminator": self.snapshot_discriminator,
+            "target_authority": [item.material() for item in self.target_authority],
             "tenant_id": self.tenant_id,
         }
 
@@ -342,6 +599,10 @@ class _ArchiveSearchRecipe:
                 and _same_exact_graph(self.request, frozen_request)
                 and self.request.continuation is None
                 and type(self.continuation) is bool
+                and _authority_projection_is_valid(
+                    self.target_authority,
+                    canonical_archive_search_targets(self.request),
+                )
                 and type(self.tenant_id) is str
                 and type(self.principal_id) is str
                 and type(self.snapshot_discriminator) is str
@@ -373,6 +634,7 @@ def _new_recipe(
     current_conversation_id: str | None,
     boundary_user_message_id: str | None,
     continuation: bool,
+    target_authority: tuple[_ArchiveTargetAuthority, ...],
 ) -> _ArchiveSearchRecipe:
     recipe = _ArchiveSearchRecipe(
         tenant_id,
@@ -382,6 +644,7 @@ def _new_recipe(
         current_conversation_id,
         boundary_user_message_id,
         continuation,
+        target_authority,
         b"0" * 32,
     )
     object.__setattr__(
@@ -694,6 +957,7 @@ def _collect_federated_in_transaction(
     run: ArchiveSearchRunBinding,
     phase: ArchiveSearchAuthorityPhase,
     exact_file_reader: ArchiveObsidianExactFileReader | None,
+    target_authority: tuple[_ArchiveTargetAuthority, ...] | None = None,
 ) -> FederatedArchiveSearch:
     if (
         type(conn) is not sqlite3.Connection
@@ -707,6 +971,10 @@ def _collect_federated_in_transaction(
     targets = canonical_archive_search_targets(recipe.request)
     if binding.requested_targets != targets:
         raise _fail()
+    authority = recipe.target_authority if target_authority is None else target_authority
+    if not _authority_projection_is_valid(authority, targets):
+        raise _fail()
+    authority_by_target = {item.target: item for item in authority}
     candidates_by_target: dict[
         tuple[SearchCorpus, SearchLane], tuple[ArchiveSearchCandidate, ...]
     ] = {}
@@ -714,6 +982,11 @@ def _collect_federated_in_transaction(
     for target in targets:
         candidates: tuple[ArchiveSearchCandidate, ...] = ()
         coverage = _unsupported(target, binding)
+        target_permission = authority_by_target[target]
+        if target_permission.capability is not None and not target_permission.allowed:
+            candidates_by_target[target] = ()
+            coverage_by_target[target] = _permission_filtered(target, binding)
+            continue
         try:
             if target[0] in _DOCUMENT_CORPUS and target[1] in _DOCUMENT_LANES:
                 candidates, coverage = _collect_document_target(
@@ -784,6 +1057,7 @@ class _FreshEvidence:
     run: ArchiveSearchRunBinding
     recipe: _ArchiveSearchRecipe
     federation: FederatedArchiveSearch
+    target_authority: tuple[_ArchiveTargetAuthority, ...]
 
 
 class ArchiveSearchReauthorizationContext(_ProcessPrivate):
@@ -812,6 +1086,9 @@ class ArchiveSearchReauthorizationContext(_ProcessPrivate):
                     "execution_handle": item.run.execution_binding.opaque_handle,
                     "federation": _federation_material(item.federation),
                     "recipe_seal": item.recipe.seal.hex(),
+                    "target_authority": [
+                        authority.material() for authority in item.target_authority
+                    ],
                 }
                 for item in self._entries
             ],
@@ -831,6 +1108,10 @@ class ArchiveSearchReauthorizationContext(_ProcessPrivate):
                     and type(item.run) is ArchiveSearchRunBinding
                     and item.recipe.is_valid()
                     and type(item.federation) is FederatedArchiveSearch
+                    and _authority_projection_is_valid(
+                        item.target_authority,
+                        canonical_archive_search_targets(item.recipe.request),
+                    )
                     for item in self._entries
                 )
                 and len({id(item.run) for item in self._entries}) == len(self._entries)
@@ -903,6 +1184,16 @@ def _same_candidate(left: ArchiveSearchCandidate, right: ArchiveSearchCandidate)
         )
     except Exception:
         return False
+
+
+def _target_authority(
+    evidence: _FreshEvidence,
+    target: tuple[SearchCorpus, SearchLane],
+) -> _ArchiveTargetAuthority | None:
+    return next(
+        (item for item in evidence.target_authority if item.target == target),
+        None,
+    )
 
 
 def _same_continuation_candidate_evidence(
@@ -1118,6 +1409,34 @@ def reauthorize_archive_search_candidate(
         return ArchiveSearchCandidateReauthorization.rejected(
             ArchiveSearchReauthorizationStatus.UNAVAILABLE
         )
+    try:
+        corpus = {
+            ArchiveSearchCorpus.DOCUMENTS: SearchCorpus.RAW_DOCUMENTS,
+            ArchiveSearchCorpus.KNOWLEDGE: SearchCorpus.KNOWLEDGE,
+            ArchiveSearchCorpus.MESSAGES: SearchCorpus.CONVERSATION,
+            ArchiveSearchCorpus.OBSIDIAN: SearchCorpus.OBSIDIAN,
+            ArchiveSearchCorpus.GENERATED: SearchCorpus.GENERATED_ARTIFACTS,
+            ArchiveSearchCorpus.WEB: SearchCorpus.WEB_CAPTURES,
+            ArchiveSearchCorpus.EXTERNAL: SearchCorpus.EXTERNAL,
+        }[candidate.corpus]
+        candidate_targets = tuple(
+            (corpus, match.channel.search_lane) for match in candidate.matches
+        )
+        target_permissions = tuple(
+            _target_authority(evidence, target) for target in candidate_targets
+        )
+    except Exception:
+        return ArchiveSearchCandidateReauthorization.rejected(
+            ArchiveSearchReauthorizationStatus.UNAVAILABLE
+        )
+    if any(item is None or item.capability is None for item in target_permissions):
+        return ArchiveSearchCandidateReauthorization.rejected(
+            ArchiveSearchReauthorizationStatus.UNAVAILABLE
+        )
+    if any(not item.allowed for item in target_permissions if item is not None):
+        return ArchiveSearchCandidateReauthorization.rejected(
+            ArchiveSearchReauthorizationStatus.DENIED
+        )
     fresh_candidates = (
         *evidence.federation.candidates,
         *evidence.federation.tail_candidates,
@@ -1140,21 +1459,10 @@ def reauthorize_archive_search_candidate(
     target_coverages = tuple(
         _fresh_coverage(
             evidence,
-            (
-                {
-                    ArchiveSearchCorpus.DOCUMENTS: SearchCorpus.RAW_DOCUMENTS,
-                    ArchiveSearchCorpus.KNOWLEDGE: SearchCorpus.KNOWLEDGE,
-                    ArchiveSearchCorpus.MESSAGES: SearchCorpus.CONVERSATION,
-                    ArchiveSearchCorpus.OBSIDIAN: SearchCorpus.OBSIDIAN,
-                    ArchiveSearchCorpus.GENERATED: SearchCorpus.GENERATED_ARTIFACTS,
-                    ArchiveSearchCorpus.WEB: SearchCorpus.WEB_CAPTURES,
-                    ArchiveSearchCorpus.EXTERNAL: SearchCorpus.EXTERNAL,
-                }[candidate.corpus],
-                match.channel.search_lane,
-            ),
+            target,
             terminal=evidence.recipe.continuation,
         )
-        for match in candidate.matches
+        for target in candidate_targets
     )
     statuses = {_rejection_for_coverage(item) for item in target_coverages}
     status = (
@@ -1181,6 +1489,29 @@ def reauthorize_archive_search_coverage(
         return ArchiveSearchCoverageReauthorization.rejected(
             ArchiveSearchReauthorizationStatus.UNAVAILABLE
         )
+    target = coverage.corpus, coverage.lane
+    target_permission = _target_authority(evidence, target)
+    current_fresh = _fresh_coverage(
+        evidence,
+        target,
+        terminal=evidence.recipe.continuation,
+    )
+    if target_permission is None or current_fresh is None:
+        return ArchiveSearchCoverageReauthorization.rejected(
+            ArchiveSearchReauthorizationStatus.UNAVAILABLE
+        )
+    if target_permission.capability is None:
+        if CoverageState.UNAVAILABLE not in current_fresh.states:
+            return ArchiveSearchCoverageReauthorization.rejected(
+                ArchiveSearchReauthorizationStatus.UNAVAILABLE
+            )
+    elif (
+        not target_permission.allowed
+        and CoverageState.PERMISSION_FILTERED not in current_fresh.states
+    ):
+        return ArchiveSearchCoverageReauthorization.rejected(
+            ArchiveSearchReauthorizationStatus.DENIED
+        )
     if _coverage_attested(evidence, coverage, phase=phase):
         if phase is ArchiveSearchAuthorityPhase.BEFORE_PUBLICATION or evidence.recipe.continuation:
             current: SearchCoverage | None = coverage
@@ -1192,11 +1523,6 @@ def reauthorize_archive_search_coverage(
             )
         if current is not None:
             return ArchiveSearchCoverageReauthorization.authorized(current)
-    current_fresh = _fresh_coverage(
-        evidence,
-        (coverage.corpus, coverage.lane),
-        terminal=evidence.recipe.continuation,
-    )
     return ArchiveSearchCoverageReauthorization.rejected(
         _rejection_for_coverage(current_fresh)
     )
@@ -1205,6 +1531,8 @@ def reauthorize_archive_search_coverage(
 def prepare_archive_search_in_transaction(
     conn: sqlite3.Connection,
     *,
+    authorization: AuthorizationService,
+    actor: ActorContext,
     tenant_id: str,
     principal_id: str,
     request: ArchiveSearchRequest,
@@ -1229,16 +1557,15 @@ def prepare_archive_search_in_transaction(
         request_value = ArchiveSearchRequest.parse_private(request.to_private_json())
         storage_request = _storage_request(request_value)
         continuation = request_value.continuation is not None
-        recipe = _new_recipe(
+        targets = canonical_archive_search_targets(storage_request)
+        current_authority = _fresh_target_authority_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=actor,
             tenant_id=tenant,
             principal_id=principal,
-            request=storage_request,
-            snapshot_discriminator=snapshot,
-            current_conversation_id=current_conversation_id,
-            boundary_user_message_id=boundary_user_message_id,
-            continuation=continuation,
+            targets=targets,
         )
-        targets = canonical_archive_search_targets(storage_request)
         run = create_archive_search_run_binding(
             tenant_id=tenant,
             principal_id=principal,
@@ -1247,6 +1574,30 @@ def prepare_archive_search_in_transaction(
             snapshot_discriminator=snapshot,
             run_discriminator=run_id,
             turn_ledger=turn_ledger,
+        )
+        if continuation:
+            redemption = redeem_archive_search_continuation(
+                tenant_id=tenant,
+                principal_id=principal,
+                run_binding=run,
+            )
+            target_authority = _continued_authority_projection(
+                redemption,
+                current_authority,
+                targets,
+            )
+        else:
+            redemption = None
+            target_authority = current_authority
+        recipe = _new_recipe(
+            tenant_id=tenant,
+            principal_id=principal,
+            request=storage_request,
+            snapshot_discriminator=snapshot,
+            current_conversation_id=current_conversation_id,
+            boundary_user_message_id=boundary_user_message_id,
+            continuation=continuation,
+            target_authority=target_authority,
         )
         if continuation:
             fresh = _collect_federated_in_transaction(
@@ -1258,13 +1609,10 @@ def prepare_archive_search_in_transaction(
             )
             context = _new_context(
                 ArchiveSearchAuthorityPhase.BEFORE_MODEL,
-                (_FreshEvidence(run, recipe, fresh),),
+                (_FreshEvidence(run, recipe, fresh, recipe.target_authority),),
             )
-            redemption = redeem_archive_search_continuation(
-                tenant_id=tenant,
-                principal_id=principal,
-                run_binding=run,
-            )
+            if redemption is None:
+                raise _fail()
             batch = _authorize_resumed_before_model(
                 tenant_id=tenant,
                 principal_id=principal,
@@ -1293,7 +1641,7 @@ def prepare_archive_search_in_transaction(
                 raise _fail()
             context = _new_context(
                 ArchiveSearchAuthorityPhase.BEFORE_MODEL,
-                (_FreshEvidence(run, recipe, fresh),),
+                (_FreshEvidence(run, recipe, fresh, recipe.target_authority),),
             )
             issue = (
                 issue_archive_search_continuation(
@@ -1331,6 +1679,8 @@ def prepare_archive_search_in_transaction(
 def refresh_archive_search_reauthorization_in_transaction(
     conn: sqlite3.Connection,
     *,
+    authorization: AuthorizationService,
+    actor: ActorContext,
     tenant_id: str,
     principal_id: str,
     prepared_searches: tuple[PreparedArchiveSearch, ...],
@@ -1355,14 +1705,36 @@ def refresh_archive_search_reauthorization_in_transaction(
             recipe = prepared._recipe
             if recipe.tenant_id != tenant or recipe.principal_id != principal:
                 raise _fail()
+            targets = canonical_archive_search_targets(recipe.request)
+            current_authority = _fresh_target_authority_in_transaction(
+                conn,
+                authorization=authorization,
+                actor=actor,
+                tenant_id=tenant,
+                principal_id=principal,
+                targets=targets,
+            )
+            effective_authority = _narrow_authority_projection(
+                recipe.target_authority,
+                current_authority,
+                targets,
+            )
             fresh = _collect_federated_in_transaction(
                 conn,
                 recipe=recipe,
                 run=prepared._run,
                 phase=ArchiveSearchAuthorityPhase.BEFORE_PUBLICATION,
                 exact_file_reader=exact_file_reader,
+                target_authority=effective_authority,
             )
-            entries.append(_FreshEvidence(prepared._run, recipe, fresh))
+            entries.append(
+                _FreshEvidence(
+                    prepared._run,
+                    recipe,
+                    fresh,
+                    effective_authority,
+                )
+            )
         if not conn.in_transaction:
             raise _fail()
         return _new_context(

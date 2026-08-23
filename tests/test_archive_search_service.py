@@ -4,15 +4,17 @@ import hashlib
 import itertools
 import json
 import sqlite3
-from collections.abc import Iterator
-from contextlib import contextmanager
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
 import pytest
 
 import friday.retrieval.archive_search_service as service_module
+from friday.organs.obsidian import OBSIDIAN_READ
+from friday.permissions import ActorContext, AuthorizationService
 from friday.retrieval.archive_search_authority import (
+    ArchiveSearchPublicationDenialReason,
     ArchiveSearchPublicationDenied,
     attest_archive_search_before_publication,
     canonical_archive_search_targets,
@@ -53,7 +55,6 @@ from friday.retrieval.contracts import (
     SourceRepresentation,
     SourceRevision,
 )
-from friday.storage import SCHEMA_VERSION
 from friday.storage.models import InboxItem, InboxStatus, RawObject
 
 TENANT = "archive-service-tenant"
@@ -64,6 +65,33 @@ _TURNS = itertools.count(1)
 
 class _AlienReviewState(StrEnum):
     CONFIRMED = "confirmed"
+
+
+@dataclass(frozen=True)
+class _AlienActorContext(ActorContext):
+    pass
+
+
+def _actor(*, principal: str = PRINCIPAL) -> ActorContext:
+    return ActorContext(
+        user_id=TENANT,
+        preset_key="user",
+        source="archive-service-test",
+        shared_tenant=True,
+        person_id=principal,
+    )
+
+
+def _authorization(storage: Any) -> AuthorizationService:
+    authorization = AuthorizationService(storage, shared_tenant=TENANT)
+    authorization.register_capability(OBSIDIAN_READ)
+    return authorization
+
+
+def _seed_authority(storage: Any, *, principal: str = PRINCIPAL) -> AuthorizationService:
+    storage.ensure_user(TENANT)
+    storage.ensure_user(principal)
+    return _authorization(storage)
 
 
 def _ledger(*, principal: str = PRINCIPAL):
@@ -82,8 +110,12 @@ def _coverage(payload: dict[str, Any], lane: SearchLane) -> dict[str, Any]:
     return next(item for item in payload["coverage"] if item["lane"] == lane.value)
 
 
-def test_facade_requires_one_caller_owned_transaction_and_closes_unsupported_plan() -> None:
-    conn = sqlite3.connect(":memory:")
+def test_facade_requires_one_caller_owned_transaction_and_closes_unsupported_plan(
+    storage: Any,
+) -> None:
+    authorization = _seed_authority(storage)
+    actor = _actor()
+    conn = storage.conn
     request = ArchiveSearchRequest.create(
         query="private artifact",
         corpora=(ArchiveSearchCorpus.GENERATED,),
@@ -94,6 +126,8 @@ def test_facade_requires_one_caller_owned_transaction_and_closes_unsupported_pla
     with pytest.raises(ArchiveSearchServiceError):
         prepare_archive_search_in_transaction(
             conn,
+            authorization=authorization,
+            actor=actor,
             tenant_id=TENANT,
             principal_id=PRINCIPAL,
             request=request,
@@ -102,18 +136,20 @@ def test_facade_requires_one_caller_owned_transaction_and_closes_unsupported_pla
             turn_ledger=ledger,
         )
 
-    conn.execute("BEGIN")
-    prepared = prepare_archive_search_in_transaction(
-        conn,
-        tenant_id=TENANT,
-        principal_id=PRINCIPAL,
-        request=request,
-        snapshot_discriminator=SNAPSHOT,
-        run_discriminator="inside-transaction",
-        turn_ledger=ledger,
-    )
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=actor,
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="inside-transaction",
+            turn_ledger=ledger,
+        )
+        assert conn.in_transaction
     payload = _payload(prepared)
-    assert conn.in_transaction
     assert payload["candidates"] == []
     assert payload["absence"] == "not_established"
     assert len(payload["coverage"]) == 5
@@ -125,59 +161,46 @@ def test_facade_requires_one_caller_owned_transaction_and_closes_unsupported_pla
     )
 
 
-@pytest.mark.parametrize(
-    ("seed_users", "expected_states", "authority_rechecked", "snapshot_current"),
-    (
-        (
-            True,
-            [CoverageState.PARTIAL.value, CoverageState.PERMISSION_FILTERED.value],
-            True,
-            True,
-        ),
-        (
-            False,
-            [CoverageState.PARTIAL.value, CoverageState.UNAVAILABLE.value],
-            False,
-            False,
-        ),
-    ),
-)
-def test_document_denial_and_storage_failure_are_not_false_absence(
-    seed_users: bool,
-    expected_states: list[str],
-    authority_rechecked: bool,
-    snapshot_current: bool,
+def test_document_storage_failure_is_not_false_absence(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    conn = sqlite3.connect(":memory:")
-    if seed_users:
-        conn.execute("CREATE TABLE users(id TEXT PRIMARY KEY, status TEXT NOT NULL)")
-        conn.commit()
-    conn.execute("BEGIN")
+    authorization = _seed_authority(storage)
+    monkeypatch.setattr(
+        service_module,
+        "search_archive_document_lane",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(sqlite3.OperationalError()),
+    )
     request = ArchiveSearchRequest.create(
         query="private document",
         corpora=(ArchiveSearchCorpus.DOCUMENTS,),
     )
-    prepared = prepare_archive_search_in_transaction(
-        conn,
-        tenant_id=TENANT,
-        principal_id=PRINCIPAL,
-        request=request,
-        snapshot_discriminator=SNAPSHOT,
-        run_discriminator=f"document-failure-{seed_users}",
-        turn_ledger=_ledger(),
-    )
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="document-storage-failure",
+            turn_ledger=_ledger(),
+        )
     payload = _payload(prepared)
     for lane in (SearchLane.CATALOG, SearchLane.LEXICAL):
         item = _coverage(payload, lane)
-        assert item["states"] == expected_states
-        assert item["authority_rechecked"] is authority_rechecked
-        assert item["snapshot_current"] is snapshot_current
+        assert item["states"] == [
+            CoverageState.PARTIAL.value,
+            CoverageState.UNAVAILABLE.value,
+        ]
+        assert item["authority_rechecked"] is False
+        assert item["snapshot_current"] is False
     assert payload["absence"] == "not_established"
 
 
 def test_document_lanes_are_federated_from_the_authoritative_store(storage: Any) -> None:
-    storage.ensure_user(TENANT)
-    storage.ensure_user(PRINCIPAL)
+    authorization = _seed_authority(storage)
     body = "Needle private archive body"
     storage.store_raw_object(
         RawObject(
@@ -219,6 +242,8 @@ def test_document_lanes_are_federated_from_the_authoritative_store(storage: Any)
     with storage.transaction() as conn:
         prepared = prepare_archive_search_in_transaction(
             conn,
+            authorization=authorization,
+            actor=_actor(),
             tenant_id=TENANT,
             principal_id=PRINCIPAL,
             request=request,
@@ -234,94 +259,33 @@ def test_document_lanes_are_federated_from_the_authoritative_store(storage: Any)
     assert _coverage(payload, SearchLane.DENSE)["states"] == ["unavailable"]
 
 
-@contextmanager
-def _message_database() -> Iterator[sqlite3.Connection]:
-    conn = sqlite3.connect(":memory:")
-    try:
-        conn.executescript(
-            """CREATE TABLE conversations (
-                   id TEXT PRIMARY KEY,
-                   user_id TEXT NOT NULL,
-                   title TEXT NOT NULL DEFAULT '',
-                   is_archived INTEGER NOT NULL DEFAULT 0
-               );
-               CREATE TABLE messages (
-                   id TEXT PRIMARY KEY,
-                   conversation_id TEXT NOT NULL,
-                   user_id TEXT NOT NULL,
-                   role TEXT NOT NULL,
-                   content TEXT NOT NULL,
-                   created_at TEXT NOT NULL
-               );
-               CREATE TABLE users (id TEXT PRIMARY KEY, status TEXT NOT NULL);
-               CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-               CREATE VIRTUAL TABLE messages_fts USING fts5(
-                   content,
-                   content=messages,
-                   content_rowid=rowid,
-                   tokenize='unicode61 remove_diacritics 2'
-               );
-               CREATE TRIGGER messages_ai AFTER INSERT ON messages BEGIN
-                   INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
-               END;
-               CREATE TRIGGER messages_ad AFTER DELETE ON messages BEGIN
-                   INSERT INTO messages_fts(messages_fts, rowid, content)
-                   VALUES ('delete', old.rowid, old.content);
-               END;
-               CREATE TRIGGER messages_au AFTER UPDATE ON messages BEGIN
-                   INSERT INTO messages_fts(messages_fts, rowid, content)
-                   VALUES ('delete', old.rowid, old.content);
-                   INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
-               END;"""
-        )
-        conn.execute(
-            "INSERT INTO users(id, status) VALUES(?, 'active')",
-            (PRINCIPAL,),
-        )
-        conn.execute(
-            "INSERT INTO schema_meta(key, value) VALUES('fts_build', ?)",
-            (str(SCHEMA_VERSION),),
-        )
-        conn.execute(
-            "INSERT INTO conversations(id, user_id, title, is_archived) VALUES(?, ?, ?, 0)",
-            ("conv_0000000000000001", PRINCIPAL, "Friday project"),
-        )
-        conn.executemany(
-            """INSERT INTO messages(id, conversation_id, user_id, role, content, created_at)
-               VALUES(?, 'conv_0000000000000001', ?, ?, ?, ?)""",
-            (
-                (
-                    "msg_0000000000000001",
-                    PRINCIPAL,
-                    "user",
-                    "Needle private conversation",
-                    "2026-08-23T08:00:00+00:00",
-                ),
-                (
-                    "msg_0000000000000002",
-                    PRINCIPAL,
-                    "assistant",
-                    "Adjacent context",
-                    "2026-08-23T08:01:00+00:00",
-                ),
-            ),
-        )
-        conn.commit()
-        conn.execute("BEGIN")
-        yield conn
-    finally:
-        conn.close()
-
-
-def test_message_history_uses_authorized_context_and_leaves_other_lanes_unavailable() -> None:
+def test_message_history_uses_authorized_context_and_leaves_other_lanes_unavailable(
+    storage: Any,
+) -> None:
+    authorization = _seed_authority(storage)
+    conversation = storage.create_conversation(PRINCIPAL, "Friday project")
+    storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "user",
+        "Needle private conversation",
+    )
+    storage.store_message(
+        conversation["id"],
+        PRINCIPAL,
+        "assistant",
+        "Adjacent context",
+    )
     request = ArchiveSearchRequest.create(
         query="Needle",
         corpora=(ArchiveSearchCorpus.MESSAGES,),
         limit=5,
     )
-    with _message_database() as conn:
+    with storage.transaction() as conn:
         prepared = prepare_archive_search_in_transaction(
             conn,
+            authorization=authorization,
+            actor=_actor(),
             tenant_id=TENANT,
             principal_id=PRINCIPAL,
             request=request,
@@ -337,8 +301,7 @@ def test_message_history_uses_authorized_context_and_leaves_other_lanes_unavaila
 
 
 def test_obsidian_lanes_verify_exact_bytes_and_merge_one_stable_source(storage: Any) -> None:
-    storage.ensure_user(TENANT)
-    storage.ensure_user(PRINCIPAL)
+    authorization = _seed_authority(storage)
     storage.create_obsidian_bundle(
         PRINCIPAL,
         config_root="/private/config/archive-service",
@@ -389,6 +352,8 @@ def test_obsidian_lanes_verify_exact_bytes_and_merge_one_stable_source(storage: 
     with storage.transaction() as conn:
         prepared = prepare_archive_search_in_transaction(
             conn,
+            authorization=authorization,
+            actor=_actor(),
             tenant_id=TENANT,
             principal_id=PRINCIPAL,
             request=request,
@@ -403,6 +368,278 @@ def test_obsidian_lanes_verify_exact_bytes_and_merge_one_stable_source(storage: 
     assert {item[1] for item in reads} == {"Projects/Phoenix.md"}
     assert _coverage(payload, SearchLane.LEXICAL)["states"] == ["complete"]
     assert _coverage(payload, SearchLane.DENSE)["states"] == ["unavailable"]
+
+
+@pytest.mark.parametrize(
+    ("corpus", "capability"),
+    (
+        (ArchiveSearchCorpus.DOCUMENTS, "knowledge.read"),
+        (ArchiveSearchCorpus.KNOWLEDGE, "knowledge.read"),
+        (ArchiveSearchCorpus.MESSAGES, "conversations.read"),
+        (ArchiveSearchCorpus.OBSIDIAN, "obsidian.read"),
+        (ArchiveSearchCorpus.GENERATED, "knowledge.read"),
+        (ArchiveSearchCorpus.WEB, "knowledge.read"),
+    ),
+)
+def test_initial_explicit_corpus_denial_is_honest_and_reads_no_lane(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    corpus: ArchiveSearchCorpus,
+    capability: str,
+) -> None:
+    authorization = _seed_authority(storage)
+    storage.set_permission_override(PRINCIPAL, capability, "deny")
+    lane_calls: list[str] = []
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
+        lane_calls.append("called")
+        raise AssertionError("a denied corpus reached its storage lane")
+
+    monkeypatch.setattr(service_module, "_collect_document_target", forbidden)
+    monkeypatch.setattr(service_module, "_collect_message_target", forbidden)
+    monkeypatch.setattr(service_module, "_collect_obsidian_target", forbidden)
+    request = ArchiveSearchRequest.create(query="private denied", corpora=(corpus,))
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator=f"initial-deny-{corpus.value}",
+            turn_ledger=_ledger(),
+        )
+    payload = _payload(prepared)
+    assert lane_calls == []
+    assert payload["candidates"] == []
+    assert payload["absence"] == "not_established"
+    assert all(
+        set(item["states"])
+        == {CoverageState.PARTIAL.value, CoverageState.PERMISSION_FILTERED.value}
+        and item["authority_rechecked"] is True
+        and item["snapshot_current"] is True
+        for item in payload["coverage"]
+    )
+
+
+def test_external_archive_corpus_is_unavailable_and_never_reaches_a_lane(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _seed_authority(storage)
+    lane_calls: list[str] = []
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
+        lane_calls.append("called")
+        raise AssertionError("external archive search attempted an execution lane")
+
+    monkeypatch.setattr(service_module, "_collect_document_target", forbidden)
+    monkeypatch.setattr(service_module, "_collect_message_target", forbidden)
+    monkeypatch.setattr(service_module, "_collect_obsidian_target", forbidden)
+    request = ArchiveSearchRequest.create(
+        query="private external",
+        corpora=(ArchiveSearchCorpus.EXTERNAL,),
+    )
+    assert request.permits_outbound is False
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="external-never-outbound",
+            turn_ledger=_ledger(),
+        )
+    payload = _payload(prepared)
+    assert lane_calls == []
+    assert payload["candidates"] == []
+    assert all(item["states"] == [CoverageState.UNAVAILABLE.value] for item in payload["coverage"])
+    assert all(
+        item.capability is None and item.allowed is False
+        for item in prepared._recipe.target_authority
+    )
+
+
+def test_global_search_capability_remains_the_kernel_boundary(storage: Any) -> None:
+    authorization = _seed_authority(storage)
+    storage.set_permission_override(PRINCIPAL, "search.use", "deny")
+    request = ArchiveSearchRequest.create(
+        query="kernel already admitted this search",
+        corpora=(ArchiveSearchCorpus.GENERATED,),
+    )
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="kernel-search-boundary",
+            turn_ledger=_ledger(),
+        )
+    assert all(
+        CoverageState.PERMISSION_FILTERED.value not in item["states"]
+        for item in _payload(prepared)["coverage"]
+    )
+
+
+def test_same_value_foreign_actor_and_unbound_principal_fail_closed(storage: Any) -> None:
+    authorization = _seed_authority(storage)
+    canonical = _actor()
+    alien = _AlienActorContext(
+        user_id=canonical.user_id,
+        preset_key=canonical.preset_key,
+        source=canonical.source,
+        identity_id=canonical.identity_id,
+        session_id=canonical.session_id,
+        shared_tenant=canonical.shared_tenant,
+        person_id=canonical.person_id,
+    )
+    request = ArchiveSearchRequest.create(
+        query="private actor",
+        corpora=(ArchiveSearchCorpus.GENERATED,),
+    )
+    for actor in (
+        alien,
+        ActorContext(
+            user_id=TENANT,
+            preset_key="owner",
+            source="archive-service-test",
+            person_id=PRINCIPAL,
+        ),
+    ):
+        with storage.transaction() as conn, pytest.raises(ArchiveSearchServiceError):
+            prepare_archive_search_in_transaction(
+                conn,
+                authorization=authorization,
+                actor=actor,
+                tenant_id=TENANT,
+                principal_id=PRINCIPAL,
+                request=request,
+                snapshot_discriminator=SNAPSHOT,
+                run_discriminator=f"actor-spoof-{type(actor).__name__}",
+                turn_ledger=_ledger(),
+            )
+
+
+@pytest.mark.parametrize(
+    ("corpus", "capability"),
+    (
+        (ArchiveSearchCorpus.GENERATED, "knowledge.read"),
+        (ArchiveSearchCorpus.MESSAGES, "conversations.read"),
+        (ArchiveSearchCorpus.OBSIDIAN, "obsidian.read"),
+    ),
+)
+def test_between_phase_explicit_deny_blocks_publication(
+    storage: Any,
+    corpus: ArchiveSearchCorpus,
+    capability: str,
+) -> None:
+    authorization = _seed_authority(storage)
+    request = ArchiveSearchRequest.create(query="private late deny", corpora=(corpus,))
+    ledger = _ledger()
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator=f"late-deny-{corpus.value}",
+            turn_ledger=ledger,
+        )
+    ledger.admit_model_tool_bytes(
+        prepared.run_binding,
+        prepared.authorized_batch,
+        prepared.authorized_batch.model_visible_canonical_bytes,
+    )
+    ledger.freeze_for_publication()
+    storage.set_permission_override(PRINCIPAL, capability, "deny")
+    with storage.transaction() as conn:
+        context = refresh_archive_search_reauthorization_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            prepared_searches=(prepared,),
+        )
+    with pytest.raises(ArchiveSearchPublicationDenied) as denied:
+        attest_archive_search_before_publication(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            ledger=ledger,
+            answer="This must not publish",
+            candidate_reauthorizer=reauthorize_archive_search_candidate,
+            coverage_reauthorizer=reauthorize_archive_search_coverage,
+            authority_context=context,
+        )
+    assert denied.value.reason is ArchiveSearchPublicationDenialReason.AUTHORITY_CHANGED
+
+
+def test_between_phase_explicit_allow_revocation_blocks_publication(storage: Any) -> None:
+    authorization = _seed_authority(storage)
+    authorization.create_custom_preset(
+        "archive_denied",
+        "Archive denied",
+        set(),
+        created_by=PRINCIPAL,
+    )
+    authorization.set_user_preset(PRINCIPAL, "archive_denied")
+    storage.set_permission_override(PRINCIPAL, "knowledge.read", "allow")
+    request = ArchiveSearchRequest.create(
+        query="private late revoke",
+        corpora=(ArchiveSearchCorpus.GENERATED,),
+    )
+    ledger = _ledger()
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="late-explicit-allow-revoke",
+            turn_ledger=ledger,
+        )
+    ledger.admit_model_tool_bytes(
+        prepared.run_binding,
+        prepared.authorized_batch,
+        prepared.authorized_batch.model_visible_canonical_bytes,
+    )
+    ledger.freeze_for_publication()
+    storage.set_permission_override(PRINCIPAL, "knowledge.read", None)
+    with storage.transaction() as conn:
+        context = refresh_archive_search_reauthorization_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            prepared_searches=(prepared,),
+        )
+    with pytest.raises(ArchiveSearchPublicationDenied) as denied:
+        attest_archive_search_before_publication(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            ledger=ledger,
+            answer="This must not publish",
+            candidate_reauthorizer=reauthorize_archive_search_candidate,
+            coverage_reauthorizer=reauthorize_archive_search_coverage,
+            authority_context=context,
+        )
+    assert denied.value.reason is ArchiveSearchPublicationDenialReason.AUTHORITY_CHANGED
 
 
 def _synthetic_candidate(index: int, rank: int) -> ArchiveSearchCandidate:
@@ -501,31 +738,174 @@ def _synthetic_federation(_conn: sqlite3.Connection, **values: Any):
     )
 
 
+def test_sealed_corpus_authority_rejects_a_federation_bypass(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _seed_authority(storage)
+    storage.set_permission_override(PRINCIPAL, "knowledge.read", "deny")
+    monkeypatch.setattr(
+        service_module,
+        "_collect_federated_in_transaction",
+        _synthetic_federation,
+    )
+    request = ArchiveSearchRequest.create(
+        query="private bypass",
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        limit=1,
+    )
+    with storage.transaction() as conn, pytest.raises(ArchiveSearchServiceError):
+        prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="federation-bypass",
+            turn_ledger=_ledger(),
+        )
+
+
+def test_continuation_cannot_widen_a_previously_denied_corpus(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _seed_authority(storage)
+    storage.set_permission_override(PRINCIPAL, "obsidian.read", "deny")
+    obsidian_calls: list[tuple[SearchCorpus, SearchLane]] = []
+
+    def synthetic_document_lane(
+        _conn: sqlite3.Connection,
+        **values: Any,
+    ) -> tuple[tuple[ArchiveSearchCandidate, ...], SearchCoverage]:
+        target = values["target"]
+        binding = values["run"].execution_binding
+        candidates = (
+            tuple(_synthetic_candidate(index, index) for index in range(1, 4))
+            if target == (SearchCorpus.RAW_DOCUMENTS, SearchLane.CATALOG)
+            else ()
+        )
+        return candidates, SearchCoverage.create(
+            corpus=target[0],
+            lane=target[1],
+            execution_binding=binding,
+            states=(
+                (CoverageState.COMPLETE,)
+                if candidates
+                else (CoverageState.UNAVAILABLE,)
+            ),
+            eligible_authorized=3 if candidates else None,
+            examined=3 if candidates else 0,
+            matched_at_least=3 if candidates else 0,
+            returned=3 if candidates else 0,
+            authority_rechecked=True,
+            snapshot_current=True,
+        )
+
+    def observed_obsidian_lane(
+        _conn: sqlite3.Connection,
+        **values: Any,
+    ) -> tuple[tuple[ArchiveSearchCandidate, ...], SearchCoverage]:
+        target = values["target"]
+        obsidian_calls.append(target)
+        return (), service_module._unsupported(
+            target,
+            values["run"].execution_binding,
+        )
+
+    monkeypatch.setattr(
+        service_module,
+        "_collect_document_target",
+        synthetic_document_lane,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_collect_obsidian_target",
+        observed_obsidian_lane,
+    )
+    ledger = _ledger()
+    request = ArchiveSearchRequest.create(
+        query="private continuation",
+        corpora=(ArchiveSearchCorpus.DOCUMENTS, ArchiveSearchCorpus.OBSIDIAN),
+        limit=1,
+    )
+    with storage.transaction() as conn:
+        first = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="authority-continuation-first",
+            turn_ledger=ledger,
+        )
+    first_payload = _payload(first)
+    assert isinstance(first_payload["continuation"], str)
+    assert obsidian_calls == []
+
+    storage.set_permission_override(PRINCIPAL, "obsidian.read", None)
+    resumed = ArchiveSearchRequest.create(
+        query="private continuation",
+        corpora=(ArchiveSearchCorpus.DOCUMENTS, ArchiveSearchCorpus.OBSIDIAN),
+        limit=1,
+        continuation=first_payload["continuation"],
+    )
+    with storage.transaction() as conn:
+        second = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=resumed,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="authority-continuation-second",
+            turn_ledger=ledger,
+        )
+    assert obsidian_calls == []
+    assert all(
+        item.allowed is False
+        for item in second._recipe.target_authority
+        if item.corpus is SearchCorpus.OBSIDIAN
+    )
+    assert all(
+        item["corpus"] == ArchiveSearchCorpus.DOCUMENTS.value
+        for item in _payload(second)["candidates"]
+    )
+
+
 def test_deterministic_continuation_reauthorizes_against_fresh_full_universe(
     monkeypatch: pytest.MonkeyPatch,
+    storage: Any,
 ) -> None:
     monkeypatch.setattr(
         service_module,
         "_collect_federated_in_transaction",
         _synthetic_federation,
     )
-    conn = sqlite3.connect(":memory:")
-    conn.execute("BEGIN")
+    authorization = _seed_authority(storage)
     ledger = _ledger()
     initial_request = ArchiveSearchRequest.create(
         query="private documents",
         corpora=(ArchiveSearchCorpus.DOCUMENTS,),
         limit=1,
     )
-    first = prepare_archive_search_in_transaction(
-        conn,
-        tenant_id=TENANT,
-        principal_id=PRINCIPAL,
-        request=initial_request,
-        snapshot_discriminator=SNAPSHOT,
-        run_discriminator="continuation-first",
-        turn_ledger=ledger,
-    )
+    with storage.transaction() as conn:
+        first = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=initial_request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="continuation-first",
+            turn_ledger=ledger,
+        )
     first_payload = _payload(first)
     assert len(first_payload["candidates"]) == 1
     assert isinstance(first_payload["continuation"], str)
@@ -536,15 +916,18 @@ def test_deterministic_continuation_reauthorizes_against_fresh_full_universe(
         limit=1,
         continuation=first_payload["continuation"],
     )
-    second = prepare_archive_search_in_transaction(
-        conn,
-        tenant_id=TENANT,
-        principal_id=PRINCIPAL,
-        request=resumed_request,
-        snapshot_discriminator=SNAPSHOT,
-        run_discriminator="continuation-second",
-        turn_ledger=ledger,
-    )
+    with storage.transaction() as conn:
+        second = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=resumed_request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="continuation-second",
+            turn_ledger=ledger,
+        )
     second_payload = _payload(second)
     assert len(second_payload["candidates"]) == 1
     assert second_payload["continuation"] is not None
@@ -556,12 +939,15 @@ def test_deterministic_continuation_reauthorizes_against_fresh_full_universe(
             prepared.authorized_batch.model_visible_canonical_bytes,
         )
     ledger.freeze_for_publication()
-    context = refresh_archive_search_reauthorization_in_transaction(
-        conn,
-        tenant_id=TENANT,
-        principal_id=PRINCIPAL,
-        prepared_searches=(first, second),
-    )
+    with storage.transaction() as conn:
+        context = refresh_archive_search_reauthorization_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            prepared_searches=(first, second),
+        )
     attestation = attest_archive_search_before_publication(
         tenant_id=TENANT,
         principal_id=PRINCIPAL,
@@ -576,6 +962,7 @@ def test_deterministic_continuation_reauthorizes_against_fresh_full_universe(
 
 def test_same_json_foreign_nested_type_invalidates_candidate_and_prepared_carrier(
     monkeypatch: pytest.MonkeyPatch,
+    storage: Any,
 ) -> None:
     canonical = _synthetic_candidate(1, 1)
     alien = _synthetic_candidate(1, 1)
@@ -588,29 +975,33 @@ def test_same_json_foreign_nested_type_invalidates_candidate_and_prepared_carrie
         "_collect_federated_in_transaction",
         _synthetic_federation,
     )
-    conn = sqlite3.connect(":memory:")
-    conn.execute("BEGIN")
+    authorization = _seed_authority(storage)
     request = ArchiveSearchRequest.create(
         query="private documents",
         corpora=(ArchiveSearchCorpus.DOCUMENTS,),
         limit=1,
     )
-    prepared = prepare_archive_search_in_transaction(
-        conn,
-        tenant_id=TENANT,
-        principal_id=PRINCIPAL,
-        request=request,
-        snapshot_discriminator=SNAPSHOT,
-        run_discriminator="same-json-spoof",
-        turn_ledger=_ledger(),
-    )
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="same-json-spoof",
+            turn_ledger=_ledger(),
+        )
     run = prepared.run_binding
     batch = prepared.authorized_batch
     carried = batch._page.results[0].candidate
     object.__setattr__(carried, "review_state", _AlienReviewState.CONFIRMED)
-    with pytest.raises(ArchiveSearchServiceError):
+    with storage.transaction() as conn, pytest.raises(ArchiveSearchServiceError):
         refresh_archive_search_reauthorization_in_transaction(
             conn,
+            authorization=authorization,
+            actor=_actor(),
             tenant_id=TENANT,
             principal_id=PRINCIPAL,
             prepared_searches=(prepared,),
@@ -618,23 +1009,27 @@ def test_same_json_foreign_nested_type_invalidates_candidate_and_prepared_carrie
     assert run.execution_binding.is_live_private_request_binding
 
 
-def test_publication_refresh_attests_exact_batch_and_rejects_wrong_actor() -> None:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("BEGIN")
+def test_publication_refresh_attests_exact_batch_and_rejects_wrong_actor(
+    storage: Any,
+) -> None:
+    authorization = _seed_authority(storage)
     request = ArchiveSearchRequest.create(
         query="private artifact",
         corpora=(ArchiveSearchCorpus.GENERATED,),
     )
     ledger = _ledger()
-    prepared = prepare_archive_search_in_transaction(
-        conn,
-        tenant_id=TENANT,
-        principal_id=PRINCIPAL,
-        request=request,
-        snapshot_discriminator=SNAPSHOT,
-        run_discriminator="publication",
-        turn_ledger=ledger,
-    )
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="publication",
+            turn_ledger=ledger,
+        )
     body = prepared.authorized_batch.model_visible_canonical_bytes
     ledger.admit_model_tool_bytes(
         prepared.run_binding,
@@ -642,19 +1037,24 @@ def test_publication_refresh_attests_exact_batch_and_rejects_wrong_actor() -> No
         body,
     )
     ledger.freeze_for_publication()
-    with pytest.raises(ArchiveSearchServiceError):
+    with storage.transaction() as conn, pytest.raises(ArchiveSearchServiceError):
         refresh_archive_search_reauthorization_in_transaction(
             conn,
+            authorization=authorization,
+            actor=_actor(),
             tenant_id=TENANT,
             principal_id="wrong-principal",
             prepared_searches=(prepared,),
         )
-    context = refresh_archive_search_reauthorization_in_transaction(
-        conn,
-        tenant_id=TENANT,
-        principal_id=PRINCIPAL,
-        prepared_searches=(prepared,),
-    )
+    with storage.transaction() as conn:
+        context = refresh_archive_search_reauthorization_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            prepared_searches=(prepared,),
+        )
     attestation = attest_archive_search_before_publication(
         tenant_id=TENANT,
         principal_id=PRINCIPAL,
@@ -677,32 +1077,45 @@ def test_publication_refresh_attests_exact_batch_and_rejects_wrong_actor() -> No
         )
 
 
-def test_publication_refresh_reproduces_honestly_degraded_storage_coverage() -> None:
-    conn = sqlite3.connect(":memory:")
-    conn.execute("BEGIN")
+def test_publication_refresh_reproduces_honestly_degraded_storage_coverage(
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _seed_authority(storage)
+    monkeypatch.setattr(
+        service_module,
+        "search_archive_document_lane",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(sqlite3.OperationalError()),
+    )
     request = ArchiveSearchRequest.create(
         query="missing storage",
         corpora=(ArchiveSearchCorpus.DOCUMENTS,),
     )
     ledger = _ledger()
-    prepared = prepare_archive_search_in_transaction(
-        conn,
-        tenant_id=TENANT,
-        principal_id=PRINCIPAL,
-        request=request,
-        snapshot_discriminator=SNAPSHOT,
-        run_discriminator="degraded-publication",
-        turn_ledger=ledger,
-    )
+    with storage.transaction() as conn:
+        prepared = prepare_archive_search_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            request=request,
+            snapshot_discriminator=SNAPSHOT,
+            run_discriminator="degraded-publication",
+            turn_ledger=ledger,
+        )
     body = prepared.authorized_batch.model_visible_canonical_bytes
     ledger.admit_model_tool_bytes(prepared.run_binding, prepared.authorized_batch, body)
     ledger.freeze_for_publication()
-    context = refresh_archive_search_reauthorization_in_transaction(
-        conn,
-        tenant_id=TENANT,
-        principal_id=PRINCIPAL,
-        prepared_searches=(prepared,),
-    )
+    with storage.transaction() as conn:
+        context = refresh_archive_search_reauthorization_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=_actor(),
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            prepared_searches=(prepared,),
+        )
     attestation = attest_archive_search_before_publication(
         tenant_id=TENANT,
         principal_id=PRINCIPAL,
