@@ -67,8 +67,9 @@ Live: Friday `0.207.4` / `c91260d`, schema 38
 
 ## Next implementation order
 
-1. Add the canonical golden-journey/evidence registry with strict readiness
-   states and mechanically linked proof.
+1. Use the canonical golden-journey/evidence registry in
+   `outer_sol/PROJECT_IMPLEMENTATION_STATUS.md`; its machine validator owns the
+   strict readiness and evidence rules.
 2. Establish stable retrieval and passage identity plus honest coverage, then a
    read-only federated `archive_search` facade.
 3. Extend durable recall to documents/messages only through those stable
