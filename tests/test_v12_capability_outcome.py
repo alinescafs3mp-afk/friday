@@ -282,7 +282,7 @@ def test_complete_outcome_passes_for_both_existing_routes() -> None:
 @pytest.mark.parametrize(
     "mutation",
     (
-        lambda item: replace(item, route=RouteClass.WEB_READ),
+        lambda item: replace(item, route=RouteClass.EFFECT),
         lambda item: replace(item, evidence_identity_sha256=None),
         lambda item: replace(item, citation_labels=()),
         lambda item: replace(item, authority_rechecked=False),

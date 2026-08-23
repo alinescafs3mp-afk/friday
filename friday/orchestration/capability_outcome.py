@@ -1,8 +1,10 @@
-"""Closed outcome and completion gate for the first promoted V12 read routes.
+"""Closed outcome and completion gates for promoted bounded read contours.
 
 The contract is deliberately smaller than the future cross-capability outcome
 ledger.  It carries no prose, paths, object identifiers, or evidence bodies.
-Only the existing ``file_read`` and ``archive_read`` handlers may produce v1.
+The existing V12 file gates remain deliberately narrower than the outcome
+carrier: a separately gated legacy public-news contour may also persist
+``web_read`` outcomes without activating a V12 web handler.
 """
 
 from __future__ import annotations
@@ -28,7 +30,8 @@ _MAX_SERIALIZED_BYTES = 4_096
 _MAX_RECEIPT_SERIALIZED_BYTES = 8_192
 _MAX_ASSISTANT_METADATA_BYTES = 65_536
 _MAX_CITATIONS = 32
-_PROMOTED_ROUTES = frozenset({RouteClass.FILE_READ, RouteClass.ARCHIVE_READ})
+_OUTCOME_ROUTES = frozenset({RouteClass.FILE_READ, RouteClass.ARCHIVE_READ, RouteClass.WEB_READ})
+_FILE_GATE_ROUTES = frozenset({RouteClass.FILE_READ, RouteClass.ARCHIVE_READ})
 
 
 class CapabilityOutcomeError(ValueError):
@@ -55,6 +58,7 @@ class CompletionGateDecision(StrEnum):
     READY_TO_PUBLISH = "ready_to_publish"
     RETURN_PARTIAL = "return_partial"
     RETURN_EMPTY = "return_empty"
+    RETURN_UNAVAILABLE = "return_unavailable"
     RETRY = "retry"
     DENY = "deny"
 
@@ -123,7 +127,7 @@ class CapabilityOutcome:
     verified: bool
 
     def __post_init__(self) -> None:
-        if not isinstance(self.route, RouteClass) or self.route not in _PROMOTED_ROUTES:
+        if not isinstance(self.route, RouteClass) or self.route not in _OUTCOME_ROUTES:
             raise CapabilityOutcomeError("route is not admitted by capability outcome v1")
         if not isinstance(self.status, CapabilityOutcomeStatus):
             raise CapabilityOutcomeError("status must be a CapabilityOutcomeStatus")
@@ -175,7 +179,9 @@ class CapabilityOutcome:
         # A verified partial/empty result is stable.  Authority denial must never
         # be retried through another path.  Only transient unavailability is
         # retryable in this first read-only contract.
-        return self.status is CapabilityOutcomeStatus.UNAVAILABLE
+        return bool(
+            self.status is CapabilityOutcomeStatus.UNAVAILABLE and self.route is not RouteClass.WEB_READ
+        )
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -432,7 +438,7 @@ def evaluate_read_only_completion(
 
     if type(outcome) is not CapabilityOutcome:  # exact v1, never a widened subclass
         raise CapabilityOutcomeError("completion gate requires CapabilityOutcome v1")
-    if expected_route not in _PROMOTED_ROUTES or outcome.route is not expected_route:
+    if expected_route not in _FILE_GATE_ROUTES or outcome.route is not expected_route:
         raise CapabilityOutcomeError("completion gate route binding failed")
     expected_plan = _digest(expected_plan_sha256, label="expected_plan_sha256")
     expected_evidence = _digest(

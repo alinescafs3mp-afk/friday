@@ -124,6 +124,40 @@ from friday.office_attestation import (
     OFFICE_STRUCTURE_ATTESTATION_METADATA_KEY,
     verify_office_structure_attestation,
 )
+from friday.orchestration.capability_outcome import (
+    attach_accepted_capability_outcome_receipt,
+    load_accepted_capability_outcome_receipt,
+)
+from friday.orchestration.simple_public_news_outcome import (
+    SIMPLE_PUBLIC_NEWS_ENVELOPE_FALLBACK as _SIMPLE_PUBLIC_NEWS_ENVELOPE_FALLBACK,
+)
+from friday.orchestration.simple_public_news_outcome import (
+    SIMPLE_PUBLIC_NEWS_EVIDENCE_MARKER as _SIMPLE_PUBLIC_NEWS_EVIDENCE_MARKER,
+)
+from friday.orchestration.simple_public_news_outcome import (
+    SIMPLE_PUBLIC_NEWS_EVIDENCE_MAX_CHARS as _SIMPLE_PUBLIC_NEWS_EVIDENCE_MAX_CHARS,
+)
+from friday.orchestration.simple_public_news_outcome import (
+    SIMPLE_PUBLIC_NEWS_MISSING_FALLBACK as _WEB_EVIDENCE_MISSING,
+)
+from friday.orchestration.simple_public_news_outcome import (
+    SIMPLE_PUBLIC_NEWS_SYNTHESIS_FALLBACK as _SIMPLE_PUBLIC_NEWS_SYNTHESIS_FALLBACK,
+)
+from friday.orchestration.simple_public_news_outcome import (
+    SIMPLE_PUBLIC_NEWS_UNVERIFIED_FALLBACK as _SIMPLE_PUBLIC_NEWS_UNVERIFIED_FALLBACK,
+)
+from friday.orchestration.simple_public_news_outcome import (
+    LegacySimplePublicNewsPlan,
+    SimplePublicNewsEvidence,
+    SimplePublicNewsEvidenceStatus,
+    build_simple_public_news_result,
+    require_accepted_simple_public_news_publication,
+    simple_public_news_content_identity,
+    simple_public_news_model_envelope_identity,
+    simple_public_news_outcome,
+    simple_public_news_source_ledger_identity,
+    simple_public_news_topic_mismatch_is_empty,
+)
 from friday.organs.obsidian.conversation import (
     OBSIDIAN_READ_TOOL_NAMES,
     OBSIDIAN_TOOL_NAMES,
@@ -150,6 +184,7 @@ from friday.source_identity import (
     raw_source_identity_sha256 as _raw_source_identity_sha256,
 )
 from friday.storage import FridayStorage, normalize_conversation_mode, validate_user_id
+from friday.storage._conversations import store_message_in_transaction
 from friday.storage._core import iso_date
 from friday.storage._intake import (
     resolve_explicit_file_citation_sources,
@@ -363,8 +398,6 @@ _TOOL_EVIDENCE_CHARS = 2500
 # envelope.  Its judge and sole repair must see those exact same bytes rather
 # than the ordinary query-focused 2.5k excerpt; otherwise a fluent synthesis
 # can be "verified" against a different subset of the web result.
-_SIMPLE_PUBLIC_NEWS_EVIDENCE_MARKER = "simple_public_news_full"
-_SIMPLE_PUBLIC_NEWS_EVIDENCE_MAX_CHARS = 12_100
 # A compound public-research -> Obsidian note is another bounded publication
 # lane.  Its synthesis, judge and optional repair must see the same projected
 # web envelope; re-slicing it to 2.5k made unsupported model-specific details
@@ -24278,6 +24311,10 @@ def _project_web_tool_result(
             continue
         seen.add(identity)
         all_distinct.append(source)
+    if tool_name == "web_research" and len(all_distinct) < len(usable):
+        # Duplicate provider rows shrink the verifier's evidence universe.
+        # They remain usable, but cannot authorize a complete publication.
+        incomplete = True
     source_limit = max(1, min(int(limit), 10))
     deduplicated = all_distinct[:source_limit]
     if len(all_distinct) > source_limit:
@@ -24501,11 +24538,6 @@ _SIMPLE_PUBLIC_NEWS_ANY_TIME_SCOPE = re.compile(
 # responsibility.
 _SIMPLE_PUBLIC_NEWS_TIMEOUT_SEC = 60.0
 _SIMPLE_PUBLIC_NEWS_MAX_TOKENS = 900
-_SIMPLE_PUBLIC_NEWS_UNVERIFIED_FALLBACK = (
-    "Поиск завершён и проверяемые источники получены, но сводку не удалось "
-    "подтвердить по полученной выдаче. Ниже оставляю только найденные источники; "
-    "неподтверждённые факты не публикую."
-)
 
 _FOREIGN_PUBLIC_SOURCE_SCOPE = re.compile(
     r"не\s+из\s+ру\w*|не\s+рос\w+|не\s+рунет\w*|вне\s+рунет\w*|"
@@ -26547,11 +26579,6 @@ _PRIVATE_WEB_SEARCH_BLOCKED = (
 _PRIVATE_MCP_OUTPUT_BLOCKED = (
     "Не могу создать файл во внешнем MCP outbox из приватного источника: "
     "MCP-инструменты закрыты до передачи содержимого. Файл не создан."
-)
-_WEB_EVIDENCE_MISSING = (
-    "В этом ходе я не получила проверяемую интернет-выдачу и не буду выдавать ответ "
-    "из памяти за свежую интернет-сводку. Повтори запрос позже; если поиск отключён "
-    "из-за приватных вложений, открой новый диалог без файлов."
 )
 
 
@@ -29532,6 +29559,25 @@ class AgentContext:
     #: evidence list.  This distinguishes an open search/research sample from a
     #: complete single-page fetch and survives unrelated evidence crowd-out.
     web_evidence_tools: list[str] = field(default_factory=list)
+    #: Digest-only, code-owned contract for the already isolated simple public-
+    #: news lane. These values never enter prompts, response dictionaries or
+    #: durable metadata directly; only an accepted CapabilityOutcome receipt may
+    #: retain their plan/evidence identities at the final assistant commit.
+    simple_public_news_plan: LegacySimplePublicNewsPlan | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    simple_public_news_evidence: SimplePublicNewsEvidence | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    simple_public_news_verified_content_sha256: str | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     #: At least one accepted web result was shortened in the synthesis prompt
     #: (same-round share, prior-round compaction), or a planned web call was
     #: dropped. The verifier may have a different evidence universe and may
@@ -30288,6 +30334,28 @@ class AgentRuntime:
             context.web_evidence_status = "none"
 
     @staticmethod
+    def _simple_public_news_plan_for(
+        speech: str,
+        outbound_query: str,
+    ) -> LegacySimplePublicNewsPlan:
+        """Freeze the exact code-owned legacy news request without retaining text."""
+
+        freshness = _simple_public_news_freshness(speech)
+        if freshness is None:
+            raise ValueError("simple public-news plan requires an exact freshness window")
+        source_class = _web_source_class_on_speech(speech)
+        topic_class = _web_research_collision_topic_class(speech) if source_class == "foreign" else ""
+        query = _public_news_search_query(speech, outbound_query, source_class)
+        return LegacySimplePublicNewsPlan.from_request(
+            speech,
+            query,
+            freshness=freshness,
+            source_class=source_class,
+            topic_class=topic_class,
+            max_sources=3,
+        )
+
+    @staticmethod
     def _raw_attachment_ids(items: list[dict[str, Any]] | None) -> list[str]:
         """Syntactically valid Raw Object pointers, with no caller metadata."""
 
@@ -30964,6 +31032,33 @@ class AgentRuntime:
             return False
         fresh_actor = replace(actor, preset_key=str(principal_row["preset_key"] or "user"))
         return bool(authorization.authorize(fresh_actor, expected_security_id).allowed)
+
+    def _simple_public_news_publication_authorized(
+        self,
+        conn: Any,
+        *,
+        actor: ActorContext,
+    ) -> bool:
+        """Re-authorize the exact legacy news capability at assistant commit."""
+
+        get_tool = getattr(self.kernel, "get_tool", None)
+        tool_spec = get_tool("web_research") if callable(get_tool) else None
+        if (
+            str(getattr(tool_spec, "name", "") or "") != "web_research"
+            or str(getattr(tool_spec, "security_id", "") or "") != "web.research"
+            or str(getattr(tool_spec, "risk", "") or "") != "mutate"
+        ):
+            return False
+        principal = str(actor.own_id or "").strip()
+        principal_row = conn.execute(
+            "SELECT preset_key, status FROM users WHERE id=?",
+            (principal,),
+        ).fetchone()
+        authorization = getattr(self.kernel, "authorization", None)
+        if principal_row is None or str(principal_row["status"] or "") != "active" or authorization is None:
+            return False
+        fresh_actor = replace(actor, preset_key=str(principal_row["preset_key"] or "user"))
+        return bool(authorization.authorize(fresh_actor, "web.research").allowed)
 
     def _final_voice_tool_authorized(
         self,
@@ -42652,11 +42747,15 @@ class AgentRuntime:
             and obsidian_publication_tool == obsidian_tool_ledger[-1]
         )
         obsidian_publication_reauth_required = bool(obsidian_owned_response and obsidian_tool_ledger)
+        simple_public_news_owned_response = response.get("_simple_public_news_owned") is True
+        simple_public_news_publication_reauth_required = simple_public_news_owned_response
         publication_reauth_required = bool(
             attachment_publication_reauth_required
             or source_search_publication_reauth_required
             or obsidian_owned_response
+            or simple_public_news_publication_reauth_required
         )
+        accepted_simple_public_news_outcome = None
         with self.storage.transaction() as publication_conn:
             attachment_publication_authorized = bool(
                 not attachment_publication_reauth_required
@@ -42697,11 +42796,19 @@ class AgentRuntime:
                     )
                 )
             )
+            simple_public_news_publication_authorized = bool(
+                not simple_public_news_publication_reauth_required
+                or self._simple_public_news_publication_authorized(
+                    publication_conn,
+                    actor=actor,
+                )
+            )
             publication_authorized = bool(
                 not publication_reauth_required
                 or attachment_publication_authorized
                 and source_search_publication_authorized
                 and obsidian_publication_authorized
+                and simple_public_news_publication_authorized
             )
             final_voice_publication_authorized = bool(
                 final_voice is None
@@ -42723,6 +42830,10 @@ class AgentRuntime:
             obsidian_authority_changed_before_publication = bool(
                 obsidian_owned_response and not obsidian_publication_authorized
             )
+            simple_public_news_authority_changed_before_publication = bool(
+                simple_public_news_publication_reauth_required
+                and not simple_public_news_publication_authorized
+            )
             if not publication_authorized:
                 LOGGER.warning("source-publication: authority changed before assistant commit")
                 publication_authority_issues = [
@@ -42740,6 +42851,10 @@ class AgentRuntime:
                             "obsidian_authority_changed_before_publication",
                             obsidian_authority_changed_before_publication,
                         ),
+                        (
+                            "simple_public_news_authority_changed_before_publication",
+                            simple_public_news_authority_changed_before_publication,
+                        ),
                     )
                     if changed
                 ]
@@ -42756,6 +42871,8 @@ class AgentRuntime:
                         else "Напоминание было сохранено; автоматическая доставка сейчас недоступна."
                     )
                 authority_changed_notice = _ATTACHMENT_AUTHORITY_CHANGED_BEFORE_PUBLICATION
+                if simple_public_news_authority_changed_before_publication:
+                    authority_changed_notice = _WEB_EVIDENCE_MISSING
                 if obsidian_authority_changed_before_publication:
                     authority_changed_notice = (
                         _OBSIDIAN_WRITE_AUTHORITY_CHANGED_BEFORE_PUBLICATION
@@ -42878,6 +42995,56 @@ class AgentRuntime:
                     "attachment_query_files_matched",
                 ):
                     assistant_metadata.pop(private_key, None)
+
+            if simple_public_news_owned_response:
+                plan = context.simple_public_news_plan
+                evidence = context.simple_public_news_evidence
+                if type(plan) is not LegacySimplePublicNewsPlan:
+                    raise ValueError("simple public-news publication has no frozen plan")
+                if type(evidence) is not SimplePublicNewsEvidence:
+                    raise ValueError("simple public-news publication has no typed evidence")
+                current_source_ledger_sha256, current_citation_labels = (
+                    simple_public_news_source_ledger_identity(web_sources)
+                )
+                current_model_envelope_sha256 = simple_public_news_model_envelope_identity(
+                    response.get("tool_evidence")
+                )
+                raw_news_tools = response.get("tools_used")
+                news_tools = list(raw_news_tools) if isinstance(raw_news_tools, (list, tuple)) else []
+                news_research_call_count = news_tools.count("web_research")
+                news_result = build_simple_public_news_result(
+                    evidence,
+                    content=content,
+                    source_ledger_sha256=current_source_ledger_sha256,
+                    model_generated=response.get("_model_generated") is True,
+                    verifier_status=verification_status,
+                    legacy_web_status=web_evidence_status,
+                    authority_allowed=simple_public_news_publication_authorized,
+                )
+                accepted_simple_public_news_outcome = simple_public_news_outcome(
+                    plan,
+                    evidence,
+                    news_result,
+                    authority_allowed=simple_public_news_publication_authorized,
+                )
+                require_accepted_simple_public_news_publication(
+                    accepted_simple_public_news_outcome,
+                    plan=plan,
+                    evidence=evidence,
+                    result=news_result,
+                    answer=content,
+                    current_source_ledger_sha256=current_source_ledger_sha256,
+                    current_citation_labels=current_citation_labels,
+                    current_model_envelope_sha256=current_model_envelope_sha256,
+                    verified_content_sha256=context.simple_public_news_verified_content_sha256,
+                    research_call_count=news_research_call_count,
+                    authority_rechecked=True,
+                    authority_allowed=simple_public_news_publication_authorized,
+                )
+                attach_accepted_capability_outcome_receipt(
+                    assistant_metadata,
+                    accepted_simple_public_news_outcome,
+                )
 
             trace_structural = assistant_metadata.get("structural")
             trace_structural = trace_structural if isinstance(trace_structural, Mapping) else {}
@@ -43188,18 +43355,40 @@ class AgentRuntime:
             except Exception as exc:  # noqa: BLE001 - shadow tracing cannot break chat publication
                 LOGGER.warning("interaction-trace omitted (%s)", type(exc).__name__)
 
-            assistant_message = self.storage.store_message(
-                conversation_id,
-                user_id,
-                "assistant",
-                content,
-                metadata=assistant_metadata,
-                reply_to=source_search_lineage_user_message_id,
-            )
+            if accepted_simple_public_news_outcome is not None:
+                load_accepted_capability_outcome_receipt(
+                    assistant_metadata,
+                    expected_outcome=accepted_simple_public_news_outcome,
+                )
+                assistant_message = store_message_in_transaction(
+                    publication_conn,
+                    conversation_id,
+                    user_id,
+                    "assistant",
+                    content,
+                    metadata=assistant_metadata,
+                    reply_to=source_search_lineage_user_message_id,
+                )
+                if assistant_message.get("content") != content:
+                    raise ValueError("simple public-news assistant durability reread changed content")
+                load_accepted_capability_outcome_receipt(
+                    assistant_message.get("metadata_json"),
+                    expected_outcome=accepted_simple_public_news_outcome,
+                )
+            else:
+                assistant_message = self.storage.store_message(
+                    conversation_id,
+                    user_id,
+                    "assistant",
+                    content,
+                    metadata=assistant_metadata,
+                    reply_to=source_search_lineage_user_message_id,
+                )
         publication_authority_changed_before_publication = bool(
             attachment_authority_changed_before_publication
             or source_search_authority_changed_before_publication
             or obsidian_authority_changed_before_publication
+            or simple_public_news_authority_changed_before_publication
         )
         if attributed_knowledge_ids:
             self.storage.record_knowledge_usage(
@@ -45751,6 +45940,16 @@ class AgentRuntime:
         temporal_message, _ = _file_effect_projection(message, turn_auth, "temporal")
         archive_message, _ = _file_effect_projection(message, turn_auth, "archive")
         file_create_message, _ = _file_effect_projection(message, turn_auth, "file_create")
+        simple_public_news_lane = bool(
+            context.isolated_outbound_turn
+            and turn_auth.actions == frozenset({"web"})
+            and _simple_public_news_freshness(turn_auth.speech) is not None
+        )
+        if simple_public_news_lane and context.simple_public_news_plan is None:
+            context.simple_public_news_plan = self._simple_public_news_plan_for(
+                turn_auth.speech,
+                self.web_query_from(turn_auth.speech),
+            )
         if (
             context.isolated_outbound_turn
             and not closed_past_timeline_prefetched
@@ -45781,17 +45980,31 @@ class AgentRuntime:
                 if str((tool.get("function") or {}).get("name") or tool.get("name") or "")
                 not in _OUTBOUND_TOOL_NAMES
             ]
-        if (
-            context.isolated_outbound_turn
-            and turn_auth.actions == frozenset({"web"})
-            and _simple_public_news_freshness(turn_auth.speech) is not None
-        ):
+        if simple_public_news_lane:
             # The explicit public-news lane owns the whole turn.  Search has
             # already happened exactly once above.  It never enters tool rounds
             # or salvage; an accepted synthesis does enter one evidence-bound
             # judge and, only after FAILED, at most one repair plus one final
             # judge.  A timed-out synthesis still returns immediately with no
             # secondary model call.
+            if context.simple_public_news_evidence is None:
+                plan = context.simple_public_news_plan
+                if type(plan) is not LegacySimplePublicNewsPlan:
+                    raise ValueError("simple public-news plan was not frozen")
+                context.simple_public_news_evidence = SimplePublicNewsEvidence.from_projection(
+                    plan,
+                    status=SimplePublicNewsEvidenceStatus.UNAVAILABLE,
+                    executed_query=_public_news_search_query(
+                        turn_auth.speech,
+                        self.web_query_from(turn_auth.speech),
+                        _web_source_class_on_speech(turn_auth.speech),
+                    ),
+                    outbound_attempted=False,
+                    research_call_count=tools_used.count("web_research"),
+                    report=None,
+                    model_envelope="",
+                    sources=[],
+                )
             if context.web_evidence_status not in {"sourced", "partial"} or not context.web_sources:
                 return {
                     "content": _WEB_EVIDENCE_MISSING,
@@ -45896,18 +46109,17 @@ class AgentRuntime:
                     accepted = False
             elif accepted:
                 verification = _unknown_verdict("simple_public_news_full_evidence_unavailable")
-                clean = (
-                    "Поиск завершён и проверяемые источники получены, но полная ограниченная "
-                    "выдача недоступна для проверки. Ниже оставляю только найденные источники; "
-                    "непроверенные факты не публикую."
-                )
+                clean = _SIMPLE_PUBLIC_NEWS_ENVELOPE_FALLBACK
                 accepted = False
             else:
-                clean = (
-                    "Поиск завершён и проверяемые источники получены, но модель не успела "
-                    "подготовить сводку за ограниченное время. Ниже оставляю найденные ссылки; "
-                    "факты без завершённой обработки не пересказываю."
-                )
+                clean = _SIMPLE_PUBLIC_NEWS_SYNTHESIS_FALLBACK
+            context.simple_public_news_verified_content_sha256 = (
+                simple_public_news_content_identity(clean)
+                if accepted
+                and verification is not None
+                and str(verification.get("status") or "") == VERDICT_PASSED
+                else None
+            )
             return {
                 "content": clean,
                 "_model_generated": accepted,
@@ -52713,6 +52925,16 @@ class AgentRuntime:
             web_arguments["source_class"] = source_class
         if topic_class:
             web_arguments["topic_class"] = topic_class
+        if simple_public_news_request and context is not None:
+            assert simple_public_news_freshness is not None
+            context.simple_public_news_plan = LegacySimplePublicNewsPlan.from_request(
+                turn_auth.speech,
+                query,
+                freshness=simple_public_news_freshness,
+                source_class=source_class,
+                topic_class=topic_class,
+                max_sources=3,
+            )
         turn_deadline = getattr(context, "turn_deadline", None)
         if _turn_deadline_expired(turn_deadline):
             return
@@ -52767,6 +52989,20 @@ class AgentRuntime:
             tools_used.append("web_research")
             if context is not None:
                 self._record_web_projection(context, "failed", [])
+                if simple_public_news_request:
+                    plan = context.simple_public_news_plan
+                    if type(plan) is not LegacySimplePublicNewsPlan:
+                        raise ValueError("simple public-news plan was not frozen") from exc
+                    context.simple_public_news_evidence = SimplePublicNewsEvidence.from_projection(
+                        plan,
+                        status=SimplePublicNewsEvidenceStatus.UNAVAILABLE,
+                        executed_query=query,
+                        outbound_attempted=True,
+                        research_call_count=1,
+                        report=None,
+                        model_envelope="",
+                        sources=[],
+                    )
             messages.append(
                 {
                     "role": "system",
@@ -52786,8 +53022,29 @@ class AgentRuntime:
             "web_research",
             result.data,
             transport_success=result.success,
+            limit=3 if simple_public_news_request else 5,
             freshness=str(web_arguments.get("freshness") or ""),
             source_class=source_class,
+        )
+        simple_projected_report = web_payload
+        simple_topic_mismatch = bool(
+            simple_public_news_request
+            and simple_public_news_topic_mismatch_is_empty(
+                outbound_result_data,
+                expected_topic_class=topic_class,
+            )
+        )
+        raw_topic_filtered_sources = (
+            outbound_result_data.get("topic_filtered_sources")
+            if isinstance(outbound_result_data, Mapping)
+            else None
+        )
+        simple_topic_filtered_sources = (
+            raw_topic_filtered_sources
+            if isinstance(raw_topic_filtered_sources, int)
+            and not isinstance(raw_topic_filtered_sources, bool)
+            and raw_topic_filtered_sources >= 0
+            else 0
         )
         if (
             web_status in {"sourced", "partial"}
@@ -52809,10 +53066,18 @@ class AgentRuntime:
                     source for source in web_sources if str(source.get("url") or "") in relevant_urls
                 ]
                 if not relevant_payload_sources or not relevant_web_sources:
+                    simple_topic_filtered_sources = max(
+                        simple_topic_filtered_sources,
+                        len(payload_sources),
+                    )
                     web_status, web_sources, web_payload = "failed", [], None
                 else:
                     filtered_count = len(payload_sources) - len(relevant_payload_sources)
                     if filtered_count:
+                        simple_topic_filtered_sources = max(
+                            simple_topic_filtered_sources,
+                            filtered_count,
+                        )
                         web_status = "partial"
                         completed_sources = web_payload.get("completed_sources")
                         failed_sources = web_payload.get("failed_sources")
@@ -52850,6 +53115,7 @@ class AgentRuntime:
                         f"{'s' if len(relevant_payload_sources) != 1 else ''}."
                     )
                     web_sources = relevant_web_sources
+                    simple_projected_report = web_payload
         rendered = ""
         if web_status in {"sourced", "partial"} and web_sources and web_payload is not None:
             result.data = web_payload
@@ -52867,6 +53133,65 @@ class AgentRuntime:
                 context.web_evidence_scope = "open_search"
         if context is not None:
             self._record_web_projection(context, web_status, web_sources)
+            if simple_public_news_request:
+                plan = context.simple_public_news_plan
+                if type(plan) is not LegacySimplePublicNewsPlan:
+                    raise ValueError("simple public-news plan was not frozen")
+                typed_status = (
+                    SimplePublicNewsEvidenceStatus.SOURCED
+                    if web_status == "sourced"
+                    else SimplePublicNewsEvidenceStatus.PARTIAL
+                    if web_status == "partial"
+                    else SimplePublicNewsEvidenceStatus.EMPTY
+                    if web_status == "empty" or simple_topic_mismatch
+                    else SimplePublicNewsEvidenceStatus.UNAVAILABLE
+                )
+                source_bearing = typed_status in {
+                    SimplePublicNewsEvidenceStatus.SOURCED,
+                    SimplePublicNewsEvidenceStatus.PARTIAL,
+                }
+                report_for_evidence = (
+                    web_payload
+                    if isinstance(web_payload, Mapping)
+                    else simple_projected_report
+                    if isinstance(simple_projected_report, Mapping)
+                    else outbound_result_data
+                    if isinstance(outbound_result_data, Mapping)
+                    else None
+                )
+                if source_bearing and isinstance(report_for_evidence, Mapping):
+                    raw_evidence_report = (
+                        outbound_result_data if isinstance(outbound_result_data, Mapping) else {}
+                    )
+                    report_for_evidence = {
+                        **report_for_evidence,
+                        "outbound_attempted": raw_evidence_report.get("outbound_attempted"),
+                        "search_failed": raw_evidence_report.get("search_failed", False),
+                        "search_timed_out": raw_evidence_report.get("search_timed_out", False),
+                        "refused": raw_evidence_report.get("refused", False),
+                        "quota_exhausted": raw_evidence_report.get("quota_exhausted", False),
+                        "error": str(raw_evidence_report.get("error") or ""),
+                    }
+                    if plan.topic_class:
+                        # This attestation is code-owned and is minted only after
+                        # the local collision filter above retained a source row.
+                        report_for_evidence["topic_class"] = plan.topic_class
+                        report_for_evidence["topic_class_satisfied"] = True
+                context.simple_public_news_evidence = SimplePublicNewsEvidence.from_projection(
+                    plan,
+                    status=typed_status,
+                    executed_query=query,
+                    outbound_attempted=bool(
+                        isinstance(outbound_result_data, Mapping)
+                        and outbound_result_data.get("outbound_attempted") is True
+                    ),
+                    research_call_count=1,
+                    report=report_for_evidence,
+                    model_envelope=rendered if source_bearing else "",
+                    sources=web_sources if source_bearing else [],
+                    topic_filtered_sources=simple_topic_filtered_sources,
+                    projection_truncated=bool(getattr(result, "truncated", False)),
+                )
         # Что именно ушло в поисковик — человеку, сразу, в самом ответе. В
         # неудаляемый журнал запрос класть нельзя (туда попадёт и «пароль от
         # роутера …»), но и хеш никого не спасает: когда детектор намерения
