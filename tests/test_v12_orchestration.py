@@ -25,6 +25,7 @@ from friday.orchestration import (
     TurnPlanError,
     build_orchestrated_agent,
 )
+from friday.orchestration.capability_outcome import CapabilityOutcome, CapabilityOutcomeStatus
 from friday.orchestration.file_read_contract import file_read_plan_supports_attachment_count
 from friday.orchestration.planner import V12Planner
 from friday.orchestration.router import (
@@ -149,6 +150,15 @@ class _Handler:
             evidence_identity_sha256=preparation.evidence_identity_sha256,
             citation_labels=("A1",),
             verified=True,
+            outcome=CapabilityOutcome(
+                route=plan.route,
+                status=CapabilityOutcomeStatus.COMPLETE,
+                plan_sha256=plan.canonical_sha256(),
+                evidence_identity_sha256=preparation.evidence_identity_sha256,
+                citation_labels=("A1",),
+                authority_rechecked=True,
+                verified=True,
+            ),
         )
 
 
@@ -1063,9 +1073,42 @@ async def test_source_result_must_match_prepared_evidence_and_citations() -> Non
                 return replace(result, citation_labels=())
             if self.variant == "extra":
                 return replace(result, message="answer [A1], invented [A2]")
+            if self.variant == "outcome_partial":
+                return replace(
+                    result,
+                    outcome=replace(result.outcome, status=CapabilityOutcomeStatus.PARTIAL),
+                )
+            if self.variant == "outcome_plan":
+                return replace(result, outcome=replace(result.outcome, plan_sha256="f" * 64))
+            if self.variant == "outcome_evidence":
+                return replace(
+                    result,
+                    outcome=replace(result.outcome, evidence_identity_sha256="f" * 64),
+                )
+            if self.variant == "outcome_citations":
+                return replace(
+                    result,
+                    outcome=replace(result.outcome, citation_labels=("A2",)),
+                )
+            if self.variant == "outcome_route":
+                return replace(
+                    result,
+                    outcome=replace(result.outcome, route=RouteClass.ARCHIVE_READ),
+                )
             return replace(result, message="answer without marker")
 
-    for variant in ("digest", "verified", "empty", "extra", "marker"):
+    for variant in (
+        "digest",
+        "verified",
+        "empty",
+        "extra",
+        "marker",
+        "outcome_partial",
+        "outcome_plan",
+        "outcome_evidence",
+        "outcome_citations",
+        "outcome_route",
+    ):
         legacy = _Runtime()
         router = OrchestrationRouter(
             legacy,
@@ -1081,6 +1124,15 @@ async def test_source_result_must_match_prepared_evidence_and_citations() -> Non
 
 
 def test_read_only_result_is_deeply_immutable_and_citations_are_unique() -> None:
+    outcome = CapabilityOutcome(
+        route=RouteClass.FILE_READ,
+        status=CapabilityOutcomeStatus.COMPLETE,
+        plan_sha256="2" * 64,
+        evidence_identity_sha256="1" * 64,
+        citation_labels=("A1",),
+        authority_rechecked=True,
+        verified=True,
+    )
     with pytest.raises(ValueError, match="immutable tuple"):
         ReadOnlyRouteResult(
             message="answer [A1]",
@@ -1089,6 +1141,7 @@ def test_read_only_result_is_deeply_immutable_and_citations_are_unique() -> None
             evidence_identity_sha256="1" * 64,
             citation_labels=["A1"],  # type: ignore[arg-type]
             verified=True,
+            outcome=outcome,
         )
     with pytest.raises(ValueError, match="unique"):
         ReadOnlyRouteResult(
@@ -1098,6 +1151,7 @@ def test_read_only_result_is_deeply_immutable_and_citations_are_unique() -> None
             evidence_identity_sha256="1" * 64,
             citation_labels=("A1", "A1"),
             verified=True,
+            outcome=outcome,
         )
 
 

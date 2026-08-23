@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from friday.orchestration import OrchestrationRouter, RouteClass, ToolEffect, TurnInput, TurnPlan
+from friday.orchestration.capability_outcome import CapabilityOutcome, CapabilityOutcomeStatus
 from friday.orchestration.file_read_contract import archive_read_plan_supports_selection
 from friday.orchestration.router import (
     ReadOnlyRoutePreparation,
@@ -154,6 +155,15 @@ class _ArchiveHandler:
             evidence_identity_sha256=preparation.evidence_identity_sha256,
             citation_labels=("A1",),
             verified=True,
+            outcome=CapabilityOutcome(
+                route=plan.route,
+                status=CapabilityOutcomeStatus.COMPLETE,
+                plan_sha256=plan.canonical_sha256(),
+                evidence_identity_sha256=preparation.evidence_identity_sha256,
+                citation_labels=("A1",),
+                authority_rechecked=True,
+                verified=True,
+            ),
         )
 
 

@@ -45,6 +45,12 @@ from friday.model_profiles import (
     ModelProfileLease,
     ModelRequirements,
 )
+from friday.orchestration.capability_outcome import (
+    CapabilityOutcome,
+    CapabilityOutcomeError,
+    CapabilityOutcomeStatus,
+    require_complete_read_only_publication,
+)
 from friday.orchestration.contracts import RouteClass, ToolEffect, TurnInput, TurnPlan
 from friday.orchestration.file_read_contract import (
     V12_FILE_SYNTHESIS_SYSTEM,
@@ -434,6 +440,23 @@ class V12FileReadHandler:
         except ValueError:
             raise V12FileReadError("verifier rejected the answer") from None
 
+    def _completion_outcome(
+        self,
+        plan: TurnPlan,
+        evidence: PreparedFileEvidence,
+    ) -> CapabilityOutcome:
+        """Build the only outcome currently publishable by the narrow canary."""
+
+        return CapabilityOutcome(
+            route=self.route,
+            status=CapabilityOutcomeStatus.COMPLETE,
+            plan_sha256=plan.canonical_sha256(),
+            evidence_identity_sha256=evidence.identity_sha256,
+            citation_labels=evidence.bundle.citation_labels,
+            authority_rechecked=True,
+            verified=True,
+        )
+
     def _publish_sync(
         self,
         request: ReadOnlyRouteRequest,
@@ -445,7 +468,7 @@ class V12FileReadHandler:
         deadline: float,
         trace_started_at: float,
         trace_planner_model_calls: int,
-    ) -> tuple[str, str, str]:
+    ) -> tuple[str, str, str, CapabilityOutcome]:
         _require_deadline(
             deadline,
             stage="before effect ownership",
@@ -507,6 +530,23 @@ class V12FileReadHandler:
                     interaction_mode = normalize_conversation_mode(
                         str(conversation_row["mode"] or "dialogue")
                     )
+
+                # Both source and conversation authority are now current in the
+                # same transaction that will own the two durable message rows.
+                outcome = self._completion_outcome(plan, evidence)
+                try:
+                    require_complete_read_only_publication(
+                        outcome,
+                        expected_route=self.route,
+                        expected_plan_sha256=plan.canonical_sha256(),
+                        expected_evidence_identity_sha256=evidence.identity_sha256,
+                        expected_citation_labels=evidence.bundle.citation_labels,
+                        answer=answer,
+                        authority_rechecked=True,
+                        verification_passed=True,
+                    )
+                except CapabilityOutcomeError:
+                    raise V12FileReadError("completion gate rejected publication") from None
 
                 route_mode = f"v12_{plan.route.value}"
                 user_metadata = {
@@ -600,7 +640,7 @@ class V12FileReadHandler:
                 if not re.fullmatch(r"msg_[0-9a-f]{16}", message_id):
                     raise V12FileReadError("assistant publication has no durable identity")
                 _require_deadline(deadline, stage="before transaction commit")
-                publication = (conversation_id, message_id, interaction_mode)
+                publication = (conversation_id, message_id, interaction_mode, outcome)
         except BaseException:
             raise
         confirm_staged_request_effect()
@@ -670,7 +710,7 @@ class V12FileReadHandler:
         # not detach a worker thread that can commit after the router reports a
         # timeout.  Canary sources are bounded to two small exact-text bodies,
         # so the final byte revalidation remains a bounded local operation.
-        conversation_id, message_id, interaction_mode = self._publish_sync(
+        conversation_id, message_id, interaction_mode, outcome = self._publish_sync(
             request,
             turn,
             plan,
@@ -687,6 +727,7 @@ class V12FileReadHandler:
             evidence_identity_sha256=prepared.evidence.identity_sha256,
             citation_labels=prepared.evidence.bundle.citation_labels,
             verified=True,
+            outcome=outcome,
             message_format="markdown",
             interaction_mode=interaction_mode,
         )

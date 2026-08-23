@@ -14,8 +14,9 @@ import pytest
 
 import friday.file_evidence_reader as file_evidence_reader
 from friday.model_profiles import ModelProfileLease, ModelRequirements
-from friday.orchestration import ReadOnlyRouteRequest, TurnInput, TurnPlan
+from friday.orchestration import ReadOnlyRouteRequest, RouteClass, TurnInput, TurnPlan
 from friday.orchestration.archive_read import V12ArchiveReadHandler
+from friday.orchestration.capability_outcome import CapabilityOutcomeStatus
 from friday.orchestration.file_read import V12FileReadError
 from friday.permissions import ActorContext, AuthorizationService
 from friday.storage.models import RawObject, new_id
@@ -304,6 +305,8 @@ async def test_exact_filename_selects_one_unique_registered_file(settings, stora
     result = await handler.handle(request, turn, plan, preparation)
 
     assert result.citation_labels == ("A1",)
+    assert result.outcome.status is CapabilityOutcomeStatus.COMPLETE
+    assert result.outcome.route is RouteClass.ARCHIVE_READ
     payload = json.dumps(model.calls[0]["messages"], ensure_ascii=False)
     assert "EXACT-WANTED" in payload
     assert "UNRELATED-DECOY" not in payload

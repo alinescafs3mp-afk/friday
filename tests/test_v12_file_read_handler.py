@@ -35,6 +35,7 @@ from friday.orchestration import (
     TurnInput,
     TurnPlan,
 )
+from friday.orchestration.capability_outcome import CapabilityOutcome, CapabilityOutcomeStatus
 from friday.orchestration.file_read import V12FileReadError, V12FileReadHandler
 from friday.permissions import ActorContext, AuthorizationService
 from friday.source_identity import raw_source_identity_sha256
@@ -569,6 +570,73 @@ async def test_file_handler_creates_conversation_and_two_messages_in_one_commit(
     messages = storage.get_conversation_messages(result.conversation_id, user_id="alice")
     assert [item["role"] for item in messages] == ["user", "assistant"]
     assert result.message_id == messages[-1]["id"]
+    assert result.outcome.status is CapabilityOutcomeStatus.COMPLETE
+    assert result.outcome.route is RouteClass.FILE_READ
+    assert result.outcome.evidence_identity_sha256 == result.evidence_identity_sha256
+    assert result.outcome.citation_labels == result.citation_labels
+    assert "outcome" not in result.response(conversation_mode="dialogue")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status",
+    (
+        CapabilityOutcomeStatus.PARTIAL,
+        CapabilityOutcomeStatus.EMPTY,
+        CapabilityOutcomeStatus.UNAVAILABLE,
+        CapabilityOutcomeStatus.DENIED,
+    ),
+)
+async def test_file_handler_completion_gate_rolls_back_every_noncomplete_outcome(
+    settings,
+    storage,
+    monkeypatch,
+    status: CapabilityOutcomeStatus,
+) -> None:
+    conversation = storage.create_conversation("alice")
+    reference = _register(storage, settings, text="GATE-SOURCE", filename="gate.txt")
+    handler = _handler(storage, settings, _Model("Источник прочитан. [A1]"))
+    request, turn, plan = _request(reference, conversation_id=str(conversation["id"]))
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+
+    def outcome_for_status(turn_plan: TurnPlan, evidence: Any) -> CapabilityOutcome:
+        if status in {CapabilityOutcomeStatus.COMPLETE, CapabilityOutcomeStatus.PARTIAL}:
+            evidence_digest: str | None = evidence.identity_sha256
+            citations = evidence.bundle.citation_labels
+            authority_rechecked = True
+            verified = True
+        elif status is CapabilityOutcomeStatus.EMPTY:
+            evidence_digest = evidence.identity_sha256
+            citations = ()
+            authority_rechecked = True
+            verified = True
+        elif status is CapabilityOutcomeStatus.UNAVAILABLE:
+            evidence_digest = None
+            citations = ()
+            authority_rechecked = False
+            verified = False
+        else:
+            evidence_digest = None
+            citations = ()
+            authority_rechecked = True
+            verified = False
+        return CapabilityOutcome(
+            route=RouteClass.FILE_READ,
+            status=status,
+            plan_sha256=turn_plan.canonical_sha256(),
+            evidence_identity_sha256=evidence_digest,
+            citation_labels=citations,
+            authority_rechecked=authority_rechecked,
+            verified=verified,
+        )
+
+    monkeypatch.setattr(handler, "_completion_outcome", outcome_for_status)
+
+    with pytest.raises(V12FileReadError, match="completion gate"):
+        await handler.handle(request, turn, plan, preparation)
+
+    assert storage.count_messages(str(conversation["id"]), user_id="alice") == 0
 
 
 @pytest.mark.asyncio

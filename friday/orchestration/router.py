@@ -12,6 +12,11 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from friday.file_evidence import CurrentTurnFileReferenceToken, current_turn_file_reference_of
+from friday.interaction_control_plane import FailureStage
+from friday.orchestration.capability_outcome import (
+    CapabilityOutcome,
+    require_complete_read_only_publication,
+)
 from friday.orchestration.contracts import (
     RouteClass,
     RouterMode,
@@ -29,7 +34,33 @@ from friday.turn_intent_policy import TurnPolicyDecision
 
 LOGGER = logging.getLogger(__name__)
 _MAX_PENDING_SHADOW_PLANS = 4
-_EVIDENCE_CITATION_RE = re.compile(r"\[(A[1-9][0-9]{0,2})\]")
+
+
+def _observe_failure_route(route: str) -> None:
+    # Failure retention imports storage contracts; keep it out of the router's
+    # import graph because storage conversation hooks also import the observer.
+    try:
+        from friday.interaction_control_plane.failure_store import observe_failure_route
+
+        observe_failure_route(route)
+    except Exception as exc:  # noqa: BLE001 - observability cannot break routing
+        LOGGER.warning("interaction failure route omitted (%s)", type(exc).__name__)
+
+
+def _observe_failure_stage(stage: FailureStage) -> None:
+    try:
+        from friday.interaction_control_plane.failure_store import observe_failure_stage
+
+        observe_failure_stage(stage)
+    except Exception as exc:  # noqa: BLE001 - observability cannot break routing
+        LOGGER.warning("interaction failure stage omitted (%s)", type(exc).__name__)
+
+
+def _observe_legacy_capability_owner() -> None:
+    """Bind a possible pre-commit failure to the runtime that owns the turn."""
+
+    _observe_failure_route("legacy")
+    _observe_failure_stage(FailureStage.CAPABILITY)
 
 
 class ChatRuntime(Protocol):
@@ -164,6 +195,7 @@ class ReadOnlyRouteResult:
     evidence_identity_sha256: str
     citation_labels: tuple[str, ...]
     verified: bool
+    outcome: CapabilityOutcome
     message_format: str = "markdown"
     interaction_mode: str | None = None
 
@@ -200,6 +232,8 @@ class ReadOnlyRouteResult:
             raise ValueError("read-only route result has invalid citation labels")
         if not isinstance(self.verified, bool):
             raise ValueError("read-only route result verified must be boolean")
+        if type(self.outcome) is not CapabilityOutcome:
+            raise ValueError("read-only route result requires CapabilityOutcome v1")
 
     def response(self, *, conversation_mode: str) -> dict[str, Any]:
         effective_mode = self.interaction_mode or conversation_mode
@@ -560,8 +594,10 @@ class OrchestrationRouter:
         if turn_policy is not None:
             legacy_kwargs["turn_policy"] = turn_policy
         if turn_policy is not None and turn_policy.handled:
+            _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
         if self.mode is RouterMode.LEGACY:
+            _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
 
         started = time.monotonic()
@@ -572,6 +608,7 @@ class OrchestrationRouter:
                 plan=None,
                 selected_runtime="legacy",
             )
+            _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
         if self.mode in {RouterMode.CANARY, RouterMode.V12} and answer_with_voice:
             self._observe(
@@ -580,6 +617,7 @@ class OrchestrationRouter:
                 plan=None,
                 selected_runtime="legacy",
             )
+            _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
 
         # Capture the scalar attachment state before the first await. The
@@ -605,6 +643,7 @@ class OrchestrationRouter:
             attachment_tokens,
         )
         if self.mode is RouterMode.SHADOW:
+            _observe_legacy_capability_owner()
             result = await self._legacy.chat(user_id, message, **legacy_kwargs)
             self._schedule_shadow_plan(turn, turn_deadline=turn_deadline, started=started)
             return result
@@ -625,8 +664,10 @@ class OrchestrationRouter:
                 plan=None,
                 selected_runtime="legacy",
             )
+            _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
 
+        _observe_failure_stage(FailureStage.PLANNING)
         plan = await self._try_plan(turn, turn_deadline=turn_deadline, attested=True)
         handler = self._route_handlers.get(plan.route) if plan is not None else None
         eligible = bool(
@@ -651,9 +692,12 @@ class OrchestrationRouter:
             )
             if turn_deadline is not None and turn_deadline - time.monotonic() < legacy_reserve:
                 raise TimeoutError("legacy fallback reserve was exhausted during V12 planning")
+            _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
 
         assert handler is not None and plan is not None  # narrowed by the predicate above
+        _observe_failure_route(plan.route.value)
+        _observe_failure_stage(FailureStage.CAPABILITY)
         handler_deadline = turn_deadline or (time.monotonic() + self._route_timeout_sec)
         remaining = handler_deadline - time.monotonic()
         if remaining <= 0:
@@ -691,6 +735,7 @@ class OrchestrationRouter:
             )
             if turn_deadline is not None and turn_deadline - time.monotonic() < legacy_reserve:
                 raise TimeoutError("legacy fallback reserve was exhausted during V12 admission") from exc
+            _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
         if (
             not isinstance(preparation, ReadOnlyRoutePreparation)
@@ -705,6 +750,7 @@ class OrchestrationRouter:
             )
             if turn_deadline is not None and turn_deadline - time.monotonic() < legacy_reserve:
                 raise TimeoutError("legacy fallback reserve was exhausted during V12 admission")
+            _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
 
         try:
@@ -725,6 +771,7 @@ class OrchestrationRouter:
                 raise TimeoutError(
                     "legacy fallback reserve was exhausted during V12 authority check"
                 ) from exc
+            _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
         if current is not True:
             self._observe(
@@ -735,6 +782,7 @@ class OrchestrationRouter:
             )
             if turn_deadline is not None and turn_deadline - time.monotonic() < legacy_reserve:
                 raise TimeoutError("legacy fallback reserve was exhausted during V12 authority check")
+            _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
 
         self._observe(started=started, status="selected", plan=plan, selected_runtime="v12")
@@ -744,6 +792,7 @@ class OrchestrationRouter:
         if remaining <= 0:
             raise TimeoutError("V12 route deadline expired before handler execution")
         try:
+            _observe_failure_stage(FailureStage.CAPABILITY)
             handler_result = await asyncio.wait_for(
                 handler.handle(request, turn, plan, preparation),
                 timeout=max(0.001, remaining),
@@ -764,31 +813,29 @@ class OrchestrationRouter:
                 selected_runtime="v12",
             )
             raise
-        source_route = plan.route in {
-            RouteClass.FILE_READ,
-            RouteClass.ARCHIVE_READ,
-            RouteClass.WEB_READ,
-        }
-        if (
-            not isinstance(handler_result, ReadOnlyRouteResult)
-            or handler_result.evidence_identity_sha256 != preparation.evidence_identity_sha256
-            or (
-                source_route
-                and (
-                    not handler_result.verified
-                    or not handler_result.citation_labels
-                    or set(_EVIDENCE_CITATION_RE.findall(handler_result.message))
-                    != set(handler_result.citation_labels)
-                )
+        try:
+            if not isinstance(handler_result, ReadOnlyRouteResult):
+                raise TypeError("read-only V12 handler returned a non-result")
+            if handler_result.evidence_identity_sha256 != preparation.evidence_identity_sha256:
+                raise ValueError("read-only V12 result evidence is not the prepared evidence")
+            require_complete_read_only_publication(
+                handler_result.outcome,
+                expected_route=plan.route,
+                expected_plan_sha256=plan.canonical_sha256(),
+                expected_evidence_identity_sha256=preparation.evidence_identity_sha256,
+                expected_citation_labels=handler_result.citation_labels,
+                answer=handler_result.message,
+                authority_rechecked=True,
+                verification_passed=handler_result.verified,
             )
-        ):
+        except (TypeError, ValueError):
             self._observe(
                 started=started,
                 status="handler_invalid_result",
                 plan=plan,
                 selected_runtime="v12",
             )
-            raise TypeError("read-only V12 handler returned an invalid result")
+            raise TypeError("read-only V12 handler returned an invalid result") from None
         self._observe(started=started, status="completed", plan=plan, selected_runtime="v12")
         return handler_result.response(conversation_mode=turn.conversation_mode)
 
