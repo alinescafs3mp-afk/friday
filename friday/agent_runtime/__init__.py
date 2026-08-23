@@ -494,7 +494,7 @@ _ATTACHMENT_MAP_CHUNK_CHARS = 20_000
 _ATTACHMENT_MAP_WIDE_CHUNK_CHARS = 64_000
 _ATTACHMENT_MAP_MAX_CHUNK_CHARS = 64_000
 _ATTACHMENT_MAP_TARGET_WAVES = 2
-_ATTACHMENT_MAP_MODEL_OUTPUT_TOKENS = 900
+_ATTACHMENT_MAP_MODEL_OUTPUT_TOKENS = 1_536
 # A document answer is delivered over one non-streaming request behind the
 # 90-second primary deadline.  Leaving the ordinary call at the global
 # 2,048-token default let a cancelled generation keep running remotely and
@@ -513,7 +513,7 @@ _ATTACHMENT_PRIMARY_MODEL_OUTPUT_TOKENS = 2_048
 # request and framing.  Reserve this independently of the separately bounded
 # request text; an exact serialized-size guard below remains the final gate.
 _ATTACHMENT_MAP_FIXED_PROMPT_RESERVE_CHARS = 12_000
-_ATTACHMENT_MAP_OUTPUT_CHARS = 3_200
+_ATTACHMENT_MAP_OUTPUT_CHARS = 5_200
 _ATTACHMENT_MAP_REDUCE_INPUT_CHARS = 18_000
 _ATTACHMENT_MAP_REDUCE_OUTPUT_CHARS = 2_400
 _ATTACHMENT_MAP_FINAL_EVIDENCE_CHARS = 44_000
@@ -7711,6 +7711,77 @@ _PASSIVE_INPUT_FILE_STATE = re.compile(
     r"прикрепл[её]н|приложен|отправлен|выгружен)\w*\b",
     re.IGNORECASE,
 )
+_PASSIVE_INPUT_FILE_STATE_FAMILIES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("ready", re.compile(r"\bготов\w*\b", re.IGNORECASE)),
+    ("created", re.compile(r"\b(?:создан|сделан|сформирован)\w*\b", re.IGNORECASE)),
+    ("saved", re.compile(r"\bсохран[её]н\w*\b", re.IGNORECASE)),
+    ("prepared", re.compile(r"\b(?:подготовлен|собран)\w*\b", re.IGNORECASE)),
+    ("attached", re.compile(r"\b(?:прикрепл[её]н|приложен)\w*\b", re.IGNORECASE)),
+    ("sent", re.compile(r"\b(?:отправлен|выгружен)\w*\b", re.IGNORECASE)),
+)
+_PASSIVE_INPUT_FILE_SOURCE_RELATION = re.compile(
+    r"\b(?:к|в|по|из)\s+"
+    r"(?:(?:этому|данному|исходному|основному|самому)\s+)?"
+    r"(?:документ|файл|материал|анкет|форм|заявлен|договор|отч[её]т)\w*\b|"
+    r"\b(?:документ|файл|материал|анкет|форм|заявлен|договор|отч[её]т)\w*\s+"
+    r"(?:сообща|указыва|фиксиру|содерж|говор)\w*\b",
+    re.IGNORECASE,
+)
+_PASSIVE_INPUT_CURRENT_DELIVERY = re.compile(
+    r"\b(?:в|во|к)\s+(?:(?:этот|данный|текущий)\s+)?"
+    r"(?:чат|сообщени|ответ|переписк)\w*\b|\b(?:вам|тебе)\b",
+    re.IGNORECASE,
+)
+_PASSIVE_INPUT_CURRENT_AVAILABILITY = re.compile(
+    r"\b(?:уже|теперь)\s+доступ\w*\b",
+    re.IGNORECASE,
+)
+_PASSIVE_INPUT_EVIDENCE_NEW_CLAUSE = (
+    r"(?:(?:а|но|однако|при\s+этом)\s+)?(?:"
+    r"(?:(?:друг|эт|указан)\w*\s+)?"
+    r"(?:файл|документ|материал|приложени)\w*\b|"
+    r"(?:к|в|по|из)\s+(?:(?:этому|данному|исходному)\s+)?"
+    r"(?:файл|документ|материал|анкет|форм|заявлен|договор|отч[её]т)\w*\b"
+    r")"
+)
+_PASSIVE_INPUT_EVIDENCE_CLAUSE_SPLIT = re.compile(
+    rf"(?:[!?;]+|\.(?=\s|$)|\r?\n+|,\s*(?={_PASSIVE_INPUT_EVIDENCE_NEW_CLAUSE})|"
+    rf"\s+и\s+(?={_PASSIVE_INPUT_EVIDENCE_NEW_CLAUSE}))",
+    re.IGNORECASE,
+)
+
+
+def _passive_input_file_state_surface(text: str) -> str:
+    """Keep sentence boundaries while making dots inside filenames traversable."""
+
+    return _ATTACHMENT_FILENAME_REFERENCE.sub(
+        lambda match: match.group(0).replace(".", "·"),
+        _classification_text(text),
+    )
+
+
+def _passive_input_file_state_families(text: str) -> set[str]:
+    surface = _passive_input_file_state_surface(text)
+    return {
+        family
+        for family, pattern in _PASSIVE_INPUT_FILE_STATE_FAMILIES
+        if pattern.search(surface)
+    }
+
+
+def _passive_input_file_state_clauses(text: str) -> tuple[str, ...]:
+    """Return finite sentence-local evidence spans without splitting filenames."""
+
+    surface = _passive_input_file_state_surface(text)[:_ATTACHMENT_MAP_FINAL_EVIDENCE_CHARS]
+    clauses: list[str] = []
+    for part in _PASSIVE_INPUT_EVIDENCE_CLAUSE_SPLIT.split(surface):
+        candidate = part.replace("·", ".").strip(" \t\r,.:—–-")
+        if not candidate or len(candidate) > 2_048:
+            continue
+        clauses.append(candidate)
+        if len(clauses) >= 512:
+            break
+    return tuple(clauses)
 
 
 def _passive_input_file_state_is_evidenced(
@@ -7719,35 +7790,67 @@ def _passive_input_file_state_is_evidenced(
 ) -> bool:
     """Prove a passive statement about the input, not a new assistant deed."""
 
-    if not evidence or _PASSIVE_INPUT_FILE_STATE.search(clause) is None:
+    surface = _passive_input_file_state_surface(clause)
+    claimed_states = _passive_input_file_state_families(clause)
+    if not evidence or _PASSIVE_INPUT_FILE_STATE.search(surface) is None or not claimed_states:
         return False
     if (
         _OUTSIDE_SELF_SUBJECT.search(clause)
         or _OUTSIDE_DEED_SELF_AGENT.search(clause)
         or re.search(rf"\b{_SUPPORTED_FILE_ACTIVE_ACTION}\b", clause, re.IGNORECASE)
         or _SUPPORTED_FILE_BARE_HANDOFF.search(clause)
+        or _READ_ONLY_ATTACHMENT_CARRIER_CLAIM.search(clause)
+        or _READ_ONLY_ATTACHMENT_UNSAFE_DESCRIPTION_SUFFIX.search(clause)
+        or _PASSIVE_INPUT_CURRENT_DELIVERY.search(clause)
+        or _PASSIVE_INPUT_CURRENT_AVAILABILITY.search(clause)
         or _SUPPORTED_EXTERNAL_WORKSPACE_COMPLETION.search(clause)
         or _SUPPORTED_REMINDER_COMPLETION.search(clause)
         or _SUPPORTED_VOICE_COMPLETION.search(clause)
     ):
         return False
+    if claimed_states.intersection({"attached", "sent"}) and not _PASSIVE_INPUT_FILE_SOURCE_RELATION.search(
+        clause
+    ):
+        # A passive carrier state is safe only as an explicit relation reported
+        # from the source.  ``Файл X прикреплён`` and chat delivery remain deeds
+        # even when the same words happen to occur in an input document.
+        return False
     claim_terms = _supported_deed_terms(clause, generic=_SUPPORTED_FILE_GENERIC_TERMS)
     if not claim_terms:
         # ``Документ подготовлен`` is exactly the ambiguous, unsupported form.
         return False
-    joined = "\n".join(str(item or "") for item in evidence if str(item or "").strip())
-    if not joined:
+    descriptors = tuple(str(item or "") for item in evidence if str(item or "").strip())
+    if not descriptors:
         return False
-    descriptors = (joined,)
-    return bool(
-        _supported_file_formats_match_evidence(clause, descriptors)
-        and _supported_claim_matches_evidence(
-            clause,
-            descriptors,
-            generic=_SUPPORTED_FILE_GENERIC_TERMS,
-            format_descriptors=descriptors,
-        )
-    )
+    claimed_filenames = set(_attachment_filename_mentions(clause))
+    carrier_relation_required = bool(claimed_states.intersection({"attached", "sent"}))
+    for descriptor in descriptors:
+        for evidence_clause in _passive_input_file_state_clauses(descriptor):
+            evidence_surface = _passive_input_file_state_surface(evidence_clause)
+            if _PASSIVE_INPUT_FILE_STATE.search(evidence_surface) is None:
+                continue
+            descriptor_tuple = (evidence_clause,)
+            descriptor_filenames = set(_attachment_filename_mentions(evidence_clause))
+            if claimed_filenames and not claimed_filenames.issubset(descriptor_filenames):
+                continue
+            if not claimed_states.issubset(_passive_input_file_state_families(evidence_clause)):
+                continue
+            if carrier_relation_required and _PASSIVE_INPUT_FILE_SOURCE_RELATION.search(
+                evidence_clause
+            ) is None:
+                continue
+            format_descriptors = (*descriptor_tuple, *sorted(descriptor_filenames))
+            if _supported_file_formats_match_evidence(
+                clause,
+                format_descriptors,
+            ) and _supported_claim_matches_evidence(
+                clause,
+                descriptor_tuple,
+                generic=_SUPPORTED_FILE_GENERIC_TERMS,
+                format_descriptors=format_descriptors,
+            ):
+                return True
+    return False
 
 
 def _supported_claim_scope(
@@ -7971,6 +8074,20 @@ def _claims_an_unconfirmed_supported_deed(
     passive_source_state: bool = False,
     passive_input_file_state_evidence: Sequence[str] = (),
 ) -> bool:
+    if (
+        passive_source_state
+        and _SUPPORTED_FILE_COMPLETION.search(answer)
+        and (
+            _SUPPORTED_FILE_BARE_HANDOFF.search(answer)
+            or _READ_ONLY_ATTACHMENT_CARRIER_CLAIM.search(answer)
+            or _READ_ONLY_ATTACHMENT_UNSAFE_DESCRIPTION_SUFFIX.search(answer)
+            or _PASSIVE_INPUT_CURRENT_DELIVERY.search(answer)
+            or _PASSIVE_INPUT_CURRENT_AVAILABILITY.search(answer)
+        )
+    ):
+        # Sentence splitting must not detach a current-delivery handoff from the
+        # passive file state it tries to launder as source content.
+        return True
     for clause in _supported_deed_claim_clauses(answer):
         if clause.rstrip().endswith("?") or _SUPPORTED_DEED_NONACTUAL.search(clause):
             continue
@@ -39662,7 +39779,10 @@ class AgentRuntime:
         restricted_outbound_turn = bool(topic.startswith("человек") or private_outbound_restricted)
         web_intent_authorized = bool(
             file_web
-            if file_turn.proved("local_read")
+            if (
+                file_turn.proved("local_read")
+                or (authenticated_attachment_scope and attachment_expected_count > 0)
+            )
             else (
                 asks_for_the_web(clean_message)
                 or context.policy_web_authorized
@@ -40748,7 +40868,7 @@ class AgentRuntime:
             and not attachment_web_literal_grounded
             and not web_evidence_used
             and (
-                web_evidence_status in {"failed", "empty"}
+                (web_intent_authorized and web_evidence_status in {"failed", "empty"})
                 or file_web
                 or _claims_current_answer_came_from_the_web(content)
                 or _has_explicit_web_provenance_claim(content)
@@ -45772,7 +45892,7 @@ class AgentRuntime:
                         "к полю request факты, тезисы, структуру, слабые места, выводы или различия, "
                         "которые действительно присутствуют в этом фрагменте. "
                         "Прямой ответ человеку на этом этапе не формируется. Верни компактную "
-                        "заметку для итогового синтеза."
+                        "заметку для итогового синтеза, не более 600 слов."
                     ),
                 },
                 {

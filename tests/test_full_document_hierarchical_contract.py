@@ -1500,6 +1500,76 @@ async def test_two_30k_files_are_compared_from_both_complete_sources(
 
 
 @pytest.mark.asyncio
+async def test_four_ordinary_office_files_have_bounded_map_completion_headroom(
+    settings: Any,
+    storage: Any,
+) -> None:
+    class OutputHeadroomLLM(_HierarchyLLM):
+        async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+            result = await super().chat(messages, **kwargs)
+            if any(str(item.get("content") or "").startswith(CHUNK_PREFIX) for item in messages):
+                # Reproduce the old live boundary: a useful Office map needed
+                # more than 900 output tokens and was truthfully marked partial.
+                result["finish_reason"] = "length" if int(kwargs.get("max_tokens") or 0) <= 900 else "stop"
+            return result
+
+    filenames = ("brief.docx", "survey.odt", "slides.pptx", "ledger.xlsx")
+    attachments = [
+        trusted_office_attachment(
+            {
+                "filename": filename,
+                "transient_text": "\n".join(
+                    f"Раздел {file_index}, пункт {row}: синтетический факт {file_index}-{row}."
+                    for row in range(1, 181)
+                ),
+                "extraction_success": True,
+                "verification_eligible": True,
+            }
+        )
+        for file_index, filename in enumerate(filenames, start=1)
+    ]
+    llm = OutputHeadroomLLM("unused")
+    runtime = AgentRuntime(
+        replace(
+            settings,
+            llm_foreground_slots=4,
+            profile=replace(settings.profile, document_map_max_concurrency=3),
+        ),
+        storage,
+        llm=llm,
+    )
+    context = AgentContext(
+        conversation_id="synthetic-four-office-map",
+        user_id="synthetic-four-office-owner",
+        person_id="synthetic-four-office-owner",
+        current_attachment_present=True,
+    )
+
+    bundle, complete = await runtime._build_attachment_hierarchy_bundle(  # noqa: SLF001
+        context,
+        "Сопоставь все четыре документа целиком.",
+        attachments,
+        task_kind="comparison",
+    )
+
+    map_calls = [
+        call
+        for call in llm.calls
+        if any(
+            str(item.get("content") or "").startswith(CHUNK_PREFIX)
+            for item in call["messages"]
+        )
+    ]
+    assert len(map_calls) == 4
+    assert all(900 < int(call["kwargs"]["max_tokens"]) <= 2_048 for call in map_calls)
+    assert all("не более 600 слов" in _blob(call["messages"]) for call in map_calls)
+    assert context.attachment_prepass_deadline is not None
+    assert bundle.files_total == bundle.files_readable == 4
+    assert bundle.chunks_mapped == bundle.chunks_total == 4
+    assert bundle.map_complete is complete is True
+
+
+@pytest.mark.asyncio
 async def test_large_spreadsheet_versions_use_one_full_scan_delta_synthesis(
     settings: Any,
     storage: Any,

@@ -640,6 +640,123 @@ def test_an_evidenced_passive_input_file_relation_survives_the_supported_deed_gu
 @pytest.mark.parametrize(
     "claim",
     [
+        "Документ сообщает: файл «Схема.pdf» приложен.",
+        "К исходному документу приложен файл appendix.docx.",
+        "Приложение «Схема.pdf» прикреплено к документу.",
+    ],
+)
+def test_a_source_grounded_passive_attachment_relation_is_not_a_new_delivery(
+    claim: str,
+) -> None:
+    assert not _claims_an_unconfirmed_supported_deed(
+        claim,
+        has_file=False,
+        reminder_succeeded=False,
+        passive_source_state=True,
+        passive_input_file_state_evidence=(claim,),
+    )
+
+
+@pytest.mark.parametrize(
+    ("claim", "evidence"),
+    [
+        ("Я прикрепила файл appendix.pdf к документу.", "Файл appendix.pdf приложен к документу."),
+        ("Файл appendix.pdf прикреплён.", "Файл appendix.pdf прикреплён."),
+        ("Файл appendix.pdf прикреплён к сообщению.", "Файл appendix.pdf прикреплён к сообщению."),
+        ("Файл beta.pdf приложен к материалу.", "Файл appendix.pdf приложен к материалу."),
+        ("Файл appendix.pdf отправлен к материалу.", "Файл appendix.pdf приложен к материалу."),
+    ],
+)
+def test_passive_source_scope_keeps_active_bare_chat_and_unrelated_file_states_guarded(
+    claim: str,
+    evidence: str,
+) -> None:
+    assert _claims_an_unconfirmed_supported_deed(
+        claim,
+        has_file=False,
+        reminder_succeeded=False,
+        passive_source_state=True,
+        passive_input_file_state_evidence=(evidence,),
+    )
+
+
+def test_passive_file_state_cannot_be_assembled_across_two_evidence_fragments() -> None:
+    assert _claims_an_unconfirmed_supported_deed(
+        "Файл appendix.pdf приложен к материалу Альфа.",
+        has_file=False,
+        reminder_succeeded=False,
+        passive_source_state=True,
+        passive_input_file_state_evidence=(
+            "Файл appendix.pdf создан.",
+            "Другой файл приложен к материалу Альфа.",
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("claim", "evidence"),
+    [
+        (
+            "Файл appendix.pdf приложен к материалу Альфа.",
+            "Файл appendix.pdf создан. Другой файл приложен к материалу Альфа.",
+        ),
+        (
+            "Файл appendix.pdf приложен к материалу Альфа.",
+            "Файл appendix.pdf создан, к материалу Альфа приложен другой файл.",
+        ),
+    ],
+)
+def test_passive_file_state_cannot_be_assembled_inside_one_evidence_descriptor(
+    claim: str,
+    evidence: str,
+) -> None:
+    assert _claims_an_unconfirmed_supported_deed(
+        claim,
+        has_file=False,
+        reminder_succeeded=False,
+        passive_source_state=True,
+        passive_input_file_state_evidence=(evidence,),
+    )
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Файл appendix.pdf приложен к документу и теперь доступен.",
+        "Файл appendix.pdf приложен к документу; забирайте.",
+        "Файл appendix.pdf приложен к документу моделью.",
+        "Файл appendix.pdf приложен к документу ботом.",
+        "Файл appendix.pdf приложен к документу, передаю вам.",
+        "Файл appendix.pdf приложен к документу и его можно скачать.",
+    ],
+)
+def test_passive_source_scope_never_licenses_a_current_carrier_tail(claim: str) -> None:
+    assert _claims_an_unconfirmed_supported_deed(
+        claim,
+        has_file=False,
+        reminder_succeeded=False,
+        passive_source_state=True,
+        passive_input_file_state_evidence=(claim,),
+    )
+
+
+def test_odt_source_summary_keeps_one_sentence_local_passive_fact() -> None:
+    claim = (
+        "В исходном ODT-документе указано: документ «Артемьев» "
+        "подготовлен кадровой службой."
+    )
+    assert not _claims_an_unconfirmed_supported_deed(
+        claim,
+        has_file=False,
+        reminder_succeeded=False,
+        passive_source_state=True,
+        passive_input_file_state_evidence=(claim,),
+    )
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
         pytest.param(
             "Документ «Бета» подготовлен отделом кадров.",
             id="fabricated-passive-relation",

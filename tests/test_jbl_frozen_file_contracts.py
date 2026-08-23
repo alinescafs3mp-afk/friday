@@ -1476,6 +1476,107 @@ async def test_same_clause_attachment_fact_survives_url_reconciliation_and_final
     assert invented not in reply["message"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("web_status", "synthetic_notice", "file_count"),
+    [
+        pytest.param("failed", True, 1, id="bare-synthetic-upload"),
+        pytest.param("empty", False, 2, id="multi-file-local-read"),
+    ],
+)
+async def test_failed_web_status_alone_does_not_replace_an_authenticated_local_file_answer(
+    settings,
+    storage,
+    monkeypatch,
+    web_status: str,
+    synthetic_notice: bool,
+    file_count: int,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_PlainAnswerModel("Компактная промежуточная заметка."),
+        kernel=_NoToolsKernel(),
+    )
+    answer = (
+        "Локальный вывод: контрольный код ALPHA-1."
+        if file_count == 1
+        else "Сопоставление: ALPHA-1 относится к первому файлу, BETA-2 — ко второму."
+    )
+
+    async def generate(context, message, attachments):  # noqa: ANN001, ARG001
+        context.web_evidence_status = web_status
+        return {"content": answer, "tools_used": [], "_model_generated": True}
+
+    async def prepare_with_stale_web_authority(*args, **kwargs):  # noqa: ANN002, ANN003
+        context = await _prepare_without_retrieval(*args, **kwargs)
+        context.policy_web_authorized = True
+        context.outward_verdict = ("интернет", "stale-prior-query")
+        return context
+
+    monkeypatch.setattr(runtime, "_prepare_context", prepare_with_stale_web_authority)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    attachments = [
+        _transient_attachment(filename="alpha.txt", text="Контрольный код ALPHA-1."),
+    ]
+    if file_count == 2:
+        attachments.append(
+            _transient_attachment(filename="beta.txt", text="Контрольный код BETA-2."),
+        )
+    reply = await runtime.chat(
+        "alice",
+        "Загружен документ: alpha.txt"
+        if synthetic_notice
+        else "Сопоставь контрольные коды в приложенных файлах.",
+        actor=_actor(),
+        attachments=attachments,
+        enable_tools=False,
+        synthetic_document_notice=synthetic_notice,
+    )
+
+    assert answer in reply["message"]
+    assert reply["message"] != _WEB_EVIDENCE_MISSING
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    assert metadata["web_evidence_status"] == web_status
+    assert metadata["structural"].get("output_guards", {}).get("web_evidence_replaced") is not True
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_web_request_with_failed_evidence_still_fails_closed(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    storage.ensure_user("alice", preset_key="owner")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=_NeverModel(),
+        kernel=_NoToolsKernel(),
+    )
+
+    async def generate(context, message, attachments):  # noqa: ANN001, ARG001
+        context.web_evidence_status = "failed"
+        return {
+            "content": "Текущее синтетическое значение — 42.",
+            "tools_used": [],
+            "_model_generated": True,
+        }
+
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_retrieval)
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Найди в интернете текущее синтетическое значение.",
+        actor=_actor(),
+        enable_tools=False,
+    )
+
+    assert reply["message"] == _WEB_EVIDENCE_MISSING
+
+
 @pytest.mark.parametrize(
     "model_answer",
     [
