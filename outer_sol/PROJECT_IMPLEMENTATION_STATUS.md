@@ -6,7 +6,7 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-23
 - Branch: `main`
-- Source: `4c02ab8e3bbfac4f56d9e838dd016afb7c55711e`
+- Source: `e4d4a46` (`main`; implementation live code remains `4c02ab8`)
 - Live: Friday `0.207.4` / `4c02ab8e3bbfac4f56d9e838dd016afb7c55711e`
 - Previous/fallback: `272b64c4dcd2aa80ea368a70efe6cd6083d70095`
 - Database schema: 37
@@ -60,18 +60,33 @@ live release healthy after every package.
 
 ## In progress
 
-1. Cumulative non-Docker Python/static gate over the three new adapter releases.
-2. Classify any failures as product regressions or hermetic test-environment
-   issues and fix only demonstrated product regressions.
-3. Reconfirm production health after the cumulative gate.
+1. P2 schema-38 foundation for one generic durable `RecallConversation` Work
+   Item and bounded Active Frame; no runtime behavior in the foundation release.
+2. Schema-38-capable foundation release so it can serve as the rollback-safe
+   fallback for the later behavior candidate.
+3. Narrow behavior canary over the typed exact message-window lane: a full
+   request creates the current Work Item; an immediate closed temporal follow-up
+   such as `А вчера?` updates only its window while retaining the authorized
+   conversation and role.
+
+## Current cumulative gate
+
+- 16,022 selected non-UI Python tests passed on 20 workers.
+- One declared opt-in migration drill over copies of real operator backups was
+  skipped; production backups were not used as a test playground.
+- Ruff, release-surface format (862 files), mypy (206 source files), compileall,
+  Bandit HIGH, JavaScript syntax and toolchain preflight passed.
+- Two initial failures were stale synthetic web-kernel fixtures. `e4d4a46`
+  updated them to emit the same exact query/tool identity attestation as the
+  production kernel and added negative tests for missing/substituted queries;
+  no production check was weakened.
 
 ## Next order
 
-1. Freeze the cumulative gate result in this register and the detailed P1
-   tracker.
-2. Re-read `outer_sol/INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md`
-   against current code and implement the smallest useful P2 durable Work Item /
-   Active Frame slice. Generic WorkGraphs remain deferred.
+1. Complete and release the schema-38 Work Item/Active Frame foundation.
+2. Release the exact message-window continuation canary with restart, expiry,
+   cancellation, ownership, revision-CAS, receipt and atomic-rollback coverage.
+   Generic WorkGraphs and candidate sets remain deferred.
 3. Continue V12 refinement only through independently releasable, typed,
    read-only slices before considering broader effects.
 4. Perform the physical Android/Syncthing-Fork evidence matrix when an actual
