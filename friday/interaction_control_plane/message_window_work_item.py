@@ -62,6 +62,18 @@ def _canonical_surface(message: object) -> str | None:
     return surface.casefold()
 
 
+def is_recall_conversation_temporal_followup_syntax(message: object) -> bool:
+    """Recognize only the closed reference surface without resolving its date.
+
+    This predicate is deliberately independent of a clock and timezone.  The
+    runtime can therefore keep a syntactically exact reference out of the model
+    even when its only valid semantic authority is a retained Active Frame.
+    """
+
+    surface = _canonical_surface(message)
+    return bool(surface is not None and _FOLLOWUP_RE.fullmatch(surface) is not None)
+
+
 def _safe_date(year: int, month: int, day: int) -> date | None:
     try:
         return date(year, month, day)
@@ -195,5 +207,6 @@ def parse_recall_conversation_temporal_followup(
 
 __all__ = [
     "MessageWindowTemporalUpdate",
+    "is_recall_conversation_temporal_followup_syntax",
     "parse_recall_conversation_temporal_followup",
 ]

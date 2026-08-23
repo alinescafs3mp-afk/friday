@@ -106,7 +106,6 @@ from friday.file_evidence import (
     FileEvidenceView,
     FileRegistrationKind,
 )
-from friday.interaction_control_plane import ContinuationKind, CountAccounting
 from friday.interaction_control_plane.legacy_trace import (
     CapabilityStatus,
     LegacyTurnSignals,
@@ -115,9 +114,38 @@ from friday.interaction_control_plane.legacy_trace import (
     WebStatus,
     build_legacy_turn_trace,
 )
+from friday.interaction_control_plane.message_window_work_item import (
+    MessageWindowTemporalUpdate,
+    is_recall_conversation_temporal_followup_syntax,
+    parse_recall_conversation_temporal_followup,
+)
 from friday.interaction_control_plane.runtime_trace import (
     attach_trace_to_metadata,
+    build_work_trace,
     load_trace_namespace_key,
+)
+from friday.interaction_control_plane.turn_trace import (
+    CapabilityClass,
+    CompletionDecision,
+    ContinuationKind,
+    CountAccounting,
+    FailureReason,
+    FailureStage,
+    IntentClass,
+    OutcomeStatus,
+    PlaybookClass,
+    WorkRelation,
+)
+from friday.interaction_control_plane.work_item_contract import (
+    RecallConversationWorkItem,
+    RecallMessageRole,
+)
+from friday.interaction_control_plane.work_item_store import (
+    WorkItemConflictError,
+    cas_update_recall_conversation_constraints_in_transaction,
+    create_recall_conversation_work_item_in_transaction,
+    get_current_recall_conversation_work_item_in_transaction,
+    new_recall_conversation_work_item_id,
 )
 from friday.knowledge_graph import build_user_model, normalize_event_date
 from friday.morphology import LEXICAL_MIN_STEM_INPUT, stem
@@ -397,6 +425,9 @@ def _remaining_attachment_primary_budget(deadline: float | None) -> float | None
 _MAX_TOOL_EVIDENCE = 6
 _OWN_MESSAGE_WINDOW_PAGE_SIZE = 100
 _OWN_MESSAGE_WINDOW_AUTO_CAP = 500
+_MESSAGE_WINDOW_CONTINUATION_CLARIFICATION = (
+    "Не удалось восстановить активный запрос переписки. Повторите полный запрос с нужным периодом."
+)
 #: Сколько знаков остаётся от УЖЕ ОТРАБОТАВШЕГО результата инструмента, когда в
 #: ленте появляется свежий. Начало несёт суть («найдено 9 документов», «курс
 #: 79,46 ₽»), и его достаточно, чтобы модель помнила, что уже делала.
@@ -31155,6 +31186,100 @@ class AgentRuntime:
             projection=projection,
         )
 
+    def _message_window_continuation_clarification_response(
+        self,
+        *,
+        conversation_id: str,
+        person_id: str,
+        boundary_message_id: str,
+    ) -> dict[str, Any]:
+        """Atomically publish the only answer for an unresolved temporal reference."""
+
+        content = _MESSAGE_WINDOW_CONTINUATION_CLARIFICATION
+        assistant_metadata: dict[str, Any] = {
+            "answer_mode": "structural",
+            "interaction_mode": "dialogue",
+            "tools_used": [],
+            "private_context_lineage": True,
+            "verified": False,
+            "verification_status": VERDICT_UNKNOWN,
+            "verification": {
+                "status": VERDICT_UNKNOWN,
+                "ok": False,
+                "score": None,
+                "issues": [],
+                "attachment_evidence_used": False,
+            },
+            "structural": {
+                "verdict_kind": "message_window_continuation_clarification",
+                "answer_present": True,
+                "model_spoke": False,
+                "remainder_known": False,
+                "llm_failed": False,
+            },
+        }
+        with self.storage.transaction() as publication_conn:
+            boundary = publication_conn.execute(
+                """SELECT 1
+                     FROM users owner
+                     JOIN conversations conversation
+                       ON conversation.id=? AND conversation.user_id=owner.id
+                    JOIN messages message
+                       ON message.id=? AND message.user_id=owner.id
+                      AND message.conversation_id=conversation.id AND message.role='user'
+                    WHERE owner.id=? AND owner.status='active'
+                    LIMIT 1""",
+                (conversation_id, boundary_message_id, person_id),
+            ).fetchone()
+            if boundary is None:
+                raise WorkItemConflictError("temporal clarification boundary is no longer owned")
+            assistant_message = store_message_in_transaction(
+                publication_conn,
+                conversation_id,
+                person_id,
+                "assistant",
+                content,
+                metadata=assistant_metadata,
+                reply_to=boundary_message_id,
+            )
+            if assistant_message.get("content") != content:
+                raise ValueError("temporal clarification durability reread changed content")
+
+        return {
+            "conversation_id": conversation_id,
+            "message_id": assistant_message.get("id"),
+            "message": content,
+            "message_format": "plain",
+            "verified": False,
+            "verification_status": VERDICT_UNKNOWN,
+            "verification": {"status": VERDICT_UNKNOWN, "score": None, "issues": []},
+            "verification_caution": "",
+            "citations": [],
+            "answer_grounded": None,
+            "citation_notice": "",
+            "grounding_warning": "",
+            "citation_check": {"status": "skipped", "checked": 0},
+            "tools_used": [],
+            "obsidian_open_url": "",
+            "web_evidence_status": "none",
+            "web_evidence_scope": "none",
+            "web_sources": [],
+            "web_query_notice": "",
+            "voice": None,
+            "files": [],
+            "attachment_context_available": False,
+            "attachment_context_expected_count": 0,
+            "attachment_context_readable_count": 0,
+            "attachment_coverage_complete": False,
+            "attachment_verification_complete": False,
+            "restored_attachment_count": 0,
+            "context": {
+                "interaction_mode": "dialogue",
+                "llm_failed": False,
+                "message_window_continuation": "unresolved",
+            },
+        }
+
     async def _promoted_message_window_response(
         self,
         *,
@@ -31168,9 +31293,16 @@ class AgentRuntime:
         until: str,
         role: str | None,
         turn_deadline: float | None,
+        turn_started: float,
+        continued_work_item: RecallConversationWorkItem | None = None,
     ) -> dict[str, Any]:
         """Execute, re-attest and atomically publish one exact message window."""
 
+        work_item_id = (
+            continued_work_item.id
+            if continued_work_item is not None
+            else new_recall_conversation_work_item_id()
+        )
         plan = LegacyMessageWindowPlan.from_request(
             request,
             tenant_id=actor.user_id,
@@ -31186,9 +31318,36 @@ class AgentRuntime:
         prepared_selection: MessageWindowSelectionToken | None = None
         initial_evidence: MessageWindowEvidence
         with self.storage.transaction() as authority_conn:
-            initial_authority = self._message_window_authority_state(
-                authority_conn,
-                actor=actor,
+            continuation_current = continued_work_item
+            if continued_work_item is not None:
+                try:
+                    continuation_current = get_current_recall_conversation_work_item_in_transaction(
+                        authority_conn,
+                        user_id=person_id,
+                        conversation_id=conversation_id,
+                        boundary_user_message_id=boundary_message_id,
+                    )
+                except Exception as exc:  # noqa: BLE001 - stale private state closes this lane
+                    LOGGER.warning(
+                        "message-window: continuation anchor unavailable (%s)",
+                        type(exc).__name__,
+                    )
+                    continuation_current = None
+                if continuation_current is not None and (
+                    continuation_current.id != continued_work_item.id
+                    or continuation_current.revision != continued_work_item.revision
+                ):
+                    continuation_current = None
+            initial_authority = (
+                self._message_window_authority_state(authority_conn, actor=actor)
+                if continued_work_item is None or continuation_current is not None
+                else "unavailable"
+            )
+        if continued_work_item is not None and continuation_current is None:
+            return self._message_window_continuation_clarification_response(
+                conversation_id=conversation_id,
+                person_id=person_id,
+                boundary_message_id=boundary_message_id,
             )
         if initial_authority == "denied":
             initial_evidence = MessageWindowEvidence.source_free(
@@ -31217,6 +31376,7 @@ class AgentRuntime:
                             "before_message_id": boundary_message_id,
                             "promoted_current_conversation": True,
                             "promoted_plan": plan,
+                            "promoted_timezone_name": timezone_name,
                             **({"role": role} if role is not None else {}),
                         },
                         actor=actor,
@@ -31349,13 +31509,64 @@ class AgentRuntime:
                     "remainder_known": True,
                     "llm_failed": False,
                     "message_window_status": outcome.status.value,
+                    "accepted_message_window_plan": plan.payload(),
                 },
             }
             attach_accepted_capability_outcome_receipt(assistant_metadata, outcome)
-            load_accepted_capability_outcome_receipt(
+            accepted_receipt = load_accepted_capability_outcome_receipt(
                 assistant_metadata,
                 expected_outcome=outcome,
             )
+            source_bearing = outcome.status in {
+                CapabilityOutcomeStatus.COMPLETE,
+                CapabilityOutcomeStatus.PARTIAL,
+                CapabilityOutcomeStatus.EMPTY,
+            }
+            if source_bearing:
+                trace_outcome = {
+                    CapabilityOutcomeStatus.COMPLETE: OutcomeStatus.SUCCEEDED,
+                    CapabilityOutcomeStatus.PARTIAL: OutcomeStatus.PARTIAL,
+                    CapabilityOutcomeStatus.EMPTY: OutcomeStatus.EMPTY,
+                }[outcome.status]
+                trace_completion = {
+                    CapabilityOutcomeStatus.COMPLETE: CompletionDecision.COMPLETE,
+                    CapabilityOutcomeStatus.PARTIAL: CompletionDecision.PARTIAL,
+                    CapabilityOutcomeStatus.EMPTY: CompletionDecision.NOT_EVALUATED,
+                }[outcome.status]
+                work_trace = build_work_trace(
+                    namespace_key=load_trace_namespace_key(publication_conn),
+                    turn_identifier=boundary_message_id,
+                    conversation_identifier=conversation_id,
+                    work_item_identifier=work_item_id,
+                    work_relation=(
+                        WorkRelation.CONTINUED if continued_work_item is not None else WorkRelation.NEW
+                    ),
+                    intent=IntentClass.MESSAGE_RECALL,
+                    playbook=PlaybookClass.RECALL_CONVERSATION,
+                    capability_outcomes=((CapabilityClass.MESSAGE_RETRIEVAL, trace_outcome),),
+                    continuation=(
+                        ContinuationKind.CONSTRAINT_UPDATE
+                        if continued_work_item is not None
+                        else ContinuationKind.NONE
+                    ),
+                    completion=trace_completion,
+                    failure_stage=FailureStage.NONE,
+                    failure_reason=FailureReason.NONE,
+                    ambiguity_present=False,
+                    partial_coverage=outcome.status is CapabilityOutcomeStatus.PARTIAL,
+                    state_restored=continued_work_item is not None,
+                    latency_ms=min(
+                        86_400_000,
+                        max(0, int((time.monotonic() - turn_started) * 1_000)),
+                    ),
+                    model_calls=0,
+                    model_call_accounting=CountAccounting.COMPLETE,
+                    capability_calls=1,
+                    capability_call_accounting=CountAccounting.COMPLETE,
+                    authority_rechecked=True,
+                )
+                if not attach_trace_to_metadata(assistant_metadata, work_trace):
+                    raise RuntimeError("message-window Work Item trace could not be stored")
             assistant_message = store_message_in_transaction(
                 publication_conn,
                 conversation_id,
@@ -31367,10 +31578,41 @@ class AgentRuntime:
             )
             if assistant_message.get("content") != content:
                 raise ValueError("message-window assistant durability reread changed content")
-            load_accepted_capability_outcome_receipt(
+            stored_receipt = load_accepted_capability_outcome_receipt(
                 assistant_message.get("metadata_json"),
                 expected_outcome=outcome,
             )
+            if source_bearing:
+                work_role = RecallMessageRole(role or RecallMessageRole.ANY.value)
+                if continued_work_item is None:
+                    create_recall_conversation_work_item_in_transaction(
+                        publication_conn,
+                        user_id=person_id,
+                        conversation_id=conversation_id,
+                        timezone_name=timezone_name,
+                        since_utc=since,
+                        until_utc=until,
+                        role=work_role,
+                        anchor_user_message_id=boundary_message_id,
+                        anchor_assistant_message_id=str(assistant_message["id"]),
+                        accepted_plan_sha256=accepted_receipt.outcome.plan_sha256,
+                        accepted_outcome_sha256=stored_receipt.outcome_sha256,
+                        work_item_id=work_item_id,
+                    )
+                else:
+                    cas_update_recall_conversation_constraints_in_transaction(
+                        publication_conn,
+                        work_item_id=continued_work_item.id,
+                        user_id=person_id,
+                        conversation_id=conversation_id,
+                        expected_revision=continued_work_item.revision,
+                        since_utc=since,
+                        until_utc=until,
+                        new_boundary_user_message_id=boundary_message_id,
+                        new_assistant_message_id=str(assistant_message["id"]),
+                        new_accepted_plan_sha256=accepted_receipt.outcome.plan_sha256,
+                        new_accepted_outcome_sha256=stored_receipt.outcome_sha256,
+                    )
 
         LOGGER.info("message-window: published %s without model or retry", outcome.status.value)
         return {
@@ -36843,7 +37085,7 @@ class AgentRuntime:
             ).strip()
         except (KeyError, ValueError):
             promoted_message_window_timezone = ""
-        promoted_message_window_admitted = bool(
+        promoted_message_window_initial_admitted = bool(
             enable_tools
             and turn_policy is None
             and interaction_mode == "dialogue"
@@ -36892,6 +37134,95 @@ class AgentRuntime:
             and obsidian_intent is None
             and obsidian_result_request_candidate is None
             and bool(promoted_message_window_timezone)
+        )
+        promoted_temporal_update: MessageWindowTemporalUpdate | None = None
+        promoted_continued_work_item: RecallConversationWorkItem | None = None
+        promoted_temporal_reference_recognized = is_recall_conversation_temporal_followup_syntax(
+            clean_message
+        )
+        if promoted_temporal_reference_recognized:
+            try:
+                with self.storage.transaction() as work_item_conn:
+                    promoted_continued_work_item = get_current_recall_conversation_work_item_in_transaction(
+                        work_item_conn,
+                        user_id=person_id,
+                        conversation_id=str(conversation_id),
+                    )
+            except Exception as exc:  # noqa: BLE001 - invalid/stale state stays code-owned
+                LOGGER.warning(
+                    "message-window: active continuation unavailable (%s)",
+                    type(exc).__name__,
+                )
+                promoted_continued_work_item = None
+            if promoted_continued_work_item is not None and promoted_message_window_timezone:
+                temporal_reference_now = self._local_now()
+                current_zone_now = (
+                    temporal_reference_now.replace(tzinfo=promoted_message_window_zone)
+                    if temporal_reference_now.tzinfo is None
+                    else temporal_reference_now.astimezone(promoted_message_window_zone)
+                )
+                temporal_reference_instant = current_zone_now.astimezone(UTC)
+                retained_zone = ZoneInfo(promoted_continued_work_item.active_frame.timezone_name)
+                promoted_temporal_update = parse_recall_conversation_temporal_followup(
+                    clean_message,
+                    timezone_name=promoted_continued_work_item.active_frame.timezone_name,
+                    today=temporal_reference_instant.astimezone(retained_zone).date(),
+                )
+        promoted_message_window_continuation_admitted = bool(
+            enable_tools
+            and turn_policy is None
+            and interaction_mode == "dialogue"
+            and actor.own_id == person_id
+            and promoted_continued_work_item is not None
+            and promoted_temporal_update is not None
+            and not message_locate_route
+            and locate_decomposition.remainder_known
+            and not locate_decomposition.split
+            and not locate_decomposition.open_remainder
+            and locate_decomposition.locate_clause == clean_message
+            and not locate_subject
+            and not _OWN_MESSAGE_ANALYSIS_REQUEST.search(_classification_text(clean_message))
+            and not message_locate_malformed
+            and not message_locate_compound
+            and not message_locate_resume_attempt
+            and not message_locate_flow
+            and not file_turn.actions
+            and not synthetic_document_notice
+            and not answer_with_voice
+            and not replay_source_message_id
+            and not replay_had_attachments
+            and replay_source_parent is None
+            and not reply_quote
+            and not reply_to
+            and not quoted_attachment_reference
+            and not reply_assistant_reference
+            and not reply_assistant_message_id
+            and user_reply_parent_id is None
+            and supplied_attachment_count == 0
+            and not attachments
+            and not attachment_list
+            and not current_attachment_ids
+            and restored_attachment_expected_count == 0
+            and not restored_attachments
+            and not restored_attachment_ids
+            and not attachment_reference_kind
+            and not attachment_resolution_failed
+            and workspace_inbox_request is None
+            and not person_inventory_turn
+            and not named_person_corpus.applies
+            and not exact_uploader_file.applies
+            and not filename_clue_selection.applies
+            and filename_inventory_request is None
+            and not direct_archived_source_query
+            and not contextual_source_query
+            and obsidian_intent is None
+            and obsidian_result_request_candidate is None
+            and bool(promoted_message_window_timezone)
+        )
+        promoted_message_window_admitted = bool(
+            promoted_message_window_initial_admitted
+            or promoted_message_window_continuation_admitted
+            or promoted_temporal_reference_recognized
         )
         # Once a private file has contributed to this conversation, nothing
         # derived from its history may be promoted into account-wide memory.
@@ -37092,7 +37423,48 @@ class AgentRuntime:
             if re.fullmatch(r"msg_[0-9a-f]{16}", replay_root_id)
             else source_search_lineage_user_message_id
         )
-        if promoted_message_window_admitted:
+        if promoted_message_window_continuation_admitted:
+            assert promoted_temporal_update is not None
+            assert promoted_continued_work_item is not None
+            refreshed_continuation: RecallConversationWorkItem | None = None
+            try:
+                with self.storage.transaction() as work_item_conn:
+                    refreshed_continuation = get_current_recall_conversation_work_item_in_transaction(
+                        work_item_conn,
+                        user_id=person_id,
+                        conversation_id=str(conversation_id),
+                        boundary_user_message_id=source_search_lineage_user_message_id,
+                    )
+            except Exception as exc:  # noqa: BLE001 - a raced reference stays ordinary
+                LOGGER.warning(
+                    "message-window: continuation admission changed (%s)",
+                    type(exc).__name__,
+                )
+            if refreshed_continuation is not None and (
+                refreshed_continuation.id == promoted_continued_work_item.id
+                and refreshed_continuation.revision == promoted_continued_work_item.revision
+            ):
+                return await self._promoted_message_window_response(
+                    actor=actor,
+                    conversation_id=str(conversation_id),
+                    person_id=person_id,
+                    request=clean_message,
+                    boundary_message_id=source_search_lineage_user_message_id,
+                    timezone_name=refreshed_continuation.active_frame.timezone_name,
+                    since=promoted_temporal_update.since_utc,
+                    until=promoted_temporal_update.until_utc,
+                    role=refreshed_continuation.active_frame.role.selector_value,
+                    turn_deadline=turn_deadline,
+                    turn_started=turn_started,
+                    continued_work_item=refreshed_continuation,
+                )
+        if promoted_temporal_reference_recognized:
+            return self._message_window_continuation_clarification_response(
+                conversation_id=str(conversation_id),
+                person_id=person_id,
+                boundary_message_id=source_search_lineage_user_message_id,
+            )
+        if promoted_message_window_initial_admitted:
             assert locate_window is not None
             window_since, window_until, window_role = locate_window
             return await self._promoted_message_window_response(
@@ -37106,6 +37478,7 @@ class AgentRuntime:
                 until=window_until,
                 role=window_role,
                 turn_deadline=turn_deadline,
+                turn_started=turn_started,
             )
         workspace_inbox_resolution = _WorkspaceInboxResolution()
         if workspace_inbox_request is not None:

@@ -5443,6 +5443,7 @@ class ExecutionKernel:
         include_full_content: bool = False,
         promoted_current_conversation: bool = False,
         promoted_plan: LegacyMessageWindowPlan | None = None,
+        promoted_timezone_name: str | None = None,
     ) -> dict[str, Any] | MessageWindowStorageSnapshot:
         """Search the caller's own chat history — not the knowledge base.
 
@@ -5463,9 +5464,17 @@ class ExecutionKernel:
         conv = " ".join(str(conversation_id or "").split()).strip() or None
         if (since is None) != (until is None):
             raise ValueError("since and until must be supplied together")
+        if promoted_current_conversation is not True and (
+            promoted_plan is not None or promoted_timezone_name is not None
+        ):
+            raise ValueError("promoted message window authority is unavailable to ordinary calls")
         if promoted_current_conversation is True:
             if (
                 type(promoted_plan) is not LegacyMessageWindowPlan
+                or not isinstance(promoted_timezone_name, str)
+                or not promoted_timezone_name
+                or promoted_timezone_name != promoted_timezone_name.strip()
+                or len(promoted_timezone_name) > 128
                 or query != ""
                 or since is None
                 or until is None
@@ -5477,6 +5486,10 @@ class ExecutionKernel:
                 or include_full_content is not False
             ):
                 raise ValueError("promoted message window arguments are outside the closed lane")
+            try:
+                ZoneInfo(promoted_timezone_name)
+            except (KeyError, ValueError) as exc:
+                raise ValueError("promoted message window requires an installed IANA timezone") from exc
             authorization = self.authorization
             if (
                 authorization is None
@@ -5486,11 +5499,6 @@ class ExecutionKernel:
                 ).allowed
             ):
                 raise PermissionError("conversation read authorization denied")
-            timezone_name = str(getattr(self.settings, "local_timezone", "") or "").strip()
-            if not timezone_name:
-                timezone_name = str(getattr(_machine_zone(), "key", "") or "").strip()
-            if not timezone_name:
-                raise ValueError("promoted message window requires a named timezone")
             with storage.transaction() as conn:
                 projection = select_promoted_current_conversation_window_in_transaction(
                     conn,
@@ -5511,7 +5519,7 @@ class ExecutionKernel:
                     tenant_id=actor.user_id,
                     person_id=actor.own_id,
                     conversation_id=conv,
-                    timezone_name=timezone_name,
+                    timezone_name=promoted_timezone_name,
                     projection=projection,
                 )
         if since is not None and until is not None:
