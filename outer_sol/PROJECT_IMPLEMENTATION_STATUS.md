@@ -91,10 +91,32 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Implement the smallest stable `SourceRef`, `CatalogItem`, `PassageRef`, typed
-   temporal-fact and honest coverage contracts without widening schema 38.
-2. Map those contracts read-only onto authoritative document, Obsidian and
-   conversation stores before exposing the federated archive facade.
+1. Map the frozen retrieval contracts read-only onto authoritative document,
+   Obsidian and conversation stores and expose the federated archive facade.
+2. Keep every lane capability-scoped, late-reauthorized and explicit about
+   partial, capped, stale, incompatible and unavailable coverage.
+
+## Completed in source; awaiting immutable activation
+
+### Retrieval identity and coverage foundation (`0.207.5`)
+
+- `SourceRef` separates stable logical identity from mutable `ResolvedSource`;
+  tenant/principal lookup axes, representation/lifecycle/revision matrices and
+  every revalidation target are closed and exact.
+- `PassageRef` anchors codepoint spans or message windows to exact source
+  revisions. Schema-38 embedding identity never treats stale, incompatible,
+  missing or backfill-pending material as current.
+- `TemporalFact` preserves exact roles and provenance; legacy collapsed dates
+  and Knowledge Object projection dates cannot silently substitute source dates.
+- `CatalogItem` is body-free, rebuildable and non-authoritative. Every catalog,
+  passage, lexical, approximate-identity and dense lane reports an explicit
+  index state.
+- `SearchCoverage` binds each per-lane result to one keyed private request,
+  authority scope, requested target set, snapshot and run. Mixed batches fail
+  closed and only complete, current, reauthorized coverage can confirm absence.
+- Independent schema/privacy review passed; 52 focused adversarial tests and the
+  complete 16-worker quality gate are green. No database migration or runtime
+  route was introduced.
 
 ## Canonical golden-journey/evidence registry
 
@@ -152,9 +174,8 @@ claims at this checkpoint.
 
 ## Next order
 
-1. Design and release the retrieval-identity foundation: `SourceRef`, rebuildable
-   `CatalogItem`, `PassageRef`, typed `TemporalFact` and `SearchCoverage`, with
-   authoritative revalidation and no date-role substitution.
+1. Activate the schema-free retrieval-identity foundation as `0.207.5` and
+   record its exact source/tree/wheel identity.
 2. Release one read-only federated `archive_search` facade with deterministic
    continuation, neighboring message context and explicit per-lane coverage.
 3. Extend the proven recall Work Item across document and message evidence only
