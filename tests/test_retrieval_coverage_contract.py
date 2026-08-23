@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import copy
 import json
+import pickle
 
 import pytest
 
@@ -288,14 +290,59 @@ def test_execution_binding_attestation_is_exact_process_private_and_not_deserial
     assert binding.attests_private_request('{"query":"other"}') is False
     assert binding.attests_private_request('{"query": "quarterly report"}') is False
     assert binding.attests_private_request({"query": "quarterly report"}) is False
+    assert binding.attests_authority(
+        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+        tenant_id="tenant-main",
+        principal_id="person-42",
+    ) is True
+    assert binding.attests_authority(
+        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+        tenant_id="tenant-other",
+        principal_id="person-42",
+    ) is False
+    assert binding.attests_authority(
+        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+        tenant_id="tenant-main",
+        principal_id="person-other",
+    ) is False
+    assert binding.attests_authority(
+        authority_scope=AuthorityScope.PRINCIPAL,
+        tenant_id=None,
+        principal_id="person-42",
+    ) is False
+    assert binding.attests_authority(
+        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+        tenant_id=None,
+        principal_id="person-42",
+    ) is False
+    assert binding.attests_authority(
+        authority_scope="tenant_principal",  # type: ignore[arg-type]
+        tenant_id="tenant-main",
+        principal_id="person-42",
+    ) is False
+    assert binding.attests_snapshot("snapshot-17") is True
+    assert binding.attests_snapshot("snapshot-18") is False
+    assert binding.attests_snapshot({"snapshot": 17}) is False
 
     restored = SearchExecutionBinding.from_payload(binding.to_payload())
     assert restored == binding
     assert restored.attests_private_request(request) is False
+    assert restored.attests_authority(
+        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+        tenant_id="tenant-main",
+        principal_id="person-42",
+    ) is False
+    assert restored.attests_snapshot("snapshot-17") is False
     assert "query" not in repr(binding)
     serialized = json.dumps(binding.to_payload(), sort_keys=True)
     assert "quarterly report" not in serialized
     assert "sha256" not in serialized.casefold()
+    with pytest.raises(TypeError, match="process-private"):
+        copy.copy(binding)
+    with pytest.raises(TypeError, match="process-private"):
+        copy.deepcopy(binding)
+    with pytest.raises(TypeError, match="process-private"):
+        pickle.dumps(binding)
 
     class StatefulTargets(tuple[object, ...]):
         def __iter__(self):  # type: ignore[no-untyped-def]
@@ -308,6 +355,61 @@ def test_execution_binding_attestation_is_exact_process_private_and_not_deserial
             StatefulTargets(binding.requested_targets),  # type: ignore[arg-type]
             binding.opaque_handle,
         )
+
+
+def test_execution_binding_rejects_attestation_splice_and_public_field_tamper() -> None:
+    targets = ((SearchCorpus.RAW_DOCUMENTS, SearchLane.LEXICAL),)
+    first = _binding(targets)
+    second = _binding(
+        targets,
+        tenant_id="tenant-other",
+        principal_id="person-other",
+        snapshot="snapshot-other",
+        run="run-other",
+    )
+    object.__setattr__(
+        first,
+        "_private_authority_attestation",
+        second._private_authority_attestation,
+    )
+    object.__setattr__(
+        first,
+        "_private_snapshot_attestation",
+        second._private_snapshot_attestation,
+    )
+    assert first.is_live_private_request_binding is False
+    assert first.attests_authority(
+        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+        tenant_id="tenant-other",
+        principal_id="person-other",
+    ) is False
+    assert first.attests_snapshot("snapshot-other") is False
+
+    public_tamper = _binding(targets)
+    object.__setattr__(public_tamper, "authority_scope", AuthorityScope.PRINCIPAL)
+    assert public_tamper.is_live_private_request_binding is False
+    assert public_tamper.attests_authority(
+        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+        tenant_id="tenant-main",
+        principal_id="person-42",
+    ) is False
+
+
+def test_execution_binding_attestors_swallow_hostile_string_subclasses() -> None:
+    binding = _binding(((SearchCorpus.RAW_DOCUMENTS, SearchLane.LEXICAL),))
+
+    class HostileString(str):
+        def strip(self, *args: object, **kwargs: object) -> str:
+            raise RuntimeError("private body must not escape")
+
+    hostile = HostileString("snapshot-17")
+    assert binding.attests_snapshot(hostile) is False
+    assert binding.attests_private_request(HostileString('{"query":"quarterly report"}')) is False
+    assert binding.attests_authority(
+        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+        tenant_id=HostileString("tenant-main"),
+        principal_id="person-42",
+    ) is False
 
 
 def test_coverage_rejects_unrelated_execution_target() -> None:

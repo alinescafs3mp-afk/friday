@@ -8,6 +8,7 @@ import secrets
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import NoReturn, SupportsIndex, cast
 
 from friday.retrieval._contract_utils import (
     RetrievalContractError,
@@ -33,6 +34,62 @@ def _private_request_attestation(value: str) -> str:
     return hmac.new(
         _PROCESS_REQUEST_ATTESTATION_KEY,
         b"friday/search-execution-private-request/v1\0" + value.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _private_authority_attestation(
+    authority_scope: AuthorityScope,
+    tenant_id: str | None,
+    principal_id: str | None,
+) -> str:
+    material = canonical_json(
+        {
+            "authority_scope": authority_scope.value,
+            "principal_id": principal_id,
+            "tenant_id": tenant_id,
+        }
+    ).encode("ascii")
+    return hmac.new(
+        _PROCESS_REQUEST_ATTESTATION_KEY,
+        b"friday/search-execution-private-authority/v1\0" + material,
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _private_snapshot_attestation(value: str) -> str:
+    return hmac.new(
+        _PROCESS_REQUEST_ATTESTATION_KEY,
+        b"friday/search-execution-private-snapshot/v1\0" + value.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _private_binding_seal(
+    *,
+    authority_scope: AuthorityScope,
+    requested_targets: tuple[SearchTarget, ...],
+    opaque_handle: str,
+    request_attestation: str,
+    authority_attestation: str,
+    snapshot_attestation: str,
+) -> str:
+    material = canonical_json(
+        {
+            "authority_attestation": authority_attestation,
+            "authority_scope": authority_scope.value,
+            "opaque_handle": opaque_handle,
+            "request_attestation": request_attestation,
+            "requested_targets": [
+                {"corpus": corpus.value, "lane": lane.value}
+                for corpus, lane in requested_targets
+            ],
+            "snapshot_attestation": snapshot_attestation,
+        }
+    ).encode("ascii")
+    return hmac.new(
+        _PROCESS_REQUEST_ATTESTATION_KEY,
+        b"friday/search-execution-private-binding/v1\0" + material,
         hashlib.sha256,
     ).hexdigest()
 
@@ -92,6 +149,24 @@ class SearchExecutionBinding:
         repr=False,
         compare=False,
     )
+    _private_authority_attestation: str | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _private_snapshot_attestation: str | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _private_binding_seal: str | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
     _process_authority: object | None = field(
         default=None,
         init=False,
@@ -112,9 +187,30 @@ class SearchExecutionBinding:
                 self._private_request_attestation,
                 label="private request attestation",
             )
+        if self._private_authority_attestation is not None:
+            lowercase_sha256(
+                self._private_authority_attestation,
+                label="private authority attestation",
+            )
+        if self._private_snapshot_attestation is not None:
+            lowercase_sha256(
+                self._private_snapshot_attestation,
+                label="private snapshot attestation",
+            )
+        if self._private_binding_seal is not None:
+            lowercase_sha256(self._private_binding_seal, label="private binding seal")
 
     def __repr__(self) -> str:
         return "SearchExecutionBinding(private=True)"
+
+    def __copy__(self) -> NoReturn:
+        raise TypeError("search execution binding is process-private")
+
+    def __deepcopy__(self, _memo: object) -> NoReturn:
+        raise TypeError("search execution binding is process-private")
+
+    def __reduce_ex__(self, _protocol: SupportsIndex) -> NoReturn:
+        raise TypeError("search execution binding is process-private")
 
     @classmethod
     def create(
@@ -137,6 +233,10 @@ class SearchExecutionBinding:
         )
         if len(normalized_private_request_json.encode("utf-8")) > _MAX_PRIVATE_REQUEST_BYTES:
             raise RetrievalContractError("normalized private search request is too large")
+        if tenant_id is not None and type(tenant_id) is not str:
+            raise RetrievalContractError("binding tenant_id must be canonical text")
+        if principal_id is not None and type(principal_id) is not str:
+            raise RetrievalContractError("binding principal_id must be canonical text")
         if tenant_id is not None:
             bounded_text(tenant_id, label="binding tenant_id", maximum_bytes=200)
         if principal_id is not None:
@@ -149,6 +249,8 @@ class SearchExecutionBinding:
         if (tenant_id is not None, principal_id is not None) != expected_presence:
             raise RetrievalContractError("execution authority IDs do not match the declared scope")
         targets = _targets(requested_targets)
+        if type(snapshot_discriminator) is not str or type(run_discriminator) is not str:
+            raise RetrievalContractError("execution discriminators must be canonical text")
         snapshot = bounded_text(
             snapshot_discriminator,
             label="snapshot discriminator",
@@ -178,22 +280,68 @@ class SearchExecutionBinding:
             "_private_request_attestation",
             _private_request_attestation(normalized_private_request_json),
         )
+        object.__setattr__(
+            binding,
+            "_private_authority_attestation",
+            _private_authority_attestation(authority_scope, tenant_id, principal_id),
+        )
+        object.__setattr__(
+            binding,
+            "_private_snapshot_attestation",
+            _private_snapshot_attestation(snapshot),
+        )
+        object.__setattr__(
+            binding,
+            "_private_binding_seal",
+            _private_binding_seal(
+                authority_scope=authority_scope,
+                requested_targets=targets,
+                opaque_handle=binding.opaque_handle,
+                request_attestation=cast(str, binding._private_request_attestation),
+                authority_attestation=cast(str, binding._private_authority_attestation),
+                snapshot_attestation=cast(str, binding._private_snapshot_attestation),
+            ),
+        )
         object.__setattr__(binding, "_process_authority", _PROCESS_BINDING_AUTHORITY)
         return binding
 
     @property
     def is_live_private_request_binding(self) -> bool:
-        return bool(
-            type(self) is SearchExecutionBinding
-            and self._process_authority is _PROCESS_BINDING_AUTHORITY
-            and self._private_request_attestation is not None
-        )
+        try:
+            request_attestation = self._private_request_attestation
+            authority_attestation = self._private_authority_attestation
+            snapshot_attestation = self._private_snapshot_attestation
+            binding_seal = self._private_binding_seal
+            if (
+                type(self) is not SearchExecutionBinding
+                or self._process_authority is not _PROCESS_BINDING_AUTHORITY
+                or type(self.authority_scope) is not AuthorityScope
+                or type(self.requested_targets) is not tuple
+                or self.requested_targets != _targets(self.requested_targets)
+                or type(self.opaque_handle) is not str
+                or type(request_attestation) is not str
+                or type(authority_attestation) is not str
+                or type(snapshot_attestation) is not str
+                or type(binding_seal) is not str
+            ):
+                return False
+            expected = _private_binding_seal(
+                authority_scope=self.authority_scope,
+                requested_targets=self.requested_targets,
+                opaque_handle=self.opaque_handle,
+                request_attestation=request_attestation,
+                authority_attestation=authority_attestation,
+                snapshot_attestation=snapshot_attestation,
+            )
+            return hmac.compare_digest(binding_seal, expected)
+        except Exception:
+            return False
 
     def attests_private_request(self, normalized_private_request_json: object) -> bool:
         """Match the exact canonical private request only for a live-created binding."""
 
         expected = self._private_request_attestation
-        if expected is None or not isinstance(normalized_private_request_json, str):
+        if expected is None or type(normalized_private_request_json) is not str:
             return False
         if not self.is_live_private_request_binding:
             return False
@@ -204,10 +352,68 @@ class SearchExecutionBinding:
             )
             if len(normalized_private_request_json.encode("utf-8")) > _MAX_PRIVATE_REQUEST_BYTES:
                 return False
-        except (RetrievalContractError, UnicodeEncodeError):
+        except Exception:
             return False
         actual = _private_request_attestation(normalized_private_request_json)
         return hmac.compare_digest(expected, actual)
+
+    def attests_authority(
+        self,
+        *,
+        authority_scope: AuthorityScope,
+        tenant_id: str | None,
+        principal_id: str | None,
+    ) -> bool:
+        """Match the exact private actor axis used to create this live binding."""
+
+        expected = self._private_authority_attestation
+        if expected is None or not self.is_live_private_request_binding:
+            return False
+        try:
+            if not isinstance(authority_scope, AuthorityScope):
+                return False
+            if tenant_id is not None and type(tenant_id) is not str:
+                return False
+            if principal_id is not None and type(principal_id) is not str:
+                return False
+            if tenant_id is not None:
+                bounded_text(tenant_id, label="binding tenant_id", maximum_bytes=200)
+            if principal_id is not None:
+                bounded_text(principal_id, label="binding principal_id", maximum_bytes=200)
+            expected_presence = {
+                AuthorityScope.TENANT: (True, False),
+                AuthorityScope.PRINCIPAL: (False, True),
+                AuthorityScope.TENANT_PRINCIPAL: (True, True),
+            }[authority_scope]
+            if (tenant_id is not None, principal_id is not None) != expected_presence:
+                return False
+            actual = _private_authority_attestation(
+                authority_scope,
+                tenant_id,
+                principal_id,
+            )
+            return hmac.compare_digest(expected, actual)
+        except Exception:
+            return False
+
+    def attests_snapshot(self, snapshot_discriminator: object) -> bool:
+        """Match the exact private snapshot discriminator of this live run."""
+
+        expected = self._private_snapshot_attestation
+        if expected is None or not self.is_live_private_request_binding:
+            return False
+        try:
+            if type(snapshot_discriminator) is not str:
+                return False
+            snapshot = bounded_text(
+                snapshot_discriminator,
+                label="snapshot discriminator",
+                maximum_bytes=256,
+            )
+            actual = _private_snapshot_attestation(snapshot)
+            return hmac.compare_digest(expected, actual)
+        except Exception:
+            return False
 
     def to_payload(self) -> dict[str, object]:
         return {
