@@ -29,9 +29,15 @@ class CurrentTurnFileReferenceToken:
     raw_id: str
     source_identity_sha256: str
     _process_authority: object = field(repr=False, compare=False)
+    reinspect_current_upload: bool = False
 
 
-def stamp_current_turn_file_reference(carrier: Any, raw: Mapping[str, Any]) -> Any:
+def stamp_current_turn_file_reference(
+    carrier: Any,
+    raw: Mapping[str, Any],
+    *,
+    reinspect_current_upload: bool = False,
+) -> Any:
     """Attach a private source pin to one server-owned mapping carrier."""
 
     raw_id = str(raw.get("id") or "").strip()
@@ -51,6 +57,7 @@ def stamp_current_turn_file_reference(carrier: Any, raw: Mapping[str, Any]) -> A
         raw_id=raw_id,
         source_identity_sha256=raw_source_identity_sha256(projection),
         _process_authority=_PROCESS_AUTHORITY,
+        reinspect_current_upload=reinspect_current_upload is True,
     )
     try:
         object.__setattr__(carrier, _CURRENT_TURN_REFERENCE_ATTR, token)

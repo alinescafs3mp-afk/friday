@@ -105,6 +105,7 @@ from friday.file_evidence import (
     FileEvidenceSet,
     FileEvidenceView,
     FileRegistrationKind,
+    current_turn_file_reference_of,
 )
 from friday.interaction_control_plane.legacy_trace import (
     CapabilityStatus,
@@ -33151,6 +33152,7 @@ class AgentRuntime:
         person_id: str,
         require_projected_direct_read_authority: bool = False,
         force_reinspect: bool = False,
+        current_upload_reinspection_pins: Mapping[str, str] | None = None,
         recover_missing_office_index: bool = False,
         turn_deadline: float | None = None,
     ) -> list[dict[str, Any]]:
@@ -33330,6 +33332,15 @@ class AgentRuntime:
             canonical = _retain_historical_direct_read_authority(item, canonical)
             canonical = _retain_explicit_filename_direct_read(item, canonical)
 
+            pinned_identity = str((current_upload_reinspection_pins or {}).get(raw_id) or "")
+            force_item_reinspect = bool(
+                force_reinspect
+                or (
+                    re.fullmatch(r"[0-9a-f]{64}", pinned_identity)
+                    and hmac.compare_digest(pinned_identity, current_identity)
+                )
+            )
+
             verified = _mark_narrowed_parser_state(
                 canonical,
                 _narrow_attachment_parser_state(canonical, item),
@@ -33348,7 +33359,7 @@ class AgentRuntime:
                 and not is_trusted_office_attachment(canonical)
             )
             if (
-                not force_reinspect
+                not force_item_reinspect
                 and not office_upgrade
                 and (body.strip() or canonical.get("empty_text") is True)
             ):
@@ -33412,7 +33423,7 @@ class AgentRuntime:
                     authorized.content,
                     filename=authorized.filename or filename,
                     mime_type=authorized.mime_type or mime_type,
-                    preferred_language="ru" if force_reinspect else "",
+                    preferred_language="ru" if force_item_reinspect else "",
                     turn_deadline=turn_deadline,
                     expired="turn deadline expired during attachment recovery",
                 )
@@ -36068,6 +36079,13 @@ class AgentRuntime:
         reply_quote = str(reply_to or "").strip()[:1000]
         if not clean_message:
             raise ValueError("message is required")
+        current_upload_reinspection_pins: dict[str, str] = {}
+        for supplied in attachments or []:
+            if not isinstance(supplied, Mapping):
+                continue
+            token = current_turn_file_reference_of(supplied)
+            if token is not None and token.reinspect_current_upload:
+                current_upload_reinspection_pins[token.raw_id] = token.source_identity_sha256
         if turn_policy is not None and not isinstance(turn_policy, TurnPolicyDecision):
             raise ValueError("turn_policy must be a code-owned decision")
         locate_decomposition = _closed_locate_remainder(clean_message)
@@ -37807,6 +37825,8 @@ class AgentRuntime:
                 "turn_deadline": turn_deadline,
                 "expired": "turn deadline expired during registered attachment verification",
             }
+            if current_upload_reinspection_pins:
+                verification_kwargs["current_upload_reinspection_pins"] = current_upload_reinspection_pins
             refresh_visual_overview = bool(
                 len(active_attachment_set) == 1
                 and _current_visual_overview_request(clean_message)
@@ -38020,9 +38040,17 @@ class AgentRuntime:
                 # a projection that lost or changed its typed Raw authority and
                 # keeps ordinary current siblings in a mixed set readable.
                 reverified: list[dict[str, Any]] = []
-                projected_office_upgrade_kwargs = (
-                    {"recover_missing_office_index": True} if recover_missing_office_index else {}
-                )
+                projected_reverification_kwargs: dict[str, Any] = {}
+                if recover_missing_office_index:
+                    projected_reverification_kwargs["recover_missing_office_index"] = True
+                if current_upload_reinspection_pins:
+                    # Exact-name authority adds a second registered-byte gate.
+                    # Carry the same identity pin so that gate reuses the
+                    # process-private recovery instead of reverting to stale
+                    # durable text; it still cannot parse another Raw.
+                    projected_reverification_kwargs["current_upload_reinspection_pins"] = (
+                        current_upload_reinspection_pins
+                    )
                 for position, item in enumerate(attachments):
                     source = (
                         active_attachment_set[position] if position < len(active_attachment_set) else None
@@ -38040,7 +38068,7 @@ class AgentRuntime:
                         require_projected_direct_read_authority=require_direct,
                         turn_deadline=turn_deadline,
                         expired="turn deadline expired during projected attachment verification",
-                        **projected_office_upgrade_kwargs,
+                        **projected_reverification_kwargs,
                     )
                     reverified.extend(verified_item)
                 # Reauthorization deliberately returns canonical sources, not
@@ -39778,7 +39806,22 @@ class AgentRuntime:
         context.private_source_boundary_active = private_outbound_restricted
         restricted_outbound_turn = bool(topic.startswith("человек") or private_outbound_restricted)
         web_intent_authorized = bool(
-            file_web
+            # A current private source cannot enter the isolated public-web
+            # lane.  Still retain the code-owned policy verdict (weather,
+            # news, prices, or another explicit public request) so the turn
+            # closes with the private-source refusal instead of silently
+            # asking the model to answer a current fact from memory.  This bit
+            # authorizes only that refusal: the projection below has already
+            # removed every outbound capability.
+            (
+                private_outbound_restricted
+                and (
+                    asks_for_the_web(clean_message)
+                    or context.policy_web_authorized
+                    or topic.startswith("интернет")
+                )
+            )
+            or file_web
             if (
                 file_turn.proved("local_read")
                 or (authenticated_attachment_scope and attachment_expected_count > 0)

@@ -707,6 +707,108 @@ def _archive_password_challenge(file_ingestion: dict[str, Any]) -> dict[str, Any
     }
 
 
+def _current_replay_needs_reinspection(
+    *,
+    filename: str,
+    file_ingestion: Mapping[str, Any],
+    raw: Mapping[str, Any] | None,
+) -> bool:
+    """Whether one exact current upload should retry a stale durable parse.
+
+    The decision is made only from the server-owned ingestion receipt and Raw
+    projection.  Its result is carried by a process-private, source-identity
+    pinned token below; no JSON field can request parser work or file access.
+    """
+
+    if file_ingestion.get("idempotent_replay") is not True or not isinstance(raw, Mapping):
+        return False
+    raw_id = str(raw.get("id") or "").strip()
+    if not raw_id or raw_id != str(file_ingestion.get("raw_object_id") or "").strip():
+        return False
+
+    metadata = bounded_raw_file_metadata(raw.get("metadata_json"))
+    raw_text = str(raw.get("raw_content") or "")
+    usable_text = bool(raw_text.strip()) and not _is_file_provenance_stub(raw_text)
+
+    def count(name: str) -> int:
+        try:
+            return max(0, int(metadata.get(name) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    if metadata.get("unsupported_format") is True:
+        return True
+    # A deadline failure can improve on a fresh, explicitly repeated upload.
+    # Fixed text/page/archive/source caps cannot: retrying those on every
+    # duplicate would create an expensive perpetual loop while Raw must remain
+    # immutable. Their durable partial-coverage warning remains authoritative.
+    if metadata.get("parse_deadline_reached") is True:
+        return True
+    if metadata.get("extraction_success") is not True:
+        return True
+
+    mime_type = (
+        str(metadata.get("mime_type") or file_ingestion.get("mime_type") or "")
+        .split(";", 1)[0]
+        .strip()
+        .casefold()
+    )
+    lowered_filename = str(filename or metadata.get("filename") or "").casefold()
+    visual_candidate = bool(
+        mime_type.startswith("image/")
+        or mime_type == "application/pdf"
+        or lowered_filename.endswith(
+            (".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp", ".gif")
+        )
+    )
+    structured_document_candidate = bool(
+        mime_type
+        in {
+            "application/msword",
+            "application/rtf",
+            "application/vnd.ms-excel",
+            "application/vnd.ms-excel.sheet.binary.macroenabled.12",
+            "application/vnd.ms-outlook",
+            "application/vnd.ms-powerpoint",
+        }
+        or mime_type.startswith("application/vnd.openxmlformats-officedocument.")
+        or mime_type.startswith("application/vnd.oasis.opendocument.")
+        or lowered_filename.endswith(
+            (
+                ".doc",
+                ".docx",
+                ".msg",
+                ".odp",
+                ".ods",
+                ".odt",
+                ".ppt",
+                ".pptx",
+                ".rtf",
+                ".xls",
+                ".xlsb",
+                ".xlsx",
+            )
+        )
+    )
+    extracted_chars = max(count("extraction_chars"), len(raw_text.strip()) if usable_text else 0)
+    if (visual_candidate or structured_document_candidate) and extracted_chars < 160:
+        return True
+    if usable_text:
+        return False
+
+    # A non-visual, lossless parser-success with zero characters and a false
+    # text-success bit is an attested genuinely empty text document, not an
+    # unreadable source. Conversely, text-success/chars with no durable body is
+    # an inconsistent receipt and gets one current-upload repair attempt.
+    return bool(
+        visual_candidate
+        or metadata.get("text_extraction_success") is True
+        or count("extraction_chars") > 0
+        or metadata.get("vision_review_required") is True
+        or metadata.get("transcription")
+    )
+
+
 def _current_turn_file_attachment(
     *,
     filename: str,
@@ -889,11 +991,24 @@ def _current_turn_file_attachment(
             "source_truncated_for_parse": source_truncated_for_parse,
         }
     )
+    reinspect_current_upload = _current_replay_needs_reinspection(
+        filename=filename,
+        file_ingestion=file_ingestion,
+        raw=raw,
+    )
     if office_index is not None:
         attachment[OFFICE_STRUCTURE_KEY] = office_index
-        carrier = stamp_current_turn_file_reference(trusted_office_attachment(attachment), raw or {})
+        carrier = stamp_current_turn_file_reference(
+            trusted_office_attachment(attachment),
+            raw or {},
+            reinspect_current_upload=reinspect_current_upload,
+        )
     else:
-        carrier = stamp_current_turn_file_reference(_OwnedAttachment(attachment), raw or {})
+        carrier = stamp_current_turn_file_reference(
+            _OwnedAttachment(attachment),
+            raw or {},
+            reinspect_current_upload=reinspect_current_upload,
+        )
     if storage is not None and tenant_id and uploaded_by:
         carrier = _bind_storage_owned_exact_filename_direct_read(
             storage,
