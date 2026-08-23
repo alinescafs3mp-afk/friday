@@ -24649,6 +24649,92 @@ def _self_contained_public_product_spec_query(speech: str) -> str:
     return f"{brand} {model} {field}"[:140]
 
 
+# Public market questions are intrinsically time-sensitive, but people do not
+# normally spell out “search the web”.  After a private attachment the ordinary
+# router used to interpret that natural wording as web intent and then reject
+# its own answer because the sticky private boundary was still active.  Admit a
+# small, current-text-only market contour instead: reviewed public instruments,
+# an explicit metric and an explicit time window.  The call site still removes
+# history and rejects every attachment/reply/archive carrier before any bytes
+# can leave the process.
+_PUBLIC_MARKET_INSTRUMENT = re.compile(
+    r"\b(?:"
+    r"bitcoin|btc|биткоин\w*|биткойн\w*|ethereum|eth|эфириум\w*|"
+    r"monero|xmr|tether|usdt|toncoin|solana|dogecoin|litecoin|cardano|"
+    r"ripple|xrp|polkadot|avalanche|chainlink|криптовалют\w*|"
+    r"доллар\w*|usd|евро|eur|юан\w*|cny|фунт\w*|gbp|иен\w*|йен\w*|jpy|"
+    r"рубл\w*|rub|нефт\w*|brent|wti|золот\w*|gold"
+    r")\b",
+    re.IGNORECASE,
+)
+_PUBLIC_MARKET_METRIC = re.compile(
+    r"\b(?:стоимост\w*|цен\w*|курс\w*|котиров\w*|капитализац\w*|"
+    r"сложност\w*|хешрейт\w*|хэшрейт\w*|объ[её]м\w*\s+торг\w*|"
+    r"price\w*|exchange\s+rate\w*|market\s+cap\w*|difficulty|hash\s*rate|hashrate)\b",
+    re.IGNORECASE,
+)
+_PUBLIC_MARKET_TIME_SCOPE = re.compile(
+    r"\b(?:сегодня\w*|сейчас|ныне|текущ\w*|на\s+данн\w*\s+момент|"
+    r"по\s+данн\w*\s+момент|с\s+(?:начала\s+)?(?:этого|текущего)\s+года|"
+    r"с\s+(?:январ|феврал|март|апрел|ма[йяе]|июн|июл|август|сентябр|"
+    r"октябр|ноябр|декабр|весн|лет|осен|зим)\w*(?:\s+(?:этого|текущего)\s+года)?|"
+    r"за\s+(?:последн\w*|текущ\w*)\s+(?:час|сут|дн|недел|месяц|год)\w*|"
+    r"today|now|currently|at\s+the\s+moment|year[- ]to[- ]date|ytd|"
+    r"since\s+(?:the\s+start\s+of\s+)?(?:this\s+year|spring|summer|autumn|winter))\b",
+    re.IGNORECASE,
+)
+
+
+def _self_contained_public_market_query(message: str) -> str:
+    """Return one bounded public-market query which needs fresh evidence."""
+
+    raw = str(message or "")
+    if not raw or len(raw) > 320 or any(character in raw for character in "\x00\r\n"):
+        return ""
+    visible = unicodedata.normalize("NFKC", raw).strip()
+    body = visible.rstrip(" \t?!.…")
+    if (
+        not visible
+        or any(character in visible for character in "`\"'«»“”„’")
+        or re.search(r"https?://|www\.", visible, flags=re.IGNORECASE)
+        or re.search(r"[!;…]|\.(?=\s+\S)", body)
+        or not _PUBLIC_MARKET_INSTRUMENT.search(visible)
+        or not _PUBLIC_MARKET_METRIC.search(visible)
+        or not _PUBLIC_MARKET_TIME_SCOPE.search(visible)
+    ):
+        return ""
+    # These phrases are complete calendar anchors, not references to excluded
+    # conversation history.  Mask them only for the generic deictic detector.
+    deictic_probe = re.sub(
+        r"\b(?:этого|текущего)\s+года\b|\b(?:на|по)\s+данн\w*\s+момент\b",
+        " ",
+        visible,
+        flags=re.IGNORECASE,
+    )
+    if (
+        _WEB_ISOLATION_DEICTIC.search(deictic_probe)
+        or _WEB_ISOLATION_UNRESOLVED_TOPIC.search(visible)
+        or _EXPLICIT_PUBLIC_WEB_ENGLISH_DEICTIC.search(visible)
+        or _EXPLICIT_PUBLIC_WEB_ENGLISH_IT_DEICTIC.search(visible)
+        or _EXPLICIT_PUBLIC_WEB_UNRESOLVED_PRONOUN.search(visible)
+        or _EXPLICIT_PUBLIC_WEB_PRIVATE_SOURCE_CARRIER.search(visible)
+        or _EXPLICIT_PUBLIC_WEB_PRIVATE_PERSON_CARRIER.search(visible)
+        or _EXPLICIT_PUBLIC_WEB_SECRET_CARRIER.search(visible)
+        or _EXPLICIT_PUBLIC_WEB_FILENAME_OR_PATH.search(visible)
+        or _EXPLICIT_PUBLIC_WEB_SECRET_VALUE.search(visible)
+        or _ASKS_ABOUT_PERSONAL_STORAGE.search(visible)
+        or _ATTACHMENT_CROSS_CONTEXT_REQUEST.search(visible)
+        or _requests_foreign_private_data(visible)
+        or _person_action_on_speech(visible)
+        or _archived_source_search_query(visible)
+        or _is_direct_file_request(visible)
+        or _mutation_action_on_speech(visible)
+        or len(visible.split()) > 32
+    ):
+        return ""
+    return " ".join(visible.split())[:280]
+
+
 # Explicit public research can also be isolated after a sticky private-file
 # lineage, but only when the current turn is a complete authority envelope by
 # itself.  These are rejection contours, not a semantic allowlist: an unknown
@@ -36968,6 +37054,35 @@ class AgentRuntime:
             and obsidian_intent is None
             and obsidian_result_request_candidate is None
         )
+        public_market_query = _self_contained_public_market_query(file_turn.speech)
+        isolated_public_market_turn = bool(
+            inherited_private_context_lineage
+            and public_market_query
+            and file_turn.actions.issubset({"web"})
+            and not file_turn.source_filenames()
+            and not synthetic_document_notice
+            and not supplied_attachment_count
+            and not attachments
+            and not quoted_attachment_reference
+            and not reply_assistant_reference
+            and not reply_quote
+            and not replay_source_message_id
+            and not replay_had_attachments
+            and restored_attachment_expected_count == 0
+            and not restored_attachments
+            and not attachment_reference_kind
+            and workspace_inbox_request is None
+            and not message_locate_flow
+            and not person_inventory_turn
+            and not named_person_corpus.applies
+            and not exact_uploader_file.applies
+            and not filename_clue_selection.applies
+            and filename_inventory_request is None
+            and not direct_archived_source_query
+            and not contextual_source_query
+            and obsidian_intent is None
+            and obsidian_result_request_candidate is None
+        )
         explicit_public_web_query = _self_contained_explicit_public_web_query(routing_message)
         isolated_explicit_public_web_turn = bool(
             inherited_private_context_lineage
@@ -37045,6 +37160,7 @@ class AgentRuntime:
         isolated_outbound_turn = bool(
             isolated_public_news_turn
             or isolated_public_product_spec_turn
+            or isolated_public_market_turn
             or isolated_explicit_public_web_turn
             or isolated_obsidian_result_turn
             or policy_weather_outbound_turn
@@ -38961,6 +39077,8 @@ class AgentRuntime:
                     if policy_weather_outbound_turn
                     else ("интернет", public_product_spec_query)
                     if isolated_public_product_spec_turn
+                    else ("интернет", public_market_query)
+                    if isolated_public_market_turn
                     else ("интернет", explicit_public_web_query)
                     if isolated_explicit_public_web_turn
                     else None
@@ -38968,6 +39086,7 @@ class AgentRuntime:
                 policy_web_authorized=bool(
                     policy_weather_outbound_turn
                     or isolated_public_product_spec_turn
+                    or isolated_public_market_turn
                     or isolated_explicit_public_web_turn
                 ),
             )

@@ -23,6 +23,7 @@ from friday.agent_runtime import (
     AgentRuntime,
     _filename_clue_request,
     _self_contained_explicit_public_web_query,
+    _self_contained_public_market_query,
     _self_contained_public_product_spec_query,
     asks_for_the_web,
     file_turn_authority,
@@ -150,6 +151,24 @@ def test_explicit_public_web_query_is_current_only_and_fail_closed() -> None:
         "Найди в интернете официальный сайт проекта Nextcloud\nPRIVATE-CARRIER",
     ):
         assert _self_contained_explicit_public_web_query(unsafe_or_contextual) == ""
+
+
+def test_public_market_query_is_current_only_and_fail_closed() -> None:
+    request = "Как менялась стоимость и сложность монеты monero с весны этого года по данный момент?"
+    assert _self_contained_public_market_query(request) == request
+    assert _self_contained_public_market_query("Какой курс доллара сегодня?") == (
+        "Какой курс доллара сегодня?"
+    )
+    for unsafe_or_contextual in (
+        "Как менялась стоимость monero?",
+        "Как менялась стоимость этой монеты с весны этого года?",
+        "Как менялась стоимость monero из моего файла с весны этого года?",
+        "Как менялась стоимость PRIVATE-CANARY с весны этого года?",
+        "«Как менялась стоимость monero с весны этого года?»",
+        "Запиши стоимость monero на данный момент",
+        "Как менялась стоимость monero с весны этого года?\nPRIVATE-CARRIER",
+    ):
+        assert _self_contained_public_market_query(unsafe_or_contextual) == ""
 
 
 def _actor() -> ActorContext:
@@ -673,6 +692,59 @@ async def test_qnap_product_spec_uses_isolated_web_after_private_history(
     assert PRIVATE_HISTORY_CANARY not in model_payload
     assert PRIVATE_HISTORY_CANARY not in outbound_payload
     assert "Загружен документ" not in model_payload
+
+
+@pytest.mark.asyncio
+async def test_current_monero_market_history_uses_isolated_web_after_private_history(
+    settings,
+    storage,
+) -> None:
+    storage.ensure_user(OWNER, preset_key="owner")
+    conversation = storage.create_conversation(OWNER, title="synthetic private history")
+    conversation_id = str(conversation["id"])
+    storage.store_message(
+        conversation_id,
+        OWNER,
+        "user",
+        f"Загружен документ: {PRIVATE_HISTORY_CANARY}.docx",
+        metadata={"had_attachments": True, "private_context_lineage": True},
+    )
+    storage.store_message(
+        conversation_id,
+        OWNER,
+        "assistant",
+        f"Приватная сводка: {PRIVATE_HISTORY_CANARY}",
+        metadata={"attachment_context_used": True, "private_context_lineage": True},
+    )
+    fact = "Synthetic public Monero price and network-difficulty history is source-backed."
+    url = "https://public.synthetic.example.com/monero-history"
+    kernel = _SyntheticWebKernel(url=url, fact=fact, title="Synthetic Monero market history")
+    model = _ScriptedModel({}, web_fact=fact, web_url=url)
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=False),
+        storage,
+        llm=model,
+        kernel=kernel,
+    )
+    request = "Как менялась стоимость и сложность монеты monero с весны этого года по данный момент?"
+
+    response = await runtime.chat(
+        OWNER,
+        request,
+        actor=_actor(),
+        conversation_id=conversation_id,
+    )
+
+    assert kernel.calls == [("web_research", {"query": request, "max_sources": 3})]
+    assert response["tools_used"] == ["web_research"]
+    assert response["web_evidence_status"] == "sourced"
+    assert fact in response["message"]
+    metadata = _stored_metadata(storage, response)
+    assert metadata["private_context_lineage"] is True
+    assert metadata["structural"].get("private_web_search_blocked") is not True
+    exposed = json.dumps([model.calls, kernel.calls], ensure_ascii=False)
+    assert PRIVATE_HISTORY_CANARY not in exposed
+    assert "Загружен документ" not in exposed
 
 
 @pytest.mark.asyncio
