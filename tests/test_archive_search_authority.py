@@ -5,6 +5,7 @@ import hashlib
 import itertools
 import json
 import pickle
+import threading
 from dataclasses import replace
 from typing import cast
 
@@ -45,6 +46,7 @@ from friday.retrieval.archive_search_contract import (
     ArchiveSearchPage,
     ArchiveSearchPassage,
     ArchiveSearchRequest,
+    ArchiveSearchWarning,
 )
 from friday.retrieval.contracts import (
     AuthorityScope,
@@ -191,6 +193,49 @@ def _candidates() -> tuple[ArchiveSearchCandidate, ...]:
         _candidate(RAW_ONE, ArchiveMatchChannel.LEXICAL, title="One"),
         _candidate(RAW_TWO, ArchiveMatchChannel.DENSE, title="Two"),
     )
+
+
+def _large_candidates(count: int, *, excerpt_chars: int = 1_800) -> tuple[ArchiveSearchCandidate, ...]:
+    result: list[ArchiveSearchCandidate] = []
+    for index in range(1, count + 1):
+        candidate = _candidate(
+            f"raw_{index:016d}",
+            ArchiveMatchChannel.LEXICAL,
+            title=f"Large {index}",
+        )
+        passage = replace(candidate.passages[0], excerpt=str(index) * excerpt_chars)
+        result.append(
+            replace(
+                candidate,
+                matches=(ArchiveMatchRank(ArchiveMatchChannel.LEXICAL, index),),
+                passages=(passage,),
+            )
+        )
+    return tuple(result)
+
+
+def _oversized_candidate() -> ArchiveSearchCandidate:
+    candidate = _candidate(
+        "raw_0000000000000001",
+        ArchiveMatchChannel.LEXICAL,
+        title="Cannot fit",
+    )
+    original = candidate.passages[0]
+    passages = tuple(
+        ArchiveSearchPassage(
+            replace(
+                original.passage_ref,
+                locator=TextSpanLocator(
+                    chunk_index=index,
+                    start_char=index * 30,
+                    end_char=index * 30 + 24,
+                ),
+            ),
+            "X" * 1_900,
+        )
+        for index in range(4)
+    )
+    return replace(candidate, passages=passages)
 
 
 def _coverage(
@@ -810,6 +855,518 @@ def test_resumed_authority_mints_exact_child_without_caller_token() -> None:
     )
     assert final.public_tool_result_payload["continuation"] is None
     assert len(cast(list[object], final.public_tool_result_payload["candidates"])) == 1
+
+
+def test_resumed_authority_uses_largest_public_byte_prefix_without_losing_suffix() -> None:
+    tail = _large_candidates(3)
+    origin = _run(run="byte-prefix-origin", request=_request(limit=3))
+    token, _issued = _issue_public_continuation(origin, tail=tail)
+    resumed = _run(
+        run="byte-prefix-first",
+        request=_request(limit=3, continuation=token),
+    )
+    redemption = redeem_archive_search_continuation(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=resumed,
+    )
+
+    first = authorize_archive_search_resumed_before_model(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=resumed,
+        redemption=redemption,
+        candidate_reauthorizer=_allow_candidate,
+        coverage_reauthorizer=_allow_coverage,
+        authority_context=CONTEXT,
+    )
+    first_payload = first.public_tool_result_payload
+    first_candidates = cast(list[dict[str, object]], first_payload["candidates"])
+    child = first_payload["continuation"]
+
+    assert [item["title"] for item in first_candidates] == ["Large 1", "Large 2"]
+    assert type(child) is str and child != token
+    assert len(child) == 43 and child.isascii()
+    assert len(first.model_visible_canonical_bytes) <= 7_900
+
+    final_run = _run(
+        run="byte-prefix-final",
+        request=_request(limit=3, continuation=child),
+    )
+    final_redemption = redeem_archive_search_continuation(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=final_run,
+    )
+    final = authorize_archive_search_resumed_before_model(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=final_run,
+        redemption=final_redemption,
+        candidate_reauthorizer=_allow_candidate,
+        coverage_reauthorizer=_allow_coverage,
+        authority_context=CONTEXT,
+    )
+    final_payload = final.public_tool_result_payload
+    final_candidates = cast(list[dict[str, object]], final_payload["candidates"])
+
+    assert [item["title"] for item in final_candidates] == ["Large 3"]
+    assert final_payload["continuation"] is None
+
+
+def test_resumed_probe_differs_from_inbound_and_child_mint_follows_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = authority_module._ArchiveContinuationRegistry()
+    monkeypatch.setattr(authority_module, "_CONTINUATION_REGISTRY", registry)
+    tokens = iter(("A" * 43, "A" * 43, "C" * 43))
+    monkeypatch.setattr(authority_module.secrets, "token_urlsafe", lambda _size: next(tokens))
+    tail = _large_candidates(4)
+    origin = _run(run="probe-origin", request=_request(limit=3))
+    token, _issued = _issue_public_continuation(origin, tail=tail)
+    assert token == "A" * 43
+
+    resumed = _run(
+        run="probe-resumed",
+        request=_request(limit=3, continuation=token),
+    )
+    redemption = redeem_archive_search_continuation(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=resumed,
+    )
+    events: list[tuple[str, str | None]] = []
+    original_projection = ArchiveSearchPage.to_public_json
+    original_mint_child = authority_module._ArchiveContinuationRegistry.mint_selected_child
+
+    def observed_projection(page: ArchiveSearchPage, privacy_key: bytes) -> str:
+        events.append(("project", page.continuation))
+        return original_projection(page, privacy_key)
+
+    def observed_mint_child(
+        selected_registry: authority_module._ArchiveContinuationRegistry,
+        *,
+        run: ArchiveSearchRunBinding,
+        selection: authority_module._SelectedArchiveContinuation,
+    ) -> authority_module._ArchiveContinuationRecord:
+        events.append(("mint", None))
+        return original_mint_child(
+            selected_registry,
+            run=run,
+            selection=selection,
+        )
+
+    monkeypatch.setattr(ArchiveSearchPage, "to_public_json", observed_projection)
+    monkeypatch.setattr(
+        authority_module._ArchiveContinuationRegistry,
+        "mint_selected_child",
+        observed_mint_child,
+    )
+    batch = authorize_archive_search_resumed_before_model(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=resumed,
+        redemption=redemption,
+        candidate_reauthorizer=_allow_candidate,
+        coverage_reauthorizer=_allow_coverage,
+        authority_context=CONTEXT,
+    )
+
+    child = batch.public_tool_result_payload["continuation"]
+    mint_index = events.index(("mint", None))
+    assert events[0] == ("project", "B" * 43)
+    assert all(value != token for event, value in events[:mint_index] if event == "project")
+    assert mint_index > 0
+    assert child == "C" * 43
+
+
+def test_resumed_callback_cannot_reenter_or_mint_before_outer_selection_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = authority_module._ArchiveContinuationRegistry()
+    monkeypatch.setattr(authority_module, "_CONTINUATION_REGISTRY", registry)
+    tail = tuple(
+        replace(
+            _candidate(f"raw_{index:016d}", ArchiveMatchChannel.LEXICAL, title=f"R{index}"),
+            matches=(ArchiveMatchRank(ArchiveMatchChannel.LEXICAL, index),),
+        )
+        for index in range(1, 4)
+    )
+    origin = _run(run="reentrant-origin", request=_request(limit=1))
+    token, _issued = _issue_public_continuation(origin, tail=tail)
+    resumed = _run(
+        run="reentrant-resumed",
+        request=_request(limit=1, continuation=token),
+    )
+    redemption = redeem_archive_search_continuation(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=resumed,
+    )
+    nested_attempted = False
+
+    def reentrant_candidate(
+        _phase: ArchiveSearchAuthorityPhase,
+        _run_binding: ArchiveSearchRunBinding,
+        candidate: ArchiveSearchCandidate,
+        _context: object,
+    ) -> ArchiveSearchCandidateReauthorization:
+        nonlocal nested_attempted
+        if not nested_attempted:
+            nested_attempted = True
+            with pytest.raises(TypeError):
+                authority_module._finish_redeemed_continuation(  # type: ignore[call-arg]
+                    resumed,
+                    redemption,
+                    head_count=1,
+                )
+            with pytest.raises((AttributeError, ArchiveSearchAuthorityError)):
+                authority_module._finish_redeemed_continuation(
+                    resumed,
+                    redemption,
+                    cast(
+                        authority_module._ArchiveContinuationSelectionLease,
+                        redemption._selection_handle,
+                    ),
+                    head_count=1,
+                )
+            with pytest.raises(ArchiveSearchAuthorityError):
+                authority_module._finish_redeemed_continuation(
+                    resumed,
+                    redemption,
+                    cast(
+                        authority_module._ArchiveContinuationSelectionLease,
+                        redemption,
+                    ),
+                    head_count=1,
+                )
+            authority_module._abort_redeemed_continuation(
+                resumed,
+                redemption,
+                cast(
+                    authority_module._ArchiveContinuationSelectionLease,
+                    redemption,
+                ),
+            )
+            with pytest.raises(ArchiveSearchAuthorityError):
+                authority_module._new_selected_continuation(
+                    run=resumed,
+                    redemption=redemption,
+                    lease=cast(
+                        authority_module._ArchiveContinuationSelectionLease,
+                        redemption._selection_handle,
+                    ),
+                    candidates=tail[1:],
+                )
+            with pytest.raises(ArchiveSearchAuthorityError):
+                authorize_archive_search_resumed_before_model(
+                    tenant_id=TENANT,
+                    principal_id=PRINCIPAL,
+                    run_binding=resumed,
+                    redemption=redemption,
+                    candidate_reauthorizer=_allow_candidate,
+                    coverage_reauthorizer=_allow_coverage,
+                    authority_context=CONTEXT,
+                )
+            assert not registry._records
+            assert not hasattr(registry, "mint_child")
+        return ArchiveSearchCandidateReauthorization.authorized(candidate)
+
+    batch = authorize_archive_search_resumed_before_model(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=resumed,
+        redemption=redemption,
+        candidate_reauthorizer=reentrant_candidate,
+        coverage_reauthorizer=_allow_coverage,
+        authority_context=CONTEXT,
+    )
+
+    assert nested_attempted is True
+    assert type(batch.public_tool_result_payload["continuation"]) is str
+    assert len(registry._records) == 1
+    with pytest.raises(ArchiveSearchAuthorityError):
+        authorize_archive_search_resumed_before_model(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            run_binding=resumed,
+            redemption=redemption,
+            candidate_reauthorizer=_allow_candidate,
+            coverage_reauthorizer=_allow_coverage,
+            authority_context=CONTEXT,
+        )
+    assert len(registry._records) == 1
+
+
+def test_concurrent_resumed_authorization_has_one_winner_and_one_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = authority_module._ArchiveContinuationRegistry()
+    monkeypatch.setattr(authority_module, "_CONTINUATION_REGISTRY", registry)
+    tail = tuple(
+        replace(
+            _candidate(f"raw_{index:016d}", ArchiveMatchChannel.LEXICAL, title=f"C{index}"),
+            matches=(ArchiveMatchRank(ArchiveMatchChannel.LEXICAL, index),),
+        )
+        for index in range(1, 4)
+    )
+    origin = _run(run="concurrent-origin", request=_request(limit=1))
+    token, _issued = _issue_public_continuation(origin, tail=tail)
+    resumed = _run(
+        run="concurrent-resumed",
+        request=_request(limit=1, continuation=token),
+    )
+    redemption = redeem_archive_search_continuation(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=resumed,
+    )
+    entered = threading.Event()
+    release = threading.Event()
+    batches: list[AuthorizedArchiveBatch] = []
+    failures: list[Exception] = []
+
+    def paused_candidate(
+        _phase: ArchiveSearchAuthorityPhase,
+        _run_binding: ArchiveSearchRunBinding,
+        candidate: ArchiveSearchCandidate,
+        _context: object,
+    ) -> ArchiveSearchCandidateReauthorization:
+        entered.set()
+        assert release.wait(timeout=2)
+        return ArchiveSearchCandidateReauthorization.authorized(candidate)
+
+    def winner() -> None:
+        try:
+            batches.append(
+                authorize_archive_search_resumed_before_model(
+                    tenant_id=TENANT,
+                    principal_id=PRINCIPAL,
+                    run_binding=resumed,
+                    redemption=redemption,
+                    candidate_reauthorizer=paused_candidate,
+                    coverage_reauthorizer=_allow_coverage,
+                    authority_context=CONTEXT,
+                )
+            )
+        except Exception as exc:  # pragma: no cover - assertion below owns detail
+            failures.append(exc)
+
+    thread = threading.Thread(target=winner)
+    thread.start()
+    assert entered.wait(timeout=2)
+    with pytest.raises(ArchiveSearchAuthorityError):
+        authorize_archive_search_resumed_before_model(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            run_binding=resumed,
+            redemption=redemption,
+            candidate_reauthorizer=_allow_candidate,
+            coverage_reauthorizer=_allow_coverage,
+            authority_context=CONTEXT,
+        )
+    assert not registry._records
+    release.set()
+    thread.join(timeout=2)
+
+    assert not thread.is_alive()
+    assert not failures
+    assert len(batches) == 1
+    assert type(batches[0].public_tool_result_payload["continuation"]) is str
+    assert len(registry._records) == 1
+
+
+def test_resumed_page_that_cannot_fit_one_candidate_consumes_and_leaves_no_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = authority_module._ArchiveContinuationRegistry()
+    monkeypatch.setattr(authority_module, "_CONTINUATION_REGISTRY", registry)
+    tail = (_oversized_candidate(), _large_candidates(2, excerpt_chars=100)[1])
+    origin = _run(run="unfit-origin", request=_request(limit=2))
+    token, _issued = _issue_public_continuation(origin, tail=tail)
+    resumed = _run(
+        run="unfit-resumed",
+        request=_request(limit=2, continuation=token),
+    )
+    redemption = redeem_archive_search_continuation(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=resumed,
+    )
+
+    with pytest.raises(ArchiveSearchAuthorityError):
+        authorize_archive_search_resumed_before_model(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            run_binding=resumed,
+            redemption=redemption,
+            candidate_reauthorizer=_allow_candidate,
+            coverage_reauthorizer=_allow_coverage,
+            authority_context=CONTEXT,
+        )
+
+    assert not registry._records
+    with pytest.raises(ArchiveSearchAuthorityError):
+        authorize_archive_search_resumed_before_model(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            run_binding=resumed,
+            redemption=redemption,
+            candidate_reauthorizer=_allow_candidate,
+            coverage_reauthorizer=_allow_coverage,
+            authority_context=CONTEXT,
+        )
+
+
+def test_resumed_final_projection_failure_revokes_minted_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = authority_module._ArchiveContinuationRegistry()
+    monkeypatch.setattr(authority_module, "_CONTINUATION_REGISTRY", registry)
+    tail = _candidates()
+    origin = _run(run="final-projection-origin", request=_request(limit=1))
+    token, _issued = _issue_public_continuation(origin, tail=tail)
+    resumed = _run(
+        run="final-projection-resumed",
+        request=_request(limit=1, continuation=token),
+    )
+    redemption = redeem_archive_search_continuation(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=resumed,
+    )
+    original_projection = ArchiveSearchPage.to_public_json
+    resumed_projections = 0
+
+    def fail_after_selection(page: ArchiveSearchPage, privacy_key: bytes) -> str:
+        nonlocal resumed_projections
+        if page.request is resumed._request:
+            resumed_projections += 1
+            if resumed_projections == 2:
+                raise RuntimeError("final projection failed")
+        return original_projection(page, privacy_key)
+
+    monkeypatch.setattr(ArchiveSearchPage, "to_public_json", fail_after_selection)
+    with pytest.raises(ArchiveSearchAuthorityError):
+        authorize_archive_search_resumed_before_model(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            run_binding=resumed,
+            redemption=redemption,
+            candidate_reauthorizer=_allow_candidate,
+            coverage_reauthorizer=_allow_coverage,
+            authority_context=CONTEXT,
+        )
+
+    assert resumed_projections == 2
+    assert not registry._records
+    with pytest.raises(ArchiveSearchAuthorityError):
+        authorize_archive_search_resumed_before_model(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            run_binding=resumed,
+            redemption=redemption,
+            candidate_reauthorizer=_allow_candidate,
+            coverage_reauthorizer=_allow_coverage,
+            authority_context=CONTEXT,
+        )
+
+
+def test_backend_capped_lane_without_cursor_warns_beside_other_lane_child() -> None:
+    tail = _candidates()
+    origin = _run(run="backend-capped-origin", request=_request(limit=1))
+    terminal = tuple(
+        SearchCoverage.create(
+            corpus=item.corpus,
+            lane=item.lane,
+            execution_binding=item.execution_binding,
+            states=(CoverageState.PARTIAL, CoverageState.CAPPED),
+            eligible_authorized=item.eligible_authorized,
+            examined=item.examined,
+            matched_at_least=item.matched_at_least,
+            returned=item.returned,
+            authority_rechecked=item.authority_rechecked,
+            snapshot_current=item.snapshot_current,
+            limit=1,
+            next_cursor_available=False,
+        )
+        if item.lane is SearchLane.LEXICAL
+        else item
+        for item in _terminal_coverage_for_tail(origin, tail)
+    )
+    issued = issue_archive_search_continuation(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=origin,
+        tail_candidates=tail,
+        terminal_coverage=terminal,
+        warnings=(ArchiveSearchWarning.BACKFILL_PENDING,),
+    )
+    initial = authorize_archive_search_before_model(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=origin,
+        candidates=(),
+        coverage=_continuing_coverage(origin, terminal, tail),
+        warnings=(ArchiveSearchWarning.BACKFILL_PENDING,),
+        continuation=issued,
+        candidate_reauthorizer=_allow_candidate,
+        coverage_reauthorizer=_allow_coverage,
+        authority_context=CONTEXT,
+    )
+    token = cast(str, initial.public_tool_result_payload["continuation"])
+    resumed = _run(
+        run="backend-capped-first",
+        request=_request(limit=1, continuation=token),
+    )
+    redemption = redeem_archive_search_continuation(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=resumed,
+    )
+    first = authorize_archive_search_resumed_before_model(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=resumed,
+        redemption=redemption,
+        candidate_reauthorizer=_allow_candidate,
+        coverage_reauthorizer=_allow_coverage,
+        authority_context=CONTEXT,
+    )
+    first_payload = first.public_tool_result_payload
+    first_coverage = {
+        item["lane"]: item for item in cast(list[dict[str, object]], first_payload["coverage"])
+    }
+    child = cast(str, first_payload["continuation"])
+
+    assert first_payload["warnings"] == ["backfill_pending", "continuation_unavailable"]
+    assert first_coverage["lexical"]["next_cursor_available"] is False
+    assert first_coverage["dense"]["next_cursor_available"] is True
+
+    final_run = _run(
+        run="backend-capped-final",
+        request=_request(limit=1, continuation=child),
+    )
+    final_redemption = redeem_archive_search_continuation(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=final_run,
+    )
+    final = authorize_archive_search_resumed_before_model(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=final_run,
+        redemption=final_redemption,
+        candidate_reauthorizer=_allow_candidate,
+        coverage_reauthorizer=_allow_coverage,
+        authority_context=CONTEXT,
+    )
+
+    assert final.public_tool_result_payload["continuation"] is None
+    assert final.public_tool_result_payload["warnings"] == [
+        "backfill_pending",
+        "continuation_unavailable",
+    ]
 
 
 def test_continuation_expiry_and_registry_restart_fail_closed(

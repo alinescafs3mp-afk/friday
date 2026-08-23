@@ -41,13 +41,16 @@ ARCHIVE_AUTHORITY_MAX_ANSWER_BYTES = 1_000_000
 
 _PROCESS_KEY = secrets.token_bytes(32)
 _NONCE_BYTES = 32
+_CONTINUATION_TOKEN_BYTES = 32
+_CONTINUATION_TOKEN_CHARS = 43
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_ACTOR_ID_BYTES = 200
 _MAX_MODEL_BYTES = 7_900
 _RUN_SCHEMA = "friday.archive-search-run-binding.private.v2"
 _BATCH_SCHEMA = "friday.archive-search-model-batch.private.v2"
 _ATTESTATION_SCHEMA = "friday.archive-search-publication-attestation.private.v2"
-_REDEMPTION_SCHEMA = "friday.archive-search-continuation-redemption.private.v2"
+_REDEMPTION_SCHEMA = "friday.archive-search-continuation-redemption.private.v3"
+_SELECTED_CONTINUATION_SCHEMA = "friday.archive-search-continuation-selection.private.v1"
 _LEDGER_SCHEMA = "friday.archive-search-model-batch-ledger.private.v2"
 _CONTINUATION_RECORD_SCHEMA = "friday.archive-search-continuation-record.private.v3"
 _CONTINUATION_ISSUE_SCHEMA = "friday.archive-search-continuation-issue.private.v3"
@@ -1362,7 +1365,7 @@ def _consume_model_batch_ledger(
         return entries
 
 
-def _authorize_archive_search_before_model(
+def _authorized_archive_search_page(
     *,
     tenant_id: str,
     principal_id: str,
@@ -1374,7 +1377,7 @@ def _authorize_archive_search_before_model(
     candidate_reauthorizer: ArchiveSearchCandidateReauthorizer,
     coverage_reauthorizer: ArchiveSearchCoverageReauthorizer,
     authority_context: object,
-) -> AuthorizedArchiveBatch:
+) -> ArchiveSearchPage:
     if not _run_is_valid(run_binding, tenant_id=tenant_id, principal_id=principal_id):
         raise ArchiveSearchAuthorityError("archive run is unavailable")
     if (
@@ -1456,21 +1459,58 @@ def _authorize_archive_search_before_model(
     has_continuation = any(item.next_cursor_available for item in final_coverage)
     if (continuation_token is not None) != has_continuation:
         raise ArchiveSearchAuthorityError("archive continuation coverage is inconsistent")
-    if continuation_token is not None and not _CONTINUATION_REGISTRY.token_is_live(
-        continuation_token,
-        actor_handle=run_binding._actor_handle,
-        request_identity_handle=_request_identity_handle(run_binding._request),
-        expected_targets={(item.corpus, item.lane) for item in final_coverage if item.next_cursor_available},
-    ):
-        raise ArchiveSearchAuthorityError("archive continuation is unavailable")
-    page = ArchiveSearchPage.create(
+    return ArchiveSearchPage.create(
         request=run_binding._request,
         candidates=admitted,
         coverage=final_coverage,
         warnings=final_warnings,
         continuation=continuation_token,
     )
-    return _new_batch(run_binding, page)
+
+
+def _new_live_archive_batch(
+    run: ArchiveSearchRunBinding,
+    page: ArchiveSearchPage,
+) -> AuthorizedArchiveBatch:
+    continuation_token = page.continuation
+    if continuation_token is not None and not _CONTINUATION_REGISTRY.token_is_live(
+        continuation_token,
+        actor_handle=run._actor_handle,
+        request_identity_handle=_request_identity_handle(run._request),
+        expected_targets={
+            (item.corpus, item.lane) for item in page.coverage if item.next_cursor_available
+        },
+    ):
+        raise ArchiveSearchAuthorityError("archive continuation is unavailable")
+    return _new_batch(run, page)
+
+
+def _authorize_archive_search_before_model(
+    *,
+    tenant_id: str,
+    principal_id: str,
+    run_binding: ArchiveSearchRunBinding,
+    candidates: tuple[ArchiveSearchCandidate, ...],
+    coverage: tuple[SearchCoverage, ...],
+    warnings: tuple[ArchiveSearchWarning, ...],
+    continuation_token: str | None,
+    candidate_reauthorizer: ArchiveSearchCandidateReauthorizer,
+    coverage_reauthorizer: ArchiveSearchCoverageReauthorizer,
+    authority_context: object,
+) -> AuthorizedArchiveBatch:
+    page = _authorized_archive_search_page(
+        tenant_id=tenant_id,
+        principal_id=principal_id,
+        run_binding=run_binding,
+        candidates=candidates,
+        coverage=coverage,
+        warnings=warnings,
+        continuation_token=continuation_token,
+        candidate_reauthorizer=candidate_reauthorizer,
+        coverage_reauthorizer=coverage_reauthorizer,
+        authority_context=authority_context,
+    )
+    return _new_live_archive_batch(run_binding, page)
 
 
 def authorize_archive_search_before_model(
@@ -1534,6 +1574,29 @@ def _continuation_token_handle(value: object) -> str:
     ):
         raise ArchiveSearchAuthorityError("archive continuation token is invalid")
     return _mac(b"friday/archive-search-continuation-token/v2", encoded)
+
+
+def _continuation_token_has_public_shape(value: object) -> bool:
+    if type(value) is not str or len(value) != _CONTINUATION_TOKEN_CHARS:
+        return False
+    try:
+        encoded = value.encode("ascii", errors="strict")
+    except UnicodeEncodeError:
+        return False
+    return bool(
+        len(encoded) == _CONTINUATION_TOKEN_CHARS
+        and all(
+            character in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+            for character in encoded
+        )
+    )
+
+
+def _continuation_probe_token(inbound_token: str) -> str:
+    probe = "A" * _CONTINUATION_TOKEN_CHARS
+    if probe == inbound_token:
+        probe = "B" * _CONTINUATION_TOKEN_CHARS
+    return probe
 
 
 def _request_identity_handle(request: object) -> str:
@@ -1629,6 +1692,7 @@ def _continuation_record_is_valid(
             and _DIGEST.fullmatch(record.request_identity_handle)
             and _DIGEST.fullmatch(record.token_handle)
             and _DIGEST.fullmatch(record.seal)
+            and _continuation_token_has_public_shape(record.token)
             and hmac.compare_digest(record.token_handle, _continuation_token_handle(record.token))
             and hmac.compare_digest(
                 _canonical_json(list(record.candidate_handles)),
@@ -1822,6 +1886,7 @@ class _ArchiveContinuationRegistry(_ProcessPrivate):
         coverage: tuple[SearchCoverage, ...],
         warnings: tuple[ArchiveSearchWarning, ...],
         now: float,
+        exclude_token_handle: str | None = None,
     ) -> _ArchiveContinuationRecord:
         while (
             len(self._records) >= _CONTINUATION_MAX_RECORDS
@@ -1832,9 +1897,14 @@ class _ArchiveContinuationRegistry(_ProcessPrivate):
             self._records.popitem(last=False)
             self._recount_locked()
         for _attempt in range(8):
-            token = secrets.token_urlsafe(32)
+            token = secrets.token_urlsafe(_CONTINUATION_TOKEN_BYTES)
+            if not _continuation_token_has_public_shape(token):
+                continue
             token_handle = _continuation_token_handle(token)
-            if token_handle not in self._records:
+            if token_handle not in self._records and (
+                exclude_token_handle is None
+                or not hmac.compare_digest(token_handle, exclude_token_handle)
+            ):
                 break
         else:
             raise ArchiveSearchAuthorityError("archive continuation token allocation failed")
@@ -1955,6 +2025,43 @@ class _ArchiveContinuationRegistry(_ProcessPrivate):
             _reseal_issue(issue)
             return issue._token
 
+    def mint_selected_child(
+        self,
+        *,
+        run: ArchiveSearchRunBinding,
+        selection: _SelectedArchiveContinuation,
+    ) -> _ArchiveContinuationRecord:
+        """Consume one post-reauthorization selection and mint exactly one child."""
+
+        if type(selection) is not _SelectedArchiveContinuation:
+            raise ArchiveSearchAuthorityError("archive continuation child is unavailable")
+        with selection._lock:
+            now = float(self._clock())
+            with self._lock:
+                self._purge_locked(now)
+                if (
+                    not _selected_continuation_is_valid(
+                        selection,
+                        run,
+                        registry_generation=self._generation,
+                    )
+                    or selection._claimed
+                ):
+                    raise ArchiveSearchAuthorityError("archive continuation child is unavailable")
+                # Claim before allocation.  A full/failed registry therefore
+                # leaves no reusable capability and can never mint later.
+                object.__setattr__(selection, "_claimed", True)
+                _reseal_selected_continuation(selection)
+                return self._mint_record_locked(
+                    actor_handle=run._actor_handle,
+                    request_identity_handle=_request_identity_handle(run._request),
+                    candidates=selection._candidates,
+                    coverage=selection._coverage,
+                    warnings=selection._warnings,
+                    now=now,
+                    exclude_token_handle=selection._parent_token_handle,
+                )
+
     def revoke_token(self, token: object) -> None:
         try:
             token_handle = _continuation_token_handle(token)
@@ -2048,39 +2155,15 @@ class _ArchiveContinuationRegistry(_ProcessPrivate):
                 or not _stored_coverage_matches_resumed_run(record.coverage, run_value)
             ):
                 raise ArchiveSearchAuthorityError("archive continuation redemption failed")
-            page_candidates = record.candidates[: run_value._request.limit]
-            remaining = record.candidates[run_value._request.limit :]
-            child: _ArchiveContinuationRecord | None = None
-            if remaining:
-                with self._lock:
-                    child_now = float(self._clock())
-                    self._purge_locked(child_now)
-                    child = self._mint_record_locked(
-                        actor_handle=record.actor_handle,
-                        request_identity_handle=record.request_identity_handle,
-                        candidates=remaining,
-                        coverage=record.coverage,
-                        warnings=record.warnings,
-                        now=child_now,
-                    )
-            rebound = _continuation_page_coverage(
-                run_value,
-                record.coverage,
-                page_candidates,
-                child_candidates=remaining,
-            )
             return _new_redemption(
                 run=run_value,
                 parent=record,
-                candidates=page_candidates,
-                coverage=rebound,
+                candidates=record.candidates,
+                coverage=record.coverage,
                 warnings=record.warnings,
-                child=child,
                 registry_generation=self._generation,
             )
         except Exception:
-            if "child" in locals() and child is not None:
-                self.revoke_token(child.token)
             raise ArchiveSearchAuthorityError("archive continuation redemption failed") from None
 
 
@@ -2158,42 +2241,44 @@ def _continuation_page_coverage(
     return tuple(rebound)
 
 
+class _ArchiveRedemptionState(StrEnum):
+    FRESH = "fresh"
+    SELECTING = "selecting"
+    CONSUMED = "consumed"
+
+
 class RedeemedArchiveContinuation(_ProcessPrivate):
     """One-use sealed continuation page issued only after registry redemption."""
 
     __slots__ = (
         "_candidate_handles",
         "_candidates",
-        "_consumed",
         "_coverage",
         "_coverage_handles",
-        "_child_record_seal",
-        "_child_token",
-        "_child_token_handle",
         "_lock",
         "_nonce",
         "_parent_record_seal",
         "_registry_generation",
         "_run_handle",
         "_seal",
+        "_selection_handle",
+        "_state",
         "_token_handle",
         "_warnings",
     )
 
     _candidate_handles: tuple[str, ...]
     _candidates: tuple[ArchiveSearchCandidate, ...]
-    _consumed: bool
     _coverage: tuple[SearchCoverage, ...]
     _coverage_handles: tuple[str, ...]
-    _child_record_seal: str | None
-    _child_token: str | None
-    _child_token_handle: str | None
     _lock: threading.Lock
     _nonce: bytes
     _parent_record_seal: str
     _registry_generation: bytes
     _run_handle: str
     _seal: str
+    _selection_handle: str | None
+    _state: _ArchiveRedemptionState
     _token_handle: str
     _warnings: tuple[ArchiveSearchWarning, ...]
 
@@ -2211,18 +2296,28 @@ def _redemption_material(redemption: RedeemedArchiveContinuation) -> bytes:
     return _canonical_json(
         {
             "candidate_handles": list(redemption._candidate_handles),
-            "consumed": redemption._consumed,
             "coverage_handles": list(redemption._coverage_handles),
-            "child_record_seal": redemption._child_record_seal,
-            "child_token_handle": redemption._child_token_handle,
             "nonce": redemption._nonce.hex(),
             "parent_record_seal": redemption._parent_record_seal,
             "registry_generation": redemption._registry_generation.hex(),
             "run_handle": redemption._run_handle,
             "schema": _REDEMPTION_SCHEMA,
+            "selection_handle": redemption._selection_handle,
+            "state": redemption._state.value,
             "token_handle": redemption._token_handle,
             "warnings": [item.value for item in redemption._warnings],
         }
+    )
+
+
+def _reseal_redemption(redemption: RedeemedArchiveContinuation) -> None:
+    object.__setattr__(
+        redemption,
+        "_seal",
+        _mac(
+            b"friday/archive-search-continuation-redemption/v3",
+            _redemption_material(redemption),
+        ),
     )
 
 
@@ -2238,13 +2333,21 @@ def _redemption_is_valid(
         if (
             type(request_token) is not str
             or type(redemption._candidates) is not tuple
-            or len(redemption._candidates) > ARCHIVE_AUTHORITY_MAX_CANDIDATES
+            or not 0 < len(redemption._candidates) <= ARCHIVE_AUTHORITY_MAX_CONTINUATION_TAIL
             or any(type(item) is not ArchiveSearchCandidate for item in redemption._candidates)
             or type(redemption._coverage) is not tuple
             or not redemption._coverage
             or len(redemption._coverage) > ARCHIVE_AUTHORITY_MAX_COVERAGES
             or any(type(item) is not SearchCoverage for item in redemption._coverage)
-            or type(redemption._consumed) is not bool
+            or type(redemption._state) is not _ArchiveRedemptionState
+            or (
+                redemption._selection_handle is not None
+                and _DIGEST.fullmatch(redemption._selection_handle) is None
+            )
+            or (
+                (redemption._state is _ArchiveRedemptionState.FRESH)
+                is (redemption._selection_handle is not None)
+            )
             or type(redemption._warnings) is not tuple
             or any(type(item) is not ArchiveSearchWarning for item in redemption._warnings)
             or type(redemption._nonce) is not bytes
@@ -2264,22 +2367,6 @@ def _redemption_is_valid(
             return False
         candidate_handles = tuple(_candidate_handle(item) for item in redemption._candidates)
         coverage_handles = tuple(_coverage_handle(item) for item in redemption._coverage)
-        child_is_valid = redemption._child_token is None
-        if redemption._child_token is not None:
-            child_is_valid = bool(
-                type(redemption._child_token_handle) is str
-                and type(redemption._child_record_seal) is str
-                and hmac.compare_digest(
-                    redemption._child_token_handle,
-                    _continuation_token_handle(redemption._child_token),
-                )
-                and _CONTINUATION_REGISTRY.token_is_live(
-                    redemption._child_token,
-                    actor_handle=run._actor_handle,
-                    request_identity_handle=_request_identity_handle(run._request),
-                    record_seal=redemption._child_record_seal,
-                )
-            )
         return bool(
             hmac.compare_digest(
                 _canonical_json(list(redemption._candidate_handles)),
@@ -2291,9 +2378,11 @@ def _redemption_is_valid(
             )
             and hmac.compare_digest(
                 redemption._seal,
-                _mac(b"friday/archive-search-continuation-redemption/v2", _redemption_material(redemption)),
+                _mac(
+                    b"friday/archive-search-continuation-redemption/v3",
+                    _redemption_material(redemption),
+                ),
             )
-            and child_is_valid
         )
     except Exception:
         return False
@@ -2306,17 +2395,12 @@ def _new_redemption(
     candidates: tuple[ArchiveSearchCandidate, ...],
     coverage: tuple[SearchCoverage, ...],
     warnings: tuple[ArchiveSearchWarning, ...],
-    child: _ArchiveContinuationRecord | None,
     registry_generation: bytes,
 ) -> RedeemedArchiveContinuation:
     redemption = cast(RedeemedArchiveContinuation, object.__new__(RedeemedArchiveContinuation))
     for name, item in (
         ("_candidate_handles", tuple(_candidate_handle(candidate) for candidate in candidates)),
         ("_candidates", candidates),
-        ("_child_record_seal", None if child is None else child.seal),
-        ("_child_token", None if child is None else child.token),
-        ("_child_token_handle", None if child is None else child.token_handle),
-        ("_consumed", False),
         ("_coverage", coverage),
         ("_coverage_handles", tuple(_coverage_handle(item) for item in coverage)),
         ("_lock", threading.Lock()),
@@ -2325,19 +2409,313 @@ def _new_redemption(
         ("_registry_generation", registry_generation),
         ("_run_handle", run._seal),
         ("_seal", "0" * 64),
+        ("_selection_handle", None),
+        ("_state", _ArchiveRedemptionState.FRESH),
         ("_token_handle", parent.token_handle),
         ("_warnings", warnings),
     ):
         object.__setattr__(redemption, name, item)
-    object.__setattr__(
-        redemption,
+    _reseal_redemption(redemption)
+    return redemption
+
+
+class _ArchiveContinuationSelectionLease(_ProcessPrivate):
+    """Unforgeable local ownership of one in-progress resumed-page selection."""
+
+    __slots__ = (
+        "_claimed",
+        "_handle",
+        "_lock",
+        "_nonce",
+        "_redemption_seal",
+        "_registry_generation",
+        "_run_handle",
         "_seal",
-        _mac(
-            b"friday/archive-search-continuation-redemption/v2",
-            _redemption_material(redemption),
+    )
+
+    _claimed: bool
+    _handle: str
+    _lock: threading.Lock
+    _nonce: bytes
+    _redemption_seal: str
+    _registry_generation: bytes
+    _run_handle: str
+    _seal: str
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise ArchiveSearchAuthorityError("archive continuation selection lease is unavailable")
+
+    def __setattr__(self, _name: str, _value: object) -> NoReturn:
+        raise TypeError("archive continuation selection lease is immutable")
+
+    def __repr__(self) -> str:
+        return "<_ArchiveContinuationSelectionLease sealed one-use private>"
+
+
+def _selection_lease_handle(
+    *,
+    nonce: bytes,
+    run_handle: str,
+    registry_generation: bytes,
+) -> str:
+    return _mac(
+        b"friday/archive-search-continuation-selection-lease-identity/v1",
+        _canonical_json(
+            {
+                "nonce": nonce.hex(),
+                "registry_generation": registry_generation.hex(),
+                "run_handle": run_handle,
+            }
         ),
     )
-    return redemption
+
+
+def _selection_lease_material(lease: _ArchiveContinuationSelectionLease) -> bytes:
+    return _canonical_json(
+        {
+            "claimed": lease._claimed,
+            "handle": lease._handle,
+            "nonce": lease._nonce.hex(),
+            "redemption_seal": lease._redemption_seal,
+            "registry_generation": lease._registry_generation.hex(),
+            "run_handle": lease._run_handle,
+            "schema": "friday.archive-search-continuation-selection-lease.private.v1",
+        }
+    )
+
+
+def _reseal_selection_lease(lease: _ArchiveContinuationSelectionLease) -> None:
+    object.__setattr__(
+        lease,
+        "_seal",
+        _mac(
+            b"friday/archive-search-continuation-selection-lease/v1",
+            _selection_lease_material(lease),
+        ),
+    )
+
+
+def _selection_lease_is_valid(
+    value: object,
+    run: ArchiveSearchRunBinding,
+    redemption: RedeemedArchiveContinuation,
+) -> bool:
+    if type(value) is not _ArchiveContinuationSelectionLease:
+        return False
+    lease = cast(_ArchiveContinuationSelectionLease, value)
+    try:
+        expected_state = (
+            _ArchiveRedemptionState.CONSUMED
+            if lease._claimed
+            else _ArchiveRedemptionState.SELECTING
+        )
+        return bool(
+            type(lease._claimed) is bool
+            and type(lease._lock) is type(threading.Lock())
+            and type(lease._nonce) is bytes
+            and len(lease._nonce) == _NONCE_BYTES
+            and type(lease._registry_generation) is bytes
+            and hmac.compare_digest(
+                lease._registry_generation,
+                redemption._registry_generation,
+            )
+            and hmac.compare_digest(lease._run_handle, run._seal)
+            and hmac.compare_digest(lease._run_handle, redemption._run_handle)
+            and redemption._state is expected_state
+            and type(redemption._selection_handle) is str
+            and hmac.compare_digest(lease._handle, redemption._selection_handle)
+            and hmac.compare_digest(lease._redemption_seal, redemption._seal)
+            and hmac.compare_digest(
+                lease._handle,
+                _selection_lease_handle(
+                    nonce=lease._nonce,
+                    run_handle=lease._run_handle,
+                    registry_generation=lease._registry_generation,
+                ),
+            )
+            and hmac.compare_digest(
+                lease._seal,
+                _mac(
+                    b"friday/archive-search-continuation-selection-lease/v1",
+                    _selection_lease_material(lease),
+                ),
+            )
+        )
+    except Exception:
+        return False
+
+
+class _SelectedArchiveContinuation(_ProcessPrivate):
+    """One-use exact suffix created only after resumed reauthorization and fit."""
+
+    __slots__ = (
+        "_candidate_handles",
+        "_candidates",
+        "_claimed",
+        "_coverage",
+        "_coverage_handles",
+        "_lock",
+        "_selection_lease_handle",
+        "_selection_lease_seal",
+        "_nonce",
+        "_parent_token_handle",
+        "_redemption_seal",
+        "_registry_generation",
+        "_run_handle",
+        "_seal",
+        "_warnings",
+    )
+
+    _candidate_handles: tuple[str, ...]
+    _candidates: tuple[ArchiveSearchCandidate, ...]
+    _claimed: bool
+    _coverage: tuple[SearchCoverage, ...]
+    _coverage_handles: tuple[str, ...]
+    _lock: threading.Lock
+    _selection_lease_handle: str
+    _selection_lease_seal: str
+    _nonce: bytes
+    _parent_token_handle: str
+    _redemption_seal: str
+    _registry_generation: bytes
+    _run_handle: str
+    _seal: str
+    _warnings: tuple[ArchiveSearchWarning, ...]
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise ArchiveSearchAuthorityError("archive continuation selection is unavailable")
+
+    def __setattr__(self, _name: str, _value: object) -> NoReturn:
+        raise TypeError("archive continuation selection is immutable")
+
+    def __repr__(self) -> str:
+        return "<_SelectedArchiveContinuation sealed one-use private>"
+
+
+def _selected_continuation_material(selection: _SelectedArchiveContinuation) -> bytes:
+    return _canonical_json(
+        {
+            "candidate_handles": list(selection._candidate_handles),
+            "claimed": selection._claimed,
+            "coverage_handles": list(selection._coverage_handles),
+            "selection_lease_handle": selection._selection_lease_handle,
+            "selection_lease_seal": selection._selection_lease_seal,
+            "nonce": selection._nonce.hex(),
+            "parent_token_handle": selection._parent_token_handle,
+            "redemption_seal": selection._redemption_seal,
+            "registry_generation": selection._registry_generation.hex(),
+            "run_handle": selection._run_handle,
+            "schema": _SELECTED_CONTINUATION_SCHEMA,
+            "warnings": [item.value for item in selection._warnings],
+        }
+    )
+
+
+def _reseal_selected_continuation(selection: _SelectedArchiveContinuation) -> None:
+    object.__setattr__(
+        selection,
+        "_seal",
+        _mac(
+            b"friday/archive-search-continuation-selection/v1",
+            _selected_continuation_material(selection),
+        ),
+    )
+
+
+def _selected_continuation_is_valid(
+    value: object,
+    run: ArchiveSearchRunBinding,
+    *,
+    registry_generation: bytes,
+) -> bool:
+    if type(value) is not _SelectedArchiveContinuation:
+        return False
+    selection = cast(_SelectedArchiveContinuation, value)
+    try:
+        if (
+            type(selection._candidates) is not tuple
+            or not 0 < len(selection._candidates) <= ARCHIVE_AUTHORITY_MAX_CONTINUATION_TAIL
+            or any(type(item) is not ArchiveSearchCandidate for item in selection._candidates)
+            or type(selection._coverage) is not tuple
+            or not selection._coverage
+            or len(selection._coverage) > ARCHIVE_AUTHORITY_MAX_COVERAGES
+            or any(type(item) is not SearchCoverage for item in selection._coverage)
+            or type(selection._warnings) is not tuple
+            or any(type(item) is not ArchiveSearchWarning for item in selection._warnings)
+            or type(selection._claimed) is not bool
+            or type(selection._lock) is not type(threading.Lock())
+            or _DIGEST.fullmatch(selection._selection_lease_handle) is None
+            or _DIGEST.fullmatch(selection._selection_lease_seal) is None
+            or type(selection._nonce) is not bytes
+            or len(selection._nonce) != _NONCE_BYTES
+            or type(selection._registry_generation) is not bytes
+            or not hmac.compare_digest(selection._registry_generation, registry_generation)
+            or not hmac.compare_digest(selection._run_handle, run._seal)
+            or _DIGEST.fullmatch(selection._parent_token_handle) is None
+            or _DIGEST.fullmatch(selection._redemption_seal) is None
+            or not _stored_coverage_matches_resumed_run(selection._coverage, run)
+        ):
+            return False
+        return bool(
+            hmac.compare_digest(
+                _canonical_json(list(selection._candidate_handles)),
+                _canonical_json([_candidate_handle(item) for item in selection._candidates]),
+            )
+            and hmac.compare_digest(
+                _canonical_json(list(selection._coverage_handles)),
+                _canonical_json([_coverage_handle(item) for item in selection._coverage]),
+            )
+            and hmac.compare_digest(
+                selection._seal,
+                _mac(
+                    b"friday/archive-search-continuation-selection/v1",
+                    _selected_continuation_material(selection),
+                ),
+            )
+        )
+    except Exception:
+        return False
+
+
+def _new_selected_continuation(
+    *,
+    run: ArchiveSearchRunBinding,
+    redemption: RedeemedArchiveContinuation,
+    lease: _ArchiveContinuationSelectionLease,
+    candidates: tuple[ArchiveSearchCandidate, ...],
+) -> _SelectedArchiveContinuation:
+    if (
+        not _redemption_is_valid(redemption, run)
+        or not _selection_lease_is_valid(lease, run, redemption)
+        or not lease._claimed
+        or redemption._state is not _ArchiveRedemptionState.CONSUMED
+        or not candidates
+    ):
+        raise ArchiveSearchAuthorityError("archive continuation selection is unavailable")
+    selection = cast(
+        _SelectedArchiveContinuation,
+        object.__new__(_SelectedArchiveContinuation),
+    )
+    for name, value in (
+        ("_candidate_handles", tuple(_candidate_handle(item) for item in candidates)),
+        ("_candidates", candidates),
+        ("_claimed", False),
+        ("_coverage", redemption._coverage),
+        ("_coverage_handles", redemption._coverage_handles),
+        ("_lock", threading.Lock()),
+        ("_selection_lease_handle", lease._handle),
+        ("_selection_lease_seal", lease._seal),
+        ("_nonce", secrets.token_bytes(_NONCE_BYTES)),
+        ("_parent_token_handle", redemption._token_handle),
+        ("_redemption_seal", redemption._seal),
+        ("_registry_generation", redemption._registry_generation),
+        ("_run_handle", run._seal),
+        ("_seal", "0" * 64),
+        ("_warnings", redemption._warnings),
+    ):
+        object.__setattr__(selection, name, value)
+    _reseal_selected_continuation(selection)
+    return selection
 
 
 def issue_archive_search_continuation(
@@ -2385,33 +2763,200 @@ def redeem_archive_search_continuation(
     )
 
 
-def _consume_redeemed_continuation(
+def _begin_redeemed_continuation(
     run: ArchiveSearchRunBinding,
     redemption: RedeemedArchiveContinuation,
 ) -> tuple[
+    _ArchiveContinuationSelectionLease,
     tuple[ArchiveSearchCandidate, ...],
     tuple[SearchCoverage, ...],
     tuple[ArchiveSearchWarning, ...],
-    str | None,
 ]:
     with redemption._lock:
-        if not _redemption_is_valid(redemption, run) or redemption._consumed:
+        if (
+            not _redemption_is_valid(redemption, run)
+            or redemption._state is not _ArchiveRedemptionState.FRESH
+        ):
             raise ArchiveSearchAuthorityError("archive continuation redemption is unavailable")
-        object.__setattr__(redemption, "_consumed", True)
-        object.__setattr__(
-            redemption,
-            "_seal",
-            _mac(
-                b"friday/archive-search-continuation-redemption/v2",
-                _redemption_material(redemption),
-            ),
+        # SELECTING is sealed before any caller-controlled reauthorization
+        # callback.  A nested attempt therefore cannot consume or mint from the
+        # same redemption while the outer page is still being chosen.
+        nonce = secrets.token_bytes(_NONCE_BYTES)
+        lease_handle = _selection_lease_handle(
+            nonce=nonce,
+            run_handle=run._seal,
+            registry_generation=redemption._registry_generation,
         )
+        object.__setattr__(redemption, "_selection_handle", lease_handle)
+        object.__setattr__(redemption, "_state", _ArchiveRedemptionState.SELECTING)
+        _reseal_redemption(redemption)
+        lease = cast(
+            _ArchiveContinuationSelectionLease,
+            object.__new__(_ArchiveContinuationSelectionLease),
+        )
+        for name, value in (
+            ("_claimed", False),
+            ("_handle", lease_handle),
+            ("_lock", threading.Lock()),
+            ("_nonce", nonce),
+            ("_redemption_seal", redemption._seal),
+            ("_registry_generation", redemption._registry_generation),
+            ("_run_handle", run._seal),
+            ("_seal", "0" * 64),
+        ):
+            object.__setattr__(lease, name, value)
+        _reseal_selection_lease(lease)
         return (
+            lease,
             redemption._candidates,
             redemption._coverage,
             redemption._warnings,
-            redemption._child_token,
         )
+
+
+def _abort_redeemed_continuation(
+    run: ArchiveSearchRunBinding,
+    redemption: RedeemedArchiveContinuation,
+    lease: _ArchiveContinuationSelectionLease,
+) -> None:
+    """Fail closed after selection began; no later retry may mint a child."""
+
+    if (
+        type(redemption) is not RedeemedArchiveContinuation
+        or type(lease) is not _ArchiveContinuationSelectionLease
+        or type(redemption._lock) is not type(threading.Lock())
+        or type(lease._lock) is not type(threading.Lock())
+        or redemption._lock is lease._lock
+    ):
+        return
+    try:
+        with lease._lock, redemption._lock:
+            if (
+                _redemption_is_valid(redemption, run)
+                and _selection_lease_is_valid(lease, run, redemption)
+                and not lease._claimed
+                and redemption._state is _ArchiveRedemptionState.SELECTING
+            ):
+                object.__setattr__(redemption, "_state", _ArchiveRedemptionState.CONSUMED)
+                _reseal_redemption(redemption)
+                object.__setattr__(lease, "_claimed", True)
+                object.__setattr__(lease, "_redemption_seal", redemption._seal)
+                _reseal_selection_lease(lease)
+    except Exception:
+        return
+
+
+def _finish_redeemed_continuation(
+    run: ArchiveSearchRunBinding,
+    redemption: RedeemedArchiveContinuation,
+    lease: _ArchiveContinuationSelectionLease,
+    *,
+    head_count: int,
+) -> _SelectedArchiveContinuation | None:
+    """Seal the exact post-fit suffix and consume the redemption atomically."""
+
+    if (
+        type(redemption) is not RedeemedArchiveContinuation
+        or type(lease) is not _ArchiveContinuationSelectionLease
+        or type(redemption._lock) is not type(threading.Lock())
+        or type(lease._lock) is not type(threading.Lock())
+        or redemption._lock is lease._lock
+    ):
+        raise ArchiveSearchAuthorityError("archive continuation selection is unavailable")
+    with lease._lock, redemption._lock:
+        if (
+            not _redemption_is_valid(redemption, run)
+            or not _selection_lease_is_valid(lease, run, redemption)
+            or lease._claimed
+            or redemption._state is not _ArchiveRedemptionState.SELECTING
+            or type(head_count) is not int
+            or not 0 < head_count <= len(redemption._candidates)
+        ):
+            raise ArchiveSearchAuthorityError("archive continuation selection is unavailable")
+        suffix = redemption._candidates[head_count:]
+        object.__setattr__(redemption, "_state", _ArchiveRedemptionState.CONSUMED)
+        _reseal_redemption(redemption)
+        object.__setattr__(lease, "_claimed", True)
+        object.__setattr__(lease, "_redemption_seal", redemption._seal)
+        _reseal_selection_lease(lease)
+        if not suffix:
+            return None
+        return _new_selected_continuation(
+            run=run,
+            redemption=redemption,
+            lease=lease,
+            candidates=suffix,
+        )
+
+
+def _terminal_continuation_warnings(
+    warnings: tuple[ArchiveSearchWarning, ...],
+    page_coverage: tuple[SearchCoverage, ...],
+) -> tuple[ArchiveSearchWarning, ...]:
+    result = set(warnings)
+    if any(
+        CoverageState.CAPPED in item.states and not item.next_cursor_available
+        for item in page_coverage
+    ):
+        result.add(ArchiveSearchWarning.CONTINUATION_UNAVAILABLE)
+    return tuple(sorted(result, key=lambda item: item.value))
+
+
+def _page_fits_public_contract(
+    run: ArchiveSearchRunBinding,
+    page: ArchiveSearchPage,
+) -> bool:
+    try:
+        model_bytes = page.to_public_json(run._privacy_key).encode("ascii")
+    except Exception:
+        return False
+    return bool(model_bytes and len(model_bytes) <= _MAX_MODEL_BYTES)
+
+
+def _select_resumed_archive_page(
+    *,
+    tenant_id: str,
+    principal_id: str,
+    run_binding: ArchiveSearchRunBinding,
+    candidates: tuple[ArchiveSearchCandidate, ...],
+    terminal_coverage: tuple[SearchCoverage, ...],
+    warnings: tuple[ArchiveSearchWarning, ...],
+    candidate_reauthorizer: ArchiveSearchCandidateReauthorizer,
+    coverage_reauthorizer: ArchiveSearchCoverageReauthorizer,
+    authority_context: object,
+) -> tuple[ArchiveSearchPage, int]:
+    inbound_token = run_binding._request.continuation
+    if type(inbound_token) is not str:
+        raise ArchiveSearchAuthorityError("archive continuation request is unavailable")
+    probe_token = _continuation_probe_token(inbound_token)
+    maximum = min(run_binding._request.limit, len(candidates))
+    for head_count in range(maximum, 0, -1):
+        head = candidates[:head_count]
+        suffix = candidates[head_count:]
+        coverage = _continuation_page_coverage(
+            run_binding,
+            terminal_coverage,
+            head,
+            child_candidates=suffix,
+        )
+        page = _authorized_archive_search_page(
+            tenant_id=tenant_id,
+            principal_id=principal_id,
+            run_binding=run_binding,
+            candidates=head,
+            coverage=coverage,
+            warnings=_terminal_continuation_warnings(
+                warnings,
+                coverage,
+            ),
+            continuation_token=probe_token if suffix else None,
+            candidate_reauthorizer=candidate_reauthorizer,
+            coverage_reauthorizer=coverage_reauthorizer,
+            authority_context=authority_context,
+        )
+        if _page_fits_public_contract(run_binding, page):
+            return page, head_count
+    raise ArchiveSearchAuthorityError("archive continuation page is outside its closed limit")
 
 
 def authorize_archive_search_resumed_before_model(
@@ -2427,36 +2972,50 @@ def authorize_archive_search_resumed_before_model(
     """Consume one sealed registry redemption through the ordinary BEFORE_MODEL gate."""
 
     child_token: str | None = None
+    selection_lease: _ArchiveContinuationSelectionLease | None = None
     try:
         if not _run_is_valid(run_binding, tenant_id=tenant_id, principal_id=principal_id):
             raise ArchiveSearchAuthorityError("archive continuation run is unavailable")
-        candidates, coverage, warnings, child_token = _consume_redeemed_continuation(
+        selection_lease, candidates, terminal_coverage, warnings = _begin_redeemed_continuation(
             run_binding,
             redemption,
         )
-        try:
-            return _authorize_archive_search_before_model(
-                tenant_id=tenant_id,
-                principal_id=principal_id,
-                run_binding=run_binding,
-                candidates=candidates,
-                coverage=coverage,
-                warnings=warnings,
-                continuation_token=child_token,
-                candidate_reauthorizer=candidate_reauthorizer,
-                coverage_reauthorizer=coverage_reauthorizer,
-                authority_context=authority_context,
+        page, head_count = _select_resumed_archive_page(
+            tenant_id=tenant_id,
+            principal_id=principal_id,
+            run_binding=run_binding,
+            candidates=candidates,
+            terminal_coverage=terminal_coverage,
+            warnings=warnings,
+            candidate_reauthorizer=candidate_reauthorizer,
+            coverage_reauthorizer=coverage_reauthorizer,
+            authority_context=authority_context,
+        )
+        if selection_lease is None:
+            raise ArchiveSearchAuthorityError("archive continuation selection is unavailable")
+        selection = _finish_redeemed_continuation(
+            run_binding,
+            redemption,
+            selection_lease,
+            head_count=head_count,
+        )
+        if selection is not None:
+            child = _CONTINUATION_REGISTRY.mint_selected_child(
+                run=run_binding,
+                selection=selection,
             )
-        except Exception:
-            if child_token is not None:
-                _CONTINUATION_REGISTRY.revoke_token(child_token)
-            raise
+            child_token = child.token
+            page = ArchiveSearchPage.create(
+                request=run_binding._request,
+                candidates=tuple(result.candidate for result in page.results),
+                coverage=page.coverage,
+                warnings=page.warnings,
+                continuation=child_token,
+            )
+        return _new_live_archive_batch(run_binding, page)
     except Exception:
-        if child_token is None and type(redemption) is RedeemedArchiveContinuation:
-            try:
-                child_token = redemption._child_token
-            except Exception:
-                child_token = None
+        if selection_lease is not None:
+            _abort_redeemed_continuation(run_binding, redemption, selection_lease)
         if child_token is not None:
             _CONTINUATION_REGISTRY.revoke_token(child_token)
         raise ArchiveSearchAuthorityError("archive continuation model admission failed") from None
