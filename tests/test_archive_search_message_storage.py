@@ -9,6 +9,7 @@ from contextlib import contextmanager
 import pytest
 
 from friday.retrieval.contracts import LifecycleState, MessageRole
+from friday.storage import SCHEMA_VERSION
 from friday.storage._archive_search_messages import (
     ArchiveMessageScope,
     ArchiveMessageSearchPage,
@@ -36,6 +37,7 @@ def _database() -> Iterator[sqlite3.Connection]:
             """CREATE TABLE conversations (
                    id TEXT PRIMARY KEY,
                    user_id TEXT NOT NULL,
+                   title TEXT NOT NULL DEFAULT '',
                    is_archived INTEGER NOT NULL DEFAULT 0
                );
                CREATE TABLE messages (
@@ -45,6 +47,14 @@ def _database() -> Iterator[sqlite3.Connection]:
                    role TEXT NOT NULL,
                    content TEXT NOT NULL,
                    created_at TEXT NOT NULL
+               );
+               CREATE TABLE users (
+                   id TEXT PRIMARY KEY,
+                   status TEXT NOT NULL
+               );
+               CREATE TABLE schema_meta (
+                   key TEXT PRIMARY KEY,
+                   value TEXT NOT NULL
                );
                CREATE VIRTUAL TABLE messages_fts USING fts5(
                    content,
@@ -66,11 +76,19 @@ def _database() -> Iterator[sqlite3.Connection]:
                END;"""
         )
         conn.executemany(
-            "INSERT INTO conversations(id, user_id, is_archived) VALUES(?, ?, ?)",
+            "INSERT INTO users(id, status) VALUES(?, 'active')",
+            (("alice",), ("bob",)),
+        )
+        conn.execute(
+            "INSERT INTO schema_meta(key, value) VALUES('fts_build', ?)",
+            (str(SCHEMA_VERSION),),
+        )
+        conn.executemany(
+            "INSERT INTO conversations(id, user_id, title, is_archived) VALUES(?, ?, ?, ?)",
             (
-                (_CURRENT, "alice", 0),
-                (_OTHER, "alice", 1),
-                (_FOREIGN, "bob", 0),
+                (_CURRENT, "alice", "Friday work", 0),
+                (_OTHER, "alice", "Old archive", 1),
+                (_FOREIGN, "bob", "Foreign title", 0),
             ),
         )
         conn.execute(
@@ -179,6 +197,7 @@ def test_current_scope_authorizes_before_recall_and_returns_exact_bounded_contex
         assert page.total == page.returned == 1
         assert page.examined == 3
         assert page.has_more is False
+        assert page.lexical_index_build == str(SCHEMA_VERSION)
         assert page.roles == (MessageRole.ASSISTANT,)
         hit = page.hits[0]
         assert hit.match_rank == 1
@@ -189,6 +208,7 @@ def test_current_scope_authorizes_before_recall_and_returns_exact_bounded_contex
             (1, "user after"),
         ]
         assert hit.ledger.row_count == 5
+        assert hit.ledger.conversation_title == "Friday work"
         assert hit.ledger.boundary_identity_sha256 == page.boundary_identity_sha256
         assert len(hit.ledger.row_ledger_sha256) == 64
 
@@ -466,6 +486,60 @@ def test_fts_unavailable_is_explicit_not_a_false_empty_result() -> None:
         conn.execute("DROP TABLE messages_fts")
         with pytest.raises(ArchiveMessageStorageError, match="selection is unavailable") as error:
             _current(conn)
+        assert error.value.__cause__ is None
+
+
+def test_principal_and_index_attestations_block_false_authorized_absence() -> None:
+    with _database() as conn:
+        with pytest.raises(ArchiveMessageStorageError, match="principal authority"):
+            select_authorized_archive_message_page_in_transaction(
+                conn,
+                principal_id="missing-principal",
+                query="absent",
+            )
+        conn.execute("UPDATE users SET status='inactive' WHERE id='alice'")
+        with pytest.raises(ArchiveMessageStorageError, match="principal authority"):
+            _current(conn, query="absent")
+
+    with _database() as conn:
+        conn.execute("UPDATE schema_meta SET value='stale' WHERE key='fts_build'")
+        with pytest.raises(ArchiveMessageStorageError, match="lexical index"):
+            _current(conn, query="absent")
+
+    with _database() as conn:
+        _insert(conn, 10, content="needle index drift")
+        conn.execute(
+            "INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', 10, ?)",
+            ("needle index drift",),
+        )
+        with pytest.raises(ArchiveMessageStorageError, match="lexical index"):
+            _current(conn, query="absent")
+
+    with _database() as conn:
+        _insert(conn, 10, content="needle indexed content drift")
+        conn.execute(
+            "INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', 10, ?)",
+            ("needle indexed content drift",),
+        )
+        conn.execute(
+            "INSERT INTO messages_fts(rowid, content) VALUES(10, 'bogus replacement tokens')"
+        )
+        assert conn.execute(
+            "SELECT 1 FROM messages_fts_docsize WHERE id=10"
+        ).fetchone() == (1,)
+        with pytest.raises(ArchiveMessageStorageError, match="lexical index"):
+            _current(conn, query="needle")
+
+
+@pytest.mark.parametrize("created_at", ("not-an-instant", "2026-08-23 10:30:00"))
+def test_malformed_owned_timestamp_cannot_become_complete_time_filtered_absence(
+    created_at: str,
+) -> None:
+    with _database() as conn:
+        _insert(conn, 10, content="needle malformed time", created_at=created_at)
+        with pytest.raises(ArchiveMessageStorageError, match="timestamp") as error:
+            _current(conn, query="needle", since=_SINCE, until=_UNTIL)
+        assert "needle" not in str(error.value) + repr(error.value)
         assert error.value.__cause__ is None
 
 

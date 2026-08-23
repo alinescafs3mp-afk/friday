@@ -1,7 +1,9 @@
 """One-snapshot, principal-authorized lexical recall over private messages.
 
 The caller owns the SQLite transaction.  This module neither starts nor ends a
-transaction and performs no writes, so cancellation can only abort read work.
+transaction.  Its only write-shaped statement is FTS5's diagnostic
+``integrity-check`` command, which changes no durable rows; cancellation can
+therefore only abort verification/read work.
 Returned values contain message bodies and storage identities; they are
 process-private inputs to the archive authority layer, never public payloads.
 """
@@ -9,23 +11,27 @@ process-private inputs to the archive authority layer, never public payloads.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import math
 import re
+import secrets
 import sqlite3
 from collections.abc import Iterable
-from dataclasses import InitVar, dataclass
+from dataclasses import InitVar, dataclass, field
 from datetime import UTC, datetime
 from typing import Any, NoReturn, SupportsIndex, TypeAlias
 
 from friday.retrieval.archive_search_contract import ConversationScope
 from friday.retrieval.contracts import LifecycleState, MessageRole
+from friday.storage._base import SCHEMA_VERSION
 from friday.storage._knowledge import _fts_term_groups
 
 _MESSAGE_ID = re.compile(r"msg_[0-9a-f]{16}\Z")
 _CONVERSATION_ID = re.compile(r"conv_[0-9a-f]{16}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _FACTORY = object()
+_PROCESS_KEY = secrets.token_bytes(32)
 _MAX_QUERY_BYTES = 4_000
 _MAX_QUERY_CHARS = 1_000
 _MAX_RESULTS = 20
@@ -82,6 +88,19 @@ def _private_content(value: object) -> str:
     return value
 
 
+def _private_title(value: object) -> str:
+    if not isinstance(value, str) or len(value) > 1_000:
+        raise ArchiveMessageStorageError("stored conversation title is invalid")
+    try:
+        value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError:
+        raise ArchiveMessageStorageError("stored conversation title is invalid") from None
+    normalized = " ".join(value.split())[:200]
+    if any(ord(character) < 32 for character in normalized):
+        raise ArchiveMessageStorageError("stored conversation title is invalid")
+    return normalized
+
+
 def _message_id(value: object, *, label: str) -> str:
     if not isinstance(value, str) or _MESSAGE_ID.fullmatch(value) is None:
         raise ArchiveMessageStorageError(f"{label} is invalid")
@@ -103,7 +122,10 @@ def _utc(value: object, *, label: str) -> str:
         raise ArchiveMessageStorageError(f"{label} is invalid") from None
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ArchiveMessageStorageError(f"{label} is invalid")
-    return parsed.astimezone(UTC).isoformat()
+    normalized = parsed.astimezone(UTC).isoformat()
+    if value != normalized:
+        raise ArchiveMessageStorageError(f"{label} is invalid")
+    return normalized
 
 
 def _optional_utc(value: object, *, label: str) -> str | None:
@@ -271,6 +293,7 @@ class ArchiveMessageLedgerEvidence(_ProcessPrivate):
     row_count: int
     first_message_id: str
     last_message_id: str
+    conversation_title: str
     conversation_archived: bool
     _factory: InitVar[object] = None
 
@@ -287,6 +310,7 @@ class ArchiveMessageLedgerEvidence(_ProcessPrivate):
             or self.row_count <= 0
             or _MESSAGE_ID.fullmatch(self.first_message_id) is None
             or _MESSAGE_ID.fullmatch(self.last_message_id) is None
+            or self.conversation_title != _private_title(self.conversation_title)
             or type(self.conversation_archived) is not bool
         ):
             raise ArchiveMessageStorageError("message ledger evidence is invalid")
@@ -330,36 +354,127 @@ class ArchiveMessageHit(_ProcessPrivate):
 class ArchiveMessageSearchPage(_ProcessPrivate):
     """Private page; ``examined`` is eligible corpus size and ``total`` matched size."""
 
+    principal_id: str
+    query: str
     scope: ArchiveMessageScope
+    conversation_id: str | None
+    boundary_user_message_id: str | None
     hits: tuple[ArchiveMessageHit, ...]
     ledgers: tuple[ArchiveMessageLedgerEvidence, ...]
     roles: tuple[MessageRole, ...]
     lifecycle_states: tuple[LifecycleState, ...]
     since: str | None
     until: str | None
+    limit: int
+    context_before: int
+    context_after: int
+    lexical_index_build: str
     total: int
     examined: int
     has_more: bool
     boundary_identity_sha256: str | None
+    _seal: bytes = field(default=b"", init=False, repr=False, compare=False)
     _factory: InitVar[object] = None
 
     def __post_init__(self, _factory: object) -> None:
         if (
             _factory is not _FACTORY
+            or self.principal_id != _private_scope(self.principal_id, label="stored principal")
+            or self.query != _query(self.query)
             or type(self.scope) is not ArchiveMessageScope
+            or (
+                self.scope is ArchiveMessageScope.CURRENT
+                and (
+                    _CONVERSATION_ID.fullmatch(self.conversation_id or "") is None
+                    or _MESSAGE_ID.fullmatch(self.boundary_user_message_id or "") is None
+                    or self.boundary_identity_sha256 is None
+                )
+            )
+            or (
+                self.scope is ArchiveMessageScope.ALL
+                and (
+                    self.conversation_id is not None
+                    or self.boundary_user_message_id is not None
+                    or self.boundary_identity_sha256 is not None
+                )
+            )
+            or type(self.roles) is not tuple
+            or self.roles != _roles(self.roles)
+            or type(self.lifecycle_states) is not tuple
+            or self.lifecycle_states != _lifecycle_states(self.lifecycle_states)
+            or self.context_before
+            != _bounded_integer(
+                self.context_before,
+                label="message context radius",
+                low=0,
+                high=_MAX_NEIGHBORS,
+            )
+            or self.context_after
+            != _bounded_integer(
+                self.context_after,
+                label="message context radius",
+                low=0,
+                high=_MAX_NEIGHBORS,
+            )
             or type(self.hits) is not tuple
             or any(type(item) is not ArchiveMessageHit for item in self.hits)
             or tuple(item.match_rank for item in self.hits) != tuple(range(1, len(self.hits) + 1))
             or type(self.ledgers) is not tuple
             or any(type(item) is not ArchiveMessageLedgerEvidence for item in self.ledgers)
-            or type(self.roles) is not tuple
-            or any(type(item) is not MessageRole for item in self.roles)
-            or type(self.lifecycle_states) is not tuple
-            or self.lifecycle_states != _lifecycle_states(self.lifecycle_states)
+            or tuple(item.conversation_id for item in self.ledgers)
+            != tuple(sorted({item.conversation_id for item in self.ledgers}))
+            or any(item.ledger not in self.ledgers for item in self.hits)
+            or {item.conversation_id for item in self.ledgers}
+            != {item.message.conversation_id for item in self.hits}
+            or any(item.boundary_identity_sha256 != self.boundary_identity_sha256 for item in self.ledgers)
+            or any(
+                item.message.principal_id != self.principal_id
+                or item.message.role not in self.roles
+                or (
+                    item.message.conversation_archived
+                    and LifecycleState.ARCHIVED not in self.lifecycle_states
+                )
+                or (
+                    not item.message.conversation_archived
+                    and LifecycleState.ACTIVE not in self.lifecycle_states
+                )
+                or (
+                    self.scope is ArchiveMessageScope.CURRENT
+                    and item.message.conversation_id != self.conversation_id
+                )
+                or tuple(context.relative_position for context in item.context)
+                != tuple(sorted({context.relative_position for context in item.context}))
+                or any(
+                    context.row.principal_id != self.principal_id
+                    or context.row.conversation_id != item.message.conversation_id
+                    or context.row.conversation_archived is not item.message.conversation_archived
+                    or context.relative_position < -self.context_before
+                    or context.relative_position > self.context_after
+                    for context in item.context
+                )
+                or next(
+                    (context.row for context in item.context if context.relative_position == 0),
+                    None,
+                )
+                != item.message
+                for item in self.hits
+            )
+            or self.since != _optional_utc(self.since, label="message time boundary")
+            or self.until != _optional_utc(self.until, label="message time boundary")
+            or (self.since is not None and self.until is not None and self.since >= self.until)
+            or self.limit
+            != _bounded_integer(
+                self.limit,
+                label="message result limit",
+                low=1,
+                high=_MAX_RESULTS,
+            )
+            or self.lexical_index_build != str(SCHEMA_VERSION)
             or isinstance(self.total, bool)
             or isinstance(self.examined, bool)
             or self.total < len(self.hits)
             or self.examined < self.total
+            or len(self.hits) > self.limit
             or type(self.has_more) is not bool
             or self.has_more is not (self.total > len(self.hits))
             or (
@@ -368,6 +483,7 @@ class ArchiveMessageSearchPage(_ProcessPrivate):
             )
         ):
             raise ArchiveMessageStorageError("message page evidence is invalid")
+        object.__setattr__(self, "_seal", _page_seal(self))
 
     @property
     def returned(self) -> int:
@@ -380,10 +496,211 @@ class ArchiveMessageSearchPage(_ProcessPrivate):
             f"examined={self.examined}, has_more={self.has_more}, private=True)"
         )
 
+    def is_valid(self) -> bool:
+        """Return whether this exact process-private selection remains intact."""
+
+        try:
+            return bool(
+                type(self) is ArchiveMessageSearchPage
+                and type(self._seal) is bytes
+                and len(self._seal) == 32
+                and hmac.compare_digest(self._seal, _page_seal(self))
+            )
+        except Exception:
+            return False
+
+    @property
+    def selection_handle(self) -> str:
+        """Opaque identity of every sealed storage control and selected byte."""
+
+        if not self.is_valid():
+            raise ArchiveMessageStorageError("message page evidence is invalid")
+        return self._seal.hex()
+
+
+def _page_seal(page: ArchiveMessageSearchPage) -> bytes:
+    def row(item: ArchiveMessageRow) -> dict[str, object]:
+        return {
+            "archived": item.conversation_archived,
+            "content": item.content,
+            "conversation_id": item.conversation_id,
+            "created_at": item.created_at,
+            "message_id": item.message_id,
+            "principal_id": item.principal_id,
+            "role": item.role.value,
+        }
+
+    def ledger(item: ArchiveMessageLedgerEvidence) -> dict[str, object]:
+        return {
+            "archived": item.conversation_archived,
+            "boundary_identity_sha256": item.boundary_identity_sha256,
+            "conversation_id": item.conversation_id,
+            "conversation_title": item.conversation_title,
+            "first_message_id": item.first_message_id,
+            "last_message_id": item.last_message_id,
+            "row_count": item.row_count,
+            "row_ledger_sha256": item.row_ledger_sha256,
+        }
+
+    material = {
+        "boundary_identity_sha256": page.boundary_identity_sha256,
+        "boundary_user_message_id": page.boundary_user_message_id,
+        "context_after": page.context_after,
+        "context_before": page.context_before,
+        "conversation_id": page.conversation_id,
+        "examined": page.examined,
+        "has_more": page.has_more,
+        "hits": [
+            {
+                "context": [
+                    {"relative_position": context.relative_position, "row": row(context.row)}
+                    for context in hit.context
+                ],
+                "ledger": ledger(hit.ledger),
+                "lexical_score": hit.lexical_score,
+                "match_rank": hit.match_rank,
+                "message": row(hit.message),
+            }
+            for hit in page.hits
+        ],
+        "ledgers": [ledger(item) for item in page.ledgers],
+        "lifecycle_states": [item.value for item in page.lifecycle_states],
+        "lexical_index_build": page.lexical_index_build,
+        "limit": page.limit,
+        "principal_id": page.principal_id,
+        "query": page.query,
+        "roles": [item.value for item in page.roles],
+        "scope": page.scope.value,
+        "since": page.since,
+        "total": page.total,
+        "until": page.until,
+    }
+    try:
+        encoded = json.dumps(
+            material,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeError):
+        raise ArchiveMessageStorageError("message page evidence is invalid") from None
+    return hmac.new(
+        _PROCESS_KEY,
+        b"friday/archive-message-storage-page/v1\0" + encoded,
+        hashlib.sha256,
+    ).digest()
+
 
 def _records(cursor: sqlite3.Cursor) -> list[dict[str, Any]]:
     columns = tuple(item[0] for item in (cursor.description or ()))
     return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+
+
+def _require_active_principal_and_current_lexical_index(
+    conn: sqlite3.Connection,
+    *,
+    principal_id: str,
+) -> str:
+    authority = conn.execute(
+        "SELECT 1 FROM users WHERE id=? AND status='active'",
+        (principal_id,),
+    ).fetchone()
+    if authority is None:
+        raise ArchiveMessageStorageError("message principal authority is unavailable")
+    marker = conn.execute(
+        "SELECT value FROM schema_meta WHERE key='fts_build'",
+    ).fetchone()
+    expected = str(SCHEMA_VERSION)
+    if marker is None or type(marker[0]) is not str or marker[0] != expected:
+        raise ArchiveMessageStorageError("message lexical index is unavailable")
+    missing = conn.execute(
+        """SELECT 1
+             FROM messages m
+             JOIN conversations c
+               ON c.id=m.conversation_id AND c.user_id=m.user_id
+             LEFT JOIN messages_fts_docsize fts_row ON fts_row.id=m.rowid
+            WHERE m.user_id=? AND fts_row.id IS NULL
+            LIMIT 1""",
+        (principal_id,),
+    ).fetchone()
+    if missing is not None:
+        raise ArchiveMessageStorageError("message lexical index is unavailable")
+    try:
+        # ``rank=1`` compares an external-content index with its source table,
+        # rather than checking only the internal FTS b-tree structure.
+        conn.execute(
+            "INSERT INTO messages_fts(messages_fts, rank) VALUES('integrity-check', 1)"
+        )
+    except sqlite3.DatabaseError:
+        raise ArchiveMessageStorageError("message lexical index is unavailable") from None
+    return expected
+
+
+def _validate_authorized_scope_timestamps(
+    conn: sqlite3.Connection,
+    *,
+    principal_id: str,
+    scope: ArchiveMessageScope,
+    conversation_id: str | None,
+    boundary_user_message_id: str | None,
+    include_active: int,
+    include_archived: int,
+) -> None:
+    """Decode every authorized timestamp before any temporal row can disappear."""
+
+    cursor = conn.execute(
+        """WITH owned_conversations AS MATERIALIZED (
+                   SELECT c.id, c.user_id, c.is_archived
+                     FROM conversations c
+                    WHERE c.user_id=? AND (?='all' OR c.id=?)
+               ),
+               eligible_conversations AS MATERIALIZED (
+                   SELECT *
+                     FROM owned_conversations
+                    WHERE (is_archived=0 AND ?=1) OR (is_archived=1 AND ?=1)
+               ),
+               scope_gate AS MATERIALIZED (
+                   SELECT b.conversation_id AS boundary_conversation_id,
+                          b.rowid AS boundary_rowid
+                     FROM messages b
+                     JOIN owned_conversations c
+                       ON c.id=b.conversation_id AND c.user_id=b.user_id
+                    WHERE ?='current' AND b.id=? AND b.user_id=? AND b.role='user'
+                   UNION ALL
+                   SELECT NULL, NULL WHERE ?='all'
+               )
+               SELECT m.created_at
+                 FROM messages m
+                 JOIN eligible_conversations c
+                   ON c.id=m.conversation_id AND c.user_id=m.user_id
+                 CROSS JOIN scope_gate gate
+                WHERE m.user_id=?
+                  AND m.role IN ('user', 'assistant')
+                  AND (?='all' OR (
+                       m.conversation_id=gate.boundary_conversation_id
+                       AND m.rowid<gate.boundary_rowid
+                  ))""",
+        (
+            principal_id,
+            scope.value,
+            conversation_id,
+            include_active,
+            include_archived,
+            scope.value,
+            boundary_user_message_id,
+            principal_id,
+            scope.value,
+            principal_id,
+            scope.value,
+        ),
+    )
+    while True:
+        batch = cursor.fetchmany(256)
+        if not batch:
+            return
+        for row in batch:
+            _utc(row[0], label="stored message timestamp")
 
 
 def _row(values: dict[str, Any], *, prefix: str) -> ArchiveMessageRow:
@@ -413,7 +730,7 @@ def _row(values: dict[str, Any], *, prefix: str) -> ArchiveMessageRow:
 
 
 class _LedgerAccumulator:
-    __slots__ = ("archived", "count", "first", "hasher", "last")
+    __slots__ = ("archived", "count", "first", "hasher", "last", "title")
 
     def __init__(self) -> None:
         self.hasher = hashlib.sha256()
@@ -422,8 +739,9 @@ class _LedgerAccumulator:
         self.first = ""
         self.last = ""
         self.archived: bool | None = None
+        self.title: str | None = None
 
-    def add(self, row: ArchiveMessageRow) -> None:
+    def add(self, row: ArchiveMessageRow, *, conversation_title: str) -> None:
         identity = _row_identity(
             message_id=row.message_id,
             conversation_id=row.conversation_id,
@@ -442,6 +760,11 @@ class _LedgerAccumulator:
             self.archived = row.conversation_archived
         elif self.archived is not row.conversation_archived:
             raise ArchiveMessageStorageError("stored conversation lifecycle changed within snapshot")
+        title = _private_title(conversation_title)
+        if self.title is None:
+            self.title = title
+        elif self.title != title:
+            raise ArchiveMessageStorageError("stored conversation title changed within snapshot")
 
     def finish(self) -> str:
         self.hasher.update(b'],"schema":"friday.private-message-window-row-ledger.v1"}')
@@ -462,7 +785,7 @@ def _ledger_evidence(
 ) -> tuple[ArchiveMessageLedgerEvidence, ...]:
     placeholders = ",".join("?" for _item in conversation_ids)
     statement = f"""WITH selected_owned AS MATERIALIZED (
-                         SELECT c.id, c.user_id, c.is_archived
+                         SELECT c.id, c.user_id, c.is_archived, c.title
                            FROM conversations c
                           WHERE c.user_id=? AND c.id IN ({placeholders})
                      )
@@ -472,6 +795,7 @@ def _ledger_evidence(
                             m.role AS ledger_role,
                             m.content AS ledger_content,
                             m.created_at AS ledger_created_at,
+                            c.title AS ledger_conversation_title,
                             c.is_archived AS ledger_conversation_archived
                        FROM messages m
                        JOIN selected_owned c
@@ -510,12 +834,15 @@ def _ledger_evidence(
             accumulator = accumulators.get(row.conversation_id)
             if accumulator is None:
                 raise ArchiveMessageStorageError("message ledger escaped its authorized scope")
-            accumulator.add(row)
+            accumulator.add(
+                row,
+                conversation_title=_private_title(values["ledger_conversation_title"]),
+            )
 
     evidence: list[ArchiveMessageLedgerEvidence] = []
     for conversation_id in conversation_ids:
         accumulator = accumulators[conversation_id]
-        if accumulator.count == 0 or accumulator.archived is None:
+        if accumulator.count == 0 or accumulator.archived is None or accumulator.title is None:
             raise ArchiveMessageStorageError("message ledger could not be reselected")
         evidence.append(
             ArchiveMessageLedgerEvidence(
@@ -525,6 +852,7 @@ def _ledger_evidence(
                 row_count=accumulator.count,
                 first_message_id=accumulator.first,
                 last_message_id=accumulator.last,
+                conversation_title=accumulator.title,
                 conversation_archived=accumulator.archived,
                 _factory=_FACTORY,
             )
@@ -558,6 +886,10 @@ def _select_authorized_archive_message_page_in_transaction(
     """
 
     principal = _private_scope(principal_id, label="principal identity")
+    lexical_index_build = _require_active_principal_and_current_lexical_index(
+        conn,
+        principal_id=principal,
+    )
     if type(scope) is not ArchiveMessageScope:
         raise ArchiveMessageStorageError("message scope is invalid")
     normalized_query = _query(query)
@@ -592,6 +924,15 @@ def _select_authorized_archive_message_page_in_transaction(
     include_assistant = int(MessageRole.ASSISTANT in selected_roles)
     include_active = int(LifecycleState.ACTIVE in selected_lifecycles)
     include_archived = int(LifecycleState.ARCHIVED in selected_lifecycles)
+    _validate_authorized_scope_timestamps(
+        conn,
+        principal_id=principal,
+        scope=scope,
+        conversation_id=current_conversation,
+        boundary_user_message_id=boundary_id,
+        include_active=include_active,
+        include_archived=include_archived,
+    )
 
     match_queries = _match_queries(normalized_query)
     local_score = " + ".join(
@@ -630,26 +971,31 @@ def _select_authorized_archive_message_page_in_transaction(
                    UNION ALL
                    SELECT NULL, NULL, NULL, NULL, NULL, NULL WHERE ?='all'
                ),
-               authorized_context AS MATERIALIZED (
+               authorized_scope_rows AS MATERIALIZED (
                    SELECT m.id, m.conversation_id, m.user_id, m.role, m.content,
                           m.created_at, m.rowid AS message_rowid,
-                          c.is_archived AS conversation_archived,
-                          ROW_NUMBER() OVER (
-                              PARTITION BY m.conversation_id
-                              ORDER BY julianday(m.created_at) ASC, m.rowid ASC
-                          ) AS conversation_sequence
+                          c.is_archived AS conversation_archived
                      FROM messages m
                      JOIN eligible_conversations c
                        ON c.id=m.conversation_id AND c.user_id=m.user_id
                      CROSS JOIN scope_gate gate
                     WHERE m.user_id=?
                       AND m.role IN ('user', 'assistant')
-                      AND (? IS NULL OR julianday(m.created_at) >= julianday(?))
-                      AND (? IS NULL OR julianday(m.created_at) < julianday(?))
                       AND (?='all' OR (
                            m.conversation_id=gate.boundary_conversation_id
                            AND m.rowid<gate.boundary_rowid
                       ))
+               ),
+               authorized_context AS MATERIALIZED (
+                   SELECT scoped.*,
+                          ROW_NUMBER() OVER (
+                              PARTITION BY scoped.conversation_id
+                              ORDER BY julianday(scoped.created_at) ASC,
+                                       scoped.message_rowid ASC
+                          ) AS conversation_sequence
+                     FROM authorized_scope_rows scoped
+                    WHERE (? IS NULL OR julianday(scoped.created_at) >= julianday(?))
+                      AND (? IS NULL OR julianday(scoped.created_at) < julianday(?))
                ),
                eligible AS MATERIALIZED (
                    SELECT * FROM authorized_context
@@ -679,7 +1025,10 @@ def _select_authorized_archive_message_page_in_transaction(
                           (SELECT COUNT(*)
                              FROM owned_conversations
                             WHERE typeof(is_archived)!='integer'
-                               OR is_archived NOT IN (0, 1)) AS invalid_lifecycle
+                               OR is_archived NOT IN (0, 1)) AS invalid_lifecycle,
+                          (SELECT COUNT(*)
+                             FROM authorized_scope_rows
+                            WHERE julianday(created_at) IS NULL) AS invalid_timestamp
                ),
                expanded AS MATERIALIZED (
                    SELECT page.match_rank,
@@ -711,6 +1060,7 @@ def _select_authorized_archive_message_page_in_transaction(
                       statistics.examined,
                       statistics.total,
                       statistics.invalid_lifecycle,
+                      statistics.invalid_timestamp,
                       expanded.*
                  FROM scope_gate gate
                  CROSS JOIN statistics
@@ -729,11 +1079,11 @@ def _select_authorized_archive_message_page_in_transaction(
             principal,
             scope.value,
             principal,
-            start,
-            start,
-            end,
-            end,
             scope.value,
+            start,
+            start,
+            end,
+            end,
             include_user,
             include_assistant,
             *match_queries,
@@ -748,6 +1098,8 @@ def _select_authorized_archive_message_page_in_transaction(
     first = records[0]
     if int(first["invalid_lifecycle"]):
         raise ArchiveMessageStorageError("stored conversation lifecycle is invalid")
+    if int(first["invalid_timestamp"]):
+        raise ArchiveMessageStorageError("stored message timestamp is invalid")
     examined = int(first["examined"])
     total = int(first["total"])
     boundary_digest = _boundary_identity(first) if scope is ArchiveMessageScope.CURRENT else None
@@ -815,13 +1167,21 @@ def _select_authorized_archive_message_page_in_transaction(
             )
         )
     return ArchiveMessageSearchPage(
+        principal_id=principal,
+        query=normalized_query,
         scope=scope,
+        conversation_id=current_conversation,
+        boundary_user_message_id=boundary_id,
         hits=tuple(hits),
         ledgers=ledgers,
         roles=selected_roles,
         lifecycle_states=selected_lifecycles,
         since=start,
         until=end,
+        limit=page_size,
+        context_before=before,
+        context_after=after,
+        lexical_index_build=lexical_index_build,
         total=total,
         examined=examined,
         has_more=total > len(hits),
@@ -855,10 +1215,16 @@ def select_authorized_archive_message_page_in_transaction(
     An authorized search with zero matches returns an empty typed page.  The
     archive authority callback must rerun this exact selector, with the same
     normalized controls, inside its publication ``BEGIN IMMEDIATE`` and compare
-    the resulting private candidate and coverage evidence.  A returned page is
-    deliberately not a transferable authorization proof by itself.  The adapter
-    must separately attest the derivative FTS build before declaring coverage
-    complete; ``has_more`` without a frozen tail is capped coverage, not a cursor.
+    the resulting private candidate and coverage evidence.  Selection requires
+    an active principal, the durable FTS build marker and principal-local index
+    row parity in the same snapshot.  A returned page remains non-transferable;
+    ``has_more`` without a frozen tail is capped coverage, not a cursor.
+
+    The caller must provide a writable SQLite transaction: FTS5 exposes its
+    external-content ``integrity-check`` only as a write-shaped diagnostic
+    command.  The command changes no durable rows and this selector never
+    commits, but a ``PRAGMA query_only`` connection cannot attest the index and
+    therefore fails unavailable.
     """
 
     if type(conn) is not sqlite3.Connection or not conn.in_transaction:
