@@ -107,6 +107,17 @@ from friday.file_evidence import (
     FileRegistrationKind,
     current_turn_file_reference_of,
 )
+from friday.interaction_control_plane.archive_evidence_work_item import (
+    RecallSelectedArchiveEvidenceWorkItem,
+    parse_archive_evidence_followup,
+)
+from friday.interaction_control_plane.archive_evidence_work_item_store import (
+    accept_recall_selected_archive_evidence_replay_in_transaction,
+    create_recall_selected_archive_evidence_work_item_in_transaction,
+    get_current_recall_selected_archive_evidence_work_item_in_transaction,
+    new_recall_selected_archive_evidence_work_item_id,
+    suspend_recall_selected_archive_evidence_replay_in_transaction,
+)
 from friday.interaction_control_plane.legacy_trace import (
     CapabilityStatus,
     LegacyTurnSignals,
@@ -124,6 +135,11 @@ from friday.interaction_control_plane.runtime_trace import (
     attach_trace_to_metadata,
     build_work_trace,
     load_trace_namespace_key,
+)
+from friday.interaction_control_plane.selected_archive_evidence import (
+    SelectedArchiveCorpus,
+    SelectedArchiveCoverageGrade,
+    SelectedArchiveEvidence,
 )
 from friday.interaction_control_plane.turn_trace import (
     CapabilityClass,
@@ -153,6 +169,14 @@ from friday.morphology import LEXICAL_MIN_STEM_INPUT, stem
 from friday.office_attestation import (
     OFFICE_STRUCTURE_ATTESTATION_METADATA_KEY,
     verify_office_structure_attestation,
+)
+from friday.orchestration.archive_recall_outcome import (
+    ArchiveRecallOutcome,
+    ArchiveRecallStatus,
+    accept_archive_evidence_replay,
+    archive_recall_outcome_from_attestation,
+    attach_accepted_archive_recall_outcome_receipt,
+    load_accepted_archive_recall_outcome_receipt,
 )
 from friday.orchestration.capability_outcome import (
     CapabilityOutcomeStatus,
@@ -219,14 +243,23 @@ from friday.people import unambiguous
 from friday.permissions import ActorContext, AuthorizationService
 from friday.reports import SUPPORTED_KINDS, sheet_title_from_report_title, spec_from_payload
 from friday.retrieval import best_snippet, is_relational_query
+from friday.retrieval.archive_evidence_replay import (
+    ArchiveEvidenceReplayCoverageGrade,
+    ArchiveEvidenceReplayStatus,
+    replay_archive_evidence_in_transaction,
+    unavailable_archive_evidence_replay_result,
+)
 from friday.retrieval.archive_search_authority import (
     ArchiveModelBatchLedger,
+    ArchiveSearchCoverageGrade,
     ArchiveSearchPublicationDenied,
+    ArchiveSearchSelectedEvidence,
     abandon_empty_archive_model_batch_ledger,
     attest_archive_search_before_publication,
     consume_archive_model_batch_ledger_fail_closed,
     create_archive_model_batch_ledger,
 )
+from friday.retrieval.archive_search_contract import ArchiveSearchCorpus
 from friday.retrieval.archive_search_service import (
     PreparedArchiveSearch,
     reauthorize_archive_search_candidate,
@@ -33061,6 +33094,242 @@ class AgentRuntime:
             },
         }
 
+    def _selected_archive_evidence_replay_response(
+        self,
+        *,
+        actor: ActorContext,
+        conversation_id: str,
+        person_id: str,
+        request: str,
+        boundary_message_id: str,
+        admitted_work_item: RecallSelectedArchiveEvidenceWorkItem,
+        turn_started: float,
+    ) -> dict[str, Any]:
+        """Replay one exact durable archive selection without search or model use."""
+
+        with self.storage.transaction() as publication_conn:
+            current = get_current_recall_selected_archive_evidence_work_item_in_transaction(
+                publication_conn,
+                user_id=person_id,
+                conversation_id=conversation_id,
+                boundary_user_message_id=boundary_message_id,
+            )
+            if current is None or (
+                current.id != admitted_work_item.id
+                or current.revision != admitted_work_item.revision
+            ):
+                raise WorkItemConflictError("archive replay admission is no longer current")
+            evidence = current.selected_evidence
+            selected = ArchiveSearchSelectedEvidence(
+                corpus=ArchiveSearchCorpus(evidence.corpus.value),
+                source_ref=evidence.source_ref,
+                passage_refs=evidence.passage_refs,
+                resolved_snapshot_sha256=evidence.source_snapshot_sha256,
+            )
+            authorization = getattr(self.kernel, "authorization", None)
+            if type(authorization) is AuthorizationService:
+                try:
+                    replay = replay_archive_evidence_in_transaction(
+                        publication_conn,
+                        authorization=authorization,
+                        actor=actor,
+                        tenant_id=actor.user_id,
+                        principal_id=person_id,
+                        origin_boundary_user_message_id=(
+                            evidence.origin_boundary_user_message_id
+                        ),
+                        corpus=selected.corpus,
+                        source_ref=selected.source_ref,
+                        passage_refs=selected.passage_refs,
+                        expected_source_snapshot_sha256=(
+                            evidence.source_snapshot_sha256
+                        ),
+                        expected_coverage_grade=ArchiveEvidenceReplayCoverageGrade(
+                            evidence.coverage_grade.value
+                        ),
+                    )
+                except Exception as exc:  # noqa: BLE001 - source-free terminal
+                    LOGGER.warning(
+                        "archive-replay: exact resolver unavailable (%s)",
+                        type(exc).__name__,
+                    )
+                    replay = unavailable_archive_evidence_replay_result(selected.corpus)
+            else:
+                replay = unavailable_archive_evidence_replay_result(selected.corpus)
+            content, outcome = accept_archive_evidence_replay(
+                request=request,
+                result=replay,
+                selected_evidence=selected,
+                coverage_sha256=evidence.coverage_sha256,
+                coverage_grade=ArchiveSearchCoverageGrade(evidence.coverage_grade.value),
+            )
+            exact = replay.status is ArchiveEvidenceReplayStatus.EXACT
+            verification_status = VERDICT_PASSED if exact else VERDICT_UNKNOWN
+            assistant_metadata: dict[str, Any] = {
+                "answer_mode": "structural",
+                "interaction_mode": "dialogue",
+                "tools_used": [],
+                "private_context_lineage": True,
+                "verified": exact,
+                "verification_status": verification_status,
+                "verification": {
+                    "status": verification_status,
+                    "ok": exact,
+                    "score": 1.0 if exact else None,
+                    "issues": [],
+                    "attachment_evidence_used": False,
+                },
+                "structural": {
+                    "verdict_kind": "selected_archive_evidence_replay",
+                    "answer_present": True,
+                    "model_spoke": False,
+                    "remainder_known": True,
+                    "llm_failed": False,
+                    "archive_replay_status": outcome.status.value,
+                },
+            }
+            attach_accepted_archive_recall_outcome_receipt(assistant_metadata, outcome)
+            trace_outcome = {
+                ArchiveRecallStatus.COMPLETE: OutcomeStatus.SUCCEEDED,
+                ArchiveRecallStatus.PARTIAL: OutcomeStatus.PARTIAL,
+                ArchiveRecallStatus.DENIED: OutcomeStatus.DENIED,
+                ArchiveRecallStatus.DRIFTED: OutcomeStatus.UNAVAILABLE,
+                ArchiveRecallStatus.UNAVAILABLE: OutcomeStatus.UNAVAILABLE,
+            }[outcome.status]
+            trace_completion = (
+                CompletionDecision.COMPLETE
+                if outcome.status is ArchiveRecallStatus.COMPLETE
+                else CompletionDecision.PARTIAL
+                if outcome.status is ArchiveRecallStatus.PARTIAL
+                else CompletionDecision.FAILED
+            )
+            failure_stage, failure_reason = {
+                ArchiveRecallStatus.COMPLETE: (FailureStage.NONE, FailureReason.NONE),
+                ArchiveRecallStatus.PARTIAL: (FailureStage.NONE, FailureReason.NONE),
+                ArchiveRecallStatus.DENIED: (
+                    FailureStage.CAPABILITY,
+                    FailureReason.AUTHORITY_DENIED,
+                ),
+                ArchiveRecallStatus.DRIFTED: (
+                    FailureStage.STATE_LOSS,
+                    FailureReason.STALE_STATE,
+                ),
+                ArchiveRecallStatus.UNAVAILABLE: (
+                    FailureStage.CAPABILITY,
+                    FailureReason.SOURCE_UNAVAILABLE,
+                ),
+            }[outcome.status]
+            capability = (
+                CapabilityClass.MESSAGE_RETRIEVAL
+                if evidence.corpus is SelectedArchiveCorpus.MESSAGES
+                else CapabilityClass.DOCUMENT_RETRIEVAL
+            )
+            work_trace = build_work_trace(
+                namespace_key=load_trace_namespace_key(publication_conn),
+                turn_identifier=boundary_message_id,
+                conversation_identifier=conversation_id,
+                work_item_identifier=current.id,
+                work_relation=WorkRelation.CONTINUED,
+                intent=(
+                    IntentClass.MESSAGE_RECALL
+                    if evidence.corpus is SelectedArchiveCorpus.MESSAGES
+                    else IntentClass.DOCUMENT_WORK
+                ),
+                playbook=PlaybookClass.OTHER,
+                capability_outcomes=((capability, trace_outcome),),
+                continuation=ContinuationKind.REFERENCE,
+                completion=trace_completion,
+                failure_stage=failure_stage,
+                failure_reason=failure_reason,
+                ambiguity_present=False,
+                partial_coverage=outcome.status is ArchiveRecallStatus.PARTIAL,
+                state_restored=True,
+                latency_ms=min(
+                    86_400_000,
+                    max(0, int((time.monotonic() - turn_started) * 1_000)),
+                ),
+                model_calls=0,
+                model_call_accounting=CountAccounting.COMPLETE,
+                capability_calls=1,
+                capability_call_accounting=CountAccounting.COMPLETE,
+                authority_rechecked=True,
+            )
+            if not attach_trace_to_metadata(assistant_metadata, work_trace):
+                raise RuntimeError("archive replay Work Item trace could not be stored")
+            assistant_message = store_message_in_transaction(
+                publication_conn,
+                conversation_id,
+                person_id,
+                "assistant",
+                content,
+                metadata=assistant_metadata,
+                reply_to=boundary_message_id,
+            )
+            if assistant_message.get("content") != content:
+                raise ValueError("archive replay assistant durability reread changed content")
+            stored_receipt = load_accepted_archive_recall_outcome_receipt(
+                assistant_message.get("metadata_json"),
+                expected_outcome=outcome,
+            )
+            mutation = (
+                accept_recall_selected_archive_evidence_replay_in_transaction
+                if exact
+                else suspend_recall_selected_archive_evidence_replay_in_transaction
+            )
+            mutation(
+                publication_conn,
+                work_item_id=current.id,
+                user_id=person_id,
+                conversation_id=conversation_id,
+                expected_revision=current.revision,
+                new_boundary_user_message_id=boundary_message_id,
+                new_assistant_message_id=str(assistant_message["id"]),
+                new_accepted_plan_sha256=outcome.plan_sha256,
+                new_accepted_outcome_sha256=stored_receipt.outcome_sha256,
+            )
+
+        return {
+            "conversation_id": conversation_id,
+            "message_id": assistant_message.get("id"),
+            "message": content,
+            "message_format": "plain",
+            "verified": exact,
+            "verification_status": verification_status,
+            "verification": {
+                "status": verification_status,
+                "score": 1.0 if exact else None,
+                "issues": [],
+            },
+            "verification_caution": "",
+            "citations": [],
+            "answer_grounded": True if exact else None,
+            "citation_notice": "",
+            "grounding_warning": "",
+            "citation_check": {
+                "status": "passed" if exact else "skipped",
+                "checked": len(outcome.used_citation_labels),
+            },
+            "tools_used": [],
+            "obsidian_open_url": "",
+            "web_evidence_status": "none",
+            "web_evidence_scope": "none",
+            "web_sources": [],
+            "web_query_notice": "",
+            "voice": None,
+            "files": [],
+            "attachment_context_available": False,
+            "attachment_context_expected_count": 0,
+            "attachment_context_readable_count": 0,
+            "attachment_coverage_complete": False,
+            "attachment_verification_complete": False,
+            "restored_attachment_count": 0,
+            "context": {
+                "interaction_mode": "dialogue",
+                "llm_failed": False,
+                "selected_archive_evidence_replay": outcome.status.value,
+            },
+        }
+
     async def _promoted_message_window_response(
         self,
         *,
@@ -37651,6 +37920,7 @@ class AgentRuntime:
             if isinstance(configured_budget, (int, float)) and configured_budget > 0:
                 turn_deadline = turn_started + float(configured_budget)
         clean_message = (message or "").strip()
+        archive_evidence_followup_kind = parse_archive_evidence_followup(clean_message)
         archive_structural_supplied_attachment_count = sum(
             1 for item in (attachments or []) if isinstance(item, dict)
         )
@@ -37690,6 +37960,9 @@ class AgentRuntime:
         # message search has run. A malformed literal closes routing entirely
         # and is settled by the message-search control plane below.
         routing_message = (
+            ""
+            if archive_evidence_followup_kind is not None
+            else
             locate_decomposition.locate_clause
             if message_locate_route and locate_decomposition.remainder_known
             else ""
@@ -39010,6 +39283,61 @@ class AgentRuntime:
             and obsidian_result_request_candidate is None
             and bool(promoted_message_window_timezone)
         )
+        admitted_archive_evidence_work_item: RecallSelectedArchiveEvidenceWorkItem | None = None
+        archive_evidence_followup_candidate = bool(
+            archive_evidence_followup_kind is not None
+            and not archive_search_current_text
+            and enable_tools
+            and turn_policy is None
+            and interaction_mode == "dialogue"
+            and actor.own_id == person_id
+            and not synthetic_document_notice
+            and not answer_with_voice
+            and not replay_source_message_id
+            and not replay_had_attachments
+            and replay_source_parent is None
+            and not reply_quote
+            and not reply_to
+            and not quoted_attachment_reference
+            and not reply_assistant_reference
+            and not reply_assistant_message_id
+            and user_reply_parent_id is None
+            and supplied_attachment_count == 0
+            and not attachments
+            and not attachment_list
+            and not current_attachment_ids
+            and restored_attachment_expected_count == 0
+            and not restored_attachments
+            and not restored_attachment_ids
+            and not attachment_reference_kind
+            and not attachment_resolution_failed
+            and workspace_inbox_request is None
+            and not person_inventory_turn
+            and not named_person_corpus.applies
+            and not exact_uploader_file.applies
+            and not filename_clue_selection.applies
+            and filename_inventory_request is None
+            and obsidian_intent is None
+            and obsidian_result_request_candidate is None
+            and not isolated_outbound_turn
+        )
+        if archive_evidence_followup_candidate:
+            try:
+                with self.storage.transaction() as work_item_conn:
+                    admitted_archive_evidence_work_item = (
+                        get_current_recall_selected_archive_evidence_work_item_in_transaction(
+                            work_item_conn,
+                            user_id=person_id,
+                            conversation_id=str(conversation_id),
+                        )
+                    )
+            except Exception as exc:  # noqa: BLE001 - stale private state stays ordinary
+                LOGGER.warning(
+                    "archive-replay: active continuation unavailable (%s)",
+                    type(exc).__name__,
+                )
+                admitted_archive_evidence_work_item = None
+        archive_evidence_followup_admitted = admitted_archive_evidence_work_item is not None
         promoted_temporal_update: MessageWindowTemporalUpdate | None = None
         promoted_continued_work_item: RecallConversationWorkItem | None = None
         promoted_temporal_reference_recognized = bool(
@@ -39121,6 +39449,7 @@ class AgentRuntime:
             or filename_clue_selection.applies
             or message_locate_flow
             or promoted_message_window_admitted
+            or archive_evidence_followup_admitted
             # A corpus source lookup can expose the same private bytes in a
             # fresh conversation without a restorable attachment pointer.  Mark
             # the user row before execution so a crash cannot reopen outbound
@@ -39302,6 +39631,17 @@ class AgentRuntime:
             if re.fullmatch(r"msg_[0-9a-f]{16}", replay_root_id)
             else source_search_lineage_user_message_id
         )
+        if archive_evidence_followup_admitted:
+            assert admitted_archive_evidence_work_item is not None
+            return self._selected_archive_evidence_replay_response(
+                actor=actor,
+                conversation_id=str(conversation_id),
+                person_id=person_id,
+                request=clean_message,
+                boundary_message_id=source_search_lineage_user_message_id,
+                admitted_work_item=admitted_archive_evidence_work_item,
+                turn_started=turn_started,
+            )
         if promoted_message_window_continuation_admitted:
             assert promoted_temporal_update is not None
             assert promoted_continued_work_item is not None
@@ -45765,6 +46105,9 @@ class AgentRuntime:
             or simple_public_news_publication_reauth_required
         )
         accepted_simple_public_news_outcome = None
+        accepted_archive_recall_outcome: ArchiveRecallOutcome | None = None
+        selected_archive_work_evidence: SelectedArchiveEvidence | None = None
+        archive_attestation = None
         with self.storage.transaction() as publication_conn:
             attachment_publication_authorized = bool(
                 not attachment_publication_reauth_required
@@ -45821,7 +46164,6 @@ class AgentRuntime:
                             "archive-search: publication refresh failed (%s)",
                             type(exc).__name__,
                         )
-                archive_attestation = None
                 archive_ledger = context.archive_model_batch_ledger
                 if type(archive_ledger) is ArchiveModelBatchLedger:
                     try:
@@ -46088,6 +46430,31 @@ class AgentRuntime:
                     "attachment_query_files_matched",
                 ):
                     assistant_metadata.pop(private_key, None)
+
+            if (
+                archive_search_publication_reauth_required
+                and publication_authorized
+                and archive_attestation is not None
+            ):
+                accepted_archive_recall_outcome = archive_recall_outcome_from_attestation(archive_attestation)
+                attach_accepted_archive_recall_outcome_receipt(
+                    assistant_metadata,
+                    accepted_archive_recall_outcome,
+                )
+                selected_archive_evidence = accepted_archive_recall_outcome.selected_evidence
+                if selected_archive_evidence is not None:
+                    selected_archive_work_evidence = SelectedArchiveEvidence(
+                        work_item_id=new_recall_selected_archive_evidence_work_item_id(),
+                        corpus=SelectedArchiveCorpus(selected_archive_evidence.corpus.value),
+                        source_ref=selected_archive_evidence.source_ref,
+                        passage_refs=selected_archive_evidence.passage_refs,
+                        source_snapshot_sha256=selected_archive_evidence.source_snapshot_sha256,
+                        coverage_sha256=accepted_archive_recall_outcome.coverage_sha256,
+                        coverage_grade=SelectedArchiveCoverageGrade(
+                            accepted_archive_recall_outcome.coverage_grade.value
+                        ),
+                        origin_boundary_user_message_id=source_search_lineage_user_message_id,
+                    )
 
             if simple_public_news_owned_response:
                 plan = context.simple_public_news_plan
@@ -46513,6 +46880,22 @@ class AgentRuntime:
                 )
                 if assistant_message.get("content") != content:
                     raise ValueError("archive-search assistant durability reread changed content")
+                if accepted_archive_recall_outcome is not None:
+                    stored_archive_receipt = load_accepted_archive_recall_outcome_receipt(
+                        assistant_message.get("metadata_json"),
+                        expected_outcome=accepted_archive_recall_outcome,
+                    )
+                    if selected_archive_work_evidence is not None:
+                        create_recall_selected_archive_evidence_work_item_in_transaction(
+                            publication_conn,
+                            user_id=user_id,
+                            conversation_id=conversation_id,
+                            selected_evidence=selected_archive_work_evidence,
+                            anchor_user_message_id=source_search_lineage_user_message_id,
+                            anchor_assistant_message_id=str(assistant_message["id"]),
+                            accepted_plan_sha256=accepted_archive_recall_outcome.plan_sha256,
+                            accepted_outcome_sha256=stored_archive_receipt.outcome_sha256,
+                        )
             else:
                 assistant_message = self.storage.store_message(
                     conversation_id,

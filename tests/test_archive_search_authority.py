@@ -5,6 +5,7 @@ import hashlib
 import itertools
 import json
 import pickle
+import re
 import threading
 from dataclasses import replace
 from typing import cast
@@ -12,6 +13,13 @@ from typing import cast
 import pytest
 
 import friday.retrieval.archive_search_authority as authority_module
+from friday.orchestration.archive_recall_outcome import (
+    ArchiveRecallStatus,
+    archive_recall_outcome_from_attestation,
+)
+from friday.retrieval.archive_evidence_snapshot import (
+    archive_selected_evidence_snapshot_sha256,
+)
 from friday.retrieval.archive_search_authority import (
     ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES,
     ARCHIVE_AUTHORITY_MAX_MODEL_BYTES,
@@ -19,11 +27,13 @@ from friday.retrieval.archive_search_authority import (
     ArchiveSearchAuthorityError,
     ArchiveSearchAuthorityPhase,
     ArchiveSearchCandidateReauthorization,
+    ArchiveSearchCoverageGrade,
     ArchiveSearchCoverageReauthorization,
     ArchiveSearchPublicationDenialReason,
     ArchiveSearchPublicationDenied,
     ArchiveSearchReauthorizationStatus,
     ArchiveSearchRunBinding,
+    ArchiveSearchSelectedEvidence,
     AuthorizedArchiveBatch,
     IssuedArchiveContinuation,
     RedeemedArchiveContinuation,
@@ -1961,3 +1971,299 @@ def test_consumed_turn_filter_rotates_after_replay_retention() -> None:
         now[0] += 3.01
     now[0] += 10.0
     assert replay_filter.contains("f" * 64) is False
+
+
+def test_phase_two_attestation_seals_body_free_single_selected_evidence() -> None:
+    run = _run()
+    batch = _batch(run)
+    answer = "The first exact fact is supported here [A1.1]."
+
+    attestation = _attest(run, batch, answer=answer)
+
+    assert attestation.attests_answer(answer)
+    assert attestation.coverage_grade is ArchiveSearchCoverageGrade.COMPLETE
+    assert attestation.candidate_count == 2
+    assert attestation.used_citation_count == 1
+    assert attestation.used_citation_labels == ("A1.1",)
+    assert all(
+        re.fullmatch(r"[0-9a-f]{64}", value)
+        for value in (
+            attestation.plan_sha256,
+            attestation.evidence_sha256,
+            attestation.coverage_sha256,
+            attestation.answer_sha256,
+        )
+    )
+    selected = attestation.selected_evidence
+    assert type(selected) is ArchiveSearchSelectedEvidence
+    assert selected.corpus is ArchiveSearchCorpus.DOCUMENTS
+    assert selected.source_ref == _candidates()[0].resolved_source.source_ref
+    assert selected.passage_refs == (_candidates()[0].passages[0].passage_ref,)
+    assert selected.resolved_snapshot_sha256 == archive_selected_evidence_snapshot_sha256(
+        _candidates()[0].resolved_source,
+        selected.passage_refs,
+        (_candidates()[0].passages[0].excerpt,),
+    )
+    assert selected == ArchiveSearchSelectedEvidence.from_private_payload(selected.to_private_payload())
+    body_free = selected.to_private_json() + repr(selected)
+    assert QUERY not in body_free
+    assert "Model-visible excerpt" not in body_free
+    assert "One" not in body_free
+    with pytest.raises(ArchiveSearchAuthorityError):
+        replace(selected, corpus=selected.corpus.value)
+    with pytest.raises(ArchiveSearchAuthorityError):
+        replace(selected, corpus=ArchiveSearchCorpus.MESSAGES)
+    with pytest.raises(ArchiveSearchAuthorityError):
+        replace(selected, resolved_snapshot_sha256=True)
+    oversized_payload = selected.to_private_payload()
+    raw_passages = cast(list[object], oversized_payload["passage_refs"])
+    oversized_payload["passage_refs"] = raw_passages * 9
+    with pytest.raises(ArchiveSearchAuthorityError, match="selected passages"):
+        ArchiveSearchSelectedEvidence.from_private_payload(oversized_payload)
+
+    outcome = archive_recall_outcome_from_attestation(attestation)
+    assert outcome.status is ArchiveRecallStatus.COMPLETE
+    assert outcome.selected_evidence == selected
+    assert outcome.publication_attested is True
+    assert outcome.semantic_verified is False
+
+
+def test_phase_two_selection_requires_all_citations_to_name_one_candidate() -> None:
+    cases = (
+        ("No citation was used.", ()),
+        ("Two candidates [A1.1] and [A2.1].", ("A1.1", "A2.1")),
+        ("One real and one invented [A1.1] [A999.1].", ("A1.1",)),
+        ("One real and one malformed group [A1.1] [A2.1, A2].", ("A1.1",)),
+        ("One real and one zero label [A1.1] [A0].", ("A1.1",)),
+        ("One real and one leading-zero label [A1.1] [A01.1].", ("A1.1",)),
+        ("One real and one bare label [A1.1] [A].", ("A1.1",)),
+    )
+    for answer, labels in cases:
+        run = _run(run=f"selection-case-{next(_TURN_SEQUENCE)}")
+        attestation = _attest(run, _batch(run), answer=answer)
+        assert attestation.used_citation_labels == labels
+        assert attestation.selected_evidence is None
+
+
+def test_noncanonical_factual_candidate_never_becomes_selected_evidence() -> None:
+    canonical = _candidates()[0]
+    inbox = SourceRepresentation(RepresentationKind.INBOX_ITEM, "inbox_3333333333333333")
+    resolved = ResolvedSource.create(
+        source_ref=canonical.resolved_source.source_ref,
+        representations=(*canonical.resolved_source.representations, inbox),
+        lifecycle=(
+            *canonical.resolved_source.lifecycle,
+            LifecycleRef(inbox, LifecycleState.PENDING),
+        ),
+        revisions=canonical.resolved_source.revisions,
+        revalidation_targets=(
+            *canonical.resolved_source.revalidation_targets,
+            RevalidationTarget(inbox, AuthorityScope.TENANT_PRINCIPAL),
+        ),
+    )
+    noncanonical = replace(
+        canonical,
+        resolved_source=resolved,
+        review_state=ArchiveReviewState.PENDING,
+        evidence_authority=ArchiveEvidenceAuthority.NONCANONICAL,
+        lifecycle_state=LifecycleState.PENDING,
+    )
+    run = _run()
+    attestation = _attest(
+        run,
+        _batch(run, candidates=(noncanonical,), coverage=_coverage(run)),
+        answer="Pending material was cited [A1.1].",
+    )
+
+    assert attestation.candidate_count == 1
+    assert attestation.used_citation_labels == ("A1.1",)
+    assert attestation.selected_evidence is None
+
+
+def test_incompatible_selected_shape_does_not_deny_valid_archive_publication() -> None:
+    canonical = _candidates()[0]
+    knowledge_revision = next(
+        item
+        for item in canonical.resolved_source.revisions
+        if item.representation.kind is RepresentationKind.KNOWLEDGE_OBJECT
+    )
+    incompatible_passage = replace(
+        canonical.passages[0],
+        passage_ref=replace(
+            canonical.passages[0].passage_ref,
+            source_revision=knowledge_revision,
+        ),
+    )
+    incompatible = replace(canonical, passages=(incompatible_passage,))
+    run = _run()
+    answer = "The contract-valid archive passage was cited [A1.1]."
+
+    attestation = _attest(
+        run,
+        _batch(run, candidates=(incompatible,)),
+        answer=answer,
+    )
+
+    assert attestation.attests_answer(answer)
+    assert attestation.used_citation_labels == ("A1.1",)
+    assert attestation.selected_evidence is None
+
+
+def test_phase_two_projection_distinguishes_partial_and_complete_empty_coverage() -> None:
+    partial_run = _run()
+    partial_coverage = list(_coverage(partial_run))
+    partial_coverage[0] = replace(
+        partial_coverage[0],
+        states=(CoverageState.BACKFILL_PENDING, CoverageState.PARTIAL),
+    )
+    partial = _attest(
+        partial_run,
+        _batch(partial_run, coverage=tuple(partial_coverage)),
+        answer="A bounded result [A1.1].",
+    )
+    assert partial.coverage_grade is ArchiveSearchCoverageGrade.PARTIAL
+    assert archive_recall_outcome_from_attestation(partial).status is ArchiveRecallStatus.PARTIAL
+
+    empty_run = _run()
+    empty = _attest(
+        empty_run,
+        _batch(empty_run, candidates=(), coverage=_coverage(empty_run, zero=True)),
+        answer="No authorized matches were present.",
+    )
+    assert empty.coverage_grade is ArchiveSearchCoverageGrade.COMPLETE
+    assert empty.candidate_count == 0
+    assert empty.selected_evidence is None
+    assert archive_recall_outcome_from_attestation(empty).status is ArchiveRecallStatus.EMPTY
+
+    incomplete_run = _run()
+    incomplete_coverage = list(_coverage(incomplete_run, zero=True))
+    incomplete_coverage[0] = replace(
+        incomplete_coverage[0],
+        states=(CoverageState.BACKFILL_PENDING, CoverageState.PARTIAL),
+    )
+    incomplete = _attest(
+        incomplete_run,
+        _batch(incomplete_run, candidates=(), coverage=tuple(incomplete_coverage)),
+        answer="Coverage was incomplete, so absence was not established.",
+    )
+    assert incomplete.coverage_grade is ArchiveSearchCoverageGrade.PARTIAL
+    assert incomplete.candidate_count == 0
+    assert archive_recall_outcome_from_attestation(incomplete).status is ArchiveRecallStatus.INCOMPLETE_EMPTY
+
+
+def test_ordinary_model_gate_rejects_an_unredeemed_inbound_continuation() -> None:
+    ledger = create_archive_model_batch_ledger(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        turn_discriminator=f"unredeemed-turn-{next(_TURN_SEQUENCE)}",
+    )
+    origin = _run(run="unredeemed-origin", request=_request(limit=1), ledger=ledger)
+    token, _issued = _issue_public_continuation(origin)
+    forged = _run(
+        run="unredeemed-forged",
+        request=_request(limit=1, continuation=token),
+        ledger=ledger,
+    )
+
+    with pytest.raises(ArchiveSearchAuthorityError, match="model admission failed"):
+        _batch(forged)
+
+
+@pytest.mark.parametrize("warning", tuple(ArchiveSearchWarning))
+def test_single_page_warning_cannot_claim_complete_coverage(
+    warning: ArchiveSearchWarning,
+) -> None:
+    run = _run(run=f"warning-grade-{warning.value}-{next(_TURN_SEQUENCE)}")
+    batch = authorize_archive_search_before_model(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=run,
+        candidates=_candidates(),
+        coverage=_coverage(run),
+        warnings=(warning,),
+        candidate_reauthorizer=_allow_candidate,
+        coverage_reauthorizer=_allow_coverage,
+        authority_context=CONTEXT,
+    )
+
+    attestation = _attest(run, batch, answer="A bounded result [A1.1].")
+
+    assert batch.public_tool_result_payload["exhaustive"] is True
+    assert attestation.coverage_grade is ArchiveSearchCoverageGrade.PARTIAL
+
+
+def test_redeemed_exhaustive_chain_is_complete_despite_pagination_warning() -> None:
+    ledger = create_archive_model_batch_ledger(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        turn_discriminator=f"complete-chain-{next(_TURN_SEQUENCE)}",
+    )
+    origin = _run(run="complete-chain-origin", request=_request(limit=20), ledger=ledger)
+    tail = _candidates()
+    terminal = _terminal_coverage_for_tail(origin, tail)
+    issued = issue_archive_search_continuation(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=origin,
+        tail_candidates=tail,
+        terminal_coverage=terminal,
+        warnings=(ArchiveSearchWarning.LANE_CAPPED,),
+    )
+    initial = authorize_archive_search_before_model(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=origin,
+        candidates=(),
+        coverage=_continuing_coverage(origin, terminal, tail),
+        warnings=(ArchiveSearchWarning.LANE_CAPPED,),
+        continuation=issued,
+        candidate_reauthorizer=_allow_candidate,
+        coverage_reauthorizer=_allow_coverage,
+        authority_context=CONTEXT,
+    )
+    token = cast(str, initial.public_tool_result_payload["continuation"])
+    ledger.admit_model_tool_bytes(origin, initial, initial.model_visible_canonical_bytes)
+
+    resumed = _run(
+        run="complete-chain-resumed",
+        request=_request(limit=20, continuation=token),
+        ledger=ledger,
+    )
+    redemption = redeem_archive_search_continuation(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=resumed,
+    )
+    final = authorize_archive_search_resumed_before_model(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        run_binding=resumed,
+        redemption=redemption,
+        candidate_reauthorizer=_allow_candidate,
+        coverage_reauthorizer=_allow_coverage,
+        authority_context=CONTEXT,
+    )
+    assert final.public_tool_result_payload["warnings"] == ["lane_capped"]
+    assert final.public_tool_result_payload["continuation"] is None
+    ledger.admit_model_tool_bytes(resumed, final, final.model_visible_canonical_bytes)
+    ledger.freeze_for_publication()
+
+    attestation = _attest(
+        resumed,
+        final,
+        answer="The exact fact is cited [A21.1].",
+        ledger=ledger,
+    )
+    assert attestation.coverage_grade is ArchiveSearchCoverageGrade.COMPLETE
+    assert archive_recall_outcome_from_attestation(attestation).status is ArchiveRecallStatus.COMPLETE
+
+
+def test_phase_two_projection_fields_are_inside_the_attestation_seal() -> None:
+    run = _run()
+    answer = "Exact fact [A1.1]."
+    attestation = _attest(run, _batch(run), answer=answer)
+    object.__setattr__(attestation, "_candidate_count", attestation.candidate_count + 1)
+
+    assert attestation.attests_answer(answer) is False
+    with pytest.raises(ArchiveSearchAuthorityError, match="attestation is unavailable"):
+        _ = attestation.selected_evidence

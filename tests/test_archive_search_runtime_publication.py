@@ -8,7 +8,7 @@ import json
 import unicodedata
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -27,8 +27,17 @@ from friday.agent_runtime import (
 from friday.agent_runtime.llm import LLMRouter
 from friday.execution_kernel import ExecutionKernel, ToolResult
 from friday.ingestion import IngestionPipeline
+from friday.interaction_control_plane.archive_evidence_work_item_store import (
+    get_recall_selected_archive_evidence_work_item_in_transaction,
+)
 from friday.interaction_control_plane.legacy_trace import CapabilityStatus
+from friday.interaction_control_plane.work_item_contract import WorkState, WorkTransition
 from friday.knowledge_graph import KnowledgeGraph
+from friday.orchestration.archive_recall_outcome import (
+    ArchiveRecallLane,
+    ArchiveRecallStatus,
+    load_accepted_archive_recall_outcome_receipt,
+)
 from friday.permissions import ActorContext, AuthorizationService
 from friday.retrieval.archive_search_authority import (
     ArchiveSearchAuthorityError,
@@ -363,7 +372,12 @@ class _CancelDuringArchiveKernel(_SpyKernel):
         )
 
 
-def _seed_document(storage: Any, *, suffix: str = "") -> str:
+def _seed_document(
+    storage: Any,
+    *,
+    suffix: str = "",
+    inbox_status: InboxStatus = InboxStatus.PENDING,
+) -> str:
     raw_id = new_id("raw")
     storage.store_raw_object(
         RawObject(
@@ -387,7 +401,7 @@ def _seed_document(storage: Any, *, suffix: str = "") -> str:
             id=new_id("inbox"),
             user_id=_OWNER,
             raw_object_id=raw_id,
-            status=InboxStatus.PENDING,
+            status=inbox_status,
         )
     )
     return raw_id
@@ -475,6 +489,50 @@ async def _chat(
     )
 
 
+async def _create_durable_selected_archive_work(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    suffix: str,
+) -> tuple[str, dict[str, Any], Any]:
+    raw_id = _seed_document(
+        storage,
+        suffix=suffix,
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    runtime, kernel, actor, model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    try:
+        response = await _chat(runtime, actor, answer_with_voice=False)
+    finally:
+        await web.close()
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert model.calls == 2
+    row = storage.execute(
+        """SELECT id FROM work_items
+             WHERE user_id=? AND conversation_id=?
+               AND kind='recall_selected_archive_evidence'""",
+        (_OWNER, str(response["conversation_id"])),
+    ).fetchone()
+    assert row is not None
+    with storage.transaction() as conn:
+        item = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=str(row["id"]),
+            user_id=_OWNER,
+            conversation_id=str(response["conversation_id"]),
+        )
+    assert item is not None
+    assert item.state is WorkState.ACTIVE
+    assert item.transition is WorkTransition.CREATED
+    assert item.revision == 1
+    return raw_id, response, item
+
+
 def _assert_archive_ledger_consumed(context: AgentContext) -> None:
     def forbidden_reauthorizer(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("consumed archive ledger reached a reauthorizer")
@@ -485,8 +543,8 @@ def _assert_archive_ledger_consumed(context: AgentContext) -> None:
             principal_id=_OWNER,
             ledger=context.archive_model_batch_ledger,  # type: ignore[arg-type]
             answer=_ANSWER,
-            candidate_reauthorizer=forbidden_reauthorizer,
-            coverage_reauthorizer=forbidden_reauthorizer,
+            candidate_reauthorizer=cast(Any, forbidden_reauthorizer),
+            coverage_reauthorizer=cast(Any, forbidden_reauthorizer),
             authority_context=object(),
         )
     assert denied.value.reason is ArchiveSearchPublicationDenialReason.LEDGER_UNAVAILABLE
@@ -955,6 +1013,135 @@ async def test_exact_archive_bytes_are_admitted_and_committed_in_phase2_transact
     _assert_archive_ledger_consumed(contexts[0])
     stored = storage.get_message(str(response["message_id"]), _OWNER)
     assert stored is not None and stored["content"] == _ANSWER
+    receipt = load_accepted_archive_recall_outcome_receipt(stored["metadata_json"])
+    assert receipt.outcome.lane is ArchiveRecallLane.FEDERATED_SEARCH
+    assert receipt.outcome.semantic_verified is False
+
+
+@pytest.mark.asyncio
+async def test_selected_canonical_archive_evidence_replays_exactly_after_runtime_restart(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_id, initial, created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix="-durable-restart",
+    )
+    no_model = _DirectAnswerModel()
+    restarted, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=no_model,
+    )
+    try:
+        replay = await restarted.chat(
+            _OWNER,
+            "Что в нём сказано?",
+            actor=actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            answer_with_voice=False,
+        )
+    finally:
+        await web.close()
+
+    body_row = storage.execute(
+        "SELECT raw_content FROM raw_objects WHERE id=? AND user_id=?",
+        (raw_id, _OWNER),
+    ).fetchone()
+    assert body_row is not None
+    locator = created.selected_evidence.passage_refs[0].locator
+    expected_passage = str(body_row["raw_content"])[locator.start_char : locator.end_char]  # type: ignore[union-attr]
+    assert expected_passage and expected_passage in replay["message"]
+    assert replay["context"]["selected_archive_evidence_replay"] in {"complete", "partial"}
+    assert replay["tools_used"] == []
+    assert no_model.calls == 0
+    assert kernel.calls == []
+
+    with storage.transaction() as conn:
+        advanced = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert advanced is not None
+    assert advanced.state is WorkState.ACTIVE
+    assert advanced.transition is WorkTransition.EVIDENCE_REPLAYED
+    assert advanced.revision == created.revision + 1
+    assert advanced.anchor_assistant_message_id == replay["message_id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "expected_status"),
+    [
+        ("denied", ArchiveRecallStatus.DENIED),
+        ("drifted", ArchiveRecallStatus.DRIFTED),
+    ],
+)
+async def test_selected_archive_replay_failure_is_source_free_and_suspends(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+    expected_status: ArchiveRecallStatus,
+) -> None:
+    raw_id, initial, created = await _create_durable_selected_archive_work(
+        settings,
+        storage,
+        monkeypatch,
+        suffix=f"-{failure}",
+    )
+    if failure == "denied":
+        storage.set_permission_override(_OWNER, "knowledge.read", "deny")
+    else:
+        storage.execute(
+            "UPDATE raw_objects SET raw_content=? WHERE id=? AND user_id=?",
+            ("Изменённое содержимое без исходного фрагмента.", raw_id, _OWNER),
+        )
+        storage.conn.commit()
+
+    no_model = _DirectAnswerModel()
+    restarted, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=no_model,
+    )
+    try:
+        replay = await restarted.chat(
+            _OWNER,
+            "Покажи фрагмент.",
+            actor=actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            answer_with_voice=False,
+        )
+    finally:
+        await web.close()
+
+    assert replay["context"]["selected_archive_evidence_replay"] == expected_status.value
+    assert _QUERY not in json.dumps(replay, ensure_ascii=False)
+    assert "Изменённое содержимое" not in json.dumps(replay, ensure_ascii=False)
+    assert replay["tools_used"] == []
+    assert no_model.calls == 0
+    assert kernel.calls == []
+    with storage.transaction() as conn:
+        suspended = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert suspended is not None
+    assert suspended.state is WorkState.SUSPENDED
+    assert suspended.transition is WorkTransition.SUSPENDED
+    assert suspended.revision == created.revision + 1
 
 
 @pytest.mark.asyncio
@@ -2355,6 +2542,7 @@ async def test_real_router_preserves_two_exact_archive_pages_through_final_answe
             assert isinstance(payload, dict)
             payloads.append(payload)
             call_number = len(payloads)
+            message: dict[str, Any]
             if call_number == 1:
                 message = {
                     "content": "",

@@ -75,6 +75,7 @@ _MAX_EXCERPT_CHARS = 720
 _RAW_ID = re.compile(r"raw_[0-9a-f]{16}\Z")
 _KO_ID = re.compile(r"ko_[A-Za-z0-9_-]{8,120}\Z")
 _INBOX_ID = re.compile(r"inbox_[0-9a-f]{16}\Z")
+_MESSAGE_ID = re.compile(r"msg_[0-9a-f]{16}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _SUPPORTED_CORPORA = frozenset({ArchiveSearchCorpus.DOCUMENTS, ArchiveSearchCorpus.KNOWLEDGE})
 _SUPPORTED_LANES = frozenset({SearchLane.CATALOG, SearchLane.LEXICAL})
@@ -88,6 +89,7 @@ _MATCH_CHANNEL = {
 }
 _PAGE_KEY = secrets.token_bytes(32)
 _PAGE_PROCESS_AUTHORITY = object()
+_REPLAY_FACTORY = object()
 
 _SUPPORTED_TEMPORAL_ROLES = {
     ArchiveSearchCorpus.DOCUMENTS: frozenset(
@@ -108,6 +110,54 @@ _SUPPORTED_TEMPORAL_ROLES = {
 
 class ArchiveDocumentStorageError(RuntimeError):
     """Body-free failure at the read-only document storage seam."""
+
+
+class ArchiveDocumentReplaySource:
+    """Exact authorized body and source snapshot for durable evidence replay."""
+
+    __slots__ = ("body", "corpus", "resolved_source")
+
+    corpus: ArchiveSearchCorpus
+    resolved_source: ResolvedSource
+    body: str
+
+    def __init__(
+        self,
+        corpus: ArchiveSearchCorpus,
+        resolved_source: ResolvedSource,
+        body: str,
+        *,
+        _factory: object = None,
+    ) -> None:
+        if (
+            _factory is not _REPLAY_FACTORY
+            or corpus not in _SUPPORTED_CORPORA
+            or type(resolved_source) is not ResolvedSource
+            or type(body) is not str
+        ):
+            raise _fail("archive document replay source is invalid")
+        try:
+            body.encode("utf-8", errors="strict")
+        except UnicodeEncodeError:
+            raise _fail("archive document replay source is invalid") from None
+        object.__setattr__(self, "corpus", corpus)
+        object.__setattr__(self, "resolved_source", resolved_source)
+        object.__setattr__(self, "body", body)
+
+    def __setattr__(self, _name: str, _value: object) -> NoReturn:
+        raise TypeError("archive document replay source is immutable")
+
+    def __repr__(self) -> str:
+        return f"ArchiveDocumentReplaySource(corpus={self.corpus.value!r}, private=True)"
+
+    def __copy__(self) -> NoReturn:
+        raise _fail("archive document replay source cannot be copied")
+
+    def __deepcopy__(self, _memo: object) -> NoReturn:
+        raise _fail("archive document replay source cannot be copied")
+
+    def __reduce_ex__(self, _protocol: SupportsIndex) -> NoReturn:
+        raise _fail("archive document replay source cannot be serialized")
 
 
 def _fail(message: str) -> ArchiveDocumentStorageError:
@@ -1747,6 +1797,142 @@ def _candidate(
     )
 
 
+def _select_authorized_archive_document_replay_source_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    owner_id: str,
+    origin_boundary_user_message_id: str,
+    corpus: ArchiveSearchCorpus,
+    source_ref: SourceRef,
+    knowledge_object_id: str | None = None,
+) -> ArchiveDocumentReplaySource | None:
+    """Reselect one exact authorized document source without searching.
+
+    ``None`` means that the accepted-turn boundary or selected source is no
+    longer in the actor's authorized scope.  The caller owns the transaction
+    and classifies that absence with its separately refreshed capability signal.
+    """
+
+    if type(conn) is not sqlite3.Connection or not conn.in_transaction:
+        raise _fail("archive document replay requires a caller-owned snapshot")
+    tenant = _actor(tenant_id)
+    owner = _actor(owner_id)
+    if type(origin_boundary_user_message_id) is not str or _MESSAGE_ID.fullmatch(
+        origin_boundary_user_message_id
+    ) is None:
+        raise _fail("archive document replay boundary is invalid")
+    if type(corpus) is not ArchiveSearchCorpus or corpus not in _SUPPORTED_CORPORA:
+        raise _fail("archive document replay corpus is invalid")
+    if (
+        type(source_ref) is not SourceRef
+        or source_ref.authority_scope is not AuthorityScope.TENANT_PRINCIPAL
+        or source_ref.tenant_id != tenant
+        or source_ref.principal_id != owner
+        or source_ref.canonical_object_kind is not CanonicalObjectKind.RAW_OBJECT
+        or (
+            corpus is ArchiveSearchCorpus.DOCUMENTS
+            and source_ref.source_kind is not SourceKind.DOCUMENT
+        )
+        or (
+            corpus is ArchiveSearchCorpus.KNOWLEDGE
+            and source_ref.source_kind
+            not in {SourceKind.DOCUMENT, SourceKind.WEB_CAPTURE, SourceKind.GENERATED_ARTIFACT}
+        )
+    ):
+        raise _fail("archive document replay source is invalid")
+    if corpus is ArchiveSearchCorpus.DOCUMENTS:
+        if knowledge_object_id is not None:
+            raise _fail("archive document replay representation is invalid")
+    elif type(knowledge_object_id) is not str or _KO_ID.fullmatch(knowledge_object_id) is None:
+        raise _fail("archive document replay representation is invalid")
+
+    request = ArchiveSearchRequest.create(
+        query="exact replay",
+        corpora=(corpus,),
+        review_scope=ReviewScope.DISCOVERABLE,
+        limit=1,
+    )
+    source_cte, scope_parameters = _source_cte(corpus, request, include_body=True)
+    representation_clause = "" if knowledge_object_id is None else " AND s.knowledge_id=?"
+    sql = f"""WITH {source_cte},
+        replay_boundary AS MATERIALIZED (
+            SELECT b.id
+              FROM messages b
+              JOIN conversations c
+                ON c.id=b.conversation_id AND c.user_id=b.user_id
+             WHERE b.id=? AND b.user_id=? AND b.role='user'
+               AND c.user_id=?
+        )
+        SELECT s.*
+          FROM authorized_sources s
+          CROSS JOIN replay_boundary
+         WHERE s.raw_id=?{representation_clause}
+         LIMIT 2"""  # nosec B608
+    parameters: tuple[object, ...] = (
+        *_authority_parameters(tenant, owner),
+        *scope_parameters,
+        origin_boundary_user_message_id,
+        owner,
+        owner,
+        source_ref.canonical_object_id,
+        *((knowledge_object_id,) if knowledge_object_id is not None else ()),
+    )
+    rows = _select_rows(conn, sql, parameters)
+    if not rows:
+        return None
+    if len(rows) != 1:
+        raise _fail("archive document replay source is ambiguous")
+    try:
+        resolved, _selected, _raw, _knowledge = _resolved_source(
+            rows[0],
+            corpus=corpus,
+            tenant_id=tenant,
+            owner_id=owner,
+        )
+        body = rows[0].get("passage_body")
+        if type(body) is not str:
+            raise _fail("archive document replay body is unavailable")
+        return ArchiveDocumentReplaySource(
+            corpus=corpus,
+            resolved_source=resolved,
+            body=body,
+            _factory=_REPLAY_FACTORY,
+        )
+    except ArchiveDocumentStorageError:
+        raise
+    except Exception:
+        raise _fail("archive document replay source is unavailable") from None
+
+
+def select_authorized_archive_document_replay_source_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    owner_id: str,
+    origin_boundary_user_message_id: str,
+    corpus: ArchiveSearchCorpus,
+    source_ref: SourceRef,
+    knowledge_object_id: str | None = None,
+) -> ArchiveDocumentReplaySource | None:
+    """Public body-free wrapper for one exact document replay SELECT."""
+
+    try:
+        return _select_authorized_archive_document_replay_source_in_transaction(
+            conn,
+            tenant_id=tenant_id,
+            owner_id=owner_id,
+            origin_boundary_user_message_id=origin_boundary_user_message_id,
+            corpus=corpus,
+            source_ref=source_ref,
+            knowledge_object_id=knowledge_object_id,
+        )
+    except ArchiveDocumentStorageError:
+        raise
+    except Exception:
+        raise _fail("archive document replay selection is unavailable") from None
+
+
 def search_archive_document_lane(
     conn: sqlite3.Connection,
     *,
@@ -1931,8 +2117,10 @@ def search_archive_document_lane(
 
 __all__ = [
     "ArchiveDocumentLanePage",
+    "ArchiveDocumentReplaySource",
     "ArchiveDocumentStorageError",
     "MAX_ARCHIVE_DOCUMENT_RESULTS",
     "PASSAGE_INDEX_VERSION",
+    "select_authorized_archive_document_replay_source_in_transaction",
     "search_archive_document_lane",
 ]

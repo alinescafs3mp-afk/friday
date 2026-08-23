@@ -1881,24 +1881,47 @@ class MaintenanceMixin(StorageShared):
             # Import the transaction-local validator only on this export path.
             # Keeping it out of storage package initialisation avoids coupling
             # schema bootstrap to the orchestration/store dependency graph.
+            from friday.interaction_control_plane.archive_evidence_work_item_store import (
+                get_recall_selected_archive_evidence_work_item_for_export_in_transaction,
+            )
             from friday.interaction_control_plane.work_item_store import (
                 get_recall_conversation_work_item_for_export_in_transaction,
             )
 
             exported_work_items: list[dict[str, object]] = []
             for row in rows_by_table["work_items"]:
+                item_payload: dict[str, object] | None = None
                 try:
-                    item = get_recall_conversation_work_item_for_export_in_transaction(
-                        conn,
-                        work_item_id=str(row.get("id") or ""),
-                        user_id=user_id,
-                        conversation_id=str(row.get("conversation_id") or ""),
-                    )
+                    if row.get("kind") == "recall_selected_archive_evidence":
+                        archive_item = (
+                            get_recall_selected_archive_evidence_work_item_for_export_in_transaction(
+                                conn,
+                                work_item_id=str(row.get("id") or ""),
+                                user_id=user_id,
+                                conversation_id=str(row.get("conversation_id") or ""),
+                            )
+                        )
+                        if (
+                            archive_item is not None
+                            and archive_item.conversation_id in conversation_ids
+                        ):
+                            item_payload = archive_item.to_payload()
+                    else:
+                        recall_item = get_recall_conversation_work_item_for_export_in_transaction(
+                            conn,
+                            work_item_id=str(row.get("id") or ""),
+                            user_id=user_id,
+                            conversation_id=str(row.get("conversation_id") or ""),
+                        )
+                        if (
+                            recall_item is not None
+                            and recall_item.conversation_id in conversation_ids
+                        ):
+                            item_payload = recall_item.to_payload()
                 except (TypeError, ValueError):
                     continue
-                if item is None or item.conversation_id not in conversation_ids:
-                    continue
-                exported_work_items.append(item.to_payload())
+                if item_payload is not None:
+                    exported_work_items.append(item_payload)
             rows_by_table["work_items"] = exported_work_items
             rows_by_table["channel_sessions"] = [
                 row

@@ -5,6 +5,7 @@ import pickle
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import asdict, is_dataclass
 
 import pytest
 
@@ -46,6 +47,7 @@ from friday.storage import SCHEMA_VERSION, init_storage
 from friday.storage._archive_search_messages import (
     ArchiveMessageScope,
     select_authorized_archive_message_page_in_transaction,
+    select_authorized_archive_message_replay_source_in_transaction,
 )
 
 CURRENT = "conv_0000000000000001"
@@ -339,6 +341,69 @@ def test_current_page_projects_exact_ledger_windows_and_honest_complete_coverage
     assert coverage.authority_rechecked is coverage.snapshot_current is True
     assert coverage.eligible_authorized == coverage.examined == 3
     assert coverage.matched_at_least == coverage.returned == 1
+
+
+def test_temporal_selection_replays_against_full_pre_boundary_ledger() -> None:
+    request = _request()
+    with _database() as conn:
+        _insert(
+            conn,
+            5,
+            CURRENT,
+            "alice",
+            "assistant",
+            "outside selected time window",
+            "2026-08-23T07:59:00+00:00",
+        )
+        page = _page(conn, request)
+        assert page is not None
+        assert page.examined == 3
+        assert page.hits[0].ledger.row_count == 4
+        projection = project_archive_message_page(
+            principal_id="alice",
+            request=request,
+            page=page,
+            index_state=_current_index(),
+            current_conversation_id=CURRENT,
+            boundary_user_message_id=BOUNDARY,
+        )
+        candidate = projection.candidates[0]
+        locators = tuple(item.passage_ref.locator for item in candidate.passages)
+        assert all(type(item) is MessageWindowLocator for item in locators)
+
+        _insert(
+            conn,
+            110,
+            CURRENT,
+            "alice",
+            "assistant",
+            "later post-boundary message",
+            "2026-08-23T09:06:00+00:00",
+        )
+        replayed = select_authorized_archive_message_replay_source_in_transaction(
+            conn,
+            principal_id="alice",
+            origin_boundary_user_message_id=BOUNDARY,
+            source_ref=candidate.resolved_source.source_ref,
+            locators=locators,  # type: ignore[arg-type]
+        )
+        assert replayed is not None
+        assert replayed.resolved_source == candidate.resolved_source
+        replayed_text = " ".join(row.content for window in replayed.windows for row in window.rows)
+        assert "outside selected time window" not in replayed_text
+        assert "later post-boundary message" not in replayed_text
+        assert not is_dataclass(replayed)
+        assert not is_dataclass(replayed.windows[0])
+        for private_value in (replayed, replayed.windows[0]):
+            with pytest.raises(TypeError):
+                asdict(private_value)  # type: ignore[call-overload]
+            for operation in (copy.copy, copy.deepcopy, pickle.dumps):
+                with pytest.raises(TypeError, match="process-private"):
+                    operation(private_value)
+        with pytest.raises(TypeError, match="immutable"):
+            replayed.windows = ()
+        with pytest.raises(TypeError, match="immutable"):
+            replayed.windows[0].rows = ()
 
 
 def test_all_scope_merges_passages_by_conversation_and_keeps_unique_lane_ranks() -> None:

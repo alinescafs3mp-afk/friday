@@ -1,4 +1,4 @@
-"""Closed P2 contract for one durable ``RecallConversation`` work item.
+"""Closed contracts for Friday's two bounded durable recall Work Item kinds.
 
 This first vertical slice is intentionally smaller than the eventual generic
 work graph.  It retains only code-owned workflow labels, a bounded temporal
@@ -20,6 +20,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 RECALL_CONVERSATION_ACTIVE_FRAME_SCHEMA = "friday.recall-conversation-active-frame.v1"
 RECALL_CONVERSATION_WORK_ITEM_SCHEMA = "friday.recall-conversation-work-item.v1"
+RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_SCHEMA = (
+    "friday.recall-selected-archive-evidence-active-frame.v1"
+)
+RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_JSON = (
+    '{"schema":"' + RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_SCHEMA + '"}'
+)
 WORK_ITEM_ACTIVE_FRAME_MAX_BYTES = 4_096
 WORK_ITEM_TTL_HOURS = 12
 WORK_ITEM_MAX_REVISION = 2_147_483_647
@@ -38,18 +44,22 @@ class WorkItemContractError(ValueError):
 
 class WorkKind(StrEnum):
     RECALL_CONVERSATION = "recall_conversation"
+    RECALL_SELECTED_ARCHIVE_EVIDENCE = "recall_selected_archive_evidence"
 
 
 class WorkGoal(StrEnum):
     EXACT_CURRENT_CONVERSATION_RECALL = "exact_current_conversation_recall"
+    EXACT_SELECTED_ARCHIVE_EVIDENCE_RECALL = "exact_selected_archive_evidence_recall"
 
 
 class WorkPlaybook(StrEnum):
     RECALL_CONVERSATION = "recall_conversation"
+    RECALL_SELECTED_ARCHIVE_EVIDENCE = "recall_selected_archive_evidence"
 
 
 class WorkCompletionContract(StrEnum):
     ACCEPTED_EXACT_OWNED_MESSAGE_WINDOW = "accepted_exact_owned_message_window"
+    ACCEPTED_EXACT_SELECTED_ARCHIVE_EVIDENCE = "accepted_exact_selected_archive_evidence"
 
 
 class WorkSourceScope(StrEnum):
@@ -78,6 +88,7 @@ class WorkState(StrEnum):
 class WorkTransition(StrEnum):
     CREATED = "created"
     CONSTRAINT_UPDATED = "constraint_updated"
+    EVIDENCE_REPLAYED = "evidence_replayed"
     SUSPENDED = "suspended"
     CANCELLED = "cancelled"
     EXPIRED = "expired"
@@ -504,6 +515,8 @@ class RecallConversationWorkItem:
 __all__ = [
     "RECALL_CONVERSATION_ACTIVE_FRAME_SCHEMA",
     "RECALL_CONVERSATION_WORK_ITEM_SCHEMA",
+    "RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_JSON",
+    "RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_SCHEMA",
     "RecallConversationActiveFrame",
     "RecallConversationWorkItem",
     "RecallMessageRole",

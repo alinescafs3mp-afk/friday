@@ -68,9 +68,9 @@ def _age_current_database_to_released_schema_35(database: Path) -> None:
 
 
 def test_schema_36_installs_the_revision_graph_and_extended_operation_contract(storage) -> None:
-    assert SCHEMA_VERSION == 38
+    assert SCHEMA_VERSION == 39
     marker = storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
-    assert marker[0] == "38"
+    assert marker[0] == "39"
     tables = {
         str(row[0])
         for row in storage.execute(
@@ -115,7 +115,7 @@ def test_released_schema_35_migrates_atomically_and_preserves_operation_rows(set
     upgraded = FridayStorage(replace(settings, database_path=database))
     try:
         assert (
-            upgraded.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "38"
+            upgraded.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "39"
         )
         preserved = upgraded.get_obsidian_operation("alice", "released-schema35-operation")
         assert preserved is not None

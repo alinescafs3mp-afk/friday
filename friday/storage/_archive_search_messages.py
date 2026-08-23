@@ -19,11 +19,26 @@ import secrets
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import InitVar, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, NoReturn, SupportsIndex, TypeAlias
 
 from friday.retrieval.archive_search_contract import ConversationScope
-from friday.retrieval.contracts import LifecycleState, MessageRole
+from friday.retrieval.contracts import (
+    AuthorityScope,
+    CanonicalObjectKind,
+    LifecycleRef,
+    LifecycleState,
+    MessageRole,
+    MessageWindowLocator,
+    RepresentationKind,
+    ResolvedSource,
+    RevalidationTarget,
+    RevisionKind,
+    SourceKind,
+    SourceRef,
+    SourceRepresentation,
+    SourceRevision,
+)
 from friday.storage._base import SCHEMA_VERSION
 from friday.storage._knowledge import _fts_term_groups
 
@@ -317,6 +332,76 @@ class ArchiveMessageLedgerEvidence(_ProcessPrivate):
 
     def __repr__(self) -> str:
         return f"ArchiveMessageLedgerEvidence(row_count={self.row_count}, private=True)"
+
+
+class ArchiveMessageReplayWindow(_ProcessPrivate):
+    """Exact rows addressed by one already-selected message locator."""
+
+    __slots__ = ("rows",)
+
+    rows: tuple[ArchiveMessageRow, ...]
+
+    def __init__(
+        self,
+        rows: tuple[ArchiveMessageRow, ...],
+        *,
+        _factory: object = None,
+    ) -> None:
+        if (
+            _factory is not _FACTORY
+            or type(rows) is not tuple
+            or not rows
+            or any(type(item) is not ArchiveMessageRow for item in rows)
+            or len({item.message_id for item in rows}) != len(rows)
+            or len({item.conversation_id for item in rows}) != 1
+            or len({item.principal_id for item in rows}) != 1
+            or len({item.conversation_archived for item in rows}) != 1
+        ):
+            raise ArchiveMessageStorageError("message replay window is invalid")
+        object.__setattr__(self, "rows", rows)
+
+    def __setattr__(self, _name: str, _value: object) -> NoReturn:
+        raise TypeError("archive message replay window is immutable")
+
+    def __repr__(self) -> str:
+        return f"ArchiveMessageReplayWindow(row_count={len(self.rows)}, private=True)"
+
+
+class ArchiveMessageReplaySource(_ProcessPrivate):
+    """Fresh conversation revision plus exact selected windows."""
+
+    __slots__ = ("resolved_source", "windows")
+
+    resolved_source: ResolvedSource
+    windows: tuple[ArchiveMessageReplayWindow, ...]
+
+    def __init__(
+        self,
+        resolved_source: ResolvedSource,
+        windows: tuple[ArchiveMessageReplayWindow, ...],
+        *,
+        _factory: object = None,
+    ) -> None:
+        if (
+            _factory is not _FACTORY
+            or type(resolved_source) is not ResolvedSource
+            or type(windows) is not tuple
+            or not windows
+            or any(type(item) is not ArchiveMessageReplayWindow for item in windows)
+            or any(
+                item.rows[0].conversation_id != resolved_source.source_ref.canonical_object_id
+                for item in windows
+            )
+        ):
+            raise ArchiveMessageStorageError("message replay source is invalid")
+        object.__setattr__(self, "resolved_source", resolved_source)
+        object.__setattr__(self, "windows", windows)
+
+    def __setattr__(self, _name: str, _value: object) -> NoReturn:
+        raise TypeError("archive message replay source is immutable")
+
+    def __repr__(self) -> str:
+        return f"ArchiveMessageReplaySource(window_count={len(self.windows)}, private=True)"
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -766,12 +851,13 @@ def _ledger_evidence(
     principal_id: str,
     conversation_ids: tuple[str, ...],
     scope: ArchiveMessageScope,
-    since: str | None,
-    until: str | None,
     boundary_conversation_id: str | None,
     boundary_rowid: int | None,
     boundary_identity_sha256: str | None,
 ) -> tuple[ArchiveMessageLedgerEvidence, ...]:
+    # Search-time since/until bounds select candidate windows, not source
+    # identity.  Attest the complete accepted pre-boundary conversation so the
+    # same SourceRevision can be recomputed later without persisting the query.
     placeholders = ",".join("?" for _item in conversation_ids)
     statement = f"""WITH selected_owned AS MATERIALIZED (
                          SELECT c.id, c.user_id, c.is_archived, c.title
@@ -791,8 +877,6 @@ def _ledger_evidence(
                          ON c.id=m.conversation_id AND c.user_id=m.user_id
                       WHERE m.user_id=?
                         AND m.role IN ('user', 'assistant')
-                        AND (? IS NULL OR julianday(m.created_at) >= julianday(?))
-                        AND (? IS NULL OR julianday(m.created_at) < julianday(?))
                         AND m.rowid<?
                         AND (?='all' OR m.conversation_id=?)
                       ORDER BY m.conversation_id ASC,
@@ -803,10 +887,6 @@ def _ledger_evidence(
             principal_id,
             *conversation_ids,
             principal_id,
-            since,
-            since,
-            until,
-            until,
             boundary_rowid,
             scope.value,
             boundary_conversation_id,
@@ -848,6 +928,244 @@ def _ledger_evidence(
             )
         )
     return tuple(evidence)
+
+
+def _select_authorized_archive_message_replay_source_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    principal_id: str,
+    origin_boundary_user_message_id: str,
+    source_ref: SourceRef,
+    locators: tuple[MessageWindowLocator, ...],
+) -> ArchiveMessageReplaySource | None:
+    """Reselect one conversation ledger and exact windows without FTS/search.
+
+    The ledger is recomputed over all user/assistant rows whose SQLite rowid is
+    strictly before the immutable accepted-turn boundary.  Rows inserted after
+    that boundary therefore cannot change the replayed source revision.
+    """
+
+    if type(conn) is not sqlite3.Connection or not conn.in_transaction:
+        raise RuntimeError("archive message replay requires a caller-owned transaction")
+    principal = _private_scope(principal_id, label="principal identity")
+    boundary_id = _message_id(
+        origin_boundary_user_message_id,
+        label="archive replay boundary",
+    )
+    if (
+        type(source_ref) is not SourceRef
+        or source_ref.source_kind is not SourceKind.CONVERSATION
+        or source_ref.authority_scope is not AuthorityScope.PRINCIPAL
+        or source_ref.tenant_id is not None
+        or source_ref.principal_id != principal
+        or source_ref.canonical_object_kind is not CanonicalObjectKind.CONVERSATION
+    ):
+        raise ArchiveMessageStorageError("message replay source is invalid")
+    if (
+        type(locators) is not tuple
+        or not 1 <= len(locators) <= 8
+        or any(type(item) is not MessageWindowLocator for item in locators)
+        or len(locators) != len(set(locators))
+    ):
+        raise ArchiveMessageStorageError("message replay locators are invalid")
+    if any(item.context_before > _MAX_NEIGHBORS or item.context_after > _MAX_NEIGHBORS for item in locators):
+        return None
+
+    try:
+        cursor = conn.execute(
+            """WITH replay_boundary AS MATERIALIZED (
+                       SELECT b.rowid AS boundary_rowid
+                         FROM messages b
+                         JOIN conversations boundary_conversation
+                           ON boundary_conversation.id=b.conversation_id
+                          AND boundary_conversation.user_id=b.user_id
+                         JOIN users principal_authority
+                           ON principal_authority.id=b.user_id
+                          AND principal_authority.status='active'
+                        WHERE b.id=? AND b.user_id=? AND b.role='user'
+                   ),
+                   selected_owned AS MATERIALIZED (
+                       SELECT c.id, c.user_id, c.title, c.is_archived
+                         FROM conversations c
+                         JOIN users principal_authority
+                           ON principal_authority.id=c.user_id
+                          AND principal_authority.status='active'
+                        WHERE c.id=? AND c.user_id=?
+                   )
+                   SELECT c.id AS selected_conversation_id,
+                          c.user_id AS selected_conversation_principal_id,
+                          c.title AS selected_conversation_title,
+                          c.is_archived AS selected_conversation_archived,
+                          m.rowid AS replay_rowid,
+                          m.id AS replay_id,
+                          m.conversation_id AS replay_conversation_id,
+                          m.user_id AS replay_principal_id,
+                          m.role AS replay_role,
+                          m.content AS replay_content,
+                          m.created_at AS replay_created_at,
+                          c.is_archived AS replay_conversation_archived
+                     FROM replay_boundary boundary
+                     CROSS JOIN selected_owned c
+                     LEFT JOIN messages m
+                       ON m.conversation_id=c.id AND m.user_id=c.user_id
+                      AND m.role IN ('user', 'assistant')
+                      AND m.rowid<boundary.boundary_rowid
+                    ORDER BY julianday(m.created_at) ASC, m.rowid ASC""",
+            (
+                boundary_id,
+                principal,
+                source_ref.canonical_object_id,
+                principal,
+            ),
+        )
+        columns = tuple(str(item[0]) for item in (cursor.description or ()))
+        first_raw = cursor.fetchone()
+    except sqlite3.Error:
+        raise ArchiveMessageStorageError("message replay selection is unavailable") from None
+    if first_raw is None:
+        return None
+
+    first = dict(zip(columns, tuple(first_raw), strict=True))
+    if first["replay_rowid"] is None:
+        return None
+    archived_value = first["selected_conversation_archived"]
+    if archived_value not in {0, 1}:
+        raise ArchiveMessageStorageError("stored conversation lifecycle is invalid")
+    title = _private_title(first["selected_conversation_title"])
+    accumulator = _LedgerAccumulator()
+    captured: list[list[ArchiveMessageRow]] = [[] for _item in locators]
+    started = [False for _item in locators]
+    completed = [False for _item in locators]
+
+    def accept(values: dict[str, Any]) -> bool:
+        if (
+            values["selected_conversation_id"] != source_ref.canonical_object_id
+            or values["selected_conversation_principal_id"] != principal
+            or values["selected_conversation_title"] != first["selected_conversation_title"]
+            or values["selected_conversation_archived"] != archived_value
+        ):
+            raise ArchiveMessageStorageError(
+                "stored conversation changed within replay snapshot"
+            )
+        row = _row(values, prefix="replay")
+        accumulator.add(row, conversation_title=title)
+        for index, locator in enumerate(locators):
+            if completed[index]:
+                continue
+            if not started[index] and row.message_id == locator.first_message_id:
+                started[index] = True
+            if started[index]:
+                captured[index].append(row)
+                if len(captured[index]) > locator.context_before + locator.context_after + 1:
+                    return False
+                if row.message_id == locator.last_message_id:
+                    completed[index] = True
+        return True
+
+    if not accept(first):
+        return None
+    while True:
+        try:
+            batch = cursor.fetchmany(256)
+        except sqlite3.Error:
+            raise ArchiveMessageStorageError("message replay selection is unavailable") from None
+        if not batch:
+            break
+        for raw in batch:
+            values = dict(zip(columns, tuple(raw), strict=True))
+            if not accept(values):
+                return None
+    if accumulator.count <= 0 or accumulator.archived is None:
+        raise ArchiveMessageStorageError("message replay ledger is unavailable")
+
+    representation = SourceRepresentation(
+        RepresentationKind.CONVERSATION,
+        source_ref.canonical_object_id,
+    )
+    revision = SourceRevision(
+        representation,
+        RevisionKind.MESSAGE_LEDGER_SHA256,
+        accumulator.finish(),
+    )
+    resolved_source = ResolvedSource.create(
+        source_ref=SourceRef(
+            SourceKind.CONVERSATION,
+            AuthorityScope.PRINCIPAL,
+            None,
+            principal,
+            CanonicalObjectKind.CONVERSATION,
+            source_ref.canonical_object_id,
+        ),
+        representations=(representation,),
+        lifecycle=(
+            LifecycleRef(
+                representation,
+                LifecycleState.ARCHIVED if bool(archived_value) else LifecycleState.ACTIVE,
+            ),
+        ),
+        revisions=(revision,),
+        revalidation_targets=(
+            RevalidationTarget(representation, AuthorityScope.PRINCIPAL),
+        ),
+    )
+
+    windows: list[ArchiveMessageReplayWindow] = []
+    for index, locator in enumerate(locators):
+        selected = tuple(captured[index])
+        if (
+            not started[index]
+            or not completed[index]
+            or len(selected) != locator.context_before + locator.context_after + 1
+            or selected[0].message_id != locator.first_message_id
+            or selected[-1].message_id != locator.last_message_id
+        ):
+            return None
+        matched = selected[locator.context_before]
+        if locator.matched_role is not None and matched.role is not locator.matched_role:
+            return None
+        first_instant = datetime.fromisoformat(selected[0].created_at)
+        last_instant = datetime.fromisoformat(selected[-1].created_at)
+        try:
+            exclusive_end = last_instant + timedelta(microseconds=1)
+            if exclusive_end <= first_instant:
+                exclusive_end = first_instant + timedelta(microseconds=1)
+        except OverflowError:
+            raise ArchiveMessageStorageError("message replay window is unavailable") from None
+        if (
+            locator.start_at != first_instant.astimezone(UTC).isoformat()
+            or locator.end_at != exclusive_end.astimezone(UTC).isoformat()
+        ):
+            return None
+        windows.append(ArchiveMessageReplayWindow(tuple(selected), _factory=_FACTORY))
+    return ArchiveMessageReplaySource(
+        resolved_source,
+        tuple(windows),
+        _factory=_FACTORY,
+    )
+
+
+def select_authorized_archive_message_replay_source_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    principal_id: str,
+    origin_boundary_user_message_id: str,
+    source_ref: SourceRef,
+    locators: tuple[MessageWindowLocator, ...],
+) -> ArchiveMessageReplaySource | None:
+    """Public body-free wrapper for one exact message replay SELECT."""
+
+    try:
+        return _select_authorized_archive_message_replay_source_in_transaction(
+            conn,
+            principal_id=principal_id,
+            origin_boundary_user_message_id=origin_boundary_user_message_id,
+            source_ref=source_ref,
+            locators=locators,
+        )
+    except ArchiveMessageStorageError:
+        raise
+    except Exception:
+        raise ArchiveMessageStorageError("message replay selection is unavailable") from None
 
 
 def _select_authorized_archive_message_page_in_transaction(
@@ -1110,8 +1428,6 @@ def _select_authorized_archive_message_page_in_transaction(
             principal_id=principal,
             conversation_ids=conversation_ids,
             scope=scope,
-            since=start,
-            until=end,
             boundary_conversation_id=boundary_conversation,
             boundary_rowid=boundary_rowid,
             boundary_identity_sha256=boundary_digest,
@@ -1240,9 +1556,12 @@ __all__ = [
     "ArchiveMessageContextRow",
     "ArchiveMessageHit",
     "ArchiveMessageLedgerEvidence",
+    "ArchiveMessageReplaySource",
+    "ArchiveMessageReplayWindow",
     "ArchiveMessageRow",
     "ArchiveMessageScope",
     "ArchiveMessageSearchPage",
     "ArchiveMessageStorageError",
+    "select_authorized_archive_message_replay_source_in_transaction",
     "select_authorized_archive_message_page_in_transaction",
 ]

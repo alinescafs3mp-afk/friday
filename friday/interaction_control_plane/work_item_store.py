@@ -139,7 +139,8 @@ def _fetch_work_item(
 ) -> RecallConversationWorkItem | None:
     cursor = conn.execute(
         """SELECT * FROM work_items
-            WHERE id=? AND user_id=? AND conversation_id=?""",
+            WHERE id=? AND user_id=? AND conversation_id=?
+              AND kind='recall_conversation'""",
         (work_item_id, user_id, conversation_id),
     )
     row = cursor.fetchone()
@@ -611,7 +612,8 @@ def get_current_recall_conversation_work_item_in_transaction(
     timestamp = _now(now)
     cursor = conn.execute(
         """SELECT * FROM work_items
-            WHERE user_id=? AND conversation_id=? AND state='active' AND expires_at>?
+            WHERE user_id=? AND conversation_id=? AND kind='recall_conversation'
+              AND state='active' AND expires_at>?
             LIMIT 1""",
         (user, conversation, timestamp),
     )
@@ -912,7 +914,8 @@ def expire_due_recall_conversation_work_items_in_transaction(
     if user_id is None:
         exhausted = conn.execute(
             """DELETE FROM work_items
-                WHERE state IN ('active','suspended') AND expires_at<=?
+                WHERE kind='recall_conversation'
+                  AND state IN ('active','suspended') AND expires_at<=?
                   AND revision>=2147483647""",
             (timestamp,),
         )
@@ -920,7 +923,8 @@ def expire_due_recall_conversation_work_items_in_transaction(
             """UPDATE work_items
                   SET state='expired',transition='expired',revision=revision+1,
                       updated_at=?,closed_at=?
-                WHERE state IN ('active','suspended') AND expires_at<=?
+                WHERE kind='recall_conversation'
+                  AND state IN ('active','suspended') AND expires_at<=?
                   AND revision<2147483647""",
             (timestamp, timestamp, timestamp),
         )
@@ -928,7 +932,8 @@ def expire_due_recall_conversation_work_items_in_transaction(
         user = _scope(user_id, _USER_ID_RE, label="user_id")
         exhausted = conn.execute(
             """DELETE FROM work_items
-                WHERE user_id=? AND state IN ('active','suspended') AND expires_at<=?
+                WHERE user_id=? AND kind='recall_conversation'
+                  AND state IN ('active','suspended') AND expires_at<=?
                   AND revision>=2147483647""",
             (user, timestamp),
         )
@@ -936,7 +941,8 @@ def expire_due_recall_conversation_work_items_in_transaction(
             """UPDATE work_items
                   SET state='expired',transition='expired',revision=revision+1,
                       updated_at=?,closed_at=?
-                WHERE user_id=? AND state IN ('active','suspended') AND expires_at<=?
+                WHERE user_id=? AND kind='recall_conversation'
+                  AND state IN ('active','suspended') AND expires_at<=?
                   AND revision<2147483647""",
             (timestamp, timestamp, user, timestamp),
         )

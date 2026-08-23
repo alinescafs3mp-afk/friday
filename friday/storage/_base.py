@@ -148,7 +148,10 @@ LOGGER = logging.getLogger("friday.storage")
 # Frame.  The first slice persists only RecallConversation control state; bodies
 # remain in messages, while exact DDL validation and revision CAS make restart and
 # continuation state fail closed.
-SCHEMA_VERSION = 38
+# 39 — one body-free selected-evidence sidecar and the closed
+# RecallSelectedArchiveEvidence workflow labels.  The released schema-38 table is
+# authenticated and rebuilt without changing any existing RecallConversation row.
+SCHEMA_VERSION = 39
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно

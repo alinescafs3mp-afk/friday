@@ -37,6 +37,7 @@ from friday.interaction_control_plane.failure_schema import (
 from friday.interaction_control_plane.work_item_schema import (
     WORK_ITEM_SCHEMA,
     WORK_ITEM_SCHEMA_VERSION,
+    upgrade_work_item_schema_38_to_39,
     validate_work_item_schema,
 )
 from friday.private_fs import prepare_private_sqlite, restrict_sqlite_files
@@ -2465,11 +2466,17 @@ class CoreMixin(StorageShared):
                 validate_interaction_failure_schema(conn, required=False)
             if parsed_version is not None and parsed_version >= WORK_ITEM_SCHEMA_VERSION:
                 validate_work_item_schema(conn)
-            elif parsed_version is None or parsed_version < WORK_ITEM_SCHEMA_VERSION:
-                # A failed schema-38 attempt may have installed the Work Item
-                # table without publishing its marker.  Retry only when every
-                # object already present has the exact released contract.
-                validate_work_item_schema(conn, required=False)
+            else:
+                # Schema 39 widens closed workflow labels and adds one exact
+                # sidecar, so SQLite must rebuild the released schema-38 table.
+                # Accept only the byte-shape-equivalent released DDL or an exact
+                # already-completed 39 projection whose marker publication was
+                # interrupted.  Older databases may legitimately have no Work
+                # Item table yet; marker 38 may not.
+                upgrade_work_item_schema_38_to_39(
+                    conn,
+                    required=parsed_version is not None and parsed_version >= 38,
+                )
             self._execute_statements(conn, CORE_TABLE_SCHEMA)
             self._execute_statements(conn, OBSIDIAN_SCHEMA)
             self._execute_statements(conn, INTERACTION_FAILURE_SCHEMA)

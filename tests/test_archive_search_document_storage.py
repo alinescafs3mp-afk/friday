@@ -6,6 +6,7 @@ import json
 import pickle
 import re
 import sqlite3
+from dataclasses import asdict, is_dataclass
 from typing import Any
 
 import pytest
@@ -37,6 +38,7 @@ from friday.storage._archive_search_documents import (
     ArchiveDocumentLanePage,
     ArchiveDocumentStorageError,
     search_archive_document_lane,
+    select_authorized_archive_document_replay_source_in_transaction,
 )
 from friday.storage.models import InboxItem, InboxStatus, KnowledgeObject, RawObject
 
@@ -1262,6 +1264,55 @@ def test_lane_page_is_exact_process_private_and_snapshot_attestation_is_explicit
     with pytest.raises(ArchiveDocumentStorageError):
         _coverage(page, request)
     assert "{}" not in repr(page)
+
+
+def test_document_replay_source_is_immutable_and_not_dataclass_serializable(storage) -> None:
+    raw_id, _knowledge_id = _seed(
+        storage,
+        43,
+        filename="needle-replay.pdf",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    conversation = storage.create_conversation(OWNER, "Replay boundary")
+    boundary = storage.store_message(
+        conversation["id"],
+        OWNER,
+        "user",
+        "replay selected evidence",
+    )
+    request = _request(corpora=(ArchiveSearchCorpus.DOCUMENTS,))
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.CATALOG,
+    )
+    candidate = next(
+        item for item in page.candidates if item.resolved_source.source_ref.canonical_object_id == raw_id
+    )
+
+    storage.conn.execute("BEGIN")
+    try:
+        source = select_authorized_archive_document_replay_source_in_transaction(
+            storage.conn,
+            tenant_id=TENANT,
+            owner_id=OWNER,
+            origin_boundary_user_message_id=boundary["id"],
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            source_ref=candidate.resolved_source.source_ref,
+        )
+        assert source is not None
+        assert source.body == SECRET
+        assert not is_dataclass(source)
+        with pytest.raises(TypeError):
+            asdict(source)  # type: ignore[call-overload]
+        with pytest.raises(TypeError, match="immutable"):
+            source.body = "changed"
+        for operation in (copy.copy, copy.deepcopy, pickle.dumps):
+            with pytest.raises(ArchiveDocumentStorageError):
+                operation(source)
+    finally:
+        storage.conn.rollback()
 
 
 def test_inbound_continuation_is_explicitly_unavailable_without_a_local_cursor(storage) -> None:

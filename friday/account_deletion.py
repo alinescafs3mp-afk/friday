@@ -65,6 +65,11 @@ class _Scope:
 # target's entity set.  ``relation_revisions`` is counted separately and blocks:
 # its append-only trigger correctly refuses ordinary DELETE.
 _DELETE_SCOPES: tuple[_Scope, ...] = (
+    _Scope(
+        "work_item_selected_evidence",
+        "work_item_selected_evidence",
+        "work_item_id IN (SELECT id FROM work_items WHERE user_id=?)",
+    ),
     _Scope("work_items", "work_items", "user_id=?"),
     _Scope("interaction_failure_traces", "interaction_failure_traces", "user_id=?"),
     _Scope("obsidian_active_frames", "obsidian_active_frames", "user_id=?"),
@@ -677,6 +682,11 @@ _CROSS_ACCOUNT_JSON_SCOPES = (
     ("mission_tasks", "tools_used_json", "user_id"),
 )
 
+_WORK_ITEM_SELECTED_EVIDENCE_JSON_COLUMNS = (
+    "source_ref_json",
+    "passage_refs_json",
+)
+
 # Object ids are also persisted inside executable approval/checkpoint arguments.
 # These columns have no declarative FK, so the generic incoming-FK inventory
 # cannot protect them.  Reusing the full provenance registry is intentionally
@@ -833,6 +843,23 @@ def _cross_account_structural_json_reference_counts(
         if count:
             result[f"structural_json:{table}.{column}"] = count
 
+    for column in _WORK_ITEM_SELECTED_EVIDENCE_JSON_COLUMNS:
+        rows = conn.execute(
+            f'''SELECT evidence."{column}" AS payload
+                  FROM work_item_selected_evidence evidence
+                  JOIN work_items work ON work.id=evidence.work_item_id
+                 WHERE work.user_id<>?''',  # nosec B608 - closed column registry
+            (user_id,),
+        ).fetchall()
+        count = sum(
+            1
+            for row in rows
+            if row["payload"] not in (None, "")
+            and _json_has_exact_person_reference(str(row["payload"] or ""), exact_references)
+        )
+        if count:
+            result[f"structural_json:work_item_selected_evidence.{column}"] = count
+
     for table in ("entity_versions", "knowledge_object_versions"):
         rows = conn.execute(
             f'''SELECT snapshot_json FROM "{table}" WHERE user_id<>?''',  # nosec B608
@@ -899,6 +926,23 @@ def _cross_account_json_reference_counts(conn: sqlite3.Connection, user_id: str)
         )
         if count:
             result[f"{table}.{column}"] = count
+
+    for column in _WORK_ITEM_SELECTED_EVIDENCE_JSON_COLUMNS:
+        rows = conn.execute(
+            f'''SELECT evidence."{column}" AS payload
+                  FROM work_item_selected_evidence evidence
+                  JOIN work_items work ON work.id=evidence.work_item_id
+                 WHERE work.user_id<>?''',  # nosec B608 - closed column registry
+            (user_id,),
+        ).fetchall()
+        count = sum(
+            1
+            for row in rows
+            if row["payload"] not in (None, "")
+            and _json_has_exact_person_reference(str(row["payload"] or ""), references)
+        )
+        if count:
+            result[f"work_item_selected_evidence.{column}"] = count
 
     for table in ("entity_versions", "knowledge_object_versions"):
         rows = conn.execute(

@@ -12,10 +12,15 @@ import time
 from collections import OrderedDict
 from collections.abc import Callable, Iterable
 from contextlib import suppress
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import NoReturn, Protocol, SupportsIndex, cast
 
+from friday.retrieval.archive_evidence_snapshot import (
+    archive_selected_evidence_snapshot_sha256,
+)
 from friday.retrieval.archive_search_contract import (
+    ArchiveEvidenceAuthority,
     ArchiveMatchRank,
     ArchiveSearchCandidate,
     ArchiveSearchCorpus,
@@ -26,10 +31,16 @@ from friday.retrieval.archive_search_contract import (
 from friday.retrieval.contracts import (
     AuthorityScope,
     CoverageState,
+    MessageWindowLocator,
+    PassageRef,
+    RepresentationKind,
     SearchCorpus,
     SearchCoverage,
     SearchExecutionBinding,
     SearchLane,
+    SourceKind,
+    SourceRef,
+    TextSpanLocator,
 )
 
 ARCHIVE_AUTHORITY_MAX_CANDIDATES = 20
@@ -44,11 +55,15 @@ _NONCE_BYTES = 32
 _CONTINUATION_TOKEN_BYTES = 32
 _CONTINUATION_TOKEN_CHARS = 43
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+_PUBLIC_CITATION = re.compile(r"\[(A[1-9][0-9]{0,2}(?:\.[1-8])?)\]")
+_PUBLIC_CITATION_LABEL = re.compile(r"A([1-9][0-9]{0,2})(?:\.[1-8])?\Z")
+_PUBLIC_CITATION_PREFIX = re.compile(r"\[A", re.IGNORECASE)
 _MAX_ACTOR_ID_BYTES = 200
 _MAX_MODEL_BYTES = 7_900
 _RUN_SCHEMA = "friday.archive-search-run-binding.private.v2"
 _BATCH_SCHEMA = "friday.archive-search-model-batch.private.v2"
-_ATTESTATION_SCHEMA = "friday.archive-search-publication-attestation.private.v2"
+_ATTESTATION_SCHEMA = "friday.archive-search-publication-attestation.private.v3"
+ARCHIVE_SEARCH_SELECTED_EVIDENCE_SCHEMA = "friday.archive-search-selected-evidence.private.v1"
 _REDEMPTION_SCHEMA = "friday.archive-search-continuation-redemption.private.v3"
 _SELECTED_CONTINUATION_SCHEMA = "friday.archive-search-continuation-selection.private.v1"
 _LEDGER_SCHEMA = "friday.archive-search-model-batch-ledger.private.v2"
@@ -63,6 +78,14 @@ _TURN_LEDGER_MAX_RECORDS = 8_192
 _TURN_LEDGER_RETAIN_SECONDS = 6 * 60 * 60
 _TURN_LEDGER_REPLAY_FILTER_BYTES = 262_144
 _TURN_LEDGER_REPLAY_FILTER_BUCKETS = 7
+
+
+def _public_citation_label_is_valid(value: object) -> bool:
+    if type(value) is not str:
+        return False
+    match = _PUBLIC_CITATION_LABEL.fullmatch(value)
+    return bool(match is not None and int(match.group(1)) <= 640)
+
 
 _CORPUS_TARGET = {
     ArchiveSearchCorpus.DOCUMENTS: SearchCorpus.RAW_DOCUMENTS,
@@ -131,6 +154,13 @@ class ArchiveSearchAuthorityError(ValueError):
 class ArchiveSearchAuthorityPhase(StrEnum):
     BEFORE_MODEL = "before_model"
     BEFORE_PUBLICATION = "before_publication"
+
+
+class ArchiveSearchCoverageGrade(StrEnum):
+    """Honest terminal completeness of the exact pages admitted in one turn."""
+
+    COMPLETE = "complete"
+    PARTIAL = "partial"
 
 
 class ArchiveSearchReauthorizationStatus(StrEnum):
@@ -1785,6 +1815,11 @@ def authorize_archive_search_before_model(
 
     token: str | None = None
     try:
+        # An inbound continuation is useful only after the registry has
+        # redeemed the exact token and selected its sealed tail.  The ordinary
+        # first-page gate must never accept a hand-built continued request.
+        if run_binding._request.continuation is not None:
+            raise ArchiveSearchAuthorityError("archive continuation requires redemption")
         if continuation is not None and type(continuation) is not IssuedArchiveContinuation:
             raise ArchiveSearchAuthorityError("archive continuation issue is invalid")
         token = (
@@ -3284,24 +3319,176 @@ def authorize_archive_search_resumed_before_model(
         raise ArchiveSearchAuthorityError("archive continuation model admission failed") from None
 
 
+def _selected_evidence_shape_is_compatible(
+    corpus: ArchiveSearchCorpus,
+    source_ref: SourceRef,
+    passage_refs: tuple[PassageRef, ...],
+) -> bool:
+    if (
+        type(corpus) is not ArchiveSearchCorpus
+        or type(source_ref) is not SourceRef
+        or type(passage_refs) is not tuple
+        or not 1 <= len(passage_refs) <= 8
+        or any(type(item) is not PassageRef or item.source_ref != source_ref for item in passage_refs)
+    ):
+        return False
+    if corpus is ArchiveSearchCorpus.DOCUMENTS:
+        return bool(
+            source_ref.source_kind is SourceKind.DOCUMENT
+            and all(
+                type(item.locator) is TextSpanLocator
+                and item.source_revision.representation.kind is RepresentationKind.RAW_OBJECT
+                for item in passage_refs
+            )
+        )
+    if corpus is ArchiveSearchCorpus.KNOWLEDGE:
+        return bool(
+            source_ref.source_kind
+            in {SourceKind.DOCUMENT, SourceKind.WEB_CAPTURE, SourceKind.GENERATED_ARTIFACT}
+            and all(
+                type(item.locator) is TextSpanLocator
+                and item.source_revision.representation.kind is RepresentationKind.KNOWLEDGE_OBJECT
+                for item in passage_refs
+            )
+        )
+    if corpus is ArchiveSearchCorpus.MESSAGES:
+        return bool(
+            source_ref.source_kind is SourceKind.CONVERSATION
+            and all(
+                type(item.locator) is MessageWindowLocator
+                and item.source_revision.representation.kind is RepresentationKind.CONVERSATION
+                for item in passage_refs
+            )
+        )
+    return False
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class ArchiveSearchSelectedEvidence:
+    """Body-free identity of one factual candidate selected by exact citations."""
+
+    corpus: ArchiveSearchCorpus
+    source_ref: SourceRef
+    passage_refs: tuple[PassageRef, ...]
+    resolved_snapshot_sha256: str
+
+    def __post_init__(self) -> None:
+        if type(self.corpus) is not ArchiveSearchCorpus or self.corpus not in {
+            ArchiveSearchCorpus.DOCUMENTS,
+            ArchiveSearchCorpus.KNOWLEDGE,
+            ArchiveSearchCorpus.MESSAGES,
+        }:
+            raise ArchiveSearchAuthorityError("archive selected corpus is invalid")
+        if type(self.source_ref) is not SourceRef:
+            raise ArchiveSearchAuthorityError("archive selected source is invalid")
+        if (
+            type(self.passage_refs) is not tuple
+            or not 1 <= len(self.passage_refs) <= 8
+            or any(type(item) is not PassageRef for item in self.passage_refs)
+            or any(item.source_ref != self.source_ref for item in self.passage_refs)
+        ):
+            raise ArchiveSearchAuthorityError("archive selected passages are invalid")
+        identities = tuple(item.to_private_json() for item in self.passage_refs)
+        if identities != tuple(sorted(identities)) or len(identities) != len(set(identities)):
+            raise ArchiveSearchAuthorityError("archive selected passages are not canonical")
+        if not _selected_evidence_shape_is_compatible(
+            self.corpus,
+            self.source_ref,
+            self.passage_refs,
+        ):
+            raise ArchiveSearchAuthorityError("archive selected corpus and source disagree")
+        if (
+            type(self.resolved_snapshot_sha256) is not str
+            or _DIGEST.fullmatch(self.resolved_snapshot_sha256) is None
+        ):
+            raise ArchiveSearchAuthorityError("archive selected snapshot digest is invalid")
+
+    def __repr__(self) -> str:
+        return "<ArchiveSearchSelectedEvidence body-free private-identity>"
+
+    @property
+    def source_snapshot_sha256(self) -> str:
+        """Alias used by the durable selected-evidence sidecar contract."""
+
+        return self.resolved_snapshot_sha256
+
+    def to_private_payload(self) -> dict[str, object]:
+        return {
+            "corpus": self.corpus.value,
+            "passage_refs": [item.to_private_payload() for item in self.passage_refs],
+            "resolved_snapshot_sha256": self.resolved_snapshot_sha256,
+            "schema": ARCHIVE_SEARCH_SELECTED_EVIDENCE_SCHEMA,
+            "source_ref": self.source_ref.to_private_payload(),
+        }
+
+    def to_private_json(self) -> str:
+        return _canonical_json(self.to_private_payload()).decode("ascii")
+
+    @classmethod
+    def from_private_payload(cls, value: object) -> ArchiveSearchSelectedEvidence:
+        if type(value) is not dict or frozenset(value) != frozenset(
+            {
+                "passage_refs",
+                "corpus",
+                "resolved_snapshot_sha256",
+                "schema",
+                "source_ref",
+            }
+        ):
+            raise ArchiveSearchAuthorityError("archive selected evidence keys are invalid")
+        payload = cast(dict[str, object], value)
+        if payload["schema"] != ARCHIVE_SEARCH_SELECTED_EVIDENCE_SCHEMA:
+            raise ArchiveSearchAuthorityError("archive selected evidence schema is invalid")
+        raw_passages = payload["passage_refs"]
+        if type(raw_passages) is not list or not 1 <= len(raw_passages) <= 8:
+            raise ArchiveSearchAuthorityError("archive selected passages are invalid")
+        try:
+            raw_corpus = payload["corpus"]
+            if type(raw_corpus) is not str:
+                raise ArchiveSearchAuthorityError("archive selected corpus is invalid")
+            corpus = ArchiveSearchCorpus(raw_corpus)
+            source_ref = SourceRef.from_private_payload(payload["source_ref"])
+            passage_refs = tuple(PassageRef.from_private_payload(item) for item in raw_passages)
+        except Exception:
+            raise ArchiveSearchAuthorityError("archive selected evidence is invalid") from None
+        snapshot = payload["resolved_snapshot_sha256"]
+        if type(snapshot) is not str:
+            raise ArchiveSearchAuthorityError("archive selected snapshot digest is invalid")
+        return cls(corpus, source_ref, passage_refs, snapshot)
+
+
 class ArchiveSearchPublicationAttestation(_ProcessPrivate):
     """Accepted phase-2 proof bound to the exact carriers and answer digest."""
 
     __slots__ = (
         "_answer_sha256",
+        "_candidate_count",
         "_carrier_ledger",
+        "_coverage_grade",
+        "_coverage_sha256",
+        "_evidence_sha256",
         "_nonce",
+        "_plan_sha256",
         "_run_ledger",
         "_seal",
+        "_selected_evidence",
         "_turn_ledger_handle",
+        "_used_citation_labels",
     )
 
     _answer_sha256: str
+    _candidate_count: int
     _carrier_ledger: str
+    _coverage_grade: ArchiveSearchCoverageGrade
+    _coverage_sha256: str
+    _evidence_sha256: str
     _nonce: bytes
+    _plan_sha256: str
     _run_ledger: str
     _seal: str
+    _selected_evidence: ArchiveSearchSelectedEvidence | None
     _turn_ledger_handle: str
+    _used_citation_labels: tuple[str, ...]
 
     def __init__(self, *_args: object, **_kwargs: object) -> None:
         raise ArchiveSearchAuthorityError("publication attestations require phase-2 authorization")
@@ -3314,28 +3501,99 @@ class ArchiveSearchPublicationAttestation(_ProcessPrivate):
 
     @property
     def answer_sha256(self) -> str:
+        self._require_valid()
         return self._answer_sha256
 
-    def attests_answer(self, answer: str) -> bool:
+    @property
+    def plan_sha256(self) -> str:
+        self._require_valid()
+        return self._plan_sha256
+
+    @property
+    def evidence_sha256(self) -> str:
+        self._require_valid()
+        return self._evidence_sha256
+
+    @property
+    def coverage_sha256(self) -> str:
+        self._require_valid()
+        return self._coverage_sha256
+
+    @property
+    def coverage_grade(self) -> ArchiveSearchCoverageGrade:
+        self._require_valid()
+        return self._coverage_grade
+
+    @property
+    def candidate_count(self) -> int:
+        self._require_valid()
+        return self._candidate_count
+
+    @property
+    def used_citation_labels(self) -> tuple[str, ...]:
+        self._require_valid()
+        return self._used_citation_labels
+
+    @property
+    def used_citation_count(self) -> int:
+        self._require_valid()
+        return len(self._used_citation_labels)
+
+    @property
+    def selected_evidence(self) -> ArchiveSearchSelectedEvidence | None:
+        self._require_valid()
+        return self._selected_evidence
+
+    def _is_valid(self) -> bool:
         try:
-            answer_sha256 = _answer_digest(answer)
             return bool(
-                _DIGEST.fullmatch(self._answer_sha256)
-                and _DIGEST.fullmatch(self._carrier_ledger)
-                and _DIGEST.fullmatch(self._run_ledger)
-                and _DIGEST.fullmatch(self._turn_ledger_handle)
-                and _DIGEST.fullmatch(self._seal)
+                type(self) is ArchiveSearchPublicationAttestation
+                and all(
+                    _DIGEST.fullmatch(value) is not None
+                    for value in (
+                        self._answer_sha256,
+                        self._carrier_ledger,
+                        self._coverage_sha256,
+                        self._evidence_sha256,
+                        self._plan_sha256,
+                        self._run_ledger,
+                        self._turn_ledger_handle,
+                        self._seal,
+                    )
+                )
+                and type(self._candidate_count) is int
+                and 0
+                <= self._candidate_count
+                <= ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES * ARCHIVE_AUTHORITY_MAX_CANDIDATES
+                and type(self._coverage_grade) is ArchiveSearchCoverageGrade
+                and type(self._used_citation_labels) is tuple
+                and len(self._used_citation_labels) == len(set(self._used_citation_labels))
+                and all(_public_citation_label_is_valid(item) for item in self._used_citation_labels)
+                and (
+                    self._selected_evidence is None
+                    or type(self._selected_evidence) is ArchiveSearchSelectedEvidence
+                )
                 and type(self._nonce) is bytes
                 and len(self._nonce) == _NONCE_BYTES
-                and hmac.compare_digest(self._answer_sha256, answer_sha256)
                 and hmac.compare_digest(
                     self._seal,
                     _mac(
-                        b"friday/archive-search-publication-attestation/v2",
+                        b"friday/archive-search-publication-attestation/v3",
                         _attestation_material(self),
                     ),
                 )
             )
+        except Exception:
+            return False
+
+    def _require_valid(self) -> None:
+        if not self._is_valid():
+            raise ArchiveSearchAuthorityError("archive publication attestation is unavailable")
+
+    def attests_answer(self, answer: str) -> bool:
+        try:
+            answer_sha256 = _answer_digest(answer)
+            return bool(self._is_valid() and hmac.compare_digest(self._answer_sha256, answer_sha256))
         except Exception:
             return False
 
@@ -3356,12 +3614,196 @@ def _attestation_material(attestation: ArchiveSearchPublicationAttestation) -> b
     return _canonical_json(
         {
             "answer_sha256": attestation._answer_sha256,
+            "candidate_count": attestation._candidate_count,
             "carrier_ledger": attestation._carrier_ledger,
+            "coverage_grade": attestation._coverage_grade.value,
+            "coverage_sha256": attestation._coverage_sha256,
+            "evidence_sha256": attestation._evidence_sha256,
             "nonce": attestation._nonce.hex(),
+            "plan_sha256": attestation._plan_sha256,
             "run_ledger": attestation._run_ledger,
             "schema": _ATTESTATION_SCHEMA,
+            "selected_evidence": (
+                None
+                if attestation._selected_evidence is None
+                else attestation._selected_evidence.to_private_payload()
+            ),
             "turn_ledger_handle": attestation._turn_ledger_handle,
+            "used_citation_labels": list(attestation._used_citation_labels),
         }
+    )
+
+
+def _publication_projection(
+    entries: tuple[tuple[ArchiveSearchRunBinding, AuthorizedArchiveBatch, bytes], ...],
+    answer: str,
+) -> tuple[
+    str,
+    str,
+    str,
+    ArchiveSearchCoverageGrade,
+    int,
+    tuple[str, ...],
+    ArchiveSearchSelectedEvidence | None,
+]:
+    """Derive the body-free accepted outcome projection from consumed exact pages."""
+
+    request_identities: list[str] = []
+    evidence_records: list[dict[str, object]] = []
+    coverage_records: list[dict[str, object]] = []
+    label_map: dict[
+        str,
+        tuple[
+            tuple[int, int],
+            ArchiveSearchCandidate,
+            tuple[PassageRef, ...] | None,
+        ],
+    ] = {}
+    candidate_count = 0
+    for entry_index, (run, batch, _visible) in enumerate(entries, 1):
+        request_identity_sha256 = _sha256(run._request.identity_digest_material())
+        if request_identity_sha256 not in request_identities:
+            request_identities.append(request_identity_sha256)
+        page_candidates: list[dict[str, object]] = []
+        for result in batch._page.results:
+            candidate = result.candidate
+            public_ordinal = (batch._model_page_index - 1) * ARCHIVE_AUTHORITY_MAX_CANDIDATES + result.ordinal
+            candidate_label = f"A{public_ordinal}"
+            candidate_key = (entry_index, result.ordinal)
+            passage_refs = tuple(item.passage_ref for item in candidate.passages)
+            label_map[candidate_label] = (candidate_key, candidate, None)
+            for passage_index, passage_ref in enumerate(passage_refs, 1):
+                label_map[f"{candidate_label}.{passage_index}"] = (
+                    candidate_key,
+                    candidate,
+                    (passage_ref,),
+                )
+            page_candidates.append(
+                {
+                    "candidate_sha256": _sha256(candidate.to_private_json().encode("ascii")),
+                    "label": candidate_label,
+                }
+            )
+            candidate_count += 1
+        evidence_records.append(
+            {
+                "candidates": page_candidates,
+                "model_page_index": batch._model_page_index,
+            }
+        )
+        coverage_records.append(
+            {
+                "coverage_sha256": [_sha256(item.to_json().encode("ascii")) for item in batch._page.coverage],
+                "exhaustive": batch._page.exhaustive,
+                "has_continuation": batch._page.continuation is not None,
+                "model_page_index": batch._model_page_index,
+                "warnings": [item.value for item in batch._page.warnings],
+            }
+        )
+
+    citation_matches = tuple(_PUBLIC_CITATION.finditer(answer))
+    valid_citation_matches = tuple(
+        match for match in citation_matches if _public_citation_label_is_valid(match.group(1))
+    )
+    used_citation_labels = tuple(dict.fromkeys(match.group(1) for match in valid_citation_matches))
+    valid_citation_starts = {match.start() for match in valid_citation_matches}
+    malformed_citation_present = any(
+        match.start() not in valid_citation_starts for match in _PUBLIC_CITATION_PREFIX.finditer(answer)
+    )
+    maximum_labels = ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES * ARCHIVE_AUTHORITY_MAX_CANDIDATES * 9
+    if len(used_citation_labels) > maximum_labels:
+        raise ArchiveSearchAuthorityError("archive answer has too many citation labels")
+
+    selected: ArchiveSearchSelectedEvidence | None = None
+    mapped = [label_map.get(label) for label in used_citation_labels]
+    if not malformed_citation_present and used_citation_labels and all(item is not None for item in mapped):
+        exact_mapped = cast(
+            list[
+                tuple[
+                    tuple[int, int],
+                    ArchiveSearchCandidate,
+                    tuple[PassageRef, ...] | None,
+                ]
+            ],
+            mapped,
+        )
+        candidate_keys = {item[0] for item in exact_mapped}
+        candidate = exact_mapped[0][1]
+        if (
+            len(candidate_keys) == 1
+            and candidate.corpus
+            in {
+                ArchiveSearchCorpus.DOCUMENTS,
+                ArchiveSearchCorpus.KNOWLEDGE,
+                ArchiveSearchCorpus.MESSAGES,
+            }
+            and candidate.evidence_authority is ArchiveEvidenceAuthority.CANONICAL
+            and not candidate.navigation_only
+            and 1 <= len(candidate.passages) <= 8
+        ):
+            selected_passages = (
+                tuple(item.passage_ref for item in candidate.passages)
+                if any(item[2] is None for item in exact_mapped)
+                else tuple(
+                    passage.passage_ref
+                    for passage in candidate.passages
+                    if any(item[2] is not None and passage.passage_ref in item[2] for item in exact_mapped)
+                )
+            )
+            if selected_passages and _selected_evidence_shape_is_compatible(
+                candidate.corpus,
+                candidate.resolved_source.source_ref,
+                selected_passages,
+            ):
+                selected_excerpts = tuple(
+                    passage.excerpt
+                    for passage in candidate.passages
+                    if passage.passage_ref in selected_passages
+                )
+                selected = ArchiveSearchSelectedEvidence(
+                    corpus=candidate.corpus,
+                    source_ref=candidate.resolved_source.source_ref,
+                    passage_refs=selected_passages,
+                    resolved_snapshot_sha256=archive_selected_evidence_snapshot_sha256(
+                        candidate.resolved_source,
+                        selected_passages,
+                        selected_excerpts,
+                    ),
+                )
+
+    same_plan = len(request_identities) == 1
+    chained_pages = bool(entries and entries[0][0]._request.continuation is None)
+    for (_previous_run, previous_batch, _previous_visible), (
+        next_run,
+        _next_batch,
+        _next_visible,
+    ) in zip(entries, entries[1:], strict=False):
+        previous_token = previous_batch._page.continuation
+        next_token = next_run._request.continuation
+        if (
+            type(previous_token) is not str
+            or type(next_token) is not str
+            or not hmac.compare_digest(previous_token, next_token)
+        ):
+            chained_pages = False
+            break
+    page_warnings = {warning for _run, batch, _visible in entries for warning in batch._page.warnings}
+    warnings_allow_complete = not page_warnings or bool(
+        len(entries) > 1 and page_warnings == {ArchiveSearchWarning.LANE_CAPPED}
+    )
+    coverage_grade = (
+        ArchiveSearchCoverageGrade.COMPLETE
+        if (same_plan and chained_pages and warnings_allow_complete and entries[-1][1]._page.exhaustive)
+        else ArchiveSearchCoverageGrade.PARTIAL
+    )
+    return (
+        _sha256(_canonical_json(request_identities)),
+        _sha256(_canonical_json(evidence_records)),
+        _sha256(_canonical_json(coverage_records)),
+        coverage_grade,
+        candidate_count,
+        used_citation_labels,
+        selected,
     )
 
 
@@ -3370,6 +3812,15 @@ def _new_attestation(
     entries: tuple[tuple[ArchiveSearchRunBinding, AuthorizedArchiveBatch, bytes], ...],
     answer: str,
 ) -> ArchiveSearchPublicationAttestation:
+    (
+        plan_sha256,
+        evidence_sha256,
+        coverage_sha256,
+        coverage_grade,
+        candidate_count,
+        used_citation_labels,
+        selected_evidence,
+    ) = _publication_projection(entries, answer)
     carrier_ledger = _mac(
         b"friday/archive-search-publication-ledger/v2",
         _canonical_json(
@@ -3393,18 +3844,25 @@ def _new_attestation(
     )
     for name, value in (
         ("_answer_sha256", _answer_digest(answer)),
+        ("_candidate_count", candidate_count),
         ("_carrier_ledger", carrier_ledger),
+        ("_coverage_grade", coverage_grade),
+        ("_coverage_sha256", coverage_sha256),
+        ("_evidence_sha256", evidence_sha256),
         ("_nonce", secrets.token_bytes(_NONCE_BYTES)),
+        ("_plan_sha256", plan_sha256),
         ("_run_ledger", run_ledger),
         ("_seal", "0" * 64),
+        ("_selected_evidence", selected_evidence),
         ("_turn_ledger_handle", ledger._identity_handle),
+        ("_used_citation_labels", used_citation_labels),
     ):
         object.__setattr__(attestation, name, value)
     object.__setattr__(
         attestation,
         "_seal",
         _mac(
-            b"friday/archive-search-publication-attestation/v2",
+            b"friday/archive-search-publication-attestation/v3",
             _attestation_material(attestation),
         ),
     )
@@ -3556,6 +4014,7 @@ def attest_archive_search_before_publication(
 
 
 __all__ = [
+    "ARCHIVE_SEARCH_SELECTED_EVIDENCE_SCHEMA",
     "ARCHIVE_AUTHORITY_MAX_ANSWER_BYTES",
     "ARCHIVE_AUTHORITY_MAX_CANDIDATES",
     "ARCHIVE_AUTHORITY_MAX_CONTINUATION_TAIL",
@@ -3565,6 +4024,7 @@ __all__ = [
     "ArchiveModelBatchLedger",
     "ArchiveSearchAuthorityError",
     "ArchiveSearchAuthorityPhase",
+    "ArchiveSearchCoverageGrade",
     "ArchiveSearchCandidateReauthorization",
     "ArchiveSearchCandidateReauthorizer",
     "ArchiveSearchCoverageReauthorization",
@@ -3574,6 +4034,7 @@ __all__ = [
     "ArchiveSearchPublicationDenialReason",
     "ArchiveSearchReauthorizationStatus",
     "ArchiveSearchRunBinding",
+    "ArchiveSearchSelectedEvidence",
     "AuthorizedArchiveBatch",
     "IssuedArchiveContinuation",
     "RedeemedArchiveContinuation",

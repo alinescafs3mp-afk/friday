@@ -149,6 +149,10 @@ def test_chat_projection_never_publishes_internal_control_metadata() -> None:
                 "schema": "friday.accepted-capability-outcome-receipt.v1",
                 "private_sentinel": sentinel,
             },
+            "accepted_archive_recall_outcome": {
+                "schema": "friday.accepted-archive-recall-outcome-receipt.v1",
+                "private_sentinel": sentinel,
+            },
             "source_search_result_identities": {
                 "raw_0123456789abcdef": sentinel,
             },

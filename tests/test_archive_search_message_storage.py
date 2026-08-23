@@ -221,7 +221,9 @@ def test_current_scope_authorizes_before_recall_and_returns_exact_bounded_contex
             (0, "needle exact hit"),
             (1, "user after"),
         ]
-        assert hit.ledger.row_count == 5
+        # The source revision covers the complete accepted pre-boundary
+        # conversation, including rows outside the search-time window.
+        assert hit.ledger.row_count == 6
         assert hit.ledger.conversation_title == "Friday work"
         assert hit.ledger.boundary_identity_sha256 == page.boundary_identity_sha256
         assert len(hit.ledger.row_ledger_sha256) == 64
