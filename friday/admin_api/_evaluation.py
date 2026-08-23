@@ -23,9 +23,55 @@ from friday.admin_api._deps import (
     _services,
     _target_user,
 )
+from friday.storage._base import _SEARCH_TEXT_LEN_SQL
 from friday.storage._privacy import _not_private_knowledge_dependency
 
 router = APIRouter()
+
+
+def _embedding_index_health(state: Any, user_id: str) -> dict[str, Any]:
+    """Tenant-scoped vector freshness counts; never expose rows or model text."""
+
+    backend = state.embeddings
+    if not getattr(backend, "remote_enabled", False):
+        return {
+            "status": "disabled",
+            "missing_objects": None,
+            "stale_objects": None,
+            "freshness": "not_applicable",
+        }
+
+    from friday.retrieval import chunk_scheme
+
+    settings = state.settings
+    scheme = chunk_scheme(settings)
+    row = state.storage.execute(
+        f"""SELECT
+                  SUM(CASE WHEN e.knowledge_object_id IS NULL THEN 1 ELSE 0 END) AS missing,
+                  SUM(CASE WHEN e.knowledge_object_id IS NOT NULL
+                            AND (e.model != ? OR e.source_version != k.version
+                                 OR (e.chunk_scheme != ? AND {_SEARCH_TEXT_LEN_SQL} > ?))
+                           THEN 1 ELSE 0 END) AS stale
+               FROM knowledge_objects k
+               LEFT JOIN knowledge_embeddings e
+                 ON e.knowledge_object_id=k.id AND e.user_id=k.user_id
+              WHERE k.user_id=? AND k.deleted_at IS NULL
+                AND {_not_private_knowledge_dependency("k")}""",  # nosec B608
+        (
+            settings.embeddings_model,
+            scheme,
+            settings.embeddings_chunk_chars,
+            user_id,
+        ),
+    ).fetchone()
+    missing = int(row["missing"] or 0) if row else 0
+    stale = int(row["stale"] or 0) if row else 0
+    return {
+        "status": "complete" if missing + stale == 0 else "incomplete",
+        "missing_objects": missing,
+        "stale_objects": stale,
+        "freshness": "measured_from_source_version_and_chunk_scheme",
+    }
 
 
 @router.get("/quality")
@@ -142,17 +188,49 @@ async def eval_search(
 
 @router.get("/retrieval/explain")
 async def retrieval_explain(
-    request: Request, q: str, user_id: str | None = None, limit: int = Query(10, ge=1, le=50)
+    request: Request,
+    q: str,
+    user_id: str | None = None,
+    limit: int = Query(10, ge=1, le=50),
+    corpora: str = Query("knowledge", min_length=1, max_length=96),
+    date_role: str = Query("document_or_mentioned_date", min_length=1, max_length=48),
+    since: str | None = Query(None, max_length=10),
+    until: str | None = Query(None, max_length=10),
 ) -> dict[str, Any]:
     """Explain-trace: why the ranker returned/discarded/ordered candidates for a
     query. Read-only, deterministic (no LLM) — the same HybridSearcher run the
     user sees, with the per-signal breakdown and discard reasons surfaced."""
     from friday.retrieval import is_relational_query
+    from friday.retrieval.search_explain import (
+        SEARCH_EXPLAIN_DATE_ROLES,
+        build_search_explain_projection,
+        parse_search_explain_corpora,
+        validate_search_explain_date_range,
+    )
 
     _require(request, "admin.all_data.read")
+    try:
+        selected_corpora = parse_search_explain_corpora(corpora)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    normalized_date_role = date_role.strip().casefold()
+    if normalized_date_role not in SEARCH_EXPLAIN_DATE_ROLES:
+        raise HTTPException(status_code=400, detail="date_role_unknown")
+    try:
+        normalized_date_role, since, until = validate_search_explain_date_range(
+            normalized_date_role,
+            since,
+            until,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     target = _target_user(request, user_id)
     _audit_cross_tenant_read(request, "admin.eval.read", target)
     state = _services(request)
+    if not state.storage.get_user(target):
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    graph_selected = "knowledge" in selected_corpora and is_relational_query(q)
     # `record_usage=False` — не украшение: без него объявленный здесь read-only
     # писал счётчик обращений, который ранжирование читает обратно, и диагностика
     # меняла ту самую выдачу, которую показывает.
@@ -163,17 +241,56 @@ async def retrieval_explain(
     # показывала документы-концентраторы с графовым вкладом 0.744, которого в
     # боевой выдаче нет: «Судимости.docx» обгонял нужный листок ровно на эту
     # величину — в объяснении, но не в жизни.
-    result = await state.hybrid_searcher.search(
-        target,
-        q,
-        limit=limit,
-        kg=state.kg,
-        graph_expansion=is_relational_query(q),
-        explain=True,
-        record_usage=False,
-    )
+    if "knowledge" in selected_corpora:
+        result = await state.hybrid_searcher.search(
+            target,
+            q,
+            limit=limit,
+            kg=state.kg,
+            graph_expansion=graph_selected,
+            explain=True,
+            since=since,
+            until=until,
+            record_usage=False,
+        )
+        authorized_knowledge_objects: int | None = state.storage.count_knowledge_objects(target)
+        embedding_index = _embedding_index_health(state, target)
+        fts_available = bool(getattr(state.storage, "_fts_available", False))
+    else:
+        # Documents/messages do not yet share this retrieval contour.  Returning
+        # an explicit unavailable scope is safer than silently searching Knowledge
+        # and presenting its empty page as proof that those corpora contain nothing.
+        result = {
+            "query": q,
+            "results": [],
+            "count": 0,
+            "matched_at_least": 0,
+            "trace": [],
+            "strategy": {},
+        }
+        authorized_knowledge_objects = None
+        embedding_index = {
+            "status": "not_inspected",
+            "missing_objects": None,
+            "stale_objects": None,
+            "freshness": "not_inspected",
+        }
+        fts_available = False
     trace = result.get("trace", [])
     discarded = [row for row in trace if row.get("status") == "discarded"]
+    search_explain = build_search_explain_projection(
+        result,
+        selected_corpora=selected_corpora,
+        authorized_knowledge_objects=authorized_knowledge_objects,
+        date_role=normalized_date_role,
+        since=since,
+        until=until,
+        graph_selected=graph_selected,
+        fts_available=fts_available,
+        embedding_index=embedding_index,
+        result_limit=limit,
+        dense_object_cap=state.settings.embeddings_dense_max_objects,
+    )
     return {
         "user_id": target,
         "query": result.get("query", q),
@@ -183,6 +300,7 @@ async def retrieval_explain(
         "discarded": len(discarded),
         "trace": trace,
         "strategy": result.get("strategy", {}),
+        "search_explain": search_explain,
     }
 
 

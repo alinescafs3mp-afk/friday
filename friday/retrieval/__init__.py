@@ -2188,6 +2188,11 @@ class HybridSearcher:
         candidates = list(candidate_map.values())
 
         fts_ranking = [item["id"] for item in fts_candidates]
+        # Candidate origin is different from score contribution.  Keep the two
+        # recall pools explicit so explain can say how an object entered the set;
+        # a zero lexical score on a recent-pool object is still a real origin.
+        fts_recalled = {str(item["id"]) for item in fts_candidates}
+        recent_pool_recalled = {str(item["id"]) for item in recent_pool}
         # A SECOND ranking, over the content-bearing words only, used by nothing but
         # the exclusion gate below.
         #
@@ -3067,6 +3072,18 @@ class HybridSearcher:
                         "status": status,
                         "rank": entry_rank,
                         "reason": reason,
+                        # Closed, content-free provenance of candidate recall.  An
+                        # object may be independently supplied by several lanes.
+                        "recalled_by": [
+                            channel
+                            for channel, recalled in (
+                                ("fts", document_id in fts_recalled),
+                                ("recent_pool", document_id in recent_pool_recalled),
+                                ("dense", document_id in embedding_scores),
+                                ("graph", document_id in graph_scores),
+                            )
+                            if recalled
+                        ],
                         # WHICH signal carried the retrieval — a different question
                         # from which passage is quoted, and it used to be answered by
                         # silently discarding the second one. Outside `components`

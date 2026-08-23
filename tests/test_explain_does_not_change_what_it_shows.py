@@ -105,7 +105,7 @@ def test_the_explain_route_asks_for_the_read_only_mode(settings):
     # редакция теста из-за этого проходила при снятом аргументе — проверяла текст,
     # а не вызов.
     body = "\n".join(
-        line for line in source[marker : marker + 2000].splitlines() if not line.strip().startswith("#")
+        line for line in source[marker : marker + 6000].splitlines() if not line.strip().startswith("#")
     )
     assert "record_usage=False" in body, (
         "explain-маршрут снова ходит через поисковик, пишущий счётчик обращений"

@@ -1,0 +1,218 @@
+{
+  "$schema": "friday.retrieval_difficult_query.v1",
+  "schema_version": 1,
+  "synthetic_only": true,
+  "privacy": {
+    "contains_live_chat": false,
+    "contains_live_file_text": false,
+    "contains_real_people": false,
+    "contains_real_tenant_ids": false,
+    "contains_model_responses": false
+  },
+  "closed_enums": {
+    "class": [
+      "approximate_content",
+      "approximate_date",
+      "old_file",
+      "pending_file",
+      "unhelpful_filename",
+      "typo",
+      "person_plus_topic",
+      "topic_plus_month",
+      "message_history_paraphrase",
+      "unknown_corpus"
+    ],
+    "corpus": ["knowledge", "documents", "messages", "unknown"],
+    "date_role": ["none", "document_or_mentioned_date"]
+  },
+  "acceptance": {
+    "case_count": 10,
+    "one_case_per_class": true,
+    "knowledge_recall_at_5": 1.0,
+    "unsupported_corpora_must_report_incomplete": true,
+    "questions_must_be_unique": true
+  },
+  "corpus": [
+    {
+      "id": "ko_emergency",
+      "title": "Аварийный запас сектора Б",
+      "content": "Резервный комплект для восстановления сектора Б после аварии хранится в подсобке на втором этаже.",
+      "received_at": "2025-11-04T08:00:00+00:00",
+      "metadata": {}
+    },
+    {
+      "id": "ko_generator",
+      "title": "Журнал генератора",
+      "content": "Проверка резервного генератора завершена без замечаний, топливный насос исправен.",
+      "received_at": "2024-03-18T08:00:00+00:00",
+      "metadata": {"dates": ["2024-03-17"]}
+    },
+    {
+      "id": "ko_old_ventilation",
+      "title": "Схема вентиляции корпуса Омега",
+      "content": "Архивная схема вентиляции корпуса Омега: заслонка В-17 относится к северной магистрали.",
+      "received_at": "2018-02-03T08:00:00+00:00",
+      "metadata": {"document_date": "2018-02-02"}
+    },
+    {
+      "id": "ko_scan_0041",
+      "title": "scan_0041.pdf",
+      "content": "Регламент поверки складских весов требует контрольную гирю класса М1 и запись в журнале.",
+      "received_at": "2025-06-10T08:00:00+00:00",
+      "metadata": {"filename": "scan_0041.pdf"}
+    },
+    {
+      "id": "ko_subscription",
+      "title": "Конфигурация подписки",
+      "content": "Конфигурация подписки и чёрные списки адресов для маршрутизации.",
+      "received_at": "2026-01-09T08:00:00+00:00",
+      "metadata": {}
+    },
+    {
+      "id": "ko_orlova",
+      "title": "Миграция склада",
+      "content": "Марина Орлова отвечает за миграцию складского учёта и сверяет остатки перед переносом.",
+      "received_at": "2025-12-14T08:00:00+00:00",
+      "metadata": {}
+    },
+    {
+      "id": "ko_pump_july",
+      "title": "Ремонт насоса",
+      "content": "Ремонт циркуляционного насоса завершён заменой подшипника и повторной балансировкой.",
+      "received_at": "2025-07-22T08:00:00+00:00",
+      "metadata": {"dates": ["2025-07-21"]}
+    }
+  ],
+  "cases": [
+    {
+      "id": "dq_01_approximate_content",
+      "class": "approximate_content",
+      "query": "где запас для аварийного восстановления сектора Б",
+      "requested_corpora": ["knowledge"],
+      "expected_corpus": "knowledge",
+      "expected_object_or_message": "ko_emergency",
+      "expected_passage": "комплект для восстановления сектора Б",
+      "expected_date_role": "none",
+      "acceptable_alternatives": [],
+      "since": null,
+      "until": null
+    },
+    {
+      "id": "dq_02_approximate_date",
+      "class": "approximate_date",
+      "query": "проверка резервного генератора",
+      "requested_corpora": ["knowledge"],
+      "expected_corpus": "knowledge",
+      "expected_object_or_message": "ko_generator",
+      "expected_passage": "Проверка резервного генератора",
+      "expected_date_role": "document_or_mentioned_date",
+      "acceptable_alternatives": [],
+      "since": "2024-03-01",
+      "until": "2024-03-31"
+    },
+    {
+      "id": "dq_03_old_file",
+      "class": "old_file",
+      "query": "заслонка В-17 северная магистраль",
+      "requested_corpora": ["knowledge"],
+      "expected_corpus": "knowledge",
+      "expected_object_or_message": "ko_old_ventilation",
+      "expected_passage": "заслонка В-17 относится к северной магистрали",
+      "expected_date_role": "none",
+      "acceptable_alternatives": [],
+      "since": null,
+      "until": null
+    },
+    {
+      "id": "dq_04_pending_file",
+      "class": "pending_file",
+      "query": "черновик акта по секции Дельта",
+      "requested_corpora": ["documents"],
+      "expected_corpus": "documents",
+      "expected_object_or_message": "doc_pending_delta",
+      "expected_passage": "черновик акта по секции Дельта",
+      "expected_date_role": "none",
+      "acceptable_alternatives": [],
+      "since": null,
+      "until": null
+    },
+    {
+      "id": "dq_05_unhelpful_filename",
+      "class": "unhelpful_filename",
+      "query": "контрольная гиря класса М1",
+      "requested_corpora": ["knowledge"],
+      "expected_corpus": "knowledge",
+      "expected_object_or_message": "ko_scan_0041",
+      "expected_passage": "контрольную гирю класса М1",
+      "expected_date_role": "none",
+      "acceptable_alternatives": [],
+      "since": null,
+      "until": null
+    },
+    {
+      "id": "dq_06_typo",
+      "class": "typo",
+      "query": "конфигурацоя подпискт",
+      "requested_corpora": ["knowledge"],
+      "expected_corpus": "knowledge",
+      "expected_object_or_message": "ko_subscription",
+      "expected_passage": "Конфигурация подписки",
+      "expected_date_role": "none",
+      "acceptable_alternatives": [],
+      "since": null,
+      "until": null
+    },
+    {
+      "id": "dq_07_person_plus_topic",
+      "class": "person_plus_topic",
+      "query": "Марина Орлова миграция складского учёта",
+      "requested_corpora": ["knowledge"],
+      "expected_corpus": "knowledge",
+      "expected_object_or_message": "ko_orlova",
+      "expected_passage": "Марина Орлова отвечает за миграцию",
+      "expected_date_role": "none",
+      "acceptable_alternatives": [],
+      "since": null,
+      "until": null
+    },
+    {
+      "id": "dq_08_topic_plus_month",
+      "class": "topic_plus_month",
+      "query": "ремонт циркуляционного насоса",
+      "requested_corpora": ["knowledge"],
+      "expected_corpus": "knowledge",
+      "expected_object_or_message": "ko_pump_july",
+      "expected_passage": "Ремонт циркуляционного насоса",
+      "expected_date_role": "document_or_mentioned_date",
+      "acceptable_alternatives": [],
+      "since": "2025-07-01",
+      "until": "2025-07-31"
+    },
+    {
+      "id": "dq_09_message_history_paraphrase",
+      "class": "message_history_paraphrase",
+      "query": "когда мы решили перенести встречу с поставщиком",
+      "requested_corpora": ["messages"],
+      "expected_corpus": "messages",
+      "expected_object_or_message": "msg_supplier_reschedule",
+      "expected_passage": "встречу с поставщиком переносим на четверг",
+      "expected_date_role": "none",
+      "acceptable_alternatives": [],
+      "since": null,
+      "until": null
+    },
+    {
+      "id": "dq_10_unknown_corpus",
+      "class": "unknown_corpus",
+      "query": "где было про поверку весов и гирю М1",
+      "requested_corpora": ["knowledge", "documents", "messages"],
+      "expected_corpus": "unknown",
+      "expected_object_or_message": "ko_scan_0041",
+      "expected_passage": "поверки складских весов",
+      "expected_date_role": "none",
+      "acceptable_alternatives": ["doc_scale_rules", "msg_scale_rules"],
+      "since": null,
+      "until": null
+    }
+  ]
+}
