@@ -133,6 +133,185 @@ def store_message_in_transaction(
     return dict(row) if row else {}
 
 
+def _message_window_utc_boundary(value: str, *, label: str) -> str:
+    """Normalize one closed selector boundary without accepting local time."""
+
+    if not isinstance(value, str) or not value or value != value.strip() or len(value) > 64:
+        raise ValueError(f"invalid {label} boundary")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"invalid {label} boundary") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{label} boundary must include an offset")
+    return parsed.astimezone(UTC).isoformat()
+
+
+def select_promoted_current_conversation_window_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    own_id: str,
+    conversation_id: str,
+    boundary_user_message_id: str,
+    since: str,
+    until: str,
+    role: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> dict[str, Any] | None:
+    """Select one exact, owned pre-turn message window in the caller's transaction.
+
+    The current user message is both the immutable rowid cutoff and the proof that
+    this exact conversation still belongs to the requested person.  Conversation,
+    boundary, page and total are read by one statement, so a confirmed empty window
+    cannot be confused with a missing/foreign boundary and a page cannot advertise
+    completeness from a different SQLite snapshot.
+
+    This is deliberately a module-level, transaction-local seam.  Its rows include
+    private message bodies and must be sealed by the orchestration layer before any
+    durable/public projection.  Invalid ownership identities fail closed as ``None``;
+    malformed window controls remain programmer errors.
+    """
+
+    if not conn.in_transaction:
+        raise RuntimeError("message window selector requires an existing transaction")
+    if (
+        not isinstance(own_id, str)
+        or not own_id
+        or own_id != own_id.strip()
+        or len(own_id) > 200
+        or any(ord(character) < 32 for character in own_id)
+    ):
+        return None
+    if (
+        not isinstance(conversation_id, str)
+        or not isinstance(boundary_user_message_id, str)
+        or _MESSAGE_ID_RE.fullmatch(boundary_user_message_id) is None
+        or re.fullmatch(r"conv_[0-9a-f]{16}", conversation_id) is None
+    ):
+        return None
+
+    start = _message_window_utc_boundary(since, label="since")
+    end = _message_window_utc_boundary(until, label="until")
+    if start >= end:
+        raise ValueError("message time window must be non-empty")
+    if role not in {None, "user", "assistant"}:
+        raise ValueError("invalid message role")
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 20:
+        raise ValueError("message window limit must be between 1 and 20")
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset != 0:
+        raise ValueError("promoted message window offset must be zero")
+
+    cursor = conn.execute(
+        """WITH owned_conversation AS MATERIALIZED (
+                   SELECT c.id, c.user_id
+                     FROM conversations c
+                    WHERE c.id=? AND c.user_id=?
+                    LIMIT 1
+               ),
+               boundary AS MATERIALIZED (
+                   SELECT b.id, b.user_id, b.conversation_id, b.role,
+                          b.content, b.created_at, b.rowid AS boundary_rowid
+                     FROM messages b
+                     JOIN owned_conversation c
+                       ON c.id=b.conversation_id AND c.user_id=b.user_id
+                    WHERE b.id=? AND b.user_id=? AND b.conversation_id=?
+                      AND b.role='user'
+                    LIMIT 1
+               ),
+               scoped AS MATERIALIZED (
+                   SELECT m.id, m.user_id, m.conversation_id, m.role,
+                          m.content, m.created_at, m.rowid AS message_rowid
+                     FROM messages m
+                     JOIN boundary b
+                       ON b.user_id=m.user_id
+                      AND b.conversation_id=m.conversation_id
+                      AND m.rowid < b.boundary_rowid
+                    WHERE julianday(m.created_at) >= julianday(?)
+                      AND julianday(m.created_at) < julianday(?)
+                      AND m.role IN ('user', 'assistant')
+                      AND (? IS NULL OR m.role=?)
+               ),
+               totals AS (
+                   SELECT COUNT(*) AS total FROM scoped
+               ),
+               page AS (
+                   SELECT * FROM scoped
+                    ORDER BY created_at ASC, message_rowid ASC
+                    LIMIT ?
+               )
+               SELECT b.id AS boundary_id,
+                      b.user_id AS boundary_user_id,
+                      b.conversation_id AS boundary_conversation_id,
+                      b.role AS boundary_role,
+                      b.content AS boundary_content,
+                      b.created_at AS boundary_created_at,
+                      p.id AS result_id,
+                      p.user_id AS result_user_id,
+                      p.conversation_id AS result_conversation_id,
+                      p.role AS result_role,
+                      p.content AS result_content,
+                      p.created_at AS result_created_at,
+                      p.message_rowid AS result_rowid,
+                      totals.total AS total
+                 FROM boundary b
+                 CROSS JOIN totals
+                 LEFT JOIN page p ON 1=1
+                ORDER BY p.created_at ASC, p.message_rowid ASC""",
+        (
+            conversation_id,
+            own_id,
+            boundary_user_message_id,
+            own_id,
+            conversation_id,
+            start,
+            end,
+            role,
+            role,
+            limit,
+        ),
+    )
+    columns = tuple(description[0] for description in (cursor.description or ()))
+    records = [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+    if not records:
+        return None
+
+    first = records[0]
+    boundary = {
+        "id": first["boundary_id"],
+        "user_id": first["boundary_user_id"],
+        "conversation_id": first["boundary_conversation_id"],
+        "role": first["boundary_role"],
+        "content": first["boundary_content"],
+        "created_at": first["boundary_created_at"],
+    }
+    results = [
+        {
+            "id": row["result_id"],
+            "user_id": row["result_user_id"],
+            "conversation_id": row["result_conversation_id"],
+            "role": row["result_role"],
+            "content": row["result_content"],
+            "created_at": row["result_created_at"],
+        }
+        for row in records
+        if row["result_id"] is not None
+    ]
+    total = int(first["total"])
+    shown = len(results)
+    return {
+        "results": results,
+        "boundary": boundary,
+        "total": total,
+        "shown": shown,
+        "complete": shown == total,
+        "since": start,
+        "until": end,
+        "role": role,
+        "limit": limit,
+    }
+
+
 class ConversationsMixin(StorageShared):
     def create_conversation(
         self,

@@ -38,6 +38,12 @@ from friday.file_delivery import (
     read_authorized_file_in_transaction,
 )
 from friday.morphology import LEXICAL_MIN_STEM_INPUT, stem
+from friday.orchestration.message_window_outcome import (
+    LegacyMessageWindowPlan,
+    MessageWindowStorageSnapshot,
+    _trusted_message_window_storage_authority,
+    attest_message_window_storage_projection,
+)
 from friday.organs import local_now
 from friday.oversight_scope import hierarchy_is_configured, may_oversee
 from friday.people import resolve_person, unambiguous
@@ -54,6 +60,9 @@ from friday.reminder_schedule import reminder_clock, reminder_clock_description,
 from friday.reports import SUPPORTED_KINDS, render, spec_from_payload
 from friday.retrieval import _public_graph_context, best_snippet, is_relational_query, tokens_of
 from friday.source_identity import private_source_search_page, raw_source_snapshot
+from friday.storage._conversations import (
+    select_promoted_current_conversation_window_in_transaction,
+)
 from friday.storage._core import iso_date
 from friday.storage._oversight import ANALYSES
 from friday.storage.models import (
@@ -3061,7 +3070,11 @@ class ExecutionKernel:
             "mission_compensation": self._mission_compensation,
             "memory_search": self._memory_search,
             "source_search": self._source_search,
-            "message_search": self._message_search,
+            # The promoted internal lane returns an opaque process-owned
+            # snapshot rather than a public JSON mapping.  The ordinary tool
+            # contract remains dictionary-shaped; only AgentRuntime can supply
+            # the hidden typed plan which reaches that branch.
+            "message_search": cast(Handler, self._message_search),
             "memory_save": self._memory_save,
             "web_search": self._web_search,
             "web_fetch": self._web_fetch,
@@ -5428,7 +5441,9 @@ class ExecutionKernel:
         before_message_id: str | None = None,
         match_all_terms: bool = False,
         include_full_content: bool = False,
-    ) -> dict[str, Any]:
+        promoted_current_conversation: bool = False,
+        promoted_plan: LegacyMessageWindowPlan | None = None,
+    ) -> dict[str, Any] | MessageWindowStorageSnapshot:
         """Search the caller's own chat history — not the knowledge base.
 
         ``memory_search`` only sees confirmed knowledge_objects. People ask
@@ -5448,6 +5463,57 @@ class ExecutionKernel:
         conv = " ".join(str(conversation_id or "").split()).strip() or None
         if (since is None) != (until is None):
             raise ValueError("since and until must be supplied together")
+        if promoted_current_conversation is True:
+            if (
+                type(promoted_plan) is not LegacyMessageWindowPlan
+                or query != ""
+                or since is None
+                or until is None
+                or conv is None
+                or before_message_id is None
+                or limit != promoted_plan.max_messages
+                or offset != 0
+                or match_all_terms is not False
+                or include_full_content is not False
+            ):
+                raise ValueError("promoted message window arguments are outside the closed lane")
+            authorization = self.authorization
+            if (
+                authorization is None
+                or not authorization.authorize(
+                    actor,
+                    "conversations.read",
+                ).allowed
+            ):
+                raise PermissionError("conversation read authorization denied")
+            timezone_name = str(getattr(self.settings, "local_timezone", "") or "").strip()
+            if not timezone_name:
+                timezone_name = str(getattr(_machine_zone(), "key", "") or "").strip()
+            if not timezone_name:
+                raise ValueError("promoted message window requires a named timezone")
+            with storage.transaction() as conn:
+                projection = select_promoted_current_conversation_window_in_transaction(
+                    conn,
+                    own_id=actor.own_id,
+                    conversation_id=conv,
+                    boundary_user_message_id=before_message_id,
+                    since=since,
+                    until=until,
+                    role=role,
+                    limit=limit,
+                    offset=offset,
+                )
+                if projection is None:
+                    raise RuntimeError("promoted message window scope is unavailable")
+                return attest_message_window_storage_projection(
+                    _trusted_message_window_storage_authority(),
+                    promoted_plan,
+                    tenant_id=actor.user_id,
+                    person_id=actor.own_id,
+                    conversation_id=conv,
+                    timezone_name=timezone_name,
+                    projection=projection,
+                )
         if since is not None and until is not None:
             page = storage.list_messages_window(
                 actor.own_id,

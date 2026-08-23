@@ -30,7 +30,14 @@ _MAX_SERIALIZED_BYTES = 4_096
 _MAX_RECEIPT_SERIALIZED_BYTES = 8_192
 _MAX_ASSISTANT_METADATA_BYTES = 65_536
 _MAX_CITATIONS = 32
-_OUTCOME_ROUTES = frozenset({RouteClass.FILE_READ, RouteClass.ARCHIVE_READ, RouteClass.WEB_READ})
+_OUTCOME_ROUTES = frozenset(
+    {
+        RouteClass.FILE_READ,
+        RouteClass.ARCHIVE_READ,
+        RouteClass.WEB_READ,
+        RouteClass.ORDINARY_DIALOGUE,
+    }
+)
 _FILE_GATE_ROUTES = frozenset({RouteClass.FILE_READ, RouteClass.ARCHIVE_READ})
 
 
@@ -176,11 +183,12 @@ class CapabilityOutcome:
 
     @property
     def retryable(self) -> bool:
-        # A verified partial/empty result is stable.  Authority denial must never
-        # be retried through another path.  Only transient unavailability is
-        # retryable in this first read-only contract.
+        # A verified partial/empty result is stable. Authority denial must never
+        # be retried through another path. Only bounded file/archive reads admit
+        # a transient retry; message and web lanes fail closed without fallback.
         return bool(
-            self.status is CapabilityOutcomeStatus.UNAVAILABLE and self.route is not RouteClass.WEB_READ
+            self.status is CapabilityOutcomeStatus.UNAVAILABLE
+            and self.route in {RouteClass.FILE_READ, RouteClass.ARCHIVE_READ}
         )
 
     def to_payload(self) -> dict[str, object]:

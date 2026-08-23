@@ -81,6 +81,7 @@ from friday.document_metadata_codec import (
 from friday.execution_kernel import (
     ExecutionKernel,
     ToolResult,
+    _machine_zone,
     _memory_graph_context_for_llm,
     _safe_filename,
     _web_research_collision_topic_class,
@@ -125,8 +126,23 @@ from friday.office_attestation import (
     verify_office_structure_attestation,
 )
 from friday.orchestration.capability_outcome import (
+    CapabilityOutcomeStatus,
     attach_accepted_capability_outcome_receipt,
     load_accepted_capability_outcome_receipt,
+)
+from friday.orchestration.message_window_outcome import (
+    MESSAGE_WINDOW_MAX_MESSAGES,
+    LegacyMessageWindowPlan,
+    MessageWindowEvidence,
+    MessageWindowOutcomeError,
+    MessageWindowSelectionToken,
+    MessageWindowStorageSnapshot,
+    _trusted_message_window_storage_authority,
+    accept_message_window_capability_outcome,
+    attest_message_window_storage_projection,
+    message_window_storage_snapshot_is_process_owned,
+    prepare_message_window_selection,
+    render_message_window_result,
 )
 from friday.orchestration.simple_public_news_outcome import (
     SIMPLE_PUBLIC_NEWS_ENVELOPE_FALLBACK as _SIMPLE_PUBLIC_NEWS_ENVELOPE_FALLBACK,
@@ -184,7 +200,10 @@ from friday.source_identity import (
     raw_source_identity_sha256 as _raw_source_identity_sha256,
 )
 from friday.storage import FridayStorage, normalize_conversation_mode, validate_user_id
-from friday.storage._conversations import store_message_in_transaction
+from friday.storage._conversations import (
+    select_promoted_current_conversation_window_in_transaction,
+    store_message_in_transaction,
+)
 from friday.storage._core import iso_date
 from friday.storage._intake import (
     resolve_explicit_file_citation_sources,
@@ -31060,6 +31079,343 @@ class AgentRuntime:
         fresh_actor = replace(actor, preset_key=str(principal_row["preset_key"] or "user"))
         return bool(authorization.authorize(fresh_actor, "web.research").allowed)
 
+    def _message_window_authority_state(
+        self,
+        conn: Any,
+        *,
+        actor: ActorContext,
+    ) -> str:
+        """Return one fresh, closed authority state for exact chat-window reads."""
+
+        get_tool = getattr(self.kernel, "get_tool", None)
+        tool_spec = get_tool("message_search") if callable(get_tool) else None
+        if (
+            str(getattr(tool_spec, "name", "") or "") != "message_search"
+            or str(getattr(tool_spec, "security_id", "") or "") != "search.use"
+            or str(getattr(tool_spec, "risk", "") or "") != "observe"
+            or "dialogue" not in set(getattr(tool_spec, "allowed_execution_scopes", ()) or ())
+            or not callable(getattr(tool_spec, "handler", None))
+        ):
+            return "unavailable"
+        principal = str(actor.own_id or "").strip()
+        principal_row = conn.execute(
+            "SELECT preset_key, status FROM users WHERE id=?",
+            (principal,),
+        ).fetchone()
+        authorization = getattr(self.kernel, "authorization", None)
+        if authorization is None:
+            return "unavailable"
+        if principal_row is None or str(principal_row["status"] or "") != "active":
+            return "denied"
+        fresh_actor = replace(actor, preset_key=str(principal_row["preset_key"] or "user"))
+        try:
+            allowed = bool(
+                authorization.authorize(fresh_actor, "search.use").allowed
+                and authorization.authorize(fresh_actor, "conversations.read").allowed
+            )
+        except Exception as exc:  # noqa: BLE001 - broken authority is not permission
+            LOGGER.warning("message-window: authority check failed (%s)", type(exc).__name__)
+            return "unavailable"
+        return "allowed" if allowed else "denied"
+
+    @staticmethod
+    def _attest_message_window_in_transaction(
+        conn: Any,
+        *,
+        plan: LegacyMessageWindowPlan,
+        tenant_id: str,
+        person_id: str,
+        conversation_id: str,
+        timezone_name: str,
+        since: str,
+        until: str,
+        boundary_message_id: str,
+        role: str | None,
+    ) -> MessageWindowStorageSnapshot | None:
+        projection = select_promoted_current_conversation_window_in_transaction(
+            conn,
+            own_id=person_id,
+            conversation_id=conversation_id,
+            boundary_user_message_id=boundary_message_id,
+            since=since,
+            until=until,
+            role=role,
+            limit=MESSAGE_WINDOW_MAX_MESSAGES,
+            offset=0,
+        )
+        if projection is None:
+            return None
+        return attest_message_window_storage_projection(
+            _trusted_message_window_storage_authority(),
+            plan,
+            tenant_id=tenant_id,
+            person_id=person_id,
+            conversation_id=conversation_id,
+            timezone_name=timezone_name,
+            projection=projection,
+        )
+
+    async def _promoted_message_window_response(
+        self,
+        *,
+        actor: ActorContext,
+        conversation_id: str,
+        person_id: str,
+        request: str,
+        boundary_message_id: str,
+        timezone_name: str,
+        since: str,
+        until: str,
+        role: str | None,
+        turn_deadline: float | None,
+    ) -> dict[str, Any]:
+        """Execute, re-attest and atomically publish one exact message window."""
+
+        plan = LegacyMessageWindowPlan.from_request(
+            request,
+            tenant_id=actor.user_id,
+            person_id=person_id,
+            conversation_id=conversation_id,
+            timezone_name=timezone_name,
+            since_utc=since,
+            until_utc=until,
+            boundary_message_id=boundary_message_id,
+            role=role,
+        )
+        attempted = False
+        prepared_selection: MessageWindowSelectionToken | None = None
+        initial_evidence: MessageWindowEvidence
+        with self.storage.transaction() as authority_conn:
+            initial_authority = self._message_window_authority_state(
+                authority_conn,
+                actor=actor,
+            )
+        if initial_authority == "denied":
+            initial_evidence = MessageWindowEvidence.source_free(
+                plan,
+                CapabilityOutcomeStatus.DENIED,
+            )
+        elif initial_authority != "allowed":
+            initial_evidence = MessageWindowEvidence.source_free(
+                plan,
+                CapabilityOutcomeStatus.UNAVAILABLE,
+            )
+        else:
+            attempted = True
+            tool_result: ToolResult | None = None
+            try:
+                tool_result = await _await_with_turn_deadline(
+                    self.kernel.execute(
+                        "message_search",
+                        {
+                            "query": "",
+                            "limit": MESSAGE_WINDOW_MAX_MESSAGES,
+                            "conversation_id": conversation_id,
+                            "since": since,
+                            "until": until,
+                            "offset": 0,
+                            "before_message_id": boundary_message_id,
+                            "promoted_current_conversation": True,
+                            "promoted_plan": plan,
+                            **({"role": role} if role is not None else {}),
+                        },
+                        actor=actor,
+                    ),
+                    turn_deadline,
+                    expired="turn deadline expired during exact message-window read",
+                )
+                snapshot = tool_result.data if tool_result.success else None
+                if not message_window_storage_snapshot_is_process_owned(snapshot):
+                    raise MessageWindowOutcomeError("kernel returned no sealed message snapshot")
+                assert isinstance(snapshot, MessageWindowStorageSnapshot)
+                prepared_selection = prepare_message_window_selection(plan, snapshot)
+                initial_evidence = MessageWindowEvidence.from_selection(plan, prepared_selection)
+            except Exception as exc:  # noqa: BLE001 - exact read fails closed without retry
+                LOGGER.warning("message-window: initial read unavailable (%s)", type(exc).__name__)
+                initial_evidence = MessageWindowEvidence.source_free(
+                    plan,
+                    CapabilityOutcomeStatus.UNAVAILABLE,
+                )
+
+        with self.storage.transaction() as publication_conn:
+            final_authority = self._message_window_authority_state(
+                publication_conn,
+                actor=actor,
+            )
+            current_snapshot: MessageWindowStorageSnapshot | None = None
+            final_evidence: MessageWindowEvidence
+            authority_allowed: bool
+            if initial_evidence.status is CapabilityOutcomeStatus.DENIED or final_authority == "denied":
+                final_evidence = MessageWindowEvidence.source_free(
+                    plan,
+                    CapabilityOutcomeStatus.DENIED,
+                )
+                authority_allowed = False
+            elif (
+                final_authority != "allowed"
+                or initial_evidence.status is CapabilityOutcomeStatus.UNAVAILABLE
+                or prepared_selection is None
+            ):
+                final_evidence = MessageWindowEvidence.source_free(
+                    plan,
+                    CapabilityOutcomeStatus.UNAVAILABLE,
+                )
+                authority_allowed = True
+            else:
+                try:
+                    current_snapshot = self._attest_message_window_in_transaction(
+                        publication_conn,
+                        plan=plan,
+                        tenant_id=actor.user_id,
+                        person_id=person_id,
+                        conversation_id=conversation_id,
+                        timezone_name=timezone_name,
+                        since=since,
+                        until=until,
+                        boundary_message_id=boundary_message_id,
+                        role=role,
+                    )
+                    if not message_window_storage_snapshot_is_process_owned(current_snapshot):
+                        raise MessageWindowOutcomeError("current message snapshot is unavailable")
+                    assert current_snapshot is not None
+                    current_selection = prepare_message_window_selection(plan, current_snapshot)
+                    if current_selection.identity_sha256 != prepared_selection.identity_sha256:
+                        raise MessageWindowOutcomeError("message snapshot changed before publication")
+                    final_evidence = initial_evidence
+                    authority_allowed = True
+                except Exception as exc:  # noqa: BLE001 - stale evidence is never published
+                    LOGGER.warning("message-window: final snapshot unavailable (%s)", type(exc).__name__)
+                    current_snapshot = None
+                    final_evidence = MessageWindowEvidence.source_free(
+                        plan,
+                        CapabilityOutcomeStatus.UNAVAILABLE,
+                    )
+                    authority_allowed = True
+
+            if final_evidence.status in {
+                CapabilityOutcomeStatus.COMPLETE,
+                CapabilityOutcomeStatus.PARTIAL,
+                CapabilityOutcomeStatus.EMPTY,
+            }:
+                content, result = render_message_window_result(
+                    plan,
+                    final_evidence,
+                    selection=prepared_selection,
+                    snapshot=current_snapshot,
+                    authority_allowed=True,
+                )
+                gate_selection = prepared_selection
+                gate_snapshot = current_snapshot
+            else:
+                content, result = render_message_window_result(
+                    plan,
+                    final_evidence,
+                    selection=None,
+                    snapshot=None,
+                    authority_allowed=authority_allowed,
+                )
+                gate_selection = None
+                gate_snapshot = None
+            _decision, outcome = accept_message_window_capability_outcome(
+                plan=plan,
+                evidence=final_evidence,
+                result=result,
+                answer=content,
+                prepared_selection=gate_selection,
+                current_snapshot=gate_snapshot,
+                authority_rechecked=True,
+                authority_allowed=authority_allowed,
+            )
+            verification_status = VERDICT_PASSED if outcome.verified else VERDICT_UNKNOWN
+            tools_used = ["message_search"] if attempted else []
+            assistant_metadata: dict[str, Any] = {
+                "answer_mode": "structural",
+                "interaction_mode": "dialogue",
+                "tools_used": tools_used,
+                "private_context_lineage": True,
+                "verified": outcome.verified,
+                "verification_status": verification_status,
+                "verification": {
+                    "status": verification_status,
+                    "ok": outcome.verified,
+                    "score": 1.0 if outcome.verified else None,
+                    "issues": [],
+                    "attachment_evidence_used": False,
+                },
+                "structural": {
+                    "verdict_kind": "message_window",
+                    "answer_present": True,
+                    "model_spoke": False,
+                    "remainder_known": True,
+                    "llm_failed": False,
+                    "message_window_status": outcome.status.value,
+                },
+            }
+            attach_accepted_capability_outcome_receipt(assistant_metadata, outcome)
+            load_accepted_capability_outcome_receipt(
+                assistant_metadata,
+                expected_outcome=outcome,
+            )
+            assistant_message = store_message_in_transaction(
+                publication_conn,
+                conversation_id,
+                person_id,
+                "assistant",
+                content,
+                metadata=assistant_metadata,
+                reply_to=boundary_message_id,
+            )
+            if assistant_message.get("content") != content:
+                raise ValueError("message-window assistant durability reread changed content")
+            load_accepted_capability_outcome_receipt(
+                assistant_message.get("metadata_json"),
+                expected_outcome=outcome,
+            )
+
+        LOGGER.info("message-window: published %s without model or retry", outcome.status.value)
+        return {
+            "conversation_id": conversation_id,
+            "message_id": assistant_message.get("id"),
+            "message": content,
+            "message_format": "plain",
+            "verified": outcome.verified,
+            "verification_status": verification_status,
+            "verification": {
+                "status": verification_status,
+                "score": 1.0 if outcome.verified else None,
+                "issues": [],
+            },
+            "verification_caution": "",
+            "citations": [],
+            "answer_grounded": True if outcome.verified else None,
+            "citation_notice": "",
+            "grounding_warning": "",
+            "citation_check": {
+                "status": "passed" if outcome.verified else "skipped",
+                "checked": len(outcome.citation_labels),
+            },
+            "tools_used": tools_used,
+            "obsidian_open_url": "",
+            "web_evidence_status": "none",
+            "web_evidence_scope": "none",
+            "web_sources": [],
+            "web_query_notice": "",
+            "voice": None,
+            "files": [],
+            "attachment_context_available": False,
+            "attachment_context_expected_count": 0,
+            "attachment_context_readable_count": 0,
+            "attachment_coverage_complete": False,
+            "attachment_verification_complete": False,
+            "restored_attachment_count": 0,
+            "message_window_status": outcome.status.value,
+            "context": {
+                "interaction_mode": "dialogue",
+                "llm_failed": False,
+                "message_window_status": outcome.status.value,
+            },
+        }
+
     def _final_voice_tool_authorized(
         self,
         conn: Any,
@@ -36473,6 +36829,70 @@ class AgentRuntime:
             and not isolated_outbound_turn
             and not _requests_foreign_private_data(clean_message)
         )
+        promoted_message_window_timezone = str(
+            getattr(getattr(self, "settings", None), "local_timezone", "") or ""
+        ).strip()
+        try:
+            promoted_message_window_zone = (
+                ZoneInfo(promoted_message_window_timezone)
+                if promoted_message_window_timezone
+                else _machine_zone()
+            )
+            promoted_message_window_timezone = str(
+                getattr(promoted_message_window_zone, "key", "") or ""
+            ).strip()
+        except (KeyError, ValueError):
+            promoted_message_window_timezone = ""
+        promoted_message_window_admitted = bool(
+            enable_tools
+            and turn_policy is None
+            and interaction_mode == "dialogue"
+            and actor.own_id == person_id
+            and locate_window is not None
+            and message_locate_route
+            and locate_decomposition.remainder_known
+            and not locate_decomposition.split
+            and not locate_decomposition.open_remainder
+            and locate_decomposition.locate_clause == clean_message
+            and not locate_subject
+            and not _OWN_MESSAGE_ANALYSIS_REQUEST.search(_classification_text(clean_message))
+            and not message_locate_malformed
+            and not message_locate_compound
+            and not message_locate_resume_attempt
+            and not message_locate_flow
+            and not file_turn.actions
+            and not synthetic_document_notice
+            and not answer_with_voice
+            and not replay_source_message_id
+            and not replay_had_attachments
+            and replay_source_parent is None
+            and not reply_quote
+            and not reply_to
+            and not quoted_attachment_reference
+            and not reply_assistant_reference
+            and not reply_assistant_message_id
+            and user_reply_parent_id is None
+            and supplied_attachment_count == 0
+            and not attachments
+            and not attachment_list
+            and not current_attachment_ids
+            and restored_attachment_expected_count == 0
+            and not restored_attachments
+            and not restored_attachment_ids
+            and not attachment_reference_kind
+            and not attachment_resolution_failed
+            and workspace_inbox_request is None
+            and not person_inventory_turn
+            and not named_person_corpus.applies
+            and not exact_uploader_file.applies
+            and not filename_clue_selection.applies
+            and filename_inventory_request is None
+            and not direct_archived_source_query
+            and not contextual_source_query
+            and obsidian_intent is None
+            and obsidian_result_request_candidate is None
+            and bool(promoted_message_window_timezone)
+        )
         # Once a private file has contributed to this conversation, nothing
         # derived from its history may be promoted into account-wide memory.
         # Compute the taint before `_prepare_context`: correction/rule learning
@@ -36490,6 +36910,7 @@ class AgentRuntime:
             or filename_inventory_request is not None
             or filename_clue_selection.applies
             or message_locate_flow
+            or promoted_message_window_admitted
             # A corpus source lookup can expose the same private bytes in a
             # fresh conversation without a restorable attachment pointer.  Mark
             # the user row before execution so a crash cannot reopen outbound
@@ -36671,6 +37092,21 @@ class AgentRuntime:
             if re.fullmatch(r"msg_[0-9a-f]{16}", replay_root_id)
             else source_search_lineage_user_message_id
         )
+        if promoted_message_window_admitted:
+            assert locate_window is not None
+            window_since, window_until, window_role = locate_window
+            return await self._promoted_message_window_response(
+                actor=actor,
+                conversation_id=str(conversation_id),
+                person_id=person_id,
+                request=clean_message,
+                boundary_message_id=source_search_lineage_user_message_id,
+                timezone_name=promoted_message_window_timezone,
+                since=window_since,
+                until=window_until,
+                role=window_role,
+                turn_deadline=turn_deadline,
+            )
         workspace_inbox_resolution = _WorkspaceInboxResolution()
         if workspace_inbox_request is not None:
             workspace_inbox_resolution = (
