@@ -1,23 +1,25 @@
 # Interaction Control Plane implementation status
 
-Status: **P0A + P0B + FIRST P1 READ SLICE IMPLEMENTED AND DEPLOYED**
+Status: **P0A + P0B + P1 READ SLICES + NARROW P2 RECALL CANARY DEPLOYED**
 Date: 2026-08-23
 Branch: `main`
-Source: `main` / `321f8fa`
-Live: Friday `0.207.4` / `6a25cda`, schema 37
+Source: `main` / `c91260d`
+Live: Friday `0.207.4` / `c91260d`, schema 38
 
 ## Release checkpoint
 
-- P0A structural tracing was completed through `4ba65f1` on schema 36.
-- `f99d889` introduced the schema-37-capable failure-store foundation and remains
-  an available sealed schema-capable release.
-- `2614e69` added the durable pre-assistant-commit failure path.
-- `478378f` added the privacy-safe admin baseline.
-- `ba53e2b`/`fc0c6c1` added the first typed read completion gate and
-  `search_explain`; `b50e63b` made accepted outcomes durable and atomic.
-- The live anchor resolves to `6a25cda`, with `b50e63b` as its current
-  previous/schema-capable fallback. Backend and bridge are active, health is
-  `ok`, the database is schema 37 and `PRAGMA integrity_check` is `ok`.
+- P0A/P0B structural tracing, failure storage and the privacy-safe admin
+  baseline remain deployed.
+- Typed `FILE_READ`, `ARCHIVE_READ` and bounded `WEB_READ` outcomes use a
+  deterministic completion gate and atomic private accepted-outcome receipts.
+- `0f47870` introduced the dormant schema-38 Work Item foundation; `cb1b3f7`
+  established it as the sealed schema-capable fallback.
+- `d1c5d6f` added the exact message-window continuation canary; `4b6bc49`
+  preserved the existing named-inventory follow-up lane and `c91260d` is the
+  current deployed source.
+- The live anchor resolves to `c91260d`, with `cb1b3f7` as fallback. Backend and
+  bridge are active, trusted-CA health is `ok`, and schema 38, SQLite quick-check,
+  foreign keys and exact Work Item DDL are clean.
 
 ## P0A implemented
 
@@ -59,22 +61,26 @@ Live: Friday `0.207.4` / `6a25cda`, schema 37
 - The V12 `FILE_READ`/`ARCHIVE_READ` `CapabilityOutcome v1`, completion gate and
   atomic accepted-outcome receipt are deployed. The wider P1 adapter set is not
   complete; see `outer_sol/V12_FURTHER_REFINEMENT_STATUS.md`.
-- Durable Work Items, general Active Frames and WorkGraphs have not started in
-  this contour and must not be inferred from the tracing layer.
+- The only durable Work Item currently released is the narrow
+  `RecallConversation` exact-window canary. It must not be generalized into a
+  claim that document recall, generic Active Frames or WorkGraphs are complete.
 
 ## Next implementation order
 
-1. Extend typed outcomes to the remaining highest-value document, message and
-   web read capabilities without migrating every legacy tool at once.
-2. Start P2 lightweight durable Work Items and Active Frame only after the P1
-   contracts and receipt boundary are stable.
-3. Keep generic autonomous WorkGraphs behind those prerequisites.
+1. Add the canonical golden-journey/evidence registry with strict readiness
+   states and mechanically linked proof.
+2. Establish stable retrieval and passage identity plus honest coverage, then a
+   read-only federated `archive_search` facade.
+3. Extend durable recall to documents/messages only through those stable
+   references; keep generic autonomous WorkGraphs behind that proof.
 
 ## Current cumulative gate
 
-- Focused accepted-receipt gate: 190 passed.
-- Full non-UI Python gate: 15,874 passed, zero skipped, including pinned
-  Syncthing `v2.1.3`.
+- Full non-UI Python gate: 16,175 passed, zero skipped, including pinned
+  Syncthing `v2.1.3` managed-REST smoke.
+- Schema-38 migration, lifecycle/privacy, revision-CAS, restart, temporal
+  continuation, receipt/plan binding and named-inventory compatibility checks
+  passed.
 - Toolchain preflight, Ruff, format, mypy, compileall, Bandit HIGH and JavaScript
   syntax checks passed. Docker and the separate unchanged browser/UI phase were
   deliberately outside this checkpoint.
