@@ -13,8 +13,15 @@ from zoneinfo import ZoneInfo
 import pytest
 
 import friday.file_evidence_reader as file_evidence_reader
+from friday.api.projections import public_chat_ingestion, public_conversation_message
 from friday.model_profiles import ModelProfileLease, ModelRequirements
-from friday.orchestration import ReadOnlyRouteRequest, RouteClass, TurnInput, TurnPlan
+from friday.orchestration import (
+    OrchestrationRouter,
+    ReadOnlyRouteRequest,
+    RouteClass,
+    TurnInput,
+    TurnPlan,
+)
 from friday.orchestration.archive_read import V12ArchiveReadHandler
 from friday.orchestration.capability_outcome import (
     CapabilityOutcomeStatus,
@@ -22,7 +29,8 @@ from friday.orchestration.capability_outcome import (
 )
 from friday.orchestration.file_read import V12FileReadError
 from friday.permissions import ActorContext, AuthorizationService
-from friday.storage.models import RawObject, new_id
+from friday.source_identity import raw_source_identity_sha256
+from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
 
 
 def _actor(*, preset_key: str = "owner") -> ActorContext:
@@ -282,6 +290,62 @@ def _recent(minutes: int) -> datetime:
     return datetime.now(UTC) - timedelta(minutes=minutes)
 
 
+def _raw_identity_pin(storage: Any, raw_id: str) -> str:
+    raw = storage.get_raw_object(raw_id, "alice")
+    if not isinstance(raw, dict):
+        return "a" * 64
+    return raw_source_identity_sha256(
+        {
+            **raw,
+            "_raw_content": raw.get("raw_content"),
+            "_raw_metadata": raw.get("metadata_json"),
+        }
+    )
+
+
+def _source_search_conversation(
+    storage: Any,
+    raw_ids: list[Any],
+    *,
+    extra_metadata: dict[str, Any] | None = None,
+) -> tuple[str, str]:
+    if storage.get_user("alice") is None:
+        storage.ensure_user("alice", preset_key="owner", display_name="Alice", username="alice")
+    conversation = storage.create_conversation("alice")
+    conversation_id = str(conversation["id"])
+    user_message = storage.store_message(
+        conversation_id,
+        "alice",
+        "user",
+        "Найди мои документы по теме проекта",
+    )
+    identities: dict[str, str] = {}
+    if type(raw_ids) is list:
+        for value in raw_ids:
+            if not isinstance(value, str):
+                continue
+            raw_id = str(value)
+            if raw_id in identities:
+                continue
+            identities[raw_id] = _raw_identity_pin(storage, raw_id)
+    metadata = {
+        "private_context_lineage": True,
+        "source_search_result_identities": identities,
+        "source_search_result_raw_ids": raw_ids,
+        "tools_used": ["source_search"],
+        **(extra_metadata or {}),
+    }
+    assistant = storage.store_message(
+        conversation_id,
+        "alice",
+        "assistant",
+        "Нашла подходящие документы.",
+        metadata=metadata,
+        reply_to=str(user_message["id"]),
+    )
+    return conversation_id, str(assistant["id"])
+
+
 @pytest.mark.asyncio
 async def test_exact_filename_selects_one_unique_registered_file(settings, storage) -> None:
     wanted = _registered_text_file(
@@ -325,6 +389,531 @@ async def test_exact_filename_selects_one_unique_registered_file(settings, stora
     )
     assert receipt.outcome.route is RouteClass.ARCHIVE_READ
     assert receipt.outcome_sha256 == result.outcome.canonical_sha256()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "ordinal"),
+    [
+        ("Прочитай первый найденный файл целиком", 1),
+        ("Прочитай второй найденный документ", 2),
+        ("Пожалуйста, прочти 2-й найденный материал полностью.", 2),
+    ],
+)
+async def test_immediate_source_search_ordinal_reads_only_selected_raw_with_receipt_and_privacy(
+    settings,
+    storage,
+    message: str,
+    ordinal: int,
+) -> None:
+    first = _registered_text_file(storage, settings, text="FIRST-CANDIDATE", filename="first.txt")
+    second = _registered_text_file(storage, settings, text="SECOND-CANDIDATE", filename="second.txt")
+    conversation_id, _source_message_id = _source_search_conversation(storage, [first, second])
+    model = _Model("Выбранный документ прочитан. [A1]", labels=("A1",))
+    handler, _authorization = _handler(storage, settings, model)
+    request, turn, plan = _request(message, actor=_actor(), conversation_id=conversation_id)
+
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+    result = await handler.handle(request, turn, plan, preparation)
+
+    selected = (first, second)[ordinal - 1]
+    decoy = (second, first)[ordinal - 1]
+    payload = json.dumps(model.calls[0]["messages"], ensure_ascii=False)
+    assert ("FIRST-CANDIDATE", "SECOND-CANDIDATE")[ordinal - 1] in payload
+    assert ("SECOND-CANDIDATE", "FIRST-CANDIDATE")[ordinal - 1] not in payload
+    messages = storage.get_conversation_messages(conversation_id, user_id="alice")
+    metadata = json.loads(messages[-1]["metadata_json"])
+    assert metadata["conversation_attachment_raw_ids"] == [selected]
+    receipt = load_accepted_capability_outcome_receipt(metadata, expected_outcome=result.outcome)
+    assert receipt.outcome.route is RouteClass.ARCHIVE_READ
+    assert receipt.outcome_sha256 == result.outcome.canonical_sha256()
+
+    public_message = public_conversation_message(messages[-1])
+    public_chat = public_chat_ingestion(
+        {
+            "message": result.message,
+            "accepted_capability_outcome": metadata["accepted_capability_outcome"],
+            "source_search_result_identities": {selected: "f" * 64},
+        }
+    )
+    public_payload = json.dumps((public_message, public_chat), ensure_ascii=False)
+    assert selected not in public_payload
+    assert decoy not in public_payload
+    assert "source_search_result_raw_ids" not in public_payload
+    assert "source_search_result_identities" not in public_payload
+    assert "accepted_capability_outcome" not in public_payload
+
+
+@pytest.mark.asyncio
+async def test_stale_source_search_page_is_not_recovered_past_a_new_dialogue_turn(
+    settings,
+    storage,
+) -> None:
+    raw_id = _registered_text_file(storage, settings, text="STALE", filename="stale.txt")
+    conversation_id, _source_message_id = _source_search_conversation(storage, [raw_id])
+    storage.store_message(conversation_id, "alice", "user", "Это другой вопрос")
+    storage.store_message(conversation_id, "alice", "assistant", "Это другой ответ")
+    model = _Model("Не должен вызываться. [A1]", labels=("A1",))
+    handler, _authorization = _handler(storage, settings, model)
+    request, turn, plan = _request(
+        "Прочитай первый найденный файл целиком",
+        actor=_actor(),
+        conversation_id=conversation_id,
+    )
+
+    assert await handler.prepare(request, turn, plan) is None
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "raw_ids",
+    [
+        "raw_0123456789abcdef",
+        ["not-a-raw-id"],
+        ["raw_0123456789abcdef", "raw_0123456789abcdef"],
+        [1],
+        [f"raw_{index:016x}" for index in range(11)],
+    ],
+)
+async def test_malformed_source_search_candidate_metadata_falls_back_before_read(
+    settings,
+    storage,
+    raw_ids: Any,
+) -> None:
+    conversation_id, _source_message_id = _source_search_conversation(storage, raw_ids)
+    model = _Model("Не должен вызываться. [A1]", labels=("A1",))
+    handler, _authorization = _handler(storage, settings, model)
+    request, turn, plan = _request(
+        "Прочитай первый найденный файл целиком",
+        actor=_actor(),
+        conversation_id=conversation_id,
+    )
+
+    assert await handler.prepare(request, turn, plan) is None
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_oversized_source_search_metadata_falls_back_before_read(settings, storage) -> None:
+    raw_id = _registered_text_file(storage, settings, text="PRIVATE", filename="private.txt")
+    conversation_id, source_message_id = _source_search_conversation(storage, [raw_id])
+    oversized = json.dumps(
+        {
+            "private_context_lineage": True,
+            "source_search_result_identities": {raw_id: "a" * 64},
+            "source_search_result_raw_ids": [raw_id],
+            "tools_used": ["source_search"],
+            "padding": "x" * 65_536,
+        },
+        ensure_ascii=False,
+    )
+    storage.execute("UPDATE messages SET metadata_json=? WHERE id=?", (oversized, source_message_id))
+    storage.commit()
+    model = _Model("Не должен вызываться. [A1]", labels=("A1",))
+    handler, _authorization = _handler(storage, settings, model)
+    request, turn, plan = _request(
+        "Прочитай первый найденный файл целиком",
+        actor=_actor(),
+        conversation_id=conversation_id,
+    )
+
+    assert await handler.prepare(request, turn, plan) is None
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_duplicate_source_search_metadata_key_falls_back_before_read(settings, storage) -> None:
+    first = _registered_text_file(storage, settings, text="FIRST", filename="first.txt")
+    second = _registered_text_file(storage, settings, text="SECOND", filename="second.txt")
+    conversation_id, source_message_id = _source_search_conversation(storage, [first])
+    duplicate = (
+        '{"private_context_lineage":true,"tools_used":["source_search"],'
+        f'"source_search_result_raw_ids":["{first}"],'
+        f'"source_search_result_raw_ids":["{second}"]}}'
+    )
+    storage.execute("UPDATE messages SET metadata_json=? WHERE id=?", (duplicate, source_message_id))
+    storage.commit()
+    model = _Model("Не должен вызываться. [A1]", labels=("A1",))
+    handler, _authorization = _handler(storage, settings, model)
+    request, turn, plan = _request(
+        "Прочитай первый найденный файл целиком",
+        actor=_actor(),
+        conversation_id=conversation_id,
+    )
+
+    assert await handler.prepare(request, turn, plan) is None
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_source_search_page_without_identity_pins_falls_back(settings, storage) -> None:
+    raw_id = _registered_text_file(storage, settings, text="LEGACY", filename="legacy.txt")
+    conversation_id, source_message_id = _source_search_conversation(storage, [raw_id])
+    storage.execute(
+        "UPDATE messages SET metadata_json=? WHERE id=?",
+        (
+            json.dumps(
+                {
+                    "private_context_lineage": True,
+                    "source_search_result_raw_ids": [raw_id],
+                    "tools_used": ["source_search"],
+                }
+            ),
+            source_message_id,
+        ),
+    )
+    storage.commit()
+    model = _Model("Не должен вызываться. [A1]", labels=("A1",))
+    handler, _authorization = _handler(storage, settings, model)
+    request, turn, plan = _request(
+        "Прочитай первый найденный файл целиком",
+        actor=_actor(),
+        conversation_id=conversation_id,
+    )
+
+    assert await handler.prepare(request, turn, plan) is None
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_source_mutation_after_search_before_followup_prepare_falls_back(
+    settings,
+    storage,
+) -> None:
+    raw_id = _registered_text_file(storage, settings, text="ORIGINAL", filename="original.txt")
+    conversation_id, _source_message_id = _source_search_conversation(storage, [raw_id])
+    storage.execute(
+        "UPDATE raw_objects SET raw_content='MUTATED-BEFORE-PREPARE', content_hash=? WHERE id=?",
+        ("0" * 64, raw_id),
+    )
+    storage.commit()
+    model = _Model("Не должен вызываться. [A1]", labels=("A1",))
+    handler, _authorization = _handler(storage, settings, model)
+    request, turn, plan = _request(
+        "Прочитай первый найденный файл целиком",
+        actor=_actor(),
+        conversation_id=conversation_id,
+    )
+
+    assert await handler.prepare(request, turn, plan) is None
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Прочитай второй найденный файл",
+        "Прочитай 3-й найденный документ целиком",
+    ],
+)
+async def test_out_of_range_source_search_ordinal_falls_back(
+    settings,
+    storage,
+    message: str,
+) -> None:
+    raw_id = _registered_text_file(storage, settings, text="ONLY", filename="only.txt")
+    conversation_id, _source_message_id = _source_search_conversation(storage, [raw_id])
+    model = _Model("Не должен вызываться. [A1]", labels=("A1",))
+    handler, _authorization = _handler(storage, settings, model)
+    request, turn, plan = _request(message, actor=_actor(), conversation_id=conversation_id)
+
+    assert await handler.prepare(request, turn, plan) is None
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_tenth_candidate_is_the_closed_source_search_page_limit(settings, storage) -> None:
+    candidates = [
+        _registered_text_file(
+            storage,
+            settings,
+            text=f"CANDIDATE-{index}",
+            filename=f"candidate-{index}.txt",
+        )
+        for index in range(1, 11)
+    ]
+    conversation_id, _source_message_id = _source_search_conversation(storage, candidates)
+    model = _Model("Десятый документ прочитан. [A1]", labels=("A1",))
+    handler, _authorization = _handler(storage, settings, model)
+    request, turn, plan = _request(
+        "Прочитай 10-й найденный файл целиком",
+        actor=_actor(),
+        conversation_id=conversation_id,
+    )
+
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+    result = await handler.handle(request, turn, plan, preparation)
+
+    messages = storage.get_conversation_messages(conversation_id, user_id="alice")
+    metadata = json.loads(messages[-1]["metadata_json"])
+    assert metadata["conversation_attachment_raw_ids"] == [candidates[-1]]
+    assert result.outcome.route is RouteClass.ARCHIVE_READ
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Прочитай найденный файл",
+        "Прочитай все найденные файлы",
+        "Прочитай файл №1",
+        "Не читай первый найденный файл",
+        "Я сказал: прочитай первый найденный файл",
+    ],
+)
+async def test_non_closed_source_search_followups_remain_legacy_owned(
+    settings,
+    storage,
+    message: str,
+) -> None:
+    raw_id = _registered_text_file(storage, settings, text="PRIVATE", filename="private.txt")
+    conversation_id, _source_message_id = _source_search_conversation(storage, [raw_id])
+    model = _Model("Не должен вызываться. [A1]", labels=("A1",))
+    handler, _authorization = _handler(storage, settings, model)
+    request, turn, plan = _request(message, actor=_actor(), conversation_id=conversation_id)
+
+    assert await handler.prepare(request, turn, plan) is None
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_foreign_source_search_candidate_never_crosses_uploader_boundary(
+    settings,
+    storage,
+) -> None:
+    foreign = _registered_text_file(
+        storage,
+        settings,
+        text="BOB-PRIVATE",
+        filename="bob.txt",
+        uploaded_by="bob",
+    )
+    conversation_id, _source_message_id = _source_search_conversation(storage, [foreign])
+    model = _Model("Не должен вызываться. [A1]", labels=("A1",))
+    handler, _authorization = _handler(storage, settings, model)
+    request, turn, plan = _request(
+        "Прочитай первый найденный файл целиком",
+        actor=_actor(),
+        conversation_id=conversation_id,
+    )
+
+    assert await handler.prepare(request, turn, plan) is None
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_source_search_conversation_and_active_person_are_exact_authority_boundaries(
+    settings,
+    storage,
+) -> None:
+    raw_id = _registered_text_file(storage, settings, text="ALICE", filename="alice.txt")
+    storage.ensure_user("bob", preset_key="user", display_name="Bob", username="bob")
+    foreign_conversation = storage.create_conversation("bob")
+    storage.store_message(
+        str(foreign_conversation["id"]),
+        "bob",
+        "assistant",
+        "Чужая поисковая выдача",
+        metadata={
+            "private_context_lineage": True,
+            "source_search_result_identities": {raw_id: _raw_identity_pin(storage, raw_id)},
+            "source_search_result_raw_ids": [raw_id],
+            "tools_used": ["source_search"],
+        },
+    )
+    model = _Model("Не должен вызываться. [A1]", labels=("A1",))
+    handler, _authorization = _handler(storage, settings, model)
+    request, turn, plan = _request(
+        "Прочитай первый найденный файл целиком",
+        actor=_actor(),
+        conversation_id=str(foreign_conversation["id"]),
+    )
+    assert await handler.prepare(request, turn, plan) is None
+
+    own_conversation_id, _source_message_id = _source_search_conversation(storage, [raw_id])
+    storage.update_user("alice", status="disabled")
+    request, turn, plan = _request(
+        "Прочитай первый найденный файл целиком",
+        actor=_actor(),
+        conversation_id=own_conversation_id,
+    )
+    assert await handler.prepare(request, turn, plan) is None
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "drift",
+    [
+        "intervening",
+        "source_row_marker_removed",
+        "deleted",
+        "ignored",
+        "mutated",
+        "candidate_reordered",
+    ],
+)
+async def test_source_search_selection_drift_during_synthesis_rolls_back_publication(
+    settings,
+    storage,
+    drift: str,
+) -> None:
+    selected = _registered_text_file(storage, settings, text="SELECTED", filename="selected.txt")
+    decoy = _registered_text_file(storage, settings, text="DECOY", filename="decoy.txt")
+    selected_pin = _raw_identity_pin(storage, selected)
+    decoy_pin = _raw_identity_pin(storage, decoy)
+    conversation_id, source_message_id = _source_search_conversation(storage, [selected, decoy])
+
+    def mutate() -> None:
+        if drift == "intervening":
+            storage.store_message(conversation_id, "alice", "assistant", "Вмешавшийся ответ")
+        elif drift == "source_row_marker_removed":
+            storage.execute(
+                "UPDATE messages SET metadata_json=? WHERE id=?",
+                (
+                    json.dumps(
+                        {
+                            "private_context_lineage": False,
+                            "source_search_result_identities": {
+                                selected: selected_pin,
+                                decoy: decoy_pin,
+                            },
+                            "source_search_result_raw_ids": [selected, decoy],
+                            "tools_used": ["source_search"],
+                        }
+                    ),
+                    source_message_id,
+                ),
+            )
+            storage.commit()
+        elif drift == "deleted":
+            storage.execute(
+                "UPDATE raw_objects SET deleted_at=? WHERE id=?",
+                (datetime.now(UTC).isoformat(), selected),
+            )
+            storage.commit()
+        elif drift == "ignored":
+            storage.store_inbox_item(
+                InboxItem(
+                    id=new_id("inbox"),
+                    user_id="alice",
+                    raw_object_id=selected,
+                    status=InboxStatus.IGNORED,
+                )
+            )
+        elif drift == "mutated":
+            storage.execute(
+                "UPDATE raw_objects SET raw_content='TAMPERED', content_hash=? WHERE id=?",
+                ("0" * 64, selected),
+            )
+            storage.commit()
+        elif drift == "candidate_reordered":
+            storage.execute(
+                "UPDATE messages SET metadata_json=? WHERE id=?",
+                (
+                    json.dumps(
+                        {
+                            "private_context_lineage": True,
+                            "source_search_result_identities": {
+                                selected: selected_pin,
+                                decoy: decoy_pin,
+                            },
+                            "source_search_result_raw_ids": [decoy, selected],
+                            "tools_used": ["source_search"],
+                        }
+                    ),
+                    source_message_id,
+                ),
+            )
+            storage.commit()
+        else:  # pragma: no cover - closed parameter set above
+            raise AssertionError(drift)
+
+    model = _Model("Выбранный документ прочитан. [A1]", labels=("A1",), mutate=mutate)
+    handler, _authorization = _handler(storage, settings, model)
+    request, turn, plan = _request(
+        "Прочитай первый найденный файл целиком",
+        actor=_actor(),
+        conversation_id=conversation_id,
+    )
+    preparation = await handler.prepare(request, turn, plan)
+    assert preparation is not None
+
+    with pytest.raises(V12FileReadError, match="authority changed"):
+        await handler.handle(request, turn, plan, preparation)
+
+    messages = storage.get_conversation_messages(conversation_id, user_id="alice")
+    assert all(row["content"] != turn.message for row in messages)
+
+
+@pytest.mark.asyncio
+async def test_real_router_dispatches_immediate_source_search_ordinal_to_archive_read(
+    settings,
+    storage,
+) -> None:
+    raw_id = _registered_text_file(storage, settings, text="ROUTER-SOURCE", filename="router.txt")
+    conversation_id, _source_message_id = _source_search_conversation(storage, [raw_id])
+    phrase = "Прочитай первый найденный файл целиком"
+
+    class _Planner:
+        def __init__(self) -> None:
+            self.turns: list[TurnInput] = []
+
+        async def plan(self, turn: TurnInput, *, turn_deadline: float | None = None) -> TurnPlan:
+            del turn, turn_deadline
+            raise AssertionError("V12 router must use attested planning")
+
+        async def plan_attested(
+            self,
+            turn: TurnInput,
+            *,
+            turn_deadline: float | None = None,
+        ) -> TurnPlan:
+            del turn_deadline
+            self.turns.append(turn)
+            return _plan()
+
+    class _NeverLegacy:
+        async def chat(self, user_id: str, message: str, **kwargs: Any) -> dict[str, Any]:
+            del user_id, message, kwargs
+            raise AssertionError("eligible source result must not fall back to legacy")
+
+    planner = _Planner()
+    model = _Model("Маршрутизированный документ прочитан. [A1]", labels=("A1",))
+    handler, _authorization = _handler(storage, settings, model)
+    router = OrchestrationRouter(
+        _NeverLegacy(),
+        planner,
+        mode="v12",
+        allowed_routes=("archive_read",),
+        route_handlers={RouteClass.ARCHIVE_READ: handler},
+        planner_timeout_sec=1.0,
+        preparation_timeout_sec=2.0,
+        route_timeout_sec=10.0,
+    )
+
+    result = await router.chat(
+        "alice",
+        phrase,
+        actor=_actor(),
+        conversation_id=conversation_id,
+        attachments=[],
+        enable_tools=True,
+        turn_deadline=time.monotonic() + 60,
+    )
+
+    assert result["message"] == "Маршрутизированный документ прочитан. [A1]"
+    assert len(planner.turns) == 1
+    assert planner.turns[0].message == phrase
+    assert [item.status for item in router.observations[-2:]] == ["selected", "completed"]
+    messages = storage.get_conversation_messages(conversation_id, user_id="alice")
+    metadata = json.loads(messages[-1]["metadata_json"])
+    receipt = load_accepted_capability_outcome_receipt(metadata)
+    assert receipt.outcome.route is RouteClass.ARCHIVE_READ
 
 
 @pytest.mark.asyncio

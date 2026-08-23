@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import re
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
@@ -49,7 +50,15 @@ _PROVENANCE_STUB_RE = re.compile(r"\A\s*\[[A-Za-z][A-Za-z0-9_-]{0,40}:\s*", re.A
 _MAX_FILES = 12
 _MAX_PART_CHARS = 48_000
 _MAX_TOTAL_CHARS = 120_000
-_HISTORICAL_SELECTOR_KINDS = frozenset({"exact_filename", "time_window", "latest"})
+_HISTORICAL_SELECTOR_KINDS = frozenset({"exact_filename", "time_window", "latest", "source_search_result"})
+_SOURCE_SEARCH_RESULT_RAW_IDS = "source_search_result_raw_ids"
+_SOURCE_SEARCH_RESULT_IDENTITIES = "source_search_result_identities"
+# This is the durable page emitted by agent_runtime._SOURCE_SEARCH_PAGE_SIZE.
+# Keep the independent reader fail-closed if a future producer widens it.
+_SOURCE_SEARCH_RESULT_LIMIT = 10
+_SOURCE_SEARCH_METADATA_MAX_CHARS = 65_536
+_CONVERSATION_ID_RE = re.compile(r"conv_[0-9a-f]{16}")
+_MESSAGE_ID_RE = re.compile(r"msg_[0-9a-f]{16}")
 _NATIVE_TEXT_SUFFIXES = frozenset(
     {
         ".cfg",
@@ -149,12 +158,33 @@ class HistoricalFileSelectionToken:
     document_since: str | None
     document_until: str | None
     latest_count: int | None
+    conversation_id: str
+    source_message_id: str
+    source_result_raw_ids: tuple[str, ...]
+    source_result_identities: tuple[tuple[str, str], ...]
+    source_result_ordinal: int | None
     _process_authority: object = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if type(self.raw_ids) is not tuple:
             raise ValueError("historical file selector is invalid")
-        scalar_strings = (self.tenant_id, self.uploaded_by, self.kind, self.filename, *self.raw_ids)
+        if type(self.source_result_raw_ids) is not tuple:
+            raise ValueError("historical file selector is invalid")
+        if type(self.source_result_identities) is not tuple or any(
+            type(item) is not tuple or len(item) != 2 for item in self.source_result_identities
+        ):
+            raise ValueError("historical file selector is invalid")
+        scalar_strings = (
+            self.tenant_id,
+            self.uploaded_by,
+            self.kind,
+            self.filename,
+            self.conversation_id,
+            self.source_message_id,
+            *self.raw_ids,
+            *self.source_result_raw_ids,
+            *(value for item in self.source_result_identities for value in item),
+        )
         optional_strings = (
             self.received_since,
             self.received_until,
@@ -171,6 +201,13 @@ class HistoricalFileSelectionToken:
                 self.latest_count is not None
                 and (type(self.latest_count) is not int or self.latest_count not in {1, 2})
             )
+            or (
+                self.source_result_ordinal is not None
+                and (
+                    type(self.source_result_ordinal) is not int
+                    or not 1 <= self.source_result_ordinal <= _SOURCE_SEARCH_RESULT_LIMIT
+                )
+            )
             or self.kind not in _HISTORICAL_SELECTOR_KINDS
             or not self.tenant_id
             or not self.uploaded_by
@@ -183,6 +220,11 @@ class HistoricalFileSelectionToken:
             if (
                 not self.filename
                 or len(self.filename) > 260
+                or self.conversation_id
+                or self.source_message_id
+                or self.source_result_raw_ids
+                or self.source_result_identities
+                or self.source_result_ordinal is not None
                 or any(
                     value is not None
                     for value in (
@@ -199,6 +241,11 @@ class HistoricalFileSelectionToken:
             if (
                 self.latest_count not in {1, 2}
                 or self.filename
+                or self.conversation_id
+                or self.source_message_id
+                or self.source_result_raw_ids
+                or self.source_result_identities
+                or self.source_result_ordinal is not None
                 or any(
                     value is not None
                     for value in (
@@ -210,8 +257,39 @@ class HistoricalFileSelectionToken:
                 )
             ):
                 raise ValueError("historical latest selector is invalid")
-        elif self.filename or self.latest_count is not None or has_received_window == has_document_window:
-            raise ValueError("historical time selector is invalid")
+        elif self.kind == "time_window":
+            if (
+                self.filename
+                or self.latest_count is not None
+                or self.conversation_id
+                or self.source_message_id
+                or self.source_result_raw_ids
+                or self.source_result_identities
+                or self.source_result_ordinal is not None
+                or has_received_window == has_document_window
+            ):
+                raise ValueError("historical time selector is invalid")
+        elif (
+            self.filename
+            or self.latest_count is not None
+            or has_received_window
+            or has_document_window
+            or _CONVERSATION_ID_RE.fullmatch(self.conversation_id) is None
+            or _MESSAGE_ID_RE.fullmatch(self.source_message_id) is None
+            or not 1 <= len(self.source_result_raw_ids) <= _SOURCE_SEARCH_RESULT_LIMIT
+            or len(set(self.source_result_raw_ids)) != len(self.source_result_raw_ids)
+            or any(_RAW_ID_RE.fullmatch(raw_id) is None for raw_id in self.source_result_raw_ids)
+            or len(self.source_result_identities) != len(self.source_result_raw_ids)
+            or tuple(raw_id for raw_id, _identity in self.source_result_identities)
+            != self.source_result_raw_ids
+            or any(
+                _SHA256_RE.fullmatch(identity) is None for _raw_id, identity in self.source_result_identities
+            )
+            or self.source_result_ordinal is None
+            or self.source_result_ordinal > len(self.source_result_raw_ids)
+            or self.raw_ids != (self.source_result_raw_ids[self.source_result_ordinal - 1],)
+        ):
+            raise ValueError("historical source-search selector is invalid")
 
     def identity_sha256(self) -> str:
         digest = hashlib.sha256()
@@ -226,6 +304,11 @@ class HistoricalFileSelectionToken:
             self.document_since or "",
             self.document_until or "",
             str(self.latest_count or ""),
+            self.conversation_id,
+            self.source_message_id,
+            *self.source_result_raw_ids,
+            *(value for item in self.source_result_identities for value in item),
+            str(self.source_result_ordinal or ""),
         ):
             encoded = value.encode("utf-8", errors="strict")
             digest.update(len(encoded).to_bytes(8, "big"))
@@ -245,6 +328,11 @@ def historical_file_selection_token(
     document_since: str | None = None,
     document_until: str | None = None,
     latest_count: int | None = None,
+    conversation_id: str = "",
+    source_message_id: str = "",
+    source_result_raw_ids: Sequence[str] = (),
+    source_result_identities: Sequence[tuple[str, str]] = (),
+    source_result_ordinal: int | None = None,
 ) -> HistoricalFileSelectionToken:
     return HistoricalFileSelectionToken(
         tenant_id=str(tenant_id or "").strip(),
@@ -257,13 +345,173 @@ def historical_file_selection_token(
         document_since=document_since,
         document_until=document_until,
         latest_count=latest_count,
+        conversation_id=str(conversation_id or "").strip(),
+        source_message_id=str(source_message_id or "").strip(),
+        source_result_raw_ids=tuple(str(raw_id or "").strip() for raw_id in source_result_raw_ids),
+        source_result_identities=tuple(
+            (str(raw_id or "").strip(), str(identity or "").strip().casefold())
+            for raw_id, identity in source_result_identities
+        ),
+        source_result_ordinal=source_result_ordinal,
         _process_authority=_PROCESS_AUTHORITY,
     )
 
 
-def _historical_selection_is_current(storage: Any, token: HistoricalFileSelectionToken) -> bool:
+def _closed_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate message metadata key")
+        result[key] = value
+    return result
+
+
+def _source_search_result_page(
+    message: Mapping[str, Any],
+) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
+    encoded = message.get("metadata_json")
+    if not isinstance(encoded, str) or len(encoded) > _SOURCE_SEARCH_METADATA_MAX_CHARS:
+        return (), ()
+    try:
+        metadata = json.loads(encoded, object_pairs_hook=_closed_json_object)
+    except (json.JSONDecodeError, RecursionError, ValueError):
+        return (), ()
+    if not isinstance(metadata, dict):
+        return (), ()
+    tools_used = metadata.get("tools_used")
+    if (
+        metadata.get("private_context_lineage") is not True
+        or type(tools_used) is not list
+        or "source_search" not in tools_used
+        or any(type(tool_name) is not str for tool_name in tools_used)
+    ):
+        return (), ()
+    values = metadata.get(_SOURCE_SEARCH_RESULT_RAW_IDS)
+    if type(values) is not list or not 1 <= len(values) <= _SOURCE_SEARCH_RESULT_LIMIT:
+        return (), ()
+    if any(type(value) is not str or _RAW_ID_RE.fullmatch(value) is None for value in values):
+        return (), ()
+    result = tuple(str(value) for value in values)
+    if len(set(result)) != len(result):
+        return (), ()
+    raw_identities = metadata.get(_SOURCE_SEARCH_RESULT_IDENTITIES)
+    if type(raw_identities) is not dict or set(raw_identities) != set(result):
+        return (), ()
+    identities: list[tuple[str, str]] = []
+    for raw_id in result:
+        identity = raw_identities.get(raw_id)
+        if type(identity) is not str or _SHA256_RE.fullmatch(identity) is None:
+            return (), ()
+        identities.append((raw_id, identity))
+    return result, tuple(identities)
+
+
+def _latest_source_search_message(
+    storage: Any,
+    *,
+    conversation_id: str,
+    conversation_owner_id: str,
+) -> Mapping[str, Any] | None:
+    rows = storage.get_conversation_messages(
+        conversation_id,
+        user_id=conversation_owner_id,
+        limit=1,
+    )
+    if len(rows) != 1:
+        return None
+    row = rows[0]
+    if (
+        not isinstance(row, Mapping)
+        or row.get("role") != "assistant"
+        or row.get("conversation_id") != conversation_id
+        or row.get("user_id") != conversation_owner_id
+        or _MESSAGE_ID_RE.fullmatch(str(row.get("id") or "")) is None
+    ):
+        return None
+    return row
+
+
+def source_search_result_selection_token(
+    storage: Any,
+    *,
+    tenant_id: str,
+    uploaded_by: str,
+    conversation_id: str,
+    ordinal: int,
+) -> HistoricalFileSelectionToken | None:
+    """Pin one ordinal from the immediately preceding owned search result."""
+
+    tenant_id = str(tenant_id or "").strip()
+    uploaded_by = str(uploaded_by or "").strip()
+    conversation_id = str(conversation_id or "").strip()
+    if (
+        not tenant_id
+        or not uploaded_by
+        or _CONVERSATION_ID_RE.fullmatch(conversation_id) is None
+        or type(ordinal) is not int
+    ):
+        return None
+    row = _latest_source_search_message(
+        storage,
+        conversation_id=conversation_id,
+        conversation_owner_id=uploaded_by,
+    )
+    if row is None:
+        return None
+    candidates, identities = _source_search_result_page(row)
+    if not 1 <= ordinal <= len(candidates):
+        return None
+    try:
+        token = historical_file_selection_token(
+            tenant_id=tenant_id,
+            uploaded_by=uploaded_by,
+            kind="source_search_result",
+            raw_ids=(candidates[ordinal - 1],),
+            conversation_id=conversation_id,
+            source_message_id=str(row.get("id") or ""),
+            source_result_raw_ids=candidates,
+            source_result_identities=identities,
+            source_result_ordinal=ordinal,
+        )
+    except ValueError:
+        return None
+    return token if _historical_selection_is_current(storage, token) else None
+
+
+def _historical_selection_is_current(
+    storage: Any,
+    token: HistoricalFileSelectionToken,
+    *,
+    verify_source_identities: bool = False,
+) -> bool:
     if type(token) is not HistoricalFileSelectionToken or token._process_authority is not _PROCESS_AUTHORITY:
         return False
+    if token.kind == "source_search_result":
+        row = _latest_source_search_message(
+            storage,
+            conversation_id=token.conversation_id,
+            conversation_owner_id=token.uploaded_by,
+        )
+        if (
+            row is None
+            or str(row.get("id") or "") != token.source_message_id
+            or _source_search_result_page(row)
+            != (token.source_result_raw_ids, token.source_result_identities)
+        ):
+            return False
+        selected = storage.get_searchable_file_sources(
+            token.tenant_id,
+            list(token.raw_ids),
+            uploaded_by=token.uploaded_by,
+            limit=1,
+            include_content=verify_source_identities,
+        )
+        if len(selected) != 1 or str(selected[0].get("id") or "") != token.raw_ids[0]:
+            return False
+        if not verify_source_identities:
+            return True
+        expected = dict(token.source_result_identities).get(token.raw_ids[0], "")
+        return hmac.compare_digest(expected, raw_source_identity_sha256(selected[0]))
     if token.kind == "exact_filename":
         rows = storage.find_owned_files_by_filename(
             token.tenant_id,
@@ -654,6 +902,7 @@ def _prepare_registered_file_evidence(
         if historical_selection is not None and not _historical_selection_is_current(
             storage,
             historical_selection,
+            verify_source_identities=True,
         ):
             raise FileEvidenceUnavailable("historical_selector_changed")
         if historical_selection is not None:
@@ -881,7 +1130,12 @@ def reauthorize_prepared_file_evidence_in_transaction(
             source_person_id=prepared.person_id,
         )
         if prepared.historical_selection is not None and (
-            storage is None or not _historical_selection_is_current(storage, prepared.historical_selection)
+            storage is None
+            or not _historical_selection_is_current(
+                storage,
+                prepared.historical_selection,
+                verify_source_identities=True,
+            )
         ):
             return False
         for raw_id, original in zip(prepared.raw_ids, prepared.snapshot_tokens, strict=True):
@@ -915,6 +1169,7 @@ __all__ = [
     "prepare_registered_file_evidence",
     "historical_file_selection_token",
     "historical_file_selection_is_current",
+    "source_search_result_selection_token",
     "prepared_file_evidence_is_process_owned",
     "reauthorize_prepared_file_evidence_in_transaction",
 ]

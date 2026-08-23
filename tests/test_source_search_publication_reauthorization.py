@@ -19,6 +19,7 @@ import pytest
 from friday.agent_runtime import AgentRuntime
 from friday.execution_kernel import ExecutionKernel, ToolResult
 from friday.permissions import AuthorizationService
+from friday.source_identity import raw_source_identity_sha256
 from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
 
 _OWNER = "source-publication-owner"
@@ -35,6 +36,18 @@ _ANSWER = (
     "В найденном ранее загруженном источнике указана должность: "
     f"ведущий инженер по эксплуатации ({_SOURCE_CANARY}; {_MODEL_CANARY})."
 )
+
+
+def _durable_raw_identity(storage: Any, raw_id: str) -> str:
+    raw = storage.get_raw_object(raw_id, _OWNER)
+    assert isinstance(raw, dict)
+    return raw_source_identity_sha256(
+        {
+            **raw,
+            "_raw_content": raw.get("raw_content"),
+            "_raw_metadata": raw.get("metadata_json"),
+        }
+    )
 
 
 class _EmptySearcher:
@@ -399,6 +412,7 @@ def _assert_source_publication_failed_closed(
     assert metadata["verification"]["issues"] == [_ISSUE]
     assert metadata["private_context_lineage"] is True
     assert "source_search_result_raw_ids" not in metadata
+    assert "source_search_result_identities" not in metadata
     assert user_metadata["private_context_lineage"] is True
 
 
@@ -492,6 +506,7 @@ async def test_model_selected_source_search_skips_web_sibling_and_revokes_schema
     assert _FORBIDDEN_WEB_CANARY not in durable
     assert metadata["tools_used"] == ["source_search"]
     assert metadata["source_search_result_raw_ids"] == [raw.id]
+    assert metadata["source_search_result_identities"] == {raw.id: _durable_raw_identity(storage, raw.id)}
     assert metadata["private_context_lineage"] is True
 
 
@@ -566,6 +581,7 @@ async def test_source_search_verifier_issue_cannot_persist_private_canary(
         assert canary not in durable
     assert metadata["verification_status"] == "unknown"
     assert metadata["source_search_result_raw_ids"] == [raw.id]
+    assert metadata["source_search_result_identities"] == {raw.id: _durable_raw_identity(storage, raw.id)}
     assert metadata["private_context_lineage"] is True
 
 
@@ -609,6 +625,7 @@ async def test_source_search_shown_and_raw_identity_cardinality_mismatch_fails_c
     assert _SOURCE_CANARY not in durable
     assert _MODEL_CANARY not in durable
     assert "source_search_result_raw_ids" not in metadata
+    assert "source_search_result_identities" not in metadata
 
 
 @pytest.mark.asyncio
@@ -638,6 +655,7 @@ async def test_unchanged_source_search_publishes_and_keeps_exact_private_lineage
     assistant, metadata, user_metadata = _stored_rows(storage, response)
     assert assistant["content"] == response["message"]
     assert metadata["source_search_result_raw_ids"] == [raw.id]
+    assert metadata["source_search_result_identities"] == {raw.id: _durable_raw_identity(storage, raw.id)}
     assert metadata["private_context_lineage"] is True
     assert user_metadata["private_context_lineage"] is True
 

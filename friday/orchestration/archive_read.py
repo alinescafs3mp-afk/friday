@@ -2,9 +2,10 @@
 
 The selector is deliberately code-owned.  The model may classify a turn as
 ``archive_read`` but it cannot choose a person, Raw id or time boundary.  This
-first historical slice accepts only an exact filename, a closed local calendar
-window, or the latest one/two files.  Wider/ambiguous corpora retain the legacy
-owner until the hierarchy evidence contract is promoted.
+historical slice accepts an exact filename, a closed local calendar window, the
+latest one/two files, or one ordinal from the immediately preceding owned
+source-search page.  Wider/ambiguous corpora retain the legacy owner until the
+hierarchy evidence contract is promoted.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from friday.file_evidence_reader import (
     historical_file_selection_is_current,
     historical_file_selection_token,
     prepare_registered_file_evidence,
+    source_search_result_selection_token,
 )
 from friday.orchestration.contracts import RouteClass, TurnInput, TurnPlan
 from friday.orchestration.file_read import V12FileReadHandler, _PreparedFileContext
@@ -121,6 +123,14 @@ _BENIGN_FIELD_SUFFIX = re.compile(
 )
 _QUOTE_GLYPH = re.compile(r"[«»\"'`“”„‟‘’‚‛]")
 _UNOWNED_SURFACE_CHAR = re.compile(r"[^0-9A-Za-zА-ЯЁа-яё_ .,;:!?()\-]")
+_SOURCE_RESULT_ORDINAL_SURFACE = re.compile(
+    r"\A\s*(?:пожалуйста\s*,?\s*)?(?:прочитай|прочитайте|прочти|прочтите)"
+    r"(?:\s+мне)?\s+"
+    r"(?:(?P<word>первый|второй)|(?P<number>(?:[1-9]|10))\s*[-–—]\s*(?:й|ый))\s+"
+    r"найденный\s+(?:файл|документ|материал)"
+    r"(?:\s+(?:целиком|полностью))?\s*[.!?]*\s*\Z",
+    re.IGNORECASE,
+)
 
 
 def _local_zone(settings: Any) -> Any:
@@ -191,6 +201,19 @@ def _archive_request_surface_is_closed(
 
 def _latest_count(value: str) -> int:
     return 1 if value.casefold() in {"1", "один", "одну"} else 2
+
+
+def _source_result_ordinal(message: str) -> int | None:
+    match = _SOURCE_RESULT_ORDINAL_SURFACE.fullmatch(message)
+    if match is None:
+        return None
+    word = str(match.group("word") or "").casefold()
+    if word:
+        return 1 if word == "первый" else 2
+    try:
+        return int(str(match.group("number") or ""))
+    except ValueError:  # pragma: no cover - closed regex above
+        return None
 
 
 def _has_temporal_surface(message: str, *, today: date) -> bool:
@@ -266,6 +289,19 @@ class V12ArchiveReadHandler(V12FileReadHandler):
         *,
         uploaded_by: str,
     ) -> tuple[tuple[str, ...], HistoricalFileSelectionToken | None]:
+        source_result_ordinal = _source_result_ordinal(turn.message)
+        if source_result_ordinal is not None:
+            if request.conversation_id is None or not archive_read_plan_supports_selection(plan, 1):
+                return (), None
+            selector = source_search_result_selection_token(
+                self._storage,
+                tenant_id=request.actor.user_id,
+                uploaded_by=uploaded_by,
+                conversation_id=request.conversation_id,
+                ordinal=source_result_ordinal,
+            )
+            return (selector.raw_ids, selector) if selector is not None else ((), None)
+
         filename_matches = _filename_matches(turn.message)
         if not _archive_request_surface_is_closed(turn.message, filename_matches):
             return (), None

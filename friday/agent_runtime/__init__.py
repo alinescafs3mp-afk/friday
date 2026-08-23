@@ -1509,6 +1509,7 @@ _CONVERSATION_ATTACHMENT_RAW_IDS = "conversation_attachment_raw_ids"
 _CONVERSATION_ATTACHMENT_UPLOADERS = "conversation_attachment_uploaders"
 _CONVERSATION_UPLOADED_RAW_IDS = "conversation_uploaded_raw_ids"
 _SOURCE_SEARCH_RESULT_RAW_IDS = "source_search_result_raw_ids"
+_SOURCE_SEARCH_RESULT_IDENTITIES = "source_search_result_identities"
 _FILENAME_RESULT_RAW_IDS = "filename_result_raw_ids"
 _FILENAME_RESULT_UPLOADERS = "filename_result_uploaders"
 _FILENAME_RESULT_DISPLAY_NAMES = "filename_result_display_names"
@@ -42276,7 +42277,12 @@ class AgentRuntime:
                 {
                     _SOURCE_SEARCH_RESULT_RAW_IDS: list(
                         context.source_search_result_raw_ids[:_SOURCE_SEARCH_PAGE_SIZE]
-                    )
+                    ),
+                    _SOURCE_SEARCH_RESULT_IDENTITIES: {
+                        raw_id: context.source_search_result_identities[raw_id]
+                        for raw_id in context.source_search_result_raw_ids[:_SOURCE_SEARCH_PAGE_SIZE]
+                        if raw_id in context.source_search_result_identities
+                    },
                 }
                 if context.source_search_result_raw_ids
                 else {}
@@ -42862,6 +42868,7 @@ class AgentRuntime:
                     _WORKSPACE_INBOX_SHA256,
                     _WORKSPACE_INBOX_SOURCE_SHA256,
                     _SOURCE_SEARCH_RESULT_RAW_IDS,
+                    _SOURCE_SEARCH_RESULT_IDENTITIES,
                     _FILENAME_RESULT_RAW_IDS,
                     _FILENAME_RESULT_UPLOADERS,
                     _FILENAME_SELECTED_RAW_ID,

@@ -149,6 +149,9 @@ def test_chat_projection_never_publishes_internal_control_metadata() -> None:
                 "schema": "friday.accepted-capability-outcome-receipt.v1",
                 "private_sentinel": sentinel,
             },
+            "source_search_result_identities": {
+                "raw_0123456789abcdef": sentinel,
+            },
         }
     )
 
@@ -169,7 +172,10 @@ def test_conversation_projection_never_publishes_accepted_capability_outcome() -
                     "accepted_capability_outcome": {
                         "schema": "friday.accepted-capability-outcome-receipt.v1",
                         "private_sentinel": sentinel,
-                    }
+                    },
+                    "source_search_result_identities": {
+                        "raw_0123456789abcdef": sentinel,
+                    },
                 }
             ),
         }

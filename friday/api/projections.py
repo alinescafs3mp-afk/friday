@@ -429,6 +429,7 @@ def public_chat_ingestion(
     # replays of historical cached responses containing an internal key.
     public.pop("interaction_trace", None)
     public.pop("accepted_capability_outcome", None)
+    public.pop("source_search_result_identities", None)
     if "ingestion" in public:
         ingestion = public.get("ingestion")
         public["ingestion"] = (
