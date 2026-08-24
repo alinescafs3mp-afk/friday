@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
 import re
 import secrets
@@ -21,6 +22,27 @@ _HARDWARE_RUNTIME_RECEIPT_PATH = Path("/run/friday-hardware/accepted.json")
 _SOURCE_ROOT = Path("/source")
 _RUNTIME_EPOCH_ROOT = Path("/run/friday-runtime-epoch")
 _RUNTIME_EPOCH_PATH = _RUNTIME_EPOCH_ROOT / "process-start-time-seconds"
+_SGLANG_REASONER_GRAMMAR_PATH = Path(
+    "/sgl-workspace/sglang/python/sglang/srt/constrained/reasoner_grammar_backend.py"
+)
+
+
+def _verify_sglang_compat_patch(path: Path, expected_sha256: str) -> None:
+    """Fail closed unless the mounted GPT-OSS grammar fix is the accepted file."""
+
+    try:
+        metadata = path.lstat()
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise RuntimeError("SGLang compatibility patch is unavailable") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or path.is_symlink()
+        or len(raw) == 0
+        or len(raw) > 131_072
+        or not secrets.compare_digest(hashlib.sha256(raw).hexdigest(), expected_sha256)
+    ):
+        raise RuntimeError("SGLang compatibility patch does not match the accepted profile")
 
 
 def _process_start_epoch(proc_stat: str, self_stat: str, clock_ticks: int) -> str:
@@ -145,6 +167,10 @@ def main() -> None:
     verify_source_model_snapshot(
         _SOURCE_ROOT,
         profile.source_model_manifest_sha256,
+    )
+    _verify_sglang_compat_patch(
+        _SGLANG_REASONER_GRAMMAR_PATH,
+        profile.sglang_compat_patch_sha256,
     )
     api_key = _KEY_PATH.read_text(encoding="ascii")
     if re.fullmatch(r"[0-9a-f]{64}", api_key) is None:

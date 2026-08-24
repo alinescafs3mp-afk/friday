@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _PROFILE_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}")
-_PROFILE_SCHEMA = "friday.secondary-runtime-profile.v3"
+_PROFILE_SCHEMA = "friday.secondary-runtime-profile.v4"
 _EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256 = "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
 _EXPECTED_SOURCE_MODEL_MANIFEST_SHA256 = "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"
 _EXPECTED_RUNTIME_IMAGE = (
@@ -47,6 +47,7 @@ _PROFILE_KEYS = frozenset(
         "runtime_image_config_digest",
         "runtime_image_oci_manifest_digest",
         "runtime_source_revision",
+        "sglang_compat_patch_sha256",
         "runtime_manifest_sha256",
         "model_path",
         "quantization",
@@ -93,6 +94,7 @@ _ENGINE_KEYS = (
     "runtime_image_config_digest",
     "runtime_image_oci_manifest_digest",
     "runtime_source_revision",
+    "sglang_compat_patch_sha256",
     "runtime_manifest_sha256",
     "model_path",
     "quantization",
@@ -126,6 +128,7 @@ _ENGINE_KEYS = (
 _REQUIRED_HASH_KEYS = (
     "hardware_runtime_receipt_sha256",
     "source_model_manifest_sha256",
+    "sglang_compat_patch_sha256",
     "runtime_manifest_sha256",
 )
 _EVIDENCE_HASH_KEYS = (
@@ -195,6 +198,7 @@ class SecondaryRuntimeProfile:
     runtime_image_config_digest: str
     runtime_image_oci_manifest_digest: str
     runtime_source_revision: str
+    sglang_compat_patch_sha256: str
     runtime_manifest_sha256: str
 
     def accepts_manifest(self, raw: bytes) -> bool:
@@ -299,6 +303,7 @@ class SecondaryRuntimeProfile:
             or value.get("runtime_image_config_digest") != self.runtime_image_config_digest
             or value.get("runtime_image_oci_manifest_digest") != self.runtime_image_oci_manifest_digest
             or value.get("runtime_source_revision") != self.runtime_source_revision
+            or value.get("sglang_compat_patch_sha256") != self.sglang_compat_patch_sha256
             or value.get("runtime_manifest_sha256") != self.runtime_manifest_sha256
             or value.get("model_path") != self.model_path
             or value.get("quantization") != self.quantization
@@ -348,6 +353,7 @@ class SecondaryRuntimeProfile:
             self.engine_binding_sha256,
             self.hardware_runtime_receipt_sha256,
             self.source_model_manifest_sha256,
+            self.sglang_compat_patch_sha256,
             self.runtime_manifest_sha256,
         )
         ca_is_bound = bool(
@@ -366,6 +372,7 @@ class SecondaryRuntimeProfile:
             and not endpoint.fragment
             and self.served_model_alias == f"friday-secondary-{self.profile_id}"
             and all(_SHA256_RE.fullmatch(value) for value in hashes)
+            and all(value != _ZERO_SHA256 for value in hashes)
             and ca_is_bound
             and type(self.max_context_tokens) is int
             and self.max_context_tokens in _CONTEXT_LADDER

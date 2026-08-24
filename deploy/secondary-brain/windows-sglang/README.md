@@ -35,7 +35,7 @@ have been removed from this deployment bundle.
 - The source volume is read-only. Before importing SGLang or creating CUDA
   state, the launcher rehashes the exact source manifest and all 14 files
   (13,789,264,674 bytes).
-- The runtime profile is canonical schema `friday.secondary-runtime-profile.v3`.
+- The runtime profile is canonical schema `friday.secondary-runtime-profile.v4`.
   It binds source, runtime image/config/OCI identities, backend selection,
   context, memory, graph policy and every acceptance receipt.
 - The accepted-profile registry stays empty until protocol, quality, capacity,
@@ -174,6 +174,7 @@ python .\scripts\runtime_profile_operator.py candidate `
   --source-model-manifest .\evidence\source-model.verified.json `
   --runtime-manifest .\evidence\runtime.accepted.json `
   --ca-certificate .\secrets\tls\ca.crt `
+  --sglang-compat-patch-sha256 ((Get-FileHash .\runtime\reasoner_grammar_backend.py -Algorithm SHA256).Hash.ToLowerInvariant()) `
   --context-tokens 4096 --max-output-tokens 512 `
   --mem-fraction-static 0.97 --chunked-prefill-size 1024 `
   --allowed-modes assist,shadow --allowed-workloads extract `

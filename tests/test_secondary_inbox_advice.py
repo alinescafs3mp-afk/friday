@@ -27,6 +27,7 @@ _ENGINE_PROJECTION: dict[str, Any] = {
     "runtime_image_config_digest": "sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc",
     "runtime_image_oci_manifest_digest": "sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405",
     "runtime_source_revision": "29481685462732237d80d86076d6563e1f658102",
+    "sglang_compat_patch_sha256": "d" * 64,
     "runtime_manifest_sha256": "e" * 64,
     "model_path": "/source/snapshot",
     "quantization": "mxfp4",
@@ -64,7 +65,7 @@ _PROFILE_ID = f"gptoss20b-{_ENGINE_BINDING_SHA256}"
 _ALIAS = f"friday-secondary-{_PROFILE_ID}"
 _PROFILE_VALUE: dict[str, Any] = {
     **_ENGINE_PROJECTION,
-    "schema": "friday.secondary-runtime-profile.v3",
+    "schema": "friday.secondary-runtime-profile.v4",
     "status": "accepted",
     "profile_id": _PROFILE_ID,
     "engine_binding_sha256": _ENGINE_BINDING_SHA256,
@@ -135,6 +136,7 @@ def _accepted_test_profile(monkeypatch: pytest.MonkeyPatch) -> None:
         runtime_image_config_digest=_ENGINE_PROJECTION["runtime_image_config_digest"],
         runtime_image_oci_manifest_digest=_ENGINE_PROJECTION["runtime_image_oci_manifest_digest"],
         runtime_source_revision=_ENGINE_PROJECTION["runtime_source_revision"],
+        sglang_compat_patch_sha256=_ENGINE_PROJECTION["sglang_compat_patch_sha256"],
         runtime_manifest_sha256="e" * 64,
     )
     monkeypatch.setattr(

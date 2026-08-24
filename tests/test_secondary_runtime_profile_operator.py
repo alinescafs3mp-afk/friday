@@ -73,6 +73,7 @@ def _candidate_args(tmp_path: Path) -> argparse.Namespace:
         source_model_manifest=source_manifest,
         runtime_manifest=runtime,
         ca_certificate=ca,
+        sglang_compat_patch_sha256="d" * 64,
         context_tokens=4096,
         max_output_tokens=512,
         mem_fraction_static=0.92,
@@ -285,6 +286,7 @@ def test_operator_builds_one_runtime_loadable_candidate(tmp_path: Path) -> None:
     assert profile.source_model_manifest_sha256 == operator.SOURCE_MANIFEST_RAW_SHA256
     assert profile.runtime_image_config_digest == operator.RUNTIME_IMAGE_CONFIG_DIGEST
     assert profile.runtime_image_oci_manifest_digest == operator.RUNTIME_IMAGE_OCI_MANIFEST_DIGEST
+    assert profile.sglang_compat_patch_sha256 == "d" * 64
     assert profile.quantization == "mxfp4"
     assert profile.dtype == "bfloat16"
     assert profile.kv_cache_dtype == "bf16"
@@ -353,6 +355,41 @@ def test_operator_rejects_chunked_prefill_outside_the_closed_grid(tmp_path: Path
         operator.build_candidate(args)
 
 
+@pytest.mark.parametrize("patch_sha256", ["0" * 64, "D" * 64, "d" * 63])
+def test_operator_rejects_invalid_sglang_compat_patch_identity(
+    tmp_path: Path,
+    patch_sha256: str,
+) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    args = _candidate_args(tmp_path)
+    args.sglang_compat_patch_sha256 = patch_sha256
+
+    with pytest.raises(operator.ProfileOperatorError, match="compatibility patch identity"):
+        operator.build_candidate(args)
+
+    assert not args.output.exists()
+    assert not args.profile_id_output.exists()
+
+
+def test_sglang_compat_patch_identity_changes_the_engine_binding(tmp_path: Path) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    first_root = tmp_path / "first"
+    first_root.mkdir()
+    first_args = _candidate_args(first_root)
+    operator.build_candidate(first_args)
+    first = json.loads(first_args.output.read_text(encoding="utf-8"))
+
+    second_root = tmp_path / "second"
+    second_root.mkdir()
+    second_args = _candidate_args(second_root)
+    second_args.sglang_compat_patch_sha256 = "e" * 64
+    operator.build_candidate(second_args)
+    second = json.loads(second_args.output.read_text(encoding="utf-8"))
+
+    assert first["engine_binding_sha256"] != second["engine_binding_sha256"]
+    assert first["profile_id"] != second["profile_id"]
+
+
 def test_candidate_cli_defaults_preserve_the_safe_baseline(tmp_path: Path) -> None:
     operator = importlib.import_module("runtime_profile_operator")
     args = operator._parser().parse_args(
@@ -366,6 +403,8 @@ def test_candidate_cli_defaults_preserve_the_safe_baseline(tmp_path: Path) -> No
             str(tmp_path / "runtime.json"),
             "--ca-certificate",
             str(tmp_path / "ca.crt"),
+            "--sglang-compat-patch-sha256",
+            "d" * 64,
             "--context-tokens",
             "4096",
             "--mem-fraction-static",

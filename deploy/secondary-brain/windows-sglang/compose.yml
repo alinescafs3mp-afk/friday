@@ -59,6 +59,10 @@ services:
         target: /run/friday-bootstrap/hardware_runtime_contract.py
         read_only: true
       - type: bind
+        source: ./runtime/reasoner_grammar_backend.py
+        target: /sgl-workspace/sglang/python/sglang/srt/constrained/reasoner_grammar_backend.py
+        read_only: true
+      - type: bind
         source: ${FRIDAY_SECONDARY_HARDWARE_RUNTIME_RECEIPT_PATH:?accepted hardware/runtime receipt is required}
         target: /run/friday-hardware/accepted.json
         read_only: true
