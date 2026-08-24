@@ -27,7 +27,8 @@ _EXPECTED_RUNTIME_IMAGE_OCI_MANIFEST_DIGEST = (
 )
 _EXPECTED_RUNTIME_SOURCE_REVISION = "29481685462732237d80d86076d6563e1f658102"
 _EXPECTED_MODEL_PATH = "/source/snapshot"
-_CONTEXT_LADDER = frozenset({4096, 8192, 12288, 16384, 24576, 32768})
+_CONTEXT_LADDER = frozenset({4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536})
+_CHUNKED_PREFILL_GRID = frozenset({512, 1024, 1536, 2048})
 _PROFILE_KEYS = frozenset(
     {
         "schema",
@@ -50,7 +51,11 @@ _PROFILE_KEYS = frozenset(
         "quantization",
         "dtype",
         "kv_cache_dtype",
+        "kv_cache_scale_policy",
         "attention_backend",
+        "prefill_attention_backend",
+        "decode_attention_backend",
+        "sampling_backend",
         "moe_runner_backend",
         "mxfp4_moe_precision",
         "context_tokens",
@@ -59,8 +64,15 @@ _PROFILE_KEYS = frozenset(
         "max_running_requests",
         "max_output_tokens",
         "chunked_prefill_size",
+        "page_size",
+        "radix_cache_enabled",
+        "overlap_schedule_enabled",
+        "hybrid_swa_memory_enabled",
+        "swa_full_tokens_ratio",
         "cuda_graph_backend_decode",
         "cuda_graph_backend_prefill",
+        "cuda_graph_max_bs_decode",
+        "cuda_graph_bs_decode",
         "allowed_modes",
         "allowed_workloads",
         "no_cpu_offload",
@@ -84,7 +96,11 @@ _ENGINE_KEYS = (
     "quantization",
     "dtype",
     "kv_cache_dtype",
+    "kv_cache_scale_policy",
     "attention_backend",
+    "prefill_attention_backend",
+    "decode_attention_backend",
+    "sampling_backend",
     "moe_runner_backend",
     "mxfp4_moe_precision",
     "context_tokens",
@@ -93,8 +109,15 @@ _ENGINE_KEYS = (
     "max_running_requests",
     "max_output_tokens",
     "chunked_prefill_size",
+    "page_size",
+    "radix_cache_enabled",
+    "overlap_schedule_enabled",
+    "hybrid_swa_memory_enabled",
+    "swa_full_tokens_ratio",
     "cuda_graph_backend_decode",
     "cuda_graph_backend_prefill",
+    "cuda_graph_max_bs_decode",
+    "cuda_graph_bs_decode",
     "no_cpu_offload",
 )
 _REQUIRED_HASH_KEYS = (
@@ -138,11 +161,22 @@ class SecondaryRuntimeProfile:
     quantization: str
     dtype: str
     kv_cache_dtype: str
+    kv_cache_scale_policy: str
     attention_backend: str
+    prefill_attention_backend: str
+    decode_attention_backend: str
+    sampling_backend: str
     moe_runner_backend: str
     mxfp4_moe_precision: str
+    page_size: int
+    radix_cache_enabled: bool
+    overlap_schedule_enabled: bool
+    hybrid_swa_memory_enabled: bool
+    swa_full_tokens_ratio: str
     cuda_graph_backend_decode: str
     cuda_graph_backend_prefill: str
+    cuda_graph_max_bs_decode: int
+    cuda_graph_bs_decode: tuple[int, ...]
     no_cpu_offload: bool
     allowed_modes: frozenset[str]
     allowed_workloads: frozenset[str]
@@ -215,6 +249,8 @@ class SecondaryRuntimeProfile:
             "max_running_requests",
             "max_output_tokens",
             "chunked_prefill_size",
+            "page_size",
+            "cuda_graph_max_bs_decode",
         )
         return not (
             any(type(value.get(key)) is not int for key in exact_integer_fields)
@@ -239,7 +275,11 @@ class SecondaryRuntimeProfile:
             or value.get("quantization") != self.quantization
             or value.get("dtype") != self.dtype
             or value.get("kv_cache_dtype") != self.kv_cache_dtype
+            or value.get("kv_cache_scale_policy") != self.kv_cache_scale_policy
             or value.get("attention_backend") != self.attention_backend
+            or value.get("prefill_attention_backend") != self.prefill_attention_backend
+            or value.get("decode_attention_backend") != self.decode_attention_backend
+            or value.get("sampling_backend") != self.sampling_backend
             or value.get("moe_runner_backend") != self.moe_runner_backend
             or value.get("mxfp4_moe_precision") != self.mxfp4_moe_precision
             or value.get("context_tokens") != self.max_context_tokens
@@ -248,8 +288,15 @@ class SecondaryRuntimeProfile:
             or value.get("max_running_requests") != self.max_concurrency
             or value.get("max_output_tokens") != self.max_output_tokens
             or value.get("chunked_prefill_size") != self.chunked_prefill_size
+            or value.get("page_size") != self.page_size
+            or value.get("radix_cache_enabled") is not self.radix_cache_enabled
+            or value.get("overlap_schedule_enabled") is not self.overlap_schedule_enabled
+            or value.get("hybrid_swa_memory_enabled") is not self.hybrid_swa_memory_enabled
+            or value.get("swa_full_tokens_ratio") != self.swa_full_tokens_ratio
             or value.get("cuda_graph_backend_decode") != self.cuda_graph_backend_decode
             or value.get("cuda_graph_backend_prefill") != self.cuda_graph_backend_prefill
+            or value.get("cuda_graph_max_bs_decode") != self.cuda_graph_max_bs_decode
+            or value.get("cuda_graph_bs_decode") != list(self.cuda_graph_bs_decode)
             or value.get("no_cpu_offload") is not self.no_cpu_offload
             or not isinstance(modes, list)
             or modes != sorted(self.allowed_modes)
@@ -300,16 +347,41 @@ class SecondaryRuntimeProfile:
             and 64 <= self.max_output_tokens <= 4096
             and self.max_output_tokens < self.max_context_tokens
             and type(self.chunked_prefill_size) is int
-            and 512 <= self.chunked_prefill_size <= 2_048
-            and self.mem_fraction_static in {"0.86", "0.88", "0.90", "0.92", "0.94", "0.96", "0.97"}
+            and self.chunked_prefill_size in _CHUNKED_PREFILL_GRID
+            and self.mem_fraction_static
+            in {"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"}
             and self.quantization == "mxfp4"
             and self.dtype == "bfloat16"
-            and self.kv_cache_dtype == "bf16"
+            and self.kv_cache_dtype in {"bf16", "fp8_e4m3"}
+            and self.kv_cache_scale_policy
+            == ("not_applicable" if self.kv_cache_dtype == "bf16" else "implicit_unit")
             and self.attention_backend == "triton"
+            and self.prefill_attention_backend == "triton"
+            and self.decode_attention_backend in {"triton", "trtllm_mha"}
+            and self.sampling_backend in {"pytorch", "flashinfer"}
             and self.moe_runner_backend == "flashinfer_mxfp4"
             and self.mxfp4_moe_precision == "default"
-            and self.cuda_graph_backend_decode == "disabled"
+            and type(self.page_size) is int
+            and self.page_size in {1, 16}
+            and type(self.radix_cache_enabled) is bool
+            and type(self.overlap_schedule_enabled) is bool
+            and self.hybrid_swa_memory_enabled is True
+            and self.swa_full_tokens_ratio in {"0.25", "0.50", "0.80", "1.00"}
+            and self.cuda_graph_backend_decode in {"disabled", "full"}
             and self.cuda_graph_backend_prefill == "disabled"
+            and type(self.cuda_graph_max_bs_decode) is int
+            and (
+                (
+                    self.cuda_graph_backend_decode == "disabled"
+                    and self.cuda_graph_max_bs_decode == 0
+                    and self.cuda_graph_bs_decode == ()
+                )
+                or (
+                    self.cuda_graph_backend_decode == "full"
+                    and self.cuda_graph_max_bs_decode == 1
+                    and self.cuda_graph_bs_decode == (1,)
+                )
+            )
             and self.no_cpu_offload is True
             and self.allowed_modes
             and self.allowed_modes <= {"shadow", "assist"}

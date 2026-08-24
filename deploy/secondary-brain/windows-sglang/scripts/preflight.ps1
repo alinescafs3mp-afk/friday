@@ -123,6 +123,14 @@ function Get-TextSha256([string]$Value) {
     }
 }
 
+function ConvertTo-LfContainerProgram([string]$Value) {
+    $normalized = $Value.Replace("`r`n", "`n")
+    if ($normalized.Contains("`r")) {
+        throw 'Container program contains a non-CRLF carriage return.'
+    }
+    return $normalized
+}
+
 function Convert-ExactGpuProjection([string]$Text) {
     $lines = @($Text -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ($lines.Count -ne 1 -or $lines[0].Length -gt 512) {
@@ -335,6 +343,7 @@ p = torch.cuda.get_device_properties(device)
 print(json.dumps({'name': p.name, 'memory_total_bytes': p.total_memory,
                   'compute_capability': [p.major, p.minor], 'kernel_sum': y}, sort_keys=True))
 '@
+    $canaryProgram = ConvertTo-LfContainerProgram $canaryProgram
     $gpuCanaryText = Invoke-Captured 'docker.exe' @(
         'run', '--rm', '--pull', 'never', '--network', 'none', '--gpus', 'device=0',
         '--security-opt', 'no-new-privileges:true', '--cap-drop', 'ALL',
@@ -381,9 +390,13 @@ if ($InspectSglangHelp) {
     $requiredFlags = @(
         '--model-path', '--served-model-name', '--api-key', '--reasoning-parser', '--dtype',
         '--tool-call-parser', '--attention-backend', '--quantization', '--moe-runner-backend',
+        '--prefill-attention-backend', '--decode-attention-backend', '--sampling-backend',
         '--flashinfer-mxfp4-moe-precision',
-        '--kv-cache-dtype', '--chunked-prefill-size', '--max-running-requests',
+        '--kv-cache-dtype', '--page-size', '--swa-full-tokens-ratio',
+        '--chunked-prefill-size', '--max-running-requests',
+        '--disable-radix-cache', '--disable-overlap-schedule',
         '--cuda-graph-backend-decode', '--cuda-graph-backend-prefill',
+        '--cuda-graph-max-bs-decode', '--cuda-graph-bs-decode',
         '--context-length', '--max-total-tokens',
         '--mem-fraction-static', '--enable-metrics', '--enable-cache-report'
     )
@@ -400,6 +413,7 @@ print(json.dumps({'cuda_runtime_version':torch.version.cuda,
                   'sglang_version':m.version('sglang')},
                  sort_keys=True, separators=(',', ':')))
 '@
+    $versionProbeCode = ConvertTo-LfContainerProgram $versionProbeCode
     $runtimeVersionsText = Invoke-Captured 'docker.exe' @(
         'run', '--rm', '--pull', 'never', '--network', 'none', '--read-only',
         '--tmpfs', '/tmp:size=16m', '--security-opt', 'no-new-privileges:true',
@@ -481,6 +495,7 @@ command -v sed >/dev/null
 command -v wget >/dev/null
 printf verified
 '@
+    $gatewayRuntimeProbeProgram = ConvertTo-LfContainerProgram $gatewayRuntimeProbeProgram
     $gatewayRuntimeProbe = Invoke-Captured 'docker.exe' @(
         'run', '--rm', '--pull', 'never', '--network', 'none', '--user', '101', '--read-only',
         '--tmpfs', '/tmp:size=16m', '--security-opt', 'no-new-privileges:true',

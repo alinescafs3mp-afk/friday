@@ -35,6 +35,26 @@ EXPECTED_RUNTIME_IMAGE_OCI_MANIFEST_DIGEST = (
 )
 EXPECTED_RUNTIME_SOURCE_REVISION = "29481685462732237d80d86076d6563e1f658102"
 _PROFILE_ID = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}\Z")
+_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_CONTEXT_LADDER = frozenset(
+    {4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536}
+)
+_MEMORY_FRACTIONS = frozenset(
+    {"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"}
+)
+_MODES = frozenset({"shadow", "assist"})
+_WORKLOADS = frozenset(
+    {
+        "classify",
+        "extract",
+        "query_rewrite",
+        "summarize",
+        "document_map",
+        "critique",
+        "verify",
+        "plan_candidate",
+    }
+)
 _ENGINE_KEYS = (
     "source_model_repository",
     "source_model_revision",
@@ -49,9 +69,18 @@ _ENGINE_KEYS = (
     "quantization",
     "dtype",
     "kv_cache_dtype",
+    "kv_cache_scale_policy",
     "attention_backend",
+    "prefill_attention_backend",
+    "decode_attention_backend",
+    "sampling_backend",
     "moe_runner_backend",
     "mxfp4_moe_precision",
+    "page_size",
+    "radix_cache_enabled",
+    "overlap_schedule_enabled",
+    "hybrid_swa_memory_enabled",
+    "swa_full_tokens_ratio",
     "context_tokens",
     "max_total_tokens",
     "mem_fraction_static",
@@ -59,8 +88,63 @@ _ENGINE_KEYS = (
     "max_output_tokens",
     "chunked_prefill_size",
     "cuda_graph_backend_decode",
+    "cuda_graph_max_bs_decode",
+    "cuda_graph_bs_decode",
     "cuda_graph_backend_prefill",
     "no_cpu_offload",
+)
+_PROFILE_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        "profile_id",
+        "engine_binding_sha256",
+        "hardware_runtime_receipt_sha256",
+        "endpoint_base_url",
+        "served_model_alias",
+        "source_model_repository",
+        "source_model_revision",
+        "source_model_manifest_sha256",
+        "gateway_ca_certificate_sha256",
+        "runtime_image",
+        "runtime_image_config_digest",
+        "runtime_image_oci_manifest_digest",
+        "runtime_source_revision",
+        "runtime_manifest_sha256",
+        "model_path",
+        "quantization",
+        "dtype",
+        "kv_cache_dtype",
+        "kv_cache_scale_policy",
+        "attention_backend",
+        "prefill_attention_backend",
+        "decode_attention_backend",
+        "sampling_backend",
+        "moe_runner_backend",
+        "mxfp4_moe_precision",
+        "page_size",
+        "radix_cache_enabled",
+        "overlap_schedule_enabled",
+        "hybrid_swa_memory_enabled",
+        "swa_full_tokens_ratio",
+        "context_tokens",
+        "max_total_tokens",
+        "mem_fraction_static",
+        "max_running_requests",
+        "max_output_tokens",
+        "chunked_prefill_size",
+        "cuda_graph_backend_decode",
+        "cuda_graph_max_bs_decode",
+        "cuda_graph_bs_decode",
+        "cuda_graph_backend_prefill",
+        "allowed_modes",
+        "allowed_workloads",
+        "no_cpu_offload",
+        "quality_evidence_sha256",
+        "capacity_evidence_sha256",
+        "soak_evidence_sha256",
+        "failure_evidence_sha256",
+    }
 )
 _HARMONY_MARKERS = (
     "<|analysis|>",
@@ -90,6 +174,9 @@ class EndpointIdentity:
     profile_bytes: bytes
     ca_sha256: str
     ca_pem: str
+    endpoint_base_url: str
+    context_tokens: int
+    mem_fraction_static: str
 
 
 _ENDPOINT_IDENTITY: EndpointIdentity | None = None
@@ -97,6 +184,83 @@ _ENDPOINT_IDENTITY: EndpointIdentity | None = None
 
 def _reject_json_constant(_value: str) -> None:
     raise EndpointError("runtime profile contains a non-finite number")
+
+
+def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise EndpointError("runtime profile contains a duplicate key")
+        value[key] = item
+    return value
+
+
+def _closed_profile_list(value: Any, allowed: frozenset[str]) -> bool:
+    return bool(
+        isinstance(value, list)
+        and value
+        and all(isinstance(item, str) for item in value)
+        and value == sorted(set(value))
+        and set(value) <= allowed
+    )
+
+
+def _profile_engine_surface_is_valid(value: dict[str, Any]) -> bool:
+    context = value.get("context_tokens")
+    output = value.get("max_output_tokens")
+    page_size = value.get("page_size")
+    graph_backend = value.get("cuda_graph_backend_decode")
+    graph_max_bs = value.get("cuda_graph_max_bs_decode")
+    graph_bs = value.get("cuda_graph_bs_decode")
+    kv_cache_dtype = value.get("kv_cache_dtype")
+    expected_scale = {"bf16": "not_applicable", "fp8_e4m3": "implicit_unit"}.get(
+        kv_cache_dtype if isinstance(kv_cache_dtype, str) else ""
+    )
+    expected_graph_shape = (0, []) if graph_backend == "disabled" else (1, [1])
+    evidence_keys = (
+        "runtime_manifest_sha256",
+        "gateway_ca_certificate_sha256",
+        "quality_evidence_sha256",
+        "capacity_evidence_sha256",
+        "soak_evidence_sha256",
+        "failure_evidence_sha256",
+    )
+    return bool(
+        type(context) is int
+        and context in _CONTEXT_LADDER
+        and type(value.get("max_total_tokens")) is int
+        and value["max_total_tokens"] == context
+        and value.get("mem_fraction_static") in _MEMORY_FRACTIONS
+        and type(value.get("max_running_requests")) is int
+        and value["max_running_requests"] == 1
+        and type(output) is int
+        and 64 <= output <= 4096
+        and output < context
+        and type(value.get("chunked_prefill_size")) is int
+        and value["chunked_prefill_size"] in {512, 1024, 1536, 2048}
+        and kv_cache_dtype in {"bf16", "fp8_e4m3"}
+        and value.get("kv_cache_scale_policy") == expected_scale
+        and value.get("attention_backend") == "triton"
+        and value.get("prefill_attention_backend") == "triton"
+        and value.get("decode_attention_backend") in {"triton", "trtllm_mha"}
+        and value.get("sampling_backend") in {"pytorch", "flashinfer"}
+        and type(page_size) is int
+        and page_size in {1, 16}
+        and type(value.get("radix_cache_enabled")) is bool
+        and type(value.get("overlap_schedule_enabled")) is bool
+        and value.get("hybrid_swa_memory_enabled") is True
+        and value.get("swa_full_tokens_ratio") in {"0.25", "0.50", "0.80", "1.00"}
+        and graph_backend in {"disabled", "full"}
+        and type(graph_max_bs) is int
+        and isinstance(graph_bs, list)
+        and all(type(item) is int for item in graph_bs)
+        and (graph_max_bs, graph_bs) == expected_graph_shape
+        and value.get("cuda_graph_backend_prefill") == "disabled"
+        and _closed_profile_list(value.get("allowed_modes"), _MODES)
+        and _closed_profile_list(value.get("allowed_workloads"), _WORKLOADS)
+        and value.get("no_cpu_offload") is True
+        and all(isinstance(value.get(key), str) and _SHA256.fullmatch(value[key]) for key in evidence_keys)
+    )
 
 
 def _read_bounded_regular(path: Path, *, maximum_bytes: int, label: str) -> bytes:
@@ -185,6 +349,7 @@ def configure_expected_model(profile_manifest: Path, ca_file: Path | None = None
         value = json.loads(
             raw.decode("utf-8", errors="strict"),
             parse_constant=_reject_json_constant,
+            object_pairs_hook=_strict_json_object,
         )
     except EndpointError:
         raise
@@ -212,6 +377,7 @@ def configure_expected_model(profile_manifest: Path, ca_file: Path | None = None
     ).hexdigest()
     if (
         not isinstance(value, dict)
+        or set(value) != _PROFILE_KEYS
         or raw != canonical
         or value.get("schema") != "friday.secondary-runtime-profile.v2"
         or value.get("status") not in {"candidate", "accepted"}
@@ -226,15 +392,13 @@ def configure_expected_model(profile_manifest: Path, ca_file: Path | None = None
         or value.get("runtime_image_config_digest") != EXPECTED_RUNTIME_IMAGE_CONFIG_DIGEST
         or value.get("runtime_image_oci_manifest_digest") != EXPECTED_RUNTIME_IMAGE_OCI_MANIFEST_DIGEST
         or value.get("runtime_source_revision") != EXPECTED_RUNTIME_SOURCE_REVISION
+        or value.get("endpoint_base_url") != "https://192.168.1.35:8443/v1"
         or value.get("model_path") != "/source/snapshot"
         or value.get("quantization") != "mxfp4"
         or value.get("dtype") != "bfloat16"
-        or value.get("kv_cache_dtype") != "bf16"
-        or value.get("attention_backend") != "triton"
         or value.get("moe_runner_backend") != "flashinfer_mxfp4"
         or value.get("mxfp4_moe_precision") != "default"
-        or value.get("cuda_graph_backend_decode") != "disabled"
-        or value.get("cuda_graph_backend_prefill") != "disabled"
+        or not _profile_engine_surface_is_valid(value)
         or profile_id != f"gptoss20b-{binding}"
         or alias != f"friday-secondary-{profile_id}"
     ):
@@ -253,6 +417,9 @@ def configure_expected_model(profile_manifest: Path, ca_file: Path | None = None
         profile_bytes=raw,
         ca_sha256=ca_sha256,
         ca_pem=ca_pem,
+        endpoint_base_url=str(value["endpoint_base_url"]),
+        context_tokens=int(value["context_tokens"]),
+        mem_fraction_static=str(value["mem_fraction_static"]),
     )
     return alias
 
@@ -269,6 +436,24 @@ def evidence_identity() -> dict[str, str]:
         "served_model_alias": identity.model_alias,
         "gateway_ca_certificate_sha256": identity.ca_sha256,
     }
+
+
+def configured_profile_context_tokens() -> int:
+    """Return the exact candidate context bound by ``configure_expected_model``."""
+
+    identity = _ENDPOINT_IDENTITY
+    if identity is None:
+        raise EndpointError("endpoint identity was not configured")
+    return identity.context_tokens
+
+
+def configured_profile_mem_fraction_static() -> str:
+    """Return the exact candidate memory fraction bound by the runtime profile."""
+
+    identity = _ENDPOINT_IDENTITY
+    if identity is None:
+        raise EndpointError("endpoint identity was not configured")
+    return identity.mem_fraction_static
 
 
 def load_api_key(path: Path) -> str:
@@ -499,8 +684,17 @@ def verify_remote_profile_epoch(
 
     identity = _ENDPOINT_IDENTITY
     normalized = normalize_base_url(base_url)
-    if identity is None or not identity.ca_pem or urlsplit(normalized).scheme != "https":
+    if (
+        identity is None
+        or not identity.ca_pem
+        or base_url != identity.endpoint_base_url
+        or normalized != identity.endpoint_base_url
+        or urlsplit(normalized).scheme != "https"
+    ):
         raise EndpointError("HTTPS endpoint identity was not configured")
+    ca_pem, ca_sha256 = _load_ca_pem(ca_file, identity.ca_sha256)
+    if ca_sha256 != identity.ca_sha256 or ca_pem != identity.ca_pem:
+        raise EndpointError("private CA identity changed after profile configuration")
     request = urllib.request.Request(
         f"{normalized}/friday-profile",
         headers={

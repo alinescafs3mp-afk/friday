@@ -54,8 +54,22 @@ GATEWAY_IMAGE = (
 )
 GATEWAY_IMAGE_CONFIG_DIGEST = "sha256:89dc7d054bddca245db3d5a779e363007d0e75b1161cfe2f283ebeaf0ed90d50"
 GATEWAY_IMAGE_LOCAL_ID = "sha256:d61d7ef52430df468e74ed6ee6e914429b80e20ba988e3176278a73165f876cf"
-CONTEXT_LADDER = frozenset({4096, 8192, 12288, 16384, 24576, 32768})
-MEMORY_GRID = frozenset({"0.86", "0.88", "0.90", "0.92", "0.94", "0.96", "0.97"})
+CONTEXT_LADDER = frozenset(
+    {4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536}
+)
+CHUNKED_PREFILL_GRID = frozenset({512, 1024, 1536, 2048})
+MEMORY_GRID = frozenset(
+    {"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"}
+)
+KV_CACHE_DTYPES = frozenset({"bf16", "fp8_e4m3"})
+KV_CACHE_SCALE_POLICIES = {"bf16": "not_applicable", "fp8_e4m3": "implicit_unit"}
+DECODE_ATTENTION_BACKENDS = frozenset({"triton", "trtllm_mha"})
+SAMPLING_BACKENDS = frozenset({"pytorch", "flashinfer"})
+PAGE_SIZES = frozenset({1, 16})
+SWA_FULL_TOKENS_RATIOS = frozenset({"0.25", "0.50", "0.80", "1.00"})
+CUDA_GRAPH_DECODE_BACKENDS = frozenset({"disabled", "full"})
+LONG_CONTEXT_QUALITY_CASE = "near_limit_long_context_recall"
+LONG_CONTEXT_PROMPT_RESERVE = 768
 MODES = frozenset({"shadow", "assist"})
 WORKLOADS = frozenset(
     {
@@ -199,6 +213,7 @@ QUALITY_CASES = frozenset(
         "contradiction",
         "citation_preservation",
         "wrong_language_guard",
+        LONG_CONTEXT_QUALITY_CASE,
         "tool_call_shape",
         "tool_result_continuation",
         "stream_cancellation",
@@ -231,9 +246,18 @@ PROFILE_KEYS = frozenset(
         "quantization",
         "dtype",
         "kv_cache_dtype",
+        "kv_cache_scale_policy",
         "attention_backend",
+        "prefill_attention_backend",
+        "decode_attention_backend",
+        "sampling_backend",
         "moe_runner_backend",
         "mxfp4_moe_precision",
+        "page_size",
+        "radix_cache_enabled",
+        "overlap_schedule_enabled",
+        "hybrid_swa_memory_enabled",
+        "swa_full_tokens_ratio",
         "context_tokens",
         "max_total_tokens",
         "mem_fraction_static",
@@ -241,6 +265,8 @@ PROFILE_KEYS = frozenset(
         "max_output_tokens",
         "chunked_prefill_size",
         "cuda_graph_backend_decode",
+        "cuda_graph_max_bs_decode",
+        "cuda_graph_bs_decode",
         "cuda_graph_backend_prefill",
         "allowed_modes",
         "allowed_workloads",
@@ -265,9 +291,18 @@ ENGINE_KEYS = (
     "quantization",
     "dtype",
     "kv_cache_dtype",
+    "kv_cache_scale_policy",
     "attention_backend",
+    "prefill_attention_backend",
+    "decode_attention_backend",
+    "sampling_backend",
     "moe_runner_backend",
     "mxfp4_moe_precision",
+    "page_size",
+    "radix_cache_enabled",
+    "overlap_schedule_enabled",
+    "hybrid_swa_memory_enabled",
+    "swa_full_tokens_ratio",
     "context_tokens",
     "max_total_tokens",
     "mem_fraction_static",
@@ -275,6 +310,8 @@ ENGINE_KEYS = (
     "max_output_tokens",
     "chunked_prefill_size",
     "cuda_graph_backend_decode",
+    "cuda_graph_max_bs_decode",
+    "cuda_graph_bs_decode",
     "cuda_graph_backend_prefill",
     "no_cpu_offload",
 )
@@ -483,6 +520,16 @@ def _closed_csv(raw: str, allowed: frozenset[str], *, label: str) -> list[str]:
     return values
 
 
+def _closed_bool(raw: Any, *, label: str) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    if raw == "true":
+        return True
+    if raw == "false":
+        return False
+    raise ProfileOperatorError(f"{label} is outside the closed boolean vocabulary")
+
+
 def _accepted_manifest(
     path: Path,
     *,
@@ -624,18 +671,44 @@ def build_candidate(args: argparse.Namespace) -> dict[str, Any]:
         ca_certificate=args.ca_certificate,
     )
 
-    context = _exact_int(args.context_tokens, minimum=4096, maximum=32768, label="context")
+    context = _exact_int(args.context_tokens, minimum=4096, maximum=65536, label="context")
     if context not in CONTEXT_LADDER:
         raise ProfileOperatorError("context is outside the certified ladder")
     output = _exact_int(args.max_output_tokens, minimum=64, maximum=4096, label="output")
     if output >= context:
         raise ProfileOperatorError("output budget is not below context")
     chunk = _exact_int(args.chunked_prefill_size, minimum=512, maximum=2048, label="chunk")
+    if chunk not in CHUNKED_PREFILL_GRID:
+        raise ProfileOperatorError("chunked prefill size is outside the closed grid")
     memory = f"{args.mem_fraction_static:.2f}"
     if memory not in MEMORY_GRID:
         raise ProfileOperatorError("memory fraction is outside the closed grid")
     modes = _closed_csv(args.allowed_modes, MODES, label="modes")
     workloads = _closed_csv(args.allowed_workloads, WORKLOADS, label="workloads")
+    kv_cache_dtype = str(args.kv_cache_dtype)
+    if kv_cache_dtype not in KV_CACHE_DTYPES:
+        raise ProfileOperatorError("KV cache dtype is outside the closed vocabulary")
+    if args.prefill_attention_backend != "triton":
+        raise ProfileOperatorError("prefill attention backend is outside the closed vocabulary")
+    decode_attention_backend = str(args.decode_attention_backend)
+    if decode_attention_backend not in DECODE_ATTENTION_BACKENDS:
+        raise ProfileOperatorError("decode attention backend is outside the closed vocabulary")
+    sampling_backend = str(args.sampling_backend)
+    if sampling_backend not in SAMPLING_BACKENDS:
+        raise ProfileOperatorError("sampling backend is outside the closed vocabulary")
+    page_size = _exact_int(args.page_size, minimum=1, maximum=16, label="page size")
+    if page_size not in PAGE_SIZES:
+        raise ProfileOperatorError("page size is outside the closed grid")
+    radix_cache_enabled = _closed_bool(args.radix_cache_enabled, label="radix cache")
+    overlap_schedule_enabled = _closed_bool(args.overlap_schedule_enabled, label="overlap schedule")
+    swa_ratio = str(args.swa_full_tokens_ratio)
+    if swa_ratio not in SWA_FULL_TOKENS_RATIOS:
+        raise ProfileOperatorError("SWA ratio is outside the closed grid")
+    cuda_graph_decode = str(args.cuda_graph_backend_decode)
+    if cuda_graph_decode not in CUDA_GRAPH_DECODE_BACKENDS:
+        raise ProfileOperatorError("decode CUDA graph backend is outside the closed vocabulary")
+    cuda_graph_max_bs_decode = 0 if cuda_graph_decode == "disabled" else 1
+    cuda_graph_bs_decode: list[int] = [] if cuda_graph_decode == "disabled" else [1]
     profile: dict[str, Any] = {
         "schema": PROFILE_SCHEMA,
         "status": "candidate",
@@ -656,17 +729,28 @@ def build_candidate(args: argparse.Namespace) -> dict[str, Any]:
         "model_path": MODEL_PATH,
         "quantization": "mxfp4",
         "dtype": "bfloat16",
-        "kv_cache_dtype": "bf16",
+        "kv_cache_dtype": kv_cache_dtype,
+        "kv_cache_scale_policy": KV_CACHE_SCALE_POLICIES[kv_cache_dtype],
         "attention_backend": "triton",
+        "prefill_attention_backend": "triton",
+        "decode_attention_backend": decode_attention_backend,
+        "sampling_backend": sampling_backend,
         "moe_runner_backend": "flashinfer_mxfp4",
         "mxfp4_moe_precision": "default",
+        "page_size": page_size,
+        "radix_cache_enabled": radix_cache_enabled,
+        "overlap_schedule_enabled": overlap_schedule_enabled,
+        "hybrid_swa_memory_enabled": True,
+        "swa_full_tokens_ratio": swa_ratio,
         "context_tokens": context,
         "max_total_tokens": context,
         "mem_fraction_static": memory,
         "max_running_requests": 1,
         "max_output_tokens": output,
         "chunked_prefill_size": chunk,
-        "cuda_graph_backend_decode": "disabled",
+        "cuda_graph_backend_decode": cuda_graph_decode,
+        "cuda_graph_max_bs_decode": cuda_graph_max_bs_decode,
+        "cuda_graph_bs_decode": cuda_graph_bs_decode,
         "cuda_graph_backend_prefill": "disabled",
         "allowed_modes": modes,
         "allowed_workloads": workloads,
@@ -701,7 +785,7 @@ def _evidence_matches(value: dict[str, Any], candidate: dict[str, Any], candidat
     )
 
 
-def _validate_quality_cases(cases: Any) -> None:
+def _validate_quality_cases(cases: Any, *, context_tokens: int) -> None:
     expected_keys = {
         "case",
         "status",
@@ -726,13 +810,21 @@ def _validate_quality_cases(cases: Any) -> None:
         ):
             raise ProfileOperatorError("quality evidence row is invalid")
         _exact_number(row.get("latency_sec"), minimum=0.0, maximum=3_600.0, label="quality latency")
-        _exact_int(row.get("prompt_tokens"), minimum=0, maximum=10_000_000, label="quality prompt")
-        _exact_int(
+        prompt_tokens = _exact_int(
+            row.get("prompt_tokens"), minimum=0, maximum=10_000_000, label="quality prompt"
+        )
+        completion_tokens = _exact_int(
             row.get("completion_tokens"),
             minimum=0,
             maximum=10_000_000,
             label="quality completion",
         )
+        if name == LONG_CONTEXT_QUALITY_CASE and (
+            prompt_tokens < context_tokens - LONG_CONTEXT_PROMPT_RESERVE
+            or completion_tokens < 1
+            or prompt_tokens + completion_tokens > context_tokens
+        ):
+            raise ProfileOperatorError("long-context quality evidence is not near the profile limit")
         names.append(name)
     if len(set(names)) != len(names) or set(names) != QUALITY_CASES:
         raise ProfileOperatorError("quality evidence case set is invalid")
@@ -826,11 +918,18 @@ def accept_capacity(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _validate_candidate(value: dict[str, Any], raw: bytes) -> None:
-    context = _exact_int(value.get("context_tokens"), minimum=4096, maximum=32768, label="context")
-    total = _exact_int(value.get("max_total_tokens"), minimum=4096, maximum=32768, label="token pool")
+    context = _exact_int(value.get("context_tokens"), minimum=4096, maximum=65536, label="context")
+    total = _exact_int(value.get("max_total_tokens"), minimum=4096, maximum=65536, label="token pool")
     concurrency = _exact_int(value.get("max_running_requests"), minimum=1, maximum=1, label="concurrency")
     output = _exact_int(value.get("max_output_tokens"), minimum=64, maximum=4096, label="output")
     chunk = _exact_int(value.get("chunked_prefill_size"), minimum=512, maximum=2048, label="chunk")
+    page_size = _exact_int(value.get("page_size"), minimum=1, maximum=16, label="page size")
+    graph_max_bs = _exact_int(
+        value.get("cuda_graph_max_bs_decode"), minimum=0, maximum=1, label="decode graph max batch"
+    )
+    graph_bs = value.get("cuda_graph_bs_decode")
+    graph_backend = value.get("cuda_graph_backend_decode")
+    expected_graph_shape = (0, []) if graph_backend == "disabled" else (1, [1])
     modes = value.get("allowed_modes")
     workloads = value.get("allowed_workloads")
     hashes = (
@@ -860,16 +959,29 @@ def _validate_candidate(value: dict[str, Any], raw: bytes) -> None:
         or value.get("model_path") != MODEL_PATH
         or value.get("quantization") != "mxfp4"
         or value.get("dtype") != "bfloat16"
-        or value.get("kv_cache_dtype") != "bf16"
+        or value.get("kv_cache_dtype") not in KV_CACHE_DTYPES
+        or value.get("kv_cache_scale_policy")
+        != KV_CACHE_SCALE_POLICIES.get(str(value.get("kv_cache_dtype")))
         or value.get("attention_backend") != "triton"
+        or value.get("prefill_attention_backend") != "triton"
+        or value.get("decode_attention_backend") not in DECODE_ATTENTION_BACKENDS
+        or value.get("sampling_backend") not in SAMPLING_BACKENDS
         or value.get("moe_runner_backend") != "flashinfer_mxfp4"
         or value.get("mxfp4_moe_precision") != "default"
+        or page_size not in PAGE_SIZES
+        or not isinstance(value.get("radix_cache_enabled"), bool)
+        or not isinstance(value.get("overlap_schedule_enabled"), bool)
+        or value.get("hybrid_swa_memory_enabled") is not True
+        or value.get("swa_full_tokens_ratio") not in SWA_FULL_TOKENS_RATIOS
         or context not in CONTEXT_LADDER
         or total != context
         or concurrency != 1
         or output >= context
-        or chunk not in {512, 1024, 1536, 2048}
-        or value.get("cuda_graph_backend_decode") != "disabled"
+        or chunk not in CHUNKED_PREFILL_GRID
+        or graph_backend not in CUDA_GRAPH_DECODE_BACKENDS
+        or not isinstance(graph_bs, list)
+        or any(isinstance(item, bool) or not isinstance(item, int) for item in graph_bs)
+        or (graph_max_bs, graph_bs) != expected_graph_shape
         or value.get("cuda_graph_backend_prefill") != "disabled"
         or value.get("mem_fraction_static") not in MEMORY_GRID
         or not isinstance(modes, list)
@@ -1320,7 +1432,7 @@ def accept_profile(args: argparse.Namespace) -> dict[str, Any]:
             raise ProfileOperatorError(f"{name} evidence is not accepted for this candidate")
         if name == "quality":
             cases = value.get("cases")
-            _validate_quality_cases(cases)
+            _validate_quality_cases(cases, context_tokens=int(candidate["context_tokens"]))
             if value.get("raw_content_retained") is not False or value.get("api_key_retained") is not False:
                 raise ProfileOperatorError("quality evidence is incomplete")
         elif name == "capacity":
@@ -1403,7 +1515,33 @@ def _parser() -> argparse.ArgumentParser:
     candidate.add_argument("--context-tokens", required=True, type=int)
     candidate.add_argument("--max-output-tokens", default=2048, type=int)
     candidate.add_argument("--mem-fraction-static", required=True, type=float)
-    candidate.add_argument("--chunked-prefill-size", default=1024, type=int)
+    candidate.add_argument(
+        "--chunked-prefill-size",
+        choices=sorted(CHUNKED_PREFILL_GRID),
+        default=1024,
+        type=int,
+    )
+    candidate.add_argument("--kv-cache-dtype", choices=sorted(KV_CACHE_DTYPES), default="bf16")
+    candidate.add_argument("--prefill-attention-backend", choices=("triton",), default="triton")
+    candidate.add_argument(
+        "--decode-attention-backend",
+        choices=sorted(DECODE_ATTENTION_BACKENDS),
+        default="triton",
+    )
+    candidate.add_argument("--sampling-backend", choices=sorted(SAMPLING_BACKENDS), default="pytorch")
+    candidate.add_argument("--page-size", choices=sorted(PAGE_SIZES), default=1, type=int)
+    candidate.add_argument("--radix-cache-enabled", choices=("false", "true"), default="true")
+    candidate.add_argument("--overlap-schedule-enabled", choices=("false", "true"), default="true")
+    candidate.add_argument(
+        "--swa-full-tokens-ratio",
+        choices=sorted(SWA_FULL_TOKENS_RATIOS),
+        default="0.80",
+    )
+    candidate.add_argument(
+        "--cuda-graph-backend-decode",
+        choices=sorted(CUDA_GRAPH_DECODE_BACKENDS),
+        default="disabled",
+    )
     candidate.add_argument("--allowed-modes", default="assist,shadow")
     candidate.add_argument("--allowed-workloads", default="extract")
     candidate.add_argument("--profile-id-output", required=True, type=Path)

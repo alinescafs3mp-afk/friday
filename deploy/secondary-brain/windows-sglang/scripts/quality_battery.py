@@ -24,6 +24,7 @@ from endpoint_common import (
     atomic_write_json,
     build_tls_context,
     configure_expected_model,
+    configured_profile_context_tokens,
     evidence_identity,
     load_api_key,
     normalize_base_url,
@@ -43,6 +44,15 @@ _RESERVED_PAYLOAD_KEYS = frozenset(
 _TOOL_NAME = "lookup_temperature"
 _TOOL_USER = "Call lookup_temperature once for Moscow. Do not answer from memory."
 _CALL_ID = re.compile(r"[A-Za-z0-9_.:-]{1,200}\Z")
+LONG_CONTEXT_CASE_NAME = "near_limit_long_context_recall"
+_CONTEXT_LADDER = frozenset(
+    {4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536}
+)
+_LONG_CONTEXT_MARKER = "FRIDAY-LONG-CONTEXT-7C91E2"
+_LONG_CONTEXT_FILLER_RESERVE = 512
+_LONG_CONTEXT_ACCEPTANCE_RESERVE = 768
+_LONG_CONTEXT_MAX_TOKENS = 128
+_LONG_CONTEXT_MAX_PROMPT_BYTES = 1_048_576
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +211,41 @@ def _base_messages(
     return (
         {"role": "system", "content": system},
         {"role": "user", "content": user},
+    )
+
+
+def _near_limit_long_context_case(context_tokens: int) -> QualityCase:
+    if type(context_tokens) is not int or context_tokens not in _CONTEXT_LADDER:
+        raise EndpointError("profile context is outside the quality ladder")
+    filler_count = context_tokens - _LONG_CONTEXT_FILLER_RESERVE
+    user = (
+        f"Memory value: {_LONG_CONTEXT_MARKER}.\n"
+        + " x" * filler_count
+        + "\nReturn only the memory value stated before the filler."
+    )
+    messages = _base_messages(
+        user,
+        system="Read the entire bounded message and return only the requested earlier memory value.",
+    )
+    encoded_bytes = len(
+        json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    )
+    if encoded_bytes > _LONG_CONTEXT_MAX_PROMPT_BYTES:
+        raise EndpointError("long-context quality prompt exceeds its byte bound")
+
+    def validate(completion: SanitizedCompletion) -> bool:
+        return bool(
+            completion.content.strip() == _LONG_CONTEXT_MARKER
+            and completion.prompt_tokens >= context_tokens - _LONG_CONTEXT_ACCEPTANCE_RESERVE
+            and completion.completion_tokens >= 1
+            and completion.prompt_tokens + completion.completion_tokens <= context_tokens
+        )
+
+    return QualityCase(
+        LONG_CONTEXT_CASE_NAME,
+        messages,
+        validate,
+        max_tokens=_LONG_CONTEXT_MAX_TOKENS,
     )
 
 
@@ -869,6 +914,7 @@ def run_battery(
     api_key: str,
     timeout_sec: float,
     ca_file: Path,
+    context_tokens: int | None = None,
 ) -> dict[str, object]:
     normalized = normalize_base_url(base_url)
     if urlsplit(normalized).scheme != "https":
@@ -881,6 +927,9 @@ def run_battery(
     )
     rows = [inventory]
     cases = _live_cases()
+    long_context_case = (
+        _near_limit_long_context_case(context_tokens) if context_tokens is not None else None
+    )
     if alias_ok:
         rows.extend(
             _run_live_case(
@@ -892,6 +941,16 @@ def run_battery(
             )
             for case in cases
         )
+        if long_context_case is not None:
+            rows.append(
+                _run_live_case(
+                    long_context_case,
+                    base_url=normalized,
+                    api_key=api_key,
+                    timeout_sec=timeout_sec,
+                    ca_file=ca_file,
+                )
+            )
         rows.extend(
             _run_tool_protocol(
                 base_url=normalized,
@@ -910,6 +969,8 @@ def run_battery(
         )
     else:
         rows.extend(_failed(case.name) for case in cases)
+        if long_context_case is not None:
+            rows.append(_failed(long_context_case.name))
         rows.extend((_failed("tool_call_shape"), _failed("tool_result_continuation")))
         rows.extend((_failed("stream_cancellation"), _failed("client_disconnect_recovery")))
     rows.extend(_protocol_rejection_rows())
@@ -958,6 +1019,7 @@ def main(argv: list[str] | None = None) -> int:
             api_key=api_key,
             timeout_sec=args.timeout_sec,
             ca_file=args.ca_file,
+            context_tokens=configured_profile_context_tokens(),
         )
         atomic_write_json(args.output, report)
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))

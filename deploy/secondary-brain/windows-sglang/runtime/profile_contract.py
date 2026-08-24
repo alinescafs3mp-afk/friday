@@ -30,8 +30,13 @@ _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _IMAGE_ID_RE = re.compile(r"sha256:[0-9a-f]{64}")
 _REVISION_RE = re.compile(r"[0-9a-f]{40}")
 _PROFILE_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}")
-_MEMORY_FRACTIONS = frozenset({"0.86", "0.88", "0.90", "0.92", "0.94", "0.96", "0.97"})
-_CONTEXT_LADDER = frozenset({4096, 8192, 12288, 16384, 24576, 32768})
+_MEMORY_FRACTIONS = frozenset(
+    {"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"}
+)
+_CONTEXT_LADDER = frozenset(
+    {4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536}
+)
+_CHUNKED_PREFILL_GRID = frozenset({512, 1024, 1536, 2048})
 _MODES = frozenset({"shadow", "assist"})
 _WORKLOADS = frozenset(
     {
@@ -67,9 +72,18 @@ _KEYS = frozenset(
         "quantization",
         "dtype",
         "kv_cache_dtype",
+        "kv_cache_scale_policy",
         "attention_backend",
+        "prefill_attention_backend",
+        "decode_attention_backend",
+        "sampling_backend",
         "moe_runner_backend",
         "mxfp4_moe_precision",
+        "page_size",
+        "radix_cache_enabled",
+        "overlap_schedule_enabled",
+        "hybrid_swa_memory_enabled",
+        "swa_full_tokens_ratio",
         "context_tokens",
         "max_total_tokens",
         "mem_fraction_static",
@@ -77,6 +91,8 @@ _KEYS = frozenset(
         "max_output_tokens",
         "chunked_prefill_size",
         "cuda_graph_backend_decode",
+        "cuda_graph_max_bs_decode",
+        "cuda_graph_bs_decode",
         "cuda_graph_backend_prefill",
         "allowed_modes",
         "allowed_workloads",
@@ -101,9 +117,18 @@ _ENGINE_KEYS = (
     "quantization",
     "dtype",
     "kv_cache_dtype",
+    "kv_cache_scale_policy",
     "attention_backend",
+    "prefill_attention_backend",
+    "decode_attention_backend",
+    "sampling_backend",
     "moe_runner_backend",
     "mxfp4_moe_precision",
+    "page_size",
+    "radix_cache_enabled",
+    "overlap_schedule_enabled",
+    "hybrid_swa_memory_enabled",
+    "swa_full_tokens_ratio",
     "context_tokens",
     "max_total_tokens",
     "mem_fraction_static",
@@ -111,6 +136,8 @@ _ENGINE_KEYS = (
     "max_output_tokens",
     "chunked_prefill_size",
     "cuda_graph_backend_decode",
+    "cuda_graph_max_bs_decode",
+    "cuda_graph_bs_decode",
     "cuda_graph_backend_prefill",
     "no_cpu_offload",
 )
@@ -227,9 +254,18 @@ class LaunchProfile:
     quantization: str
     dtype: str
     kv_cache_dtype: str
+    kv_cache_scale_policy: str
     attention_backend: str
+    prefill_attention_backend: str
+    decode_attention_backend: str
+    sampling_backend: str
     moe_runner_backend: str
     mxfp4_moe_precision: str
+    page_size: int
+    radix_cache_enabled: bool
+    overlap_schedule_enabled: bool
+    hybrid_swa_memory_enabled: bool
+    swa_full_tokens_ratio: str
     context_tokens: int
     max_total_tokens: int
     mem_fraction_static: str
@@ -237,6 +273,8 @@ class LaunchProfile:
     max_output_tokens: int
     chunked_prefill_size: int
     cuda_graph_backend_decode: str
+    cuda_graph_max_bs_decode: int
+    cuda_graph_bs_decode: tuple[int, ...]
     cuda_graph_backend_prefill: str
 
     def server_arguments(self, api_key: str) -> list[str]:
@@ -261,12 +299,22 @@ class LaunchProfile:
             "gpt-oss",
             "--attention-backend",
             self.attention_backend,
+            "--prefill-attention-backend",
+            self.prefill_attention_backend,
+            "--decode-attention-backend",
+            self.decode_attention_backend,
+            "--sampling-backend",
+            self.sampling_backend,
             "--moe-runner-backend",
             self.moe_runner_backend,
             "--flashinfer-mxfp4-moe-precision",
             self.mxfp4_moe_precision,
             "--kv-cache-dtype",
             self.kv_cache_dtype,
+            "--page-size",
+            str(self.page_size),
+            "--swa-full-tokens-ratio",
+            self.swa_full_tokens_ratio,
             "--chunked-prefill-size",
             str(self.chunked_prefill_size),
             "--max-running-requests",
@@ -275,15 +323,32 @@ class LaunchProfile:
             self.cuda_graph_backend_decode,
             "--cuda-graph-backend-prefill",
             self.cuda_graph_backend_prefill,
-            "--context-length",
-            str(self.context_tokens),
-            "--max-total-tokens",
-            str(self.max_total_tokens),
-            "--mem-fraction-static",
-            self.mem_fraction_static,
-            "--enable-metrics",
-            "--enable-cache-report",
         ]
+        if self.cuda_graph_backend_decode == "full":
+            arguments.extend(
+                [
+                    "--cuda-graph-max-bs-decode",
+                    str(self.cuda_graph_max_bs_decode),
+                    "--cuda-graph-bs-decode",
+                    *(str(size) for size in self.cuda_graph_bs_decode),
+                ]
+            )
+        if not self.radix_cache_enabled:
+            arguments.append("--disable-radix-cache")
+        if not self.overlap_schedule_enabled:
+            arguments.append("--disable-overlap-schedule")
+        arguments.extend(
+            [
+                "--context-length",
+                str(self.context_tokens),
+                "--max-total-tokens",
+                str(self.max_total_tokens),
+                "--mem-fraction-static",
+                self.mem_fraction_static,
+                "--enable-metrics",
+                "--enable-cache-report",
+            ]
+        )
         return arguments
 
 
@@ -356,18 +421,44 @@ def load_launch_profile(
         raise ProfileContractError("profile runtime identity is invalid")
     if runtime_image != actual_runtime_image:
         raise ProfileContractError("running image does not match the profile")
-    if value["quantization"] != "mxfp4" or value["dtype"] != "bfloat16" or value["kv_cache_dtype"] != "bf16":
+    if (
+        value["quantization"] != "mxfp4"
+        or value["dtype"] != "bfloat16"
+        or not isinstance(value["kv_cache_dtype"], str)
+        or value["kv_cache_dtype"] not in {"bf16", "fp8_e4m3"}
+        or not isinstance(value["kv_cache_scale_policy"], str)
+        or value["kv_cache_scale_policy"]
+        != {"bf16": "not_applicable", "fp8_e4m3": "implicit_unit"}.get(value["kv_cache_dtype"])
+    ):
         raise ProfileContractError("profile quantization is invalid")
     if (
         value["attention_backend"] != "triton"
+        or value["prefill_attention_backend"] != "triton"
+        or not isinstance(value["decode_attention_backend"], str)
+        or value["decode_attention_backend"] not in {"triton", "trtllm_mha"}
+        or not isinstance(value["sampling_backend"], str)
+        or value["sampling_backend"] not in {"pytorch", "flashinfer"}
         or value["moe_runner_backend"] != "flashinfer_mxfp4"
         or value["mxfp4_moe_precision"] != "default"
     ):
         raise ProfileContractError("profile kernel selection is invalid")
-    context_tokens = _exact_int(value["context_tokens"], minimum=4096, maximum=32768)
+    page_size = _exact_int(value["page_size"], minimum=1, maximum=16)
+    if page_size not in {1, 16}:
+        raise ProfileContractError("profile page size is invalid")
+    if not isinstance(value["radix_cache_enabled"], bool) or not isinstance(
+        value["overlap_schedule_enabled"], bool
+    ):
+        raise ProfileContractError("profile scheduler selection is invalid")
+    if value["hybrid_swa_memory_enabled"] is not True:
+        raise ProfileContractError("profile hybrid SWA memory selection is invalid")
+    if not isinstance(value["swa_full_tokens_ratio"], str) or value[
+        "swa_full_tokens_ratio"
+    ] not in {"0.25", "0.50", "0.80", "1.00"}:
+        raise ProfileContractError("profile SWA token ratio is invalid")
+    context_tokens = _exact_int(value["context_tokens"], minimum=4096, maximum=65536)
     if context_tokens not in _CONTEXT_LADDER:
         raise ProfileContractError("profile context is outside the certified ladder")
-    max_total_tokens = _exact_int(value["max_total_tokens"], minimum=4096, maximum=32768)
+    max_total_tokens = _exact_int(value["max_total_tokens"], minimum=4096, maximum=65536)
     if max_total_tokens != context_tokens:
         raise ProfileContractError("profile token pool must equal the single-request context")
     mem_fraction = value["mem_fraction_static"]
@@ -378,7 +469,28 @@ def load_launch_profile(
     if max_output_tokens >= context_tokens:
         raise ProfileContractError("profile output budget is invalid")
     chunked_prefill_size = _exact_int(value["chunked_prefill_size"], minimum=512, maximum=2048)
-    if value["cuda_graph_backend_decode"] != "disabled" or value["cuda_graph_backend_prefill"] != "disabled":
+    if chunked_prefill_size not in _CHUNKED_PREFILL_GRID:
+        raise ProfileContractError("profile chunked prefill size is invalid")
+    cuda_graph_backend_decode = value["cuda_graph_backend_decode"]
+    if not isinstance(cuda_graph_backend_decode, str) or cuda_graph_backend_decode not in {
+        "disabled",
+        "full",
+    }:
+        raise ProfileContractError("profile CUDA graph selection is invalid")
+    cuda_graph_max_bs_decode = _exact_int(
+        value["cuda_graph_max_bs_decode"], minimum=0, maximum=1
+    )
+    cuda_graph_bs_value = value["cuda_graph_bs_decode"]
+    if not isinstance(cuda_graph_bs_value, list) or any(
+        isinstance(item, bool) or not isinstance(item, int) for item in cuda_graph_bs_value
+    ):
+        raise ProfileContractError("profile CUDA graph batch sizes are invalid")
+    cuda_graph_bs_decode = tuple(cuda_graph_bs_value)
+    expected_graph_shape = (0, ()) if cuda_graph_backend_decode == "disabled" else (1, (1,))
+    if (
+        (cuda_graph_max_bs_decode, cuda_graph_bs_decode) != expected_graph_shape
+        or value["cuda_graph_backend_prefill"] != "disabled"
+    ):
         raise ProfileContractError("profile CUDA graph selection is invalid")
     _closed_list(value["allowed_modes"], _MODES)
     _closed_list(value["allowed_workloads"], _WORKLOADS)
@@ -398,15 +510,26 @@ def load_launch_profile(
         quantization=value["quantization"],
         dtype=value["dtype"],
         kv_cache_dtype=value["kv_cache_dtype"],
+        kv_cache_scale_policy=value["kv_cache_scale_policy"],
         attention_backend=value["attention_backend"],
+        prefill_attention_backend=value["prefill_attention_backend"],
+        decode_attention_backend=value["decode_attention_backend"],
+        sampling_backend=value["sampling_backend"],
         moe_runner_backend=value["moe_runner_backend"],
         mxfp4_moe_precision=value["mxfp4_moe_precision"],
+        page_size=page_size,
+        radix_cache_enabled=value["radix_cache_enabled"],
+        overlap_schedule_enabled=value["overlap_schedule_enabled"],
+        hybrid_swa_memory_enabled=value["hybrid_swa_memory_enabled"],
+        swa_full_tokens_ratio=value["swa_full_tokens_ratio"],
         context_tokens=context_tokens,
         max_total_tokens=max_total_tokens,
         mem_fraction_static=mem_fraction,
         max_running_requests=max_running_requests,
         max_output_tokens=max_output_tokens,
         chunked_prefill_size=chunked_prefill_size,
-        cuda_graph_backend_decode=value["cuda_graph_backend_decode"],
+        cuda_graph_backend_decode=cuda_graph_backend_decode,
+        cuda_graph_max_bs_decode=cuda_graph_max_bs_decode,
+        cuda_graph_bs_decode=cuda_graph_bs_decode,
         cuda_graph_backend_prefill=value["cuda_graph_backend_prefill"],
     )

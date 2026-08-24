@@ -77,6 +77,15 @@ def _candidate_args(tmp_path: Path) -> argparse.Namespace:
         max_output_tokens=512,
         mem_fraction_static=0.92,
         chunked_prefill_size=1024,
+        kv_cache_dtype="bf16",
+        prefill_attention_backend="triton",
+        decode_attention_backend="triton",
+        sampling_backend="pytorch",
+        page_size=1,
+        radix_cache_enabled="true",
+        overlap_schedule_enabled="true",
+        swa_full_tokens_ratio="0.80",
+        cuda_graph_backend_decode="disabled",
         allowed_modes="assist,shadow",
         allowed_workloads="extract",
         profile_id_output=tmp_path / "profile.id",
@@ -273,12 +282,170 @@ def test_operator_builds_one_runtime_loadable_candidate(tmp_path: Path) -> None:
     assert profile.quantization == "mxfp4"
     assert profile.dtype == "bfloat16"
     assert profile.kv_cache_dtype == "bf16"
+    assert profile.kv_cache_scale_policy == "not_applicable"
+    assert profile.prefill_attention_backend == "triton"
+    assert profile.decode_attention_backend == "triton"
+    assert profile.sampling_backend == "pytorch"
     assert profile.moe_runner_backend == "flashinfer_mxfp4"
     assert profile.mxfp4_moe_precision == "default"
+    assert profile.page_size == 1
+    assert profile.radix_cache_enabled is True
+    assert profile.overlap_schedule_enabled is True
+    assert profile.hybrid_swa_memory_enabled is True
+    assert profile.swa_full_tokens_ratio == "0.80"
     assert profile.cuda_graph_backend_decode == "disabled"
+    assert profile.cuda_graph_max_bs_decode == 0
+    assert profile.cuda_graph_bs_decode == ()
     assert profile.cuda_graph_backend_prefill == "disabled"
     assert profile.served_model_alias == f"friday-secondary-{profile.profile_id}"
     assert args.profile_id_output.read_text(encoding="ascii") == profile.profile_id
+
+
+def test_operator_builds_the_closed_fp8_graph_candidate_surface(tmp_path: Path) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    contract = importlib.import_module("profile_contract")
+    args = _candidate_args(tmp_path)
+    args.context_tokens = 65536
+    args.mem_fraction_static = 0.95
+    args.kv_cache_dtype = "fp8_e4m3"
+    args.decode_attention_backend = "trtllm_mha"
+    args.sampling_backend = "flashinfer"
+    args.page_size = 16
+    args.radix_cache_enabled = "false"
+    args.overlap_schedule_enabled = "false"
+    args.swa_full_tokens_ratio = "0.25"
+    args.cuda_graph_backend_decode = "full"
+
+    operator.build_candidate(args)
+    profile = contract.load_launch_profile(
+        args.output,
+        args.profile_id_output,
+        actual_runtime_image=operator.RUNTIME_IMAGE,
+    )
+
+    assert profile.context_tokens == 65536
+    assert profile.mem_fraction_static == "0.95"
+    assert profile.kv_cache_dtype == "fp8_e4m3"
+    assert profile.kv_cache_scale_policy == "implicit_unit"
+    assert profile.decode_attention_backend == "trtllm_mha"
+    assert profile.sampling_backend == "flashinfer"
+    assert profile.page_size == 16
+    assert profile.radix_cache_enabled is False
+    assert profile.overlap_schedule_enabled is False
+    assert profile.swa_full_tokens_ratio == "0.25"
+    assert profile.cuda_graph_backend_decode == "full"
+    assert profile.cuda_graph_max_bs_decode == 1
+    assert profile.cuda_graph_bs_decode == (1,)
+
+
+def test_operator_rejects_chunked_prefill_outside_the_closed_grid(tmp_path: Path) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    args = _candidate_args(tmp_path)
+    args.chunked_prefill_size = 513
+
+    with pytest.raises(operator.ProfileOperatorError, match="chunked prefill"):
+        operator.build_candidate(args)
+
+
+def test_candidate_cli_defaults_preserve_the_safe_baseline(tmp_path: Path) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    args = operator._parser().parse_args(
+        [
+            "candidate",
+            "--hardware-receipt",
+            str(tmp_path / "hardware.json"),
+            "--source-model-manifest",
+            str(tmp_path / "source.json"),
+            "--runtime-manifest",
+            str(tmp_path / "runtime.json"),
+            "--ca-certificate",
+            str(tmp_path / "ca.crt"),
+            "--context-tokens",
+            "4096",
+            "--mem-fraction-static",
+            "0.92",
+            "--profile-id-output",
+            str(tmp_path / "profile.id"),
+            "--output",
+            str(tmp_path / "profile.json"),
+        ]
+    )
+
+    assert (
+        args.kv_cache_dtype,
+        args.prefill_attention_backend,
+        args.decode_attention_backend,
+        args.sampling_backend,
+        args.page_size,
+        args.radix_cache_enabled,
+        args.overlap_schedule_enabled,
+        args.swa_full_tokens_ratio,
+        args.cuda_graph_backend_decode,
+    ) == ("bf16", "triton", "triton", "pytorch", 1, "true", "true", "0.80", "disabled")
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    (
+        ("kv_cache_scale_policy", "implicit_unit"),
+        ("cuda_graph_max_bs_decode", 1),
+        ("cuda_graph_bs_decode", [1]),
+        ("hybrid_swa_memory_enabled", False),
+    ),
+)
+def test_candidate_validation_rejects_incoherent_engine_relationships(
+    tmp_path: Path,
+    key: str,
+    value: Any,
+) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    args = _candidate_args(tmp_path)
+    operator.build_candidate(args)
+    candidate = json.loads(args.output.read_text(encoding="utf-8"))
+    candidate[key] = value
+    binding = operator._engine_sha256(candidate)
+    candidate["engine_binding_sha256"] = binding
+    candidate["profile_id"] = f"gptoss20b-{binding}"
+    candidate["served_model_alias"] = f"friday-secondary-{candidate['profile_id']}"
+    raw = _canonical(candidate)
+
+    with pytest.raises(operator.ProfileOperatorError, match="candidate profile"):
+        operator._validate_candidate(candidate, raw)
+
+
+def test_endpoint_identity_accepts_only_the_closed_candidate_specific_surface(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    endpoint = importlib.import_module("endpoint_common")
+    args = _candidate_args(tmp_path)
+    args.context_tokens = 40960
+    args.kv_cache_dtype = "fp8_e4m3"
+    args.decode_attention_backend = "trtllm_mha"
+    args.sampling_backend = "flashinfer"
+    args.page_size = 16
+    args.swa_full_tokens_ratio = "1.00"
+    args.cuda_graph_backend_decode = "full"
+    operator.build_candidate(args)
+    monkeypatch.setattr(endpoint, "_ENDPOINT_IDENTITY", None)
+    monkeypatch.setattr(endpoint, "EXPECTED_MODEL", "friday-secondary-gptoss20b")
+
+    alias = endpoint.configure_expected_model(args.output, args.ca_certificate)
+
+    assert alias.startswith("friday-secondary-gptoss20b-")
+    assert endpoint.configured_profile_context_tokens() == 40960
+
+    candidate = json.loads(args.output.read_text(encoding="utf-8"))
+    candidate["kv_cache_scale_policy"] = "not_applicable"
+    binding = operator._engine_sha256(candidate)
+    candidate["engine_binding_sha256"] = binding
+    candidate["profile_id"] = f"gptoss20b-{binding}"
+    candidate["served_model_alias"] = f"friday-secondary-{candidate['profile_id']}"
+    invalid = _write(tmp_path / "invalid-profile.json", candidate)
+
+    with pytest.raises(endpoint.EndpointError, match="runtime profile identity"):
+        endpoint.configure_expected_model(invalid, args.ca_certificate)
 
 
 def test_operator_rejects_hardware_receipt_drift_before_outputs(tmp_path: Path) -> None:
@@ -430,7 +597,11 @@ def test_capacity_and_profile_promotion_are_candidate_epoch_bound(
                     "case": name,
                     "status": "passed",
                     "latency_sec": 0.01,
-                    "prompt_tokens": 1,
+                    "prompt_tokens": (
+                        4096 - operator.LONG_CONTEXT_PROMPT_RESERVE
+                        if name == operator.LONG_CONTEXT_QUALITY_CASE
+                        else 1
+                    ),
                     "completion_tokens": 1,
                     "output_sha256": "" if name == "stream_cancellation" else "1" * 64,
                 }
@@ -627,6 +798,7 @@ def test_quality_contract_rejects_anonymous_pass_rows_and_matches_the_runner() -
     actual = {
         "exact_model_alias",
         *(case.name for case in battery._live_cases()),
+        battery.LONG_CONTEXT_CASE_NAME,
         *(name for name, _content in battery._protocol_rejection_cases()),
         "tool_call_shape",
         "tool_result_continuation",
@@ -636,7 +808,60 @@ def test_quality_contract_rejects_anonymous_pass_rows_and_matches_the_runner() -
 
     assert actual == operator.QUALITY_CASES
     with pytest.raises(operator.ProfileOperatorError, match="quality evidence"):
-        operator._validate_quality_cases([{"status": "passed"} for _ in operator.QUALITY_CASES])
+        operator._validate_quality_cases(
+            [{"status": "passed"} for _ in operator.QUALITY_CASES],
+            context_tokens=4096,
+        )
+
+
+def test_near_limit_quality_case_is_context_derived_bounded_and_content_free(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    battery = importlib.import_module("quality_battery")
+    context_tokens = 65536
+    quality_case = battery._near_limit_long_context_case(context_tokens)
+    serialized_prompt = json.dumps(quality_case.messages, ensure_ascii=False)
+    captured: dict[str, Any] = {}
+
+    def completion_request(**kwargs: Any) -> Any:
+        captured["messages"] = kwargs["messages"]
+        return battery.SanitizedCompletion(
+            content=battery._LONG_CONTEXT_MARKER,
+            latency_sec=0.1,
+            prompt_tokens=context_tokens - 512,
+            completion_tokens=8,
+            finish_reason="stop",
+            reasoning_present=False,
+        )
+
+    monkeypatch.setattr(battery, "_completion_request", completion_request)
+    row = battery._run_live_case(
+        quality_case,
+        base_url="https://192.168.1.35:8443/v1",
+        api_key="a" * 64,
+        timeout_sec=10.0,
+        ca_file=Path("private-ca.crt"),
+    )
+
+    assert quality_case.name == battery.LONG_CONTEXT_CASE_NAME
+    assert quality_case.max_tokens == 128
+    assert len(serialized_prompt.encode("utf-8")) < battery._LONG_CONTEXT_MAX_PROMPT_BYTES
+    assert serialized_prompt.count(battery._LONG_CONTEXT_MARKER) == 1
+    assert captured["messages"] == quality_case.messages
+    assert row["status"] == "passed"
+    assert row["prompt_tokens"] == context_tokens - 512
+    assert battery._LONG_CONTEXT_MARKER not in json.dumps(row)
+    assert " x x x" not in json.dumps(row)
+
+    below_limit = battery.SanitizedCompletion(
+        content=battery._LONG_CONTEXT_MARKER,
+        latency_sec=0.1,
+        prompt_tokens=context_tokens - battery._LONG_CONTEXT_ACCEPTANCE_RESERVE - 1,
+        completion_tokens=8,
+        finish_reason="stop",
+        reasoning_present=False,
+    )
+    assert quality_case.validator(below_limit) is False
 
 
 def test_endpoint_helpers_fix_the_certified_gpt_oss_sampling(

@@ -20,7 +20,6 @@ from endpoint_common import (
     configure_expected_model,
     evidence_identity,
     load_api_key,
-    normalize_base_url,
     runtime_process_epoch,
     verify_remote_profile_epoch,
 )
@@ -105,8 +104,14 @@ def run_soak(
     timeout_sec: float,
     maximum_temperature_c: float,
     checkpoint: Path,
-    ca_file: Path | None,
+    ca_file: Path,
 ) -> dict[str, object]:
+    verify_remote_profile_epoch(
+        base_url,
+        api_key=api_key,
+        timeout_sec=min(timeout_sec, 10.0),
+        ca_file=ca_file,
+    )
     cases = _cases()
     runtime_epoch = runtime_process_epoch(
         base_url,
@@ -135,7 +140,12 @@ def run_soak(
                     timeout_sec=timeout_sec,
                     max_tokens=128,
                     temperature=1.0,
-                    extra={"reasoning_effort": "low", "top_p": 1.0, "seed": 0, **case.extra},
+                    extra={
+                        "reasoning_effort": "low",
+                        "top_p": 1.0,
+                        "seed": 0,
+                        **(case.extra or {}),
+                    },
                     ca_file=ca_file,
                 )
                 trial = _safe_trial(case, completion, len(trials) + 1)
@@ -227,9 +237,9 @@ def _minimum_requests(value: str) -> int:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default="http://127.0.0.1:30000/v1")
+    parser.add_argument("--base-url", required=True)
     parser.add_argument("--api-key-file", required=True, type=Path)
-    parser.add_argument("--ca-file", type=Path)
+    parser.add_argument("--ca-file", required=True, type=Path)
     parser.add_argument("--profile-manifest", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--duration-sec", default=1800, type=_duration)
@@ -245,15 +255,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         configure_expected_model(args.profile_manifest, args.ca_file)
         api_key = load_api_key(args.api_key_file)
-        if normalize_base_url(args.base_url).startswith("https://"):
-            if args.ca_file is None:
-                raise EndpointError("HTTPS soak requires an explicit CA file")
-            verify_remote_profile_epoch(
-                args.base_url,
-                api_key=api_key,
-                timeout_sec=args.timeout_sec,
-                ca_file=args.ca_file,
-            )
         report = run_soak(
             base_url=args.base_url,
             api_key=api_key,

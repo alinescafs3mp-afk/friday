@@ -7,6 +7,7 @@ import json
 import statistics
 import sys
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -14,17 +15,18 @@ from endpoint_common import (
     EndpointError,
     atomic_write_json,
     configure_expected_model,
+    configured_profile_context_tokens,
+    configured_profile_mem_fraction_static,
     evidence_identity,
     load_api_key,
-    normalize_base_url,
     runtime_process_epoch,
     stream_chat_completion,
     verify_remote_profile_epoch,
 )
 from gpu_telemetry import GpuSampler, GpuTelemetryError, expected_gpu_identity, sample_summary
 
-_LADDER = (4096, 8192, 12288, 16384, 24576, 32768)
-_MEMORY_GRID = (0.86, 0.88, 0.90, 0.92, 0.94, 0.96, 0.97)
+_LADDER = (4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536)
+_MEMORY_GRID = (0.86, 0.88, 0.90, 0.92, 0.94, 0.95, 0.96, 0.97)
 _PROTOCOL_TOKEN_RESERVE = 384
 _MINIMUM_PROMPT_FRACTION = 0.80
 
@@ -125,8 +127,24 @@ def run_ladder(
     timeout_sec: float,
     generation_tokens: int,
     mem_fraction_static: float,
-    ca_file: Path | None,
+    ca_file: Path,
 ) -> dict[str, Any]:
+    profile_context = configured_profile_context_tokens()
+    profile_memory = configured_profile_mem_fraction_static()
+    try:
+        observed_memory = Decimal(str(mem_fraction_static))
+    except (InvalidOperation, ValueError) as exc:
+        raise EndpointError("capacity memory fraction is invalid") from exc
+    if candidates != (profile_context,):
+        raise EndpointError("capacity candidate must equal the exact profile context")
+    if not observed_memory.is_finite() or observed_memory != Decimal(profile_memory):
+        raise EndpointError("capacity memory fraction must equal the exact profile value")
+    verify_remote_profile_epoch(
+        base_url,
+        api_key=api_key,
+        timeout_sec=min(timeout_sec, 10.0),
+        ca_file=ca_file,
+    )
     runtime_epoch = runtime_process_epoch(
         base_url,
         api_key=api_key,
@@ -207,12 +225,12 @@ def _parse_candidates(value: str) -> tuple[int, ...]:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base-url", default="http://127.0.0.1:30000/v1")
+    parser.add_argument("--base-url", required=True)
     parser.add_argument("--api-key-file", required=True, type=Path)
-    parser.add_argument("--ca-file", type=Path)
+    parser.add_argument("--ca-file", required=True, type=Path)
     parser.add_argument("--profile-manifest", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--candidates", default=_LADDER, type=_parse_candidates)
+    parser.add_argument("--candidates", required=True, type=_parse_candidates)
     parser.add_argument("--repeats", default=3, type=int, choices=range(3, 11))
     parser.add_argument("--timeout-sec", default=180.0, type=float)
     parser.add_argument("--generation-tokens", default=320, type=int, choices=range(256, 513))
@@ -225,15 +243,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         configure_expected_model(args.profile_manifest, args.ca_file)
         api_key = load_api_key(args.api_key_file)
-        if normalize_base_url(args.base_url).startswith("https://"):
-            if args.ca_file is None:
-                raise EndpointError("HTTPS capacity trial requires an explicit CA file")
-            verify_remote_profile_epoch(
-                args.base_url,
-                api_key=api_key,
-                timeout_sec=args.timeout_sec,
-                ca_file=args.ca_file,
-            )
         report = run_ladder(
             base_url=args.base_url,
             api_key=api_key,

@@ -411,6 +411,10 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     assert "Invoke-Captured 'wsl.exe'" not in preflight
     assert "CudaCanaryImage" not in preflight
     assert "$SglangImage, '-c', $canaryProgram" in preflight
+    assert '$normalized = $Value.Replace("`r`n", "`n")' in preflight
+    assert "Container program contains a non-CRLF carriage return." in preflight
+    for payload in ("canaryProgram", "versionProbeCode", "gatewayRuntimeProbeProgram"):
+        assert f"${payload} = ConvertTo-LfContainerProgram ${payload}" in preflight
     assert "torch.device('cuda:0')" in preflight
     assert "m.version('flashinfer-python')" in preflight
     assert 'torch.device("cuda:0")' not in preflight
@@ -654,9 +658,18 @@ def _candidate_runtime_profile() -> dict[str, Any]:
         "quantization": "mxfp4",
         "dtype": "bfloat16",
         "kv_cache_dtype": "bf16",
+        "kv_cache_scale_policy": "not_applicable",
         "attention_backend": "triton",
+        "prefill_attention_backend": "triton",
+        "decode_attention_backend": "triton",
+        "sampling_backend": "pytorch",
         "moe_runner_backend": "flashinfer_mxfp4",
         "mxfp4_moe_precision": "default",
+        "page_size": 1,
+        "radix_cache_enabled": True,
+        "overlap_schedule_enabled": True,
+        "hybrid_swa_memory_enabled": True,
+        "swa_full_tokens_ratio": "0.50",
         "context_tokens": 4096,
         "max_total_tokens": 4096,
         "mem_fraction_static": "0.97",
@@ -664,6 +677,8 @@ def _candidate_runtime_profile() -> dict[str, Any]:
         "max_output_tokens": 512,
         "chunked_prefill_size": 1024,
         "cuda_graph_backend_decode": "disabled",
+        "cuda_graph_max_bs_decode": 0,
+        "cuda_graph_bs_decode": [],
         "cuda_graph_backend_prefill": "disabled",
         "allowed_modes": ["assist", "shadow"],
         "allowed_workloads": ["extract"],
@@ -673,11 +688,15 @@ def _candidate_runtime_profile() -> dict[str, Any]:
         "soak_evidence_sha256": "0" * 64,
         "failure_evidence_sha256": "0" * 64,
     }
+    _seal_runtime_profile(value)
+    return value
+
+
+def _seal_runtime_profile(value: dict[str, Any]) -> None:
     binding = importlib.import_module("profile_contract").engine_binding_sha256(value)
     value["engine_binding_sha256"] = binding
     value["profile_id"] = f"gptoss20b-{binding}"
     value["served_model_alias"] = f"friday-secondary-{value['profile_id']}"
-    return value
 
 
 def _write_profile_fixture(tmp_path: Path, value: dict[str, Any]) -> tuple[Path, Path]:
@@ -708,19 +727,106 @@ def test_shared_profile_contract_derives_every_capacity_argument(tmp_path: Path)
     assert profile.hardware_runtime_receipt_sha256 == (
         "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
     )
-    assert arguments[arguments.index("--context-length") + 1] == "4096"
-    assert arguments[arguments.index("--max-total-tokens") + 1] == "4096"
-    assert arguments[arguments.index("--mem-fraction-static") + 1] == "0.97"
-    assert arguments[arguments.index("--max-running-requests") + 1] == "1"
-    assert arguments[arguments.index("--quantization") + 1] == "mxfp4"
-    assert arguments[arguments.index("--dtype") + 1] == "bfloat16"
-    assert arguments[arguments.index("--kv-cache-dtype") + 1] == "bf16"
-    assert arguments[arguments.index("--moe-runner-backend") + 1] == "flashinfer_mxfp4"
-    assert arguments[arguments.index("--flashinfer-mxfp4-moe-precision") + 1] == "default"
-    assert arguments[arguments.index("--cuda-graph-backend-decode") + 1] == "disabled"
-    assert arguments[arguments.index("--cuda-graph-backend-prefill") + 1] == "disabled"
+    assert arguments == [
+        "--model-path",
+        "/source/snapshot",
+        "--served-model-name",
+        profile.served_model_alias,
+        "--quantization",
+        "mxfp4",
+        "--dtype",
+        "bfloat16",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "30000",
+        "--api-key",
+        "a" * 64,
+        "--reasoning-parser",
+        "gpt-oss",
+        "--tool-call-parser",
+        "gpt-oss",
+        "--attention-backend",
+        "triton",
+        "--prefill-attention-backend",
+        "triton",
+        "--decode-attention-backend",
+        "triton",
+        "--sampling-backend",
+        "pytorch",
+        "--moe-runner-backend",
+        "flashinfer_mxfp4",
+        "--flashinfer-mxfp4-moe-precision",
+        "default",
+        "--kv-cache-dtype",
+        "bf16",
+        "--page-size",
+        "1",
+        "--swa-full-tokens-ratio",
+        "0.50",
+        "--chunked-prefill-size",
+        "1024",
+        "--max-running-requests",
+        "1",
+        "--cuda-graph-backend-decode",
+        "disabled",
+        "--cuda-graph-backend-prefill",
+        "disabled",
+        "--context-length",
+        "4096",
+        "--max-total-tokens",
+        "4096",
+        "--mem-fraction-static",
+        "0.97",
+        "--enable-metrics",
+        "--enable-cache-report",
+    ]
     assert profile.runtime_image == SGLANG_IMAGE
     assert profile.runtime_image_config_digest == SGLANG_CONFIG_DIGEST
+
+
+def test_shared_profile_contract_emits_the_full_optimized_surface(tmp_path: Path) -> None:
+    contract = importlib.import_module("profile_contract")
+    candidate = _candidate_runtime_profile()
+    candidate.update(
+        {
+            "kv_cache_dtype": "fp8_e4m3",
+            "kv_cache_scale_policy": "implicit_unit",
+            "decode_attention_backend": "trtllm_mha",
+            "sampling_backend": "flashinfer",
+            "page_size": 16,
+            "radix_cache_enabled": False,
+            "overlap_schedule_enabled": False,
+            "swa_full_tokens_ratio": "1.00",
+            "context_tokens": 65536,
+            "max_total_tokens": 65536,
+            "mem_fraction_static": "0.95",
+            "cuda_graph_backend_decode": "full",
+            "cuda_graph_max_bs_decode": 1,
+            "cuda_graph_bs_decode": [1],
+        }
+    )
+    _seal_runtime_profile(candidate)
+    manifest, profile_id = _write_profile_fixture(tmp_path, candidate)
+
+    profile = contract.load_launch_profile(
+        manifest,
+        profile_id,
+        actual_runtime_image=SGLANG_IMAGE,
+    )
+    arguments = profile.server_arguments("a" * 64)
+
+    assert arguments[arguments.index("--kv-cache-dtype") + 1] == "fp8_e4m3"
+    assert arguments[arguments.index("--decode-attention-backend") + 1] == "trtllm_mha"
+    assert arguments[arguments.index("--sampling-backend") + 1] == "flashinfer"
+    assert arguments[arguments.index("--page-size") + 1] == "16"
+    assert arguments[arguments.index("--swa-full-tokens-ratio") + 1] == "1.00"
+    assert arguments[arguments.index("--cuda-graph-max-bs-decode") + 1] == "1"
+    assert arguments[arguments.index("--cuda-graph-bs-decode") + 1] == "1"
+    assert arguments[arguments.index("--context-length") + 1] == "65536"
+    assert arguments[arguments.index("--mem-fraction-static") + 1] == "0.95"
+    assert arguments.count("--disable-radix-cache") == 1
+    assert arguments.count("--disable-overlap-schedule") == 1
 
 
 @pytest.mark.parametrize(
@@ -737,14 +843,27 @@ def test_shared_profile_contract_derives_every_capacity_argument(tmp_path: Path)
         ("runtime_source_revision", "3" * 40),
         ("quantization", "modelopt_fp4"),
         ("dtype", "float16"),
-        ("kv_cache_dtype", "fp8_e4m3"),
+        ("kv_cache_dtype", "fp8_e5m2"),
+        ("kv_cache_scale_policy", "explicit"),
+        ("attention_backend", "flashinfer"),
+        ("prefill_attention_backend", "flashinfer"),
+        ("decode_attention_backend", "flashinfer"),
+        ("sampling_backend", "triton"),
         ("moe_runner_backend", "cutlass"),
         ("mxfp4_moe_precision", "bf16"),
+        ("page_size", 8),
+        ("radix_cache_enabled", 1),
+        ("overlap_schedule_enabled", 1),
+        ("hybrid_swa_memory_enabled", False),
+        ("swa_full_tokens_ratio", "0.75"),
         ("cuda_graph_backend_decode", "flashinfer"),
+        ("cuda_graph_max_bs_decode", 2),
+        ("cuda_graph_bs_decode", [2]),
         ("cuda_graph_backend_prefill", "flashinfer"),
         ("context_tokens", 10_000),
         ("max_total_tokens", 12_288),
         ("max_running_requests", 2),
+        ("chunked_prefill_size", 513),
         ("mem_fraction_static", "0.99"),
         ("no_cpu_offload", False),
     ],
@@ -753,7 +872,82 @@ def test_shared_profile_contract_rejects_mutation(tmp_path: Path, key: str, valu
     contract = importlib.import_module("profile_contract")
     candidate = copy.deepcopy(_candidate_runtime_profile())
     candidate[key] = value
+    if key != "served_model_alias":
+        _seal_runtime_profile(candidate)
     manifest, profile_id = _write_profile_fixture(tmp_path, candidate)
+    with pytest.raises(contract.ProfileContractError):
+        contract.load_launch_profile(
+            manifest,
+            profile_id,
+            actual_runtime_image=SGLANG_IMAGE,
+        )
+
+
+@pytest.mark.parametrize(
+    ("kv_cache_dtype", "kv_cache_scale_policy"),
+    [("bf16", "implicit_unit"), ("fp8_e4m3", "not_applicable")],
+)
+def test_shared_profile_rejects_mismatched_kv_scale_policy(
+    tmp_path: Path,
+    kv_cache_dtype: str,
+    kv_cache_scale_policy: str,
+) -> None:
+    contract = importlib.import_module("profile_contract")
+    candidate = _candidate_runtime_profile()
+    candidate["kv_cache_dtype"] = kv_cache_dtype
+    candidate["kv_cache_scale_policy"] = kv_cache_scale_policy
+    _seal_runtime_profile(candidate)
+    manifest, profile_id = _write_profile_fixture(tmp_path, candidate)
+
+    with pytest.raises(contract.ProfileContractError):
+        contract.load_launch_profile(
+            manifest,
+            profile_id,
+            actual_runtime_image=SGLANG_IMAGE,
+        )
+
+
+@pytest.mark.parametrize(
+    ("backend", "maximum", "batch_sizes"),
+    [
+        ("disabled", 1, [1]),
+        ("disabled", 0, [1]),
+        ("full", 0, []),
+        ("full", 1, []),
+    ],
+)
+def test_shared_profile_rejects_inexact_decode_graph_shape(
+    tmp_path: Path,
+    backend: str,
+    maximum: int,
+    batch_sizes: list[int],
+) -> None:
+    contract = importlib.import_module("profile_contract")
+    candidate = _candidate_runtime_profile()
+    candidate["cuda_graph_backend_decode"] = backend
+    candidate["cuda_graph_max_bs_decode"] = maximum
+    candidate["cuda_graph_bs_decode"] = batch_sizes
+    _seal_runtime_profile(candidate)
+    manifest, profile_id = _write_profile_fixture(tmp_path, candidate)
+
+    with pytest.raises(contract.ProfileContractError):
+        contract.load_launch_profile(
+            manifest,
+            profile_id,
+            actual_runtime_image=SGLANG_IMAGE,
+        )
+
+
+@pytest.mark.parametrize("mutation", ["missing", "unknown"])
+def test_shared_profile_surface_is_closed(tmp_path: Path, mutation: str) -> None:
+    contract = importlib.import_module("profile_contract")
+    candidate = _candidate_runtime_profile()
+    if mutation == "missing":
+        candidate.pop("sampling_backend")
+    else:
+        candidate["unreviewed_engine_flag"] = True
+    manifest, profile_id = _write_profile_fixture(tmp_path, candidate)
+
     with pytest.raises(contract.ProfileContractError):
         contract.load_launch_profile(
             manifest,
@@ -932,6 +1126,8 @@ def test_certification_profile_pins_ca_headers_and_exact_remote_bytes(
     manifest, _profile_id_path = _write_profile_fixture(tmp_path, candidate)
     alias = common.configure_expected_model(manifest, ca_file)
     assert alias == candidate["served_model_alias"]
+    assert common.configured_profile_context_tokens() == candidate["context_tokens"]
+    assert common.configured_profile_mem_fraction_static() == candidate["mem_fraction_static"]
     completion_body = {
         "model": alias,
         "choices": [{"message": {"content": "ready"}, "finish_reason": "stop"}],
@@ -989,6 +1185,15 @@ def test_certification_profile_pins_ca_headers_and_exact_remote_bytes(
         "ca_file": ca_file,
     }
     with pytest.raises(common.EndpointError):
+        common.verify_remote_profile_epoch("http://127.0.0.1:30000/v1", **arguments)
+    with pytest.raises(common.EndpointError):
+        common.verify_remote_profile_epoch("https://192.168.1.35:8443/v1/", **arguments)
+    with pytest.raises(common.EndpointError):
+        common.verify_remote_profile_epoch(
+            "https://192.168.1.35:8443/v1",
+            **{**arguments, "ca_file": wrong_ca},
+        )
+    with pytest.raises(common.EndpointError):
         common.verify_remote_profile_epoch("https://192.168.1.35:8443/v1", **arguments)
     with pytest.raises(common.EndpointError):
         common.verify_remote_profile_epoch("https://192.168.1.35:8443/v1", **arguments)
@@ -1039,8 +1244,12 @@ def test_capacity_accepts_profile_memory_grid_and_reserves_generation_tokens() -
     tuner = importlib.import_module("tune_context")
     args = tuner._parser().parse_args(
         [
+            "--base-url",
+            "https://192.168.1.35:8443/v1",
             "--api-key-file",
             "key",
+            "--ca-file",
+            "ca.crt",
             "--profile-manifest",
             "candidate.json",
             "--output",
@@ -1070,6 +1279,74 @@ def test_capacity_accepts_profile_memory_grid_and_reserves_generation_tokens() -
     )
     assert overcommitted["generation_reserve_met"] is False
     assert overcommitted["prompt_near_limit"] is False
+
+
+def test_capacity_and_soak_require_the_exact_profile_endpoint_and_capacity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    common = importlib.import_module("endpoint_common")
+    tuner = importlib.import_module("tune_context")
+    soak = importlib.import_module("soak")
+    monkeypatch.setattr(common, "_ENDPOINT_IDENTITY", None)
+    monkeypatch.setattr(common, "EXPECTED_MODEL", "friday-secondary-gptoss20b")
+    ca_bytes = b"-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----\n"
+    ca_file = tmp_path / "ca.crt"
+    ca_file.write_bytes(ca_bytes)
+    wrong_ca = tmp_path / "wrong-ca.crt"
+    wrong_ca.write_bytes(ca_bytes + b"changed")
+    candidate = _candidate_runtime_profile()
+    candidate["gateway_ca_certificate_sha256"] = hashlib.sha256(ca_bytes).hexdigest()
+    manifest, _profile_id_path = _write_profile_fixture(tmp_path, candidate)
+    common.configure_expected_model(manifest, ca_file)
+    capacity_arguments = {
+        "base_url": "https://192.168.1.35:8443/v1",
+        "api_key": "a" * 64,
+        "candidates": (4096,),
+        "repeats": 3,
+        "timeout_sec": 1.0,
+        "generation_tokens": 320,
+        "mem_fraction_static": 0.97,
+        "ca_file": ca_file,
+    }
+    with pytest.raises(common.EndpointError, match="exact profile context"):
+        tuner.run_ladder(**{**capacity_arguments, "candidates": (8192,)})
+    with pytest.raises(common.EndpointError, match="exact profile value"):
+        tuner.run_ladder(**{**capacity_arguments, "mem_fraction_static": 0.96})
+    with pytest.raises(common.EndpointError, match="HTTPS endpoint identity"):
+        tuner.run_ladder(
+            **{**capacity_arguments, "base_url": "http://127.0.0.1:30000/v1"}
+        )
+    with pytest.raises(common.EndpointError, match="HTTPS endpoint identity"):
+        tuner.run_ladder(
+            **{**capacity_arguments, "base_url": "https://192.168.1.36:8443/v1"}
+        )
+    with pytest.raises(common.EndpointError, match="private CA identity"):
+        tuner.run_ladder(**{**capacity_arguments, "ca_file": wrong_ca})
+
+    soak_arguments = {
+        "base_url": "https://192.168.1.35:8443/v1",
+        "api_key": "a" * 64,
+        "duration_sec": 1800,
+        "minimum_requests": 100,
+        "timeout_sec": 1.0,
+        "maximum_temperature_c": 87.0,
+        "checkpoint": tmp_path / "soak.checkpoint.json",
+        "ca_file": ca_file,
+    }
+    with pytest.raises(common.EndpointError, match="HTTPS endpoint identity"):
+        soak.run_soak(**{**soak_arguments, "base_url": "http://127.0.0.1:30000/v1"})
+    with pytest.raises(common.EndpointError, match="private CA identity"):
+        soak.run_soak(**{**soak_arguments, "ca_file": wrong_ca})
+
+    def reject_epoch(*_args: object, **_kwargs: object) -> None:
+        raise common.EndpointError("remote epoch witness required")
+
+    monkeypatch.setattr(tuner, "verify_remote_profile_epoch", reject_epoch)
+    monkeypatch.setattr(soak, "verify_remote_profile_epoch", reject_epoch)
+    with pytest.raises(common.EndpointError, match="remote epoch witness required"):
+        tuner.run_ladder(**capacity_arguments)
+    with pytest.raises(common.EndpointError, match="remote epoch witness required"):
+        soak.run_soak(**soak_arguments)
 
 
 def test_gpu_telemetry_is_bound_to_exact_laptop_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
