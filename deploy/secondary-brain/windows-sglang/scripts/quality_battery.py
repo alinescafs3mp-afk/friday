@@ -183,9 +183,29 @@ def _json_equals(expected: object) -> Callable[[SanitizedCompletion], bool]:
 
 def _summary_is_faithful(completion: SanitizedCompletion) -> bool:
     value = completion.content.casefold()
-    numbers = re.findall(r"\d+", value)
+    dotted_date = bool(re.search(r"(?<!\d)24\.08\.2026(?!\d)", value))
+    written_date = bool(re.search(r"(?<!\d)24\s+августа\s+2026(?:\s+года)?(?!\d)", value))
+    if dotted_date == written_date:
+        return False
+    numbers = tuple(re.findall(r"\d+", value))
+    allowed_numbers = (
+        {("17", "24", "08", "2026"), ("24", "08", "2026", "17")}
+        if dotted_date
+        else {("17", "24", "2026"), ("24", "2026", "17")}
+    )
     return (
-        "север" in value and "17" in value and "24.08.2026" in value and numbers == ["17", "24", "08", "2026"]
+        completion.finish_reason == "stop"
+        and bool(re.search(r"(?<![а-яё])проект(?:а|у|ом|е)?(?![а-яё])", value))
+        and bool(re.search(r"(?<![а-яё])север(?![а-яё])", value))
+        and bool(re.search(r"(?<![а-яё])бюджет(?:а|у|ом|е)?(?![а-яё])", value))
+        and bool(
+            re.search(
+                r"(?<!\d)17(?!\d)\s+руб(?:л(?:ь|я|ей|ю|ём|ем|ях|ям|ями)|\.)?(?![а-яё])",
+                value,
+            )
+        )
+        and bool(re.search(r"(?<![а-яё])срок(?:а|у|ом|е)?(?![а-яё])", value))
+        and numbers in allowed_numbers
     )
 
 
@@ -368,8 +388,10 @@ def _live_cases() -> tuple[QualityCase, ...]:
         QualityCase(
             "ru_summary_faithfulness",
             _base_messages(
-                "Суммируй одним русским предложением, сохрани числа без изменений: "
-                "проект «Север»; бюджет 17 рублей; срок 24.08.2026."
+                "Составь одно русское предложение без новых фактов или чисел. Явно назови проект "
+                "«Север», бюджет 17 рублей и срок. Дату срока запиши либо «24.08.2026», либо "
+                "«24 августа 2026 года». Исходные факты: проект «Север»; бюджет 17 рублей; "
+                "срок 24.08.2026."
             ),
             _summary_is_faithful,
         ),

@@ -332,6 +332,69 @@ def test_intentional_reasoning_only_length_stop_is_valid_and_content_free(
     assert "PRIVATE_REASONING" not in json.dumps(report, ensure_ascii=False)
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        "Проект «Север»: бюджет 17 рублей, срок 24.08.2026.",
+        "Срок проекта «Север» — 24 августа 2026 года, а бюджет составляет 17 руб.",
+    ],
+)
+def test_summary_validator_accepts_only_the_two_exact_date_representations(
+    battery: Any, content: str
+) -> None:
+    completion = battery.SanitizedCompletion(
+        content=content,
+        latency_sec=0.1,
+        prompt_tokens=20,
+        completion_tokens=20,
+        finish_reason="stop",
+        reasoning_present=False,
+    )
+
+    assert battery._summary_is_faithful(completion)
+
+
+@pytest.mark.parametrize(
+    ("content", "finish_reason"),
+    [
+        ("Проект «Север»: стоимость 17 рублей, срок 24.08.2026.", "stop"),
+        ("Проект «Север»: бюджет 17 долларов, срок 24.08.2026.", "stop"),
+        ("Проект «Север»: бюджет 17 рублей, дата 24.08.2026.", "stop"),
+        ("Проект «Север»: бюджет 18 рублей, срок 24.08.2026.", "stop"),
+        ("Проект «Север»: бюджет 17 рублей, срок 25.08.2026.", "stop"),
+        ("Проект «Север»: бюджет 17 рублей, срок 24.08.2026, резерв 9 рублей.", "stop"),
+        (
+            "Проект «Север»: бюджет 17 рублей, срок 24.08.2026 (24 августа 2026 года).",
+            "stop",
+        ),
+        ("Проект «Север»: бюджет 17 рублей, срок 24.08.2026.", "length"),
+    ],
+)
+def test_summary_validator_rejects_changed_missing_or_extra_facts(
+    battery: Any, content: str, finish_reason: str
+) -> None:
+    completion = battery.SanitizedCompletion(
+        content=content,
+        latency_sec=0.1,
+        prompt_tokens=20,
+        completion_tokens=20,
+        finish_reason=finish_reason,
+        reasoning_present=False,
+    )
+
+    assert not battery._summary_is_faithful(completion)
+
+
+def test_summary_prompt_declares_the_closed_fact_contract(battery: Any) -> None:
+    case = next(case for case in battery._live_cases() if case.name == "ru_summary_faithfulness")
+    prompt = json.dumps(case.messages, ensure_ascii=False).casefold()
+
+    assert all(item in prompt for item in ("проект", "север", "бюджет", "17 рублей", "срок"))
+    assert "без новых фактов или чисел" in prompt
+    assert "24.08.2026" in prompt
+    assert "24 августа 2026 года" in prompt
+
+
 def test_stop_probe_uses_the_native_return_token_with_a_bounded_generation(battery: Any) -> None:
     case = next(case for case in battery._live_cases() if case.name == "stop_sequence")
     serialized_prompt = json.dumps(case.messages, ensure_ascii=False)
