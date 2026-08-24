@@ -201,7 +201,7 @@ Optional candidate flags have these closed choices and defaults:
 - `--page-size`: `1` (default) or `16`; `--radix-cache-enabled` and
   `--overlap-schedule-enabled`: `true` (default) or `false`.
 - `--swa-full-tokens-ratio`: `0.25`, `0.50`, `0.80` (default) or `1.00`;
-  `--chunked-prefill-size`: `512`, `1024` (default), `1536` or `2048`.
+  `--chunked-prefill-size`: `256`, `512`, `1024` (default), `1536` or `2048`.
 - `--cuda-graph-backend-decode`: `disabled` (default), which binds batch shape
   `0/[]`, or `full`, which is restricted to batch shape `1/[1]`.
 

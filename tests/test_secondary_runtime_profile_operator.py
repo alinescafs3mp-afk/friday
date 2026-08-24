@@ -321,6 +321,7 @@ def test_operator_builds_the_closed_fp8_graph_candidate_surface(tmp_path: Path) 
     args.decode_attention_backend = "triton"
     args.sampling_backend = "pytorch"
     args.page_size = 16
+    args.chunked_prefill_size = 256
     args.radix_cache_enabled = "false"
     args.overlap_schedule_enabled = "false"
     args.swa_full_tokens_ratio = "0.25"
@@ -341,6 +342,7 @@ def test_operator_builds_the_closed_fp8_graph_candidate_surface(tmp_path: Path) 
     assert profile.sampling_backend == "pytorch"
     assert profile.moe_runner_backend == "flashinfer_mxfp4"
     assert profile.page_size == 16
+    assert profile.chunked_prefill_size == 256
     assert profile.radix_cache_enabled is False
     assert profile.overlap_schedule_enabled is False
     assert profile.swa_full_tokens_ratio == "0.25"
@@ -349,12 +351,16 @@ def test_operator_builds_the_closed_fp8_graph_candidate_surface(tmp_path: Path) 
     assert profile.cuda_graph_bs_decode == (1,)
 
 
-def test_operator_rejects_chunked_prefill_outside_the_closed_grid(tmp_path: Path) -> None:
+@pytest.mark.parametrize("chunked_prefill_size", [255, 257, 513])
+def test_operator_rejects_chunked_prefill_outside_the_closed_grid(
+    tmp_path: Path,
+    chunked_prefill_size: int,
+) -> None:
     operator = importlib.import_module("runtime_profile_operator")
     args = _candidate_args(tmp_path)
-    args.chunked_prefill_size = 513
+    args.chunked_prefill_size = chunked_prefill_size
 
-    with pytest.raises(operator.ProfileOperatorError, match="chunked prefill"):
+    with pytest.raises(operator.ProfileOperatorError, match="chunk"):
         operator.build_candidate(args)
 
 
@@ -428,6 +434,7 @@ def test_candidate_cli_defaults_preserve_the_safe_baseline(tmp_path: Path) -> No
         args.radix_cache_enabled,
         args.overlap_schedule_enabled,
         args.swa_full_tokens_ratio,
+        args.chunked_prefill_size,
         args.cuda_graph_backend_decode,
     ) == (
         "bf16",
@@ -438,9 +445,41 @@ def test_candidate_cli_defaults_preserve_the_safe_baseline(tmp_path: Path) -> No
         "true",
         "true",
         "0.80",
+        1024,
         "disabled",
     )
     assert not hasattr(args, "deterministic_inference_enabled")
+
+
+def test_candidate_cli_admits_the_256_chunk_grid_point(tmp_path: Path) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    args = operator._parser().parse_args(
+        [
+            "candidate",
+            "--hardware-receipt",
+            str(tmp_path / "hardware.json"),
+            "--source-model-manifest",
+            str(tmp_path / "source.json"),
+            "--runtime-manifest",
+            str(tmp_path / "runtime.json"),
+            "--ca-certificate",
+            str(tmp_path / "ca.crt"),
+            "--sglang-compat-patch-sha256",
+            "d" * 64,
+            "--context-tokens",
+            "4096",
+            "--mem-fraction-static",
+            "0.92",
+            "--chunked-prefill-size",
+            "256",
+            "--profile-id-output",
+            str(tmp_path / "profile.id"),
+            "--output",
+            str(tmp_path / "profile.json"),
+        ]
+    )
+
+    assert args.chunked_prefill_size == 256
 
 
 @pytest.mark.parametrize(

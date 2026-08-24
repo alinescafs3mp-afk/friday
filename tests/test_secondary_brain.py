@@ -723,6 +723,8 @@ def test_provisional_policy_mismatch_constructs_no_transport(
         _runtime_profile(max_context_tokens=5000, max_total_tokens=5000),
         _runtime_profile(max_output_tokens=4096),
         _runtime_profile(max_context_tokens=True, max_total_tokens=True),
+        _runtime_profile(chunked_prefill_size=255),
+        _runtime_profile(chunked_prefill_size=257),
         _runtime_profile(chunked_prefill_size=513),
         _runtime_profile(sglang_compat_patch_sha256="0" * 64),
         _runtime_profile(deterministic_inference_enabled=True),
@@ -731,6 +733,10 @@ def test_provisional_policy_mismatch_constructs_no_transport(
 )
 def test_product_profile_uses_the_deploy_capacity_bounds(profile: SecondaryRuntimeProfile) -> None:
     assert profile.is_well_formed is False
+
+
+def test_product_profile_admits_the_256_chunk_grid_point() -> None:
+    assert _runtime_profile(chunked_prefill_size=256).is_well_formed is True
 
 
 @pytest.mark.asyncio

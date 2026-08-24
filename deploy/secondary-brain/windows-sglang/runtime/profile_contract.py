@@ -36,7 +36,7 @@ _MEMORY_FRACTIONS = frozenset(
 _CONTEXT_LADDER = frozenset(
     {4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536}
 )
-_CHUNKED_PREFILL_GRID = frozenset({512, 1024, 1536, 2048})
+_CHUNKED_PREFILL_GRID = frozenset({256, 512, 1024, 1536, 2048})
 _MODES = frozenset({"shadow", "assist"})
 _WORKLOADS = frozenset(
     {
@@ -484,7 +484,7 @@ def load_launch_profile(
     max_output_tokens = _exact_int(value["max_output_tokens"], minimum=64, maximum=4096)
     if max_output_tokens >= context_tokens:
         raise ProfileContractError("profile output budget is invalid")
-    chunked_prefill_size = _exact_int(value["chunked_prefill_size"], minimum=512, maximum=2048)
+    chunked_prefill_size = _exact_int(value["chunked_prefill_size"], minimum=256, maximum=2048)
     if chunked_prefill_size not in _CHUNKED_PREFILL_GRID:
         raise ProfileContractError("profile chunked prefill size is invalid")
     cuda_graph_backend_decode = value["cuda_graph_backend_decode"]

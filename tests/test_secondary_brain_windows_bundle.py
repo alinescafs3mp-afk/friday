@@ -1069,6 +1069,7 @@ def test_shared_profile_contract_emits_the_full_optimized_surface(tmp_path: Path
             "radix_cache_enabled": False,
             "overlap_schedule_enabled": False,
             "swa_full_tokens_ratio": "1.00",
+            "chunked_prefill_size": 256,
             "context_tokens": 65536,
             "max_total_tokens": 65536,
             "mem_fraction_static": "0.95",
@@ -1094,6 +1095,7 @@ def test_shared_profile_contract_emits_the_full_optimized_surface(tmp_path: Path
     assert "--enable-deterministic-inference" not in arguments
     assert arguments[arguments.index("--page-size") + 1] == "16"
     assert arguments[arguments.index("--swa-full-tokens-ratio") + 1] == "1.00"
+    assert arguments[arguments.index("--chunked-prefill-size") + 1] == "256"
     assert arguments[arguments.index("--cuda-graph-max-bs-decode") + 1] == "1"
     assert arguments[arguments.index("--cuda-graph-bs-decode") + 1] == "1"
     assert arguments[arguments.index("--context-length") + 1] == "65536"
@@ -1139,6 +1141,8 @@ def test_shared_profile_contract_emits_the_full_optimized_surface(tmp_path: Path
         ("context_tokens", 10_000),
         ("max_total_tokens", 12_288),
         ("max_running_requests", 2),
+        ("chunked_prefill_size", 255),
+        ("chunked_prefill_size", 257),
         ("chunked_prefill_size", 513),
         ("mem_fraction_static", "0.99"),
         ("no_cpu_offload", False),
@@ -1398,7 +1402,9 @@ def test_certification_profile_pins_ca_headers_and_exact_remote_bytes(
     ca_file = tmp_path / "ca.crt"
     ca_file.write_bytes(ca_bytes)
     candidate = _candidate_runtime_profile()
+    candidate["chunked_prefill_size"] = 256
     candidate["gateway_ca_certificate_sha256"] = hashlib.sha256(ca_bytes).hexdigest()
+    _seal_runtime_profile(candidate)
     manifest, _profile_id_path = _write_profile_fixture(tmp_path, candidate)
     alias = common.configure_expected_model(manifest, ca_file)
     assert alias == candidate["served_model_alias"]

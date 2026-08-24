@@ -245,7 +245,7 @@ def _profile_engine_surface_is_valid(value: dict[str, Any]) -> bool:
         and 64 <= output <= 4096
         and output < context
         and type(value.get("chunked_prefill_size")) is int
-        and value["chunked_prefill_size"] in {512, 1024, 1536, 2048}
+        and value["chunked_prefill_size"] in {256, 512, 1024, 1536, 2048}
         and kv_cache_dtype in {"bf16", "fp8_e4m3"}
         and value.get("kv_cache_scale_policy") == expected_scale
         and value.get("attention_backend") == "triton"

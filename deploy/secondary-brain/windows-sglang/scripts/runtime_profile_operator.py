@@ -57,7 +57,7 @@ GATEWAY_IMAGE_LOCAL_ID = "sha256:d61d7ef52430df468e74ed6ee6e914429b80e20ba988e31
 CONTEXT_LADDER = frozenset(
     {4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536}
 )
-CHUNKED_PREFILL_GRID = frozenset({512, 1024, 1536, 2048})
+CHUNKED_PREFILL_GRID = frozenset({256, 512, 1024, 1536, 2048})
 MEMORY_GRID = frozenset(
     {"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"}
 )
@@ -690,7 +690,7 @@ def build_candidate(args: argparse.Namespace) -> dict[str, Any]:
     output = _exact_int(args.max_output_tokens, minimum=64, maximum=4096, label="output")
     if output >= context:
         raise ProfileOperatorError("output budget is not below context")
-    chunk = _exact_int(args.chunked_prefill_size, minimum=512, maximum=2048, label="chunk")
+    chunk = _exact_int(args.chunked_prefill_size, minimum=256, maximum=2048, label="chunk")
     if chunk not in CHUNKED_PREFILL_GRID:
         raise ProfileOperatorError("chunked prefill size is outside the closed grid")
     memory = f"{args.mem_fraction_static:.2f}"
@@ -941,7 +941,7 @@ def _validate_candidate(value: dict[str, Any], raw: bytes) -> None:
     total = _exact_int(value.get("max_total_tokens"), minimum=4096, maximum=65536, label="token pool")
     concurrency = _exact_int(value.get("max_running_requests"), minimum=1, maximum=1, label="concurrency")
     output = _exact_int(value.get("max_output_tokens"), minimum=64, maximum=4096, label="output")
-    chunk = _exact_int(value.get("chunked_prefill_size"), minimum=512, maximum=2048, label="chunk")
+    chunk = _exact_int(value.get("chunked_prefill_size"), minimum=256, maximum=2048, label="chunk")
     page_size = _exact_int(value.get("page_size"), minimum=1, maximum=16, label="page size")
     graph_max_bs = _exact_int(
         value.get("cuda_graph_max_bs_decode"), minimum=0, maximum=1, label="decode graph max batch"
