@@ -166,9 +166,13 @@ def _exact(expected: str) -> Callable[[SanitizedCompletion], bool]:
     return lambda completion: completion.content.strip().casefold() == folded
 
 
-def _exact_with_separated_reasoning(expected: str) -> Callable[[SanitizedCompletion], bool]:
-    exact = _exact(expected)
-    return lambda completion: exact(completion) and completion.reasoning_present
+def _integer_with_separated_reasoning(expected: int) -> Callable[[SanitizedCompletion], bool]:
+    numeric = re.compile(rf"{expected}(?:\.0+)?\Z")
+    return lambda completion: bool(
+        completion.finish_reason == "stop"
+        and completion.reasoning_present
+        and numeric.fullmatch(completion.content.strip())
+    )
 
 
 def _json_equals(expected: object) -> Callable[[SanitizedCompletion], bool]:
@@ -336,21 +340,21 @@ def _live_cases() -> tuple[QualityCase, ...]:
         QualityCase(
             "reasoning_low",
             _base_messages("Return only the decimal result of (19 * 3) - 15."),
-            _exact_with_separated_reasoning("42"),
+            _integer_with_separated_reasoning(42),
             max_tokens=256,
             extra={"reasoning_effort": "low"},
         ),
         QualityCase(
             "reasoning_medium",
             _base_messages("Return only the decimal result of (19 * 3) - 15."),
-            _exact_with_separated_reasoning("42"),
+            _integer_with_separated_reasoning(42),
             max_tokens=512,
             extra={"reasoning_effort": "medium"},
         ),
         QualityCase(
             "reasoning_high",
             _base_messages("Return only the decimal result of (19 * 3) - 15."),
-            _exact_with_separated_reasoning("42"),
+            _integer_with_separated_reasoning(42),
             max_tokens=1024,
             extra={"reasoning_effort": "high"},
         ),

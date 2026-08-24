@@ -332,6 +332,46 @@ def test_intentional_reasoning_only_length_stop_is_valid_and_content_free(
     assert "PRIVATE_REASONING" not in json.dumps(report, ensure_ascii=False)
 
 
+@pytest.mark.parametrize("content", ["42", "42.0", "42.000"])
+def test_reasoning_validator_accepts_equivalent_integer_renderings(
+    battery: Any, content: str
+) -> None:
+    completion = battery.SanitizedCompletion(
+        content=content,
+        latency_sec=0.1,
+        prompt_tokens=20,
+        completion_tokens=20,
+        finish_reason="stop",
+        reasoning_present=True,
+    )
+
+    assert battery._integer_with_separated_reasoning(42)(completion)
+
+
+@pytest.mark.parametrize(
+    ("content", "finish_reason", "reasoning_present"),
+    [
+        ("42.5", "stop", True),
+        ("The answer is 42", "stop", True),
+        ("42", "length", True),
+        ("42", "stop", False),
+    ],
+)
+def test_reasoning_validator_rejects_wrong_or_unseparated_results(
+    battery: Any, content: str, finish_reason: str, reasoning_present: bool
+) -> None:
+    completion = battery.SanitizedCompletion(
+        content=content,
+        latency_sec=0.1,
+        prompt_tokens=20,
+        completion_tokens=20,
+        finish_reason=finish_reason,
+        reasoning_present=reasoning_present,
+    )
+
+    assert not battery._integer_with_separated_reasoning(42)(completion)
+
+
 @pytest.mark.parametrize(
     "content",
     [
