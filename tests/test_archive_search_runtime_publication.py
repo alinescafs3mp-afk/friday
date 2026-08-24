@@ -551,6 +551,19 @@ def _fresh_interpreter_replay(storage: Any, item: Any) -> dict[str, Any]:
     return payload
 
 
+def _fresh_interpreter_replay_after_clean_shutdown(
+    settings: Any,
+    storage: Any,
+    item: Any,
+    request: pytest.FixtureRequest,
+) -> tuple[dict[str, Any], FridayStorage]:
+    storage.close(final=True)
+    payload = _fresh_interpreter_replay(storage, item)
+    reopened = _reopen_storage(settings, storage)
+    request.addfinalizer(lambda: reopened.close(final=True))
+    return payload, reopened
+
+
 async def _runtime(
     settings: Any,
     storage: Any,
@@ -1167,6 +1180,7 @@ async def test_selected_canonical_archive_evidence_replays_exactly_after_runtime
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> None:
     raw_id, initial, created = await _create_durable_selected_archive_work(
         settings,
@@ -1174,7 +1188,12 @@ async def test_selected_canonical_archive_evidence_replays_exactly_after_runtime
         monkeypatch,
         suffix="-durable-restart",
     )
-    fresh_process = _fresh_interpreter_replay(storage, created)
+    fresh_process, storage = _fresh_interpreter_replay_after_clean_shutdown(
+        settings,
+        storage,
+        created,
+        request,
+    )
     assert fresh_process["status"] == "exact"
     assert fresh_process["corpus"] == created.selected_evidence.corpus.value
     assert fresh_process["coverage_grade"] == created.selected_evidence.coverage_grade.value
@@ -1248,6 +1267,7 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_fail
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
     revoked_permission: str | None,
     expected_replay_status: str,
 ) -> None:
@@ -1296,7 +1316,12 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_fail
     assert created.state is WorkState.ACTIVE
     assert created.transition is WorkTransition.CREATED
     assert created.revision == 1
-    fresh_process = _fresh_interpreter_replay(storage, created)
+    fresh_process, storage = _fresh_interpreter_replay_after_clean_shutdown(
+        settings,
+        storage,
+        created,
+        request,
+    )
     assert fresh_process["status"] == "exact"
     assert fresh_process["corpus"] == "messages"
     assert fresh_process["coverage_grade"] == created.selected_evidence.coverage_grade.value
