@@ -32,6 +32,7 @@ PROFILE_SCHEMA = "friday.secondary-runtime-profile.v2"
 CAPACITY_SCHEMA = "friday.secondary-capacity-evidence.v1"
 FAILURE_SCHEMA = "friday.secondary-failure-battery.v1"
 RUNTIME_IMAGE = "lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
+RUNTIME_IMAGE_LOCAL_ID = "sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
 RUNTIME_IMAGE_CONFIG_DIGEST = "sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc"
 RUNTIME_IMAGE_OCI_MANIFEST_DIGEST = "sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
 RUNTIME_SOURCE_REVISION = "29481685462732237d80d86076d6563e1f658102"
@@ -378,7 +379,7 @@ def _validate_runtime_manifest(value: dict[str, Any], hardware: dict[str, Any]) 
         set(value) != RUNTIME_KEYS
         or not isinstance(gpu, dict)
         or value.get("image_ref") != RUNTIME_IMAGE
-        or value.get("image_id") != RUNTIME_IMAGE_CONFIG_DIGEST
+        or value.get("image_id") != RUNTIME_IMAGE_LOCAL_ID
         or value.get("image_config_digest") != RUNTIME_IMAGE_CONFIG_DIGEST
         or value.get("image_oci_manifest_digest") != RUNTIME_IMAGE_OCI_MANIFEST_DIGEST
         or value.get("gateway_image_ref") != GATEWAY_IMAGE

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the closed Friday secondary failure suite and emit candidate-bound evidence."""
+"""Run deterministic mocked failure contracts and emit candidate-bound evidence."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from typing import Any
 from endpoint_common import EndpointError, configure_expected_model, evidence_identity
 
 SCHEMA = "friday.secondary-failure-battery.v1"
+EVIDENCE_SCOPE = "deterministic_mock_contract"
 REPO_ROOT = Path(__file__).resolve().parents[4]
 JOURNEY_TESTS = {
     "startup_laptop_off": "test_server_stays_healthy_with_secondary_disabled_or_laptop_off",
@@ -182,6 +183,8 @@ def run_battery(*, candidate: Path, ca_file: Path, output: Path) -> dict[str, An
     evidence = {
         "schema": SCHEMA,
         "status": "passed",
+        "evidence_scope": EVIDENCE_SCOPE,
+        "live_physical_journeys_observed": False,
         **evidence_identity(),
         "source_head": _git_head(),
         "runner_sha256": runner_hash,
@@ -208,7 +211,12 @@ def run_battery(*, candidate: Path, ca_file: Path, output: Path) -> dict[str, An
             os.fsync(stream.fileno())
     except OSError as exc:
         raise FailureBatteryError("failure evidence could not be created") from exc
-    return {"status": "passed", "test_count": test_count, "output_sha256": _sha256(output)}
+    return {
+        "status": "deterministic_contract_passed",
+        "live_physical_journeys_observed": False,
+        "test_count": test_count,
+        "output_sha256": _sha256(output),
+    }
 
 
 def _parser() -> argparse.ArgumentParser:

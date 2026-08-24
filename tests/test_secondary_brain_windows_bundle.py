@@ -264,7 +264,7 @@ def test_examples_have_sealed_source_and_nonaccepted_runtime_placeholders() -> N
     assert model["total_bytes"] == 13_789_264_674
     assert runtime["status"] == "template_not_accepted"
     assert runtime["image_ref"] == SGLANG_IMAGE
-    assert runtime["image_id"] == SGLANG_CONFIG_DIGEST
+    assert runtime["image_id"] == SGLANG_IMAGE.removeprefix("lmsysorg/sglang@")
     assert runtime["image_config_digest"] == SGLANG_CONFIG_DIGEST
     assert runtime["image_oci_manifest_digest"] == SGLANG_IMAGE.removeprefix("lmsysorg/sglang@")
     assert runtime["sglang_version"] == "0.5.17"
@@ -374,7 +374,7 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     assert "openai/gpt-oss-20b" in population
     assert "6cee5e81ee83917806bbde320786a8fb61efebee" in population
     assert SGLANG_IMAGE in population
-    assert SGLANG_CONFIG_DIGEST in population
+    assert SGLANG_IMAGE.removeprefix("lmsysorg/sglang@") in population
     assert "$DownloaderImage -cne $expectedDownloaderImage" in population
     assert "$downloaderInspection.Id -cne $expectedDownloaderImageId" in population
     assert "$downloaderInspection.Descriptor.digest -cne $expectedDownloaderManifest" in population
@@ -410,7 +410,7 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     assert "nginx version: nginx/1.31.3" in preflight
     assert "inventory_incomplete" in preflight
     for expected in (
-        "Майкрософт Windows 11 Pro",
+        "0JzQsNC50LrRgNC+0YHQvtGE0YIgV2luZG93cyAxMSBQcm8=",
         "10.0.26200.9168",
         "6.6.114.1-1",
         "Docker Desktop.exe",
@@ -423,6 +423,8 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
         "friday.secondary-hardware-runtime.v1",
     ):
         assert expected in preflight
+    assert all(byte < 128 for byte in (SCRIPTS / "preflight.ps1").read_bytes())
+    assert all(byte < 128 for byte in (SCRIPTS / "accept-hardware-runtime-receipt.ps1").read_bytes())
     assert "$env:" not in preflight.casefold()
     assert "--pull', 'never" in preflight
     for flag in (
@@ -1012,3 +1014,72 @@ def test_capacity_and_soak_minimums_are_not_decorative() -> None:
         soak._duration("60")
     with pytest.raises(argparse.ArgumentTypeError):
         soak._minimum_requests("10")
+
+
+def test_capacity_accepts_profile_memory_grid_and_reserves_generation_tokens() -> None:
+    tuner = importlib.import_module("tune_context")
+    args = tuner._parser().parse_args(
+        [
+            "--api-key-file",
+            "key",
+            "--profile-manifest",
+            "candidate.json",
+            "--output",
+            "capacity.json",
+            "--candidates",
+            "4096",
+            "--mem-fraction-static",
+            "0.97",
+        ]
+    )
+    assert args.mem_fraction_static == 0.97
+    messages = tuner._context_prompt(4096, 320)
+    body = messages[-1]["content"]
+    assert body.count("probe ") == 4096 - 320 - tuner._PROTOCOL_TOKEN_RESERVE
+    checks = tuner._usage_checks(
+        context_tokens=4096,
+        generation_tokens=320,
+        prompt_tokens=3400,
+        completion_tokens=256,
+    )
+    assert all(checks.values())
+    overcommitted = tuner._usage_checks(
+        context_tokens=4096,
+        generation_tokens=320,
+        prompt_tokens=3800,
+        completion_tokens=256,
+    )
+    assert overcommitted["generation_reserve_met"] is False
+    assert overcommitted["prompt_near_limit"] is False
+
+
+def test_gpu_telemetry_is_bound_to_exact_laptop_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
+    telemetry = importlib.import_module("gpu_telemetry")
+
+    class Result:
+        stdout = (
+            "GPU-d7ef849e-55f5-f33c-2812-9dc32b644b07, "
+            "NVIDIA GeForce RTX 5080 Laptop GPU, 16303, 12000, 4303, 70, 100, 80\n"
+        )
+
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **_kwargs: object) -> Result:
+        commands.append(command)
+        return Result()
+
+    monkeypatch.setattr(telemetry.subprocess, "run", run)
+    sample = telemetry.sample_gpu()
+    assert commands[0][1] == "--id=GPU-d7ef849e-55f5-f33c-2812-9dc32b644b07"
+    assert sample.uuid == telemetry.EXPECTED_GPU_UUID
+    assert telemetry.sample_summary([sample])["total_mib"] == 16303
+
+    drifted_identities = (
+        ("GPU-other", telemetry.EXPECTED_GPU_NAME, 16303),
+        (telemetry.EXPECTED_GPU_UUID, "NVIDIA GeForce RTX 5090", 16303),
+        (telemetry.EXPECTED_GPU_UUID, telemetry.EXPECTED_GPU_NAME, 24564),
+    )
+    for uuid, name, total_mib in drifted_identities:
+        drifted = telemetry.GpuSample(uuid, name, total_mib, 12000, 4303, 70, 100, 80)
+        with pytest.raises(telemetry.GpuTelemetryError, match="accepted laptop receipt"):
+            telemetry.sample_summary([drifted])

@@ -36,9 +36,12 @@ $ProgressPreference = 'SilentlyContinue'
 $digestPattern = '\A[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}\z'
 $expectedObservedHardwareReceiptSha256 = '7b850221e7e11ac0063971d7baaf627c96eae5441368f1907cc070106832b0f3'
 $expectedSglangImage = 'lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405'
-$expectedSglangImageId = 'sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc'
+$expectedSglangImageId = 'sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405'
 $expectedSglangConfigDigest = 'sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc'
 $expectedSglangOciManifestDigest = 'sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405'
+$expectedWindowsCaption = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String('0JzQsNC50LrRgNC+0YHQvtGE0YIgV2luZG93cyAxMSBQcm8=')
+)
 $ociManifestMediaType = 'application/vnd.oci.image.manifest.v1+json'
 $expectedGpu = [ordered]@{
     compute_capability = '12.0'
@@ -230,7 +233,7 @@ function Test-ComposeExactImageSelector([string]$ImageRef) {
 
 $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
 $computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem
-if ([string]$operatingSystem.Caption -cne 'Майкрософт Windows 11 Pro' -or
+if ([string]$operatingSystem.Caption -cne $expectedWindowsCaption -or
     [string]$operatingSystem.Version -cne '10.0.26200' -or
     [string]$operatingSystem.BuildNumber -cne '26200') {
     throw 'Windows version differs from the code-owned hardware contract.'

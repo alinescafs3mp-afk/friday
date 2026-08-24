@@ -17,6 +17,9 @@ $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $expectedObservedSha256 = '7b850221e7e11ac0063971d7baaf627c96eae5441368f1907cc070106832b0f3'
 $expectedAcceptedSha256 = '0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f'
+$expectedWindowsCaption = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String('0JzQsNC50LrRgNC+0YHQvtGE0YIgV2luZG93cyAxMSBQcm8=')
+)
 
 function Get-BytesSha256([byte[]]$Bytes) {
     $algorithm = [Security.Cryptography.SHA256]::Create()
@@ -54,7 +57,7 @@ function New-CanonicalReceipt([string]$Status) {
         status = $Status
         windows = [ordered]@{
             build = '26200'
-            caption = 'Майкрософт Windows 11 Pro'
+            caption = $expectedWindowsCaption
             version = '10.0.26200'
         }
         wsl = [ordered]@{

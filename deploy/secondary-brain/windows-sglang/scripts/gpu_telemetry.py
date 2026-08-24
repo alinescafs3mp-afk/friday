@@ -1,4 +1,4 @@
-"""Bounded local NVIDIA telemetry used by capacity and soak probes."""
+"""Bounded NVIDIA telemetry pinned to the accepted Friday laptop GPU."""
 
 from __future__ import annotations
 
@@ -15,8 +15,15 @@ class GpuTelemetryError(RuntimeError):
     pass
 
 
+EXPECTED_GPU_UUID = "GPU-d7ef849e-55f5-f33c-2812-9dc32b644b07"
+EXPECTED_GPU_NAME = "NVIDIA GeForce RTX 5080 Laptop GPU"
+EXPECTED_GPU_MEMORY_TOTAL_MIB = 16_303
+
+
 @dataclass(frozen=True, slots=True)
 class GpuSample:
+    uuid: str
+    name: str
     total_mib: float
     used_mib: float
     free_mib: float
@@ -28,8 +35,11 @@ class GpuSample:
 def sample_gpu() -> GpuSample:
     command = [
         "nvidia-smi",
-        "--id=0",
-        "--query-gpu=memory.total,memory.used,memory.free,temperature.gpu,power.draw,utilization.gpu",
+        f"--id={EXPECTED_GPU_UUID}",
+        (
+            "--query-gpu=uuid,name,memory.total,memory.used,memory.free,"
+            "temperature.gpu,power.draw,utilization.gpu"
+        ),
         "--format=csv,noheader,nounits",
     ]
     try:
@@ -46,15 +56,36 @@ def sample_gpu() -> GpuSample:
     if len(lines) != 1:
         raise GpuTelemetryError("nvidia-smi did not return exactly one GPU row")
     parts = [part.strip() for part in lines[0].split(",")]
-    if len(parts) != 6:
+    if len(parts) != 8:
         raise GpuTelemetryError("nvidia-smi GPU row has the wrong shape")
     try:
-        numbers = [float(part) for part in parts]
+        numbers = [float(part) for part in parts[2:]]
     except ValueError as exc:
         raise GpuTelemetryError("nvidia-smi GPU row is non-numeric") from exc
     if any(not math.isfinite(value) or value < 0 for value in numbers):
         raise GpuTelemetryError("nvidia-smi GPU row is outside finite bounds")
-    return GpuSample(*numbers)
+    sample = GpuSample(parts[0], parts[1], *numbers)
+    _validate_identity(sample)
+    return sample
+
+
+def _validate_identity(sample: GpuSample) -> None:
+    if (
+        sample.uuid != EXPECTED_GPU_UUID
+        or sample.name != EXPECTED_GPU_NAME
+        or sample.total_mib != EXPECTED_GPU_MEMORY_TOTAL_MIB
+    ):
+        raise GpuTelemetryError("telemetry GPU differs from the accepted laptop receipt")
+
+
+def expected_gpu_identity() -> dict[str, str | int]:
+    """Return the content-free GPU identity bound into every telemetry sample."""
+
+    return {
+        "uuid": EXPECTED_GPU_UUID,
+        "name": EXPECTED_GPU_NAME,
+        "memory_total_mib": EXPECTED_GPU_MEMORY_TOTAL_MIB,
+    }
 
 
 class GpuSampler:
@@ -91,6 +122,8 @@ class GpuSampler:
 def sample_summary(samples: list[GpuSample]) -> dict[str, float]:
     if not samples:
         raise GpuTelemetryError("no GPU telemetry samples were collected")
+    for sample in samples:
+        _validate_identity(sample)
     return {
         "total_mib": min(sample.total_mib for sample in samples),
         "peak_used_mib": max(sample.used_mib for sample in samples),

@@ -437,7 +437,7 @@ def test_endpoint_helpers_fix_the_certified_gpt_oss_sampling(
         )
 
 
-def test_failure_runner_emits_only_measured_closed_journeys(
+def test_failure_runner_labels_mocked_contracts_as_not_live_physical_journeys(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -458,7 +458,10 @@ def test_failure_runner_emits_only_measured_closed_journeys(
     result = runner.run_battery(candidate=args.output, ca_file=args.ca_certificate, output=output)
     evidence = json.loads(output.read_text(encoding="utf-8"))
 
-    assert result["status"] == "passed"
+    assert result["status"] == "deterministic_contract_passed"
+    assert result["live_physical_journeys_observed"] is False
+    assert evidence["evidence_scope"] == "deterministic_mock_contract"
+    assert evidence["live_physical_journeys_observed"] is False
     assert set(evidence["journeys"]) == set(runner.JOURNEY_TESTS)
     assert all(row["status"] == "passed" for row in evidence["journeys"].values())
     assert evidence["raw_content_retained"] is False

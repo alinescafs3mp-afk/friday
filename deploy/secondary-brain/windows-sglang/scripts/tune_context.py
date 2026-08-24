@@ -21,14 +21,18 @@ from endpoint_common import (
     stream_chat_completion,
     verify_remote_profile_epoch,
 )
-from gpu_telemetry import GpuSampler, GpuTelemetryError, sample_summary
+from gpu_telemetry import GpuSampler, GpuTelemetryError, expected_gpu_identity, sample_summary
 
 _LADDER = (4096, 8192, 12288, 16384, 24576, 32768)
-_MEMORY_GRID = (0.86, 0.88, 0.90, 0.92)
+_MEMORY_GRID = (0.86, 0.88, 0.90, 0.92, 0.94, 0.96, 0.97)
+_PROTOCOL_TOKEN_RESERVE = 384
+_MINIMUM_PROMPT_FRACTION = 0.80
 
 
-def _context_prompt(target_tokens: int) -> list[dict[str, str]]:
-    repeats = max(1, target_tokens - 256)
+def _context_prompt(target_tokens: int, generation_tokens: int) -> list[dict[str, str]]:
+    repeats = target_tokens - generation_tokens - _PROTOCOL_TOKEN_RESERVE
+    if repeats < 1:
+        raise ValueError("context target cannot reserve generation and protocol tokens")
     body = "probe " * repeats
     return [
         {
@@ -40,6 +44,21 @@ def _context_prompt(target_tokens: int) -> list[dict[str, str]]:
         },
         {"role": "user", "content": body + "\nBegin the numbered final answer now."},
     ]
+
+
+def _usage_checks(
+    *, context_tokens: int, generation_tokens: int, prompt_tokens: int, completion_tokens: int
+) -> dict[str, bool]:
+    return {
+        "usage_accounting_present": prompt_tokens > 0 and completion_tokens > 0,
+        "generation_reserve_met": prompt_tokens + generation_tokens <= context_tokens,
+        "observed_total_within_context": prompt_tokens + completion_tokens <= context_tokens,
+        "prompt_near_limit": (
+            int(context_tokens * _MINIMUM_PROMPT_FRACTION)
+            <= prompt_tokens
+            <= context_tokens - generation_tokens
+        ),
+    }
 
 
 def _trial(
@@ -56,7 +75,7 @@ def _trial(
         completion = stream_chat_completion(
             base_url,
             api_key=api_key,
-            messages=_context_prompt(context_tokens),
+            messages=_context_prompt(context_tokens, generation_tokens),
             timeout_sec=timeout_sec,
             max_tokens=generation_tokens,
             ca_file=ca_file,
@@ -65,7 +84,12 @@ def _trial(
         raise sampler.error
     gpu = sample_summary(sampler.samples)
     value = completion.completion
-    prompt_near_limit = int(context_tokens * 0.80) <= value.prompt_tokens <= context_tokens
+    usage_checks = _usage_checks(
+        context_tokens=context_tokens,
+        generation_tokens=generation_tokens,
+        prompt_tokens=value.prompt_tokens,
+        completion_tokens=value.completion_tokens,
+    )
     generated_envelope_met = value.completion_tokens >= 256
     required_headroom_mib = max(512.0, gpu["total_mib"] * 0.05)
     headroom_met = gpu["minimum_free_mib"] >= required_headroom_mib
@@ -81,11 +105,12 @@ def _trial(
         ),
         "finish_reason": value.finish_reason,
         "reasoning_field_present": value.reasoning_present,
-        "prompt_near_limit": prompt_near_limit,
+        **usage_checks,
         "generated_envelope_met": generated_envelope_met,
         "required_headroom_mib": round(required_headroom_mib, 3),
         "headroom_met": headroom_met,
         "gpu": {key: round(number, 3) for key, number in gpu.items()},
+        "gpu_identity": expected_gpu_identity(),
         "raw_prompt_retained": False,
         "raw_response_retained": False,
     }
@@ -125,7 +150,12 @@ def run_ladder(
         ]
         trials.extend(candidate_trials)
         passed = all(
-            trial["prompt_near_limit"] and trial["generated_envelope_met"] and trial["headroom_met"]
+            trial["usage_accounting_present"]
+            and trial["generation_reserve_met"]
+            and trial["observed_total_within_context"]
+            and trial["prompt_near_limit"]
+            and trial["generated_envelope_met"]
+            and trial["headroom_met"]
             for trial in candidate_trials
         )
         if passed:
