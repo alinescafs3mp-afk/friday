@@ -152,7 +152,7 @@ function Assert-FridayFirewallProfilesEnabled {
             -not $defaultInbound.valid -or $defaultInbound.value -cne 'Block' -or
             -not $allowInbound.valid -or $allowInbound.value -cne 'True' -or
             -not $allowLocal.valid -or $allowLocal.value -cne 'True' -or
-            $disabledAliases.Count -ne 0) {
+            @($disabledAliases).Count -ne 0) {
             throw 'Every effective firewall profile must enforce blocks and local inbound rules.'
         }
     }

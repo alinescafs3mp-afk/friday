@@ -394,6 +394,7 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     assert "Get-Service -Name MpsSvc -ErrorAction Stop" in firewall
     assert "Windows Defender Firewall service must be running." in firewall
     assert "DisabledInterfaceAliases" in firewall
+    assert "@($disabledAliases).Count -ne 0" in firewall
     assert "Get-FridayAuthenticatedBypassConflicts" in firewall
     bypass_preflight = firewall.index("if (@(Get-FridayAuthenticatedBypassConflicts).Count -ne 0)")
     guard_create = firewall.index("New-NetFirewallRule -Name $applyGuardName")
