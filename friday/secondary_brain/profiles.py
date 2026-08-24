@@ -458,21 +458,21 @@ class SecondaryRuntimeProfile:
 # Exact content-free finalist admitted only for discarded shadow extraction.
 # Assist remains impossible until the physical-failure witness promotes an
 # accepted manifest with its own, different digest.
-_PROVISIONAL_GPT_OSS_20B_V9 = SecondaryRuntimeProfile(
-    profile_id=("gptoss20b-2329f5a607687d03cafcfcd7de00ce8b9a236943776283c9da6a29f63d2f30da"),
+_PROVISIONAL_GPT_OSS_20B_FINALIST = SecondaryRuntimeProfile(
+    profile_id=("gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"),
     endpoint_base_url="https://192.168.1.35:8443/v1",
     served_model_alias=(
-        "friday-secondary-gptoss20b-2329f5a607687d03cafcfcd7de00ce8b9a236943776283c9da6a29f63d2f30da"
+        "friday-secondary-gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"
     ),
-    manifest_sha256="528c7e9540eaaf3b7bbbcfcd29135dcf63e40fc460ab44cfcae1a3f96ccb0f07",
-    engine_binding_sha256=("2329f5a607687d03cafcfcd7de00ce8b9a236943776283c9da6a29f63d2f30da"),
+    manifest_sha256="51af2164fa07ff3c01813e318076f7ac8b37eeecb73e695b6ca7543061c93439",
+    engine_binding_sha256=("2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"),
     hardware_runtime_receipt_sha256=("0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"),
     gateway_ca_certificate_sha256=("392756a74fd9100635c42f4fbf7e5a5f1822d18ea898ebb7848b9fdd0bddc1fe"),
     max_context_tokens=4096,
     max_total_tokens=4096,
     max_concurrency=1,
     max_output_tokens=512,
-    chunked_prefill_size=512,
+    chunked_prefill_size=256,
     mem_fraction_static="0.96",
     quantization="mxfp4",
     dtype="bfloat16",
@@ -491,10 +491,10 @@ _PROVISIONAL_GPT_OSS_20B_V9 = SecondaryRuntimeProfile(
     overlap_schedule_enabled=True,
     hybrid_swa_memory_enabled=True,
     swa_full_tokens_ratio="0.80",
-    cuda_graph_backend_decode="disabled",
+    cuda_graph_backend_decode="full",
     cuda_graph_backend_prefill="disabled",
-    cuda_graph_max_bs_decode=0,
-    cuda_graph_bs_decode=(),
+    cuda_graph_max_bs_decode=1,
+    cuda_graph_bs_decode=(1,),
     no_cpu_offload=True,
     allowed_modes=frozenset({"assist", "shadow"}),
     allowed_workloads=frozenset({"extract"}),
@@ -522,7 +522,7 @@ ACCEPTED_SECONDARY_RUNTIME_PROFILES: Mapping[str, SecondaryRuntimeProfile] = Map
 # This registry never grants assist authority; the resolver below restricts it
 # further to the exact shadow/extract contour.
 PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES: Mapping[str, SecondaryRuntimeProfile] = MappingProxyType(
-    {_PROVISIONAL_GPT_OSS_20B_V9.profile_id: _PROVISIONAL_GPT_OSS_20B_V9}
+    {_PROVISIONAL_GPT_OSS_20B_FINALIST.profile_id: _PROVISIONAL_GPT_OSS_20B_FINALIST}
 )
 
 

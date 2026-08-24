@@ -14,9 +14,9 @@ from friday.secondary_brain.profiles import (
     get_secondary_runtime_profile,
 )
 
-_PROFILE_ID = "gptoss20b-2329f5a607687d03cafcfcd7de00ce8b9a236943776283c9da6a29f63d2f30da"
-_CANDIDATE_SHA256 = "528c7e9540eaaf3b7bbbcfcd29135dcf63e40fc460ab44cfcae1a3f96ccb0f07"
-_CANDIDATE_PATH = Path(__file__).parent / "fixtures" / "secondary_v9_profile_candidate.json"
+_PROFILE_ID = "gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"
+_CANDIDATE_SHA256 = "51af2164fa07ff3c01813e318076f7ac8b37eeecb73e695b6ca7543061c93439"
+_CANDIDATE_PATH = Path(__file__).parent / "fixtures" / "secondary_finalist_profile_candidate.json"
 _EVIDENCE_KEYS = (
     "quality_evidence_sha256",
     "capacity_evidence_sha256",
@@ -25,7 +25,7 @@ _EVIDENCE_KEYS = (
 )
 
 
-def test_v9_is_registered_only_as_the_exact_provisional_shadow_candidate() -> None:
+def test_finalist_is_registered_only_as_the_exact_provisional_shadow_candidate() -> None:
     raw = _CANDIDATE_PATH.read_bytes()
     candidate = json.loads(raw)
 
@@ -38,6 +38,10 @@ def test_v9_is_registered_only_as_the_exact_provisional_shadow_candidate() -> No
     assert profile.manifest_sha256 == _CANDIDATE_SHA256
     assert profile.allowed_modes == frozenset({"assist", "shadow"})
     assert profile.allowed_workloads == frozenset({"extract"})
+    assert profile.chunked_prefill_size == 256
+    assert profile.cuda_graph_backend_decode == "full"
+    assert profile.cuda_graph_max_bs_decode == 1
+    assert profile.cuda_graph_bs_decode == (1,)
     assert candidate["status"] == "candidate"
     assert [candidate[key] for key in _EVIDENCE_KEYS] == ["0" * 64] * len(_EVIDENCE_KEYS)
 
@@ -52,7 +56,7 @@ def test_v9_is_registered_only_as_the_exact_provisional_shadow_candidate() -> No
     assert profile.accepts_manifest(raw) is False
 
 
-def test_v9_provisional_admission_rejects_candidate_lookalikes() -> None:
+def test_finalist_provisional_admission_rejects_candidate_lookalikes() -> None:
     raw = _CANDIDATE_PATH.read_bytes()
     profile = PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES[_PROFILE_ID]
 
