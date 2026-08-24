@@ -41,6 +41,7 @@ _ENGINE_PROJECTION: dict[str, Any] = {
     "moe_runner_backend": "flashinfer_mxfp4",
     "mxfp4_moe_precision": "default",
     "mm_feature_transport": "cpu",
+    "deterministic_inference_enabled": True,
     "context_tokens": 16_384,
     "max_total_tokens": 16_384,
     "mem_fraction_static": "0.97",
@@ -65,7 +66,7 @@ _PROFILE_ID = f"gptoss20b-{_ENGINE_BINDING_SHA256}"
 _ALIAS = f"friday-secondary-{_PROFILE_ID}"
 _PROFILE_VALUE: dict[str, Any] = {
     **_ENGINE_PROJECTION,
-    "schema": "friday.secondary-runtime-profile.v4",
+    "schema": "friday.secondary-runtime-profile.v5",
     "status": "accepted",
     "profile_id": _PROFILE_ID,
     "engine_binding_sha256": _ENGINE_BINDING_SHA256,
@@ -116,6 +117,7 @@ def _accepted_test_profile(monkeypatch: pytest.MonkeyPatch) -> None:
         moe_runner_backend="flashinfer_mxfp4",
         mxfp4_moe_precision="default",
         mm_feature_transport="cpu",
+        deterministic_inference_enabled=True,
         page_size=1,
         radix_cache_enabled=True,
         overlap_schedule_enabled=True,

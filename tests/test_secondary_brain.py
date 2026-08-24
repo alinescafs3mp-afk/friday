@@ -63,6 +63,7 @@ _ENGINE_PROJECTION: dict[str, Any] = {
     "moe_runner_backend": "flashinfer_mxfp4",
     "mxfp4_moe_precision": "default",
     "mm_feature_transport": "cpu",
+    "deterministic_inference_enabled": True,
     "context_tokens": 4096,
     "max_total_tokens": 4096,
     "mem_fraction_static": "0.97",
@@ -87,7 +88,7 @@ _PROFILE_ID = f"gptoss20b-{_ENGINE_BINDING_SHA256}"
 _ALIAS = f"friday-secondary-{_PROFILE_ID}"
 _PROFILE_VALUE: dict[str, Any] = {
     **_ENGINE_PROJECTION,
-    "schema": "friday.secondary-runtime-profile.v4",
+    "schema": "friday.secondary-runtime-profile.v5",
     "status": "accepted",
     "profile_id": _PROFILE_ID,
     "engine_binding_sha256": _ENGINE_BINDING_SHA256,
@@ -137,6 +138,7 @@ def _runtime_profile(**changes: Any) -> SecondaryRuntimeProfile:
         moe_runner_backend="flashinfer_mxfp4",
         mxfp4_moe_precision="default",
         mm_feature_transport="cpu",
+        deterministic_inference_enabled=True,
         page_size=1,
         radix_cache_enabled=True,
         overlap_schedule_enabled=True,
@@ -723,6 +725,7 @@ def test_provisional_policy_mismatch_constructs_no_transport(
         _runtime_profile(max_context_tokens=True, max_total_tokens=True),
         _runtime_profile(chunked_prefill_size=513),
         _runtime_profile(sglang_compat_patch_sha256="0" * 64),
+        _runtime_profile(deterministic_inference_enabled=False),
     ],
 )
 def test_product_profile_uses_the_deploy_capacity_bounds(profile: SecondaryRuntimeProfile) -> None:
@@ -1586,7 +1589,10 @@ async def test_structured_result_is_typed_and_tool_output_is_rejected(settings: 
         _response(message_extra={"tool_calls": [{"id": "never-execute"}]}),
     ]
 
-    async def handler(_request: httpx.Request) -> httpx.Response:
+    observed_payloads: list[dict[str, Any]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed_payloads.append(json.loads(request.content))
         return responses.pop(0)
 
     scheduler = build_secondary_brain(
@@ -1597,9 +1603,11 @@ async def test_structured_result_is_typed_and_tool_output_is_rejected(settings: 
         structured = await scheduler.attempt(_request(structured=True))
         assert structured.result is not None
         assert structured.result.structured_output == {"label": "ok", "score": 1}
+        assert observed_payloads[0]["response_format"] == {"type": "json_object"}
         tool_attempt = await scheduler.attempt(_request())
         assert tool_attempt.result is None
         assert tool_attempt.failure is SecondaryFailure.TOOL_CALL_REJECTED
+        assert "response_format" not in observed_payloads[1]
     finally:
         await scheduler.aclose()
 

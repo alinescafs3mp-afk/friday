@@ -30,7 +30,7 @@ from source_model_manifest import (  # type: ignore[import-not-found]  # noqa: E
     verify_source_model_manifest,
 )
 
-PROFILE_SCHEMA = "friday.secondary-runtime-profile.v4"
+PROFILE_SCHEMA = "friday.secondary-runtime-profile.v5"
 CAPACITY_SCHEMA = "friday.secondary-capacity-evidence.v1"
 DETERMINISTIC_FAILURE_SCHEMA = "friday.secondary-failure-battery.v1"
 PHYSICAL_FAILURE_SCHEMA = "friday.secondary-physical-failure-observation.v1"
@@ -63,8 +63,8 @@ MEMORY_GRID = frozenset(
 )
 KV_CACHE_DTYPES = frozenset({"bf16", "fp8_e4m3"})
 KV_CACHE_SCALE_POLICIES = {"bf16": "not_applicable", "fp8_e4m3": "implicit_unit"}
-DECODE_ATTENTION_BACKENDS = frozenset({"triton", "trtllm_mha"})
-SAMPLING_BACKENDS = frozenset({"pytorch", "flashinfer"})
+DECODE_ATTENTION_BACKENDS = frozenset({"triton"})
+SAMPLING_BACKENDS = frozenset({"pytorch"})
 PAGE_SIZES = frozenset({1, 16})
 SWA_FULL_TOKENS_RATIOS = frozenset({"0.25", "0.50", "0.80", "1.00"})
 CUDA_GRAPH_DECODE_BACKENDS = frozenset({"disabled", "full"})
@@ -255,6 +255,7 @@ PROFILE_KEYS = frozenset(
         "moe_runner_backend",
         "mxfp4_moe_precision",
         "mm_feature_transport",
+        "deterministic_inference_enabled",
         "page_size",
         "radix_cache_enabled",
         "overlap_schedule_enabled",
@@ -302,6 +303,7 @@ ENGINE_KEYS = (
     "moe_runner_backend",
     "mxfp4_moe_precision",
     "mm_feature_transport",
+    "deterministic_inference_enabled",
     "page_size",
     "radix_cache_enabled",
     "overlap_schedule_enabled",
@@ -753,6 +755,7 @@ def build_candidate(args: argparse.Namespace) -> dict[str, Any]:
         "moe_runner_backend": "flashinfer_mxfp4",
         "mxfp4_moe_precision": "default",
         "mm_feature_transport": "cpu",
+        "deterministic_inference_enabled": True,
         "page_size": page_size,
         "radix_cache_enabled": radix_cache_enabled,
         "overlap_schedule_enabled": overlap_schedule_enabled,
@@ -989,6 +992,7 @@ def _validate_candidate(value: dict[str, Any], raw: bytes) -> None:
         or value.get("moe_runner_backend") != "flashinfer_mxfp4"
         or value.get("mxfp4_moe_precision") != "default"
         or value.get("mm_feature_transport") != "cpu"
+        or value.get("deterministic_inference_enabled") is not True
         or page_size not in PAGE_SIZES
         or not isinstance(value.get("radix_cache_enabled"), bool)
         or not isinstance(value.get("overlap_schedule_enabled"), bool)

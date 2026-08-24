@@ -243,6 +243,7 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     assert 'value["moe_runner_backend"] != "flashinfer_mxfp4"' in profile_contract
     assert '"--flashinfer-mxfp4-moe-precision",' in profile_contract
     assert '"--mm-feature-transport",' in profile_contract
+    assert '"--enable-deterministic-inference",' in profile_contract
     assert 'value["mm_feature_transport"] != "cpu"' in profile_contract
     assert launcher.index("profile = load_launch_profile(") < launcher.index(
         "from sglang.launch_server import run_server"
@@ -253,6 +254,8 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     assert launcher.index("verify_live_hardware_runtime(") < launcher.index("verify_source_model_snapshot(")
     assert "FRIDAY_SECONDARY_CONTEXT_TOKENS" not in launcher
     assert 'server_args.mm_feature_transport != "cpu"' in launcher
+    assert "server_args.enable_deterministic_inference is not True" in launcher
+    assert 'server_args.sampling_backend != "pytorch"' in launcher
     assert "server_args.language_only" in launcher
     assert "server_args.get_model_config().is_multimodal" in launcher
     assert launcher.index("server_args = prepare_server_args(arguments)") < launcher.index(
@@ -902,7 +905,7 @@ def test_model_volume_verifier_is_strict_and_fail_closed(
 
 def _candidate_runtime_profile() -> dict[str, Any]:
     value: dict[str, Any] = {
-        "schema": "friday.secondary-runtime-profile.v4",
+        "schema": "friday.secondary-runtime-profile.v5",
         "status": "candidate",
         "profile_id": "pending",
         "engine_binding_sha256": "0" * 64,
@@ -933,6 +936,7 @@ def _candidate_runtime_profile() -> dict[str, Any]:
         "moe_runner_backend": "flashinfer_mxfp4",
         "mxfp4_moe_precision": "default",
         "mm_feature_transport": "cpu",
+        "deterministic_inference_enabled": True,
         "page_size": 1,
         "radix_cache_enabled": True,
         "overlap_schedule_enabled": True,
@@ -993,6 +997,7 @@ def test_shared_profile_contract_derives_every_capacity_argument(tmp_path: Path)
     assert profile.model_path == "/source/snapshot"
     assert profile.source_model_manifest_sha256 == SOURCE_MANIFEST_SHA256
     assert profile.sglang_compat_patch_sha256 == "d" * 64
+    assert profile.deterministic_inference_enabled is True
     assert profile.hardware_runtime_receipt_sha256 == (
         "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
     )
@@ -1029,6 +1034,7 @@ def test_shared_profile_contract_derives_every_capacity_argument(tmp_path: Path)
         "default",
         "--mm-feature-transport",
         "cpu",
+        "--enable-deterministic-inference",
         "--kv-cache-dtype",
         "bf16",
         "--page-size",
@@ -1063,8 +1069,8 @@ def test_shared_profile_contract_emits_the_full_optimized_surface(tmp_path: Path
         {
             "kv_cache_dtype": "fp8_e4m3",
             "kv_cache_scale_policy": "implicit_unit",
-            "decode_attention_backend": "trtllm_mha",
-            "sampling_backend": "flashinfer",
+            "decode_attention_backend": "triton",
+            "sampling_backend": "pytorch",
             "page_size": 16,
             "radix_cache_enabled": False,
             "overlap_schedule_enabled": False,
@@ -1088,9 +1094,10 @@ def test_shared_profile_contract_emits_the_full_optimized_surface(tmp_path: Path
     arguments = profile.server_arguments("a" * 64)
 
     assert arguments[arguments.index("--kv-cache-dtype") + 1] == "fp8_e4m3"
-    assert arguments[arguments.index("--decode-attention-backend") + 1] == "trtllm_mha"
-    assert arguments[arguments.index("--sampling-backend") + 1] == "flashinfer"
+    assert arguments[arguments.index("--decode-attention-backend") + 1] == "triton"
+    assert arguments[arguments.index("--sampling-backend") + 1] == "pytorch"
     assert arguments[arguments.index("--mm-feature-transport") + 1] == "cpu"
+    assert arguments.count("--enable-deterministic-inference") == 1
     assert arguments[arguments.index("--page-size") + 1] == "16"
     assert arguments[arguments.index("--swa-full-tokens-ratio") + 1] == "1.00"
     assert arguments[arguments.index("--cuda-graph-max-bs-decode") + 1] == "1"
@@ -1120,11 +1127,12 @@ def test_shared_profile_contract_emits_the_full_optimized_surface(tmp_path: Path
         ("kv_cache_scale_policy", "explicit"),
         ("attention_backend", "flashinfer"),
         ("prefill_attention_backend", "flashinfer"),
-        ("decode_attention_backend", "flashinfer"),
-        ("sampling_backend", "triton"),
+        ("decode_attention_backend", "trtllm_mha"),
+        ("sampling_backend", "flashinfer"),
         ("moe_runner_backend", "cutlass"),
         ("mxfp4_moe_precision", "bf16"),
         ("mm_feature_transport", "cuda_ipc"),
+        ("deterministic_inference_enabled", False),
         ("page_size", 8),
         ("radix_cache_enabled", 1),
         ("overlap_schedule_enabled", 1),

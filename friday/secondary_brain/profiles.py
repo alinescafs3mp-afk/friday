@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _PROFILE_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}")
-_PROFILE_SCHEMA = "friday.secondary-runtime-profile.v4"
+_PROFILE_SCHEMA = "friday.secondary-runtime-profile.v5"
 _EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256 = "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
 _EXPECTED_SOURCE_MODEL_MANIFEST_SHA256 = "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"
 _EXPECTED_RUNTIME_IMAGE = (
@@ -61,6 +61,7 @@ _PROFILE_KEYS = frozenset(
         "moe_runner_backend",
         "mxfp4_moe_precision",
         "mm_feature_transport",
+        "deterministic_inference_enabled",
         "context_tokens",
         "max_total_tokens",
         "mem_fraction_static",
@@ -108,6 +109,7 @@ _ENGINE_KEYS = (
     "moe_runner_backend",
     "mxfp4_moe_precision",
     "mm_feature_transport",
+    "deterministic_inference_enabled",
     "context_tokens",
     "max_total_tokens",
     "mem_fraction_static",
@@ -178,6 +180,7 @@ class SecondaryRuntimeProfile:
     moe_runner_backend: str
     mxfp4_moe_precision: str
     mm_feature_transport: str
+    deterministic_inference_enabled: bool
     page_size: int
     radix_cache_enabled: bool
     overlap_schedule_enabled: bool
@@ -317,6 +320,8 @@ class SecondaryRuntimeProfile:
             or value.get("moe_runner_backend") != self.moe_runner_backend
             or value.get("mxfp4_moe_precision") != self.mxfp4_moe_precision
             or value.get("mm_feature_transport") != self.mm_feature_transport
+            or value.get("deterministic_inference_enabled")
+            is not self.deterministic_inference_enabled
             or value.get("context_tokens") != self.max_context_tokens
             or value.get("max_total_tokens") != self.max_total_tokens
             or value.get("mem_fraction_static") != self.mem_fraction_static
@@ -394,11 +399,12 @@ class SecondaryRuntimeProfile:
             == ("not_applicable" if self.kv_cache_dtype == "bf16" else "implicit_unit")
             and self.attention_backend == "triton"
             and self.prefill_attention_backend == "triton"
-            and self.decode_attention_backend in {"triton", "trtllm_mha"}
-            and self.sampling_backend in {"pytorch", "flashinfer"}
+            and self.decode_attention_backend == "triton"
+            and self.sampling_backend == "pytorch"
             and self.moe_runner_backend == "flashinfer_mxfp4"
             and self.mxfp4_moe_precision == "default"
             and self.mm_feature_transport == "cpu"
+            and self.deterministic_inference_enabled is True
             and type(self.page_size) is int
             and self.page_size in {1, 16}
             and type(self.radix_cache_enabled) is bool

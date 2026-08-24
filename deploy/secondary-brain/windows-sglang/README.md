@@ -35,7 +35,7 @@ have been removed from this deployment bundle.
 - The source volume is read-only. Before importing SGLang or creating CUDA
   state, the launcher rehashes the exact source manifest and all 14 files
   (13,789,264,674 bytes).
-- The runtime profile is canonical schema `friday.secondary-runtime-profile.v4`.
+- The runtime profile is canonical schema `friday.secondary-runtime-profile.v5`.
   It binds source, runtime image/config/OCI identities, backend selection,
   context, memory, graph policy and every acceptance receipt.
 - The accepted-profile registry stays empty until protocol, quality, capacity,
@@ -186,15 +186,17 @@ The profile ID and served-model alias are derived from the complete engine
 projection. `dtype=bfloat16`, `quantization=mxfp4`, global/prefill attention
 `triton`, `moe_runner_backend=flashinfer_mxfp4`, hybrid SWA memory, one running
 request, `mm_feature_transport=cpu`, prefill graphs disabled and no weight/KV
-CPU offload are fixed. SGLang `--language-only` is deliberately not used: that
-is an encoder-disaggregation mode and rejects this GPT-OSS architecture.
+CPU offload are fixed. Deterministic inference is mandatory and launches with
+`--enable-deterministic-inference`. SGLang `--language-only` is deliberately
+not used: that is an encoder-disaggregation mode and rejects this GPT-OSS
+architecture.
 
 Optional candidate flags have these closed choices and defaults:
 
 - `--kv-cache-dtype`: `bf16` (default) or `fp8_e4m3`; scale policy is derived as
   `not_applicable` or `implicit_unit` and cannot be supplied independently.
-- `--decode-attention-backend`: `triton` (default) or `trtllm_mha`;
-  `--sampling-backend`: `pytorch` (default) or `flashinfer`.
+- Decode attention stays on deterministic-compatible `triton`; sampling is
+  fixed to `pytorch` by deterministic inference.
 - `--page-size`: `1` (default) or `16`; `--radix-cache-enabled` and
   `--overlap-schedule-enabled`: `true` (default) or `false`.
 - `--swa-full-tokens-ratio`: `0.25`, `0.50`, `0.80` (default) or `1.00`;

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "friday.secondary-runtime-profile.v4"
+SCHEMA = "friday.secondary-runtime-profile.v5"
 EXPECTED_MODEL_PATH = "/source/snapshot"
 EXPECTED_SOURCE_REVISION = "6cee5e81ee83917806bbde320786a8fb61efebee"
 EXPECTED_SOURCE_MANIFEST_SHA256 = "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"
@@ -81,6 +81,7 @@ _KEYS = frozenset(
         "moe_runner_backend",
         "mxfp4_moe_precision",
         "mm_feature_transport",
+        "deterministic_inference_enabled",
         "page_size",
         "radix_cache_enabled",
         "overlap_schedule_enabled",
@@ -128,6 +129,7 @@ _ENGINE_KEYS = (
     "moe_runner_backend",
     "mxfp4_moe_precision",
     "mm_feature_transport",
+    "deterministic_inference_enabled",
     "page_size",
     "radix_cache_enabled",
     "overlap_schedule_enabled",
@@ -267,6 +269,7 @@ class LaunchProfile:
     moe_runner_backend: str
     mxfp4_moe_precision: str
     mm_feature_transport: str
+    deterministic_inference_enabled: bool
     page_size: int
     radix_cache_enabled: bool
     overlap_schedule_enabled: bool
@@ -317,6 +320,7 @@ class LaunchProfile:
             self.mxfp4_moe_precision,
             "--mm-feature-transport",
             self.mm_feature_transport,
+            "--enable-deterministic-inference",
             "--kv-cache-dtype",
             self.kv_cache_dtype,
             "--page-size",
@@ -447,12 +451,12 @@ def load_launch_profile(
         value["attention_backend"] != "triton"
         or value["prefill_attention_backend"] != "triton"
         or not isinstance(value["decode_attention_backend"], str)
-        or value["decode_attention_backend"] not in {"triton", "trtllm_mha"}
-        or not isinstance(value["sampling_backend"], str)
-        or value["sampling_backend"] not in {"pytorch", "flashinfer"}
+        or value["decode_attention_backend"] != "triton"
+        or value["sampling_backend"] != "pytorch"
         or value["moe_runner_backend"] != "flashinfer_mxfp4"
         or value["mxfp4_moe_precision"] != "default"
         or value["mm_feature_transport"] != "cpu"
+        or value["deterministic_inference_enabled"] is not True
     ):
         raise ProfileContractError("profile kernel selection is invalid")
     page_size = _exact_int(value["page_size"], minimum=1, maximum=16)
@@ -532,6 +536,7 @@ def load_launch_profile(
         moe_runner_backend=value["moe_runner_backend"],
         mxfp4_moe_precision=value["mxfp4_moe_precision"],
         mm_feature_transport=value["mm_feature_transport"],
+        deterministic_inference_enabled=value["deterministic_inference_enabled"],
         page_size=page_size,
         radix_cache_enabled=value["radix_cache_enabled"],
         overlap_schedule_enabled=value["overlap_schedule_enabled"],

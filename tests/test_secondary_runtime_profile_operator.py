@@ -296,6 +296,8 @@ def test_operator_builds_one_runtime_loadable_candidate(tmp_path: Path) -> None:
     assert profile.sampling_backend == "pytorch"
     assert profile.moe_runner_backend == "flashinfer_mxfp4"
     assert profile.mxfp4_moe_precision == "default"
+    assert profile.deterministic_inference_enabled is True
+    assert profile.server_arguments("a" * 64).count("--enable-deterministic-inference") == 1
     assert profile.page_size == 1
     assert profile.radix_cache_enabled is True
     assert profile.overlap_schedule_enabled is True
@@ -316,8 +318,8 @@ def test_operator_builds_the_closed_fp8_graph_candidate_surface(tmp_path: Path) 
     args.context_tokens = 65536
     args.mem_fraction_static = 0.95
     args.kv_cache_dtype = "fp8_e4m3"
-    args.decode_attention_backend = "trtllm_mha"
-    args.sampling_backend = "flashinfer"
+    args.decode_attention_backend = "triton"
+    args.sampling_backend = "pytorch"
     args.page_size = 16
     args.radix_cache_enabled = "false"
     args.overlap_schedule_enabled = "false"
@@ -335,8 +337,8 @@ def test_operator_builds_the_closed_fp8_graph_candidate_surface(tmp_path: Path) 
     assert profile.mem_fraction_static == "0.95"
     assert profile.kv_cache_dtype == "fp8_e4m3"
     assert profile.kv_cache_scale_policy == "implicit_unit"
-    assert profile.decode_attention_backend == "trtllm_mha"
-    assert profile.sampling_backend == "flashinfer"
+    assert profile.decode_attention_backend == "triton"
+    assert profile.sampling_backend == "pytorch"
     assert profile.page_size == 16
     assert profile.radix_cache_enabled is False
     assert profile.overlap_schedule_enabled is False
@@ -427,6 +429,7 @@ def test_candidate_cli_defaults_preserve_the_safe_baseline(tmp_path: Path) -> No
         args.swa_full_tokens_ratio,
         args.cuda_graph_backend_decode,
     ) == ("bf16", "triton", "triton", "pytorch", 1, "true", "true", "0.80", "disabled")
+    assert not hasattr(args, "deterministic_inference_enabled")
 
 
 @pytest.mark.parametrize(
@@ -436,6 +439,7 @@ def test_candidate_cli_defaults_preserve_the_safe_baseline(tmp_path: Path) -> No
         ("cuda_graph_max_bs_decode", 1),
         ("cuda_graph_bs_decode", [1]),
         ("hybrid_swa_memory_enabled", False),
+        ("deterministic_inference_enabled", False),
     ),
 )
 def test_candidate_validation_rejects_incoherent_engine_relationships(
@@ -467,8 +471,8 @@ def test_endpoint_identity_accepts_only_the_closed_candidate_specific_surface(
     args = _candidate_args(tmp_path)
     args.context_tokens = 40960
     args.kv_cache_dtype = "fp8_e4m3"
-    args.decode_attention_backend = "trtllm_mha"
-    args.sampling_backend = "flashinfer"
+    args.decode_attention_backend = "triton"
+    args.sampling_backend = "pytorch"
     args.page_size = 16
     args.swa_full_tokens_ratio = "1.00"
     args.cuda_graph_backend_decode = "full"
@@ -491,6 +495,17 @@ def test_endpoint_identity_accepts_only_the_closed_candidate_specific_surface(
 
     with pytest.raises(endpoint.EndpointError, match="runtime profile identity"):
         endpoint.configure_expected_model(invalid, args.ca_certificate)
+
+    candidate = json.loads(args.output.read_text(encoding="utf-8"))
+    candidate["deterministic_inference_enabled"] = False
+    binding = operator._engine_sha256(candidate)
+    candidate["engine_binding_sha256"] = binding
+    candidate["profile_id"] = f"gptoss20b-{binding}"
+    candidate["served_model_alias"] = f"friday-secondary-{candidate['profile_id']}"
+    nondeterministic = _write(tmp_path / "nondeterministic-profile.json", candidate)
+
+    with pytest.raises(endpoint.EndpointError, match="runtime profile identity"):
+        endpoint.configure_expected_model(nondeterministic, args.ca_certificate)
 
 
 def test_operator_rejects_hardware_receipt_drift_before_outputs(tmp_path: Path) -> None:

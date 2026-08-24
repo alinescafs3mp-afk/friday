@@ -154,7 +154,7 @@ class GptOssProtocolAdapter:
 
         # No tools, images, reasoning body or endpoint-selected model ever enter
         # this payload.  SGLang applies the checkpoint's Harmony chat template.
-        return {
+        payload: dict[str, Any] = {
             "model": config.served_model_alias,
             "messages": messages,
             "max_tokens": request.max_output_tokens,
@@ -171,6 +171,9 @@ class GptOssProtocolAdapter:
             "seed": 0,
             "stream": False,
         }
+        if request.require_structured_output:
+            payload["response_format"] = {"type": "json_object"}
+        return payload
 
     def parse_response(
         self,

@@ -78,6 +78,7 @@ _ENGINE_KEYS = (
     "moe_runner_backend",
     "mxfp4_moe_precision",
     "mm_feature_transport",
+    "deterministic_inference_enabled",
     "page_size",
     "radix_cache_enabled",
     "overlap_schedule_enabled",
@@ -126,6 +127,7 @@ _PROFILE_KEYS = frozenset(
         "moe_runner_backend",
         "mxfp4_moe_precision",
         "mm_feature_transport",
+        "deterministic_inference_enabled",
         "page_size",
         "radix_cache_enabled",
         "overlap_schedule_enabled",
@@ -247,9 +249,10 @@ def _profile_engine_surface_is_valid(value: dict[str, Any]) -> bool:
         and value.get("kv_cache_scale_policy") == expected_scale
         and value.get("attention_backend") == "triton"
         and value.get("prefill_attention_backend") == "triton"
-        and value.get("decode_attention_backend") in {"triton", "trtllm_mha"}
-        and value.get("sampling_backend") in {"pytorch", "flashinfer"}
+        and value.get("decode_attention_backend") == "triton"
+        and value.get("sampling_backend") == "pytorch"
         and value.get("mm_feature_transport") == "cpu"
+        and value.get("deterministic_inference_enabled") is True
         and type(page_size) is int
         and page_size in {1, 16}
         and type(value.get("radix_cache_enabled")) is bool
@@ -386,7 +389,7 @@ def configure_expected_model(profile_manifest: Path, ca_file: Path | None = None
         not isinstance(value, dict)
         or set(value) != _PROFILE_KEYS
         or raw != canonical
-        or value.get("schema") != "friday.secondary-runtime-profile.v4"
+        or value.get("schema") != "friday.secondary-runtime-profile.v5"
         or value.get("status") not in {"candidate", "accepted"}
         or not isinstance(profile_id, str)
         or _PROFILE_ID.fullmatch(profile_id) is None
