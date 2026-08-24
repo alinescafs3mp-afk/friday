@@ -62,6 +62,8 @@ def test_bundle_has_the_closed_operator_surface() -> None:
         "scripts/preflight.ps1",
         "scripts/install-openssh.ps1",
         "scripts/firewall.ps1",
+        "scripts/firewall-classifier.ps1",
+        "scripts/test-firewall-classifier.ps1",
         "scripts/provision-secrets.ps1",
         "scripts/model_volume_tool.py",
         "scripts/populate-model-volume.ps1",
@@ -359,6 +361,8 @@ def test_runtime_process_epoch_rejects_missing_ambiguous_or_nonfinite(
 def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> None:
     openssh = (SCRIPTS / "install-openssh.ps1").read_text(encoding="utf-8")
     firewall = (SCRIPTS / "firewall.ps1").read_text(encoding="utf-8")
+    firewall_classifier = (SCRIPTS / "firewall-classifier.ps1").read_text(encoding="utf-8")
+    firewall_test = (SCRIPTS / "test-firewall-classifier.ps1").read_text(encoding="utf-8")
     population = (SCRIPTS / "populate-model-volume.ps1").read_text(encoding="utf-8")
     provisioning = (SCRIPTS / "provision-secrets.ps1").read_text(encoding="utf-8")
     for source in (openssh, firewall, population, provisioning):
@@ -369,7 +373,36 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     assert "192.168.1.78" in firewall
     assert "-LocalPort 8443" in firewall
     assert "-LocalPort 30000" not in firewall
-    assert "'6', 'TCP', '256', 'Any'" in firewall
+    assert "Friday.Secondary.SGLang.PrimaryOnly.TCP8443" in firewall
+    assert "-Name $managedRuleName" in firewall
+    assert "-PolicyStore ActiveStore" in firewall
+    assert "-TracePolicyStore" in firewall
+    assert "Get-AppxPackage -AllUsers -ErrorAction Stop" in firewall
+    assert "New-FridayVerifiedPackageFamilyNameSet" in firewall
+    assert "Test-FridayManagedCandidate" in firewall
+    audit_gate = firewall.index("if ($conflicts.Count -ne 0)")
+    first_remove = firewall.index("Remove-NetFirewallRule")
+    first_create = firewall.index("New-NetFirewallRule")
+    assert audit_gate < first_remove < first_create
+    final_rescan = firewall.index("$finalEffectiveRules")
+    assert first_create < final_rescan
+    assert firewall.count("Get-FridayFirewallRuleAssessment") == 2
+    assert "$finalManagedCount -ne 1" in firewall
+    assert "the managed allow rule was rolled back where possible" in firewall
+    assert firewall.rindex("Remove-NetFirewallRule") > final_rescan
+    assert "Where-Object { [string]$_.DisplayName" not in firewall
+    assert "Get-FridayFirewallRuleAssessment" in firewall_classifier
+    assert "Get-FridayPortRelation8443" in firewall_classifier
+    assert "Test-FridayCanonicalSpecificAppContainerSid" in firewall_classifier
+    assert "S-1-15-2-" in firewall_classifier
+    assert "-In-Allow-ServerCapability" in firewall_classifier
+    assert "PackageFamilyName" in firewall_classifier
+    assert "PolicyStoreSourceType" in firewall_classifier
+    assert "display_name_does_not_exempt_broad_remote_address" in firewall_test
+    assert "missing_application_filter_fails_closed" in firewall_test
+    assert "malformed_installed_pfn_fails_closed" in firewall_test
+    assert "ConvertTo-Json" in firewall_test
+    assert ".\\scripts\\test-firewall-classifier.ps1" in (BUNDLE / "README.md").read_text(encoding="utf-8")
     assert "'--network', 'none'" in population
     assert "--pull', 'never" in population
     assert "docker pull" not in population

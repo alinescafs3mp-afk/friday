@@ -202,6 +202,7 @@ and source-volume values unchanged.
 Audit/apply the firewall rule, then start only this detached bundle:
 
 ```powershell
+.\scripts\test-firewall-classifier.ps1
 .\scripts\firewall.ps1
 .\scripts\firewall.ps1 -Apply
 docker compose --env-file .env -f compose.yml config
