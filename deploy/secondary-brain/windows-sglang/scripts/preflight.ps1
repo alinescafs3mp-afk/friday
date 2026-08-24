@@ -5,9 +5,6 @@ param(
     [string]$ExpectedAddress = '192.168.1.35',
 
     [Parameter()]
-    [string]$CudaCanaryImage,
-
-    [Parameter()]
     [string]$SglangImage,
 
     [Parameter()]
@@ -43,6 +40,7 @@ $expectedWindowsCaption = [Text.Encoding]::UTF8.GetString(
     [Convert]::FromBase64String('0JzQsNC50LrRgNC+0YHQvtGE0YIgV2luZG93cyAxMSBQcm8=')
 )
 $ociManifestMediaType = 'application/vnd.oci.image.manifest.v1+json'
+$ociIndexMediaType = 'application/vnd.oci.image.index.v1+json'
 $expectedGpu = [ordered]@{
     compute_capability = '12.0'
     driver_version = '610.88'
@@ -82,6 +80,37 @@ function Invoke-Captured([string]$Executable, [string[]]$Arguments) {
         throw "$Executable failed."
     }
     return (($output | ForEach-Object { [string]$_ }) -join "`n").Trim()
+}
+
+function Invoke-WslCaptured([ValidateSet('--version', '--status')][string]$Argument) {
+    # wsl.exe writes UTF-16LE even when the surrounding Windows PowerShell 5
+    # console is configured for UTF-8. Capture it through .NET with the exact
+    # native encoding instead of letting the pipeline split NUL bytes into rows.
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = 'wsl.exe'
+    $startInfo.Arguments = $Argument
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = [Text.Encoding]::Unicode
+    $startInfo.StandardErrorEncoding = [Text.Encoding]::Unicode
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            throw 'wsl.exe could not start.'
+        }
+        $stdout = $process.StandardOutput.ReadToEnd()
+        [void]$process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        if ($process.ExitCode -ne 0) {
+            throw 'wsl.exe failed.'
+        }
+        return $stdout.Trim()
+    } finally {
+        $process.Dispose()
+    }
 }
 
 function Get-TextSha256([string]$Value) {
@@ -173,7 +202,11 @@ function Write-NewUtf8File([string]$Path, [string]$Text) {
     return $resolved
 }
 
-function Test-ComposeExactImageSelector([string]$ImageRef) {
+function Test-ComposeExactImageSelector(
+    [string]$ImageRef,
+    [string]$ExpectedImageId,
+    [string]$ExpectedPlatformManifestDigest
+) {
     $nonce = [Guid]::NewGuid().ToString('N')
     $project = "fridayselector$nonce"
     $composePath = Join-Path ([IO.Path]::GetTempPath()) "$project.json"
@@ -181,6 +214,7 @@ function Test-ComposeExactImageSelector([string]$ImageRef) {
         services = [ordered]@{
             selector = [ordered]@{
                 image = $ImageRef
+                platform = 'linux/amd64'
                 network_mode = 'none'
                 pull_policy = 'never'
             }
@@ -205,8 +239,8 @@ function Test-ComposeExactImageSelector([string]$ImageRef) {
         ) | ConvertFrom-Json
         $manifestDescriptor = $inspection.ImageManifestDescriptor
         if ([string]$inspection.Config.Image -cne $ImageRef -or
-            [string]$inspection.Image -cne $expectedSglangImageId -or
-            [string]$manifestDescriptor.digest -cne $expectedSglangOciManifestDigest -or
+            [string]$inspection.Image -cne $ExpectedImageId -or
+            [string]$manifestDescriptor.digest -cne $ExpectedPlatformManifestDigest -or
             [string]$manifestDescriptor.mediaType -cne $ociManifestMediaType -or
             [string]$manifestDescriptor.platform.os -cne 'linux' -or
             [string]$manifestDescriptor.platform.architecture -cne 'amd64') {
@@ -247,8 +281,8 @@ if ($addresses -notcontains $ExpectedAddress) {
     throw 'The expected static LAN address is not currently assigned.'
 }
 
-$wslVersion = Invoke-Captured 'wsl.exe' @('--version')
-$wslStatus = Invoke-Captured 'wsl.exe' @('--status')
+$wslVersion = Invoke-WslCaptured '--version'
+$wslStatus = Invoke-WslCaptured '--status'
 $wslProjection = Get-WslVersionProjection $wslVersion
 $dockerVersion = Invoke-Captured 'docker.exe' @('version', '--format', '{{json .}}') | ConvertFrom-Json
 $dockerInfo = Invoke-Captured 'docker.exe' @('info', '--format', '{{json .}}') | ConvertFrom-Json
@@ -277,30 +311,43 @@ $hostGpu = Convert-ExactGpuProjection $hostGpuText
 
 $gpuCanary = $null
 if ($RunGpuCanary) {
-    Assert-ExactImageReference $CudaCanaryImage 'CudaCanaryImage'
-    $cudaImageId = Invoke-Captured 'docker.exe' @('image', 'inspect', '--format', '{{.Id}}', $CudaCanaryImage)
-    $canaryProgram = @'
+    Assert-ExactImageReference $SglangImage 'SglangImage'
+    if ([string]$SglangImage -cne $expectedSglangImage) {
+        throw 'The GPU canary requires the exact SGLang runtime image.'
+    }
+    $canaryImageInspection = (
+        Invoke-Captured 'docker.exe' @('image', 'inspect', '--format', '{{json .}}', $SglangImage)
+    ) | ConvertFrom-Json
+    if ([string]$canaryImageInspection.Id -cne $expectedSglangImageId -or
+        @($canaryImageInspection.RepoDigests | Where-Object { [string]$_ -ceq $expectedSglangImage }).Count -ne 1 -or
+        [string]$canaryImageInspection.Descriptor.digest -cne $expectedSglangOciManifestDigest -or
+        [string]$canaryImageInspection.Descriptor.mediaType -cne $ociManifestMediaType -or
+        [string]$canaryImageInspection.Os -cne 'linux' -or
+        [string]$canaryImageInspection.Architecture -cne 'amd64') {
+        throw 'The GPU canary image differs from the exact runtime contract.'
+    }
+$canaryProgram = @'
 import json, torch
-device = torch.device("cuda:0")
+device = torch.device('cuda:0')
 x = torch.arange(4096, dtype=torch.float32, device=device)
 y = float((x * 2).sum().item())
 p = torch.cuda.get_device_properties(device)
-print(json.dumps({"name": p.name, "memory_total_bytes": p.total_memory,
-                  "compute_capability": [p.major, p.minor], "kernel_sum": y}, sort_keys=True))
+print(json.dumps({'name': p.name, 'memory_total_bytes': p.total_memory,
+                  'compute_capability': [p.major, p.minor], 'kernel_sum': y}, sort_keys=True))
 '@
     $gpuCanaryText = Invoke-Captured 'docker.exe' @(
         'run', '--rm', '--pull', 'never', '--network', 'none', '--gpus', 'device=0',
         '--security-opt', 'no-new-privileges:true', '--cap-drop', 'ALL',
         '--read-only', '--tmpfs', '/tmp:size=64m', '--entrypoint', 'python3',
-        $CudaCanaryImage, '-c', $canaryProgram
+        $SglangImage, '-c', $canaryProgram
     )
     $gpuObservation = $gpuCanaryText | ConvertFrom-Json
     if ([double]$gpuObservation.kernel_sum -ne 16773120.0) {
         throw 'The CUDA allocation/kernel canary returned the wrong result.'
     }
     $gpuCanary = [ordered]@{
-        image_ref = $CudaCanaryImage
-        image_id = $cudaImageId
+        image_ref = $SglangImage
+        image_id = [string]$canaryImageInspection.Id
         observation = $gpuObservation
     }
 }
@@ -324,7 +371,8 @@ if ($InspectSglangHelp) {
         [string]$sglangInspection.Architecture -cne 'amd64') {
         throw 'Local SGLang image identity/platform differs from the exact runtime contract.'
     }
-    $composeSelectorVerified = Test-ComposeExactImageSelector $SglangImage
+    $composeSelectorVerified = Test-ComposeExactImageSelector `
+        $SglangImage $expectedSglangImageId $expectedSglangOciManifestDigest
     $helpText = Invoke-Captured 'docker.exe' @(
         'run', '--rm', '--pull', 'never', '--network', 'none', '--security-opt', 'no-new-privileges:true',
         '--cap-drop', 'ALL', '--entrypoint', 'python3', $SglangImage,
@@ -343,7 +391,15 @@ if ($InspectSglangHelp) {
     if ($missingFlags.Count -ne 0) {
         throw 'The pinned SGLang image does not expose every baseline launch flag.'
     }
-    $versionProbeCode = 'import importlib.metadata as m,json,torch; print(json.dumps({"cuda_runtime_version":torch.version.cuda,"flashinfer_version":m.version("flashinfer-python"),"pytorch_version":m.version("torch"),"sgl_kernel_version":m.version("sgl-kernel"),"sglang_version":m.version("sglang")},sort_keys=True,separators=(",",":")))'
+    $versionProbeCode = @'
+import importlib.metadata as m,json,torch
+print(json.dumps({'cuda_runtime_version':torch.version.cuda,
+                  'flashinfer_version':m.version('flashinfer-python'),
+                  'pytorch_version':m.version('torch'),
+                  'sgl_kernel_version':m.version('sglang-kernel'),
+                  'sglang_version':m.version('sglang')},
+                 sort_keys=True, separators=(',', ':')))
+'@
     $runtimeVersionsText = Invoke-Captured 'docker.exe' @(
         'run', '--rm', '--pull', 'never', '--network', 'none', '--read-only',
         '--tmpfs', '/tmp:size=16m', '--security-opt', 'no-new-privileges:true',
@@ -387,9 +443,10 @@ if ($InspectSglangHelp) {
     }
 }
 
-$gatewayImage = $null
+$gatewayObservation = $null
 if ($InspectGatewayImage) {
     $expectedGateway = 'nginxinc/nginx-unprivileged@sha256:d61d7ef52430df468e74ed6ee6e914429b80e20ba988e3176278a73165f876cf'
+    $expectedGatewayIndex = 'sha256:d61d7ef52430df468e74ed6ee6e914429b80e20ba988e3176278a73165f876cf'
     $expectedGatewayPlatformManifest = 'sha256:8d764dd92e0b48d0ca94887dc0fe1df6dffc5200b25b2efcc2deb7ffb61d714c'
     $expectedGatewayConfig = 'sha256:89dc7d054bddca245db3d5a779e363007d0e75b1161cfe2f283ebeaf0ed90d50'
     if (-not [string]::Equals($GatewayImage, $expectedGateway, [StringComparison]::Ordinal)) {
@@ -403,9 +460,9 @@ if ($InspectGatewayImage) {
         $gatewayInspection.Config.Env |
             Where-Object { [string]$_ -like 'NGINX_VERSION=*' }
     )
-    if ([string]$gatewayInspection.Id -cne $expectedGatewayPlatformManifest -or
-        [string]$gatewayInspection.Descriptor.digest -cne $expectedGatewayPlatformManifest -or
-        [string]$gatewayInspection.Descriptor.mediaType -cne $ociManifestMediaType -or
+    if ([string]$gatewayInspection.Id -cne $expectedGatewayIndex -or
+        [string]$gatewayInspection.Descriptor.digest -cne $expectedGatewayIndex -or
+        [string]$gatewayInspection.Descriptor.mediaType -cne $ociIndexMediaType -or
         [string]$gatewayInspection.Os -cne 'linux' -or
         [string]$gatewayInspection.Architecture -cne 'amd64' -or
         [string]$gatewayInspection.Config.User -cne '101' -or
@@ -414,22 +471,33 @@ if ($InspectGatewayImage) {
         @($gatewayInspection.RepoDigests | Where-Object { [string]$_ -ceq $expectedGateway }).Count -ne 1) {
         throw 'Local gateway image does not match the exact platform/user/version contract.'
     }
+    $gatewayComposeSelectorVerified = Test-ComposeExactImageSelector `
+        $GatewayImage $expectedGatewayIndex $expectedGatewayPlatformManifest
+    $gatewayRuntimeProbeProgram = @'
+test $(id -u) = 101
+nginx -v 2>&1 | grep -Fqx 'nginx version: nginx/1.31.3'
+command -v grep >/dev/null
+command -v sed >/dev/null
+command -v wget >/dev/null
+printf verified
+'@
     $gatewayRuntimeProbe = Invoke-Captured 'docker.exe' @(
         'run', '--rm', '--pull', 'never', '--network', 'none', '--user', '101', '--read-only',
         '--tmpfs', '/tmp:size=16m', '--security-opt', 'no-new-privileges:true',
         '--cap-drop', 'ALL', '--entrypoint', '/bin/sh', $GatewayImage, '-ceu',
-        'test "$(id -u)" = 101; test "$(nginx -v 2>&1)" = "nginx version: nginx/1.31.3"; command -v sed >/dev/null; command -v wget >/dev/null; printf verified'
+        $gatewayRuntimeProbeProgram
     )
     if ([string]$gatewayRuntimeProbe -cne 'verified') {
         throw 'Gateway executable/user runtime probe failed.'
     }
-    $gatewayImage = [ordered]@{
+    $gatewayObservation = [ordered]@{
         image_ref = $expectedGateway
         image_id = [string]$gatewayInspection.Id
         platform = 'linux/amd64'
         user = '101'
         nginx_version = '1.31.3'
         runtime_probe = 'verified'
+        compose_exact_selector_verified = [bool]$gatewayComposeSelectorVerified
         platform_manifest_digest = $expectedGatewayPlatformManifest
         config_digest = $expectedGatewayConfig
     }
@@ -519,7 +587,7 @@ $report = [ordered]@{
     runtime_gpu = $runtimeGpu
     gpu_container_canary = $gpuCanary
     sglang_help = $sglangHelp
-    gateway_image = $gatewayImage
+    gateway_image = $gatewayObservation
     hardware_runtime_receipt = [ordered]@{
         status = $(if ($null -ne $hardwareReceipt) { 'observed_unaccepted' } else { 'not_observed' })
         sha256 = $hardwareReceiptSha256

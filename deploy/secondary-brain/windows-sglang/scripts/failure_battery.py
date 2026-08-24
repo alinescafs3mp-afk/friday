@@ -38,11 +38,18 @@ JOURNEY_TESTS = {
     "one_flag_primary_only": "test_disabled_builds_no_client_and_required_falls_back_exactly_once",
 }
 SUITE_FILES = (
+    "friday/agent_runtime/__init__.py",
+    "friday/config/__init__.py",
+    "friday/ingestion/_advice.py",
+    "friday/ingestion/_core.py",
+    "friday/ingestion/_secondary_advice.py",
+    "friday/model_input_hygiene.py",
     "friday/secondary_brain/client.py",
     "friday/secondary_brain/contracts.py",
     "friday/secondary_brain/profiles.py",
     "friday/secondary_brain/gpt_oss.py",
     "friday/secondary_brain/scheduler.py",
+    "friday/server.py",
     "tests/test_secondary_brain.py",
     "tests/test_secondary_inbox_advice.py",
 )
@@ -129,9 +136,7 @@ def _test_names(junit_path: Path) -> tuple[set[str], int]:
         raise FailureBatteryError("pytest receipt is invalid") from exc
     cases = root.findall(".//testcase")
     if not cases or any(
-        case.find("failure") is not None
-        or case.find("error") is not None
-        or case.find("skipped") is not None
+        case.find("failure") is not None or case.find("error") is not None or case.find("skipped") is not None
         for case in cases
     ):
         raise FailureBatteryError("failure battery contains a failed assertion")

@@ -53,11 +53,10 @@ Run inventory first without mutation:
 After the exact images are already local, run the complete image/GPU checks:
 
 ```powershell
-$cuda = 'nvidia/cuda@sha256:f8ef28f579ea42a44b415d2c5d46f788e6a9b395c6c83f2929416e1fc192c143'
 $sglang = 'lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405'
 
 .\scripts\preflight.ps1 `
-  -CudaCanaryImage $cuda -SglangImage $sglang `
+  -SglangImage $sglang `
   -RunGpuCanary -InspectSglangHelp -InspectGatewayImage `
   -OutputPath .\evidence\preflight.observed.json `
   -HardwareRuntimeReceiptOutputPath .\evidence\hardware-runtime.observed.json
@@ -223,9 +222,65 @@ python scripts/soak.py \
   --output evidence/soak.observed.json
 ```
 
-Run `failure_battery.py`, including laptop-off, mid-turn disconnect, restart,
-bad TLS/auth/profile and cancellation recovery. Then create capacity evidence
-and promote the same candidate while rechecking source, runtime, hardware and CA:
+The deterministic battery proves the mocked failure contract, but cannot claim
+that the physical laptop disappeared. Run it and the controlled live outage
+runner from the primary host:
+
+```bash
+python scripts/failure_battery.py \
+  --candidate evidence/profile.candidate.json \
+  --ca-file /secure/friday-secondary-ca.crt \
+  --output evidence/failure.deterministic.json
+
+python scripts/live_failure_battery.py controlled \
+  --candidate evidence/profile.candidate.json \
+  --api-key-file /secure/friday-secondary-gateway-key \
+  --ca-file /secure/friday-secondary-ca.crt \
+  --output evidence/failure.controlled-live.json
+```
+
+Physical laptop loss is a separate three-stage witness. Start it against the
+currently running Friday backend, physically power the laptop off, exercise one
+ordinary and one mid-turn Friday request and verify exactly one primary result
+with no effect replay, then record the off-state. Power the same laptop back on
+and finish only after the exact candidate is healthy and Friday has readmitted
+it without restarting the primary process:
+
+```bash
+primary_pid="$(systemctl --user show -p MainPID --value friday-backend.service)"
+
+python scripts/live_failure_battery.py physical-begin \
+  --candidate evidence/profile.candidate.json \
+  --api-key-file /secure/friday-secondary-gateway-key \
+  --ca-file /secure/friday-secondary-ca.crt \
+  --primary-pid "$primary_pid" \
+  --output evidence/failure.physical-begin.json
+
+python scripts/live_failure_battery.py physical-off \
+  --candidate evidence/profile.candidate.json \
+  --ca-file /secure/friday-secondary-ca.crt \
+  --state evidence/failure.physical-begin.json \
+  --physical-power-loss-observed \
+  --ordinary-primary-fallback-exactly-once-operator-observed \
+  --mid-turn-primary-fallback-exactly-once-operator-observed \
+  --no-effect-replay-operator-observed \
+  --v12-readiness-unchanged-operator-observed \
+  --output evidence/failure.physical-off.json
+
+python scripts/live_failure_battery.py physical-finish \
+  --candidate evidence/profile.candidate.json \
+  --api-key-file /secure/friday-secondary-gateway-key \
+  --ca-file /secure/friday-secondary-ca.crt \
+  --state evidence/failure.physical-off.json \
+  --readmitted-without-primary-restart-operator-observed \
+  --output evidence/failure.physical-observed.json
+```
+
+The witness checks TLS loss, laptop boot-epoch change, unchanged Friday process
+epoch and exact candidate recovery. It never turns a service stop or mocked test
+into a physical-loss claim. Combine all four bound receipts, then create capacity
+evidence and promote the same candidate while rechecking source, runtime,
+hardware and CA:
 
 ```powershell
 python .\scripts\runtime_profile_operator.py accept-capacity `
@@ -234,6 +289,15 @@ python .\scripts\runtime_profile_operator.py accept-capacity `
   --cold-restart-trial .\evidence\context.cold-restart.json `
   --soak .\evidence\soak.observed.json `
   --output .\evidence\capacity.accepted.json
+
+python .\scripts\runtime_profile_operator.py accept-failure `
+  --candidate .\evidence\profile.candidate.json `
+  --deterministic .\evidence\failure.deterministic.json `
+  --live .\evidence\failure.controlled-live.json `
+  --physical-begin .\evidence\failure.physical-begin.json `
+  --physical-state .\evidence\failure.physical-off.json `
+  --physical-observation .\evidence\failure.physical-observed.json `
+  --output .\evidence\failure.accepted.json
 
 python .\scripts\runtime_profile_operator.py accept-profile `
   --candidate .\evidence\profile.candidate.json `
@@ -245,6 +309,11 @@ python .\scripts\runtime_profile_operator.py accept-profile `
   --capacity .\evidence\capacity.accepted.json `
   --soak .\evidence\soak.observed.json `
   --failure .\evidence\failure.accepted.json `
+  --failure-deterministic .\evidence\failure.deterministic.json `
+  --failure-live .\evidence\failure.controlled-live.json `
+  --failure-physical-begin .\evidence\failure.physical-begin.json `
+  --failure-physical-state .\evidence\failure.physical-off.json `
+  --failure-physical-observation .\evidence\failure.physical-observed.json `
   --output .\evidence\profile.accepted.json
 ```
 

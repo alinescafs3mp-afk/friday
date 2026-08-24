@@ -22,6 +22,7 @@ SCRIPTS = BUNDLE / "scripts"
 RUNTIME = BUNDLE / "runtime"
 SGLANG_IMAGE = "lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
 SGLANG_CONFIG_DIGEST = "sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc"
+GATEWAY_INDEX_DIGEST = "sha256:d61d7ef52430df468e74ed6ee6e914429b80e20ba988e3176278a73165f876cf"
 SOURCE_MANIFEST_SHA256 = "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"
 
 
@@ -67,6 +68,7 @@ def test_bundle_has_the_closed_operator_surface() -> None:
         "scripts/probe_endpoint.py",
         "scripts/quality_battery.py",
         "scripts/failure_battery.py",
+        "scripts/live_failure_battery.py",
         "scripts/tune_context.py",
         "scripts/soak.py",
         "scripts/runtime_profile_operator.py",
@@ -278,6 +280,7 @@ def test_examples_have_sealed_source_and_nonaccepted_runtime_placeholders() -> N
     assert runtime["gateway_expected_platform_manifest_digest"] == (
         "sha256:8d764dd92e0b48d0ca94887dc0fe1df6dffc5200b25b2efcc2deb7ffb61d714c"
     )
+    assert runtime["gateway_image_id"] == GATEWAY_INDEX_DIGEST
     assert runtime["plain_sglang_lan_published"] is False
     assert runtime["published_endpoint"] == "https://192.168.1.35:8443/v1"
     assert hardware["status"] == "template_not_accepted"
@@ -402,11 +405,27 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     capture_end = preflight.index("\n}\n\nfunction Get-TextSha256", capture_start)
     assert "2>&1" not in preflight[capture_start:capture_end]
     assert "$ErrorActionPreference = 'Continue'" in preflight
+    assert "$startInfo.StandardOutputEncoding = [Text.Encoding]::Unicode" in preflight
+    assert "$wslVersion = Invoke-WslCaptured '--version'" in preflight
+    assert "$wslStatus = Invoke-WslCaptured '--status'" in preflight
+    assert "Invoke-Captured 'wsl.exe'" not in preflight
+    assert "CudaCanaryImage" not in preflight
+    assert "$SglangImage, '-c', $canaryProgram" in preflight
+    assert "torch.device('cuda:0')" in preflight
+    assert "m.version('flashinfer-python')" in preflight
+    assert 'torch.device("cuda:0")' not in preflight
+    assert 'm.version("flashinfer-python")' not in preflight
+    assert "$gatewayObservation = $null" in preflight
+    assert "$gatewayImage = $null" not in preflight
     assert "NGINX_VERSION=1.31.3" in preflight
-    assert "$gatewayInspection.Id -cne $expectedGatewayPlatformManifest" in preflight
-    assert "$gatewayInspection.Descriptor.digest -cne $expectedGatewayPlatformManifest" in preflight
+    assert "$gatewayInspection.Id -cne $expectedGatewayIndex" in preflight
+    assert "$gatewayInspection.Descriptor.digest -cne $expectedGatewayIndex" in preflight
+    assert "$gatewayInspection.Descriptor.mediaType -cne $ociIndexMediaType" in preflight
+    assert "$GatewayImage $expectedGatewayIndex $expectedGatewayPlatformManifest" in preflight
     assert "Config.User -cne '101'" in preflight
-    assert 'test "$(id -u)" = 101' in preflight
+    assert "test $(id -u) = 101" in preflight
+    assert "grep -Fqx 'nginx version: nginx/1.31.3'" in preflight
+    assert 'test "$(id -u)" = 101' not in preflight
     assert "nginx version: nginx/1.31.3" in preflight
     assert "inventory_incomplete" in preflight
     for expected in (
@@ -437,8 +456,8 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
         assert flag in preflight
     for version in ("2.11.0+cu130", "0.6.15.post1", "0.4.5"):
         assert version in preflight
-    assert 'm.version("sgl-kernel")' in preflight
-    assert 'm.version("sglang-kernel")' not in preflight
+    assert "m.version('sglang-kernel')" in preflight
+    assert "m.version('sgl-kernel')" not in preflight
     assert "[switch]$Apply" in promotion
     assert "if ($Apply)" in promotion
     assert "[IO.FileMode]::CreateNew" in promotion

@@ -54,7 +54,7 @@ def _candidate_args(tmp_path: Path) -> argparse.Namespace:
     runtime_value.update(
         {
             "status": "accepted",
-            "gateway_image_id": ("sha256:8d764dd92e0b48d0ca94887dc0fe1df6dffc5200b25b2efcc2deb7ffb61d714c"),
+            "gateway_image_id": ("sha256:d61d7ef52430df468e74ed6ee6e914429b80e20ba988e3176278a73165f876cf"),
             "cuda_runtime_version": "13.0",
             "pytorch_version": "2.11.0+cu130",
             "flashinfer_version": "0.6.15.post1",
@@ -108,6 +108,147 @@ def _identity(profile: dict[str, Any], raw: bytes) -> dict[str, Any]:
         "candidate_profile_sha256": hashlib.sha256(raw).hexdigest(),
         "served_model_alias": profile["served_model_alias"],
         "gateway_ca_certificate_sha256": profile["gateway_ca_certificate_sha256"],
+    }
+
+
+def _deterministic_failure(
+    operator: Any,
+    identity: dict[str, Any],
+    *,
+    source_head: str = "a" * 40,
+) -> dict[str, Any]:
+    suite_hashes = {
+        name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in operator.SUITE_FILES
+    }
+    return {
+        "schema": operator.DETERMINISTIC_FAILURE_SCHEMA,
+        "status": "passed",
+        "evidence_scope": "deterministic_mock_contract",
+        "live_physical_journeys_observed": False,
+        **identity,
+        "source_head": source_head,
+        "runner_sha256": hashlib.sha256((SCRIPTS / "failure_battery.py").read_bytes()).hexdigest(),
+        "journey_contract_sha256": operator.journey_contract_sha256(),
+        "suite_file_sha256": suite_hashes,
+        "test_count": len(operator.FAILURE_JOURNEYS),
+        "journeys": {
+            name: {"status": "passed", "assertion_test": operator.JOURNEY_TESTS[name]}
+            for name in operator.FAILURE_JOURNEYS
+        },
+        "primary_fallback_exactly_once": True,
+        "effect_replay_observed": False,
+        "v12_readiness_changed": False,
+        "primary_only_flag_verified": True,
+        "raw_content_retained": False,
+        "credentials_retained": False,
+    }
+
+
+def _controlled_live_failure(operator: Any, identity: dict[str, Any]) -> dict[str, Any]:
+    live = importlib.import_module("live_failure_battery")
+    return {
+        "schema": live.SCHEMA,
+        "status": "passed",
+        "evidence_scope": live.EVIDENCE_SCOPE,
+        **identity,
+        "source_head": "a" * 40,
+        "endpoint_base_url": live.ENDPOINT,
+        "runner_sha256": hashlib.sha256((SCRIPTS / "live_failure_battery.py").read_bytes()).hexdigest(),
+        "control_surface": {
+            "ssh_host_alias": live.SSH_HOST_ALIAS,
+            "authentication": "key_only_batch",
+            "remote_bundle_path": live.REMOTE_BUNDLE_PATH,
+            "command_set": sorted(live.CONTROL_ACTIONS),
+            "ssh_output_retained": False,
+        },
+        "controlled_gateway_stop_observed": True,
+        "tls_endpoint_loss_observed": True,
+        "exact_candidate_gateway_recovery_observed": True,
+        "gateway_recovery_preserved_runtime_epoch": True,
+        "controlled_runtime_restart_observed": True,
+        "runtime_application_outage_observed": True,
+        "exact_candidate_runtime_recovery_observed": True,
+        "runtime_epoch_before_sha256": "1" * 64,
+        "runtime_epoch_after_sha256": "2" * 64,
+        "runtime_epoch_changed": True,
+        "physical_laptop_power_loss_observed": False,
+        "friday_primary_process_continuity_observed": False,
+        "primary_fallback_exactly_once_observed": False,
+        "mid_turn_primary_fallback_observed": False,
+        "raw_content_retained": False,
+        "credentials_retained": False,
+    }
+
+
+def _physical_failure_begin(identity: dict[str, Any], *, source_head: str = "a" * 40) -> dict[str, Any]:
+    return {
+        "schema": "friday.secondary-physical-failure-state.v1",
+        "status": "awaiting_physical_power_loss",
+        **identity,
+        "observer_source_head": source_head,
+        "observer_runner_sha256": hashlib.sha256(
+            (SCRIPTS / "live_failure_battery.py").read_bytes()
+        ).hexdigest(),
+        "primary_pid": 2613,
+        "primary_process_epoch_before_sha256": "6" * 64,
+        "primary_version": "0.207.8",
+        "laptop_boot_epoch_before_sha256": "4" * 64,
+        "raw_content_retained": False,
+        "credentials_retained": False,
+    }
+
+
+def _physical_failure_state(
+    identity: dict[str, Any],
+    *,
+    begin_sha256: str,
+    source_head: str = "a" * 40,
+) -> dict[str, Any]:
+    return {
+        **_physical_failure_begin(identity, source_head=source_head),
+        "status": "physical_power_loss_observed_awaiting_recovery",
+        "physical_begin_state_sha256": begin_sha256,
+        "physical_tls_endpoint_unavailable_observed": True,
+        "primary_process_epoch_while_off_sha256": "6" * 64,
+        "physical_laptop_power_loss_operator_observed": True,
+        "ordinary_primary_fallback_exactly_once_operator_observed": True,
+        "mid_turn_primary_fallback_exactly_once_operator_observed": True,
+        "effect_replay_operator_observed": False,
+        "v12_readiness_changed_operator_observed": False,
+    }
+
+
+def _physical_failure_observation(
+    operator: Any,
+    identity: dict[str, Any],
+    *,
+    source_head: str = "a" * 40,
+    state_sha256: str = "7" * 64,
+) -> dict[str, Any]:
+    return {
+        "schema": operator.PHYSICAL_FAILURE_SCHEMA,
+        "status": "observed",
+        **identity,
+        "observation_scope": "physical_power_loss_with_existing_primary_process",
+        "observation_method": "code_owned_manual_state_machine",
+        "observation_state_sha256": state_sha256,
+        "observer_source_head": source_head,
+        "observer_runner_sha256": hashlib.sha256(
+            (SCRIPTS / "live_failure_battery.py").read_bytes()
+        ).hexdigest(),
+        "laptop_boot_epoch_before_sha256": "4" * 64,
+        "laptop_boot_epoch_after_sha256": "5" * 64,
+        "friday_primary_process_epoch_before_sha256": "6" * 64,
+        "friday_primary_process_epoch_after_sha256": "6" * 64,
+        "physical_laptop_power_loss_observed": True,
+        "friday_primary_process_continuity_observed": True,
+        "ordinary_primary_fallback_exactly_once_operator_observed": True,
+        "mid_turn_primary_fallback_exactly_once_operator_observed": True,
+        "readmitted_without_primary_restart_operator_observed": True,
+        "effect_replay_operator_observed": False,
+        "v12_readiness_changed_operator_observed": False,
+        "raw_content_retained": False,
+        "credentials_retained": False,
     }
 
 
@@ -199,13 +340,22 @@ def test_profile_promotion_rechecks_the_source_runtime_chain(tmp_path: Path) -> 
                 capacity=placeholder,
                 soak=placeholder,
                 failure=placeholder,
+                failure_deterministic=placeholder,
+                failure_live=placeholder,
+                failure_physical_begin=placeholder,
+                failure_physical_state=placeholder,
+                failure_physical_observation=placeholder,
                 output=tmp_path / "accepted.json",
             )
         )
 
 
-def test_capacity_and_profile_promotion_are_candidate_epoch_bound(tmp_path: Path) -> None:
+def test_capacity_and_profile_promotion_are_candidate_epoch_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     operator = importlib.import_module("runtime_profile_operator")
+    monkeypatch.setattr(operator, "_repository_head", lambda: "a" * 40)
     contract = importlib.import_module("profile_contract")
     candidate_args = _candidate_args(tmp_path)
     operator.build_candidate(candidate_args)
@@ -290,32 +440,121 @@ def test_capacity_and_profile_promotion_are_candidate_epoch_bound(tmp_path: Path
             "api_key_retained": False,
         },
     )
-    failure = _write(
-        tmp_path / "failure.json",
-        {
-            "schema": "friday.secondary-failure-battery.v1",
-            "status": "passed",
-            **identity,
-            "source_head": "a" * 40,
-            "runner_sha256": hashlib.sha256((SCRIPTS / "failure_battery.py").read_bytes()).hexdigest(),
-            "journey_contract_sha256": operator.journey_contract_sha256(),
-            "suite_file_sha256": {name: "a" * 64 for name in operator.SUITE_FILES},
-            "test_count": 15,
-            "journeys": {
-                name: {
-                    "status": "passed",
-                    "assertion_test": operator.JOURNEY_TESTS[name],
-                }
-                for name in operator.FAILURE_JOURNEYS
-            },
-            "primary_fallback_exactly_once": True,
-            "effect_replay_observed": False,
-            "v12_readiness_changed": False,
-            "primary_only_flag_verified": True,
-            "raw_content_retained": False,
-            "credentials_retained": False,
-        },
+    deterministic = _write(
+        tmp_path / "failure.deterministic.json",
+        _deterministic_failure(operator, identity),
     )
+    controlled_live = _write(
+        tmp_path / "failure.live.json",
+        _controlled_live_failure(operator, identity),
+    )
+    physical_begin = _write(
+        tmp_path / "failure.physical-begin.json",
+        _physical_failure_begin(identity),
+    )
+    physical_state = _write(
+        tmp_path / "failure.physical-state.json",
+        _physical_failure_state(
+            identity,
+            begin_sha256=hashlib.sha256(physical_begin.read_bytes()).hexdigest(),
+        ),
+    )
+    physical = _write(
+        tmp_path / "failure.physical.json",
+        _physical_failure_observation(
+            operator,
+            identity,
+            state_sha256=hashlib.sha256(physical_state.read_bytes()).hexdigest(),
+        ),
+    )
+    mixed_begin_value = _physical_failure_begin(identity)
+    mixed_begin_value["laptop_boot_epoch_before_sha256"] = "9" * 64
+    mixed_begin = _write(tmp_path / "failure.physical-begin-mixed.json", mixed_begin_value)
+    with pytest.raises(operator.ProfileOperatorError, match="physical failure state"):
+        operator.accept_failure(
+            argparse.Namespace(
+                candidate=candidate_args.output,
+                deterministic=deterministic,
+                live=controlled_live,
+                physical_begin=mixed_begin,
+                physical_state=physical_state,
+                physical_observation=physical,
+                output=tmp_path / "failure.mixed-chain.json",
+            )
+        )
+    stale_live_value = _controlled_live_failure(operator, identity)
+    stale_live_value["source_head"] = "b" * 40
+    stale_live = _write(tmp_path / "failure.live-stale.json", stale_live_value)
+    with pytest.raises(operator.ProfileOperatorError, match="current tested source epoch"):
+        operator.accept_failure(
+            argparse.Namespace(
+                candidate=candidate_args.output,
+                deterministic=deterministic,
+                live=stale_live,
+                physical_begin=physical_begin,
+                physical_state=physical_state,
+                physical_observation=physical,
+                output=tmp_path / "failure.stale-source.json",
+            )
+        )
+    failure = tmp_path / "failure.accepted.json"
+    failure_result = operator.accept_failure(
+        argparse.Namespace(
+            candidate=candidate_args.output,
+            deterministic=deterministic,
+            live=controlled_live,
+            physical_begin=physical_begin,
+            physical_state=physical_state,
+            physical_observation=physical,
+            output=failure,
+        )
+    )
+    assert failure_result["status"] == "failure_accepted"
+    assert json.loads(failure.read_text(encoding="utf-8"))["schema"] == operator.FAILURE_SCHEMA
+
+    with pytest.raises(operator.ProfileOperatorError, match="failure evidence is not accepted"):
+        operator.accept_profile(
+            argparse.Namespace(
+                candidate=candidate_args.output,
+                hardware_receipt=candidate_args.hardware_receipt,
+                source_model_manifest=candidate_args.source_model_manifest,
+                runtime_manifest=candidate_args.runtime_manifest,
+                ca_certificate=candidate_args.ca_certificate,
+                quality=quality,
+                capacity=capacity_output,
+                soak=soak,
+                failure=deterministic,
+                failure_deterministic=deterministic,
+                failure_live=controlled_live,
+                failure_physical_begin=physical_begin,
+                failure_physical_state=physical_state,
+                failure_physical_observation=physical,
+                output=tmp_path / "profile.mock-only.json",
+            )
+        )
+    forged_failure_value = json.loads(failure.read_text(encoding="utf-8"))
+    forged_failure_value["controlled_live_failure_sha256"] = "f" * 64
+    forged_failure = _write(tmp_path / "failure.forged-composite.json", forged_failure_value)
+    with pytest.raises(operator.ProfileOperatorError, match="source receipts"):
+        operator.accept_profile(
+            argparse.Namespace(
+                candidate=candidate_args.output,
+                hardware_receipt=candidate_args.hardware_receipt,
+                source_model_manifest=candidate_args.source_model_manifest,
+                runtime_manifest=candidate_args.runtime_manifest,
+                ca_certificate=candidate_args.ca_certificate,
+                quality=quality,
+                capacity=capacity_output,
+                soak=soak,
+                failure=forged_failure,
+                failure_deterministic=deterministic,
+                failure_live=controlled_live,
+                failure_physical_begin=physical_begin,
+                failure_physical_state=physical_state,
+                failure_physical_observation=physical,
+                output=tmp_path / "profile.forged-composite.json",
+            )
+        )
     accepted_output = tmp_path / "profile.accepted.json"
     result = operator.accept_profile(
         argparse.Namespace(
@@ -328,6 +567,11 @@ def test_capacity_and_profile_promotion_are_candidate_epoch_bound(tmp_path: Path
             capacity=capacity_output,
             soak=soak,
             failure=failure,
+            failure_deterministic=deterministic,
+            failure_live=controlled_live,
+            failure_physical_begin=physical_begin,
+            failure_physical_state=physical_state,
+            failure_physical_observation=physical,
             output=accepted_output,
         )
     )
@@ -367,6 +611,11 @@ def test_profile_promotion_rejects_evidence_from_another_candidate(tmp_path: Pat
                 capacity=evidence,
                 soak=evidence,
                 failure=evidence,
+                failure_deterministic=evidence,
+                failure_live=evidence,
+                failure_physical_begin=evidence,
+                failure_physical_state=evidence,
+                failure_physical_observation=evidence,
                 output=tmp_path / "accepted.json",
             )
         )
@@ -466,3 +715,258 @@ def test_failure_runner_labels_mocked_contracts_as_not_live_physical_journeys(
     assert all(row["status"] == "passed" for row in evidence["journeys"].values())
     assert evidence["raw_content_retained"] is False
     assert evidence["credentials_retained"] is False
+
+
+def test_controlled_live_failure_runner_uses_fixed_key_only_surface_and_never_claims_power_loss(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    live = importlib.import_module("live_failure_battery")
+    args = _candidate_args(tmp_path)
+    operator.build_candidate(args)
+    api_key = tmp_path / "gateway.key"
+    api_key.write_text("a" * 64, encoding="ascii")
+    controls: list[str] = []
+    tls = iter((True, False))
+    endpoint_error = importlib.import_module("endpoint_common").EndpointError
+    epochs: Iterator[str | BaseException] = iter(
+        ("1700000000", "1700000000", endpoint_error("runtime unavailable"), "1700000100")
+    )
+
+    def ready_with_restart(*_args: Any, **_kwargs: Any) -> str:
+        value = next(epochs)
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+    monkeypatch.setattr(live, "_run_control", controls.append)
+    monkeypatch.setattr(live, "_tls_handshake_available", lambda *_args, **_kwargs: next(tls))
+    monkeypatch.setattr(live, "_ready_epoch", ready_with_restart)
+    monkeypatch.setattr(
+        live,
+        "_source_identity",
+        lambda: (
+            "a" * 40,
+            hashlib.sha256((SCRIPTS / "live_failure_battery.py").read_bytes()).hexdigest(),
+        ),
+    )
+    output = tmp_path / "failure.live.json"
+
+    result = live.run_battery(
+        candidate=args.output,
+        api_key_file=api_key,
+        ca_file=args.ca_certificate,
+        output=output,
+        timeout_sec=1.0,
+        recovery_timeout_sec=60.0,
+    )
+    evidence = json.loads(output.read_text(encoding="utf-8"))
+
+    assert controls == ["stop_gateway", "start_gateway", "restart_runtime"]
+    assert result["status"] == "controlled_live_failure_passed"
+    assert evidence["control_surface"] == {
+        "ssh_host_alias": "friday-secondary-brain",
+        "authentication": "key_only_batch",
+        "remote_bundle_path": r"C:\ProgramData\FridaySecondary\bundle",
+        "command_set": sorted(live.CONTROL_ACTIONS),
+        "ssh_output_retained": False,
+    }
+    assert evidence["physical_laptop_power_loss_observed"] is False
+    assert evidence["friday_primary_process_continuity_observed"] is False
+    assert evidence["primary_fallback_exactly_once_observed"] is False
+    assert evidence["credentials_retained"] is False
+
+
+def test_controlled_live_failure_restores_bundle_when_gateway_journey_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    live = importlib.import_module("live_failure_battery")
+    args = _candidate_args(tmp_path)
+    operator.build_candidate(args)
+    api_key = tmp_path / "gateway.key"
+    api_key.write_text("a" * 64, encoding="ascii")
+    controls: list[str] = []
+    monkeypatch.setattr(live, "_run_control", controls.append)
+    monkeypatch.setattr(live, "_tls_handshake_available", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(live, "_ready_epoch", lambda *_args, **_kwargs: "1700000000")
+    monkeypatch.setattr(
+        live,
+        "_source_identity",
+        lambda: (
+            "a" * 40,
+            hashlib.sha256((SCRIPTS / "live_failure_battery.py").read_bytes()).hexdigest(),
+        ),
+    )
+    monkeypatch.setattr(
+        live,
+        "_wait_for_tls_loss",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(live.LiveFailureBatteryError("endpoint stayed up")),
+    )
+
+    with pytest.raises(live.LiveFailureBatteryError, match="gateway outage journey"):
+        live.run_battery(
+            candidate=args.output,
+            api_key_file=api_key,
+            ca_file=args.ca_certificate,
+            output=tmp_path / "must-not-exist.json",
+            timeout_sec=1.0,
+            recovery_timeout_sec=60.0,
+        )
+
+    assert controls == ["stop_gateway", "recover_all"]
+    assert not (tmp_path / "must-not-exist.json").exists()
+
+
+def test_live_control_command_is_bounded_key_only_and_overrides_long_stop_grace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live = importlib.import_module("live_failure_battery")
+    captured: list[str] = []
+
+    def run(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        captured.extend(command)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(live.subprocess, "run", run)
+    live._run_control("restart_runtime")
+    script = importlib.import_module("base64").b64decode(captured[-1]).decode("utf-16-le")
+
+    assert "BatchMode=yes" in captured
+    assert "PasswordAuthentication=no" in captured
+    assert "KbdInteractiveAuthentication=no" in captured
+    assert "StrictHostKeyChecking=yes" in captured
+    assert "friday-secondary-brain" in captured
+    assert r"C:\ProgramData\FridaySecondary\bundle" in script
+    assert "restart --timeout 60 sglang" in script
+    with pytest.raises(live.LiveFailureBatteryError, match="closed command set"):
+        live._run_control("arbitrary-command")
+
+
+def test_physical_failure_receipt_requires_the_code_owned_three_stage_witness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    live = importlib.import_module("live_failure_battery")
+    args = _candidate_args(tmp_path)
+    operator.build_candidate(args)
+    api_key = tmp_path / "gateway.key"
+    api_key.write_text("a" * 64, encoding="ascii")
+    runner_sha = hashlib.sha256((SCRIPTS / "live_failure_battery.py").read_bytes()).hexdigest()
+    boot_epochs = iter(("4" * 64, "5" * 64))
+    monkeypatch.setattr(live, "_source_identity", lambda: ("a" * 40, runner_sha))
+    monkeypatch.setattr(live, "_friday_backend_main_pid", lambda: 2613)
+    monkeypatch.setattr(live, "_ready_epoch", lambda *_args, **_kwargs: "1700000000")
+    monkeypatch.setattr(live, "_primary_process_epoch_sha256", lambda _pid: "6" * 64)
+    monkeypatch.setattr(live, "_primary_health", lambda _timeout: "0.207.8")
+    monkeypatch.setattr(live, "_laptop_boot_epoch_sha256", lambda: next(boot_epochs))
+
+    begin = tmp_path / "physical.begin.json"
+    with pytest.raises(live.LiveFailureBatteryError, match="friday-backend.service MainPID"):
+        live.begin_physical_observation(
+            candidate=args.output,
+            api_key_file=api_key,
+            ca_file=args.ca_certificate,
+            primary_pid=999,
+            output=tmp_path / "wrong-primary.json",
+        )
+    live.begin_physical_observation(
+        candidate=args.output,
+        api_key_file=api_key,
+        ca_file=args.ca_certificate,
+        primary_pid=2613,
+        output=begin,
+    )
+    monkeypatch.setattr(live, "_tls_handshake_available", lambda *_args, **_kwargs: False)
+    with pytest.raises(live.LiveFailureBatteryError, match="must be explicit"):
+        live.record_physical_power_loss(
+            candidate=args.output,
+            ca_file=args.ca_certificate,
+            state_path=begin,
+            output=tmp_path / "unconfirmed.json",
+            physical_power_loss_observed=True,
+            ordinary_fallback_observed=True,
+            mid_turn_fallback_observed=False,
+            no_effect_replay_observed=True,
+            v12_readiness_unchanged_observed=True,
+        )
+    off = tmp_path / "physical.off.json"
+    live.record_physical_power_loss(
+        candidate=args.output,
+        ca_file=args.ca_certificate,
+        state_path=begin,
+        output=off,
+        physical_power_loss_observed=True,
+        ordinary_fallback_observed=True,
+        mid_turn_fallback_observed=True,
+        no_effect_replay_observed=True,
+        v12_readiness_unchanged_observed=True,
+    )
+    assert json.loads(off.read_text(encoding="utf-8"))["physical_begin_state_sha256"] == (
+        hashlib.sha256(begin.read_bytes()).hexdigest()
+    )
+    receipt = tmp_path / "physical.observed.json"
+    live.finish_physical_observation(
+        candidate=args.output,
+        api_key_file=api_key,
+        ca_file=args.ca_certificate,
+        state_path=off,
+        output=receipt,
+        readmitted_without_primary_restart_observed=True,
+    )
+    evidence = json.loads(receipt.read_text(encoding="utf-8"))
+
+    assert evidence["observation_method"] == "code_owned_manual_state_machine"
+    assert evidence["observer_runner_sha256"] == runner_sha
+    assert evidence["physical_laptop_power_loss_observed"] is True
+    assert (
+        evidence["friday_primary_process_epoch_before_sha256"]
+        == evidence["friday_primary_process_epoch_after_sha256"]
+    )
+    assert evidence["raw_content_retained"] is False
+
+
+def test_composite_failure_rejects_a_forged_physical_observer_runner(tmp_path: Path) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    args = _candidate_args(tmp_path)
+    operator.build_candidate(args)
+    candidate_raw = args.output.read_bytes()
+    candidate = json.loads(candidate_raw)
+    identity = _identity(candidate, candidate_raw)
+    deterministic = _write(
+        tmp_path / "deterministic.json",
+        _deterministic_failure(operator, identity),
+    )
+    controlled = _write(tmp_path / "live.json", _controlled_live_failure(operator, identity))
+    physical_begin = _write(tmp_path / "physical-begin.json", _physical_failure_begin(identity))
+    physical_state = _write(
+        tmp_path / "physical-state.json",
+        _physical_failure_state(
+            identity,
+            begin_sha256=hashlib.sha256(physical_begin.read_bytes()).hexdigest(),
+        ),
+    )
+    physical_value = _physical_failure_observation(
+        operator,
+        identity,
+        state_sha256=hashlib.sha256(physical_state.read_bytes()).hexdigest(),
+    )
+    physical_value["observer_runner_sha256"] = "f" * 64
+    physical = _write(tmp_path / "physical.json", physical_value)
+
+    with pytest.raises(operator.ProfileOperatorError, match="physical failure observation"):
+        operator.accept_failure(
+            argparse.Namespace(
+                candidate=args.output,
+                deterministic=deterministic,
+                live=controlled,
+                physical_begin=physical_begin,
+                physical_state=physical_state,
+                physical_observation=physical,
+                output=tmp_path / "failure.accepted.json",
+            )
+        )
+    assert not (tmp_path / "failure.accepted.json").exists()

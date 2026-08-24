@@ -9,10 +9,12 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+import live_failure_battery as live_failure
 from endpoint_common import EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256
 from failure_battery import JOURNEY_TESTS, SUITE_FILES, journey_contract_sha256
 
@@ -30,7 +32,9 @@ from source_model_manifest import (  # type: ignore[import-not-found]  # noqa: E
 
 PROFILE_SCHEMA = "friday.secondary-runtime-profile.v2"
 CAPACITY_SCHEMA = "friday.secondary-capacity-evidence.v1"
-FAILURE_SCHEMA = "friday.secondary-failure-battery.v1"
+DETERMINISTIC_FAILURE_SCHEMA = "friday.secondary-failure-battery.v1"
+PHYSICAL_FAILURE_SCHEMA = "friday.secondary-physical-failure-observation.v1"
+FAILURE_SCHEMA = "friday.secondary-failure-acceptance.v1"
 RUNTIME_IMAGE = "lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
 RUNTIME_IMAGE_LOCAL_ID = "sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
 RUNTIME_IMAGE_CONFIG_DIGEST = "sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc"
@@ -49,7 +53,7 @@ GATEWAY_IMAGE = (
     "nginxinc/nginx-unprivileged@sha256:d61d7ef52430df468e74ed6ee6e914429b80e20ba988e3176278a73165f876cf"
 )
 GATEWAY_IMAGE_CONFIG_DIGEST = "sha256:89dc7d054bddca245db3d5a779e363007d0e75b1161cfe2f283ebeaf0ed90d50"
-GATEWAY_IMAGE_LOCAL_ID = "sha256:8d764dd92e0b48d0ca94887dc0fe1df6dffc5200b25b2efcc2deb7ffb61d714c"
+GATEWAY_IMAGE_LOCAL_ID = "sha256:d61d7ef52430df468e74ed6ee6e914429b80e20ba988e3176278a73165f876cf"
 CONTEXT_LADDER = frozenset({4096, 8192, 12288, 16384, 24576, 32768})
 MEMORY_GRID = frozenset({"0.86", "0.88", "0.90", "0.92", "0.94", "0.96", "0.97"})
 MODES = frozenset({"shadow", "assist"})
@@ -66,6 +70,113 @@ WORKLOADS = frozenset(
     }
 )
 FAILURE_JOURNEYS = frozenset(JOURNEY_TESTS)
+_EVIDENCE_IDENTITY_KEYS = frozenset(
+    {
+        "candidate_profile_id",
+        "candidate_profile_sha256",
+        "served_model_alias",
+        "gateway_ca_certificate_sha256",
+    }
+)
+DETERMINISTIC_FAILURE_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        "evidence_scope",
+        "live_physical_journeys_observed",
+        *_EVIDENCE_IDENTITY_KEYS,
+        "source_head",
+        "runner_sha256",
+        "journey_contract_sha256",
+        "suite_file_sha256",
+        "test_count",
+        "journeys",
+        "primary_fallback_exactly_once",
+        "effect_replay_observed",
+        "v12_readiness_changed",
+        "primary_only_flag_verified",
+        "raw_content_retained",
+        "credentials_retained",
+    }
+)
+LIVE_FAILURE_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        "evidence_scope",
+        *_EVIDENCE_IDENTITY_KEYS,
+        "source_head",
+        "endpoint_base_url",
+        "runner_sha256",
+        "control_surface",
+        "controlled_gateway_stop_observed",
+        "tls_endpoint_loss_observed",
+        "exact_candidate_gateway_recovery_observed",
+        "gateway_recovery_preserved_runtime_epoch",
+        "controlled_runtime_restart_observed",
+        "runtime_application_outage_observed",
+        "exact_candidate_runtime_recovery_observed",
+        "runtime_epoch_before_sha256",
+        "runtime_epoch_after_sha256",
+        "runtime_epoch_changed",
+        "physical_laptop_power_loss_observed",
+        "friday_primary_process_continuity_observed",
+        "primary_fallback_exactly_once_observed",
+        "mid_turn_primary_fallback_observed",
+        "raw_content_retained",
+        "credentials_retained",
+    }
+)
+PHYSICAL_FAILURE_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        *_EVIDENCE_IDENTITY_KEYS,
+        "observation_scope",
+        "observation_method",
+        "observation_state_sha256",
+        "observer_source_head",
+        "observer_runner_sha256",
+        "laptop_boot_epoch_before_sha256",
+        "laptop_boot_epoch_after_sha256",
+        "friday_primary_process_epoch_before_sha256",
+        "friday_primary_process_epoch_after_sha256",
+        "physical_laptop_power_loss_observed",
+        "friday_primary_process_continuity_observed",
+        "ordinary_primary_fallback_exactly_once_operator_observed",
+        "mid_turn_primary_fallback_exactly_once_operator_observed",
+        "readmitted_without_primary_restart_operator_observed",
+        "effect_replay_operator_observed",
+        "v12_readiness_changed_operator_observed",
+        "raw_content_retained",
+        "credentials_retained",
+    }
+)
+FAILURE_ACCEPTANCE_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        *_EVIDENCE_IDENTITY_KEYS,
+        "deterministic_failure_sha256",
+        "controlled_live_failure_sha256",
+        "physical_failure_begin_sha256",
+        "physical_failure_state_sha256",
+        "physical_failure_observation_sha256",
+        "journey_contract_sha256",
+        "deterministic_mock_contract_passed",
+        "controlled_gateway_outage_observed",
+        "controlled_runtime_restart_observed",
+        "physical_laptop_power_loss_observed",
+        "friday_primary_process_continuity_observed",
+        "ordinary_primary_fallback_exactly_once_operator_observed",
+        "mid_turn_primary_fallback_exactly_once_operator_observed",
+        "readmitted_without_primary_restart_operator_observed",
+        "effect_replay_operator_observed",
+        "v12_readiness_changed_operator_observed",
+        "raw_content_retained",
+        "credentials_retained",
+    }
+)
 QUALITY_CASES = frozenset(
     {
         "exact_model_alias",
@@ -295,6 +406,48 @@ def _strict_json(path: Path, *, label: str, maximum_bytes: int = 8 << 20) -> tup
 
 def _sha256(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
+
+
+def _repository_head() -> str:
+    repository = _BUNDLE_ROOT.parents[2]
+    gate_sources = (
+        *SUITE_FILES,
+        "deploy/secondary-brain/windows-sglang/scripts/failure_battery.py",
+        "deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py",
+        "deploy/secondary-brain/windows-sglang/scripts/runtime_profile_operator.py",
+    )
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repository,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=10,
+        )
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all", "--", *gate_sources],
+            cwd=repository,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ProfileOperatorError("current source epoch is unavailable") from exc
+    value = result.stdout.strip()
+    if (
+        result.returncode != 0
+        or _REVISION.fullmatch(value) is None
+        or dirty.returncode != 0
+        or bool(dirty.stdout)
+    ):
+        raise ProfileOperatorError("current source epoch is unavailable or not clean")
+    return value
 
 
 def _write_new(path: Path, raw: bytes, *, label: str) -> None:
@@ -743,6 +896,401 @@ def _validate_candidate(value: dict[str, Any], raw: bytes) -> None:
         raise ProfileOperatorError("candidate profile is invalid")
 
 
+def _validate_deterministic_failure(value: dict[str, Any], raw: bytes) -> str:
+    journeys = value.get("journeys")
+    suite_hashes = value.get("suite_file_sha256")
+    runner_raw = _read_regular(
+        _BUNDLE_ROOT / "scripts" / "failure_battery.py",
+        maximum_bytes=1 << 20,
+        label="deterministic failure battery runner",
+    )
+    expected_suite_hashes = {
+        relative: _sha256(
+            _read_regular(
+                _BUNDLE_ROOT.parents[2] / relative,
+                maximum_bytes=8 << 20,
+                label="deterministic failure suite source",
+            )
+        )
+        for relative in SUITE_FILES
+    }
+    source_head = value.get("source_head")
+    if (
+        set(value) != DETERMINISTIC_FAILURE_KEYS
+        or raw != canonical_json(value)
+        or value.get("schema") != DETERMINISTIC_FAILURE_SCHEMA
+        or value.get("status") != "passed"
+        or value.get("evidence_scope") != "deterministic_mock_contract"
+        or value.get("live_physical_journeys_observed") is not False
+        or not isinstance(journeys, dict)
+        or set(journeys) != FAILURE_JOURNEYS
+        or any(
+            row != {"status": "passed", "assertion_test": JOURNEY_TESTS[journey]}
+            for journey, row in journeys.items()
+        )
+        or value.get("runner_sha256") != _sha256(runner_raw)
+        or value.get("journey_contract_sha256") != journey_contract_sha256()
+        or not isinstance(source_head, str)
+        or _REVISION.fullmatch(source_head) is None
+        or suite_hashes != expected_suite_hashes
+        or type(value.get("test_count")) is not int
+        or value["test_count"] < len(FAILURE_JOURNEYS)
+        or value.get("primary_fallback_exactly_once") is not True
+        or value.get("effect_replay_observed") is not False
+        or value.get("v12_readiness_changed") is not False
+        or value.get("primary_only_flag_verified") is not True
+        or value.get("raw_content_retained") is not False
+        or value.get("credentials_retained") is not False
+    ):
+        raise ProfileOperatorError("deterministic failure evidence is incomplete")
+    return source_head
+
+
+def _validate_controlled_live_failure(value: dict[str, Any], raw: bytes) -> str:
+    runner_raw = _read_regular(
+        _BUNDLE_ROOT / "scripts" / "live_failure_battery.py",
+        maximum_bytes=1 << 20,
+        label="live failure battery runner",
+    )
+    expected_control = {
+        "ssh_host_alias": live_failure.SSH_HOST_ALIAS,
+        "authentication": "key_only_batch",
+        "remote_bundle_path": live_failure.REMOTE_BUNDLE_PATH,
+        "command_set": sorted(live_failure.CONTROL_ACTIONS),
+        "ssh_output_retained": False,
+    }
+    before = value.get("runtime_epoch_before_sha256")
+    after = value.get("runtime_epoch_after_sha256")
+    source_head = value.get("source_head")
+    if (
+        set(value) != LIVE_FAILURE_KEYS
+        or raw != canonical_json(value)
+        or value.get("schema") != live_failure.SCHEMA
+        or value.get("status") != "passed"
+        or value.get("evidence_scope") != live_failure.EVIDENCE_SCOPE
+        or not isinstance(source_head, str)
+        or _REVISION.fullmatch(source_head) is None
+        or value.get("endpoint_base_url") != live_failure.ENDPOINT
+        or value.get("runner_sha256") != _sha256(runner_raw)
+        or value.get("control_surface") != expected_control
+        or value.get("controlled_gateway_stop_observed") is not True
+        or value.get("tls_endpoint_loss_observed") is not True
+        or value.get("exact_candidate_gateway_recovery_observed") is not True
+        or value.get("gateway_recovery_preserved_runtime_epoch") is not True
+        or value.get("controlled_runtime_restart_observed") is not True
+        or value.get("runtime_application_outage_observed") is not True
+        or value.get("exact_candidate_runtime_recovery_observed") is not True
+        or not isinstance(before, str)
+        or _SHA256.fullmatch(before) is None
+        or not isinstance(after, str)
+        or _SHA256.fullmatch(after) is None
+        or before == after
+        or value.get("runtime_epoch_changed") is not True
+        or value.get("physical_laptop_power_loss_observed") is not False
+        or value.get("friday_primary_process_continuity_observed") is not False
+        or value.get("primary_fallback_exactly_once_observed") is not False
+        or value.get("mid_turn_primary_fallback_observed") is not False
+        or value.get("raw_content_retained") is not False
+        or value.get("credentials_retained") is not False
+    ):
+        raise ProfileOperatorError("controlled live failure evidence is incomplete")
+    return source_head
+
+
+def _validate_physical_begin(value: dict[str, Any], raw: bytes) -> str:
+    source_head = value.get("observer_source_head")
+    runner_raw = _read_regular(
+        _BUNDLE_ROOT / "scripts" / "live_failure_battery.py",
+        maximum_bytes=1 << 20,
+        label="physical failure observation runner",
+    )
+    primary_before = value.get("primary_process_epoch_before_sha256")
+    laptop_before = value.get("laptop_boot_epoch_before_sha256")
+    if (
+        set(value) != live_failure.PHYSICAL_BEGIN_KEYS
+        or raw != canonical_json(value)
+        or value.get("schema") != live_failure.PHYSICAL_STATE_SCHEMA
+        or value.get("status") != "awaiting_physical_power_loss"
+        or not isinstance(source_head, str)
+        or _REVISION.fullmatch(source_head) is None
+        or value.get("observer_runner_sha256") != _sha256(runner_raw)
+        or type(value.get("primary_pid")) is not int
+        or not 2 <= value["primary_pid"] <= 4_194_304
+        or not isinstance(value.get("primary_version"), str)
+        or _VERSION.fullmatch(value["primary_version"]) is None
+        or not isinstance(primary_before, str)
+        or _SHA256.fullmatch(primary_before) is None
+        or not isinstance(laptop_before, str)
+        or _SHA256.fullmatch(laptop_before) is None
+        or value.get("raw_content_retained") is not False
+        or value.get("credentials_retained") is not False
+    ):
+        raise ProfileOperatorError("physical failure begin state is incomplete")
+    return source_head
+
+
+def _validate_physical_state(
+    value: dict[str, Any],
+    raw: bytes,
+    begin: dict[str, Any],
+    begin_raw: bytes,
+) -> str:
+    source_head = value.get("observer_source_head")
+    runner_raw = _read_regular(
+        _BUNDLE_ROOT / "scripts" / "live_failure_battery.py",
+        maximum_bytes=1 << 20,
+        label="physical failure observation runner",
+    )
+    primary_before = value.get("primary_process_epoch_before_sha256")
+    primary_off = value.get("primary_process_epoch_while_off_sha256")
+    laptop_before = value.get("laptop_boot_epoch_before_sha256")
+    if (
+        set(value) != live_failure.PHYSICAL_OFF_KEYS
+        or raw != canonical_json(value)
+        or value.get("schema") != live_failure.PHYSICAL_STATE_SCHEMA
+        or value.get("status") != "physical_power_loss_observed_awaiting_recovery"
+        or value.get("physical_begin_state_sha256") != _sha256(begin_raw)
+        or any(value.get(key) != begin.get(key) for key in live_failure.PHYSICAL_BEGIN_KEYS - {"status"})
+        or not isinstance(source_head, str)
+        or _REVISION.fullmatch(source_head) is None
+        or value.get("observer_runner_sha256") != _sha256(runner_raw)
+        or type(value.get("primary_pid")) is not int
+        or not 2 <= value["primary_pid"] <= 4_194_304
+        or not isinstance(value.get("primary_version"), str)
+        or _VERSION.fullmatch(value["primary_version"]) is None
+        or not isinstance(primary_before, str)
+        or _SHA256.fullmatch(primary_before) is None
+        or primary_off != primary_before
+        or not isinstance(laptop_before, str)
+        or _SHA256.fullmatch(laptop_before) is None
+        or value.get("physical_tls_endpoint_unavailable_observed") is not True
+        or value.get("physical_laptop_power_loss_operator_observed") is not True
+        or value.get("ordinary_primary_fallback_exactly_once_operator_observed") is not True
+        or value.get("mid_turn_primary_fallback_exactly_once_operator_observed") is not True
+        or value.get("effect_replay_operator_observed") is not False
+        or value.get("v12_readiness_changed_operator_observed") is not False
+        or value.get("raw_content_retained") is not False
+        or value.get("credentials_retained") is not False
+    ):
+        raise ProfileOperatorError("physical failure state is incomplete")
+    return source_head
+
+
+def _validate_physical_failure(
+    value: dict[str, Any],
+    raw: bytes,
+    state: dict[str, Any],
+    state_raw: bytes,
+) -> str:
+    source_head = value.get("observer_source_head")
+    observer_runner = value.get("observer_runner_sha256")
+    observation_state = value.get("observation_state_sha256")
+    laptop_before = value.get("laptop_boot_epoch_before_sha256")
+    laptop_after = value.get("laptop_boot_epoch_after_sha256")
+    primary_before = value.get("friday_primary_process_epoch_before_sha256")
+    primary_after = value.get("friday_primary_process_epoch_after_sha256")
+    hashes = (
+        observer_runner,
+        observation_state,
+        laptop_before,
+        laptop_after,
+        primary_before,
+        primary_after,
+    )
+    runner_raw = _read_regular(
+        _BUNDLE_ROOT / "scripts" / "live_failure_battery.py",
+        maximum_bytes=1 << 20,
+        label="physical failure observation runner",
+    )
+    if (
+        set(value) != PHYSICAL_FAILURE_KEYS
+        or raw != canonical_json(value)
+        or value.get("schema") != PHYSICAL_FAILURE_SCHEMA
+        or value.get("status") != "observed"
+        or value.get("observation_scope") != "physical_power_loss_with_existing_primary_process"
+        or value.get("observation_method") != "code_owned_manual_state_machine"
+        or value.get("observation_state_sha256") != _sha256(state_raw)
+        or not isinstance(source_head, str)
+        or _REVISION.fullmatch(source_head) is None
+        or any(not isinstance(item, str) or _SHA256.fullmatch(item) is None for item in hashes)
+        or observer_runner != _sha256(runner_raw)
+        or source_head != state.get("observer_source_head")
+        or observer_runner != state.get("observer_runner_sha256")
+        or laptop_before != state.get("laptop_boot_epoch_before_sha256")
+        or primary_before != state.get("primary_process_epoch_before_sha256")
+        or laptop_before == laptop_after
+        or primary_before != primary_after
+        or value.get("physical_laptop_power_loss_observed") is not True
+        or value.get("friday_primary_process_continuity_observed") is not True
+        or value.get("ordinary_primary_fallback_exactly_once_operator_observed") is not True
+        or value.get("mid_turn_primary_fallback_exactly_once_operator_observed") is not True
+        or value.get("readmitted_without_primary_restart_operator_observed") is not True
+        or value.get("effect_replay_operator_observed") is not False
+        or value.get("v12_readiness_changed_operator_observed") is not False
+        or value.get("raw_content_retained") is not False
+        or value.get("credentials_retained") is not False
+    ):
+        raise ProfileOperatorError("physical failure observation is incomplete")
+    return source_head
+
+
+def _validate_failure_acceptance(value: dict[str, Any], raw: bytes) -> None:
+    digest_keys = (
+        "deterministic_failure_sha256",
+        "controlled_live_failure_sha256",
+        "physical_failure_begin_sha256",
+        "physical_failure_state_sha256",
+        "physical_failure_observation_sha256",
+        "journey_contract_sha256",
+    )
+    if (
+        set(value) != FAILURE_ACCEPTANCE_KEYS
+        or raw != canonical_json(value)
+        or value.get("schema") != FAILURE_SCHEMA
+        or value.get("status") != "accepted"
+        or any(
+            not isinstance(value.get(key), str) or _SHA256.fullmatch(value[key]) is None
+            for key in digest_keys
+        )
+        or value.get("journey_contract_sha256") != journey_contract_sha256()
+        or value.get("deterministic_mock_contract_passed") is not True
+        or value.get("controlled_gateway_outage_observed") is not True
+        or value.get("controlled_runtime_restart_observed") is not True
+        or value.get("physical_laptop_power_loss_observed") is not True
+        or value.get("friday_primary_process_continuity_observed") is not True
+        or value.get("ordinary_primary_fallback_exactly_once_operator_observed") is not True
+        or value.get("mid_turn_primary_fallback_exactly_once_operator_observed") is not True
+        or value.get("readmitted_without_primary_restart_operator_observed") is not True
+        or value.get("effect_replay_operator_observed") is not False
+        or value.get("v12_readiness_changed_operator_observed") is not False
+        or value.get("raw_content_retained") is not False
+        or value.get("credentials_retained") is not False
+    ):
+        raise ProfileOperatorError("composite failure acceptance is incomplete")
+
+
+def _validated_failure_component_hashes(
+    *,
+    candidate: dict[str, Any],
+    candidate_sha256: str,
+    deterministic_path: Path,
+    live_path: Path,
+    physical_begin_path: Path,
+    physical_state_path: Path,
+    physical_observation_path: Path,
+) -> dict[str, str]:
+    deterministic, deterministic_raw = _strict_json(
+        deterministic_path,
+        label="deterministic failure evidence",
+        maximum_bytes=64 << 20,
+    )
+    live, live_raw = _strict_json(
+        live_path,
+        label="controlled live failure evidence",
+        maximum_bytes=8 << 20,
+    )
+    physical_begin, physical_begin_raw = _strict_json(
+        physical_begin_path,
+        label="physical failure begin state",
+        maximum_bytes=8 << 20,
+    )
+    physical_state, physical_state_raw = _strict_json(
+        physical_state_path,
+        label="physical failure state",
+        maximum_bytes=8 << 20,
+    )
+    physical, physical_raw = _strict_json(
+        physical_observation_path,
+        label="physical failure observation",
+        maximum_bytes=8 << 20,
+    )
+    for label, value in (
+        ("deterministic", deterministic),
+        ("controlled live", live),
+        ("physical begin", physical_begin),
+        ("physical state", physical_state),
+        ("physical", physical),
+    ):
+        if not _evidence_matches(value, candidate, candidate_sha256):
+            raise ProfileOperatorError(f"{label} failure evidence is not bound to this candidate")
+    deterministic_head = _validate_deterministic_failure(deterministic, deterministic_raw)
+    live_head = _validate_controlled_live_failure(live, live_raw)
+    physical_begin_head = _validate_physical_begin(physical_begin, physical_begin_raw)
+    physical_state_head = _validate_physical_state(
+        physical_state,
+        physical_state_raw,
+        physical_begin,
+        physical_begin_raw,
+    )
+    physical_head = _validate_physical_failure(
+        physical,
+        physical_raw,
+        physical_state,
+        physical_state_raw,
+    )
+    source_heads = {
+        deterministic_head,
+        live_head,
+        physical_begin_head,
+        physical_state_head,
+        physical_head,
+    }
+    if source_heads != {_repository_head()}:
+        raise ProfileOperatorError("failure evidence differs from the current tested source epoch")
+    return {
+        "deterministic_failure_sha256": _sha256(deterministic_raw),
+        "controlled_live_failure_sha256": _sha256(live_raw),
+        "physical_failure_begin_sha256": _sha256(physical_begin_raw),
+        "physical_failure_state_sha256": _sha256(physical_state_raw),
+        "physical_failure_observation_sha256": _sha256(physical_raw),
+    }
+
+
+def accept_failure(args: argparse.Namespace) -> dict[str, Any]:
+    candidate, candidate_raw = _strict_json(args.candidate, label="candidate profile")
+    _validate_candidate(candidate, candidate_raw)
+    candidate_sha256 = _sha256(candidate_raw)
+    component_hashes = _validated_failure_component_hashes(
+        candidate=candidate,
+        candidate_sha256=candidate_sha256,
+        deterministic_path=args.deterministic,
+        live_path=args.live,
+        physical_begin_path=args.physical_begin,
+        physical_state_path=args.physical_state,
+        physical_observation_path=args.physical_observation,
+    )
+    accepted = {
+        "schema": FAILURE_SCHEMA,
+        "status": "accepted",
+        "candidate_profile_id": candidate["profile_id"],
+        "candidate_profile_sha256": candidate_sha256,
+        "served_model_alias": candidate["served_model_alias"],
+        "gateway_ca_certificate_sha256": candidate["gateway_ca_certificate_sha256"],
+        **component_hashes,
+        "journey_contract_sha256": journey_contract_sha256(),
+        "deterministic_mock_contract_passed": True,
+        "controlled_gateway_outage_observed": True,
+        "controlled_runtime_restart_observed": True,
+        "physical_laptop_power_loss_observed": True,
+        "friday_primary_process_continuity_observed": True,
+        "ordinary_primary_fallback_exactly_once_operator_observed": True,
+        "mid_turn_primary_fallback_exactly_once_operator_observed": True,
+        "readmitted_without_primary_restart_operator_observed": True,
+        "effect_replay_operator_observed": False,
+        "v12_readiness_changed_operator_observed": False,
+        "raw_content_retained": False,
+        "credentials_retained": False,
+    }
+    raw = canonical_json(accepted)
+    _validate_failure_acceptance(accepted, raw)
+    _write_new(args.output, raw, label="composite failure acceptance")
+    return {
+        "schema": "friday.secondary-profile-operation.v1",
+        "status": "failure_accepted",
+        "failure_evidence_sha256": _sha256(raw),
+    }
+
+
 def accept_profile(args: argparse.Namespace) -> dict[str, Any]:
     candidate, candidate_raw = _strict_json(args.candidate, label="candidate profile")
     _validate_candidate(candidate, candidate_raw)
@@ -809,44 +1357,18 @@ def accept_profile(args: argparse.Namespace) -> dict[str, Any]:
             ):
                 raise ProfileOperatorError("soak evidence is incomplete")
         else:
-            journeys = value.get("journeys")
-            suite_hashes = value.get("suite_file_sha256")
-            runner_raw = _read_regular(
-                _BUNDLE_ROOT / "scripts" / "failure_battery.py",
-                maximum_bytes=1 << 20,
-                label="failure battery runner",
+            _validate_failure_acceptance(value, raw)
+            component_hashes = _validated_failure_component_hashes(
+                candidate=candidate,
+                candidate_sha256=candidate_sha256,
+                deterministic_path=args.failure_deterministic,
+                live_path=args.failure_live,
+                physical_begin_path=args.failure_physical_begin,
+                physical_state_path=args.failure_physical_state,
+                physical_observation_path=args.failure_physical_observation,
             )
-            if (
-                not isinstance(journeys, dict)
-                or set(journeys) != FAILURE_JOURNEYS
-                or any(
-                    row
-                    != {
-                        "status": "passed",
-                        "assertion_test": JOURNEY_TESTS[journey],
-                    }
-                    for journey, row in journeys.items()
-                )
-                or value.get("runner_sha256") != _sha256(runner_raw)
-                or value.get("journey_contract_sha256") != journey_contract_sha256()
-                or not isinstance(value.get("source_head"), str)
-                or _REVISION.fullmatch(value["source_head"]) is None
-                or not isinstance(suite_hashes, dict)
-                or set(suite_hashes) != set(SUITE_FILES)
-                or any(
-                    not isinstance(digest, str) or _SHA256.fullmatch(digest) is None
-                    for digest in suite_hashes.values()
-                )
-                or type(value.get("test_count")) is not int
-                or value["test_count"] < len(FAILURE_JOURNEYS)
-                or value.get("primary_fallback_exactly_once") is not True
-                or value.get("effect_replay_observed") is not False
-                or value.get("v12_readiness_changed") is not False
-                or value.get("primary_only_flag_verified") is not True
-                or value.get("raw_content_retained") is not False
-                or value.get("credentials_retained") is not False
-            ):
-                raise ProfileOperatorError("failure evidence is incomplete")
+            if any(value.get(key) != digest for key, digest in component_hashes.items()):
+                raise ProfileOperatorError("composite failure acceptance does not match its source receipts")
         evidence_hashes[name] = _sha256(raw)
     accepted = dict(candidate)
     accepted.update(
@@ -894,6 +1416,15 @@ def _parser() -> argparse.ArgumentParser:
     capacity.add_argument("--soak", required=True, type=Path)
     capacity.add_argument("--output", required=True, type=Path)
 
+    failure = commands.add_parser("accept-failure")
+    failure.add_argument("--candidate", required=True, type=Path)
+    failure.add_argument("--deterministic", required=True, type=Path)
+    failure.add_argument("--live", required=True, type=Path)
+    failure.add_argument("--physical-begin", required=True, type=Path)
+    failure.add_argument("--physical-state", required=True, type=Path)
+    failure.add_argument("--physical-observation", required=True, type=Path)
+    failure.add_argument("--output", required=True, type=Path)
+
     accept = commands.add_parser("accept-profile")
     accept.add_argument("--candidate", required=True, type=Path)
     accept.add_argument("--hardware-receipt", required=True, type=Path)
@@ -904,6 +1435,11 @@ def _parser() -> argparse.ArgumentParser:
     accept.add_argument("--capacity", required=True, type=Path)
     accept.add_argument("--soak", required=True, type=Path)
     accept.add_argument("--failure", required=True, type=Path)
+    accept.add_argument("--failure-deterministic", required=True, type=Path)
+    accept.add_argument("--failure-live", required=True, type=Path)
+    accept.add_argument("--failure-physical-begin", required=True, type=Path)
+    accept.add_argument("--failure-physical-state", required=True, type=Path)
+    accept.add_argument("--failure-physical-observation", required=True, type=Path)
     accept.add_argument("--output", required=True, type=Path)
     return parser
 
@@ -915,6 +1451,8 @@ def main(argv: list[str] | None = None) -> int:
             result = build_candidate(args)
         elif args.command == "accept-capacity":
             result = accept_capacity(args)
+        elif args.command == "accept-failure":
+            result = accept_failure(args)
         else:
             result = accept_profile(args)
     except ProfileOperatorError as exc:
