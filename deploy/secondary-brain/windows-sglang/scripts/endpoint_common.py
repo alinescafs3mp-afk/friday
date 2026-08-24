@@ -890,6 +890,12 @@ def stream_chat_completion(
         "model": EXPECTED_MODEL,
         "messages": messages,
         "max_tokens": max_tokens,
+        # Capacity evidence must exercise the complete reserved generation
+        # envelope.  A natural EOS can otherwise hit SGLang's pinned
+        # TokenizerManager cleanup race and strand an otherwise healthy SSE
+        # request before its terminal usage event.
+        "min_tokens": max_tokens,
+        "ignore_eos": True,
         "reasoning_effort": "low",
         "temperature": 1.0,
         "top_p": 1.0,

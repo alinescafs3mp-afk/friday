@@ -1759,7 +1759,13 @@ def test_streaming_error_event_is_rejected_before_model_alias_validation(
         def __iter__(self) -> Iterator[bytes]:
             return iter((b'data: {"error":{"message":"oversized private prompt"}}\n',))
 
-    monkeypatch.setattr(common.urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
+    requests: list[Any] = []
+
+    def open_response(request: Any, **_kwargs: Any) -> Response:
+        requests.append(request)
+        return Response()
+
+    monkeypatch.setattr(common.urllib.request, "urlopen", open_response)
     with pytest.raises(common.EndpointError, match="streaming endpoint returned an error event"):
         common.stream_chat_completion(
             "http://127.0.0.1:30000/v1",
@@ -1768,6 +1774,9 @@ def test_streaming_error_event_is_rejected_before_model_alias_validation(
             timeout_sec=1.0,
             max_tokens=1,
         )
+    payload = json.loads(requests[0].data)
+    assert payload["max_tokens"] == payload["min_tokens"] == 1
+    assert payload["ignore_eos"] is True
 
 
 def test_capacity_and_soak_require_the_exact_profile_endpoint_and_capacity(
