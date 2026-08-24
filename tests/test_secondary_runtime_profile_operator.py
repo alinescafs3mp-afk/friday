@@ -82,7 +82,6 @@ def _candidate_args(tmp_path: Path) -> argparse.Namespace:
         prefill_attention_backend="triton",
         decode_attention_backend="triton",
         sampling_backend="pytorch",
-        moe_runner_backend="flashinfer_mxfp4",
         page_size=1,
         radix_cache_enabled="true",
         overlap_schedule_enabled="true",
@@ -321,7 +320,6 @@ def test_operator_builds_the_closed_fp8_graph_candidate_surface(tmp_path: Path) 
     args.kv_cache_dtype = "fp8_e4m3"
     args.decode_attention_backend = "triton"
     args.sampling_backend = "pytorch"
-    args.moe_runner_backend = "triton_kernel"
     args.page_size = 16
     args.radix_cache_enabled = "false"
     args.overlap_schedule_enabled = "false"
@@ -341,7 +339,7 @@ def test_operator_builds_the_closed_fp8_graph_candidate_surface(tmp_path: Path) 
     assert profile.kv_cache_scale_policy == "implicit_unit"
     assert profile.decode_attention_backend == "triton"
     assert profile.sampling_backend == "pytorch"
-    assert profile.moe_runner_backend == "triton_kernel"
+    assert profile.moe_runner_backend == "flashinfer_mxfp4"
     assert profile.page_size == 16
     assert profile.radix_cache_enabled is False
     assert profile.overlap_schedule_enabled is False
@@ -395,40 +393,6 @@ def test_sglang_compat_patch_identity_changes_the_engine_binding(tmp_path: Path)
     assert first["profile_id"] != second["profile_id"]
 
 
-def test_moe_runner_backend_is_the_tracked_ab_engine_variable(tmp_path: Path) -> None:
-    operator = importlib.import_module("runtime_profile_operator")
-    contract = importlib.import_module("profile_contract")
-    first_root = tmp_path / "flashinfer"
-    first_root.mkdir()
-    first_args = _candidate_args(first_root)
-    operator.build_candidate(first_args)
-    first = json.loads(first_args.output.read_text(encoding="utf-8"))
-
-    second_root = tmp_path / "triton"
-    second_root.mkdir()
-    second_args = _candidate_args(second_root)
-    second_args.moe_runner_backend = "triton_kernel"
-    operator.build_candidate(second_args)
-    second = json.loads(second_args.output.read_text(encoding="utf-8"))
-    loaded = contract.load_launch_profile(
-        second_args.output,
-        second_args.profile_id_output,
-        actual_runtime_image=operator.RUNTIME_IMAGE,
-    )
-
-    differing_engine_fields = {
-        key
-        for key in operator.ENGINE_KEYS
-        if first[key] != second[key]
-    }
-    assert differing_engine_fields == {"moe_runner_backend"}
-    assert first["profile_id"] != second["profile_id"]
-    assert loaded.moe_runner_backend == "triton_kernel"
-    arguments = loaded.server_arguments("a" * 64)
-    assert arguments[arguments.index("--moe-runner-backend") + 1] == "triton_kernel"
-    assert "--enable-deterministic-inference" not in arguments
-
-
 def test_candidate_cli_defaults_preserve_the_safe_baseline(tmp_path: Path) -> None:
     operator = importlib.import_module("runtime_profile_operator")
     args = operator._parser().parse_args(
@@ -460,7 +424,6 @@ def test_candidate_cli_defaults_preserve_the_safe_baseline(tmp_path: Path) -> No
         args.prefill_attention_backend,
         args.decode_attention_backend,
         args.sampling_backend,
-        args.moe_runner_backend,
         args.page_size,
         args.radix_cache_enabled,
         args.overlap_schedule_enabled,
@@ -471,7 +434,6 @@ def test_candidate_cli_defaults_preserve_the_safe_baseline(tmp_path: Path) -> No
         "triton",
         "triton",
         "pytorch",
-        "flashinfer_mxfp4",
         1,
         "true",
         "true",
@@ -489,6 +451,7 @@ def test_candidate_cli_defaults_preserve_the_safe_baseline(tmp_path: Path) -> No
         ("cuda_graph_bs_decode", [1]),
         ("hybrid_swa_memory_enabled", False),
         ("deterministic_inference_enabled", True),
+        ("moe_runner_backend", "triton_kernel"),
     ),
 )
 def test_candidate_validation_rejects_incoherent_engine_relationships(
@@ -522,7 +485,6 @@ def test_endpoint_identity_accepts_only_the_closed_candidate_specific_surface(
     args.kv_cache_dtype = "fp8_e4m3"
     args.decode_attention_backend = "triton"
     args.sampling_backend = "pytorch"
-    args.moe_runner_backend = "triton_kernel"
     args.page_size = 16
     args.swa_full_tokens_ratio = "1.00"
     args.cuda_graph_backend_decode = "full"
@@ -556,6 +518,17 @@ def test_endpoint_identity_accepts_only_the_closed_candidate_specific_surface(
 
     with pytest.raises(endpoint.EndpointError, match="runtime profile identity"):
         endpoint.configure_expected_model(nondeterministic, args.ca_certificate)
+
+    candidate = json.loads(args.output.read_text(encoding="utf-8"))
+    candidate["moe_runner_backend"] = "triton_kernel"
+    binding = operator._engine_sha256(candidate)
+    candidate["engine_binding_sha256"] = binding
+    candidate["profile_id"] = f"gptoss20b-{binding}"
+    candidate["served_model_alias"] = f"friday-secondary-{candidate['profile_id']}"
+    unsupported_backend = _write(tmp_path / "unsupported-backend-profile.json", candidate)
+
+    with pytest.raises(endpoint.EndpointError, match="runtime profile identity"):
+        endpoint.configure_expected_model(unsupported_backend, args.ca_certificate)
 
 
 def test_operator_rejects_hardware_receipt_drift_before_outputs(tmp_path: Path) -> None:

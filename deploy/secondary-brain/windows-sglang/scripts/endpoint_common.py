@@ -42,7 +42,6 @@ _CONTEXT_LADDER = frozenset(
 _MEMORY_FRACTIONS = frozenset(
     {"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"}
 )
-_MOE_RUNNER_BACKENDS = frozenset({"flashinfer_mxfp4", "triton_kernel"})
 _MODES = frozenset({"shadow", "assist"})
 _WORKLOADS = frozenset(
     {
@@ -253,7 +252,7 @@ def _profile_engine_surface_is_valid(value: dict[str, Any]) -> bool:
         and value.get("decode_attention_backend") == "triton"
         and value.get("sampling_backend") == "pytorch"
         and value.get("mm_feature_transport") == "cpu"
-        and value.get("moe_runner_backend") in _MOE_RUNNER_BACKENDS
+        and value.get("moe_runner_backend") == "flashinfer_mxfp4"
         and value.get("deterministic_inference_enabled") is False
         and type(page_size) is int
         and page_size in {1, 16}
@@ -408,7 +407,7 @@ def configure_expected_model(profile_manifest: Path, ca_file: Path | None = None
         or value.get("model_path") != "/source/snapshot"
         or value.get("quantization") != "mxfp4"
         or value.get("dtype") != "bfloat16"
-        or value.get("moe_runner_backend") not in _MOE_RUNNER_BACKENDS
+        or value.get("moe_runner_backend") != "flashinfer_mxfp4"
         or value.get("mxfp4_moe_precision") != "default"
         or value.get("mm_feature_transport") != "cpu"
         or not _profile_engine_surface_is_valid(value)

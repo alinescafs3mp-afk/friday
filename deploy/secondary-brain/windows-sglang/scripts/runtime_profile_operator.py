@@ -65,7 +65,6 @@ KV_CACHE_DTYPES = frozenset({"bf16", "fp8_e4m3"})
 KV_CACHE_SCALE_POLICIES = {"bf16": "not_applicable", "fp8_e4m3": "implicit_unit"}
 DECODE_ATTENTION_BACKENDS = frozenset({"triton"})
 SAMPLING_BACKENDS = frozenset({"pytorch"})
-MOE_RUNNER_BACKENDS = frozenset({"flashinfer_mxfp4", "triton_kernel"})
 PAGE_SIZES = frozenset({1, 16})
 SWA_FULL_TOKENS_RATIOS = frozenset({"0.25", "0.50", "0.80", "1.00"})
 CUDA_GRAPH_DECODE_BACKENDS = frozenset({"disabled", "full"})
@@ -710,9 +709,6 @@ def build_candidate(args: argparse.Namespace) -> dict[str, Any]:
     sampling_backend = str(args.sampling_backend)
     if sampling_backend not in SAMPLING_BACKENDS:
         raise ProfileOperatorError("sampling backend is outside the closed vocabulary")
-    moe_runner_backend = str(args.moe_runner_backend)
-    if moe_runner_backend not in MOE_RUNNER_BACKENDS:
-        raise ProfileOperatorError("MoE runner backend is outside the closed vocabulary")
     page_size = _exact_int(args.page_size, minimum=1, maximum=16, label="page size")
     if page_size not in PAGE_SIZES:
         raise ProfileOperatorError("page size is outside the closed grid")
@@ -756,7 +752,7 @@ def build_candidate(args: argparse.Namespace) -> dict[str, Any]:
         "prefill_attention_backend": "triton",
         "decode_attention_backend": decode_attention_backend,
         "sampling_backend": sampling_backend,
-        "moe_runner_backend": moe_runner_backend,
+        "moe_runner_backend": "flashinfer_mxfp4",
         "mxfp4_moe_precision": "default",
         "mm_feature_transport": "cpu",
         "deterministic_inference_enabled": False,
@@ -993,7 +989,7 @@ def _validate_candidate(value: dict[str, Any], raw: bytes) -> None:
         or value.get("prefill_attention_backend") != "triton"
         or value.get("decode_attention_backend") not in DECODE_ATTENTION_BACKENDS
         or value.get("sampling_backend") not in SAMPLING_BACKENDS
-        or value.get("moe_runner_backend") not in MOE_RUNNER_BACKENDS
+        or value.get("moe_runner_backend") != "flashinfer_mxfp4"
         or value.get("mxfp4_moe_precision") != "default"
         or value.get("mm_feature_transport") != "cpu"
         or value.get("deterministic_inference_enabled") is not False
@@ -1559,11 +1555,6 @@ def _parser() -> argparse.ArgumentParser:
         default="triton",
     )
     candidate.add_argument("--sampling-backend", choices=sorted(SAMPLING_BACKENDS), default="pytorch")
-    candidate.add_argument(
-        "--moe-runner-backend",
-        choices=sorted(MOE_RUNNER_BACKENDS),
-        default="flashinfer_mxfp4",
-    )
     candidate.add_argument("--page-size", choices=sorted(PAGE_SIZES), default=1, type=int)
     candidate.add_argument("--radix-cache-enabled", choices=("false", "true"), default="true")
     candidate.add_argument("--overlap-schedule-enabled", choices=("false", "true"), default="true")

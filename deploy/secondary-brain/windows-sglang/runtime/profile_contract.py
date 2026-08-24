@@ -37,7 +37,6 @@ _CONTEXT_LADDER = frozenset(
     {4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536}
 )
 _CHUNKED_PREFILL_GRID = frozenset({512, 1024, 1536, 2048})
-_MOE_RUNNER_BACKENDS = frozenset({"flashinfer_mxfp4", "triton_kernel"})
 _MODES = frozenset({"shadow", "assist"})
 _WORKLOADS = frozenset(
     {
@@ -453,7 +452,7 @@ def load_launch_profile(
         or not isinstance(value["decode_attention_backend"], str)
         or value["decode_attention_backend"] != "triton"
         or value["sampling_backend"] != "pytorch"
-        or value["moe_runner_backend"] not in _MOE_RUNNER_BACKENDS
+        or value["moe_runner_backend"] != "flashinfer_mxfp4"
         or value["mxfp4_moe_precision"] != "default"
         or value["mm_feature_transport"] != "cpu"
         or value["deterministic_inference_enabled"] is not False

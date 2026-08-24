@@ -240,7 +240,7 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     assert '"--api-key",' in profile_contract
     assert '"--quantization",' in profile_contract
     assert 'value["quantization"] != "mxfp4"' in profile_contract
-    assert 'value["moe_runner_backend"] not in _MOE_RUNNER_BACKENDS' in profile_contract
+    assert 'value["moe_runner_backend"] != "flashinfer_mxfp4"' in profile_contract
     assert '"--flashinfer-mxfp4-moe-precision",' in profile_contract
     assert '"--mm-feature-transport",' in profile_contract
     assert '"--enable-deterministic-inference",' not in profile_contract
@@ -1129,7 +1129,7 @@ def test_shared_profile_contract_emits_the_full_optimized_surface(tmp_path: Path
         ("prefill_attention_backend", "flashinfer"),
         ("decode_attention_backend", "trtllm_mha"),
         ("sampling_backend", "flashinfer"),
-        ("moe_runner_backend", "cutlass"),
+        ("moe_runner_backend", "triton_kernel"),
         ("mxfp4_moe_precision", "bf16"),
         ("mm_feature_transport", "cuda_ipc"),
         ("deterministic_inference_enabled", True),

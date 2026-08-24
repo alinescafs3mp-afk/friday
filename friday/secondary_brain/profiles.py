@@ -30,7 +30,6 @@ _EXPECTED_RUNTIME_SOURCE_REVISION = "29481685462732237d80d86076d6563e1f658102"
 _EXPECTED_MODEL_PATH = "/source/snapshot"
 _CONTEXT_LADDER = frozenset({4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536})
 _CHUNKED_PREFILL_GRID = frozenset({512, 1024, 1536, 2048})
-_MOE_RUNNER_BACKENDS = frozenset({"flashinfer_mxfp4", "triton_kernel"})
 _PROFILE_KEYS = frozenset(
     {
         "schema",
@@ -402,7 +401,7 @@ class SecondaryRuntimeProfile:
             and self.prefill_attention_backend == "triton"
             and self.decode_attention_backend == "triton"
             and self.sampling_backend == "pytorch"
-            and self.moe_runner_backend in _MOE_RUNNER_BACKENDS
+            and self.moe_runner_backend == "flashinfer_mxfp4"
             and self.mxfp4_moe_precision == "default"
             and self.mm_feature_transport == "cpu"
             and self.deterministic_inference_enabled is False

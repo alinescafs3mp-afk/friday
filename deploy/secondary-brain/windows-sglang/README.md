@@ -177,7 +177,6 @@ python .\scripts\runtime_profile_operator.py candidate `
   --sglang-compat-patch-sha256 ((Get-FileHash .\runtime\reasoner_grammar_backend.py -Algorithm SHA256).Hash.ToLowerInvariant()) `
   --context-tokens 4096 --max-output-tokens 512 `
   --mem-fraction-static 0.97 --chunked-prefill-size 1024 `
-  --moe-runner-backend flashinfer_mxfp4 `
   --allowed-modes assist,shadow --allowed-workloads extract `
   --profile-id-output .\evidence\profile.id `
   --output .\evidence\profile.candidate.json
@@ -185,8 +184,7 @@ python .\scripts\runtime_profile_operator.py candidate `
 
 The profile ID and served-model alias are derived from the complete engine
 projection. `dtype=bfloat16`, `quantization=mxfp4`, global/prefill attention
-`triton`, a profile-bound `moe_runner_backend` selected from the closed
-`flashinfer_mxfp4|triton_kernel` A/B surface, hybrid SWA memory, one running
+`triton`, `moe_runner_backend=flashinfer_mxfp4`, hybrid SWA memory, one running
 request, `mm_feature_transport=cpu`, prefill graphs disabled and no weight/KV
 CPU offload are fixed. `deterministic_inference_enabled=false` is part of the
 engine binding and the launcher never emits `--enable-deterministic-inference`.
@@ -200,8 +198,6 @@ Optional candidate flags have these closed choices and defaults:
   `not_applicable` or `implicit_unit` and cannot be supplied independently.
 - Decode attention stays on `triton`; sampling remains fixed to the production
   `pytorch` path.
-- `--moe-runner-backend`: `flashinfer_mxfp4` (default) or `triton_kernel`; this
-  is the sole engine variable in the tracked MoE backend A/B.
 - `--page-size`: `1` (default) or `16`; `--radix-cache-enabled` and
   `--overlap-schedule-enabled`: `true` (default) or `false`.
 - `--swa-full-tokens-ratio`: `0.25`, `0.50`, `0.80` (default) or `1.00`;
