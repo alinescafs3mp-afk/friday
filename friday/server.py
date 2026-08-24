@@ -1797,7 +1797,13 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             mcp_manager: MCPClientManager | None = None
             kernel = ExecutionKernel(auth_service, settings)
             kernel.bind_services(storage, graph, web_surfer, ingestion, searcher=searcher)
-            legacy_agent = AgentRuntime(settings, storage, llm, kernel)
+            legacy_agent = AgentRuntime(
+                settings,
+                storage,
+                llm,
+                kernel,
+                secondary_brain=secondary_brain,
+            )
             available_route_handlers = (
                 {
                     RouteClass.ARCHIVE_READ: V12ArchiveReadHandler(

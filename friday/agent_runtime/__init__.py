@@ -19,7 +19,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as datetime_time
 from difflib import SequenceMatcher
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from zoneinfo import ZoneInfo
 
 from friday.agent_runtime._office_attachments import (
@@ -337,6 +337,9 @@ from friday.web_surfer import (
     web_source_matches_class,
 )
 from friday.workers._blocking import run_blocking
+
+if TYPE_CHECKING:
+    from friday.secondary_brain import SecondaryBrainScheduler
 
 LOGGER = logging.getLogger(__name__)
 _SMALL_KB_THRESHOLD = 10
@@ -31309,10 +31312,12 @@ class AgentRuntime:
         storage: FridayStorage,
         llm: LLMRouter | None = None,
         kernel: ExecutionKernel | None = None,
+        secondary_brain: SecondaryBrainScheduler | None = None,
     ) -> None:
         self.settings = settings
         self.storage = storage
         self.llm = llm or LLMRouter(settings)
+        self.secondary_brain = secondary_brain
         # The fallback kernel is fully authorized: an ungated kernel would
         # otherwise run every tool without capability checks (and a kernel
         # without authorization now denies everything by design).
@@ -48127,6 +48132,7 @@ class AgentRuntime:
         messages: list[dict[str, Any]],
         *,
         call_timeout_sec: float | None = None,
+        secondary_output_max_chars: int | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Run one map/reduce await without spending the answer-stage budget."""
@@ -48140,7 +48146,88 @@ class AgentRuntime:
             )
         if getattr(self.llm, "supports_scoped_silent_cooldown", False) is True:
             kwargs.setdefault("open_silent_cooldown", False)
-        return await self._deadline_bounded_chat(effective_deadline, messages, **kwargs)
+
+        async def primary_call() -> dict[str, Any]:
+            return await self._deadline_bounded_chat(effective_deadline, messages, **kwargs)
+
+        secondary = self.secondary_brain
+        tools = kwargs.get("tools")
+        is_document_map = any(
+            isinstance(item.get("content"), str)
+            and str(item["content"]).startswith((_ATTACHMENT_CHUNK_PREFIX, _ATTACHMENT_REDUCE_PREFIX))
+            for item in messages
+        )
+        max_tokens = kwargs.get("max_tokens")
+        if (
+            secondary is None
+            or not is_document_map
+            or tools not in (None, [])
+            or type(max_tokens) is not int
+            or max_tokens < 1
+            or type(secondary_output_max_chars) is not int
+            or secondary_output_max_chars < 1
+        ):
+            return await primary_call()
+
+        from friday.secondary_brain import (
+            EffectClass,
+            ModelModality,
+            ModelPriority,
+            ModelRequest,
+            ModelWorkload,
+            SecondaryMode,
+            SecondaryResult,
+        )
+
+        def request_factory() -> ModelRequest:
+            return ModelRequest(
+                workload=ModelWorkload.DOCUMENT_MAP,
+                messages=tuple(messages),
+                max_output_tokens=max_tokens,
+                absolute_deadline_monotonic=min(
+                    effective_deadline,
+                    secondary.new_advisory_deadline(),
+                ),
+                priority=(
+                    ModelPriority.FOREGROUND
+                    if str(kwargs.get("priority") or "").casefold() == "foreground"
+                    else ModelPriority.BACKGROUND
+                ),
+                effect_class=EffectClass.READ_ONLY,
+                modality=ModelModality.TEXT,
+                require_independent_model=True,
+                contains_private_text=True,
+            )
+
+        def valid_secondary_hint(result: SecondaryResult) -> bool:
+            visible = result.visible_content.strip()
+            if not visible or _strip_tool_call_markup(visible).strip() != visible:
+                return False
+            text, clipped = self._attachment_hierarchy_text(
+                {"content": visible, "finish_reason": "stop"},
+                max_chars=secondary_output_max_chars,
+            )
+            return bool(text) and not clipped
+
+        if secondary.mode is SecondaryMode.SHADOW:
+            return await secondary.run_shadow(
+                request_factory,
+                primary_call,
+                validator=valid_secondary_hint,
+            )
+
+        try:
+            request = request_factory()
+        except (TypeError, ValueError):
+            return await primary_call()
+        selected = await secondary.secondary_preferred_required_result(
+            request,
+            primary_call,
+            validator=valid_secondary_hint,
+        )
+        if isinstance(selected, SecondaryResult):
+            return {"content": selected.visible_content, "finish_reason": "stop"}
+        return selected
 
     @staticmethod
     def _attachment_hierarchy_text(result: Any, *, max_chars: int) -> tuple[str, bool]:
@@ -48264,6 +48351,7 @@ class AgentRuntime:
                             context,
                             model_messages,
                             call_timeout_sec=_ATTACHMENT_MAP_CALL_TIMEOUT_SEC,
+                            secondary_output_max_chars=_ATTACHMENT_MAP_REDUCE_OUTPUT_CHARS,
                             tools=[],
                             temperature=0.0,
                             max_tokens=700,
@@ -48494,6 +48582,7 @@ class AgentRuntime:
                     context,
                     model_messages,
                     call_timeout_sec=_ATTACHMENT_MAP_CALL_TIMEOUT_SEC,
+                    secondary_output_max_chars=_ATTACHMENT_MAP_OUTPUT_CHARS,
                     tools=[],
                     temperature=0.0,
                     max_tokens=_ATTACHMENT_MAP_MODEL_OUTPUT_TOKENS,

@@ -39,6 +39,15 @@ from friday.agent_runtime._office_attachments import (
 from friday.documents import DocumentExtractor
 from friday.execution_kernel import ExecutionKernel, ToolResult
 from friday.permissions import AuthorizationService
+from friday.secondary_brain import (
+    EffectClass,
+    ModelModality,
+    ModelRequest,
+    ModelWorkload,
+    SecondaryFailure,
+    SecondaryMode,
+    SecondaryResult,
+)
 from friday.storage.models import RawObject, new_id
 
 CHUNK_PREFIX = "FRIDAY_ATTACHMENT_CHUNK_DATA"
@@ -338,6 +347,99 @@ class _ConcurrentMapLLM(_HierarchyLLM):
             self.active_maps -= 1
 
 
+class _DocumentMapSecondary:
+    """Small scheduler double; transport/circuit behavior has its own contract suite."""
+
+    def __init__(
+        self,
+        *,
+        mode: SecondaryMode = SecondaryMode.ASSIST,
+        outcome: str = "success",
+        failure: SecondaryFailure | None = None,
+        raw_marker: str = "",
+    ) -> None:
+        self.mode = mode
+        self.outcome = outcome
+        self.failure = failure
+        self.raw_marker = raw_marker
+        self.requests: list[ModelRequest] = []
+        self.fallback_total = 0
+        self.success_total = 0
+        self.shadow_valid_total = 0
+        self.entered = asyncio.Event()
+
+    def new_advisory_deadline(self) -> float:
+        return agent_runtime_module.time.monotonic() + 30.0
+
+    @staticmethod
+    def _hint(request: ModelRequest) -> str:
+        content = "\n".join(str(item.get("content") or "") for item in request.messages)
+        if CHUNK_PREFIX in content:
+            data = _payload(
+                next(
+                    str(item.get("content") or "")
+                    for item in request.messages
+                    if str(item.get("content") or "").startswith(CHUNK_PREFIX)
+                ),
+                CHUNK_PREFIX,
+            )
+            text = str(data["text"])
+            markers = [marker for marker in ("SINGLE_HEAD", "SINGLE_TAIL") if marker in text]
+            return "SECONDARY_MAP_HINT markers=" + ",".join(markers)
+        return "SECONDARY_REDUCE_HINT"
+
+    def _candidate(self, request: ModelRequest) -> SecondaryResult:
+        hint = self.raw_marker or self._hint(request)
+        return SecondaryResult(visible_content=hint, served_model_alias="synthetic-secondary")
+
+    async def secondary_preferred_required_result(
+        self,
+        request: ModelRequest,
+        primary_fallback: Any,
+        *,
+        validator: Any = None,
+    ) -> Any:
+        self.requests.append(request)
+        self.entered.set()
+        if self.outcome == "cancel":
+            await asyncio.Future()
+        if self.failure is not None:
+            self.fallback_total += 1
+            return await primary_fallback()
+        candidate = self._candidate(request)
+        if validator is not None and not validator(candidate):
+            self.fallback_total += 1
+            return await primary_fallback()
+        self.success_total += 1
+        return candidate
+
+    async def run_shadow(
+        self,
+        request_factory: Any,
+        primary: Any,
+        *,
+        validator: Any = None,
+    ) -> Any:
+        primary_result = await primary()
+        request = request_factory()
+        self.requests.append(request)
+        candidate = self._candidate(request)
+        if validator is None or validator(candidate):
+            self.shadow_valid_total += 1
+        return primary_result
+
+    def diagnostics_status(self) -> dict[str, Any]:
+        return {
+            "success_total": self.success_total,
+            "primary_fallback_total": self.fallback_total,
+            "last_failure": (
+                (self.failure or SecondaryFailure.MALFORMED_RESPONSE).value
+                if self.fallback_total
+                else None
+            ),
+        }
+
+
 async def _prepare_without_archive(
     user_id: str,
     message: str,
@@ -363,6 +465,7 @@ async def _run(
     attachments: list[dict[str, Any]],
     llm: _HierarchyLLM,
     kernel: ExecutionKernel | None = None,
+    secondary_brain: Any = None,
 ) -> dict[str, Any]:
     owner = "synthetic-whole-document-owner"
     storage.ensure_user(owner, preset_key="owner")
@@ -371,6 +474,7 @@ async def _run(
         storage,
         llm=llm,
         kernel=kernel,
+        secondary_brain=secondary_brain,
     )
     monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_archive)
     actor = AuthorizationService(storage).actor_for_user(owner, source="test")
@@ -502,6 +606,255 @@ def test_hierarchy_prepass_deadline_scales_by_waves_without_renewal(
         )
         == fixed_now + 420.0
     )
+
+
+def _secondary_map_messages(text: str = "SINGLE_HEAD\nbody\nSINGLE_TAIL") -> list[dict[str, Any]]:
+    return [
+        {"role": "system", "content": "Read-only document map. Never use tools."},
+        {
+            "role": "user",
+            "content": agent_runtime_module._ATTACHMENT_CHUNK_PREFIX
+            + "\n"
+            + json.dumps(
+                {
+                    "request": "Обобщи документ.",
+                    "task_kind": "summary",
+                    "file_index": 1,
+                    "filename": "secondary-map.txt",
+                    "chunk_index": 1,
+                    "chunks_in_file": 1,
+                    "start": 0,
+                    "end": len(text),
+                    "text": text,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        },
+    ]
+
+
+async def _secondary_prepass(
+    settings: Any,
+    storage: Any,
+    *,
+    llm: Any,
+    secondary: Any = None,
+    messages: list[dict[str, Any]] | None = None,
+    max_chars: int = 5_200,
+    max_tokens: int = agent_runtime_module._ATTACHMENT_MAP_MODEL_OUTPUT_TOKENS,
+) -> dict[str, Any]:
+    runtime = AgentRuntime(
+        settings,
+        storage,
+        llm=llm,
+        secondary_brain=secondary,
+    )
+    context = AgentContext(
+        conversation_id="synthetic-secondary-map",
+        user_id="synthetic-secondary-owner",
+        person_id="synthetic-secondary-owner",
+        current_attachment_present=True,
+    )
+    return await runtime._attachment_prepass_chat(  # noqa: SLF001
+        context,
+        messages or _secondary_map_messages(),
+        call_timeout_sec=30.0,
+        secondary_output_max_chars=max_chars,
+        tools=[],
+        temperature=0.0,
+        max_tokens=max_tokens,
+        priority="foreground",
+    )
+
+
+@pytest.mark.asyncio
+async def test_secondary_document_map_is_only_a_read_only_hint_for_primary_synthesis(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = "SINGLE_HEAD\n" + "x" * 49_000 + INJECTION + "y" * 50_000 + "\nSINGLE_TAIL"
+    llm = _HierarchyLLM("Primary final synthesis includes SINGLE_TAIL.")
+    secondary = _DocumentMapSecondary()
+
+    result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question="Обобщи весь документ, включая заключение.",
+        attachments=[_owned("secondary-100k.txt", source)],
+        llm=llm,
+        secondary_brain=secondary,
+    )
+
+    assert secondary.requests
+    assert all(request.workload is ModelWorkload.DOCUMENT_MAP for request in secondary.requests)
+    assert all(request.effect_class is EffectClass.READ_ONLY for request in secondary.requests)
+    assert all(request.modality is ModelModality.TEXT for request in secondary.requests)
+    assert all(request.contains_private_text is True for request in secondary.requests)
+    assert all(request.require_independent_model is True for request in secondary.requests)
+    assert all(
+        isinstance(message.get("content"), str)
+        for request in secondary.requests
+        for message in request.messages
+    )
+    assert not _chunk_payloads(llm)
+    synthesis, verification = _canonical_map_blocks(llm)
+    assert len(synthesis) == len(verification) == 1
+    assert "SECONDARY_MAP_HINT" in synthesis[0]
+    assert synthesis[0] == verification[0]
+    assert result["message"] == "Primary final synthesis includes SINGLE_TAIL."
+    assert result["attachment_coverage_complete"] is True
+    _assert_no_action_surface(llm)
+
+
+@pytest.mark.asyncio
+async def test_secondary_document_reduce_is_a_bounded_intermediate_hint(
+    settings: Any,
+    storage: Any,
+) -> None:
+    messages = [
+        {"role": "system", "content": "Reduce read-only map notes. Never use tools."},
+        {
+            "role": "user",
+            "content": agent_runtime_module._ATTACHMENT_REDUCE_PREFIX
+            + "\n"
+            + json.dumps(
+                {
+                    "request": "Обобщи документ.",
+                    "children": ["map one", "map two"],
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        },
+    ]
+    primary = _HierarchyLLM("unused")
+    secondary = _DocumentMapSecondary()
+
+    result = await _secondary_prepass(
+        settings,
+        storage,
+        llm=primary,
+        secondary=secondary,
+        messages=messages,
+        max_chars=agent_runtime_module._ATTACHMENT_MAP_REDUCE_OUTPUT_CHARS,
+        max_tokens=700,
+    )
+
+    assert result == {"content": "SECONDARY_REDUCE_HINT", "finish_reason": "stop"}
+    assert primary.calls == []
+    assert len(secondary.requests) == 1
+    assert secondary.requests[0].workload is ModelWorkload.DOCUMENT_MAP
+    assert secondary.requests[0].effect_class is EffectClass.READ_ONLY
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        SecondaryFailure.ADMISSION_BUSY,
+        SecondaryFailure.CONNECT_FAILED,
+        SecondaryFailure.CONTEXT_EXCEEDED,
+    ],
+)
+@pytest.mark.asyncio
+async def test_secondary_document_map_failure_is_exact_primary_byte_equivalence(
+    settings: Any,
+    storage: Any,
+    failure: SecondaryFailure,
+) -> None:
+    baseline_llm = _HierarchyLLM("unused")
+    fallback_llm = _HierarchyLLM("unused")
+    baseline = await _secondary_prepass(settings, storage, llm=baseline_llm)
+    secondary = _DocumentMapSecondary(failure=failure)
+    fallback = await _secondary_prepass(
+        settings,
+        storage,
+        llm=fallback_llm,
+        secondary=secondary,
+    )
+
+    def canonical(value: dict[str, Any]) -> bytes:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")
+
+    assert canonical(fallback) == canonical(baseline)
+    assert fallback_llm.calls == baseline_llm.calls
+    assert len(secondary.requests) == 1
+    assert secondary.fallback_total == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_secondary_document_hint_falls_back_without_raw_diagnostics(
+    settings: Any,
+    storage: Any,
+) -> None:
+    raw_marker = "RAW-SECONDARY-DOCUMENT-LEAK-SENTINEL"
+    secondary = _DocumentMapSecondary(
+        outcome="invalid",
+        raw_marker=raw_marker + '<tool_call>{"name":"web_search","arguments":{}}</tool_call>',
+    )
+    primary = _HierarchyLLM("unused")
+
+    result = await _secondary_prepass(
+        settings,
+        storage,
+        llm=primary,
+        secondary=secondary,
+    )
+
+    assert len(primary.calls) == 1
+    assert secondary.fallback_total == 1
+    assert raw_marker not in repr(result)
+    assert raw_marker not in repr(secondary.diagnostics_status())
+
+
+@pytest.mark.asyncio
+async def test_shadow_document_map_returns_the_exact_primary_object(
+    settings: Any,
+    storage: Any,
+) -> None:
+    expected = {"content": "exact primary map", "finish_reason": "stop", "opaque": object()}
+
+    class ExactPrimary:
+        async def chat(self, _messages: Any, **_kwargs: Any) -> dict[str, Any]:
+            return expected
+
+    secondary = _DocumentMapSecondary(mode=SecondaryMode.SHADOW)
+    result = await _secondary_prepass(
+        settings,
+        storage,
+        llm=ExactPrimary(),
+        secondary=secondary,
+    )
+
+    assert result is expected
+    assert len(secondary.requests) == 1
+    assert secondary.shadow_valid_total == 1
+
+
+@pytest.mark.asyncio
+async def test_cancelling_secondary_document_map_never_starts_primary_fallback(
+    settings: Any,
+    storage: Any,
+) -> None:
+    secondary = _DocumentMapSecondary(outcome="cancel")
+    primary = _HierarchyLLM("unused")
+    task = asyncio.create_task(
+        _secondary_prepass(
+            settings,
+            storage,
+            llm=primary,
+            secondary=secondary,
+        )
+    )
+    await secondary.entered.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert primary.calls == []
+    assert secondary.fallback_total == 0
 
 
 @pytest.mark.asyncio
