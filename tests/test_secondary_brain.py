@@ -36,24 +36,28 @@ _API_KEY = "a" * 64
 _ENGINE_PROJECTION: dict[str, Any] = {
     "source_model_repository": "openai/gpt-oss-20b",
     "source_model_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
-    "hardware_runtime_receipt_sha256": "a" * 64,
-    "converted_model_manifest_sha256": "b" * 64,
-    "conversion_manifest_sha256": "f" * 64,
-    "runtime_image": "lmsysorg/sglang@sha256:" + "c" * 64,
-    "runtime_source_revision": "d" * 40,
+    "hardware_runtime_receipt_sha256": "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f",
+    "source_model_manifest_sha256": "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9",
+    "runtime_image": "lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405",
+    "runtime_image_config_digest": "sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc",
+    "runtime_image_oci_manifest_digest": "sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405",
+    "runtime_source_revision": "29481685462732237d80d86076d6563e1f658102",
     "runtime_manifest_sha256": "e" * 64,
-    "model_path": "/models/gpt-oss-20b-nvfp4-modelopt/candidate",
-    "quantization": "modelopt_fp4",
-    "kv_cache_dtype": "none",
+    "model_path": "/source/snapshot",
+    "quantization": "mxfp4",
+    "dtype": "bfloat16",
+    "kv_cache_dtype": "bf16",
     "attention_backend": "triton",
-    "fp4_gemm_backend": "flashinfer_cutlass",
+    "moe_runner_backend": "flashinfer_mxfp4",
+    "mxfp4_moe_precision": "default",
     "context_tokens": 4096,
     "max_total_tokens": 4096,
-    "mem_fraction_static": "0.92",
+    "mem_fraction_static": "0.97",
     "max_running_requests": 1,
     "max_output_tokens": 512,
     "chunked_prefill_size": 1024,
-    "cuda_graph_max_bs": 1,
+    "cuda_graph_backend_decode": "disabled",
+    "cuda_graph_backend_prefill": "disabled",
     "no_cpu_offload": True,
 }
 _ENGINE_BINDING_SHA256 = hashlib.sha256(
@@ -63,7 +67,7 @@ _PROFILE_ID = f"gptoss20b-{_ENGINE_BINDING_SHA256}"
 _ALIAS = f"friday-secondary-{_PROFILE_ID}"
 _PROFILE_VALUE: dict[str, Any] = {
     **_ENGINE_PROJECTION,
-    "schema": "friday.secondary-runtime-profile.v1",
+    "schema": "friday.secondary-runtime-profile.v2",
     "status": "accepted",
     "profile_id": _PROFILE_ID,
     "engine_binding_sha256": _ENGINE_BINDING_SHA256,
@@ -94,23 +98,33 @@ def _runtime_profile(**changes: Any) -> SecondaryRuntimeProfile:
         served_model_alias=_ALIAS,
         manifest_sha256=_PROFILE_SHA256,
         engine_binding_sha256=_ENGINE_BINDING_SHA256,
+        hardware_runtime_receipt_sha256=_ENGINE_PROJECTION["hardware_runtime_receipt_sha256"],
         gateway_ca_certificate_sha256="",
         max_context_tokens=4096,
         max_total_tokens=4096,
         max_concurrency=1,
         max_output_tokens=512,
-        mem_fraction_static="0.92",
-        quantization="modelopt_fp4",
-        kv_cache_dtype="none",
+        chunked_prefill_size=1024,
+        mem_fraction_static="0.97",
+        quantization="mxfp4",
+        dtype="bfloat16",
+        kv_cache_dtype="bf16",
         attention_backend="triton",
-        fp4_gemm_backend="flashinfer_cutlass",
+        moe_runner_backend="flashinfer_mxfp4",
+        mxfp4_moe_precision="default",
+        cuda_graph_backend_decode="disabled",
+        cuda_graph_backend_prefill="disabled",
+        no_cpu_offload=True,
         allowed_modes=frozenset({"shadow", "assist"}),
         allowed_workloads=frozenset({"classify", "critique"}),
         model_repository="openai/gpt-oss-20b",
         model_revision="6cee5e81ee83917806bbde320786a8fb61efebee",
-        model_manifest_sha256="b" * 64,
-        runtime_image="lmsysorg/sglang@sha256:" + "c" * 64,
-        runtime_source_revision="d" * 40,
+        source_model_manifest_sha256=_ENGINE_PROJECTION["source_model_manifest_sha256"],
+        model_path="/source/snapshot",
+        runtime_image=_ENGINE_PROJECTION["runtime_image"],
+        runtime_image_config_digest=_ENGINE_PROJECTION["runtime_image_config_digest"],
+        runtime_image_oci_manifest_digest=_ENGINE_PROJECTION["runtime_image_oci_manifest_digest"],
+        runtime_source_revision=_ENGINE_PROJECTION["runtime_source_revision"],
         runtime_manifest_sha256="e" * 64,
     )
     return replace(profile, **changes)
@@ -609,6 +623,9 @@ async def test_exact_alias_and_reasoning_are_sanitized(settings: Any) -> None:
         payload = __import__("json").loads(request.content)
         assert payload["model"] == _ALIAS
         assert payload["reasoning_effort"] == "low"
+        assert payload["temperature"] == 1.0
+        assert payload["top_p"] == 1.0
+        assert payload["seed"] == 0
         assert "tools" not in payload
         return _response(message_extra={"reasoning_content": synthetic_reasoning})
 

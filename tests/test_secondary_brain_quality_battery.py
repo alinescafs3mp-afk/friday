@@ -94,6 +94,9 @@ class FakeEndpoint:
         assert payload is not None
         assert payload["model"] == self.battery.EXPECTED_MODEL
         assert payload["reasoning_effort"] in {"low", "medium", "high"}
+        assert payload["temperature"] == 1.0
+        assert payload["top_p"] == 1.0
+        assert payload["seed"] == 0
         messages = payload.get("messages")
         assert isinstance(messages, list)
         if any(isinstance(message, dict) and message.get("role") == "tool" for message in messages):

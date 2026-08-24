@@ -1,11 +1,71 @@
 {
-  "schema": "friday.secondary-model-snapshot.v1",
-  "status": "template_not_accepted",
-  "model_repository": "shanjiaz/gpt-oss-20b-nvfp4-modelopt",
-  "model_revision": "fb9848e169d5b38cbc00ecf3383283ea1fc33a21",
-  "snapshot_directory": "snapshot",
-  "file_count": 0,
-  "total_bytes": 0,
-  "files": [],
-  "note": "Replace only from live volume discovery; this template is deliberately not deployable."
+  "excluded_prefixes": [
+    "metal/",
+    "original/"
+  ],
+  "file_count": 14,
+  "files": {
+    ".gitattributes": {
+      "bytes": 1570,
+      "sha256": "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930"
+    },
+    "LICENSE": {
+      "bytes": 11357,
+      "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd"
+    },
+    "README.md": {
+      "bytes": 7095,
+      "sha256": "03c2fcf292549176757b85c911e7dcf527aef3e4241d64b6caec94af3ecf3ac2"
+    },
+    "USAGE_POLICY": {
+      "bytes": 200,
+      "sha256": "d6387ef7985019c45db8d9801e6ac5fd9f98f02b9f1c56f8c5af80c3e8f385d0"
+    },
+    "chat_template.jinja": {
+      "bytes": 16738,
+      "sha256": "a4c9919cbbd4acdd51ccffe22da049264b1b73e59055fa58811a99efbd7c8146"
+    },
+    "config.json": {
+      "bytes": 1806,
+      "sha256": "3a2a26ded679375b7928ddeca59764df7cea83220c1961035f6d6e232659e9ce"
+    },
+    "generation_config.json": {
+      "bytes": 177,
+      "sha256": "f9970ada892d2d1f72e3ed0a6535ccebadd11897318794ca671d8c7014c957da"
+    },
+    "model-00000-of-00002.safetensors": {
+      "bytes": 4792272488,
+      "sha256": "16d0f997dcfc4462089d536bffe51b4bcea2f872f5c430be09ef8ed392312427"
+    },
+    "model-00001-of-00002.safetensors": {
+      "bytes": 4798702184,
+      "sha256": "4fbe328ab445455d6f58dc73852b85873bd626986310abd91cd4d2ce3245eaea"
+    },
+    "model-00002-of-00002.safetensors": {
+      "bytes": 4170342232,
+      "sha256": "a18106b209e9ab35c3406db4f6f12a927364a058b21e9d1373d682e20674b303"
+    },
+    "model.safetensors.index.json": {
+      "bytes": 36355,
+      "sha256": "0e085b977c4c9942f85938828e8c989ed7d5cdabf852e4da6a67c116cd502cd1"
+    },
+    "special_tokens_map.json": {
+      "bytes": 98,
+      "sha256": "dd5e191d20c12d2fee1da5bae14ca1db0f5f4215300af691f23cdee97120a293"
+    },
+    "tokenizer.json": {
+      "bytes": 27868174,
+      "sha256": "0614fe83cadab421296e664e1f48f4261fa8fef6e03e63bb75c20f38e37d07d3"
+    },
+    "tokenizer_config.json": {
+      "bytes": 4200,
+      "sha256": "9279e942392b742d633c7adbb89ebe002c98399db8926a7af5125c726f404070"
+    }
+  },
+  "repository": "openai/gpt-oss-20b",
+  "revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
+  "root_only": true,
+  "schema": "friday.secondary-source-manifest.v1",
+  "status": "verified",
+  "total_bytes": 13789264674
 }

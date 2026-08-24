@@ -7,15 +7,15 @@ import re
 from pathlib import Path
 from typing import Any
 
-from converted_model_manifest import verify_converted_model_snapshot
 from hardware_runtime_contract import verify_live_hardware_runtime
 from profile_contract import load_launch_profile
+from source_model_manifest import verify_source_model_snapshot
 
 _KEY_PATH = Path("/run/friday-secrets/sglang-api-key")
 _PROFILE_PATH = Path("/run/friday-profile/accepted.json")
 _PROFILE_ID_PATH = Path("/run/friday-profile/id")
-_CONVERTED_MODEL_MANIFEST_PATH = Path("/run/friday-model/accepted.json")
 _HARDWARE_RUNTIME_RECEIPT_PATH = Path("/run/friday-hardware/accepted.json")
+_SOURCE_ROOT = Path("/source")
 
 
 def main() -> None:
@@ -32,10 +32,9 @@ def main() -> None:
         _HARDWARE_RUNTIME_RECEIPT_PATH,
         profile.hardware_runtime_receipt_sha256,
     )
-    verify_converted_model_snapshot(
-        Path(profile.model_path),
-        _CONVERTED_MODEL_MANIFEST_PATH,
-        profile.converted_model_manifest_sha256,
+    verify_source_model_snapshot(
+        _SOURCE_ROOT,
+        profile.source_model_manifest_sha256,
     )
     api_key = _KEY_PATH.read_text(encoding="ascii")
     if re.fullmatch(r"[0-9a-f]{64}", api_key) is None:

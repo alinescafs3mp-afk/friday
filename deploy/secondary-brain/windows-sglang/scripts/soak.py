@@ -134,8 +134,8 @@ def run_soak(
                     ],
                     timeout_sec=timeout_sec,
                     max_tokens=128,
-                    temperature=0.0,
-                    extra=case.extra,
+                    temperature=1.0,
+                    extra={"reasoning_effort": "low", "top_p": 1.0, "seed": 0, **case.extra},
                     ca_file=ca_file,
                 )
                 trial = _safe_trial(case, completion, len(trials) + 1)

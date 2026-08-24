@@ -35,7 +35,11 @@ $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $digestPattern = '\A[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}\z'
 $expectedObservedHardwareReceiptSha256 = '7b850221e7e11ac0063971d7baaf627c96eae5441368f1907cc070106832b0f3'
-$expectedSglangImage = 'lmsysorg/sglang@sha256:7a038aa31356fdd1a5b591fc756397bc2e9eb5ac91442c407f55cd2ae8bee738'
+$expectedSglangImage = 'lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405'
+$expectedSglangImageId = 'sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc'
+$expectedSglangConfigDigest = 'sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc'
+$expectedSglangOciManifestDigest = 'sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405'
+$ociManifestMediaType = 'application/vnd.oci.image.manifest.v1+json'
 $expectedGpu = [ordered]@{
     compute_capability = '12.0'
     driver_version = '610.88'
@@ -60,8 +64,18 @@ function Assert-ExactImageReference([string]$Value, [string]$Name) {
 }
 
 function Invoke-Captured([string]$Executable, [string[]]$Arguments) {
-    $output = & $Executable @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    $exitCode = $null
+    try {
+        # Native stderr can become a terminating NativeCommandError under
+        # Windows PowerShell 5 when the enclosing script uses Stop.
+        $ErrorActionPreference = 'Continue'
+        $output = & $Executable @Arguments 2> $null
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($exitCode -ne 0) {
         throw "$Executable failed."
     }
     return (($output | ForEach-Object { [string]$_ }) -join "`n").Trim()
@@ -156,6 +170,64 @@ function Write-NewUtf8File([string]$Path, [string]$Text) {
     return $resolved
 }
 
+function Test-ComposeExactImageSelector([string]$ImageRef) {
+    $nonce = [Guid]::NewGuid().ToString('N')
+    $project = "fridayselector$nonce"
+    $composePath = Join-Path ([IO.Path]::GetTempPath()) "$project.json"
+    $composeValue = [ordered]@{
+        services = [ordered]@{
+            selector = [ordered]@{
+                image = $ImageRef
+                network_mode = 'none'
+                pull_policy = 'never'
+            }
+        }
+    }
+    [void](Write-NewUtf8File $composePath (($composeValue | ConvertTo-Json -Depth 5 -Compress) + "`n"))
+    $cleanupExitCode = $null
+    try {
+        [void](Invoke-Captured 'docker.exe' @(
+            'compose', '--project-name', $project, '--file', $composePath,
+            'create', '--pull', 'never', 'selector'
+        ))
+        $containerId = Invoke-Captured 'docker.exe' @(
+            'compose', '--project-name', $project, '--file', $composePath,
+            'ps', '--all', '--quiet', 'selector'
+        )
+        if ($containerId -notmatch '\A[0-9a-f]{12,64}\z') {
+            throw 'Compose did not create exactly one bounded selector container.'
+        }
+        $inspection = Invoke-Captured 'docker.exe' @(
+            'container', 'inspect', '--format', '{{json .}}', $containerId
+        ) | ConvertFrom-Json
+        $manifestDescriptor = $inspection.ImageManifestDescriptor
+        if ([string]$inspection.Config.Image -cne $ImageRef -or
+            [string]$inspection.Image -cne $expectedSglangImageId -or
+            [string]$manifestDescriptor.digest -cne $expectedSglangOciManifestDigest -or
+            [string]$manifestDescriptor.mediaType -cne $ociManifestMediaType -or
+            [string]$manifestDescriptor.platform.os -cne 'linux' -or
+            [string]$manifestDescriptor.platform.architecture -cne 'amd64') {
+            throw 'Compose did not resolve the exact local SGLang image.'
+        }
+    } finally {
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            & docker.exe compose --project-name $project --file $composePath down --remove-orphans 1> $null 2> $null
+            $cleanupExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+            if (Test-Path -LiteralPath $composePath -PathType Leaf) {
+                Remove-Item -LiteralPath $composePath -Force
+            }
+        }
+        if ($cleanupExitCode -ne 0) {
+            throw 'Compose selector canary cleanup failed.'
+        }
+    }
+    return $true
+}
+
 $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
 $computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem
 if ([string]$operatingSystem.Caption -cne 'Майкрософт Windows 11 Pro' -or
@@ -237,29 +309,68 @@ if ($InspectSglangHelp) {
     if ([string]$SglangImage -cne $expectedSglangImage) {
         throw 'SglangImage differs from the code-owned hardware/runtime contract.'
     }
-    $sglangImageId = Invoke-Captured 'docker.exe' @('image', 'inspect', '--format', '{{.Id}}', $SglangImage)
+    $sglangInspectionText = Invoke-Captured 'docker.exe' @(
+        'image', 'inspect', '--format', '{{json .}}', $SglangImage
+    )
+    $sglangInspection = $sglangInspectionText | ConvertFrom-Json
+    if ([string]$sglangInspection.Id -cne $expectedSglangImageId -or
+        @($sglangInspection.RepoDigests | Where-Object { [string]$_ -ceq $expectedSglangImage }).Count -ne 1 -or
+        [string]$sglangInspection.Descriptor.digest -cne $expectedSglangOciManifestDigest -or
+        [string]$sglangInspection.Descriptor.mediaType -cne $ociManifestMediaType -or
+        [string]$sglangInspection.Os -cne 'linux' -or
+        [string]$sglangInspection.Architecture -cne 'amd64') {
+        throw 'Local SGLang image identity/platform differs from the exact runtime contract.'
+    }
+    $composeSelectorVerified = Test-ComposeExactImageSelector $SglangImage
     $helpText = Invoke-Captured 'docker.exe' @(
         'run', '--rm', '--pull', 'never', '--network', 'none', '--security-opt', 'no-new-privileges:true',
         '--cap-drop', 'ALL', '--entrypoint', 'python3', $SglangImage,
         '-m', 'sglang.launch_server', '--help'
     )
     $requiredFlags = @(
-        '--model-path', '--served-model-name', '--api-key', '--reasoning-parser',
-        '--tool-call-parser', '--attention-backend', '--fp4-gemm-backend',
+        '--model-path', '--served-model-name', '--api-key', '--reasoning-parser', '--dtype',
+        '--tool-call-parser', '--attention-backend', '--quantization', '--moe-runner-backend',
+        '--flashinfer-mxfp4-moe-precision',
         '--kv-cache-dtype', '--chunked-prefill-size', '--max-running-requests',
-        '--cuda-graph-max-bs', '--context-length', '--max-total-tokens',
+        '--cuda-graph-backend-decode', '--cuda-graph-backend-prefill',
+        '--context-length', '--max-total-tokens',
         '--mem-fraction-static', '--enable-metrics', '--enable-cache-report'
     )
     $missingFlags = @($requiredFlags | Where-Object { $helpText -notmatch [regex]::Escape($_) })
     if ($missingFlags.Count -ne 0) {
         throw 'The pinned SGLang image does not expose every baseline launch flag.'
     }
+    $versionProbeCode = 'import importlib.metadata as m,json,torch; print(json.dumps({"cuda_runtime_version":torch.version.cuda,"flashinfer_version":m.version("flashinfer-python"),"pytorch_version":m.version("torch"),"sgl_kernel_version":m.version("sgl-kernel"),"sglang_version":m.version("sglang")},sort_keys=True,separators=(",",":")))'
+    $runtimeVersionsText = Invoke-Captured 'docker.exe' @(
+        'run', '--rm', '--pull', 'never', '--network', 'none', '--read-only',
+        '--tmpfs', '/tmp:size=16m', '--security-opt', 'no-new-privileges:true',
+        '--cap-drop', 'ALL', '--entrypoint', 'python3', $SglangImage,
+        '-c', $versionProbeCode
+    )
+    $runtimeVersions = $runtimeVersionsText | ConvertFrom-Json
+    if ([string]$runtimeVersions.sglang_version -cne '0.5.17' -or
+        [string]$runtimeVersions.cuda_runtime_version -cne '13.0' -or
+        [string]$runtimeVersions.pytorch_version -cne '2.11.0+cu130' -or
+        [string]$runtimeVersions.flashinfer_version -cne '0.6.15.post1' -or
+        [string]$runtimeVersions.sgl_kernel_version -cne '0.4.5') {
+        throw 'Pinned SGLang image package/runtime versions differ from the exact contract.'
+    }
     $sglangHelp = [ordered]@{
         image_ref = $SglangImage
-        image_id = $sglangImageId
+        image_id = [string]$sglangInspection.Id
+        image_config_digest = $expectedSglangConfigDigest
+        image_oci_manifest_digest = [string]$sglangInspection.Descriptor.digest
+        compose_exact_selector_verified = [bool]$composeSelectorVerified
         required_flag_count = $requiredFlags.Count
         required_flags_present = $true
         help_sha256 = Get-TextSha256 $helpText
+        runtime_versions = [ordered]@{
+            sglang_version = [string]$runtimeVersions.sglang_version
+            cuda_runtime_version = [string]$runtimeVersions.cuda_runtime_version
+            pytorch_version = [string]$runtimeVersions.pytorch_version
+            flashinfer_version = [string]$runtimeVersions.flashinfer_version
+            sgl_kernel_version = [string]$runtimeVersions.sgl_kernel_version
+        }
     }
     if ($RunGpuCanary) {
         $runtimeGpuText = Invoke-Captured 'docker.exe' @(
@@ -276,6 +387,8 @@ if ($InspectSglangHelp) {
 $gatewayImage = $null
 if ($InspectGatewayImage) {
     $expectedGateway = 'nginxinc/nginx-unprivileged@sha256:d61d7ef52430df468e74ed6ee6e914429b80e20ba988e3176278a73165f876cf'
+    $expectedGatewayPlatformManifest = 'sha256:8d764dd92e0b48d0ca94887dc0fe1df6dffc5200b25b2efcc2deb7ffb61d714c'
+    $expectedGatewayConfig = 'sha256:89dc7d054bddca245db3d5a779e363007d0e75b1161cfe2f283ebeaf0ed90d50'
     if (-not [string]::Equals($GatewayImage, $expectedGateway, [StringComparison]::Ordinal)) {
         throw 'Gateway image differs from the code-owned exact OCI index digest.'
     }
@@ -287,7 +400,10 @@ if ($InspectGatewayImage) {
         $gatewayInspection.Config.Env |
             Where-Object { [string]$_ -like 'NGINX_VERSION=*' }
     )
-    if ([string]$gatewayInspection.Os -cne 'linux' -or
+    if ([string]$gatewayInspection.Id -cne $expectedGatewayPlatformManifest -or
+        [string]$gatewayInspection.Descriptor.digest -cne $expectedGatewayPlatformManifest -or
+        [string]$gatewayInspection.Descriptor.mediaType -cne $ociManifestMediaType -or
+        [string]$gatewayInspection.Os -cne 'linux' -or
         [string]$gatewayInspection.Architecture -cne 'amd64' -or
         [string]$gatewayInspection.Config.User -cne '101' -or
         $gatewayVersion.Count -ne 1 -or
@@ -311,8 +427,8 @@ if ($InspectGatewayImage) {
         user = '101'
         nginx_version = '1.31.3'
         runtime_probe = 'verified'
-        platform_manifest_digest = 'sha256:8d764dd92e0b48d0ca94887dc0fe1df6dffc5200b25b2efcc2deb7ffb61d714c'
-        config_digest = 'sha256:89dc7d054bddca245db3d5a779e363007d0e75b1161cfe2f283ebeaf0ed90d50'
+        platform_manifest_digest = $expectedGatewayPlatformManifest
+        config_digest = $expectedGatewayConfig
     }
 }
 

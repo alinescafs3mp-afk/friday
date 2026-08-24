@@ -30,7 +30,7 @@ services:
     volumes:
       - type: volume
         source: model-snapshot
-        target: /models/gpt-oss-20b-nvfp4-modelopt
+        target: /source
         read_only: true
       - type: volume
         source: runtime-cache
@@ -48,8 +48,8 @@ services:
         target: /run/friday-bootstrap/profile_contract.py
         read_only: true
       - type: bind
-        source: ./runtime/converted_model_manifest.py
-        target: /run/friday-bootstrap/converted_model_manifest.py
+        source: ./runtime/source_model_manifest.py
+        target: /run/friday-bootstrap/source_model_manifest.py
         read_only: true
       - type: bind
         source: ./runtime/hardware_runtime_contract.py
@@ -58,12 +58,6 @@ services:
       - type: bind
         source: ${FRIDAY_SECONDARY_HARDWARE_RUNTIME_RECEIPT_PATH:?accepted hardware/runtime receipt is required}
         target: /run/friday-hardware/accepted.json
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ${FRIDAY_SECONDARY_CONVERTED_MODEL_MANIFEST_PATH:?accepted converted model manifest is required}
-        target: /run/friday-model/accepted.json
         read_only: true
         bind:
           create_host_path: false
@@ -218,7 +212,7 @@ networks:
 
 volumes:
   model-snapshot:
-    name: ${FRIDAY_SECONDARY_MODEL_VOLUME:?sealed model volume is required}
+    name: ${FRIDAY_SECONDARY_MODEL_VOLUME:?sealed official source model volume is required}
     external: true
   runtime-cache:
     name: friday-secondary-sglang-cache

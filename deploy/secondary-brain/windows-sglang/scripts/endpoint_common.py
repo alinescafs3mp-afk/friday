@@ -23,28 +23,43 @@ from urllib.parse import urlsplit, urlunsplit
 MAX_RESPONSE_BYTES = 1_048_576
 EXPECTED_MODEL = "friday-secondary-gptoss20b"
 EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256 = "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
+EXPECTED_SOURCE_MODEL_MANIFEST_SHA256 = "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"
+EXPECTED_RUNTIME_IMAGE = (
+    "lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
+)
+EXPECTED_RUNTIME_IMAGE_CONFIG_DIGEST = (
+    "sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc"
+)
+EXPECTED_RUNTIME_IMAGE_OCI_MANIFEST_DIGEST = (
+    "sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
+)
+EXPECTED_RUNTIME_SOURCE_REVISION = "29481685462732237d80d86076d6563e1f658102"
 _PROFILE_ID = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}\Z")
 _ENGINE_KEYS = (
     "source_model_repository",
     "source_model_revision",
     "hardware_runtime_receipt_sha256",
-    "converted_model_manifest_sha256",
-    "conversion_manifest_sha256",
+    "source_model_manifest_sha256",
     "runtime_image",
+    "runtime_image_config_digest",
+    "runtime_image_oci_manifest_digest",
     "runtime_source_revision",
     "runtime_manifest_sha256",
     "model_path",
     "quantization",
+    "dtype",
     "kv_cache_dtype",
     "attention_backend",
-    "fp4_gemm_backend",
+    "moe_runner_backend",
+    "mxfp4_moe_precision",
     "context_tokens",
     "max_total_tokens",
     "mem_fraction_static",
     "max_running_requests",
     "max_output_tokens",
     "chunked_prefill_size",
-    "cuda_graph_max_bs",
+    "cuda_graph_backend_decode",
+    "cuda_graph_backend_prefill",
     "no_cpu_offload",
 )
 _HARMONY_MARKERS = (
@@ -198,12 +213,28 @@ def configure_expected_model(profile_manifest: Path, ca_file: Path | None = None
     if (
         not isinstance(value, dict)
         or raw != canonical
-        or value.get("schema") != "friday.secondary-runtime-profile.v1"
+        or value.get("schema") != "friday.secondary-runtime-profile.v2"
         or value.get("status") not in {"candidate", "accepted"}
         or not isinstance(profile_id, str)
         or _PROFILE_ID.fullmatch(profile_id) is None
         or value.get("engine_binding_sha256") != binding
         or value.get("hardware_runtime_receipt_sha256") != EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256
+        or value.get("source_model_repository") != "openai/gpt-oss-20b"
+        or value.get("source_model_revision") != "6cee5e81ee83917806bbde320786a8fb61efebee"
+        or value.get("source_model_manifest_sha256") != EXPECTED_SOURCE_MODEL_MANIFEST_SHA256
+        or value.get("runtime_image") != EXPECTED_RUNTIME_IMAGE
+        or value.get("runtime_image_config_digest") != EXPECTED_RUNTIME_IMAGE_CONFIG_DIGEST
+        or value.get("runtime_image_oci_manifest_digest") != EXPECTED_RUNTIME_IMAGE_OCI_MANIFEST_DIGEST
+        or value.get("runtime_source_revision") != EXPECTED_RUNTIME_SOURCE_REVISION
+        or value.get("model_path") != "/source/snapshot"
+        or value.get("quantization") != "mxfp4"
+        or value.get("dtype") != "bfloat16"
+        or value.get("kv_cache_dtype") != "bf16"
+        or value.get("attention_backend") != "triton"
+        or value.get("moe_runner_backend") != "flashinfer_mxfp4"
+        or value.get("mxfp4_moe_precision") != "default"
+        or value.get("cuda_graph_backend_decode") != "disabled"
+        or value.get("cuda_graph_backend_prefill") != "disabled"
         or profile_id != f"gptoss20b-{binding}"
         or alias != f"friday-secondary-{profile_id}"
     ):
@@ -585,20 +616,28 @@ def chat_completion(
     messages: list[dict[str, str]],
     timeout_sec: float,
     max_tokens: int,
-    temperature: float = 0.0,
+    temperature: float = 1.0,
     extra: dict[str, Any] | None = None,
     ca_file: Path | None = None,
 ) -> SanitizedCompletion:
     if not 1 <= max_tokens <= 4096:
         raise EndpointError("max_tokens is outside the certification bound")
+    if temperature != 1.0:
+        raise EndpointError("GPT-OSS sampling parameters are fixed for certification")
     payload: dict[str, Any] = {
         "model": EXPECTED_MODEL,
         "messages": messages,
         "max_tokens": max_tokens,
-        "temperature": temperature,
+        "reasoning_effort": "low",
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "seed": 0,
     }
     if extra:
-        payload.update(extra)
+        for key in ("reasoning_effort", "temperature", "top_p", "seed"):
+            if key in extra and extra[key] != payload[key]:
+                raise EndpointError("GPT-OSS sampling parameters cannot be overridden")
+        payload.update({key: value for key, value in extra.items() if key not in payload})
     body, latency = request_json(
         "POST",
         f"{normalize_base_url(base_url)}/chat/completions",
@@ -625,7 +664,10 @@ def stream_chat_completion(
         "model": EXPECTED_MODEL,
         "messages": messages,
         "max_tokens": max_tokens,
-        "temperature": 0.0,
+        "reasoning_effort": "low",
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "seed": 0,
         "stream": True,
         "stream_options": {"include_usage": True},
     }

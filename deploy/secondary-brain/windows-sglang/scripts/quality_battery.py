@@ -37,7 +37,9 @@ from endpoint_common import (
 _EVIDENCE_KEYS = frozenset(
     {"case", "status", "latency_sec", "prompt_tokens", "completion_tokens", "output_sha256"}
 )
-_RESERVED_PAYLOAD_KEYS = frozenset({"model", "messages", "max_tokens", "temperature", "stream"})
+_RESERVED_PAYLOAD_KEYS = frozenset(
+    {"model", "messages", "max_tokens", "temperature", "top_p", "seed", "stream"}
+)
 _TOOL_NAME = "lookup_temperature"
 _TOOL_USER = "Call lookup_temperature once for Moscow. Do not answer from memory."
 _CALL_ID = re.compile(r"[A-Za-z0-9_.:-]{1,200}\Z")
@@ -373,7 +375,9 @@ def _completion_request(
         "messages": list(messages),
         "max_tokens": max_tokens,
         "reasoning_effort": "low",
-        "temperature": 0.0,
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "seed": 0,
         "stream": False,
         **dict(extra),
     }
@@ -399,9 +403,7 @@ def _completion_request(
     choice = choices[0] if isinstance(choices, list) and len(choices) == 1 else None
     message = choice.get("message") if isinstance(choice, dict) else None
     usage = body.get("usage")
-    completion_tokens = (
-        _bounded_token_count(usage.get("completion_tokens")) if isinstance(usage, dict) else 0
-    )
+    completion_tokens = _bounded_token_count(usage.get("completion_tokens")) if isinstance(usage, dict) else 0
     content = message.get("content") if isinstance(message, dict) else None
     reasoning = message.get("reasoning_content") if isinstance(message, dict) else None
     if (
@@ -420,9 +422,7 @@ def _completion_request(
     return SanitizedCompletion(
         content="",
         latency_sec=latency,
-        prompt_tokens=(
-            _bounded_token_count(usage.get("prompt_tokens")) if isinstance(usage, dict) else 0
-        ),
+        prompt_tokens=(_bounded_token_count(usage.get("prompt_tokens")) if isinstance(usage, dict) else 0),
         completion_tokens=completion_tokens,
         finish_reason="length",
         reasoning_present=isinstance(reasoning, str) and bool(reasoning),
@@ -486,7 +486,9 @@ def _tool_call_request(
         ),
         "max_tokens": 256,
         "reasoning_effort": "low",
-        "temperature": 0.0,
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "seed": 0,
         "stream": False,
         "tools": [_tool_spec()],
         "tool_choice": {"type": "function", "function": {"name": _TOOL_NAME}},
@@ -668,14 +670,16 @@ def _run_disconnect_protocol(
                         "Write the integers from 1 through 5000, separated by spaces, with no omissions."
                     )
                 ),
-                # Native pinned-v0.5.16 controls make natural completion far
+                # The accepted native runtime makes natural completion far
                 # slower than the bounded post-disconnect recovery canary.
                 "max_tokens": 2_048,
                 "min_tokens": 2_048,
                 "ignore_eos": True,
                 "rid": f"friday-quality-{secrets.token_hex(16)}",
                 "reasoning_effort": "low",
-                "temperature": 0.0,
+                "temperature": 1.0,
+                "top_p": 1.0,
+                "seed": 0,
                 "stream": True,
             },
             ensure_ascii=False,

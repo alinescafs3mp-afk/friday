@@ -20,6 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "deploy" / "secondary-brain" / "windows-sglang"
 SCRIPTS = BUNDLE / "scripts"
 RUNTIME = BUNDLE / "runtime"
+SGLANG_IMAGE = "lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
+SGLANG_CONFIG_DIGEST = "sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc"
+SOURCE_MANIFEST_SHA256 = "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -52,18 +55,15 @@ def test_bundle_has_the_closed_operator_surface() -> None:
         "runtime/hardware_runtime_contract.py",
         "runtime/launch_sglang_secure.py",
         "runtime/profile_contract.py",
+        "runtime/source_model_manifest.py",
         "runtime/render_gateway_secure.sh",
-        "runtime-compat/.dockerignore",
-        "runtime-compat/Dockerfile",
-        "runtime-compat/apply_compat.py",
-        "runtime-compat/compat.patch",
         "scripts/accept-hardware-runtime-receipt.ps1",
         "scripts/preflight.ps1",
         "scripts/install-openssh.ps1",
         "scripts/firewall.ps1",
         "scripts/provision-secrets.ps1",
+        "scripts/model_volume_tool.py",
         "scripts/populate-model-volume.ps1",
-        "scripts/generate_calibration.py",
         "scripts/probe_endpoint.py",
         "scripts/quality_battery.py",
         "scripts/failure_battery.py",
@@ -74,25 +74,20 @@ def test_bundle_has_the_closed_operator_surface() -> None:
     assert required <= {path.relative_to(BUNDLE).as_posix() for path in BUNDLE.rglob("*") if path.is_file()}
 
 
-def test_runtime_compatibility_image_is_exact_offline_and_minimal() -> None:
-    compat = BUNDLE / "runtime-compat"
-    expected_hashes = {
-        ".dockerignore": "2bcf7a28b6fd7575d1326a3f923e8750e1c1bcb38205b72c7d7e2a51fb898013",
-        "Dockerfile": "4be190b91e49176951055aa4c2a8068b08067c32e7965d980c97511483a2f547",
-        "apply_compat.py": "67182abfc5104facbf870af7ebd2a108445b2ace7e3da9194b9586ffa8b83726",
-        "compat.patch": "0408f38a639c4a477e9ba14dacb488cb3d120fda0f4019b280fc999fa5fe0b5e",
+def test_native_runtime_replaces_the_obsolete_internal_compat_image() -> None:
+    assert not any(path.is_file() for path in (BUNDLE / "runtime-compat").glob("*"))
+    obsolete = {
+        "modelopt-converter-manifest.example.json",
+        "runtime/converted_model_manifest.py",
+        "scripts/convert-modelopt-nvfp4.ps1",
+        "scripts/generate_calibration.py",
+        "scripts/modelopt_conversion_tool.py",
     }
-    assert {
-        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in compat.iterdir()
-        if path.is_file()
-    } == expected_hashes
-    dockerfile = (compat / "Dockerfile").read_text(encoding="utf-8")
-    assert (
-        "FROM lmsysorg/sglang@sha256:7a038aa31356fdd1a5b591fc756397bc2e9eb5ac91442c407f55cd2ae8bee738"
-        in dockerfile
-    )
-    assert "apt" not in dockerfile and "pip install" not in dockerfile and "curl" not in dockerfile
+    assert not any((BUNDLE / path).exists() for path in obsolete)
+    compose = _compose()
+    assert compose["services"]["sglang"]["image"].startswith("${FRIDAY_SECONDARY_SGLANG_IMAGE:?")
+    assert SGLANG_IMAGE in (BUNDLE / ".env.example").read_text(encoding="utf-8")
+    assert "flashinfer_mxfp4" in (RUNTIME / "profile_contract.py").read_text(encoding="utf-8")
 
 
 def test_only_tls_gateway_is_published_to_lan() -> None:
@@ -146,23 +141,14 @@ def test_compose_is_digest_gated_and_has_no_host_authority() -> None:
 def test_model_is_read_only_and_cache_and_tmp_are_the_only_mutable_runtime_surfaces() -> None:
     engine = _compose()["services"]["sglang"]
     volumes = engine["volumes"]
-    model = next(row for row in volumes if row["target"] == "/models/gpt-oss-20b-nvfp4-modelopt")
+    model = next(row for row in volumes if row["target"] == "/source")
     assert model == {
         "type": "volume",
         "source": "model-snapshot",
-        "target": "/models/gpt-oss-20b-nvfp4-modelopt",
+        "target": "/source",
         "read_only": True,
     }
-    accepted_manifest = next(row for row in volumes if row["target"] == "/run/friday-model/accepted.json")
-    assert accepted_manifest == {
-        "type": "bind",
-        "source": (
-            "${FRIDAY_SECONDARY_CONVERTED_MODEL_MANIFEST_PATH:?accepted converted model manifest is required}"
-        ),
-        "target": "/run/friday-model/accepted.json",
-        "read_only": True,
-        "bind": {"create_host_path": False},
-    }
+    assert not any(row.get("target") == "/run/friday-model/accepted.json" for row in volumes)
     accepted_hardware = next(row for row in volumes if row["target"] == "/run/friday-hardware/accepted.json")
     assert accepted_hardware == {
         "type": "bind",
@@ -190,10 +176,9 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
         "/run/friday-secrets/sglang-api-key",
         "/run/friday-bootstrap/launch_sglang_secure.py",
         "/run/friday-bootstrap/profile_contract.py",
-        "/run/friday-bootstrap/converted_model_manifest.py",
+        "/run/friday-bootstrap/source_model_manifest.py",
         "/run/friday-bootstrap/hardware_runtime_contract.py",
         "/run/friday-hardware/accepted.json",
-        "/run/friday-model/accepted.json",
         "/run/friday-profile/accepted.json",
         "/run/friday-profile/id",
     }
@@ -223,16 +208,16 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     profile_contract = (BUNDLE / "runtime" / "profile_contract.py").read_text(encoding="utf-8")
     assert '"--api-key",' in profile_contract
     assert '"--quantization",' in profile_contract
-    assert 'value["quantization"] != "modelopt_fp4"' in profile_contract
+    assert 'value["quantization"] != "mxfp4"' in profile_contract
+    assert 'value["moe_runner_backend"] != "flashinfer_mxfp4"' in profile_contract
+    assert '"--flashinfer-mxfp4-moe-precision",' in profile_contract
     assert launcher.index("profile = load_launch_profile(") < launcher.index(
         "from sglang.launch_server import run_server"
     )
-    assert launcher.index("verify_converted_model_snapshot(") < launcher.index(
+    assert launcher.index("verify_source_model_snapshot(") < launcher.index(
         "from sglang.launch_server import run_server"
     )
-    assert launcher.index("verify_live_hardware_runtime(") < launcher.index(
-        "verify_converted_model_snapshot("
-    )
+    assert launcher.index("verify_live_hardware_runtime(") < launcher.index("verify_source_model_snapshot(")
     assert "FRIDAY_SECONDARY_CONTEXT_TOKENS" not in launcher
     assert 'if __name__ == "__main__":' in launcher
     assert launcher.index('if __name__ == "__main__":') < launcher.index(
@@ -263,14 +248,31 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     assert "proxy_pass http://friday_secondary_sglang" in policy
 
 
-def test_examples_are_honest_nonaccepted_placeholders() -> None:
-    model = json.loads((BUNDLE / "model-manifest.example.json").read_text(encoding="utf-8"))
+def test_examples_have_sealed_source_and_nonaccepted_runtime_placeholders() -> None:
+    model_raw = (BUNDLE / "model-manifest.example.json").read_bytes()
+    model = json.loads(model_raw)
     runtime = json.loads((BUNDLE / "runtime-manifest.example.json").read_text(encoding="utf-8"))
     hardware = json.loads((BUNDLE / "hardware-runtime-receipt.example.json").read_text(encoding="utf-8"))
-    assert model["status"] == "template_not_accepted"
-    assert model["files"] == []
-    assert model["model_revision"] == "fb9848e169d5b38cbc00ecf3383283ea1fc33a21"
+    assert hashlib.sha256(model_raw).hexdigest() == SOURCE_MANIFEST_SHA256
+    assert model["schema"] == "friday.secondary-source-manifest.v1"
+    assert model["status"] == "verified"
+    assert model["repository"] == "openai/gpt-oss-20b"
+    assert model["revision"] == "6cee5e81ee83917806bbde320786a8fb61efebee"
+    assert model["root_only"] is True
+    assert model["excluded_prefixes"] == ["metal/", "original/"]
+    assert model["file_count"] == len(model["files"]) == 14
+    assert model["total_bytes"] == 13_789_264_674
     assert runtime["status"] == "template_not_accepted"
+    assert runtime["image_ref"] == SGLANG_IMAGE
+    assert runtime["image_id"] == SGLANG_CONFIG_DIGEST
+    assert runtime["image_config_digest"] == SGLANG_CONFIG_DIGEST
+    assert runtime["image_oci_manifest_digest"] == SGLANG_IMAGE.removeprefix("lmsysorg/sglang@")
+    assert runtime["sglang_version"] == "0.5.17"
+    assert runtime["sglang_git_revision"] == "29481685462732237d80d86076d6563e1f658102"
+    assert runtime["cuda_runtime_version"] == "13.0"
+    assert runtime["pytorch_version"] == "2.11.0+cu130"
+    assert runtime["flashinfer_version"] == "0.6.15.post1"
+    assert runtime["sgl_kernel_version"] == "0.4.5"
     assert runtime["gateway_expected_version"] == "1.31.3"
     assert runtime["gateway_expected_user"] == "101"
     assert runtime["gateway_expected_platform_manifest_digest"] == (
@@ -290,7 +292,9 @@ def test_examples_are_honest_nonaccepted_placeholders() -> None:
         "uuid": "GPU-d7ef849e-55f5-f33c-2812-9dc32b644b07",
     }
     env = (BUNDLE / ".env.example").read_text(encoding="utf-8")
-    assert "REPLACE_WITH_lmsysorg_sglang_AT_sha256_DIGEST" in env
+    assert f"FRIDAY_SECONDARY_SGLANG_IMAGE={SGLANG_IMAGE}" in env
+    assert "FRIDAY_SECONDARY_MODEL_VOLUME=friday-secondary-source-gptoss20b" in env
+    assert "FRIDAY_SECONDARY_CONVERTED_MODEL_MANIFEST_PATH" not in env
     assert "FRIDAY_SECONDARY_GATEWAY_IMAGE" not in env
     assert ("FRIDAY_SECONDARY_HARDWARE_RUNTIME_RECEIPT_PATH=./evidence/hardware-runtime.accepted.json") in env
     assert "latest" not in env.casefold()
@@ -363,8 +367,18 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     assert "-LocalPort 8443" in firewall
     assert "-LocalPort 30000" not in firewall
     assert "'6', 'TCP', '256', 'Any'" in firewall
-    assert "--network none" in population
+    assert "'--network', 'none'" in population
+    assert "--pull', 'never" in population
     assert "docker pull" not in population
+    assert "friday-secondary-source-gptoss20b" in population
+    assert "openai/gpt-oss-20b" in population
+    assert "6cee5e81ee83917806bbde320786a8fb61efebee" in population
+    assert SGLANG_IMAGE in population
+    assert SGLANG_CONFIG_DIGEST in population
+    assert "$DownloaderImage -cne $expectedDownloaderImage" in population
+    assert "$downloaderInspection.Id -cne $expectedDownloaderImageId" in population
+    assert "$downloaderInspection.Descriptor.digest -cne $expectedDownloaderManifest" in population
+    assert "TokenFile" not in population
     assert "New-RandomHex 32" in provisioning
     assert "distinct_bearers_verified = $true" in provisioning
     assert "IP Address:192\\.168\\.1\\.35" in provisioning
@@ -376,7 +390,21 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     preflight = (SCRIPTS / "preflight.ps1").read_text(encoding="utf-8")
     promotion = (SCRIPTS / "accept-hardware-runtime-receipt.ps1").read_text(encoding="utf-8")
     assert "[switch]$InspectGatewayImage" in preflight
+    assert SGLANG_IMAGE in preflight
+    assert SGLANG_CONFIG_DIGEST in preflight
+    assert "$sglangInspection.Id -cne $expectedSglangImageId" in preflight
+    assert "$sglangInspection.RepoDigests" in preflight
+    assert "$sglangInspection.Descriptor.digest -cne $expectedSglangOciManifestDigest" in preflight
+    assert "Descriptor.annotations" not in preflight
+    assert "ImageManifestDescriptor" in preflight
+    assert "'ps', '--all', '--quiet', 'selector'" in preflight
+    capture_start = preflight.index("function Invoke-Captured")
+    capture_end = preflight.index("\n}\n\nfunction Get-TextSha256", capture_start)
+    assert "2>&1" not in preflight[capture_start:capture_end]
+    assert "$ErrorActionPreference = 'Continue'" in preflight
     assert "NGINX_VERSION=1.31.3" in preflight
+    assert "$gatewayInspection.Id -cne $expectedGatewayPlatformManifest" in preflight
+    assert "$gatewayInspection.Descriptor.digest -cne $expectedGatewayPlatformManifest" in preflight
     assert "Config.User -cne '101'" in preflight
     assert 'test "$(id -u)" = 101' in preflight
     assert "nginx version: nginx/1.31.3" in preflight
@@ -397,6 +425,18 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
         assert expected in preflight
     assert "$env:" not in preflight.casefold()
     assert "--pull', 'never" in preflight
+    for flag in (
+        "--dtype",
+        "--moe-runner-backend",
+        "--flashinfer-mxfp4-moe-precision",
+        "--cuda-graph-backend-decode",
+        "--cuda-graph-backend-prefill",
+    ):
+        assert flag in preflight
+    for version in ("2.11.0+cu130", "0.6.15.post1", "0.4.5"):
+        assert version in preflight
+    assert 'm.version("sgl-kernel")' in preflight
+    assert 'm.version("sglang-kernel")' not in preflight
     assert "[switch]$Apply" in promotion
     assert "if ($Apply)" in promotion
     assert "[IO.FileMode]::CreateNew" in promotion
@@ -405,10 +445,10 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     assert "$env:" not in promotion.casefold()
 
 
-def test_missing_model_volume_is_a_normal_powershell5_discovery_state() -> None:
+def test_missing_model_volume_is_a_normal_powershell5_population_state() -> None:
     source = (SCRIPTS / "populate-model-volume.ps1").read_text(encoding="utf-8")
     function_start = source.index("function Test-DockerVolumeExists")
-    function_end = source.index("\n}\n\nif ($Mode -eq 'Discover')", function_start) + 2
+    function_end = source.index("\n}\n\nInvoke-DockerCapture", function_start) + 2
     function = source[function_start:function_end]
     continue_index = function.index("$ErrorActionPreference = 'Continue'")
     inspect_index = function.index("& docker volume inspect $Name")
@@ -492,41 +532,86 @@ def test_completion_projection_drops_reasoning_and_rejects_alias_or_markers() ->
         common.parse_completion(numerical, latency_sec=0.1)
 
 
-def test_model_volume_manifest_requires_accepted_exact_file_set(tmp_path: Path) -> None:
+def test_model_volume_manifest_matches_the_runtime_source_contract() -> None:
     tool = importlib.import_module("model_volume_tool")
-    snapshot = tmp_path / "snapshot"
-    snapshot.mkdir()
+    runtime = importlib.import_module("source_model_manifest")
+    raw = (BUNDLE / "model-manifest.example.json").read_bytes()
+
+    assert raw == tool.canonical_manifest_bytes()
+    assert hashlib.sha256(raw).hexdigest() == SOURCE_MANIFEST_SHA256
+    assert tool.SCHEMA == runtime.SCHEMA
+    assert tool.MODEL_REPOSITORY == runtime.SOURCE_REPOSITORY
+    assert tool.MODEL_REVISION == runtime.SOURCE_REVISION
+    assert tool.SOURCE_FILES == runtime.SOURCE_FILES
+    assert tool.SOURCE_FILE_COUNT == runtime.SOURCE_FILE_COUNT
+    assert tool.SOURCE_TOTAL_BYTES == runtime.SOURCE_TOTAL_BYTES
+    assert tool.SOURCE_MANIFEST_RAW_SHA256 == runtime.SOURCE_MANIFEST_RAW_SHA256
+    assert tool.SOURCE_MANIFEST_SEMANTIC_SHA256 == runtime.SOURCE_MANIFEST_SEMANTIC_SHA256
+
+
+def test_model_volume_verifier_is_strict_and_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool = importlib.import_module("model_volume_tool")
+    source = tmp_path / "source"
+    snapshot = source / "snapshot"
+    snapshot.mkdir(parents=True)
     content = b"bounded model fixture"
     (snapshot / "config.json").write_bytes(content)
-    manifest = {
+    files = {"config.json": (len(content), hashlib.sha256(content).hexdigest())}
+    monkeypatch.setattr(tool, "SOURCE_FILES", files)
+    monkeypatch.setattr(tool, "SOURCE_FILE_COUNT", 1)
+    monkeypatch.setattr(tool, "SOURCE_TOTAL_BYTES", len(content))
+    manifest: dict[str, Any] = {
         "schema": tool.SCHEMA,
-        "status": "accepted",
-        "model_repository": tool.MODEL_REPOSITORY,
-        "model_revision": tool.MODEL_REVISION,
-        "snapshot_directory": tool.SNAPSHOT_DIRECTORY,
+        "status": "verified",
+        "repository": tool.MODEL_REPOSITORY,
+        "revision": tool.MODEL_REVISION,
+        "root_only": True,
+        "excluded_prefixes": tool.SOURCE_EXCLUDED_PREFIXES,
         "file_count": 1,
         "total_bytes": len(content),
-        "files": [
-            {
-                "path": "config.json",
-                "size": len(content),
+        "files": {
+            "config.json": {
+                "bytes": len(content),
                 "sha256": hashlib.sha256(content).hexdigest(),
             }
-        ],
+        },
     }
-    manifest_path = tmp_path / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    result = tool.verify_manifest(snapshot, manifest_path)
+    raw = (json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
+    semantic = json.dumps(
+        manifest,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    manifest_sha256 = hashlib.sha256(raw).hexdigest()
+    monkeypatch.setattr(tool, "SOURCE_MANIFEST_RAW_SHA256", manifest_sha256)
+    monkeypatch.setattr(tool, "SOURCE_MANIFEST_SEMANTIC_SHA256", hashlib.sha256(semantic).hexdigest())
+    internal_manifest = source / "source-manifest.json"
+    external_manifest = tmp_path / "source-model.verified.json"
+    internal_manifest.write_bytes(raw)
+    external_manifest.write_bytes(raw)
+
+    result = tool.verify_manifest(source, external_manifest)
     assert result["status"] == "passed"
+    assert result["manifest_raw_sha256"] == manifest_sha256
+
     manifest["status"] = "template_not_accepted"
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    external_manifest.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(tool.ModelVolumeError):
-        tool.verify_manifest(snapshot, manifest_path)
+        tool.verify_manifest(source, external_manifest)
+
+    external_manifest.write_bytes(raw)
+    (source / "unexpected").write_bytes(b"no")
+    with pytest.raises(tool.ModelVolumeError):
+        tool.verify_manifest(source, external_manifest)
 
 
 def _candidate_runtime_profile() -> dict[str, Any]:
     value: dict[str, Any] = {
-        "schema": "friday.secondary-runtime-profile.v1",
+        "schema": "friday.secondary-runtime-profile.v2",
         "status": "candidate",
         "profile_id": "pending",
         "engine_binding_sha256": "0" * 64,
@@ -537,24 +622,28 @@ def _candidate_runtime_profile() -> dict[str, Any]:
         "hardware_runtime_receipt_sha256": (
             "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
         ),
-        "converted_model_manifest_sha256": "b" * 64,
-        "conversion_manifest_sha256": "c" * 64,
+        "source_model_manifest_sha256": SOURCE_MANIFEST_SHA256,
         "gateway_ca_certificate_sha256": "1" * 64,
-        "runtime_image": "lmsysorg/sglang@sha256:" + "d" * 64,
-        "runtime_source_revision": "e" * 40,
+        "runtime_image": SGLANG_IMAGE,
+        "runtime_image_config_digest": SGLANG_CONFIG_DIGEST,
+        "runtime_image_oci_manifest_digest": SGLANG_IMAGE.removeprefix("lmsysorg/sglang@"),
+        "runtime_source_revision": "29481685462732237d80d86076d6563e1f658102",
         "runtime_manifest_sha256": "f" * 64,
-        "model_path": "/models/gpt-oss-20b-nvfp4-modelopt/candidate",
-        "quantization": "modelopt_fp4",
-        "kv_cache_dtype": "none",
+        "model_path": "/source/snapshot",
+        "quantization": "mxfp4",
+        "dtype": "bfloat16",
+        "kv_cache_dtype": "bf16",
         "attention_backend": "triton",
-        "fp4_gemm_backend": "flashinfer_cutlass",
-        "context_tokens": 8192,
-        "max_total_tokens": 8192,
-        "mem_fraction_static": "0.92",
+        "moe_runner_backend": "flashinfer_mxfp4",
+        "mxfp4_moe_precision": "default",
+        "context_tokens": 4096,
+        "max_total_tokens": 4096,
+        "mem_fraction_static": "0.97",
         "max_running_requests": 1,
-        "max_output_tokens": 2048,
+        "max_output_tokens": 512,
         "chunked_prefill_size": 1024,
-        "cuda_graph_max_bs": 1,
+        "cuda_graph_backend_decode": "disabled",
+        "cuda_graph_backend_prefill": "disabled",
         "allowed_modes": ["assist", "shadow"],
         "allowed_workloads": ["extract"],
         "no_cpu_offload": True,
@@ -588,22 +677,29 @@ def test_shared_profile_contract_derives_every_capacity_argument(tmp_path: Path)
     profile = contract.load_launch_profile(
         manifest,
         profile_id,
-        actual_runtime_image="lmsysorg/sglang@sha256:" + "d" * 64,
+        actual_runtime_image=SGLANG_IMAGE,
     )
     arguments = profile.server_arguments("a" * 64)
 
     assert profile.manifest_sha256 == hashlib.sha256(manifest.read_bytes()).hexdigest()
-    assert profile.model_path == "/models/gpt-oss-20b-nvfp4-modelopt/candidate"
-    assert profile.converted_model_manifest_sha256 == "b" * 64
+    assert profile.model_path == "/source/snapshot"
+    assert profile.source_model_manifest_sha256 == SOURCE_MANIFEST_SHA256
     assert profile.hardware_runtime_receipt_sha256 == (
         "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
     )
-    assert arguments[arguments.index("--context-length") + 1] == "8192"
-    assert arguments[arguments.index("--max-total-tokens") + 1] == "8192"
-    assert arguments[arguments.index("--mem-fraction-static") + 1] == "0.92"
+    assert arguments[arguments.index("--context-length") + 1] == "4096"
+    assert arguments[arguments.index("--max-total-tokens") + 1] == "4096"
+    assert arguments[arguments.index("--mem-fraction-static") + 1] == "0.97"
     assert arguments[arguments.index("--max-running-requests") + 1] == "1"
-    assert "--kv-cache-dtype" not in arguments
-    assert profile.runtime_image == "lmsysorg/sglang@sha256:" + "d" * 64
+    assert arguments[arguments.index("--quantization") + 1] == "mxfp4"
+    assert arguments[arguments.index("--dtype") + 1] == "bfloat16"
+    assert arguments[arguments.index("--kv-cache-dtype") + 1] == "bf16"
+    assert arguments[arguments.index("--moe-runner-backend") + 1] == "flashinfer_mxfp4"
+    assert arguments[arguments.index("--flashinfer-mxfp4-moe-precision") + 1] == "default"
+    assert arguments[arguments.index("--cuda-graph-backend-decode") + 1] == "disabled"
+    assert arguments[arguments.index("--cuda-graph-backend-prefill") + 1] == "disabled"
+    assert profile.runtime_image == SGLANG_IMAGE
+    assert profile.runtime_image_config_digest == SGLANG_CONFIG_DIGEST
 
 
 @pytest.mark.parametrize(
@@ -613,7 +709,18 @@ def test_shared_profile_contract_derives_every_capacity_argument(tmp_path: Path)
         ("endpoint_base_url", "https://192.168.1.36:8443/v1"),
         ("served_model_alias", "wrong"),
         ("hardware_runtime_receipt_sha256", "3" * 64),
+        ("source_model_manifest_sha256", "3" * 64),
         ("runtime_image", "lmsysorg/sglang:latest"),
+        ("runtime_image_config_digest", "sha256:" + "3" * 64),
+        ("runtime_image_oci_manifest_digest", "sha256:" + "3" * 64),
+        ("runtime_source_revision", "3" * 40),
+        ("quantization", "modelopt_fp4"),
+        ("dtype", "float16"),
+        ("kv_cache_dtype", "fp8_e4m3"),
+        ("moe_runner_backend", "cutlass"),
+        ("mxfp4_moe_precision", "bf16"),
+        ("cuda_graph_backend_decode", "flashinfer"),
+        ("cuda_graph_backend_prefill", "flashinfer"),
         ("context_tokens", 10_000),
         ("max_total_tokens", 12_288),
         ("max_running_requests", 2),
@@ -630,7 +737,7 @@ def test_shared_profile_contract_rejects_mutation(tmp_path: Path, key: str, valu
         contract.load_launch_profile(
             manifest,
             profile_id,
-            actual_runtime_image="lmsysorg/sglang@sha256:" + "d" * 64,
+            actual_runtime_image=SGLANG_IMAGE,
         )
 
 
@@ -663,7 +770,7 @@ def test_profile_contract_rejects_symlinks_and_oversized_inputs(tmp_path: Path) 
         contract.load_launch_profile(
             manifest_link,
             profile_id,
-            actual_runtime_image="lmsysorg/sglang@sha256:" + "d" * 64,
+            actual_runtime_image=SGLANG_IMAGE,
         )
 
     profile_id_link = tmp_path / "profile-link.id"
@@ -672,7 +779,7 @@ def test_profile_contract_rejects_symlinks_and_oversized_inputs(tmp_path: Path) 
         contract.load_launch_profile(
             manifest,
             profile_id_link,
-            actual_runtime_image="lmsysorg/sglang@sha256:" + "d" * 64,
+            actual_runtime_image=SGLANG_IMAGE,
         )
 
     oversized_id = tmp_path / "oversized.id"
@@ -681,7 +788,7 @@ def test_profile_contract_rejects_symlinks_and_oversized_inputs(tmp_path: Path) 
         contract.load_launch_profile(
             manifest,
             oversized_id,
-            actual_runtime_image="lmsysorg/sglang@sha256:" + "d" * 64,
+            actual_runtime_image=SGLANG_IMAGE,
         )
 
     oversized_manifest = tmp_path / "oversized.json"
@@ -690,7 +797,7 @@ def test_profile_contract_rejects_symlinks_and_oversized_inputs(tmp_path: Path) 
         contract.load_launch_profile(
             oversized_manifest,
             profile_id,
-            actual_runtime_image="lmsysorg/sglang@sha256:" + "d" * 64,
+            actual_runtime_image=SGLANG_IMAGE,
         )
 
 
@@ -891,30 +998,6 @@ def test_engine_and_gateway_mount_the_identical_profile_bytes() -> None:
             ),
         }
     )
-
-
-def test_internal_conversion_calibration_is_fixed_synthetic_and_content_addressed(
-    tmp_path: Path,
-) -> None:
-    generator = importlib.import_module("generate_calibration")
-    corpus = tmp_path / "friday-secondary.jsonl"
-    manifest = tmp_path / "calibration.observed.json"
-
-    report = generator.generate(corpus, manifest)
-
-    assert report["schema"] == "friday.secondary-brain.calibration.v1"
-    assert report["status"] == "observed_unaccepted"
-    assert report["rows"] == 256
-    assert report["synthetic_only"] is True
-    assert report["operator_data_present"] is False
-    assert report["bytes"] == corpus.stat().st_size
-    assert report["sha256"] == hashlib.sha256(corpus.read_bytes()).hexdigest()
-    assert json.loads(manifest.read_text(encoding="utf-8")) == report
-    rows = [json.loads(line) for line in corpus.read_text(encoding="utf-8").splitlines()]
-    assert len(rows) == 256
-    assert all(set(row) == {"text"} and len(row["text"]) > 2_000 for row in rows)
-    with pytest.raises(FileExistsError):
-        generator.generate(corpus, tmp_path / "second-manifest.json")
 
 
 def test_capacity_and_soak_minimums_are_not_decorative() -> None:

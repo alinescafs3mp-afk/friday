@@ -1,19 +1,16 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Plan', 'Discover', 'Verify')]
+    [ValidateSet('Plan', 'Populate', 'Verify')]
     [string]$Mode,
 
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
     [string]$DownloaderImage,
 
-    [Parameter(Mandatory = $true)]
-    [ValidateNotNullOrEmpty()]
-    [string]$VolumeName,
-
     [Parameter()]
-    [string]$TokenFile,
+    [ValidateNotNullOrEmpty()]
+    [string]$VolumeName = 'friday-secondary-source-gptoss20b',
 
     [Parameter()]
     [string]$ManifestPath,
@@ -29,50 +26,108 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 
-if ($DownloaderImage -notmatch '\A[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}\z') {
-    throw 'DownloaderImage must be an exact lowercase repo@sha256 digest.'
+$expectedVolumeName = 'friday-secondary-source-gptoss20b'
+$expectedRepository = 'openai/gpt-oss-20b'
+$expectedRevision = '6cee5e81ee83917806bbde320786a8fb61efebee'
+$expectedDownloaderImage = 'lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405'
+$expectedDownloaderImageId = 'sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc'
+$expectedDownloaderManifest = 'sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405'
+$expectedDownloaderMediaType = 'application/vnd.oci.image.manifest.v1+json'
+$expectedManifestSha256 = '438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9'
+$expectedManifestSemanticSha256 = 'e75b176ed1817e762cf9b7f2262f6e58491a0f9d48d1ea51e466a6e2c3b8a3ab'
+
+if ($DownloaderImage -cne $expectedDownloaderImage) {
+    throw 'DownloaderImage differs from the code-owned exact SGLang runtime.'
 }
-if ($VolumeName -notmatch '\A[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}\z') {
-    throw 'VolumeName is not a bounded Docker volume name.'
+if ($VolumeName -cne $expectedVolumeName) {
+    throw 'VolumeName must be the canonical sealed official-source volume.'
 }
-if ($Mode -eq 'Discover' -and [string]::IsNullOrWhiteSpace($OutputManifest)) {
-    throw 'Discover requires OutputManifest.'
+if ($Mode -eq 'Populate' -and [string]::IsNullOrWhiteSpace($OutputManifest)) {
+    throw 'Populate requires OutputManifest.'
 }
 if ($Mode -eq 'Verify' -and [string]::IsNullOrWhiteSpace($ManifestPath)) {
-    throw 'Verify requires an accepted ManifestPath.'
+    throw 'Verify requires the canonical source ManifestPath.'
 }
 
 $plan = [ordered]@{
-    schema = 'friday.secondary-model-volume-plan.v1'
+    schema = 'friday.secondary-source-volume-plan.v1'
     mode = $Mode
     apply = [bool]$Apply
     downloader_image = $DownloaderImage
     volume = $VolumeName
-    model_repository = 'shanjiaz/gpt-oss-20b-nvfp4-modelopt'
-    model_revision = 'fb9848e169d5b38cbc00ecf3383283ea1fc33a21'
-    token_supplied_by_file = -not [string]::IsNullOrWhiteSpace($TokenFile)
+    repository = $expectedRepository
+    revision = $expectedRevision
+    manifest_raw_sha256 = $expectedManifestSha256
+    manifest_semantic_sha256 = $expectedManifestSemanticSha256
+    file_count = 14
+    total_bytes = [int64]13789264674
+    public_source = $true
+    token_used = $false
 }
 if (-not $Apply -or $Mode -eq 'Plan') {
     $plan | ConvertTo-Json -Depth 4
     return
 }
 
-& docker version --format '{{.Server.Version}}' | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw 'Docker engine is unavailable.'
-}
-& docker image inspect --format '{{.Id}}' $DownloaderImage | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw 'Exact downloader image is not present locally; this script never pulls a mutable image.'
+function Invoke-DockerCapture([string[]]$Arguments) {
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = (Get-Command docker.exe -ErrorAction Stop).Source
+    $startInfo.Arguments = @($Arguments | ForEach-Object {
+        if ($_ -match '[\s"]') { '"' + $_.Replace('"', '\"') + '"' } else { $_ }
+    }) -join ' '
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) {
+        throw 'Docker process could not start.'
+    }
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    [Threading.Tasks.Task]::WaitAll(@($stdoutTask, $stderrTask))
+    if ($process.ExitCode -ne 0) {
+        throw ('Docker operation failed with exit code ' + $process.ExitCode + '.')
+    }
+    return $stdoutTask.Result
 }
 
-$toolPath = (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'model_volume_tool.py')).FullName
-$toolMount = ('type=bind,source={0},target=/bundle/model_volume_tool.py,readonly' -f $toolPath)
+function Get-TextSha256([string]$Text) {
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [Text.Encoding]::UTF8.GetBytes($Text)
+        return ([BitConverter]::ToString($hasher.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $hasher.Dispose()
+    }
+}
+
+function Write-NewUtf8File([string]$Path, [string]$Text) {
+    $parent = Split-Path -Parent $Path
+    if ([string]::IsNullOrWhiteSpace($parent) -or -not (Test-Path -LiteralPath $parent -PathType Container)) {
+        throw 'Manifest output parent directory is absent.'
+    }
+    $bytes = [Text.Encoding]::UTF8.GetBytes($Text)
+    $stream = [IO.FileStream]::new(
+        $Path,
+        [IO.FileMode]::CreateNew,
+        [IO.FileAccess]::Write,
+        [IO.FileShare]::None
+    )
+    try {
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush($true)
+    } finally {
+        $stream.Dispose()
+    }
+}
 
 function Test-DockerVolumeExists([string]$Name) {
     $previousErrorActionPreference = $ErrorActionPreference
     try {
-        # A missing volume is the expected Discover state. Windows PowerShell
+        # A missing volume is the expected Populate state. Windows PowerShell
         # 5 can promote docker's stderr NativeCommandError while the enclosing
         # script uses Stop, so capture the native exit code under Continue.
         $ErrorActionPreference = 'Continue'
@@ -90,56 +145,132 @@ function Test-DockerVolumeExists([string]$Name) {
     throw 'Docker volume existence check failed unexpectedly.'
 }
 
-if ($Mode -eq 'Discover') {
+Invoke-DockerCapture @('version', '--format', '{{.Server.Version}}') | Out-Null
+$downloaderInspection = (
+    Invoke-DockerCapture @('image', 'inspect', '--format', '{{json .}}', $DownloaderImage)
+) | ConvertFrom-Json
+if ([string]$downloaderInspection.Id -cne $expectedDownloaderImageId -or
+    @($downloaderInspection.RepoDigests | Where-Object { [string]$_ -ceq $expectedDownloaderImage }).Count -ne 1 -or
+    [string]$downloaderInspection.Descriptor.digest -cne $expectedDownloaderManifest -or
+    [string]$downloaderInspection.Descriptor.mediaType -cne $expectedDownloaderMediaType -or
+    [string]$downloaderInspection.Os -cne 'linux' -or
+    [string]$downloaderInspection.Architecture -cne 'amd64') {
+    throw 'Local downloader image identity/platform differs from the exact contract.'
+}
+
+$toolPath = (Get-Item -LiteralPath (Join-Path $PSScriptRoot 'model_volume_tool.py')).FullName
+$toolMount = ('type=bind,source={0},target=/bundle/model_volume_tool.py,readonly' -f $toolPath)
+
+if ($Mode -eq 'Populate') {
     if (Test-DockerVolumeExists $VolumeName) {
-        throw 'Discovery refuses an existing volume.'
-    }
-    & docker volume create `
-        --label 'com.friday.role=optional-secondary-model-candidate' `
-        --label 'com.friday.model-revision=fb9848e169d5b38cbc00ecf3383283ea1fc33a21' `
-        $VolumeName | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Could not create the candidate model volume.'
-    }
-    $arguments = @(
-        'run', '--rm', '--network', 'bridge',
-        '--mount', ('type=volume,source={0},target=/volume' -f $VolumeName),
-        '--mount', $toolMount,
-        '--entrypoint', 'python3'
-    )
-    if (-not [string]::IsNullOrWhiteSpace($TokenFile)) {
-        $resolvedToken = (Get-Item -LiteralPath $TokenFile).FullName
-        $arguments += @('--mount', ('type=bind,source={0},target=/run/secrets/hf-token,readonly' -f $resolvedToken))
-    }
-    $arguments += @($DownloaderImage, '/bundle/model_volume_tool.py', 'download')
-    if (-not [string]::IsNullOrWhiteSpace($TokenFile)) {
-        $arguments += @('--token-file', '/run/secrets/hf-token')
-    }
-    $manifestJson = & docker @arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Pinned-revision model discovery failed; the candidate volume was retained for inspection.'
+        throw 'Population refuses an existing volume.'
     }
     $resolvedOutput = [IO.Path]::GetFullPath($OutputManifest)
-    [IO.File]::WriteAllText($resolvedOutput, (($manifestJson -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
+    if (Test-Path -LiteralPath $resolvedOutput) {
+        throw 'Population refuses to overwrite an existing manifest copy.'
+    }
+    $outputParent = Split-Path -Parent $resolvedOutput
+    if (-not (Test-Path -LiteralPath $outputParent -PathType Container)) {
+        throw 'Manifest output parent directory is absent.'
+    }
+
+    Invoke-DockerCapture @(
+        'volume', 'create',
+        '--label', 'com.friday.role=optional-secondary-source-model',
+        '--label', ('com.friday.model-revision=' + $expectedRevision),
+        '--label', ('com.friday.source-manifest-sha256=' + $expectedManifestSha256),
+        $VolumeName
+    ) | Out-Null
+    $arguments = @(
+        'run', '--rm', '--pull', 'never', '--network', 'bridge',
+        '--read-only', '--cap-drop', 'ALL',
+        '--security-opt', 'no-new-privileges:true',
+        '--tmpfs', '/tmp:size=1g,mode=1777',
+        '--env', 'HF_HOME=/tmp/huggingface',
+        '--env', 'HF_HUB_ENABLE_HF_TRANSFER=0',
+        '--mount', ('type=volume,source={0},target=/volume' -f $VolumeName),
+        '--mount', $toolMount,
+        '--entrypoint', 'python3',
+        $DownloaderImage, '/bundle/model_volume_tool.py', 'download',
+        '--volume', '/volume'
+    )
+    try {
+        $manifestText = (Invoke-DockerCapture $arguments).TrimEnd("`r", "`n") + "`n"
+        if ((Get-TextSha256 $manifestText) -cne $expectedManifestSha256) {
+            throw 'Populated source manifest output identity is invalid.'
+        }
+        $verificationText = Invoke-DockerCapture @(
+            'run', '--rm', '--pull', 'never', '--network', 'none',
+            '--read-only', '--cap-drop', 'ALL',
+            '--security-opt', 'no-new-privileges:true',
+            '--tmpfs', '/tmp:size=64m,mode=1777',
+            '--env', 'HF_HUB_OFFLINE=1',
+            '--mount', ('type=volume,source={0},target=/volume,readonly' -f $VolumeName),
+            '--mount', $toolMount,
+            '--entrypoint', 'python3',
+            $DownloaderImage, '/bundle/model_volume_tool.py', 'verify',
+            '--source', '/volume'
+        )
+        $verification = $verificationText | ConvertFrom-Json
+        if (
+            $verification.status -cne 'passed' -or
+            $verification.manifest_raw_sha256 -cne $expectedManifestSha256 -or
+            $verification.manifest_semantic_sha256 -cne $expectedManifestSemanticSha256 -or
+            [int]$verification.file_count -ne 14 -or
+            [int64]$verification.total_bytes -ne 13789264674
+        ) {
+            throw 'Offline verification returned an unexpected source receipt.'
+        }
+        Write-NewUtf8File $resolvedOutput $manifestText
+    } catch {
+        throw 'Pinned official-source population failed; the candidate volume was retained for inspection.'
+    }
     [ordered]@{
-        schema = 'friday.secondary-model-volume-discovery.v1'
-        status = 'observed_unaccepted'
+        schema = 'friday.secondary-source-volume-population.v1'
+        status = 'verified'
         volume = $VolumeName
+        repository = $expectedRepository
+        revision = $expectedRevision
         manifest_path = $resolvedOutput
+        manifest_raw_sha256 = $expectedManifestSha256
+        file_count = 14
+        total_bytes = [int64]13789264674
+        offline_verified = $true
+        token_used = $false
     } | ConvertTo-Json -Depth 4
     return
 }
 
+if (-not (Test-DockerVolumeExists $VolumeName)) {
+    throw 'Canonical source volume is absent.'
+}
 $resolvedManifest = (Get-Item -LiteralPath $ManifestPath).FullName
-$manifestMount = ('type=bind,source={0},target=/bundle/accepted-model-manifest.json,readonly' -f $resolvedManifest)
-$verificationJson = & docker run --rm --network none `
-    --mount ('type=volume,source={0},target=/volume,readonly' -f $VolumeName) `
-    --mount $toolMount `
-    --mount $manifestMount `
-    --entrypoint python3 `
-    $DownloaderImage /bundle/model_volume_tool.py verify `
-    --manifest /bundle/accepted-model-manifest.json
-if ($LASTEXITCODE -ne 0) {
-    throw 'Model volume does not match the accepted manifest.'
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedManifest).Hash.ToLowerInvariant() -cne $expectedManifestSha256) {
+    throw 'External source manifest copy is not byte-identical to the canonical manifest.'
+}
+$manifestMount = ('type=bind,source={0},target=/bundle/source-model.verified.json,readonly' -f $resolvedManifest)
+$verificationJson = Invoke-DockerCapture @(
+    'run', '--rm', '--pull', 'never', '--network', 'none',
+    '--read-only', '--cap-drop', 'ALL',
+    '--security-opt', 'no-new-privileges:true',
+    '--tmpfs', '/tmp:size=64m,mode=1777',
+    '--env', 'HF_HUB_OFFLINE=1',
+    '--mount', ('type=volume,source={0},target=/volume,readonly' -f $VolumeName),
+    '--mount', $toolMount,
+    '--mount', $manifestMount,
+    '--entrypoint', 'python3',
+    $DownloaderImage, '/bundle/model_volume_tool.py', 'verify',
+    '--source', '/volume',
+    '--manifest', '/bundle/source-model.verified.json'
+)
+$verification = $verificationJson | ConvertFrom-Json
+if (
+    $verification.status -cne 'passed' -or
+    $verification.manifest_raw_sha256 -cne $expectedManifestSha256 -or
+    $verification.manifest_semantic_sha256 -cne $expectedManifestSemanticSha256 -or
+    [int]$verification.file_count -ne 14 -or
+    [int64]$verification.total_bytes -ne 13789264674
+) {
+    throw 'Model volume does not match the canonical official-source manifest.'
 }
 $verificationJson

@@ -18,24 +18,39 @@ from failure_battery import JOURNEY_TESTS, SUITE_FILES, journey_contract_sha256
 
 _BUNDLE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_BUNDLE_ROOT / "runtime"))
-from converted_model_manifest import (  # noqa: E402
-    ConvertedModelManifestError,
-    verify_converted_model_manifest,
+from source_model_manifest import (  # type: ignore[import-not-found]  # noqa: E402
+    SOURCE_FILE_COUNT,
+    SOURCE_MANIFEST_RAW_SHA256,
+    SOURCE_REPOSITORY,
+    SOURCE_REVISION,
+    SOURCE_TOTAL_BYTES,
+    SourceModelManifestError,
+    verify_source_model_manifest,
 )
 
-PROFILE_SCHEMA = "friday.secondary-runtime-profile.v1"
+PROFILE_SCHEMA = "friday.secondary-runtime-profile.v2"
 CAPACITY_SCHEMA = "friday.secondary-capacity-evidence.v1"
 FAILURE_SCHEMA = "friday.secondary-failure-battery.v1"
-SOURCE_REPOSITORY = "openai/gpt-oss-20b"
-SOURCE_REVISION = "6cee5e81ee83917806bbde320786a8fb61efebee"
-RUNTIME_IMAGE = "lmsysorg/sglang@sha256:7a038aa31356fdd1a5b591fc756397bc2e9eb5ac91442c407f55cd2ae8bee738"
-MODEL_PATH = "/models/gpt-oss-20b-nvfp4-modelopt/candidate"
+RUNTIME_IMAGE = "lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
+RUNTIME_IMAGE_CONFIG_DIGEST = "sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc"
+RUNTIME_IMAGE_OCI_MANIFEST_DIGEST = "sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
+RUNTIME_SOURCE_REVISION = "29481685462732237d80d86076d6563e1f658102"
+RUNTIME_VERSIONS = {
+    "sglang_version": "0.5.17",
+    "cuda_runtime_version": "13.0",
+    "pytorch_version": "2.11.0+cu130",
+    "flashinfer_version": "0.6.15.post1",
+    "sgl_kernel_version": "0.4.5",
+}
+MODEL_PATH = "/source/snapshot"
 ENDPOINT = "https://192.168.1.35:8443/v1"
 GATEWAY_IMAGE = (
     "nginxinc/nginx-unprivileged@sha256:d61d7ef52430df468e74ed6ee6e914429b80e20ba988e3176278a73165f876cf"
 )
+GATEWAY_IMAGE_CONFIG_DIGEST = "sha256:89dc7d054bddca245db3d5a779e363007d0e75b1161cfe2f283ebeaf0ed90d50"
+GATEWAY_IMAGE_LOCAL_ID = "sha256:8d764dd92e0b48d0ca94887dc0fe1df6dffc5200b25b2efcc2deb7ffb61d714c"
 CONTEXT_LADDER = frozenset({4096, 8192, 12288, 16384, 24576, 32768})
-MEMORY_GRID = frozenset({"0.86", "0.88", "0.90", "0.92", "0.94"})
+MEMORY_GRID = frozenset({"0.86", "0.88", "0.90", "0.92", "0.94", "0.96", "0.97"})
 MODES = frozenset({"shadow", "assist"})
 WORKLOADS = frozenset(
     {
@@ -93,24 +108,28 @@ PROFILE_KEYS = frozenset(
         "served_model_alias",
         "source_model_repository",
         "source_model_revision",
-        "converted_model_manifest_sha256",
-        "conversion_manifest_sha256",
+        "source_model_manifest_sha256",
         "gateway_ca_certificate_sha256",
         "runtime_image",
+        "runtime_image_config_digest",
+        "runtime_image_oci_manifest_digest",
         "runtime_source_revision",
         "runtime_manifest_sha256",
         "model_path",
         "quantization",
+        "dtype",
         "kv_cache_dtype",
         "attention_backend",
-        "fp4_gemm_backend",
+        "moe_runner_backend",
+        "mxfp4_moe_precision",
         "context_tokens",
         "max_total_tokens",
         "mem_fraction_static",
         "max_running_requests",
         "max_output_tokens",
         "chunked_prefill_size",
-        "cuda_graph_max_bs",
+        "cuda_graph_backend_decode",
+        "cuda_graph_backend_prefill",
         "allowed_modes",
         "allowed_workloads",
         "no_cpu_offload",
@@ -124,23 +143,27 @@ ENGINE_KEYS = (
     "source_model_repository",
     "source_model_revision",
     "hardware_runtime_receipt_sha256",
-    "converted_model_manifest_sha256",
-    "conversion_manifest_sha256",
+    "source_model_manifest_sha256",
     "runtime_image",
+    "runtime_image_config_digest",
+    "runtime_image_oci_manifest_digest",
     "runtime_source_revision",
     "runtime_manifest_sha256",
     "model_path",
     "quantization",
+    "dtype",
     "kv_cache_dtype",
     "attention_backend",
-    "fp4_gemm_backend",
+    "moe_runner_backend",
+    "mxfp4_moe_precision",
     "context_tokens",
     "max_total_tokens",
     "mem_fraction_static",
     "max_running_requests",
     "max_output_tokens",
     "chunked_prefill_size",
-    "cuda_graph_max_bs",
+    "cuda_graph_backend_decode",
+    "cuda_graph_backend_prefill",
     "no_cpu_offload",
 )
 RUNTIME_KEYS = frozenset(
@@ -149,6 +172,8 @@ RUNTIME_KEYS = frozenset(
         "status",
         "image_ref",
         "image_id",
+        "image_config_digest",
+        "image_oci_manifest_digest",
         "gateway_image_ref",
         "gateway_image_id",
         "gateway_expected_version",
@@ -340,18 +365,6 @@ def _engine_sha256(profile: dict[str, Any]) -> str:
     return _sha256(canonical_json(projection))
 
 
-def _validate_converter_manifest(value: dict[str, Any]) -> None:
-    template, _raw = _strict_json(
-        _BUNDLE_ROOT / "modelopt-converter-manifest.example.json",
-        label="code-owned converter template",
-        maximum_bytes=1 << 20,
-    )
-    expected = dict(template)
-    expected["status"] = "accepted"
-    if value != expected:
-        raise ProfileOperatorError("converter manifest differs from the code-owned identity")
-
-
 def _validate_runtime_manifest(value: dict[str, Any], hardware: dict[str, Any]) -> None:
     gpu = hardware.get("gpu")
     version_keys = (
@@ -365,9 +378,11 @@ def _validate_runtime_manifest(value: dict[str, Any], hardware: dict[str, Any]) 
         set(value) != RUNTIME_KEYS
         or not isinstance(gpu, dict)
         or value.get("image_ref") != RUNTIME_IMAGE
-        or _IMAGE_ID.fullmatch(str(value.get("image_id", ""))) is None
+        or value.get("image_id") != RUNTIME_IMAGE_CONFIG_DIGEST
+        or value.get("image_config_digest") != RUNTIME_IMAGE_CONFIG_DIGEST
+        or value.get("image_oci_manifest_digest") != RUNTIME_IMAGE_OCI_MANIFEST_DIGEST
         or value.get("gateway_image_ref") != GATEWAY_IMAGE
-        or _IMAGE_ID.fullmatch(str(value.get("gateway_image_id", ""))) is None
+        or value.get("gateway_image_id") != GATEWAY_IMAGE_LOCAL_ID
         or value.get("gateway_expected_version") != "1.31.3"
         or value.get("gateway_expected_user") != "101"
         or value.get("gateway_expected_platform") != "linux/amd64"
@@ -379,8 +394,9 @@ def _validate_runtime_manifest(value: dict[str, Any], hardware: dict[str, Any]) 
             not isinstance(value.get(key), str) or _VERSION.fullmatch(value[key]) is None
             for key in version_keys
         )
-        or not isinstance(value.get("sglang_git_revision"), str)
-        or _REVISION.fullmatch(value["sglang_git_revision"]) is None
+        or any(str(value.get(key, "")).startswith("REPLACE_") for key in version_keys)
+        or any(value.get(key) != expected for key, expected in RUNTIME_VERSIONS.items())
+        or value.get("sglang_git_revision") != RUNTIME_SOURCE_REVISION
         or value.get("nvidia_driver_version") != gpu.get("driver_version")
         or value.get("gpu_name") != gpu.get("name")
         or value.get("gpu_vram_mib") != gpu.get("memory_total_mib")
@@ -394,49 +410,65 @@ def _validate_runtime_manifest(value: dict[str, Any], hardware: dict[str, Any]) 
         raise ProfileOperatorError("runtime manifest identity is invalid")
 
 
-def build_candidate(args: argparse.Namespace) -> dict[str, Any]:
+def _verify_source_manifest(path: Path) -> str:
+    try:
+        receipt = verify_source_model_manifest(path, SOURCE_MANIFEST_RAW_SHA256)
+    except SourceModelManifestError as exc:
+        raise ProfileOperatorError("source model identity is invalid") from exc
+    if (
+        receipt.manifest_sha256 != SOURCE_MANIFEST_RAW_SHA256
+        or receipt.source_revision != SOURCE_REVISION
+        or receipt.file_count != SOURCE_FILE_COUNT
+        or receipt.total_bytes != SOURCE_TOTAL_BYTES
+    ):
+        raise ProfileOperatorError("source model identity is invalid")
+    return receipt.manifest_sha256
+
+
+def _validate_bound_chain(
+    *,
+    hardware_receipt: Path,
+    source_model_manifest: Path,
+    runtime_manifest: Path,
+    ca_certificate: Path,
+) -> dict[str, str]:
     hardware, hardware_raw = _accepted_manifest(
-        args.hardware_receipt,
+        hardware_receipt,
         label="hardware receipt",
         schema="friday.secondary-hardware-runtime.v1",
     )
     if _sha256(hardware_raw) != EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256:
         raise ProfileOperatorError("hardware receipt differs from the code-owned identity")
-    converted, converted_raw = _accepted_manifest(
-        args.converted_model_manifest,
-        label="converted model manifest",
-        schema="friday.secondary-modelopt-conversion-output.v1",
-        maximum_bytes=64 << 20,
-    )
-    converter, conversion_raw = _accepted_manifest(
-        args.conversion_manifest,
-        label="conversion manifest",
-        schema="friday.secondary-modelopt-converter-image.v1",
-    )
-    _validate_converter_manifest(converter)
-    converted_converter = converted.get("converter")
-    if not isinstance(converted_converter, dict) or converted_converter.get(
-        "accepted_converter_manifest_sha256"
-    ) != _sha256(conversion_raw):
-        raise ProfileOperatorError("converted model is not bound to the accepted converter")
-    try:
-        verify_converted_model_manifest(args.converted_model_manifest, _sha256(converted_raw))
-    except ConvertedModelManifestError as exc:
-        raise ProfileOperatorError("converted model identity is invalid") from exc
+    source_manifest_sha256 = _verify_source_manifest(source_model_manifest)
     runtime, runtime_raw = _accepted_manifest(
-        args.runtime_manifest,
+        runtime_manifest,
         label="runtime manifest",
         schema="friday.secondary-sglang-runtime.v1",
     )
     _validate_runtime_manifest(runtime, hardware)
-    runtime_revision = runtime["sglang_git_revision"]
-    ca_raw = _read_regular(args.ca_certificate, maximum_bytes=65_536, label="gateway CA")
+    ca_raw = _read_regular(ca_certificate, maximum_bytes=65_536, label="gateway CA")
     try:
         ca_pem = ca_raw.decode("ascii", errors="strict")
     except UnicodeError:
         raise ProfileOperatorError("gateway CA encoding is invalid") from None
     if "-----BEGIN CERTIFICATE-----" not in ca_pem or "-----END CERTIFICATE-----" not in ca_pem:
         raise ProfileOperatorError("gateway CA is not a PEM certificate")
+    return {
+        "hardware_runtime_receipt_sha256": _sha256(hardware_raw),
+        "source_model_manifest_sha256": source_manifest_sha256,
+        "runtime_manifest_sha256": _sha256(runtime_raw),
+        "runtime_source_revision": str(runtime["sglang_git_revision"]),
+        "gateway_ca_certificate_sha256": _sha256(ca_raw),
+    }
+
+
+def build_candidate(args: argparse.Namespace) -> dict[str, Any]:
+    chain = _validate_bound_chain(
+        hardware_receipt=args.hardware_receipt,
+        source_model_manifest=args.source_model_manifest,
+        runtime_manifest=args.runtime_manifest,
+        ca_certificate=args.ca_certificate,
+    )
 
     context = _exact_int(args.context_tokens, minimum=4096, maximum=32768, label="context")
     if context not in CONTEXT_LADDER:
@@ -455,29 +487,33 @@ def build_candidate(args: argparse.Namespace) -> dict[str, Any]:
         "status": "candidate",
         "profile_id": "pending",
         "engine_binding_sha256": ZERO_SHA256,
-        "hardware_runtime_receipt_sha256": _sha256(hardware_raw),
+        "hardware_runtime_receipt_sha256": chain["hardware_runtime_receipt_sha256"],
         "endpoint_base_url": ENDPOINT,
         "served_model_alias": "pending",
         "source_model_repository": SOURCE_REPOSITORY,
         "source_model_revision": SOURCE_REVISION,
-        "converted_model_manifest_sha256": _sha256(converted_raw),
-        "conversion_manifest_sha256": _sha256(conversion_raw),
-        "gateway_ca_certificate_sha256": _sha256(ca_raw),
+        "source_model_manifest_sha256": chain["source_model_manifest_sha256"],
+        "gateway_ca_certificate_sha256": chain["gateway_ca_certificate_sha256"],
         "runtime_image": RUNTIME_IMAGE,
-        "runtime_source_revision": runtime_revision,
-        "runtime_manifest_sha256": _sha256(runtime_raw),
+        "runtime_image_config_digest": RUNTIME_IMAGE_CONFIG_DIGEST,
+        "runtime_image_oci_manifest_digest": RUNTIME_IMAGE_OCI_MANIFEST_DIGEST,
+        "runtime_source_revision": chain["runtime_source_revision"],
+        "runtime_manifest_sha256": chain["runtime_manifest_sha256"],
         "model_path": MODEL_PATH,
-        "quantization": "modelopt_fp4",
-        "kv_cache_dtype": args.kv_cache_dtype,
+        "quantization": "mxfp4",
+        "dtype": "bfloat16",
+        "kv_cache_dtype": "bf16",
         "attention_backend": "triton",
-        "fp4_gemm_backend": "flashinfer_cutlass",
+        "moe_runner_backend": "flashinfer_mxfp4",
+        "mxfp4_moe_precision": "default",
         "context_tokens": context,
         "max_total_tokens": context,
         "mem_fraction_static": memory,
         "max_running_requests": 1,
         "max_output_tokens": output,
         "chunked_prefill_size": chunk,
-        "cuda_graph_max_bs": 1,
+        "cuda_graph_backend_decode": "disabled",
+        "cuda_graph_backend_prefill": "disabled",
         "allowed_modes": modes,
         "allowed_workloads": workloads,
         "no_cpu_offload": True,
@@ -532,11 +568,7 @@ def _validate_quality_cases(cases: Any) -> None:
             not isinstance(name, str)
             or row.get("status") != "passed"
             or not isinstance(digest, str)
-            or (
-                digest != ""
-                if name == "stream_cancellation"
-                else _SHA256.fullmatch(digest) is None
-            )
+            or (digest != "" if name == "stream_cancellation" else _SHA256.fullmatch(digest) is None)
         ):
             raise ProfileOperatorError("quality evidence row is invalid")
         _exact_number(row.get("latency_sec"), minimum=0.0, maximum=3_600.0, label="quality latency")
@@ -645,12 +677,10 @@ def _validate_candidate(value: dict[str, Any], raw: bytes) -> None:
     concurrency = _exact_int(value.get("max_running_requests"), minimum=1, maximum=1, label="concurrency")
     output = _exact_int(value.get("max_output_tokens"), minimum=64, maximum=4096, label="output")
     chunk = _exact_int(value.get("chunked_prefill_size"), minimum=512, maximum=2048, label="chunk")
-    graph = _exact_int(value.get("cuda_graph_max_bs"), minimum=1, maximum=1, label="graph batch")
     modes = value.get("allowed_modes")
     workloads = value.get("allowed_workloads")
     hashes = (
-        value.get("converted_model_manifest_sha256"),
-        value.get("conversion_manifest_sha256"),
+        value.get("source_model_manifest_sha256"),
         value.get("gateway_ca_certificate_sha256"),
         value.get("hardware_runtime_receipt_sha256"),
         value.get("runtime_manifest_sha256"),
@@ -667,21 +697,26 @@ def _validate_candidate(value: dict[str, Any], raw: bytes) -> None:
         or value.get("endpoint_base_url") != ENDPOINT
         or value.get("source_model_repository") != SOURCE_REPOSITORY
         or value.get("source_model_revision") != SOURCE_REVISION
+        or value.get("source_model_manifest_sha256") != SOURCE_MANIFEST_RAW_SHA256
         or any(not isinstance(item, str) or _SHA256.fullmatch(item) is None for item in hashes)
         or value.get("runtime_image") != RUNTIME_IMAGE
-        or not isinstance(value.get("runtime_source_revision"), str)
-        or _REVISION.fullmatch(value["runtime_source_revision"]) is None
+        or value.get("runtime_image_config_digest") != RUNTIME_IMAGE_CONFIG_DIGEST
+        or value.get("runtime_image_oci_manifest_digest") != RUNTIME_IMAGE_OCI_MANIFEST_DIGEST
+        or value.get("runtime_source_revision") != RUNTIME_SOURCE_REVISION
         or value.get("model_path") != MODEL_PATH
-        or value.get("quantization") != "modelopt_fp4"
-        or value.get("kv_cache_dtype") not in {"none", "fp8_e4m3"}
+        or value.get("quantization") != "mxfp4"
+        or value.get("dtype") != "bfloat16"
+        or value.get("kv_cache_dtype") != "bf16"
         or value.get("attention_backend") != "triton"
-        or value.get("fp4_gemm_backend") != "flashinfer_cutlass"
+        or value.get("moe_runner_backend") != "flashinfer_mxfp4"
+        or value.get("mxfp4_moe_precision") != "default"
         or context not in CONTEXT_LADDER
         or total != context
         or concurrency != 1
         or output >= context
         or chunk not in {512, 1024, 1536, 2048}
-        or graph != 1
+        or value.get("cuda_graph_backend_decode") != "disabled"
+        or value.get("cuda_graph_backend_prefill") != "disabled"
         or value.get("mem_fraction_static") not in MEMORY_GRID
         or not isinstance(modes, list)
         or any(not isinstance(item, str) for item in modes)
@@ -710,6 +745,14 @@ def _validate_candidate(value: dict[str, Any], raw: bytes) -> None:
 def accept_profile(args: argparse.Namespace) -> dict[str, Any]:
     candidate, candidate_raw = _strict_json(args.candidate, label="candidate profile")
     _validate_candidate(candidate, candidate_raw)
+    chain = _validate_bound_chain(
+        hardware_receipt=args.hardware_receipt,
+        source_model_manifest=args.source_model_manifest,
+        runtime_manifest=args.runtime_manifest,
+        ca_certificate=args.ca_certificate,
+    )
+    if any(candidate.get(key) != value for key, value in chain.items()):
+        raise ProfileOperatorError("candidate profile no longer matches the verified source/runtime chain")
     candidate_sha256 = _sha256(candidate_raw)
     evidence_specs = (
         ("quality", args.quality, "friday.secondary-quality-battery.v1"),
@@ -831,14 +874,12 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     candidate = commands.add_parser("candidate")
     candidate.add_argument("--hardware-receipt", required=True, type=Path)
-    candidate.add_argument("--converted-model-manifest", required=True, type=Path)
-    candidate.add_argument("--conversion-manifest", required=True, type=Path)
+    candidate.add_argument("--source-model-manifest", required=True, type=Path)
     candidate.add_argument("--runtime-manifest", required=True, type=Path)
     candidate.add_argument("--ca-certificate", required=True, type=Path)
     candidate.add_argument("--context-tokens", required=True, type=int)
     candidate.add_argument("--max-output-tokens", default=2048, type=int)
     candidate.add_argument("--mem-fraction-static", required=True, type=float)
-    candidate.add_argument("--kv-cache-dtype", choices=("none", "fp8_e4m3"), default="none")
     candidate.add_argument("--chunked-prefill-size", default=1024, type=int)
     candidate.add_argument("--allowed-modes", default="assist,shadow")
     candidate.add_argument("--allowed-workloads", default="extract")
@@ -854,6 +895,10 @@ def _parser() -> argparse.ArgumentParser:
 
     accept = commands.add_parser("accept-profile")
     accept.add_argument("--candidate", required=True, type=Path)
+    accept.add_argument("--hardware-receipt", required=True, type=Path)
+    accept.add_argument("--source-model-manifest", required=True, type=Path)
+    accept.add_argument("--runtime-manifest", required=True, type=Path)
+    accept.add_argument("--ca-certificate", required=True, type=Path)
     accept.add_argument("--quality", required=True, type=Path)
     accept.add_argument("--capacity", required=True, type=Path)
     accept.add_argument("--soak", required=True, type=Path)

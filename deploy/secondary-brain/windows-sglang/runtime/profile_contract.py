@@ -11,14 +11,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "friday.secondary-runtime-profile.v1"
-EXPECTED_MODEL_PATH = "/models/gpt-oss-20b-nvfp4-modelopt/candidate"
+SCHEMA = "friday.secondary-runtime-profile.v2"
+EXPECTED_MODEL_PATH = "/source/snapshot"
 EXPECTED_SOURCE_REVISION = "6cee5e81ee83917806bbde320786a8fb61efebee"
+EXPECTED_SOURCE_MANIFEST_SHA256 = "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"
 EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256 = "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
+EXPECTED_RUNTIME_IMAGE = (
+    "lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
+)
+EXPECTED_RUNTIME_IMAGE_CONFIG_DIGEST = (
+    "sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc"
+)
+EXPECTED_RUNTIME_IMAGE_OCI_MANIFEST_DIGEST = (
+    "sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
+)
+EXPECTED_RUNTIME_SOURCE_REVISION = "29481685462732237d80d86076d6563e1f658102"
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
+_IMAGE_ID_RE = re.compile(r"sha256:[0-9a-f]{64}")
 _REVISION_RE = re.compile(r"[0-9a-f]{40}")
 _PROFILE_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}")
-_MEMORY_FRACTIONS = frozenset({"0.86", "0.88", "0.90", "0.92", "0.94"})
+_MEMORY_FRACTIONS = frozenset({"0.86", "0.88", "0.90", "0.92", "0.94", "0.96", "0.97"})
 _CONTEXT_LADDER = frozenset({4096, 8192, 12288, 16384, 24576, 32768})
 _MODES = frozenset({"shadow", "assist"})
 _WORKLOADS = frozenset(
@@ -44,24 +56,28 @@ _KEYS = frozenset(
         "served_model_alias",
         "source_model_repository",
         "source_model_revision",
-        "converted_model_manifest_sha256",
-        "conversion_manifest_sha256",
+        "source_model_manifest_sha256",
         "gateway_ca_certificate_sha256",
         "runtime_image",
+        "runtime_image_config_digest",
+        "runtime_image_oci_manifest_digest",
         "runtime_source_revision",
         "runtime_manifest_sha256",
         "model_path",
         "quantization",
+        "dtype",
         "kv_cache_dtype",
         "attention_backend",
-        "fp4_gemm_backend",
+        "moe_runner_backend",
+        "mxfp4_moe_precision",
         "context_tokens",
         "max_total_tokens",
         "mem_fraction_static",
         "max_running_requests",
         "max_output_tokens",
         "chunked_prefill_size",
-        "cuda_graph_max_bs",
+        "cuda_graph_backend_decode",
+        "cuda_graph_backend_prefill",
         "allowed_modes",
         "allowed_workloads",
         "no_cpu_offload",
@@ -75,23 +91,27 @@ _ENGINE_KEYS = (
     "source_model_repository",
     "source_model_revision",
     "hardware_runtime_receipt_sha256",
-    "converted_model_manifest_sha256",
-    "conversion_manifest_sha256",
+    "source_model_manifest_sha256",
     "runtime_image",
+    "runtime_image_config_digest",
+    "runtime_image_oci_manifest_digest",
     "runtime_source_revision",
     "runtime_manifest_sha256",
     "model_path",
     "quantization",
+    "dtype",
     "kv_cache_dtype",
     "attention_backend",
-    "fp4_gemm_backend",
+    "moe_runner_backend",
+    "mxfp4_moe_precision",
     "context_tokens",
     "max_total_tokens",
     "mem_fraction_static",
     "max_running_requests",
     "max_output_tokens",
     "chunked_prefill_size",
-    "cuda_graph_max_bs",
+    "cuda_graph_backend_decode",
+    "cuda_graph_backend_prefill",
     "no_cpu_offload",
 )
 
@@ -198,21 +218,26 @@ class LaunchProfile:
     manifest_sha256: str
     status: str
     runtime_image: str
-    converted_model_manifest_sha256: str
+    runtime_image_config_digest: str
+    runtime_image_oci_manifest_digest: str
+    source_model_manifest_sha256: str
     hardware_runtime_receipt_sha256: str
     model_path: str
     served_model_alias: str
     quantization: str
+    dtype: str
     kv_cache_dtype: str
     attention_backend: str
-    fp4_gemm_backend: str
+    moe_runner_backend: str
+    mxfp4_moe_precision: str
     context_tokens: int
     max_total_tokens: int
     mem_fraction_static: str
     max_running_requests: int
     max_output_tokens: int
     chunked_prefill_size: int
-    cuda_graph_max_bs: int
+    cuda_graph_backend_decode: str
+    cuda_graph_backend_prefill: str
 
     def server_arguments(self, api_key: str) -> list[str]:
         arguments = [
@@ -222,6 +247,8 @@ class LaunchProfile:
             self.served_model_alias,
             "--quantization",
             self.quantization,
+            "--dtype",
+            self.dtype,
             "--host",
             "0.0.0.0",
             "--port",
@@ -234,14 +261,20 @@ class LaunchProfile:
             "gpt-oss",
             "--attention-backend",
             self.attention_backend,
-            "--fp4-gemm-backend",
-            self.fp4_gemm_backend,
+            "--moe-runner-backend",
+            self.moe_runner_backend,
+            "--flashinfer-mxfp4-moe-precision",
+            self.mxfp4_moe_precision,
+            "--kv-cache-dtype",
+            self.kv_cache_dtype,
             "--chunked-prefill-size",
             str(self.chunked_prefill_size),
             "--max-running-requests",
             str(self.max_running_requests),
-            "--cuda-graph-max-bs",
-            str(self.cuda_graph_max_bs),
+            "--cuda-graph-backend-decode",
+            self.cuda_graph_backend_decode,
+            "--cuda-graph-backend-prefill",
+            self.cuda_graph_backend_prefill,
             "--context-length",
             str(self.context_tokens),
             "--max-total-tokens",
@@ -251,8 +284,6 @@ class LaunchProfile:
             "--enable-metrics",
             "--enable-cache-report",
         ]
-        if self.kv_cache_dtype != "none":
-            arguments.extend(("--kv-cache-dtype", self.kv_cache_dtype))
         return arguments
 
 
@@ -288,8 +319,7 @@ def load_launch_profile(
     ):
         raise ProfileContractError("profile source identity is invalid")
     for key in (
-        "converted_model_manifest_sha256",
-        "conversion_manifest_sha256",
+        "source_model_manifest_sha256",
         "gateway_ca_certificate_sha256",
         "hardware_runtime_receipt_sha256",
         "runtime_manifest_sha256",
@@ -304,20 +334,35 @@ def load_launch_profile(
             raise ProfileContractError("accepted profile has missing evidence")
     if value["hardware_runtime_receipt_sha256"] != EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256:
         raise ProfileContractError("profile hardware/runtime receipt identity is invalid")
+    if value["source_model_manifest_sha256"] != EXPECTED_SOURCE_MANIFEST_SHA256:
+        raise ProfileContractError("profile source manifest identity is invalid")
     runtime_image = value["runtime_image"]
+    runtime_config_digest = value["runtime_image_config_digest"]
+    runtime_oci_digest = value["runtime_image_oci_manifest_digest"]
     runtime_revision = value["runtime_source_revision"]
     if (
         not isinstance(runtime_image, str)
-        or not re.fullmatch(r"lmsysorg/sglang@sha256:[0-9a-f]{64}", runtime_image)
+        or runtime_image != EXPECTED_RUNTIME_IMAGE
+        or not isinstance(runtime_config_digest, str)
+        or _IMAGE_ID_RE.fullmatch(runtime_config_digest) is None
+        or runtime_config_digest != EXPECTED_RUNTIME_IMAGE_CONFIG_DIGEST
+        or not isinstance(runtime_oci_digest, str)
+        or _IMAGE_ID_RE.fullmatch(runtime_oci_digest) is None
+        or runtime_oci_digest != EXPECTED_RUNTIME_IMAGE_OCI_MANIFEST_DIGEST
         or not isinstance(runtime_revision, str)
         or not _REVISION_RE.fullmatch(runtime_revision)
+        or runtime_revision != EXPECTED_RUNTIME_SOURCE_REVISION
     ):
         raise ProfileContractError("profile runtime identity is invalid")
     if runtime_image != actual_runtime_image:
         raise ProfileContractError("running image does not match the profile")
-    if value["quantization"] != "modelopt_fp4" or value["kv_cache_dtype"] not in {"none", "fp8_e4m3"}:
+    if value["quantization"] != "mxfp4" or value["dtype"] != "bfloat16" or value["kv_cache_dtype"] != "bf16":
         raise ProfileContractError("profile quantization is invalid")
-    if value["attention_backend"] != "triton" or value["fp4_gemm_backend"] != "flashinfer_cutlass":
+    if (
+        value["attention_backend"] != "triton"
+        or value["moe_runner_backend"] != "flashinfer_mxfp4"
+        or value["mxfp4_moe_precision"] != "default"
+    ):
         raise ProfileContractError("profile kernel selection is invalid")
     context_tokens = _exact_int(value["context_tokens"], minimum=4096, maximum=32768)
     if context_tokens not in _CONTEXT_LADDER:
@@ -333,7 +378,8 @@ def load_launch_profile(
     if max_output_tokens >= context_tokens:
         raise ProfileContractError("profile output budget is invalid")
     chunked_prefill_size = _exact_int(value["chunked_prefill_size"], minimum=512, maximum=2048)
-    cuda_graph_max_bs = _exact_int(value["cuda_graph_max_bs"], minimum=1, maximum=1)
+    if value["cuda_graph_backend_decode"] != "disabled" or value["cuda_graph_backend_prefill"] != "disabled":
+        raise ProfileContractError("profile CUDA graph selection is invalid")
     _closed_list(value["allowed_modes"], _MODES)
     _closed_list(value["allowed_workloads"], _WORKLOADS)
     if value["no_cpu_offload"] is not True:
@@ -343,19 +389,24 @@ def load_launch_profile(
         manifest_sha256=hashlib.sha256(raw).hexdigest(),
         status=value["status"],
         runtime_image=runtime_image,
-        converted_model_manifest_sha256=value["converted_model_manifest_sha256"],
+        runtime_image_config_digest=runtime_config_digest,
+        runtime_image_oci_manifest_digest=runtime_oci_digest,
+        source_model_manifest_sha256=value["source_model_manifest_sha256"],
         hardware_runtime_receipt_sha256=value["hardware_runtime_receipt_sha256"],
         model_path=value["model_path"],
         served_model_alias=value["served_model_alias"],
         quantization=value["quantization"],
+        dtype=value["dtype"],
         kv_cache_dtype=value["kv_cache_dtype"],
         attention_backend=value["attention_backend"],
-        fp4_gemm_backend=value["fp4_gemm_backend"],
+        moe_runner_backend=value["moe_runner_backend"],
+        mxfp4_moe_precision=value["mxfp4_moe_precision"],
         context_tokens=context_tokens,
         max_total_tokens=max_total_tokens,
         mem_fraction_static=mem_fraction,
         max_running_requests=max_running_requests,
         max_output_tokens=max_output_tokens,
         chunked_prefill_size=chunked_prefill_size,
-        cuda_graph_max_bs=cuda_graph_max_bs,
+        cuda_graph_backend_decode=value["cuda_graph_backend_decode"],
+        cuda_graph_backend_prefill=value["cuda_graph_backend_prefill"],
     )

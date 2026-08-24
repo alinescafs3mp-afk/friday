@@ -62,7 +62,8 @@ def run_probe(base_url: str, api_key: str, timeout_sec: float, ca_file: Path | N
         ],
         timeout_sec=timeout_sec,
         max_tokens=96,
-        temperature=0.0,
+        temperature=1.0,
+        extra={"reasoning_effort": "low", "top_p": 1.0, "seed": 0},
         ca_file=ca_file,
     )
     if not any(

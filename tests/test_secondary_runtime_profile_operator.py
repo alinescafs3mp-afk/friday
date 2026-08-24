@@ -47,82 +47,18 @@ def _hardware() -> dict[str, Any]:
 
 
 def _candidate_args(tmp_path: Path) -> argparse.Namespace:
-    manifest_contract = importlib.import_module("converted_model_manifest")
     hardware = _write(tmp_path / "hardware.json", _hardware())
-    conversion_value = json.loads(
-        (BUNDLE / "modelopt-converter-manifest.example.json").read_text(encoding="utf-8")
-    )
-    conversion_value["status"] = "accepted"
-    conversion = _write(tmp_path / "conversion.json", conversion_value)
-    conversion_sha256 = hashlib.sha256(conversion.read_bytes()).hexdigest()
-    converted = _write(
-        tmp_path / "converted.json",
-        {
-            "schema": "friday.secondary-modelopt-conversion-output.v1",
-            "status": "accepted",
-            "source": {
-                "repository": "openai/gpt-oss-20b",
-                "revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
-                "manifest_semantic_sha256": manifest_contract.SOURCE_MANIFEST_SEMANTIC_SHA256,
-            },
-            "converter": {
-                "image": manifest_contract.SEALED_ALTERNATIVE_IMAGE,
-                "accepted_converter_manifest_sha256": conversion_sha256,
-                "modelopt_commit": manifest_contract.MODELOPT_COMMIT,
-                "artifacts": manifest_contract.ARTIFACTS,
-                "package_versions": manifest_contract.PACKAGE_VERSIONS,
-            },
-            "recipe": {
-                "qformat": "nvfp4_mlp_only",
-                "cast_mxfp4_to_nvfp4": True,
-                "kv_cache_qformat": "none",
-                "calibration_sha256": manifest_contract.CALIBRATION_SHA256,
-                "calib_size": 256,
-                "calib_seq": 512,
-                "batch_size": 1,
-                "use_seq_device_map": True,
-                "gpu_max_mem_percentage": 0.70,
-                "skip_generate": True,
-                "low_memory_mode": False,
-                "network": "none",
-            },
-            "output_directory": "candidate",
-            "metadata": {
-                "architecture": "GptOssForCausalLM",
-                "model_type": "gpt_oss",
-                "modelopt_version": "0.45.0",
-                "quant_algo": "NVFP4",
-                "kv_cache_quant_algo": "none",
-                "safetensors_shards": 1,
-                "weight_map_entries": 1,
-            },
-            "file_count": 1,
-            "total_bytes": manifest_contract.MIN_OUTPUT_BYTES,
-            "files": [
-                {
-                    "path": "model-00001-of-00001.safetensors",
-                    "size": manifest_contract.MIN_OUTPUT_BYTES,
-                    "sha256": "1" * 64,
-                }
-            ],
-            "note": manifest_contract._NOTE,
-        },
-    )
+    source_manifest = tmp_path / "source-manifest.json"
+    source_manifest.write_bytes(b"sealed-source-manifest-fixture")
     runtime_value = json.loads((BUNDLE / "runtime-manifest.example.json").read_text(encoding="utf-8"))
     runtime_value.update(
         {
             "status": "accepted",
-            "image_ref": (
-                "lmsysorg/sglang@sha256:7a038aa31356fdd1a5b591fc756397bc2e9eb5ac91442c407f55cd2ae8bee738"
-            ),
-            "image_id": "sha256:" + "2" * 64,
-            "gateway_image_id": "sha256:" + "3" * 64,
-            "sglang_version": "0.5.16",
-            "sglang_git_revision": "a" * 40,
-            "cuda_runtime_version": "13.0.1",
-            "pytorch_version": "2.10.0a0",
-            "flashinfer_version": "0.6.6",
-            "sgl_kernel_version": "0.3.21",
+            "gateway_image_id": ("sha256:8d764dd92e0b48d0ca94887dc0fe1df6dffc5200b25b2efcc2deb7ffb61d714c"),
+            "cuda_runtime_version": "13.0",
+            "pytorch_version": "2.11.0+cu130",
+            "flashinfer_version": "0.6.15.post1",
+            "sgl_kernel_version": "0.4.5",
             "nvidia_driver_version": "610.88",
             "gpu_name": "NVIDIA GeForce RTX 5080 Laptop GPU",
             "gpu_vram_mib": 16303,
@@ -134,20 +70,36 @@ def _candidate_args(tmp_path: Path) -> argparse.Namespace:
     ca.write_bytes(b"-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----\n")
     return argparse.Namespace(
         hardware_receipt=hardware,
-        converted_model_manifest=converted,
-        conversion_manifest=conversion,
+        source_model_manifest=source_manifest,
         runtime_manifest=runtime,
         ca_certificate=ca,
         context_tokens=4096,
         max_output_tokens=512,
         mem_fraction_static=0.92,
-        kv_cache_dtype="none",
         chunked_prefill_size=1024,
         allowed_modes="assist,shadow",
         allowed_workloads="extract",
         profile_id_output=tmp_path / "profile.id",
         output=tmp_path / "profile.candidate.json",
     )
+
+
+@pytest.fixture(autouse=True)
+def _verified_source_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    source_contract = importlib.import_module("source_model_manifest")
+
+    def verify(path: Path, expected_sha256: str) -> Any:
+        assert path.name == "source-manifest.json"
+        assert expected_sha256 == source_contract.SOURCE_MANIFEST_RAW_SHA256
+        return source_contract.SourceModelReceipt(
+            manifest_sha256=source_contract.SOURCE_MANIFEST_RAW_SHA256,
+            source_revision=source_contract.SOURCE_REVISION,
+            file_count=source_contract.SOURCE_FILE_COUNT,
+            total_bytes=source_contract.SOURCE_TOTAL_BYTES,
+        )
+
+    monkeypatch.setattr(operator, "verify_source_model_manifest", verify)
 
 
 def _identity(profile: dict[str, Any], raw: bytes) -> dict[str, Any]:
@@ -174,6 +126,16 @@ def test_operator_builds_one_runtime_loadable_candidate(tmp_path: Path) -> None:
     assert result["status"] == "candidate_created"
     assert profile.status == "candidate"
     assert profile.hardware_runtime_receipt_sha256 == operator.EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256
+    assert profile.source_model_manifest_sha256 == operator.SOURCE_MANIFEST_RAW_SHA256
+    assert profile.runtime_image_config_digest == operator.RUNTIME_IMAGE_CONFIG_DIGEST
+    assert profile.runtime_image_oci_manifest_digest == operator.RUNTIME_IMAGE_OCI_MANIFEST_DIGEST
+    assert profile.quantization == "mxfp4"
+    assert profile.dtype == "bfloat16"
+    assert profile.kv_cache_dtype == "bf16"
+    assert profile.moe_runner_backend == "flashinfer_mxfp4"
+    assert profile.mxfp4_moe_precision == "default"
+    assert profile.cuda_graph_backend_decode == "disabled"
+    assert profile.cuda_graph_backend_prefill == "disabled"
     assert profile.served_model_alias == f"friday-secondary-{profile.profile_id}"
     assert args.profile_id_output.read_text(encoding="ascii") == profile.profile_id
 
@@ -189,6 +151,57 @@ def test_operator_rejects_hardware_receipt_drift_before_outputs(tmp_path: Path) 
         operator.build_candidate(args)
     assert not args.output.exists()
     assert not args.profile_id_output.exists()
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    (
+        ("cuda_runtime_version", "REPLACE_AFTER_LIVE_PROBE"),
+        ("pytorch_version", "REPLACE_AFTER_LIVE_PROBE"),
+        ("flashinfer_version", "REPLACE_AFTER_LIVE_PROBE"),
+        ("sgl_kernel_version", "REPLACE_AFTER_LIVE_PROBE"),
+        ("gateway_image_id", "sha256:" + "3" * 64),
+    ),
+)
+def test_operator_rejects_unmeasured_or_unbound_runtime_identity(
+    tmp_path: Path,
+    key: str,
+    value: str,
+) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    args = _candidate_args(tmp_path)
+    runtime = json.loads(args.runtime_manifest.read_text(encoding="utf-8"))
+    runtime[key] = value
+    args.runtime_manifest.write_bytes(_canonical(runtime))
+
+    with pytest.raises(operator.ProfileOperatorError, match="runtime manifest identity"):
+        operator.build_candidate(args)
+    assert not args.output.exists()
+    assert not args.profile_id_output.exists()
+
+
+def test_profile_promotion_rechecks_the_source_runtime_chain(tmp_path: Path) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    args = _candidate_args(tmp_path)
+    operator.build_candidate(args)
+    args.ca_certificate.write_bytes(b"-----BEGIN CERTIFICATE-----\nchanged\n-----END CERTIFICATE-----\n")
+    placeholder = _write(tmp_path / "placeholder.json", {})
+
+    with pytest.raises(operator.ProfileOperatorError, match="no longer matches"):
+        operator.accept_profile(
+            argparse.Namespace(
+                candidate=args.output,
+                hardware_receipt=args.hardware_receipt,
+                source_model_manifest=args.source_model_manifest,
+                runtime_manifest=args.runtime_manifest,
+                ca_certificate=args.ca_certificate,
+                quality=placeholder,
+                capacity=placeholder,
+                soak=placeholder,
+                failure=placeholder,
+                output=tmp_path / "accepted.json",
+            )
+        )
 
 
 def test_capacity_and_profile_promotion_are_candidate_epoch_bound(tmp_path: Path) -> None:
@@ -307,6 +320,10 @@ def test_capacity_and_profile_promotion_are_candidate_epoch_bound(tmp_path: Path
     result = operator.accept_profile(
         argparse.Namespace(
             candidate=candidate_args.output,
+            hardware_receipt=candidate_args.hardware_receipt,
+            source_model_manifest=candidate_args.source_model_manifest,
+            runtime_manifest=candidate_args.runtime_manifest,
+            ca_certificate=candidate_args.ca_certificate,
             quality=quality,
             capacity=capacity_output,
             soak=soak,
@@ -342,6 +359,10 @@ def test_profile_promotion_rejects_evidence_from_another_candidate(tmp_path: Pat
         operator.accept_profile(
             argparse.Namespace(
                 candidate=args.output,
+                hardware_receipt=args.hardware_receipt,
+                source_model_manifest=args.source_model_manifest,
+                runtime_manifest=args.runtime_manifest,
+                ca_certificate=args.ca_certificate,
                 quality=evidence,
                 capacity=evidence,
                 soak=evidence,
@@ -367,6 +388,53 @@ def test_quality_contract_rejects_anonymous_pass_rows_and_matches_the_runner() -
     assert actual == operator.QUALITY_CASES
     with pytest.raises(operator.ProfileOperatorError, match="quality evidence"):
         operator._validate_quality_cases([{"status": "passed"} for _ in operator.QUALITY_CASES])
+
+
+def test_endpoint_helpers_fix_the_certified_gpt_oss_sampling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = importlib.import_module("endpoint_common")
+    captured: dict[str, Any] = {}
+
+    def request_json(_method: str, _url: str, **kwargs: Any) -> tuple[dict[str, Any], float]:
+        captured.update(kwargs["payload"])
+        return (
+            {
+                "model": endpoint.EXPECTED_MODEL,
+                "choices": [
+                    {
+                        "message": {"content": "ready"},
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+            0.01,
+        )
+
+    monkeypatch.setattr(endpoint, "request_json", request_json)
+    endpoint.chat_completion(
+        "http://127.0.0.1:30000/v1",
+        api_key="a" * 64,
+        messages=[{"role": "user", "content": "ready"}],
+        timeout_sec=1.0,
+        max_tokens=16,
+    )
+
+    assert {key: captured[key] for key in ("reasoning_effort", "temperature", "top_p", "seed")} == {
+        "reasoning_effort": "low",
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "seed": 0,
+    }
+    with pytest.raises(endpoint.EndpointError, match="cannot be overridden"):
+        endpoint.chat_completion(
+            "http://127.0.0.1:30000/v1",
+            api_key="a" * 64,
+            messages=[{"role": "user", "content": "ready"}],
+            timeout_sec=1.0,
+            max_tokens=16,
+            extra={"seed": 1},
+        )
 
 
 def test_failure_runner_emits_only_measured_closed_journeys(

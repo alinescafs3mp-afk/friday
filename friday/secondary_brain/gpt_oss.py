@@ -163,7 +163,12 @@ class GptOssProtocolAdapter:
             # is deliberately low-effort; separate certification probes cover
             # medium/high reasoning without exposing it to Friday.
             "reasoning_effort": "low",
-            "temperature": 0.0,
+            # GPT-OSS is operated with its supported stochastic sampling
+            # envelope. Keep that protocol closed and reproducible; callers
+            # have no override surface for it.
+            "temperature": 1.0,
+            "top_p": 1.0,
+            "seed": 0,
             "stream": False,
         }
 
