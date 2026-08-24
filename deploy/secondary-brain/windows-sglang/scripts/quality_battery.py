@@ -183,8 +183,10 @@ def _json_equals(expected: object) -> Callable[[SanitizedCompletion], bool]:
 
 def _summary_is_faithful(completion: SanitizedCompletion) -> bool:
     value = completion.content.casefold()
-    dotted_date = bool(re.search(r"(?<!\d)24\.08\.2026(?!\d)", value))
-    written_date = bool(re.search(r"(?<!\d)24\s+августа\s+2026(?:\s+года)?(?!\d)", value))
+    dotted_date_pattern = r"(?<!\d)24\.08\.2026(?!\d)"
+    written_date_pattern = r"(?<!\d)24\s+августа\s+2026(?:\s+года)?(?!\d)"
+    dotted_date = bool(re.search(dotted_date_pattern, value))
+    written_date = bool(re.search(written_date_pattern, value))
     if dotted_date == written_date:
         return False
     numbers = tuple(re.findall(r"\d+", value))
@@ -192,6 +194,16 @@ def _summary_is_faithful(completion: SanitizedCompletion) -> bool:
         {("17", "24", "08", "2026"), ("24", "08", "2026", "17")}
         if dotted_date
         else {("17", "24", "2026"), ("24", "2026", "17")}
+    )
+    date_pattern = rf"(?:{dotted_date_pattern}|{written_date_pattern})"
+    deadline_cue = (
+        r"(?:срок(?:а|у|ом|е)?|дедлайн(?:а|у|ом|е)?|заверш[а-яё]*|"
+        r"оконч[а-яё]*|сда(?:ч|т)[а-яё]*|выполн[а-яё]*|готов[а-яё]*)"
+    )
+    deadline_gap = r"[^\n.!?;]{0,96}"
+    deadline_is_stated = bool(
+        re.search(rf"{deadline_cue}{deadline_gap}{date_pattern}", value)
+        or re.search(rf"{date_pattern}{deadline_gap}{deadline_cue}", value)
     )
     return (
         completion.finish_reason == "stop"
@@ -204,7 +216,7 @@ def _summary_is_faithful(completion: SanitizedCompletion) -> bool:
                 value,
             )
         )
-        and bool(re.search(r"(?<![а-яё])срок(?:а|у|ом|е)?(?![а-яё])", value))
+        and deadline_is_stated
         and numbers in allowed_numbers
     )
 
