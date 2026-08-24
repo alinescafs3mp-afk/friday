@@ -431,6 +431,9 @@ def test_summary_prompt_declares_the_closed_fact_contract(battery: Any) -> None:
 
     assert all(item in prompt for item in ("проект", "север", "бюджет", "17 рублей", "срок"))
     assert "без новых фактов или чисел" in prompt
+    assert "начни предложение дословно" in prompt
+    assert "проект „север“: бюджет 17 рублей, срок" in prompt
+    assert "ничего больше не добавляй" in prompt
     assert "24.08.2026" in prompt
     assert "24 августа 2026 года" in prompt
 
