@@ -5,7 +5,8 @@ This bundle runs one detachable, advisory GPT-OSS node on the Windows laptop at
 publication authority or V12 authority, and loss of the laptop must degrade to
 the normal primary path.
 
-The admitted runtime is one exact native-MXFP4 combination:
+The immutable native-MXFP4 base is exact; only a profile selected from the
+closed candidate surface may vary its reviewed engine settings:
 
 - model `openai/gpt-oss-20b@6cee5e81ee83917806bbde320786a8fb61efebee`;
 - sealed volume `friday-secondary-source-gptoss20b`, mounted read-only at `/source`;
@@ -15,8 +16,9 @@ The admitted runtime is one exact native-MXFP4 combination:
 - image config
   `sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc`;
 - SGLang source revision `29481685462732237d80d86076d6563e1f658102`;
-- native `mxfp4` weights, `flashinfer_mxfp4` MoE on SM120, Triton attention,
-  BF16 model/KV, one running request and CUDA graphs disabled.
+- native `mxfp4` weights, BF16 model dtype, `flashinfer_mxfp4` MoE on SM120,
+  one running request and no CPU offload. BF16 KV, Triton decode and disabled
+  CUDA graphs are the safe baseline, not a certified winner.
 
 The earlier community checkpoint, internal ModelOpt NVFP4 conversion and patched
 SGLang 0.5.16 image are rejected. Their conversion and calibration utilities
@@ -37,6 +39,20 @@ have been removed from this deployment bundle.
   context, memory, graph policy and every acceptance receipt.
 - The accepted-profile registry stays empty until protocol, quality, capacity,
   restart, soak and failure batteries all pass.
+
+## Current checkpoint
+
+`main` and the laptop bundle are exact at
+`c726e1a6d6c3826f939c5c586034d6a21fe32917`. The laptop sync receipt is
+`1077a0e39025c7941e4751013baf0134ce494dd3fe0d85f960e70d56a7056dea`; full
+preflight evidence is green at
+`99796c80ff9b6028f41d8ff095706147cd5d5e4ac5275247ae29e5ff0ad2db2b`.
+The exact observed/accepted hardware receipts are respectively
+`7b850221e7e11ac0063971d7baaf627c96eae5441368f1907cc070106832b0f3` and
+`0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f`.
+The sealed model source is exact and zero containers were left running. No
+candidate has been run; no winner, accepted profile or production traffic is
+claimed yet.
 
 ## 1. Management access and host preflight
 
@@ -131,13 +147,14 @@ SID and SYSTEM.
 Only the public `secrets/tls/ca.crt` may leave the laptop. Friday uses that CA
 and the gateway bearer; the internal SGLang bearer never leaves the laptop.
 
-## 4. Build the immutable candidate profile
+## 4. Build an immutable candidate profile
 
 Create `evidence/runtime.accepted.json` from `runtime-manifest.example.json`
 only after preflight reproduces every pinned image, package and hardware value;
 change only its status to `accepted`.
 
-Build a 4K, single-request, no-graph candidate:
+Build the safe 4K/BF16/no-graph baseline first. This is an experiment starting
+point, not an accepted or preferred profile:
 
 ```powershell
 python .\scripts\runtime_profile_operator.py candidate `
@@ -152,11 +169,29 @@ python .\scripts\runtime_profile_operator.py candidate `
   --output .\evidence\profile.candidate.json
 ```
 
-The operator fixes `dtype=bfloat16`, `quantization=mxfp4`,
-`kv_cache_dtype=bf16`, `attention_backend=triton`,
-`moe_runner_backend=flashinfer_mxfp4`, `mxfp4_moe_precision=default` and both
-CUDA-graph phases to `disabled`. The profile ID and served-model alias are
-derived from the complete engine projection.
+The profile ID and served-model alias are derived from the complete engine
+projection. `dtype=bfloat16`, `quantization=mxfp4`, global/prefill attention
+`triton`, `moe_runner_backend=flashinfer_mxfp4`, hybrid SWA memory, one running
+request, prefill graphs disabled and no CPU offload are fixed.
+
+Optional candidate flags have these closed choices and defaults:
+
+- `--kv-cache-dtype`: `bf16` (default) or `fp8_e4m3`; scale policy is derived as
+  `not_applicable` or `implicit_unit` and cannot be supplied independently.
+- `--decode-attention-backend`: `triton` (default) or `trtllm_mha`;
+  `--sampling-backend`: `pytorch` (default) or `flashinfer`.
+- `--page-size`: `1` (default) or `16`; `--radix-cache-enabled` and
+  `--overlap-schedule-enabled`: `true` (default) or `false`.
+- `--swa-full-tokens-ratio`: `0.25`, `0.50`, `0.80` (default) or `1.00`;
+  `--chunked-prefill-size`: `512`, `1024` (default), `1536` or `2048`.
+- `--cuda-graph-backend-decode`: `disabled` (default), which binds batch shape
+  `0/[]`, or `full`, which is restricted to batch shape `1/[1]`.
+
+`--context-tokens` must be one of
+`4096,8192,12288,16384,24576,32768,40960,49152,65536`;
+`--mem-fraction-static` must be one of
+`0.86,0.88,0.90,0.92,0.94,0.95,0.96,0.97`. A candidate is only a candidate
+until its exact evidence chain is promoted.
 
 ## 5. Configure and start the detached node
 
@@ -174,16 +209,20 @@ docker compose --env-file .env -f compose.yml up -d
 docker compose --env-file .env -f compose.yml ps
 ```
 
-Startup must prove the native source and runtime projection: `mxfp4`,
-`flashinfer_mxfp4`, the SM120 FlashInfer CUTLASS path, BF16 KV, 4K token pool,
-memory fraction 0.97, both graph phases disabled and no CPU offload. Reject any
-NaN/Inf, repeated-token degeneration, backend fallback, missing final channel,
-unexpected image identity or source drift.
+Startup must prove the native source and the exact candidate projection. For the
+example above that means BF16 KV, 4K, memory fraction 0.97 and disabled graphs;
+other reviewed candidates must reproduce their own bound values exactly. Reject
+any NaN/Inf, repeated-token degeneration, backend fallback, missing final
+channel, unexpected image identity or source drift.
 
 ## 6. Probe, tune, soak and promote through TLS
 
-All evidence tools retain only bounded status, latency/token counts and hashes;
-they do not retain prompts, responses, reasoning or secrets.
+All evidence tools bind the exact profile epoch, HTTPS endpoint and private CA,
+and retain only bounded status, latency/token counts and hashes; they do not
+retain prompts, responses, reasoning or secrets. Quality includes a
+deterministic near-limit recall case generated from the candidate context, so an
+FP8 candidate cannot pass on short prompts alone. Capacity evidence must match
+the candidate context and memory exactly.
 
 ```bash
 python scripts/probe_endpoint.py \

@@ -3,10 +3,12 @@
 - Updated: 2026-08-24
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
-- Phase: **native MXFP4 endpoint certification**
-- Primary production: Friday `0.207.8`, schema 38, unchanged
-- Current source: `main` at `4511737`; the accepted secondary-profile registry
-  remains empty, so production cannot send traffic to an uncertified laptop
+- Phase: **closed candidate-matrix certification**
+- Primary production: Friday `0.207.8` / `da8d11e2ac3c8982e43fa1f104076e922426ac25`,
+  schema 38, unchanged
+- Current source: `main` at `c726e1a6d6c3826f939c5c586034d6a21fe32917`;
+  the accepted secondary-profile registry remains empty and no traffic is sent
+  to the laptop
 - Rollout policy: default-off; the primary model remains required and final;
   the secondary has no tool, effect, publication or V12 authority
 
@@ -19,6 +21,17 @@
   Docker Desktop `4.87.0`, Linux engine `29.7.2`.
 - RTX 5080 Laptop GPU: driver `610.88`, 16,303 MiB VRAM and compute capability
   `12.0`; the pinned CUDA container reproduced those facts.
+- The laptop has the exact `c726e1a6d6c3826f939c5c586034d6a21fe32917`
+  bundle. Its sync receipt is
+  `1077a0e39025c7941e4751013baf0134ce494dd3fe0d85f960e70d56a7056dea`;
+  the full preflight is green with evidence SHA-256
+  `99796c80ff9b6028f41d8ff095706147cd5d5e4ac5275247ae29e5ff0ad2db2b`.
+- The observed hardware receipt is
+  `7b850221e7e11ac0063971d7baaf627c96eae5441368f1907cc070106832b0f3`;
+  its protected accepted form is
+  `0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f`.
+  The sealed source is exact and the checkpoint ended with zero running
+  containers.
 
 ## Model/runtime checkpoint
 
@@ -41,6 +54,11 @@
   `faf4af0c6e429e2ce2b716f84510049bc0fac740c921827e97c4ad14e93f13d0`.
 - Canary scope is deliberately `production_accepted=false`. The container and
   transient cache were removed after the run; the GPU is clean.
+- Candidate construction is now closed to BF16 or FP8 E4M3 KV (the latter with
+  derived implicit-unit scaling), contexts through 65,536 tokens, the exact
+  memory/chunk grids, reviewed prefill/decode/sampling backends, page sizes,
+  radix/overlap cache policy, hybrid-SWA ratios and decode graphs only at batch
+  one. No matrix winner has been measured or accepted.
 
 ## Friday checkpoint
 
@@ -49,9 +67,15 @@
   fallback; optional advice is skipped; secondary output cannot execute tools
   or publish a final answer.
 - Product/runtime admission is profile-v2 and binds the exact source manifest,
-  OCI/config identities, package versions, kernels, context, memory and evidence.
-- Full isolated source gate at `4511737`: 17,648 passed, 2 explicitly configured
-  real-environment tests skipped; focused Ruff, format and mypy gates are green.
+  OCI/config identities, package versions, kernels and every candidate engine
+  choice. Quality now includes deterministic near-limit recall derived from the
+  profile context; endpoint/capacity evidence is bound to exact HTTPS, private
+  CA, profile epoch, context and memory without retaining raw prompts.
+- Gate at `c726e1a6d6c3826f939c5c586034d6a21fe32917`: 17,689 passed in the
+  full parallel run, and the parallel-skipped canvas case passed sequentially,
+  for 17,690 verified tests. Only the explicitly configured real Syncthing and
+  backup environments remain unrun. The secondary-focused gate passed 206;
+  Ruff and mypy are green.
 
 ## Paused parent checkpoint
 
@@ -61,7 +85,8 @@
 
 ## Active order
 
-1. Reproduce the exact preflight and start the private-CA candidate endpoint.
+1. Start each exact private-CA candidate and measure the closed matrix without
+   promoting a winner early.
 2. Pass protocol/quality, context, cold restart, 30-minute/100-request soak and
    failure batteries; accept only the exact evidence-bound profile.
 3. Register and release it default-off, then prove shadow and narrow assist,
@@ -71,5 +96,6 @@
 ## Not yet claimed
 
 - No secondary profile is accepted or deployed to production Friday yet.
-- Context above 4K, sustained thermal behavior, restart recovery, TLS/LAN policy
-  and end-to-end shadow/assist operation remain to be certified.
+- No matrix winner is selected. Context above 4K, FP8 KV, alternate reviewed
+  backends, sustained thermal behavior, restart recovery and end-to-end
+  shadow/assist operation remain to be certified live.

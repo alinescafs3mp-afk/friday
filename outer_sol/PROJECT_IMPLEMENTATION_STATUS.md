@@ -6,8 +6,8 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-24
 - Branch: `main`
-- Current source head: `4511737` (native-MXFP4 secondary runtime and dormant
-  Inbox/document advisory seams; not yet released)
+- Current source head: `c726e1a6d6c3826f939c5c586034d6a21fe32917`
+  (closed secondary optimization/certification surface; not yet released)
 - Deployed implementation head: `da8d11e2ac3c8982e43fa1f104076e922426ac25`
 - Live: Friday `0.207.8` / `da8d11e2ac3c8982e43fa1f104076e922426ac25`;
   tree `c80959299f0a6dac89f3288a742e668a8f575b855de1bbed55b32cf45d33ed45`;
@@ -30,6 +30,12 @@ an independently certified laptop endpoint and preserving exact primary-only
 behavior whenever that node is absent. The Interaction Control Plane is paused
 at the local schema-39 archive-evidence checkpoint `912dc1a`; it is not deployed
 and will resume from that commit after the urgent secondary-brain package.
+
+The exact `c726e1a6d6c3826f939c5c586034d6a21fe32917` bundle is synchronized to
+the laptop and its full preflight is green. The sealed source and accepted
+hardware identity are exact, and the checkpoint ended with zero containers.
+The accepted-profile registry remains empty, no production traffic uses the
+laptop, and no optimization-matrix winner is claimed.
 
 Detailed active tracker:
 `outer_sol/OPTIONAL_SECONDARY_BRAIN_IMPLEMENTATION_STATUS.md`.
@@ -100,11 +106,15 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Resume `INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md` from the
-   deployed TurnTrace/failure/RecallConversation checkpoint.
-2. Extend durable recall only through the released source/passage identity,
-   coverage and late-reauthorization contracts; keep a generic WorkGraph behind
-   that product proof.
+1. Measure and certify the closed native-MXFP4 matrix: BF16/FP8 E4M3 KV,
+   contexts through 65K and only the reviewed backend/page/cache/SWA/chunk/graph
+   choices. Promotion still requires near-limit quality, exact HTTPS/CA/profile
+   evidence, restart, soak and failure receipts.
+2. Register and release only the evidence-bound winner default-off, then prove
+   shadow and bounded assist with exact primary fallback.
+3. Resume `INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md` from checkpoint
+   `912dc1a`; extend durable recall only through released source/passage,
+   coverage and late-reauthorization contracts.
 
 ## Completed and deployed (current package)
 
@@ -251,9 +261,10 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- Full isolated Python gate: 17,367 passed; the two skips require explicitly
-  configured real Syncthing and real backup-migration environments.
-- Ruff, mypy for all changed source files, compileall and diff checks are clean.
+- Full parallel Python gate: 17,689 passed. The canvas case skipped by that
+  parallel run passed sequentially, for 17,690 verified tests; only the two
+  explicitly configured real Syncthing and backup environments remain unrun.
+- Secondary-focused gate: 206 passed. Ruff and mypy are green.
 - The `0.207.8` wheel was built twice with one `SOURCE_DATE_EPOCH` and matched
   byte-for-byte. Immutable activation completed `clear`; exact candidate and
   fallback identities, database/inbox/Obsidian backup receipts, trusted-CA
