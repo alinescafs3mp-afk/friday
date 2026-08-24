@@ -314,10 +314,7 @@ def test_lexical_projection_uses_exact_bytes_and_codepoint_span(storage: Any) ->
     assert passage.passage_ref.passage_index_version == OBSIDIAN_PASSAGE_INDEX_VERSION
     assert passage.passage_ref.source_revision.kind is RevisionKind.OBSIDIAN_REVISION_SHA256
     assert passage.passage_ref.source_revision.value == seeded["revision"]
-    assert (
-        passage.passage_ref.embedding.compatibility
-        is EmbeddingCompatibility.NOT_APPLICABLE
-    )
+    assert passage.passage_ref.embedding.compatibility is EmbeddingCompatibility.NOT_APPLICABLE
 
 
 def test_lexical_projection_maps_hangul_jamo_to_exact_original_codepoints(storage: Any) -> None:

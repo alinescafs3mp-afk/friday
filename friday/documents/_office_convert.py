@@ -212,9 +212,7 @@ def convert_legacy_office(
     if resolved is None:
         return OfficeConversionResult(target_format=target_format, error="libreoffice_unavailable")
     common_deadline = (
-        float(deadline)
-        if deadline is not None
-        else time.monotonic() + _DEFAULT_CONVERSION_TIMEOUT_SEC
+        float(deadline) if deadline is not None else time.monotonic() + _DEFAULT_CONVERSION_TIMEOUT_SEC
     )
     if not math.isfinite(common_deadline) or common_deadline <= time.monotonic():
         return OfficeConversionResult(target_format=target_format, error="libreoffice_deadline_reached")

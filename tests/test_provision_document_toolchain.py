@@ -103,8 +103,7 @@ class PlanningRunner:
         if normalized[0] == provisioner.APT_GET:
             if "indextargets" in normalized:
                 return (
-                    b"Packages\thttp://archive.ubuntu.com/ubuntu\tresolute\tuniverse\t"
-                    b"amd64\tUbuntu\tUbuntu\n"
+                    b"Packages\thttp://archive.ubuntu.com/ubuntu\tresolute\tuniverse\tamd64\tUbuntu\tUbuntu\n"
                 )
             return _solver_output()
         if normalized[0] == provisioner.APT_CACHE:
@@ -241,9 +240,9 @@ def test_wrappers_bind_all_runtime_state_without_an_env_file() -> None:
     assert "--unshare-all" in office and "--clearenv" in office
     assert '--bind "$TMPDIR" "$TMPDIR"' in office
     assert "--ro-bind /usr /host/usr" in office
-    assert "--ro-bind \"$root/rootfs/usr/lib/libreoffice\" /usr/lib/libreoffice" in office
+    assert '--ro-bind "$root/rootfs/usr/lib/libreoffice" /usr/lib/libreoffice' in office
     assert "--setenv LD_LIBRARY_PATH /opt/friday-document-toolchain/" in office
-    assert "-- /usr/lib/libreoffice/program/soffice \"$@\"" in office
+    assert '-- /usr/lib/libreoffice/program/soffice "$@"' in office
     assert ".env" not in office
 
 
@@ -266,13 +265,13 @@ def test_libreoffice_wrapper_has_a_real_clean_namespace_and_writable_workdir(
     soffice.write_text(
         "#!/bin/sh\n"
         "set -eu\n"
-        "[ -z \"${LEAK_ME+x}\" ]\n"
+        '[ -z "${LEAK_ME+x}" ]\n'
         "[ -d /usr/lib/libreoffice ]\n"
         "[ -d /usr/share/libreoffice ]\n"
         "[ -d /etc/libreoffice ]\n"
         "[ -d /opt/friday-document-toolchain ]\n"
-        "[ -w \"$TMPDIR\" ]\n"
-        "printf clear > \"$TMPDIR/wrapper-canary\"\n",
+        '[ -w "$TMPDIR" ]\n'
+        'printf clear > "$TMPDIR/wrapper-canary"\n',
         encoding="ascii",
     )
     soffice.chmod(0o500)

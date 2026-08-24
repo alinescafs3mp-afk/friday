@@ -290,36 +290,54 @@ def test_execution_binding_attestation_is_exact_process_private_and_not_deserial
     assert binding.attests_private_request('{"query":"other"}') is False
     assert binding.attests_private_request('{"query": "quarterly report"}') is False
     assert binding.attests_private_request({"query": "quarterly report"}) is False
-    assert binding.attests_authority(
-        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
-        tenant_id="tenant-main",
-        principal_id="person-42",
-    ) is True
-    assert binding.attests_authority(
-        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
-        tenant_id="tenant-other",
-        principal_id="person-42",
-    ) is False
-    assert binding.attests_authority(
-        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
-        tenant_id="tenant-main",
-        principal_id="person-other",
-    ) is False
-    assert binding.attests_authority(
-        authority_scope=AuthorityScope.PRINCIPAL,
-        tenant_id=None,
-        principal_id="person-42",
-    ) is False
-    assert binding.attests_authority(
-        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
-        tenant_id=None,
-        principal_id="person-42",
-    ) is False
-    assert binding.attests_authority(
-        authority_scope="tenant_principal",  # type: ignore[arg-type]
-        tenant_id="tenant-main",
-        principal_id="person-42",
-    ) is False
+    assert (
+        binding.attests_authority(
+            authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+            tenant_id="tenant-main",
+            principal_id="person-42",
+        )
+        is True
+    )
+    assert (
+        binding.attests_authority(
+            authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+            tenant_id="tenant-other",
+            principal_id="person-42",
+        )
+        is False
+    )
+    assert (
+        binding.attests_authority(
+            authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+            tenant_id="tenant-main",
+            principal_id="person-other",
+        )
+        is False
+    )
+    assert (
+        binding.attests_authority(
+            authority_scope=AuthorityScope.PRINCIPAL,
+            tenant_id=None,
+            principal_id="person-42",
+        )
+        is False
+    )
+    assert (
+        binding.attests_authority(
+            authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+            tenant_id=None,
+            principal_id="person-42",
+        )
+        is False
+    )
+    assert (
+        binding.attests_authority(
+            authority_scope="tenant_principal",  # type: ignore[arg-type]
+            tenant_id="tenant-main",
+            principal_id="person-42",
+        )
+        is False
+    )
     assert binding.attests_snapshot("snapshot-17") is True
     assert binding.attests_snapshot("snapshot-18") is False
     assert binding.attests_snapshot({"snapshot": 17}) is False
@@ -327,11 +345,14 @@ def test_execution_binding_attestation_is_exact_process_private_and_not_deserial
     restored = SearchExecutionBinding.from_payload(binding.to_payload())
     assert restored == binding
     assert restored.attests_private_request(request) is False
-    assert restored.attests_authority(
-        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
-        tenant_id="tenant-main",
-        principal_id="person-42",
-    ) is False
+    assert (
+        restored.attests_authority(
+            authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+            tenant_id="tenant-main",
+            principal_id="person-42",
+        )
+        is False
+    )
     assert restored.attests_snapshot("snapshot-17") is False
     assert "query" not in repr(binding)
     serialized = json.dumps(binding.to_payload(), sort_keys=True)
@@ -378,21 +399,27 @@ def test_execution_binding_rejects_attestation_splice_and_public_field_tamper() 
         second._private_snapshot_attestation,
     )
     assert first.is_live_private_request_binding is False
-    assert first.attests_authority(
-        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
-        tenant_id="tenant-other",
-        principal_id="person-other",
-    ) is False
+    assert (
+        first.attests_authority(
+            authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+            tenant_id="tenant-other",
+            principal_id="person-other",
+        )
+        is False
+    )
     assert first.attests_snapshot("snapshot-other") is False
 
     public_tamper = _binding(targets)
     object.__setattr__(public_tamper, "authority_scope", AuthorityScope.PRINCIPAL)
     assert public_tamper.is_live_private_request_binding is False
-    assert public_tamper.attests_authority(
-        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
-        tenant_id="tenant-main",
-        principal_id="person-42",
-    ) is False
+    assert (
+        public_tamper.attests_authority(
+            authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+            tenant_id="tenant-main",
+            principal_id="person-42",
+        )
+        is False
+    )
 
 
 def test_execution_binding_attestors_swallow_hostile_string_subclasses() -> None:
@@ -405,11 +432,14 @@ def test_execution_binding_attestors_swallow_hostile_string_subclasses() -> None
     hostile = HostileString("snapshot-17")
     assert binding.attests_snapshot(hostile) is False
     assert binding.attests_private_request(HostileString('{"query":"quarterly report"}')) is False
-    assert binding.attests_authority(
-        authority_scope=AuthorityScope.TENANT_PRINCIPAL,
-        tenant_id=HostileString("tenant-main"),
-        principal_id="person-42",
-    ) is False
+    assert (
+        binding.attests_authority(
+            authority_scope=AuthorityScope.TENANT_PRINCIPAL,
+            tenant_id=HostileString("tenant-main"),
+            principal_id="person-42",
+        )
+        is False
+    )
 
 
 def test_coverage_rejects_unrelated_execution_target() -> None:

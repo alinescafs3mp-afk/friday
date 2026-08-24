@@ -1818,9 +1818,10 @@ def _select_authorized_archive_document_replay_source_in_transaction(
         raise _fail("archive document replay requires a caller-owned snapshot")
     tenant = _actor(tenant_id)
     owner = _actor(owner_id)
-    if type(origin_boundary_user_message_id) is not str or _MESSAGE_ID.fullmatch(
-        origin_boundary_user_message_id
-    ) is None:
+    if (
+        type(origin_boundary_user_message_id) is not str
+        or _MESSAGE_ID.fullmatch(origin_boundary_user_message_id) is None
+    ):
         raise _fail("archive document replay boundary is invalid")
     if type(corpus) is not ArchiveSearchCorpus or corpus not in _SUPPORTED_CORPORA:
         raise _fail("archive document replay corpus is invalid")
@@ -1830,10 +1831,7 @@ def _select_authorized_archive_document_replay_source_in_transaction(
         or source_ref.tenant_id != tenant
         or source_ref.principal_id != owner
         or source_ref.canonical_object_kind is not CanonicalObjectKind.RAW_OBJECT
-        or (
-            corpus is ArchiveSearchCorpus.DOCUMENTS
-            and source_ref.source_kind is not SourceKind.DOCUMENT
-        )
+        or (corpus is ArchiveSearchCorpus.DOCUMENTS and source_ref.source_kind is not SourceKind.DOCUMENT)
         or (
             corpus is ArchiveSearchCorpus.KNOWLEDGE
             and source_ref.source_kind

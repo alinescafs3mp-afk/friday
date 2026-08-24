@@ -568,11 +568,7 @@ def extract_msg_text(content: bytes) -> tuple[str, dict[str, object]]:
         if selected:
             raw, truncated = ole.read_root_stream_bounded(
                 selected,
-                max_bytes=(
-                    _MAX_MSG_BODY_PROPERTY_BYTES
-                    if key == "body"
-                    else _MAX_MSG_HEADER_PROPERTY_BYTES
-                ),
+                max_bytes=(_MAX_MSG_BODY_PROPERTY_BYTES if key == "body" else _MAX_MSG_HEADER_PROPERTY_BYTES),
             )
             property_truncated = property_truncated or truncated
             values[key] = _decode_msg_property(

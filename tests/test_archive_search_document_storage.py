@@ -193,10 +193,16 @@ def _search(
             request=request,
             corpus=corpus,
             lane=lane,
-            execution_binding=_binding(request, ({
-                ArchiveSearchCorpus.DOCUMENTS: SearchCorpus.RAW_DOCUMENTS,
-                ArchiveSearchCorpus.KNOWLEDGE: SearchCorpus.KNOWLEDGE,
-            }[corpus], lane)),
+            execution_binding=_binding(
+                request,
+                (
+                    {
+                        ArchiveSearchCorpus.DOCUMENTS: SearchCorpus.RAW_DOCUMENTS,
+                        ArchiveSearchCorpus.KNOWLEDGE: SearchCorpus.KNOWLEDGE,
+                    }[corpus],
+                    lane,
+                ),
+            ),
             snapshot_discriminator=SNAPSHOT,
             snapshot_current=True,
             limit=limit,
@@ -213,10 +219,13 @@ def _coverage(
     owner: str = OWNER,
     snapshot: str = SNAPSHOT,
 ) -> SearchCoverage:
-    target = ({
-        ArchiveSearchCorpus.DOCUMENTS: SearchCorpus.RAW_DOCUMENTS,
-        ArchiveSearchCorpus.KNOWLEDGE: SearchCorpus.KNOWLEDGE,
-    }[page.corpus], page.lane)
+    target = (
+        {
+            ArchiveSearchCorpus.DOCUMENTS: SearchCorpus.RAW_DOCUMENTS,
+            ArchiveSearchCorpus.KNOWLEDGE: SearchCorpus.KNOWLEDGE,
+        }[page.corpus],
+        page.lane,
+    )
     return page.to_coverage(
         execution_binding=_binding(
             request,
@@ -288,9 +297,10 @@ def test_lexical_lanes_authorize_before_counts_and_return_exact_revision_passage
         assert source_body[locator.start_char : locator.end_char] == passage.excerpt  # type: ignore[union-attr]
         assert passage.passage_ref.source_revision.representation.kind is RepresentationKind.RAW_OBJECT
         source_number = 1 if source_id == confirmed_raw else 2
-        assert passage.passage_ref.source_revision.value == hashlib.sha256(
-            f"source-bytes-{source_number}".encode()
-        ).hexdigest()
+        assert (
+            passage.passage_ref.source_revision.value
+            == hashlib.sha256(f"source-bytes-{source_number}".encode()).hexdigest()
+        )
 
     assert (knowledge.total, knowledge.examined, knowledge.matched, knowledge.returned) == (1, 1, 1, 1)
     assert knowledge.derivative_current is True
@@ -453,13 +463,13 @@ def test_catalog_navigation_is_body_free_stably_ordered_and_honestly_capped(stor
     assert all(item.navigation_only and not item.passages for item in first.candidates)
     assert first.candidates[0].filename == "report"
     assert raw_exact not in repr(first)
-    assert not any(re.match(r"\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)\b", sql, re.I) for sql in statements)
+    assert not any(
+        re.match(r"\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)\b", sql, re.I) for sql in statements
+    )
     assert ("raw_objects", "raw_content") not in body_reads
     assert ("knowledge_objects", "content") not in body_reads
 
-    source_ids = tuple(
-        item.resolved_source.source_ref.canonical_object_id for item in first.candidates
-    )
+    source_ids = tuple(item.resolved_source.source_ref.canonical_object_id for item in first.candidates)
     assert len(source_ids) == len(set(source_ids)) == 2
     assert set(source_ids) <= {raw_exact, raw_prefix, raw_substring, raw_alias}
 
@@ -623,10 +633,7 @@ def test_latest_inbox_state_wins_over_an_older_review_timestamp(storage) -> None
         corpus=ArchiveSearchCorpus.DOCUMENTS,
         lane=SearchLane.LEXICAL,
     )
-    by_raw = {
-        item.resolved_source.source_ref.canonical_object_id: item
-        for item in page.candidates
-    }
+    by_raw = {item.resolved_source.source_ref.canonical_object_id: item for item in page.candidates}
     candidate = by_raw[raw_id]
     assert candidate.review_state is ArchiveReviewState.PENDING
     assert candidate.lifecycle_state is LifecycleState.PENDING
@@ -864,10 +871,7 @@ def test_knowledge_lane_covers_non_file_sources_and_does_not_collapse_independen
         lane=SearchLane.LEXICAL,
     )
     assert (page.total, page.examined, page.matched, page.returned) == (None, 2, 2, 2)
-    by_raw = {
-        item.resolved_source.source_ref.canonical_object_id: item
-        for item in page.candidates
-    }
+    by_raw = {item.resolved_source.source_ref.canonical_object_id: item for item in page.candidates}
     first = by_raw[first_raw]
     assert first.passages[0].passage_ref.source_revision.representation.object_id == matching_ko
     assert by_raw[second_raw].resolved_source.source_ref.source_kind is SourceKind.WEB_CAPTURE
@@ -1174,9 +1178,12 @@ def test_unicode_folded_match_keeps_an_exact_raw_text_locator(storage) -> None:
     passage = candidate.passages[0]
     assert "Ёлка" in passage.excerpt
     locator = passage.passage_ref.locator
-    assert "Точная Ёлка в извлечённом тексте"[
-        locator.start_char : locator.end_char  # type: ignore[union-attr]
-    ] == passage.excerpt
+    assert (
+        "Точная Ёлка в извлечённом тексте"[
+            locator.start_char : locator.end_char  # type: ignore[union-attr]
+        ]
+        == passage.excerpt
+    )
 
 
 def test_lane_page_is_exact_process_private_and_snapshot_attestation_is_explicit(storage) -> None:

@@ -101,10 +101,7 @@ def _build_ole_streams(
             )
         )
     directory = b"".join(directory_parts).ljust(directory_sector_count * _SECTOR, b"\x00")
-    directory_sectors = [
-        directory[offset : offset + _SECTOR]
-        for offset in range(0, len(directory), _SECTOR)
-    ]
+    directory_sectors = [directory[offset : offset + _SECTOR] for offset in range(0, len(directory), _SECTOR)]
 
     body = list(directory_sectors) + sectors
     fat_sector_index = len(body)
@@ -345,8 +342,7 @@ def test_a_truncated_msg_stream_returns_only_a_marked_partial_prefix() -> None:
     body_name = "__substg1.0_1000001F"
     message = _build_ole_streams(
         {
-            body_name: ("Видимый префикс. " + "Продолжение " * 120).encode("utf-16-le")
-            + b"\x00\x00",
+            body_name: ("Видимый префикс. " + "Продолжение " * 120).encode("utf-16-le") + b"\x00\x00",
         }
     )
     damaged = _truncate_ole_stream_after_first_sector(message, body_name)

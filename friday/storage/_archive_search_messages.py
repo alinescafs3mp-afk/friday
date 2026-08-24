@@ -1044,9 +1044,7 @@ def _select_authorized_archive_message_replay_source_in_transaction(
             or values["selected_conversation_title"] != first["selected_conversation_title"]
             or values["selected_conversation_archived"] != archived_value
         ):
-            raise ArchiveMessageStorageError(
-                "stored conversation changed within replay snapshot"
-            )
+            raise ArchiveMessageStorageError("stored conversation changed within replay snapshot")
         row = _row(values, prefix="replay")
         accumulator.add(row, conversation_title=title)
         for index, locator in enumerate(locators):
@@ -1104,9 +1102,7 @@ def _select_authorized_archive_message_replay_source_in_transaction(
             ),
         ),
         revisions=(revision,),
-        revalidation_targets=(
-            RevalidationTarget(representation, AuthorityScope.PRINCIPAL),
-        ),
+        revalidation_targets=(RevalidationTarget(representation, AuthorityScope.PRINCIPAL),),
     )
 
     windows: list[ArchiveMessageReplayWindow] = []

@@ -224,9 +224,7 @@ class ToolchainPlan:
 
 
 def _canonical_json(value: object) -> bytes:
-    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode(
-        "ascii"
-    )
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("ascii")
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -485,8 +483,7 @@ def _trusted_ubuntu_indexes(runner: Runner, *, architecture: str) -> frozenset[s
             APT_GET,
             "indextargets",
             "--format",
-            "$(IDENTIFIER)\t$(SITE)\t$(RELEASE)\t$(COMPONENT)\t"
-            "$(ARCHITECTURE)\t$(ORIGIN)\t$(LABEL)",
+            "$(IDENTIFIER)\t$(SITE)\t$(RELEASE)\t$(COMPONENT)\t$(ARCHITECTURE)\t$(ORIGIN)\t$(LABEL)",
         ),
         failure_code="apt_index_provenance_unavailable",
         timeout=METADATA_TIMEOUT_SEC,
@@ -521,14 +518,8 @@ def _trusted_ubuntu_indexes(runner: Runner, *, architecture: str) -> frozenset[s
                     (hostname == "archive.ubuntu.com" or hostname.endswith(".archive.ubuntu.com"))
                     and parsed_site.path.rstrip("/") == "/ubuntu"
                 )
-                or (
-                    hostname == "security.ubuntu.com"
-                    and parsed_site.path.rstrip("/") == "/ubuntu"
-                )
-                or (
-                    hostname == "ports.ubuntu.com"
-                    and parsed_site.path.rstrip("/") == "/ubuntu-ports"
-                )
+                or (hostname == "security.ubuntu.com" and parsed_site.path.rstrip("/") == "/ubuntu")
+                or (hostname == "ports.ubuntu.com" and parsed_site.path.rstrip("/") == "/ubuntu-ports")
             )
         )
         if (
@@ -549,11 +540,11 @@ def _tesseract_wrapper(multiarch: str) -> bytes:
         "#!/bin/sh\n"
         "set -eu\n"
         "case $0 in */bin/tesseract) root=${0%/bin/tesseract} ;; *) exit 64 ;; esac\n"
-        "[ -d \"$root/rootfs\" ] || exit 64\n"
-        f"LD_LIBRARY_PATH=\"{library_path}\"\n"
-        "TESSDATA_PREFIX=\"$root/rootfs/usr/share/tesseract-ocr/5/tessdata\"\n"
+        '[ -d "$root/rootfs" ] || exit 64\n'
+        f'LD_LIBRARY_PATH="{library_path}"\n'
+        'TESSDATA_PREFIX="$root/rootfs/usr/share/tesseract-ocr/5/tessdata"\n'
         "export LD_LIBRARY_PATH TESSDATA_PREFIX\n"
-        "exec \"$root/rootfs/usr/bin/tesseract\" \"$@\"\n"
+        'exec "$root/rootfs/usr/bin/tesseract" "$@"\n'
     ).encode("ascii")
 
 
@@ -570,17 +561,17 @@ def _libreoffice_wrapper(multiarch: str) -> bytes:
         "case ${TMPDIR-} in /tmp/friday-office-*) ;; *) exit 64 ;; esac\n"
         "tmp_suffix=${TMPDIR#/tmp/friday-office-}\n"
         "case $tmp_suffix in ''|*/*|*[!A-Za-z0-9._-]*) exit 64 ;; esac\n"
-        "[ \"${HOME-}\" = \"$TMPDIR\" ] || exit 64\n"
-        "[ -d \"$TMPDIR\" ] || exit 64\n"
-        "[ ! -L \"$TMPDIR\" ] || exit 64\n"
-        "[ \"$(/usr/bin/readlink -f -- \"$TMPDIR\")\" = \"$TMPDIR\" ] || exit 64\n"
-        "[ \"$(/usr/bin/stat -Lc %u -- \"$TMPDIR\")\" = \"$(/usr/bin/id -u)\" ] || exit 64\n"
-        "[ \"$(/usr/bin/stat -Lc %a -- \"$TMPDIR\")\" = 700 ] || exit 64\n"
-        "[ -d \"$root/rootfs/usr/lib/libreoffice\" ] || exit 64\n"
+        '[ "${HOME-}" = "$TMPDIR" ] || exit 64\n'
+        '[ -d "$TMPDIR" ] || exit 64\n'
+        '[ ! -L "$TMPDIR" ] || exit 64\n'
+        '[ "$(/usr/bin/readlink -f -- "$TMPDIR")" = "$TMPDIR" ] || exit 64\n'
+        '[ "$(/usr/bin/stat -Lc %u -- "$TMPDIR")" = "$(/usr/bin/id -u)" ] || exit 64\n'
+        '[ "$(/usr/bin/stat -Lc %a -- "$TMPDIR")" = 700 ] || exit 64\n'
+        '[ -d "$root/rootfs/usr/lib/libreoffice" ] || exit 64\n'
         f"exec {BWRAP} \\\n"
         "  --unshare-all --die-with-parent --new-session --hostname friday-document \\\n"
         "  --ro-bind /usr /host/usr \\\n"
-        f"  --ro-bind \"$root/rootfs\" {private_root} \\\n"
+        f'  --ro-bind "$root/rootfs" {private_root} \\\n'
         "  --perms 0755 --dir /usr --perms 0755 --dir /usr/lib \\\n"
         "  --perms 0755 --dir /usr/share \\\n"
         "  --symlink /host/usr/bin /usr/bin --symlink /host/usr/sbin /usr/sbin \\\n"
@@ -601,23 +592,23 @@ def _libreoffice_wrapper(multiarch: str) -> bytes:
         "  --ro-bind-try /etc/group /etc/group \\\n"
         "  --perms 0755 --dir /var --perms 0755 --dir /var/cache \\\n"
         "  --ro-bind-try /var/cache/fontconfig /var/cache/fontconfig \\\n"
-        "  --ro-bind \"$root/rootfs/usr/lib/libreoffice\" /usr/lib/libreoffice \\\n"
-        "  --ro-bind \"$root/rootfs/usr/share/libreoffice\" /usr/share/libreoffice \\\n"
-        "  --ro-bind \"$root/rootfs/etc/libreoffice\" /etc/libreoffice \\\n"
-        "  --ro-bind-try \"$root/rootfs/usr/share/liblangtag\" /usr/share/liblangtag \\\n"
-        "  --ro-bind-try \"$root/rootfs/usr/share/libexttextcat\" /usr/share/libexttextcat \\\n"
-        "  --ro-bind-try \"$root/rootfs/usr/share/fonts/truetype/openoffice\" "
+        '  --ro-bind "$root/rootfs/usr/lib/libreoffice" /usr/lib/libreoffice \\\n'
+        '  --ro-bind "$root/rootfs/usr/share/libreoffice" /usr/share/libreoffice \\\n'
+        '  --ro-bind "$root/rootfs/etc/libreoffice" /etc/libreoffice \\\n'
+        '  --ro-bind-try "$root/rootfs/usr/share/liblangtag" /usr/share/liblangtag \\\n'
+        '  --ro-bind-try "$root/rootfs/usr/share/libexttextcat" /usr/share/libexttextcat \\\n'
+        '  --ro-bind-try "$root/rootfs/usr/share/fonts/truetype/openoffice" '
         "/usr/share/fonts/truetype/openoffice \\\n"
         "  --proc /proc --dev /dev --perms 0700 --dir /tmp \\\n"
-        "  --perms 0700 --tmpfs /run --bind \"$TMPDIR\" \"$TMPDIR\" \\\n"
-        "  --chdir \"$TMPDIR\" --clearenv \\\n"
-        "  --setenv HOME \"$TMPDIR\" --setenv TMPDIR \"$TMPDIR\" \\\n"
-        "  --setenv XDG_CACHE_HOME \"$TMPDIR/cache\" \\\n"
-        "  --setenv XDG_CONFIG_HOME \"$TMPDIR/config\" \\\n"
+        '  --perms 0700 --tmpfs /run --bind "$TMPDIR" "$TMPDIR" \\\n'
+        '  --chdir "$TMPDIR" --clearenv \\\n'
+        '  --setenv HOME "$TMPDIR" --setenv TMPDIR "$TMPDIR" \\\n'
+        '  --setenv XDG_CACHE_HOME "$TMPDIR/cache" \\\n'
+        '  --setenv XDG_CONFIG_HOME "$TMPDIR/config" \\\n'
         "  --setenv LANG C.UTF-8 --setenv LC_ALL C.UTF-8 \\\n"
         "  --setenv SAL_USE_VCLPLUGIN svp \\\n"
         f"  --setenv LD_LIBRARY_PATH {private_libs} \\\n"
-        "  -- /usr/lib/libreoffice/program/soffice \"$@\"\n"
+        '  -- /usr/lib/libreoffice/program/soffice "$@"\n'
     ).encode("ascii")
 
 
@@ -1233,9 +1224,7 @@ def _restore_link(link: Path, old_target: str | None) -> None:
 def _activate(final: Path, *, base: Path, activation_dir: Path, uid: int) -> None:
     directory = _activation_directory(activation_dir, uid=uid)
     targets = {name: final / "bin" / name for name in COMMAND_NAMES}
-    previous = {
-        name: _trusted_old_link(directory / name, base=base, uid=uid) for name in COMMAND_NAMES
-    }
+    previous = {name: _trusted_old_link(directory / name, base=base, uid=uid) for name in COMMAND_NAMES}
     for target in targets.values():
         try:
             details = os.lstat(target)
@@ -1264,11 +1253,7 @@ def _activate(final: Path, *, base: Path, activation_dir: Path, uid: int) -> Non
                 resolved = link.resolve(strict=True)
             except OSError:
                 raise ProvisionFailure("activation_verification_failed") from None
-            if (
-                not stat.S_ISLNK(details.st_mode)
-                or details.st_uid != uid
-                or resolved != target.resolve()
-            ):
+            if not stat.S_ISLNK(details.st_mode) or details.st_uid != uid or resolved != target.resolve():
                 raise ProvisionFailure("activation_verification_failed")
     except (OSError, ProvisionFailure):
         for name in reversed(replaced):
@@ -1306,8 +1291,7 @@ def _validate_plan_integrity(plan: ToolchainPlan) -> None:
         or _MULTIARCH.fullmatch(host.multiarch) is None
         or _HEX64.fullmatch(host.dpkg_status_sha256) is None
         or len(plan.packages) > MAX_PACKAGES
-        or len({(package.package, package.architecture) for package in plan.packages})
-        != len(plan.packages)
+        or len({(package.package, package.architecture) for package in plan.packages}) != len(plan.packages)
         or sum(package.size for package in plan.packages) > MAX_TOTAL_DEB_BYTES
         or not set(ROOT_PACKAGES).issubset({package.package for package in plan.packages})
     ):

@@ -175,9 +175,9 @@ def _provisional_candidate() -> tuple[SecondaryRuntimeProfile, bytes, dict[str, 
         "soak_evidence_sha256": "0" * 64,
         "failure_evidence_sha256": "0" * 64,
     }
-    raw = (
-        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
-    ).encode("utf-8")
+    raw = (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode(
+        "utf-8"
+    )
     digest = hashlib.sha256(raw).hexdigest()
     profile = _runtime_profile(
         manifest_sha256=digest,

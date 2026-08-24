@@ -393,11 +393,7 @@ def extract_local_ocr(
     child_environment = {"TESSDATA_PREFIX": standard_tessdata} if standard_tessdata is not None else {}
     if library_path is not None:
         child_environment["LD_LIBRARY_PATH"] = library_path
-    common_deadline = (
-        float(deadline)
-        if deadline is not None
-        else time.monotonic() + _OCR_PAGE_TIMEOUT_SEC
-    )
+    common_deadline = float(deadline) if deadline is not None else time.monotonic() + _OCR_PAGE_TIMEOUT_SEC
     if not math.isfinite(common_deadline) or common_deadline <= time.monotonic():
         return LocalOcrResult(
             (),

@@ -333,9 +333,7 @@ def test_intentional_reasoning_only_length_stop_is_valid_and_content_free(
 
 
 @pytest.mark.parametrize("content", ["42", "42.0", "42.000"])
-def test_reasoning_validator_accepts_equivalent_integer_renderings(
-    battery: Any, content: str
-) -> None:
+def test_reasoning_validator_accepts_equivalent_integer_renderings(battery: Any, content: str) -> None:
     completion = battery.SanitizedCompletion(
         content=content,
         latency_sec=0.1,
@@ -382,9 +380,7 @@ def test_reasoning_validator_rejects_wrong_or_unseparated_results(
         "Проект «Север» планируется сдать 24 августа 2026 года при бюджете 17 руб.",
     ],
 )
-def test_summary_validator_accepts_closed_faithful_deadline_forms(
-    battery: Any, content: str
-) -> None:
+def test_summary_validator_accepts_closed_faithful_deadline_forms(battery: Any, content: str) -> None:
     completion = battery.SanitizedCompletion(
         content=content,
         latency_sec=0.1,
@@ -471,9 +467,7 @@ def test_citation_validator_accepts_faithful_rewrites(battery: Any, content: str
         ("The measured height is 42 m [SRC-17].", "length"),
     ],
 )
-def test_citation_validator_rejects_broken_claims(
-    battery: Any, content: str, finish_reason: str
-) -> None:
+def test_citation_validator_rejects_broken_claims(battery: Any, content: str, finish_reason: str) -> None:
     completion = battery.SanitizedCompletion(
         content=content,
         latency_sec=0.1,

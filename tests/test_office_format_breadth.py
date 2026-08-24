@@ -130,25 +130,19 @@ def _with_main_content_type(payload: bytes, canonical: str, replacement: str) ->
     return output.getvalue()
 
 
-_WORD_CANONICAL = (
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
-)
+_WORD_CANONICAL = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
 _WORD_TYPES = {
     "docm": "application/vnd.ms-word.document.macroEnabled.main+xml",
     "dotx": "application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml",
     "dotm": "application/vnd.ms-word.template.macroEnabledTemplate.main+xml",
 }
-_SHEET_CANONICAL = (
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
-)
+_SHEET_CANONICAL = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"
 _SHEET_TYPES = {
     "xlsm": "application/vnd.ms-excel.sheet.macroEnabled.main+xml",
     "xltx": "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml",
     "xltm": "application/vnd.ms-excel.template.macroEnabled.main+xml",
 }
-_PRESENTATION_CANONICAL = (
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"
-)
+_PRESENTATION_CANONICAL = "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"
 _PRESENTATION_TYPES = {
     "pptm": "application/vnd.ms-powerpoint.presentation.macroEnabled.main+xml",
     "potx": "application/vnd.openxmlformats-officedocument.presentationml.template.main+xml",
@@ -746,10 +740,7 @@ def test_ambiguous_works_family_uses_the_common_bounded_pdf_target(
 
 def test_libreoffice_timeout_kills_the_whole_converter_process_group(tmp_path: Path) -> None:
     marker = tmp_path / "escaped-child"
-    child = (
-        "import pathlib,time;time.sleep(0.4);"
-        f"pathlib.Path({str(marker)!r}).write_text('escaped')"
-    )
+    child = f"import pathlib,time;time.sleep(0.4);pathlib.Path({str(marker)!r}).write_text('escaped')"
     executable = _fake_libreoffice_action(
         tmp_path / "soffice",
         f"subprocess.Popen([sys.executable, '-c', {child!r}])\ntime.sleep(5)",

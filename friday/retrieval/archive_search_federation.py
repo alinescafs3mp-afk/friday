@@ -154,8 +154,7 @@ def _same_exact_graph(left: object, right: object) -> bool:
         )
     if is_dataclass(left) and not isinstance(left, type):
         return all(
-            _same_exact_graph(getattr(left, field.name), getattr(right, field.name))
-            for field in fields(left)
+            _same_exact_graph(getattr(left, field.name), getattr(right, field.name)) for field in fields(left)
         )
     try:
         return bool(left == right)
@@ -173,9 +172,7 @@ def _canonical_coverage(
         raise _fail()
     item = cast(SearchCoverage, value)
     try:
-        if item.execution_binding is not binding or (
-            require_cursor_free and item.next_cursor_available
-        ):
+        if item.execution_binding is not binding or (require_cursor_free and item.next_cursor_available):
             raise _fail()
         frozen = SearchCoverage.create(
             corpus=item.corpus,
@@ -333,19 +330,13 @@ def _canonical_source(
     by_corpus: dict[ArchiveSearchCorpus, ArchiveSearchCandidate] = {}
     for candidate in candidates:
         previous = by_corpus.get(candidate.corpus)
-        by_corpus[candidate.corpus] = (
-            candidate if previous is None else _merge_candidate(previous, candidate)
-        )
+        by_corpus[candidate.corpus] = candidate if previous is None else _merge_candidate(previous, candidate)
     values = tuple(by_corpus.values())
     if any(item.resolved_source != values[0].resolved_source for item in values[1:]):
         raise _fail()
     selected = min(values, key=_cross_corpus_key)
     selected_targets = {_target(selected, match) for match in selected.matches}
-    all_targets = {
-        _target(item, match)
-        for item in values
-        for match in item.matches
-    }
+    all_targets = {_target(item, match) for item in values for match in item.matches}
     return _with_display_from(selected, values), frozenset(all_targets - selected_targets)
 
 
@@ -434,10 +425,7 @@ def _warnings(
         values.add(ArchiveSearchWarning.BACKFILL_PENDING)
     if CoverageState.CAPPED in states:
         values.add(ArchiveSearchWarning.LANE_CAPPED)
-        if any(
-            CoverageState.CAPPED in item.states and not item.next_cursor_available
-            for item in coverage
-        ):
+        if any(CoverageState.CAPPED in item.states and not item.next_cursor_available for item in coverage):
             values.add(ArchiveSearchWarning.CONTINUATION_UNAVAILABLE)
     if states & {CoverageState.UNAVAILABLE, CoverageState.EMBEDDING_INCOMPATIBLE}:
         values.add(ArchiveSearchWarning.LANE_UNAVAILABLE)
@@ -487,15 +475,9 @@ def _bounded_first_page(
     for count in counts:
         head = ordered[:count]
         actual_tail = ordered[count:]
-        tail = (
-            ()
-            if len(actual_tail) > ARCHIVE_AUTHORITY_MAX_CONTINUATION_TAIL
-            else actual_tail
-        )
+        tail = () if len(actual_tail) > ARCHIVE_AUTHORITY_MAX_CONTINUATION_TAIL else actual_tail
         actual_tail_targets = frozenset(
-            _target(candidate, match)
-            for candidate in actual_tail
-            for match in candidate.matches
+            _target(candidate, match) for candidate in actual_tail for match in candidate.matches
         )
         capped_targets = actual_tail_targets | suppressed_targets
         cursor_targets = actual_tail_targets if tail else frozenset()
@@ -561,10 +543,7 @@ class FederatedArchiveSearch:
 
     def __repr__(self) -> str:
         try:
-            return (
-                "<FederatedArchiveSearch "
-                f"head={len(self._head)} tail={len(self._tail)} private=True>"
-            )
+            return f"<FederatedArchiveSearch head={len(self._head)} tail={len(self._tail)} private=True>"
         except Exception:
             return "<FederatedArchiveSearch invalid private=True>"
 
@@ -592,9 +571,7 @@ class FederatedArchiveSearch:
                 )
                 for item in self._coverage
             )
-            frozen_terminal = tuple(
-                _freeze_coverage(item, self._binding) for item in self._terminal_coverage
-            )
+            frozen_terminal = tuple(_freeze_coverage(item, self._binding) for item in self._terminal_coverage)
             return bool(
                 type(self) is FederatedArchiveSearch
                 and self._process_authority is _PROCESS_AUTHORITY
@@ -755,24 +732,16 @@ def federate_archive_search(
         ] = {}
         for target in expected_targets:
             raw_candidates = candidates_by_target[target]
-            if (
-                type(raw_candidates) is not tuple
-                or len(raw_candidates) > ARCHIVE_AUTHORITY_MAX_CANDIDATES
-            ):
+            if type(raw_candidates) is not tuple or len(raw_candidates) > ARCHIVE_AUTHORITY_MAX_CANDIDATES:
                 raise _fail()
             candidates = tuple(_freeze_candidate(item) for item in raw_candidates)
             lane_coverage = frozen_coverage[coverage_targets.index(target)]
-            if (
-                lane_coverage.returned != len(candidates)
-                or (
-                    lane_coverage.matched_at_least > lane_coverage.returned
-                    and CoverageState.CAPPED not in lane_coverage.states
-                )
+            if lane_coverage.returned != len(candidates) or (
+                lane_coverage.matched_at_least > lane_coverage.returned
+                and CoverageState.CAPPED not in lane_coverage.states
             ):
                 raise _fail()
-            source_refs: tuple[SourceRef, ...] = tuple(
-                item.resolved_source.source_ref for item in candidates
-            )
+            source_refs: tuple[SourceRef, ...] = tuple(item.resolved_source.source_ref for item in candidates)
             if len(source_refs) != len(set(source_refs)):
                 raise _fail()
             expected_ranks = tuple(range(1, len(candidates) + 1))
@@ -785,17 +754,11 @@ def federate_archive_search(
                 ):
                     raise _fail()
                 ranks.append(candidate.matches[0].rank)
-            if tuple(ranks) != expected_ranks or (
-                ranks and ranks[-1] > lane_coverage.matched_at_least
-            ):
+            if tuple(ranks) != expected_ranks or (ranks and ranks[-1] > lane_coverage.matched_at_least):
                 raise _fail()
             frozen_lanes[target] = candidates
 
-        all_candidates = tuple(
-            candidate
-            for target in expected_targets
-            for candidate in frozen_lanes[target]
-        )
+        all_candidates = tuple(candidate for target in expected_targets for candidate in frozen_lanes[target])
         constraints = {item.corpus: item.states for item in request_copy.lifecycle_constraints}
         if any(
             item.corpus in constraints and item.lifecycle_state not in constraints[item.corpus]

@@ -162,9 +162,7 @@ def _candidate(
                     source_revision=revision,
                     locator=TextSpanLocator(chunk_index=0, start_char=0, end_char=12),
                     passage_index_version="archive-federation-test-v1",
-                    embedding=EmbeddingIdentity.unindexed(
-                        EmbeddingCompatibility.NOT_APPLICABLE
-                    ),
+                    embedding=EmbeddingIdentity.unindexed(EmbeddingCompatibility.NOT_APPLICABLE),
                 ),
                 f"Excerpt {index}",
             ),
@@ -176,9 +174,7 @@ def _candidate(
         filename=f"document-{index}.md",
         review_state=ArchiveReviewState.CONFIRMED,
         evidence_authority=(
-            ArchiveEvidenceAuthority.NAVIGATION_ONLY
-            if navigation
-            else ArchiveEvidenceAuthority.CANONICAL
+            ArchiveEvidenceAuthority.NAVIGATION_ONLY if navigation else ArchiveEvidenceAuthority.CANONICAL
         ),
         lifecycle_state=LifecycleState.ACTIVE,
         matches=(ArchiveMatchRank(channel, rank),),
@@ -219,9 +215,7 @@ def _principal_navigation_candidate(
         representations=(representation,),
         lifecycle=(LifecycleRef(representation, LifecycleState.ACTIVE),),
         revisions=(SourceRevision(representation, revision_kind, f"{index % 16:x}" * 64),),
-        revalidation_targets=(
-            RevalidationTarget(representation, AuthorityScope.PRINCIPAL),
-        ),
+        revalidation_targets=(RevalidationTarget(representation, AuthorityScope.PRINCIPAL),),
     )
     return ArchiveSearchCandidate.create(
         corpus=corpus,
@@ -239,10 +233,7 @@ def _lanes(
     **values: tuple[ArchiveSearchCandidate, ...],
 ) -> dict[tuple[SearchCorpus, SearchLane], tuple[ArchiveSearchCandidate, ...]]:
     selected = {SearchLane(name): candidates for name, candidates in values.items()}
-    return {
-        target: selected.get(target[1], ())
-        for target in canonical_archive_search_targets(request)
-    }
+    return {target: selected.get(target[1], ()) for target in canonical_archive_search_targets(request)}
 
 
 def _coverage(
@@ -340,9 +331,7 @@ def test_cross_corpus_source_is_globally_deduplicated_without_false_coverage() -
     )
     binding = _binding(request)
     lanes = _lanes(request)
-    lanes[(SearchCorpus.RAW_DOCUMENTS, SearchLane.LEXICAL)] = (
-        _candidate(1, ArchiveMatchChannel.LEXICAL, 1),
-    )
+    lanes[(SearchCorpus.RAW_DOCUMENTS, SearchLane.LEXICAL)] = (_candidate(1, ArchiveMatchChannel.LEXICAL, 1),)
     lanes[(SearchCorpus.KNOWLEDGE, SearchLane.LEXICAL)] = (
         _candidate(
             1,
@@ -375,9 +364,7 @@ def test_suppressed_cross_corpus_target_never_borrows_an_unrelated_cursor() -> N
     )
     binding = _binding(request)
     lanes = _lanes(request)
-    lanes[(SearchCorpus.RAW_DOCUMENTS, SearchLane.LEXICAL)] = (
-        _candidate(1, ArchiveMatchChannel.LEXICAL, 1),
-    )
+    lanes[(SearchCorpus.RAW_DOCUMENTS, SearchLane.LEXICAL)] = (_candidate(1, ArchiveMatchChannel.LEXICAL, 1),)
     lanes[(SearchCorpus.KNOWLEDGE, SearchLane.LEXICAL)] = (
         _candidate(
             1,
@@ -422,9 +409,7 @@ def test_cross_corpus_suppression_keeps_the_real_tail_issuable() -> None:
         turn_ledger=ledger,
     )
     lanes = _lanes(request)
-    lanes[(SearchCorpus.RAW_DOCUMENTS, SearchLane.LEXICAL)] = (
-        _candidate(1, ArchiveMatchChannel.LEXICAL, 1),
-    )
+    lanes[(SearchCorpus.RAW_DOCUMENTS, SearchLane.LEXICAL)] = (_candidate(1, ArchiveMatchChannel.LEXICAL, 1),)
     lanes[(SearchCorpus.KNOWLEDGE, SearchLane.LEXICAL)] = (
         _candidate(
             1,
@@ -533,9 +518,7 @@ def test_cross_corpus_suppression_composes_with_same_lane_internal_overfetch() -
     )
 
     result = _federate(request, binding, lanes)
-    terminal = {
-        (item.corpus, item.lane): item for item in result.terminal_coverage
-    }
+    terminal = {(item.corpus, item.lane): item for item in result.terminal_coverage}
     raw = terminal[(SearchCorpus.RAW_DOCUMENTS, SearchLane.LEXICAL)]
 
     assert len(result.candidates) == 1
@@ -583,9 +566,7 @@ def test_real_tail_marks_only_affected_targets_and_terminal_is_cursor_free() -> 
         CoverageState.CAPPED,
         CoverageState.PARTIAL,
     }
-    assert page[(SearchCorpus.RAW_DOCUMENTS, SearchLane.EXACT_IDENTITY)].states == (
-        CoverageState.COMPLETE,
-    )
+    assert page[(SearchCorpus.RAW_DOCUMENTS, SearchLane.EXACT_IDENTITY)].states == (CoverageState.COMPLETE,)
     assert not any(item.next_cursor_available for item in result.terminal_coverage)
     assert result.warnings == (ArchiveSearchWarning.LANE_CAPPED,)
 
@@ -712,10 +693,7 @@ def test_lane_target_rank_and_count_invariants_fail_closed(failure: str) -> None
         lanes[(SearchCorpus.RAW_DOCUMENTS, SearchLane.CATALOG)] = (candidate,)
     else:
         coverage = tuple(
-            replace(item, returned=0)
-            if item.lane is SearchLane.LEXICAL
-            else item
-            for item in coverage
+            replace(item, returned=0) if item.lane is SearchLane.LEXICAL else item for item in coverage
         )
 
     with pytest.raises(ArchiveSearchFederationError):

@@ -31,9 +31,7 @@ def operator() -> ModuleType:
 
 def _write_json(path: Path, value: Any) -> Path:
     path.write_bytes(
-        (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode(
-            "utf-8"
-        )
+        (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     )
     return path
 

@@ -315,9 +315,7 @@ def test_sidecar_scope_binds_origin_anchor_and_principal_owner(storage) -> None:
         origin_boundary_user_message_id=later_boundary["id"],
     )
     foreign_source = replace(evidence.source_ref, principal_id="foreign-owner")
-    foreign_passages = tuple(
-        replace(passage, source_ref=foreign_source) for passage in evidence.passage_refs
-    )
+    foreign_passages = tuple(replace(passage, source_ref=foreign_source) for passage in evidence.passage_refs)
     foreign_owner = replace(
         evidence,
         source_ref=foreign_source,

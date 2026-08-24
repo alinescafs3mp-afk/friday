@@ -375,9 +375,7 @@ def test_local_ocr_multipage_work_shares_one_deadline(tmp_path: Path) -> None:
 def test_local_ocr_empty_later_page_is_an_honest_partial(tmp_path: Path) -> None:
     executable = _fake_tesseract(
         tmp_path / "tesseract",
-        ocr_action=(
-            "sys.stdout.buffer.write(b'FIRST') if payload.startswith(b'first') else None"
-        ),
+        ocr_action=("sys.stdout.buffer.write(b'FIRST') if payload.startswith(b'first') else None"),
     )
 
     result = extract_local_ocr(

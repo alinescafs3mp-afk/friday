@@ -179,9 +179,7 @@ def test_model_is_read_only_and_mutable_runtime_surfaces_are_explicit() -> None:
             "target": "/run/friday-runtime-epoch",
         }
     ]
-    assert [
-        row for row in gateway["volumes"] if row.get("target") == "/run/friday-runtime-epoch"
-    ] == [
+    assert [row for row in gateway["volumes"] if row.get("target") == "/run/friday-runtime-epoch"] == [
         {
             "type": "volume",
             "source": "runtime-epoch",
@@ -189,9 +187,7 @@ def test_model_is_read_only_and_mutable_runtime_surfaces_are_explicit() -> None:
             "read_only": True,
         }
     ]
-    assert compose["volumes"]["runtime-epoch"] == {
-        "name": "friday-secondary-runtime-epoch"
-    }
+    assert compose["volumes"]["runtime-epoch"] == {"name": "friday-secondary-runtime-epoch"}
 
 
 def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None:
@@ -259,9 +255,11 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     assert 'server_args.sampling_backend != "pytorch"' in launcher
     assert "server_args.language_only" in launcher
     assert "server_args.get_model_config().is_multimodal" in launcher
-    assert launcher.index("server_args = prepare_server_args(arguments)") < launcher.index(
-        'server_args.mm_feature_transport != "cpu"'
-    ) < launcher.index("_publish_runtime_epoch()")
+    assert (
+        launcher.index("server_args = prepare_server_args(arguments)")
+        < launcher.index('server_args.mm_feature_transport != "cpu"')
+        < launcher.index("_publish_runtime_epoch()")
+    )
     assert 'if __name__ == "__main__":' in launcher
     assert launcher.index('if __name__ == "__main__":') < launcher.index(
         "main()", launcher.index('if __name__ == "__main__":')
@@ -450,9 +448,7 @@ def test_launcher_derives_and_atomically_publishes_exact_process_epoch(
     launcher = importlib.import_module("launch_sglang_secure")
     fields = ["S", *(["1"] * 18), "1234"]
     self_stat = f"123 (python worker) {' '.join(fields)}\n"
-    assert launcher._process_start_epoch("cpu 1 2 3\nbtime 1700000000\n", self_stat, 100) == (
-        "1700000012.34"
-    )
+    assert launcher._process_start_epoch("cpu 1 2 3\nbtime 1700000000\n", self_stat, 100) == ("1700000012.34")
 
     observations = iter(("1700000012.34", "1700000099"))
     monkeypatch.setattr(launcher, "_observed_process_start_epoch", lambda: next(observations))
@@ -696,7 +692,7 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     assert "[regex]::Matches($helpText, $flagPattern" in preflight
     assert "$match.Groups['flag'].Value" in preflight
     assert "-not $observedFlagSet.Contains([string]$_)" in preflight
-    assert 'required_flags_sha256 = $requiredFlagsSha256' in preflight
+    assert "required_flags_sha256 = $requiredFlagsSha256" in preflight
     assert "help_sha256" not in preflight
     flag_contract = preflight[
         preflight.index("    $requiredFlags = @(") : preflight.index(
@@ -705,9 +701,7 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     ]
     required_flags = re.findall(r"'(--[a-z0-9][a-z0-9-]*)'", flag_contract)
     assert len(required_flags) == len(set(required_flags)) == 30
-    required_flags_sha256 = hashlib.sha256(
-        "\n".join(sorted(required_flags)).encode("ascii")
-    ).hexdigest()
+    required_flags_sha256 = hashlib.sha256("\n".join(sorted(required_flags)).encode("ascii")).hexdigest()
     assert required_flags_sha256 == "29bda2d9297054a71b1e939cced1afc04faaa0fd8ea4ecd0523ca93365d4c979"
     flag_pattern_match = re.search(r"\$flagPattern = '([^']+)'", preflight)
     assert flag_pattern_match is not None
@@ -1772,13 +1766,9 @@ def test_capacity_and_soak_require_the_exact_profile_endpoint_and_capacity(
     with pytest.raises(common.EndpointError, match="exact profile value"):
         tuner.run_ladder(**{**capacity_arguments, "mem_fraction_static": 0.96})
     with pytest.raises(common.EndpointError, match="HTTPS endpoint identity"):
-        tuner.run_ladder(
-            **{**capacity_arguments, "base_url": "http://127.0.0.1:30000/v1"}
-        )
+        tuner.run_ladder(**{**capacity_arguments, "base_url": "http://127.0.0.1:30000/v1"})
     with pytest.raises(common.EndpointError, match="HTTPS endpoint identity"):
-        tuner.run_ladder(
-            **{**capacity_arguments, "base_url": "https://192.168.1.36:8443/v1"}
-        )
+        tuner.run_ladder(**{**capacity_arguments, "base_url": "https://192.168.1.36:8443/v1"})
     with pytest.raises(common.EndpointError, match="private CA identity"):
         tuner.run_ladder(**{**capacity_arguments, "ca_file": wrong_ca})
 

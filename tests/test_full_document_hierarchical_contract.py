@@ -433,9 +433,7 @@ class _DocumentMapSecondary:
             "success_total": self.success_total,
             "primary_fallback_total": self.fallback_total,
             "last_failure": (
-                (self.failure or SecondaryFailure.MALFORMED_RESPONSE).value
-                if self.fallback_total
-                else None
+                (self.failure or SecondaryFailure.MALFORMED_RESPONSE).value if self.fallback_total else None
             ),
         }
 
@@ -1908,10 +1906,7 @@ async def test_four_ordinary_office_files_have_bounded_map_completion_headroom(
     map_calls = [
         call
         for call in llm.calls
-        if any(
-            str(item.get("content") or "").startswith(CHUNK_PREFIX)
-            for item in call["messages"]
-        )
+        if any(str(item.get("content") or "").startswith(CHUNK_PREFIX) for item in call["messages"])
     ]
     assert len(map_calls) == 4
     assert all(900 < int(call["kwargs"]["max_tokens"]) <= 2_048 for call in map_calls)

@@ -741,10 +741,7 @@ def test_passive_source_scope_never_licenses_a_current_carrier_tail(claim: str) 
 
 
 def test_odt_source_summary_keeps_one_sentence_local_passive_fact() -> None:
-    claim = (
-        "В исходном ODT-документе указано: документ «Артемьев» "
-        "подготовлен кадровой службой."
-    )
+    claim = "В исходном ODT-документе указано: документ «Артемьев» подготовлен кадровой службой."
     assert not _claims_an_unconfirmed_supported_deed(
         claim,
         has_file=False,

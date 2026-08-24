@@ -33120,8 +33120,7 @@ class AgentRuntime:
                 boundary_user_message_id=boundary_message_id,
             )
             if current is None or (
-                current.id != admitted_work_item.id
-                or current.revision != admitted_work_item.revision
+                current.id != admitted_work_item.id or current.revision != admitted_work_item.revision
             ):
                 raise WorkItemConflictError("archive replay admission is no longer current")
             evidence = current.selected_evidence
@@ -33140,15 +33139,11 @@ class AgentRuntime:
                         actor=actor,
                         tenant_id=actor.user_id,
                         principal_id=person_id,
-                        origin_boundary_user_message_id=(
-                            evidence.origin_boundary_user_message_id
-                        ),
+                        origin_boundary_user_message_id=(evidence.origin_boundary_user_message_id),
                         corpus=selected.corpus,
                         source_ref=selected.source_ref,
                         passage_refs=selected.passage_refs,
-                        expected_source_snapshot_sha256=(
-                            evidence.source_snapshot_sha256
-                        ),
+                        expected_source_snapshot_sha256=(evidence.source_snapshot_sha256),
                         expected_coverage_grade=ArchiveEvidenceReplayCoverageGrade(
                             evidence.coverage_grade.value
                         ),
@@ -37967,8 +37962,7 @@ class AgentRuntime:
         routing_message = (
             ""
             if archive_evidence_followup_kind is not None
-            else
-            locate_decomposition.locate_clause
+            else locate_decomposition.locate_clause
             if message_locate_route and locate_decomposition.remainder_known
             else ""
             if message_locate_malformed

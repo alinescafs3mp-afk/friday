@@ -32,9 +32,7 @@ from friday.interaction_control_plane.work_item_contract import (
 )
 
 _MAX_SURFACE_LENGTH = 96
-RECALL_SELECTED_ARCHIVE_EVIDENCE_WORK_ITEM_SCHEMA = (
-    "friday.recall-selected-archive-evidence-work-item.v1"
-)
+RECALL_SELECTED_ARCHIVE_EVIDENCE_WORK_ITEM_SCHEMA = "friday.recall-selected-archive-evidence-work-item.v1"
 _WORK_ITEM_ID_RE = re.compile(r"work_[0-9a-f]{16}\Z")
 _CONVERSATION_ID_RE = re.compile(r"conv_[0-9a-f]{16}\Z")
 _MESSAGE_ID_RE = re.compile(r"msg_[0-9a-f]{16}\Z")
@@ -144,9 +142,9 @@ class RecallSelectedArchiveEvidenceWorkItem:
         expires = canonical_work_item_instant(self.expires_at, label="expires_at")
         if (created, updated, expires) != (self.created_at, self.updated_at, self.expires_at):
             raise WorkItemContractError("work item timestamps must already be canonical")
-        if updated < created or datetime.fromisoformat(expires) > datetime.fromisoformat(
-            updated
-        ) + timedelta(hours=WORK_ITEM_TTL_HOURS):
+        if updated < created or datetime.fromisoformat(expires) > datetime.fromisoformat(updated) + timedelta(
+            hours=WORK_ITEM_TTL_HOURS
+        ):
             raise WorkItemContractError("selected archive work timestamps are invalid")
         if self.state in {WorkState.ACTIVE, WorkState.SUSPENDED}:
             if self.closed_at is not None or expires <= updated:
@@ -169,8 +167,7 @@ class RecallSelectedArchiveEvidenceWorkItem:
             raise WorkItemContractError("selected archive transition does not match state")
         if self.transition is WorkTransition.CREATED:
             if self.revision != 1 or (
-                self.selected_evidence.origin_boundary_user_message_id
-                != self.anchor_user_message_id
+                self.selected_evidence.origin_boundary_user_message_id != self.anchor_user_message_id
             ):
                 raise WorkItemContractError("created selected archive work is inconsistent")
         elif self.revision < 2:
@@ -274,9 +271,7 @@ class RecallSelectedArchiveEvidenceWorkItem:
             "goal": WorkGoal.EXACT_SELECTED_ARCHIVE_EVIDENCE_RECALL.value,
             "state": self.state.value,
             "playbook": WorkPlaybook.RECALL_SELECTED_ARCHIVE_EVIDENCE.value,
-            "completion_contract": (
-                WorkCompletionContract.ACCEPTED_EXACT_SELECTED_ARCHIVE_EVIDENCE.value
-            ),
+            "completion_contract": (WorkCompletionContract.ACCEPTED_EXACT_SELECTED_ARCHIVE_EVIDENCE.value),
             "active_frame": self.active_frame.to_payload(),
             "anchor_user_message_id": self.anchor_user_message_id,
             "anchor_assistant_message_id": self.anchor_assistant_message_id,

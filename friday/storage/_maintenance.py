@@ -1901,10 +1901,7 @@ class MaintenanceMixin(StorageShared):
                                 conversation_id=str(row.get("conversation_id") or ""),
                             )
                         )
-                        if (
-                            archive_item is not None
-                            and archive_item.conversation_id in conversation_ids
-                        ):
+                        if archive_item is not None and archive_item.conversation_id in conversation_ids:
                             item_payload = archive_item.to_payload()
                     else:
                         recall_item = get_recall_conversation_work_item_for_export_in_transaction(
@@ -1913,10 +1910,7 @@ class MaintenanceMixin(StorageShared):
                             user_id=user_id,
                             conversation_id=str(row.get("conversation_id") or ""),
                         )
-                        if (
-                            recall_item is not None
-                            and recall_item.conversation_id in conversation_ids
-                        ):
+                        if recall_item is not None and recall_item.conversation_id in conversation_ids:
                             item_payload = recall_item.to_payload()
                 except (TypeError, ValueError):
                     continue

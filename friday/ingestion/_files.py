@@ -474,8 +474,7 @@ async def _local_ocr_projection(
         "evidence_reread_confirmed": False,
         "evidence_text_inconsistent": False,
         "assets": [
-            {"asset_id": f"A{index}", **asset.to_dict()}
-            for index, asset in enumerate(assets, start=1)
+            {"asset_id": f"A{index}", **asset.to_dict()} for index, asset in enumerate(assets, start=1)
         ],
         "reported_asset_ids": [f"A{index}" for index in range(1, pages_read + 1)],
         "model": "local-tesseract",
@@ -1191,17 +1190,13 @@ class FilesMixin(PipelineShared):
         preferred_language: str = "",
     ) -> dict[str, Any] | None:
         """Render and OCR a bounded document in ordered, at-most-four-page batches."""
-        vision_enabled = bool(
-            self.llm and self.llm.enabled and self.settings.profile.vision_capable
-        )
+        vision_enabled = bool(self.llm and self.llm.enabled and self.settings.profile.vision_capable)
         local_ocr_probe = getattr(self._doc_extractor, "local_ocr_available", None)
         # The first availability check asks the exact binary for its effective
         # language set.  Keep that bounded subprocess off the async request
         # loop; subsequent checks are cached, but the cold path is the one a
         # freshly deployed backend actually sees.
-        local_ocr_enabled = bool(
-            callable(local_ocr_probe) and await asyncio.to_thread(local_ocr_probe)
-        )
+        local_ocr_enabled = bool(callable(local_ocr_probe) and await asyncio.to_thread(local_ocr_probe))
         if not vision_enabled and not local_ocr_enabled:
             return None
 

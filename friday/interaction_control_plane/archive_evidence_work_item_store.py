@@ -55,9 +55,7 @@ _CONVERSATION_ID_RE = re.compile(r"conv_[0-9a-f]{16}\Z")
 _MESSAGE_ID_RE = re.compile(r"msg_[0-9a-f]{16}\Z")
 _USER_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@+-]{0,199}\Z")
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
-_SOURCE_BEARING_STATUSES = frozenset(
-    {ArchiveRecallStatus.COMPLETE, ArchiveRecallStatus.PARTIAL}
-)
+_SOURCE_BEARING_STATUSES = frozenset({ArchiveRecallStatus.COMPLETE, ArchiveRecallStatus.PARTIAL})
 _SOURCE_FREE_STATUSES = frozenset(
     {
         ArchiveRecallStatus.DENIED,
@@ -93,11 +91,7 @@ def _digest(value: object, *, label: str) -> str:
 
 
 def _revision(value: object) -> int:
-    if (
-        not isinstance(value, int)
-        or isinstance(value, bool)
-        or not 1 <= value < WORK_ITEM_MAX_REVISION
-    ):
+    if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value < WORK_ITEM_MAX_REVISION:
         raise WorkItemContractError("expected_revision is outside the closed limit")
     return value
 
@@ -128,10 +122,7 @@ def _row_mapping(cursor: sqlite3.Cursor, row: object) -> dict[str, object]:
     if isinstance(row, Mapping):
         return {str(key): value for key, value in row.items()}
     if isinstance(row, tuple) and cursor.description is not None:
-        return {
-            str(column[0]): value
-            for column, value in zip(cursor.description, row, strict=True)
-        }
+        return {str(column[0]): value for column, value in zip(cursor.description, row, strict=True)}
     raise WorkItemContractError("archive Work Item query returned an invalid row")
 
 
@@ -158,9 +149,7 @@ def _fetch_archive_work_item(
     evidence_row = evidence_cursor.fetchone()
     if evidence_row is None:
         raise WorkItemContractError("archive Work Item has no selected-evidence sidecar")
-    selected = SelectedArchiveEvidence.from_storage_row(
-        _row_mapping(evidence_cursor, evidence_row)
-    )
+    selected = SelectedArchiveEvidence.from_storage_row(_row_mapping(evidence_cursor, evidence_row))
     return RecallSelectedArchiveEvidenceWorkItem.from_storage_rows(
         _row_mapping(work_cursor, work_row),
         selected,
@@ -277,23 +266,20 @@ def _validate_archive_anchor(
     anchor = _row_mapping(cursor, row)
     if require_latest_message:
         assistant_rowid = anchor["assistant_rowid"]
-        if (
-            not isinstance(assistant_rowid, int)
-            or isinstance(assistant_rowid, bool)
-            or assistant_rowid < 1
-        ):
+        if not isinstance(assistant_rowid, int) or isinstance(assistant_rowid, bool) or assistant_rowid < 1:
             raise WorkItemAnchorError("archive assistant anchor row is invalid")
-        if conn.execute(
-            """SELECT 1 FROM messages
+        if (
+            conn.execute(
+                """SELECT 1 FROM messages
                 WHERE user_id=? AND conversation_id=? AND rowid>? LIMIT 1""",
-            (user, conversation, assistant_rowid),
-        ).fetchone() is not None:
+                (user, conversation, assistant_rowid),
+            ).fetchone()
+            is not None
+        ):
             raise WorkItemAnchorError("archive assistant anchor is not the latest publication")
 
     try:
-        receipt = load_accepted_archive_recall_outcome_receipt(
-            anchor["assistant_metadata_json"]
-        )
+        receipt = load_accepted_archive_recall_outcome_receipt(anchor["assistant_metadata_json"])
     except (ArchiveRecallOutcomeError, TypeError, ValueError) as exc:
         raise WorkItemAnchorError("archive assistant has no accepted outcome") from exc
     outcome = receipt.outcome
@@ -709,11 +695,15 @@ def get_current_recall_selected_archive_evidence_work_item_in_transaction(
             "SELECT rowid FROM messages WHERE id=? AND user_id=? AND conversation_id=?",
             (boundary, user, conversation),
         ).fetchone()
-        if boundary_row is None or conn.execute(
-            """SELECT 1 FROM messages
+        if (
+            boundary_row is None
+            or conn.execute(
+                """SELECT 1 FROM messages
                 WHERE user_id=? AND conversation_id=? AND rowid>? LIMIT 1""",
-            (user, conversation, boundary_row[0]),
-        ).fetchone() is not None:
+                (user, conversation, boundary_row[0]),
+            ).fetchone()
+            is not None
+        ):
             raise WorkItemAnchorError("archive replay boundary is no longer latest")
     return item
 
@@ -835,9 +825,7 @@ def _accept_archive_replay_publication(
         require_latest_message=True,
     )
     target_state = WorkState.ACTIVE if source_bearing else WorkState.SUSPENDED
-    transition = (
-        WorkTransition.EVIDENCE_REPLAYED if source_bearing else WorkTransition.SUSPENDED
-    )
+    transition = WorkTransition.EVIDENCE_REPLAYED if source_bearing else WorkTransition.SUSPENDED
     expiry = _expiry(timestamp) if source_bearing else current.expires_at
     cursor = conn.execute(
         """UPDATE work_items

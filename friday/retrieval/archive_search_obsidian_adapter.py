@@ -253,8 +253,7 @@ def _same_exact_graph(left: object, right: object) -> bool:
         )
     if is_dataclass(left) and not isinstance(left, type):
         return all(
-            _same_exact_graph(getattr(left, field.name), getattr(right, field.name))
-            for field in fields(left)
+            _same_exact_graph(getattr(left, field.name), getattr(right, field.name)) for field in fields(left)
         )
     try:
         return bool(left == right)
@@ -953,9 +952,8 @@ def _new_projection(
 ) -> ArchiveObsidianLaneProjection:
     frozen_candidates = tuple(_freeze_candidate(item) for item in candidates)
     frozen_coverage = _freeze_coverage(coverage, execution_binding)
-    if (
-        not _same_exact_graph(candidates, frozen_candidates)
-        or not _same_exact_graph(coverage, frozen_coverage)
+    if not _same_exact_graph(candidates, frozen_candidates) or not _same_exact_graph(
+        coverage, frozen_coverage
     ):
         raise _fail()
     projection = cast(

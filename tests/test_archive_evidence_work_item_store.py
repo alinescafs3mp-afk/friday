@@ -363,9 +363,9 @@ def test_exact_replay_reanchors_refreshes_ttl_and_supports_next_immediate_follow
     assert replayed.transition is WorkTransition.EVIDENCE_REPLAYED
     assert replayed.revision == item.revision + 1
     assert replayed.anchor_assistant_message_id == assistant["id"]
-    assert replayed.expires_at == (
-        datetime.fromisoformat(replay_now) + timedelta(hours=12)
-    ).isoformat(timespec="seconds")
+    assert replayed.expires_at == (datetime.fromisoformat(replay_now) + timedelta(hours=12)).isoformat(
+        timespec="seconds"
+    )
 
     next_boundary = storage.store_message(
         item.conversation_id,
@@ -592,9 +592,7 @@ def test_creation_final_recheck_rolls_back_late_same_transaction_message(storage
         )
 
     assert storage.execute("SELECT 1 FROM work_items WHERE id=?", (identifier,)).fetchone() is None
-    assert storage.execute(
-        "SELECT 1 FROM messages WHERE id='msg_eeeeeeeeeeeeeeee'"
-    ).fetchone() is None
+    assert storage.execute("SELECT 1 FROM messages WHERE id='msg_eeeeeeeeeeeeeeee'").fetchone() is None
 
 
 def test_store_requires_a_caller_owned_transaction(storage: Any) -> None:
@@ -613,9 +611,12 @@ def test_sidecar_replacement_cannot_detach_a_source_bearing_anchor(storage: Any)
             "UPDATE work_item_selected_evidence SET source_snapshot_sha256=? WHERE work_item_id=?",
             ("8" * 64, item.id),
         )
-    with storage.transaction() as conn, pytest.raises(
-        WorkItemAnchorError,
-        match="selected evidence changed",
+    with (
+        storage.transaction() as conn,
+        pytest.raises(
+            WorkItemAnchorError,
+            match="selected evidence changed",
+        ),
     ):
         get_recall_selected_archive_evidence_work_item_in_transaction(
             conn,

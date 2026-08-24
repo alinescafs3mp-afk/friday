@@ -81,8 +81,7 @@ def _private_binding_seal(
             "opaque_handle": opaque_handle,
             "request_attestation": request_attestation,
             "requested_targets": [
-                {"corpus": corpus.value, "lane": lane.value}
-                for corpus, lane in requested_targets
+                {"corpus": corpus.value, "lane": lane.value} for corpus, lane in requested_targets
             ],
             "snapshot_attestation": snapshot_attestation,
         }
