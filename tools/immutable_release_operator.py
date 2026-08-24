@@ -566,8 +566,8 @@ def _validate_staged_environment_transition(
     _target_values, _target_unrelated, target_secondary = _secondary_environment_parts(target)
     if predecessor is None:
         return
-    _predecessor_values, _predecessor_unrelated, predecessor_secondary = (
-        _secondary_environment_parts(predecessor)
+    _predecessor_values, _predecessor_unrelated, predecessor_secondary = _secondary_environment_parts(
+        predecessor
     )
     if predecessor_secondary != target_secondary:
         raise ReleaseFailure("nonsecondary_transition_changed_secondary_environment")
