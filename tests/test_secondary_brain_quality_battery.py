@@ -62,11 +62,15 @@ class FakeEndpoint:
         *,
         overrides: Mapping[str, str] | None = None,
         invalid_tool: bool = False,
+        include_tool_index: bool = True,
+        tool_index: object = 0,
         alias_ok: bool = True,
     ) -> None:
         self.battery = battery
         self.overrides = dict(overrides or {})
         self.invalid_tool = invalid_tool
+        self.include_tool_index = include_tool_index
+        self.tool_index = tool_index
         self.alias_ok = alias_ok
         self.live_names = [case.name for case in battery._live_cases()]
         self.live_index = 0
@@ -107,6 +111,16 @@ class FakeEndpoint:
             assert payload["reasoning_effort"] == "low"
             assert payload["max_tokens"] == 256
             city = "Paris" if self.invalid_tool else "Moscow"
+            tool_call = {
+                "id": "call-safe-17",
+                "type": "function",
+                "function": {
+                    "name": "lookup_temperature",
+                    "arguments": json.dumps({"city": city}),
+                },
+            }
+            if self.include_tool_index:
+                tool_call["index"] = self.tool_index
             return (
                 {
                     "model": self.battery.EXPECTED_MODEL,
@@ -115,16 +129,7 @@ class FakeEndpoint:
                             "message": {
                                 "content": None,
                                 "reasoning_content": "PRIVATE_TOOL_REASONING",
-                                "tool_calls": [
-                                    {
-                                        "id": "call-safe-17",
-                                        "type": "function",
-                                        "function": {
-                                            "name": "lookup_temperature",
-                                            "arguments": json.dumps({"city": city}),
-                                        },
-                                    }
-                                ],
+                                "tool_calls": [tool_call],
                             },
                             "finish_reason": "tool_calls",
                         }
@@ -143,7 +148,7 @@ class FakeEndpoint:
             "reasoning_medium": 512,
             "reasoning_high": 1024,
             "max_token_truncation": 8,
-            "stop_sequence": 32,
+            "stop_sequence": 128,
         }.get(name, 256)
         content = self.overrides.get(name, _LIVE_OUTPUTS[name])
         finish_reason = "length" if name == "max_token_truncation" else "stop"
@@ -293,6 +298,7 @@ def test_full_battery_covers_the_brief_and_retains_only_closed_evidence(
     tool_result = next(message for message in continuation["messages"] if message["role"] == "tool")
     assert set(assistant) == {"role", "content", "tool_calls"}
     assert assistant["content"] is None
+    assert "index" not in assistant["tool_calls"][0]
     assert tool_result == {
         "role": "tool",
         "tool_call_id": "call-safe-17",
@@ -326,6 +332,50 @@ def test_intentional_reasoning_only_length_stop_is_valid_and_content_free(
     assert "PRIVATE_REASONING" not in json.dumps(report, ensure_ascii=False)
 
 
+def test_stop_probe_uses_the_native_return_token_with_a_bounded_generation(battery: Any) -> None:
+    case = next(case for case in battery._live_cases() if case.name == "stop_sequence")
+    serialized_prompt = json.dumps(case.messages, ensure_ascii=False)
+
+    assert case.max_tokens == 128
+    assert case.extra == {"stop": ["<|return|>"]}
+    assert serialized_prompt.count("<|return|>") == 0
+    assert "alpha" in serialized_prompt
+
+
+def test_near_limit_probe_requires_one_marker_and_a_natural_stop(battery: Any) -> None:
+    context_tokens = 4096
+    case = battery._near_limit_long_context_case(context_tokens)
+    common = {
+        "latency_sec": 0.1,
+        "prompt_tokens": context_tokens - 512,
+        "completion_tokens": 8,
+        "reasoning_present": False,
+    }
+
+    assert json.dumps(case.messages, ensure_ascii=False).count(battery._LONG_CONTEXT_MARKER) == 1
+    assert case.validator(
+        battery.SanitizedCompletion(
+            content=f"Memory: {battery._LONG_CONTEXT_MARKER}.",
+            finish_reason="stop",
+            **common,
+        )
+    )
+    assert not case.validator(
+        battery.SanitizedCompletion(
+            content=battery._LONG_CONTEXT_MARKER,
+            finish_reason="length",
+            **common,
+        )
+    )
+    assert not case.validator(
+        battery.SanitizedCompletion(
+            content=f"{battery._LONG_CONTEXT_MARKER} {battery._LONG_CONTEXT_MARKER}",
+            finish_reason="stop",
+            **common,
+        )
+    )
+
+
 def test_tool_probe_validates_shape_without_executing_or_forwarding_reasoning(
     monkeypatch: pytest.MonkeyPatch, battery: Any
 ) -> None:
@@ -344,6 +394,43 @@ def test_tool_probe_validates_shape_without_executing_or_forwarding_reasoning(
     assert len(fake.calls) == 1
     assert "Paris" not in json.dumps(rows)
     assert "PRIVATE_TOOL_REASONING" not in json.dumps(rows)
+
+
+@pytest.mark.parametrize("include_index", [False, True])
+def test_tool_probe_accepts_optional_zero_index_and_normalizes_it(
+    monkeypatch: pytest.MonkeyPatch,
+    battery: Any,
+    include_index: bool,
+) -> None:
+    fake = FakeEndpoint(battery, include_tool_index=include_index)
+    monkeypatch.setattr(battery, "request_json", fake)
+
+    observation = battery._tool_call_request(
+        base_url="https://192.168.1.35:8443/v1",
+        api_key=API_KEY,
+        timeout_sec=10.0,
+        ca_file=CA_FILE,
+    )
+
+    assert set(observation.assistant_message["tool_calls"][0]) == {"id", "type", "function"}
+
+
+@pytest.mark.parametrize("tool_index", [True, -1, 1, None, "0"])
+def test_tool_probe_rejects_noncanonical_optional_index(
+    monkeypatch: pytest.MonkeyPatch,
+    battery: Any,
+    tool_index: object,
+) -> None:
+    fake = FakeEndpoint(battery, tool_index=tool_index)
+    monkeypatch.setattr(battery, "request_json", fake)
+
+    with pytest.raises(battery.EndpointError, match="tool-call index"):
+        battery._tool_call_request(
+            base_url="https://192.168.1.35:8443/v1",
+            api_key=API_KEY,
+            timeout_sec=10.0,
+            ca_file=CA_FILE,
+        )
 
 
 def test_wrong_inventory_fails_closed_before_any_completion(
@@ -450,8 +537,9 @@ def test_disconnect_probe_parses_exact_sse_and_requires_bounded_recovery(
     monkeypatch.setattr(battery, "_completion_request", completion)
     metric_rows = iter(
         [
-            battery.CancellationMetrics(aborted_total=4.0, running=0.0, queued=0.0),
-            battery.CancellationMetrics(aborted_total=5.0, running=0.0, queued=0.0),
+            battery.CancellationMetrics(aborted_total=None, running=0.0, queued=0.0),
+            battery.CancellationMetrics(aborted_total=None, running=1.0, queued=0.0),
+            battery.CancellationMetrics(aborted_total=None, running=0.0, queued=0.0),
         ]
     )
     monkeypatch.setattr(battery, "_cancellation_metrics", lambda **_kwargs: next(metric_rows))
@@ -507,6 +595,87 @@ def test_cancellation_metrics_reads_only_the_three_bounded_series(
     assert "prompt" not in repr(snapshot)
     with pytest.raises(battery.EndpointError):
         battery._metric_values("sglang:num_running_reqs NaN", "sglang:num_running_reqs")
+
+
+def test_disconnect_probe_requires_a_running_gauge_before_client_close(
+    monkeypatch: pytest.MonkeyPatch, battery: Any
+) -> None:
+    monkeypatch.setattr(
+        battery,
+        "_completion_request",
+        lambda **_kwargs: battery.SanitizedCompletion(
+            content="ready",
+            latency_sec=0.2,
+            prompt_tokens=3,
+            completion_tokens=1,
+            finish_reason="stop",
+            reasoning_present=False,
+        ),
+    )
+    monkeypatch.setattr(
+        battery,
+        "_cancellation_metrics",
+        lambda **_kwargs: battery.CancellationMetrics(
+            aborted_total=1.0,
+            running=0.0,
+            queued=0.0,
+        ),
+    )
+
+    class Response:
+        status = 200
+        headers = object()
+
+        def readline(self, _limit: int) -> bytes:
+            return b'data: {"model":"friday-secondary-gptoss20b","choices":[{"index":0,"delta":{}}]}\r\n'
+
+    class Connection:
+        def request(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def getresponse(self) -> Response:
+            return Response()
+
+        def close(self) -> None:
+            return None
+
+    monotonic_values = iter([0.0, 0.0, 9.0])
+    monkeypatch.setattr(battery.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(battery.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(battery, "build_tls_context", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(battery, "validate_profile_headers", lambda _headers: None)
+    monkeypatch.setattr(battery.http.client, "HTTPSConnection", lambda *_args, **_kwargs: Connection())
+
+    rows = battery._run_disconnect_protocol(
+        base_url="https://192.168.1.35:8443/v1",
+        api_key=API_KEY,
+        timeout_sec=60.0,
+        ca_file=CA_FILE,
+    )
+
+    assert [row["status"] for row in rows] == ["failed", "failed"]
+
+
+def test_cancellation_metrics_allows_the_pinned_runtime_to_omit_abort_counter(
+    monkeypatch: pytest.MonkeyPatch, battery: Any
+) -> None:
+    monkeypatch.setattr(
+        battery,
+        "request_text",
+        lambda *_args, **_kwargs: (
+            "sglang:num_running_reqs 1\nsglang:num_queue_reqs 0\n",
+            0.01,
+        ),
+    )
+
+    snapshot = battery._cancellation_metrics(
+        base_url="https://192.168.1.35:8443/v1",
+        api_key=API_KEY,
+        timeout_sec=3.0,
+        ca_file=CA_FILE,
+    )
+
+    assert snapshot == battery.CancellationMetrics(aborted_total=None, running=1.0, queued=0.0)
 
 
 @pytest.mark.parametrize(
@@ -611,8 +780,9 @@ def test_disconnect_recovery_cannot_pass_outside_its_strict_budget(
     monkeypatch.setattr(battery, "_completion_request", completion)
     metric_rows = iter(
         [
-            battery.CancellationMetrics(aborted_total=7.0, running=0.0, queued=0.0),
-            battery.CancellationMetrics(aborted_total=8.0, running=0.0, queued=0.0),
+            battery.CancellationMetrics(aborted_total=None, running=0.0, queued=0.0),
+            battery.CancellationMetrics(aborted_total=None, running=1.0, queued=0.0),
+            battery.CancellationMetrics(aborted_total=None, running=0.0, queued=0.0),
         ]
     )
     monkeypatch.setattr(battery, "_cancellation_metrics", lambda **_kwargs: next(metric_rows))

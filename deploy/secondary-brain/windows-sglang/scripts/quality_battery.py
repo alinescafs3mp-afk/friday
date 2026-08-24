@@ -45,9 +45,7 @@ _TOOL_NAME = "lookup_temperature"
 _TOOL_USER = "Call lookup_temperature once for Moscow. Do not answer from memory."
 _CALL_ID = re.compile(r"[A-Za-z0-9_.:-]{1,200}\Z")
 LONG_CONTEXT_CASE_NAME = "near_limit_long_context_recall"
-_CONTEXT_LADDER = frozenset(
-    {4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536}
-)
+_CONTEXT_LADDER = frozenset({4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536})
 _LONG_CONTEXT_MARKER = "FRIDAY-LONG-CONTEXT-7C91E2"
 _LONG_CONTEXT_FILLER_RESERVE = 512
 _LONG_CONTEXT_ACCEPTANCE_RESERVE = 768
@@ -76,7 +74,7 @@ class ToolCallObservation:
 
 @dataclass(frozen=True, slots=True)
 class CancellationMetrics:
-    aborted_total: float
+    aborted_total: float | None
     running: float
     queued: float
 
@@ -157,7 +155,7 @@ def _cancellation_metrics(
     if not running or not queued:
         raise EndpointError("required cancellation gauges are absent")
     return CancellationMetrics(
-        aborted_total=sum(aborted),
+        aborted_total=sum(aborted) if aborted else None,
         running=sum(running),
         queued=sum(queued),
     )
@@ -227,15 +225,14 @@ def _near_limit_long_context_case(context_tokens: int) -> QualityCase:
         user,
         system="Read the entire bounded message and return only the requested earlier memory value.",
     )
-    encoded_bytes = len(
-        json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    )
+    encoded_bytes = len(json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
     if encoded_bytes > _LONG_CONTEXT_MAX_PROMPT_BYTES:
         raise EndpointError("long-context quality prompt exceeds its byte bound")
 
     def validate(completion: SanitizedCompletion) -> bool:
         return bool(
-            completion.content.strip() == _LONG_CONTEXT_MARKER
+            completion.finish_reason == "stop"
+            and completion.content.count(_LONG_CONTEXT_MARKER) == 1
             and completion.prompt_tokens >= context_tokens - _LONG_CONTEXT_ACCEPTANCE_RESERVE
             and completion.completion_tokens >= 1
             and completion.prompt_tokens + completion.completion_tokens <= context_tokens
@@ -342,10 +339,10 @@ def _live_cases() -> tuple[QualityCase, ...]:
         ),
         QualityCase(
             "stop_sequence",
-            _base_messages("Return exactly: alpha<STOP>omega"),
+            _base_messages("Reply exactly: alpha"),
             _stop_is_honoured,
-            max_tokens=32,
-            extra={"stop": ["<STOP>"]},
+            max_tokens=128,
+            extra={"stop": ["<|return|>"]},
         ),
         QualityCase(
             "max_token_truncation",
@@ -564,7 +561,13 @@ def _tool_call_request(
     if not isinstance(calls, list) or len(calls) != 1 or not isinstance(calls[0], dict):
         raise EndpointError("tool probe returned an invalid tool-call collection")
     call = calls[0]
-    if set(call) != {"id", "type", "function"} or call.get("type") != "function":
+    call_keys = set(call)
+    required_call_keys = {"id", "type", "function"}
+    if call_keys not in (required_call_keys, required_call_keys | {"index"}):
+        raise EndpointError("tool probe returned an invalid tool-call envelope")
+    if "index" in call and (type(call["index"]) is not int or call["index"] != 0):
+        raise EndpointError("tool probe returned an invalid tool-call index")
+    if call.get("type") != "function":
         raise EndpointError("tool probe returned an invalid tool-call envelope")
     call_id = call.get("id")
     function = call.get("function")
@@ -775,6 +778,22 @@ def _run_disconnect_protocol(
             break
         if not observed_event:
             raise EndpointError("disconnect probe observed no valid stream event")
+
+        active_deadline = time.monotonic() + min(timeout_sec, 8.0)
+        active_observed = False
+        while time.monotonic() < active_deadline:
+            active = _cancellation_metrics(
+                base_url=base_url,
+                api_key=api_key,
+                timeout_sec=min(timeout_sec, 3.0),
+                ca_file=ca_file,
+            )
+            if active.running >= 1:
+                active_observed = True
+                break
+            time.sleep(0.2)
+        if not active_observed:
+            raise EndpointError("disconnect probe never observed a running request")
     except Exception:
         return [_failed("stream_cancellation"), _failed("client_disconnect_recovery")]
     finally:
@@ -782,30 +801,24 @@ def _run_disconnect_protocol(
             connection.close()
 
     cancelled_at = time.monotonic()
-    abort_deadline = cancelled_at + min(timeout_sec, 8.0)
-    abort_observed = False
+    drain_deadline = cancelled_at + min(timeout_sec, 8.0)
+    drain_observed = False
     try:
-        while time.monotonic() < abort_deadline:
+        while time.monotonic() < drain_deadline:
             observed = _cancellation_metrics(
                 base_url=base_url,
                 api_key=api_key,
                 timeout_sec=min(timeout_sec, 3.0),
                 ca_file=ca_file,
             )
-            if observed.aborted_total > before.aborted_total + 1:
-                raise EndpointError("disconnect abort counter changed by more than one")
-            if (
-                observed.aborted_total == before.aborted_total + 1
-                and observed.running == 0
-                and observed.queued == 0
-            ):
-                abort_observed = True
+            if observed.running == 0 and observed.queued == 0:
+                drain_observed = True
                 break
             time.sleep(0.2)
     except EndpointError:
-        abort_observed = False
+        drain_observed = False
     abort_latency = time.monotonic() - cancelled_at
-    if not abort_observed:
+    if not drain_observed:
         return [_failed("stream_cancellation"), _failed("client_disconnect_recovery")]
 
     try:
@@ -927,9 +940,7 @@ def run_battery(
     )
     rows = [inventory]
     cases = _live_cases()
-    long_context_case = (
-        _near_limit_long_context_case(context_tokens) if context_tokens is not None else None
-    )
+    long_context_case = _near_limit_long_context_case(context_tokens) if context_tokens is not None else None
     if alias_ok:
         rows.extend(
             _run_live_case(

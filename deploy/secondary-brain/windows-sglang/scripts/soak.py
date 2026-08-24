@@ -86,7 +86,7 @@ def _safe_trial(case: SoakCase, completion: SanitizedCompletion, sequence: int) 
     return {
         "sequence": sequence,
         "case": case.name,
-        "passed": case.validator(completion.content),
+        "passed": completion.finish_reason == "stop" and case.validator(completion.content),
         "latency_sec": round(completion.latency_sec, 6),
         "prompt_tokens": completion.prompt_tokens,
         "completion_tokens": completion.completion_tokens,
