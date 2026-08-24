@@ -59,7 +59,6 @@ class QualityCase:
     messages: tuple[dict[str, Any], ...] = field(repr=False)
     validator: Callable[[SanitizedCompletion], bool] = field(repr=False)
     max_tokens: int = 256
-    temperature: float = 1.0
     extra: Mapping[str, Any] = field(default_factory=dict, repr=False)
     allow_empty_length: bool = False
 
@@ -356,7 +355,6 @@ def _live_cases() -> tuple[QualityCase, ...]:
             "arithmetic",
             _base_messages("Return only the decimal result of 144 / 12 + 30."),
             _exact("42"),
-            temperature=0.0,
         ),
         QualityCase(
             "extraction_and_date",
@@ -365,7 +363,6 @@ def _live_cases() -> tuple[QualityCase, ...]:
                 "Артемьев, 24.08.2026, сумма 17. Normalize the date to ISO."
             ),
             _json_equals({"amount": 17, "date": "2026-08-24", "person": "Артемьев"}),
-            temperature=0.0,
             extra={"response_format": {"type": "json_object"}},
         ),
         QualityCase(
@@ -375,7 +372,6 @@ def _live_cases() -> tuple[QualityCase, ...]:
                 "проект «Север»; бюджет 17 рублей; срок 24.08.2026."
             ),
             _summary_is_faithful,
-            temperature=0.0,
         ),
         QualityCase(
             "contradiction",
@@ -384,7 +380,6 @@ def _live_cases() -> tuple[QualityCase, ...]:
                 "Return exactly CONTRADICTION if they conflict, otherwise CONSISTENT."
             ),
             _exact("CONTRADICTION"),
-            temperature=0.0,
         ),
         QualityCase(
             "citation_preservation",
@@ -393,13 +388,11 @@ def _live_cases() -> tuple[QualityCase, ...]:
                 "The measured height is 42 m [SRC-17]."
             ),
             _citation_is_preserved,
-            temperature=0.0,
         ),
         QualityCase(
             "wrong_language_guard",
             _base_messages("Ответь ровно одним русским словом: подтверждено"),
             _exact("подтверждено"),
-            temperature=0.0,
         ),
     )
 
@@ -413,21 +406,18 @@ def _completion_request(
     max_tokens: int,
     extra: Mapping[str, Any],
     ca_file: Path,
-    temperature: float = 1.0,
     allow_empty_length: bool = False,
 ) -> SanitizedCompletion:
     if not 1 <= max_tokens <= 4096:
         raise EndpointError("quality case max_tokens is outside the certification bound")
     if _RESERVED_PAYLOAD_KEYS.intersection(extra):
         raise EndpointError("quality case attempted to override a reserved payload field")
-    if type(temperature) is not float or temperature not in {0.0, 1.0}:
-        raise EndpointError("quality case temperature is outside the certified set")
     payload: dict[str, Any] = {
         "model": EXPECTED_MODEL,
         "messages": list(messages),
         "max_tokens": max_tokens,
         "reasoning_effort": "low",
-        "temperature": temperature,
+        "temperature": 1.0,
         "top_p": 1.0,
         "seed": 0,
         "stream": False,
@@ -498,7 +488,6 @@ def _run_live_case(
             max_tokens=case.max_tokens,
             extra=case.extra,
             ca_file=ca_file,
-            temperature=case.temperature,
             allow_empty_length=case.allow_empty_length,
         )
         try:
