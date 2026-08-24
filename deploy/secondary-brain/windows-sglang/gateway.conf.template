@@ -13,6 +13,9 @@ http {
     client_body_buffer_size 8m;
     client_body_temp_path /tmp/client-body;
     proxy_temp_path /tmp/proxy;
+    fastcgi_temp_path /tmp/fastcgi;
+    uwsgi_temp_path /tmp/uwsgi;
+    scgi_temp_path /tmp/scgi;
     map_hash_bucket_size 128;
 
     map $http_authorization $friday_authorized {
