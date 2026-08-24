@@ -51,6 +51,10 @@ def _is_exact_extraction(value: str) -> bool:
     return parsed == {"amount": 17, "date": "2026-08-24", "person": "Артемьев"}
 
 
+def _is_integer_42(value: str) -> bool:
+    return bool(re.fullmatch(r"42(?:\.0+)?", value.strip()))
+
+
 def _cases() -> tuple[SoakCase, ...]:
     return (
         SoakCase("russian", "Одним предложением объясни, зачем проверяют резервный узел.", _has_cyrillic),
@@ -58,7 +62,7 @@ def _cases() -> tuple[SoakCase, ...]:
         SoakCase(
             "arithmetic",
             "Return only the decimal result of (19 * 3) - 15.",
-            lambda value: value.strip() == "42",
+            _is_integer_42,
         ),
         SoakCase(
             "json_extraction",

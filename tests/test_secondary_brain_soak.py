@@ -59,3 +59,13 @@ def test_complete_trial_passes_and_json_grammar_request_remains_enabled(soak: An
     assert soak._safe_trial(case, completion, 1)["passed"] is True
     json_case = next(case for case in soak._cases() if case.name == "json_extraction")
     assert json_case.extra == {"response_format": {"type": "json_object"}}
+
+
+@pytest.mark.parametrize("value", ["42", "42.0", "42.000"])
+def test_arithmetic_case_accepts_equivalent_integer_renderings(soak: Any, value: str) -> None:
+    assert soak._is_integer_42(value)
+
+
+@pytest.mark.parametrize("value", ["42.5", "The answer is 42", "41", ""])
+def test_arithmetic_case_rejects_wrong_or_verbose_results(soak: Any, value: str) -> None:
+    assert not soak._is_integer_42(value)
