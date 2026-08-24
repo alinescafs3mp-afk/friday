@@ -46,6 +46,7 @@ from friday.retrieval.archive_search_authority import (
     attest_archive_search_before_publication,
     create_archive_model_batch_ledger,
 )
+from friday.storage import FridayStorage
 from friday.storage.models import InboxItem, InboxStatus, RawObject, new_id
 from friday.turn_intent_policy import (
     WEATHER_LOCATION_CLARIFICATION,
@@ -428,6 +429,16 @@ def _seed_message_archive(
         selected_text,
     )
     return str(conversation["id"]), selected_text
+
+
+def _reopen_storage(settings: Any, storage: Any) -> FridayStorage:
+    return FridayStorage(
+        replace(
+            settings,
+            database_path=storage.settings.database_path,
+            database_must_exist=True,
+        )
+    )
 
 
 async def _runtime(
@@ -1054,23 +1065,27 @@ async def test_selected_canonical_archive_evidence_replays_exactly_after_runtime
         suffix="-durable-restart",
     )
     no_model = _DirectAnswerModel()
-    restarted, kernel, actor, _model, web, _contexts = await _runtime(
-        settings,
-        storage,
-        monkeypatch,
-        model_override=no_model,
-    )
+    reopened = _reopen_storage(settings, storage)
     try:
-        replay = await restarted.chat(
-            _OWNER,
-            "Что в нём сказано?",
-            actor=actor,
-            conversation_id=str(initial["conversation_id"]),
-            enable_tools=True,
-            answer_with_voice=False,
+        restarted, kernel, actor, _model, web, _contexts = await _runtime(
+            settings,
+            reopened,
+            monkeypatch,
+            model_override=no_model,
         )
+        try:
+            replay = await restarted.chat(
+                _OWNER,
+                "Что в нём сказано?",
+                actor=actor,
+                conversation_id=str(initial["conversation_id"]),
+                enable_tools=True,
+                answer_with_voice=False,
+            )
+        finally:
+            await web.close()
     finally:
-        await web.close()
+        reopened.close(final=True)
 
     body_row = storage.execute(
         "SELECT raw_content FROM raw_objects WHERE id=? AND user_id=?",
@@ -1170,31 +1185,35 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_fail
     )
 
     no_model = _DirectAnswerModel()
-    restarted, replay_kernel, replay_actor, _model, replay_web, _contexts = await _runtime(
-        settings,
-        storage,
-        monkeypatch,
-        model_override=no_model,
-    )
-    replay_authorize_calls: list[tuple[str, str]] = []
-    original_authorize = replay_kernel.authorization.authorize
-
-    def observe_replay_authorize(fresh_actor: ActorContext, security_id: str) -> Any:
-        replay_authorize_calls.append((fresh_actor.own_id, security_id))
-        return original_authorize(fresh_actor, security_id)
-
-    monkeypatch.setattr(replay_kernel.authorization, "authorize", observe_replay_authorize)
+    replay_storage = _reopen_storage(settings, storage)
     try:
-        replay = await restarted.chat(
-            _OWNER,
-            "Что в нём сказано?",
-            actor=replay_actor,
-            conversation_id=str(initial["conversation_id"]),
-            enable_tools=True,
-            answer_with_voice=False,
+        restarted, replay_kernel, replay_actor, _model, replay_web, _contexts = await _runtime(
+            settings,
+            replay_storage,
+            monkeypatch,
+            model_override=no_model,
         )
+        replay_authorize_calls: list[tuple[str, str]] = []
+        original_authorize = replay_kernel.authorization.authorize
+
+        def observe_replay_authorize(fresh_actor: ActorContext, security_id: str) -> Any:
+            replay_authorize_calls.append((fresh_actor.own_id, security_id))
+            return original_authorize(fresh_actor, security_id)
+
+        monkeypatch.setattr(replay_kernel.authorization, "authorize", observe_replay_authorize)
+        try:
+            replay = await restarted.chat(
+                _OWNER,
+                "Что в нём сказано?",
+                actor=replay_actor,
+                conversation_id=str(initial["conversation_id"]),
+                enable_tools=True,
+                answer_with_voice=False,
+            )
+        finally:
+            await replay_web.close()
     finally:
-        await replay_web.close()
+        replay_storage.close(final=True)
 
     assert selected_text in replay["message"]
     assert late_text not in replay["message"]
@@ -1225,29 +1244,34 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_fail
         assert storage.archive_conversation(source_conversation_id, _OWNER) is True
 
     drift_model = _DirectAnswerModel()
-    drifted_runtime, drift_kernel, drift_actor, _model, drift_web, _contexts = await _runtime(
-        settings,
-        storage,
-        monkeypatch,
-        model_override=drift_model,
-    )
+    failure_storage = _reopen_storage(settings, storage)
     try:
-        drifted = await drifted_runtime.chat(
-            _OWNER,
-            "Покажи фрагмент.",
-            actor=drift_actor,
-            conversation_id=str(initial["conversation_id"]),
-            enable_tools=True,
-            answer_with_voice=False,
+        drifted_runtime, drift_kernel, drift_actor, _model, drift_web, _contexts = await _runtime(
+            settings,
+            failure_storage,
+            monkeypatch,
+            model_override=drift_model,
         )
+        try:
+            drifted = await drifted_runtime.chat(
+                _OWNER,
+                "Покажи фрагмент.",
+                actor=drift_actor,
+                conversation_id=str(initial["conversation_id"]),
+                enable_tools=True,
+                answer_with_voice=False,
+            )
+        finally:
+            await drift_web.close()
     finally:
-        await drift_web.close()
+        failure_storage.close(final=True)
 
     assert drifted["context"]["selected_archive_evidence_replay"] == expected_replay_status
     source_free = json.dumps(drifted, ensure_ascii=False)
     assert selected_text not in source_free
     assert late_text not in source_free
     assert _QUERY not in source_free
+    assert source_conversation_id not in source_free
     assert drifted["tools_used"] == []
     assert drift_model.calls == 0
     assert drift_kernel.calls == []
@@ -1295,23 +1319,27 @@ async def test_selected_archive_replay_failure_is_source_free_and_suspends(
         storage.conn.commit()
 
     no_model = _DirectAnswerModel()
-    restarted, kernel, actor, _model, web, _contexts = await _runtime(
-        settings,
-        storage,
-        monkeypatch,
-        model_override=no_model,
-    )
+    reopened = _reopen_storage(settings, storage)
     try:
-        replay = await restarted.chat(
-            _OWNER,
-            "Покажи фрагмент.",
-            actor=actor,
-            conversation_id=str(initial["conversation_id"]),
-            enable_tools=True,
-            answer_with_voice=False,
+        restarted, kernel, actor, _model, web, _contexts = await _runtime(
+            settings,
+            reopened,
+            monkeypatch,
+            model_override=no_model,
         )
+        try:
+            replay = await restarted.chat(
+                _OWNER,
+                "Покажи фрагмент.",
+                actor=actor,
+                conversation_id=str(initial["conversation_id"]),
+                enable_tools=True,
+                answer_with_voice=False,
+            )
+        finally:
+            await web.close()
     finally:
-        await web.close()
+        reopened.close(final=True)
 
     assert replay["context"]["selected_archive_evidence_replay"] == expected_status.value
     assert _QUERY not in json.dumps(replay, ensure_ascii=False)
