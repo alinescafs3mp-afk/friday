@@ -16,15 +16,21 @@ the current production identity, completed packages, active work and next order.
 - Database schema: 38
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean
-- Delivery constraints: no Docker; companion plugin untouched; small commits and
-  immutable wheel-only production releases
+- Delivery constraints: no Docker for primary Friday release certification;
+  companion plugin untouched; small commits and immutable wheel-only production
+  releases. The optional laptop inference node is a separate Docker contour.
 
 ## Active objective
 
-Continue from the deployed golden-journey, retrieval-identity and federated
-archive-search foundation and the reconciled document-contour WIP audit. Extend
-the Interaction Control Plane by one complete durable vertical at a time. Keep
-`main` and the live release healthy after every package.
+Build the optional detachable GPT-OSS-20B/SGLang secondary node described in
+`OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`, starting with
+an independently certified laptop endpoint and preserving exact primary-only
+behavior whenever that node is absent. The Interaction Control Plane is paused
+at the local schema-39 archive-evidence checkpoint `912dc1a`; it is not deployed
+and will resume from that commit after the urgent secondary-brain package.
+
+Detailed active tracker:
+`outer_sol/OPTIONAL_SECONDARY_BRAIN_IMPLEMENTATION_STATUS.md`.
 
 ## Convergence decision
 
@@ -44,8 +50,9 @@ course, with these repository-specific constraints:
 - The release-evidence package should extend the immutable operator's existing
   journals/manifests instead of creating a competing release path.
 - Android/Syncthing, restore and external-service claims remain `UNVERIFIED`
-  until direct evidence exists. Docker and companion-plugin work remain out of
-  the current contour.
+  until direct evidence exists. Docker remains outside primary Friday
+  certification; the separate laptop inference node uses its existing Docker
+  Desktop installation. Companion-plugin work remains out of scope.
 
 ## Completed and deployed
 
@@ -254,19 +261,24 @@ claims at this checkpoint.
 
 ## Next order
 
-1. Extend the proven recall Work Item across document and message evidence only
-   through stable source/passage references and fresh authorization/revision
-   checks.
-2. Add durable candidate selection/pending-question state only when it preserves
+1. Complete P0 live discovery and independent certification of the optional
+   Windows/WSL2/Docker/SGLang node; do not make Friday depend on it.
+2. Add dormant, default-off secondary endpoint support with independent
+   transport/circuit state, typed sanitized GPT-OSS advice and fail-soft tests.
+3. Prove shadow and bounded assist rollout, including laptop-off and
+   disconnect-mid-turn journeys, before any advisory output influences a turn.
+4. Resume the schema-39 archive-evidence checkpoint and release it only after
+   the complete isolated and immutable-release gates pass.
+5. Add durable candidate selection/pending-question state only when it preserves
    exact archive coverage and survives restart without persisting model prose.
-3. Add one uncertainty-aware common effect envelope and prove one idempotent,
+6. Add one uncertainty-aware common effect envelope and prove one idempotent,
    receipt-backed Obsidian mutation/reconciliation vertical.
-4. Extend existing immutable-release evidence into machine-reconcilable
+7. Extend existing immutable-release evidence into machine-reconcilable
    source/wheel/schema/activation/fallback manifests, then register exact-release
    journey evidence without promoting generic component gates.
-5. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
+8. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
    certification; simulations remain labelled separately.
-6. Evaluate generic WorkGraph, broader effects, connectors or companion work
+9. Evaluate generic WorkGraph, broader effects, connectors or companion work
    only from the golden journeys still failing after the preceding packages.
 
 ## WIP source retention

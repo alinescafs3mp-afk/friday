@@ -1,9 +1,9 @@
 # Interaction Control Plane implementation status
 
-Status: **P0A + P0B + P1 READ SLICES + NARROW P2 RECALL CANARY DEPLOYED**
+Status: **DEPLOYED CANARY + SCHEMA-39 ARCHIVE-EVIDENCE CHECKPOINT PAUSED**
 Date: 2026-08-24
 Branch: `main`
-Source: `main` / `4b27be8`
+Source: `main` / `912dc1a` local checkpoint; not released
 Live: Friday `0.207.8` / `da8d11e`, schema 38
 
 ## Release checkpoint
@@ -23,6 +23,12 @@ Live: Friday `0.207.8` / `da8d11e`, schema 38
 - The live anchor resolves to `da8d11e`, with `3d2bef3` (`0.207.7`) as fallback.
   Backend and bridge are active, trusted-CA health is `ok`, and schema 38,
   SQLite quick-check, foreign keys and exact Work Item DDL are clean.
+- Local `912dc1a` adds schema 39 and one durable, body-free selected archive
+  evidence continuation. Exact restart replay performs fresh authority and
+  revision checks without search or model use; late denial and source drift
+  suspend source-free. Its focused checkpoint gate is 645 passed, but it remains
+  intentionally undeployed while the urgent optional-secondary-brain package is
+  active.
 
 ## P0A implemented
 
