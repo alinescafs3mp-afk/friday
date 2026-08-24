@@ -286,6 +286,10 @@ python scripts/soak.py \
   --output evidence/soak.observed.json
 ```
 
+Every capacity repeat carries a deterministic discriminator near the start of
+the prompt. This forces a real near-limit prefill instead of measuring an
+identical full radix-cache hit after the first request.
+
 The deterministic battery proves the mocked failure contract, but cannot claim
 that the physical laptop disappeared. Run it and the controlled live outage
 runner from the primary host:

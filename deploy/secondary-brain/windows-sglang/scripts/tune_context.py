@@ -31,11 +31,23 @@ _PROTOCOL_TOKEN_RESERVE = 384
 _MINIMUM_PROMPT_FRACTION = 0.80
 
 
-def _context_prompt(target_tokens: int, generation_tokens: int) -> list[dict[str, str]]:
+def _context_prompt(
+    target_tokens: int,
+    generation_tokens: int,
+    *,
+    repeat: int = 1,
+) -> list[dict[str, str]]:
     repeats = target_tokens - generation_tokens - _PROTOCOL_TOKEN_RESERVE
     if repeats < 1:
         raise ValueError("context target cannot reserve generation and protocol tokens")
-    body = "probe " * repeats
+    if not 1 <= repeat <= 10:
+        raise ValueError("capacity repeat is outside the certified bound")
+    # Fully identical near-limit requests become almost complete radix-cache
+    # hits after the first pass.  That no longer measures a real prefill and can
+    # exercise a pinned SGLang streaming lifecycle race instead of capacity.
+    # A deterministic early discriminator keeps each trial content-free while
+    # forcing the near-limit body through prefill again.
+    body = f"capacity-repeat-{repeat:02d} " + ("probe " * (repeats - 1))
     return [
         {
             "role": "system",
@@ -80,7 +92,11 @@ def _trial(
             completion = stream_chat_completion(
                 base_url,
                 api_key=api_key,
-                messages=_context_prompt(context_tokens, generation_tokens),
+                messages=_context_prompt(
+                    context_tokens,
+                    generation_tokens,
+                    repeat=repeat,
+                ),
                 timeout_sec=timeout_sec,
                 max_tokens=generation_tokens,
                 ca_file=ca_file,

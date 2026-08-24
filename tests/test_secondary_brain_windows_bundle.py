@@ -1643,7 +1643,13 @@ def test_capacity_accepts_profile_memory_grid_and_reserves_generation_tokens() -
     assert args.mem_fraction_static == 0.97
     messages = tuner._context_prompt(4096, 320)
     body = messages[-1]["content"]
-    assert body.count("probe ") == 4096 - 320 - tuner._PROTOCOL_TOKEN_RESERVE
+    assert body.startswith("capacity-repeat-01 ")
+    assert body.count("probe ") == 4096 - 320 - tuner._PROTOCOL_TOKEN_RESERVE - 1
+    second_body = tuner._context_prompt(4096, 320, repeat=2)[-1]["content"]
+    assert second_body.startswith("capacity-repeat-02 ")
+    assert second_body != body
+    with pytest.raises(ValueError, match="repeat"):
+        tuner._context_prompt(4096, 320, repeat=11)
     checks = tuner._usage_checks(
         context_tokens=4096,
         generation_tokens=320,
