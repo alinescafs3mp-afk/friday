@@ -60,8 +60,8 @@ _TOP_LEVEL_KEYS = {
     "note",
 }
 _NOTE = (
-    "Observed only. Accept only after offline tensor audit, exact loader proof, "
-    "and the complete quality battery."
+    "Observed only. Accept only after the exact offline tensor and provenance audit; "
+    "loader and quality acceptance belong to the bound runtime profile."
 )
 
 
@@ -389,4 +389,21 @@ def verify_converted_model_snapshot(
         source_revision=SOURCE_REVISION,
         file_count=len(actual),
         total_bytes=total_bytes,
+    )
+
+
+def verify_converted_model_manifest(
+    accepted_manifest_path: Path,
+    expected_manifest_sha256: str,
+) -> ConvertedModelReceipt:
+    """Validate an accepted manifest and its closed file projection without mounting the model."""
+
+    value = _load_manifest(accepted_manifest_path, expected_manifest_sha256)
+    _validate_identity(value)
+    expected = _manifest_file_rows(value)
+    return ConvertedModelReceipt(
+        manifest_sha256=expected_manifest_sha256,
+        source_revision=SOURCE_REVISION,
+        file_count=len(expected),
+        total_bytes=sum(size for size, _digest in expected.values()),
     )

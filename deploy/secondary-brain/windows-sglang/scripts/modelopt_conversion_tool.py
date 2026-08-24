@@ -612,8 +612,8 @@ def observed_output_manifest(
         "total_bytes": total_bytes,
         "files": rows,
         "note": (
-            "Observed only. Accept only after offline tensor audit, exact loader proof, "
-            "and the complete quality battery."
+            "Observed only. Accept only after the exact offline tensor and provenance audit; "
+            "loader and quality acceptance belong to the bound runtime profile."
         ),
     }
 
