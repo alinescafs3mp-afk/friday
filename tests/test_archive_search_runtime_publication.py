@@ -1101,17 +1101,18 @@ async def test_selected_canonical_archive_evidence_replays_exactly_after_runtime
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("late_failure", "expected_replay_status"),
+    ("revoked_permission", "expected_replay_status"),
     [
-        ("denied", "denied"),
-        ("drifted", "drifted"),
+        pytest.param("search.use", "denied", id="search-denied"),
+        pytest.param("conversations.read", "denied", id="corpus-denied"),
+        pytest.param(None, "drifted", id="source-drifted"),
     ],
 )
 async def test_selected_message_archive_evidence_replays_after_restart_then_fails_closed(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
-    late_failure: str,
+    revoked_permission: str | None,
     expected_replay_status: str,
 ) -> None:
     source_conversation_id, selected_text = _seed_message_archive(
@@ -1218,8 +1219,8 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_fail
     assert advanced.revision == created.revision + 1
     assert advanced.anchor_assistant_message_id == replay["message_id"]
 
-    if late_failure == "denied":
-        storage.set_permission_override(_OWNER, "conversations.read", "deny")
+    if revoked_permission is not None:
+        storage.set_permission_override(_OWNER, revoked_permission, "deny")
     else:
         assert storage.archive_conversation(source_conversation_id, _OWNER) is True
 
