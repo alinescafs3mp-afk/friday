@@ -38,17 +38,21 @@ def _compose() -> dict[str, Any]:
 def test_bundle_has_the_closed_operator_surface() -> None:
     required = {
         "README.md",
+        ".gitattributes",
         "compose.yml",
         ".env.example",
         "gateway.conf.template",
         "model-manifest.example.json",
         "runtime-manifest.example.json",
+        "runtime/launch_sglang_secure.py",
+        "runtime/render_gateway_secure.sh",
         "scripts/preflight.ps1",
         "scripts/install-openssh.ps1",
         "scripts/firewall.ps1",
         "scripts/provision-secrets.ps1",
         "scripts/populate-model-volume.ps1",
         "scripts/probe_endpoint.py",
+        "scripts/quality_battery.py",
         "scripts/tune_context.py",
         "scripts/soak.py",
     }
@@ -69,8 +73,10 @@ def test_only_tls_gateway_is_published_to_lan() -> None:
     ]
     assert engine["networks"] == ["engine-internal"]
     assert gateway["networks"] == ["engine-internal", "gateway-publish"]
-    assert engine["entrypoint"] == ["/bin/bash", "-ceu"]
-    assert gateway["entrypoint"] == ["/bin/sh", "-ceu"]
+    assert engine["entrypoint"] == ["python3"]
+    assert engine["command"] == ["/run/friday-bootstrap/launch_sglang_secure.py"]
+    assert gateway["entrypoint"] == ["/bin/sh"]
+    assert gateway["command"] == ["/run/friday-bootstrap/render_gateway_secure.sh"]
     networks = compose["networks"]
     assert networks["engine-internal"]["internal"] is True
     assert networks["gateway-publish"]["internal"] is False
@@ -112,6 +118,9 @@ def test_model_is_read_only_and_cache_and_tmp_are_the_only_mutable_runtime_surfa
     }
     assert engine["tmpfs"] == ["/tmp:size=2g,mode=1777", "/run:size=16m,mode=0755"]
     assert not any(volume.get("target") == "/var/run/docker.sock" for volume in volumes)
+    assert engine["environment"]["TRITON_CACHE_DIR"] == "/root/.cache/triton"
+    assert engine["environment"]["CUDA_CACHE_PATH"] == "/root/.cache/cuda"
+    assert engine["environment"]["TORCHINDUCTOR_CACHE_DIR"] == "/root/.cache/torchinductor"
 
 
 def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None:
@@ -120,19 +129,40 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     gateway = compose["services"]["gateway"]
     engine_mounts = {row["target"] for row in engine["volumes"] if row["type"] == "bind"}
     gateway_mounts = {row["target"] for row in gateway["volumes"] if row["type"] == "bind"}
-    assert engine_mounts == {"/run/friday-secrets/sglang-api-key"}
+    assert engine_mounts == {
+        "/run/friday-secrets/sglang-api-key",
+        "/run/friday-bootstrap/launch_sglang_secure.py",
+    }
     assert {
         "/run/friday-secrets/gateway-api-key",
         "/run/friday-secrets/sglang-api-key",
         "/run/friday-tls/ca.crt",
         "/run/friday-tls/server.crt",
         "/run/friday-tls/server.key",
+        "/run/friday-bootstrap/render_gateway_secure.sh",
     } <= gateway_mounts
-    command = "\n".join(gateway["command"])
-    assert 'test "$${gateway_key}" != "$${upstream_key}"' in command
-    assert 'test "$${#gateway_key}" -eq 64' in command
-    assert "exec nginx -c /tmp/gateway.conf" in command
     assert "environment" not in gateway
+
+    renderer = (BUNDLE / "runtime" / "render_gateway_secure.sh").read_text(encoding="utf-8")
+    assert 'test "$gateway_key" != "$upstream_key"' in renderer
+    assert 'test "${#SECRET_VALUE}" -eq 64' in renderer
+    assert "exec nginx -c /tmp/gateway.conf" in renderer
+    assert "sed " not in renderer
+
+    launcher = (BUNDLE / "runtime" / "launch_sglang_secure.py").read_text(encoding="utf-8")
+    assert "ServerArgs.__repr__ = _redacted_repr" in launcher
+    assert 'rendered.replace(repr(secret), repr("<redacted>"))' in launcher
+    assert '"--api-key",' in launcher
+    assert 'if __name__ == "__main__":' in launcher
+    assert launcher.index('if __name__ == "__main__":') < launcher.index(
+        "main()", launcher.index('if __name__ == "__main__":')
+    )
+    compose_text = (BUNDLE / "compose.yml").read_text(encoding="utf-8")
+    assert "Authorization: Bearer $$(cat" not in compose_text
+    assert "401 Unauthorized" in compose_text
+    assert "http://127.0.0.1:30000/v1/models" in compose_text
+    assert "friday-secondary-gptoss20b" in compose_text
+    assert "http://127.0.0.1:30000/health" not in compose_text
 
     policy = (BUNDLE / "gateway.conf.template").read_text(encoding="utf-8")
     assert "listen 8443 ssl;" in policy
@@ -178,13 +208,17 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     assert "192.168.1.78" in firewall
     assert "-LocalPort 8443" in firewall
     assert "-LocalPort 30000" not in firewall
+    assert "'6', 'TCP', '256', 'Any'" in firewall
     assert "--network none" in population
     assert "docker pull" not in population
     assert "New-RandomHex 32" in provisioning
     assert "distinct_bearers_verified = $true" in provisioning
     assert "IP Address:192\\.168\\.1\\.35" in provisioning
     assert "secret_values_reported = $false" in provisioning
-    assert "/inheritance:r /T /C" in provisioning
+    assert "$acl.SetAccessRuleProtection($true, $false)" in provisioning
+    assert "$acl.RemoveAccessRuleSpecific($existing)" in provisioning
+    assert "$observed.AreAccessRulesProtected" in provisioning
+    assert "Secret ACL readback differs from the exact owner/SYSTEM allowlist" in provisioning
     preflight = (SCRIPTS / "preflight.ps1").read_text(encoding="utf-8")
     assert "[switch]$InspectGatewayImage" in preflight
     assert "NGINX_VERSION=1.31.3" in preflight
@@ -221,6 +255,24 @@ def test_bundle_contains_no_supplied_bootstrap_credentials() -> None:
     assert "FRIDAY_LLM_API_KEY" not in text
 
 
+def test_generated_certificates_and_bearers_are_ignored() -> None:
+    ignored = (BUNDLE / ".gitignore").read_text(encoding="utf-8")
+    assert "secrets/*" in ignored
+    assert "secrets/tls/*" in ignored
+    assert "!secrets/tls/.gitkeep" in ignored
+    tracked = {path.relative_to(BUNDLE).as_posix() for path in BUNDLE.rglob("*") if path.is_file()}
+    assert "secrets/gateway-api-key" not in tracked
+    assert "secrets/sglang-api-key" not in tracked
+    assert "secrets/tls/ca.crt" not in tracked
+    assert "secrets/tls/server.crt" not in tracked
+
+
+def test_linux_container_entrypoints_are_checkout_stable_lf() -> None:
+    attributes = (BUNDLE / ".gitattributes").read_text(encoding="utf-8")
+    assert "runtime/*.sh text eol=lf" in attributes
+    assert "runtime/*.py text eol=lf" in attributes
+
+
 def test_endpoint_url_rejects_plain_lan_and_embedded_credentials() -> None:
     common = importlib.import_module("endpoint_common")
     assert common.normalize_base_url("http://127.0.0.1:30000") == "http://127.0.0.1:30000/v1"
@@ -252,6 +304,9 @@ def test_completion_projection_drops_reasoning_and_rejects_alias_or_markers() ->
         common.parse_completion(wrong, latency_sec=0.1)
     leaked = json.loads(json.dumps(body))
     leaked["choices"][0]["message"]["content"] = "<|channel|>analysis"
+    with pytest.raises(common.EndpointError):
+        common.parse_completion(leaked, latency_sec=0.1)
+    leaked["choices"][0]["message"]["content"] = "<think>private chain</think>visible"
     with pytest.raises(common.EndpointError):
         common.parse_completion(leaked, latency_sec=0.1)
     numerical = json.loads(json.dumps(body))

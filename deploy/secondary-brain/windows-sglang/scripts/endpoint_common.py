@@ -22,12 +22,17 @@ MAX_RESPONSE_BYTES = 1_048_576
 EXPECTED_MODEL = "friday-secondary-gptoss20b"
 _HARMONY_MARKERS = (
     "<|analysis|>",
+    "<|call|>",
     "<|channel|>",
     "<|constrain|>",
     "<|end|>",
+    "<|final|>",
     "<|message|>",
+    "<|recipient|>",
+    "<|return|>",
     "<|start|>",
 )
+_REASONING_MARKERS = ("<think>", "</think>")
 _NUMERICAL_FAILURE = re.compile(r"(?:^|[^a-z])(nan|[+-]?inf(?:inity)?)(?:$|[^a-z])", re.IGNORECASE)
 
 
@@ -206,8 +211,8 @@ def parse_completion(
     if len(content.encode("utf-8")) > MAX_RESPONSE_BYTES:
         raise EndpointError("completion content exceeds the response bound")
     lowered = content.casefold()
-    if any(marker in lowered for marker in _HARMONY_MARKERS):
-        raise EndpointError("Harmony control marker leaked into final content")
+    if any(marker in lowered for marker in (*_HARMONY_MARKERS, *_REASONING_MARKERS)):
+        raise EndpointError("reasoning or control marker leaked into final content")
     if _NUMERICAL_FAILURE.search(content):
         raise EndpointError("numerical failure marker leaked into final content")
     if _has_repeated_token_degeneration(content):

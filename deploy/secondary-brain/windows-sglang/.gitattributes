@@ -1,0 +1,7 @@
+*.cnf text eol=lf
+*.template text eol=lf
+*.yml text eol=lf
+runtime/*.py text eol=lf
+runtime/*.sh text eol=lf
+scripts/*.py text eol=lf
+scripts/*.ps1 text eol=crlf

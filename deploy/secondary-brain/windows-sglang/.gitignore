@@ -5,5 +5,6 @@ evidence/*
 *.accepted.json
 !secrets/.gitkeep
 !secrets/tls/
+secrets/tls/*
 !secrets/tls/.gitkeep
 !evidence/.gitkeep

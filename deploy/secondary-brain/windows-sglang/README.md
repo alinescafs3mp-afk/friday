@@ -42,6 +42,14 @@ or repository content.
   bind mount is present.
 - The node has no Friday tools, storage, Telegram, V12 lease or effect authority.
 - The primary Friday service must remain healthy with both containers stopped.
+- The pinned SGLang build has no API-key-file option and logs its `ServerArgs`
+  representation. `runtime/launch_sglang_secure.py` therefore reads the bearer
+  from the mounted file, patches that exact pinned representation before parser
+  construction, and invokes SGLang in-process; the secret is absent from OS
+  argv/environment. The gateway renderer uses shell builtins only, so neither
+  bearer enters a child argv. Admission must still scan complete container logs,
+  process argv and process environments for both live values without printing
+  them; any match rejects the node.
 
 ## 1. Establish key-based management
 
@@ -157,6 +165,14 @@ inject the gateway bearer through its dedicated secret channel without placing
 it in a report, command line or repository. The internal SGLang bearer never
 leaves the laptop.
 
+For the primary Docker runtime, place that public CA at the protected host path
+`${FRIDAY_HOST_HOME}/data/secondary-brain/ca.crt` and set
+`FRIDAY_SECONDARY_LLM_CA_FILE=/runtime/data/secondary-brain/ca.crt`. The existing
+data mount exposes that exact container path. A Windows path or a path outside
+`/runtime/data` is not visible inside the backend and leaves the optional client
+safely misconfigured. The production URL is
+`https://192.168.1.35:8443/v1`; Friday rejects plain LAN HTTP.
+
 ## 5. Configure firewall and baseline Compose
 
 `firewall.ps1` defaults to the only approved source, `192.168.1.78`, and TCP
@@ -182,7 +198,11 @@ This explicit command is the deployment boundary. None of the preparation
 scripts invokes it. Before accepting the node, inspect the container/image
 identities and startup logs to prove native ModelOpt FP4 loading, SM120
 FlashInfer CUTLASS FP4 GEMM, FP8 KV, no CPU offload and no prompt/response-body
-logging. If automatic quantization detection is not proven, test the exact
+logging. Also prove that neither generated bearer occurs in either container's
+complete logs, command line or environment. The gateway healthcheck expects the
+secret-free unauthenticated `401`; SGLang's authenticated internal `/v1/models`
+healthcheck asserts the exact served alias, so both service health states are
+required. If automatic quantization detection is not proven, test the exact
 pinned image's explicit `--quantization modelopt_fp4` form in a separate
 candidate and retain only the proven form.
 
@@ -191,7 +211,7 @@ candidate and retain only the proven form.
 All external probes use the gateway bearer and explicit private CA. They never
 write raw prompts, responses or reasoning into evidence.
 
-The container healthcheck uses certificate verification bypass only for its
+The gateway container healthcheck uses certificate verification bypass only for its
 same-process `127.0.0.1` liveness call because the pinned Alpine-slim BusyBox
 `wget` has no custom-CA option. It is not an acceptance check: every host-side
 probe below validates the private CA and the exact IP SAN.
@@ -202,6 +222,20 @@ python scripts/probe_endpoint.py \
   --api-key-file /secure/friday-secondary-gateway-key \
   --ca-file /secure/friday-secondary-ca.crt \
   --output evidence/endpoint.observed.json
+```
+
+Run the full deterministic protocol and quality battery before capacity tuning.
+It validates the exact model alias, Russian/English and structured responses,
+reasoning modes, tool-call shape and continuation, multi-turn/context behavior,
+Unicode, truncation, live stream cancellation/recovery and factual minimums. It never executes a requested tool
+and retains only closed status, latency/token counts and output hashes.
+
+```bash
+python scripts/quality_battery.py \
+  --base-url https://192.168.1.35:8443/v1 \
+  --api-key-file /secure/friday-secondary-gateway-key \
+  --ca-file /secure/friday-secondary-ca.crt \
+  --output evidence/quality.observed.json
 ```
 
 Tune one explicitly configured context/memory candidate at a time. Update the

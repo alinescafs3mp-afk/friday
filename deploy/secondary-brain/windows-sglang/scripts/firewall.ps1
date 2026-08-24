@@ -43,6 +43,21 @@ New-NetFirewallRule `
     -EdgeTraversalPolicy Block | Out-Null
 
 $conflicts = @()
+
+function Test-PortSetIncludes8443([string]$Value) {
+    foreach ($part in @($Value -split ',')) {
+        $candidate = $part.Trim()
+        if ($candidate -ceq '8443') {
+            return $true
+        }
+        if ($candidate -match '\A(?<first>[0-9]{1,5})-(?<last>[0-9]{1,5})\z' -and
+            [int]$Matches.first -le 8443 -and 8443 -le [int]$Matches.last) {
+            return $true
+        }
+    }
+    return $false
+}
+
 $otherRules = @(
     Get-NetFirewallRule -Direction Inbound -Action Allow -Enabled True |
         Where-Object { [string]$_.DisplayName -cne $ruleName }
@@ -50,16 +65,23 @@ $otherRules = @(
 foreach ($otherRule in $otherRules) {
     $portFilters = @($otherRule | Get-NetFirewallPortFilter)
     $applicationFilters = @($otherRule | Get-NetFirewallApplicationFilter)
+    $serviceFilters = @($otherRule | Get-NetFirewallServiceFilter)
     foreach ($portFilter in $portFilters) {
-        $portMatches = @([string]$portFilter.LocalPort -split ',') -contains '8443'
-        $broadDockerProgram = @(
+        $localPort = [string]$portFilter.LocalPort
+        $portMatches = Test-PortSetIncludes8443 $localPort
+        $broadProgram = @(
             $applicationFilters |
                 Where-Object {
-                    [string]$_.Program -match '(?i)(?:docker|com\.docker)' -and
-                    [string]$portFilter.LocalPort -ceq 'Any'
+                    [string]$_.Program -ceq 'Any' -or
+                    [string]$_.Program -match '(?i)(?:docker|com\.docker)'
                 }
         ).Count -ne 0
-        if ([string]$portFilter.Protocol -in @('6', 'TCP') -and ($portMatches -or $broadDockerProgram)) {
+        $broadService = @(
+            $serviceFilters | Where-Object { [string]$_.Service -ceq 'Any' }
+        ).Count -ne 0
+        $anyPortConflict = $localPort -ceq 'Any' -and $broadProgram -and $broadService
+        if ([string]$portFilter.Protocol -in @('6', 'TCP', '256', 'Any') -and
+            ($portMatches -or $anyPortConflict)) {
             $conflicts += $otherRule
         }
     }

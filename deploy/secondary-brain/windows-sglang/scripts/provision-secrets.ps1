@@ -27,12 +27,73 @@ $finalPaths = @(
     $caCertPath, $serverKeyPath, $serverCertPath
 )
 
-function Invoke-OpenSsl([string[]]$Arguments) {
-    $output = & $OpenSslPath @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw 'OpenSSL operation failed; output was suppressed because this is a secret provisioning boundary.'
+function ConvertTo-NativeArgument([string]$Value) {
+    if ([string]::IsNullOrEmpty($Value)) {
+        return '""'
     }
-    return (($output | ForEach-Object { [string]$_ }) -join "`n").Trim()
+    if ($Value -notmatch '[\s"]') {
+        return $Value
+    }
+
+    $builder = [Text.StringBuilder]::new()
+    [void]$builder.Append('"')
+    $backslashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq [char]92) {
+            $backslashes += 1
+            continue
+        }
+        if ($character -eq [char]34) {
+            [void]$builder.Append((('\' * (($backslashes * 2) + 1)) -join ''))
+            [void]$builder.Append('"')
+            $backslashes = 0
+            continue
+        }
+        if ($backslashes -gt 0) {
+            [void]$builder.Append((('\' * $backslashes) -join ''))
+            $backslashes = 0
+        }
+        [void]$builder.Append($character)
+    }
+    if ($backslashes -gt 0) {
+        [void]$builder.Append((('\' * ($backslashes * 2)) -join ''))
+    }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function Invoke-OpenSsl([string[]]$Arguments) {
+    # Windows PowerShell 5 turns benign native stderr into a terminating error
+    # under ErrorActionPreference=Stop.  Capture both streams directly so the
+    # native exit code alone decides success and no command output can leak on
+    # a provisioning failure.
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $OpenSslPath
+    $startInfo.Arguments = (($Arguments | ForEach-Object {
+        ConvertTo-NativeArgument ([string]$_)
+    }) -join ' ')
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            throw 'OpenSSL process did not start.'
+        }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderrTask.GetAwaiter().GetResult() | Out-Null
+        if ($process.ExitCode -ne 0) {
+            throw 'OpenSSL operation failed; output was suppressed because this is a secret provisioning boundary.'
+        }
+        return $stdout.Trim()
+    } finally {
+        $process.Dispose()
+    }
 }
 
 function New-RandomHex([int]$ByteCount) {
@@ -84,12 +145,54 @@ function Assert-CertificateSet(
 }
 
 function Set-RestrictiveSecretAcl() {
-    $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    & icacls.exe $secretRoot /inheritance:r /T /C `
-        /grant:r ('*{0}:(OI)(CI)F' -f $currentSid) `
-        /grant:r '*S-1-5-18:(OI)(CI)F' | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Could not apply the restrictive owner/SYSTEM secret ACL.'
+    $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $currentSid = $currentIdentity.User
+    $systemSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+    $targets = @((Get-Item -LiteralPath $secretRoot)) + @(
+        Get-ChildItem -LiteralPath $secretRoot -Force -Recurse
+    )
+    foreach ($target in $targets) {
+        $acl = Get-Acl -LiteralPath $target.FullName
+        $acl.SetAccessRuleProtection($true, $false)
+        foreach ($existing in @($acl.Access)) {
+            $acl.RemoveAccessRuleSpecific($existing)
+        }
+        $inheritance = if ($target.PSIsContainer) {
+            [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+        } else {
+            [Security.AccessControl.InheritanceFlags]::None
+        }
+        foreach ($sid in @($currentSid, $systemSid)) {
+            $rule = [Security.AccessControl.FileSystemAccessRule]::new(
+                $sid,
+                [Security.AccessControl.FileSystemRights]::FullControl,
+                $inheritance,
+                [Security.AccessControl.PropagationFlags]::None,
+                [Security.AccessControl.AccessControlType]::Allow
+            )
+            $acl.AddAccessRule($rule) | Out-Null
+        }
+        $acl.SetOwner($currentSid)
+        Set-Acl -LiteralPath $target.FullName -AclObject $acl
+
+        $observed = Get-Acl -LiteralPath $target.FullName
+        $observedSids = @(
+            $observed.Access | ForEach-Object {
+                $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+            }
+        )
+        $allowedSids = @($currentSid.Value, $systemSid.Value)
+        if (-not $observed.AreAccessRulesProtected -or
+            $observedSids.Count -ne 2 -or
+            @($observedSids | Where-Object { $_ -notin $allowedSids }).Count -ne 0 -or
+            @($observed.Access | Where-Object {
+                $_.IsInherited -or
+                $_.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or
+                ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -ne
+                    [Security.AccessControl.FileSystemRights]::FullControl
+            }).Count -ne 0) {
+            throw 'Secret ACL readback differs from the exact owner/SYSTEM allowlist.'
+        }
     }
 }
 
