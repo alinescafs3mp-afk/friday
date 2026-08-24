@@ -13,13 +13,13 @@ from typing import Any
 
 from endpoint_common import (
     EndpointError,
+    chat_completion,
     configure_expected_model,
     configured_profile_context_tokens,
     configured_profile_mem_fraction_static,
     evidence_identity,
     load_api_key,
     runtime_process_epoch,
-    stream_chat_completion,
     verify_remote_profile_epoch,
     write_new_json,
 )
@@ -29,6 +29,8 @@ _LADDER = (4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536)
 _MEMORY_GRID = (0.86, 0.88, 0.90, 0.92, 0.94, 0.95, 0.96, 0.97)
 _PROTOCOL_TOKEN_RESERVE = 384
 _MINIMUM_PROMPT_FRACTION = 0.80
+_CAPACITY_TRIAL_SCHEMA = "friday.secondary-context-capacity-trial.v2"
+_CAPACITY_TRANSPORT = "openai_chat_completions_non_streaming"
 
 
 def _context_prompt(
@@ -43,8 +45,7 @@ def _context_prompt(
     if not 1 <= repeat <= 10:
         raise ValueError("capacity repeat is outside the certified bound")
     # Fully identical near-limit requests become almost complete radix-cache
-    # hits after the first pass.  That no longer measures a real prefill and can
-    # exercise a pinned SGLang streaming lifecycle race instead of capacity.
+    # hits after the first pass and no longer measure a real prefill.
     # A deterministic early discriminator keeps each trial content-free while
     # forcing the near-limit body through prefill again.
     body = f"capacity-repeat-{repeat:02d} " + ("probe " * (repeats - 1))
@@ -89,7 +90,7 @@ def _trial(
     endpoint_rejected = False
     with GpuSampler() as sampler:
         try:
-            completion = stream_chat_completion(
+            completion = chat_completion(
                 base_url,
                 api_key=api_key,
                 messages=_context_prompt(
@@ -99,6 +100,11 @@ def _trial(
                 ),
                 timeout_sec=timeout_sec,
                 max_tokens=generation_tokens,
+                extra={
+                    "stream": False,
+                    "min_tokens": generation_tokens,
+                    "ignore_eos": True,
+                },
                 ca_file=ca_file,
             )
         except EndpointError:
@@ -111,12 +117,12 @@ def _trial(
     if endpoint_rejected:
         return {
             "repeat": repeat,
+            "transport": _CAPACITY_TRANSPORT,
             "context_target_tokens": context_tokens,
             "prompt_tokens": 0,
             "completion_tokens": 0,
-            "ttft_sec": 0.0,
             "end_to_end_sec": 0.0,
-            "decode_tokens_per_sec_after_first_token": 0.0,
+            "completion_tokens_per_sec_end_to_end": 0.0,
             "finish_reason": "rejected",
             "reasoning_field_present": False,
             "usage_accounting_present": False,
@@ -134,26 +140,26 @@ def _trial(
         }
     if completion is None:
         raise EndpointError("capacity completion state is missing")
-    value = completion.completion
     usage_checks = _usage_checks(
         context_tokens=context_tokens,
         generation_tokens=generation_tokens,
-        prompt_tokens=value.prompt_tokens,
-        completion_tokens=value.completion_tokens,
+        prompt_tokens=completion.prompt_tokens,
+        completion_tokens=completion.completion_tokens,
     )
-    generated_envelope_met = value.completion_tokens >= 256
+    generated_envelope_met = completion.completion_tokens == generation_tokens
+    end_to_end_sec = round(completion.latency_sec, 6)
     return {
         "repeat": repeat,
+        "transport": _CAPACITY_TRANSPORT,
         "context_target_tokens": context_tokens,
-        "prompt_tokens": value.prompt_tokens,
-        "completion_tokens": value.completion_tokens,
-        "ttft_sec": round(completion.ttft_sec, 6),
-        "end_to_end_sec": round(value.latency_sec, 6),
-        "decode_tokens_per_sec_after_first_token": round(
-            value.completion_tokens / max(0.001, value.latency_sec - completion.ttft_sec), 6
+        "prompt_tokens": completion.prompt_tokens,
+        "completion_tokens": completion.completion_tokens,
+        "end_to_end_sec": end_to_end_sec,
+        "completion_tokens_per_sec_end_to_end": round(
+            completion.completion_tokens / max(0.001, end_to_end_sec), 6
         ),
-        "finish_reason": value.finish_reason,
-        "reasoning_field_present": value.reasoning_present,
+        "finish_reason": completion.finish_reason,
+        "reasoning_field_present": completion.reasoning_present,
         **usage_checks,
         "generated_envelope_met": generated_envelope_met,
         "required_headroom_mib": round(required_headroom_mib, 3),
@@ -201,8 +207,9 @@ def run_ladder(
     trials: list[dict[str, Any]] = []
     admitted: list[int] = []
     for candidate in candidates:
-        candidate_trials = [
-            _trial(
+        candidate_trials: list[dict[str, Any]] = []
+        for index in range(repeats):
+            trial = _trial(
                 base_url=base_url,
                 api_key=api_key,
                 context_tokens=candidate,
@@ -211,10 +218,21 @@ def run_ladder(
                 generation_tokens=generation_tokens,
                 ca_file=ca_file,
             )
-            for index in range(repeats)
-        ]
+            candidate_trials.append(trial)
+            if not (
+                trial["usage_accounting_present"]
+                and trial["generation_reserve_met"]
+                and trial["observed_total_within_context"]
+                and trial["prompt_near_limit"]
+                and trial["generated_envelope_met"]
+                and trial["headroom_met"]
+                and trial["end_to_end_sec"] > 0
+                and trial["completion_tokens_per_sec_end_to_end"] > 0
+                and trial["finish_reason"] == "length"
+            ):
+                break
         trials.extend(candidate_trials)
-        passed = all(
+        passed = len(candidate_trials) == repeats and all(
             trial["usage_accounting_present"]
             and trial["generation_reserve_met"]
             and trial["observed_total_within_context"]
@@ -238,7 +256,7 @@ def run_ladder(
     ):
         raise EndpointError("runtime restarted during the capacity trial")
     return {
-        "schema": "friday.secondary-context-capacity-trial.v1",
+        "schema": _CAPACITY_TRIAL_SCHEMA,
         "status": "measured_not_yet_certified",
         **evidence_identity(),
         "runtime_process_start_time_seconds": runtime_epoch,
@@ -247,9 +265,14 @@ def run_ladder(
         "candidates": list(candidates),
         "repeats_per_candidate": repeats,
         "generation_tokens": generation_tokens,
+        "transport": _CAPACITY_TRANSPORT,
         "largest_passing_trial_tokens": max(admitted, default=0),
         "trial_count": len(trials),
-        "median_ttft_sec": round(statistics.median(trial["ttft_sec"] for trial in trials), 6),
+        "median_end_to_end_sec": round(statistics.median(trial["end_to_end_sec"] for trial in trials), 6),
+        "median_completion_tokens_per_sec_end_to_end": round(
+            statistics.median(trial["completion_tokens_per_sec_end_to_end"] for trial in trials),
+            6,
+        ),
         "trials": trials,
         "cold_restart_retest_required": True,
         "thermal_soak_required": True,

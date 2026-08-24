@@ -9,6 +9,7 @@ import json
 import os
 import re
 import stat
+import statistics
 import subprocess
 import sys
 from pathlib import Path
@@ -31,7 +32,9 @@ from source_model_manifest import (  # type: ignore[import-not-found]  # noqa: E
 )
 
 PROFILE_SCHEMA = "friday.secondary-runtime-profile.v7"
-CAPACITY_SCHEMA = "friday.secondary-capacity-evidence.v1"
+CAPACITY_SCHEMA = "friday.secondary-capacity-evidence.v2"
+CAPACITY_TRIAL_SCHEMA = "friday.secondary-context-capacity-trial.v2"
+CAPACITY_TRANSPORT = "openai_chat_completions_non_streaming"
 DETERMINISTIC_FAILURE_SCHEMA = "friday.secondary-failure-battery.v1"
 PHYSICAL_FAILURE_SCHEMA = "friday.secondary-physical-failure-observation.v1"
 FAILURE_SCHEMA = "friday.secondary-failure-acceptance.v1"
@@ -865,6 +868,8 @@ def accept_capacity(args: argparse.Namespace) -> dict[str, Any]:
     context = candidate["context_tokens"]
     memory = float(candidate["mem_fraction_static"])
     trial_epochs: list[str] = []
+    trial_generation_tokens: list[int] = []
+    trial_repeats: list[int] = []
     for label, trial in (("initial", initial), ("cold restart", cold)):
         rows = trial.get("trials")
         repeats = _exact_int(
@@ -876,14 +881,23 @@ def accept_capacity(args: argparse.Namespace) -> dict[str, Any]:
             maximum=max(float(item) for item in MEMORY_GRID),
             label=f"{label} memory fraction",
         )
+        generation_tokens = _exact_int(
+            trial.get("generation_tokens"),
+            minimum=256,
+            maximum=candidate["max_output_tokens"],
+            label=f"{label} generation tokens",
+        )
         runtime_epoch = trial.get("runtime_process_start_time_seconds")
         if (
-            trial.get("schema") != "friday.secondary-context-capacity-trial.v1"
+            trial.get("schema") != CAPACITY_TRIAL_SCHEMA
             or trial.get("status") != "measured_not_yet_certified"
             or not _evidence_matches(trial, candidate, candidate_sha256)
+            or trial.get("transport") != CAPACITY_TRANSPORT
             or trial.get("candidates") != [context]
             or trial.get("largest_passing_trial_tokens") != context
+            or trial.get("trial_count") != repeats
             or trial_memory != memory
+            or "median_ttft_sec" in trial
             or not isinstance(runtime_epoch, str)
             or not 1 <= len(runtime_epoch) <= 40
             or _PROCESS_EPOCH.fullmatch(runtime_epoch) is None
@@ -892,17 +906,69 @@ def accept_capacity(args: argparse.Namespace) -> dict[str, Any]:
             or len(rows) != repeats
             or any(
                 not isinstance(row, dict)
+                or row.get("repeat") != index
                 or row.get("context_target_tokens") != context
+                or row.get("transport") != CAPACITY_TRANSPORT
+                or type(row.get("completion_tokens")) is not int
+                or row["completion_tokens"] != generation_tokens
+                or row.get("finish_reason") != "length"
+                or row.get("usage_accounting_present") is not True
+                or row.get("generation_reserve_met") is not True
+                or row.get("observed_total_within_context") is not True
                 or row.get("prompt_near_limit") is not True
                 or row.get("generated_envelope_met") is not True
                 or row.get("headroom_met") is not True
-                for row in rows
+                or row.get("raw_prompt_retained") is not False
+                or row.get("raw_response_retained") is not False
+                or "ttft_sec" in row
+                or "decode_tokens_per_sec_after_first_token" in row
+                for index, row in enumerate(rows, start=1)
             )
         ):
             raise ProfileOperatorError(f"{label} capacity trial did not pass")
+        latencies: list[float] = []
+        rates: list[float] = []
+        for index, row in enumerate(rows, start=1):
+            latency = _exact_number(
+                row.get("end_to_end_sec"),
+                minimum=0.001,
+                maximum=600.0,
+                label=f"{label} repeat {index} end-to-end latency",
+            )
+            rate = _exact_number(
+                row.get("completion_tokens_per_sec_end_to_end"),
+                minimum=0.000001,
+                maximum=1_000_000.0,
+                label=f"{label} repeat {index} end-to-end rate",
+            )
+            if abs(rate - generation_tokens / latency) > 0.001:
+                raise ProfileOperatorError(f"{label} capacity end-to-end rate is inconsistent")
+            latencies.append(latency)
+            rates.append(rate)
+        median_latency = _exact_number(
+            trial.get("median_end_to_end_sec"),
+            minimum=0.001,
+            maximum=600.0,
+            label=f"{label} median end-to-end latency",
+        )
+        median_rate = _exact_number(
+            trial.get("median_completion_tokens_per_sec_end_to_end"),
+            minimum=0.000001,
+            maximum=1_000_000.0,
+            label=f"{label} median end-to-end rate",
+        )
+        if (
+            abs(median_latency - round(statistics.median(latencies), 6)) > 0.000001
+            or abs(median_rate - round(statistics.median(rates), 6)) > 0.000001
+        ):
+            raise ProfileOperatorError(f"{label} capacity medians are inconsistent")
         trial_epochs.append(runtime_epoch)
+        trial_generation_tokens.append(generation_tokens)
+        trial_repeats.append(repeats)
     if _sha256(initial_raw) == _sha256(cold_raw) or trial_epochs[0] == trial_epochs[1]:
         raise ProfileOperatorError("cold restart capacity trial did not change runtime epoch")
+    if len(set(trial_generation_tokens)) != 1 or len(set(trial_repeats)) != 1:
+        raise ProfileOperatorError("warm and cold capacity protocols differ")
     completed_requests = _exact_int(
         soak.get("completed_requests"), minimum=0, maximum=1_000_000, label="soak requests"
     )
@@ -928,6 +994,9 @@ def accept_capacity(args: argparse.Namespace) -> dict[str, Any]:
         "gateway_ca_certificate_sha256": candidate["gateway_ca_certificate_sha256"],
         "context_tokens": context,
         "mem_fraction_static": candidate["mem_fraction_static"],
+        "transport": CAPACITY_TRANSPORT,
+        "generation_tokens": trial_generation_tokens[0],
+        "repeats_per_candidate": trial_repeats[0],
         "initial_trial_sha256": _sha256(initial_raw),
         "cold_restart_trial_sha256": _sha256(cold_raw),
         "soak_sha256": _sha256(soak_raw),

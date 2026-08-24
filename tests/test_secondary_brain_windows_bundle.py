@@ -1717,7 +1717,7 @@ def test_capacity_rejection_emits_content_free_failed_trial(
         raise common.EndpointError("private upstream detail must not be retained")
 
     monkeypatch.setattr(tuner, "GpuSampler", Sampler)
-    monkeypatch.setattr(tuner, "stream_chat_completion", reject)
+    monkeypatch.setattr(tuner, "chat_completion", reject)
     row = tuner._trial(
         base_url="https://192.168.1.35:8443/v1",
         api_key="a" * 64,
@@ -1729,13 +1729,130 @@ def test_capacity_rejection_emits_content_free_failed_trial(
     )
 
     assert row["failure_class"] == "endpoint_or_capacity_rejection"
+    assert row["transport"] == "openai_chat_completions_non_streaming"
     assert row["prompt_tokens"] == row["completion_tokens"] == 0
+    assert row["completion_tokens_per_sec_end_to_end"] == 0.0
+    assert "ttft_sec" not in row
+    assert "decode_tokens_per_sec_after_first_token" not in row
     assert row["usage_accounting_present"] is False
     assert row["prompt_near_limit"] is False
     assert row["generated_envelope_met"] is False
     assert row["raw_prompt_retained"] is False
     assert row["raw_response_retained"] is False
     assert "private upstream detail" not in json.dumps(row)
+
+
+def test_capacity_uses_full_envelope_non_streaming_end_to_end_measurement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tuner = importlib.import_module("tune_context")
+    common = importlib.import_module("endpoint_common")
+    telemetry = importlib.import_module("gpu_telemetry")
+    sample = telemetry.GpuSample(
+        telemetry.EXPECTED_GPU_UUID,
+        telemetry.EXPECTED_GPU_NAME,
+        telemetry.EXPECTED_GPU_MEMORY_TOTAL_MIB,
+        14_900.0,
+        1_403.0,
+        55.0,
+        100.0,
+        90.0,
+    )
+
+    class Sampler:
+        error = None
+        samples = [sample]
+
+        def __enter__(self) -> Sampler:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    calls: list[dict[str, Any]] = []
+
+    def complete(*_args: object, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return common.SanitizedCompletion(
+            content="bounded capacity result",
+            latency_sec=4.0,
+            prompt_tokens=3_300,
+            completion_tokens=320,
+            finish_reason="length",
+            reasoning_present=True,
+        )
+
+    monkeypatch.setattr(tuner, "GpuSampler", Sampler)
+    monkeypatch.setattr(tuner, "chat_completion", complete)
+    row = tuner._trial(
+        base_url="https://192.168.1.35:8443/v1",
+        api_key="a" * 64,
+        context_tokens=4096,
+        repeat=1,
+        timeout_sec=10.0,
+        generation_tokens=320,
+        ca_file=Path("ca.crt"),
+    )
+
+    assert calls[0]["extra"] == {
+        "stream": False,
+        "min_tokens": 320,
+        "ignore_eos": True,
+    }
+    assert row["transport"] == tuner._CAPACITY_TRANSPORT
+    assert row["end_to_end_sec"] == 4.0
+    assert row["completion_tokens_per_sec_end_to_end"] == 80.0
+    assert row["generated_envelope_met"] is True
+    assert row["finish_reason"] == "length"
+    assert "ttft_sec" not in row
+
+
+def test_capacity_ladder_fails_fast_after_first_rejected_repeat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tuner = importlib.import_module("tune_context")
+    calls: list[int] = []
+
+    monkeypatch.setattr(tuner, "configured_profile_context_tokens", lambda: 4096)
+    monkeypatch.setattr(tuner, "configured_profile_mem_fraction_static", lambda: "0.97")
+    monkeypatch.setattr(tuner, "verify_remote_profile_epoch", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tuner, "runtime_process_epoch", lambda *_args, **_kwargs: "1700000000")
+    monkeypatch.setattr(tuner, "evidence_identity", lambda: {"candidate_profile_id": "fixture"})
+
+    def rejected(**kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs["repeat"])
+        return {
+            "repeat": kwargs["repeat"],
+            "transport": tuner._CAPACITY_TRANSPORT,
+            "usage_accounting_present": False,
+            "generation_reserve_met": False,
+            "observed_total_within_context": False,
+            "prompt_near_limit": False,
+            "generated_envelope_met": False,
+            "headroom_met": True,
+            "end_to_end_sec": 0.0,
+            "completion_tokens_per_sec_end_to_end": 0.0,
+            "finish_reason": "rejected",
+        }
+
+    monkeypatch.setattr(tuner, "_trial", rejected)
+    report = tuner.run_ladder(
+        base_url="https://192.168.1.35:8443/v1",
+        api_key="a" * 64,
+        candidates=(4096,),
+        repeats=3,
+        timeout_sec=10.0,
+        generation_tokens=320,
+        mem_fraction_static=0.97,
+        ca_file=Path("ca.crt"),
+    )
+
+    assert calls == [1]
+    assert report["schema"] == tuner._CAPACITY_TRIAL_SCHEMA
+    assert report["transport"] == tuner._CAPACITY_TRANSPORT
+    assert report["trial_count"] == 1
+    assert report["largest_passing_trial_tokens"] == 0
+    assert report["median_end_to_end_sec"] == 0.0
 
 
 def test_streaming_error_event_is_rejected_before_model_alias_validation(

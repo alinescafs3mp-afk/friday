@@ -694,20 +694,37 @@ def test_capacity_and_profile_promotion_are_candidate_epoch_bound(
     identity = _identity(candidate, candidate_raw)
     rows = [
         {
+            "repeat": index,
+            "transport": operator.CAPACITY_TRANSPORT,
             "context_target_tokens": 4096,
+            "prompt_tokens": 3_300,
+            "completion_tokens": 512,
+            "end_to_end_sec": 5.0,
+            "completion_tokens_per_sec_end_to_end": 102.4,
+            "finish_reason": "length",
+            "usage_accounting_present": True,
+            "generation_reserve_met": True,
+            "observed_total_within_context": True,
             "prompt_near_limit": True,
             "generated_envelope_met": True,
             "headroom_met": True,
+            "raw_prompt_retained": False,
+            "raw_response_retained": False,
         }
-        for _ in range(3)
+        for index in range(1, 4)
     ]
     trial = {
-        "schema": "friday.secondary-context-capacity-trial.v1",
+        "schema": operator.CAPACITY_TRIAL_SCHEMA,
         "status": "measured_not_yet_certified",
         **identity,
+        "transport": operator.CAPACITY_TRANSPORT,
         "candidates": [4096],
         "largest_passing_trial_tokens": 4096,
         "repeats_per_candidate": 3,
+        "trial_count": 3,
+        "generation_tokens": 512,
+        "median_end_to_end_sec": 5.0,
+        "median_completion_tokens_per_sec_end_to_end": 102.4,
         "mem_fraction_static": 0.92,
         "runtime_process_start_time_seconds": "1700000000",
         "trials": rows,
@@ -730,6 +747,77 @@ def test_capacity_and_profile_promotion_are_candidate_epoch_bound(
     }
     soak = _write(tmp_path / "soak.json", soak_value)
     capacity_output = tmp_path / "capacity.accepted.json"
+    legacy = _write(
+        tmp_path / "capacity-legacy.json",
+        {**trial, "schema": "friday.secondary-context-capacity-trial.v1"},
+    )
+    with pytest.raises(operator.ProfileOperatorError, match="capacity trial did not pass"):
+        operator.accept_capacity(
+            argparse.Namespace(
+                candidate=candidate_args.output,
+                initial_trial=legacy,
+                cold_restart_trial=cold,
+                soak=soak,
+                output=tmp_path / "legacy-capacity.json",
+            )
+        )
+    wrong_transport = _write(
+        tmp_path / "capacity-streaming.json",
+        {**trial, "transport": "openai_chat_completions_streaming"},
+    )
+    with pytest.raises(operator.ProfileOperatorError, match="capacity trial did not pass"):
+        operator.accept_capacity(
+            argparse.Namespace(
+                candidate=candidate_args.output,
+                initial_trial=wrong_transport,
+                cold_restart_trial=cold,
+                soak=soak,
+                output=tmp_path / "streaming-capacity.json",
+            )
+        )
+    inconsistent_rows = [dict(row) for row in rows]
+    inconsistent_rows[0]["completion_tokens_per_sec_end_to_end"] = 1.0
+    inconsistent_rate = _write(
+        tmp_path / "capacity-inconsistent-rate.json",
+        {**trial, "trials": inconsistent_rows},
+    )
+    with pytest.raises(operator.ProfileOperatorError, match="end-to-end rate is inconsistent"):
+        operator.accept_capacity(
+            argparse.Namespace(
+                candidate=candidate_args.output,
+                initial_trial=inconsistent_rate,
+                cold_restart_trial=cold,
+                soak=soak,
+                output=tmp_path / "inconsistent-capacity.json",
+            )
+        )
+    different_protocol = _write(
+        tmp_path / "capacity-different-protocol.json",
+        {
+            **trial,
+            "generation_tokens": 511,
+            "runtime_process_start_time_seconds": "1700000100",
+            "trials": [
+                {
+                    **row,
+                    "completion_tokens": 511,
+                    "completion_tokens_per_sec_end_to_end": 102.2,
+                }
+                for row in rows
+            ],
+            "median_completion_tokens_per_sec_end_to_end": 102.2,
+        },
+    )
+    with pytest.raises(operator.ProfileOperatorError, match="capacity protocols differ"):
+        operator.accept_capacity(
+            argparse.Namespace(
+                candidate=candidate_args.output,
+                initial_trial=initial,
+                cold_restart_trial=different_protocol,
+                soak=soak,
+                output=tmp_path / "different-protocol-capacity.json",
+            )
+        )
     with pytest.raises(operator.ProfileOperatorError, match="runtime epoch"):
         operator.accept_capacity(
             argparse.Namespace(
@@ -749,6 +837,11 @@ def test_capacity_and_profile_promotion_are_candidate_epoch_bound(
             output=capacity_output,
         )
     )
+    accepted_capacity = json.loads(capacity_output.read_text(encoding="utf-8"))
+    assert accepted_capacity["schema"] == "friday.secondary-capacity-evidence.v2"
+    assert accepted_capacity["transport"] == operator.CAPACITY_TRANSPORT
+    assert accepted_capacity["generation_tokens"] == 512
+    assert accepted_capacity["repeats_per_candidate"] == 3
     quality = _write(
         tmp_path / "quality.json",
         {
