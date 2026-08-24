@@ -59,6 +59,7 @@ def test_bundle_has_the_closed_operator_surface() -> None:
         "runtime/source_model_manifest.py",
         "runtime/render_gateway_secure.sh",
         "scripts/accept-hardware-runtime-receipt.ps1",
+        "scripts/accept_runtime_manifest.py",
         "scripts/preflight.ps1",
         "scripts/install-openssh.ps1",
         "scripts/firewall.ps1",

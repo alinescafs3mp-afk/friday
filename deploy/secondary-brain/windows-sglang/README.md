@@ -90,7 +90,17 @@ protected accepted copy without editing either file:
   -ObservedPath .\evidence\hardware-runtime.observed.json `
   -AcceptedPath .\evidence\hardware-runtime.accepted.json `
   -Apply
+
+python .\scripts\accept_runtime_manifest.py `
+  --template .\runtime-manifest.example.json `
+  --preflight-evidence .\evidence\preflight.observed.json `
+  --hardware-receipt .\evidence\hardware-runtime.accepted.json `
+  --output .\evidence\runtime.accepted.json
 ```
+
+The runtime promotion validates the exact image, package, GPU and gateway
+projections in the automated preflight and changes only the template status to
+`accepted`; it never overwrites an existing receipt.
 
 ## 2. Populate or verify the sealed official model
 
