@@ -407,9 +407,11 @@ if ($InspectSglangHelp) {
         }
     }
     $observedFlagSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    $flagPattern = '(?<![A-Za-z0-9_-])--[a-z0-9][a-z0-9-]*(?![A-Za-z0-9_-])'
-    foreach ($match in [regex]::Matches($helpText, $flagPattern, [Text.RegularExpressions.RegexOptions]::CultureInvariant)) {
-        [void]$observedFlagSet.Add($match.Value)
+    $flagPattern = '(?:^|[\s\[({|,=])(?<flag>--[a-z0-9][a-z0-9-]*)(?=$|[\s\])}|,=])'
+    $flagRegexOptions = [Text.RegularExpressions.RegexOptions]::CultureInvariant -bor `
+        [Text.RegularExpressions.RegexOptions]::Multiline
+    foreach ($match in [regex]::Matches($helpText, $flagPattern, $flagRegexOptions)) {
+        [void]$observedFlagSet.Add($match.Groups['flag'].Value)
     }
     $missingFlags = @($requiredFlags | Where-Object { -not $observedFlagSet.Contains([string]$_) })
     if ($missingFlags.Count -ne 0) {

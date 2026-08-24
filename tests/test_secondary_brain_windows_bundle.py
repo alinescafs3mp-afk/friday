@@ -536,6 +536,7 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     assert "friday.secondary-windows-preflight.v2" in preflight
     assert "[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)" in preflight
     assert "[regex]::Matches($helpText, $flagPattern" in preflight
+    assert "$match.Groups['flag'].Value" in preflight
     assert "-not $observedFlagSet.Contains([string]$_)" in preflight
     assert 'required_flags_sha256 = $requiredFlagsSha256' in preflight
     assert "help_sha256" not in preflight
@@ -550,6 +551,29 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
         "\n".join(sorted(required_flags)).encode("ascii")
     ).hexdigest()
     assert required_flags_sha256 == "15defb43aa2cef5f5df941822bbacd170c787513ef136cd6f951a6c0580d1cd9"
+    flag_pattern_match = re.search(r"\$flagPattern = '([^']+)'", preflight)
+    assert flag_pattern_match is not None
+    flag_pattern = flag_pattern_match.group(1).replace("(?<flag>", "(?P<flag>")
+    for value in (
+        "--model-path VALUE",
+        " [--model-path VALUE]",
+        "\n--model-path=VALUE\n",
+        "{--model-path|--other-flag}",
+    ):
+        assert [match.group("flag") for match in re.finditer(flag_pattern, value, re.MULTILINE)][
+            0
+        ] == "--model-path"
+    for value in (
+        "--model-path.invalid",
+        "--model-path/invalid",
+        "--model-path:invalid",
+        "--model-path-extra VALUE",
+        "--model-path_invalid VALUE",
+        "prefix--model-path VALUE",
+    ):
+        assert "--model-path" not in {
+            match.group("flag") for match in re.finditer(flag_pattern, value, re.MULTILINE)
+        }
     assert "[switch]$Apply" in promotion
     assert "if ($Apply)" in promotion
     assert "[IO.FileMode]::CreateNew" in promotion
