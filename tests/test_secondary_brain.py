@@ -63,7 +63,7 @@ _ENGINE_PROJECTION: dict[str, Any] = {
     "moe_runner_backend": "flashinfer_mxfp4",
     "mxfp4_moe_precision": "default",
     "mm_feature_transport": "cpu",
-    "deterministic_inference_enabled": True,
+    "deterministic_inference_enabled": False,
     "context_tokens": 4096,
     "max_total_tokens": 4096,
     "mem_fraction_static": "0.97",
@@ -88,7 +88,7 @@ _PROFILE_ID = f"gptoss20b-{_ENGINE_BINDING_SHA256}"
 _ALIAS = f"friday-secondary-{_PROFILE_ID}"
 _PROFILE_VALUE: dict[str, Any] = {
     **_ENGINE_PROJECTION,
-    "schema": "friday.secondary-runtime-profile.v5",
+    "schema": "friday.secondary-runtime-profile.v6",
     "status": "accepted",
     "profile_id": _PROFILE_ID,
     "engine_binding_sha256": _ENGINE_BINDING_SHA256,
@@ -138,7 +138,7 @@ def _runtime_profile(**changes: Any) -> SecondaryRuntimeProfile:
         moe_runner_backend="flashinfer_mxfp4",
         mxfp4_moe_precision="default",
         mm_feature_transport="cpu",
-        deterministic_inference_enabled=True,
+        deterministic_inference_enabled=False,
         page_size=1,
         radix_cache_enabled=True,
         overlap_schedule_enabled=True,
@@ -725,11 +725,17 @@ def test_provisional_policy_mismatch_constructs_no_transport(
         _runtime_profile(max_context_tokens=True, max_total_tokens=True),
         _runtime_profile(chunked_prefill_size=513),
         _runtime_profile(sglang_compat_patch_sha256="0" * 64),
-        _runtime_profile(deterministic_inference_enabled=False),
+        _runtime_profile(deterministic_inference_enabled=True),
     ],
 )
 def test_product_profile_uses_the_deploy_capacity_bounds(profile: SecondaryRuntimeProfile) -> None:
     assert profile.is_well_formed is False
+
+
+def test_product_profile_accepts_both_closed_moe_ab_backends() -> None:
+    assert _runtime_profile(moe_runner_backend="flashinfer_mxfp4").is_well_formed is True
+    assert _runtime_profile(moe_runner_backend="triton_kernel").is_well_formed is True
+    assert _runtime_profile(moe_runner_backend="cutlass").is_well_formed is False
 
 
 @pytest.mark.asyncio

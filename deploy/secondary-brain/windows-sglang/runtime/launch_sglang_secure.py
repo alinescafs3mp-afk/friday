@@ -201,12 +201,13 @@ def main() -> None:
     server_args = prepare_server_args(arguments)
     if (
         server_args.mm_feature_transport != "cpu"
-        or server_args.enable_deterministic_inference is not True
+        or server_args.enable_deterministic_inference is not False
+        or server_args.moe_runner_backend != profile.moe_runner_backend
         or server_args.sampling_backend != "pytorch"
         or server_args.language_only
         or server_args.get_model_config().is_multimodal
     ):
-        raise RuntimeError("runtime model/determinism projection is invalid")
+        raise RuntimeError("runtime model/kernel projection is invalid")
     arguments[arguments.index(api_key)] = "<redacted>"
     api_key = ""
     _publish_runtime_epoch()

@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _PROFILE_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}")
-_PROFILE_SCHEMA = "friday.secondary-runtime-profile.v5"
+_PROFILE_SCHEMA = "friday.secondary-runtime-profile.v6"
 _EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256 = "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
 _EXPECTED_SOURCE_MODEL_MANIFEST_SHA256 = "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"
 _EXPECTED_RUNTIME_IMAGE = (
@@ -30,6 +30,7 @@ _EXPECTED_RUNTIME_SOURCE_REVISION = "29481685462732237d80d86076d6563e1f658102"
 _EXPECTED_MODEL_PATH = "/source/snapshot"
 _CONTEXT_LADDER = frozenset({4096, 8192, 12288, 16384, 24576, 32768, 40960, 49152, 65536})
 _CHUNKED_PREFILL_GRID = frozenset({512, 1024, 1536, 2048})
+_MOE_RUNNER_BACKENDS = frozenset({"flashinfer_mxfp4", "triton_kernel"})
 _PROFILE_KEYS = frozenset(
     {
         "schema",
@@ -401,10 +402,10 @@ class SecondaryRuntimeProfile:
             and self.prefill_attention_backend == "triton"
             and self.decode_attention_backend == "triton"
             and self.sampling_backend == "pytorch"
-            and self.moe_runner_backend == "flashinfer_mxfp4"
+            and self.moe_runner_backend in _MOE_RUNNER_BACKENDS
             and self.mxfp4_moe_precision == "default"
             and self.mm_feature_transport == "cpu"
-            and self.deterministic_inference_enabled is True
+            and self.deterministic_inference_enabled is False
             and type(self.page_size) is int
             and self.page_size in {1, 16}
             and type(self.radix_cache_enabled) is bool
