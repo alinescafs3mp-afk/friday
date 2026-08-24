@@ -42,6 +42,7 @@ _CONTEXT_LADDER = frozenset(
 _MEMORY_FRACTIONS = frozenset(
     {"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"}
 )
+_REASONING_EFFORTS = frozenset({"low", "medium", "high"})
 _MODES = frozenset({"shadow", "assist"})
 _WORKLOADS = frozenset(
     {
@@ -851,7 +852,11 @@ def chat_completion(
         "seed": 0,
     }
     if extra:
-        for key in ("reasoning_effort", "temperature", "top_p", "seed"):
+        requested_effort = extra.get("reasoning_effort", payload["reasoning_effort"])
+        if requested_effort not in _REASONING_EFFORTS:
+            raise EndpointError("GPT-OSS reasoning effort is outside the certification set")
+        payload["reasoning_effort"] = requested_effort
+        for key in ("temperature", "top_p", "seed"):
             if key in extra and extra[key] != payload[key]:
                 raise EndpointError("GPT-OSS sampling parameters cannot be overridden")
         payload.update({key: value for key, value in extra.items() if key not in payload})

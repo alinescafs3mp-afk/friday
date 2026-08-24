@@ -32,15 +32,13 @@ class SoakCase:
     name: str
     prompt: str
     validator: Callable[[str], bool]
+    max_tokens: int = 256
+    reasoning_effort: str = "low"
     extra: dict[str, object] | None = None
 
 
 def _has_cyrillic(value: str) -> bool:
     return any("а" <= char.casefold() <= "я" or char.casefold() == "ё" for char in value)
-
-
-def _has_english(value: str) -> bool:
-    return any("a" <= char.casefold() <= "z" for char in value)
 
 
 def _is_exact_extraction(value: str) -> bool:
@@ -55,14 +53,28 @@ def _is_integer_42(value: str) -> bool:
     return bool(re.fullmatch(r"42(?:\.0+)?", value.strip()))
 
 
+def _is_exact_unicode_filename(value: str) -> bool:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return False
+    return parsed == {"filename": "Проекты/Ёж №17 — финал.txt"}
+
+
 def _cases() -> tuple[SoakCase, ...]:
     return (
         SoakCase("russian", "Одним предложением объясни, зачем проверяют резервный узел.", _has_cyrillic),
-        SoakCase("english", "In one sentence, explain why an optional node must fail soft.", _has_english),
+        SoakCase(
+            "english",
+            "Reply with exactly this sentence: An optional node must fail soft.",
+            lambda value: value.strip() == "An optional node must fail soft.",
+        ),
         SoakCase(
             "arithmetic",
             "Return only the decimal result of (19 * 3) - 15.",
             _is_integer_42,
+            max_tokens=512,
+            reasoning_effort="medium",
         ),
         SoakCase(
             "json_extraction",
@@ -71,17 +83,21 @@ def _cases() -> tuple[SoakCase, ...]:
                 "Артемьев, 24.08.2026, сумма 17. Use ISO date and numeric amount."
             ),
             _is_exact_extraction,
-            {"response_format": {"type": "json_object"}},
+            extra={"response_format": {"type": "json_object"}},
         ),
         SoakCase(
             "unicode",
-            "Повтори без изменений только это имя файла: Проекты/Ёж №17 — финал.txt",
-            lambda value: "Проекты/Ёж №17 — финал.txt" in value,
+            'Return only JSON in this exact form: {"filename":"Проекты/Ёж №17 — финал.txt"}',
+            _is_exact_unicode_filename,
+            extra={"response_format": {"type": "json_object"}},
         ),
         SoakCase(
             "contradiction",
-            "Ответь одним словом да или нет: утверждения «A больше B» и «A меньше B» противоречат?",
-            lambda value: _has_cyrillic(value) and len(value) <= 64,
+            (
+                "Statements A>B and A<B describe the same A and B at the same time. "
+                "Return exactly CONTRADICTION if they conflict, otherwise CONSISTENT."
+            ),
+            lambda value: value.strip() == "CONTRADICTION",
         ),
     )
 
@@ -138,15 +154,18 @@ def run_soak(
                     messages=[
                         {
                             "role": "system",
-                            "content": "Return final content only. Never reveal internal reasoning or call tools.",
+                            "content": (
+                                "Follow the user instruction exactly. Return final content only. "
+                                "Never reveal internal reasoning or call tools."
+                            ),
                         },
                         {"role": "user", "content": case.prompt},
                     ],
                     timeout_sec=timeout_sec,
-                    max_tokens=128,
+                    max_tokens=case.max_tokens,
                     temperature=1.0,
                     extra={
-                        "reasoning_effort": "low",
+                        "reasoning_effort": case.reasoning_effort,
                         "top_p": 1.0,
                         "seed": 0,
                         **(case.extra or {}),

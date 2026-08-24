@@ -983,6 +983,24 @@ def test_endpoint_helpers_fix_the_certified_gpt_oss_sampling(
         "top_p": 1.0,
         "seed": 0,
     }
+    endpoint.chat_completion(
+        "http://127.0.0.1:30000/v1",
+        api_key="a" * 64,
+        messages=[{"role": "user", "content": "ready"}],
+        timeout_sec=1.0,
+        max_tokens=16,
+        extra={"reasoning_effort": "medium"},
+    )
+    assert captured["reasoning_effort"] == "medium"
+    with pytest.raises(endpoint.EndpointError, match="reasoning effort"):
+        endpoint.chat_completion(
+            "http://127.0.0.1:30000/v1",
+            api_key="a" * 64,
+            messages=[{"role": "user", "content": "ready"}],
+            timeout_sec=1.0,
+            max_tokens=16,
+            extra={"reasoning_effort": "extreme"},
+        )
     with pytest.raises(endpoint.EndpointError, match="cannot be overridden"):
         endpoint.chat_completion(
             "http://127.0.0.1:30000/v1",

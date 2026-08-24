@@ -61,6 +61,34 @@ def test_complete_trial_passes_and_json_grammar_request_remains_enabled(soak: An
     assert json_case.extra == {"response_format": {"type": "json_object"}}
 
 
+def test_mixed_soak_cases_use_closed_stable_contracts(soak: Any) -> None:
+    cases = {case.name: case for case in soak._cases()}
+
+    assert cases["english"].validator("An optional node must fail soft.")
+    assert not cases["english"].validator("An optional node must fail soft")
+    assert cases["contradiction"].validator("CONTRADICTION")
+    assert not cases["contradiction"].validator("consistent")
+    assert cases["arithmetic"].max_tokens == 512
+    assert cases["arithmetic"].reasoning_effort == "medium"
+    assert cases["unicode"].extra == {"response_format": {"type": "json_object"}}
+    assert cases["unicode"].validator('{"filename":"Проекты/Ёж №17 — финал.txt"}')
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        'Проекты/Ёж №17 — финал.txt',
+        '{"filename":"Проекты/Ёж №17\u202f—\u202fфинал.txt"}',
+        '{"filename":"Проекты/Еж №17 — финал.txt"}',
+        '{"filename":"Проекты/Ёж №18 — финал.txt"}',
+        '{"filename":"Проекты/Ёж №17 — финал.txt","extra":true}',
+        "not-json",
+    ],
+)
+def test_unicode_case_rejects_non_exact_or_non_json_outputs(soak: Any, value: str) -> None:
+    assert not soak._is_exact_unicode_filename(value)
+
+
 @pytest.mark.parametrize("value", ["42", "42.0", "42.000"])
 def test_arithmetic_case_accepts_equivalent_integer_renderings(soak: Any, value: str) -> None:
     assert soak._is_integer_42(value)
