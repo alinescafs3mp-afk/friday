@@ -30,7 +30,7 @@ from source_model_manifest import (  # type: ignore[import-not-found]  # noqa: E
     verify_source_model_manifest,
 )
 
-PROFILE_SCHEMA = "friday.secondary-runtime-profile.v6"
+PROFILE_SCHEMA = "friday.secondary-runtime-profile.v7"
 CAPACITY_SCHEMA = "friday.secondary-capacity-evidence.v1"
 DETERMINISTIC_FAILURE_SCHEMA = "friday.secondary-failure-battery.v1"
 PHYSICAL_FAILURE_SCHEMA = "friday.secondary-physical-failure-observation.v1"
@@ -242,6 +242,7 @@ PROFILE_KEYS = frozenset(
         "runtime_image_oci_manifest_digest",
         "runtime_source_revision",
         "sglang_compat_patch_sha256",
+        "sglang_sampler_compat_patch_sha256",
         "runtime_manifest_sha256",
         "model_path",
         "quantization",
@@ -290,6 +291,7 @@ ENGINE_KEYS = (
     "runtime_image_oci_manifest_digest",
     "runtime_source_revision",
     "sglang_compat_patch_sha256",
+    "sglang_sampler_compat_patch_sha256",
     "runtime_manifest_sha256",
     "model_path",
     "quantization",
@@ -725,6 +727,9 @@ def build_candidate(args: argparse.Namespace) -> dict[str, Any]:
     compat_patch_sha256 = str(args.sglang_compat_patch_sha256)
     if _SHA256.fullmatch(compat_patch_sha256) is None or compat_patch_sha256 == ZERO_SHA256:
         raise ProfileOperatorError("SGLang compatibility patch identity is invalid")
+    sampler_compat_patch_sha256 = str(args.sglang_sampler_compat_patch_sha256)
+    if _SHA256.fullmatch(sampler_compat_patch_sha256) is None or sampler_compat_patch_sha256 == ZERO_SHA256:
+        raise ProfileOperatorError("SGLang sampler compatibility patch identity is invalid")
     profile: dict[str, Any] = {
         "schema": PROFILE_SCHEMA,
         "status": "candidate",
@@ -742,6 +747,7 @@ def build_candidate(args: argparse.Namespace) -> dict[str, Any]:
         "runtime_image_oci_manifest_digest": RUNTIME_IMAGE_OCI_MANIFEST_DIGEST,
         "runtime_source_revision": chain["runtime_source_revision"],
         "sglang_compat_patch_sha256": compat_patch_sha256,
+        "sglang_sampler_compat_patch_sha256": sampler_compat_patch_sha256,
         "runtime_manifest_sha256": chain["runtime_manifest_sha256"],
         "model_path": MODEL_PATH,
         "quantization": "mxfp4",
@@ -956,6 +962,7 @@ def _validate_candidate(value: dict[str, Any], raw: bytes) -> None:
         value.get("gateway_ca_certificate_sha256"),
         value.get("hardware_runtime_receipt_sha256"),
         value.get("sglang_compat_patch_sha256"),
+        value.get("sglang_sampler_compat_patch_sha256"),
         value.get("runtime_manifest_sha256"),
     )
     if (
@@ -1538,6 +1545,7 @@ def _parser() -> argparse.ArgumentParser:
     candidate.add_argument("--runtime-manifest", required=True, type=Path)
     candidate.add_argument("--ca-certificate", required=True, type=Path)
     candidate.add_argument("--sglang-compat-patch-sha256", required=True)
+    candidate.add_argument("--sglang-sampler-compat-patch-sha256", required=True)
     candidate.add_argument("--context-tokens", required=True, type=int)
     candidate.add_argument("--max-output-tokens", default=2048, type=int)
     candidate.add_argument("--mem-fraction-static", required=True, type=float)

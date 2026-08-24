@@ -66,6 +66,7 @@ _ENGINE_KEYS = (
     "runtime_image_oci_manifest_digest",
     "runtime_source_revision",
     "sglang_compat_patch_sha256",
+    "sglang_sampler_compat_patch_sha256",
     "runtime_manifest_sha256",
     "model_path",
     "quantization",
@@ -115,6 +116,7 @@ _PROFILE_KEYS = frozenset(
         "runtime_image_oci_manifest_digest",
         "runtime_source_revision",
         "sglang_compat_patch_sha256",
+        "sglang_sampler_compat_patch_sha256",
         "runtime_manifest_sha256",
         "model_path",
         "quantization",
@@ -226,6 +228,7 @@ def _profile_engine_surface_is_valid(value: dict[str, Any]) -> bool:
     expected_graph_shape = (0, []) if graph_backend == "disabled" else (1, [1])
     evidence_keys = (
         "sglang_compat_patch_sha256",
+        "sglang_sampler_compat_patch_sha256",
         "runtime_manifest_sha256",
         "gateway_ca_certificate_sha256",
         "quality_evidence_sha256",
@@ -272,6 +275,7 @@ def _profile_engine_surface_is_valid(value: dict[str, Any]) -> bool:
         and value.get("no_cpu_offload") is True
         and all(isinstance(value.get(key), str) and _SHA256.fullmatch(value[key]) for key in evidence_keys)
         and value.get("sglang_compat_patch_sha256") != "0" * 64
+        and value.get("sglang_sampler_compat_patch_sha256") != "0" * 64
     )
 
 
@@ -391,7 +395,7 @@ def configure_expected_model(profile_manifest: Path, ca_file: Path | None = None
         not isinstance(value, dict)
         or set(value) != _PROFILE_KEYS
         or raw != canonical
-        or value.get("schema") != "friday.secondary-runtime-profile.v6"
+        or value.get("schema") != "friday.secondary-runtime-profile.v7"
         or value.get("status") not in {"candidate", "accepted"}
         or not isinstance(profile_id, str)
         or _PROFILE_ID.fullmatch(profile_id) is None

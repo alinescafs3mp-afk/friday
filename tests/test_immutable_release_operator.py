@@ -1686,10 +1686,10 @@ def _secondary_shadow_environment(
         "FRIDAY_SECONDARY_LLM_MAX_CONTEXT_TOKENS": "4096",
         "FRIDAY_SECONDARY_LLM_MODE": "shadow",
         "FRIDAY_SECONDARY_LLM_MODEL": (
-            "friday-secondary-gptoss20b-ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3"
+            "friday-secondary-gptoss20b-2329f5a607687d03cafcfcd7de00ce8b9a236943776283c9da6a29f63d2f30da"
         ),
         "FRIDAY_SECONDARY_LLM_PROFILE": (
-            "gptoss20b-ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3"
+            "gptoss20b-2329f5a607687d03cafcfcd7de00ce8b9a236943776283c9da6a29f63d2f30da"
         ),
         "FRIDAY_SECONDARY_LLM_READ_TIMEOUT_SEC": "12.0",
         "FRIDAY_SECONDARY_LLM_WORKLOADS": "extract",
@@ -2065,7 +2065,7 @@ def test_systemd_port_rejects_noncanonical_secondary_shadow_disable_target(
     elif mutation == "missing_profile":
         target = target.replace(
             b"FRIDAY_SECONDARY_LLM_PROFILE="
-            b"gptoss20b-ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3\n",
+            b"gptoss20b-2329f5a607687d03cafcfcd7de00ce8b9a236943776283c9da6a29f63d2f30da\n",
             b"",
         )
     elif mutation == "api_key":
@@ -2080,7 +2080,7 @@ def test_systemd_port_rejects_noncanonical_secondary_shadow_disable_target(
     elif mutation == "profile":
         target = target.replace(
             b"FRIDAY_SECONDARY_LLM_PROFILE="
-            b"gptoss20b-ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3",
+            b"gptoss20b-2329f5a607687d03cafcfcd7de00ce8b9a236943776283c9da6a29f63d2f30da",
             b"FRIDAY_SECONDARY_LLM_PROFILE=wrong",
         )
     elif mutation == "reordered":

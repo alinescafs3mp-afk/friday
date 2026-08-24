@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _PROFILE_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}")
-_PROFILE_SCHEMA = "friday.secondary-runtime-profile.v6"
+_PROFILE_SCHEMA = "friday.secondary-runtime-profile.v7"
 _EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256 = "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
 _EXPECTED_SOURCE_MODEL_MANIFEST_SHA256 = "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"
 _EXPECTED_RUNTIME_IMAGE = (
@@ -48,6 +48,7 @@ _PROFILE_KEYS = frozenset(
         "runtime_image_oci_manifest_digest",
         "runtime_source_revision",
         "sglang_compat_patch_sha256",
+        "sglang_sampler_compat_patch_sha256",
         "runtime_manifest_sha256",
         "model_path",
         "quantization",
@@ -96,6 +97,7 @@ _ENGINE_KEYS = (
     "runtime_image_oci_manifest_digest",
     "runtime_source_revision",
     "sglang_compat_patch_sha256",
+    "sglang_sampler_compat_patch_sha256",
     "runtime_manifest_sha256",
     "model_path",
     "quantization",
@@ -131,6 +133,7 @@ _REQUIRED_HASH_KEYS = (
     "hardware_runtime_receipt_sha256",
     "source_model_manifest_sha256",
     "sglang_compat_patch_sha256",
+    "sglang_sampler_compat_patch_sha256",
     "runtime_manifest_sha256",
 )
 _EVIDENCE_HASH_KEYS = (
@@ -202,6 +205,7 @@ class SecondaryRuntimeProfile:
     runtime_image_oci_manifest_digest: str
     runtime_source_revision: str
     sglang_compat_patch_sha256: str
+    sglang_sampler_compat_patch_sha256: str
     runtime_manifest_sha256: str
 
     def accepts_manifest(self, raw: bytes) -> bool:
@@ -305,6 +309,7 @@ class SecondaryRuntimeProfile:
             or value.get("runtime_image_oci_manifest_digest") != self.runtime_image_oci_manifest_digest
             or value.get("runtime_source_revision") != self.runtime_source_revision
             or value.get("sglang_compat_patch_sha256") != self.sglang_compat_patch_sha256
+            or value.get("sglang_sampler_compat_patch_sha256") != self.sglang_sampler_compat_patch_sha256
             or value.get("runtime_manifest_sha256") != self.runtime_manifest_sha256
             or value.get("model_path") != self.model_path
             or value.get("quantization") != self.quantization
@@ -356,6 +361,7 @@ class SecondaryRuntimeProfile:
             self.hardware_runtime_receipt_sha256,
             self.source_model_manifest_sha256,
             self.sglang_compat_patch_sha256,
+            self.sglang_sampler_compat_patch_sha256,
             self.runtime_manifest_sha256,
         )
         ca_is_bound = bool(
@@ -453,13 +459,13 @@ class SecondaryRuntimeProfile:
 # Assist remains impossible until the physical-failure witness promotes an
 # accepted manifest with its own, different digest.
 _PROVISIONAL_GPT_OSS_20B_V9 = SecondaryRuntimeProfile(
-    profile_id=("gptoss20b-ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3"),
+    profile_id=("gptoss20b-2329f5a607687d03cafcfcd7de00ce8b9a236943776283c9da6a29f63d2f30da"),
     endpoint_base_url="https://192.168.1.35:8443/v1",
     served_model_alias=(
-        "friday-secondary-gptoss20b-ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3"
+        "friday-secondary-gptoss20b-2329f5a607687d03cafcfcd7de00ce8b9a236943776283c9da6a29f63d2f30da"
     ),
-    manifest_sha256="6607c9b865c8b1d89779327ac04ef7178b9b18f9d0daae198193b348955fb5cb",
-    engine_binding_sha256=("ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3"),
+    manifest_sha256="528c7e9540eaaf3b7bbbcfcd29135dcf63e40fc460ab44cfcae1a3f96ccb0f07",
+    engine_binding_sha256=("2329f5a607687d03cafcfcd7de00ce8b9a236943776283c9da6a29f63d2f30da"),
     hardware_runtime_receipt_sha256=("0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"),
     gateway_ca_certificate_sha256=("392756a74fd9100635c42f4fbf7e5a5f1822d18ea898ebb7848b9fdd0bddc1fe"),
     max_context_tokens=4096,
@@ -503,6 +509,7 @@ _PROVISIONAL_GPT_OSS_20B_V9 = SecondaryRuntimeProfile(
     ),
     runtime_source_revision="29481685462732237d80d86076d6563e1f658102",
     sglang_compat_patch_sha256=("4ec4bbf76c047bf93d782525250ef79f8c2dae925d0035b95d97a41285052ffb"),
+    sglang_sampler_compat_patch_sha256=("5ddc5343c1ac368052046bc467d0d8fbd7fe3288b6ea8f88beb89cd4c8962d2e"),
     runtime_manifest_sha256=("15be7b3bdaa3cd76ace1bcc93ca461598a9583d920f4f3e55924db2f6b643428"),
 )
 

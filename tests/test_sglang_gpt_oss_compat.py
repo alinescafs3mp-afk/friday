@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import ast
+import hashlib
 import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 import yaml  # type: ignore[import-untyped]
 
@@ -14,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "deploy" / "secondary-brain" / "windows-sglang"
 PATCH = BUNDLE / "runtime" / "reasoner_grammar_backend.py"
 PATCH_TARGET = "/sgl-workspace/sglang/python/sglang/srt/constrained/reasoner_grammar_backend.py"
+SAMPLER_PATCH = BUNDLE / "runtime" / "sampler.py"
+SAMPLER_PATCH_TARGET = "/sgl-workspace/sglang/python/sglang/srt/layers/sampler.py"
+SAMPLER_PATCH_SHA256 = "5ddc5343c1ac368052046bc467d0d8fbd7fe3288b6ea8f88beb89cd4c8962d2e"
 
 
 class _BaseGrammarObject:
@@ -219,9 +225,76 @@ def test_compose_mounts_the_accepted_patch_over_the_pinned_module() -> None:
     ]
 
 
+def test_compose_mounts_the_accepted_sampler_patch_over_the_pinned_module() -> None:
+    compose = yaml.safe_load((BUNDLE / "compose.yml").read_text(encoding="utf-8"))
+    rows = compose["services"]["sglang"]["volumes"]
+    assert [row for row in rows if row.get("target") == SAMPLER_PATCH_TARGET] == [
+        {
+            "type": "bind",
+            "source": "./runtime/sampler.py",
+            "target": SAMPLER_PATCH_TARGET,
+            "read_only": True,
+        }
+    ]
+
+
+def _sampler_sync_method() -> Any:
+    tree = ast.parse(SAMPLER_PATCH.read_text(encoding="utf-8"))
+    sampler_class = next(
+        node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Sampler"
+    )
+    method = next(
+        node
+        for node in sampler_class.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_sync_token_ids_across_tp"
+    )
+    module = ast.Module(
+        body=[
+            ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
+            method,
+        ],
+        type_ignores=[],
+    )
+    ast.fix_missing_locations(module)
+    all_reduce = Mock()
+    reduce_min = object()
+    namespace = {
+        "SYNC_TOKEN_IDS_ACROSS_TP": False,
+        "torch": SimpleNamespace(distributed=SimpleNamespace(all_reduce=all_reduce)),
+        "dist": SimpleNamespace(ReduceOp=SimpleNamespace(MIN=reduce_min)),
+    }
+    exec(compile(module, str(SAMPLER_PATCH), "exec"), namespace)
+    return namespace["_sync_token_ids_across_tp"], all_reduce, reduce_min
+
+
+def test_sampler_patch_is_exact_and_skips_only_singleton_tp_sync() -> None:
+    assert hashlib.sha256(SAMPLER_PATCH.read_bytes()).hexdigest() == SAMPLER_PATCH_SHA256
+    sync, all_reduce, reduce_min = _sampler_sync_method()
+    token_ids = object()
+    group = object()
+
+    sync(
+        SimpleNamespace(tp_sync_group=group, tp_sync_group_world_size=1),
+        token_ids,
+        SimpleNamespace(grammars=[object()]),
+    )
+    all_reduce.assert_not_called()
+
+    sync(
+        SimpleNamespace(tp_sync_group=group, tp_sync_group_world_size=2),
+        token_ids,
+        SimpleNamespace(grammars=[object()]),
+    )
+    all_reduce.assert_called_once_with(token_ids, op=reduce_min, group=group)
+
+
 def test_launcher_verifies_patch_before_importing_sglang() -> None:
     launcher = (BUNDLE / "runtime" / "launch_sglang_secure.py").read_text(encoding="utf-8")
     assert "profile.sglang_compat_patch_sha256" in launcher
+    assert "profile.sglang_sampler_compat_patch_sha256" in launcher
     assert launcher.index("_verify_sglang_compat_patch(") < launcher.index(
+        "from sglang.launch_server import run_server"
+    )
+    assert launcher.index("profile.sglang_sampler_compat_patch_sha256") < launcher.index(
         "from sglang.launch_server import run_server"
     )

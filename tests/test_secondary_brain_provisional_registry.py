@@ -14,8 +14,8 @@ from friday.secondary_brain.profiles import (
     get_secondary_runtime_profile,
 )
 
-_PROFILE_ID = "gptoss20b-ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3"
-_CANDIDATE_SHA256 = "6607c9b865c8b1d89779327ac04ef7178b9b18f9d0daae198193b348955fb5cb"
+_PROFILE_ID = "gptoss20b-2329f5a607687d03cafcfcd7de00ce8b9a236943776283c9da6a29f63d2f30da"
+_CANDIDATE_SHA256 = "528c7e9540eaaf3b7bbbcfcd29135dcf63e40fc460ab44cfcae1a3f96ccb0f07"
 _CANDIDATE_PATH = Path(__file__).parent / "fixtures" / "secondary_v9_profile_candidate.json"
 _EVIDENCE_KEYS = (
     "quality_evidence_sha256",

@@ -35,9 +35,14 @@ have been removed from this deployment bundle.
 - The source volume is read-only. Before importing SGLang or creating CUDA
   state, the launcher rehashes the exact source manifest and all 14 files
   (13,789,264,674 bytes).
-- The runtime profile is canonical schema `friday.secondary-runtime-profile.v6`.
+- The runtime profile is canonical schema `friday.secondary-runtime-profile.v7`.
   It binds source, runtime image/config/OCI identities, backend selection,
-  context, memory, graph policy and every acceptance receipt.
+  context, memory, graph policy, both exact SGLang compatibility files and every
+  acceptance receipt. The code-owned sampler is the pinned 0.5.17 source plus
+  upstream PR #35830: TP=1 skips the otherwise unnecessary grammar token-ID
+  collective, while TP>1 retains the original synchronization semantics. Its
+  exact SHA-256 is
+  `5ddc5343c1ac368052046bc467d0d8fbd7fe3288b6ea8f88beb89cd4c8962d2e`.
 - The accepted-profile registry stays empty until protocol, quality, capacity,
   restart, soak and failure batteries all pass.
 
@@ -175,6 +180,7 @@ python .\scripts\runtime_profile_operator.py candidate `
   --runtime-manifest .\evidence\runtime.accepted.json `
   --ca-certificate .\secrets\tls\ca.crt `
   --sglang-compat-patch-sha256 ((Get-FileHash .\runtime\reasoner_grammar_backend.py -Algorithm SHA256).Hash.ToLowerInvariant()) `
+  --sglang-sampler-compat-patch-sha256 ((Get-FileHash .\runtime\sampler.py -Algorithm SHA256).Hash.ToLowerInvariant()) `
   --context-tokens 4096 --max-output-tokens 512 `
   --mem-fraction-static 0.97 --chunked-prefill-size 1024 `
   --allowed-modes assist,shadow --allowed-workloads extract `

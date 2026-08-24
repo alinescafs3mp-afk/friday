@@ -25,10 +25,11 @@ _RUNTIME_EPOCH_PATH = _RUNTIME_EPOCH_ROOT / "process-start-time-seconds"
 _SGLANG_REASONER_GRAMMAR_PATH = Path(
     "/sgl-workspace/sglang/python/sglang/srt/constrained/reasoner_grammar_backend.py"
 )
+_SGLANG_SAMPLER_PATH = Path("/sgl-workspace/sglang/python/sglang/srt/layers/sampler.py")
 
 
 def _verify_sglang_compat_patch(path: Path, expected_sha256: str) -> None:
-    """Fail closed unless the mounted GPT-OSS grammar fix is the accepted file."""
+    """Fail closed unless one mounted SGLang compatibility file is accepted."""
 
     try:
         metadata = path.lstat()
@@ -171,6 +172,10 @@ def main() -> None:
     _verify_sglang_compat_patch(
         _SGLANG_REASONER_GRAMMAR_PATH,
         profile.sglang_compat_patch_sha256,
+    )
+    _verify_sglang_compat_patch(
+        _SGLANG_SAMPLER_PATH,
+        profile.sglang_sampler_compat_patch_sha256,
     )
     api_key = _KEY_PATH.read_text(encoding="ascii")
     if re.fullmatch(r"[0-9a-f]{64}", api_key) is None:

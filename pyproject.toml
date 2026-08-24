@@ -132,6 +132,9 @@ ignore_missing_imports = true
 [tool.ruff]
 line-length = 110
 target-version = "py311"
+# Exact pinned SGLang 0.5.17 source plus upstream PR #35830. Its byte hash is
+# runtime-profile identity, so local formatting or modernization is forbidden.
+extend-exclude = ["deploy/secondary-brain/windows-sglang/runtime/sampler.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

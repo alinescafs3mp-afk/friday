@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "friday.secondary-runtime-profile.v6"
+SCHEMA = "friday.secondary-runtime-profile.v7"
 EXPECTED_MODEL_PATH = "/source/snapshot"
 EXPECTED_SOURCE_REVISION = "6cee5e81ee83917806bbde320786a8fb61efebee"
 EXPECTED_SOURCE_MANIFEST_SHA256 = "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"
@@ -68,6 +68,7 @@ _KEYS = frozenset(
         "runtime_image_oci_manifest_digest",
         "runtime_source_revision",
         "sglang_compat_patch_sha256",
+        "sglang_sampler_compat_patch_sha256",
         "runtime_manifest_sha256",
         "model_path",
         "quantization",
@@ -116,6 +117,7 @@ _ENGINE_KEYS = (
     "runtime_image_oci_manifest_digest",
     "runtime_source_revision",
     "sglang_compat_patch_sha256",
+    "sglang_sampler_compat_patch_sha256",
     "runtime_manifest_sha256",
     "model_path",
     "quantization",
@@ -254,6 +256,7 @@ class LaunchProfile:
     runtime_image_config_digest: str
     runtime_image_oci_manifest_digest: str
     sglang_compat_patch_sha256: str
+    sglang_sampler_compat_patch_sha256: str
     source_model_manifest_sha256: str
     hardware_runtime_receipt_sha256: str
     model_path: str
@@ -417,6 +420,7 @@ def load_launch_profile(
     runtime_oci_digest = value["runtime_image_oci_manifest_digest"]
     runtime_revision = value["runtime_source_revision"]
     compat_patch_sha256 = value["sglang_compat_patch_sha256"]
+    sampler_compat_patch_sha256 = value["sglang_sampler_compat_patch_sha256"]
     if (
         not isinstance(runtime_image, str)
         or runtime_image != EXPECTED_RUNTIME_IMAGE
@@ -432,6 +436,9 @@ def load_launch_profile(
         or not isinstance(compat_patch_sha256, str)
         or _SHA256_RE.fullmatch(compat_patch_sha256) is None
         or compat_patch_sha256 == "0" * 64
+        or not isinstance(sampler_compat_patch_sha256, str)
+        or _SHA256_RE.fullmatch(sampler_compat_patch_sha256) is None
+        or sampler_compat_patch_sha256 == "0" * 64
     ):
         raise ProfileContractError("profile runtime identity is invalid")
     if runtime_image != actual_runtime_image:
@@ -520,6 +527,7 @@ def load_launch_profile(
         runtime_image_config_digest=runtime_config_digest,
         runtime_image_oci_manifest_digest=runtime_oci_digest,
         sglang_compat_patch_sha256=compat_patch_sha256,
+        sglang_sampler_compat_patch_sha256=sampler_compat_patch_sha256,
         source_model_manifest_sha256=value["source_model_manifest_sha256"],
         hardware_runtime_receipt_sha256=value["hardware_runtime_receipt_sha256"],
         model_path=value["model_path"],

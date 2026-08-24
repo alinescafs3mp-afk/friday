@@ -57,6 +57,7 @@ def test_bundle_has_the_closed_operator_surface() -> None:
         "runtime/launch_sglang_secure.py",
         "runtime/profile_contract.py",
         "runtime/reasoner_grammar_backend.py",
+        "runtime/sampler.py",
         "runtime/source_model_manifest.py",
         "runtime/render_gateway_secure.sh",
         "scripts/accept-hardware-runtime-receipt.ps1",
@@ -206,6 +207,7 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
         "/run/friday-profile/accepted.json",
         "/run/friday-profile/id",
         "/sgl-workspace/sglang/python/sglang/srt/constrained/reasoner_grammar_backend.py",
+        "/sgl-workspace/sglang/python/sglang/srt/layers/sampler.py",
     }
     assert {
         "/run/friday-secrets/gateway-api-key",
@@ -900,7 +902,7 @@ def test_model_volume_verifier_is_strict_and_fail_closed(
 
 def _candidate_runtime_profile() -> dict[str, Any]:
     value: dict[str, Any] = {
-        "schema": "friday.secondary-runtime-profile.v6",
+        "schema": "friday.secondary-runtime-profile.v7",
         "status": "candidate",
         "profile_id": "pending",
         "engine_binding_sha256": "0" * 64,
@@ -918,6 +920,7 @@ def _candidate_runtime_profile() -> dict[str, Any]:
         "runtime_image_oci_manifest_digest": SGLANG_IMAGE.removeprefix("lmsysorg/sglang@"),
         "runtime_source_revision": "29481685462732237d80d86076d6563e1f658102",
         "sglang_compat_patch_sha256": "d" * 64,
+        "sglang_sampler_compat_patch_sha256": "c" * 64,
         "runtime_manifest_sha256": "f" * 64,
         "model_path": "/source/snapshot",
         "quantization": "mxfp4",
@@ -992,6 +995,7 @@ def test_shared_profile_contract_derives_every_capacity_argument(tmp_path: Path)
     assert profile.model_path == "/source/snapshot"
     assert profile.source_model_manifest_sha256 == SOURCE_MANIFEST_SHA256
     assert profile.sglang_compat_patch_sha256 == "d" * 64
+    assert profile.sglang_sampler_compat_patch_sha256 == "c" * 64
     assert profile.deterministic_inference_enabled is False
     assert profile.hardware_runtime_receipt_sha256 == (
         "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
@@ -1117,6 +1121,7 @@ def test_shared_profile_contract_emits_the_full_optimized_surface(tmp_path: Path
         ("runtime_image_oci_manifest_digest", "sha256:" + "3" * 64),
         ("runtime_source_revision", "3" * 40),
         ("sglang_compat_patch_sha256", "0" * 64),
+        ("sglang_sampler_compat_patch_sha256", "0" * 64),
         ("quantization", "modelopt_fp4"),
         ("dtype", "float16"),
         ("kv_cache_dtype", "fp8_e5m2"),
