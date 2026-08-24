@@ -1539,6 +1539,14 @@ def _active_backend_diagnostics_unavailable(
     if check_secrets:
         _add_secret_hygiene_actions(add_action, settings)
     model = _model_status(settings.model_dir)
+    secondary_configured = settings.secondary_llm_configured
+    secondary_state = (
+        "disabled"
+        if not settings.secondary_llm_enabled or settings.secondary_llm_mode == "disabled"
+        else "not_observed"
+        if secondary_configured
+        else "misconfigured"
+    )
     result: dict[str, Any] = {
         "ok": False,
         "configuration_issues": configuration,
@@ -1571,6 +1579,15 @@ def _active_backend_diagnostics_unavailable(
         "auth_failures": {"state": "active_backend_uninspected"},
         "embeddings_index": {"available": False},
         "memory_vault": memory_vault,
+        "secondary": {
+            "schema": "friday.optional-secondary-health.v1",
+            "role": "optional_advisory",
+            "enabled": bool(settings.secondary_llm_enabled),
+            "configured": secondary_configured,
+            "mode": settings.secondary_llm_mode,
+            "state": secondary_state,
+            "available": False,
+        },
         "runtime": SystemTelemetry(settings.home).snapshot(),
         "features": {
             "llm_enabled": settings.llm_enabled,

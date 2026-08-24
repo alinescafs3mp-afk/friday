@@ -21,7 +21,18 @@ from .contracts import (
 )
 
 _MAX_RESPONSE_BYTES = 1_048_576
-_HARMONY_MARKERS = ("<|channel|>", "<|start|>", "<|end|>", "<|message|>")
+_HARMONY_MARKERS = (
+    "<|analysis|>",
+    "<|call|>",
+    "<|channel|>",
+    "<|constrain|>",
+    "<|end|>",
+    "<|final|>",
+    "<|message|>",
+    "<|recipient|>",
+    "<|return|>",
+    "<|start|>",
+)
 _REASONING_MARKERS = ("<think>", "</think>")
 _IMAGE_TYPES = frozenset({"image", "image_url", "input_image"})
 
@@ -60,8 +71,8 @@ def _contains_tool_material(message: Mapping[str, Any]) -> bool:
 def _message_chars(message: Mapping[str, Any]) -> int:
     content = message.get("content", "")
     if isinstance(content, str):
-        return len(content)
-    return len(str(content))
+        return len(content.encode("utf-8"))
+    return len(str(content).encode("utf-8"))
 
 
 def _bounded_nonnegative_int(value: Any) -> int:
@@ -74,12 +85,26 @@ def _bounded_nonnegative_int(value: Any) -> int:
     return min(max(number, 0), 2_147_483_647)
 
 
+def _safe_json_string(value: str) -> str:
+    try:
+        value.encode("utf-8", errors="strict")
+    except UnicodeError:
+        raise ProtocolRejection(SecondaryFailure.MALFORMED_RESPONSE) from None
+    if any(ord(character) < 32 and character not in "\t\n\r" for character in value):
+        raise ProtocolRejection(SecondaryFailure.MALFORMED_RESPONSE)
+    return value
+
+
 def _immutable_json(value: Any) -> JsonValue:
     """Copy only JSON values, rejecting NaN/Inf and exotic objects."""
 
-    if value is None or isinstance(value, (str, bool)):
+    if value is None or isinstance(value, bool):
         return value
+    if isinstance(value, str):
+        return _safe_json_string(value)
     if isinstance(value, int):
+        if not -(2**63) <= value <= 2**63 - 1:
+            raise ProtocolRejection(SecondaryFailure.MALFORMED_RESPONSE)
         return value
     if isinstance(value, float):
         if value != value or value in {float("inf"), float("-inf")}:
@@ -88,7 +113,7 @@ def _immutable_json(value: Any) -> JsonValue:
     if isinstance(value, list):
         return [_immutable_json(item) for item in value]
     if isinstance(value, dict) and all(isinstance(key, str) for key in value):
-        return {str(key): _immutable_json(item) for key, item in value.items()}
+        return {_safe_json_string(key): _immutable_json(item) for key, item in value.items()}
     raise ProtocolRejection(SecondaryFailure.MALFORMED_RESPONSE)
 
 
@@ -108,9 +133,12 @@ class GptOssProtocolAdapter:
             raise ProtocolRejection(SecondaryFailure.EFFECT_DENIED)
         if any(_contains_tool_material(message) for message in request.messages):
             raise ProtocolRejection(SecondaryFailure.TOOL_CALL_REJECTED)
+        if request.max_output_tokens > config.max_output_tokens:
+            raise ProtocolRejection(SecondaryFailure.CONTEXT_EXCEEDED)
 
-        # A conservative, tokenizer-independent ceiling.  The measured endpoint
-        # cap remains authoritative; output and a small protocol margin are kept.
+        # UTF-8 bytes are a conservative tokenizer-independent ceiling, including
+        # Cyrillic, CJK and emoji. The measured endpoint cap remains authoritative;
+        # output and a small protocol margin are kept.
         input_tokens_upper_bound = max(1, sum(_message_chars(item) for item in request.messages))
         context_budget = config.max_context_tokens - request.max_output_tokens - 256
         if context_budget < 1 or input_tokens_upper_bound > context_budget:
@@ -151,6 +179,11 @@ class GptOssProtocolAdapter:
             raise ProtocolRejection(SecondaryFailure.MALFORMED_RESPONSE)
         choice = choices[0]
         if not isinstance(choice, dict):
+            raise ProtocolRejection(SecondaryFailure.MALFORMED_RESPONSE)
+        # Utility/advisory results must be complete.  In particular, never
+        # persist a truncated JSON object or a content-filter sentinel as Inbox
+        # advice merely because its visible prefix happened to parse.
+        if choice.get("finish_reason") != "stop":
             raise ProtocolRejection(SecondaryFailure.MALFORMED_RESPONSE)
         message = choice.get("message")
         if not isinstance(message, dict):

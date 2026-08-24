@@ -67,13 +67,13 @@ BATTERY_CASE_IDS = ("D06", "D07", "D08")
 
 _EXPECTED_DEPENDENCY_HASHES = {
     "tools/document_contour_live_battery.py": (
-        "ed6149fb7bdd6ea0eccbbde6a46513c308b141dd8aa6ef8054af58eb9d62852e"
+        "5e44bef8be18c3489f8132d6eef6855d2ea9c3f87077d5e98d1115620032a007"
     ),
-    "friday/diagnostics/__init__.py": ("dcf27eae15a92d8e5c02bb350ff9a43b17fe969c86d6243c53254719b3fd0a87"),
+    "friday/diagnostics/__init__.py": ("3920ed6300c4a01ce374643b1e1cbdbeeb04edce5054f29ab6f721ef964cecee"),
     "friday/diagnostics/runtime_lease.py": (
         "6986bcef0d21d1754672ad784746fbc205b4822de708c71b16dd93576f3d1926"
     ),
-    "friday/admin_api/_overview.py": ("a72f76b59d7ab8ac19a56dc80d8ae1887fb02c07898f346f59fe4449444e6b51"),
+    "friday/admin_api/_overview.py": ("ae6a861de89bcee5209e7f322f8c0f0b6c9502d01890a676685379d63135d1ea"),
 }
 
 _MODEL_ENV_ALLOWLIST = frozenset(
@@ -85,6 +85,23 @@ _MODEL_ENV_ALLOWLIST = frozenset(
         "FRIDAY_LLM_TIMEOUT_SEC",
         "FRIDAY_LLM_MAX_TOKENS",
         "FRIDAY_LLM_FOREGROUND_SLOTS",
+        "FRIDAY_SECONDARY_LLM_ENABLED",
+        "FRIDAY_SECONDARY_LLM_MODE",
+        "FRIDAY_SECONDARY_LLM_BASE_URL",
+        "FRIDAY_SECONDARY_LLM_MODEL",
+        "FRIDAY_SECONDARY_LLM_API_KEY",
+        "FRIDAY_SECONDARY_LLM_CA_FILE",
+        "FRIDAY_SECONDARY_LLM_CONNECT_TIMEOUT_SEC",
+        "FRIDAY_SECONDARY_LLM_READ_TIMEOUT_SEC",
+        "FRIDAY_SECONDARY_LLM_CALL_BUDGET_SEC",
+        "FRIDAY_SECONDARY_LLM_ADMISSION_TIMEOUT_SEC",
+        "FRIDAY_SECONDARY_LLM_HEALTH_INTERVAL_SEC",
+        "FRIDAY_SECONDARY_LLM_COOLDOWN_SEC",
+        "FRIDAY_SECONDARY_LLM_MAX_CONTEXT_TOKENS",
+        "FRIDAY_SECONDARY_LLM_MAX_CONCURRENCY",
+        "FRIDAY_SECONDARY_LLM_PROFILE",
+        "FRIDAY_SECONDARY_LLM_WORKLOADS",
+        "FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT",
         "FRIDAY_EMBEDDINGS_ENABLED",
         "FRIDAY_EMBEDDINGS_BASE_URL",
         "FRIDAY_EMBEDDINGS_API_KEY",
@@ -1213,6 +1230,25 @@ def _model_environment(settings: Any) -> dict[str, str]:
         "FRIDAY_LLM_TIMEOUT_SEC": str(settings.llm_timeout_sec),
         "FRIDAY_LLM_MAX_TOKENS": str(settings.llm_max_tokens),
         "FRIDAY_LLM_FOREGROUND_SLOTS": str(settings.llm_foreground_slots),
+        "FRIDAY_SECONDARY_LLM_ENABLED": "1" if settings.secondary_llm_enabled else "0",
+        "FRIDAY_SECONDARY_LLM_MODE": str(settings.secondary_llm_mode),
+        "FRIDAY_SECONDARY_LLM_BASE_URL": str(settings.secondary_llm_base_url),
+        "FRIDAY_SECONDARY_LLM_MODEL": str(settings.secondary_llm_model),
+        "FRIDAY_SECONDARY_LLM_API_KEY": str(settings.secondary_llm_api_key),
+        "FRIDAY_SECONDARY_LLM_CA_FILE": str(settings.secondary_llm_ca_file),
+        "FRIDAY_SECONDARY_LLM_CONNECT_TIMEOUT_SEC": str(settings.secondary_llm_connect_timeout_sec),
+        "FRIDAY_SECONDARY_LLM_READ_TIMEOUT_SEC": str(settings.secondary_llm_read_timeout_sec),
+        "FRIDAY_SECONDARY_LLM_CALL_BUDGET_SEC": str(settings.secondary_llm_call_budget_sec),
+        "FRIDAY_SECONDARY_LLM_ADMISSION_TIMEOUT_SEC": str(settings.secondary_llm_admission_timeout_sec),
+        "FRIDAY_SECONDARY_LLM_HEALTH_INTERVAL_SEC": str(settings.secondary_llm_health_interval_sec),
+        "FRIDAY_SECONDARY_LLM_COOLDOWN_SEC": str(settings.secondary_llm_cooldown_sec),
+        "FRIDAY_SECONDARY_LLM_MAX_CONTEXT_TOKENS": str(settings.secondary_llm_max_context_tokens),
+        "FRIDAY_SECONDARY_LLM_MAX_CONCURRENCY": str(settings.secondary_llm_max_concurrency),
+        "FRIDAY_SECONDARY_LLM_PROFILE": settings.secondary_llm_profile,
+        "FRIDAY_SECONDARY_LLM_WORKLOADS": ",".join(settings.secondary_llm_workloads),
+        "FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT": (
+            "1" if settings.secondary_llm_allow_private_text else "0"
+        ),
         "FRIDAY_EMBEDDINGS_ENABLED": "1" if settings.embeddings_enabled else "0",
         "FRIDAY_EMBEDDINGS_BASE_URL": str(settings.embeddings_base_url),
         "FRIDAY_EMBEDDINGS_API_KEY": str(settings.embeddings_api_key),

@@ -624,6 +624,7 @@ class FridaySettings:
     secondary_llm_cooldown_sec: float
     secondary_llm_max_context_tokens: int
     secondary_llm_max_concurrency: int
+    secondary_llm_profile: str
     secondary_llm_workloads: tuple[str, ...]
     secondary_llm_allow_private_text: bool
 
@@ -1007,6 +1008,42 @@ class FridaySettings:
     def obsidian_effective_root(self) -> Path:
         return Path(self.obsidian_root or (self.data_dir / "obsidian")).absolute()
 
+    @property
+    def secondary_llm_configured(self) -> bool:
+        from friday.secondary_brain.contracts import (
+            SecondaryEndpointConfig,
+            secondary_configuration_is_admissible,
+        )
+        from friday.secondary_brain.profiles import get_secondary_runtime_profile
+
+        profile = get_secondary_runtime_profile(self.secondary_llm_profile)
+        endpoint = SecondaryEndpointConfig(
+            base_url=self.secondary_llm_base_url,
+            served_model_alias=self.secondary_llm_model,
+            api_key=self.secondary_llm_api_key,
+            ca_file=self.secondary_llm_ca_file,
+            ca_sha256=profile.gateway_ca_certificate_sha256 if profile is not None else "",
+            connect_timeout_sec=self.secondary_llm_connect_timeout_sec,
+            read_timeout_sec=self.secondary_llm_read_timeout_sec,
+            call_budget_sec=self.secondary_llm_call_budget_sec,
+            admission_timeout_sec=self.secondary_llm_admission_timeout_sec,
+            health_interval_sec=self.secondary_llm_health_interval_sec,
+            cooldown_sec=self.secondary_llm_cooldown_sec,
+            max_context_tokens=self.secondary_llm_max_context_tokens,
+            max_concurrency=self.secondary_llm_max_concurrency,
+            max_output_tokens=profile.max_output_tokens if profile is not None else 0,
+            profile_id=self.secondary_llm_profile,
+            profile_manifest_sha256=profile.manifest_sha256 if profile is not None else "",
+        )
+        return secondary_configuration_is_admissible(
+            endpoint,
+            primary_base_url=self.llm_base_url,
+            primary_model=self.llm_model,
+            primary_timeout_sec=self.llm_timeout_sec,
+            workload_names=self.secondary_llm_workloads,
+            mode=self.secondary_llm_mode,
+        )
+
     def public_dict(self) -> dict[str, object]:
         return {
             "home": str(self.home),
@@ -1020,6 +1057,18 @@ class FridaySettings:
                 "auth": bool(self.llm_api_key),
                 "verify_answers": self.verify_answers,
                 "verify_min_answer_chars": self.verify_min_answer_chars,
+            },
+            "secondary_llm": {
+                "enabled": self.secondary_llm_enabled,
+                "mode": self.secondary_llm_mode,
+                "configured": self.secondary_llm_configured,
+                "auth": bool(self.secondary_llm_api_key),
+                "private_ca": bool(self.secondary_llm_ca_file),
+                "max_context_tokens": self.secondary_llm_max_context_tokens,
+                "max_concurrency": self.secondary_llm_max_concurrency,
+                "profile": self.secondary_llm_profile,
+                "allow_private_text": self.secondary_llm_allow_private_text,
+                "workloads": list(self.secondary_llm_workloads),
             },
             "orchestration": {
                 "mode": self.router_mode,
@@ -1247,10 +1296,11 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         # therefore the safe, intentionally unusable default.
         secondary_llm_max_context_tokens=_int_env("FRIDAY_SECONDARY_LLM_MAX_CONTEXT_TOKENS", 0, minimum=0),
         secondary_llm_max_concurrency=_int_env("FRIDAY_SECONDARY_LLM_MAX_CONCURRENCY", 1, minimum=1),
+        secondary_llm_profile=env("FRIDAY_SECONDARY_LLM_PROFILE", "").strip(),
         secondary_llm_workloads=tuple(
             _list_env(
                 "FRIDAY_SECONDARY_LLM_WORKLOADS",
-                ["classify", "extract", "query_rewrite", "summarize", "critique", "verify"],
+                ["extract"],
             )
         ),
         secondary_llm_allow_private_text=_bool_env("FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT", False),
@@ -1766,6 +1816,106 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
         warnings.append("FRIDAY_API_TOKEN is shorter than 32 characters")
     if settings.telegram_bridge_secret and len(settings.telegram_bridge_secret) < 32:
         errors.append("FRIDAY_TELEGRAM_BRIDGE_SECRET must contain at least 32 characters")
+    if settings.secondary_llm_enabled:
+        from friday.secondary_brain.profiles import get_secondary_runtime_profile
+
+        try:
+            secondary_url = urlparse(settings.secondary_llm_base_url)
+            secondary_host = str(secondary_url.hostname or "")
+        except ValueError:
+            secondary_url = None
+            secondary_host = ""
+        secondary_is_loopback = secondary_host == "localhost"
+        secondary_is_private_ip = False
+        try:
+            secondary_address = ipaddress.ip_address(secondary_host)
+        except ValueError:
+            pass
+        else:
+            secondary_is_loopback = secondary_address.is_loopback
+            secondary_is_private_ip = secondary_address.is_private and not secondary_address.is_loopback
+        secondary_profile = get_secondary_runtime_profile(settings.secondary_llm_profile)
+        missing_secondary = [
+            name
+            for name, present in (
+                ("FRIDAY_SECONDARY_LLM_BASE_URL", bool(settings.secondary_llm_base_url)),
+                ("FRIDAY_SECONDARY_LLM_MODEL", bool(settings.secondary_llm_model)),
+                (
+                    "FRIDAY_SECONDARY_LLM_API_KEY",
+                    bool(re.fullmatch(r"[0-9a-f]{64}", settings.secondary_llm_api_key)),
+                ),
+                (
+                    "FRIDAY_SECONDARY_LLM_MAX_CONTEXT_TOKENS",
+                    settings.secondary_llm_max_context_tokens > 0,
+                ),
+                (
+                    "FRIDAY_SECONDARY_LLM_CA_FILE",
+                    not secondary_is_private_ip or bool(settings.secondary_llm_ca_file),
+                ),
+                (
+                    "FRIDAY_SECONDARY_LLM_PROFILE",
+                    not secondary_is_private_ip or secondary_profile is not None,
+                ),
+            )
+            if not present
+        ]
+        if settings.secondary_llm_mode == "disabled":
+            warnings.append(
+                "FRIDAY_SECONDARY_LLM_ENABLED is on but mode is disabled; "
+                "the optional endpoint will remain inert"
+            )
+        elif missing_secondary:
+            warnings.append(
+                "optional secondary endpoint is incomplete and will remain unavailable: "
+                + ", ".join(missing_secondary)
+            )
+        if secondary_url is None:
+            warnings.append("optional secondary endpoint URL is invalid and will remain unavailable")
+        elif not secondary_is_loopback and not secondary_is_private_ip:
+            warnings.append(
+                "optional secondary endpoint must use a numeric private LAN address and will "
+                "remain unavailable"
+            )
+        elif secondary_url.scheme == "http" and not secondary_is_loopback:
+            warnings.append(
+                "optional secondary endpoint uses unsafe non-loopback HTTP and will remain unavailable"
+            )
+        if settings.secondary_llm_ca_file and not Path(settings.secondary_llm_ca_file).is_file():
+            warnings.append(
+                "FRIDAY_SECONDARY_LLM_CA_FILE is unavailable; the optional endpoint "
+                "will fail soft without affecting primary service"
+            )
+        if settings.secondary_llm_max_concurrency != 1:
+            warnings.append(
+                "optional secondary concurrency is not certified as exactly one and will remain unavailable"
+            )
+        if (
+            secondary_is_private_ip
+            and secondary_profile is not None
+            and not settings.secondary_llm_configured
+        ):
+            warnings.append(
+                "optional secondary settings do not match the code-owned runtime profile and will remain unavailable"
+            )
+        if (
+            settings.secondary_llm_base_url.rstrip("/") == settings.llm_base_url.rstrip("/")
+            or settings.secondary_llm_model == settings.llm_model
+        ):
+            warnings.append(
+                "optional secondary endpoint/model is not independent from primary and will remain unavailable"
+            )
+        if settings.secondary_llm_cooldown_sec <= 0.0:
+            warnings.append("optional secondary cooldown must be positive and will remain unavailable")
+        if not (
+            0.0
+            < settings.secondary_llm_connect_timeout_sec
+            <= settings.secondary_llm_read_timeout_sec
+            <= settings.secondary_llm_call_budget_sec
+            < settings.llm_timeout_sec
+            and settings.secondary_llm_call_budget_sec <= 30.0
+            and 0.0 < settings.secondary_llm_admission_timeout_sec <= 0.25
+        ):
+            warnings.append("optional secondary timeout relationship is unsafe and will remain unavailable")
     if (
         settings.api_token
         and settings.telegram_bridge_secret

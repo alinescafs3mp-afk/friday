@@ -22,6 +22,7 @@ from friday.ingestion._classifier import _classifier
 if TYPE_CHECKING:
     from friday.agent_runtime.llm import LLMRouter
     from friday.knowledge_graph import KnowledgeGraph
+    from friday.secondary_brain import SecondaryBrainScheduler
 
 
 class CoreMixin(PipelineShared):
@@ -31,11 +32,13 @@ class CoreMixin(PipelineShared):
         storage: FridayStorage,
         knowledge_graph: KnowledgeGraph | None = None,
         llm: LLMRouter | None = None,
+        secondary_brain: SecondaryBrainScheduler | None = None,
     ) -> None:
         self.settings = settings
         self.storage = storage
         self.knowledge_graph = knowledge_graph
         self.llm = llm
+        self.secondary_brain = secondary_brain
         # Serialises inbox promotion within this (single) backend process so
         # concurrent approvals cannot race on the shared storage connection.
         self._promotion_lock = threading.Lock()

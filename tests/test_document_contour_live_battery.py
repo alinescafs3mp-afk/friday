@@ -369,6 +369,7 @@ def _complete_operator_model_environment(runner) -> dict[str, str]:
     values.update(
         {
             "FRIDAY_LLM_BASE_URL": "http://127.0.0.1:8101/v1",
+            "FRIDAY_SECONDARY_LLM_BASE_URL": "http://127.0.0.1:8104/v1",
             "FRIDAY_EMBEDDINGS_BASE_URL": "http://127.0.0.1:8102/v1",
             "FRIDAY_RERANK_BASE_URL": "http://127.0.0.1:8103/v1",
         }

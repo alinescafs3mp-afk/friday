@@ -1,6 +1,5 @@
 """Optional, default-off advisory model foundation."""
 
-from .client import SecondaryEndpointClient
 from .contracts import (
     EffectClass,
     ModelModality,
@@ -30,7 +29,6 @@ __all__ = [
     "ProtocolRejection",
     "SecondaryAttempt",
     "SecondaryBrainScheduler",
-    "SecondaryEndpointClient",
     "SecondaryEndpointConfig",
     "SecondaryFailure",
     "SecondaryMode",

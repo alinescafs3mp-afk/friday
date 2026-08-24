@@ -206,7 +206,9 @@ def _settings_info_sync(request: Request) -> dict[str, Any]:
 
 @router.get("/diagnostics")
 async def diagnostics(request: Request, check_llm: bool = False) -> dict[str, Any]:
-    return await run_blocking(_diagnostics_sync, request, check_llm)
+    report = await run_blocking(_diagnostics_sync, request, check_llm)
+    report["secondary"] = _secondary_diagnostics_on_event_loop(request.app.state)
+    return report
 
 
 def _diagnostics_sync(request: Request, check_llm: bool) -> dict[str, Any]:
@@ -217,6 +219,29 @@ def _diagnostics_sync(request: Request, check_llm: bool) -> dict[str, Any]:
         state.storage,
         check_llm_port=check_llm,
     )
+
+
+def _secondary_diagnostics_on_event_loop(state: Any) -> dict[str, object]:
+    """Snapshot asyncio-owned optional state only on the serving event loop."""
+
+    secondary = getattr(state, "secondary_brain", None)
+    projection = getattr(secondary, "diagnostics_status", None)
+    if callable(projection):
+        try:
+            value = projection()
+            if isinstance(value, dict):
+                return value
+        except Exception:  # noqa: BLE001 - optional diagnostics are fail-soft
+            pass
+    return {
+        "schema": "friday.optional-secondary-health.v1",
+        "role": "optional_advisory",
+        "enabled": bool(state.settings.secondary_llm_enabled),
+        "configured": False,
+        "mode": state.settings.secondary_llm_mode,
+        "state": "unavailable",
+        "available": False,
+    }
 
 
 @router.get("/document-contour-observer-snapshot", include_in_schema=False)

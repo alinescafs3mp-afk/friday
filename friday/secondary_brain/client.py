@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import ssl
 import time
 from collections.abc import Callable
@@ -17,6 +18,7 @@ from .contracts import (
     SecondaryFailure,
     SecondaryState,
     SecondaryStatus,
+    _load_pinned_ca_pem,
 )
 from .gpt_oss import GptOssProtocolAdapter, ProtocolRejection
 
@@ -27,6 +29,7 @@ _ENDPOINT_FAILURES = frozenset(
         SecondaryFailure.HTTP_TRANSIENT,
         SecondaryFailure.HTTP_REJECTED,
         SecondaryFailure.AUTH_REJECTED,
+        SecondaryFailure.WRONG_PROFILE,
         SecondaryFailure.WRONG_MODEL,
         SecondaryFailure.MALFORMED_RESPONSE,
         SecondaryFailure.TOOL_CALL_REJECTED,
@@ -35,6 +38,8 @@ _ENDPOINT_FAILURES = frozenset(
         SecondaryFailure.CANCELLED,
     }
 )
+_PROFILE_ID_HEADER = b"x-friday-secondary-profile-id"
+_PROFILE_SHA_HEADER = b"x-friday-secondary-profile-sha256"
 
 
 class SecondaryEndpointClient:
@@ -65,15 +70,25 @@ class SecondaryEndpointClient:
         self._fallback_total = 0
         self._active_requests = 0
         self._served_model_match = False
+        self._profile_manifest_match = False
+        self._last_success_at: float | None = None
+        self._probe_success_total = 0
+        self._probe_failure_total = 0
         timeout = httpx.Timeout(
             config.read_timeout_sec,
             connect=config.connect_timeout_sec,
             write=config.read_timeout_sec,
             pool=config.admission_timeout_sec,
         )
-        tls_verifier: ssl.SSLContext | bool = (
-            ssl.create_default_context(cafile=config.ca_file) if config.ca_file else True
-        )
+        tls_verifier: ssl.SSLContext | bool = True
+        if config.ca_file:
+            pinned_ca_pem = _load_pinned_ca_pem(config.ca_file, config.ca_sha256)
+            if not pinned_ca_pem:
+                raise ValueError("secondary endpoint CA identity changed")
+            tls_verifier = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            tls_verifier.verify_mode = ssl.CERT_REQUIRED
+            tls_verifier.check_hostname = True
+            tls_verifier.load_verify_locations(cadata=pinned_ca_pem)
         self._http = httpx.AsyncClient(
             headers={
                 "Authorization": f"Bearer {config.api_key}",
@@ -100,6 +115,7 @@ class SecondaryEndpointClient:
         await self.aclose()
 
     def status(self) -> SecondaryStatus:
+        now = self._clock()
         return SecondaryStatus(
             state=self._state,
             last_failure=self._last_failure,
@@ -110,10 +126,68 @@ class SecondaryEndpointClient:
             active_requests=self._active_requests,
             context_cap_tokens=self.config.max_context_tokens,
             served_model_match=self._served_model_match,
+            last_success_age_sec=(
+                max(0.0, now - self._last_success_at) if self._last_success_at is not None else None
+            ),
+            cooldown_retry_after_sec=(
+                max(0.0, self._cooldown_until - now) if self._state is SecondaryState.COOLDOWN else 0.0
+            ),
+            probe_success_total=self._probe_success_total,
+            probe_failure_total=self._probe_failure_total,
+            profile_manifest_match=self._profile_manifest_match,
         )
 
     def record_fallback(self) -> None:
         self._fallback_total += 1
+
+    def validate_request(self, request: ModelRequest) -> SecondaryFailure | None:
+        """Run the pure protocol/context gate before any endpoint probe."""
+
+        try:
+            self._adapter.build_payload(self.config, request)
+        except ProtocolRejection as rejection:
+            return rejection.failure
+        except Exception:
+            return SecondaryFailure.MALFORMED_RESPONSE
+        return None
+
+    async def invalidate(self, failure: SecondaryFailure) -> None:
+        """Reject a post-transport semantic canary without retaining its body."""
+
+        async with self._state_lock:
+            self._last_failure = failure
+            self._skipped_total += 1
+            if failure is SecondaryFailure.WRONG_MODEL:
+                self._served_model_match = False
+            if failure is SecondaryFailure.WRONG_PROFILE:
+                self._profile_manifest_match = False
+            if failure in _ENDPOINT_FAILURES:
+                self._state = SecondaryState.COOLDOWN
+                self._cooldown_until = self._clock() + self.config.cooldown_sec
+            else:
+                self._state = SecondaryState.DEGRADED
+
+    @staticmethod
+    def _http_failure(status_code: int) -> SecondaryFailure | None:
+        if status_code in {401, 403}:
+            return SecondaryFailure.AUTH_REJECTED
+        if status_code == 429 or status_code >= 500:
+            return SecondaryFailure.HTTP_TRANSIENT
+        if status_code < 200 or status_code >= 300:
+            return SecondaryFailure.HTTP_REJECTED
+        return None
+
+    def _profile_header_failure(self, response: httpx.Response) -> SecondaryFailure | None:
+        values: dict[bytes, list[bytes]] = {_PROFILE_ID_HEADER: [], _PROFILE_SHA_HEADER: []}
+        for name, value in response.headers.raw:
+            normalized = name.lower()
+            if normalized in values:
+                values[normalized].append(value)
+        if values[_PROFILE_ID_HEADER] != [self.config.profile_id.encode("ascii")]:
+            return SecondaryFailure.WRONG_PROFILE
+        if values[_PROFILE_SHA_HEADER] != [self.config.profile_manifest_sha256.encode("ascii")]:
+            return SecondaryFailure.WRONG_PROFILE
+        return None
 
     async def _admit(self) -> SecondaryFailure | None:
         try:
@@ -160,11 +234,14 @@ class SecondaryEndpointClient:
                 self._last_failure = None
                 self._success_total += 1
                 self._served_model_match = True
+                self._last_success_at = self._clock()
                 return
             self._last_failure = failure
             self._skipped_total += 1
             if failure is SecondaryFailure.WRONG_MODEL:
                 self._served_model_match = False
+            if failure is SecondaryFailure.WRONG_PROFILE:
+                self._profile_manifest_match = False
             if failure in _ENDPOINT_FAILURES:
                 self._state = SecondaryState.COOLDOWN
                 self._cooldown_until = self._clock() + self.config.cooldown_sec
@@ -212,14 +289,11 @@ class SecondaryEndpointClient:
                 failure = SecondaryFailure.TIMEOUT
                 return SecondaryAttempt.rejected(failure)
 
-            if response.status_code in {401, 403}:
-                failure = SecondaryFailure.AUTH_REJECTED
+            failure = self._http_failure(response.status_code)
+            if failure is not None:
                 return SecondaryAttempt.rejected(failure)
-            if response.status_code == 429 or response.status_code >= 500:
-                failure = SecondaryFailure.HTTP_TRANSIENT
-                return SecondaryAttempt.rejected(failure)
-            if response.status_code < 200 or response.status_code >= 300:
-                failure = SecondaryFailure.HTTP_REJECTED
+            failure = self._profile_header_failure(response)
+            if failure is not None:
                 return SecondaryAttempt.rejected(failure)
             if len(response.content) > 1_048_576:
                 failure = SecondaryFailure.MALFORMED_RESPONSE
@@ -262,3 +336,110 @@ class SecondaryEndpointClient:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
             await self._finish(failure)
+
+    async def probe_models(self, *, absolute_deadline_monotonic: float) -> SecondaryFailure | None:
+        """Verify the accepted profile manifest and exact served alias."""
+
+        self._profile_manifest_match = False
+        remaining = min(
+            self.config.call_budget_sec,
+            absolute_deadline_monotonic - self._clock(),
+        )
+        if remaining <= 0.0:
+            self._last_failure = SecondaryFailure.DEADLINE
+            self._skipped_total += 1
+            self._probe_failure_total += 1
+            return SecondaryFailure.DEADLINE
+        admission_failure = await self._admit()
+        if admission_failure is not None:
+            self._last_failure = admission_failure
+            self._skipped_total += 1
+            self._probe_failure_total += 1
+            return admission_failure
+
+        failure: SecondaryFailure | None = None
+        task: asyncio.Task[httpx.Response] | None = None
+        try:
+            if self.config.profile_manifest_sha256:
+                task = asyncio.create_task(self._http.get(self.config.profile_url))
+                try:
+                    response = await asyncio.wait_for(task, timeout=remaining)
+                except TimeoutError:
+                    failure = SecondaryFailure.TIMEOUT
+                    return failure
+                failure = self._http_failure(response.status_code)
+                if failure is not None:
+                    return failure
+                if len(response.content) > 65_536:
+                    failure = SecondaryFailure.WRONG_PROFILE
+                    return failure
+                if hashlib.sha256(response.content).hexdigest() != self.config.profile_manifest_sha256:
+                    failure = SecondaryFailure.WRONG_PROFILE
+                    return failure
+                self._profile_manifest_match = True
+
+                remaining = min(
+                    self.config.call_budget_sec,
+                    absolute_deadline_monotonic - self._clock(),
+                )
+                if remaining <= 0.0:
+                    failure = SecondaryFailure.DEADLINE
+                    return failure
+            task = asyncio.create_task(self._http.get(self.config.models_url))
+            try:
+                response = await asyncio.wait_for(task, timeout=remaining)
+            except TimeoutError:
+                failure = SecondaryFailure.TIMEOUT
+                return failure
+            failure = self._http_failure(response.status_code)
+            if failure is not None:
+                return failure
+            failure = self._profile_header_failure(response)
+            if failure is not None:
+                return failure
+            if len(response.content) > 1_048_576:
+                failure = SecondaryFailure.MALFORMED_RESPONSE
+                return failure
+            try:
+                body: Any = response.json()
+            except Exception:
+                failure = SecondaryFailure.MALFORMED_RESPONSE
+                return failure
+            rows = body.get("data") if isinstance(body, dict) else None
+            if not isinstance(rows, list) or len(rows) > 128:
+                failure = SecondaryFailure.MALFORMED_RESPONSE
+                return failure
+            identifiers: list[str] = []
+            for row in rows:
+                if not isinstance(row, dict) or not isinstance(row.get("id"), str):
+                    failure = SecondaryFailure.MALFORMED_RESPONSE
+                    return failure
+                identifiers.append(row["id"])
+            if identifiers != [self.config.served_model_alias]:
+                failure = SecondaryFailure.WRONG_MODEL
+                return failure
+            return None
+        except asyncio.CancelledError:
+            failure = SecondaryFailure.CANCELLED
+            if task is not None and not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            raise
+        except httpx.TimeoutException:
+            failure = SecondaryFailure.TIMEOUT
+            return failure
+        except (httpx.NetworkError, httpx.ProtocolError):
+            failure = SecondaryFailure.CONNECT_FAILED
+            return failure
+        except Exception:
+            failure = SecondaryFailure.CONNECT_FAILED
+            return failure
+        finally:
+            if task is not None and not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            await self._finish(failure)
+            if failure is None:
+                self._probe_success_total += 1
+            else:
+                self._probe_failure_total += 1

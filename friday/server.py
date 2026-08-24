@@ -130,6 +130,7 @@ from friday.permissions import (
 )
 from friday.retrieval import EmbeddingBackend, HybridSearcher, is_relational_query
 from friday.retrieval._rerank_backend import RerankBackend, rerank_with_backend
+from friday.secondary_brain import SecondaryBrainScheduler, build_secondary_brain
 from friday.security import verify_bridge_request
 from friday.storage import (
     DeletedAccountError,
@@ -1741,6 +1742,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 shared_tenant=LEGACY_OWNER_USER_ID if settings.shared_archive else "",
             )
             llm = LLMRouter(settings)
+            secondary_brain = build_secondary_brain(settings)
             configured_router_mode = RouterMode.fail_closed(settings.router_mode)
             attempted_v12_runtime: AttestedV12ModelRuntime | None = None
             attested_v12_runtime: AttestedV12ModelRuntime | None = None
@@ -1784,7 +1786,13 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 rerank_confident_min=settings.rerank_confident_min,
             )
             graph = KnowledgeGraph(storage)
-            ingestion = IngestionPipeline(settings, storage, graph, llm)
+            ingestion = IngestionPipeline(
+                settings,
+                storage,
+                graph,
+                llm,
+                secondary_brain=secondary_brain,
+            )
             web_surfer = WebSurfer(settings)
             mcp_manager: MCPClientManager | None = None
             kernel = ExecutionKernel(auth_service, settings)
@@ -1916,6 +1924,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.storage = storage
             application.state.auth_service = auth_service
             application.state.llm = llm
+            application.state.secondary_brain = secondary_brain
             application.state.embeddings = embeddings
             application.state.hybrid_searcher = searcher
             application.state.kg = graph
@@ -1933,6 +1942,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             application.state.workers = workers
             application.state.organs = organs
             application.state.rate_limiter = SlidingWindowLimiter()
+            secondary_brain.start()
             if settings.mcp_enabled:
                 try:
                     mcp_manager = MCPClientManager([workspace_server_definition(settings)])
@@ -1944,6 +1954,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 except BaseException:
                     if mcp_manager is not None:
                         await mcp_manager.close()
+                    await secondary_brain.aclose()
                     if obsidian_runtime is not None:
                         await obsidian_runtime.close()
                     raise
@@ -1953,6 +1964,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             except BaseException:
                 if mcp_manager is not None:
                     await mcp_manager.close()
+                await secondary_brain.aclose()
                 if obsidian_runtime is not None:
                     await obsidian_runtime.close()
                 raise
@@ -1963,6 +1975,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 if isinstance(agent, OrchestrationRouter):
                     await agent.close()
                 await workers.stop()
+                await secondary_brain.aclose()
                 if obsidian_runtime is not None:
                     await obsidian_runtime.close()
                 await web_surfer.close()
@@ -2268,6 +2281,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         storage = getattr(request.app.state, "storage", None)
         agent = getattr(request.app.state, "agent", None)
         runtime = getattr(request.app.state, "v12_model_runtime", None)
+        secondary_brain = getattr(request.app.state, "secondary_brain", None)
         gate_status = (
             runtime.public_status()
             if isinstance(runtime, AttestedV12ModelRuntime)
@@ -2285,6 +2299,19 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             "version": VERSION,
             "llm_enabled": settings.llm_enabled,
             "model": settings.llm_model,
+            "secondary": (
+                secondary_brain.public_status()
+                if isinstance(secondary_brain, SecondaryBrainScheduler)
+                else {
+                    "schema": "friday.optional-secondary-health.v1",
+                    "role": "optional_advisory",
+                    "enabled": False,
+                    "configured": False,
+                    "mode": "disabled",
+                    "state": "disabled",
+                    "available": False,
+                }
+            ),
             "profile": settings.profile.name,
             "memory_vault": {
                 "mode": settings.memory_vault_mode,

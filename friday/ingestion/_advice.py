@@ -47,6 +47,7 @@ from friday.ingestion._base import (
 )
 from friday.ingestion._boilerplate import stored_boilerplate
 from friday.ingestion._document_kind import detect_document_kind, kind_tag
+from friday.ingestion._secondary_advice import route_inbox_advice
 
 if TYPE_CHECKING:
     from friday.agent_runtime.llm import LLMRouter
@@ -181,11 +182,16 @@ class AdviceMixin(PipelineShared):
 
         current = _json_dict(item.get("suggestions_json"))
         previous_advice = _json_dict(current.get("model_advice"))
-        model_name = str(getattr(llm, "model", "local-model") or "local-model")[:200]
+        primary_model_name = str(getattr(llm, "model", "local-model") or "local-model")[:200]
+        secondary = getattr(self, "secondary_brain", None)
+        advice_model_names = {primary_model_name}
+        secondary_alias = str(getattr(secondary, "served_model_alias", "") or "")[:200]
+        if secondary_alias:
+            advice_model_names.add(secondary_alias)
         if (
             not force
             and previous_advice.get("policy_version") == _PROMOTION_POLICY_VERSION
-            and previous_advice.get("model") == model_name
+            and previous_advice.get("model") in advice_model_names
         ):
             return {
                 "item": item,
@@ -260,14 +266,37 @@ class AdviceMixin(PipelineShared):
                 ),
             },
         ]
-        response = await llm.chat(
-            messages,
-            temperature=0.0,
-            max_tokens=self.settings.cognition_max_tokens,
-            priority="background",
-            tools=[],
+
+        async def primary_advice_call() -> dict[str, Any]:
+            return await llm.chat(
+                messages,
+                temperature=0.0,
+                max_tokens=self.settings.cognition_max_tokens,
+                priority="background",
+                tools=[],
+            )
+
+        raw_metadata = _json_dict(raw.get("metadata_json"))
+        image_bearing = bool(
+            str(raw_metadata.get("mime_type") or "").strip().casefold().startswith("image/")
+            or raw_metadata.get("vision_used") is True
         )
-        parsed = _parse_model_response(response)
+        routed = await route_inbox_advice(
+            secondary=secondary,
+            messages=messages,
+            # This extraction schema is bounded well below the primary cognition
+            # ceiling.  Keeping a secondary call at 2K leaves room for source
+            # context on a measured 8K+ profile; fallback retains the exact old 4K.
+            max_output_tokens=min(self.settings.cognition_max_tokens, 2_048),
+            primary_model_name=primary_model_name,
+            primary_call=primary_advice_call,
+            # Inbox material belongs to one tenant and may contain personal data.
+            # The operator must explicitly allow crossing the host boundary.
+            contains_private_text=True,
+            image_bearing=image_bearing,
+        )
+        model_name = routed.model_name[:200]
+        parsed = _parse_model_response(routed.response)
 
         allowed_kinds = {
             "note",
@@ -380,6 +409,7 @@ class AdviceMixin(PipelineShared):
         model_advice = {
             "policy_version": _PROMOTION_POLICY_VERSION,
             "model": model_name,
+            "endpoint_role": routed.source,
             "generated_at": utc_now(),
             "requested_by": bounded_text(requested_by, 200),
             "recommended_action": recommended_action,
