@@ -473,6 +473,13 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     assert "$wslVersion = Invoke-WslCaptured '--version'" in preflight
     assert "$wslStatus = Invoke-WslCaptured '--status'" in preflight
     assert "Invoke-Captured 'wsl.exe'" not in preflight
+    assert "GetUnresolvedProviderPathFromPSPath($Path)" in preflight
+    assert "GetUnresolvedProviderPathFromPSPath($OutputPath)" in preflight
+    assert "[IO.Path]::GetFullPath($OutputPath)" not in preflight
+    assert "GetUnresolvedProviderPathFromPSPath($OutputManifest)" in population
+    assert "[IO.Path]::GetFullPath($OutputManifest)" not in population
+    assert "GetUnresolvedProviderPathFromPSPath($Path)" in promotion
+    assert "GetUnresolvedProviderPathFromPSPath($AcceptedPath)" in promotion
     assert "CudaCanaryImage" not in preflight
     assert "$SglangImage, '-c', $canaryProgram" in preflight
     assert '$normalized = $Value.Replace("`r`n", "`n")' in preflight

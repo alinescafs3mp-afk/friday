@@ -74,7 +74,7 @@ function New-CanonicalReceipt([string]$Status) {
 }
 
 function Read-BoundedObservedReceipt([string]$Path) {
-    $resolved = [IO.Path]::GetFullPath($Path)
+    $resolved = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
     $before = Get-Item -LiteralPath $resolved -Force
     if ($before.PSIsContainer -or
         ($before.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
@@ -101,7 +101,7 @@ function Read-BoundedObservedReceipt([string]$Path) {
 }
 
 function Write-NewUtf8File([string]$Path, [string]$Text) {
-    $resolved = [IO.Path]::GetFullPath($Path)
+    $resolved = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
     $parent = Split-Path -Parent $resolved
     if ([string]::IsNullOrWhiteSpace($parent) -or -not (Test-Path -LiteralPath $parent -PathType Container)) {
         throw 'Accepted receipt parent directory does not exist.'
@@ -134,7 +134,7 @@ if ($acceptedSha256 -cne $expectedAcceptedSha256) {
     throw 'Accepted receipt serialization differs from the canonical contract.'
 }
 
-$resolvedAcceptedPath = [IO.Path]::GetFullPath($AcceptedPath)
+$resolvedAcceptedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($AcceptedPath)
 $applied = $false
 if ($Apply) {
     $resolvedAcceptedPath = Write-NewUtf8File $AcceptedPath $canonicalAccepted

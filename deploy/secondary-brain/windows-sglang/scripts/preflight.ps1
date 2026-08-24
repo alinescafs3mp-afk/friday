@@ -191,7 +191,7 @@ function Get-WslVersionProjection([string]$Text) {
 }
 
 function Write-NewUtf8File([string]$Path, [string]$Text) {
-    $resolved = [IO.Path]::GetFullPath($Path)
+    $resolved = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
     $parent = Split-Path -Parent $resolved
     if ([string]::IsNullOrWhiteSpace($parent) -or -not (Test-Path -LiteralPath $parent -PathType Container)) {
         throw 'Hardware receipt parent directory does not exist.'
@@ -613,7 +613,7 @@ $report = [ordered]@{
 }
 $json = $report | ConvertTo-Json -Depth 8
 if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
-    $resolvedOutput = [IO.Path]::GetFullPath($OutputPath)
+    $resolvedOutput = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)
     [IO.File]::WriteAllText($resolvedOutput, ($json + "`n"), [Text.UTF8Encoding]::new($false))
 }
 $json

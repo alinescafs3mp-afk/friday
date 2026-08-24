@@ -165,7 +165,7 @@ if ($Mode -eq 'Populate') {
     if (Test-DockerVolumeExists $VolumeName) {
         throw 'Population refuses an existing volume.'
     }
-    $resolvedOutput = [IO.Path]::GetFullPath($OutputManifest)
+    $resolvedOutput = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputManifest)
     if (Test-Path -LiteralPath $resolvedOutput) {
         throw 'Population refuses to overwrite an existing manifest copy.'
     }
