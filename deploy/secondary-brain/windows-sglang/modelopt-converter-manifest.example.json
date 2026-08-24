@@ -1,0 +1,56 @@
+{
+  "schema": "friday.secondary-modelopt-converter-image.v1",
+  "status": "template_not_accepted",
+  "image_id": "sha256:b801dc95ca304701242aeeaaeaf64332d67134ba8e56c8c0e74ab2dc77569c7a",
+  "platform": "linux/amd64",
+  "base_image": "lmsysorg/sglang@sha256:7a038aa31356fdd1a5b591fc756397bc2e9eb5ac91442c407f55cd2ae8bee738",
+  "base_image_id": "sha256:7a038aa31356fdd1a5b591fc756397bc2e9eb5ac91442c407f55cd2ae8bee738",
+  "dockerfile_sha256": "89edbaa53184e725f8d1ff1071e1ab42663df64bd8e7a605b574e38ec12f1278",
+  "context_archive": {
+    "name": "friday-secondary-converter-context-v2.tgz",
+    "sha256": "d1b24adcccf52f20aee7c07a950783b01f4d62ad488d668e7713fedb9ec8dabe"
+  },
+  "context_tree_sha256": "6f2c066d818303396430a0667997a799a1903bf93c0faa32fadd171fcd43d220",
+  "core_artifacts": {
+    "accelerate-1.12.0-py3-none-any.whl": "3e2091cd341423207e2f084a6654b1efcd250dc326f2a37d6dde446e07cabb11",
+    "cast_mxfp4_to_nvfp4.py": "cd4a14baf6e977581e016b8ceec3102b8304523b11f289692ec1826eb01c4018",
+    "example_utils.py": "981c036c2c6ec0dbac4f1fb8cce33493d2fcc958dc248054e8863d4ede4b8549",
+    "hf_ptq.py": "4606bcb6a9ace89a9c6c29a95bd9903be56e93a1c859e8ffbc16323d40f670d1",
+    "nvidia_modelopt-0.45.0-py3-none-any.whl": "04e1d787898e44e7281022f4772ee57bf59d1224cbcdd10d9487c2a110687a30",
+    "transformers-5.9.0-py3-none-any.whl": "1d19509bcff7028ebc6b277d71caa712e8353778463d38764237d14b42b52788"
+  },
+  "wheelhouse": {
+    "accelerate-1.12.0-py3-none-any.whl": "3e2091cd341423207e2f084a6654b1efcd250dc326f2a37d6dde446e07cabb11",
+    "cryptography-50.0.0-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl": "06a32a980526a6ab9a4b9bf8f7385800791e2bb960903cb6b530e4817509a3b7",
+    "nvidia_modelopt-0.45.0-py3-none-any.whl": "04e1d787898e44e7281022f4772ee57bf59d1224cbcdd10d9487c2a110687a30",
+    "pillow-11.3.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl": "67172f2944ebba3d4a7b54f2e95c786a3a50c21b88456329314caaa28cda70f6",
+    "pyjwt-2.13.0-py3-none-any.whl": "66adcc2aff09b3f1bbd95fc1e1577df8ac8723c978552fd43304c8a290ac5728",
+    "pyparsing-3.3.2-py3-none-any.whl": "850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d",
+    "transformers-5.9.0-py3-none-any.whl": "1d19509bcff7028ebc6b277d71caa712e8353778463d38764237d14b42b52788"
+  },
+  "removed_distributions": [
+    "sglang",
+    "nixl"
+  ],
+  "packages": {
+    "accelerate": "1.12.0",
+    "nvidia-modelopt": "0.45.0",
+    "transformers": "5.9.0"
+  },
+  "package_freeze": {
+    "name": "converter-pip-freeze.txt",
+    "lines": 313,
+    "sha256": "d989c6a1e4215176e96e06059e7dbd5d6883d5fb30bc1f79255343e56a56d4d3"
+  },
+  "pip_check": {
+    "name": "converter-pip-check.txt",
+    "status": "passed",
+    "sha256": "9261363b733079a641c2e4cc9bc46ffa1d8336945a87f807b6cf68847dbc9b09"
+  },
+  "preflight_attestation": {
+    "name": "converter-preflight.json",
+    "sha256": "ee895ea6a82eddfe0ee8d649f26d1017ee588a3a0df45d2a8537a60b39ed498b"
+  },
+  "build_network": "none",
+  "note": "Observed live derived converter facts. Copy to a protected untracked file and change only status after review."
+}

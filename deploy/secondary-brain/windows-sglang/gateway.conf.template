@@ -31,6 +31,10 @@ http {
         ssl_protocols TLSv1.2 TLSv1.3;
         ssl_session_tickets off;
         ssl_session_cache shared:TLS:1m;
+        proxy_hide_header X-Friday-Secondary-Profile-Id;
+        proxy_hide_header X-Friday-Secondary-Profile-Sha256;
+        add_header X-Friday-Secondary-Profile-Id "__PROFILE_ID__" always;
+        add_header X-Friday-Secondary-Profile-Sha256 "__PROFILE_SHA256__" always;
 
         if ($friday_authorized = 0) {
             return 401;
@@ -48,6 +52,24 @@ http {
             proxy_set_header Authorization "Bearer __SGLANG_BEARER__";
             proxy_set_header Host sglang;
             proxy_pass http://friday_secondary_sglang/v1/models;
+        }
+
+        location = /v1/friday-profile {
+            limit_except GET { deny all; }
+            default_type application/json;
+            etag off;
+            add_header Cache-Control "no-store" always;
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header X-Friday-Secondary-Profile-Id "__PROFILE_ID__" always;
+            add_header X-Friday-Secondary-Profile-Sha256 "__PROFILE_SHA256__" always;
+            alias /run/friday-profile/accepted.json;
+        }
+
+        location = /metrics {
+            limit_except GET { deny all; }
+            proxy_set_header Authorization "Bearer __SGLANG_BEARER__";
+            proxy_set_header Host sglang;
+            proxy_pass http://friday_secondary_sglang/metrics;
         }
 
         location = /v1/chat/completions {

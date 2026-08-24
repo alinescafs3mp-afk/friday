@@ -16,8 +16,9 @@ Friday host 192.168.1.78
 ```
 
 TCP 30000 is never published. The SGLang service has only an internal Compose
-network. The gateway disables access logs, exposes only health, models and chat
-completions, and substitutes two local 256-bit hex secrets into a tmpfs config.
+network. The gateway disables access logs, exposes only health, models, chat
+completions and authenticated operational metrics, and substitutes two local
+256-bit hex secrets into a tmpfs config.
 Neither secret belongs in `.env`, Docker labels, a command line, an image layer
 or repository content.
 
@@ -142,6 +143,71 @@ by verifying the read-only volume with networking disabled:
 Retain the verification receipt. If download or verification fails, the script
 keeps the candidate volume for inspection and never overwrites an existing one.
 
+## 3a. Sealed internal ModelOpt conversion fallback
+
+Use this path only for the supported internal fallback. Its source is exactly
+`openai/gpt-oss-20b@6cee5e81ee83917806bbde320786a8fb61efebee`, stored root-only in
+the existing `friday-secondary-source-gptoss20b` volume with its verified source
+manifest. The operator never downloads, pulls, creates a volume, overwrites a
+file, mounts a secret or enables container networking.
+
+First generate the fixed synthetic corpus. It contains no Telegram, operator or
+Friday production data and is content-addressed by the operator:
+
+```powershell
+py .\scripts\generate_calibration.py `
+  --output .\evidence\modelopt-calibration.jsonl `
+  --manifest .\evidence\modelopt-calibration.observed.json
+```
+
+Prepare a directory containing exactly the six pinned files listed in
+`modelopt-converter-manifest.example.json`: the ModelOpt 0.45.0, Transformers
+5.9.0 and Accelerate 1.12.0 wheels plus `hf_ptq.py`,
+`cast_mxfp4_to_nvfp4.py` and `example_utils.py` from ModelOpt commit
+`ec87a82927d003986d44fb7f4fa8b3d10c31b095`. Create the empty output volume
+explicitly; conversion refuses an absent or non-empty volume:
+
+```powershell
+docker volume create friday-secondary-modelopt-conversion-output
+
+$common = @{
+  ArtifactDirectory = 'C:\ProgramData\FridaySecondary\converter\artifacts'
+  CalibrationFile = '.\evidence\modelopt-calibration.jsonl'
+  CalibrationManifest = '.\evidence\modelopt-calibration.observed.json'
+}
+.\scripts\convert-modelopt-nvfp4.ps1 -Mode Plan @common
+.\scripts\convert-modelopt-nvfp4.ps1 -Mode Convert @common `
+  -OutputManifest .\evidence\modelopt-conversion.observed.json -Apply
+```
+
+The preferred converter is the code-owned TRT-LLM `linux/amd64` child digest.
+If that exact image is unavailable, the only alternative is a local image ID
+bound by an explicitly accepted converter manifest. Start from
+`modelopt-converter-manifest.example.json`; accept it only after proving the
+exact SGLang base digest, Dockerfile/context and wheel hashes, package versions,
+network-disabled build and a passing `pip check`, then add
+`-AcceptedConverterManifest <path>` to every Plan/Convert/Verify invocation.
+No tag or arbitrary image reference is accepted.
+
+The conversion command is fixed to `nvfp4_mlp_only`, closed-form MXFP4-to-NVFP4
+cast, unquantized KV cache, 256 synthetic samples at sequence length 512,
+batch size 1, sequential device map, GPU memory fraction 0.70 and skipped
+generation. Low-memory mode is deliberately absent. The container runs with
+`--network none` and `--pull never`.
+
+The produced manifest is `observed_unaccepted`. Do not change its status until
+offline tensor inspection, exact SGLang loader/backend proof and the complete
+quality battery all pass. After that review, change only `status` to `accepted`
+in a protected copy and seal the live volume:
+
+```powershell
+.\scripts\convert-modelopt-nvfp4.ps1 -Mode Verify @common `
+  -AcceptedOutputManifest .\evidence\modelopt-conversion.accepted.json -Apply
+```
+
+Any partial output is retained for inspection and makes every later conversion
+attempt fail closed; cleanup or retry is a separate, explicit operator action.
+
 ## 4. Create distinct auth secrets and a private IP-SAN CA
 
 `provision-secrets.ps1` is the idempotent provisioning path. Its default is a
@@ -202,9 +268,11 @@ logging. Also prove that neither generated bearer occurs in either container's
 complete logs, command line or environment. The gateway healthcheck expects the
 secret-free unauthenticated `401`; SGLang's authenticated internal `/v1/models`
 healthcheck asserts the exact served alias, so both service health states are
-required. If automatic quantization detection is not proven, test the exact
-pinned image's explicit `--quantization modelopt_fp4` form in a separate
-candidate and retain only the proven form.
+required. The accepted launcher uses explicit `--quantization modelopt_fp4`:
+live auto-detection exposed ModelOpt metadata but left `quantization=None`, then
+the GPT-OSS override selected an incompatible Triton MoE loader and rejected the
+checkpoint's three-dimensional tensors. The explicit pinned method is therefore
+a measured loader correction, not an online re-quantization request.
 
 ## 6. Probe, tune and soak through TLS
 
@@ -221,20 +289,26 @@ python scripts/probe_endpoint.py \
   --base-url https://192.168.1.35:8443/v1 \
   --api-key-file /secure/friday-secondary-gateway-key \
   --ca-file /secure/friday-secondary-ca.crt \
+  --profile-manifest evidence/profile.candidate.json \
   --output evidence/endpoint.observed.json
 ```
 
 Run the full deterministic protocol and quality battery before capacity tuning.
 It validates the exact model alias, Russian/English and structured responses,
 reasoning modes, tool-call shape and continuation, multi-turn/context behavior,
-Unicode, truncation, live stream cancellation/recovery and factual minimums. It never executes a requested tool
-and retains only closed status, latency/token counts and output hashes.
+Unicode, truncation and factual minimums. Stream cancellation is accepted only
+when the bounded canary increments `sglang:num_aborted_requests_total` by exactly
+one, both running/queued request gauges return to zero, and a fresh request
+recovers inside the strict latency budget; merely completing eventually does not
+pass. The battery never executes a requested tool and retains only closed status,
+latency/token counts and output hashes.
 
 ```bash
 python scripts/quality_battery.py \
   --base-url https://192.168.1.35:8443/v1 \
   --api-key-file /secure/friday-secondary-gateway-key \
   --ca-file /secure/friday-secondary-ca.crt \
+  --profile-manifest evidence/profile.candidate.json \
   --output evidence/quality.observed.json
 ```
 
@@ -249,6 +323,7 @@ python scripts/tune_context.py \
   --base-url https://192.168.1.35:8443/v1 \
   --api-key-file /secure/friday-secondary-gateway-key \
   --ca-file /secure/friday-secondary-ca.crt \
+  --profile-manifest evidence/profile.candidate.json \
   --candidates 4096 --mem-fraction-static 0.86 \
   --output evidence/context-4096-086.observed.json
 ```
@@ -262,6 +337,7 @@ python scripts/soak.py \
   --base-url https://192.168.1.35:8443/v1 \
   --api-key-file /secure/friday-secondary-gateway-key \
   --ca-file /secure/friday-secondary-ca.crt \
+  --profile-manifest evidence/profile.candidate.json \
   --duration-sec 1800 --minimum-requests 100 \
   --output evidence/soak.observed.json
 ```

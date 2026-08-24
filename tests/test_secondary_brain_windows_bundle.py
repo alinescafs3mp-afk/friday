@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import importlib
 import json
@@ -18,14 +19,17 @@ import yaml  # type: ignore[import-untyped]
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / "deploy" / "secondary-brain" / "windows-sglang"
 SCRIPTS = BUNDLE / "scripts"
+RUNTIME = BUNDLE / "runtime"
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _script_import_path() -> Iterator[None]:
     sys.path.insert(0, str(SCRIPTS))
+    sys.path.insert(0, str(RUNTIME))
     try:
         yield
     finally:
+        sys.path.remove(str(RUNTIME))
         sys.path.remove(str(SCRIPTS))
 
 
@@ -45,12 +49,14 @@ def test_bundle_has_the_closed_operator_surface() -> None:
         "model-manifest.example.json",
         "runtime-manifest.example.json",
         "runtime/launch_sglang_secure.py",
+        "runtime/profile_contract.py",
         "runtime/render_gateway_secure.sh",
         "scripts/preflight.ps1",
         "scripts/install-openssh.ps1",
         "scripts/firewall.ps1",
         "scripts/provision-secrets.ps1",
         "scripts/populate-model-volume.ps1",
+        "scripts/generate_calibration.py",
         "scripts/probe_endpoint.py",
         "scripts/quality_battery.py",
         "scripts/tune_context.py",
@@ -95,6 +101,7 @@ def test_compose_is_digest_gated_and_has_no_host_authority() -> None:
         assert service.get("privileged") is None
         assert service.get("network_mode") is None
     assert services["sglang"]["image"].startswith("${FRIDAY_SECONDARY_SGLANG_IMAGE:?")
+    assert services["sglang"]["environment"]["FRIDAY_SECONDARY_RUNTIME_IMAGE"] == services["sglang"]["image"]
     assert services["gateway"]["image"] == (
         "nginxinc/nginx-unprivileged@sha256:d61d7ef52430df468e74ed6ee6e914429b80e20ba988e3176278a73165f876cf"
     )
@@ -116,6 +123,16 @@ def test_model_is_read_only_and_cache_and_tmp_are_the_only_mutable_runtime_surfa
         "target": "/models/gpt-oss-20b-nvfp4-modelopt",
         "read_only": True,
     }
+    accepted_manifest = next(row for row in volumes if row["target"] == "/run/friday-model/accepted.json")
+    assert accepted_manifest == {
+        "type": "bind",
+        "source": (
+            "${FRIDAY_SECONDARY_CONVERTED_MODEL_MANIFEST_PATH:?accepted converted model manifest is required}"
+        ),
+        "target": "/run/friday-model/accepted.json",
+        "read_only": True,
+        "bind": {"create_host_path": False},
+    }
     assert engine["tmpfs"] == ["/tmp:size=2g,mode=1777", "/run:size=16m,mode=0755"]
     assert not any(volume.get("target") == "/var/run/docker.sock" for volume in volumes)
     assert engine["environment"]["TRITON_CACHE_DIR"] == "/root/.cache/triton"
@@ -132,6 +149,11 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     assert engine_mounts == {
         "/run/friday-secrets/sglang-api-key",
         "/run/friday-bootstrap/launch_sglang_secure.py",
+        "/run/friday-bootstrap/profile_contract.py",
+        "/run/friday-bootstrap/converted_model_manifest.py",
+        "/run/friday-model/accepted.json",
+        "/run/friday-profile/accepted.json",
+        "/run/friday-profile/id",
     }
     assert {
         "/run/friday-secrets/gateway-api-key",
@@ -140,19 +162,33 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
         "/run/friday-tls/server.crt",
         "/run/friday-tls/server.key",
         "/run/friday-bootstrap/render_gateway_secure.sh",
+        "/run/friday-profile/accepted.json",
+        "/run/friday-profile/id",
     } <= gateway_mounts
     assert "environment" not in gateway
 
     renderer = (BUNDLE / "runtime" / "render_gateway_secure.sh").read_text(encoding="utf-8")
+    assert "umask 077" in renderer
+    assert "if IFS= read -r SECRET_VALUE" in renderer
     assert 'test "$gateway_key" != "$upstream_key"' in renderer
     assert 'test "${#SECRET_VALUE}" -eq 64' in renderer
     assert "exec nginx -c /tmp/gateway.conf" in renderer
     assert "sed " not in renderer
 
     launcher = (BUNDLE / "runtime" / "launch_sglang_secure.py").read_text(encoding="utf-8")
-    assert "ServerArgs.__repr__ = _redacted_repr" in launcher
+    assert "ServerArgs.__repr__ = redacted_repr" in launcher
     assert 'rendered.replace(repr(secret), repr("<redacted>"))' in launcher
-    assert '"--api-key",' in launcher
+    profile_contract = (BUNDLE / "runtime" / "profile_contract.py").read_text(encoding="utf-8")
+    assert '"--api-key",' in profile_contract
+    assert '"--quantization",' in profile_contract
+    assert 'value["quantization"] != "modelopt_fp4"' in profile_contract
+    assert launcher.index("profile = load_launch_profile(") < launcher.index(
+        "from sglang.launch_server import run_server"
+    )
+    assert launcher.index("verify_converted_model_snapshot(") < launcher.index(
+        "from sglang.launch_server import run_server"
+    )
+    assert "FRIDAY_SECONDARY_CONTEXT_TOKENS" not in launcher
     assert 'if __name__ == "__main__":' in launcher
     assert launcher.index('if __name__ == "__main__":') < launcher.index(
         "main()", launcher.index('if __name__ == "__main__":')
@@ -161,8 +197,9 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     assert "Authorization: Bearer $$(cat" not in compose_text
     assert "401 Unauthorized" in compose_text
     assert "http://127.0.0.1:30000/v1/models" in compose_text
-    assert "friday-secondary-gptoss20b" in compose_text
+    assert "p['served_model_alias']" in compose_text
     assert "http://127.0.0.1:30000/health" not in compose_text
+    assert "FRIDAY_SECONDARY_CONTEXT_TOKENS" not in compose_text
 
     policy = (BUNDLE / "gateway.conf.template").read_text(encoding="utf-8")
     assert "listen 8443 ssl;" in policy
@@ -170,6 +207,12 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     assert '"Bearer __GATEWAY_BEARER__" 1;' in policy
     assert 'Authorization "Bearer __SGLANG_BEARER__"' in policy
     assert "location = /v1/models" in policy
+    assert "location = /v1/friday-profile" in policy
+    assert policy.count('add_header X-Friday-Secondary-Profile-Id "__PROFILE_ID__" always;') == 2
+    assert policy.count('add_header X-Friday-Secondary-Profile-Sha256 "__PROFILE_SHA256__" always;') == 2
+    assert "proxy_hide_header X-Friday-Secondary-Profile-Id" in policy
+    assert 'add_header X-Friday-Secondary-Profile-Sha256 "__PROFILE_SHA256__" always' in policy
+    assert "location = /metrics" in policy
     assert "location = /v1/chat/completions" in policy
     assert "location /" in policy and "return 404;" in policy
     assert "proxy_pass http://friday_secondary_sglang" in policy
@@ -345,6 +388,238 @@ def test_model_volume_manifest_requires_accepted_exact_file_set(tmp_path: Path) 
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(tool.ModelVolumeError):
         tool.verify_manifest(snapshot, manifest_path)
+
+
+def _candidate_runtime_profile() -> dict[str, Any]:
+    value: dict[str, Any] = {
+        "schema": "friday.secondary-runtime-profile.v1",
+        "status": "candidate",
+        "profile_id": "pending",
+        "engine_binding_sha256": "0" * 64,
+        "endpoint_base_url": "https://192.168.1.35:8443/v1",
+        "served_model_alias": "pending",
+        "source_model_repository": "openai/gpt-oss-20b",
+        "source_model_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
+        "converted_model_manifest_sha256": "b" * 64,
+        "conversion_manifest_sha256": "c" * 64,
+        "gateway_ca_certificate_sha256": "1" * 64,
+        "runtime_image": "lmsysorg/sglang@sha256:" + "d" * 64,
+        "runtime_source_revision": "e" * 40,
+        "runtime_manifest_sha256": "f" * 64,
+        "model_path": "/models/gpt-oss-20b-nvfp4-modelopt/candidate",
+        "quantization": "modelopt_fp4",
+        "kv_cache_dtype": "none",
+        "attention_backend": "triton",
+        "fp4_gemm_backend": "flashinfer_cutlass",
+        "context_tokens": 8192,
+        "max_total_tokens": 8192,
+        "mem_fraction_static": "0.92",
+        "max_running_requests": 1,
+        "max_output_tokens": 2048,
+        "chunked_prefill_size": 1024,
+        "cuda_graph_max_bs": 1,
+        "allowed_modes": ["assist", "shadow"],
+        "allowed_workloads": ["extract"],
+        "no_cpu_offload": True,
+        "quality_evidence_sha256": "0" * 64,
+        "capacity_evidence_sha256": "0" * 64,
+        "soak_evidence_sha256": "0" * 64,
+        "failure_evidence_sha256": "0" * 64,
+    }
+    binding = importlib.import_module("profile_contract").engine_binding_sha256(value)
+    value["engine_binding_sha256"] = binding
+    value["profile_id"] = f"gptoss20b-{binding}"
+    value["served_model_alias"] = f"friday-secondary-{value['profile_id']}"
+    return value
+
+
+def _write_profile_fixture(tmp_path: Path, value: dict[str, Any]) -> tuple[Path, Path]:
+    manifest = tmp_path / "profile.json"
+    profile_id = tmp_path / "profile.id"
+    manifest.write_text(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    profile_id.write_bytes(str(value["profile_id"]).encode("ascii"))
+    return manifest, profile_id
+
+
+def test_shared_profile_contract_derives_every_capacity_argument(tmp_path: Path) -> None:
+    contract = importlib.import_module("profile_contract")
+    manifest, profile_id = _write_profile_fixture(tmp_path, _candidate_runtime_profile())
+
+    profile = contract.load_launch_profile(
+        manifest,
+        profile_id,
+        actual_runtime_image="lmsysorg/sglang@sha256:" + "d" * 64,
+    )
+    arguments = profile.server_arguments("a" * 64)
+
+    assert profile.manifest_sha256 == hashlib.sha256(manifest.read_bytes()).hexdigest()
+    assert profile.model_path == "/models/gpt-oss-20b-nvfp4-modelopt/candidate"
+    assert profile.converted_model_manifest_sha256 == "b" * 64
+    assert arguments[arguments.index("--context-length") + 1] == "8192"
+    assert arguments[arguments.index("--max-total-tokens") + 1] == "8192"
+    assert arguments[arguments.index("--mem-fraction-static") + 1] == "0.92"
+    assert arguments[arguments.index("--max-running-requests") + 1] == "1"
+    assert "--kv-cache-dtype" not in arguments
+    assert profile.runtime_image == "lmsysorg/sglang@sha256:" + "d" * 64
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("status", "accepted"),
+        ("endpoint_base_url", "https://192.168.1.36:8443/v1"),
+        ("served_model_alias", "wrong"),
+        ("runtime_image", "lmsysorg/sglang:latest"),
+        ("context_tokens", 10_000),
+        ("max_total_tokens", 12_288),
+        ("max_running_requests", 2),
+        ("mem_fraction_static", "0.99"),
+        ("no_cpu_offload", False),
+    ],
+)
+def test_shared_profile_contract_rejects_mutation(tmp_path: Path, key: str, value: Any) -> None:
+    contract = importlib.import_module("profile_contract")
+    candidate = copy.deepcopy(_candidate_runtime_profile())
+    candidate[key] = value
+    manifest, profile_id = _write_profile_fixture(tmp_path, candidate)
+    with pytest.raises(contract.ProfileContractError):
+        contract.load_launch_profile(
+            manifest,
+            profile_id,
+            actual_runtime_image="lmsysorg/sglang@sha256:" + "d" * 64,
+        )
+
+
+def test_shared_profile_rejects_actual_runtime_image_drift(tmp_path: Path) -> None:
+    contract = importlib.import_module("profile_contract")
+    manifest, profile_id = _write_profile_fixture(tmp_path, _candidate_runtime_profile())
+    with pytest.raises(contract.ProfileContractError):
+        contract.load_launch_profile(
+            manifest,
+            profile_id,
+            actual_runtime_image="lmsysorg/sglang@sha256:" + "0" * 64,
+        )
+
+
+def test_certification_profile_pins_ca_headers_and_exact_remote_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    common = importlib.import_module("endpoint_common")
+    monkeypatch.setattr(common, "_ENDPOINT_IDENTITY", None)
+    monkeypatch.setattr(common, "EXPECTED_MODEL", "friday-secondary-gptoss20b")
+    ca_bytes = b"-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----\n"
+    ca_file = tmp_path / "ca.crt"
+    ca_file.write_bytes(ca_bytes)
+    candidate = _candidate_runtime_profile()
+    candidate["gateway_ca_certificate_sha256"] = hashlib.sha256(ca_bytes).hexdigest()
+    manifest, _profile_id_path = _write_profile_fixture(tmp_path, candidate)
+    alias = common.configure_expected_model(manifest, ca_file)
+    assert alias == candidate["served_model_alias"]
+    wrong_ca = tmp_path / "wrong-ca.crt"
+    wrong_ca.write_bytes(ca_bytes + b"extra")
+    with pytest.raises(common.EndpointError):
+        common.configure_expected_model(manifest, wrong_ca)
+
+    profile_sha256 = hashlib.sha256(manifest.read_bytes()).hexdigest()
+
+    class Headers:
+        def __init__(self, *, duplicate: bool = False) -> None:
+            self.duplicate = duplicate
+
+        def get_all(self, name: str) -> list[str]:
+            if name == "X-Friday-Secondary-Profile-Id":
+                rows = [str(candidate["profile_id"])]
+                return rows * 2 if self.duplicate else rows
+            return [profile_sha256]
+
+    class Response:
+        status = 200
+
+        def __init__(self, body: bytes, *, duplicate: bool = False) -> None:
+            self.body = body
+            self.headers = Headers(duplicate=duplicate)
+
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _limit: int) -> bytes:
+            return self.body
+
+    monkeypatch.setattr(common, "build_tls_context", lambda *_args: object())
+    responses = iter(
+        [
+            Response(manifest.read_bytes() + b"stale"),
+            Response(manifest.read_bytes(), duplicate=True),
+            Response(manifest.read_bytes()),
+        ]
+    )
+    monkeypatch.setattr(common.urllib.request, "urlopen", lambda *_args, **_kwargs: next(responses))
+    arguments = {
+        "api_key": "a" * 64,
+        "timeout_sec": 1.0,
+        "ca_file": ca_file,
+    }
+    with pytest.raises(common.EndpointError):
+        common.verify_remote_profile_epoch("https://192.168.1.35:8443/v1", **arguments)
+    with pytest.raises(common.EndpointError):
+        common.verify_remote_profile_epoch("https://192.168.1.35:8443/v1", **arguments)
+    common.verify_remote_profile_epoch("https://192.168.1.35:8443/v1", **arguments)
+
+
+def test_engine_and_gateway_mount_the_identical_profile_bytes() -> None:
+    compose = _compose()
+    engine = compose["services"]["sglang"]
+    gateway = compose["services"]["gateway"]
+
+    def profile_sources(service: dict[str, Any]) -> dict[str, str]:
+        return {
+            row["target"]: row["source"]
+            for row in service["volumes"]
+            if row.get("target") in {"/run/friday-profile/accepted.json", "/run/friday-profile/id"}
+        }
+
+    assert (
+        profile_sources(engine)
+        == profile_sources(gateway)
+        == {
+            "/run/friday-profile/accepted.json": (
+                "${FRIDAY_SECONDARY_PROFILE_MANIFEST_PATH:?accepted runtime profile manifest is required}"
+            ),
+            "/run/friday-profile/id": (
+                "${FRIDAY_SECONDARY_PROFILE_ID_PATH:?accepted runtime profile id file is required}"
+            ),
+        }
+    )
+
+
+def test_internal_conversion_calibration_is_fixed_synthetic_and_content_addressed(
+    tmp_path: Path,
+) -> None:
+    generator = importlib.import_module("generate_calibration")
+    corpus = tmp_path / "friday-secondary.jsonl"
+    manifest = tmp_path / "calibration.observed.json"
+
+    report = generator.generate(corpus, manifest)
+
+    assert report["schema"] == "friday.secondary-brain.calibration.v1"
+    assert report["status"] == "observed_unaccepted"
+    assert report["rows"] == 256
+    assert report["synthetic_only"] is True
+    assert report["operator_data_present"] is False
+    assert report["bytes"] == corpus.stat().st_size
+    assert report["sha256"] == hashlib.sha256(corpus.read_bytes()).hexdigest()
+    assert json.loads(manifest.read_text(encoding="utf-8")) == report
+    rows = [json.loads(line) for line in corpus.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 256
+    assert all(set(row) == {"text"} and len(row["text"]) > 2_000 for row in rows)
+    with pytest.raises(FileExistsError):
+        generator.generate(corpus, tmp_path / "second-manifest.json")
 
 
 def test_capacity_and_soak_minimums_are_not_decorative() -> None:

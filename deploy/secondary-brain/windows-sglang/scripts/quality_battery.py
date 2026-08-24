@@ -6,8 +6,9 @@ import argparse
 import hashlib
 import http.client
 import json
+import math
 import re
-import ssl
+import secrets
 import sys
 import time
 from collections.abc import Callable, Mapping
@@ -21,10 +22,15 @@ from endpoint_common import (
     EndpointError,
     SanitizedCompletion,
     atomic_write_json,
+    build_tls_context,
+    configure_expected_model,
     load_api_key,
     normalize_base_url,
     parse_completion,
     request_json,
+    request_text,
+    validate_profile_headers,
+    verify_remote_profile_epoch,
 )
 
 _EVIDENCE_KEYS = frozenset(
@@ -54,6 +60,13 @@ class ToolCallObservation:
     hash_material: str = field(repr=False)
 
 
+@dataclass(frozen=True, slots=True)
+class CancellationMetrics:
+    aborted_total: float
+    running: float
+    queued: float
+
+
 def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -81,15 +94,75 @@ def _failed(case: str) -> dict[str, object]:
     return _evidence(case, passed=False)
 
 
+def _metric_values(metrics: str, name: str) -> list[float]:
+    if len(metrics.encode("utf-8")) > 1_048_576:
+        raise EndpointError("metrics observation exceeds the response bound")
+    values: list[float] = []
+    lines = metrics.splitlines()
+    if len(lines) > 20_000:
+        raise EndpointError("metrics observation has too many rows")
+    for line in lines:
+        if not line or line.startswith("#"):
+            continue
+        if len(line) > 4_096:
+            raise EndpointError("metrics observation has an oversized row")
+        pieces = line.split()
+        if len(pieces) not in {2, 3}:
+            continue
+        metric_id = pieces[0].split("{", 1)[0]
+        if metric_id != name:
+            continue
+        try:
+            value = float(pieces[1])
+        except (ValueError, OverflowError) as exc:
+            raise EndpointError("cancellation metric is not numeric") from exc
+        if not math.isfinite(value) or value < 0:
+            raise EndpointError("cancellation metric is outside the valid bound")
+        values.append(value)
+    return values
+
+
+def _cancellation_metrics(
+    *,
+    base_url: str,
+    api_key: str,
+    timeout_sec: float,
+    ca_file: Path,
+) -> CancellationMetrics:
+    metrics_url = f"{base_url.removesuffix('/v1')}/metrics"
+    body, _latency = request_text(
+        "GET",
+        metrics_url,
+        api_key=api_key,
+        timeout_sec=timeout_sec,
+        ca_file=ca_file,
+    )
+    aborted = _metric_values(body, "sglang:num_aborted_requests_total")
+    running = _metric_values(body, "sglang:num_running_reqs")
+    queued = _metric_values(body, "sglang:num_queue_reqs")
+    if not running or not queued:
+        raise EndpointError("required cancellation gauges are absent")
+    return CancellationMetrics(
+        aborted_total=sum(aborted),
+        running=sum(running),
+        queued=sum(queued),
+    )
+
+
 def _exact(expected: str) -> Callable[[SanitizedCompletion], bool]:
     folded = expected.strip().casefold()
     return lambda completion: completion.content.strip().casefold() == folded
 
 
+def _exact_with_separated_reasoning(expected: str) -> Callable[[SanitizedCompletion], bool]:
+    exact = _exact(expected)
+    return lambda completion: exact(completion) and completion.reasoning_present
+
+
 def _json_equals(expected: object) -> Callable[[SanitizedCompletion], bool]:
     def validate(completion: SanitizedCompletion) -> bool:
         try:
-            return json.loads(completion.content) == expected
+            return bool(json.loads(completion.content) == expected)
         except json.JSONDecodeError:
             return False
 
@@ -178,19 +251,19 @@ def _live_cases() -> tuple[QualityCase, ...]:
         QualityCase(
             "reasoning_low",
             _base_messages("Return only the decimal result of (19 * 3) - 15."),
-            _exact("42"),
+            _exact_with_separated_reasoning("42"),
             extra={"reasoning_effort": "low"},
         ),
         QualityCase(
             "reasoning_medium",
             _base_messages("Return only the decimal result of (19 * 3) - 15."),
-            _exact("42"),
+            _exact_with_separated_reasoning("42"),
             extra={"reasoning_effort": "medium"},
         ),
         QualityCase(
             "reasoning_high",
             _base_messages("Return only the decimal result of (19 * 3) - 15."),
-            _exact("42"),
+            _exact_with_separated_reasoning("42"),
             extra={"reasoning_effort": "high"},
         ),
         QualityCase(
@@ -504,15 +577,37 @@ def _run_disconnect_protocol(
     timeout_sec: float,
     ca_file: Path,
 ) -> list[dict[str, object]]:
-    """Close one live stream after its first event, then prove clean recovery."""
+    """Cancel a forced-long stream, then require fast single-slot recovery."""
 
     connection: http.client.HTTPSConnection | None = None
-    started = time.monotonic()
     try:
+        baseline = _completion_request(
+            base_url=base_url,
+            api_key=api_key,
+            messages=_base_messages("Reply with exactly: ready"),
+            timeout_sec=timeout_sec,
+            max_tokens=16,
+            extra={},
+            ca_file=ca_file,
+        )
+        if baseline.finish_reason != "stop" or baseline.content.strip().casefold() != "ready":
+            raise EndpointError("disconnect baseline canary failed")
+        recovery_budget = min(timeout_sec, max(3.0, min(8.0, baseline.latency_sec * 2.5 + 1.0)))
+        before = _cancellation_metrics(
+            base_url=base_url,
+            api_key=api_key,
+            timeout_sec=timeout_sec,
+            ca_file=ca_file,
+        )
+        if before.running != 0 or before.queued != 0:
+            raise EndpointError("disconnect probe requires a quiescent single-request node")
+
         parsed = urlsplit(base_url)
         if parsed.scheme != "https" or not parsed.hostname:
             raise EndpointError("disconnect probe requires an HTTPS origin")
-        context = ssl.create_default_context(cafile=str(ca_file))
+        context = build_tls_context(base_url, ca_file)
+        if context is None:
+            raise EndpointError("disconnect probe requires TLS")
         connection = http.client.HTTPSConnection(
             parsed.hostname,
             parsed.port or 443,
@@ -524,10 +619,15 @@ def _run_disconnect_protocol(
                 "model": EXPECTED_MODEL,
                 "messages": list(
                     _base_messages(
-                        "Write the integers from 1 through 500, separated by spaces, with no omissions."
+                        "Write the integers from 1 through 5000, separated by spaces, with no omissions."
                     )
                 ),
-                "max_tokens": 512,
+                # Native pinned-v0.5.16 controls make natural completion far
+                # slower than the bounded post-disconnect recovery canary.
+                "max_tokens": 2_048,
+                "min_tokens": 2_048,
+                "ignore_eos": True,
+                "rid": f"friday-quality-{secrets.token_hex(16)}",
                 "temperature": 0.0,
                 "stream": True,
             },
@@ -547,6 +647,7 @@ def _run_disconnect_protocol(
         response = connection.getresponse()
         if response.status != 200:
             raise EndpointError("disconnect probe was rejected")
+        validate_profile_headers(response.headers)
         observed_event = False
         observed_bytes = 0
         while observed_bytes <= 1_048_576:
@@ -554,30 +655,78 @@ def _run_disconnect_protocol(
             if not line:
                 break
             observed_bytes += len(line)
-            if line.lstrip().startswith(b"data:") and b"[DONE]" not in line:
-                observed_event = True
-                break
+            stripped = line.lstrip()
+            if not stripped.startswith(b"data:"):
+                continue
+            event_text = stripped[5:].strip()
+            if event_text == b"[DONE]":
+                raise EndpointError("forced-long stream completed before cancellation")
+            try:
+                event = json.loads(event_text)
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise EndpointError("disconnect probe received malformed SSE JSON") from exc
+            choices = event.get("choices") if isinstance(event, dict) else None
+            if (
+                not isinstance(event, dict)
+                or event.get("model") != EXPECTED_MODEL
+                or not isinstance(choices, list)
+                or len(choices) != 1
+                or not isinstance(choices[0], dict)
+                or not isinstance(choices[0].get("delta"), dict)
+            ):
+                raise EndpointError("disconnect probe received an invalid completion event")
+            observed_event = True
+            break
         if not observed_event:
-            raise EndpointError("disconnect probe observed no stream event")
+            raise EndpointError("disconnect probe observed no valid stream event")
     except Exception:
         return [_failed("stream_cancellation"), _failed("client_disconnect_recovery")]
     finally:
         if connection is not None:
             connection.close()
 
-    cancelled_latency = time.monotonic() - started
-    time.sleep(min(0.25, timeout_sec / 10.0))
+    cancelled_at = time.monotonic()
+    abort_deadline = cancelled_at + min(timeout_sec, 8.0)
+    abort_observed = False
+    try:
+        while time.monotonic() < abort_deadline:
+            observed = _cancellation_metrics(
+                base_url=base_url,
+                api_key=api_key,
+                timeout_sec=min(timeout_sec, 3.0),
+                ca_file=ca_file,
+            )
+            if observed.aborted_total > before.aborted_total + 1:
+                raise EndpointError("disconnect abort counter changed by more than one")
+            if (
+                observed.aborted_total == before.aborted_total + 1
+                and observed.running == 0
+                and observed.queued == 0
+            ):
+                abort_observed = True
+                break
+            time.sleep(0.2)
+    except EndpointError:
+        abort_observed = False
+    abort_latency = time.monotonic() - cancelled_at
+    if not abort_observed:
+        return [_failed("stream_cancellation"), _failed("client_disconnect_recovery")]
+
     try:
         recovered = _completion_request(
             base_url=base_url,
             api_key=api_key,
             messages=_base_messages("Reply with exactly: ready"),
-            timeout_sec=timeout_sec,
+            timeout_sec=recovery_budget,
             max_tokens=16,
             extra={},
             ca_file=ca_file,
         )
-        recovered_ok = recovered.finish_reason == "stop" and recovered.content.strip().casefold() == "ready"
+        recovered_ok = (
+            recovered.finish_reason == "stop"
+            and recovered.content.strip().casefold() == "ready"
+            and recovered.latency_sec <= recovery_budget
+        )
         recovery_row = _evidence(
             "client_disconnect_recovery",
             passed=recovered_ok,
@@ -592,7 +741,7 @@ def _run_disconnect_protocol(
         _evidence(
             "stream_cancellation",
             passed=True,
-            latency_sec=cancelled_latency,
+            latency_sec=abort_latency,
         ),
         recovery_row,
     ]
@@ -731,6 +880,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--api-key-file", required=True, type=Path)
     parser.add_argument("--ca-file", required=True, type=Path)
+    parser.add_argument("--profile-manifest", required=True, type=Path)
     parser.add_argument("--timeout-sec", default=60.0, type=_timeout)
     parser.add_argument("--output", required=True, type=Path)
     return parser
@@ -739,9 +889,18 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        global EXPECTED_MODEL
+        EXPECTED_MODEL = configure_expected_model(args.profile_manifest, args.ca_file)
+        api_key = load_api_key(args.api_key_file)
+        verify_remote_profile_epoch(
+            args.base_url,
+            api_key=api_key,
+            timeout_sec=args.timeout_sec,
+            ca_file=args.ca_file,
+        )
         report = run_battery(
             base_url=args.base_url,
-            api_key=load_api_key(args.api_key_file),
+            api_key=api_key,
             timeout_sec=args.timeout_sec,
             ca_file=args.ca_file,
         )

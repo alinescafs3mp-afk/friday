@@ -10,7 +10,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from endpoint_common import EndpointError, atomic_write_json, load_api_key, stream_chat_completion
+from endpoint_common import (
+    EndpointError,
+    atomic_write_json,
+    configure_expected_model,
+    load_api_key,
+    normalize_base_url,
+    stream_chat_completion,
+    verify_remote_profile_epoch,
+)
 from gpu_telemetry import GpuSampler, GpuTelemetryError, sample_summary
 
 _LADDER = (4096, 8192, 12288, 16384, 24576, 32768)
@@ -152,6 +160,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-url", default="http://127.0.0.1:30000/v1")
     parser.add_argument("--api-key-file", required=True, type=Path)
     parser.add_argument("--ca-file", type=Path)
+    parser.add_argument("--profile-manifest", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--candidates", default=_LADDER, type=_parse_candidates)
     parser.add_argument("--repeats", default=3, type=int, choices=range(3, 11))
@@ -164,9 +173,20 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        configure_expected_model(args.profile_manifest, args.ca_file)
+        api_key = load_api_key(args.api_key_file)
+        if normalize_base_url(args.base_url).startswith("https://"):
+            if args.ca_file is None:
+                raise EndpointError("HTTPS capacity trial requires an explicit CA file")
+            verify_remote_profile_epoch(
+                args.base_url,
+                api_key=api_key,
+                timeout_sec=args.timeout_sec,
+                ca_file=args.ca_file,
+            )
         report = run_ladder(
             base_url=args.base_url,
-            api_key=load_api_key(args.api_key_file),
+            api_key=api_key,
             candidates=args.candidates,
             repeats=args.repeats,
             timeout_sec=args.timeout_sec,

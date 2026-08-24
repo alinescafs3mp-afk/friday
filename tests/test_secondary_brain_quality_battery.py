@@ -336,6 +336,246 @@ def test_live_battery_requires_private_ca_https_without_touching_network(battery
         )
 
 
+def test_disconnect_probe_parses_exact_sse_and_requires_bounded_recovery(
+    monkeypatch: pytest.MonkeyPatch, battery: Any
+) -> None:
+    completion_calls: list[float] = []
+
+    def completion(**kwargs: Any) -> Any:
+        completion_calls.append(float(kwargs["timeout_sec"]))
+        return battery.SanitizedCompletion(
+            content="ready",
+            latency_sec=0.2,
+            prompt_tokens=3,
+            completion_tokens=1,
+            finish_reason="stop",
+            reasoning_present=True,
+        )
+
+    class Response:
+        status = 200
+        headers = object()
+
+        def __init__(self) -> None:
+            self.lines = iter(
+                [
+                    b"\r\n",
+                    (
+                        b'data: {"model":"friday-secondary-gptoss20b",'
+                        b'"choices":[{"index":0,"delta":{"role":"assistant"}}]}\r\n'
+                    ),
+                ]
+            )
+
+        def readline(self, _limit: int) -> bytes:
+            return next(self.lines, b"")
+
+    class Connection:
+        def __init__(self) -> None:
+            self.body = b""
+            self.closed = False
+
+        def request(
+            self,
+            _method: str,
+            _path: str,
+            *,
+            body: bytes,
+            headers: dict[str, str],
+        ) -> None:
+            assert headers["Authorization"] == f"Bearer {API_KEY}"
+            self.body = body
+
+        def getresponse(self) -> Response:
+            return Response()
+
+        def close(self) -> None:
+            self.closed = True
+
+    connection = Connection()
+    monkeypatch.setattr(battery, "_completion_request", completion)
+    metric_rows = iter(
+        [
+            battery.CancellationMetrics(aborted_total=4.0, running=0.0, queued=0.0),
+            battery.CancellationMetrics(aborted_total=5.0, running=0.0, queued=0.0),
+        ]
+    )
+    monkeypatch.setattr(battery, "_cancellation_metrics", lambda **_kwargs: next(metric_rows))
+    monkeypatch.setattr(battery, "build_tls_context", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(battery, "validate_profile_headers", lambda _headers: None)
+    monkeypatch.setattr(battery.http.client, "HTTPSConnection", lambda *_args, **_kwargs: connection)
+
+    rows = battery._run_disconnect_protocol(
+        base_url="https://192.168.1.35:8443/v1",
+        api_key=API_KEY,
+        timeout_sec=60.0,
+        ca_file=CA_FILE,
+    )
+
+    assert [row["status"] for row in rows] == ["passed", "passed"]
+    assert completion_calls == [60.0, 3.0]
+    payload = json.loads(connection.body)
+    assert payload["max_tokens"] == payload["min_tokens"] == 2_048
+    assert payload["ignore_eos"] is True
+    assert payload["stream"] is True
+    assert connection.closed is True
+
+
+def test_cancellation_metrics_reads_only_the_three_bounded_series(
+    monkeypatch: pytest.MonkeyPatch, battery: Any
+) -> None:
+    observed_url = ""
+    body = "\n".join(
+        [
+            "# HELP ignored content-free fixture",
+            'sglang:num_aborted_requests_total{model="alias"} 2',
+            "sglang:num_running_reqs 0",
+            "sglang:num_queue_reqs 0",
+            'unrelated_metric{prompt="must-not-be-retained"} 99',
+        ]
+    )
+
+    def request_text(_method: str, url: str, **_kwargs: Any) -> tuple[str, float]:
+        nonlocal observed_url
+        observed_url = url
+        return body, 0.01
+
+    monkeypatch.setattr(battery, "request_text", request_text)
+    snapshot = battery._cancellation_metrics(
+        base_url="https://192.168.1.35:8443/v1",
+        api_key=API_KEY,
+        timeout_sec=3.0,
+        ca_file=CA_FILE,
+    )
+
+    assert observed_url == "https://192.168.1.35:8443/metrics"
+    assert snapshot == battery.CancellationMetrics(aborted_total=2.0, running=0.0, queued=0.0)
+    assert "prompt" not in repr(snapshot)
+    with pytest.raises(battery.EndpointError):
+        battery._metric_values("sglang:num_running_reqs NaN", "sglang:num_running_reqs")
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        b"data: garbage\r\n",
+        b'data: {"model":"wrong","choices":[{"delta":{}}]}\r\n',
+        b"data: [DONE]\r\n",
+    ],
+)
+def test_disconnect_probe_rejects_invalid_or_completed_streams(
+    monkeypatch: pytest.MonkeyPatch, battery: Any, event: bytes
+) -> None:
+    monkeypatch.setattr(
+        battery,
+        "_completion_request",
+        lambda **_kwargs: battery.SanitizedCompletion(
+            content="ready",
+            latency_sec=0.2,
+            prompt_tokens=0,
+            completion_tokens=0,
+            finish_reason="stop",
+            reasoning_present=False,
+        ),
+    )
+    monkeypatch.setattr(
+        battery,
+        "_cancellation_metrics",
+        lambda **_kwargs: battery.CancellationMetrics(
+            aborted_total=0.0,
+            running=0.0,
+            queued=0.0,
+        ),
+    )
+
+    class Response:
+        status = 200
+        headers = object()
+
+        def readline(self, _limit: int) -> bytes:
+            nonlocal event
+            current, event = event, b""
+            return current
+
+    class Connection:
+        def request(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def getresponse(self) -> Response:
+            return Response()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(battery, "build_tls_context", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(battery.http.client, "HTTPSConnection", lambda *_args, **_kwargs: Connection())
+
+    rows = battery._run_disconnect_protocol(
+        base_url="https://192.168.1.35:8443/v1",
+        api_key=API_KEY,
+        timeout_sec=60.0,
+        ca_file=CA_FILE,
+    )
+
+    assert [row["status"] for row in rows] == ["failed", "failed"]
+
+
+def test_disconnect_recovery_cannot_pass_outside_its_strict_budget(
+    monkeypatch: pytest.MonkeyPatch, battery: Any
+) -> None:
+    call_index = 0
+
+    def completion(**_kwargs: Any) -> Any:
+        nonlocal call_index
+        call_index += 1
+        return battery.SanitizedCompletion(
+            content="ready",
+            latency_sec=0.2 if call_index == 1 else 3.1,
+            prompt_tokens=0,
+            completion_tokens=0,
+            finish_reason="stop",
+            reasoning_present=False,
+        )
+
+    class Response:
+        status = 200
+        headers = object()
+
+        def readline(self, _limit: int) -> bytes:
+            return b'data: {"model":"friday-secondary-gptoss20b","choices":[{"index":0,"delta":{}}]}\r\n'
+
+    class Connection:
+        def request(self, *_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        def getresponse(self) -> Response:
+            return Response()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(battery, "_completion_request", completion)
+    metric_rows = iter(
+        [
+            battery.CancellationMetrics(aborted_total=7.0, running=0.0, queued=0.0),
+            battery.CancellationMetrics(aborted_total=8.0, running=0.0, queued=0.0),
+        ]
+    )
+    monkeypatch.setattr(battery, "_cancellation_metrics", lambda **_kwargs: next(metric_rows))
+    monkeypatch.setattr(battery, "build_tls_context", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(battery, "validate_profile_headers", lambda _headers: None)
+    monkeypatch.setattr(battery.http.client, "HTTPSConnection", lambda *_args, **_kwargs: Connection())
+
+    rows = battery._run_disconnect_protocol(
+        base_url="https://192.168.1.35:8443/v1",
+        api_key=API_KEY,
+        timeout_sec=60.0,
+        ca_file=CA_FILE,
+    )
+
+    assert [row["status"] for row in rows] == ["passed", "failed"]
+
+
 def test_cli_failure_never_prints_exception_or_credential_path(
     monkeypatch: pytest.MonkeyPatch,
     battery: Any,
@@ -348,6 +588,11 @@ def test_cli_failure_never_prints_exception_or_credential_path(
         raise battery.EndpointError(f"sensitive path: {secret_path}")
 
     monkeypatch.setattr(battery, "load_api_key", fail_key)
+    monkeypatch.setattr(
+        battery,
+        "configure_expected_model",
+        lambda *_paths: battery.EXPECTED_MODEL,
+    )
     result = battery.main(
         [
             "--base-url",
@@ -356,6 +601,8 @@ def test_cli_failure_never_prints_exception_or_credential_path(
             str(secret_path),
             "--ca-file",
             str(tmp_path / "ca.crt"),
+            "--profile-manifest",
+            str(tmp_path / "profile.json"),
             "--output",
             str(tmp_path / "evidence.json"),
         ]

@@ -15,9 +15,7 @@ services:
     command:
       - /run/friday-bootstrap/launch_sglang_secure.py
     environment:
-      FRIDAY_SECONDARY_CONTEXT_TOKENS: ${FRIDAY_SECONDARY_CONTEXT_TOKENS:?measured context is required}
-      FRIDAY_SECONDARY_MAX_TOTAL_TOKENS: ${FRIDAY_SECONDARY_MAX_TOTAL_TOKENS:?measured token pool is required}
-      FRIDAY_SECONDARY_MEM_FRACTION_STATIC: ${FRIDAY_SECONDARY_MEM_FRACTION_STATIC:?measured memory fraction is required}
+      FRIDAY_SECONDARY_RUNTIME_IMAGE: ${FRIDAY_SECONDARY_SGLANG_IMAGE:?exact image repo@sha256 digest is required}
       NVIDIA_VISIBLE_DEVICES: "0"
       CUDA_VISIBLE_DEVICES: "0"
       CUDA_DEVICE_ORDER: PCI_BUS_ID
@@ -45,6 +43,32 @@ services:
         source: ./runtime/launch_sglang_secure.py
         target: /run/friday-bootstrap/launch_sglang_secure.py
         read_only: true
+      - type: bind
+        source: ./runtime/profile_contract.py
+        target: /run/friday-bootstrap/profile_contract.py
+        read_only: true
+      - type: bind
+        source: ./runtime/converted_model_manifest.py
+        target: /run/friday-bootstrap/converted_model_manifest.py
+        read_only: true
+      - type: bind
+        source: ${FRIDAY_SECONDARY_CONVERTED_MODEL_MANIFEST_PATH:?accepted converted model manifest is required}
+        target: /run/friday-model/accepted.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FRIDAY_SECONDARY_PROFILE_MANIFEST_PATH:?accepted runtime profile manifest is required}
+        target: /run/friday-profile/accepted.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FRIDAY_SECONDARY_PROFILE_ID_PATH:?accepted runtime profile id file is required}
+        target: /run/friday-profile/id
+        read_only: true
+        bind:
+          create_host_path: false
     tmpfs:
       - /tmp:size=2g,mode=1777
       - /run:size=16m,mode=0755
@@ -64,7 +88,7 @@ services:
         - CMD
         - python3
         - -c
-        - "import json,urllib.request; k=open('/run/friday-secrets/sglang-api-key', encoding='ascii').read().strip(); q=urllib.request.Request('http://127.0.0.1:30000/v1/models', headers={'Authorization': 'Bearer '+k}); b=json.load(urllib.request.urlopen(q, timeout=3)); rows=b.get('data'); assert isinstance(rows,list) and len(rows)==1 and isinstance(rows[0],dict) and rows[0].get('id')=='friday-secondary-gptoss20b'"
+        - "import json,urllib.request; k=open('/run/friday-secrets/sglang-api-key', encoding='ascii').read().strip(); p=json.load(open('/run/friday-profile/accepted.json', encoding='utf-8')); q=urllib.request.Request('http://127.0.0.1:30000/v1/models', headers={'Authorization': 'Bearer '+k}); b=json.load(urllib.request.urlopen(q, timeout=3)); rows=b.get('data'); assert isinstance(rows,list) and len(rows)==1 and isinstance(rows[0],dict) and rows[0].get('id')==p['served_model_alias']"
       interval: 15s
       timeout: 4s
       retries: 20
@@ -126,6 +150,18 @@ services:
         source: ./runtime/render_gateway_secure.sh
         target: /run/friday-bootstrap/render_gateway_secure.sh
         read_only: true
+      - type: bind
+        source: ${FRIDAY_SECONDARY_PROFILE_MANIFEST_PATH:?accepted runtime profile manifest is required}
+        target: /run/friday-profile/accepted.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FRIDAY_SECONDARY_PROFILE_ID_PATH:?accepted runtime profile id file is required}
+        target: /run/friday-profile/id
+        read_only: true
+        bind:
+          create_host_path: false
     tmpfs:
       - /tmp:size=16m,mode=1777
       - /var/cache/nginx:size=16m,mode=0755

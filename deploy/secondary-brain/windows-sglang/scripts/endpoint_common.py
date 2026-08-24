@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -20,6 +21,29 @@ from urllib.parse import urlsplit, urlunsplit
 
 MAX_RESPONSE_BYTES = 1_048_576
 EXPECTED_MODEL = "friday-secondary-gptoss20b"
+_PROFILE_ID = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}\Z")
+_ENGINE_KEYS = (
+    "source_model_repository",
+    "source_model_revision",
+    "converted_model_manifest_sha256",
+    "conversion_manifest_sha256",
+    "runtime_image",
+    "runtime_source_revision",
+    "runtime_manifest_sha256",
+    "model_path",
+    "quantization",
+    "kv_cache_dtype",
+    "attention_backend",
+    "fp4_gemm_backend",
+    "context_tokens",
+    "max_total_tokens",
+    "mem_fraction_static",
+    "max_running_requests",
+    "max_output_tokens",
+    "chunked_prefill_size",
+    "cuda_graph_max_bs",
+    "no_cpu_offload",
+)
 _HARMONY_MARKERS = (
     "<|analysis|>",
     "<|call|>",
@@ -41,6 +65,19 @@ class EndpointError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class EndpointIdentity:
+    model_alias: str
+    profile_id: str
+    profile_sha256: str
+    profile_bytes: bytes
+    ca_sha256: str
+    ca_pem: str
+
+
+_ENDPOINT_IDENTITY: EndpointIdentity | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SanitizedCompletion:
     content: str
     latency_sec: float
@@ -54,6 +91,91 @@ class SanitizedCompletion:
 class StreamedCompletion:
     completion: SanitizedCompletion
     ttft_sec: float
+
+
+def _load_ca_pem(ca_file: Path, expected_sha256: str = "") -> tuple[str, str]:
+    try:
+        metadata = ca_file.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or not 1 <= metadata.st_size <= 65_536:
+            raise EndpointError("CA path is not a bounded regular file")
+        raw = ca_file.read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        pem = raw.decode("ascii", errors="strict")
+    except EndpointError:
+        raise
+    except Exception as exc:
+        raise EndpointError("private CA file cannot be loaded") from exc
+    if (
+        (expected_sha256 and digest != expected_sha256)
+        or "-----BEGIN CERTIFICATE-----" not in pem
+        or "-----END CERTIFICATE-----" not in pem
+    ):
+        raise EndpointError("private CA identity is invalid")
+    return pem, digest
+
+
+def configure_expected_model(profile_manifest: Path, ca_file: Path | None = None) -> str:
+    """Bind all certification calls to one canonical runtime profile epoch."""
+
+    global EXPECTED_MODEL, _ENDPOINT_IDENTITY
+    try:
+        metadata = profile_manifest.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or not 1 <= metadata.st_size <= 65_536:
+            raise EndpointError("runtime profile is not a bounded regular file")
+        raw = profile_manifest.read_bytes()
+        value = json.loads(raw.decode("utf-8", errors="strict"))
+    except EndpointError:
+        raise
+    except Exception as exc:
+        raise EndpointError("runtime profile cannot be loaded") from exc
+    canonical = (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode(
+        "utf-8"
+    )
+    profile_id = value.get("profile_id") if isinstance(value, dict) else None
+    alias = value.get("served_model_alias") if isinstance(value, dict) else None
+    try:
+        engine_projection = {key: value[key] for key in _ENGINE_KEYS}
+    except (KeyError, TypeError):
+        raise EndpointError("runtime profile engine projection is incomplete") from None
+    binding = hashlib.sha256(
+        (
+            json.dumps(
+                engine_projection,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode("utf-8")
+    ).hexdigest()
+    if (
+        not isinstance(value, dict)
+        or raw != canonical
+        or value.get("schema") != "friday.secondary-runtime-profile.v1"
+        or value.get("status") not in {"candidate", "accepted"}
+        or not isinstance(profile_id, str)
+        or _PROFILE_ID.fullmatch(profile_id) is None
+        or value.get("engine_binding_sha256") != binding
+        or profile_id != f"gptoss20b-{binding}"
+        or alias != f"friday-secondary-{profile_id}"
+    ):
+        raise EndpointError("runtime profile identity is invalid")
+    ca_sha256 = value.get("gateway_ca_certificate_sha256")
+    if not isinstance(ca_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", ca_sha256) is None:
+        raise EndpointError("runtime profile CA identity is invalid")
+    ca_pem = ""
+    if ca_file is not None:
+        ca_pem, _observed_ca_sha256 = _load_ca_pem(ca_file, ca_sha256)
+    EXPECTED_MODEL = alias
+    _ENDPOINT_IDENTITY = EndpointIdentity(
+        model_alias=alias,
+        profile_id=profile_id,
+        profile_sha256=hashlib.sha256(raw).hexdigest(),
+        profile_bytes=raw,
+        ca_sha256=ca_sha256,
+        ca_pem=ca_pem,
+    )
+    return alias
 
 
 def load_api_key(path: Path) -> str:
@@ -98,17 +220,40 @@ def normalize_base_url(value: str) -> str:
     return urlunsplit((parsed.scheme, netloc, "/v1", "", ""))
 
 
-def _tls_context(url: str, ca_file: Path | None) -> ssl.SSLContext | None:
+def build_tls_context(url: str, ca_file: Path | None) -> ssl.SSLContext | None:
     if urlsplit(url).scheme != "https":
         return None
     if ca_file is None:
         raise EndpointError("HTTPS certification requires an explicit private CA file")
     try:
-        if not ca_file.is_file() or ca_file.stat().st_size > 1024 * 1024:
-            raise EndpointError("CA path is not a bounded regular file")
-        return ssl.create_default_context(cafile=str(ca_file))
+        if _ENDPOINT_IDENTITY is not None:
+            if not _ENDPOINT_IDENTITY.ca_pem:
+                raise EndpointError("HTTPS profile has no pinned CA bytes")
+            pem = _ENDPOINT_IDENTITY.ca_pem
+        else:
+            pem, _digest = _load_ca_pem(ca_file)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.verify_mode = ssl.CERT_REQUIRED
+        context.check_hostname = True
+        context.load_verify_locations(cadata=pem)
+        return context
     except (OSError, ssl.SSLError) as exc:
         raise EndpointError("private CA file cannot be loaded") from exc
+
+
+def validate_profile_headers(headers: Any) -> None:
+    """Require one exact gateway profile identity header on every response."""
+
+    identity = _ENDPOINT_IDENTITY
+    if identity is None or not identity.ca_pem:
+        return
+    try:
+        profile_ids = headers.get_all("X-Friday-Secondary-Profile-Id") or []
+        profile_hashes = headers.get_all("X-Friday-Secondary-Profile-Sha256") or []
+    except Exception as exc:
+        raise EndpointError("endpoint profile headers are unavailable") from exc
+    if profile_ids != [identity.profile_id] or profile_hashes != [identity.profile_sha256]:
+        raise EndpointError("endpoint profile headers differ from the candidate epoch")
 
 
 def request_json(
@@ -140,9 +285,10 @@ def request_json(
         with urllib.request.urlopen(  # noqa: S310  # nosec B310
             request,
             timeout=timeout_sec,
-            context=_tls_context(url, ca_file),
+            context=build_tls_context(url, ca_file),
         ) as response:
             status = int(response.status)
+            validate_profile_headers(response.headers)
             raw = response.read(MAX_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as exc:
         raise EndpointError(f"endpoint returned HTTP {int(exc.code)}") from exc
@@ -160,6 +306,94 @@ def request_json(
     if not isinstance(value, dict):
         raise EndpointError("endpoint returned a non-object JSON body")
     return value, latency
+
+
+def request_text(
+    method: str,
+    url: str,
+    *,
+    api_key: str,
+    timeout_sec: float,
+    ca_file: Path | None = None,
+) -> tuple[str, float]:
+    """Fetch one bounded UTF-8 observation endpoint without retaining its body."""
+
+    if method != "GET" or timeout_sec <= 0 or timeout_sec > 600:
+        raise EndpointError("text request is outside the allowed contract")
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "text/plain",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "friday-secondary-node-probe/1",
+        },
+        method=method,
+    )
+    started = time.monotonic()
+    try:
+        with urllib.request.urlopen(  # noqa: S310  # nosec B310
+            request,
+            timeout=timeout_sec,
+            context=build_tls_context(url, ca_file),
+        ) as response:
+            status = int(response.status)
+            validate_profile_headers(response.headers)
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        raise EndpointError(f"endpoint returned HTTP {int(exc.code)}") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise EndpointError("endpoint request failed") from exc
+    latency = time.monotonic() - started
+    if status != 200:
+        raise EndpointError(f"endpoint returned HTTP {status}")
+    if len(raw) > MAX_RESPONSE_BYTES:
+        raise EndpointError("endpoint response exceeds 1 MiB")
+    try:
+        return raw.decode("utf-8"), latency
+    except UnicodeDecodeError as exc:
+        raise EndpointError("endpoint returned non-UTF-8 text") from exc
+
+
+def verify_remote_profile_epoch(
+    base_url: str,
+    *,
+    api_key: str,
+    timeout_sec: float,
+    ca_file: Path,
+) -> None:
+    """Authenticate the gateway's exact profile bytes before certification traffic."""
+
+    identity = _ENDPOINT_IDENTITY
+    normalized = normalize_base_url(base_url)
+    if identity is None or not identity.ca_pem or urlsplit(normalized).scheme != "https":
+        raise EndpointError("HTTPS endpoint identity was not configured")
+    request = urllib.request.Request(
+        f"{normalized}/friday-profile",
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "friday-secondary-profile-probe/1",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(  # noqa: S310  # nosec B310
+            request,
+            timeout=timeout_sec,
+            context=build_tls_context(normalized, ca_file),
+        ) as response:
+            if int(response.status) != 200:
+                raise EndpointError("profile endpoint was rejected")
+            validate_profile_headers(response.headers)
+            raw = response.read(65_537)
+    except EndpointError:
+        raise
+    except urllib.error.HTTPError as exc:
+        raise EndpointError(f"profile endpoint returned HTTP {int(exc.code)}") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise EndpointError("profile endpoint request failed") from exc
+    if len(raw) > 65_536 or raw != identity.profile_bytes:
+        raise EndpointError("remote profile bytes differ from the local candidate")
 
 
 def _bounded_count(value: Any) -> int:
@@ -317,10 +551,11 @@ def stream_chat_completion(
         with urllib.request.urlopen(  # noqa: S310  # nosec B310
             request,
             timeout=timeout_sec,
-            context=_tls_context(normalize_base_url(base_url), ca_file),
+            context=build_tls_context(normalize_base_url(base_url), ca_file),
         ) as response:
             if int(response.status) != 200:
                 raise EndpointError(f"endpoint returned HTTP {int(response.status)}")
+            validate_profile_headers(response.headers)
             for raw_line in response:
                 total_bytes += len(raw_line)
                 if total_bytes > MAX_RESPONSE_BYTES:

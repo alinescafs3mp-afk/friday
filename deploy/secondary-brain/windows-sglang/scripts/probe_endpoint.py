@@ -15,9 +15,11 @@ from endpoint_common import (
     EndpointError,
     atomic_write_json,
     chat_completion,
+    configure_expected_model,
     load_api_key,
     normalize_base_url,
     request_json,
+    verify_remote_profile_epoch,
 )
 
 
@@ -88,6 +90,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-url", default="http://127.0.0.1:30000/v1")
     parser.add_argument("--api-key-file", required=True, type=Path)
     parser.add_argument("--ca-file", type=Path)
+    parser.add_argument("--profile-manifest", required=True, type=Path)
     parser.add_argument("--timeout-sec", default=30.0, type=float)
     parser.add_argument("--output", type=Path)
     return parser
@@ -96,7 +99,19 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        report = run_probe(args.base_url, load_api_key(args.api_key_file), args.timeout_sec, args.ca_file)
+        global EXPECTED_MODEL
+        EXPECTED_MODEL = configure_expected_model(args.profile_manifest, args.ca_file)
+        api_key = load_api_key(args.api_key_file)
+        if normalize_base_url(args.base_url).startswith("https://"):
+            if args.ca_file is None:
+                raise EndpointError("HTTPS probe requires an explicit CA file")
+            verify_remote_profile_epoch(
+                args.base_url,
+                api_key=api_key,
+                timeout_sec=args.timeout_sec,
+                ca_file=args.ca_file,
+            )
+        report = run_probe(args.base_url, api_key, args.timeout_sec, args.ca_file)
         if args.output:
             atomic_write_json(args.output, report)
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))

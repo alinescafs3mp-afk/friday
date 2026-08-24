@@ -17,7 +17,10 @@ from endpoint_common import (
     SanitizedCompletion,
     atomic_write_json,
     chat_completion,
+    configure_expected_model,
     load_api_key,
+    normalize_base_url,
+    verify_remote_profile_epoch,
 )
 from gpu_telemetry import GpuSampler, GpuTelemetryError, sample_summary
 
@@ -207,6 +210,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-url", default="http://127.0.0.1:30000/v1")
     parser.add_argument("--api-key-file", required=True, type=Path)
     parser.add_argument("--ca-file", type=Path)
+    parser.add_argument("--profile-manifest", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--duration-sec", default=1800, type=_duration)
     parser.add_argument("--minimum-requests", default=100, type=_minimum_requests)
@@ -219,9 +223,20 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     checkpoint = args.output.with_suffix(args.output.suffix + ".checkpoint")
     try:
+        configure_expected_model(args.profile_manifest, args.ca_file)
+        api_key = load_api_key(args.api_key_file)
+        if normalize_base_url(args.base_url).startswith("https://"):
+            if args.ca_file is None:
+                raise EndpointError("HTTPS soak requires an explicit CA file")
+            verify_remote_profile_epoch(
+                args.base_url,
+                api_key=api_key,
+                timeout_sec=args.timeout_sec,
+                ca_file=args.ca_file,
+            )
         report = run_soak(
             base_url=args.base_url,
-            api_key=load_api_key(args.api_key_file),
+            api_key=api_key,
             duration_sec=args.duration_sec,
             minimum_requests=args.minimum_requests,
             timeout_sec=args.timeout_sec,
