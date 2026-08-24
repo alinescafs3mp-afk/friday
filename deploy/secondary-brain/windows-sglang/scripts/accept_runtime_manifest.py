@@ -17,7 +17,7 @@ from typing import Any
 
 PROMOTION_SCHEMA = "friday.secondary-runtime-manifest-promotion.v1"
 RUNTIME_SCHEMA = "friday.secondary-sglang-runtime.v1"
-PREFLIGHT_SCHEMA = "friday.secondary-windows-preflight.v1"
+PREFLIGHT_SCHEMA = "friday.secondary-windows-preflight.v2"
 HARDWARE_SCHEMA = "friday.secondary-hardware-runtime.v1"
 
 MAX_TEMPLATE_BYTES = 16 * 1024
@@ -143,7 +143,7 @@ EXPECTED_SGLANG_HELP = {
     "compose_exact_selector_verified": True,
     "required_flag_count": 29,
     "required_flags_present": True,
-    "help_sha256": "8620c6550aece614cdad08fac9aa5d3dd8089e72f3cc0bf6c6d0fb20c66739d7",
+    "required_flags_sha256": "15defb43aa2cef5f5df941822bbacd170c787513ef136cd6f951a6c0580d1cd9",
     "runtime_versions": EXPECTED_RUNTIME_VERSIONS,
 }
 EXPECTED_GATEWAY = {

@@ -400,10 +400,24 @@ if ($InspectSglangHelp) {
         '--context-length', '--max-total-tokens',
         '--mem-fraction-static', '--enable-metrics', '--enable-cache-report'
     )
-    $missingFlags = @($requiredFlags | Where-Object { $helpText -notmatch [regex]::Escape($_) })
+    $requiredFlagContract = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($requiredFlag in $requiredFlags) {
+        if (-not $requiredFlagContract.Add([string]$requiredFlag)) {
+            throw 'The code-owned SGLang launch flag contract contains a duplicate.'
+        }
+    }
+    $observedFlagSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $flagPattern = '(?<![A-Za-z0-9_-])--[a-z0-9][a-z0-9-]*(?![A-Za-z0-9_-])'
+    foreach ($match in [regex]::Matches($helpText, $flagPattern, [Text.RegularExpressions.RegexOptions]::CultureInvariant)) {
+        [void]$observedFlagSet.Add($match.Value)
+    }
+    $missingFlags = @($requiredFlags | Where-Object { -not $observedFlagSet.Contains([string]$_) })
     if ($missingFlags.Count -ne 0) {
         throw 'The pinned SGLang image does not expose every baseline launch flag.'
     }
+    [string[]]$canonicalRequiredFlags = @($requiredFlags)
+    [Array]::Sort($canonicalRequiredFlags, [StringComparer]::Ordinal)
+    $requiredFlagsSha256 = Get-TextSha256 ($canonicalRequiredFlags -join "`n")
     $versionProbeCode = @'
 import importlib.metadata as m,json,torch
 print(json.dumps({'cuda_runtime_version':torch.version.cuda,
@@ -436,7 +450,7 @@ print(json.dumps({'cuda_runtime_version':torch.version.cuda,
         compose_exact_selector_verified = [bool]$composeSelectorVerified
         required_flag_count = $requiredFlags.Count
         required_flags_present = $true
-        help_sha256 = Get-TextSha256 $helpText
+        required_flags_sha256 = $requiredFlagsSha256
         runtime_versions = [ordered]@{
             sglang_version = [string]$runtimeVersions.sglang_version
             cuda_runtime_version = [string]$runtimeVersions.cuda_runtime_version
@@ -565,7 +579,7 @@ if (-not [string]::IsNullOrWhiteSpace($HardwareRuntimeReceiptOutputPath)) {
 }
 
 $report = [ordered]@{
-    schema = 'friday.secondary-windows-preflight.v1'
+    schema = 'friday.secondary-windows-preflight.v2'
     status = $(if ($RunGpuCanary -and $InspectSglangHelp -and $InspectGatewayImage -and $null -ne $runtimeGpu) {
         'automated_preflight_checks_passed'
     } else {

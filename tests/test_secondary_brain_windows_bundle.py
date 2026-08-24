@@ -533,6 +533,23 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
         assert version in preflight
     assert "m.version('sglang-kernel')" in preflight
     assert "m.version('sgl-kernel')" not in preflight
+    assert "friday.secondary-windows-preflight.v2" in preflight
+    assert "[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)" in preflight
+    assert "[regex]::Matches($helpText, $flagPattern" in preflight
+    assert "-not $observedFlagSet.Contains([string]$_)" in preflight
+    assert 'required_flags_sha256 = $requiredFlagsSha256' in preflight
+    assert "help_sha256" not in preflight
+    flag_contract = preflight[
+        preflight.index("    $requiredFlags = @(") : preflight.index(
+            "    $requiredFlagContract =", preflight.index("    $requiredFlags = @(")
+        )
+    ]
+    required_flags = re.findall(r"'(--[a-z0-9][a-z0-9-]*)'", flag_contract)
+    assert len(required_flags) == len(set(required_flags)) == 29
+    required_flags_sha256 = hashlib.sha256(
+        "\n".join(sorted(required_flags)).encode("ascii")
+    ).hexdigest()
+    assert required_flags_sha256 == "15defb43aa2cef5f5df941822bbacd170c787513ef136cd6f951a6c0580d1cd9"
     assert "[switch]$Apply" in promotion
     assert "if ($Apply)" in promotion
     assert "[IO.FileMode]::CreateNew" in promotion

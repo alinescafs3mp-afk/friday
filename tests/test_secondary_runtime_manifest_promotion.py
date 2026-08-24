@@ -155,6 +155,7 @@ def test_operator_promotes_only_status_to_one_atomic_exclusive_manifest(
         (("runtime_gpu", "memory_total_mib"), 16_304),
         (("gpu_container_canary", "observation", "memory_total_bytes"), 17_094_475_775),
         (("sglang_help", "runtime_versions", "sglang_version"), "0.5.18"),
+        (("sglang_help", "required_flags_sha256"), "0" * 64),
         (("gateway_image", "config_digest"), "sha256:" + "0" * 64),
         (("hardware_runtime_receipt", "sha256"), "0" * 64),
     ),
