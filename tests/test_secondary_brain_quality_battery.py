@@ -98,16 +98,17 @@ class FakeEndpoint:
         assert payload is not None
         assert payload["model"] == self.battery.EXPECTED_MODEL
         assert payload["reasoning_effort"] in {"low", "medium", "high"}
-        assert payload["temperature"] == 1.0
         assert payload["top_p"] == 1.0
         assert payload["seed"] == 0
         messages = payload.get("messages")
         assert isinstance(messages, list)
         if any(isinstance(message, dict) and message.get("role") == "tool" for message in messages):
+            assert payload["temperature"] == 1.0
             assert payload["reasoning_effort"] == "low"
             assert payload["max_tokens"] == 256
             return self._completion("17", reasoning="PRIVATE_CONTINUATION_REASONING")
         if isinstance(payload.get("tool_choice"), dict):
+            assert payload["temperature"] == 1.0
             assert payload["reasoning_effort"] == "low"
             assert payload["max_tokens"] == 256
             city = "Paris" if self.invalid_tool else "Moscow"
@@ -140,6 +141,19 @@ class FakeEndpoint:
             )
         name = self.live_names[self.live_index]
         self.live_index += 1
+        assert payload["temperature"] == (
+            0.0
+            if name
+            in {
+                "arithmetic",
+                "extraction_and_date",
+                "ru_summary_faithfulness",
+                "contradiction",
+                "citation_preservation",
+                "wrong_language_guard",
+            }
+            else 1.0
+        )
         assert payload["reasoning_effort"] == {
             "reasoning_medium": "medium",
             "reasoning_high": "high",
