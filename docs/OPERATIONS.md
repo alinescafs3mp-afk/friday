@@ -67,6 +67,84 @@ SQLite/WAL, inbox и exact Obsidian root, после чего атомарно �
 при crash продолжение выполняется только `recover-activation` в identity из
 journal, без ручного запуска systemd или восстановления отдельных файлов.
 
+### Optional GPT-OSS secondary brain
+
+Release 0.207.10 запускается с secondary в состоянии `disabled`:
+переменные `FRIDAY_SECONDARY_LLM_*` в ENV0 не нужны. В этом релизе
+accepted-реестр пуст; единственная разрешённая ступень для exact
+finalist — provisional `shadow/extract` без private text. Его результат
+выбрасывается; ответ, tools, effects и publication остаются за primary.
+`assist` до отдельной accepted-регистрации запрещён.
+
+После приёмки самого default-off релиза оператор может подготовить
+owner-private ENV1. Это не отдельный env-файл: скопируйте exact ENV0 вместе с
+завершающим newline и добавьте в его конец следующий canonical sorted/unquoted
+LF-блок. Все secondary-ключи должны встретиться ровно один раз. Кроме непустого
+64-hex gateway token и absolute path к owner-private копии exact CA, блок должен
+совпадать побайтно по значениям:
+
+```dotenv
+FRIDAY_SECONDARY_LLM_ADMISSION_TIMEOUT_SEC=0.10
+FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=0
+FRIDAY_SECONDARY_LLM_API_KEY=<64-hex-gateway-token>
+FRIDAY_SECONDARY_LLM_BASE_URL=https://192.168.1.35:8443/v1
+FRIDAY_SECONDARY_LLM_CALL_BUDGET_SEC=15.0
+FRIDAY_SECONDARY_LLM_CA_FILE=/absolute/private/path/friday-secondary-ca.crt
+FRIDAY_SECONDARY_LLM_CONNECT_TIMEOUT_SEC=1.0
+FRIDAY_SECONDARY_LLM_COOLDOWN_SEC=60
+FRIDAY_SECONDARY_LLM_ENABLED=1
+FRIDAY_SECONDARY_LLM_HEALTH_INTERVAL_SEC=30
+FRIDAY_SECONDARY_LLM_MAX_CONCURRENCY=1
+FRIDAY_SECONDARY_LLM_MAX_CONTEXT_TOKENS=4096
+FRIDAY_SECONDARY_LLM_MODE=shadow
+FRIDAY_SECONDARY_LLM_MODEL=friday-secondary-gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f
+FRIDAY_SECONDARY_LLM_PROFILE=gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f
+FRIDAY_SECONDARY_LLM_READ_TIMEOUT_SEC=12.0
+FRIDAY_SECONDARY_LLM_WORKLOADS=extract
+```
+
+CA должен иметь SHA-256
+`392756a74fd9100635c42f4fbf7e5a5f1822d18ea898ebb7848b9fdd0bddc1fe`.
+Положите ENV1 как owner-private regular file непосредственно в `state_dir` и
+публикуйте его только normal distinct-candidate `install-units`/`activate`
+path. Для `activate` обязательны `--env-file-sha256 <ENV0_SHA256>`,
+`--terminal-journal-env-sha256 <ENV0_SHA256>`, `--next-env-file <ENV1>`,
+`--next-env-file-sha256 <ENV1_SHA256>` и
+`--staged-config-transition secondary_shadow_enable`. Уже развёрнутый candidate
+повторно использовать нельзя; ручная правка живого `.env.local` не является
+cutover path.
+
+Проверьте `/api/health`: в default-off режиме `status=ok`,
+`secondary.mode=disabled`, `secondary.state=disabled`. После отдельной
+activation ENV1 и успешного exact TLS/profile/model probe админская
+`/api/admin/diagnostics` должна показать exact profile,
+`profile_admission=provisional_shadow`, `state=healthy` и `available=true`.
+Одной доступности ноутбука недостаточно. Его отсутствие не меняет `status=ok`
+и ведёт к обычному primary-only path.
+
+ENV1 не получает private Inbox text и не заменяет реальный
+product shadow. После приёмки и регистрации exact accepted profile в
+отдельном default-off release постройте ENV2 из exact ENV1, изменив
+только `FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=1`, и проведите новую
+distinct-candidate activation с
+`--staged-config-transition secondary_shadow_to_private_shadow`. Это
+единственная ступень для реального private Inbox shadow: typed output
+валидируется и выбрасывается, а ответ по-прежнему строит primary.
+
+Только после принятого private-shadow evidence постройте ENV3 из exact
+ENV2, изменив только `FRIDAY_SECONDARY_LLM_MODE=assist`, и проведите
+`secondary_shadow_to_assist`: прямой ENV1→assist отклоняется —
+private-text admission и передача авторитета не могут произойти одним
+переходом.
+
+Для планового выключения public или private shadow после terminal
+`clear` создайте disabled ENV из exact текущего, изменив только
+`FRIDAY_SECONDARY_LLM_ENABLED=0`, и выполните новую distinct-candidate
+activation с `secondary_shadow_disable`; privacy bit должен
+сохраниться. Из assist используйте `secondary_assist_to_disabled`.
+При unfinished activation не запускайте disable: продолжайте только через
+`recover-activation` в identity существующего journal.
+
 ## 2. Что проверяет doctor
 
 ```powershell
@@ -560,7 +638,7 @@ orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.9`.
+требуйте `status=ok` и `version=0.207.10`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

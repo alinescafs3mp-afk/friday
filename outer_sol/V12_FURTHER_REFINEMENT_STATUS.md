@@ -1,10 +1,12 @@
 # V12 further refinement status
 
 Status: **P1A + P1B + P1C IMPLEMENTED AND DEPLOYED**
-Date: 2026-08-23
+Date: 2026-08-24
 Branch: `main`
-Source: `main` / `321f8fa`
-Live: Friday `0.207.4` / `6a25cda`, V12 canary for `FILE_READ` and `ARCHIVE_READ`
+Source: `main` / `1e3834dd5d987f84c6ca6a490c0cd9b3ac2756ed`
+Live: Friday `0.207.9` / `2b197e1e467e93a085a1b4cc330fbda8b5b7b982`,
+schema 39; V12 canary remains scoped to `FILE_READ` and `ARCHIVE_READ`;
+fallback `f1426ca561f8914574cebf3a69f8dde83f79b568`
 
 The current authority remains:
 

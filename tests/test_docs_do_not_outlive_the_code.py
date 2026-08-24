@@ -21,12 +21,16 @@ from __future__ import annotations
 
 import pathlib
 import re
+import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 ARCHITECTURE = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
 SOL_GUIDANCE = (ROOT / "sol" / "SOL.md").read_text(encoding="utf-8")
 BACKUP_GUIDANCE = (ROOT / "docs" / "BACKUP_AND_RESTORE.md").read_text(encoding="utf-8")
+OPERATIONS = (ROOT / "docs" / "OPERATIONS.md").read_text(encoding="utf-8")
+RELEASE_CHECKLIST = (ROOT / "docs" / "RELEASE_CHECKLIST.md").read_text(encoding="utf-8")
+CHANGELOG = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 
 
 def test_the_readme_states_the_version_the_package_has():
@@ -49,6 +53,62 @@ def test_the_readme_states_the_schema_the_code_opens():
         f"README называет схему {match.group(1)}, код открывает {SCHEMA_VERSION} — "
         "это инструкция по обновлению, ошибка в ней дороже обычной"
     )
+
+
+def test_current_release_identity_matches_package_operator_docs_and_schema():
+    """The release number and no-migration schema gate must move as one unit."""
+    from friday import __version__
+    from friday.storage._base import SCHEMA_VERSION
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert project["version"] == __version__
+
+    changelog_version = re.match(r"## ([0-9]+(?:\.[0-9]+)+) —", CHANGELOG)
+    assert changelog_version, "CHANGELOG must start with the current release"
+    assert changelog_version.group(1) == __version__
+
+    operations_health = re.search(r"требуйте `status=ok` и `version=([0-9.]+)`", OPERATIONS)
+    checklist_health = re.search(
+        r"final startup health имеет `status=ok`, `version=([0-9.]+)`",
+        RELEASE_CHECKLIST,
+    )
+    assert operations_health and operations_health.group(1) == __version__
+    assert checklist_health and checklist_health.group(1) == __version__
+
+    checklist_schema = re.search(r"- schema version = (\d+);", RELEASE_CHECKLIST)
+    assert checklist_schema, "release checklist must state the compatibility schema"
+    assert int(checklist_schema.group(1)) == SCHEMA_VERSION
+
+
+def test_secondary_runbook_is_bound_to_the_only_provisional_finalist():
+    """Operator copy/paste values must not drift from the code-owned admission."""
+    from friday.secondary_brain.profiles import (
+        ACCEPTED_SECONDARY_RUNTIME_PROFILES,
+        PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES,
+    )
+
+    assert ACCEPTED_SECONDARY_RUNTIME_PROFILES == {}
+    (profile,) = PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES.values()
+    section = OPERATIONS.split("### Optional GPT-OSS secondary brain", 1)[1].split("## 2.", 1)[0]
+
+    exact_lines = {
+        f"FRIDAY_SECONDARY_LLM_BASE_URL={profile.endpoint_base_url}",
+        f"FRIDAY_SECONDARY_LLM_MAX_CONCURRENCY={profile.max_concurrency}",
+        f"FRIDAY_SECONDARY_LLM_MAX_CONTEXT_TOKENS={profile.max_context_tokens}",
+        f"FRIDAY_SECONDARY_LLM_MODEL={profile.served_model_alias}",
+        f"FRIDAY_SECONDARY_LLM_PROFILE={profile.profile_id}",
+        "FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=0",
+        "FRIDAY_SECONDARY_LLM_MODE=shadow",
+        "FRIDAY_SECONDARY_LLM_WORKLOADS=extract",
+    }
+    assert all(line in section for line in exact_lines)
+    assert profile.manifest_sha256 in RELEASE_CHECKLIST
+    assert f"output `{profile.max_output_tokens}`" in RELEASE_CHECKLIST
+    assert f"chunked prefill `{profile.chunked_prefill_size}`" in RELEASE_CHECKLIST
+    assert f"`mem_fraction_static={profile.mem_fraction_static}`" in RELEASE_CHECKLIST
+    assert "secondary_shadow_to_private_shadow" in section
+    assert "secondary_shadow_to_assist" in section
+    assert "прямой ENV1→assist отклоняется" in section
 
 
 def test_sol_guidance_states_the_schema_the_code_opens():

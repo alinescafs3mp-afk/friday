@@ -6,16 +6,18 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-24
 - Branch: `main`
-- Current source head: `c726e1a6d6c3826f939c5c586034d6a21fe32917`
-  (closed secondary optimization/certification surface; not yet released)
-- Deployed implementation head: `da8d11e2ac3c8982e43fa1f104076e922426ac25`
-- Live: Friday `0.207.8` / `da8d11e2ac3c8982e43fa1f104076e922426ac25`;
-  tree `c80959299f0a6dac89f3288a742e668a8f575b855de1bbed55b32cf45d33ed45`;
-  wheel `51c1008dd4ee432de75be294b46cb42fce879df8d6786f1a8e316819ac2d642b`
-- Schema-capable fallback: Friday `0.207.7` /
-  `3d2bef322c8069d2a5f8a708d59094e6a6ac0eb3`;
-  tree `b363b73ce155a706b85c4fa2dfd8eb9d81839b3c48eca5f79c341109158aa8ba`
-- Database schema: 38
+- Secondary implementation checkpoint: `1e3834dd5d987f84c6ca6a490c0cd9b3ac2756ed`
+  (provisional exact-finalist certification; the 0.207.10 release closure is
+  pending)
+- Deployed implementation head: `2b197e1e467e93a085a1b4cc330fbda8b5b7b982`
+- Live: Friday `0.207.9` / `2b197e1e467e93a085a1b4cc330fbda8b5b7b982`;
+  tree `c3e689c7291c4919df60df163ec786208bb5f15d24c5a28813f551729ef7b6c0`;
+  wheel `cd8ab7320718cce4c7d15caef1f8ee36e4d2c25c063578d02980bf59fcc4af48`
+- Schema-capable fallback: Friday `0.207.9` /
+  `f1426ca561f8914574cebf3a69f8dde83f79b568`;
+  tree `eb8102ccf759b0f2a2d9a0a38584d9cda0c4938f14d389ac55246d87e536e6f7`;
+  wheel `cd8ab7320718cce4c7d15caef1f8ee36e4d2c25c063578d02980bf59fcc4af48`
+- Database schema: 39
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean
 - Delivery constraints: no Docker for primary Friday release certification;
@@ -25,17 +27,27 @@ the current production identity, completed packages, active work and next order.
 ## Active objective
 
 Build the optional detachable GPT-OSS-20B/SGLang secondary node described in
-`OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`, starting with
-an independently certified laptop endpoint and preserving exact primary-only
-behavior whenever that node is absent. The Interaction Control Plane is paused
-at the local schema-39 archive-evidence checkpoint `912dc1a`; it is not deployed
-and will resume from that commit after the urgent secondary-brain package.
+`OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`, preserving
+exact primary-only behavior whenever that node is absent. The narrow schema-39
+archive-evidence continuation is deployed in `0.207.9`; broader Interaction
+Control Plane work remains paused until the urgent secondary-brain package.
 
-The exact `c726e1a6d6c3826f939c5c586034d6a21fe32917` bundle is synchronized to
-the laptop and its full preflight is green. The sealed source and accepted
-hardware identity are exact, and the checkpoint ended with zero containers.
-The accepted-profile registry remains empty, no production traffic uses the
-laptop, and no optimization-matrix winner is claimed.
+The measured provisional finalist is exact profile
+`gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
+with candidate-manifest SHA-256
+`51af2164fa07ff3c01813e318076f7ac8b37eeecb73e695b6ca7543061c93439`:
+native MXFP4/BF16, BF16 KV, 4,096-token total context, 512-token output,
+`mem_fraction_static=0.96`, prefill chunk 256, page one, radix/overlap and hybrid
+SWA 0.80 enabled, full decode CUDA graph at batch one and prefill graph off.
+The fresh epoch-D warm capacity-v2 trial passed seven non-streaming exact
+512-token repeats at runtime epoch `1787601267.06`; receipt SHA-256 is
+`b317e964eced1c0a80d5d8f4cc7fcb388d60598c16dfbeb9f320f1076fa97719`,
+median end-to-end completion rate is `108.497563` tokens/s and minimum free GPU
+memory is 1,294 MiB. The accepted-profile registry remains empty, deployment is
+default-off, production sends no traffic to the laptop and `assist` is blocked.
+Fresh `soak.epoch-d.full.7c1f742.json` is active; cold-restart capacity-v2 and
+acceptance remain pending. Older passed soak and streaming capacity-v1 receipts
+are historical only and cannot satisfy v2 acceptance.
 
 Detailed active tracker:
 `outer_sol/OPTIONAL_SECONDARY_BRAIN_IMPLEMENTATION_STATUS.md`.
@@ -106,15 +118,17 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Measure and certify the closed native-MXFP4 matrix: BF16/FP8 E4M3 KV,
-   contexts through 65K and only the reviewed backend/page/cache/SWA/chunk/graph
-   choices. Promotion still requires near-limit quality, exact HTTPS/CA/profile
-   evidence, restart, soak and failure receipts.
-2. Register and release only the evidence-bound winner default-off, then prove
-   shadow and bounded assist with exact primary fallback.
-3. Resume `INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md` from checkpoint
-   `912dc1a`; extend durable recall only through released source/passage,
-   coverage and late-reauthorization contracts.
+1. Finish the fresh exact-finalist epoch-D 30-minute soak, then run the matching
+   fail-fast capacity-v2 protocol after a cold restart without promoting an
+   in-progress or historical receipt.
+2. Release the exact current finalist code default-off, then complete
+   controlled and physical laptop-loss evidence from that sealed source.
+3. Register only the accepted manifest in a separate default-off release, then
+   prove private product shadow before bounded assist with exact primary
+   fallback.
+4. Resume `INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md`; extend durable
+   recall only through the deployed source/passage, coverage and
+   late-reauthorization contracts.
 
 ## Completed and deployed (current package)
 
@@ -197,6 +211,19 @@ course, with these repository-specific constraints:
   accepted by exact process-root, trusted-CA HTTPS `ok`/`0.207.8`, schema-38,
   SQLite quick-check, foreign-key and clean post-cutover journal gates.
 
+### Durable archive evidence and default-off secondary foundation (`0.207.9`)
+
+- Schema 39 deploys the narrow body-free selected-archive-evidence sidecar and
+  restart continuation with fresh source, revision and authority checks.
+- The optional private-CA secondary control plane is deployed default-off. The
+  live `0.207.9` registry contains the superseded provisional
+  `gptoss20b-ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3`;
+  the current exact finalist is still unreleased. Both accepted registries are
+  empty and `assist` fails closed.
+- Live identity is `2b197e1e467e93a085a1b4cc330fbda8b5b7b982`, with the separate
+  schema-39 fallback `f1426ca561f8914574cebf3a69f8dde83f79b568`. Backend and bridge
+  are active and trusted-CA health reports `ok`/`0.207.9`.
+
 ## Document-contour WIP audit disposition
 
 The recovered 0.207.4 inventory was revalidated against current `main`; no old
@@ -261,30 +288,33 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- Full parallel Python gate: 17,689 passed. The canvas case skipped by that
-  parallel run passed sequentially, for 17,690 verified tests; only the two
-  explicitly configured real Syncthing and backup environments remain unrun.
-- Secondary-focused gate: 206 passed. Ruff and mypy are green.
-- The `0.207.8` wheel was built twice with one `SOURCE_DATE_EPOCH` and matched
-  byte-for-byte. Immutable activation completed `clear`; exact candidate and
-  fallback identities, database/inbox/Obsidian backup receipts, trusted-CA
-  health, process roots, schema 38, SQLite quick-check and foreign keys passed.
+- The latest completed full non-UI gate before the soak-protocol-only follow-up
+  commits passed 17,951 tests; one explicitly configured real-Syncthing case
+  remained environment-gated. Static and focused secondary gates are green.
+- The `0.207.9` wheel reproduced byte-for-byte. Immutable activation completed
+  `clear`; exact candidate and schema-39 fallback identities, recovery receipts,
+  trusted-CA health, process roots, schema 39, SQLite quick-check and foreign
+  keys passed.
 - No warning-or-higher backend or bridge journal entries were emitted during
   the post-cutover verification window.
 
 ## Next order
 
-1. Complete native-MXFP4 protocol, capacity, restart, soak and failure
-   certification of the exact optional laptop node.
-2. Register the evidence-bound profile and release it default-off; then prove
-   shadow and bounded assist, including laptop-off and disconnect-mid-turn.
-3. Resume the schema-39 archive-evidence checkpoint and release it only after
-   the complete isolated and immutable-release gates pass.
-4. Add durable candidate selection/pending-question state only when it preserves
+1. Complete the active fresh epoch-D 30-minute soak, matching cold-restart
+   capacity-v2 and failure certification of the exact provisional native-MXFP4
+   finalist.
+2. Release its exact current code default-off and close the sealed-source
+   controlled/physical failure evidence.
+3. Register only its accepted manifest in a separate default-off release; then
+   prove private product shadow before bounded assist, including laptop-off and
+   disconnect-mid-turn.
+4. Resume broader ICP work from the deployed schema-39 archive-evidence
+   vertical.
+5. Add durable candidate selection/pending-question state only when it preserves
    exact archive coverage and survives restart without persisting model prose.
-5. Add one uncertainty-aware common effect envelope and prove one idempotent,
+6. Add one uncertainty-aware common effect envelope and prove one idempotent,
    receipt-backed Obsidian mutation/reconciliation vertical.
-6. Extend existing immutable-release evidence into machine-reconcilable
+7. Extend existing immutable-release evidence into machine-reconcilable
    source/wheel/schema/activation/fallback manifests, then register exact-release
    journey evidence without promoting generic component gates.
 8. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault

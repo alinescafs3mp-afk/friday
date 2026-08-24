@@ -78,6 +78,42 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   root одним recovery set, а staged ENV1 публикуется только после verified
   backup и удаляется durable после успеха.
 
+Для optional GPT-OSS secondary brain в 0.207.10 дополнительно:
+
+- release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
+  health имеет `status=ok`, `version=0.207.10`, `secondary.mode=disabled`,
+  `secondary.state=disabled` и `secondary.available=false`;
+- `ACCEPTED_SECONDARY_RUNTIME_PROFILES` пуст; code-owned provisional-реестр
+  содержит ровно finalist
+  `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
+  с candidate-manifest SHA-256
+  `51af2164fa07ff3c01813e318076f7ac8b37eeecb73e695b6ca7543061c93439`;
+- finalist связан с `https://192.168.1.35:8443/v1`, context/total `4096`,
+  output `512`, concurrency `1`, chunked prefill `256`, native MXFP4, BF16 KV,
+  `mem_fraction_static=0.96` и full decode CUDA graph только для batch 1;
+- capacity acceptance принимает только schema v2: семь non-streaming repeats
+  с точными 512 completion tokens и `finish=length`; warm/cold имеют один
+  transport/generation/repeat protocol, разные runtime epochs, а soak связан с
+  warm epoch. Любой legacy streaming-v1 receipt отклоняется;
+- provisional admission допускает только `mode=shadow`, workload
+  `extract`, `ALLOW_PRIVATE_TEXT=0`: output выбрасывается, tools/effects/publication
+  остаются за primary; `assist`, private text и любой lookalike отклоняются;
+- обязательны regressions laptop-off, TLS/profile drift, timeout, cooldown и
+  primary-once fallback: optional endpoint не может сломать startup или primary answer;
+- provisional public shadow ENV0→ENV1 и его плановое выключение
+  идут только отдельными distinct-candidate activation через
+  `secondary_shadow_enable` / `secondary_shadow_disable`;
+- после отдельной accepted-регистрации реальный private product shadow
+  меняет только `ALLOW_PRIVATE_TEXT=0→1` через
+  `secondary_shadow_to_private_shadow`; только после его evidence
+  `secondary_shadow_to_assist` меняет только `MODE=shadow→assist`;
+  прямой public-shadow→assist отклоняется;
+- из public/private shadow плановое выключение меняет только
+  `ENABLED=1→0` через `secondary_shadow_disable` и сохраняет privacy
+  bit; из assist используется `secondary_assist_to_disabled`;
+  ручная правка live env запрещена, а unfinished activation продолжается
+  только через `recover-activation`.
+
 Для V12 file/archive slice дополнительно:
 
 - без явных переменных configured/installed mode остаются `legacy`, routes пусты;
@@ -97,7 +133,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 2 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.9`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.10`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
@@ -124,12 +160,14 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 
 Проверить:
 
-- schema version = 35;
-- предыдущий release остаётся на schema 34; переход 34 → 35 добавляет только
-  owner-scoped Obsidian profiles, vault/device bindings, onboarding, operation
-  ledger и conflicts, не переписывая canonical Raw или существующие знания;
-- прежний переход 33 → 34 сохраняет message-bound `supplied_filename`; repair
-  требует exact owner/message/raw correlation и не переписывает canonical Raw;
+- schema version = 39;
+- предыдущий release 0.207.9 уже имеет schema 39; переход
+  0.207.9 → 0.207.10 не повышает schema version и не добавляет DDL-проекцию,
+  но штатный `offline-migrate`/validation всё равно выполняется и может менять
+  bytes базы;
+- исторический переход 38 → 39 атомарно перестраивает/copy-переносит
+  `work_items`, добавляя закрытые labels `RecallSelectedArchiveEvidence` и
+  body-free sidecar выбранного archive source;
 - counts старых строк не изменились без предусмотренной миграции;
 - `integrity_check=ok`, foreign-key violations = 0;
 - FTS/retrieval работают;

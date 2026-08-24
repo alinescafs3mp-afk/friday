@@ -1,3 +1,27 @@
+## 0.207.10 — 2026-08-24
+
+### Точный provisional-финалист второго полушария
+
+- Код фиксирует один exact GPT-OSS 20B MXFP4 finalist с контекстом
+  4096, output 512, chunked prefill 256, BF16 KV, `mem_fraction_static=0.96`
+  и full decode CUDA graph для batch 1. Его admission ограничен
+  выбрасываемым `shadow/extract` на non-private тексте.
+- Secondary Inbox-запросы вписаны в exact лимиты финалиста;
+  provisional path не получает private body, tool/effect или
+  publication authority.
+- Protocol, quality, soak и product-linked failure runners усилены exact
+  Unicode/JSON-границами, реальным prefill и проверяемыми Friday-счётчиками.
+  Capacity принимает только fail-fast schema v2: одинаковые warm/cold
+  non-streaming-протоколы по семь полных 512-token ответов; прежние streaming
+  receipts не могут пройти новую приёмку. Это готовит live-приёмку, но не
+  объявляет её завершённой.
+- Immutable rollout разделяет public shadow, private product shadow и
+  `assist` на три distinct-candidate transition. Прямой public-shadow→assist
+  закрыт, а плановое shadow-disable сохраняет private-admission bit.
+- Реестр accepted-профилей остаётся пустым, `assist` закрыт,
+  а production-релиз выходит с secondary `disabled`. SQLite остаётся на
+  schema 39; новой миграции нет.
+
 ## 0.207.9 — 2026-08-24
 
 ### Точное возобновление archive evidence и опциональное второе полушарие

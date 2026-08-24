@@ -16,10 +16,13 @@ closed candidate surface may vary its reviewed engine settings:
 - image config
   `sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc`;
 - SGLang source revision `29481685462732237d80d86076d6563e1f658102`;
-- native `mxfp4` weights, BF16 model dtype, `flashinfer_mxfp4` MoE on SM120,
-  explicit CPU transport for the unused multimodal feature channel, one running
-  request and no weight/KV CPU offload. BF16 KV, Triton decode and disabled CUDA
-  graphs are the safe baseline, not a certified winner.
+- native `mxfp4` weights, BF16 model and KV dtype, `flashinfer_mxfp4` MoE on
+  SM120, explicit CPU transport for the unused multimodal feature channel, one
+  running request and no weight/KV CPU offload. The exact provisional finalist
+  uses 4,096 total context tokens, 512 output tokens,
+  `mem_fraction_static=0.96`, chunked prefill 256, page size 1, Triton
+  attention, PyTorch sampling, radix/overlap cache, hybrid SWA ratio 0.80, a
+  full decode CUDA graph at batch one and no prefill graph.
 
 The earlier community checkpoint, internal ModelOpt NVFP4 conversion and patched
 SGLang 0.5.16 image are rejected. Their conversion and calibration utilities
@@ -48,17 +51,29 @@ have been removed from this deployment bundle.
 
 ## Current checkpoint
 
-`main` and the laptop bundle are exact at
-`c726e1a6d6c3826f939c5c586034d6a21fe32917`. The laptop sync receipt is
-`1077a0e39025c7941e4751013baf0134ce494dd3fe0d85f960e70d56a7056dea`; full
-preflight evidence is green at
-`99796c80ff9b6028f41d8ff095706147cd5d5e4ac5275247ae29e5ff0ad2db2b`.
-The exact observed/accepted hardware receipts are respectively
+The current implementation checkpoint is
+`1e3834dd5d987f84c6ca6a490c0cd9b3ac2756ed`. Production Friday is `0.207.9` at
+`2b197e1e467e93a085a1b4cc330fbda8b5b7b982`, schema 39, with fallback
+`f1426ca561f8914574cebf3a69f8dde83f79b568`; the secondary feature remains
+default-off. The exact observed/accepted hardware receipts are respectively
 `7b850221e7e11ac0063971d7baaf627c96eae5441368f1907cc070106832b0f3` and
 `0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f`.
-The sealed model source is exact and zero containers were left running. No
-candidate has been run; no winner, accepted profile or production traffic is
-claimed yet.
+The sealed model source is exact. The running provisional finalist is profile
+`gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
+with candidate-manifest SHA-256
+`51af2164fa07ff3c01813e318076f7ac8b37eeecb73e695b6ca7543061c93439` and
+engine binding
+`2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`.
+It is code-admitted only to discarded non-private `shadow/extract`. The
+accepted registry is empty, `assist` remains blocked and production sends no
+traffic to the laptop. The fresh epoch-D warm capacity-v2 trial
+`capacity.v2.epoch-d.warm.7c1f742.json` passed all seven non-streaming exact
+512-token repeats at runtime epoch `1787601267.06`; its SHA-256 is
+`b317e964eced1c0a80d5d8f4cc7fcb388d60598c16dfbeb9f320f1076fa97719`,
+median end-to-end completion rate is `108.497563` tokens/s and minimum free GPU
+memory is 1,294 MiB. The fresh 30-minute
+`soak.epoch-d.full.7c1f742.json` is active; its final passing receipt, the
+matching cold-restart capacity-v2 trial and acceptance remain pending.
 
 ## 1. Management access and host preflight
 
@@ -170,8 +185,8 @@ Create `evidence/runtime.accepted.json` from `runtime-manifest.example.json`
 only after preflight reproduces every pinned image, package and hardware value;
 change only its status to `accepted`.
 
-Build the safe 4K/BF16/no-graph baseline first. This is an experiment starting
-point, not an accepted or preferred profile:
+Rebuild the exact provisional finalist below. It remains a candidate until the
+complete acceptance chain closes:
 
 ```powershell
 python .\scripts\runtime_profile_operator.py candidate `
@@ -182,12 +197,19 @@ python .\scripts\runtime_profile_operator.py candidate `
   --sglang-compat-patch-sha256 ((Get-FileHash .\runtime\reasoner_grammar_backend.py -Algorithm SHA256).Hash.ToLowerInvariant()) `
   --sglang-sampler-compat-patch-sha256 ((Get-FileHash .\runtime\sampler.py -Algorithm SHA256).Hash.ToLowerInvariant()) `
   --context-tokens 4096 --max-output-tokens 512 `
-  --mem-fraction-static 0.97 --chunked-prefill-size 1024 `
+  --mem-fraction-static 0.96 --chunked-prefill-size 256 `
+  --kv-cache-dtype bf16 --page-size 1 `
+  --radix-cache-enabled true --overlap-schedule-enabled true `
+  --swa-full-tokens-ratio 0.80 --cuda-graph-backend-decode full `
   --allowed-modes assist,shadow --allowed-workloads extract `
   --profile-id-output .\evidence\profile.id `
   --output .\evidence\profile.candidate.json
 ```
 
+The resulting profile ID must be
+`gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
+and the exact candidate bytes must hash to
+`51af2164fa07ff3c01813e318076f7ac8b37eeecb73e695b6ca7543061c93439`.
 The profile ID and served-model alias are derived from the complete engine
 projection. `dtype=bfloat16`, `quantization=mxfp4`, global/prefill attention
 `triton`, `moe_runner_backend=flashinfer_mxfp4`, hybrid SWA memory, one running
@@ -235,10 +257,11 @@ docker compose --env-file .env -f compose.yml ps
 ```
 
 Startup must prove the native source and the exact candidate projection. For the
-example above that means BF16 KV, 4K, memory fraction 0.97 and disabled graphs;
-other reviewed candidates must reproduce their own bound values exactly. Reject
-any NaN/Inf, repeated-token degeneration, backend fallback, missing final
-channel, unexpected image identity or source drift.
+finalist above that means BF16 KV, 4K, memory fraction 0.96, chunk 256, page one,
+radix/overlap and hybrid SWA 0.80 enabled, full batch-one decode graph and
+disabled prefill graph. Reject any NaN/Inf, repeated-token degeneration,
+backend fallback, missing final channel, unexpected image identity or source
+drift.
 
 ## 6. Probe, tune, soak and promote through TLS
 
@@ -265,8 +288,12 @@ python scripts/quality_battery.py \
   --output evidence/quality.observed.json
 ```
 
-Run the capacity trial at the exact candidate context/memory, repeat it after a
-cold runtime restart, then run at least 100 requests for at least 30 minutes:
+Run capacity schema v2 at the exact candidate context/memory. The accepted
+protocol is non-streaming, seven repeats and exactly 512 completion tokens per
+repeat; it stops at the first failed envelope, usage, context, headroom,
+finish-reason or throughput gate. Run the fresh soak for at least 100 requests
+and 30 minutes, then restart the runtime cold and repeat the identical v2
+capacity command against the new process epoch:
 
 ```bash
 python scripts/tune_context.py \
@@ -274,7 +301,8 @@ python scripts/tune_context.py \
   --api-key-file /secure/friday-secondary-gateway-key \
   --ca-file /secure/friday-secondary-ca.crt \
   --profile-manifest evidence/profile.candidate.json \
-  --candidates 4096 --mem-fraction-static 0.97 \
+  --candidates 4096 --repeats 7 --generation-tokens 512 \
+  --mem-fraction-static 0.96 \
   --output evidence/context.initial.json
 
 python scripts/soak.py \
@@ -284,11 +312,23 @@ python scripts/soak.py \
   --profile-manifest evidence/profile.candidate.json \
   --duration-sec 1800 --minimum-requests 100 \
   --output evidence/soak.observed.json
+
+# After a cold runtime restart, repeat the exact v2 protocol.
+python scripts/tune_context.py \
+  --base-url https://192.168.1.35:8443/v1 \
+  --api-key-file /secure/friday-secondary-gateway-key \
+  --ca-file /secure/friday-secondary-ca.crt \
+  --profile-manifest evidence/profile.candidate.json \
+  --candidates 4096 --repeats 7 --generation-tokens 512 \
+  --mem-fraction-static 0.96 \
+  --output evidence/context.cold-restart.json
 ```
 
 Every capacity repeat carries a deterministic discriminator near the start of
 the prompt. This forces a real near-limit prefill instead of measuring an
-identical full radix-cache hit after the first request.
+identical full radix-cache hit after the first request. Earlier passed soak and
+streaming capacity-v1 receipts remain preserved as historical measurements,
+but they cannot satisfy capacity-v2 acceptance.
 
 The deterministic battery proves the mocked failure contract, but cannot claim
 that the physical laptop disappeared. Run it and the controlled live outage
@@ -354,9 +394,10 @@ trust store.
 
 The pre-acceptance node witness above deliberately leaves the product counter
 gate off: assist authority does not exist yet. After the exact accepted profile
-has been registered, deployed in `assist` mode and exercised through shadow,
-repeat the three physical stages with fresh `--output` paths and add this
-complete opt-in trio (a partial trio is rejected):
+has been registered in a separate default-off release, exercised through the
+private product-shadow transition, and only then promoted to `assist`, repeat
+the three physical stages with fresh `--output` paths and add this complete
+opt-in trio (a partial trio is rejected):
 
 ```text
 physical-begin:
@@ -424,9 +465,12 @@ python .\scripts\runtime_profile_operator.py accept-profile `
   --output .\evidence\profile.accepted.json
 ```
 
-Only then register the exact accepted profile in Friday, deploy default-off,
-observe shadow mode, and enable the narrow assist workload. The primary model
-still performs final synthesis.
+Only then register the exact accepted profile in Friday and deploy it
+default-off. Real private product shadow is a separate
+`secondary_shadow_to_private_shadow` activation that changes only the private
+admission bit. After its evidence is accepted, `secondary_shadow_to_assist`
+changes only the mode; a direct public-shadow-to-assist transition is rejected.
+The primary model still performs final synthesis.
 
 ## Rollback
 

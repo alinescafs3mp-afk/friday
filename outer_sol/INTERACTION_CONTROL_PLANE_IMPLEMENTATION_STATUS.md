@@ -1,10 +1,11 @@
 # Interaction Control Plane implementation status
 
-Status: **DEPLOYED CANARY + SCHEMA-39 ARCHIVE-EVIDENCE CHECKPOINT PAUSED**
+Status: **DEPLOYED CANARY + SCHEMA-39 ARCHIVE-EVIDENCE VERTICAL DEPLOYED; BROADER ICP PAUSED**
 Date: 2026-08-24
 Branch: `main`
-Source: `main` / `912dc1a` local checkpoint; not released
-Live: Friday `0.207.8` / `da8d11e`, schema 38
+Source: `main` / `1e3834dd5d987f84c6ca6a490c0cd9b3ac2756ed`
+Live: Friday `0.207.9` / `2b197e1e467e93a085a1b4cc330fbda8b5b7b982`,
+schema 39; fallback `f1426ca561f8914574cebf3a69f8dde83f79b568`
 
 ## Release checkpoint
 
@@ -15,20 +16,19 @@ Live: Friday `0.207.8` / `da8d11e`, schema 38
 - `0f47870` introduced the dormant schema-38 Work Item foundation; `cb1b3f7`
   established its first sealed schema-capable fallback.
 - `d1c5d6f` added the exact message-window continuation canary; `4b6bc49`
-  preserved the existing named-inventory follow-up lane and `c91260d` is the
-  current deployed source.
+  preserved the existing named-inventory follow-up lane. The later live source
+  is `2b197e1`; `c91260d` is only a superseded historical checkpoint.
 - `0.207.8` adds the authorized read-only federated `archive_search` foundation:
   stable source/passage identity, explicit per-corpus coverage, process-private
   carriers and same-transaction reauthorization/publication.
-- The live anchor resolves to `da8d11e`, with `3d2bef3` (`0.207.7`) as fallback.
-  Backend and bridge are active, trusted-CA health is `ok`, and schema 38,
-  SQLite quick-check, foreign keys and exact Work Item DDL are clean.
-- Local `912dc1a` adds schema 39 and one durable, body-free selected archive
-  evidence continuation. Exact restart replay performs fresh authority and
-  revision checks without search or model use; late denial and source drift
-  suspend source-free. Its focused checkpoint gate is 645 passed, but it remains
-  intentionally undeployed while the urgent optional-secondary-brain package is
-  active.
+- The live anchor resolves to `2b197e1`, with `f1426ca` (`0.207.9`, schema 39)
+  as fallback. Backend and bridge are active, trusted-CA health is `ok`, and
+  schema 39, SQLite quick-check, foreign keys and exact Work Item DDL are clean.
+- The `912dc1a` schema-39 vertical is now deployed in `0.207.9`: one durable,
+  body-free selected archive evidence continuation. Exact restart replay
+  performs fresh authority and revision checks without search or model use;
+  late denial and source drift suspend source-free. Broader ICP implementation
+  remains paused while the urgent optional-secondary-brain package is active.
 
 ## P0A implemented
 
@@ -70,9 +70,11 @@ Live: Friday `0.207.8` / `da8d11e`, schema 38
 - The V12 `FILE_READ`/`ARCHIVE_READ` `CapabilityOutcome v1`, completion gate and
   atomic accepted-outcome receipt are deployed. The wider P1 adapter set is not
   complete; see `outer_sol/V12_FURTHER_REFINEMENT_STATUS.md`.
-- The only durable Work Item currently released is the narrow
-  `RecallConversation` exact-window canary. It must not be generalized into a
-  claim that document recall, generic Active Frames or WorkGraphs are complete.
+- The durable Work Items currently released are the narrow
+  `RecallConversation` exact-window canary and the body-free
+  `RecallSelectedArchiveEvidence` continuation. They must not be generalized
+  into a claim that generic document recall, Active Frames or WorkGraphs are
+  complete.
 
 ## Next implementation order
 
@@ -88,11 +90,12 @@ Live: Friday `0.207.8` / `da8d11e`, schema 38
 
 ## Current cumulative gate
 
-- Full isolated Python gate: 17,367 passed; two skips require explicitly
-  configured real Syncthing and real backup-migration environments.
+- The latest completed full non-UI gate before the secondary soak-protocol-only
+  follow-ups passed 17,951 tests; one real-Syncthing case remained explicitly
+  environment-gated.
 - Schema-38 migration, lifecycle/privacy, revision-CAS, restart, temporal
   continuation, receipt/plan binding and named-inventory compatibility checks
   passed.
-- Ruff, mypy for changed source, compileall and release diff checks passed. The
-  `0.207.8` wheel reproduced byte-for-byte and immutable activation completed
-  `clear`; Docker and companion-plugin work remained outside the checkpoint.
+- Ruff, compile and release diff checks passed. The `0.207.9` wheel reproduced
+  byte-for-byte and immutable activation completed `clear`; Docker and
+  companion-plugin work remained outside the primary release checkpoint.
