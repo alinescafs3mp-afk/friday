@@ -222,8 +222,19 @@ def _summary_is_faithful(completion: SanitizedCompletion) -> bool:
 
 
 def _citation_is_preserved(completion: SanitizedCompletion) -> bool:
-    return completion.content.count("[SRC-17]") == 1 and bool(
-        re.search(r"(?<!\d)42(?!\d)", completion.content)
+    text = completion.content.strip()
+    markers = re.findall(r"\[SRC-[^\[\]\r\n]{1,64}\]", text, flags=re.IGNORECASE)
+    numbers_without_marker = tuple(re.findall(r"\d+", text.replace("[SRC-17]", "")))
+    return bool(
+        completion.finish_reason == "stop"
+        and markers == ["[SRC-17]"]
+        and numbers_without_marker == ("42",)
+        and re.fullmatch(
+            r"[^.!?\r\n]{0,200}(?<!\d)42(?!\d)\s*"
+            r"(?:m\b|meters?\b|metres?\b)[^.!?\r\n]{0,64}\[SRC-17\][.!?]?",
+            text,
+            flags=re.IGNORECASE,
+        )
     )
 
 
@@ -418,8 +429,13 @@ def _live_cases() -> tuple[QualityCase, ...]:
         QualityCase(
             "citation_preservation",
             _base_messages(
-                "Restate this fact in one sentence and preserve its citation exactly once: "
-                "The measured height is 42 m [SRC-17]."
+                "Rewrite without changing the factual meaning:\n"
+                "The measured height is 42 m [SRC-17].",
+                system=(
+                    "Citation-preserving rewrite: copy every bracketed citation marker byte-for-byte "
+                    "exactly once immediately after the factual claim it supports. Never invent, alter, "
+                    "or omit citation markers. Return only one English sentence. Never call tools."
+                ),
             ),
             _citation_is_preserved,
         ),

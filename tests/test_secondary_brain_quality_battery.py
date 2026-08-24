@@ -399,6 +399,62 @@ def test_summary_prompt_declares_the_closed_fact_contract(battery: Any) -> None:
     assert "24 августа 2026 года" in prompt
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        "The measured height is 42 m [SRC-17].",
+        "The recorded height measured 42 meters [SRC-17].",
+    ],
+)
+def test_citation_validator_accepts_faithful_rewrites(battery: Any, content: str) -> None:
+    completion = battery.SanitizedCompletion(
+        content=content,
+        latency_sec=0.1,
+        prompt_tokens=20,
+        completion_tokens=20,
+        finish_reason="stop",
+        reasoning_present=False,
+    )
+
+    assert battery._citation_is_preserved(completion)
+
+
+@pytest.mark.parametrize(
+    ("content", "finish_reason"),
+    [
+        ("The measured height is 42 m.", "stop"),
+        ("The measured height is 42 m [SRC-17] [SRC-17].", "stop"),
+        ("The measured height is 42 m [SRC-18].", "stop"),
+        ("[SRC-17] The measured height is 42 m.", "stop"),
+        ("The measured height is 42 [SRC-17].", "stop"),
+        ("The measured heights are 42 m and 43 m [SRC-17].", "stop"),
+        ("The measured height is 42 m [SRC-17].", "length"),
+    ],
+)
+def test_citation_validator_rejects_broken_claims(
+    battery: Any, content: str, finish_reason: str
+) -> None:
+    completion = battery.SanitizedCompletion(
+        content=content,
+        latency_sec=0.1,
+        prompt_tokens=20,
+        completion_tokens=20,
+        finish_reason=finish_reason,
+        reasoning_present=False,
+    )
+
+    assert not battery._citation_is_preserved(completion)
+
+
+def test_citation_prompt_declares_the_marker_contract_in_system_message(battery: Any) -> None:
+    case = next(case for case in battery._live_cases() if case.name == "citation_preservation")
+    system = case.messages[0]["content"]
+
+    assert "byte-for-byte exactly once" in system
+    assert "immediately after the factual claim" in system
+    assert "Never invent, alter, or omit" in system
+
+
 def test_stop_probe_uses_the_native_return_token_with_a_bounded_generation(battery: Any) -> None:
     case = next(case for case in battery._live_cases() if case.name == "stop_sequence")
     serialized_prompt = json.dumps(case.messages, ensure_ascii=False)
