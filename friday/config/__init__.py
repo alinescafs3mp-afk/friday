@@ -607,6 +607,26 @@ class FridaySettings:
     verify_answers: bool
     verify_min_answer_chars: int
 
+    # Detachable, advisory-only text endpoint.  This namespace is deliberately
+    # independent from the primary LLM configuration: an absent or broken
+    # secondary must never alter primary startup or endpoint state.
+    secondary_llm_enabled: bool
+    secondary_llm_mode: str
+    secondary_llm_base_url: str
+    secondary_llm_model: str
+    secondary_llm_api_key: str
+    secondary_llm_ca_file: str
+    secondary_llm_connect_timeout_sec: float
+    secondary_llm_read_timeout_sec: float
+    secondary_llm_call_budget_sec: float
+    secondary_llm_admission_timeout_sec: float
+    secondary_llm_health_interval_sec: float
+    secondary_llm_cooldown_sec: float
+    secondary_llm_max_context_tokens: int
+    secondary_llm_max_concurrency: int
+    secondary_llm_workloads: tuple[str, ...]
+    secondary_llm_allow_private_text: bool
+
     embeddings_enabled: bool
     embeddings_base_url: str
     embeddings_api_key: str
@@ -1201,6 +1221,39 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         # dataclass replacement, but do not expose it to runtime configuration.
         verify_answers=False,
         verify_min_answer_chars=_int_env("FRIDAY_VERIFY_MIN_ANSWER_CHARS", 300, minimum=1),
+        secondary_llm_enabled=_bool_env("FRIDAY_SECONDARY_LLM_ENABLED", False),
+        secondary_llm_mode=_fail_closed_choice_env(
+            "FRIDAY_SECONDARY_LLM_MODE",
+            "disabled",
+            ("disabled", "shadow", "assist"),
+        ),
+        secondary_llm_base_url=env("FRIDAY_SECONDARY_LLM_BASE_URL", "").strip().rstrip("/"),
+        secondary_llm_model=env("FRIDAY_SECONDARY_LLM_MODEL", "").strip(),
+        secondary_llm_api_key=env("FRIDAY_SECONDARY_LLM_API_KEY", "").strip(),
+        secondary_llm_ca_file=env("FRIDAY_SECONDARY_LLM_CA_FILE", "").strip(),
+        secondary_llm_connect_timeout_sec=_float_env(
+            "FRIDAY_SECONDARY_LLM_CONNECT_TIMEOUT_SEC", 1.0, minimum=0.05
+        ),
+        secondary_llm_read_timeout_sec=_float_env("FRIDAY_SECONDARY_LLM_READ_TIMEOUT_SEC", 12.0, minimum=0.1),
+        secondary_llm_call_budget_sec=_float_env("FRIDAY_SECONDARY_LLM_CALL_BUDGET_SEC", 15.0, minimum=0.1),
+        secondary_llm_admission_timeout_sec=_float_env(
+            "FRIDAY_SECONDARY_LLM_ADMISSION_TIMEOUT_SEC", 0.10, minimum=0.001
+        ),
+        secondary_llm_health_interval_sec=_float_env(
+            "FRIDAY_SECONDARY_LLM_HEALTH_INTERVAL_SEC", 30.0, minimum=1.0
+        ),
+        secondary_llm_cooldown_sec=_float_env("FRIDAY_SECONDARY_LLM_COOLDOWN_SEC", 60.0, minimum=0.0),
+        # A measured cap is mandatory before traffic can be admitted.  Zero is
+        # therefore the safe, intentionally unusable default.
+        secondary_llm_max_context_tokens=_int_env("FRIDAY_SECONDARY_LLM_MAX_CONTEXT_TOKENS", 0, minimum=0),
+        secondary_llm_max_concurrency=_int_env("FRIDAY_SECONDARY_LLM_MAX_CONCURRENCY", 1, minimum=1),
+        secondary_llm_workloads=tuple(
+            _list_env(
+                "FRIDAY_SECONDARY_LLM_WORKLOADS",
+                ["classify", "extract", "query_rewrite", "summarize", "critique", "verify"],
+            )
+        ),
+        secondary_llm_allow_private_text=_bool_env("FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT", False),
         embeddings_enabled=_bool_env("FRIDAY_EMBEDDINGS_ENABLED", False),
         embeddings_base_url=env("FRIDAY_EMBEDDINGS_BASE_URL", llm_base_url).rstrip("/"),
         # A separate embeddings service may share the LLM's token; default to it.
