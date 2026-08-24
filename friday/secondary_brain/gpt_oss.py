@@ -158,6 +158,11 @@ class GptOssProtocolAdapter:
             "model": config.served_model_alias,
             "messages": messages,
             "max_tokens": request.max_output_tokens,
+            # GPT-OSS defaults to medium reasoning and can exhaust a small
+            # advisory envelope before emitting a final channel. Utility work
+            # is deliberately low-effort; separate certification probes cover
+            # medium/high reasoning without exposing it to Friday.
+            "reasoning_effort": "low",
             "temperature": 0.0,
             "stream": False,
         }

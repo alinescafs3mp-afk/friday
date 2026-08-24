@@ -608,6 +608,7 @@ async def test_exact_alias_and_reasoning_are_sanitized(settings: Any) -> None:
         assert request.headers["authorization"] == f"Bearer {_API_KEY}"
         payload = __import__("json").loads(request.content)
         assert payload["model"] == _ALIAS
+        assert payload["reasoning_effort"] == "low"
         assert "tools" not in payload
         return _response(message_extra={"reasoning_content": synthetic_reasoning})
 

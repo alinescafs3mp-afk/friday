@@ -326,7 +326,9 @@ class SecondaryBrainScheduler:
                     },
                     {"role": "user", "content": "Reply with exactly: ready"},
                 ),
-                max_output_tokens=16,
+                # GPT-OSS reasons before its final channel.  A 16-token cap can
+                # return HTTP 200 with only a length stop and no usable final.
+                max_output_tokens=min(256, self._client.config.max_output_tokens),
                 absolute_deadline_monotonic=absolute_deadline_monotonic,
             )
             attempt = await self._client.call(canary)
