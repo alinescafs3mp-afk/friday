@@ -62,10 +62,16 @@ function New-FridayRuleFixture {
 
 function New-FridayPortFixture {
     param([object]$Protocol = 'Any', [object]$LocalPort = 'Any')
+    $localPortValue = if ($LocalPort -is [array]) {
+        @($LocalPort | ForEach-Object { [string]$_ })
+    } else {
+        [string]$LocalPort
+    }
     [pscustomobject]@{
         Protocol = $Protocol
-        LocalPort = [string]$LocalPort
+        LocalPort = $localPortValue
         RemotePort = 'Any'
+        DynamicTarget = 'Any'
         LocalOnlyMapping = $false
         LooseSourceMapping = $false
     }
@@ -240,6 +246,7 @@ $managedRule = [pscustomobject]@{
     LooseSourceMapping = $false
     PolicyStoreSourceType = 'Local'
     PolicyStoreSource = 'PersistentStore'
+    Owner = $null
 }
 $managedPort = New-FridayPortFixture -Protocol TCP -LocalPort 8443
 $managedAddress = [pscustomobject]@{ LocalAddress = 'Any'; RemoteAddress = '192.168.1.78' }
@@ -251,6 +258,8 @@ $managedSecurity = [pscustomobject]@{
     RemoteUser = 'Any'
     RemoteMachine = 'Any'
 }
+$managedInterface = [pscustomobject]@{ InterfaceAlias = @('Any') }
+$managedInterfaceType = [pscustomobject]@{ InterfaceType = 'Any' }
 $managedArguments = @{
     Rule = $managedRule
     PortFilters = @($managedPort)
@@ -258,6 +267,8 @@ $managedArguments = @{
     ServiceFilters = @($anyService)
     AddressFilters = @($managedAddress)
     SecurityFilters = @($managedSecurity)
+    InterfaceFilters = @($managedInterface)
+    InterfaceTypeFilters = @($managedInterfaceType)
     PrimaryFridayHost = '192.168.1.78'
 }
 Assert-FridayTrue -Name 'exact_legacy_managed_rule_is_replaceable' `
@@ -265,6 +276,90 @@ Assert-FridayTrue -Name 'exact_legacy_managed_rule_is_replaceable' `
 $managedAddress.RemoteAddress = 'Any'
 Assert-FridayFalse -Name 'display_name_does_not_exempt_broad_remote_address' `
     -Value (Test-FridayManagedFirewallRuleExact @managedArguments)
+$managedAddress.RemoteAddress = @('192.168.1.35', '192.168.1.78')
+$managedArguments.LocalFridayHost = '192.168.1.35'
+Assert-FridayTrue -Name 'trusted_allow_exact_set_is_accepted_in_any_order' `
+    -Value (Test-FridayManagedFirewallRuleExact @managedArguments)
+$managedInterface.InterfaceAlias = @('Ethernet')
+Assert-FridayFalse -Name 'narrowed_interface_alias_fails_exact_allow' `
+    -Value (Test-FridayManagedFirewallRuleExact @managedArguments)
+$managedInterface.InterfaceAlias = @('Any')
+$managedPort.DynamicTarget = 'ProximityApps'
+Assert-FridayFalse -Name 'dynamic_target_fails_exact_allow' `
+    -Value (Test-FridayManagedFirewallRuleExact @managedArguments)
+$managedPort.DynamicTarget = 'Any'
+
+$ipv4Complement = @(
+    '0.0.0.0-192.168.1.34',
+    '192.168.1.36-192.168.1.77',
+    '192.168.1.79-255.255.255.255'
+)
+Assert-FridayTrue -Name 'exact_ipv4_ipv6_complement_is_complete' `
+    -Value (Test-FridayRemoteAddressComplementExact $ipv4Complement @('::/0'))
+Assert-FridayFalse -Name 'missing_complement_range_fails_closed' `
+    -Value (Test-FridayRemoteAddressComplementExact $ipv4Complement[0..1] @('::/0'))
+Assert-FridayFalse -Name 'missing_ipv6_block_fails_closed' `
+    -Value (Test-FridayRemoteAddressComplementExact $ipv4Complement @())
+
+$managedBlockRule = [pscustomobject]@{
+    Name = 'Friday.Secondary.SGLang.Block.Complement.IPv4.TCP8443'
+    DisplayName = 'managed complement'
+    PackageFamilyName = $null
+    Owner = $null
+    Direction = 'Inbound'
+    Action = 'Block'
+    Enabled = $true
+    Profile = 'Any'
+    EdgeTraversalPolicy = 'Block'
+    LocalOnlyMapping = $false
+    LooseSourceMapping = $false
+    PolicyStoreSourceType = 'Local'
+    PolicyStoreSource = 'PersistentStore'
+}
+$managedBlockAddress = [pscustomobject]@{
+    LocalAddress = 'Any'
+    RemoteAddress = $ipv4Complement
+}
+$managedBlockArguments = @{
+    Rule = $managedBlockRule
+    PortFilters = @($managedPort)
+    ApplicationFilters = @($anyApplication)
+    ServiceFilters = @($anyService)
+    AddressFilters = @($managedBlockAddress)
+    SecurityFilters = @($managedSecurity)
+    InterfaceFilters = @($managedInterface)
+    InterfaceTypeFilters = @($managedInterfaceType)
+    ExpectedRemoteAddresses = $ipv4Complement
+}
+Assert-FridayTrue -Name 'exact_managed_complement_block_is_accepted' `
+    -Value (Test-FridayManagedBlockFirewallRuleExact @managedBlockArguments)
+$managedBlockRule.Owner = 'S-1-5-21-1'
+Assert-FridayFalse -Name 'owned_block_fails_exact_contract' `
+    -Value (Test-FridayManagedBlockFirewallRuleExact @managedBlockArguments)
+$managedBlockRule.Owner = $null
+$managedBlockAddress.RemoteAddress = $ipv4Complement[0..1]
+Assert-FridayFalse -Name 'narrowed_managed_block_fails_exact_contract' `
+    -Value (Test-FridayManagedBlockFirewallRuleExact @managedBlockArguments)
+
+$normalSecurity = [pscustomobject]@{ OverrideBlockRules = $false }
+$bypassSecurity = [pscustomobject]@{ OverrideBlockRules = $true }
+$normalMalformed = Get-FridayAuthenticatedBypassAssessment `
+    -PortFilters @((New-FridayPortFixture -Protocol TCP -LocalPort 'unknown-token')) `
+    -SecurityFilters @($normalSecurity)
+Assert-FridayFalse -Name 'normal_allow_skips_irrelevant_port_parsing' -Value $normalMalformed.conflict
+$bypassAny = Get-FridayAuthenticatedBypassAssessment -PortFilters @($anyPort) `
+    -SecurityFilters @($bypassSecurity)
+Assert-FridayTrue -Name 'authenticated_any_port_bypass_conflicts' -Value $bypassAny.conflict
+$bypassNumeric = Get-FridayAuthenticatedBypassAssessment `
+    -PortFilters @((New-FridayPortFixture -Protocol TCP -LocalPort 80)) `
+    -SecurityFilters @($bypassSecurity)
+Assert-FridayFalse -Name 'authenticated_numeric_nonoverlap_is_safe' -Value $bypassNumeric.conflict
+$bypassUnknown = Get-FridayAuthenticatedBypassAssessment `
+    -PortFilters @((New-FridayPortFixture -Protocol TCP -LocalPort RPC)) `
+    -SecurityFilters @($bypassSecurity)
+Assert-FridayTrue -Name 'authenticated_unknown_port_is_indeterminate' -Value $bypassUnknown.conflict
+$missingSecurity = Get-FridayAuthenticatedBypassAssessment -PortFilters @($anyPort) -SecurityFilters @()
+Assert-FridayTrue -Name 'missing_bypass_security_filter_fails_closed' -Value $missingSecurity.conflict
 
 [pscustomobject][ordered]@{
     schema = 'friday.secondary-firewall-classifier-test.v1'

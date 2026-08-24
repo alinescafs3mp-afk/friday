@@ -11,17 +11,46 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-$managedRuleName = 'Friday.Secondary.SGLang.PrimaryOnly.TCP8443'
-$ruleDisplayName = 'Friday Secondary - SGLang from primary only'
+$localFridayHost = '192.168.1.35'
+$managedRuleName = 'Friday.Secondary.SGLang.Allow.TrustedIPv4.TCP8443'
+$legacyRuleDisplayName = 'Friday Secondary - SGLang from primary only'
+$ruleDisplayName = 'Friday Secondary - SGLang from primary and local telemetry'
+$applyGuardName = 'Friday.Secondary.SGLang.ApplyGuard.All.TCP8443'
+$ipv4BlockName = 'Friday.Secondary.SGLang.Block.Complement.IPv4.TCP8443'
+$ipv6BlockName = 'Friday.Secondary.SGLang.Block.All.IPv6.TCP8443'
+$ipv4BlockAddresses = @(
+    '0.0.0.0-192.168.1.34',
+    '192.168.1.36-192.168.1.77',
+    '192.168.1.79-255.255.255.255'
+)
+$ipv6BlockAddresses = @('::/0')
+$blockSpecs = @(
+    [pscustomobject]@{
+        name = $ipv4BlockName
+        display = 'Friday Secondary - block non-trusted IPv4 on TCP 8443'
+        remote_addresses = $ipv4BlockAddresses
+    },
+    [pscustomobject]@{
+        name = $ipv6BlockName
+        display = 'Friday Secondary - block all IPv6 on TCP 8443'
+        remote_addresses = $ipv6BlockAddresses
+    }
+)
+$applyGuardSpec = [pscustomobject]@{
+    name = $applyGuardName
+    display = 'Friday Secondary - temporary all-source TCP 8443 apply guard'
+    remote_addresses = @('Any')
+}
 
 $plan = [ordered]@{
-    schema = 'friday.secondary-firewall-plan.v2'
+    schema = 'friday.secondary-firewall-plan.v3'
     apply = [bool]$Apply
-    rule_name = $managedRuleName
-    rule_display_name = $ruleDisplayName
+    allow_rule_name = $managedRuleName
+    block_rule_names = @($ipv4BlockName, $ipv6BlockName)
     protocol = 'TCP'
     local_port = 8443
-    remote_address = $PrimaryFridayHost
+    allowed_remote_ipv4 = @($PrimaryFridayHost, $localFridayHost)
+    ipv6_allowed = $false
     public_internet_exposure_allowed = $false
 }
 if (-not $Apply) {
@@ -46,197 +75,291 @@ function Get-FridayCoreFirewallFilters {
 }
 
 function Get-FridayManagedFirewallFilters {
-    param(
-        [Parameter(Mandatory = $true)][object]$Rule,
-        [Parameter(Mandatory = $true)][object]$Core
-    )
+    param([Parameter(Mandatory = $true)][object]$Rule)
+    $core = Get-FridayCoreFirewallFilters $Rule
     [pscustomobject]@{
-        port = @($Core.port)
-        application = @($Core.application)
-        service = @($Core.service)
+        port = @($core.port)
+        application = @($core.application)
+        service = @($core.service)
         address = @($Rule | Get-NetFirewallAddressFilter -ErrorAction Stop)
         security = @($Rule | Get-NetFirewallSecurityFilter -ErrorAction Stop)
+        interface = @($Rule | Get-NetFirewallInterfaceFilter -ErrorAction Stop)
+        interface_type = @($Rule | Get-NetFirewallInterfaceTypeFilter -ErrorAction Stop)
     }
 }
 
-function Test-FridayManagedCandidate {
+function Test-FridayManagedAllowCandidate {
     param(
         [Parameter(Mandatory = $true)][object]$Rule,
-        [Parameter(Mandatory = $true)][object]$Core
+        [Parameter()][switch]$LegacyPrimaryOnly
     )
-    $filters = Get-FridayManagedFirewallFilters $Rule $Core
-    Test-FridayManagedFirewallRuleExact `
-        -Rule $Rule `
-        -PortFilters $filters.port `
-        -ApplicationFilters $filters.application `
-        -ServiceFilters $filters.service `
-        -AddressFilters $filters.address `
-        -SecurityFilters $filters.security `
-        -PrimaryFridayHost $PrimaryFridayHost
+    $filters = Get-FridayManagedFirewallFilters $Rule
+    $arguments = @{
+        Rule = $Rule
+        PortFilters = $filters.port
+        ApplicationFilters = $filters.application
+        ServiceFilters = $filters.service
+        AddressFilters = $filters.address
+        SecurityFilters = $filters.security
+        InterfaceFilters = $filters.interface
+        InterfaceTypeFilters = $filters.interface_type
+        PrimaryFridayHost = $PrimaryFridayHost
+    }
+    if (-not $LegacyPrimaryOnly) { $arguments.LocalFridayHost = $localFridayHost }
+    Test-FridayManagedFirewallRuleExact @arguments
 }
 
-# Package-family inventory is an authority input, not a display-name heuristic.
-# Failure to enumerate or validate it stops Apply before any firewall mutation.
-$installedPackages = @(Get-AppxPackage -AllUsers -ErrorAction Stop)
-$installedPackageFamilyNames = @()
-foreach ($installedPackage in $installedPackages) {
-    $identity = Get-FridayStrictTextProperty $installedPackage 'PackageFamilyName'
-    if (-not $identity.valid) {
-        throw 'Installed package-family inventory contains an unreadable identity.'
-    }
-    $installedPackageFamilyNames += $identity.value
-}
-$installedPackageFamilyNameSet = New-FridayVerifiedPackageFamilyNameSet $installedPackageFamilyNames
-
-# Audit effective local and policy rules. A legacy Friday DisplayName is ignored
-# only after full desired-rule verification; the name alone grants no exemption.
-$effectiveRules = @(
-    Get-NetFirewallRule `
-        -PolicyStore ActiveStore `
-        -TracePolicyStore `
-        -Direction Inbound `
-        -Action Allow `
-        -Enabled True `
-        -ErrorAction Stop
-)
-$conflicts = @()
-$managedNamesToReplace = @{}
-foreach ($otherRule in $effectiveRules) {
-    $core = Get-FridayCoreFirewallFilters $otherRule
-    $observedName = Get-FridayStrictTextProperty $otherRule 'Name'
-    $observedDisplayName = Get-FridayStrictTextProperty $otherRule 'DisplayName'
-    $isManagedName = $observedName.valid -and $observedName.value -ceq $managedRuleName
-    $isLegacyDisplayName = $observedDisplayName.valid -and
-        $observedDisplayName.value -ceq $ruleDisplayName
-    if (($isManagedName -or $isLegacyDisplayName) -and
-        (Test-FridayManagedCandidate $otherRule $core)) {
-        $managedNamesToReplace[$observedName.value] = $true
-        continue
-    }
-    $assessment = Get-FridayFirewallRuleAssessment `
-        -Rule $otherRule `
-        -PortFilters $core.port `
-        -ApplicationFilters $core.application `
-        -ServiceFilters $core.service `
-        -InstalledPackageFamilyNames $installedPackageFamilyNameSet
-    if ($assessment.conflict) {
-        $conflicts += $otherRule
-    }
-}
-if ($conflicts.Count -ne 0) {
-    throw 'Another enabled effective inbound allow rule can reach TCP 8443; remove or narrow it before rollout.'
+function Test-FridayManagedBlockCandidate {
+    param(
+        [Parameter(Mandatory = $true)][object]$Rule,
+        [Parameter(Mandatory = $true)][object]$Spec
+    )
+    $filters = Get-FridayManagedFirewallFilters $Rule
+    Test-FridayManagedBlockFirewallRuleExact -Rule $Rule -PortFilters $filters.port `
+        -ApplicationFilters $filters.application -ServiceFilters $filters.service `
+        -AddressFilters $filters.address -SecurityFilters $filters.security `
+        -InterfaceFilters $filters.interface -InterfaceTypeFilters $filters.interface_type `
+        -ExpectedRemoteAddresses $Spec.remote_addresses
 }
 
-# Re-read and revalidate every local rule that will be replaced. No mutation
-# occurs above this boundary.
-$persistentRules = @(
-    Get-NetFirewallRule -PolicyStore PersistentStore -TracePolicyStore -ErrorAction Stop
-)
-$mutationCandidates = @(
-    $persistentRules |
-        Where-Object {
-            $candidateName = Get-FridayStrictTextProperty $_ 'Name'
-            $candidateName.valid -and (
-                $candidateName.value -ceq $managedRuleName -or
-                $managedNamesToReplace.ContainsKey($candidateName.value)
-            )
+function Assert-FridayFirewallProfilesEnabled {
+    $firewallServices = @(Get-Service -Name MpsSvc -ErrorAction Stop)
+    if ($firewallServices.Count -ne 1) {
+        throw 'Windows Defender Firewall service state is missing or ambiguous.'
+    }
+    $firewallServiceStatus = Get-FridayStrictAtomProperty $firewallServices[0] 'Status'
+    if (-not $firewallServiceStatus.valid -or $firewallServiceStatus.value -cne 'Running') {
+        throw 'Windows Defender Firewall service must be running.'
+    }
+    $profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction Stop)
+    if ($profiles.Count -ne 3) { throw 'Effective firewall profile set is missing or ambiguous.' }
+    foreach ($profileName in @('Domain', 'Private', 'Public')) {
+        $matching = @($profiles | Where-Object { [string]$_.Name -ceq $profileName })
+        if ($matching.Count -ne 1) { throw 'Effective firewall profile set is missing or ambiguous.' }
+        $enabled = Get-FridayStrictAtomProperty $matching[0] 'Enabled'
+        $defaultInbound = Get-FridayStrictAtomProperty $matching[0] 'DefaultInboundAction'
+        $allowInbound = Get-FridayStrictAtomProperty $matching[0] 'AllowInboundRules'
+        $allowLocal = Get-FridayStrictAtomProperty $matching[0] 'AllowLocalFirewallRules'
+        $disabledAliasesProperty = $matching[0].PSObject.Properties['DisabledInterfaceAliases']
+        $disabledAliases = if ($null -eq $disabledAliasesProperty) {
+            @('__missing__')
+        } else {
+            @($disabledAliasesProperty.Value | Where-Object {
+                $null -ne $_ -and -not [string]::IsNullOrWhiteSpace([string]$_)
+            })
         }
-)
-foreach ($expectedName in $managedNamesToReplace.Keys) {
-    if (@($mutationCandidates | Where-Object { [string]$_.Name -ceq $expectedName }).Count -ne 1) {
-        throw 'A previously audited managed firewall rule changed before replacement.'
-    }
-}
-foreach ($candidate in $mutationCandidates) {
-    $core = Get-FridayCoreFirewallFilters $candidate
-    if (-not (Test-FridayManagedCandidate $candidate $core)) {
-        throw 'A managed firewall candidate failed exact pre-mutation revalidation.'
+        if (-not $enabled.valid -or $enabled.value -cne 'True' -or
+            -not $defaultInbound.valid -or $defaultInbound.value -cne 'Block' -or
+            -not $allowInbound.valid -or $allowInbound.value -cne 'True' -or
+            -not $allowLocal.valid -or $allowLocal.value -cne 'True' -or
+            $disabledAliases.Count -ne 0) {
+            throw 'Every effective firewall profile must enforce blocks and local inbound rules.'
+        }
     }
 }
 
-foreach ($candidate in $mutationCandidates) {
+function Get-FridayAuthenticatedBypassConflicts {
+    $conflicts = @()
+    $allowRules = @(Get-NetFirewallRule -PolicyStore ActiveStore -TracePolicyStore `
+        -Direction Inbound -Action Allow -Enabled True -ErrorAction Stop)
+    foreach ($allowRule in $allowRules) {
+        $portFilters = @($allowRule | Get-NetFirewallPortFilter -ErrorAction Stop)
+        $securityFilters = @($allowRule | Get-NetFirewallSecurityFilter -ErrorAction Stop)
+        $assessment = Get-FridayAuthenticatedBypassAssessment `
+            -PortFilters $portFilters -SecurityFilters $securityFilters
+        if ($assessment.conflict) { $conflicts += $allowRule }
+    }
+    return @($conflicts)
+}
+
+function Assert-FridayBlockCoverage {
+    foreach ($spec in $blockSpecs) {
+        $rules = @(Get-NetFirewallRule -PolicyStore ActiveStore -TracePolicyStore `
+            -Name $spec.name -ErrorAction SilentlyContinue)
+        if ($rules.Count -ne 1 -or -not (Test-FridayManagedBlockCandidate $rules[0] $spec)) {
+            throw 'Managed complement block coverage is missing or differs from the exact contract.'
+        }
+    }
+    if (-not (Test-FridayRemoteAddressComplementExact `
+        $ipv4BlockAddresses $ipv6BlockAddresses)) {
+        throw 'Managed complement address coverage is not exact.'
+    }
+}
+
+function Assert-FridayFinalCoverage {
+    Assert-FridayFirewallProfilesEnabled
+    Assert-FridayBlockCoverage
+    $allowReadback = @(Get-NetFirewallRule -PolicyStore ActiveStore -TracePolicyStore `
+        -Name $managedRuleName -ErrorAction Stop)
+    if ($allowReadback.Count -ne 1 -or
+        -not (Test-FridayManagedAllowCandidate $allowReadback[0])) {
+        throw 'The trusted allow is missing, ambiguous, or differs from the exact contract.'
+    }
+    if (@(Get-FridayAuthenticatedBypassConflicts).Count -ne 0) {
+        throw 'An enabled authenticated-bypass allow can override TCP 8443 complement blocks.'
+    }
+}
+
+function Remove-FridayCreatedTrustedAllowBestEffort {
+    param([Parameter(Mandatory = $true)][bool]$CreatedByThisApply)
+    if (-not $CreatedByThisApply) { return }
+    try {
+        $rollbackCandidates = @(Get-NetFirewallRule -PolicyStore PersistentStore `
+            -TracePolicyStore -Name $managedRuleName -ErrorAction SilentlyContinue)
+        if ($rollbackCandidates.Count -eq 1 -and
+            (Test-FridayManagedAllowCandidate $rollbackCandidates[0])) {
+            $rollbackCandidates[0] | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+        }
+    } catch {
+        # Exact complement blocks/Apply guard remain authoritative.
+    }
+}
+
+# A block is ineffective if its profile is disabled, and authenticated bypass
+# can override normal block precedence. Both facts are audited before mutation.
+Assert-FridayFirewallProfilesEnabled
+if (@(Get-FridayAuthenticatedBypassConflicts).Count -ne 0) {
+    throw 'An enabled authenticated-bypass allow can override TCP 8443 complement blocks.'
+}
+
+# The all-source guard is safe tightening. It remains after any interrupted or
+# failed Apply until both final complement blocks and the trusted allow verify.
+$guardRules = @(Get-NetFirewallRule -PolicyStore PersistentStore -TracePolicyStore `
+    -Name $applyGuardName -ErrorAction SilentlyContinue)
+if ($guardRules.Count -eq 0) {
+    New-NetFirewallRule -Name $applyGuardName -DisplayName $applyGuardSpec.display `
+        -Direction Inbound -Action Block -Enabled True -Profile Any `
+        -Protocol TCP -LocalPort 8443 -RemoteAddress Any `
+        -EdgeTraversalPolicy Block -LocalOnlyMapping $false -LooseSourceMapping $false `
+        -PolicyStore PersistentStore -ErrorAction Stop | Out-Null
+} elseif ($guardRules.Count -ne 1 -or
+    -not (Test-FridayManagedBlockCandidate $guardRules[0] $applyGuardSpec)) {
+    throw 'The persistent all-source Apply guard is ambiguous or malformed.'
+}
+$guardReadback = @(Get-NetFirewallRule -PolicyStore ActiveStore -TracePolicyStore `
+    -Name $applyGuardName -ErrorAction Stop)
+if ($guardReadback.Count -ne 1 -or
+    -not (Test-FridayManagedBlockCandidate $guardReadback[0] $applyGuardSpec)) {
+    throw 'The all-source Apply guard failed exact effective-policy readback.'
+}
+
+# Under the verified guard, a malformed or narrow complement can be repaired
+# without opening TCP 8443 during remove/create.
+foreach ($spec in $blockSpecs) {
+    $existing = @(Get-NetFirewallRule -PolicyStore PersistentStore -TracePolicyStore `
+        -Name $spec.name -ErrorAction SilentlyContinue)
+    if ($existing.Count -ne 1 -or -not (Test-FridayManagedBlockCandidate $existing[0] $spec)) {
+        foreach ($candidate in $existing) {
+            $candidate | Remove-NetFirewallRule -ErrorAction Stop
+        }
+        New-NetFirewallRule -Name $spec.name -DisplayName $spec.display `
+            -Direction Inbound -Action Block -Enabled True -Profile Any `
+            -Protocol TCP -LocalPort 8443 -RemoteAddress $spec.remote_addresses `
+            -EdgeTraversalPolicy Block -LocalOnlyMapping $false -LooseSourceMapping $false `
+            -PolicyStore PersistentStore -ErrorAction Stop | Out-Null
+    }
+}
+Assert-FridayBlockCoverage
+
+$activeAllows = @(Get-NetFirewallRule -PolicyStore ActiveStore -TracePolicyStore `
+    -Direction Inbound -Action Allow -Enabled True -ErrorAction Stop)
+$legacyNames = @{}
+foreach ($activeAllow in $activeAllows) {
+    $display = Get-FridayStrictTextProperty $activeAllow 'DisplayName'
+    $name = Get-FridayStrictTextProperty $activeAllow 'Name'
+    if ($display.valid -and $name.valid -and $display.value -ceq $legacyRuleDisplayName -and
+        (Test-FridayManagedAllowCandidate $activeAllow -LegacyPrimaryOnly)) {
+        $legacyNames[$name.value] = $true
+    }
+}
+$persistentRules = @(Get-NetFirewallRule -PolicyStore PersistentStore -TracePolicyStore -ErrorAction Stop)
+$legacyCandidates = @($persistentRules | Where-Object {
+    $name = Get-FridayStrictTextProperty $_ 'Name'
+    $name.valid -and $legacyNames.ContainsKey($name.value)
+})
+foreach ($candidate in $legacyCandidates) {
+    if (-not (Test-FridayManagedAllowCandidate $candidate -LegacyPrimaryOnly)) {
+        throw 'A legacy allow changed after exact classification.'
+    }
+}
+$trustedCandidates = @($persistentRules | Where-Object {
+    $name = Get-FridayStrictTextProperty $_ 'Name'
+    $name.valid -and $name.value -ceq $managedRuleName
+})
+if ($trustedCandidates.Count -gt 1 -or
+    ($trustedCandidates.Count -eq 1 -and -not (Test-FridayManagedAllowCandidate $trustedCandidates[0]))) {
+    throw 'The stable trusted allow identity is ambiguous or malformed.'
+}
+foreach ($candidate in $legacyCandidates) {
     $candidate | Remove-NetFirewallRule -ErrorAction Stop
 }
-New-NetFirewallRule `
-    -Name $managedRuleName `
-    -DisplayName $ruleDisplayName `
-    -Direction Inbound `
-    -Action Allow `
-    -Enabled True `
-    -Profile Any `
-    -Protocol TCP `
-    -LocalPort 8443 `
-    -RemoteAddress $PrimaryFridayHost `
-    -EdgeTraversalPolicy Block `
-    -PolicyStore PersistentStore `
-    -ErrorAction Stop | Out-Null
-
-$readback = @(
-    Get-NetFirewallRule `
-        -PolicyStore ActiveStore `
-        -TracePolicyStore `
-        -Name $managedRuleName `
-        -ErrorAction Stop
-)
-if ($readback.Count -ne 1) {
-    throw 'Managed firewall rule readback is missing or ambiguous.'
-}
-$readbackCore = Get-FridayCoreFirewallFilters $readback[0]
-if (-not (Test-FridayManagedCandidate $readback[0] $readbackCore)) {
-    throw 'Managed firewall rule readback differs from the exact desired rule.'
+$createdTrustedAllow = $false
+if ($trustedCandidates.Count -eq 0) {
+    New-NetFirewallRule -Name $managedRuleName -DisplayName $ruleDisplayName `
+        -Direction Inbound -Action Allow -Enabled True -Profile Any -Protocol TCP `
+        -LocalPort 8443 -RemoteAddress @($PrimaryFridayHost, $localFridayHost) `
+        -EdgeTraversalPolicy Block -LocalOnlyMapping $false -LooseSourceMapping $false `
+        -PolicyStore PersistentStore -ErrorAction Stop | Out-Null
+    $createdTrustedAllow = $true
 }
 
-$finalAuditFailed = $false
 try {
-    $finalEffectiveRules = @(
-        Get-NetFirewallRule `
-            -PolicyStore ActiveStore `
-            -TracePolicyStore `
-            -Direction Inbound `
-            -Action Allow `
-            -Enabled True `
-            -ErrorAction Stop
-    )
-    $finalConflicts = @()
-    $finalManagedCount = 0
-    foreach ($finalRule in $finalEffectiveRules) {
-        $finalCore = Get-FridayCoreFirewallFilters $finalRule
-        $finalName = Get-FridayStrictTextProperty $finalRule 'Name'
-        if ($finalName.valid -and $finalName.value -ceq $managedRuleName) {
-            $finalManagedCount += 1
-            if (-not (Test-FridayManagedCandidate $finalRule $finalCore)) {
-                $finalConflicts += $finalRule
-            }
-            continue
-        }
-        $finalAssessment = Get-FridayFirewallRuleAssessment `
-            -Rule $finalRule `
-            -PortFilters $finalCore.port `
-            -ApplicationFilters $finalCore.application `
-            -ServiceFilters $finalCore.service `
-            -InstalledPackageFamilyNames $installedPackageFamilyNameSet
-        if ($finalAssessment.conflict) {
-            $finalConflicts += $finalRule
-        }
-    }
-    if ($finalManagedCount -ne 1 -or $finalConflicts.Count -ne 0) {
-        $finalAuditFailed = $true
+    # This audit deliberately runs while the all-source guard still closes the
+    # endpoint. It is also the TOCTOU rescan after trusted-allow creation.
+    Assert-FridayFinalCoverage
+    $guardPersistentReadback = @(Get-NetFirewallRule -PolicyStore PersistentStore `
+        -TracePolicyStore -Name $applyGuardName -ErrorAction Stop)
+    $guardActiveReadback = @(Get-NetFirewallRule -PolicyStore ActiveStore `
+        -TracePolicyStore -Name $applyGuardName -ErrorAction Stop)
+    if ($guardPersistentReadback.Count -ne 1 -or $guardActiveReadback.Count -ne 1 -or
+        -not (Test-FridayManagedBlockCandidate $guardPersistentReadback[0] $applyGuardSpec) -or
+        -not (Test-FridayManagedBlockCandidate $guardActiveReadback[0] $applyGuardSpec)) {
+        throw 'The Apply guard changed before final removal.'
     }
 } catch {
-    $finalAuditFailed = $true
-}
-if ($finalAuditFailed) {
-    try {
-        Get-NetFirewallRule `
-            -PolicyStore PersistentStore `
-            -Name $managedRuleName `
-            -ErrorAction SilentlyContinue |
-                Remove-NetFirewallRule -ErrorAction SilentlyContinue
-    } catch {
-        # Best effort only: the rollout remains failed and reports no success.
-    }
-    throw 'Effective firewall policy changed during Apply; the managed allow rule was rolled back where possible.'
+    Remove-FridayCreatedTrustedAllowBestEffort $createdTrustedAllow
+    throw 'Pre-removal firewall coverage audit failed; the Apply guard remains installed.'
 }
 
-$plan.status = 'configured_exact_rule_and_no_conflicting_effective_allow_observed'
+try {
+    $guardPersistentReadback[0] | Remove-NetFirewallRule -ErrorAction Stop
+    $remainingActiveGuard = @(Get-NetFirewallRule -PolicyStore ActiveStore -TracePolicyStore `
+        -Name $applyGuardName -ErrorAction SilentlyContinue)
+    $remainingPersistentGuard = @(Get-NetFirewallRule -PolicyStore PersistentStore -TracePolicyStore `
+        -Name $applyGuardName -ErrorAction SilentlyContinue)
+    if ($remainingActiveGuard.Count -ne 0 -or $remainingPersistentGuard.Count -ne 0) {
+        throw 'The Apply guard remained in effective policy after removal.'
+    }
+    # Success requires the same complete proof after the guard is gone.
+    Assert-FridayFinalCoverage
+} catch {
+    # Restore closure first. Any exact complement continues to protect the
+    # endpoint even if this best-effort recovery encounters a policy race.
+    try {
+        $recoveryGuard = @(Get-NetFirewallRule -PolicyStore PersistentStore `
+            -TracePolicyStore -Name $applyGuardName -ErrorAction SilentlyContinue)
+        if ($recoveryGuard.Count -eq 0) {
+            New-NetFirewallRule -Name $applyGuardName -DisplayName $applyGuardSpec.display `
+                -Direction Inbound -Action Block -Enabled True -Profile Any `
+                -Protocol TCP -LocalPort 8443 -RemoteAddress Any `
+                -EdgeTraversalPolicy Block -LocalOnlyMapping $false -LooseSourceMapping $false `
+                -PolicyStore PersistentStore -ErrorAction Stop | Out-Null
+        } elseif ($recoveryGuard.Count -ne 1 -or
+            -not (Test-FridayManagedBlockCandidate $recoveryGuard[0] $applyGuardSpec)) {
+            throw 'Apply guard recovery identity is ambiguous or malformed.'
+        }
+        $recoveredActiveGuard = @(Get-NetFirewallRule -PolicyStore ActiveStore `
+            -TracePolicyStore -Name $applyGuardName -ErrorAction Stop)
+        if ($recoveredActiveGuard.Count -ne 1 -or
+            -not (Test-FridayManagedBlockCandidate $recoveredActiveGuard[0] $applyGuardSpec)) {
+            throw 'Apply guard recovery did not reach effective policy.'
+        }
+    } catch {
+        # The exact complement blocks are deliberately never removed here.
+    }
+    Remove-FridayCreatedTrustedAllowBestEffort $createdTrustedAllow
+    throw 'Post-removal firewall coverage audit failed; closed-state recovery was attempted.'
+}
+
+$plan.status = 'configured_complement_blocks_exact_allow_and_no_authenticated_bypass'
 $plan | ConvertTo-Json -Depth 4

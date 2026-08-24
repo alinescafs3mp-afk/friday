@@ -326,6 +326,138 @@ function Get-FridayFirewallRuleAssessment {
     New-FridayFirewallAssessment -Conflict $false -Reason 'application_or_service_excludes_docker'
 }
 
+function Test-FridayExactStringSet {
+    param(
+        [Parameter(Mandatory = $true)][object]$Observed,
+        [Parameter(Mandatory = $true)][object[]]$Expected
+    )
+    $observedItems = Get-FridayStrictStringItems $Observed
+    if (-not $observedItems.valid -or $observedItems.values.Count -ne @($Expected).Count) {
+        return $false
+    }
+    foreach ($expectedItem in $Expected) {
+        if ($expectedItem -isnot [string]) { return $false }
+        $matches = @($observedItems.values | Where-Object {
+            [string]::Equals($_, $expectedItem, [StringComparison]::OrdinalIgnoreCase)
+        })
+        if ($matches.Count -ne 1) { return $false }
+    }
+    return $true
+}
+
+function Test-FridayRemoteAddressComplementExact {
+    param(
+        [Parameter(Mandatory = $true)][object]$IPv4RemoteAddresses,
+        [Parameter(Mandatory = $true)][object]$IPv6RemoteAddresses
+    )
+    $expectedIPv4 = @(
+        '0.0.0.0-192.168.1.34',
+        '192.168.1.36-192.168.1.77',
+        '192.168.1.79-255.255.255.255'
+    )
+    (Test-FridayExactStringSet $IPv4RemoteAddresses $expectedIPv4) -and
+        (Test-FridayExactStringSet $IPv6RemoteAddresses @('::/0'))
+}
+
+function Get-FridayAuthenticatedBypassAssessment {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$PortFilters,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$SecurityFilters
+    )
+    if (@($SecurityFilters).Count -ne 1) {
+        return (New-FridayFirewallAssessment -Conflict $true -Reason 'security_filter_count')
+    }
+    $override = Get-FridayStrictAtomProperty $SecurityFilters[0] 'OverrideBlockRules'
+    if (-not $override.valid) {
+        return (New-FridayFirewallAssessment -Conflict $true -Reason 'override_block_rules_malformed')
+    }
+    if ([string]::Equals($override.value, 'False', [StringComparison]::OrdinalIgnoreCase)) {
+        return (New-FridayFirewallAssessment -Conflict $false -Reason 'normal_allow_cannot_override_block')
+    }
+    if (-not [string]::Equals($override.value, 'True', [StringComparison]::OrdinalIgnoreCase)) {
+        return (New-FridayFirewallAssessment -Conflict $true -Reason 'override_block_rules_unknown')
+    }
+    $portRelation = Get-FridayPortRelation8443 $PortFilters
+    if ($portRelation.state -eq 'no_overlap') {
+        return (New-FridayFirewallAssessment -Conflict $false -Reason $portRelation.reason)
+    }
+    if ($portRelation.state -ne 'overlap') {
+        return (New-FridayFirewallAssessment -Conflict $true -Reason 'bypass_port_indeterminate')
+    }
+    New-FridayFirewallAssessment -Conflict $true -Reason 'authenticated_bypass_8443'
+}
+
+function Test-FridayManagedBlockFirewallRuleExact {
+    param(
+        [Parameter(Mandatory = $true)][object]$Rule,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$PortFilters,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ApplicationFilters,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ServiceFilters,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$AddressFilters,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$SecurityFilters,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$InterfaceFilters,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$InterfaceTypeFilters,
+        [Parameter(Mandatory = $true)][object[]]$ExpectedRemoteAddresses
+    )
+    if (@($PortFilters).Count -ne 1 -or @($ApplicationFilters).Count -ne 1 -or
+        @($ServiceFilters).Count -ne 1 -or @($AddressFilters).Count -ne 1 -or
+        @($SecurityFilters).Count -ne 1 -or @($InterfaceFilters).Count -ne 1 -or
+        @($InterfaceTypeFilters).Count -ne 1) { return $false }
+    $ruleExpectations = [ordered]@{
+        Direction = 'Inbound'; Action = 'Block'; Enabled = 'True'; Profile = 'Any'
+        EdgeTraversalPolicy = 'Block'; LocalOnlyMapping = 'False'; LooseSourceMapping = 'False'
+        PolicyStoreSourceType = 'Local'; PolicyStoreSource = 'PersistentStore'
+    }
+    foreach ($propertyName in $ruleExpectations.Keys) {
+        $observed = Get-FridayStrictAtomProperty $Rule $propertyName
+        if (-not $observed.valid -or -not [string]::Equals(
+            $observed.value, $ruleExpectations[$propertyName], [StringComparison]::OrdinalIgnoreCase
+        )) { return $false }
+    }
+    $protocol = Get-FridayStrictAtomProperty $PortFilters[0] 'Protocol'
+    $remotePort = Get-FridayStrictTextProperty $PortFilters[0] 'RemotePort'
+    $program = Get-FridayStrictTextProperty $ApplicationFilters[0] 'Program'
+    $package = Get-FridayStrictTextProperty $ApplicationFilters[0] 'Package' -AllowNull
+    $service = Get-FridayStrictTextProperty $ServiceFilters[0] 'Service'
+    $pfn = Get-FridayStrictTextProperty $Rule 'PackageFamilyName' -AllowNull
+    $owner = Get-FridayStrictTextProperty $Rule 'Owner' -AllowNull
+    $dynamicTarget = Get-FridayStrictAtomProperty $PortFilters[0] 'DynamicTarget'
+    if (-not $protocol.valid -or $protocol.value -notin @('6', 'TCP') -or
+        -not $remotePort.valid -or $remotePort.value -cne 'Any' -or
+        -not $program.valid -or $program.value -cne 'Any' -or
+        -not $package.valid -or -not [string]::IsNullOrEmpty($package.value) -or
+        -not $service.valid -or $service.value -cne 'Any' -or
+        -not $pfn.valid -or -not [string]::IsNullOrEmpty($pfn.value) -or
+        -not $owner.valid -or -not [string]::IsNullOrEmpty($owner.value) -or
+        -not $dynamicTarget.valid -or $dynamicTarget.value -cne 'Any') { return $false }
+    $localPortProperty = $PortFilters[0].PSObject.Properties['LocalPort']
+    $localAddressProperty = $AddressFilters[0].PSObject.Properties['LocalAddress']
+    $remoteAddressProperty = $AddressFilters[0].PSObject.Properties['RemoteAddress']
+    if ($null -eq $localPortProperty -or $null -eq $localAddressProperty -or
+        $null -eq $remoteAddressProperty -or
+        -not (Test-FridayExactStringSet $localPortProperty.Value @('8443')) -or
+        -not (Test-FridayExactStringSet $localAddressProperty.Value @('Any')) -or
+        -not (Test-FridayExactStringSet $remoteAddressProperty.Value $ExpectedRemoteAddresses)) {
+        return $false
+    }
+    $interfaceAliasProperty = $InterfaceFilters[0].PSObject.Properties['InterfaceAlias']
+    $interfaceType = Get-FridayStrictAtomProperty $InterfaceTypeFilters[0] 'InterfaceType'
+    if ($null -eq $interfaceAliasProperty -or
+        -not (Test-FridayExactStringSet $interfaceAliasProperty.Value @('Any')) -or
+        -not $interfaceType.valid -or $interfaceType.value -cne 'Any') { return $false }
+    $securityExpectations = [ordered]@{
+        Authentication = 'NotRequired'; Encryption = 'NotRequired'; OverrideBlockRules = 'False'
+        LocalUser = 'Any'; RemoteUser = 'Any'; RemoteMachine = 'Any'
+    }
+    foreach ($propertyName in $securityExpectations.Keys) {
+        $observed = Get-FridayStrictAtomProperty $SecurityFilters[0] $propertyName
+        if (-not $observed.valid -or -not [string]::Equals(
+            $observed.value, $securityExpectations[$propertyName], [StringComparison]::OrdinalIgnoreCase
+        )) { return $false }
+    }
+    return $true
+}
+
 function Test-FridayManagedFirewallRuleExact {
     param(
         [Parameter(Mandatory = $true)][object]$Rule,
@@ -334,11 +466,15 @@ function Test-FridayManagedFirewallRuleExact {
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ServiceFilters,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$AddressFilters,
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$SecurityFilters,
-        [Parameter(Mandatory = $true)][string]$PrimaryFridayHost
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$InterfaceFilters,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$InterfaceTypeFilters,
+        [Parameter(Mandatory = $true)][string]$PrimaryFridayHost,
+        [Parameter()][AllowNull()][string]$LocalFridayHost = $null
     )
     if (@($PortFilters).Count -ne 1 -or @($ApplicationFilters).Count -ne 1 -or
         @($ServiceFilters).Count -ne 1 -or @($AddressFilters).Count -ne 1 -or
-        @($SecurityFilters).Count -ne 1) { return $false }
+        @($SecurityFilters).Count -ne 1 -or @($InterfaceFilters).Count -ne 1 -or
+        @($InterfaceTypeFilters).Count -ne 1) { return $false }
     $ruleExpectations = [ordered]@{
         Direction = 'Inbound'
         Action = 'Allow'
@@ -367,12 +503,16 @@ function Test-FridayManagedFirewallRuleExact {
     $package = Get-FridayStrictTextProperty $ApplicationFilters[0] 'Package' -AllowNull
     $service = Get-FridayStrictTextProperty $ServiceFilters[0] 'Service'
     $pfn = Get-FridayStrictTextProperty $Rule 'PackageFamilyName' -AllowNull
+    $owner = Get-FridayStrictTextProperty $Rule 'Owner' -AllowNull
+    $dynamicTarget = Get-FridayStrictAtomProperty $PortFilters[0] 'DynamicTarget'
     if (-not $protocol.valid -or $protocol.value -notin @('6', 'TCP') -or
         -not $remotePort.valid -or $remotePort.value -cne 'Any' -or
         -not $program.valid -or $program.value -cne 'Any' -or
         -not $package.valid -or -not [string]::IsNullOrEmpty($package.value) -or
         -not $service.valid -or $service.value -cne 'Any' -or
-        -not $pfn.valid -or -not [string]::IsNullOrEmpty($pfn.value)) { return $false }
+        -not $pfn.valid -or -not [string]::IsNullOrEmpty($pfn.value) -or
+        -not $owner.valid -or -not [string]::IsNullOrEmpty($owner.value) -or
+        -not $dynamicTarget.valid -or $dynamicTarget.value -cne 'Any') { return $false }
     $securityExpectations = [ordered]@{
         Authentication = 'NotRequired'
         Encryption = 'NotRequired'
@@ -397,14 +537,19 @@ function Test-FridayManagedFirewallRuleExact {
     $remoteAddressProperty = $AddressFilters[0].PSObject.Properties['RemoteAddress']
     if ($null -eq $localPortProperty -or $null -eq $localAddressProperty -or
         $null -eq $remoteAddressProperty) { return $false }
-    $localPorts = Get-FridayStrictStringItems $localPortProperty.Value
-    $localAddresses = Get-FridayStrictStringItems $localAddressProperty.Value
-    $remoteAddresses = Get-FridayStrictStringItems $remoteAddressProperty.Value
-    if (-not $localPorts.valid -or $localPorts.values.Count -ne 1 -or
-        $localPorts.values[0] -cne '8443' -or
-        -not $localAddresses.valid -or $localAddresses.values.Count -ne 1 -or
-        $localAddresses.values[0] -cne 'Any' -or
-        -not $remoteAddresses.valid -or $remoteAddresses.values.Count -ne 1 -or
-        $remoteAddresses.values[0] -cne $PrimaryFridayHost) { return $false }
+    $expectedRemoteAddresses = @($PrimaryFridayHost)
+    if (-not [string]::IsNullOrWhiteSpace($LocalFridayHost)) {
+        $expectedRemoteAddresses += $LocalFridayHost
+    }
+    if (-not (Test-FridayExactStringSet $localPortProperty.Value @('8443')) -or
+        -not (Test-FridayExactStringSet $localAddressProperty.Value @('Any')) -or
+        -not (Test-FridayExactStringSet $remoteAddressProperty.Value $expectedRemoteAddresses)) {
+        return $false
+    }
+    $interfaceAliasProperty = $InterfaceFilters[0].PSObject.Properties['InterfaceAlias']
+    $interfaceType = Get-FridayStrictAtomProperty $InterfaceTypeFilters[0] 'InterfaceType'
+    if ($null -eq $interfaceAliasProperty -or
+        -not (Test-FridayExactStringSet $interfaceAliasProperty.Value @('Any')) -or
+        -not $interfaceType.valid -or $interfaceType.value -cne 'Any') { return $false }
     return $true
 }

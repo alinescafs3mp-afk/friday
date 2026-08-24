@@ -374,23 +374,41 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     assert "192.168.1.78" in firewall
     assert "-LocalPort 8443" in firewall
     assert "-LocalPort 30000" not in firewall
-    assert "Friday.Secondary.SGLang.PrimaryOnly.TCP8443" in firewall
+    assert "Friday.Secondary.SGLang.PrimaryOnly.TCP8443" not in firewall
+    assert "Friday.Secondary.SGLang.Allow.TrustedIPv4.TCP8443" in firewall
+    assert "Friday.Secondary.SGLang.ApplyGuard.All.TCP8443" in firewall
+    assert "Friday.Secondary.SGLang.Block.Complement.IPv4.TCP8443" in firewall
+    assert "Friday.Secondary.SGLang.Block.All.IPv6.TCP8443" in firewall
+    for address_range in (
+        "0.0.0.0-192.168.1.34",
+        "192.168.1.36-192.168.1.77",
+        "192.168.1.79-255.255.255.255",
+        "::/0",
+    ):
+        assert address_range in firewall
+    assert "@($PrimaryFridayHost, $localFridayHost)" in firewall
     assert "-Name $managedRuleName" in firewall
     assert "-PolicyStore ActiveStore" in firewall
     assert "-TracePolicyStore" in firewall
-    assert "Get-AppxPackage -AllUsers -ErrorAction Stop" in firewall
-    assert "New-FridayVerifiedPackageFamilyNameSet" in firewall
-    assert "Test-FridayManagedCandidate" in firewall
-    audit_gate = firewall.index("if ($conflicts.Count -ne 0)")
-    first_remove = firewall.index("Remove-NetFirewallRule")
-    first_create = firewall.index("New-NetFirewallRule")
-    assert audit_gate < first_remove < first_create
-    final_rescan = firewall.index("$finalEffectiveRules")
-    assert first_create < final_rescan
-    assert firewall.count("Get-FridayFirewallRuleAssessment") == 2
-    assert "$finalManagedCount -ne 1" in firewall
-    assert "the managed allow rule was rolled back where possible" in firewall
-    assert firewall.rindex("Remove-NetFirewallRule") > final_rescan
+    assert "Assert-FridayFirewallProfilesEnabled" in firewall
+    assert "Get-Service -Name MpsSvc -ErrorAction Stop" in firewall
+    assert "Windows Defender Firewall service must be running." in firewall
+    assert "DisabledInterfaceAliases" in firewall
+    assert "Get-FridayAuthenticatedBypassConflicts" in firewall
+    bypass_preflight = firewall.index("if (@(Get-FridayAuthenticatedBypassConflicts).Count -ne 0)")
+    guard_create = firewall.index("New-NetFirewallRule -Name $applyGuardName")
+    complement_repair = firewall.index("# Under the verified guard")
+    first_remove = firewall.index("Remove-NetFirewallRule", complement_repair)
+    allow_create = firewall.index("New-NetFirewallRule -Name $managedRuleName")
+    pre_guard_removal_audit = firewall.index("Assert-FridayFinalCoverage", allow_create)
+    guard_remove = firewall.index("$guardPersistentReadback[0] | Remove-NetFirewallRule")
+    post_guard_removal_audit = firewall.rindex("Assert-FridayFinalCoverage")
+    assert bypass_preflight < guard_create < complement_repair < first_remove < allow_create
+    assert allow_create < pre_guard_removal_audit < guard_remove < post_guard_removal_audit
+    assert firewall.count("Assert-FridayFinalCoverage") >= 3
+    assert firewall.rindex("New-NetFirewallRule -Name $applyGuardName") > guard_remove
+    assert "Pre-removal firewall coverage audit failed; the Apply guard remains installed." in firewall
+    assert "Post-removal firewall coverage audit failed; closed-state recovery was attempted." in firewall
     assert "Where-Object { [string]$_.DisplayName" not in firewall
     assert "Get-FridayFirewallRuleAssessment" in firewall_classifier
     assert "Get-FridayPortRelation8443" in firewall_classifier
@@ -399,7 +417,17 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     assert "-In-Allow-ServerCapability" in firewall_classifier
     assert "PackageFamilyName" in firewall_classifier
     assert "PolicyStoreSourceType" in firewall_classifier
+    assert "Test-FridayManagedBlockFirewallRuleExact" in firewall_classifier
+    assert "Get-FridayAuthenticatedBypassAssessment" in firewall_classifier
+    assert "OverrideBlockRules" in firewall_classifier
+    assert "DynamicTarget" in firewall_classifier
+    assert "InterfaceAlias" in firewall_classifier
+    assert "Owner" in firewall_classifier
     assert "display_name_does_not_exempt_broad_remote_address" in firewall_test
+    assert "exact_managed_complement_block_is_accepted" in firewall_test
+    assert "authenticated_any_port_bypass_conflicts" in firewall_test
+    assert "normal_allow_skips_irrelevant_port_parsing" in firewall_test
+    assert "narrowed_interface_alias_fails_exact_allow" in firewall_test
     assert "missing_application_filter_fails_closed" in firewall_test
     assert "malformed_installed_pfn_fails_closed" in firewall_test
     assert "ConvertTo-Json" in firewall_test
