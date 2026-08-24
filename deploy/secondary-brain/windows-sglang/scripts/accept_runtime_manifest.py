@@ -45,10 +45,6 @@ GATEWAY_PLATFORM_DIGEST = (
 )
 GATEWAY_CONFIG_DIGEST = "sha256:89dc7d054bddca245db3d5a779e363007d0e75b1161cfe2f283ebeaf0ed90d50"
 PUBLISHED_ENDPOINT = "https://192.168.1.35:8443/v1"
-OBSERVED_HARDWARE_PATH = (
-    r"C:\ProgramData\FridaySecondary\bundle\evidence\hardware-runtime.observed.json"
-)
-
 EXPECTED_RUNTIME_VERSIONS = {
     "cuda_runtime_version": "13.0",
     "flashinfer_version": "0.6.15.post1",
@@ -95,6 +91,10 @@ EXPECTED_HARDWARE = {
     "status": "accepted",
     "windows": EXPECTED_WINDOWS,
     "wsl": EXPECTED_WSL,
+}
+EXPECTED_OBSERVED_HARDWARE = {
+    **EXPECTED_HARDWARE,
+    "status": "observed_unaccepted",
 }
 EXPECTED_RUNTIME_TEMPLATE = {
     "schema": RUNTIME_SCHEMA,
@@ -371,11 +371,20 @@ def _validate_hardware(value: dict[str, Any], raw: bytes) -> None:
         raise RuntimeManifestPromotionError("accepted hardware receipt hash is invalid")
 
 
+def _validate_observed_hardware(value: dict[str, Any], raw: bytes) -> None:
+    expected_raw = canonical_json(EXPECTED_OBSERVED_HARDWARE)
+    if _sha256(expected_raw) != EXPECTED_OBSERVED_HARDWARE_SHA256:
+        raise RuntimeManifestPromotionError("code-owned observed hardware identity is inconsistent")
+    if not _matches_exactly(value, EXPECTED_OBSERVED_HARDWARE) or raw != expected_raw:
+        raise RuntimeManifestPromotionError("observed hardware receipt identity is invalid")
+
+
 def _validate_preflight(
     value: dict[str, Any],
     *,
     hardware: dict[str, Any],
     template: dict[str, Any],
+    observed_hardware_path: Path,
 ) -> None:
     _require_keys(value, _PREFLIGHT_KEYS, label="automated preflight")
     _require_observed_at(value.get("observed_at"))
@@ -429,10 +438,13 @@ def _validate_preflight(
         _HARDWARE_EVIDENCE_KEYS,
         label="observed hardware receipt projection",
     )
+    projected_hardware_path = hardware_evidence.get("output_path")
     if (
         hardware_evidence.get("status") != "observed_unaccepted"
         or hardware_evidence.get("sha256") != EXPECTED_OBSERVED_HARDWARE_SHA256
-        or hardware_evidence.get("output_path") != OBSERVED_HARDWARE_PATH
+        or not isinstance(projected_hardware_path, str)
+        or os.path.normcase(os.path.abspath(projected_hardware_path))
+        != os.path.normcase(os.path.abspath(observed_hardware_path))
     ):
         raise RuntimeManifestPromotionError("observed hardware receipt identity is invalid")
 
@@ -549,6 +561,7 @@ def _write_atomic_exclusive(path: Path, raw: bytes) -> None:
 def promote_runtime_manifest(
     template_path: Path,
     preflight_evidence_path: Path,
+    observed_hardware_receipt_path: Path,
     hardware_receipt_path: Path,
     output_path: Path,
 ) -> dict[str, Any]:
@@ -560,6 +573,12 @@ def promote_runtime_manifest(
         label="runtime template",
     )
     _validate_template(template, template_raw)
+    observed_hardware, observed_hardware_raw = _read_json(
+        observed_hardware_receipt_path,
+        maximum_bytes=MAX_HARDWARE_BYTES,
+        label="observed hardware receipt",
+    )
+    _validate_observed_hardware(observed_hardware, observed_hardware_raw)
     hardware, hardware_raw = _read_json(
         hardware_receipt_path,
         maximum_bytes=MAX_HARDWARE_BYTES,
@@ -571,7 +590,12 @@ def promote_runtime_manifest(
         maximum_bytes=MAX_PREFLIGHT_BYTES,
         label="automated preflight evidence",
     )
-    _validate_preflight(preflight, hardware=hardware, template=template)
+    _validate_preflight(
+        preflight,
+        hardware=hardware,
+        template=template,
+        observed_hardware_path=observed_hardware_receipt_path,
+    )
 
     accepted = dict(template)
     accepted["status"] = "accepted"
@@ -602,6 +626,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--template", required=True, type=Path)
     parser.add_argument("--preflight-evidence", required=True, type=Path)
+    parser.add_argument("--observed-hardware-receipt", required=True, type=Path)
     parser.add_argument("--hardware-receipt", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     return parser
@@ -613,6 +638,7 @@ def main(argv: list[str] | None = None) -> int:
         result = promote_runtime_manifest(
             args.template,
             args.preflight_evidence,
+            args.observed_hardware_receipt,
             args.hardware_receipt,
             args.output,
         )

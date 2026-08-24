@@ -38,7 +38,7 @@ def _write_json(path: Path, value: Any) -> Path:
     return path
 
 
-def _valid_preflight(operator: ModuleType) -> dict[str, Any]:
+def _valid_preflight(operator: ModuleType, observed_hardware_path: Path) -> dict[str, Any]:
     return {
         "schema": operator.PREFLIGHT_SCHEMA,
         "status": "automated_preflight_checks_passed",
@@ -69,7 +69,7 @@ def _valid_preflight(operator: ModuleType) -> dict[str, Any]:
         "hardware_runtime_receipt": {
             "status": "observed_unaccepted",
             "sha256": operator.EXPECTED_OBSERVED_HARDWARE_SHA256,
-            "output_path": operator.OBSERVED_HARDWARE_PATH,
+            "output_path": str(observed_hardware_path.absolute()),
         },
         "operator_checks_required": [
             "wsl_update_state",
@@ -83,7 +83,14 @@ def _valid_preflight(operator: ModuleType) -> dict[str, Any]:
 def _valid_inputs(operator: ModuleType, tmp_path: Path) -> dict[str, Path]:
     template = tmp_path / "runtime-manifest.example.json"
     template.write_bytes((BUNDLE / "runtime-manifest.example.json").read_bytes())
-    preflight = _write_json(tmp_path / "preflight.observed.json", _valid_preflight(operator))
+    observed_hardware = _write_json(
+        tmp_path / "hardware-runtime.observed.json",
+        copy.deepcopy(operator.EXPECTED_OBSERVED_HARDWARE),
+    )
+    preflight = _write_json(
+        tmp_path / "preflight.observed.json",
+        _valid_preflight(operator, observed_hardware),
+    )
     hardware = _write_json(
         tmp_path / "hardware-runtime.accepted.json",
         copy.deepcopy(operator.EXPECTED_HARDWARE),
@@ -91,6 +98,7 @@ def _valid_inputs(operator: ModuleType, tmp_path: Path) -> dict[str, Path]:
     return {
         "template": template,
         "preflight": preflight,
+        "observed_hardware": observed_hardware,
         "hardware": hardware,
         "output": tmp_path / "runtime.accepted.json",
     }
@@ -100,6 +108,7 @@ def _promote(operator: ModuleType, paths: dict[str, Path]) -> dict[str, Any]:
     return operator.promote_runtime_manifest(
         paths["template"],
         paths["preflight"],
+        paths["observed_hardware"],
         paths["hardware"],
         paths["output"],
     )
@@ -164,6 +173,7 @@ def test_operator_promotes_only_status_to_one_atomic_exclusive_manifest(
         (("sglang_help", "required_flags_sha256"), "0" * 64),
         (("gateway_image", "config_digest"), "sha256:" + "0" * 64),
         (("hardware_runtime_receipt", "sha256"), "0" * 64),
+        (("hardware_runtime_receipt", "output_path"), "hardware-runtime.other.json"),
     ),
 )
 def test_operator_rejects_preflight_status_and_identity_drift_before_output(
@@ -173,7 +183,7 @@ def test_operator_rejects_preflight_status_and_identity_drift_before_output(
     replacement: Any,
 ) -> None:
     paths = _valid_inputs(operator, tmp_path)
-    preflight = _valid_preflight(operator)
+    preflight = _valid_preflight(operator, paths["observed_hardware"])
     _set_path(preflight, path, replacement)
     _write_json(paths["preflight"], preflight)
 
@@ -187,7 +197,7 @@ def test_operator_rejects_unknown_preflight_key_and_wrong_scalar_type(
     tmp_path: Path,
 ) -> None:
     paths = _valid_inputs(operator, tmp_path)
-    preflight = _valid_preflight(operator)
+    preflight = _valid_preflight(operator, paths["observed_hardware"])
     preflight["unexpected"] = False
     _write_json(paths["preflight"], preflight)
     with pytest.raises(operator.RuntimeManifestPromotionError, match="shape"):
@@ -217,7 +227,7 @@ def test_operator_rejects_noncanonical_or_impossible_preflight_timestamp(
     observed_at: str,
 ) -> None:
     paths = _valid_inputs(operator, tmp_path)
-    preflight = _valid_preflight(operator)
+    preflight = _valid_preflight(operator, paths["observed_hardware"])
     preflight["observed_at"] = observed_at
     _write_json(paths["preflight"], preflight)
 
@@ -285,6 +295,20 @@ def test_operator_rejects_nonexact_accepted_hardware_receipt(
     _write_json(paths["hardware"], hardware)
 
     with pytest.raises(operator.RuntimeManifestPromotionError, match="hardware receipt"):
+        _promote(operator, paths)
+    assert not paths["output"].exists()
+
+
+def test_operator_rejects_nonexact_observed_hardware_receipt(
+    operator: ModuleType,
+    tmp_path: Path,
+) -> None:
+    paths = _valid_inputs(operator, tmp_path)
+    observed = copy.deepcopy(operator.EXPECTED_OBSERVED_HARDWARE)
+    observed["gpu"]["memory_total_mib"] = 16_304
+    _write_json(paths["observed_hardware"], observed)
+
+    with pytest.raises(operator.RuntimeManifestPromotionError, match="observed hardware receipt"):
         _promote(operator, paths)
     assert not paths["output"].exists()
 
@@ -380,6 +404,8 @@ def test_cli_emits_only_content_free_json_on_success_and_rejection(
         str(paths["template"]),
         "--preflight-evidence",
         str(paths["preflight"]),
+        "--observed-hardware-receipt",
+        str(paths["observed_hardware"]),
         "--hardware-receipt",
         str(paths["hardware"]),
         "--output",
@@ -395,7 +421,7 @@ def test_cli_emits_only_content_free_json_on_success_and_rejection(
     rejected_directory = tmp_path / "rejected"
     rejected_directory.mkdir()
     rejected_paths = _valid_inputs(operator, rejected_directory)
-    preflight = _valid_preflight(operator)
+    preflight = _valid_preflight(operator, rejected_paths["observed_hardware"])
     preflight["status"] = "inventory_incomplete"
     _write_json(rejected_paths["preflight"], preflight)
     rejected_arguments = [
@@ -403,6 +429,8 @@ def test_cli_emits_only_content_free_json_on_success_and_rejection(
         str(rejected_paths["template"]),
         "--preflight-evidence",
         str(rejected_paths["preflight"]),
+        "--observed-hardware-receipt",
+        str(rejected_paths["observed_hardware"]),
         "--hardware-receipt",
         str(rejected_paths["hardware"]),
         "--output",

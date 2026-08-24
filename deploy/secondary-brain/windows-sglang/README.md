@@ -95,6 +95,7 @@ protected accepted copy without editing either file:
 python .\scripts\accept_runtime_manifest.py `
   --template .\runtime-manifest.example.json `
   --preflight-evidence .\evidence\preflight.observed.json `
+  --observed-hardware-receipt .\evidence\hardware-runtime.observed.json `
   --hardware-receipt .\evidence\hardware-runtime.accepted.json `
   --output .\evidence\runtime.accepted.json
 ```
