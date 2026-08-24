@@ -226,7 +226,10 @@ def _read_regular(path: Path, *, maximum_bytes: int, label: str) -> bytes:
             raise RuntimeManifestPromotionError(f"{label} is not a bounded regular file")
         descriptor = os.open(
             path,
-            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_BINARY", 0),
         )
         before = os.fstat(descriptor)
         if (
@@ -484,7 +487,8 @@ def _write_atomic_exclusive(path: Path, raw: bytes) -> None:
             | os.O_CREAT
             | os.O_EXCL
             | getattr(os, "O_CLOEXEC", 0)
-            | getattr(os, "O_NOFOLLOW", 0),
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_BINARY", 0),
             0o600,
         )
         view = memoryview(raw)

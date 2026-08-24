@@ -114,6 +114,12 @@ def _set_path(value: dict[str, Any], path: tuple[str, ...], replacement: Any) ->
     parent[path[-1]] = replacement
 
 
+def test_operator_forces_binary_descriptors_for_windows_exact_bytes() -> None:
+    source = OPERATOR_PATH.read_text(encoding="utf-8")
+
+    assert source.count('getattr(os, "O_BINARY", 0)') == 2
+
+
 def test_operator_promotes_only_status_to_one_atomic_exclusive_manifest(
     operator: ModuleType,
     tmp_path: Path,
