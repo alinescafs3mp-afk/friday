@@ -43,11 +43,11 @@ _ENGINE_PROJECTION: dict[str, Any] = {
     "mxfp4_moe_precision": "default",
     "mm_feature_transport": "cpu",
     "deterministic_inference_enabled": False,
-    "context_tokens": 16_384,
-    "max_total_tokens": 16_384,
+    "context_tokens": 4096,
+    "max_total_tokens": 4096,
     "mem_fraction_static": "0.97",
     "max_running_requests": 1,
-    "max_output_tokens": 2048,
+    "max_output_tokens": 512,
     "chunked_prefill_size": 1024,
     "page_size": 1,
     "radix_cache_enabled": True,
@@ -101,10 +101,10 @@ def _accepted_test_profile(monkeypatch: pytest.MonkeyPatch) -> None:
         engine_binding_sha256=_ENGINE_BINDING_SHA256,
         hardware_runtime_receipt_sha256=_ENGINE_PROJECTION["hardware_runtime_receipt_sha256"],
         gateway_ca_certificate_sha256="",
-        max_context_tokens=16_384,
-        max_total_tokens=16_384,
+        max_context_tokens=4096,
+        max_total_tokens=4096,
         max_concurrency=1,
-        max_output_tokens=2048,
+        max_output_tokens=512,
         chunked_prefill_size=1024,
         mem_fraction_static="0.97",
         quantization="mxfp4",
@@ -212,7 +212,7 @@ def _secondary_settings(
         secondary_llm_connect_timeout_sec=min(0.01, call_budget),
         secondary_llm_call_budget_sec=call_budget,
         secondary_llm_read_timeout_sec=call_budget,
-        secondary_llm_max_context_tokens=16_384,
+        secondary_llm_max_context_tokens=4096,
         secondary_llm_profile=_PROFILE_ID,
         secondary_llm_workloads=("extract",),
         secondary_llm_allow_private_text=allow_private,
@@ -286,6 +286,11 @@ async def test_assist_uses_validated_secondary_extraction_without_primary(
         requests += 1
         body = json.loads(request.content)
         assert body["model"] == _ALIAS
+        assert body["max_tokens"] == 512
+        input_bytes = sum(
+            len(str(message.get("content") or "").encode("utf-8")) for message in body["messages"]
+        )
+        assert input_bytes + body["max_tokens"] + 256 <= 4096
         assert "tools" not in body
         return _completion(_advice("Secondary Redis advice"))
 
@@ -312,6 +317,101 @@ async def test_assist_uses_validated_secondary_extraction_without_primary(
         assert requests == 1
         assert scheduler.status().state is SecondaryState.HEALTHY
         assert storage.count_knowledge_objects("alice") == 0
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
+async def test_assist_fits_long_private_input_to_exact_4k_profile(
+    settings: Any,
+) -> None:
+    captured: list[dict[str, Any]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        captured.append(body)
+        return _completion(_advice("Bounded private advice"))
+
+    scheduler = build_secondary_brain(
+        _secondary_settings(settings),
+        transport=_after_admission(handler),
+    )
+    primary_calls = 0
+
+    async def primary() -> dict[str, Any]:
+        nonlocal primary_calls
+        primary_calls += 1
+        return {"content": json.dumps(_advice("must not fall back"), ensure_ascii=False)}
+
+    try:
+        routed = await route_inbox_advice(
+            secondary=scheduler,
+            messages=(
+                {"role": "system", "content": "Treat the next message as private data. " * 8},
+                {
+                    "role": "user",
+                    "content": "baseline-first-sentinel:" + ("Я" * 8_000) + ":source-tail-sentinel",
+                },
+            ),
+            max_output_tokens=2_048,
+            primary_model_name="primary-model",
+            primary_call=primary,
+            image_bearing=False,
+        )
+
+        assert routed.source == "secondary"
+        assert primary_calls == 0
+        assert len(captured) == 1
+        payload = captured[0]
+        assert payload["max_tokens"] == 512
+        assert "baseline-first-sentinel" in payload["messages"][-1]["content"]
+        assert "source-tail-sentinel" in payload["messages"][-1]["content"]
+        input_bytes = sum(
+            len(str(message.get("content") or "").encode("utf-8")) for message in payload["messages"]
+        )
+        assert input_bytes + payload["max_tokens"] + 256 <= 4096
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
+async def test_unfit_system_policy_falls_back_to_primary_once_without_probe(settings: Any) -> None:
+    requests = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        return _completion(_advice("must not be called"))
+
+    scheduler = build_secondary_brain(
+        _secondary_settings(settings),
+        transport=httpx.MockTransport(handler),
+    )
+    primary_response = {"content": json.dumps(_advice("Exact primary"), ensure_ascii=False)}
+    primary_calls = 0
+
+    async def primary() -> dict[str, Any]:
+        nonlocal primary_calls
+        primary_calls += 1
+        return primary_response
+
+    try:
+        routed = await route_inbox_advice(
+            secondary=scheduler,
+            messages=(
+                {"role": "system", "content": "immutable-policy" * 1_000},
+                {"role": "user", "content": "private source"},
+            ),
+            max_output_tokens=2_048,
+            primary_model_name="primary-model",
+            primary_call=primary,
+            image_bearing=False,
+        )
+
+        assert routed.response is primary_response
+        assert routed.source == "primary"
+        assert primary_calls == 1
+        assert requests == 0
     finally:
         await scheduler.aclose()
 
@@ -569,7 +669,6 @@ async def test_disabled_route_returns_the_exact_primary_object(settings: Any) ->
         max_output_tokens=64,
         primary_model_name="primary-model",
         primary_call=primary,
-        contains_private_text=True,
         image_bearing=False,
     )
 
@@ -580,12 +679,10 @@ async def test_disabled_route_returns_the_exact_primary_object(settings: Any) ->
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("allow_private", "image_bearing"),
-    [(False, False), (True, True)],
-)
+@pytest.mark.parametrize("mode", ["assist", "shadow"])
+@pytest.mark.parametrize(("allow_private", "image_bearing"), [(False, False), (True, True)])
 async def test_private_or_image_material_never_reaches_secondary(
-    settings: Any, allow_private: bool, image_bearing: bool
+    settings: Any, mode: str, allow_private: bool, image_bearing: bool
 ) -> None:
     requests = 0
 
@@ -595,7 +692,7 @@ async def test_private_or_image_material_never_reaches_secondary(
         return _completion(_advice("must not be called"))
 
     scheduler = build_secondary_brain(
-        _secondary_settings(settings, allow_private=allow_private),
+        _secondary_settings(settings, mode=mode, allow_private=allow_private),
         transport=httpx.MockTransport(handler),
     )
     primary_response = {"content": json.dumps(_advice("Private primary"), ensure_ascii=False)}
@@ -613,12 +710,12 @@ async def test_private_or_image_material_never_reaches_secondary(
             max_output_tokens=64,
             primary_model_name="primary-model",
             primary_call=primary,
-            contains_private_text=True,
             image_bearing=image_bearing,
         )
 
         assert routed.response is primary_response
         assert primary_calls == 1
+        await scheduler.drain_shadow()
         assert requests == 0
     finally:
         await scheduler.aclose()

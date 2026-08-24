@@ -284,15 +284,11 @@ class AdviceMixin(PipelineShared):
         routed = await route_inbox_advice(
             secondary=secondary,
             messages=messages,
-            # This extraction schema is bounded well below the primary cognition
-            # ceiling.  Keeping a secondary call at 2K leaves room for source
-            # context on a measured 8K+ profile; fallback retains the exact old 4K.
+            # The route caps only the detachable call to its admitted profile;
+            # the closure above retains the primary model's existing 4K ceiling.
             max_output_tokens=min(self.settings.cognition_max_tokens, 2_048),
             primary_model_name=primary_model_name,
             primary_call=primary_advice_call,
-            # Inbox material belongs to one tenant and may contain personal data.
-            # The operator must explicitly allow crossing the host boundary.
-            contains_private_text=True,
             image_bearing=image_bearing,
         )
         model_name = routed.model_name[:200]

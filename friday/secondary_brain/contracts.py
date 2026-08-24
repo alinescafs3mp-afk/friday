@@ -18,6 +18,12 @@ from urllib.parse import urlsplit
 JsonScalar: TypeAlias = str | int | float | bool | None
 JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 
+# Shared with the product-side envelope builder.  The protocol adapter remains
+# the final authority, but callers need the same fixed allowance to prepare a
+# useful request instead of learning that a 4K profile cannot fit only after
+# admission.
+SECONDARY_CONTEXT_TOKEN_RESERVE = 256
+
 
 class SecondaryMode(StrEnum):
     DISABLED = "disabled"

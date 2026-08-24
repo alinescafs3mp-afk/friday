@@ -18,6 +18,7 @@ from friday.secondary_brain import (
     SecondaryMode,
     SecondaryResult,
 )
+from friday.secondary_brain.contracts import SECONDARY_CONTEXT_TOKEN_RESERVE
 
 _ALLOWED_KINDS = frozenset(
     {
@@ -60,6 +61,75 @@ class RoutedInboxAdvice:
     response: dict[str, Any] = field(repr=False)
     model_name: str
     source: str
+
+
+_SECONDARY_CLIP_MARKER = "\n[...bounded secondary input...]\n"
+_MIN_SECONDARY_USER_BYTES = 128
+
+
+def _clip_utf8_middle(value: str, maximum_bytes: int) -> str:
+    """Keep deterministic head/tail evidence without splitting UTF-8."""
+
+    raw = value.encode("utf-8", errors="strict")
+    if len(raw) <= maximum_bytes:
+        return value
+    marker = _SECONDARY_CLIP_MARKER.encode("ascii")
+    if maximum_bytes <= len(marker):
+        return raw[:maximum_bytes].decode("utf-8", errors="ignore")
+    body_bytes = maximum_bytes - len(marker)
+    # The Inbox carrier puts its deterministic baseline first and private source
+    # last. Preserve a bounded baseline prefix while giving most room to source.
+    head_bytes = body_bytes // 3
+    tail_bytes = body_bytes - head_bytes
+    head = raw[:head_bytes].decode("utf-8", errors="ignore")
+    tail = raw[-tail_bytes:].decode("utf-8", errors="ignore")
+    return f"{head}{_SECONDARY_CLIP_MARKER}{tail}"
+
+
+def _fit_secondary_messages(
+    messages: Sequence[Mapping[str, Any]],
+    *,
+    maximum_input_bytes: int,
+) -> tuple[Mapping[str, Any], ...] | None:
+    """Fit the one private Inbox carrier to the adapter's conservative 4K gate."""
+
+    if maximum_input_bytes < 1:
+        return None
+    projected: list[dict[str, Any]] = []
+    sizes: list[int] = []
+    try:
+        for source in messages:
+            content = source.get("content")
+            if not isinstance(content, str):
+                return None
+            copied = dict(source)
+            projected.append(copied)
+            sizes.append(len(content.encode("utf-8", errors="strict")))
+    except (UnicodeError, ValueError):
+        return None
+    if sum(sizes) <= maximum_input_bytes:
+        return tuple(projected)
+
+    # Product advice has one terminal user carrier. Never clip system policy or
+    # silently discard an earlier conversational message to make private data fit.
+    mutable_index = len(projected) - 1
+    if mutable_index < 0 or str(projected[mutable_index].get("role") or "").casefold() != "user":
+        return None
+    fixed_bytes = sum(sizes[:mutable_index])
+    available = maximum_input_bytes - fixed_bytes
+    if available < _MIN_SECONDARY_USER_BYTES:
+        return None
+    try:
+        projected[mutable_index]["content"] = _clip_utf8_middle(
+            str(projected[mutable_index]["content"]),
+            available,
+        )
+    except UnicodeError:
+        return None
+    fitted_bytes = sum(
+        len(str(message.get("content") or "").encode("utf-8", errors="strict")) for message in projected
+    )
+    return tuple(projected) if fitted_bytes <= maximum_input_bytes else None
 
 
 def _bounded_score(value: object) -> bool:
@@ -142,7 +212,6 @@ async def route_inbox_advice(
     max_output_tokens: int,
     primary_model_name: str,
     primary_call: Callable[[], Awaitable[dict[str, Any]]],
-    contains_private_text: bool,
     image_bearing: bool,
 ) -> RoutedInboxAdvice:
     """Route one advisory extraction without wrapping or replacing the primary."""
@@ -150,18 +219,38 @@ async def route_inbox_advice(
     if secondary is None:
         return RoutedInboxAdvice(await primary_call(), primary_model_name, "primary")
 
+    secondary_messages: tuple[Mapping[str, Any], ...] = tuple(messages)
+    secondary_max_output_tokens = max(64, int(max_output_tokens))
+    profile_limits = secondary.advisory_profile_limits
+    if profile_limits is not None:
+        context_tokens, profile_max_output_tokens = profile_limits
+        secondary_max_output_tokens = min(
+            secondary_max_output_tokens,
+            profile_max_output_tokens,
+        )
+        maximum_input_bytes = context_tokens - secondary_max_output_tokens - SECONDARY_CONTEXT_TOKEN_RESERVE
+        fitted = _fit_secondary_messages(
+            messages,
+            maximum_input_bytes=maximum_input_bytes,
+        )
+        if fitted is None:
+            return RoutedInboxAdvice(await primary_call(), primary_model_name, "primary")
+        secondary_messages = fitted
+
     def request_factory() -> ModelRequest:
         return ModelRequest(
             workload=ModelWorkload.EXTRACT,
-            messages=tuple(messages),
-            max_output_tokens=max(64, int(max_output_tokens)),
+            messages=secondary_messages,
+            max_output_tokens=secondary_max_output_tokens,
             absolute_deadline_monotonic=secondary.new_advisory_deadline(),
             priority=ModelPriority.BACKGROUND,
             effect_class=EffectClass.NONE,
             modality=ModelModality.IMAGE if image_bearing else ModelModality.TEXT,
             require_structured_output=True,
             require_independent_model=True,
-            contains_private_text=contains_private_text,
+            # Inbox input is always tenant-private. Keep this classification
+            # code-owned so neither assist nor shadow can accidentally relabel it.
+            contains_private_text=True,
         )
 
     if secondary.mode is SecondaryMode.SHADOW:

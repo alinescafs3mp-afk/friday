@@ -130,6 +130,17 @@ class SecondaryBrainScheduler:
 
         return self._client.config.served_model_alias if self._client is not None else ""
 
+    @property
+    def advisory_profile_limits(self) -> tuple[int, int] | None:
+        """Expose the admitted non-secret context/output limits to prompt builders."""
+
+        if self._client is None:
+            return None
+        return (
+            self._client.config.max_context_tokens,
+            self._client.config.max_output_tokens,
+        )
+
     def new_advisory_deadline(self) -> float:
         """Return one end-to-end optional budget, including all admission probes."""
 

@@ -10,6 +10,7 @@ from typing import Any, cast
 from friday.config import detect_repeated_token_degeneration
 
 from .contracts import (
+    SECONDARY_CONTEXT_TOKEN_RESERVE,
     EffectClass,
     JsonValue,
     ModelModality,
@@ -140,7 +141,9 @@ class GptOssProtocolAdapter:
         # Cyrillic, CJK and emoji. The measured endpoint cap remains authoritative;
         # output and a small protocol margin are kept.
         input_tokens_upper_bound = max(1, sum(_message_chars(item) for item in request.messages))
-        context_budget = config.max_context_tokens - request.max_output_tokens - 256
+        context_budget = (
+            config.max_context_tokens - request.max_output_tokens - SECONDARY_CONTEXT_TOKEN_RESERVE
+        )
         if context_budget < 1 or input_tokens_upper_bound > context_budget:
             raise ProtocolRejection(SecondaryFailure.CONTEXT_EXCEEDED)
 
