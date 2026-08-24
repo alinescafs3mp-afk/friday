@@ -6,6 +6,8 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-24
 - Branch: `main`
+- Current source head: `4511737` (native-MXFP4 secondary runtime and dormant
+  Inbox/document advisory seams; not yet released)
 - Deployed implementation head: `da8d11e2ac3c8982e43fa1f104076e922426ac25`
 - Live: Friday `0.207.8` / `da8d11e2ac3c8982e43fa1f104076e922426ac25`;
   tree `c80959299f0a6dac89f3288a742e668a8f575b855de1bbed55b32cf45d33ed45`;
@@ -261,19 +263,17 @@ claims at this checkpoint.
 
 ## Next order
 
-1. Complete P0 live discovery and independent certification of the optional
-   Windows/WSL2/Docker/SGLang node; do not make Friday depend on it.
-2. Add dormant, default-off secondary endpoint support with independent
-   transport/circuit state, typed sanitized GPT-OSS advice and fail-soft tests.
-3. Prove shadow and bounded assist rollout, including laptop-off and
-   disconnect-mid-turn journeys, before any advisory output influences a turn.
-4. Resume the schema-39 archive-evidence checkpoint and release it only after
+1. Complete native-MXFP4 protocol, capacity, restart, soak and failure
+   certification of the exact optional laptop node.
+2. Register the evidence-bound profile and release it default-off; then prove
+   shadow and bounded assist, including laptop-off and disconnect-mid-turn.
+3. Resume the schema-39 archive-evidence checkpoint and release it only after
    the complete isolated and immutable-release gates pass.
-5. Add durable candidate selection/pending-question state only when it preserves
+4. Add durable candidate selection/pending-question state only when it preserves
    exact archive coverage and survives restart without persisting model prose.
-6. Add one uncertainty-aware common effect envelope and prove one idempotent,
+5. Add one uncertainty-aware common effect envelope and prove one idempotent,
    receipt-backed Obsidian mutation/reconciliation vertical.
-7. Extend existing immutable-release evidence into machine-reconcilable
+6. Extend existing immutable-release evidence into machine-reconcilable
    source/wheel/schema/activation/fallback manifests, then register exact-release
    journey evidence without promoting generic component gates.
 8. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
