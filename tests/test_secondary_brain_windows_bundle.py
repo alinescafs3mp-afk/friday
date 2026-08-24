@@ -143,8 +143,10 @@ def test_compose_is_digest_gated_and_has_no_host_authority() -> None:
     assert "latest" not in text.casefold()
 
 
-def test_model_is_read_only_and_cache_and_tmp_are_the_only_mutable_runtime_surfaces() -> None:
-    engine = _compose()["services"]["sglang"]
+def test_model_is_read_only_and_mutable_runtime_surfaces_are_explicit() -> None:
+    compose = _compose()
+    engine = compose["services"]["sglang"]
+    gateway = compose["services"]["gateway"]
     volumes = engine["volumes"]
     model = next(row for row in volumes if row["target"] == "/source")
     assert model == {
@@ -169,6 +171,26 @@ def test_model_is_read_only_and_cache_and_tmp_are_the_only_mutable_runtime_surfa
     assert engine["environment"]["TRITON_CACHE_DIR"] == "/root/.cache/triton"
     assert engine["environment"]["CUDA_CACHE_PATH"] == "/root/.cache/cuda"
     assert engine["environment"]["TORCHINDUCTOR_CACHE_DIR"] == "/root/.cache/torchinductor"
+    assert [row for row in volumes if row.get("target") == "/run/friday-runtime-epoch"] == [
+        {
+            "type": "volume",
+            "source": "runtime-epoch",
+            "target": "/run/friday-runtime-epoch",
+        }
+    ]
+    assert [
+        row for row in gateway["volumes"] if row.get("target") == "/run/friday-runtime-epoch"
+    ] == [
+        {
+            "type": "volume",
+            "source": "runtime-epoch",
+            "target": "/run/friday-runtime-epoch",
+            "read_only": True,
+        }
+    ]
+    assert compose["volumes"]["runtime-epoch"] == {
+        "name": "friday-secondary-runtime-epoch"
+    }
 
 
 def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None:
@@ -204,6 +226,8 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     assert "if IFS= read -r SECRET_VALUE" in renderer
     assert 'test "$gateway_key" != "$upstream_key"' in renderer
     assert 'test "${#SECRET_VALUE}" -eq 64' in renderer
+    assert "runtime_epoch_path=/run/friday-runtime-epoch/process-start-time-seconds" in renderer
+    assert "''|[!1-9]*|*[!0-9.]*|*.*.*|*.) exit 64" in renderer
     assert "exec nginx -c /tmp/gateway.conf" in renderer
     assert "sed " not in renderer
 
@@ -246,14 +270,24 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     assert 'Authorization "Bearer __SGLANG_BEARER__"' in policy
     assert "location = /v1/models" in policy
     assert "location = /v1/friday-profile" in policy
-    assert policy.count('add_header X-Friday-Secondary-Profile-Id "__PROFILE_ID__" always;') == 2
-    assert policy.count('add_header X-Friday-Secondary-Profile-Sha256 "__PROFILE_SHA256__" always;') == 2
+    assert "location = /v1/friday-runtime-epoch" in policy
+    assert policy.count('add_header X-Friday-Secondary-Profile-Id "__PROFILE_ID__" always;') == 3
+    assert policy.count('add_header X-Friday-Secondary-Profile-Sha256 "__PROFILE_SHA256__" always;') == 3
     assert "proxy_hide_header X-Friday-Secondary-Profile-Id" in policy
     assert 'add_header X-Friday-Secondary-Profile-Sha256 "__PROFILE_SHA256__" always' in policy
     assert "location = /metrics" in policy
     assert "location = /v1/chat/completions" in policy
     assert "location /" in policy and "return 404;" in policy
     assert "proxy_pass http://friday_secondary_sglang" in policy
+    assert set(re.findall(r"^\s*location(?: =)?\s+(\S+)\s+\{", policy, re.MULTILINE)) == {
+        "/",
+        "/health",
+        "/metrics",
+        "/v1/chat/completions",
+        "/v1/friday-profile",
+        "/v1/friday-runtime-epoch",
+        "/v1/models",
+    }
 
 
 def test_examples_have_sealed_source_and_nonaccepted_runtime_placeholders() -> None:
@@ -312,11 +346,8 @@ def test_examples_have_sealed_source_and_nonaccepted_runtime_placeholders() -> N
 @pytest.mark.parametrize(
     ("body", "expected"),
     [
-        (
-            "# HELP process_start_time_seconds start\nprocess_start_time_seconds 1700000000.5000\n",
-            "1700000000.5",
-        ),
-        ("process_start_time_seconds 1700000000\n", "1700000000"),
+        ("1700000000.5000", "1700000000.5"),
+        ("1700000000", "1700000000"),
     ],
 )
 def test_runtime_process_epoch_is_exact_and_normalized(
@@ -325,7 +356,13 @@ def test_runtime_process_epoch_is_exact_and_normalized(
     expected: str,
 ) -> None:
     endpoint = importlib.import_module("endpoint_common")
-    monkeypatch.setattr(endpoint, "request_text", lambda *_args, **_kwargs: (body, 0.01))
+    observed: list[tuple[str, str]] = []
+
+    def request_text(method: str, url: str, **_kwargs: object) -> tuple[str, float]:
+        observed.append((method, url))
+        return body, 0.01
+
+    monkeypatch.setattr(endpoint, "request_text", request_text)
 
     assert (
         endpoint.runtime_process_epoch(
@@ -336,14 +373,24 @@ def test_runtime_process_epoch_is_exact_and_normalized(
         )
         == expected
     )
+    assert observed == [
+        ("GET", "https://192.168.1.35:8443/health"),
+        ("GET", "https://192.168.1.35:8443/v1/friday-runtime-epoch"),
+        ("GET", "https://192.168.1.35:8443/health"),
+        ("GET", "https://192.168.1.35:8443/v1/friday-runtime-epoch"),
+    ]
 
 
 @pytest.mark.parametrize(
     "body",
     [
         "",
-        "process_start_time_seconds NaN\n",
-        "process_start_time_seconds 1\nprocess_start_time_seconds 2\n",
+        "NaN",
+        "1700000000\n",
+        "1700000000.1\n1700000000.2",
+        "01700000000",
+        "1700000000.",
+        "1e9",
     ],
 )
 def test_runtime_process_epoch_rejects_missing_ambiguous_or_nonfinite(
@@ -360,6 +407,99 @@ def test_runtime_process_epoch_rejects_missing_ambiguous_or_nonfinite(
             timeout_sec=1.0,
             ca_file=Path("ca.crt"),
         )
+
+
+def test_runtime_process_epoch_rejects_a_restart_between_observations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = importlib.import_module("endpoint_common")
+    responses = iter(("healthy", "1700000000", "healthy", "1700000001"))
+    monkeypatch.setattr(
+        endpoint,
+        "request_text",
+        lambda *_args, **_kwargs: (next(responses), 0.01),
+    )
+
+    with pytest.raises(endpoint.EndpointError, match="runtime process epoch is missing or ambiguous"):
+        endpoint.runtime_process_epoch(
+            "https://192.168.1.35:8443/v1",
+            api_key="a" * 64,
+            timeout_sec=1.0,
+            ca_file=Path("ca.crt"),
+        )
+
+
+def test_launcher_derives_and_atomically_publishes_exact_process_epoch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    launcher = importlib.import_module("launch_sglang_secure")
+    fields = ["S", *(["1"] * 18), "1234"]
+    self_stat = f"123 (python worker) {' '.join(fields)}\n"
+    assert launcher._process_start_epoch("cpu 1 2 3\nbtime 1700000000\n", self_stat, 100) == (
+        "1700000012.34"
+    )
+
+    observations = iter(("1700000012.34", "1700000099"))
+    monkeypatch.setattr(launcher, "_observed_process_start_epoch", lambda: next(observations))
+    tmp_path.chmod(0o755)
+    assert launcher._publish_runtime_epoch(tmp_path) == "1700000012.34"
+    target = tmp_path / "process-start-time-seconds"
+    assert target.read_bytes() == b"1700000012.34"
+    assert target.stat().st_mode & 0o777 == 0o444
+    outside = tmp_path.parent / "outside-runtime-epoch"
+    outside.write_bytes(b"unchanged")
+    target.unlink()
+    target.symlink_to(outside)
+    assert launcher._publish_runtime_epoch(tmp_path) == "1700000099"
+    assert target.read_bytes() == b"1700000099"
+    assert not target.is_symlink()
+    assert outside.read_bytes() == b"unchanged"
+    assert not list(tmp_path.glob(".*.tmp-*"))
+
+
+@pytest.mark.parametrize(
+    ("clock_ticks", "start_ticks", "expected"),
+    [
+        (100, 1234, "1700000012.34"),
+        (250, 251, "1700000001.004"),
+        (300, 1, "1700000000.003333333"),
+        (1000, 1001, "1700000001.001"),
+    ],
+)
+def test_launcher_projects_process_ticks_without_floating_point(
+    clock_ticks: int,
+    start_ticks: int,
+    expected: str,
+) -> None:
+    launcher = importlib.import_module("launch_sglang_secure")
+    fields = ["S", *(["1"] * 18), str(start_ticks)]
+    self_stat = f"123 (python ) worker) {' '.join(fields)}\n"
+    assert launcher._process_start_epoch("btime 1700000000\n", self_stat, clock_ticks) == expected
+
+
+@pytest.mark.parametrize(
+    ("proc_stat", "self_stat", "clock_ticks"),
+    [
+        (
+            "btime 1\nbtime 2\n",
+            f"1 (x) {' '.join(['S', *(['1'] * 18), '1'])}",
+            100,
+        ),
+        ("btime -1\n", f"1 (x) {' '.join(['S', *(['1'] * 18), '1'])}", 100),
+        ("btime 1\n", "invalid", 100),
+        ("btime 1\n", f"1 (x) {' '.join(['S', *(['1'] * 18), '-1'])}", 100),
+        ("btime 1\n", f"1 (x) {' '.join(['S', *(['1'] * 18), '1'])}", 0),
+    ],
+)
+def test_launcher_rejects_ambiguous_process_epoch_sources(
+    proc_stat: str,
+    self_stat: str,
+    clock_ticks: int,
+) -> None:
+    launcher = importlib.import_module("launch_sglang_secure")
+    with pytest.raises(RuntimeError, match="Linux process epoch projection is invalid"):
+        launcher._process_start_epoch(proc_stat, self_stat, clock_ticks)
 
 
 def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> None:

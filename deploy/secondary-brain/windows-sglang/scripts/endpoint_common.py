@@ -639,38 +639,49 @@ def runtime_process_epoch(
     timeout_sec: float,
     ca_file: Path | None,
 ) -> str:
-    """Return one exact process-start metric for restart-bound evidence."""
+    """Return the exact gateway-served SGLang process-start epoch."""
 
     normalized = normalize_base_url(base_url)
-    body, _latency = request_text(
+    health_url = f"{normalized.removesuffix('/v1')}/health"
+    request_text(
         "GET",
-        f"{normalized.removesuffix('/v1')}/metrics",
+        health_url,
         api_key=api_key,
         timeout_sec=timeout_sec,
         ca_file=ca_file,
     )
-    values: list[Decimal] = []
-    lines = body.splitlines()
-    if len(lines) > 20_000:
-        raise EndpointError("runtime metrics has too many rows")
-    for line in lines:
-        if not line or line.startswith("#"):
-            continue
-        if len(line) > 4_096:
-            raise EndpointError("runtime metrics has an oversized row")
-        pieces = line.split()
-        if len(pieces) not in {2, 3} or pieces[0] != "process_start_time_seconds":
-            continue
-        try:
-            value = Decimal(pieces[1])
-        except (InvalidOperation, ValueError):
-            raise EndpointError("runtime process epoch is invalid") from None
-        if not value.is_finite() or value <= 0:
-            raise EndpointError("runtime process epoch is invalid")
-        values.append(value.normalize())
-    if len(values) != 1:
+    first_body, _latency = request_text(
+        "GET",
+        f"{normalized}/friday-runtime-epoch",
+        api_key=api_key,
+        timeout_sec=timeout_sec,
+        ca_file=ca_file,
+    )
+    request_text(
+        "GET",
+        health_url,
+        api_key=api_key,
+        timeout_sec=timeout_sec,
+        ca_file=ca_file,
+    )
+    second_body, _latency = request_text(
+        "GET",
+        f"{normalized}/friday-runtime-epoch",
+        api_key=api_key,
+        timeout_sec=timeout_sec,
+        ca_file=ca_file,
+    )
+    if first_body != second_body or re.fullmatch(
+        r"[1-9][0-9]*(?:\.[0-9]+)?", first_body
+    ) is None:
         raise EndpointError("runtime process epoch is missing or ambiguous")
-    return format(values[0], "f")
+    try:
+        value = Decimal(first_body)
+    except (InvalidOperation, ValueError):
+        raise EndpointError("runtime process epoch is invalid") from None
+    if not value.is_finite() or value <= 0:
+        raise EndpointError("runtime process epoch is invalid")
+    return format(value.normalize(), "f")
 
 
 def verify_remote_profile_epoch(

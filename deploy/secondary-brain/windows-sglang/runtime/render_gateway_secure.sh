@@ -52,6 +52,18 @@ esac
 test "${#PROFILE_ID}" -ge 3
 test "${#PROFILE_ID}" -le 80
 
+runtime_epoch_path=/run/friday-runtime-epoch/process-start-time-seconds
+test -f "$runtime_epoch_path"
+test ! -L "$runtime_epoch_path"
+RUNTIME_EPOCH=
+if IFS= read -r RUNTIME_EPOCH < "$runtime_epoch_path"; then
+    exit 64
+fi
+case "$RUNTIME_EPOCH" in
+    ''|[!1-9]*|*[!0-9.]*|*.*.*|*.) exit 64 ;;
+esac
+test "${#RUNTIME_EPOCH}" -le 32
+
 set -- $(sha256sum /run/friday-profile/accepted.json)
 PROFILE_SHA256=$1
 test "$#" -eq 2
@@ -75,7 +87,7 @@ while IFS= read -r config_line || test -n "$config_line"; do
     printf '%s\n' "$config_line"
 done < /etc/friday-gateway/gateway.conf.template > /tmp/gateway.conf
 
-unset SECRET_VALUE gateway_key upstream_key PROFILE_ID PROFILE_SHA256
+unset SECRET_VALUE gateway_key upstream_key PROFILE_ID PROFILE_SHA256 RUNTIME_EPOCH
 unset replace_value replace_needle replace_with
-unset replace_prefix replace_suffix REPLACED_VALUE config_line secret_path
+unset replace_prefix replace_suffix REPLACED_VALUE config_line secret_path runtime_epoch_path
 exec nginx -c /tmp/gateway.conf -g 'daemon off;'

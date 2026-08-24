@@ -69,6 +69,17 @@ http {
             alias /run/friday-profile/accepted.json;
         }
 
+        location = /v1/friday-runtime-epoch {
+            limit_except GET { deny all; }
+            default_type text/plain;
+            etag off;
+            add_header Cache-Control "no-store" always;
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header X-Friday-Secondary-Profile-Id "__PROFILE_ID__" always;
+            add_header X-Friday-Secondary-Profile-Sha256 "__PROFILE_SHA256__" always;
+            alias /run/friday-runtime-epoch/process-start-time-seconds;
+        }
+
         location = /metrics {
             limit_except GET { deny all; }
             proxy_set_header Authorization "Bearer __SGLANG_BEARER__";

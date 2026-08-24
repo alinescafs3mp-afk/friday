@@ -35,6 +35,9 @@ services:
       - type: volume
         source: runtime-cache
         target: /root/.cache
+      - type: volume
+        source: runtime-epoch
+        target: /run/friday-runtime-epoch
       - type: bind
         source: ./secrets/sglang-api-key
         target: /run/friday-secrets/sglang-api-key
@@ -166,6 +169,10 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - type: volume
+        source: runtime-epoch
+        target: /run/friday-runtime-epoch
+        read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
       - /var/cache/nginx:size=16m,mode=0755
@@ -216,3 +223,5 @@ volumes:
     external: true
   runtime-cache:
     name: friday-secondary-sglang-cache
+  runtime-epoch:
+    name: friday-secondary-runtime-epoch
