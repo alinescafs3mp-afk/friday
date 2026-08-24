@@ -5,9 +5,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import subprocess
+import sys
 import unicodedata
 from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
@@ -439,6 +442,113 @@ def _reopen_storage(settings: Any, storage: Any) -> FridayStorage:
             database_must_exist=True,
         )
     )
+
+
+_FRESH_INTERPRETER_REPLAY_PROBE = r"""
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+from dataclasses import replace
+from pathlib import Path
+
+source_root, database_path, user_id, conversation_id, work_item_id = sys.argv[1:]
+sys.path.insert(0, source_root)
+
+from friday.config import load_settings
+from friday.interaction_control_plane.archive_evidence_work_item_store import (
+    get_recall_selected_archive_evidence_work_item_in_transaction,
+)
+from friday.permissions import AuthorizationService
+from friday.retrieval.archive_evidence_replay import (
+    ArchiveEvidenceReplayCoverageGrade,
+    replay_archive_evidence_in_transaction,
+)
+from friday.retrieval.archive_search_contract import ArchiveSearchCorpus
+from friday.storage import FridayStorage
+
+settings = replace(
+    load_settings(),
+    database_path=Path(database_path),
+    database_must_exist=True,
+)
+storage = FridayStorage(settings)
+try:
+    authorization = AuthorizationService(storage)
+    actor = authorization.actor_for_user(user_id, source="archive-fresh-interpreter-probe")
+    with storage.transaction() as conn:
+        item = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=work_item_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        if item is None:
+            raise RuntimeError("durable archive Work Item is unavailable")
+        evidence = item.selected_evidence
+        replay = replay_archive_evidence_in_transaction(
+            conn,
+            authorization=authorization,
+            actor=actor,
+            tenant_id=actor.user_id,
+            principal_id=user_id,
+            origin_boundary_user_message_id=evidence.origin_boundary_user_message_id,
+            corpus=ArchiveSearchCorpus(evidence.corpus.value),
+            source_ref=evidence.source_ref,
+            passage_refs=evidence.passage_refs,
+            expected_source_snapshot_sha256=evidence.source_snapshot_sha256,
+            expected_coverage_grade=ArchiveEvidenceReplayCoverageGrade(
+                evidence.coverage_grade.value
+            ),
+        )
+        payload = {
+            "corpus": replay.corpus.value,
+            "coverage_grade": (
+                None if replay.coverage_grade is None else replay.coverage_grade.value
+            ),
+            "model_visible_sha256": hashlib.sha256(replay.model_visible_bytes).hexdigest(),
+            "passage_count": len(replay.excerpts),
+            "status": replay.status.value,
+            "work_revision": item.revision,
+        }
+    print(json.dumps(payload, ensure_ascii=True, sort_keys=True))
+finally:
+    storage.close(final=True)
+"""
+
+
+def _fresh_interpreter_replay(storage: Any, item: Any) -> dict[str, Any]:
+    completed = subprocess.run(  # noqa: S603 - fixed interpreter and inline probe
+        (
+            sys.executable,
+            "-I",
+            "-c",
+            _FRESH_INTERPRETER_REPLAY_PROBE,
+            str(Path(__file__).resolve().parents[1]),
+            str(storage.settings.database_path),
+            item.user_id,
+            item.conversation_id,
+            item.id,
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert frozenset(payload) == frozenset(
+        {
+            "corpus",
+            "coverage_grade",
+            "model_visible_sha256",
+            "passage_count",
+            "status",
+            "work_revision",
+        }
+    )
+    return payload
 
 
 async def _runtime(
@@ -1064,6 +1174,14 @@ async def test_selected_canonical_archive_evidence_replays_exactly_after_runtime
         monkeypatch,
         suffix="-durable-restart",
     )
+    fresh_process = _fresh_interpreter_replay(storage, created)
+    assert fresh_process["status"] == "exact"
+    assert fresh_process["corpus"] == created.selected_evidence.corpus.value
+    assert fresh_process["coverage_grade"] == created.selected_evidence.coverage_grade.value
+    assert fresh_process["passage_count"] == len(created.selected_evidence.passage_refs)
+    assert fresh_process["work_revision"] == created.revision
+    assert len(fresh_process["model_visible_sha256"]) == 64
+    assert not (set(fresh_process["model_visible_sha256"]) - set("0123456789abcdef"))
     no_model = _DirectAnswerModel()
     reopened = _reopen_storage(settings, storage)
     try:
@@ -1095,7 +1213,10 @@ async def test_selected_canonical_archive_evidence_replays_exactly_after_runtime
     locator = created.selected_evidence.passage_refs[0].locator
     expected_passage = str(body_row["raw_content"])[locator.start_char : locator.end_char]  # type: ignore[union-attr]
     assert expected_passage and expected_passage in replay["message"]
-    assert replay["context"]["selected_archive_evidence_replay"] in {"complete", "partial"}
+    assert (
+        replay["context"]["selected_archive_evidence_replay"]
+        == created.selected_evidence.coverage_grade.value
+    )
     assert replay["tools_used"] == []
     assert no_model.calls == 0
     assert kernel.calls == []
@@ -1175,6 +1296,14 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_fail
     assert created.state is WorkState.ACTIVE
     assert created.transition is WorkTransition.CREATED
     assert created.revision == 1
+    fresh_process = _fresh_interpreter_replay(storage, created)
+    assert fresh_process["status"] == "exact"
+    assert fresh_process["corpus"] == "messages"
+    assert fresh_process["coverage_grade"] == created.selected_evidence.coverage_grade.value
+    assert fresh_process["passage_count"] == len(created.selected_evidence.passage_refs)
+    assert fresh_process["work_revision"] == created.revision
+    assert len(fresh_process["model_visible_sha256"]) == 64
+    assert not (set(fresh_process["model_visible_sha256"]) - set("0123456789abcdef"))
 
     late_text = f"Сообщение после исходной границы: {_QUERY}-LATE."
     storage.store_message(
@@ -1217,7 +1346,10 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_fail
 
     assert selected_text in replay["message"]
     assert late_text not in replay["message"]
-    assert replay["context"]["selected_archive_evidence_replay"] in {"complete", "partial"}
+    assert (
+        replay["context"]["selected_archive_evidence_replay"]
+        == created.selected_evidence.coverage_grade.value
+    )
     assert replay["tools_used"] == []
     assert no_model.calls == 0
     assert replay_kernel.calls == []
@@ -1238,11 +1370,6 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_fail
     assert advanced.revision == created.revision + 1
     assert advanced.anchor_assistant_message_id == replay["message_id"]
 
-    if revoked_permission is not None:
-        storage.set_permission_override(_OWNER, revoked_permission, "deny")
-    else:
-        assert storage.archive_conversation(source_conversation_id, _OWNER) is True
-
     drift_model = _DirectAnswerModel()
     failure_storage = _reopen_storage(settings, storage)
     try:
@@ -1251,6 +1378,23 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_fail
             failure_storage,
             monkeypatch,
             model_override=drift_model,
+        )
+        original_replay_response = drifted_runtime._selected_archive_evidence_replay_response
+        late_mutations: list[str] = []
+
+        def mutate_after_work_item_admission(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            if revoked_permission is not None:
+                failure_storage.set_permission_override(_OWNER, revoked_permission, "deny")
+                late_mutations.append(revoked_permission)
+            else:
+                assert failure_storage.archive_conversation(source_conversation_id, _OWNER) is True
+                late_mutations.append("source_archived")
+            return original_replay_response(*args, **kwargs)
+
+        monkeypatch.setattr(
+            drifted_runtime,
+            "_selected_archive_evidence_replay_response",
+            mutate_after_work_item_admission,
         )
         try:
             drifted = await drifted_runtime.chat(
@@ -1266,6 +1410,7 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_fail
     finally:
         failure_storage.close(final=True)
 
+    assert late_mutations == [revoked_permission or "source_archived"]
     assert drifted["context"]["selected_archive_evidence_replay"] == expected_replay_status
     source_free = json.dumps(drifted, ensure_ascii=False)
     assert selected_text not in source_free
@@ -1275,6 +1420,22 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_fail
     assert drifted["tools_used"] == []
     assert drift_model.calls == 0
     assert drift_kernel.calls == []
+    stored_failure = storage.get_message(str(drifted["message_id"]), _OWNER)
+    assert stored_failure is not None and stored_failure["content"] == drifted["message"]
+    durable_failure = json.dumps(
+        {
+            "content": stored_failure["content"],
+            "metadata_json": stored_failure["metadata_json"],
+        },
+        ensure_ascii=False,
+    )
+    assert selected_text not in durable_failure
+    assert late_text not in durable_failure
+    assert _QUERY not in durable_failure
+    assert source_conversation_id not in durable_failure
+    stored_failure_receipt = load_accepted_archive_recall_outcome_receipt(stored_failure["metadata_json"])
+    assert stored_failure_receipt.outcome.status.value == expected_replay_status
+    assert stored_failure_receipt.outcome.selected_evidence is None
     with storage.transaction() as conn:
         suspended = get_recall_selected_archive_evidence_work_item_in_transaction(
             conn,
@@ -1309,15 +1470,6 @@ async def test_selected_archive_replay_failure_is_source_free_and_suspends(
         monkeypatch,
         suffix=f"-{failure}",
     )
-    if failure == "denied":
-        storage.set_permission_override(_OWNER, "knowledge.read", "deny")
-    else:
-        storage.execute(
-            "UPDATE raw_objects SET raw_content=? WHERE id=? AND user_id=?",
-            ("Изменённое содержимое без исходного фрагмента.", raw_id, _OWNER),
-        )
-        storage.conn.commit()
-
     no_model = _DirectAnswerModel()
     reopened = _reopen_storage(settings, storage)
     try:
@@ -1326,6 +1478,26 @@ async def test_selected_archive_replay_failure_is_source_free_and_suspends(
             reopened,
             monkeypatch,
             model_override=no_model,
+        )
+        original_replay_response = restarted._selected_archive_evidence_replay_response
+        late_mutations: list[str] = []
+
+        def mutate_after_work_item_admission(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            if failure == "denied":
+                reopened.set_permission_override(_OWNER, "knowledge.read", "deny")
+            else:
+                reopened.execute(
+                    "UPDATE raw_objects SET raw_content=? WHERE id=? AND user_id=?",
+                    ("Изменённое содержимое без исходного фрагмента.", raw_id, _OWNER),
+                )
+                reopened.conn.commit()
+            late_mutations.append(failure)
+            return original_replay_response(*args, **kwargs)
+
+        monkeypatch.setattr(
+            restarted,
+            "_selected_archive_evidence_replay_response",
+            mutate_after_work_item_admission,
         )
         try:
             replay = await restarted.chat(
@@ -1341,12 +1513,30 @@ async def test_selected_archive_replay_failure_is_source_free_and_suspends(
     finally:
         reopened.close(final=True)
 
+    assert late_mutations == [failure]
     assert replay["context"]["selected_archive_evidence_replay"] == expected_status.value
-    assert _QUERY not in json.dumps(replay, ensure_ascii=False)
-    assert "Изменённое содержимое" not in json.dumps(replay, ensure_ascii=False)
+    source_free = json.dumps(replay, ensure_ascii=False)
+    assert _QUERY not in source_free
+    assert "Изменённое содержимое" not in source_free
+    assert raw_id not in source_free
     assert replay["tools_used"] == []
     assert no_model.calls == 0
     assert kernel.calls == []
+    stored_failure = storage.get_message(str(replay["message_id"]), _OWNER)
+    assert stored_failure is not None and stored_failure["content"] == replay["message"]
+    durable_failure = json.dumps(
+        {
+            "content": stored_failure["content"],
+            "metadata_json": stored_failure["metadata_json"],
+        },
+        ensure_ascii=False,
+    )
+    assert _QUERY not in durable_failure
+    assert "Изменённое содержимое" not in durable_failure
+    assert raw_id not in durable_failure
+    stored_failure_receipt = load_accepted_archive_recall_outcome_receipt(stored_failure["metadata_json"])
+    assert stored_failure_receipt.outcome.status is expected_status
+    assert stored_failure_receipt.outcome.selected_evidence is None
     with storage.transaction() as conn:
         suspended = get_recall_selected_archive_evidence_work_item_in_transaction(
             conn,
