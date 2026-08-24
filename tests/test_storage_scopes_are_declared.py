@@ -205,7 +205,10 @@ APPROVAL_TENANT_WITH_A_SEPARATE_PERSON = {
 # remain private to that same owner even when Friday uses a shared archive.
 # 297 → 298: legacy Obsidian marker migration reads only one owner's operation
 # journal; shared-tenant scope would expose private note paths across people.
-EXPECTED_USER_ID_METHODS = 298
+# 298 → 300: purge_secondary_product_witness and
+# consume_secondary_product_rollout_attestation operate on the shared archive
+# tenant; uploader/person identity is bound separately by the witness proof.
+EXPECTED_USER_ID_METHODS = 300
 
 
 def _methods_taking_user_id() -> set[str]:

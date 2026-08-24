@@ -4,15 +4,14 @@ This is the canonical short status register for the active Friday work. Detailed
 design and acceptance evidence remains in the linked documents; this file owns
 the current production identity, completed packages, active work and next order.
 
-- Updated: 2026-08-24
+- Updated: 2026-08-25
 - Branch: `main`
-- Secondary implementation checkpoint: `1e3834dd5d987f84c6ca6a490c0cd9b3ac2756ed`
-  (provisional exact-finalist certification; the 0.207.10 release closure is
-  pending)
-- Deployed implementation head: `2b197e1e467e93a085a1b4cc330fbda8b5b7b982`
-- Live: Friday `0.207.9` / `2b197e1e467e93a085a1b4cc330fbda8b5b7b982`;
-  tree `c3e689c7291c4919df60df163ec786208bb5f15d24c5a28813f551729ef7b6c0`;
-  wheel `cd8ab7320718cce4c7d15caef1f8ee36e4d2c25c063578d02980bf59fcc4af48`
+- Secondary candidate source: Friday `0.207.11` in this revision (sealed product
+  evidence and rollout-consume boundary; physical/profile acceptance pending)
+- Deployed implementation head: `aaae455a3eec6024c1e4e338d8f00b31ee90f995`
+- Live: Friday `0.207.10` / `aaae455a3eec6024c1e4e338d8f00b31ee90f995`;
+  tree `4f5c5e9a130e33f47fbf8f9282362f77b18b8f625d00f313b0cda4124d7ab76e`;
+  wheel `a563ad94c678ca5332f0cfe142ef65a18c6cc4a12f7e07b9d64c2734d06181f6`
 - Schema-capable fallback: Friday `0.207.9` /
   `f1426ca561f8914574cebf3a69f8dde83f79b568`;
   tree `eb8102ccf759b0f2a2d9a0a38584d9cda0c4938f14d389ac55246d87e536e6f7`;
@@ -43,11 +42,17 @@ The fresh epoch-D warm capacity-v2 trial passed seven non-streaming exact
 512-token repeats at runtime epoch `1787601267.06`; receipt SHA-256 is
 `b317e964eced1c0a80d5d8f4cc7fcb388d60598c16dfbeb9f320f1076fa97719`,
 median end-to-end completion rate is `108.497563` tokens/s and minimum free GPU
-memory is 1,294 MiB. The accepted-profile registry remains empty, deployment is
-default-off, production sends no traffic to the laptop and `assist` is blocked.
-Fresh `soak.epoch-d.full.7c1f742.json` is active; cold-restart capacity-v2 and
-acceptance remain pending. Older passed soak and streaming capacity-v1 receipts
-are historical only and cannot satisfy v2 acceptance.
+memory is 1,294 MiB. Epoch-D soak then passed 1,800.218 seconds / 4,467 requests /
+zero failures with 1,294 MiB minimum free GPU memory, 75 C peak and SHA-256
+`852673984f6705c148d0a92957d3c2f2fd5360925b0fddd2225eb8b631a8983a`.
+Cold epoch `1787603294.09` passed the matching capacity-v2 protocol 7/7 at exact
+512 tokens, median `106.733375` end-to-end tokens/s, 1,296 MiB minimum free and
+SHA-256 `9c60611b939098020faa4f9077debde3bec96c9ded2bffc3c3385fc94d5ffa87`.
+The verified v2 capacity wrapper hashes to
+`519b5912428f491dc65928c5ba2d2e33a6408566fe5f3496501ce2e760b9205e`;
+the superseded operational v1 assertion produced no false success. The
+accepted-profile registry remains empty, deployment is default-off, production
+sends no traffic to the laptop and `assist` is blocked.
 
 Detailed active tracker:
 `outer_sol/OPTIONAL_SECONDARY_BRAIN_IMPLEMENTATION_STATUS.md`.
@@ -118,14 +123,14 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Finish the fresh exact-finalist epoch-D 30-minute soak, then run the matching
-   fail-fast capacity-v2 protocol after a cold restart without promoting an
-   in-progress or historical receipt.
-2. Release the exact current finalist code default-off, then complete
-   controlled and physical laptop-loss evidence from that sealed source.
-3. Register only the accepted manifest in a separate default-off release, then
+1. Release this exact `0.207.11` implementation default-off, then complete
+   deterministic, controlled-live and pre-acceptance physical laptop-loss
+   evidence from that immutable source and accept only the exact bound finalist.
+2. Register only the accepted manifest in a separate default-off release, then
    prove private product shadow before bounded assist with exact primary
    fallback.
+3. Repeat the physical cycle with product-linked counters after assist is
+   admitted.
 4. Resume `INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md`; extend durable
    recall only through the deployed source/passage, coverage and
    late-reauthorization contracts.
@@ -216,13 +221,25 @@ course, with these repository-specific constraints:
 - Schema 39 deploys the narrow body-free selected-archive-evidence sidecar and
   restart continuation with fresh source, revision and authority checks.
 - The optional private-CA secondary control plane is deployed default-off. The
-  live `0.207.9` registry contains the superseded provisional
+  `0.207.9` registry contained the superseded provisional
   `gptoss20b-ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3`;
-  the current exact finalist is still unreleased. Both accepted registries are
-  empty and `assist` fails closed.
-- Live identity is `2b197e1e467e93a085a1b4cc330fbda8b5b7b982`, with the separate
+  the current exact finalist was not yet released. Its accepted registry was
+  empty and `assist` failed closed.
+- Release identity was `2b197e1e467e93a085a1b4cc330fbda8b5b7b982`, with the separate
   schema-39 fallback `f1426ca561f8914574cebf3a69f8dde83f79b568`. Backend and bridge
-  are active and trusted-CA health reports `ok`/`0.207.9`.
+  were accepted with trusted-CA health `ok`/`0.207.9`.
+
+### Exact provisional finalist released default-off (`0.207.10`)
+
+- Source/released identity is `aaae455a3eec6024c1e4e338d8f00b31ee90f995`,
+  tree `4f5c5e9a130e33f47fbf8f9282362f77b18b8f625d00f313b0cda4124d7ab76e`
+  and wheel
+  `a563ad94c678ca5332f0cfe142ef65a18c6cc4a12f7e07b9d64c2734d06181f6`.
+- The exact finalist is released default-off with an empty accepted registry;
+  production sends no secondary traffic and `assist` remains closed.
+- Protocol, post-cold probe, quality 29/29, warm/cold capacity-v2 and the
+  30-minute soak are exact. Capacity v2 is accepted; failure/profile acceptance
+  and profile registration remain pending.
 
 ## Document-contour WIP audit disposition
 
@@ -288,26 +305,24 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- The latest completed full non-UI gate before the soak-protocol-only follow-up
-  commits passed 17,951 tests; one explicitly configured real-Syncthing case
-  remained environment-gated. Static and focused secondary gates are green.
-- The `0.207.9` wheel reproduced byte-for-byte. Immutable activation completed
-  `clear`; exact candidate and schema-39 fallback identities, recovery receipts,
-  trusted-CA health, process roots, schema 39, SQLite quick-check and foreign
-  keys passed.
-- No warning-or-higher backend or bridge journal entries were emitted during
-  the post-cutover verification window.
+- The canonical gate passed 18,021 tests. Static and focused secondary gates are
+  green.
+- Friday `0.207.10` is live at the exact source/tree/wheel identity above,
+  schema 39, with schema-capable fallback
+  `f1426ca561f8914574cebf3a69f8dde83f79b568` / tree
+  `eb8102ccf759b0f2a2d9a0a38584d9cda0c4938f14d389ac55246d87e536e6f7`.
 
 ## Next order
 
-1. Complete the active fresh epoch-D 30-minute soak, matching cold-restart
-   capacity-v2 and failure certification of the exact provisional native-MXFP4
-   finalist.
-2. Release its exact current code default-off and close the sealed-source
-   controlled/physical failure evidence.
-3. Register only its accepted manifest in a separate default-off release; then
+1. Release this exact `0.207.11` implementation default-off, then complete
+   deterministic, controlled-live and pre-acceptance physical laptop-loss node
+   certification from that immutable source and accept only the fully
+   evidence-bound finalist.
+2. Register only its accepted manifest in a separate default-off release; then
    prove private product shadow before bounded assist, including laptop-off and
    disconnect-mid-turn.
+3. Repeat the physical cycle with product-linked counters after assist is
+   admitted.
 4. Resume broader ICP work from the deployed schema-39 archive-evidence
    vertical.
 5. Add durable candidate selection/pending-question state only when it preserves

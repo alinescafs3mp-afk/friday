@@ -69,7 +69,7 @@ journal, без ручного запуска systemd или восстанов�
 
 ### Optional GPT-OSS secondary brain
 
-Release 0.207.10 запускается с secondary в состоянии `disabled`:
+Release 0.207.11 запускается с secondary в состоянии `disabled`:
 переменные `FRIDAY_SECONDARY_LLM_*` в ENV0 не нужны. В этом релизе
 accepted-реестр пуст; единственная разрешённая ступень для exact
 finalist — provisional `shadow/extract` без private text. Его результат
@@ -127,15 +127,27 @@ product shadow. После приёмки и регистрации exact accept
 отдельном default-off release постройте ENV2 из exact ENV1, изменив
 только `FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=1`, и проведите новую
 distinct-candidate activation с
-`--staged-config-transition secondary_shadow_to_private_shadow`. Это
+`--staged-config-transition secondary_shadow_to_private_shadow`. В эту же
+команду обязательны абсолютный путь к свежему owner-private автоматическому
+`product-stage --stage public-shadow` receipt и его exact digest:
+`--secondary-rollout-receipt <RECEIPT>` и
+`--secondary-rollout-receipt-sha256 <SHA256>`. Это
 единственная ступень для реального private Inbox shadow: typed output
 валидируется и выбрасывается, а ответ по-прежнему строит primary.
 
 Только после принятого private-shadow evidence постройте ENV3 из exact
 ENV2, изменив только `FRIDAY_SECONDARY_LLM_MODE=assist`, и проведите
-`secondary_shadow_to_assist`: прямой ENV1→assist отклоняется —
+`secondary_shadow_to_assist`, передав теми же двумя флагами свежий receipt
+`product-stage --stage private-shadow`: прямой ENV1→assist отклоняется —
 private-text admission и передача авторитета не могут произойти одним
 переходом.
+
+Rollout receipt живёт не более 570 секунд. Оператор сверяет predecessor,
+candidate, release trees, staged ENV и sealed runner, затем одноразово сжигает
+server attestation до первой мутации. Потеря consume-ответа или неудача после
+consume не разрешает повтор с тем же receipt: выполните новый exact
+`product-stage` из чистого checkout активного predecessor и начните activation
+с новым candidate.
 
 Для планового выключения public или private shadow после terminal
 `clear` создайте disabled ENV из exact текущего, изменив только
@@ -327,7 +339,10 @@ Python строит sealed wheel-only siblings; все последующие к
 только из sealed release его же interpreter и копией оператора:
 
 ```text
-<SOURCE_PYTHON> -I -B tools/immutable_release_operator.py build ...
+<SOURCE_PYTHON> -I -B tools/immutable_release_operator.py build ... \
+  --secondary-product-runner \
+  <EXACT_CLEAN_CANDIDATE_CHECKOUT>/deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py \
+  --secondary-product-runner-sha256 <RUNNER_SHA256>
 <CANDIDATE>/venv/bin/python -I -B \
   <CANDIDATE>/artifacts/immutable_release_operator.py install-units ...
 <CANDIDATE>/venv/bin/python -I -B \
@@ -337,6 +352,13 @@ Python строит sealed wheel-only siblings; все последующие к
 <CANDIDATE>/venv/bin/python -I -B \
   <CANDIDATE>/artifacts/immutable_release_operator.py recover-historical-album ...
 ```
+
+Runner берётся только из чистого checkout exact candidate commit; переданный
+digest должен совпасть с его стабильными bytes. В release копия хранится mode
+`0400` как immutable trust anchor. Самостоятельно запускать эту копию нельзя:
+`product-stage` исполняется из чистого checkout уже активного predecessor, где
+доступны sibling modules и Git identity, а оператор требует byte-for-byte
+совпадение с sealed anchor.
 
 `build` запускается отдельно для каждого sealed sibling. Режим vault связан с
 immutable config identity и с аттестованной release-metadata capability
@@ -638,7 +660,7 @@ orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.10`.
+требуйте `status=ok` и `version=0.207.11`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

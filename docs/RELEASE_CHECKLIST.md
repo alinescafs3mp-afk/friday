@@ -78,10 +78,10 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   root одним recovery set, а staged ENV1 публикуется только после verified
   backup и удаляется durable после успеха.
 
-Для optional GPT-OSS secondary brain в 0.207.10 дополнительно:
+Для optional GPT-OSS secondary brain в 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.10`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.11`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` пуст; code-owned provisional-реестр
   содержит ровно finalist
@@ -105,8 +105,14 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   `secondary_shadow_enable` / `secondary_shadow_disable`;
 - после отдельной accepted-регистрации реальный private product shadow
   меняет только `ALLOW_PRIVATE_TEXT=0→1` через
-  `secondary_shadow_to_private_shadow`; только после его evidence
-  `secondary_shadow_to_assist` меняет только `MODE=shadow→assist`;
+  `secondary_shadow_to_private_shadow` и требует свежий owner-private
+  `product-stage --stage public-shadow` receipt с exact SHA-256; только после
+  его evidence `secondary_shadow_to_assist` меняет только
+  `MODE=shadow→assist` и требует свежий `private-shadow` receipt;
+- оба promotion activate передают `--secondary-rollout-receipt` и
+  `--secondary-rollout-receipt-sha256`; attestation живёт не более 570 секунд,
+  одноразово consume-ится до мутации и после потери ответа/неудачи не
+  переиспользуется — нужен новый witness и новый candidate;
   прямой public-shadow→assist отклоняется;
 - из public/private shadow плановое выключение меняет только
   `ENABLED=1→0` через `secondary_shadow_disable` и сохраняет privacy
@@ -133,7 +139,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 2 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.10`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.11`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
@@ -161,8 +167,8 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Проверить:
 
 - schema version = 39;
-- предыдущий release 0.207.9 уже имеет schema 39; переход
-  0.207.9 → 0.207.10 не повышает schema version и не добавляет DDL-проекцию,
+- предыдущий release 0.207.10 уже имеет schema 39; переход
+  0.207.10 → 0.207.11 не повышает schema version и не добавляет DDL-проекцию,
   но штатный `offline-migrate`/validation всё равно выполняется и может менять
   bytes базы;
 - исторический переход 38 → 39 атомарно перестраивает/copy-переносит
@@ -219,7 +225,10 @@ Wheel, построенный из чисто распакованного ZIP, 
 Единственный release path:
 
 ```text
-<SOURCE_PYTHON> -I -B tools/immutable_release_operator.py build ...
+<SOURCE_PYTHON> -I -B tools/immutable_release_operator.py build ... \
+  --secondary-product-runner \
+  <EXACT_CLEAN_CANDIDATE_CHECKOUT>/deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py \
+  --secondary-product-runner-sha256 <RUNNER_SHA256>
 <CANDIDATE>/venv/bin/python -I -B \
   <CANDIDATE>/artifacts/immutable_release_operator.py install-units ...
 <CANDIDATE>/venv/bin/python -I -B \
@@ -229,6 +238,11 @@ Wheel, построенный из чисто распакованного ZIP, 
 <CANDIDATE>/venv/bin/python -I -B \
   <CANDIDATE>/artifacts/immutable_release_operator.py recover-historical-album ...
 ```
+
+Runner и digest берутся из чистого checkout exact candidate commit. Sealed
+release-копия mode `0400` является trust anchor, а product-stage запускается из
+чистого checkout активного predecessor; standalone запуск release-копии не
+является допустимым evidence path.
 
 `install-units`, `activate` и recovery не запускаются из source tree: только
 sealed interpreter и копия оператора, связанные с exact release tree. Оператор

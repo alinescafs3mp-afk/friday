@@ -81,23 +81,41 @@ def test_bundle_has_the_closed_operator_surface() -> None:
     assert required <= {path.relative_to(BUNDLE).as_posix() for path in BUNDLE.rglob("*") if path.is_file()}
 
 
-def test_readme_pins_primary_tls_and_keeps_product_witness_post_accept_opt_in() -> None:
+def test_readme_pins_primary_tls_and_uses_automatic_product_stage_witness() -> None:
     readme = (BUNDLE / "README.md").read_text(encoding="utf-8")
     normalized = " ".join(readme.split())
 
-    assert readme.count("--primary-ca-file /secure/friday-primary-ca.crt") == 3
+    assert readme.count("--primary-ca-file /secure/friday-primary-ca.crt") == 4
     assert "https://127.0.0.1:8000" in readme
     assert "including that IP in SAN" in readme
     assert "never uses `-k`" in readme
     assert "does not accept the ambient trust store" in normalized
-    assert "pre-acceptance node witness above deliberately leaves the product counter" in normalized
-    assert readme.count("--primary-api-key-file /secure/friday-primary-api-key") == 3
-    assert readme.count("--product-output evidence/failure.product-") == 3
-    assert "--product-state evidence/failure.product-begin.json" in readme
-    assert "--product-state evidence/failure.product-off.json" in readme
-    assert "prompts and responses are never written" in normalized
-    assert "owned by the runtime user with mode `0600`" in normalized
-    assert "create-only and must be new" in normalized
+    assert "manual requests plus counter-only sidecars are rejected" in normalized
+    assert readme.count("--primary-api-key-file /secure/friday-primary-api-key") == 1
+    assert "--stage public-shadow" in readme
+    assert "--stage private-shadow" in readme
+    assert "--stage assist" in readme
+    assert "--stage outage" in readme
+    assert "--stage cooldown" in readme
+    assert "--stage recovery" in readme
+    assert "request, result and storage hashes" in normalized
+    assert "Receipts retain no prompt, model response or bearer" in normalized
+    assert "owner-token file with mode `0600`" in normalized
+    assert "fresh create-only output path" in normalized
+
+
+def test_live_control_handles_native_compose_stderr_without_masking_exit_code() -> None:
+    live = importlib.import_module("live_failure_battery")
+    expected = "C:\\ProgramData\\FridaySecondary\\bundle"
+    command = live._powershell("stop_gateway")
+
+    assert expected == live.REMOTE_BUNDLE_PATH
+    assert command.count(expected) == 2
+    assert "C:\\\\ProgramData" not in command
+    assert "$ErrorActionPreference='Continue';" in command
+    assert "2>&1 | Out-Null;$code=$LASTEXITCODE;" in command
+    assert "$ErrorActionPreference=$previousEap;if($code -ne 0){exit 45}" in command
+    assert "1>$null 2>$null" not in command
 
 
 def test_native_runtime_replaces_the_obsolete_internal_compat_image() -> None:

@@ -55,6 +55,9 @@ _READMISSION_FAILURES = frozenset(
         SecondaryFailure.CANCELLED,
     }
 )
+_SECONDARY_PRODUCT_CANDIDATE_PROFILE_SHA256 = (
+    "51af2164fa07ff3c01813e318076f7ac8b37eeecb73e695b6ca7543061c93439"
+)
 
 
 def _request_contains_image(request: ModelRequest) -> bool:
@@ -511,6 +514,24 @@ class SecondaryBrainScheduler:
             },
         }
 
+    def product_attestation_identity(self) -> dict[str, object]:
+        """Return the exact non-secret runtime identity used by product attestations."""
+
+        if self._client is None or self._profile_admission is None:
+            return {}
+        config = self._client.config
+        return {
+            "candidate_profile_id": config.profile_id,
+            "candidate_profile_mode": self.mode.value,
+            "candidate_profile_allow_private_text": self.allow_private_text,
+            "candidate_profile_context_tokens": config.max_context_tokens,
+            "candidate_profile_sha256": _SECONDARY_PRODUCT_CANDIDATE_PROFILE_SHA256,
+            "candidate_profile_manifest_sha256": config.profile_manifest_sha256,
+            "candidate_profile_admission": self._profile_admission.value,
+            "served_model_alias": config.served_model_alias,
+            "gateway_ca_certificate_sha256": config.ca_sha256,
+        }
+
     def _eligibility_failure(
         self,
         request: ModelRequest,
@@ -680,6 +701,41 @@ class SecondaryBrainScheduler:
     ) -> SecondaryResult | T:
         """Use one secondary attempt or invoke the primary fallback exactly once."""
 
+        return await self._secondary_preferred_required_result_observed_call(
+            request,
+            primary_fallback,
+            validator=validator,
+        )
+
+    async def secondary_preferred_required_result_observed(
+        self,
+        request: ModelRequest,
+        primary_fallback: Callable[[], Awaitable[T]],
+        *,
+        validator: Callable[[SecondaryResult], bool] | None = None,
+    ) -> tuple[SecondaryResult | T, dict[str, object], dict[str, object]]:
+        """Return one result plus snapshots bounded around that decision.
+
+        This does not queue normal traffic.  Concurrent counter movement remains
+        visible, so the external product oracle rejects the observation closed.
+        """
+
+        before = self.diagnostics_status()
+        result = await self._secondary_preferred_required_result_observed_call(
+            request,
+            primary_fallback,
+            validator=validator,
+        )
+        after = self.diagnostics_status()
+        return result, before, after
+
+    async def _secondary_preferred_required_result_observed_call(
+        self,
+        request: ModelRequest,
+        primary_fallback: Callable[[], Awaitable[T]],
+        *,
+        validator: Callable[[SecondaryResult], bool] | None = None,
+    ) -> SecondaryResult | T:
         attempt = await self.attempt(request)
         if attempt.result is not None:
             if self._validated(attempt.result, validator):
@@ -728,6 +784,28 @@ class SecondaryBrainScheduler:
         self._shadow_tasks.add(task)
         task.add_done_callback(self._shadow_tasks.discard)
         return primary_result
+
+    async def run_shadow_observed(
+        self,
+        request_factory: Callable[[], ModelRequest],
+        primary: Callable[[], Awaitable[T]],
+        *,
+        validator: Callable[[SecondaryResult], bool] | None = None,
+    ) -> tuple[T, dict[str, object], dict[str, object]]:
+        """Return primary plus snapshots around one synchronously drained shadow."""
+
+        primary_result = await primary()
+        try:
+            request = request_factory()
+        except Exception:
+            before = self.diagnostics_status()
+            self._shadow_invalid_total += 1
+            after = self.diagnostics_status()
+            return primary_result, before, after
+        before = self.diagnostics_status()
+        await self._run_shadow_attempt(request, validator)
+        after = self.diagnostics_status()
+        return primary_result, before, after
 
     async def _run_shadow_attempt(
         self,

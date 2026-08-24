@@ -7,7 +7,7 @@ owns ``/api/admin`` and the order these modules are included in.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from friday.admin_api._deps import (
     Any,
@@ -26,6 +26,16 @@ from friday.admin_api._deps import (
     _services,
     _target_user,
 )
+from friday.diagnostics.runtime_lease import ProcessLease, RuntimeLeaseError
+from friday.secondary_product_witness import (
+    SECONDARY_PRODUCT_BACKUP_LEASE_FILENAME,
+    SECONDARY_PRODUCT_BACKUP_LEASE_PROTOCOL,
+    is_secondary_product_witness_raw,
+    issue_secondary_product_advice_proof,
+    secondary_product_canonical,
+    secondary_product_current_server_identity,
+)
+from friday.storage._intake import checkpoint_secondary_product_witness_wal
 
 router = APIRouter()
 
@@ -129,24 +139,30 @@ async def classify_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
         status = InboxStatus(str(body.get("status") or "classified"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Недопустимый статус входящих") from exc
-    result = _services(request).ingestion.classify_inbox_item(
-        user_id,
-        inbox_id,
-        status,
-        entity_id=body.get("entity_id"),
-        tags=body.get("tags") if isinstance(body.get("tags"), list) else None,
-        notes=str(body.get("notes") or ""),
-        reviewed_by=request.state.actor.own_id,
-        promote=_parse_bool(body["promote"], field="promote") if "promote" in body else None,
-        title=str(body["title"]) if body.get("title") is not None else None,
-        summary=str(body["summary"]) if body.get("summary") is not None else None,
-        importance=(
-            _parse_unit_float(body["importance"], field="importance")
-            if body.get("importance") is not None
-            else None
-        ),
-        knowledge_kind=str(body["knowledge_kind"]) if body.get("knowledge_kind") is not None else None,
-    )
+    try:
+        result = _services(request).ingestion.classify_inbox_item(
+            user_id,
+            inbox_id,
+            status,
+            entity_id=body.get("entity_id"),
+            tags=body.get("tags") if isinstance(body.get("tags"), list) else None,
+            notes=str(body.get("notes") or ""),
+            reviewed_by=request.state.actor.own_id,
+            promote=_parse_bool(body["promote"], field="promote") if "promote" in body else None,
+            title=str(body["title"]) if body.get("title") is not None else None,
+            summary=str(body["summary"]) if body.get("summary") is not None else None,
+            importance=(
+                _parse_unit_float(body["importance"], field="importance")
+                if body.get("importance") is not None
+                else None
+            ),
+            knowledge_kind=(str(body["knowledge_kind"]) if body.get("knowledge_kind") is not None else None),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Не удалось обработать элемент входящих: проверьте параметры",
+        ) from exc
     if not result:
         raise HTTPException(status_code=404, detail="Элемент входящих не найден")
     _audit(request, "admin.inbox.classify", "inbox", inbox_id, after=result)
@@ -251,6 +267,26 @@ async def advise_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
     state = _services(request)
     if not state.storage.get_user(user_id):
         raise HTTPException(status_code=404, detail="Пользователь не найден")
+    existing = state.storage.get_inbox_item(inbox_id, user_id)
+    raw = (
+        state.storage.get_raw_object(str(existing.get("raw_object_id") or ""), user_id)
+        if isinstance(existing, dict)
+        else None
+    )
+    product_witness = is_secondary_product_witness_raw(raw)
+    if product_witness and (
+        not request.state.actor.is_owner or request.state.actor.identity_id != "owner-token"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Secondary product witness доступен только владельцу",
+        )
+    observer = body.get("secondary_product_observer")
+    if product_witness and not isinstance(observer, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="Требуются данные наблюдателя проверки второго контура",
+        )
     if not state.llm.enabled:
         raise HTTPException(status_code=503, detail="Локальная модель отключена")
     try:
@@ -265,6 +301,27 @@ async def advise_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if product_witness:
+        assert isinstance(raw, dict) and isinstance(observer, dict)
+        try:
+            result["secondary_product_advice_proof"] = issue_secondary_product_advice_proof(
+                state.storage,
+                raw=raw,
+                result=result,
+                observer=observer,
+                settings=state.settings,
+                secondary=state.secondary_brain,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Некорректные данные проверки второго контура",
+            ) from exc
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Не удалось проверить состояние второго контура",
+            ) from exc
     advice = result.get("model_advice") if isinstance(result.get("model_advice"), dict) else {}
     _audit(
         request,
@@ -281,3 +338,118 @@ async def advise_inbox(inbox_id: str, request: Request) -> dict[str, Any]:
         },
     )
     return result
+
+
+@router.post("/secondary-product-witness/purge")
+async def purge_secondary_witness(request: Request) -> dict[str, Any]:
+    """Delete only one exact, pending secondary product probe after certification."""
+
+    actor = _require(request, "admin.all_data.manage")
+    if not actor.is_owner or actor.identity_id != "owner-token":
+        raise HTTPException(status_code=403, detail="Secondary product witness доступен только владельцу")
+    body = await _request_json(request)
+    advice_proof = body.get("advice_proof")
+    operation = body.get("operation")
+    state = _services(request)
+
+    def purge(*, attested: bool) -> dict[str, Any]:
+        return state.storage.purge_secondary_product_witness(
+            actor.user_id,
+            stage=str(body.get("stage") or ""),
+            expected_source_ref_sha256=str(body.get("source_ref_sha256") or ""),
+            expected_content_sha256=str(body.get("content_sha256") or ""),
+            expected_uploader=actor.own_id,
+            cleanup_token=str(body.get("cleanup_token") or ""),
+            advice_proof=(advice_proof if attested and isinstance(advice_proof, dict) else None),
+            operation=operation if attested and isinstance(operation, dict) else None,
+            current_server_identity=(
+                secondary_product_current_server_identity(
+                    state.settings,
+                    state.secondary_brain,
+                )
+                if attested and (advice_proof is not None or operation is not None)
+                else None
+            ),
+        )
+
+    try:
+        with ProcessLease(
+            state.settings.state_dir / SECONDARY_PRODUCT_BACKUP_LEASE_FILENAME,
+            protocol=SECONDARY_PRODUCT_BACKUP_LEASE_PROTOCOL,
+        ):
+            result = purge(attested=True)
+            try:
+                checkpoint_secondary_product_witness_wal(state.storage)
+            except RuntimeError:
+                if result.get("server_rollout_attestation") is not None:
+                    purge(attested=False)
+                    checkpoint_secondary_product_witness_wal(state.storage)
+                raise
+    except (OSError, RuntimeLeaseError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Secondary product witness временно заблокирован снимком базы",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Некорректные данные очистки проверки второго контура",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Не удалось безопасно завершить очистку проверки второго контура",
+        ) from exc
+    _audit(
+        request,
+        "admin.inbox.purge_secondary_witness",
+        "inbox",
+        None,
+        after={
+            "purged": True,
+            "attestation_issued": result.get("server_rollout_attestation") is not None,
+        },
+    )
+    return result
+
+
+@router.post("/secondary-product-witness/consume-rollout-attestation")
+async def consume_secondary_witness_rollout_attestation(request: Request) -> Response:
+    """Atomically burn one server-origin rollout witness before operator mutation."""
+
+    actor = _require(request, "admin.all_data.manage")
+    if not actor.is_owner or actor.identity_id != "owner-token":
+        raise HTTPException(status_code=403, detail="Secondary product witness доступен только владельцу")
+    body = await _request_json(request)
+    try:
+        result = _services(request).storage.consume_secondary_product_rollout_attestation(
+            actor.user_id,
+            request_value=body,
+            current_server_identity=secondary_product_current_server_identity(
+                _services(request).settings,
+                _services(request).secondary_brain,
+            ),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Некорректное подтверждение перехода второго контура",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Подтверждение перехода второго контура уже использовано или изменилось",
+        ) from exc
+    _audit(
+        request,
+        "admin.inbox.consume_secondary_product_rollout_attestation",
+        "inbox",
+        None,
+        after={
+            "status": "consumed",
+            "stage": result.get("stage"),
+            "transition": result.get("transition"),
+            "request_sha256": result.get("request_sha256"),
+        },
+    )
+    return Response(content=secondary_product_canonical(result), media_type="application/json")

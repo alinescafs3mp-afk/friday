@@ -4587,6 +4587,8 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             )
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Feedback target not found") from exc
         return {"feedback": item}
 
     # Declared before /api/knowledge/{knowledge_id} so "tags" is never

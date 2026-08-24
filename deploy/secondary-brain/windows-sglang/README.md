@@ -51,11 +51,15 @@ have been removed from this deployment bundle.
 
 ## Current checkpoint
 
-The current implementation checkpoint is
-`1e3834dd5d987f84c6ca6a490c0cd9b3ac2756ed`. Production Friday is `0.207.9` at
-`2b197e1e467e93a085a1b4cc330fbda8b5b7b982`, schema 39, with fallback
-`f1426ca561f8914574cebf3a69f8dde83f79b568`; the secondary feature remains
-default-off. The exact observed/accepted hardware receipts are respectively
+The current candidate source is Friday `0.207.11` in this revision. Its last
+accepted deployed predecessor is Friday `0.207.10`, schema 39, at commit
+`aaae455a3eec6024c1e4e338d8f00b31ee90f995`, with tree
+`4f5c5e9a130e33f47fbf8f9282362f77b18b8f625d00f313b0cda4124d7ab76e`, wheel
+`a563ad94c678ca5332f0cfe142ef65a18c6cc4a12f7e07b9d64c2734d06181f6` and
+fallback `f1426ca561f8914574cebf3a69f8dde83f79b568` / tree
+`eb8102ccf759b0f2a2d9a0a38584d9cda0c4938f14d389ac55246d87e536e6f7`. The
+secondary feature remains default-off. The exact observed/accepted hardware
+receipts are respectively
 `7b850221e7e11ac0063971d7baaf627c96eae5441368f1907cc070106832b0f3` and
 `0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f`.
 The sealed model source is exact. The running provisional finalist is profile
@@ -71,9 +75,24 @@ traffic to the laptop. The fresh epoch-D warm capacity-v2 trial
 512-token repeats at runtime epoch `1787601267.06`; its SHA-256 is
 `b317e964eced1c0a80d5d8f4cc7fcb388d60598c16dfbeb9f320f1076fa97719`,
 median end-to-end completion rate is `108.497563` tokens/s and minimum free GPU
-memory is 1,294 MiB. The fresh 30-minute
-`soak.epoch-d.full.7c1f742.json` is active; its final passing receipt, the
-matching cold-restart capacity-v2 trial and acceptance remain pending.
+memory is 1,294 MiB. The bound epoch-D soak passed in 1,800.218 seconds with
+4,467 requests, zero failures, 1,294 MiB minimum free GPU memory and 75 C peak;
+`soak.epoch-d.full.7c1f742.json` hashes to
+`852673984f6705c148d0a92957d3c2f2fd5360925b0fddd2225eb8b631a8983a`.
+After a real cold restart, epoch `1787603294.09` passed the matching capacity-v2
+protocol 7/7 at exactly 512 completion tokens: median end-to-end rate
+`106.733375` tokens/s, minimum free GPU memory 1,296 MiB and receipt SHA-256
+`9c60611b939098020faa4f9077debde3bec96c9ded2bffc3c3385fc94d5ffa87`.
+The post-cold probe, 29/29 quality and quality-epoch receipts hash respectively
+to `b3a88138d43ac799aa113e1b53f8cc9b0c0c106d0decaf71726a438e29ddeec5`,
+`7bb0e3aa9b48dd95afdf8a1c226fa5b7eae6212f45f72966d82344cd3227e824`
+and `b7e345962770e26f45b90f33c9ac7180be4c72dc4427247025a23fefe197a310`.
+The verified capacity-v2 wrapper accepted the bound warm/cold/soak trio as
+`519b5912428f491dc65928c5ba2d2e33a6408566fe5f3496501ce2e760b9205e`.
+An earlier operational wrapper stopped on its superseded v1 schema assertion;
+it produced no success claim. Pre-acceptance deterministic/controlled/physical
+node evidence and profile acceptance remain pending; registration,
+private-shadow/assist and the later product-linked physical cycle follow them.
 
 ## 1. Management access and host preflight
 
@@ -392,37 +411,64 @@ the fixed `https://127.0.0.1:8000` authority, including that IP in SAN. The
 witness never uses `-k`, follows no redirect and does not accept the ambient
 trust store.
 
-The pre-acceptance node witness above deliberately leaves the product counter
-gate off: assist authority does not exist yet. After the exact accepted profile
-has been registered in a separate default-off release, exercised through the
-private product-shadow transition, and only then promoted to `assist`, repeat
-the three physical stages with fresh `--output` paths and add this complete
-opt-in trio (a partial trio is rejected):
+The physical witness above proves the node boundary only. Product evidence is a
+separate automatic stage runner; manual requests plus counter-only sidecars are
+rejected. Run that runner from the exact clean checkout at the active predecessor
+commit. The sealed release copy is only its byte-for-byte trust anchor; never
+execute the copied artifact standalone because its sibling imports and Git root
+are part of the checked runtime boundary. At each rollout stage it creates one
+bounded force-review Inbox item,
+calls the authenticated admin advice route itself, checks the exact diagnostics
+delta and persisted pending/no-Knowledge-Object state, then atomically hard-purges
+that exact synthetic Raw/Inbox pair without review feedback or calibration writes.
+The backend returns before/after diagnostics with the exact advice response and
+binds them to the server-validated synthetic source hash; any unexpected counter
+movement fails the closed stage oracle. Run it in an exclusive/quiescent window,
+once after each public-shadow, private-shadow and assist activation:
 
-```text
-physical-begin:
-  --primary-api-key-file /secure/friday-primary-api-key
-  --product-output evidence/failure.product-begin.json
+```bash
+primary_pid="$(systemctl --user show -p MainPID --value friday-backend.service)"
 
-physical-off:
-  --primary-api-key-file /secure/friday-primary-api-key
-  --product-state evidence/failure.product-begin.json
-  --product-output evidence/failure.product-off.json
+python scripts/live_failure_battery.py product-stage \
+  --candidate evidence/profile.candidate.json \
+  --ca-file /secure/friday-secondary-ca.crt \
+  --primary-api-key-file /secure/friday-primary-api-key \
+  --primary-ca-file /secure/friday-primary-ca.crt \
+  --primary-pid "$primary_pid" \
+  --stage public-shadow \
+  --output evidence/product.public-shadow.json
 
-physical-finish:
-  --primary-api-key-file /secure/friday-primary-api-key
-  --product-state evidence/failure.product-off.json
-  --product-output evidence/failure.product-observed.json
+# Repeat with --stage private-shadow after ENV2, and --stage assist after ENV3.
 ```
 
-For that second cycle, start one eligible product request and power the laptop
-off while it is in flight; then run one more eligible request while the laptop
-is off. After power-on and cooldown, run one eligible request before
-`physical-finish`. The sidecars bind the accepted profile and `assist` mode and
-retain only bounded counters, reason enums and hashes. The bearer value, prompts
-and responses are never written. The primary API-key file must be a regular
-single-line file owned by the runtime user with mode `0600` (or stricter). Every
-main receipt and sidecar path is create-only and must be new.
+For the assist physical-loss cycle, run `--stage outage` immediately after the
+laptop is physically off, then `--stage cooldown` while its circuit remains
+open. After power-on run `--stage recovery`; that command waits only for the
+bounded retry window and proves exact profile/model readmission. Use a fresh
+create-only output path for every stage.
+
+Each receipt binds request, result and storage hashes to its before/after
+diagnostics. Public shadow must deny private Inbox text with zero endpoint
+requests; private shadow must validate and discard exactly one secondary result;
+assist and recovery must persist advice from the exact secondary alias; outage
+and cooldown must each return one normal primary result. Receipts retain no
+prompt, model response or bearer. Cleanup leaves no RawObject, Inbox item,
+Knowledge Object, feedback, feedback state or searchable material. It retains
+only a body-free idempotency tombstone under the exact synthetic cleanup token;
+the store keeps at most one such replay receipt per stage (six total), prunes this
+exact prefix after 24 hours, and applies the ordinary account-delete/export rules.
+The primary API-key file must be a regular single-line
+literal owner-token file with mode `0600` (or stricter); delegated administrators
+are rejected even if their preset otherwise grants every capability.
+
+For public/private rollout transitions the v2 receipt also carries a body-free,
+server-HMAC attestation and a short-lived one-shot lookup capability. The immutable
+release operator validates the sealed receipt, then calls the configured-owner-only
+`POST /api/admin/secondary-product-witness/consume-rollout-attestation` over pinned
+primary TLS before changing service/env state. The backend atomically burns the
+attestation first: a lost consume response therefore fails closed, a retry is `409`,
+and a fresh same-stage witness is required. Product material is purged immediately;
+the body-free replay/consume tombstone remains bounded to one row per stage and 24h.
 
 The witness checks TLS loss, laptop boot-epoch change, unchanged Friday process
 epoch and exact candidate recovery. It never turns a service stop or mocked test

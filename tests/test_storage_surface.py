@@ -180,7 +180,8 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # expiring candidate/Active Frame CRUD without exposing a cross-owner reader.
 # 405 → 408: owner-scoped operation status plus explicit conflict lookup/resolution.
 # 408 → 409: bounded owner-scoped legacy-marker migration candidates.
-EXPECTED_MEMBER_COUNT = 409
+# 410 → 411: one-shot server-origin secondary rollout attestation consumption.
+EXPECTED_MEMBER_COUNT = 411
 EXPECTED_SIGNATURES: dict[str, str] = {
     "bind_owned_file_source_ref_alias": "(self, user_id: 'str', uploaded_by: 'str', source_ref: 'str', raw_object_id: 'str', supplied_filename: 'str' = '') -> 'bool'",
     "find_owned_files_by_filename": "(self, user_id: 'str', uploaded_by: 'str', filename: 'str') -> 'list[dict[str, Any]]'",
@@ -390,6 +391,8 @@ EXPECTED_SIGNATURES: dict[str, str] = {
     "prune_eval_cases": "(self, user_id: 'str', *, cap: 'int' = 200) -> 'dict[str, int]'",
     "prune_backups": "(self, *, keep: 'int') -> 'dict[str, Any]'",
     "purge_knowledge_object": "(self, ko_id: 'str', user_id: 'str | None' = None, *, require_soft_deleted: 'bool' = True) -> 'dict[str, Any]'",
+    "purge_secondary_product_witness": "(self, user_id: 'str', *, stage: 'str', expected_source_ref_sha256: 'str', expected_content_sha256: 'str', expected_uploader: 'str', cleanup_token: 'str', advice_proof: 'Mapping[str, Any] | None' = None, operation: 'Mapping[str, Any] | None' = None, current_server_identity: 'Mapping[str, Any] | None' = None) -> 'dict[str, Any]'",
+    "consume_secondary_product_rollout_attestation": "(self, user_id: 'str', *, request_value: 'Mapping[str, Any]', current_server_identity: 'Mapping[str, Any]') -> 'dict[str, Any]'",
     "record_knowledge_usage": "(self, user_id: 'str', knowledge_object_ids: 'list[str]', *, retrieved: 'bool' = False, used_in_answer: 'bool' = False) -> 'int'",
     "resolve_candidate": "(self, candidate_id: 'str', status: 'ResolutionStatus', resolved_by: 'str | None' = None, *, user_id: 'str | None' = None) -> 'bool'",
     "resolve_conflict": "(self, user_id: 'str', conflict_id: 'str', winner_id: 'str', *, reviewed_by: 'str', resolution_note: 'str' = '') -> 'dict[str, Any] | None'",

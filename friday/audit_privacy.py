@@ -198,6 +198,8 @@ _SAFE_AUDIT_ACTIONS = frozenset(
         "admin.inbox.bulk_classify",
         "admin.inbox.classify",
         "admin.inbox.model_advice",
+        "admin.inbox.purge_secondary_witness",
+        "admin.inbox.consume_secondary_product_rollout_attestation",
         "admin.inbox.read",
         "admin.knowledge.cleanup.archive",
         "admin.knowledge.cleanup.keep",

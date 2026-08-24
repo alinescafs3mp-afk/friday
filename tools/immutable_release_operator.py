@@ -23,6 +23,7 @@ import hashlib
 import importlib
 import io
 import json
+import math
 import os
 import re
 import shlex
@@ -93,6 +94,25 @@ _SECONDARY_SHADOW_DISABLE_TRANSITION = "secondary_shadow_disable"
 _SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION = "secondary_shadow_to_private_shadow"
 _SECONDARY_SHADOW_TO_ASSIST_TRANSITION = "secondary_shadow_to_assist"
 _SECONDARY_ASSIST_TO_DISABLED_TRANSITION = "secondary_assist_to_disabled"
+_SECONDARY_PRODUCT_STAGE_SCHEMA = "friday.secondary-product-stage-evidence.v2"
+_SECONDARY_PRODUCT_OPERATION_SCHEMA = "friday.secondary-product-operation-core.v1"
+_SECONDARY_PRODUCT_DIAGNOSTICS_SCHEMA = "friday.secondary-product-diagnostics.v1"
+_SECONDARY_PRODUCT_CLEANUP_CORE_SCHEMA = "friday.secondary-product-cleanup-core.v1"
+_SECONDARY_PRODUCT_CLEANUP_ZERO_SCHEMA = "friday.secondary-product-cleanup-zero-residue.v1"
+_SECONDARY_PRODUCT_ROLLOUT_ATTESTATION_SCHEMA = "friday.secondary-product-rollout-attestation.v1"
+_SECONDARY_PRODUCT_CONSUME_REQUEST_SCHEMA = "friday.secondary-product-rollout-consume-request.v1"
+_SECONDARY_PRODUCT_CONSUME_RESPONSE_SCHEMA = "friday.secondary-product-rollout-consume-response.v1"
+_SECONDARY_PRODUCT_CONSUME_URL = (
+    "https://127.0.0.1:8000/api/admin/secondary-product-witness/consume-rollout-attestation"
+)
+_SECONDARY_PRODUCT_RUNNER_SOURCE = Path(
+    "deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py"
+)
+_SECONDARY_PRODUCT_RUNNER_ARTIFACT = Path("artifacts/secondary-product-witness-runner.py")
+_SECONDARY_ROLLOUT_RECEIPT_STAGE = {
+    _SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION: "public-shadow",
+    _SECONDARY_SHADOW_TO_ASSIST_TRANSITION: "private-shadow",
+}
 _SECONDARY_CONFIG_TRANSITIONS = frozenset(
     {
         _SECONDARY_SHADOW_ENABLE_TRANSITION,
@@ -133,6 +153,282 @@ _SECONDARY_LLM_ENV_KEYS = frozenset(
 _SECONDARY_FINALIST_PROFILE_ID = "gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"
 _SECONDARY_FINALIST_MODEL_ALIAS = f"friday-secondary-{_SECONDARY_FINALIST_PROFILE_ID}"
 _SECONDARY_FINALIST_CA_SHA256 = "392756a74fd9100635c42f4fbf7e5a5f1822d18ea898ebb7848b9fdd0bddc1fe"
+_SECONDARY_FINALIST_CANDIDATE_PROFILE_SHA256 = (
+    "51af2164fa07ff3c01813e318076f7ac8b37eeecb73e695b6ca7543061c93439"
+)
+_SECONDARY_PRODUCT_MAX_COUNTER = (1 << 63) - 1
+_SECONDARY_PRODUCT_FAILURES = frozenset(
+    {
+        "disabled",
+        "misconfigured",
+        "mode_disallowed",
+        "workload_disallowed",
+        "private_text_disallowed",
+        "secret_material_denied",
+        "unsupported_modality",
+        "effect_denied",
+        "context_exceeded",
+        "admission_busy",
+        "cooldown",
+        "deadline",
+        "connect_failed",
+        "timeout",
+        "http_transient",
+        "http_rejected",
+        "auth_rejected",
+        "wrong_profile",
+        "wrong_model",
+        "malformed_response",
+        "tool_call_rejected",
+        "reasoning_leak",
+        "degeneration",
+        "cancelled",
+    }
+)
+_SECONDARY_PRODUCT_SNAPSHOT_KEYS = frozenset(
+    {
+        "schema",
+        "role",
+        "enabled",
+        "configured",
+        "mode",
+        "state",
+        "available",
+        "last_failure",
+        "profile_id",
+        "profile_admission",
+        "profile_manifest_match",
+        "served_model_match",
+        "context_cap_tokens",
+        "selected_total",
+        "success_total",
+        "endpoint_request_total",
+        "endpoint_success_total",
+        "skipped_total",
+        "primary_fallback_total",
+        "probe_success_total",
+        "probe_failure_total",
+        "model_inventory_probe_success_total",
+        "model_inventory_probe_failure_total",
+        "circuit_retry_after_sec",
+        "skip_reasons",
+        "fallback_reasons",
+        "shadow",
+        "workload",
+    }
+)
+_SECONDARY_PRODUCT_SHADOW_KEYS = frozenset({"valid_total", "invalid_total", "skipped_total", "in_flight"})
+_SECONDARY_PRODUCT_WORKLOAD_KEYS = frozenset(
+    {"name", "selected_total", "success_total", "skip_reasons", "fallback_reasons"}
+)
+_SECONDARY_PRODUCT_DELTA_KEYS = frozenset(
+    {
+        "selected_total",
+        "success_total",
+        "endpoint_request_total",
+        "endpoint_success_total",
+        "skipped_total",
+        "primary_fallback_total",
+        "probe_success_total",
+        "probe_failure_total",
+        "model_inventory_probe_success_total",
+        "model_inventory_probe_failure_total",
+        "skip_reason_deltas",
+        "fallback_reason_deltas",
+        "workload_skip_reason_deltas",
+        "workload_fallback_reason_deltas",
+        "shadow_valid_total",
+        "shadow_invalid_total",
+        "shadow_skipped_total",
+    }
+)
+_SECONDARY_PRODUCT_OPERATION_KEYS = frozenset(
+    {
+        "schema",
+        "identity_result_sha256",
+        "ingest_request_sha256",
+        "ingest_result_sha256",
+        "ingest_storage_sha256",
+        "ingest_idempotent_replay",
+        "advice_request_sha256",
+        "advice_result_sha256",
+        "advice_storage_sha256",
+        "advice_diagnostics_receipt_sha256",
+        "stage_diagnostics_binding_sha256",
+        "advice_proof_sha256",
+        "source_ref_sha256",
+        "synthetic_content_sha256",
+        "synthetic_nonce_sha256",
+        "storage_user_id_sha256",
+        "uploader_id_sha256",
+        "inbox_id_sha256",
+        "raw_object_id_sha256",
+        "advice_endpoint_role",
+        "exact_secondary_model_observed",
+        "cleanup_core_sha256",
+        "cleanup_status",
+        "knowledge_object_created",
+        "tool_requested",
+        "effect_requested",
+    }
+)
+_SECONDARY_PRODUCT_RECEIPT_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        "stage",
+        "candidate_profile_id",
+        "candidate_profile_sha256",
+        "served_model_alias",
+        "gateway_ca_certificate_sha256",
+        "observer_source_head",
+        "observer_runner_sha256",
+        "primary_pid",
+        "primary_process_epoch_sha256",
+        "primary_version",
+        "primary_ca_certificate_sha256",
+        "diagnostics_before",
+        "diagnostics_after",
+        "diagnostics_deltas",
+        "diagnostics_binding_sha256",
+        "stage_diagnostics_binding_sha256",
+        "operation",
+        "operation_binding_sha256",
+        "server_rollout_attestation",
+        "server_rollout_attestation_sha256",
+        "server_rollout_lookup_token",
+        "rollout_lookup_token_retained",
+        "raw_content_retained_in_evidence",
+        "model_response_retained_in_evidence",
+        "credentials_retained",
+    }
+)
+_SECONDARY_PRODUCT_CLEANUP_ZERO_KEYS = frozenset(
+    {
+        "schema",
+        "raw_object_id_sha256",
+        "inbox_id_sha256",
+        "raw_residue",
+        "inbox_residue",
+        "knowledge_residue",
+        "alias_residue",
+        "ko_state_residue",
+        "feedback_residue",
+        "feedback_state_residue",
+        "review_residue",
+    }
+)
+_SECONDARY_PRODUCT_CLEANUP_CORE_KEYS = frozenset(
+    {
+        "schema",
+        "purged",
+        "raw_deleted",
+        "inbox_deleted",
+        "storage_binding_sha256",
+        "raw_object_id_sha256",
+        "inbox_id_sha256",
+        "cleanup_zero_residue_binding_sha256",
+        "raw_residue",
+        "inbox_residue",
+        "knowledge_residue",
+        "alias_residue",
+        "ko_state_residue",
+        "feedback_residue",
+        "feedback_state_residue",
+        "review_residue",
+    }
+)
+_SECONDARY_PRODUCT_RESIDUE_KEYS = (
+    "raw_residue",
+    "inbox_residue",
+    "knowledge_residue",
+    "alias_residue",
+    "ko_state_residue",
+    "feedback_residue",
+    "feedback_state_residue",
+    "review_residue",
+)
+_SECONDARY_PRODUCT_ATTESTATION_KEYS = frozenset(
+    {
+        "schema",
+        "attestation_id",
+        "stage",
+        "source_ref_sha256",
+        "raw_object_id_sha256",
+        "inbox_id_sha256",
+        "content_sha256",
+        "uploader_sha256",
+        "ingest_storage_binding_sha256",
+        "advice_storage_binding_sha256",
+        "advice_diagnostics_receipt_sha256",
+        "diagnostics_binding_sha256",
+        "stage_diagnostics_binding_sha256",
+        "operation_binding_sha256",
+        "advice_proof_sha256",
+        "advice_endpoint_role",
+        "advice_model_sha256",
+        "primary_pid",
+        "primary_process_epoch_sha256",
+        "primary_backend_version",
+        "primary_ca_certificate_sha256",
+        "observer_source_head",
+        "observer_runner_sha256",
+        "candidate_profile_id",
+        "candidate_profile_mode",
+        "candidate_profile_allow_private_text",
+        "candidate_profile_context_tokens",
+        "candidate_profile_sha256",
+        "candidate_profile_manifest_sha256",
+        "candidate_profile_admission",
+        "served_model_alias",
+        "gateway_ca_certificate_sha256",
+        "cleanup_storage_binding_sha256",
+        "cleanup_zero_residue_binding_sha256",
+        *_SECONDARY_PRODUCT_RESIDUE_KEYS,
+        "lookup_token_sha256",
+        "state_version",
+        "issued_at",
+        "expires_at",
+        "signature",
+    }
+)
+_SECONDARY_PRODUCT_CONSUME_REQUEST_KEYS = frozenset(
+    {
+        "schema",
+        "attestation_lookup_token",
+        "server_rollout_attestation_sha256",
+        "stage",
+        "transition",
+        "predecessor_commit",
+        "predecessor_tree_sha256",
+        "candidate_commit",
+        "candidate_tree_sha256",
+        "next_env_sha256",
+        "product_receipt_sha256",
+        "sealed_runner_sha256",
+    }
+)
+_SECONDARY_PRODUCT_CONSUME_RESPONSE_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        "stage",
+        "transition",
+        "predecessor_commit",
+        "predecessor_tree_sha256",
+        "candidate_commit",
+        "candidate_tree_sha256",
+        "next_env_sha256",
+        "product_receipt_sha256",
+        "sealed_runner_sha256",
+        "server_rollout_attestation_sha256",
+        "lookup_token_sha256",
+        "request_sha256",
+        "consumed_at",
+        "state_version",
+        "consume_binding_sha256",
+    }
+)
 _SECONDARY_SHADOW_EXACT_VALUES = {
     "FRIDAY_SECONDARY_LLM_ADMISSION_TIMEOUT_SEC": "0.10",
     "FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT": "0",
@@ -491,6 +787,71 @@ def _read_private_regular_file(path: Path, *, maximum_bytes: int, code: str) -> 
             os.close(descriptor)
 
 
+def _read_stable_regular_file(path: Path, *, maximum_bytes: int, code: str) -> bytes:
+    """Read one regular file through a stable no-follow descriptor."""
+
+    lexical = Path(os.path.abspath(path))
+    try:
+        parent = lexical.parent.resolve(strict=True)
+        parent_status = os.stat(lexical.parent, follow_symlinks=False)
+    except OSError as exc:
+        raise ReleaseFailure(code) from exc
+    if lexical.parent != parent or not stat.S_ISDIR(parent_status.st_mode) or lexical.name in {"", ".", ".."}:
+        raise ReleaseFailure(code)
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            lexical,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or not 0 < before.st_size <= maximum_bytes
+        ):
+            raise ReleaseFailure(code)
+        chunks: list[bytes] = []
+        remaining = int(before.st_size)
+        while remaining:
+            chunk = os.read(descriptor, min(remaining, 1 << 20))
+            if not chunk:
+                raise ReleaseFailure(code)
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            raise ReleaseFailure(code)
+        after = os.fstat(descriptor)
+        current = os.stat(lexical, follow_symlinks=False)
+        identity = (
+            int(before.st_dev),
+            int(before.st_ino),
+            int(before.st_size),
+            int(before.st_mtime_ns),
+            int(before.st_ctime_ns),
+        )
+        if (
+            identity
+            != (
+                int(after.st_dev),
+                int(after.st_ino),
+                int(after.st_size),
+                int(after.st_mtime_ns),
+                int(after.st_ctime_ns),
+            )
+            or (int(current.st_dev), int(current.st_ino)) != identity[:2]
+        ):
+            raise ReleaseFailure(code)
+        return b"".join(chunks)
+    except ReleaseFailure:
+        raise
+    except OSError as exc:
+        raise ReleaseFailure(code) from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
 def _secondary_environment_parts(raw: bytes) -> tuple[dict[str, str], bytes, bytes]:
     """Mirror ``load_local_env_file`` and retain both byte domains exactly."""
 
@@ -551,6 +912,39 @@ def _secondary_environment_parts(raw: bytes) -> tuple[dict[str, str], bytes, byt
 def _secondary_environment_view(raw: bytes) -> tuple[dict[str, str], bytes]:
     values, unrelated, _secondary = _secondary_environment_parts(raw)
     return values, unrelated
+
+
+def _secondary_rollout_api_token(raw: bytes) -> str:
+    """Extract the one literal owner API token without exposing it in process arguments."""
+
+    token_keys = frozenset({"FRIDAY_API_TOKEN", "JERICHO_API_TOKEN"})
+    try:
+        lines = raw.decode("utf-8", errors="strict").splitlines()
+    except UnicodeError as exc:
+        raise ReleaseFailure("secondary_rollout_api_token_invalid") from exc
+    matches: list[tuple[str, str]] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        key, separator, value = line.partition("=")
+        normalized_key = key.strip()
+        shell_words = normalized_key.split(None, 1)
+        if len(shell_words) == 2 and shell_words[0] == "export":
+            normalized_key = shell_words[1].strip()
+        if normalized_key not in token_keys:
+            continue
+        if (
+            not separator
+            or key not in token_keys
+            or line != f"{key}={value}"
+            or re.fullmatch(r"[A-Za-z0-9._~-]{32,4096}", value) is None
+        ):
+            raise ReleaseFailure("secondary_rollout_api_token_invalid")
+        matches.append((key, value))
+    if len(matches) != 1:
+        raise ReleaseFailure("secondary_rollout_api_token_invalid")
+    return matches[0][1]
 
 
 def _validate_staged_environment_transition(
@@ -775,6 +1169,676 @@ def _validate_secondary_config_transition(
     validator(predecessor, target)
 
 
+def _secondary_product_canonical(value: Any) -> bytes:
+    try:
+        encoded = json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ReleaseFailure("secondary_rollout_receipt_invalid") from exc
+    return (encoded + "\n").encode("utf-8")
+
+
+def _secondary_product_json(raw: bytes) -> dict[str, Any]:
+    def pairs(values: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in values:
+            if key in result:
+                raise ValueError("duplicate key")
+            result[key] = value
+        return result
+
+    def reject_constant(_value: str) -> None:
+        raise ValueError("non-finite number")
+
+    try:
+        parsed = json.loads(
+            raw.decode("utf-8", errors="strict"),
+            object_pairs_hook=pairs,
+            parse_constant=reject_constant,
+        )
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ReleaseFailure("secondary_rollout_receipt_invalid") from exc
+    if not isinstance(parsed, dict) or raw != _secondary_product_canonical(parsed):
+        raise ReleaseFailure("secondary_rollout_receipt_invalid")
+    return parsed
+
+
+def _secondary_product_counter(value: Any) -> int:
+    if type(value) is not int or not 0 <= value <= _SECONDARY_PRODUCT_MAX_COUNTER:
+        raise ReleaseFailure("secondary_rollout_receipt_invalid")
+    return value
+
+
+def _secondary_product_reasons(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict) or len(value) > len(_SECONDARY_PRODUCT_FAILURES):
+        raise ReleaseFailure("secondary_rollout_receipt_invalid")
+    result: dict[str, int] = {}
+    for reason, count in value.items():
+        if reason not in _SECONDARY_PRODUCT_FAILURES:
+            raise ReleaseFailure("secondary_rollout_receipt_invalid")
+        normalized = _secondary_product_counter(count)
+        if normalized:
+            result[str(reason)] = normalized
+    canonical = dict(sorted(result.items()))
+    if value != canonical:
+        raise ReleaseFailure("secondary_rollout_receipt_invalid")
+    return canonical
+
+
+def _validate_secondary_product_snapshot(
+    value: Any,
+    *,
+    stage: str,
+    profile_id: str,
+    profile_admission: str,
+    after: bool,
+) -> dict[str, Any]:
+    del after  # Both promotion witnesses require a healthy admitted endpoint throughout.
+    if not isinstance(value, dict):
+        raise ReleaseFailure("secondary_rollout_receipt_invalid")
+    workload = value.get("workload")
+    shadow = value.get("shadow")
+    last_failure = value.get("last_failure")
+    retry_after = value.get("circuit_retry_after_sec")
+    if (
+        set(value) != _SECONDARY_PRODUCT_SNAPSHOT_KEYS
+        or value.get("schema") != "friday.optional-secondary-health.v1"
+        or value.get("role") != "optional_advisory"
+        or value.get("enabled") is not True
+        or value.get("configured") is not True
+        or value.get("mode") != "shadow"
+        or value.get("state") != "healthy"
+        or value.get("available") is not True
+        or (last_failure is not None and last_failure not in _SECONDARY_PRODUCT_FAILURES)
+        or value.get("profile_id") != profile_id
+        or value.get("profile_admission") != profile_admission
+        or (stage == "private-shadow" and profile_admission != "accepted")
+        or (stage == "public-shadow" and profile_admission not in {"provisional_shadow", "accepted"})
+        or value.get("profile_manifest_match") is not True
+        or value.get("served_model_match") is not True
+        or value.get("context_cap_tokens") != 4096
+        or not isinstance(workload, dict)
+        or set(workload) != _SECONDARY_PRODUCT_WORKLOAD_KEYS
+        or workload.get("name") != "extract"
+        or not isinstance(shadow, dict)
+        or set(shadow) != _SECONDARY_PRODUCT_SHADOW_KEYS
+        or shadow.get("in_flight") != 0
+        or isinstance(retry_after, bool)
+        or not isinstance(retry_after, (int, float))
+        or not math.isfinite(float(retry_after))
+        or not 0.0 <= float(retry_after) <= 86_400.0
+        or float(retry_after) != round(float(retry_after), 3)
+    ):
+        raise ReleaseFailure("secondary_rollout_receipt_invalid")
+    for key in (
+        "context_cap_tokens",
+        "selected_total",
+        "success_total",
+        "endpoint_request_total",
+        "endpoint_success_total",
+        "skipped_total",
+        "primary_fallback_total",
+        "probe_success_total",
+        "probe_failure_total",
+        "model_inventory_probe_success_total",
+        "model_inventory_probe_failure_total",
+    ):
+        _secondary_product_counter(value.get(key))
+    assert isinstance(workload, dict) and isinstance(shadow, dict)
+    _secondary_product_counter(workload.get("selected_total"))
+    _secondary_product_counter(workload.get("success_total"))
+    for key in _SECONDARY_PRODUCT_SHADOW_KEYS:
+        _secondary_product_counter(shadow.get(key))
+    _secondary_product_reasons(value.get("skip_reasons"))
+    _secondary_product_reasons(value.get("fallback_reasons"))
+    _secondary_product_reasons(workload.get("skip_reasons"))
+    _secondary_product_reasons(workload.get("fallback_reasons"))
+    return value
+
+
+def _secondary_product_delta(after: Any, before: Any) -> int:
+    after_counter = _secondary_product_counter(after)
+    before_counter = _secondary_product_counter(before)
+    if after_counter < before_counter:
+        raise ReleaseFailure("secondary_rollout_receipt_invalid")
+    return after_counter - before_counter
+
+
+def _secondary_product_reason_deltas(after: Any, before: Any) -> dict[str, int]:
+    after_reasons = _secondary_product_reasons(after)
+    before_reasons = _secondary_product_reasons(before)
+    result: dict[str, int] = {}
+    for reason in sorted(set(after_reasons) | set(before_reasons)):
+        delta = _secondary_product_delta(after_reasons.get(reason, 0), before_reasons.get(reason, 0))
+        if delta:
+            result[reason] = delta
+    return result
+
+
+def _secondary_product_stage_deltas(
+    stage: str,
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+) -> dict[str, Any]:
+    before_workload = before["workload"]
+    after_workload = after["workload"]
+    before_shadow = before["shadow"]
+    after_shadow = after["shadow"]
+    if not all(
+        isinstance(value, Mapping) for value in (before_workload, after_workload, before_shadow, after_shadow)
+    ):
+        raise ReleaseFailure("secondary_rollout_receipt_invalid")
+    deltas: dict[str, Any] = {
+        "selected_total": _secondary_product_delta(
+            after_workload["selected_total"], before_workload["selected_total"]
+        ),
+        "success_total": _secondary_product_delta(
+            after_workload["success_total"], before_workload["success_total"]
+        ),
+        "endpoint_request_total": _secondary_product_delta(
+            after["endpoint_request_total"], before["endpoint_request_total"]
+        ),
+        "endpoint_success_total": _secondary_product_delta(
+            after["endpoint_success_total"], before["endpoint_success_total"]
+        ),
+        "skipped_total": _secondary_product_delta(after["skipped_total"], before["skipped_total"]),
+        "primary_fallback_total": _secondary_product_delta(
+            after["primary_fallback_total"], before["primary_fallback_total"]
+        ),
+        "probe_success_total": _secondary_product_delta(
+            after["probe_success_total"], before["probe_success_total"]
+        ),
+        "probe_failure_total": _secondary_product_delta(
+            after["probe_failure_total"], before["probe_failure_total"]
+        ),
+        "model_inventory_probe_success_total": _secondary_product_delta(
+            after["model_inventory_probe_success_total"],
+            before["model_inventory_probe_success_total"],
+        ),
+        "model_inventory_probe_failure_total": _secondary_product_delta(
+            after["model_inventory_probe_failure_total"],
+            before["model_inventory_probe_failure_total"],
+        ),
+        "skip_reason_deltas": _secondary_product_reason_deltas(after["skip_reasons"], before["skip_reasons"]),
+        "fallback_reason_deltas": _secondary_product_reason_deltas(
+            after["fallback_reasons"], before["fallback_reasons"]
+        ),
+        "workload_skip_reason_deltas": _secondary_product_reason_deltas(
+            after_workload["skip_reasons"], before_workload["skip_reasons"]
+        ),
+        "workload_fallback_reason_deltas": _secondary_product_reason_deltas(
+            after_workload["fallback_reasons"], before_workload["fallback_reasons"]
+        ),
+        "shadow_valid_total": _secondary_product_delta(
+            after_shadow["valid_total"], before_shadow["valid_total"]
+        ),
+        "shadow_invalid_total": _secondary_product_delta(
+            after_shadow["invalid_total"], before_shadow["invalid_total"]
+        ),
+        "shadow_skipped_total": _secondary_product_delta(
+            after_shadow["skipped_total"], before_shadow["skipped_total"]
+        ),
+    }
+    if set(deltas) != _SECONDARY_PRODUCT_DELTA_KEYS or (
+        _secondary_product_delta(after["selected_total"], before["selected_total"])
+        != deltas["selected_total"]
+        or _secondary_product_delta(after["success_total"], before["success_total"])
+        != deltas["success_total"]
+    ):
+        raise ReleaseFailure("secondary_rollout_receipt_invalid")
+    reasons_clear = not any(
+        deltas[key]
+        for key in (
+            "skip_reason_deltas",
+            "fallback_reason_deltas",
+            "workload_skip_reason_deltas",
+            "workload_fallback_reason_deltas",
+        )
+    )
+    if stage == "public-shadow":
+        valid = (
+            deltas["selected_total"] == 0
+            and deltas["success_total"] == 0
+            and deltas["endpoint_request_total"] == 0
+            and deltas["endpoint_success_total"] == 0
+            and deltas["skipped_total"] == 1
+            and deltas["primary_fallback_total"] == 0
+            and deltas["skip_reason_deltas"] == {"private_text_disallowed": 1}
+            and not deltas["fallback_reason_deltas"]
+            and deltas["workload_skip_reason_deltas"] == {"private_text_disallowed": 1}
+            and not deltas["workload_fallback_reason_deltas"]
+            and deltas["shadow_valid_total"] == 0
+            and deltas["shadow_invalid_total"] == 0
+            and deltas["shadow_skipped_total"] == 1
+            and deltas["probe_success_total"] == 0
+            and deltas["probe_failure_total"] == 0
+            and deltas["model_inventory_probe_success_total"] == 0
+            and deltas["model_inventory_probe_failure_total"] == 0
+        )
+    elif stage == "private-shadow":
+        endpoint_delta = deltas["endpoint_request_total"]
+        valid = (
+            deltas["selected_total"] == 1
+            and deltas["success_total"] == 1
+            and 1 <= endpoint_delta <= 3
+            and deltas["endpoint_success_total"] == endpoint_delta
+            and deltas["skipped_total"] == 0
+            and deltas["primary_fallback_total"] == 0
+            and reasons_clear
+            and deltas["shadow_valid_total"] == 1
+            and deltas["shadow_invalid_total"] == 0
+            and deltas["shadow_skipped_total"] == 0
+            and deltas["probe_failure_total"] == 0
+            and deltas["model_inventory_probe_failure_total"] == 0
+            and deltas["probe_success_total"] in {0, 1}
+            and deltas["model_inventory_probe_success_total"] == deltas["probe_success_total"]
+        )
+    else:  # pragma: no cover - the closed transition map proves the stage
+        valid = False
+    if not valid:
+        raise ReleaseFailure("secondary_rollout_receipt_oracle_mismatch")
+    return deltas
+
+
+def _validate_secondary_rollout_receipt(
+    receipt: Mapping[str, Any],
+    *,
+    expected_stage: str,
+    previous: ReleaseIdentity,
+    observer_runner_sha256: str,
+    profile_identity: Mapping[str, Any],
+    primary_pid: int,
+    primary_process_epoch_sha256: str,
+    primary_ca_certificate_sha256: str,
+) -> dict[str, Any]:
+    before = receipt.get("diagnostics_before")
+    after = receipt.get("diagnostics_after")
+    supplied_deltas = receipt.get("diagnostics_deltas")
+    operation = receipt.get("operation")
+    expected_profile_keys = {
+        "admission",
+        "allow_private_text",
+        "context_tokens",
+        "gateway_ca_certificate_sha256",
+        "manifest_sha256",
+        "mode",
+        "profile_id",
+        "served_model_alias",
+    }
+    if (
+        expected_stage not in {"public-shadow", "private-shadow"}
+        or set(receipt) != _SECONDARY_PRODUCT_RECEIPT_KEYS
+        or receipt.get("schema") != _SECONDARY_PRODUCT_STAGE_SCHEMA
+        or receipt.get("status") != "passed"
+        or receipt.get("stage") != expected_stage
+        or set(profile_identity) != expected_profile_keys
+        or profile_identity.get("mode") != "shadow"
+        or type(profile_identity.get("allow_private_text")) is not bool
+        or profile_identity.get("allow_private_text") is not (expected_stage == "private-shadow")
+        or type(profile_identity.get("context_tokens")) is not int
+        or profile_identity.get("context_tokens") != 4096
+        or profile_identity.get("profile_id") != _SECONDARY_FINALIST_PROFILE_ID
+        or profile_identity.get("served_model_alias") != _SECONDARY_FINALIST_MODEL_ALIAS
+        or profile_identity.get("gateway_ca_certificate_sha256") != _SECONDARY_FINALIST_CA_SHA256
+        or (expected_stage == "private-shadow" and profile_identity.get("admission") != "accepted")
+        or (
+            expected_stage == "public-shadow"
+            and profile_identity.get("admission") not in {"provisional_shadow", "accepted"}
+        )
+        or _HEX64.fullmatch(str(profile_identity.get("manifest_sha256") or "")) is None
+        or receipt.get("candidate_profile_id") != profile_identity.get("profile_id")
+        or receipt.get("candidate_profile_sha256") != _SECONDARY_FINALIST_CANDIDATE_PROFILE_SHA256
+        or (
+            profile_identity.get("admission") == "provisional_shadow"
+            and profile_identity.get("manifest_sha256") != _SECONDARY_FINALIST_CANDIDATE_PROFILE_SHA256
+        )
+        or receipt.get("served_model_alias") != profile_identity.get("served_model_alias")
+        or receipt.get("gateway_ca_certificate_sha256")
+        != profile_identity.get("gateway_ca_certificate_sha256")
+        or receipt.get("observer_source_head") != previous.commit
+        or receipt.get("observer_runner_sha256") != observer_runner_sha256
+        or type(receipt.get("primary_pid")) is not int
+        or receipt.get("primary_pid") != primary_pid
+        or receipt.get("primary_process_epoch_sha256") != primary_process_epoch_sha256
+        or receipt.get("primary_version") != previous.version
+        or receipt.get("primary_ca_certificate_sha256") != primary_ca_certificate_sha256
+        or not isinstance(before, dict)
+        or not isinstance(after, dict)
+        or not isinstance(supplied_deltas, dict)
+        or not isinstance(operation, dict)
+        or set(operation) != _SECONDARY_PRODUCT_OPERATION_KEYS
+        or receipt.get("raw_content_retained_in_evidence") is not False
+        or receipt.get("model_response_retained_in_evidence") is not False
+        or receipt.get("credentials_retained") is not False
+        or receipt.get("rollout_lookup_token_retained") is not True
+    ):
+        raise ReleaseFailure("secondary_rollout_receipt_identity_mismatch")
+    before = _validate_secondary_product_snapshot(
+        before,
+        stage=expected_stage,
+        profile_id=str(profile_identity["profile_id"]),
+        profile_admission=str(profile_identity["admission"]),
+        after=False,
+    )
+    after = _validate_secondary_product_snapshot(
+        after,
+        stage=expected_stage,
+        profile_id=str(profile_identity["profile_id"]),
+        profile_admission=str(profile_identity["admission"]),
+        after=True,
+    )
+    computed_deltas = _secondary_product_stage_deltas(expected_stage, before, after)
+    stage_projection = {
+        "source_ref_sha256": operation["source_ref_sha256"],
+        "before": before,
+        "after": after,
+        "deltas": supplied_deltas,
+    }
+    stage_binding_sha256 = _sha256_bytes(_secondary_product_canonical(stage_projection))
+    diagnostics_projection = {
+        "schema": _SECONDARY_PRODUCT_DIAGNOSTICS_SCHEMA,
+        "source_ref_sha256": operation["source_ref_sha256"],
+        "before": before,
+        "after": after,
+    }
+    diagnostics_binding_sha256 = _sha256_bytes(_secondary_product_canonical(diagnostics_projection))
+    diagnostics_receipt = {
+        **diagnostics_projection,
+        "binding_sha256": diagnostics_binding_sha256,
+    }
+    if (
+        supplied_deltas != computed_deltas
+        or receipt.get("stage_diagnostics_binding_sha256") != stage_binding_sha256
+        or operation.get("stage_diagnostics_binding_sha256") != stage_binding_sha256
+        or receipt.get("diagnostics_binding_sha256") != diagnostics_binding_sha256
+        or operation.get("advice_diagnostics_receipt_sha256")
+        != _sha256_bytes(_secondary_product_canonical(diagnostics_receipt))
+    ):
+        raise ReleaseFailure("secondary_rollout_receipt_diagnostics_mismatch")
+    for key, value in operation.items():
+        if key.endswith("_sha256") and (
+            not isinstance(value, str) or _HEX64.fullmatch(value) is None or set(value) == {"0"}
+        ):
+            raise ReleaseFailure("secondary_rollout_receipt_operation_invalid")
+    if (
+        operation.get("schema") != _SECONDARY_PRODUCT_OPERATION_SCHEMA
+        or type(operation.get("ingest_idempotent_replay")) is not bool
+        or operation.get("advice_endpoint_role") != "primary"
+        or operation.get("exact_secondary_model_observed") is not False
+        or operation.get("cleanup_status") != "purged"
+        or operation.get("knowledge_object_created") is not False
+        or operation.get("tool_requested") is not False
+        or operation.get("effect_requested") is not False
+        or receipt.get("operation_binding_sha256") != _sha256_bytes(_secondary_product_canonical(operation))
+    ):
+        raise ReleaseFailure("secondary_rollout_receipt_operation_invalid")
+    return _validate_secondary_rollout_attestation(
+        receipt,
+        operation=operation,
+        expected_stage=expected_stage,
+        previous=previous,
+        observer_runner_sha256=observer_runner_sha256,
+        profile_identity=profile_identity,
+        primary_pid=primary_pid,
+        primary_process_epoch_sha256=primary_process_epoch_sha256,
+        primary_ca_certificate_sha256=primary_ca_certificate_sha256,
+    )
+
+
+def _validate_secondary_rollout_attestation(
+    receipt: Mapping[str, Any],
+    *,
+    operation: Mapping[str, Any],
+    expected_stage: str,
+    previous: ReleaseIdentity,
+    observer_runner_sha256: str,
+    profile_identity: Mapping[str, Any],
+    primary_pid: int,
+    primary_process_epoch_sha256: str,
+    primary_ca_certificate_sha256: str,
+) -> dict[str, Any]:
+    value = receipt.get("server_rollout_attestation")
+    lookup_token = receipt.get("server_rollout_lookup_token")
+    if not isinstance(value, dict) or set(value) != _SECONDARY_PRODUCT_ATTESTATION_KEYS:
+        raise ReleaseFailure("secondary_rollout_attestation_invalid")
+    attestation = dict(value)
+    for key, item in attestation.items():
+        if (key.endswith("_sha256") or key == "signature") and (
+            not isinstance(item, str) or _HEX64.fullmatch(item) is None or set(item) == {"0"}
+        ):
+            raise ReleaseFailure("secondary_rollout_attestation_invalid")
+    attestation_id = attestation.get("attestation_id")
+    issued_at = attestation.get("issued_at")
+    expires_at = attestation.get("expires_at")
+    current_time = int(time.time())
+    if (
+        attestation.get("schema") != _SECONDARY_PRODUCT_ROLLOUT_ATTESTATION_SCHEMA
+        or not isinstance(attestation_id, str)
+        or re.fullmatch(r"[0-9a-f]{32}", attestation_id) is None
+        or set(attestation_id) == {"0"}
+        or type(issued_at) is not int
+        or type(expires_at) is not int
+        or not 0 < expires_at - issued_at <= 570
+        or current_time < issued_at - 30
+        or current_time > expires_at
+        or type(attestation.get("state_version")) is not int
+        or attestation.get("state_version") != 1
+        or issued_at < 1
+        or any(type(attestation.get(key)) is not int for key in _SECONDARY_PRODUCT_RESIDUE_KEYS)
+        or any(attestation.get(key) != 0 for key in _SECONDARY_PRODUCT_RESIDUE_KEYS)
+        or not isinstance(lookup_token, str)
+        or _HEX64.fullmatch(lookup_token) is None
+        or set(lookup_token) == {"0"}
+        or attestation.get("lookup_token_sha256") != _sha256_bytes(lookup_token.encode("ascii"))
+        or receipt.get("server_rollout_attestation_sha256")
+        != _sha256_bytes(_secondary_product_canonical(attestation))
+        or attestation.get("stage") != expected_stage
+        or attestation.get("source_ref_sha256") != operation.get("source_ref_sha256")
+        or attestation.get("raw_object_id_sha256") != operation.get("raw_object_id_sha256")
+        or attestation.get("inbox_id_sha256") != operation.get("inbox_id_sha256")
+        or attestation.get("content_sha256") != operation.get("synthetic_content_sha256")
+        or attestation.get("uploader_sha256") != operation.get("uploader_id_sha256")
+        or attestation.get("ingest_storage_binding_sha256") != operation.get("ingest_storage_sha256")
+        or attestation.get("advice_storage_binding_sha256") != operation.get("advice_storage_sha256")
+        or attestation.get("advice_diagnostics_receipt_sha256")
+        != operation.get("advice_diagnostics_receipt_sha256")
+        or attestation.get("diagnostics_binding_sha256") != receipt.get("diagnostics_binding_sha256")
+        or attestation.get("stage_diagnostics_binding_sha256")
+        != receipt.get("stage_diagnostics_binding_sha256")
+        or attestation.get("stage_diagnostics_binding_sha256")
+        != operation.get("stage_diagnostics_binding_sha256")
+        or attestation.get("operation_binding_sha256") != receipt.get("operation_binding_sha256")
+        or attestation.get("advice_proof_sha256") != operation.get("advice_proof_sha256")
+        or attestation.get("advice_endpoint_role") != operation.get("advice_endpoint_role")
+        or type(attestation.get("primary_pid")) is not int
+        or attestation.get("primary_pid") != primary_pid
+        or attestation.get("primary_process_epoch_sha256") != primary_process_epoch_sha256
+        or attestation.get("primary_backend_version") != previous.version
+        or attestation.get("primary_ca_certificate_sha256") != primary_ca_certificate_sha256
+        or attestation.get("observer_source_head") != previous.commit
+        or attestation.get("observer_runner_sha256") != observer_runner_sha256
+        or attestation.get("candidate_profile_id") != profile_identity.get("profile_id")
+        or attestation.get("candidate_profile_mode") != profile_identity.get("mode")
+        or attestation.get("candidate_profile_allow_private_text")
+        is not profile_identity.get("allow_private_text")
+        or type(attestation.get("candidate_profile_context_tokens")) is not int
+        or attestation.get("candidate_profile_context_tokens") != profile_identity.get("context_tokens")
+        or attestation.get("candidate_profile_sha256") != receipt.get("candidate_profile_sha256")
+        or attestation.get("candidate_profile_manifest_sha256") != profile_identity.get("manifest_sha256")
+        or attestation.get("candidate_profile_admission") != profile_identity.get("admission")
+        or attestation.get("served_model_alias") != profile_identity.get("served_model_alias")
+        or attestation.get("gateway_ca_certificate_sha256")
+        != profile_identity.get("gateway_ca_certificate_sha256")
+    ):
+        raise ReleaseFailure("secondary_rollout_attestation_invalid")
+    zero_projection = {
+        "schema": _SECONDARY_PRODUCT_CLEANUP_ZERO_SCHEMA,
+        "raw_object_id_sha256": attestation["raw_object_id_sha256"],
+        "inbox_id_sha256": attestation["inbox_id_sha256"],
+        **{key: attestation[key] for key in _SECONDARY_PRODUCT_RESIDUE_KEYS},
+    }
+    if set(zero_projection) != _SECONDARY_PRODUCT_CLEANUP_ZERO_KEYS or attestation.get(
+        "cleanup_zero_residue_binding_sha256"
+    ) != _sha256_bytes(_secondary_product_canonical(zero_projection)):
+        raise ReleaseFailure("secondary_rollout_attestation_cleanup_invalid")
+    cleanup_core = {
+        "schema": _SECONDARY_PRODUCT_CLEANUP_CORE_SCHEMA,
+        "purged": True,
+        "raw_deleted": 1,
+        "inbox_deleted": 1,
+        "storage_binding_sha256": attestation["cleanup_storage_binding_sha256"],
+        "raw_object_id_sha256": attestation["raw_object_id_sha256"],
+        "inbox_id_sha256": attestation["inbox_id_sha256"],
+        "cleanup_zero_residue_binding_sha256": attestation["cleanup_zero_residue_binding_sha256"],
+        **{key: attestation[key] for key in _SECONDARY_PRODUCT_RESIDUE_KEYS},
+    }
+    if set(cleanup_core) != _SECONDARY_PRODUCT_CLEANUP_CORE_KEYS or operation.get(
+        "cleanup_core_sha256"
+    ) != _sha256_bytes(_secondary_product_canonical(cleanup_core)):
+        raise ReleaseFailure("secondary_rollout_attestation_cleanup_invalid")
+    return attestation
+
+
+def _secondary_product_runner_artifact_sha256(previous: ReleaseIdentity) -> str:
+    metadata_sha256 = _closed_hash(
+        previous.secondary_product_runner_sha256,
+        "secondary_product_runner_capability_missing",
+    )
+    artifact = Path(os.path.abspath(previous.root / _SECONDARY_PRODUCT_RUNNER_ARTIFACT))
+    expected = Path(os.path.abspath(previous.root)) / _SECONDARY_PRODUCT_RUNNER_ARTIFACT
+    if artifact != expected:
+        raise ReleaseFailure("secondary_product_runner_artifact_invalid")
+    raw = _read_stable_regular_file(
+        artifact,
+        maximum_bytes=4 << 20,
+        code="secondary_product_runner_artifact_invalid",
+    )
+    status = os.stat(artifact, follow_symlinks=False)
+    if status.st_uid != os.geteuid() or stat.S_IMODE(status.st_mode) != 0o400:
+        raise ReleaseFailure("secondary_product_runner_artifact_invalid")
+    actual_sha256 = _sha256_bytes(raw)
+    if actual_sha256 != metadata_sha256:
+        raise ReleaseFailure("secondary_product_runner_artifact_digest_mismatch")
+    return actual_sha256
+
+
+def _secondary_rollout_consume_request(
+    *,
+    lookup_token: str,
+    stage: str,
+    transition: str,
+    previous: ReleaseIdentity,
+    candidate: ReleaseIdentity,
+    next_env_sha256: str,
+    product_receipt_sha256: str,
+    sealed_runner_sha256: str,
+    server_rollout_attestation_sha256: str,
+) -> dict[str, Any]:
+    request = {
+        "schema": _SECONDARY_PRODUCT_CONSUME_REQUEST_SCHEMA,
+        "attestation_lookup_token": lookup_token,
+        "server_rollout_attestation_sha256": server_rollout_attestation_sha256,
+        "stage": stage,
+        "transition": transition,
+        "predecessor_commit": previous.commit,
+        "predecessor_tree_sha256": previous.tree_manifest_sha256,
+        "candidate_commit": candidate.commit,
+        "candidate_tree_sha256": candidate.tree_manifest_sha256,
+        "next_env_sha256": next_env_sha256,
+        "product_receipt_sha256": product_receipt_sha256,
+        "sealed_runner_sha256": sealed_runner_sha256,
+    }
+    expected_transition = {
+        "public-shadow": _SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION,
+        "private-shadow": _SECONDARY_SHADOW_TO_ASSIST_TRANSITION,
+    }.get(stage)
+    if (
+        set(request) != _SECONDARY_PRODUCT_CONSUME_REQUEST_KEYS
+        or transition != expected_transition
+        or candidate.commit == previous.commit
+        or _HEX64.fullmatch(lookup_token) is None
+        or set(lookup_token) == {"0"}
+    ):
+        raise ReleaseFailure("secondary_rollout_consume_request_invalid")
+    for key in (
+        "predecessor_tree_sha256",
+        "candidate_tree_sha256",
+        "next_env_sha256",
+        "product_receipt_sha256",
+        "sealed_runner_sha256",
+        "server_rollout_attestation_sha256",
+    ):
+        _closed_hash(str(request[key]), "secondary_rollout_consume_request_invalid")
+    _closed_commit(str(request["predecessor_commit"]))
+    _closed_commit(str(request["candidate_commit"]))
+    return request
+
+
+def _validate_secondary_rollout_consume_response(
+    value: Mapping[str, Any],
+    *,
+    request: Mapping[str, Any],
+    attestation: Mapping[str, Any],
+) -> None:
+    request_sha256 = _sha256_bytes(_secondary_product_canonical(request))
+    attestation_sha256 = _sha256_bytes(_secondary_product_canonical(attestation))
+    lookup_token_sha256 = _sha256_bytes(str(request["attestation_lookup_token"]).encode("ascii"))
+    consumed_at = value.get("consumed_at")
+    if (
+        set(value) != _SECONDARY_PRODUCT_CONSUME_RESPONSE_KEYS
+        or value.get("schema") != _SECONDARY_PRODUCT_CONSUME_RESPONSE_SCHEMA
+        or value.get("status") != "consumed"
+        or value.get("stage") != request.get("stage")
+        or value.get("transition") != request.get("transition")
+        or value.get("predecessor_commit") != request.get("predecessor_commit")
+        or value.get("predecessor_tree_sha256") != request.get("predecessor_tree_sha256")
+        or value.get("candidate_commit") != request.get("candidate_commit")
+        or value.get("candidate_tree_sha256") != request.get("candidate_tree_sha256")
+        or value.get("next_env_sha256") != request.get("next_env_sha256")
+        or value.get("product_receipt_sha256") != request.get("product_receipt_sha256")
+        or value.get("sealed_runner_sha256") != request.get("sealed_runner_sha256")
+        or request.get("server_rollout_attestation_sha256") != attestation_sha256
+        or value.get("server_rollout_attestation_sha256") != attestation_sha256
+        or value.get("lookup_token_sha256") != lookup_token_sha256
+        or value.get("lookup_token_sha256") != attestation.get("lookup_token_sha256")
+        or value.get("request_sha256") != request_sha256
+        or value.get("state_version") != 2
+        or type(consumed_at) is not int
+        or consumed_at < int(attestation["issued_at"])
+        or consumed_at > int(attestation["expires_at"])
+        or consumed_at > int(time.time()) + 30
+        or not isinstance(value.get("consume_binding_sha256"), str)
+        or _HEX64.fullmatch(str(value.get("consume_binding_sha256"))) is None
+        or set(str(value.get("consume_binding_sha256"))) == {"0"}
+    ):
+        raise ReleaseFailure("secondary_rollout_consume_response_invalid")
+
+
+def _load_secondary_rollout_receipt(
+    path: Path,
+    expected_sha256: str,
+) -> dict[str, Any]:
+    lexical = Path(os.path.abspath(path))
+    if not path.is_absolute() or lexical != path:
+        raise ReleaseFailure("secondary_rollout_receipt_path_invalid")
+    raw = _read_private_regular_file(
+        lexical,
+        maximum_bytes=1 << 20,
+        code="secondary_rollout_receipt_invalid",
+    )
+    if _sha256_bytes(raw) != _closed_hash(
+        expected_sha256,
+        "secondary_rollout_receipt_digest_invalid",
+    ):
+        raise ReleaseFailure("secondary_rollout_receipt_digest_mismatch")
+    return _secondary_product_json(raw)
+
+
 def _runtime_pins(path: Path) -> dict[str, str]:
     raw = _regular_file(path, maximum_bytes=MAX_LOCK_BYTES, code="runtime_lock_invalid").read_text(
         encoding="utf-8"
@@ -857,6 +1921,8 @@ class BuildSpec:
     alias_tool_sha256: str
     alias_dependency: Path
     alias_dependency_sha256: str
+    secondary_product_runner: Path
+    secondary_product_runner_sha256: str
     max_schema: int
 
 
@@ -870,6 +1936,7 @@ class ReleaseIdentity:
     memory_vault_mode_contract: str = ""
     venv_relocation_contract: str = ""
     obsidian_cutover_contract: str = ""
+    secondary_product_runner_sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -902,7 +1969,11 @@ class ActivationPort(Protocol):
 
     def verify_units(self, candidate: ReleaseIdentity) -> None: ...
 
-    def verify_active_anchor(self, previous: ReleaseIdentity) -> None: ...
+    def verify_active_anchor(
+        self,
+        previous: ReleaseIdentity,
+        candidate: ReleaseIdentity,
+    ) -> None: ...
 
     def stop_bridge(self) -> None: ...
 
@@ -2045,6 +3116,27 @@ def build_release(spec: BuildSpec) -> ReleaseIdentity:
     if _sha256_file(base_python) != _closed_hash(spec.base_python_sha256, "base_python_digest_invalid"):
         raise ReleaseFailure("base_python_digest_mismatch")
     _preflight_base_python(base_python)
+    operator_source = _regular_file(
+        Path(__file__),
+        maximum_bytes=4 << 20,
+        code="operator_source_invalid",
+    )
+    product_runner_source = spec.secondary_product_runner
+    product_runner_lexical = Path(os.path.abspath(product_runner_source))
+    source_parts = _SECONDARY_PRODUCT_RUNNER_SOURCE.parts
+    if tuple(product_runner_lexical.parts[-len(source_parts) :]) != source_parts:
+        raise ReleaseFailure("secondary_product_runner_source_invalid")
+    product_runner_bytes = _read_stable_regular_file(
+        product_runner_lexical,
+        maximum_bytes=4 << 20,
+        code="secondary_product_runner_source_invalid",
+    )
+    product_runner_sha256 = _sha256_bytes(product_runner_bytes)
+    if product_runner_sha256 != _closed_hash(
+        spec.secondary_product_runner_sha256,
+        "secondary_product_runner_digest_invalid",
+    ):
+        raise ReleaseFailure("secondary_product_runner_digest_mismatch")
     staging = Path(tempfile.mkdtemp(prefix=f".{commit}.", dir=root))
     try:
         _create_pipless_venv(base_python, staging / "venv")
@@ -2104,13 +3196,19 @@ def build_release(spec: BuildSpec) -> ReleaseIdentity:
             or _sha256_file(runtime_lock) != runtime_lock_sha256
             or _verify_wheelhouse(wheelhouse, spec.wheelhouse_manifest, pins) != wheelhouse_manifest_sha
             or _sha256_file(base_python) != spec.base_python_sha256
+            or _read_stable_regular_file(
+                product_runner_lexical,
+                maximum_bytes=4 << 20,
+                code="secondary_product_runner_source_invalid",
+            )
+            != product_runner_bytes
         ):
             raise ReleaseFailure("release_build_input_changed")
         artifacts = staging / "artifacts"
         artifacts.mkdir(mode=0o700)
-        operator_source = _regular_file(Path(__file__), maximum_bytes=4 << 20, code="operator_source_invalid")
         operator_bytes = operator_source.read_bytes()
         (artifacts / "immutable_release_operator.py").write_bytes(operator_bytes)
+        (staging / _SECONDARY_PRODUCT_RUNNER_ARTIFACT).write_bytes(product_runner_bytes)
         alias_tool = _regular_file(spec.alias_tool, maximum_bytes=4 << 20, code="alias_tool_invalid")
         alias_dependency = _regular_file(
             spec.alias_dependency,
@@ -2150,6 +3248,7 @@ def build_release(spec: BuildSpec) -> ReleaseIdentity:
             "wheelhouse_manifest_sha256": wheelhouse_manifest_sha,
             "base_python_sha256": spec.base_python_sha256,
             "operator_sha256": _sha256_bytes(operator_bytes),
+            "secondary_product_runner_sha256": product_runner_sha256,
             "alias_tool_sha256": alias_tool_sha256,
             "alias_dependency_sha256": alias_dependency_sha256,
             "memory_vault_mode_contract": MEMORY_VAULT_MODE_CONTRACT,
@@ -2166,6 +3265,7 @@ def build_release(spec: BuildSpec) -> ReleaseIdentity:
             MEMORY_VAULT_MODE_CONTRACT,
             VENV_RELOCATION_CONTRACT,
             OBSIDIAN_CUTOVER_CONTRACT,
+            product_runner_sha256,
         )
         installed_surface_smoke(provisional)
         _relocate_venv_generated_paths(staging, target)
@@ -2213,6 +3313,7 @@ def build_release(spec: BuildSpec) -> ReleaseIdentity:
             MEMORY_VAULT_MODE_CONTRACT,
             VENV_RELOCATION_CONTRACT,
             OBSIDIAN_CUTOVER_CONTRACT,
+            product_runner_sha256,
         )
         verify_release_tree(release)
         installed_surface_smoke(release)
@@ -2363,7 +3464,7 @@ def activate_release(
         port.verify_release(previous)
     port.verify_release(schema_capable_fallback)
     port.verify_units(candidate)
-    port.verify_active_anchor(previous)
+    port.verify_active_anchor(previous, candidate)
     journal.begin(
         candidate=candidate,
         previous=previous,
@@ -2798,6 +3899,8 @@ class SystemdConfig:
     next_env_file: Path | None = None
     next_env_file_sha256: str = ""
     staged_config_transition: str = ""
+    secondary_rollout_receipt: Path | None = None
+    secondary_rollout_receipt_sha256: str = ""
     health_url: str = "https://127.0.0.1:8000/api/health"
     backend_unit: str = "friday-backend.service"
     bridge_unit: str = "friday-bridge.service"
@@ -2824,6 +3927,34 @@ def _requested_staged_config_transition(config: SystemdConfig) -> str:
     return ""
 
 
+def _secondary_rollout_receipt_stage(config: SystemdConfig) -> str | None:
+    """Require one exact automatic predecessor-stage receipt only for promotion."""
+
+    transition = _requested_staged_config_transition(config)
+    expected_stage = _SECONDARY_ROLLOUT_RECEIPT_STAGE.get(transition)
+    has_path = config.secondary_rollout_receipt is not None
+    has_digest = bool(config.secondary_rollout_receipt_sha256)
+    if expected_stage is None:
+        if has_path or has_digest:
+            raise ReleaseFailure("secondary_rollout_receipt_not_permitted")
+        return None
+    if not has_path or not has_digest:
+        raise ReleaseFailure("secondary_rollout_receipt_required")
+    assert config.secondary_rollout_receipt is not None
+    lexical = Path(os.path.abspath(config.secondary_rollout_receipt))
+    if (
+        not config.secondary_rollout_receipt.is_absolute()
+        or lexical != config.secondary_rollout_receipt
+        or any(character in str(lexical) for character in "\x00\r\n")
+    ):
+        raise ReleaseFailure("secondary_rollout_receipt_path_invalid")
+    _closed_hash(
+        config.secondary_rollout_receipt_sha256,
+        "secondary_rollout_receipt_digest_invalid",
+    )
+    return expected_stage
+
+
 def _activation_target_config(config: SystemdConfig) -> SystemdConfig:
     """Return the exact post-backup runtime identity for a staged activation."""
 
@@ -2845,6 +3976,8 @@ def _activation_target_config(config: SystemdConfig) -> SystemdConfig:
         next_env_file=None,
         next_env_file_sha256="",
         staged_config_transition="",
+        secondary_rollout_receipt=None,
+        secondary_rollout_receipt_sha256="",
     )
 
 
@@ -2858,6 +3991,8 @@ def _activation_predecessor_config(config: SystemdConfig) -> SystemdConfig:
         "next_env_file": None,
         "next_env_file_sha256": "",
         "staged_config_transition": "",
+        "secondary_rollout_receipt": None,
+        "secondary_rollout_receipt_sha256": "",
     }
     if transition == _OBSIDIAN_ENABLE_TRANSITION:
         changes["obsidian_mode"] = "disabled"
@@ -4516,7 +5651,77 @@ def _verify_obsidian_backup(
     return manifest
 
 
+def _secondary_product_sqlite_sidecar(path: Path) -> os.stat_result | None:
+    try:
+        status = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ReleaseFailure("backup_secondary_product_sidecar_invalid") from exc
+    if (
+        not stat.S_ISREG(status.st_mode)
+        or status.st_nlink != 1
+        or status.st_uid != os.geteuid()
+        or stat.S_IMODE(status.st_mode) & 0o077
+    ):
+        raise ReleaseFailure("backup_secondary_product_sidecar_invalid")
+    return status
+
+
+def _prepare_secondary_product_backup_boundary(config: SystemdConfig) -> None:
+    """Reject a live probe and truncate its already-scrubbed WAL before raw copy."""
+
+    database = _private_regular_file(
+        config.database,
+        maximum_bytes=1 << 40,
+        code="backup_database_source_invalid",
+    )
+    wal = database.with_name(f"{database.name}-wal")
+    shm = database.with_name(f"{database.name}-shm")
+    _secondary_product_sqlite_sidecar(wal)
+    _secondary_product_sqlite_sidecar(shm)
+    checkpoint: tuple[Any, ...] | sqlite3.Row | None = None
+    try:
+        connection = sqlite3.connect(
+            str(database),
+            timeout=30.0,
+            isolation_level=None,
+        )
+        try:
+            raw_table = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='raw_objects'"
+            ).fetchone()
+            if (
+                raw_table is not None
+                and connection.execute(
+                    """SELECT 1 FROM raw_objects
+                     WHERE source_ref LIKE 'secondary-product-witness:%' LIMIT 1"""
+                ).fetchone()
+                is not None
+            ):
+                raise ReleaseFailure("backup_active_secondary_product_witness")
+            checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        finally:
+            connection.close()
+    except ReleaseFailure:
+        raise
+    except sqlite3.DatabaseError as exc:
+        raise ReleaseFailure("backup_secondary_product_checkpoint_failed") from exc
+    if (
+        checkpoint is None
+        or len(checkpoint) != 3
+        or any(type(value) is not int for value in checkpoint)
+        or tuple(int(value) for value in checkpoint) not in {(0, 0, 0), (0, -1, -1)}
+    ):
+        raise ReleaseFailure("backup_secondary_product_checkpoint_failed")
+    wal_status = _secondary_product_sqlite_sidecar(wal)
+    _secondary_product_sqlite_sidecar(shm)
+    if wal_status is not None and wal_status.st_size != 0:
+        raise ReleaseFailure("backup_secondary_product_wal_invalid")
+
+
 def _exact_sqlite_backup(config: SystemdConfig) -> DatabaseBackup:
+    _prepare_secondary_product_backup_boundary(config)
     backup_root = _private_directory(config.backup_dir, create=True)
     directory = Path(tempfile.mkdtemp(prefix="immutable-cutover-", dir=backup_root))
     os.chmod(directory, 0o700)
@@ -6194,11 +7399,369 @@ print(json.dumps({'memory_vault_mode':effective_memory_vault_mode,'obsidian_mode
                     code="systemd_dropin_changed_during_attestation",
                 )
 
-    def verify_active_anchor(self, previous: ReleaseIdentity) -> None:
+    def _secondary_rollout_profile_identity(
+        self,
+        previous: ReleaseIdentity,
+        *,
+        expected_stage: str,
+    ) -> dict[str, Any]:
+        verification_config = self._staged_predecessor_config
+        if verification_config is None:
+            raise ReleaseFailure("secondary_rollout_config_identity_mismatch")
+        environment_before = _read_private_regular_file(
+            verification_config.env_file,
+            maximum_bytes=1 << 20,
+            code="environment_file_invalid",
+        )
+        environment_sha256 = _sha256_bytes(environment_before)
+        if environment_sha256 != verification_config.env_file_sha256:
+            raise ReleaseFailure("secondary_rollout_config_identity_mismatch")
+        script = """
+import json, logging, os, sys
+logging.disable(logging.CRITICAL)
+os.environ['FRIDAY_ENV_FILE']=sys.argv[1]
+from friday.config import load_local_env_file, load_settings
+from friday.secondary_brain.profiles import get_secondary_runtime_admission
+load_local_env_file(); settings=load_settings()
+admission=get_secondary_runtime_admission(settings.secondary_llm_profile,mode=settings.secondary_llm_mode)
+assert admission is not None
+profile=admission.profile
+print(json.dumps({
+ 'admission':admission.kind.value,
+ 'allow_private_text':settings.secondary_llm_allow_private_text,
+ 'context_tokens':settings.secondary_llm_max_context_tokens,
+ 'gateway_ca_certificate_sha256':profile.gateway_ca_certificate_sha256,
+ 'manifest_sha256':profile.manifest_sha256,
+ 'mode':settings.secondary_llm_mode,
+ 'profile_id':settings.secondary_llm_profile,
+ 'served_model_alias':settings.secondary_llm_model,
+},sort_keys=True,separators=(',',':')))
+"""
+        child_environment = {
+            key: value
+            for key, value in os.environ.items()
+            if key in {"LANG", "LC_ALL", "SSL_CERT_DIR", "SSL_CERT_FILE", "XDG_RUNTIME_DIR"}
+        }
+        child_environment.update(
+            {
+                "FRIDAY_ENV_FILE": str(verification_config.env_file),
+                "FRIDAY_HOME": str(verification_config.friday_home),
+                "FRIDAY_DATABASE_PATH": str(verification_config.database),
+                "FRIDAY_DATABASE_MUST_EXIST": "1",
+            }
+        )
+        try:
+            result = subprocess.run(  # noqa: S603
+                [
+                    str(previous.root / "venv/bin/python"),
+                    "-I",
+                    "-B",
+                    "-c",
+                    script,
+                    str(verification_config.env_file),
+                ],
+                check=False,
+                capture_output=True,
+                env=child_environment,
+                timeout=60,
+            )
+            identity = _unique_json(result.stdout.decode("ascii", errors="strict"))
+        except (OSError, subprocess.SubprocessError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+            raise ReleaseFailure("secondary_rollout_profile_identity_invalid") from exc
+        expected_admissions = {"provisional_shadow", "accepted"}
+        if expected_stage == "private-shadow":
+            expected_admissions = {"accepted"}
+        if (
+            result.returncode != 0
+            or result.stderr
+            or set(identity)
+            != {
+                "admission",
+                "allow_private_text",
+                "context_tokens",
+                "gateway_ca_certificate_sha256",
+                "manifest_sha256",
+                "mode",
+                "profile_id",
+                "served_model_alias",
+            }
+            or identity.get("admission") not in expected_admissions
+            or identity.get("allow_private_text") is not (expected_stage == "private-shadow")
+            or identity.get("context_tokens") != 4096
+            or identity.get("gateway_ca_certificate_sha256") != _SECONDARY_FINALIST_CA_SHA256
+            or _HEX64.fullmatch(str(identity.get("manifest_sha256") or "")) is None
+            or identity.get("mode") != "shadow"
+            or identity.get("profile_id") != _SECONDARY_FINALIST_PROFILE_ID
+            or identity.get("served_model_alias") != _SECONDARY_FINALIST_MODEL_ALIAS
+        ):
+            raise ReleaseFailure("secondary_rollout_profile_identity_invalid")
+        environment_after = _read_private_regular_file(
+            verification_config.env_file,
+            maximum_bytes=1 << 20,
+            code="environment_file_invalid",
+        )
+        if environment_after != environment_before:
+            raise ReleaseFailure("secondary_rollout_config_identity_mismatch")
+        return identity
+
+    def _current_backend_process_identity(
+        self,
+        previous: ReleaseIdentity,
+        *,
+        proc_root: Path = Path("/proc"),
+    ) -> tuple[int, str]:
+        def main_pid() -> int:
+            result = self._systemctl(
+                "show",
+                self.config.backend_unit,
+                "--property=MainPID",
+                "--value",
+                check=False,
+            )
+            try:
+                value = int(result.stdout.strip() or b"0")
+            except ValueError as exc:
+                raise ReleaseFailure("secondary_rollout_process_identity_invalid") from exc
+            if result.returncode != 0 or not 2 <= value <= 4_194_304:
+                raise ReleaseFailure("secondary_rollout_process_identity_invalid")
+            return value
+
+        pid = main_pid()
+        if not self._process_matches(pid, previous, "backend", proc_root=proc_root):
+            raise ReleaseFailure("secondary_rollout_process_identity_invalid")
+        descriptor = -1
+        try:
+            descriptor = os.open(
+                proc_root / str(pid) / "stat",
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            )
+            raw = os.read(descriptor, 8193)
+            if len(raw) > 8192 or not raw or b"\x00" in raw or os.read(descriptor, 1):
+                raise ReleaseFailure("secondary_rollout_process_identity_invalid")
+        except ReleaseFailure:
+            raise
+        except OSError as exc:
+            raise ReleaseFailure("secondary_rollout_process_identity_invalid") from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+        try:
+            text = raw.decode("ascii", errors="strict")
+        except UnicodeError as exc:
+            raise ReleaseFailure("secondary_rollout_process_identity_invalid") from exc
+        closing = text.rfind(")")
+        fields = text[closing + 2 :].split() if closing > 0 else []
+        if len(fields) < 20 or not fields[19].isdigit():
+            raise ReleaseFailure("secondary_rollout_process_identity_invalid")
+        if main_pid() != pid or not self._process_matches(pid, previous, "backend", proc_root=proc_root):
+            raise ReleaseFailure("secondary_rollout_process_identity_changed")
+        return pid, _sha256_bytes(f"{pid}:{fields[19]}".encode("ascii"))
+
+    def _consume_secondary_rollout_attestation(
+        self,
+        request_payload: Mapping[str, Any],
+        *,
+        attestation: Mapping[str, Any],
+        api_token: str,
+        primary_ca: bytes,
+    ) -> None:
+        if set(request_payload) != _SECONDARY_PRODUCT_CONSUME_REQUEST_KEYS:
+            raise ReleaseFailure("secondary_rollout_consume_request_invalid")
+        try:
+            context = ssl.create_default_context(cadata=primary_ca.decode("ascii", errors="strict"))
+            context.check_hostname = True
+            context.verify_mode = ssl.CERT_REQUIRED
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({}),
+                urllib.request.HTTPSHandler(context=context),
+                _NoRedirect(),
+            )
+            request = urllib.request.Request(
+                _SECONDARY_PRODUCT_CONSUME_URL,
+                data=_secondary_product_canonical(request_payload),
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {api_token}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            with opener.open(  # noqa: S310 - exact pinned loopback TLS endpoint
+                request,
+                timeout=10.0,
+            ) as response:
+                status = response.status
+                response_url = response.geturl()
+                raw = response.read(65_537)
+        except (OSError, UnicodeError, ValueError, ssl.SSLError, urllib.error.URLError):
+            raise ReleaseFailure("secondary_rollout_attestation_consume_failed") from None
+        if status != 200 or response_url != _SECONDARY_PRODUCT_CONSUME_URL or len(raw) > 65_536:
+            raise ReleaseFailure("secondary_rollout_attestation_consume_failed")
+        try:
+            payload = _secondary_product_json(raw)
+        except ReleaseFailure:
+            raise ReleaseFailure("secondary_rollout_consume_response_invalid") from None
+        _validate_secondary_rollout_consume_response(
+            payload,
+            request=request_payload,
+            attestation=attestation,
+        )
+
+    def _validate_secondary_rollout_gate(
+        self,
+        previous: ReleaseIdentity,
+        candidate: ReleaseIdentity,
+    ) -> None:
+        expected_stage = _secondary_rollout_receipt_stage(self.config)
+        if expected_stage is None:
+            return
+        secondary_rollout_receipt = self.config.secondary_rollout_receipt
+        assert secondary_rollout_receipt is not None
+        canonical = _read_private_regular_file(
+            self.config.env_file,
+            maximum_bytes=1 << 20,
+            code="environment_file_invalid",
+        )
+        if _sha256_bytes(canonical) != self.config.env_file_sha256:
+            raise ReleaseFailure("secondary_rollout_config_identity_mismatch")
+        values, unrelated = _secondary_environment_view(canonical)
+        exact_values = (
+            _SECONDARY_SHADOW_EXACT_VALUES
+            if expected_stage == "public-shadow"
+            else _SECONDARY_PRIVATE_SHADOW_EXACT_VALUES
+        )
+        _validate_secondary_finalist_values(
+            values,
+            exact_values=exact_values,
+            invalid_code="secondary_rollout_config_identity_mismatch",
+        )
+        if canonical != _canonical_secondary_environment(unrelated, values):
+            raise ReleaseFailure("secondary_rollout_config_identity_mismatch")
+        api_token = _secondary_rollout_api_token(canonical)
+        secondary_ca_path = Path(values["FRIDAY_SECONDARY_LLM_CA_FILE"])
+        secondary_ca = _read_private_regular_file(
+            secondary_ca_path,
+            maximum_bytes=1 << 20,
+            code="secondary_shadow_ca_invalid",
+        )
+        if _sha256_bytes(secondary_ca) != _SECONDARY_FINALIST_CA_SHA256:
+            raise ReleaseFailure("secondary_shadow_ca_digest_mismatch")
+        primary_ca = _read_private_regular_file(
+            self.config.health_ca,
+            maximum_bytes=1 << 20,
+            code="health_ca_invalid",
+        )
+        primary_ca_sha256 = _sha256_bytes(primary_ca)
+        if primary_ca_sha256 != self.config.health_ca_sha256:
+            raise ReleaseFailure("health_ca_digest_mismatch")
+        next_env_file = self.config.next_env_file
+        if next_env_file is None:
+            raise ReleaseFailure("secondary_rollout_next_environment_invalid")
+        next_environment = _read_private_regular_file(
+            next_env_file,
+            maximum_bytes=1 << 20,
+            code="secondary_rollout_next_environment_invalid",
+        )
+        next_env_sha256 = _closed_hash(
+            self.config.next_env_file_sha256,
+            "secondary_rollout_next_environment_invalid",
+        )
+        if _sha256_bytes(next_environment) != next_env_sha256:
+            raise ReleaseFailure("secondary_rollout_next_environment_invalid")
+        transition = _requested_staged_config_transition(self.config)
+        _validate_staged_environment_transition(transition, canonical, next_environment)
+        receipt = _load_secondary_rollout_receipt(
+            secondary_rollout_receipt,
+            self.config.secondary_rollout_receipt_sha256,
+        )
+        observer_runner_sha256 = _secondary_product_runner_artifact_sha256(previous)
+        profile_identity = self._secondary_rollout_profile_identity(
+            previous,
+            expected_stage=expected_stage,
+        )
+        primary_pid, process_epoch = self._current_backend_process_identity(previous)
+        attestation = _validate_secondary_rollout_receipt(
+            receipt,
+            expected_stage=expected_stage,
+            previous=previous,
+            observer_runner_sha256=observer_runner_sha256,
+            profile_identity=profile_identity,
+            primary_pid=primary_pid,
+            primary_process_epoch_sha256=process_epoch,
+            primary_ca_certificate_sha256=primary_ca_sha256,
+        )
+
+        def recheck_identity() -> None:
+            if (
+                _read_private_regular_file(
+                    self.config.env_file,
+                    maximum_bytes=1 << 20,
+                    code="environment_file_invalid",
+                )
+                != canonical
+                or _read_private_regular_file(
+                    self.config.health_ca,
+                    maximum_bytes=1 << 20,
+                    code="health_ca_invalid",
+                )
+                != primary_ca
+                or _read_private_regular_file(
+                    secondary_ca_path,
+                    maximum_bytes=1 << 20,
+                    code="secondary_shadow_ca_invalid",
+                )
+                != secondary_ca
+                or _read_private_regular_file(
+                    next_env_file,
+                    maximum_bytes=1 << 20,
+                    code="secondary_rollout_next_environment_invalid",
+                )
+                != next_environment
+                or _load_secondary_rollout_receipt(
+                    secondary_rollout_receipt,
+                    self.config.secondary_rollout_receipt_sha256,
+                )
+                != receipt
+                or _secondary_product_runner_artifact_sha256(previous) != observer_runner_sha256
+                or self._secondary_rollout_profile_identity(
+                    previous,
+                    expected_stage=expected_stage,
+                )
+                != profile_identity
+                or self._current_backend_process_identity(previous) != (primary_pid, process_epoch)
+            ):
+                raise ReleaseFailure("secondary_rollout_identity_changed")
+
+        request_payload = _secondary_rollout_consume_request(
+            lookup_token=str(receipt["server_rollout_lookup_token"]),
+            stage=expected_stage,
+            transition=transition,
+            previous=previous,
+            candidate=candidate,
+            next_env_sha256=next_env_sha256,
+            product_receipt_sha256=self.config.secondary_rollout_receipt_sha256,
+            sealed_runner_sha256=observer_runner_sha256,
+            server_rollout_attestation_sha256=_sha256_bytes(_secondary_product_canonical(attestation)),
+        )
+        recheck_identity()
+        self._consume_secondary_rollout_attestation(
+            request_payload,
+            attestation=attestation,
+            api_token=api_token,
+            primary_ca=primary_ca,
+        )
+        recheck_identity()
+
+    def verify_active_anchor(
+        self,
+        previous: ReleaseIdentity,
+        candidate: ReleaseIdentity,
+    ) -> None:
         if not self.config.anchor.is_symlink() or self.config.anchor.resolve(
             strict=True
         ) != previous.root.resolve(strict=True):
             raise ReleaseFailure("active_anchor_not_exact_previous")
+        self._validate_secondary_rollout_gate(previous, candidate)
 
     def stop_bridge(self) -> None:
         self._systemctl("stop", self.config.bridge_unit)
@@ -6919,6 +8482,7 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
     optional_capability_keys = {
         "memory_vault_mode_contract",
         "obsidian_cutover_contract",
+        "secondary_product_runner_sha256",
         "venv_relocation_contract",
     }
     memory_vault_mode_contract = (
@@ -6929,6 +8493,9 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
     )
     obsidian_cutover_contract = (
         str(metadata.get("obsidian_cutover_contract") or "") if isinstance(metadata, dict) else ""
+    )
+    secondary_product_runner_sha256 = (
+        str(metadata.get("secondary_product_runner_sha256") or "") if isinstance(metadata, dict) else ""
     )
     if (
         not isinstance(metadata, dict)
@@ -6967,6 +8534,11 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         "wheelhouse_manifest_sha256",
     ):
         _closed_hash(str(metadata.get(key) or ""), "release_metadata_digest_invalid")
+    if "secondary_product_runner_sha256" in metadata_keys:
+        _closed_hash(
+            secondary_product_runner_sha256,
+            "release_secondary_product_runner_digest_invalid",
+        )
     for digest in metadata["bootstrap_wheel_sha256"].values():
         _closed_hash(str(digest), "release_metadata_digest_invalid")
     operator_path = _regular_file(
@@ -6978,6 +8550,19 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         str(metadata.get("operator_sha256") or ""), "release_operator_digest_invalid"
     ):
         raise ReleaseFailure("release_operator_digest_mismatch")
+    if secondary_product_runner_sha256:
+        product_runner = _regular_file(
+            resolved / _SECONDARY_PRODUCT_RUNNER_ARTIFACT,
+            maximum_bytes=4 << 20,
+            code="release_secondary_product_runner_invalid",
+        )
+        product_runner_status = os.stat(product_runner, follow_symlinks=False)
+        if (
+            product_runner_status.st_uid != os.geteuid()
+            or stat.S_IMODE(product_runner_status.st_mode) != 0o400
+            or _sha256_file(product_runner) != secondary_product_runner_sha256
+        ):
+            raise ReleaseFailure("release_secondary_product_runner_digest_mismatch")
     for relative, metadata_key, code in (
         (
             Path("tools/backfill_file_alias_filenames.py"),
@@ -7008,6 +8593,7 @@ def load_release_identity(root: Path, *, expected_tree_sha256: str) -> ReleaseId
         memory_vault_mode_contract=memory_vault_mode_contract,
         venv_relocation_contract=venv_relocation_contract,
         obsidian_cutover_contract=obsidian_cutover_contract,
+        secondary_product_runner_sha256=secondary_product_runner_sha256,
     )
     verify_release_tree(release)
     return release
@@ -7315,6 +8901,8 @@ def _systemd_config(args: argparse.Namespace) -> SystemdConfig:
         next_env_file=getattr(args, "next_env_file", None),
         next_env_file_sha256=getattr(args, "next_env_file_sha256", None) or "",
         staged_config_transition=getattr(args, "staged_config_transition", None) or "",
+        secondary_rollout_receipt=getattr(args, "secondary_rollout_receipt", None),
+        secondary_rollout_receipt_sha256=(getattr(args, "secondary_rollout_receipt_sha256", None) or ""),
         alias_claim_manifests=tuple(args.alias_claim_manifest),
         alias_expected_counts=tuple(args.alias_expect_count),
         alias_expected_plan_sha256s=tuple(args.alias_expect_plan_sha256),
@@ -7391,6 +8979,13 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--alias-tool-sha256", required=True)
     build.add_argument("--alias-dependency", required=True, type=Path)
     build.add_argument("--alias-dependency-sha256", required=True)
+    build.add_argument(
+        "--secondary-product-runner",
+        required=True,
+        type=Path,
+        help=("Exact deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py source artifact"),
+    )
+    build.add_argument("--secondary-product-runner-sha256", required=True)
     build.add_argument("--max-schema", required=True, type=int)
 
     install = commands.add_parser("install-units")
@@ -7436,6 +9031,15 @@ def build_parser() -> argparse.ArgumentParser:
             "activations retain the established obsidian_enable contract"
         ),
     )
+    activate.add_argument(
+        "--secondary-rollout-receipt",
+        type=Path,
+        help=(
+            "Owner-private automatic predecessor product-stage receipt; required only for "
+            "public-shadow to private-shadow and private-shadow to assist promotions"
+        ),
+    )
+    activate.add_argument("--secondary-rollout-receipt-sha256")
 
     recovery = commands.add_parser("recover-historical-album")
     recovery.add_argument("--release", required=True, type=Path)
@@ -7471,6 +9075,8 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 alias_tool_sha256=args.alias_tool_sha256,
                 alias_dependency=args.alias_dependency,
                 alias_dependency_sha256=args.alias_dependency_sha256,
+                secondary_product_runner=args.secondary_product_runner,
+                secondary_product_runner_sha256=args.secondary_product_runner_sha256,
                 max_schema=args.max_schema,
             )
         )
@@ -7528,6 +9134,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
     elif args.command == "activate":
         config = _systemd_config(args)
         staged_config_transition = _requested_staged_config_transition(config)
+        _secondary_rollout_receipt_stage(config)
         target_config = _activation_target_config(config)
         if config.next_env_file is not None and (
             args.terminal_journal_env_sha256 is None

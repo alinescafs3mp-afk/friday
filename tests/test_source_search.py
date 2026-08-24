@@ -1330,7 +1330,8 @@ def test_the_index_is_only_ever_read_through_filtered_storage_helpers():
         source = path.read_text(encoding="utf-8")
         if "raw_fts" not in source:
             continue
-        # The schema declares it; storage/_intake.py is the one reader.
+        # The schema declares it; storage/_intake.py owns every reader plus the
+        # exact FTS secure-delete maintenance command validated below.
         if path.name in {"_base.py", "_core.py", "_intake.py"}:
             continue
         offenders.append(str(path.relative_to(root)))
@@ -1338,16 +1339,31 @@ def test_the_index_is_only_ever_read_through_filtered_storage_helpers():
 
     intake = (root / "storage" / "_intake.py").read_text(encoding="utf-8")
     tree = ast.parse(intake)
-    readers = {
-        node.name: ast.get_source_segment(intake, node) or ""
+    raw_fts_functions = {
+        node.name: node
         for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef) and "raw_fts" in (ast.get_source_segment(intake, node) or "")
     }
-    assert set(readers) == {
+    assert set(raw_fts_functions) == {
         "search_raw_objects",
         "search_raw_objects_in_set",
         "search_owned_file_content",
         "search_owned_files_by_term",
+        "purge_secondary_product_witness",
+    }
+    maintenance_literals = {
+        node.value
+        for node in ast.walk(raw_fts_functions["purge_secondary_product_witness"])
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and "raw_fts" in node.value
+    }
+    assert maintenance_literals == {
+        "INSERT INTO raw_fts(raw_fts, rank) VALUES('secure-delete', 1)",
+        "SELECT v AS value FROM raw_fts_config WHERE k='secure-delete'",
+    }
+    readers = {
+        name: ast.get_source_segment(intake, node) or ""
+        for name, node in raw_fts_functions.items()
+        if name != "purge_secondary_product_witness"
     }
     for name, source in readers.items():
         assert "_not_private_raw_dependency" in source, name

@@ -1694,6 +1694,10 @@ class WorkersManager:
 
     async def _database_optimize(self) -> None:
         await run_blocking(self.storage.optimize)
+        # Completed request receipts are replay fences, not an archive.  Keep the
+        # documented 30-day retry window bounded in the running product instead
+        # of relying on a maintenance method that was never scheduled.
+        await run_blocking(self.storage.idempotency_prune, days=30)
         # Drop expired single-use bridge nonces so the replay cache stays bounded.
         retention = max(60, self.settings.telegram_signature_max_age_sec * 4)
         await run_blocking(self.storage.prune_bridge_nonces, max_age_sec=retention)

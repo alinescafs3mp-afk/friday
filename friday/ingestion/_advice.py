@@ -48,6 +48,10 @@ from friday.ingestion._base import (
 from friday.ingestion._boilerplate import stored_boilerplate
 from friday.ingestion._document_kind import detect_document_kind, kind_tag
 from friday.ingestion._secondary_advice import route_inbox_advice
+from friday.secondary_product_witness import (
+    is_secondary_product_witness_raw,
+    secondary_product_diagnostics_receipt,
+)
 
 if TYPE_CHECKING:
     from friday.agent_runtime.llm import LLMRouter
@@ -277,6 +281,7 @@ class AdviceMixin(PipelineShared):
             )
 
         raw_metadata = _json_dict(raw.get("metadata_json"))
+        product_witness = is_secondary_product_witness_raw(raw)
         image_bearing = bool(
             str(raw_metadata.get("mime_type") or "").strip().casefold().startswith("image/")
             or raw_metadata.get("vision_used") is True
@@ -290,7 +295,22 @@ class AdviceMixin(PipelineShared):
             primary_model_name=primary_model_name,
             primary_call=primary_advice_call,
             image_bearing=image_bearing,
+            observe_diagnostics=product_witness,
         )
+        product_diagnostics: dict[str, Any] | None = None
+        if product_witness:
+            if not isinstance(routed.diagnostics_before, dict) or not isinstance(
+                routed.diagnostics_after, dict
+            ):
+                raise RuntimeError("Secondary product diagnostics receipt is unavailable")
+            try:
+                product_diagnostics = secondary_product_diagnostics_receipt(
+                    str(raw.get("source_ref") or ""),
+                    routed.diagnostics_before,
+                    routed.diagnostics_after,
+                )
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError("Secondary product diagnostics receipt is invalid") from exc
         model_name = routed.model_name[:200]
         parsed = _parse_model_response(routed.response)
 
@@ -452,12 +472,15 @@ class AdviceMixin(PipelineShared):
         if not updated:
             raise ValueError("Inbox item disappeared while advice was generated")
         refreshed = self.storage.get_inbox_item(inbox_id, user_id)
-        return {
+        result = {
             "item": refreshed,
             "suggestions": merged,
             "model_advice": model_advice,
             "idempotent_replay": False,
         }
+        if product_diagnostics is not None:
+            result["secondary_product_diagnostics"] = product_diagnostics
+        return result
 
     def reenrich_knowledge(
         self,

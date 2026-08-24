@@ -13,6 +13,16 @@ from fastapi import APIRouter, HTTPException, Request
 
 from friday.api.deps import _audit, _parse_json_bool, _request_json, _require
 from friday.api.projections import public_ingestion_receipt
+from friday.diagnostics.runtime_lease import ProcessLease, RuntimeLeaseError
+from friday.secondary_product_witness import (
+    SECONDARY_PRODUCT_BACKUP_LEASE_FILENAME,
+    SECONDARY_PRODUCT_BACKUP_LEASE_PROTOCOL,
+    SECONDARY_PRODUCT_WITNESS_SOURCE_PREFIX,
+    is_secondary_product_witness_raw,
+    parse_secondary_product_witness_source_ref,
+    secondary_product_storage_binding,
+    secondary_product_witness_content,
+)
 
 router = APIRouter(prefix="/api/ingest", tags=["ingestion"])
 
@@ -25,25 +35,93 @@ async def ingest(request: Request) -> dict[str, Any]:
     if not content:
         raise HTTPException(status_code=400, detail="Нужен content")
     force_knowledge = _parse_json_bool(body.get("force_knowledge"), field="force_knowledge", default=False)
-    outcome = await request.app.state.ingestion.ingest_text(
-        actor.user_id,
-        content,
-        source="api",
-        source_ref=str(body.get("source_ref") or ""),
-        force_knowledge=force_knowledge,
-        # Кто принёс материал: единый ключ на всех дорогах приёма.
-        metadata={
-            **(dict(given) if isinstance(given := body.get("metadata"), dict) else {}),
-            "uploaded_by": actor.own_id,
-        },
+    force_review = _parse_json_bool(body.get("force_review"), field="force_review", default=False)
+    if force_knowledge and force_review:
+        raise HTTPException(
+            status_code=400,
+            detail="force_knowledge и force_review взаимоисключающие",
+        )
+    source_ref = str(body.get("source_ref") or "")
+    metadata = {
+        **(dict(given) if isinstance(given := body.get("metadata"), dict) else {}),
+        "uploaded_by": actor.own_id,
+    }
+    reserved_witness = source_ref.startswith(SECONDARY_PRODUCT_WITNESS_SOURCE_PREFIX) or (
+        "secondary_product_witness" in metadata
     )
-    return public_ingestion_receipt(
+    if reserved_witness:
+        parsed_witness = parse_secondary_product_witness_source_ref(source_ref)
+        if (
+            metadata.get("secondary_product_witness") is not True
+            or parsed_witness is None
+            or content != secondary_product_witness_content(*parsed_witness)
+            or force_review is not True
+            or force_knowledge is not False
+        ):
+            raise HTTPException(status_code=400, detail="Некорректный secondary product witness")
+        if not actor.is_owner or actor.identity_id != "owner-token":
+            raise HTTPException(status_code=403, detail="Secondary product witness доступен только владельцу")
+        request.app.state.auth_service.require(actor, "admin.all_data.manage")
+    elif force_review:
+        raise HTTPException(status_code=400, detail="force_review зарезервирован для product witness")
+
+    boundary: ProcessLease | None = None
+    if reserved_witness:
+        try:
+            boundary = ProcessLease(
+                request.app.state.settings.state_dir / SECONDARY_PRODUCT_BACKUP_LEASE_FILENAME,
+                protocol=SECONDARY_PRODUCT_BACKUP_LEASE_PROTOCOL,
+            )
+            boundary.acquire()
+        except RuntimeLeaseError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Secondary product witness временно заблокирован снимком базы",
+            ) from exc
+    try:
+        outcome = await request.app.state.ingestion.ingest_text(
+            actor.user_id,
+            content,
+            source="api",
+            source_ref=source_ref,
+            force_knowledge=force_knowledge,
+            force_review=force_review,
+            # Кто принёс материал: единый ключ на всех дорогах приёма.
+            metadata={**metadata, "uploaded_by": actor.own_id},
+        )
+    finally:
+        if boundary is not None:
+            boundary.release()
+    receipt = public_ingestion_receipt(
         outcome,
         include_resource_id=True,
         storage=request.app.state.storage,
         resource_user_id=actor.user_id,
         resource_owner_id=actor.own_id,
     )
+    if reserved_witness:
+        raw = request.app.state.storage.get_raw_object(str(outcome.get("raw_object_id") or ""), actor.user_id)
+        inbox = request.app.state.storage.get_inbox_item(str(outcome.get("inbox_id") or ""), actor.user_id)
+        if (
+            is_secondary_product_witness_raw(raw)
+            and inbox
+            and inbox.get("status") == "pending"
+            and inbox.get("knowledge_object_id") is None
+        ):
+            # A POST may commit and lose its response.  Replaying the exact reserved
+            # source_ref must recover the same cleanable pending receipt, not the
+            # sparse generic idempotency projection.
+            receipt.update(
+                queued_for_review=True,
+                promoted=False,
+                persisted=True,
+                action="review",
+            )
+            receipt["secondary_product_storage_binding_sha256"] = secondary_product_storage_binding(
+                raw, inbox
+            )
+            receipt["secondary_product_storage_user_id"] = actor.user_id
+    return receipt
 
 
 @router.post("/url", tags=["knowledge"])

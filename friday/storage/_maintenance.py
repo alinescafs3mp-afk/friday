@@ -10,10 +10,16 @@ from __future__ import annotations
 import unicodedata
 import zlib
 
+from friday.diagnostics.runtime_lease import ProcessLease, RuntimeLeaseError
 from friday.private_fs import (
     ensure_private_directory,
     prepare_private_sqlite,
     restrict_sqlite_files,
+)
+from friday.secondary_product_witness import (
+    SECONDARY_PRODUCT_BACKUP_LEASE_FILENAME,
+    SECONDARY_PRODUCT_BACKUP_LEASE_PROTOCOL,
+    is_secondary_product_witness_raw,
 )
 from friday.storage._base import (
     ACCOUNT_DELETION_ELIGIBILITY_PREFIX,
@@ -64,6 +70,28 @@ _EXPORT_CURRENT_FIELD_MAX_BYTES = 1_048_576
 _EXPORT_CURRENT_JSON_MAX_BYTES = 1_048_576
 _EXPORT_INBOX_JSON_MAX_BYTES = 8_192
 _EXPORT_INBOX_NOTES_MAX_CHARS = 4_000
+
+
+def _contains_secondary_product_witness(conn: sqlite3.Connection) -> bool:
+    """Inspect one transactionally consistent SQLite view for the exact probe."""
+
+    rows = conn.execute(
+        """SELECT source, source_ref, raw_content, content_hash, metadata_json
+             FROM raw_objects
+            WHERE source='api' AND source_ref LIKE 'secondary-product-witness:%'"""
+    ).fetchall()
+    return any(
+        is_secondary_product_witness_raw(
+            {
+                "source": row[0],
+                "source_ref": row[1],
+                "raw_content": row[2],
+                "content_hash": row[3],
+                "metadata_json": row[4],
+            }
+        )
+        for row in rows
+    )
 
 
 def _privacy_casefold(value: Any) -> str:
@@ -409,79 +437,102 @@ class MaintenanceMixin(StorageShared):
             "SELECT value FROM schema_meta WHERE key='schema_version'"
         ).fetchone()
         backup_schema_version = int(schema_row[0]) if schema_row else -1
+        if _contains_secondary_product_witness(backup_conn):
+            raise RuntimeError("Backup snapshot contains a transient secondary product witness")
         return integrity, foreign_key_violations, backup_schema_version
 
     def create_backup(self, *, label: str = "manual") -> dict[str, Any]:
-        ensure_private_directory(self.settings.backups_dir)
-        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        stem = f"jericho-{timestamp}-{_safe_filename(label)}"
-        destination = self.settings.backups_dir / f"{stem}.sqlite3"
-        suffix = 1
-        while destination.exists():
-            destination = self.settings.backups_dir / f"{stem}-{suffix}.sqlite3"
-            suffix += 1
-
-        prepare_private_sqlite(destination)
-        backup_conn = sqlite3.connect(str(destination))
-        restrict_sqlite_files(destination)
+        boundary = ProcessLease(
+            self.settings.state_dir / SECONDARY_PRODUCT_BACKUP_LEASE_FILENAME,
+            protocol=SECONDARY_PRODUCT_BACKUP_LEASE_PROTOCOL,
+        )
         try:
-            # Checkpoint + copy run on this thread's own connection. SQLite's online
-            # backup API takes a transactionally consistent snapshot and restarts if
-            # a concurrent writer modifies the source, so no cross-thread lock is
-            # needed; a PASSIVE checkpoint never blocks other connections. The
-            # integrity/foreign-key/schema scan then runs on the backup copy.
-            self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-            self.conn.backup(backup_conn)
-            integrity, foreign_key_violations, backup_schema_version = self._verify_backup_conn(backup_conn)
-        except BaseException:
-            for candidate in (
-                destination,
-                Path(f"{destination}-wal"),
-                Path(f"{destination}-shm"),
-            ):
-                candidate.unlink(missing_ok=True)
-            raise
-        finally:
-            backup_conn.close()
-            restrict_sqlite_files(destination)
-        if integrity != "ok":
-            destination.unlink(missing_ok=True)
-            raise RuntimeError(f"Backup integrity check failed: {integrity}")
-        if foreign_key_violations:
-            destination.unlink(missing_ok=True)
-            raise RuntimeError(f"Backup foreign-key check failed: {len(foreign_key_violations)} violation(s)")
-        if backup_schema_version != SCHEMA_VERSION:
-            destination.unlink(missing_ok=True)
-            raise RuntimeError(
-                f"Backup schema mismatch: database={backup_schema_version}, expected={SCHEMA_VERSION}"
-            )
+            boundary.acquire()
+        except (OSError, RuntimeLeaseError) as exc:
+            raise RuntimeError("Backup is blocked by the secondary product witness boundary") from exc
+        try:
+            # The lease is acquired before even creating a destination.  A committed
+            # probe makes the source preflight fail, while a backup that got here first
+            # prevents reserved ingest until the manifest is durable.  OS ownership
+            # releases on process death, so no copied crash artefact can contain a probe.
+            if _contains_secondary_product_witness(self.conn):
+                raise RuntimeError("Backup source contains a transient secondary product witness")
+            ensure_private_directory(self.settings.backups_dir)
+            timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+            stem = f"jericho-{timestamp}-{_safe_filename(label)}"
+            destination = self.settings.backups_dir / f"{stem}.sqlite3"
+            suffix = 1
+            while destination.exists():
+                destination = self.settings.backups_dir / f"{stem}-{suffix}.sqlite3"
+                suffix += 1
 
-        _chmod_private(destination)
-        digest = _sha256_file(destination)
-        manifest = {
-            "schema_version": backup_schema_version,
-            "created_at": utc_now(),
-            "label": label,
-            "database": destination.name,
-            "size_bytes": destination.stat().st_size,
-            "sha256": digest,
-            "integrity_check": integrity,
-            "foreign_key_violations": 0,
-            # A database backup is transactionally consistent, but binary raw
-            # files and the Markdown vault deliberately remain separate so an
-            # operator cannot mistake this for a full installation backup.
-            "scope": {
-                "sqlite_database": "included",
-                "raw_files": "external",
-                "memory_vault": "external",
-                "obsidian_profiles_and_vaults": "external",
-                "model_weights": "external",
-                "configuration_and_secrets": "external",
-            },
-        }
-        manifest_path = destination.with_suffix(".manifest.json")
-        _write_json_atomic(manifest_path, manifest)
-        return {**manifest, "path": str(destination), "manifest_path": str(manifest_path)}
+            prepare_private_sqlite(destination)
+            backup_conn = sqlite3.connect(str(destination))
+            restrict_sqlite_files(destination)
+            try:
+                # Checkpoint + copy run on this thread's own connection. SQLite's online
+                # backup API takes a transactionally consistent snapshot and restarts if
+                # a concurrent writer modifies the source, so no cross-thread lock is
+                # needed; a PASSIVE checkpoint never blocks other connections. The
+                # integrity/foreign-key/schema scan then runs on the backup copy.
+                self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                self.conn.backup(backup_conn)
+                integrity, foreign_key_violations, backup_schema_version = self._verify_backup_conn(
+                    backup_conn
+                )
+            except BaseException:
+                for candidate in (
+                    destination,
+                    Path(f"{destination}-wal"),
+                    Path(f"{destination}-shm"),
+                ):
+                    candidate.unlink(missing_ok=True)
+                raise
+            finally:
+                backup_conn.close()
+                restrict_sqlite_files(destination)
+            if integrity != "ok":
+                destination.unlink(missing_ok=True)
+                raise RuntimeError(f"Backup integrity check failed: {integrity}")
+            if foreign_key_violations:
+                destination.unlink(missing_ok=True)
+                raise RuntimeError(
+                    f"Backup foreign-key check failed: {len(foreign_key_violations)} violation(s)"
+                )
+            if backup_schema_version != SCHEMA_VERSION:
+                destination.unlink(missing_ok=True)
+                raise RuntimeError(
+                    f"Backup schema mismatch: database={backup_schema_version}, expected={SCHEMA_VERSION}"
+                )
+
+            _chmod_private(destination)
+            digest = _sha256_file(destination)
+            manifest = {
+                "schema_version": backup_schema_version,
+                "created_at": utc_now(),
+                "label": label,
+                "database": destination.name,
+                "size_bytes": destination.stat().st_size,
+                "sha256": digest,
+                "integrity_check": integrity,
+                "foreign_key_violations": 0,
+                # A database backup is transactionally consistent, but binary raw
+                # files and the Markdown vault deliberately remain separate so an
+                # operator cannot mistake this for a full installation backup.
+                "scope": {
+                    "sqlite_database": "included",
+                    "raw_files": "external",
+                    "memory_vault": "external",
+                    "obsidian_profiles_and_vaults": "external",
+                    "model_weights": "external",
+                    "configuration_and_secrets": "external",
+                },
+            }
+            manifest_path = destination.with_suffix(".manifest.json")
+            _write_json_atomic(manifest_path, manifest)
+            return {**manifest, "path": str(destination), "manifest_path": str(manifest_path)}
+        finally:
+            boundary.release()
 
     def prune_backups(self, *, keep: int) -> dict[str, Any]:
         """Delete all but the ``keep`` newest verified backups. ``keep <= 0`` is off.
@@ -1409,7 +1460,8 @@ class MaintenanceMixin(StorageShared):
             private_material_raw_ids = {
                 raw_id
                 for raw_id, row in raw_by_id.items()
-                if not _export_raw_material_shape_is_valid(row)
+                if is_secondary_product_witness_raw(row)
+                or not _export_raw_material_shape_is_valid(row)
                 or contains_hidden_private_material(
                     row.get("source_ref"),
                     row.get("raw_content"),

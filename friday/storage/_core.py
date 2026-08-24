@@ -41,6 +41,7 @@ from friday.interaction_control_plane.work_item_schema import (
     validate_work_item_schema,
 )
 from friday.private_fs import prepare_private_sqlite, restrict_sqlite_files
+from friday.secondary_product_witness import is_secondary_product_witness_raw
 from friday.storage._base import (
     CORE_INDEX_SCHEMA,
     CORE_TABLE_SCHEMA,
@@ -82,6 +83,29 @@ from friday.storage._privacy import (
     PRIVATE_MATERIAL_RUNTIME_SCHEMA,
 )
 from friday.storage.models import RelationHistorySnapshotError, normalize_known_at
+
+
+def _secondary_product_witness_raw(
+    source: Any,
+    source_ref: Any,
+    raw_content: Any,
+    content_hash: Any,
+    metadata_json: Any,
+) -> int:
+    """SQLite's exact, body-local predicate for the reserved transient probe."""
+
+    return int(
+        is_secondary_product_witness_raw(
+            {
+                "source": source,
+                "source_ref": source_ref,
+                "raw_content": raw_content,
+                "content_hash": content_hash,
+                "metadata_json": metadata_json,
+            }
+        )
+    )
+
 
 _ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 _DMY_DATE_RE = re.compile(r"^(\d{1,2})[./](\d{1,2})[./](\d{4})$")
@@ -2276,6 +2300,12 @@ class CoreMixin(StorageShared):
                 "jericho_private_identity_match",
                 2,
                 _private_identity_match,
+                deterministic=True,
+            )
+            conn.create_function(
+                "friday_secondary_product_witness_raw",
+                5,
+                _secondary_product_witness_raw,
                 deterministic=True,
             )
             # Даты из документов извлечены и лежат в метаданных СЫРЫМИ строками — так,

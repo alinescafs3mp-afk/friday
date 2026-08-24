@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import selectors
 import socket
 import ssl
@@ -41,11 +42,21 @@ PHYSICAL_OBSERVATION_SCHEMA = "friday.secondary-physical-failure-observation.v1"
 PRODUCT_BEGIN_SCHEMA = "friday.secondary-product-failure-begin.v1"
 PRODUCT_OFF_SCHEMA = "friday.secondary-product-failure-off.v1"
 PRODUCT_OBSERVATION_SCHEMA = "friday.secondary-product-failure-observation.v1"
+PRODUCT_STAGE_SCHEMA = "friday.secondary-product-stage-evidence.v2"
+PRODUCT_STORAGE_BINDING_SCHEMA = "friday.secondary-product-storage-binding.v1"
+PRODUCT_DIAGNOSTICS_SCHEMA = "friday.secondary-product-diagnostics.v1"
+PRODUCT_ADVICE_PROOF_SCHEMA = "friday.secondary-product-advice-proof.v1"
+PRODUCT_OPERATION_CORE_SCHEMA = "friday.secondary-product-operation-core.v1"
+PRODUCT_CLEANUP_CORE_SCHEMA = "friday.secondary-product-cleanup-core.v1"
+PRODUCT_ROLLOUT_ATTESTATION_SCHEMA = "friday.secondary-product-rollout-attestation.v1"
 EVIDENCE_SCOPE = "controlled_gateway_outage_and_runtime_restart"
 ENDPOINT = "https://192.168.1.35:8443/v1"
 PRIMARY_BASE_URL = "https://127.0.0.1:8000"
 PRIMARY_HEALTH_ENDPOINT = f"{PRIMARY_BASE_URL}/api/health"
 PRIMARY_DIAGNOSTICS_ENDPOINT = f"{PRIMARY_BASE_URL}/api/admin/diagnostics"
+PRIMARY_IDENTITY_ENDPOINT = f"{PRIMARY_BASE_URL}/api/me"
+PRIMARY_INGEST_ENDPOINT = f"{PRIMARY_BASE_URL}/api/ingest"
+PRIMARY_WITNESS_PURGE_ENDPOINT = f"{PRIMARY_BASE_URL}/api/admin/secondary-product-witness/purge"
 PRODUCT_WORKLOAD = "extract"
 SSH_HOST_ALIAS = "friday-secondary-brain"
 REMOTE_BUNDLE_PATH = r"C:\ProgramData\FridaySecondary\bundle"
@@ -80,7 +91,39 @@ _CONTROL_COMMANDS = {
 }
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_INBOX_ID = re.compile(r"(?:inb|inbox)_[A-Za-z0-9_.:-]{1,144}\Z")
+_RAW_ID = re.compile(r"raw_[A-Za-z0-9_.:-]{1,148}\Z")
 _MAX_COUNTER = (1 << 63) - 1
+PRODUCT_STAGES = (
+    "public-shadow",
+    "private-shadow",
+    "assist",
+    "outage",
+    "cooldown",
+    "recovery",
+)
+PRODUCT_SURFACE_FILES = (
+    "friday/admin_api/_inbox.py",
+    "friday/audit_privacy.py",
+    "friday/api/ingest.py",
+    "friday/executive/service.py",
+    "friday/ingestion/_advice.py",
+    "friday/ingestion/_capture.py",
+    "friday/ingestion/_review.py",
+    "friday/ingestion/_secondary_advice.py",
+    "friday/secondary_brain/scheduler.py",
+    "friday/secondary_product_witness.py",
+    "friday/server.py",
+    "friday/storage/_feedback.py",
+    "friday/storage/_core.py",
+    "friday/storage/_intake.py",
+    "friday/storage/_maintenance.py",
+    "friday/storage/_runtime.py",
+    "friday/workers/__init__.py",
+    "tests/test_mission_proposer_restraint.py",
+    "tests/test_secondary_product_witness.py",
+    "tests/test_workers.py",
+)
 _SECONDARY_FAILURES = frozenset(
     {
         "disabled",
@@ -256,9 +299,10 @@ def _powershell(action: str) -> str:
         "if(-not (Test-Path -LiteralPath $envFile -PathType Leaf)){exit 43};"
         "if(-not (Test-Path -LiteralPath $composeFile -PathType Leaf)){exit 44};"
         "Set-Location -LiteralPath $bundle;"
+        "$previousEap=$ErrorActionPreference;$ErrorActionPreference='Continue';"
         f"& docker.exe compose --env-file $envFile --file $composeFile {compose_action} "
-        "1>$null 2>$null;"
-        "if($LASTEXITCODE -ne 0){exit 45}"
+        "2>&1 | Out-Null;$code=$LASTEXITCODE;$ErrorActionPreference=$previousEap;"
+        "if($code -ne 0){exit 45}"
     )
 
 
@@ -381,6 +425,7 @@ def _source_identity() -> tuple[str, str]:
         relative = str(runner.relative_to(REPO_ROOT))
         observed_paths = (
             *SUITE_FILES,
+            *PRODUCT_SURFACE_FILES,
             relative,
             str((runner.parent / "failure_battery.py").relative_to(REPO_ROOT)),
             str((runner.parent / "runtime_profile_operator.py").relative_to(REPO_ROOT)),
@@ -610,16 +655,40 @@ def _load_primary_api_key(path: Path) -> str:
             os.close(descriptor)
 
 
-def _primary_json(
+def _primary_api_endpoint_allowed(endpoint: str, method: str) -> bool:
+    if method == "GET":
+        return endpoint in {
+            PRIMARY_HEALTH_ENDPOINT,
+            PRIMARY_DIAGNOSTICS_ENDPOINT,
+            PRIMARY_IDENTITY_ENDPOINT,
+        }
+    if method != "POST":
+        return False
+    if endpoint in {PRIMARY_INGEST_ENDPOINT, PRIMARY_WITNESS_PURGE_ENDPOINT}:
+        return True
+    prefix = f"{PRIMARY_BASE_URL}/api/admin/inbox/"
+    if not endpoint.startswith(prefix):
+        return False
+    suffix = endpoint[len(prefix) :]
+    inbox_id, separator, action = suffix.partition("/")
+    return bool(separator and action == "advise" and _INBOX_ID.fullmatch(inbox_id) is not None)
+
+
+def _primary_api_request(
     endpoint: str,
     *,
     ca_file: Path,
     timeout_sec: float,
     api_key: str = "",
     maximum_bytes: int,
-) -> tuple[dict[str, Any], str]:
-    if endpoint not in {PRIMARY_HEALTH_ENDPOINT, PRIMARY_DIAGNOSTICS_ENDPOINT}:
+    method: str = "GET",
+    payload: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], str, bytes, bytes]:
+    method = method.upper()
+    if not _primary_api_endpoint_allowed(endpoint, method):
         raise LiveFailureBatteryError("primary observation endpoint is outside the closed set")
+    if (method == "GET") != (payload is None):
+        raise LiveFailureBatteryError("primary observation request body is invalid")
     context, ca_sha256 = _primary_tls_context(ca_file)
     headers = {
         "Accept": "application/json",
@@ -627,14 +696,23 @@ def _primary_json(
     }
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    request = urllib.request.Request(endpoint, headers=headers, method="GET")
+    request_body = b"" if payload is None else _canonical(payload)
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(
+        endpoint,
+        data=request_body if payload is not None else None,
+        headers=headers,
+        method=method,
+    )
     opener = urllib.request.build_opener(
         urllib.request.ProxyHandler({}),
         _NoPrimaryRedirects(),
         urllib.request.HTTPSHandler(context=context),
     )
     try:
-        with opener.open(request, timeout=min(timeout_sec, 10.0)) as response:  # noqa: S310
+        request_timeout = min(timeout_sec, 60.0 if method == "POST" else 10.0)
+        with opener.open(request, timeout=request_timeout) as response:  # noqa: S310
             if int(response.status) != 200 or response.geturl() != endpoint:
                 raise LiveFailureBatteryError("primary observation endpoint did not return direct HTTP 200")
             raw = response.read(maximum_bytes + 1)
@@ -650,6 +728,24 @@ def _primary_json(
         raise LiveFailureBatteryError("primary observation response is invalid") from exc
     if not isinstance(value, dict):
         raise LiveFailureBatteryError("primary observation response is not an object")
+    return value, ca_sha256, request_body, raw
+
+
+def _primary_json(
+    endpoint: str,
+    *,
+    ca_file: Path,
+    timeout_sec: float,
+    api_key: str = "",
+    maximum_bytes: int,
+) -> tuple[dict[str, Any], str]:
+    value, ca_sha256, _request_body, _response_body = _primary_api_request(
+        endpoint,
+        ca_file=ca_file,
+        timeout_sec=timeout_sec,
+        api_key=api_key,
+        maximum_bytes=maximum_bytes,
+    )
     return value, ca_sha256
 
 
@@ -675,6 +771,7 @@ _PRODUCT_SNAPSHOT_KEYS = frozenset(
         "mode",
         "state",
         "available",
+        "last_failure",
         "profile_id",
         "profile_admission",
         "profile_manifest_match",
@@ -690,8 +787,19 @@ _PRODUCT_SNAPSHOT_KEYS = frozenset(
         "probe_failure_total",
         "model_inventory_probe_success_total",
         "model_inventory_probe_failure_total",
+        "circuit_retry_after_sec",
+        "skip_reasons",
         "fallback_reasons",
+        "shadow",
         "workload",
+    }
+)
+_PRODUCT_SHADOW_KEYS = frozenset(
+    {
+        "valid_total",
+        "invalid_total",
+        "skipped_total",
+        "in_flight",
     }
 )
 _PRODUCT_WORKLOAD_KEYS = frozenset(
@@ -711,6 +819,15 @@ def _counter(value: Any, *, label: str) -> int:
     return value
 
 
+def _bounded_seconds(value: Any, *, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise LiveFailureBatteryError(f"primary secondary diagnostic {label} is invalid")
+    normalized = float(value)
+    if not 0.0 <= normalized <= 86_400.0:
+        raise LiveFailureBatteryError(f"primary secondary diagnostic {label} is invalid")
+    return round(normalized, 3)
+
+
 def _reason_counts(value: Any, *, label: str) -> dict[str, int]:
     if not isinstance(value, dict) or len(value) > len(_SECONDARY_FAILURES):
         raise LiveFailureBatteryError(f"primary secondary diagnostic {label} is invalid")
@@ -724,28 +841,17 @@ def _reason_counts(value: Any, *, label: str) -> dict[str, int]:
     return dict(sorted(result.items()))
 
 
-def _product_snapshot(
-    *,
-    api_key_file: Path,
-    ca_file: Path,
-    timeout_sec: float,
-) -> tuple[dict[str, Any], str]:
-    api_key = _load_primary_api_key(api_key_file)
-    report, ca_sha256 = _primary_json(
-        PRIMARY_DIAGNOSTICS_ENDPOINT,
-        ca_file=ca_file,
-        timeout_sec=timeout_sec,
-        api_key=api_key,
-        maximum_bytes=1_048_576,
-    )
-    secondary = report.get("secondary")
+def _product_snapshot_from_secondary(secondary: Any) -> dict[str, Any]:
     if not isinstance(secondary, dict):
         raise LiveFailureBatteryError("primary diagnostics have no secondary projection")
     workloads = secondary.get("workloads")
     workload = workloads.get(PRODUCT_WORKLOAD) if isinstance(workloads, dict) else None
     if not isinstance(workload, dict):
         raise LiveFailureBatteryError("primary diagnostics have no admitted product workload")
-    snapshot = {
+    raw_shadow = secondary.get("shadow")
+    if not isinstance(raw_shadow, dict):
+        raise LiveFailureBatteryError("primary diagnostics have no shadow projection")
+    snapshot: dict[str, Any] = {
         "schema": secondary.get("schema"),
         "role": secondary.get("role"),
         "enabled": secondary.get("enabled"),
@@ -753,6 +859,7 @@ def _product_snapshot(
         "mode": secondary.get("mode"),
         "state": secondary.get("state"),
         "available": secondary.get("available"),
+        "last_failure": secondary.get("last_failure"),
         "profile_id": secondary.get("profile"),
         "profile_admission": secondary.get("profile_admission"),
         "profile_manifest_match": secondary.get("profile_manifest_match"),
@@ -792,10 +899,21 @@ def _product_snapshot(
             secondary.get("model_inventory_probe_failure_total"),
             label="model_inventory_probe_failure_total",
         ),
+        "circuit_retry_after_sec": _bounded_seconds(
+            secondary.get("circuit_retry_after_sec"),
+            label="circuit_retry_after_sec",
+        ),
+        "skip_reasons": _reason_counts(
+            secondary.get("skip_reasons"),
+            label="skip_reasons",
+        ),
         "fallback_reasons": _reason_counts(
             secondary.get("fallback_reasons"),
             label="fallback_reasons",
         ),
+        "shadow": {
+            key: _counter(raw_shadow.get(key), label=f"shadow.{key}") for key in sorted(_PRODUCT_SHADOW_KEYS)
+        },
         "workload": {
             "name": PRODUCT_WORKLOAD,
             "selected_total": _counter(
@@ -819,6 +937,7 @@ def _product_snapshot(
     if (
         set(snapshot) != _PRODUCT_SNAPSHOT_KEYS
         or set(snapshot["workload"]) != _PRODUCT_WORKLOAD_KEYS
+        or set(snapshot["shadow"]) != _PRODUCT_SHADOW_KEYS
         or snapshot["schema"] != "friday.optional-secondary-health.v1"
         or snapshot["role"] != "optional_advisory"
         or type(snapshot["enabled"]) is not bool
@@ -827,6 +946,7 @@ def _product_snapshot(
         or snapshot["state"]
         not in {"disabled", "misconfigured", "probing", "healthy", "degraded", "cooldown"}
         or type(snapshot["available"]) is not bool
+        or (snapshot["last_failure"] is not None and snapshot["last_failure"] not in _SECONDARY_FAILURES)
         or not isinstance(snapshot["profile_id"], str)
         or len(snapshot["profile_id"]) > 128
         or snapshot["profile_admission"] not in {"", "provisional_shadow", "accepted"}
@@ -834,7 +954,24 @@ def _product_snapshot(
         or type(snapshot["served_model_match"]) is not bool
     ):
         raise LiveFailureBatteryError("primary secondary diagnostic projection is invalid")
-    return snapshot, ca_sha256
+    return snapshot
+
+
+def _product_snapshot(
+    *,
+    api_key_file: Path,
+    ca_file: Path,
+    timeout_sec: float,
+) -> tuple[dict[str, Any], str]:
+    api_key = _load_primary_api_key(api_key_file)
+    report, ca_sha256 = _primary_json(
+        PRIMARY_DIAGNOSTICS_ENDPOINT,
+        ca_file=ca_file,
+        timeout_sec=timeout_sec,
+        api_key=api_key,
+        maximum_bytes=1_048_576,
+    )
+    return _product_snapshot_from_secondary(report.get("secondary")), ca_sha256
 
 
 def _require_product_identity(snapshot: dict[str, Any], *, available: bool) -> None:
@@ -870,6 +1007,8 @@ def _require_product_identity(snapshot: dict[str, Any], *, available: bool) -> N
         or (not available and snapshot.get("state") not in {"probing", "degraded", "cooldown"})
         or not isinstance(workload, dict)
         or set(workload) != _PRODUCT_WORKLOAD_KEYS
+        or not isinstance(snapshot.get("shadow"), dict)
+        or set(snapshot["shadow"]) != _PRODUCT_SHADOW_KEYS
         or workload.get("name") != PRODUCT_WORKLOAD
     ):
         raise LiveFailureBatteryError("Friday is not bound to the exact accepted assist profile")
@@ -878,8 +1017,11 @@ def _require_product_identity(snapshot: dict[str, Any], *, available: bool) -> N
     assert isinstance(workload, dict)
     _counter(workload.get("selected_total"), label="workload.selected_total")
     _counter(workload.get("success_total"), label="workload.success_total")
+    for key in _PRODUCT_SHADOW_KEYS:
+        _counter(snapshot["shadow"].get(key), label=f"shadow.{key}")
     if (
-        _reason_counts(snapshot.get("fallback_reasons"), label="fallback_reasons")
+        _reason_counts(snapshot.get("skip_reasons"), label="skip_reasons") != snapshot.get("skip_reasons")
+        or _reason_counts(snapshot.get("fallback_reasons"), label="fallback_reasons")
         != snapshot.get("fallback_reasons")
         or _reason_counts(workload.get("skip_reasons"), label="workload.skip_reasons")
         != workload.get("skip_reasons")
@@ -907,6 +1049,1287 @@ def _reason_deltas(
         if delta:
             result[reason] = delta
     return result
+
+
+_PRODUCT_STAGE_DELTA_KEYS = frozenset(
+    {
+        "selected_total",
+        "success_total",
+        "endpoint_request_total",
+        "endpoint_success_total",
+        "skipped_total",
+        "primary_fallback_total",
+        "probe_success_total",
+        "probe_failure_total",
+        "model_inventory_probe_success_total",
+        "model_inventory_probe_failure_total",
+        "skip_reason_deltas",
+        "fallback_reason_deltas",
+        "workload_skip_reason_deltas",
+        "workload_fallback_reason_deltas",
+        "shadow_valid_total",
+        "shadow_invalid_total",
+        "shadow_skipped_total",
+    }
+)
+_PRODUCT_OPERATION_KEYS = frozenset(
+    {
+        "schema",
+        "identity_result_sha256",
+        "ingest_request_sha256",
+        "ingest_result_sha256",
+        "ingest_storage_sha256",
+        "ingest_idempotent_replay",
+        "advice_request_sha256",
+        "advice_result_sha256",
+        "advice_storage_sha256",
+        "advice_diagnostics_receipt_sha256",
+        "advice_proof_sha256",
+        "stage_diagnostics_binding_sha256",
+        "cleanup_core_sha256",
+        "source_ref_sha256",
+        "synthetic_content_sha256",
+        "synthetic_nonce_sha256",
+        "storage_user_id_sha256",
+        "uploader_id_sha256",
+        "inbox_id_sha256",
+        "raw_object_id_sha256",
+        "advice_endpoint_role",
+        "exact_secondary_model_observed",
+        "cleanup_status",
+        "knowledge_object_created",
+        "tool_requested",
+        "effect_requested",
+    }
+)
+PRODUCT_STAGE_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        "stage",
+        "candidate_profile_id",
+        "candidate_profile_sha256",
+        "served_model_alias",
+        "gateway_ca_certificate_sha256",
+        "observer_source_head",
+        "observer_runner_sha256",
+        "primary_pid",
+        "primary_process_epoch_sha256",
+        "primary_version",
+        "primary_ca_certificate_sha256",
+        "diagnostics_before",
+        "diagnostics_after",
+        "diagnostics_deltas",
+        "diagnostics_binding_sha256",
+        "operation",
+        "operation_binding_sha256",
+        "stage_diagnostics_binding_sha256",
+        "server_rollout_attestation",
+        "server_rollout_attestation_sha256",
+        "server_rollout_lookup_token",
+        "rollout_lookup_token_retained",
+        "raw_content_retained_in_evidence",
+        "model_response_retained_in_evidence",
+        "credentials_retained",
+    }
+)
+_PRODUCT_ADVICE_PROOF_KEYS = frozenset(
+    {
+        "schema",
+        "stage",
+        "source_ref_sha256",
+        "raw_object_id_sha256",
+        "inbox_id_sha256",
+        "content_sha256",
+        "uploader_sha256",
+        "ingest_storage_binding_sha256",
+        "advice_storage_binding_sha256",
+        "advice_diagnostics_receipt_sha256",
+        "diagnostics_binding_sha256",
+        "advice_endpoint_role",
+        "advice_model_sha256",
+        "primary_pid",
+        "primary_process_epoch_sha256",
+        "primary_backend_version",
+        "primary_ca_certificate_sha256",
+        "observer_source_head",
+        "observer_runner_sha256",
+        "candidate_profile_id",
+        "candidate_profile_mode",
+        "candidate_profile_allow_private_text",
+        "candidate_profile_context_tokens",
+        "candidate_profile_sha256",
+        "candidate_profile_manifest_sha256",
+        "candidate_profile_admission",
+        "served_model_alias",
+        "gateway_ca_certificate_sha256",
+        "issued_at",
+        "expires_at",
+        "signature",
+    }
+)
+_PRODUCT_CLEANUP_CORE_KEYS = frozenset(
+    {
+        "schema",
+        "purged",
+        "raw_deleted",
+        "inbox_deleted",
+        "storage_binding_sha256",
+        "raw_object_id_sha256",
+        "inbox_id_sha256",
+        "cleanup_zero_residue_binding_sha256",
+        "raw_residue",
+        "inbox_residue",
+        "knowledge_residue",
+        "alias_residue",
+        "ko_state_residue",
+        "feedback_residue",
+        "feedback_state_residue",
+        "review_residue",
+    }
+)
+_PRODUCT_ATTESTATION_KEYS = frozenset(
+    {
+        "schema",
+        "attestation_id",
+        "stage",
+        "source_ref_sha256",
+        "raw_object_id_sha256",
+        "inbox_id_sha256",
+        "content_sha256",
+        "uploader_sha256",
+        "ingest_storage_binding_sha256",
+        "advice_storage_binding_sha256",
+        "advice_diagnostics_receipt_sha256",
+        "diagnostics_binding_sha256",
+        "operation_binding_sha256",
+        "stage_diagnostics_binding_sha256",
+        "advice_proof_sha256",
+        "advice_endpoint_role",
+        "advice_model_sha256",
+        "primary_pid",
+        "primary_process_epoch_sha256",
+        "primary_backend_version",
+        "primary_ca_certificate_sha256",
+        "observer_source_head",
+        "observer_runner_sha256",
+        "candidate_profile_id",
+        "candidate_profile_mode",
+        "candidate_profile_allow_private_text",
+        "candidate_profile_context_tokens",
+        "candidate_profile_sha256",
+        "candidate_profile_manifest_sha256",
+        "candidate_profile_admission",
+        "served_model_alias",
+        "gateway_ca_certificate_sha256",
+        "cleanup_storage_binding_sha256",
+        "cleanup_zero_residue_binding_sha256",
+        "raw_residue",
+        "inbox_residue",
+        "knowledge_residue",
+        "alias_residue",
+        "ko_state_residue",
+        "feedback_residue",
+        "feedback_state_residue",
+        "review_residue",
+        "lookup_token_sha256",
+        "state_version",
+        "issued_at",
+        "expires_at",
+        "signature",
+    }
+)
+
+
+def _require_product_stage_identity(
+    snapshot: dict[str, Any],
+    *,
+    stage: str,
+    after: bool,
+) -> None:
+    if stage not in PRODUCT_STAGES:
+        raise LiveFailureBatteryError("secondary product stage is outside the closed set")
+    identity = evidence_identity()
+    mode = "shadow" if stage in {"public-shadow", "private-shadow"} else "assist"
+    accepted_required = stage != "public-shadow"
+    if (
+        set(snapshot) != _PRODUCT_SNAPSHOT_KEYS
+        or snapshot.get("schema") != "friday.optional-secondary-health.v1"
+        or snapshot.get("role") != "optional_advisory"
+        or snapshot.get("enabled") is not True
+        or snapshot.get("configured") is not True
+        or snapshot.get("mode") != mode
+        or snapshot.get("profile_id") != identity["candidate_profile_id"]
+        or (accepted_required and snapshot.get("profile_admission") != "accepted")
+        or (
+            not accepted_required
+            and snapshot.get("profile_admission") not in {"provisional_shadow", "accepted"}
+        )
+        or snapshot.get("profile_manifest_match") is not True
+        or snapshot.get("served_model_match") is not True
+        or snapshot.get("context_cap_tokens") != configured_profile_context_tokens()
+        or not isinstance(snapshot.get("shadow"), dict)
+        or snapshot["shadow"].get("in_flight") != 0
+    ):
+        raise LiveFailureBatteryError("Friday product stage is not bound to the exact profile")
+
+    healthy_expected = stage in {"public-shadow", "private-shadow", "assist"}
+    if stage == "outage":
+        healthy_expected = not after
+    elif stage == "cooldown":
+        healthy_expected = False
+    elif stage == "recovery":
+        healthy_expected = after
+    if healthy_expected:
+        if snapshot.get("available") is not True or snapshot.get("state") != "healthy":
+            raise LiveFailureBatteryError("Friday product stage expected an admitted healthy secondary")
+    elif snapshot.get("available") is not False or snapshot.get("state") not in {
+        "probing",
+        "degraded",
+        "cooldown",
+    }:
+        raise LiveFailureBatteryError("Friday product stage expected an unavailable secondary")
+
+
+def _product_stage_deltas(
+    stage: str,
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> dict[str, Any]:
+    _require_product_stage_identity(before, stage=stage, after=False)
+    _require_product_stage_identity(after, stage=stage, after=True)
+    before_workload = before["workload"]
+    after_workload = after["workload"]
+    before_shadow = before["shadow"]
+    after_shadow = after["shadow"]
+    deltas: dict[str, Any] = {
+        "selected_total": _counter_delta(
+            after_workload["selected_total"],
+            before_workload["selected_total"],
+            label="workload.selected_total",
+        ),
+        "success_total": _counter_delta(
+            after_workload["success_total"],
+            before_workload["success_total"],
+            label="workload.success_total",
+        ),
+        "endpoint_request_total": _counter_delta(
+            after["endpoint_request_total"],
+            before["endpoint_request_total"],
+            label="endpoint_request_total",
+        ),
+        "endpoint_success_total": _counter_delta(
+            after["endpoint_success_total"],
+            before["endpoint_success_total"],
+            label="endpoint_success_total",
+        ),
+        "skipped_total": _counter_delta(
+            after["skipped_total"], before["skipped_total"], label="skipped_total"
+        ),
+        "primary_fallback_total": _counter_delta(
+            after["primary_fallback_total"],
+            before["primary_fallback_total"],
+            label="primary_fallback_total",
+        ),
+        "probe_success_total": _counter_delta(
+            after["probe_success_total"],
+            before["probe_success_total"],
+            label="probe_success_total",
+        ),
+        "probe_failure_total": _counter_delta(
+            after["probe_failure_total"],
+            before["probe_failure_total"],
+            label="probe_failure_total",
+        ),
+        "model_inventory_probe_success_total": _counter_delta(
+            after["model_inventory_probe_success_total"],
+            before["model_inventory_probe_success_total"],
+            label="model_inventory_probe_success_total",
+        ),
+        "model_inventory_probe_failure_total": _counter_delta(
+            after["model_inventory_probe_failure_total"],
+            before["model_inventory_probe_failure_total"],
+            label="model_inventory_probe_failure_total",
+        ),
+        "skip_reason_deltas": _reason_deltas(
+            after["skip_reasons"], before["skip_reasons"], label="skip_reasons"
+        ),
+        "fallback_reason_deltas": _reason_deltas(
+            after["fallback_reasons"], before["fallback_reasons"], label="fallback_reasons"
+        ),
+        "workload_skip_reason_deltas": _reason_deltas(
+            after_workload["skip_reasons"],
+            before_workload["skip_reasons"],
+            label="workload.skip_reasons",
+        ),
+        "workload_fallback_reason_deltas": _reason_deltas(
+            after_workload["fallback_reasons"],
+            before_workload["fallback_reasons"],
+            label="workload.fallback_reasons",
+        ),
+        "shadow_valid_total": _counter_delta(
+            after_shadow["valid_total"],
+            before_shadow["valid_total"],
+            label="shadow.valid_total",
+        ),
+        "shadow_invalid_total": _counter_delta(
+            after_shadow["invalid_total"],
+            before_shadow["invalid_total"],
+            label="shadow.invalid_total",
+        ),
+        "shadow_skipped_total": _counter_delta(
+            after_shadow["skipped_total"],
+            before_shadow["skipped_total"],
+            label="shadow.skipped_total",
+        ),
+    }
+    if set(deltas) != _PRODUCT_STAGE_DELTA_KEYS:
+        raise LiveFailureBatteryError("secondary product diagnostics delta is incomplete")
+    if (
+        _counter_delta(after["selected_total"], before["selected_total"], label="selected_total")
+        != deltas["selected_total"]
+        or _counter_delta(after["success_total"], before["success_total"], label="success_total")
+        != deltas["success_total"]
+    ):
+        raise LiveFailureBatteryError("secondary product aggregate/workload counters diverged")
+
+    zero_reasons = (
+        not deltas["skip_reason_deltas"]
+        and not deltas["fallback_reason_deltas"]
+        and not deltas["workload_skip_reason_deltas"]
+        and not deltas["workload_fallback_reason_deltas"]
+    )
+    if stage == "public-shadow":
+        valid = (
+            deltas["selected_total"] == 0
+            and deltas["success_total"] == 0
+            and deltas["endpoint_request_total"] == 0
+            and deltas["endpoint_success_total"] == 0
+            and deltas["skipped_total"] == 1
+            and deltas["primary_fallback_total"] == 0
+            and deltas["workload_skip_reason_deltas"] == {"private_text_disallowed": 1}
+            and deltas["skip_reason_deltas"] == {"private_text_disallowed": 1}
+            and not deltas["fallback_reason_deltas"]
+            and not deltas["workload_fallback_reason_deltas"]
+            and deltas["shadow_valid_total"] == 0
+            and deltas["shadow_invalid_total"] == 0
+            and deltas["shadow_skipped_total"] == 1
+            and deltas["probe_success_total"] == 0
+            and deltas["probe_failure_total"] == 0
+            and deltas["model_inventory_probe_success_total"] == 0
+            and deltas["model_inventory_probe_failure_total"] == 0
+        )
+    elif stage in {"private-shadow", "assist"}:
+        endpoint_delta = deltas["endpoint_request_total"]
+        valid = (
+            deltas["selected_total"] == 1
+            and deltas["success_total"] == 1
+            and 1 <= endpoint_delta <= 3
+            and deltas["endpoint_success_total"] == endpoint_delta
+            and deltas["skipped_total"] == 0
+            and deltas["primary_fallback_total"] == 0
+            and zero_reasons
+            and deltas["shadow_valid_total"] == (1 if stage == "private-shadow" else 0)
+            and deltas["shadow_invalid_total"] == 0
+            and deltas["shadow_skipped_total"] == 0
+            and deltas["probe_failure_total"] == 0
+            and deltas["model_inventory_probe_failure_total"] == 0
+            and deltas["probe_success_total"] in {0, 1}
+            and deltas["model_inventory_probe_success_total"] == deltas["probe_success_total"]
+        )
+    elif stage == "outage":
+        reasons = deltas["workload_fallback_reason_deltas"]
+        valid = (
+            deltas["selected_total"] == 1
+            and deltas["success_total"] == 0
+            and deltas["endpoint_request_total"] == 1
+            and deltas["endpoint_success_total"] == 0
+            and deltas["skipped_total"] == 1
+            and deltas["primary_fallback_total"] == 1
+            and len(reasons) == 1
+            and sum(reasons.values()) == 1
+            and set(reasons) <= (_PHYSICAL_OUTAGE_FAILURES - {"admission_busy", "cooldown"})
+            and deltas["workload_skip_reason_deltas"] == reasons
+            and deltas["fallback_reason_deltas"] == reasons
+            and deltas["skip_reason_deltas"] == reasons
+            and deltas["shadow_valid_total"] == 0
+            and deltas["shadow_invalid_total"] == 0
+            and deltas["shadow_skipped_total"] == 0
+            and deltas["probe_success_total"] == 0
+            and deltas["probe_failure_total"] == 0
+            and deltas["model_inventory_probe_success_total"] == 0
+            and deltas["model_inventory_probe_failure_total"] == 0
+        )
+    elif stage == "cooldown":
+        valid = (
+            deltas["selected_total"] == 0
+            and deltas["success_total"] == 0
+            and deltas["endpoint_request_total"] == 0
+            and deltas["endpoint_success_total"] == 0
+            and deltas["skipped_total"] == 2
+            and deltas["primary_fallback_total"] == 1
+            and deltas["skip_reason_deltas"] == {"cooldown": 1}
+            and deltas["fallback_reason_deltas"] == {"cooldown": 1}
+            and deltas["workload_skip_reason_deltas"] == {"cooldown": 1}
+            and deltas["workload_fallback_reason_deltas"] == {"cooldown": 1}
+            and deltas["shadow_valid_total"] == 0
+            and deltas["shadow_invalid_total"] == 0
+            and deltas["shadow_skipped_total"] == 0
+            and deltas["probe_success_total"] == 0
+            and deltas["probe_failure_total"] == 1
+            and deltas["model_inventory_probe_success_total"] == 0
+            and deltas["model_inventory_probe_failure_total"] == 1
+        )
+    else:
+        valid = (
+            deltas["selected_total"] == 1
+            and deltas["success_total"] == 1
+            and deltas["endpoint_request_total"] == 3
+            and deltas["endpoint_success_total"] == 3
+            and deltas["skipped_total"] == 0
+            and deltas["primary_fallback_total"] == 0
+            and zero_reasons
+            and deltas["shadow_valid_total"] == 0
+            and deltas["shadow_invalid_total"] == 0
+            and deltas["shadow_skipped_total"] == 0
+            and deltas["probe_success_total"] == 1
+            and deltas["probe_failure_total"] == 0
+            and deltas["model_inventory_probe_success_total"] == 1
+            and deltas["model_inventory_probe_failure_total"] == 0
+        )
+    if not valid:
+        raise LiveFailureBatteryError(f"secondary product stage {stage} diagnostics do not match")
+    return deltas
+
+
+def _product_source_ref(stage: str, nonce: str) -> str:
+    if stage not in PRODUCT_STAGES or re.fullmatch(r"[0-9a-f]{32}", nonce) is None:
+        raise LiveFailureBatteryError("secondary product stage is outside the closed set")
+    return f"secondary-product-witness:{stage}:{nonce}"
+
+
+def _product_content(stage: str, nonce: str) -> str:
+    _product_source_ref(stage, nonce)
+    return (
+        f"Synthetic Friday secondary witness ({stage}; {nonce}). "
+        "Project Atlas uses PostgreSQL 16 for a bounded advisory check."
+    )
+
+
+def _product_storage_binding_sha256(
+    *,
+    stage: str,
+    nonce: str,
+    inbox_id: str,
+    raw_object_id: str,
+    inbox_status: str,
+    storage_user_id: str,
+    uploaded_by: str,
+) -> str:
+    return _sha256(
+        _canonical(
+            {
+                "schema": PRODUCT_STORAGE_BINDING_SCHEMA,
+                "source": "api",
+                "storage_user_id": storage_user_id,
+                "source_ref": _product_source_ref(stage, nonce),
+                "metadata_marker": True,
+                "uploaded_by": uploaded_by,
+                "content_sha256": _sha256(_product_content(stage, nonce)),
+                "raw_object_id": raw_object_id,
+                "inbox_id": inbox_id,
+                "inbox_status": inbox_status,
+                "knowledge_object_id": None,
+            }
+        )
+    )
+
+
+def _stored_suggestions(value: Any) -> dict[str, Any]:
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise LiveFailureBatteryError("secondary product storage suggestions are invalid") from exc
+    if not isinstance(parsed, dict):
+        raise LiveFailureBatteryError("secondary product storage suggestions are invalid")
+    return parsed
+
+
+def _storage_proof(
+    item: Any,
+    *,
+    inbox_id: str,
+    raw_object_id: str,
+    expected_status: str,
+    expected_suggestions: dict[str, Any] | None = None,
+) -> str:
+    if not isinstance(item, dict):
+        raise LiveFailureBatteryError("secondary product storage result is invalid")
+    suggestions = _stored_suggestions(item.get("suggestions_json"))
+    if expected_suggestions is not None and _canonical(suggestions) != _canonical(expected_suggestions):
+        raise LiveFailureBatteryError("secondary product result differs from persisted suggestions")
+    if (
+        item.get("id") != inbox_id
+        or item.get("raw_object_id") != raw_object_id
+        or item.get("status") != expected_status
+        or item.get("knowledge_object_id") is not None
+    ):
+        raise LiveFailureBatteryError("secondary product storage state is not Inbox-only")
+    reviewed_at = item.get("reviewed_at")
+    reviewed_by = item.get("reviewed_by")
+    if expected_status == "pending" and ((reviewed_at is None) != (reviewed_by is None)):
+        raise LiveFailureBatteryError("secondary product pending review identity is inconsistent")
+    if expected_status != "pending" and (reviewed_at is None or reviewed_by is None):
+        raise LiveFailureBatteryError("secondary product cleanup review identity is absent")
+    if reviewed_at is not None and (
+        not isinstance(reviewed_at, str)
+        or not 1 <= len(reviewed_at) <= 80
+        or not isinstance(reviewed_by, str)
+        or not 1 <= len(reviewed_by) <= 160
+    ):
+        raise LiveFailureBatteryError("secondary product review identity is invalid")
+    projection = {
+        "inbox_id_sha256": _sha256(inbox_id),
+        "raw_object_id_sha256": _sha256(raw_object_id),
+        "status": expected_status,
+        "knowledge_object_id": None,
+        "reviewed": reviewed_at is not None,
+        "reviewed_at_sha256": _sha256(reviewed_at or ""),
+        "reviewed_by_sha256": _sha256(reviewed_by or ""),
+        "suggested_action": str(item.get("suggested_action") or "")[:32],
+        "suggestions_sha256": _sha256(_canonical(suggestions)),
+    }
+    return _sha256(_canonical(projection))
+
+
+def _validate_advice_result(
+    value: dict[str, Any],
+    *,
+    stage: str,
+    source_ref: str,
+    inbox_id: str,
+    raw_object_id: str,
+    observer: dict[str, Any],
+    ingest_storage_sha256: str,
+    content_sha256: str,
+    uploader_sha256: str,
+) -> tuple[str, str, bool, dict[str, Any], dict[str, Any], str, dict[str, Any]]:
+    suggestions = value.get("suggestions")
+    advice = value.get("model_advice")
+    diagnostics = value.get("secondary_product_diagnostics")
+    proof = value.get("secondary_product_advice_proof")
+    if (
+        set(value)
+        != {
+            "item",
+            "suggestions",
+            "model_advice",
+            "idempotent_replay",
+            "secondary_product_diagnostics",
+            "secondary_product_advice_proof",
+        }
+        or value.get("idempotent_replay") is not False
+        or not isinstance(suggestions, dict)
+        or not isinstance(advice, dict)
+        or suggestions.get("model_advice") != advice
+        or advice.get("advisory_only") is not True
+    ):
+        raise LiveFailureBatteryError("secondary product advice result is not fresh advisory-only storage")
+    allowed_advice_keys = {
+        "policy_version",
+        "model",
+        "endpoint_role",
+        "generated_at",
+        "requested_by",
+        "recommended_action",
+        "confidence",
+        "rationale",
+        "validated_entity_count",
+        "advisory_only",
+    }
+    if set(advice) != allowed_advice_keys:
+        raise LiveFailureBatteryError("secondary product advice result contains an unexpected authority")
+    if not isinstance(diagnostics, dict) or set(diagnostics) != {
+        "schema",
+        "source_ref_sha256",
+        "before",
+        "after",
+        "binding_sha256",
+    }:
+        raise LiveFailureBatteryError("secondary product advice has no correlated diagnostics")
+    diagnostics_value = {key: diagnostics[key] for key in ("schema", "source_ref_sha256", "before", "after")}
+    if (
+        diagnostics["schema"] != PRODUCT_DIAGNOSTICS_SCHEMA
+        or diagnostics["source_ref_sha256"] != _sha256(source_ref)
+        or diagnostics.get("binding_sha256") != _sha256(_canonical(diagnostics_value))
+    ):
+        raise LiveFailureBatteryError("secondary product diagnostics binding is invalid")
+    diagnostics_before = (
+        dict(diagnostics["before"])
+        if isinstance(diagnostics["before"], dict) and "workload" in diagnostics["before"]
+        else _product_snapshot_from_secondary(diagnostics["before"])
+    )
+    diagnostics_after = (
+        dict(diagnostics["after"])
+        if isinstance(diagnostics["after"], dict) and "workload" in diagnostics["after"]
+        else _product_snapshot_from_secondary(diagnostics["after"])
+    )
+    expected_role = "secondary" if stage in {"assist", "recovery"} else "primary"
+    model = advice.get("model")
+    if advice.get("endpoint_role") != expected_role or not isinstance(model, str) or not model:
+        raise LiveFailureBatteryError("secondary product advice used the wrong endpoint role")
+    exact_secondary = expected_role == "secondary" and model == evidence_identity()["served_model_alias"]
+    if expected_role == "secondary" and not exact_secondary:
+        raise LiveFailureBatteryError("secondary product advice used the wrong admitted model")
+    storage_sha256 = _storage_proof(
+        value.get("item"),
+        inbox_id=inbox_id,
+        raw_object_id=raw_object_id,
+        expected_status="pending",
+        expected_suggestions=suggestions,
+    )
+    identity = evidence_identity()
+    expected_mode = "shadow" if stage in {"public-shadow", "private-shadow"} else "assist"
+    expected_private = stage != "public-shadow"
+    if (
+        not isinstance(proof, dict)
+        or set(proof) != _PRODUCT_ADVICE_PROOF_KEYS
+        or proof.get("schema") != PRODUCT_ADVICE_PROOF_SCHEMA
+        or proof.get("stage") != stage
+        or proof.get("source_ref_sha256") != _sha256(source_ref)
+        or proof.get("raw_object_id_sha256") != _sha256(raw_object_id)
+        or proof.get("inbox_id_sha256") != _sha256(inbox_id)
+        or proof.get("content_sha256") != content_sha256
+        or proof.get("uploader_sha256") != uploader_sha256
+        or proof.get("ingest_storage_binding_sha256") != ingest_storage_sha256
+        or proof.get("advice_storage_binding_sha256") != storage_sha256
+        or proof.get("advice_diagnostics_receipt_sha256") != _sha256(_canonical(diagnostics))
+        or proof.get("diagnostics_binding_sha256") != diagnostics.get("binding_sha256")
+        or proof.get("advice_endpoint_role") != expected_role
+        or proof.get("advice_model_sha256") != _sha256(model)
+        or any(proof.get(key) != observer.get(key) for key in observer)
+        or proof.get("candidate_profile_id") != identity["candidate_profile_id"]
+        or proof.get("candidate_profile_sha256") != identity["candidate_profile_sha256"]
+        or proof.get("served_model_alias") != identity["served_model_alias"]
+        or proof.get("gateway_ca_certificate_sha256") != identity["gateway_ca_certificate_sha256"]
+        or proof.get("candidate_profile_mode") != expected_mode
+        or proof.get("candidate_profile_allow_private_text") is not expected_private
+        or proof.get("candidate_profile_context_tokens") != diagnostics_before["context_cap_tokens"]
+        or proof.get("candidate_profile_admission") != diagnostics_before["profile_admission"]
+        or not isinstance(proof.get("candidate_profile_manifest_sha256"), str)
+        or _SHA256.fullmatch(proof["candidate_profile_manifest_sha256"]) is None
+        or type(proof.get("issued_at")) is not int
+        or type(proof.get("expires_at")) is not int
+        or not 0 < proof["expires_at"] - proof["issued_at"] <= 570
+        or not isinstance(proof.get("signature"), str)
+        or _SHA256.fullmatch(proof["signature"]) is None
+    ):
+        raise LiveFailureBatteryError("secondary product server advice proof is invalid")
+    return (
+        storage_sha256,
+        expected_role,
+        exact_secondary,
+        diagnostics_before,
+        diagnostics_after,
+        _sha256(_canonical(diagnostics)),
+        proof,
+    )
+
+
+def _wait_recovery_retry_window(
+    *,
+    api_key_file: Path,
+    ca_file: Path,
+    timeout_sec: float,
+    settle_timeout_sec: float,
+) -> tuple[dict[str, Any], str]:
+    deadline = time.monotonic() + settle_timeout_sec
+    last_snapshot: dict[str, Any] | None = None
+    last_ca_sha256 = ""
+    while time.monotonic() < deadline:
+        last_snapshot, last_ca_sha256 = _product_snapshot(
+            api_key_file=api_key_file,
+            ca_file=ca_file,
+            timeout_sec=timeout_sec,
+        )
+        _require_product_stage_identity(last_snapshot, stage="recovery", after=False)
+        if last_snapshot["circuit_retry_after_sec"] <= 0.0:
+            return last_snapshot, last_ca_sha256
+        time.sleep(min(0.5, max(0.05, last_snapshot["circuit_retry_after_sec"])))
+    raise LiveFailureBatteryError("secondary cooldown did not expire before recovery witness")
+
+
+def _wait_product_stage_delta(
+    *,
+    stage: str,
+    before: dict[str, Any],
+    api_key_file: Path,
+    ca_file: Path,
+    timeout_sec: float,
+    settle_timeout_sec: float,
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    deadline = time.monotonic() + settle_timeout_sec
+    last_error: LiveFailureBatteryError | None = None
+    last_ca_sha256 = ""
+    while time.monotonic() < deadline:
+        after, last_ca_sha256 = _product_snapshot(
+            api_key_file=api_key_file,
+            ca_file=ca_file,
+            timeout_sec=timeout_sec,
+        )
+        try:
+            return after, _product_stage_deltas(stage, before, after), last_ca_sha256
+        except LiveFailureBatteryError as exc:
+            last_error = exc
+        time.sleep(0.1)
+    raise LiveFailureBatteryError(f"secondary product stage {stage} did not settle") from last_error
+
+
+def validate_product_stage_evidence(
+    evidence: dict[str, Any],
+    *,
+    expected_stage: str | None = None,
+) -> None:
+    stage = evidence.get("stage")
+    operation = evidence.get("operation")
+    before = evidence.get("diagnostics_before")
+    after = evidence.get("diagnostics_after")
+    deltas = evidence.get("diagnostics_deltas")
+    attestation = evidence.get("server_rollout_attestation")
+    if (
+        set(evidence) != PRODUCT_STAGE_KEYS
+        or evidence.get("schema") != PRODUCT_STAGE_SCHEMA
+        or evidence.get("status") != "passed"
+        or stage not in PRODUCT_STAGES
+        or (expected_stage is not None and stage != expected_stage)
+        or any(evidence.get(key) != value for key, value in evidence_identity().items())
+        or not isinstance(evidence.get("observer_source_head"), str)
+        or _COMMIT.fullmatch(evidence["observer_source_head"]) is None
+        or not isinstance(evidence.get("observer_runner_sha256"), str)
+        or _SHA256.fullmatch(evidence["observer_runner_sha256"]) is None
+        or type(evidence.get("primary_pid")) is not int
+        or evidence["primary_pid"] <= 0
+        or not isinstance(evidence.get("primary_process_epoch_sha256"), str)
+        or _SHA256.fullmatch(evidence["primary_process_epoch_sha256"]) is None
+        or not isinstance(evidence.get("primary_version"), str)
+        or not 1 <= len(evidence["primary_version"]) <= 80
+        or not isinstance(evidence.get("primary_ca_certificate_sha256"), str)
+        or _SHA256.fullmatch(evidence["primary_ca_certificate_sha256"]) is None
+        or not isinstance(before, dict)
+        or not isinstance(after, dict)
+        or not isinstance(deltas, dict)
+        or not isinstance(operation, dict)
+        or set(operation) != _PRODUCT_OPERATION_KEYS
+        or operation.get("schema") != PRODUCT_OPERATION_CORE_SCHEMA
+        or not isinstance(attestation, dict)
+        or set(attestation) != _PRODUCT_ATTESTATION_KEYS
+        or attestation.get("schema") != PRODUCT_ROLLOUT_ATTESTATION_SCHEMA
+        or not isinstance(evidence.get("server_rollout_lookup_token"), str)
+        or _SHA256.fullmatch(evidence["server_rollout_lookup_token"]) is None
+        or evidence.get("rollout_lookup_token_retained") is not True
+        or evidence.get("raw_content_retained_in_evidence") is not False
+        or evidence.get("model_response_retained_in_evidence") is not False
+        or evidence.get("credentials_retained") is not False
+    ):
+        raise LiveFailureBatteryError("secondary product stage evidence is incomplete")
+    computed_deltas = _product_stage_deltas(str(stage), before, after)
+    diagnostics_binding = {
+        "source_ref_sha256": operation.get("source_ref_sha256"),
+        "before": before,
+        "after": after,
+        "deltas": deltas,
+    }
+    if (
+        deltas != computed_deltas
+        or evidence.get("stage_diagnostics_binding_sha256") != _sha256(_canonical(diagnostics_binding))
+        or evidence.get("stage_diagnostics_binding_sha256")
+        != operation.get("stage_diagnostics_binding_sha256")
+        or evidence.get("diagnostics_binding_sha256") != attestation.get("diagnostics_binding_sha256")
+    ):
+        raise LiveFailureBatteryError("secondary product stage diagnostics binding is invalid")
+    for key, value in operation.items():
+        if key.endswith("_sha256") and (not isinstance(value, str) or _SHA256.fullmatch(value) is None):
+            raise LiveFailureBatteryError("secondary product operation hash is invalid")
+    expected_role = "secondary" if stage in {"assist", "recovery"} else "primary"
+    if (
+        operation.get("advice_endpoint_role") != expected_role
+        or operation.get("exact_secondary_model_observed") is not (expected_role == "secondary")
+        or type(operation.get("ingest_idempotent_replay")) is not bool
+        or operation.get("cleanup_status") != "purged"
+        or operation.get("knowledge_object_created") is not False
+        or operation.get("tool_requested") is not False
+        or operation.get("effect_requested") is not False
+        or evidence.get("operation_binding_sha256") != _sha256(_canonical(operation))
+        or attestation.get("operation_binding_sha256") != evidence.get("operation_binding_sha256")
+        or attestation.get("stage_diagnostics_binding_sha256")
+        != evidence.get("stage_diagnostics_binding_sha256")
+        or evidence.get("server_rollout_attestation_sha256") != _sha256(_canonical(attestation))
+        or attestation.get("lookup_token_sha256") != _sha256(evidence["server_rollout_lookup_token"])
+        or attestation.get("stage") != stage
+        or attestation.get("source_ref_sha256") != operation.get("source_ref_sha256")
+        or attestation.get("advice_proof_sha256") != operation.get("advice_proof_sha256")
+        or attestation.get("advice_diagnostics_receipt_sha256")
+        != operation.get("advice_diagnostics_receipt_sha256")
+        or attestation.get("state_version") != 1
+        or any(attestation.get(key) != 0 for key in attestation if key.endswith("_residue"))
+    ):
+        raise LiveFailureBatteryError("secondary product operation binding is invalid")
+
+
+def _purge_product_storage(
+    *,
+    stage: str,
+    nonce: str,
+    api_key: str,
+    primary_ca_file: Path,
+    primary_ca_sha256: str,
+    timeout_sec: float,
+    expected_storage_sha256: str | None = None,
+    inbox_id: str | None = None,
+    raw_object_id: str | None = None,
+    advice_proof: dict[str, Any] | None = None,
+    operation: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    source_ref = _product_source_ref(stage, nonce)
+    content = _product_content(stage, nonce)
+    payload: dict[str, Any] = {
+        "cleanup_token": nonce,
+        "content_sha256": _sha256(content),
+        "source_ref_sha256": _sha256(source_ref),
+        "stage": stage,
+    }
+    if advice_proof is not None or operation is not None:
+        if not isinstance(advice_proof, dict) or not isinstance(operation, dict):
+            raise LiveFailureBatteryError("synthetic product attestation input is incomplete")
+        payload["advice_proof"] = advice_proof
+        payload["operation"] = operation
+    for attempt in range(2):
+        try:
+            result, ca_sha256, request_raw, response_raw = _primary_api_request(
+                PRIMARY_WITNESS_PURGE_ENDPOINT,
+                ca_file=primary_ca_file,
+                timeout_sec=timeout_sec,
+                api_key=api_key,
+                maximum_bytes=1_048_576,
+                method="POST",
+                payload=payload,
+            )
+            if ca_sha256 != primary_ca_sha256:
+                raise LiveFailureBatteryError(
+                    "primary observation CA identity changed during product cleanup"
+                )
+            if (
+                set(result)
+                != {
+                    "schema",
+                    "cleanup_core",
+                    "cleanup_core_sha256",
+                    "server_rollout_attestation",
+                    "server_rollout_lookup_token",
+                }
+                or result.get("schema") != "friday.secondary-product-purge-response.v2"
+                or not isinstance(result.get("cleanup_core"), dict)
+                or set(result["cleanup_core"]) != _PRODUCT_CLEANUP_CORE_KEYS
+                or result["cleanup_core"].get("schema") != PRODUCT_CLEANUP_CORE_SCHEMA
+                or result.get("cleanup_core_sha256") != _sha256(_canonical(result["cleanup_core"]))
+                or result["cleanup_core"].get("purged") is not True
+                or result["cleanup_core"].get("raw_deleted") != 1
+                or result["cleanup_core"].get("inbox_deleted") != 1
+                or any(
+                    result["cleanup_core"].get(key) != 0
+                    for key in _PRODUCT_CLEANUP_CORE_KEYS
+                    if key.endswith("_residue")
+                )
+                or (
+                    expected_storage_sha256 is not None
+                    and result["cleanup_core"].get("storage_binding_sha256") != expected_storage_sha256
+                )
+                or (
+                    raw_object_id is not None
+                    and result["cleanup_core"].get("raw_object_id_sha256") != _sha256(raw_object_id)
+                )
+                or (
+                    inbox_id is not None
+                    and result["cleanup_core"].get("inbox_id_sha256") != _sha256(inbox_id)
+                )
+            ):
+                raise LiveFailureBatteryError("synthetic product storage was not exactly purged")
+            attestation = result.get("server_rollout_attestation")
+            lookup_token = result.get("server_rollout_lookup_token")
+            if operation is None:
+                if attestation is not None or lookup_token != "":
+                    raise LiveFailureBatteryError("failure cleanup issued rollout authority")
+            elif (
+                not isinstance(attestation, dict)
+                or set(attestation) != _PRODUCT_ATTESTATION_KEYS
+                or attestation.get("schema") != PRODUCT_ROLLOUT_ATTESTATION_SCHEMA
+                or attestation.get("operation_binding_sha256") != _sha256(_canonical(operation))
+                or attestation.get("stage_diagnostics_binding_sha256")
+                != operation.get("stage_diagnostics_binding_sha256")
+                or attestation.get("advice_proof_sha256") != operation.get("advice_proof_sha256")
+                or attestation.get("cleanup_zero_residue_binding_sha256")
+                != result["cleanup_core"].get("cleanup_zero_residue_binding_sha256")
+                or attestation.get("cleanup_storage_binding_sha256")
+                != result["cleanup_core"].get("storage_binding_sha256")
+                or not isinstance(lookup_token, str)
+                or _SHA256.fullmatch(lookup_token) is None
+                or attestation.get("lookup_token_sha256") != _sha256(lookup_token)
+                or any(attestation.get(key) != 0 for key in attestation if key.endswith("_residue"))
+            ):
+                raise LiveFailureBatteryError("server rollout attestation is invalid")
+            return result
+        except Exception:
+            if attempt == 1:
+                raise
+    raise LiveFailureBatteryError("synthetic product cleanup retry was not resolved")  # pragma: no cover
+
+
+def run_product_stage(
+    *,
+    candidate: Path,
+    ca_file: Path,
+    primary_api_key_file: Path,
+    primary_ca_file: Path,
+    primary_pid: int,
+    stage: str,
+    output: Path,
+    timeout_sec: float = 15.0,
+    settle_timeout_sec: float = 30.0,
+) -> dict[str, Any]:
+    if stage not in PRODUCT_STAGES:
+        raise LiveFailureBatteryError("secondary product stage is outside the closed set")
+    if not 1.0 <= timeout_sec <= 60.0 or not 1.0 <= settle_timeout_sec <= 180.0:
+        raise LiveFailureBatteryError("secondary product witness timeout is outside the closed range")
+    _preflight_new_output_path(output)
+    try:
+        configure_expected_model(candidate, ca_file)
+    except EndpointError as exc:
+        raise LiveFailureBatteryError("secondary product candidate identity is invalid") from exc
+    if primary_pid != _friday_backend_main_pid():
+        raise LiveFailureBatteryError("primary PID is not friday-backend.service MainPID")
+    source_head, runner_sha256 = _source_identity()
+    primary_epoch = _primary_process_epoch_sha256(primary_pid)
+    primary_version, primary_ca_sha256 = _primary_health(timeout_sec, primary_ca_file)
+    api_key = _load_primary_api_key(primary_api_key_file)
+    identity_result, identity_ca_sha256, _identity_request, identity_raw = _primary_api_request(
+        PRIMARY_IDENTITY_ENDPOINT,
+        ca_file=primary_ca_file,
+        timeout_sec=timeout_sec,
+        api_key=api_key,
+        maximum_bytes=65_536,
+    )
+    actor = identity_result.get("actor")
+    if (
+        not isinstance(actor, dict)
+        or actor.get("preset_key") != "owner"
+        or actor.get("source") != "api-token"
+        or not isinstance(actor.get("user_id"), str)
+        or not actor["user_id"]
+    ):
+        raise LiveFailureBatteryError("secondary product witness requires the configured owner API token")
+    owner_id = actor["user_id"]
+    if identity_ca_sha256 != primary_ca_sha256:
+        raise LiveFailureBatteryError("primary observation CA identity changed between probes")
+    observer = {
+        "observer_source_head": source_head,
+        "observer_runner_sha256": runner_sha256,
+        "primary_pid": primary_pid,
+        "primary_process_epoch_sha256": primary_epoch,
+        "primary_backend_version": primary_version,
+        "primary_ca_certificate_sha256": primary_ca_sha256,
+        "candidate_profile_sha256": evidence_identity()["candidate_profile_sha256"],
+    }
+
+    if stage == "recovery":
+        before, diagnostics_ca_sha256 = _wait_recovery_retry_window(
+            api_key_file=primary_api_key_file,
+            ca_file=primary_ca_file,
+            timeout_sec=timeout_sec,
+            settle_timeout_sec=settle_timeout_sec,
+        )
+    else:
+        before, diagnostics_ca_sha256 = _product_snapshot(
+            api_key_file=primary_api_key_file,
+            ca_file=primary_ca_file,
+            timeout_sec=timeout_sec,
+        )
+        _require_product_stage_identity(before, stage=stage, after=False)
+    if diagnostics_ca_sha256 != primary_ca_sha256:
+        raise LiveFailureBatteryError("primary observation CA identity changed between probes")
+
+    nonce = secrets.token_hex(16)
+    source_ref = _product_source_ref(stage, nonce)
+    content = _product_content(stage, nonce)
+    ingest_payload = {
+        "content": content,
+        "force_review": True,
+        "metadata": {"secondary_product_witness": True},
+        "source_ref": source_ref,
+    }
+    for attempt in range(2):
+        try:
+            ingest_result, ingest_ca_sha256, ingest_request, ingest_raw = _primary_api_request(
+                PRIMARY_INGEST_ENDPOINT,
+                ca_file=primary_ca_file,
+                timeout_sec=timeout_sec,
+                api_key=api_key,
+                maximum_bytes=65_536,
+                method="POST",
+                payload=ingest_payload,
+            )
+            inbox_id = ingest_result.get("inbox_id")
+            raw_object_id = ingest_result.get("raw_object_id")
+            storage_user_id = ingest_result.get("secondary_product_storage_user_id")
+            if (
+                not isinstance(inbox_id, str)
+                or _INBOX_ID.fullmatch(inbox_id) is None
+                or not isinstance(raw_object_id, str)
+                or _RAW_ID.fullmatch(raw_object_id) is None
+                or not isinstance(storage_user_id, str)
+                or not storage_user_id
+            ):
+                raise LiveFailureBatteryError("synthetic product input returned no cleanable Inbox identity")
+            break
+        except Exception as exc:
+            if attempt == 1:
+                try:
+                    _purge_product_storage(
+                        stage=stage,
+                        nonce=nonce,
+                        api_key=api_key,
+                        primary_ca_file=primary_ca_file,
+                        primary_ca_sha256=primary_ca_sha256,
+                        timeout_sec=timeout_sec,
+                    )
+                except Exception as cleanup_error:
+                    raise LiveFailureBatteryError(
+                        "synthetic product ingest failed and source-bound cleanup failed"
+                    ) from cleanup_error
+                raise LiveFailureBatteryError(
+                    "synthetic product ingest did not return a recoverable identity"
+                ) from exc
+    else:  # pragma: no cover - the bounded loop either breaks or raises
+        raise LiveFailureBatteryError("synthetic product ingest retry was not resolved")
+
+    expected_storage_sha256 = _product_storage_binding_sha256(
+        stage=stage,
+        nonce=nonce,
+        inbox_id=inbox_id,
+        raw_object_id=raw_object_id,
+        inbox_status="pending",
+        storage_user_id=storage_user_id,
+        uploaded_by=owner_id,
+    )
+    cleanup_result: dict[str, Any] | None = None
+    operation: dict[str, Any] | None = None
+    advice_proof: dict[str, Any] | None = None
+    operation_error: Exception | None = None
+    try:
+        if ingest_ca_sha256 != primary_ca_sha256:
+            raise LiveFailureBatteryError("primary observation CA identity changed during product ingest")
+        if (
+            ingest_result.get("queued_for_review") is not True
+            or ingest_result.get("promoted") is not False
+            or ingest_result.get("persisted") is not True
+            or type(ingest_result.get("idempotent_replay", False)) is not bool
+            or ingest_result.get("action") != "review"
+            or "knowledge_object" in ingest_result
+            or ingest_result.get("secondary_product_storage_binding_sha256") != expected_storage_sha256
+        ):
+            raise LiveFailureBatteryError(
+                "synthetic product input did not create one exact pending Inbox item"
+            )
+        advice_payload = {
+            "force": True,
+            "user_id": storage_user_id,
+            "secondary_product_observer": observer,
+        }
+        advice_endpoint = f"{PRIMARY_BASE_URL}/api/admin/inbox/{inbox_id}/advise"
+        advice_result, advice_ca_sha256, advice_request, advice_raw = _primary_api_request(
+            advice_endpoint,
+            ca_file=primary_ca_file,
+            timeout_sec=timeout_sec,
+            api_key=api_key,
+            maximum_bytes=1_048_576,
+            method="POST",
+            payload=advice_payload,
+        )
+        if advice_ca_sha256 != primary_ca_sha256:
+            raise LiveFailureBatteryError("primary observation CA identity changed during product advice")
+        (
+            advice_storage_sha256,
+            endpoint_role,
+            exact_secondary,
+            before,
+            after,
+            advice_diagnostics_receipt_sha256,
+            advice_proof,
+        ) = _validate_advice_result(
+            advice_result,
+            stage=stage,
+            source_ref=source_ref,
+            inbox_id=inbox_id,
+            raw_object_id=raw_object_id,
+            observer=observer,
+            ingest_storage_sha256=expected_storage_sha256,
+            content_sha256=_sha256(content),
+            uploader_sha256=_sha256(owner_id),
+        )
+        diagnostics_deltas = _product_stage_deltas(stage, before, after)
+        stage_diagnostics_binding_sha256 = _sha256(
+            _canonical(
+                {
+                    "source_ref_sha256": _sha256(source_ref),
+                    "before": before,
+                    "after": after,
+                    "deltas": diagnostics_deltas,
+                }
+            )
+        )
+        zero_projection = {
+            "schema": "friday.secondary-product-cleanup-zero-residue.v1",
+            "raw_object_id_sha256": _sha256(raw_object_id),
+            "inbox_id_sha256": _sha256(inbox_id),
+            "raw_residue": 0,
+            "inbox_residue": 0,
+            "knowledge_residue": 0,
+            "alias_residue": 0,
+            "ko_state_residue": 0,
+            "feedback_residue": 0,
+            "feedback_state_residue": 0,
+            "review_residue": 0,
+        }
+        cleanup_core = {
+            "schema": PRODUCT_CLEANUP_CORE_SCHEMA,
+            "purged": True,
+            "raw_deleted": 1,
+            "inbox_deleted": 1,
+            "storage_binding_sha256": expected_storage_sha256,
+            "raw_object_id_sha256": _sha256(raw_object_id),
+            "inbox_id_sha256": _sha256(inbox_id),
+            "cleanup_zero_residue_binding_sha256": _sha256(_canonical(zero_projection)),
+            **{key: value for key, value in zero_projection.items() if key.endswith("_residue")},
+        }
+        operation = {
+            "schema": PRODUCT_OPERATION_CORE_SCHEMA,
+            "identity_result_sha256": _sha256(identity_raw),
+            "ingest_request_sha256": _sha256(ingest_request),
+            "ingest_result_sha256": _sha256(ingest_raw),
+            "ingest_storage_sha256": expected_storage_sha256,
+            "ingest_idempotent_replay": ingest_result.get("idempotent_replay", False),
+            "advice_request_sha256": _sha256(advice_request),
+            "advice_result_sha256": _sha256(advice_raw),
+            "advice_storage_sha256": advice_storage_sha256,
+            "advice_diagnostics_receipt_sha256": advice_diagnostics_receipt_sha256,
+            "advice_proof_sha256": _sha256(_canonical(advice_proof)),
+            "stage_diagnostics_binding_sha256": stage_diagnostics_binding_sha256,
+            "cleanup_core_sha256": _sha256(_canonical(cleanup_core)),
+            "source_ref_sha256": _sha256(source_ref),
+            "synthetic_content_sha256": _sha256(content),
+            "synthetic_nonce_sha256": _sha256(nonce),
+            "storage_user_id_sha256": _sha256(storage_user_id),
+            "uploader_id_sha256": _sha256(owner_id),
+            "inbox_id_sha256": _sha256(inbox_id),
+            "raw_object_id_sha256": _sha256(raw_object_id),
+            "advice_endpoint_role": endpoint_role,
+            "exact_secondary_model_observed": exact_secondary,
+            "cleanup_status": "purged",
+            "knowledge_object_created": False,
+            "tool_requested": False,
+            "effect_requested": False,
+        }
+    except Exception as exc:
+        operation_error = exc
+    finally:
+        try:
+            cleanup_result = _purge_product_storage(
+                stage=stage,
+                nonce=nonce,
+                api_key=api_key,
+                primary_ca_file=primary_ca_file,
+                primary_ca_sha256=primary_ca_sha256,
+                timeout_sec=timeout_sec,
+                expected_storage_sha256=expected_storage_sha256,
+                inbox_id=inbox_id,
+                raw_object_id=raw_object_id,
+                advice_proof=advice_proof if operation is not None else None,
+                operation=operation,
+            )
+        except Exception as cleanup_error:
+            if operation is not None:
+                try:
+                    cleanup_result = _purge_product_storage(
+                        stage=stage,
+                        nonce=nonce,
+                        api_key=api_key,
+                        primary_ca_file=primary_ca_file,
+                        primary_ca_sha256=primary_ca_sha256,
+                        timeout_sec=timeout_sec,
+                        expected_storage_sha256=expected_storage_sha256,
+                        inbox_id=inbox_id,
+                        raw_object_id=raw_object_id,
+                    )
+                except Exception as fallback_error:
+                    raise LiveFailureBatteryError(
+                        "attested cleanup failed and exact source-bound cleanup failed"
+                    ) from fallback_error
+                if operation_error is not None:
+                    raise LiveFailureBatteryError(
+                        "secondary product witness failed after exact source-bound cleanup"
+                    ) from operation_error
+                raise LiveFailureBatteryError(
+                    "secondary product attestation failed after exact source-bound cleanup"
+                ) from cleanup_error
+            if operation_error is not None:
+                raise LiveFailureBatteryError(
+                    "secondary product witness failed and synthetic Inbox cleanup failed"
+                ) from operation_error
+            raise LiveFailureBatteryError("synthetic Inbox cleanup failed") from cleanup_error
+    if operation_error is not None:
+        if isinstance(operation_error, LiveFailureBatteryError):
+            raise operation_error
+        raise LiveFailureBatteryError("secondary product witness request failed") from operation_error
+    assert cleanup_result is not None and operation is not None and advice_proof is not None
+    if (
+        primary_pid != _friday_backend_main_pid()
+        or _primary_process_epoch_sha256(primary_pid) != primary_epoch
+    ):
+        raise LiveFailureBatteryError("Friday primary process changed during product witness")
+    attestation = cleanup_result["server_rollout_attestation"]
+    lookup_token = cleanup_result["server_rollout_lookup_token"]
+    evidence = {
+        "schema": PRODUCT_STAGE_SCHEMA,
+        "status": "passed",
+        "stage": stage,
+        **evidence_identity(),
+        "observer_source_head": source_head,
+        "observer_runner_sha256": runner_sha256,
+        "primary_pid": primary_pid,
+        "primary_process_epoch_sha256": primary_epoch,
+        "primary_version": primary_version,
+        "primary_ca_certificate_sha256": primary_ca_sha256,
+        "diagnostics_before": before,
+        "diagnostics_after": after,
+        "diagnostics_deltas": diagnostics_deltas,
+        "diagnostics_binding_sha256": advice_proof["diagnostics_binding_sha256"],
+        "stage_diagnostics_binding_sha256": operation["stage_diagnostics_binding_sha256"],
+        "operation": operation,
+        "operation_binding_sha256": _sha256(_canonical(operation)),
+        "server_rollout_attestation": attestation,
+        "server_rollout_attestation_sha256": _sha256(_canonical(attestation)),
+        "server_rollout_lookup_token": lookup_token,
+        "rollout_lookup_token_retained": True,
+        "raw_content_retained_in_evidence": False,
+        "model_response_retained_in_evidence": False,
+        "credentials_retained": False,
+    }
+    validate_product_stage_evidence(evidence, expected_stage=stage)
+    output_sha256 = _write_new(output, evidence)
+    return {
+        "status": "product_stage_passed",
+        "stage": stage,
+        "output_sha256": output_sha256,
+    }
 
 
 def _physical_off_product_deltas(
@@ -1373,6 +2796,8 @@ def begin_physical_observation(
 ) -> dict[str, Any]:
     if not 1.0 <= timeout_sec <= 60.0:
         raise LiveFailureBatteryError("physical observation timeout is outside the closed range")
+    if primary_api_key_file is not None or product_output is not None:
+        raise LiveFailureBatteryError("manual counter-only product witness is rejected; use product-stage")
     product_witness = primary_api_key_file is not None and product_output is not None
     if (primary_api_key_file is None) != (product_output is None):
         raise LiveFailureBatteryError("physical product witness inputs must be complete")
@@ -1480,6 +2905,8 @@ def record_physical_power_loss(
 ) -> dict[str, Any]:
     if not 1.0 <= timeout_sec <= 60.0:
         raise LiveFailureBatteryError("physical observation timeout is outside the closed range")
+    if any(value is not None for value in (primary_api_key_file, product_state_path, product_output)):
+        raise LiveFailureBatteryError("manual counter-only product witness is rejected; use product-stage")
     product_inputs = (primary_api_key_file, product_state_path, product_output)
     product_witness = all(value is not None for value in product_inputs)
     if any(value is not None for value in product_inputs) and not product_witness:
@@ -1651,6 +3078,8 @@ def finish_physical_observation(
 ) -> dict[str, Any]:
     if not 1.0 <= timeout_sec <= 60.0:
         raise LiveFailureBatteryError("physical observation timeout is outside the closed range")
+    if any(value is not None for value in (primary_api_key_file, product_state_path, product_output)):
+        raise LiveFailureBatteryError("manual counter-only product witness is rejected; use product-stage")
     product_inputs = (primary_api_key_file, product_state_path, product_output)
     product_witness = all(value is not None for value in product_inputs)
     if any(value is not None for value in product_inputs) and not product_witness:
@@ -1837,6 +3266,17 @@ def _parser() -> argparse.ArgumentParser:
     controlled.add_argument("--recovery-timeout-sec", default=600.0, type=float)
     controlled.add_argument("--output", required=True, type=Path)
 
+    product = commands.add_parser("product-stage")
+    product.add_argument("--candidate", required=True, type=Path)
+    product.add_argument("--ca-file", required=True, type=Path)
+    product.add_argument("--primary-api-key-file", required=True, type=Path)
+    product.add_argument("--primary-ca-file", required=True, type=Path)
+    product.add_argument("--primary-pid", required=True, type=int)
+    product.add_argument("--stage", required=True, choices=PRODUCT_STAGES)
+    product.add_argument("--timeout-sec", default=30.0, type=float)
+    product.add_argument("--settle-timeout-sec", default=30.0, type=float)
+    product.add_argument("--output", required=True, type=Path)
+
     begin = commands.add_parser("physical-begin")
     begin.add_argument("--candidate", required=True, type=Path)
     begin.add_argument("--api-key-file", required=True, type=Path)
@@ -1902,6 +3342,18 @@ def main(argv: list[str] | None = None) -> int:
                 output=args.output,
                 timeout_sec=args.timeout_sec,
                 recovery_timeout_sec=args.recovery_timeout_sec,
+            )
+        elif args.command == "product-stage":
+            result = run_product_stage(
+                candidate=args.candidate,
+                ca_file=args.ca_file,
+                primary_api_key_file=args.primary_api_key_file,
+                primary_ca_file=args.primary_ca_file,
+                primary_pid=args.primary_pid,
+                stage=args.stage,
+                output=args.output,
+                timeout_sec=args.timeout_sec,
+                settle_timeout_sec=args.settle_timeout_sec,
             )
         elif args.command == "physical-begin":
             result = begin_physical_observation(

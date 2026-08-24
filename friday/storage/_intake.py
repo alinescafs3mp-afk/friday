@@ -13,6 +13,27 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from friday.raw_metadata import RAW_FILE_METADATA_MAX_BYTES
+from friday.secondary_product_witness import (
+    SECONDARY_PRODUCT_CLEANUP_CORE_KEYS,
+    SECONDARY_PRODUCT_ROLLOUT_ATTESTATION_KEYS,
+    SECONDARY_PRODUCT_STAGE_TRANSITIONS,
+    is_secondary_product_witness_raw,
+    issue_secondary_product_rollout_attestation,
+    parse_secondary_product_witness_source_ref,
+    secondary_product_advice_storage_binding,
+    secondary_product_cleanup_core,
+    secondary_product_consume_response,
+    secondary_product_rollout_lookup_token,
+    secondary_product_sha256,
+    secondary_product_signing_key,
+    secondary_product_storage_binding,
+    secondary_product_witness_content,
+    secondary_product_witness_source_ref,
+    validate_secondary_product_consume_request,
+    validate_secondary_product_operation_core,
+    verify_secondary_product_advice_proof,
+    verify_secondary_product_rollout_attestation,
+)
 from friday.storage._base import (
     Any,
     InboxItem,
@@ -45,6 +66,39 @@ _TELEGRAM_UNIQUE_SOURCE_PREFIX = "telegram-unique:"
 _TELEGRAM_MESSAGE_SOURCE_REF = re.compile(r"telegram-message:-?[1-9][0-9]{0,31}:[1-9][0-9]{0,31}\Z")
 _KNOWLEDGE_OBJECT_ID_RE = re.compile(r"ko_[A-Za-z0-9_-]{8,120}\Z")
 _PUBLIC_FILE_CITATION_MAX = 12
+
+
+def _not_secondary_product_witness_dependency(raw_alias: str) -> str:
+    """Keep the exact transient product probe out of every generic Inbox consumer."""
+
+    return f"""NOT (
+        {raw_alias}.source='api'
+        AND {raw_alias}.source_ref LIKE 'secondary-product-witness:%'
+        AND friday_secondary_product_witness_raw(
+            {raw_alias}.source,
+            {raw_alias}.source_ref,
+            {raw_alias}.raw_content,
+            {raw_alias}.content_hash,
+            {raw_alias}.metadata_json
+        )=1
+    )"""
+
+
+def checkpoint_secondary_product_witness_wal(storage: StorageShared) -> None:
+    """Make a committed probe purge physically precede any lease-sharing backup."""
+
+    try:
+        row = storage.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    except sqlite3.DatabaseError as exc:
+        raise RuntimeError("secondary product witness WAL checkpoint failed") from exc
+    if (
+        row is None
+        or len(row) != 3
+        or any(type(value) is not int for value in row)
+        or tuple(int(value) for value in row) != (0, 0, 0)
+    ):
+        raise RuntimeError("secondary product witness WAL checkpoint failed")
+
 
 TELEGRAM_REPLY_RESOLVED = "resolved"
 TELEGRAM_REPLY_ABSENT = "absent"
@@ -1425,6 +1479,7 @@ class IntakeMixin(StorageShared):
                    JOIN raw_objects r ON r.rowid=raw_fts.rowid
                    WHERE r.user_id=? AND r.deleted_at IS NULL
                      AND {_not_private_raw_dependency("r")}
+                     AND {_not_secondary_product_witness_dependency("r")}
                      {uploader_clause}
                      AND NOT EXISTS (
                          SELECT 1 FROM inbox i
@@ -1645,6 +1700,7 @@ class IntakeMixin(StorageShared):
                           WHERE r.user_id=? AND r.deleted_at IS NULL
                             AND r.id IN ({placeholders})
                             AND {_not_private_raw_dependency("r")}
+                            AND {_not_secondary_product_witness_dependency("r")}
                             AND NOT EXISTS (
                                 SELECT 1 FROM inbox i
                                  WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
@@ -2344,6 +2400,528 @@ class IntakeMixin(StorageShared):
         ).fetchone()
         return dict(row) if row else None
 
+    def purge_secondary_product_witness(
+        self,
+        user_id: str,
+        *,
+        stage: str,
+        expected_source_ref_sha256: str,
+        expected_content_sha256: str,
+        expected_uploader: str,
+        cleanup_token: str,
+        advice_proof: Mapping[str, Any] | None = None,
+        operation: Mapping[str, Any] | None = None,
+        current_server_identity: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Atomically purge one exact probe and optionally mint its server attestation."""
+
+        if (
+            re.fullmatch(r"[0-9a-f]{64}", expected_source_ref_sha256) is None
+            or re.fullmatch(r"[0-9a-f]{64}", expected_content_sha256) is None
+            or re.fullmatch(r"[0-9a-f]{32}", cleanup_token) is None
+            or not expected_uploader
+        ):
+            raise ValueError("secondary product witness purge identity is invalid")
+        try:
+            exact_source_ref = secondary_product_witness_source_ref(stage, cleanup_token)
+            exact_content = secondary_product_witness_content(stage, cleanup_token)
+        except ValueError as exc:
+            raise ValueError("secondary product witness purge identity is invalid") from exc
+        if not hmac.compare_digest(
+            hashlib.sha256(exact_source_ref.encode()).hexdigest(),
+            expected_source_ref_sha256,
+        ) or not hmac.compare_digest(
+            hashlib.sha256(exact_content.encode()).hexdigest(),
+            expected_content_sha256,
+        ):
+            raise ValueError("secondary product witness purge identity is invalid")
+        request_key = f"secondary-product-witness-purge:{stage}:{cleanup_token}"
+        request_value = {
+            "cleanup_token": cleanup_token,
+            "content_sha256": expected_content_sha256,
+            "stage": stage,
+            "source_ref_sha256": expected_source_ref_sha256,
+            "uploader": expected_uploader,
+            "advice_proof_sha256": (
+                secondary_product_sha256(dict(advice_proof)) if isinstance(advice_proof, Mapping) else ""
+            ),
+            "operation_binding_sha256": (
+                secondary_product_sha256(dict(operation)) if isinstance(operation, Mapping) else ""
+            ),
+        }
+        request_hash = hashlib.sha256(
+            (json.dumps(request_value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        ).hexdigest()
+        signing_key = secondary_product_signing_key(self)
+        self.conn.execute("PRAGMA secure_delete=ON")
+        secure_delete = self.conn.execute("PRAGMA secure_delete").fetchone()
+        if secure_delete is None or int(secure_delete[0]) != 1:
+            raise RuntimeError("secondary product witness secure delete is unavailable")
+
+        def public_response(response: Mapping[str, Any]) -> dict[str, Any]:
+            cleanup_core = response.get("cleanup_core")
+            attestation = response.get("server_rollout_attestation")
+            if (
+                set(response)
+                != {
+                    "schema",
+                    "cleanup_core",
+                    "server_rollout_attestation",
+                    "rollout_consume_state",
+                    "rollout_consumed_at",
+                    "rollout_consume_request_sha256",
+                    "rollout_consume_binding_sha256",
+                    "rollout_state_version",
+                }
+                or response.get("schema") != "friday.secondary-product-purge-tombstone.v2"
+                or not isinstance(cleanup_core, dict)
+                or set(cleanup_core) != SECONDARY_PRODUCT_CLEANUP_CORE_KEYS
+                or response.get("rollout_consume_state") not in {"unavailable", "unused"}
+                or response.get("rollout_consumed_at") != ""
+                or response.get("rollout_consume_request_sha256") != ""
+                or response.get("rollout_consume_binding_sha256") != ""
+                or response.get("rollout_state_version") not in {0, 1}
+            ):
+                raise ValueError("secondary product witness purge replay is invalid")
+            lookup_token = ""
+            if attestation is not None:
+                if (
+                    not isinstance(attestation, dict)
+                    or set(attestation) != SECONDARY_PRODUCT_ROLLOUT_ATTESTATION_KEYS
+                    or response.get("rollout_consume_state") != "unused"
+                    or response.get("rollout_state_version") != 1
+                ):
+                    raise ValueError("secondary product witness attestation replay is invalid")
+                lookup_token = secondary_product_rollout_lookup_token(signing_key, attestation)
+            elif (
+                response.get("rollout_consume_state") != "unavailable"
+                or response.get("rollout_state_version") != 0
+            ):
+                raise ValueError("secondary product witness cleanup replay is invalid")
+            return {
+                "schema": "friday.secondary-product-purge-response.v2",
+                "cleanup_core": cleanup_core,
+                "cleanup_core_sha256": secondary_product_sha256(cleanup_core),
+                "server_rollout_attestation": attestation,
+                "server_rollout_lookup_token": lookup_token,
+            }
+
+        with self.transaction() as conn:
+            replay = conn.execute(
+                """SELECT request_hash, response_json, state
+                     FROM request_idempotency WHERE user_id=? AND request_key=?""",
+                (user_id, request_key),
+            ).fetchone()
+            if replay is not None:
+                response = _json_load(replay["response_json"], {})
+                if replay["state"] != "complete" or not isinstance(response, dict):
+                    raise ValueError("secondary product witness purge replay is invalid")
+                if not hmac.compare_digest(str(replay["request_hash"] or ""), request_hash):
+                    if advice_proof is not None or operation is not None:
+                        raise ValueError("secondary product witness purge replay is invalid")
+                    # A response can be lost after an attested purge committed.  An
+                    # exact cleanup-only replay atomically burns that inaccessible
+                    # authority and replaces it with a body-free cleanup tombstone.
+                    public_response(response)
+                    response = {
+                        "schema": "friday.secondary-product-purge-tombstone.v2",
+                        "cleanup_core": response["cleanup_core"],
+                        "server_rollout_attestation": None,
+                        "rollout_consume_state": "unavailable",
+                        "rollout_consumed_at": "",
+                        "rollout_consume_request_sha256": "",
+                        "rollout_consume_binding_sha256": "",
+                        "rollout_state_version": 0,
+                    }
+                    changed = conn.execute(
+                        """UPDATE request_idempotency
+                              SET request_hash=?, response_json=?, updated_at=?
+                            WHERE user_id=? AND request_key=? AND request_hash=?
+                              AND state='complete'""",
+                        (
+                            request_hash,
+                            json.dumps(response, ensure_ascii=False, sort_keys=True),
+                            utc_now(),
+                            user_id,
+                            request_key,
+                            replay["request_hash"],
+                        ),
+                    )
+                    if changed.rowcount != 1:
+                        raise RuntimeError("secondary product witness cleanup replay CAS failed")
+                return public_response(response)
+            rows = conn.execute(
+                """SELECT i.id AS inbox_id, i.user_id AS inbox_user_id,
+                          i.raw_object_id, i.knowledge_object_id, i.status,
+                          i.reviewed_at, i.reviewed_by, i.suggestions_json,
+                          i.suggested_action,
+                          r.id AS raw_id, r.user_id AS raw_user_id, r.source, r.source_ref,
+                          r.raw_content, r.content_hash, r.metadata_json, r.deleted_at
+                     FROM inbox i
+                     JOIN raw_objects r ON r.id=i.raw_object_id AND r.user_id=i.user_id
+                    WHERE i.user_id=? AND r.source='api' AND r.source_ref=?
+                    LIMIT 2""",
+                (user_id, exact_source_ref),
+            ).fetchall()
+            if len(rows) != 1:
+                raise ValueError("secondary product witness exact Raw/Inbox pair not found")
+            row = rows[0]
+            values = dict(row)
+            raw = {
+                "id": values["raw_id"],
+                "user_id": values["raw_user_id"],
+                "source": values["source"],
+                "source_ref": values["source_ref"],
+                "raw_content": values["raw_content"],
+                "content_hash": values["content_hash"],
+                "metadata_json": values["metadata_json"],
+            }
+            inbox = {
+                "id": values["inbox_id"],
+                "user_id": values["inbox_user_id"],
+                "raw_object_id": values["raw_object_id"],
+                "knowledge_object_id": values["knowledge_object_id"],
+                "status": values["status"],
+            }
+            source_ref = str(raw["source_ref"] or "")
+            inbox_id = str(inbox["id"] or "")
+            content_hash = str(raw["content_hash"] or "")
+            metadata = _json_load(raw["metadata_json"], {})
+            parsed_source_ref = parse_secondary_product_witness_source_ref(source_ref)
+            inbox_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM inbox WHERE raw_object_id=? AND user_id=?",
+                (raw["id"], user_id),
+            ).fetchone()["count"]
+            knowledge_exists = conn.execute(
+                "SELECT 1 FROM knowledge_objects WHERE raw_object_id=? AND user_id=? LIMIT 1",
+                (raw["id"], user_id),
+            ).fetchone()
+            alias_exists = conn.execute(
+                "SELECT 1 FROM file_source_aliases WHERE raw_object_id=? AND user_id=? LIMIT 1",
+                (raw["id"], user_id),
+            ).fetchone()
+            feedback_exists = conn.execute(
+                """SELECT 1 FROM feedback WHERE user_id=? AND target_id IN (?, ?)
+                   UNION ALL
+                   SELECT 1 FROM feedback_state WHERE user_id=? AND target_id IN (?, ?)
+                   LIMIT 1""",
+                (user_id, raw["id"], inbox_id, user_id, raw["id"], inbox_id),
+            ).fetchone()
+            if (
+                not is_secondary_product_witness_raw(raw)
+                or values["deleted_at"] is not None
+                or values["status"] != InboxStatus.PENDING.value
+                or values["knowledge_object_id"] is not None
+                or values["reviewed_at"] is not None
+                or values["reviewed_by"] is not None
+                or inbox_count != 1
+                or knowledge_exists is not None
+                or alias_exists is not None
+                or feedback_exists is not None
+                or parsed_source_ref is None
+                or parsed_source_ref[1] != cleanup_token
+                or not isinstance(metadata, dict)
+                or metadata.get("uploaded_by") != expected_uploader
+                or not hmac.compare_digest(
+                    hashlib.sha256(source_ref.encode()).hexdigest(),
+                    expected_source_ref_sha256,
+                )
+                or not hmac.compare_digest(content_hash, expected_content_sha256)
+            ):
+                raise ValueError("secondary product witness purge target is not exact and isolated")
+            storage_binding_sha256 = secondary_product_storage_binding(raw, inbox)
+            advice_storage_sha256 = secondary_product_sha256("")
+            if isinstance(advice_proof, Mapping):
+                suggestions = _json_load(values["suggestions_json"], {})
+                if not isinstance(suggestions, dict):
+                    raise ValueError("secondary product witness advice storage is invalid")
+                advice_storage_sha256 = secondary_product_advice_storage_binding(
+                    {
+                        **inbox,
+                        "suggestions_json": values["suggestions_json"],
+                        "suggested_action": values["suggested_action"],
+                        "reviewed_at": values["reviewed_at"],
+                        "reviewed_by": values["reviewed_by"],
+                    },
+                    suggestions,
+                )
+                identity_keys = {
+                    "primary_pid",
+                    "primary_process_epoch_sha256",
+                    "primary_backend_version",
+                    "primary_ca_certificate_sha256",
+                    "candidate_profile_id",
+                    "candidate_profile_mode",
+                    "candidate_profile_allow_private_text",
+                    "candidate_profile_context_tokens",
+                    "candidate_profile_sha256",
+                    "candidate_profile_manifest_sha256",
+                    "candidate_profile_admission",
+                    "served_model_alias",
+                    "gateway_ca_certificate_sha256",
+                }
+                if (
+                    not isinstance(current_server_identity, Mapping)
+                    or set(current_server_identity) != identity_keys
+                    or not verify_secondary_product_advice_proof(signing_key, advice_proof)
+                    or any(advice_proof.get(key) != current_server_identity.get(key) for key in identity_keys)
+                    or advice_proof.get("stage") != stage
+                    or advice_proof.get("source_ref_sha256") != expected_source_ref_sha256
+                    or advice_proof.get("content_sha256") != expected_content_sha256
+                    or advice_proof.get("uploader_sha256") != secondary_product_sha256(expected_uploader)
+                    or advice_proof.get("raw_object_id_sha256") != secondary_product_sha256(str(raw["id"]))
+                    or advice_proof.get("inbox_id_sha256") != secondary_product_sha256(inbox_id)
+                    or advice_proof.get("ingest_storage_binding_sha256") != storage_binding_sha256
+                    or advice_proof.get("advice_storage_binding_sha256") != advice_storage_sha256
+                ):
+                    raise ValueError("secondary product witness advice proof is invalid")
+            try:
+                conn.execute("INSERT INTO raw_fts(raw_fts, rank) VALUES('secure-delete', 1)")
+                fts_secure_delete = conn.execute(
+                    "SELECT v AS value FROM raw_fts_config WHERE k='secure-delete'"
+                ).fetchone()
+            except sqlite3.DatabaseError as exc:
+                raise RuntimeError("secondary product witness FTS secure delete is unavailable") from exc
+            if fts_secure_delete is None or int(fts_secure_delete["value"]) != 1:
+                raise RuntimeError("secondary product witness FTS secure delete is unavailable")
+            inbox_deleted = conn.execute(
+                "DELETE FROM inbox WHERE id=? AND user_id=? AND raw_object_id=?",
+                (inbox_id, user_id, raw["id"]),
+            )
+            raw_deleted = conn.execute(
+                "DELETE FROM raw_objects WHERE id=? AND user_id=?",
+                (raw["id"], user_id),
+            )
+            remnants = conn.execute(
+                """SELECT
+                       (SELECT COUNT(*) FROM inbox WHERE id=? AND user_id=?) AS inbox_count,
+                       (SELECT COUNT(*) FROM raw_objects WHERE id=? AND user_id=?) AS raw_count,
+                       (SELECT COUNT(*) FROM knowledge_objects
+                         WHERE raw_object_id=? AND user_id=?) AS knowledge_count,
+                       (SELECT COUNT(*) FROM file_source_aliases
+                         WHERE raw_object_id=? AND user_id=?) AS alias_count,
+                       (SELECT COUNT(*) FROM feedback
+                         WHERE user_id=? AND target_id IN (?, ?)) AS feedback_count,
+                       (SELECT COUNT(*) FROM feedback_state
+                         WHERE user_id=? AND target_id IN (?, ?)) AS feedback_state_count,
+                       (SELECT COUNT(*) FROM inbox
+                         WHERE id=? AND user_id=?
+                           AND (reviewed_at IS NOT NULL OR reviewed_by IS NOT NULL)) AS review_count""",
+                (
+                    inbox_id,
+                    user_id,
+                    raw["id"],
+                    user_id,
+                    raw["id"],
+                    user_id,
+                    raw["id"],
+                    user_id,
+                    user_id,
+                    raw["id"],
+                    inbox_id,
+                    user_id,
+                    raw["id"],
+                    inbox_id,
+                    inbox_id,
+                    user_id,
+                ),
+            ).fetchone()
+            if (
+                inbox_deleted.rowcount != 1
+                or raw_deleted.rowcount != 1
+                or remnants is None
+                or any(int(remnants[key]) != 0 for key in remnants)
+            ):
+                raise RuntimeError("secondary product witness purge was not atomic")
+            residues = {
+                "raw_residue": int(remnants["raw_count"]),
+                "inbox_residue": int(remnants["inbox_count"]),
+                "knowledge_residue": int(remnants["knowledge_count"]),
+                "alias_residue": int(remnants["alias_count"]),
+                "ko_state_residue": int(remnants["knowledge_count"]),
+                "feedback_residue": int(remnants["feedback_count"]),
+                "feedback_state_residue": int(remnants["feedback_state_count"]),
+                "review_residue": int(remnants["review_count"]),
+            }
+            cleanup_core = secondary_product_cleanup_core(
+                storage_binding_sha256=storage_binding_sha256,
+                raw_object_id_sha256=secondary_product_sha256(str(raw["id"])),
+                inbox_id_sha256=secondary_product_sha256(inbox_id),
+                residues=residues,
+            )
+            attestation: dict[str, Any] | None = None
+            if advice_proof is not None or operation is not None:
+                if (
+                    not isinstance(advice_proof, Mapping)
+                    or not isinstance(operation, Mapping)
+                    or not validate_secondary_product_operation_core(operation)
+                    or operation.get("cleanup_core_sha256") != secondary_product_sha256(cleanup_core)
+                    or operation.get("advice_proof_sha256") != secondary_product_sha256(dict(advice_proof))
+                    or operation.get("source_ref_sha256") != expected_source_ref_sha256
+                    or operation.get("synthetic_content_sha256") != expected_content_sha256
+                    or operation.get("synthetic_nonce_sha256") != secondary_product_sha256(cleanup_token)
+                    or operation.get("storage_user_id_sha256") != secondary_product_sha256(user_id)
+                    or operation.get("uploader_id_sha256") != secondary_product_sha256(expected_uploader)
+                    or operation.get("inbox_id_sha256") != cleanup_core["inbox_id_sha256"]
+                    or operation.get("raw_object_id_sha256") != cleanup_core["raw_object_id_sha256"]
+                    or operation.get("ingest_storage_sha256") != storage_binding_sha256
+                    or operation.get("advice_storage_sha256") != advice_storage_sha256
+                    or operation.get("advice_diagnostics_receipt_sha256")
+                    != advice_proof.get("advice_diagnostics_receipt_sha256")
+                    or operation.get("advice_endpoint_role") != advice_proof.get("advice_endpoint_role")
+                    or operation.get("exact_secondary_model_observed")
+                    is not (stage in {"assist", "recovery"})
+                ):
+                    raise ValueError("secondary product witness operation binding is invalid")
+                attestation, _lookup_token = issue_secondary_product_rollout_attestation(
+                    signing_key,
+                    advice_proof=advice_proof,
+                    operation=operation,
+                    cleanup_core=cleanup_core,
+                )
+            result = {
+                "schema": "friday.secondary-product-purge-tombstone.v2",
+                "cleanup_core": cleanup_core,
+                "server_rollout_attestation": attestation,
+                "rollout_consume_state": "unused" if attestation is not None else "unavailable",
+                "rollout_consumed_at": "",
+                "rollout_consume_request_sha256": "",
+                "rollout_consume_binding_sha256": "",
+                "rollout_state_version": 1 if attestation is not None else 0,
+            }
+            now = utc_now()
+            conn.execute(
+                """INSERT INTO request_idempotency(
+                       user_id, request_key, request_hash, response_json, state,
+                       lease_token, created_at, updated_at
+                   ) VALUES(?, ?, ?, ?, 'complete', '', ?, ?)""",
+                (
+                    user_id,
+                    request_key,
+                    request_hash,
+                    json.dumps(result, ensure_ascii=False, sort_keys=True),
+                    now,
+                    now,
+                ),
+            )
+            # One replay receipt per closed rollout stage is sufficient to recover
+            # a lost cleanup response.  Keep the synthetic namespace bounded to six
+            # body-free rows even if an operator reruns a stage repeatedly.
+            conn.execute(
+                """DELETE FROM request_idempotency
+                    WHERE user_id=? AND request_key LIKE ? AND request_key<>?
+                      AND state='complete'""",
+                (user_id, f"secondary-product-witness-purge:{stage}:%", request_key),
+            )
+        return public_response(result)
+
+    def consume_secondary_product_rollout_attestation(
+        self,
+        user_id: str,
+        *,
+        request_value: Mapping[str, Any],
+        current_server_identity: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Atomically burn one exact unused rollout attestation before any mutation."""
+
+        if not validate_secondary_product_consume_request(request_value):
+            raise ValueError("secondary product rollout consume request is invalid")
+        key = secondary_product_signing_key(self)
+        lookup_sha256 = secondary_product_sha256(str(request_value["attestation_lookup_token"]))
+        consumed_at = int(__import__("time").time())
+        with self.transaction() as conn:
+            rows = conn.execute(
+                """SELECT request_key, response_json FROM request_idempotency
+                    WHERE user_id=? AND request_key LIKE 'secondary-product-witness-purge:%'
+                      AND state='complete' LIMIT 7""",
+                (user_id,),
+            ).fetchall()
+            matches: list[tuple[str, str, dict[str, Any], dict[str, Any]]] = []
+            for row in rows:
+                stored = _json_load(row["response_json"], {})
+                attestation = stored.get("server_rollout_attestation") if isinstance(stored, dict) else None
+                if isinstance(attestation, dict) and hmac.compare_digest(
+                    str(attestation.get("lookup_token_sha256") or ""), lookup_sha256
+                ):
+                    matches.append(
+                        (
+                            str(row["request_key"]),
+                            str(row["response_json"]),
+                            stored,
+                            attestation,
+                        )
+                    )
+            if len(matches) != 1:
+                raise ValueError("secondary product rollout attestation was not found")
+            request_key, old_json, stored, attestation = matches[0]
+            if stored.get("rollout_consume_state") != "unused" or stored.get("rollout_state_version") != 1:
+                raise RuntimeError("secondary product rollout attestation was already consumed")
+            if not verify_secondary_product_rollout_attestation(key, attestation, now=consumed_at):
+                raise ValueError("secondary product rollout attestation is invalid or stale")
+            if not hmac.compare_digest(
+                secondary_product_sha256(attestation),
+                str(request_value["server_rollout_attestation_sha256"]),
+            ):
+                raise ValueError("secondary product rollout attestation does not match the local receipt")
+            expected_token = secondary_product_rollout_lookup_token(key, attestation)
+            if not hmac.compare_digest(expected_token, str(request_value["attestation_lookup_token"])):
+                raise ValueError("secondary product rollout attestation token is invalid")
+            identity_keys = {
+                "primary_pid",
+                "primary_process_epoch_sha256",
+                "primary_backend_version",
+                "primary_ca_certificate_sha256",
+                "candidate_profile_id",
+                "candidate_profile_mode",
+                "candidate_profile_allow_private_text",
+                "candidate_profile_context_tokens",
+                "candidate_profile_sha256",
+                "candidate_profile_manifest_sha256",
+                "candidate_profile_admission",
+                "served_model_alias",
+                "gateway_ca_certificate_sha256",
+            }
+            stage = str(request_value["stage"])
+            expected_private = stage == "private-shadow"
+            if (
+                set(current_server_identity) != identity_keys
+                or any(attestation.get(name) != current_server_identity.get(name) for name in identity_keys)
+                or attestation.get("stage") != stage
+                or request_value.get("transition") != SECONDARY_PRODUCT_STAGE_TRANSITIONS[stage]
+                or request_value.get("predecessor_commit") != attestation.get("observer_source_head")
+                or request_value.get("sealed_runner_sha256") != attestation.get("observer_runner_sha256")
+                or attestation.get("candidate_profile_mode") != "shadow"
+                or attestation.get("candidate_profile_allow_private_text") is not expected_private
+            ):
+                raise ValueError("secondary product rollout transition binding is invalid")
+            response = secondary_product_consume_response(
+                key,
+                request_value=request_value,
+                attestation=attestation,
+                consumed_at=consumed_at,
+            )
+            updated = {
+                **stored,
+                "rollout_consume_state": "consumed",
+                "rollout_consumed_at": consumed_at,
+                "rollout_consume_request_sha256": response["request_sha256"],
+                "rollout_consume_binding_sha256": response["consume_binding_sha256"],
+                "rollout_state_version": 2,
+            }
+            changed = conn.execute(
+                """UPDATE request_idempotency SET response_json=?
+                    WHERE user_id=? AND request_key=? AND response_json=? AND state='complete'""",
+                (
+                    json.dumps(updated, ensure_ascii=False, sort_keys=True),
+                    user_id,
+                    request_key,
+                    old_json,
+                ),
+            )
+            if changed.rowcount != 1:
+                raise RuntimeError("secondary product rollout attestation CAS failed")
+        return response
+
     def get_inbox_by_raw(self, raw_object_id: str, user_id: str) -> dict[str, Any] | None:
         row = self.execute(
             f"""SELECT i.* FROM inbox i
@@ -2379,7 +2957,8 @@ class IntakeMixin(StorageShared):
                        ON r.id=i.raw_object_id AND r.user_id=i.user_id
                       AND {_not_private_raw_dependency("r")}
                      WHERE i.user_id=? AND i.status=?
-                       AND {_not_private_inbox_dependency("i")}""",  # nosec B608
+                       AND {_not_private_inbox_dependency("i")}
+                       AND {_not_secondary_product_witness_dependency("r")}""",  # nosec B608
                 (user_id, enum_value(status)),
             ).fetchone()
         else:
@@ -2389,7 +2968,8 @@ class IntakeMixin(StorageShared):
                        ON r.id=i.raw_object_id AND r.user_id=i.user_id
                       AND {_not_private_raw_dependency("r")}
                      WHERE i.user_id=?
-                      AND {_not_private_inbox_dependency("i")}""",  # nosec B608
+                      AND {_not_private_inbox_dependency("i")}
+                      AND {_not_secondary_product_witness_dependency("r")}""",  # nosec B608
                 (user_id,),
             ).fetchone()
         return int(row["count"] if row else 0)
@@ -2414,6 +2994,7 @@ class IntakeMixin(StorageShared):
                     AND {_not_private_raw_dependency("r")}
                    WHERE i.user_id=? AND i.status=?
                      AND {_not_private_inbox_dependency("i")}
+                     AND {_not_secondary_product_witness_dependency("r")}
                    ORDER BY i.created_at DESC, i.rowid DESC LIMIT ? OFFSET ?""",  # nosec B608
                 (user_id, enum_value(status), max(1, min(limit, 1000)), max(0, offset)),
             ).fetchall()
@@ -2425,6 +3006,7 @@ class IntakeMixin(StorageShared):
                     AND {_not_private_raw_dependency("r")}
                    WHERE i.user_id=?
                      AND {_not_private_inbox_dependency("i")}
+                     AND {_not_secondary_product_witness_dependency("r")}
                    ORDER BY i.created_at DESC, i.rowid DESC LIMIT ? OFFSET ?""",  # nosec B608
                 (user_id, max(1, min(limit, 1000)), max(0, offset)),
             ).fetchall()
@@ -2488,6 +3070,7 @@ class IntakeMixin(StorageShared):
                WHERE i.user_id = ? AND i.status = 'pending'
                  AND {_not_private_inbox_dependency("i")}
                  AND {_not_private_raw_dependency("r")}
+                 AND {_not_secondary_product_witness_dependency("r")}
                ORDER BY i.created_at ASC, i.rowid ASC""",  # nosec B608
             (user_id,),
         ).fetchall()
@@ -2571,6 +3154,7 @@ class IntakeMixin(StorageShared):
             "i.user_id=?",
             _not_private_inbox_dependency("i"),
             _not_private_raw_dependency("r"),
+            _not_secondary_product_witness_dependency("r"),
         ]
         params: list[Any] = [user_id]
         if status:

@@ -61,6 +61,8 @@ class RoutedInboxAdvice:
     response: dict[str, Any] = field(repr=False)
     model_name: str
     source: str
+    diagnostics_before: dict[str, object] | None = field(default=None, repr=False)
+    diagnostics_after: dict[str, object] | None = field(default=None, repr=False)
 
 
 _SECONDARY_CLIP_MARKER = "\n[...bounded secondary input...]\n"
@@ -213,6 +215,7 @@ async def route_inbox_advice(
     primary_model_name: str,
     primary_call: Callable[[], Awaitable[dict[str, Any]]],
     image_bearing: bool,
+    observe_diagnostics: bool = False,
 ) -> RoutedInboxAdvice:
     """Route one advisory extraction without wrapping or replacing the primary."""
 
@@ -253,25 +256,62 @@ async def route_inbox_advice(
             contains_private_text=True,
         )
 
+    def validator(result: SecondaryResult) -> bool:
+        return valid_inbox_advice_shape(result.structured_output)
+
+    diagnostics_before: dict[str, object] | None = None
+    diagnostics_after: dict[str, object] | None = None
     if secondary.mode is SecondaryMode.SHADOW:
+        if observe_diagnostics:
+            primary_response, diagnostics_before, diagnostics_after = await secondary.run_shadow_observed(
+                request_factory,
+                primary_call,
+                validator=validator,
+            )
+            return RoutedInboxAdvice(
+                primary_response,
+                primary_model_name,
+                "primary",
+                diagnostics_before,
+                diagnostics_after,
+            )
         primary_response = await secondary.run_shadow(
             request_factory,
             primary_call,
-            validator=lambda result: valid_inbox_advice_shape(result.structured_output),
+            validator=validator,
         )
         return RoutedInboxAdvice(primary_response, primary_model_name, "primary")
 
-    selected = await secondary.secondary_preferred_required_result(
-        request_factory(),
-        primary_call,
-        validator=lambda result: valid_inbox_advice_shape(result.structured_output),
-    )
+    if observe_diagnostics:
+        (
+            selected,
+            diagnostics_before,
+            diagnostics_after,
+        ) = await secondary.secondary_preferred_required_result_observed(
+            request_factory(),
+            primary_call,
+            validator=validator,
+        )
+    else:
+        selected = await secondary.secondary_preferred_required_result(
+            request_factory(),
+            primary_call,
+            validator=validator,
+        )
     if not isinstance(selected, SecondaryResult):
         # The scheduler returns the exact primary object on disabled, admission,
         # transport, deadline, policy or protocol failure.
-        return RoutedInboxAdvice(selected, primary_model_name, "primary")
+        return RoutedInboxAdvice(
+            selected,
+            primary_model_name,
+            "primary",
+            diagnostics_before,
+            diagnostics_after,
+        )
     return RoutedInboxAdvice(
         _secondary_response(selected),
         selected.served_model_alias,
         "secondary",
+        diagnostics_before,
+        diagnostics_after,
     )

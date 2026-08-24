@@ -1,3 +1,25 @@
+## 0.207.11 — 2026-08-25
+
+### Проверяемая продуктовая приёмка второго полушария
+
+- Реальный Inbox witness теперь выдаёт server-origin HMAC proof и финальную
+  attestation, связанные с exact release/process/profile, source, storage,
+  диагностикой и доказанным нулевым остатком после атомарной очистки.
+- Immutable rollout принимает только свежую attestation через owner-only
+  одноразовый CAS до изменения ENV или остановки сервисов. Подделка, неверная
+  привязка к predecessor/candidate/release trees, устаревание, replay и потеря
+  ответа после consume закрываются fail-closed.
+- Product runner запечатывается как отдельный артефакт immutable release;
+  owner-private evidence не сохраняет prompt, model body или bearer, а
+  body-free tombstones ограничены по числу и TTL.
+- Временный product witness исключён из обычных Inbox/Raw search,
+  классификации, feedback, workers, export и backup; ingest/backup разделяют
+  crash-safe lease, а очистка проверяет нулевой логический остаток.
+- Failure battery проверяет public/private shadow, assist, outage, cooldown и
+  recovery через реальный Friday API, включая потерю ingest/cleanup response.
+  Secondary по-прежнему стартует выключенным, accepted-реестр пуст; schema 39
+  и primary-only поведение не меняются.
+
 ## 0.207.10 — 2026-08-24
 
 ### Точный provisional-финалист второго полушария

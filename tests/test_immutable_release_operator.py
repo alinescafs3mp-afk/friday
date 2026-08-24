@@ -103,7 +103,12 @@ class FakePort:
     def verify_units(self, candidate: operator.ReleaseIdentity) -> None:
         self._event(f"units:{candidate.root.name}")
 
-    def verify_active_anchor(self, previous: operator.ReleaseIdentity) -> None:
+    def verify_active_anchor(
+        self,
+        previous: operator.ReleaseIdentity,
+        candidate: operator.ReleaseIdentity,
+    ) -> None:
+        del candidate
         self._event(f"active_anchor:{previous.root.name}")
 
     def stop_bridge(self) -> None:
@@ -1006,6 +1011,39 @@ def test_obsidian_root_is_restored_exactly_with_database_and_inbox(tmp_path: Pat
     assert stat.S_IMODE((root / "notes" / "entry.md").stat().st_mode) == 0o644
     assert (root / "notes" / "empty").is_dir()
     assert not (root / "notes" / "extra.md").exists()
+
+
+def test_exact_backup_rejects_main_database_sidecar_symlink_before_checkpoint(
+    tmp_path: Path,
+) -> None:
+    config = _obsidian_cutover_config(tmp_path)
+    target = tmp_path / "sidecar-target"
+    target.write_bytes(b"must remain untouched")
+    target.chmod(0o600)
+    Path(f"{config.database}-wal").symlink_to(target)
+
+    with pytest.raises(operator.ReleaseFailure, match="backup_secondary_product_sidecar_invalid"):
+        operator._exact_sqlite_backup(config)  # noqa: SLF001
+
+    assert target.read_bytes() == b"must remain untouched"
+
+
+def test_exact_backup_rejects_active_secondary_product_witness(tmp_path: Path) -> None:
+    config = _obsidian_cutover_config(tmp_path)
+    connection = sqlite3.connect(config.database)
+    try:
+        connection.execute("CREATE TABLE raw_objects(source_ref TEXT NOT NULL)")
+        connection.execute(
+            "INSERT INTO raw_objects VALUES(?)",
+            ("secondary-product-witness:assist:" + "a" * 32,),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    config.database.chmod(0o600)
+
+    with pytest.raises(operator.ReleaseFailure, match="backup_active_secondary_product_witness"):
+        operator._exact_sqlite_backup(config)  # noqa: SLF001
 
 
 @pytest.mark.parametrize("unsafe_kind", ["symlink", "hardlink", "fifo"])
@@ -4193,6 +4231,9 @@ def test_build_parser_binds_both_manifest_digests_into_build_spec(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: list[operator.BuildSpec] = []
+    product_runner = (
+        Path(__file__).parents[1] / "deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py"
+    )
 
     def build(spec: operator.BuildSpec) -> operator.ReleaseIdentity:
         captured.append(spec)
@@ -4240,6 +4281,10 @@ def test_build_parser_binds_both_manifest_digests_into_build_spec(
             str(tmp_path / "dependency.py"),
             "--alias-dependency-sha256",
             "6" * 64,
+            "--secondary-product-runner",
+            str(product_runner),
+            "--secondary-product-runner-sha256",
+            hashlib.sha256(product_runner.read_bytes()).hexdigest(),
             "--max-schema",
             "34",
         ]
@@ -4249,6 +4294,10 @@ def test_build_parser_binds_both_manifest_digests_into_build_spec(
     assert len(captured) == 1
     assert captured[0].runtime_lock_sha256 == "2" * 64
     assert captured[0].wheelhouse_manifest_sha256 == "3" * 64
+    assert captured[0].secondary_product_runner == product_runner
+    assert (
+        captured[0].secondary_product_runner_sha256 == hashlib.sha256(product_runner.read_bytes()).hexdigest()
+    )
 
 
 def _write_synthetic_wheelhouse(tmp_path: Path) -> tuple[Path, Path]:
@@ -4343,6 +4392,9 @@ def _synthetic_build_spec(tmp_path: Path) -> operator.BuildSpec:
     alias_tool.write_text("# synthetic alias tool\n", encoding="ascii")
     alias_dependency = tmp_path / "backfill_telegram_file_aliases.py"
     alias_dependency.write_text("# synthetic alias dependency\n", encoding="ascii")
+    product_runner = tmp_path / "deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py"
+    product_runner.parent.mkdir(parents=True)
+    product_runner.write_text("# synthetic product witness runner\n", encoding="ascii")
     return operator.BuildSpec(
         commit="a" * 40,
         version="0.206.0",
@@ -4363,6 +4415,8 @@ def _synthetic_build_spec(tmp_path: Path) -> operator.BuildSpec:
         alias_tool_sha256=hashlib.sha256(alias_tool.read_bytes()).hexdigest(),
         alias_dependency=alias_dependency,
         alias_dependency_sha256=hashlib.sha256(alias_dependency.read_bytes()).hexdigest(),
+        secondary_product_runner=product_runner,
+        secondary_product_runner_sha256=hashlib.sha256(product_runner.read_bytes()).hexdigest(),
         max_schema=34,
     )
 
@@ -4617,6 +4671,11 @@ def test_build_smoke_failure_cleans_only_prepublication_staging_and_quarantines_
         operator.VENV_RELOCATION_CONTRACT,
     )
     operator.verify_release_tree(release)
+    product_runner = target / operator._SECONDARY_PRODUCT_RUNNER_ARTIFACT  # noqa: SLF001
+    assert product_runner.read_bytes() == spec.secondary_product_runner.read_bytes()
+    assert stat.S_IMODE(os.lstat(product_runner).st_mode) == 0o400
+    loaded = operator.load_release_identity(target, expected_tree_sha256=digest)
+    assert loaded.secondary_product_runner_sha256 == spec.secondary_product_runner_sha256
     with pytest.raises(operator.ReleaseFailure, match="^release_target_exists$"):
         operator.build_release(spec)
     assert hashlib.sha256(manifest.read_bytes()).hexdigest() == digest
@@ -5110,6 +5169,9 @@ def test_missing_venv_fails_before_release_staging_or_target(
 
     monkeypatch.setattr(operator.subprocess, "run", unavailable)
     monkeypatch.setattr(operator.tempfile, "mkdtemp", unexpected_staging)
+    product_runner = (
+        Path(__file__).parents[1] / "deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py"
+    )
     spec = operator.BuildSpec(
         commit=commit,
         version="0.206.0",
@@ -5130,6 +5192,8 @@ def test_missing_venv_fails_before_release_staging_or_target(
         alias_tool_sha256=hashlib.sha256(alias_tool.read_bytes()).hexdigest(),
         alias_dependency=alias_dependency,
         alias_dependency_sha256=hashlib.sha256(alias_dependency.read_bytes()).hexdigest(),
+        secondary_product_runner=product_runner,
+        secondary_product_runner_sha256=hashlib.sha256(product_runner.read_bytes()).hexdigest(),
         max_schema=34,
     )
     with pytest.raises(operator.ReleaseFailure, match="^base_python_venv_unavailable$"):
@@ -5183,6 +5247,9 @@ def test_post_seal_failure_removes_staging_and_preserves_original_failure(
     monkeypatch.setattr(operator, "_verify_relocated_venv", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(operator, "_activation_smoke", lambda **_kwargs: None)
     monkeypatch.setattr(operator, "_write_private_durable", fail_after_seal)
+    product_runner = (
+        Path(__file__).parents[1] / "deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py"
+    )
     spec = operator.BuildSpec(
         commit="a" * 40,
         version="0.206.0",
@@ -5203,6 +5270,8 @@ def test_post_seal_failure_removes_staging_and_preserves_original_failure(
         alias_tool_sha256=hashlib.sha256(alias_tool.read_bytes()).hexdigest(),
         alias_dependency=alias_dependency,
         alias_dependency_sha256=hashlib.sha256(alias_dependency.read_bytes()).hexdigest(),
+        secondary_product_runner=product_runner,
+        secondary_product_runner_sha256=hashlib.sha256(product_runner.read_bytes()).hexdigest(),
         max_schema=34,
     )
     with pytest.raises(operator.ReleaseFailure, match="^synthetic_post_seal_failure$"):

@@ -1,14 +1,18 @@
 # Optional secondary brain implementation status
 
-- Updated: 2026-08-24
+- Updated: 2026-08-25
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
-- Phase: **provisional finalist live certification**
-- Primary production: Friday `0.207.9` /
-  `2b197e1e467e93a085a1b4cc330fbda8b5b7b982`, schema 39; schema-capable
-  fallback `f1426ca561f8914574cebf3a69f8dde83f79b568`
-- Current implementation checkpoint: `main` at
-  `1e3834dd5d987f84c6ca6a490c0cd9b3ac2756ed`
+- Phase: **default-off product-evidence release; physical/profile acceptance pending**
+- Last accepted production predecessor: Friday `0.207.10` /
+  `aaae455a3eec6024c1e4e338d8f00b31ee90f995`, tree
+  `4f5c5e9a130e33f47fbf8f9282362f77b18b8f625d00f313b0cda4124d7ab76e`, wheel
+  `a563ad94c678ca5332f0cfe142ef65a18c6cc4a12f7e07b9d64c2734d06181f6`,
+  schema 39; schema-capable fallback
+  `f1426ca561f8914574cebf3a69f8dde83f79b568` / tree
+  `eb8102ccf759b0f2a2d9a0a38584d9cda0c4938f14d389ac55246d87e536e6f7`
+- Current candidate source: Friday `0.207.11` in this revision; its immutable
+  source/tree/wheel identities are written by the release operator at cutover
 - Rollout policy: default-off; the primary model remains required and final;
   the secondary has no tool, effect, publication or V12 authority. The
   accepted registry is empty, `assist` admission is closed and production sends
@@ -23,16 +27,16 @@
   Docker Desktop `4.87.0`, Linux engine `29.7.2`.
 - RTX 5080 Laptop GPU: driver `610.88`, 16,303 MiB VRAM and compute capability
   `12.0`; the pinned CUDA container reproduced those facts.
-- The current repository checkpoint and laptop finalist use the exact profile
-  and runtime identities below. The fresh epoch-D capacity-v2 warm trial passed;
-  a new 30-minute soak is active and this status does not claim its result before
-  the final receipt closes.
+- The current released source and laptop finalist use the exact profile and
+  runtime identities below. Fresh warm, 30-minute soak and cold-restart
+  capacity-v2 evidence are closed; profile acceptance is not.
 - The observed hardware receipt is
   `7b850221e7e11ac0063971d7baaf627c96eae5441368f1907cc070106832b0f3`;
   its protected accepted form is
   `0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f`.
-  The earlier sealed-source preflight ended with zero running containers; the
-  exact finalist containers are now running for the active certification chain.
+  The earlier sealed-source preflight ended with zero running containers; later
+  certification receipts bind the exact finalist runtime without asserting its
+  current container state.
 
 ## Model/runtime checkpoint
 
@@ -66,12 +70,26 @@
   passed seven non-streaming exact 512-token repeats at runtime epoch
   `1787601267.06`: median end-to-end completion rate `108.497563` tokens/s and
   minimum free GPU memory 1,294 MiB. The harness is fail-fast on the first
-  failed protocol/capacity gate. Status remains `measured_not_yet_certified`
-  pending the active fresh soak and a matching cold-restart v2 receipt. Earlier
-  passed soak and streaming capacity-v1 receipts are retained as historical
-  measurements only and are ineligible for v2 acceptance. The finalist remains
-  `candidate`, is registered only for non-private discarded `shadow/extract`,
-  and is not an accepted production profile.
+  failed protocol/capacity gate.
+- Epoch-D soak passed in 1,800.218 seconds with 4,467 requests, zero failures,
+  minimum free GPU memory 1,294 MiB and peak temperature 75 C. Its SHA-256 is
+  `852673984f6705c148d0a92957d3c2f2fd5360925b0fddd2225eb8b631a8983a`.
+- After a real cold restart, epoch `1787603294.09` passed capacity v2 7/7 at
+  exact 512 completion tokens: median end-to-end rate `106.733375` tokens/s,
+  minimum free GPU memory 1,296 MiB and receipt SHA-256
+  `9c60611b939098020faa4f9077debde3bec96c9ded2bffc3c3385fc94d5ffa87`.
+  The post-cold probe, 29/29 quality and unchanged quality-epoch receipts hash to
+  `b3a88138d43ac799aa113e1b53f8cc9b0c0c106d0decaf71726a438e29ddeec5`,
+  `7bb0e3aa9b48dd95afdf8a1c226fa5b7eae6212f45f72966d82344cd3227e824`
+  and `b7e345962770e26f45b90f33c9ac7180be4c72dc4427247025a23fefe197a310`.
+- The verified v2 wrapper accepted the exact warm/cold/soak capacity chain;
+  accepted-capacity SHA-256 is
+  `519b5912428f491dc65928c5ba2d2e33a6408566fe5f3496501ce2e760b9205e`.
+  The earlier operational wrapper's v1 schema assertion was superseded and
+  produced no false success. Earlier streaming capacity-v1 receipts remain
+  historical and ineligible. The finalist itself remains `candidate`, is
+  registered only for non-private discarded `shadow/extract`, and is not an
+  accepted production profile.
 
 ## Friday checkpoint
 
@@ -86,26 +104,24 @@
   choice. Quality now includes deterministic near-limit recall derived from the
   profile context; endpoint/capacity evidence is bound to exact HTTPS, private
   CA, profile epoch, context and memory without retaining raw prompts.
-- The latest completed full non-UI gate before the soak-protocol-only follow-up
-  commits passed 17,951 tests; one explicitly configured real-Syncthing case
-  remained environment-gated. Static and focused secondary gates are green.
+- The canonical gate passed 18,021 tests. Static and focused secondary gates are
+  green.
 
 ## Paused parent checkpoint
 
 - ICP schema 39 and the narrow durable exact selected-archive-evidence replay
-  are deployed in `0.207.9`. Broader ICP work remains paused until the urgent
+  remain deployed. Broader ICP work remains paused until the urgent
   secondary package reaches its safe rollout checkpoint.
 
 ## Active order
 
-1. Finish active `soak.epoch-d.full.7c1f742.json`, then run the identical
-   capacity-v2 protocol after a cold runtime restart; do not accept either from
-   an in-progress or historical receipt.
-2. Release the exact current finalist code default-off, then pass deterministic,
-   controlled-live and physical laptop-loss batteries from that sealed source;
-   accept only the evidence-bound finalist.
-3. Register the resulting accepted manifest in a separate default-off release,
-   then prove the separate private product-shadow stage before narrow assist,
+1. Release this exact `0.207.11` product-evidence implementation default-off,
+   then complete deterministic, controlled-live and pre-acceptance physical
+   laptop-loss evidence from that immutable source; accept only the fully
+   evidence-bound finalist.
+2. Register the resulting accepted manifest in a separate default-off release.
+3. Prove the separate private product-shadow stage before narrow assist,
+   then repeat the physical cycle with product-linked counters in assist,
    including laptop-off and mid-turn disconnect behavior.
 4. Resume the paused ICP durable vertical, then the scheduled V12 refinement.
 
@@ -113,7 +129,6 @@
 
 - No secondary profile is accepted and no production Friday request is sent to
   the laptop. The deployed feature remains default-off and assist is blocked.
-- The exact 4K/BF16 finalist is provisional. The active fresh epoch-D soak,
-  matching cold-restart capacity-v2 receipt, failure evidence, physical
-  power-loss witness and end-to-end shadow/assist operation remain to be
-  completed and accepted.
+- The exact 4K/BF16 finalist is provisional. Capacity v2 is accepted, but
+  failure/product/physical evidence, profile acceptance, registry promotion and
+  end-to-end private-shadow/assist operation remain pending.

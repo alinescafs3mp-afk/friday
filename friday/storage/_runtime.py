@@ -504,7 +504,15 @@ class RuntimeMixin(StorageShared):
         with self.transaction() as conn:
             cursor = conn.execute(
                 """DELETE FROM request_idempotency
-                   WHERE datetime(COALESCE(NULLIF(updated_at, ''), created_at)) < datetime('now', ?)
+                   WHERE (
+                         datetime(COALESCE(NULLIF(updated_at, ''), created_at)) < datetime('now', ?)
+                         OR (
+                           request_key LIKE 'secondary-product-witness-purge:%'
+                           AND state='complete'
+                           AND datetime(COALESCE(NULLIF(updated_at, ''), created_at))
+                               < datetime('now', '-24 hours')
+                         )
+                       )
                      AND CASE WHEN json_valid(response_json)
                               THEN COALESCE(
                                   json_extract(response_json, '$.idempotency_effect_uncertain'),

@@ -22,7 +22,11 @@ from dataclasses import replace
 import pytest
 
 from friday.executive.service import _PROPOSE_INBOX_THRESHOLD, ExecutiveService
-from friday.storage.models import MissionOrigin, MissionStatus
+from friday.secondary_product_witness import (
+    secondary_product_witness_content,
+    secondary_product_witness_source_ref,
+)
+from friday.storage.models import InboxItem, InboxStatus, MissionOrigin, MissionStatus, RawObject, new_id
 
 
 class _HangingPlanner:
@@ -99,3 +103,48 @@ async def test_the_proposers_own_output_is_not_the_backlog(settings, storage, mo
     monkeypatch.setattr(storage, "list_inbox_detailed", lambda *a, **k: own)
 
     assert await service.maybe_propose_from_backlog("alice") is None
+
+
+@pytest.mark.asyncio
+async def test_nine_ordinary_items_plus_reserved_witness_do_not_create_a_mission(settings, storage):
+    storage.ensure_user("alice")
+    service = _service(replace(settings, autonomy_enabled=True), storage, _TrivialPlanner())
+    for index in range(_PROPOSE_INBOX_THRESHOLD - 1):
+        raw = storage.store_raw_object(
+            RawObject(
+                id=new_id("raw"),
+                user_id="alice",
+                source="api",
+                source_ref=f"ordinary:{index}",
+                raw_content=f"ordinary backlog item {index}",
+                content_type="text/plain",
+            )
+        )
+        storage.store_inbox_item(InboxItem(id=new_id("inbox"), user_id="alice", raw_object_id=raw.id))
+
+    nonce = "a" * 32
+    source_ref = secondary_product_witness_source_ref("assist", nonce)
+    content = secondary_product_witness_content("assist", nonce)
+    witness = storage.store_raw_object(
+        RawObject(
+            id=new_id("raw"),
+            user_id="alice",
+            source="api",
+            source_ref=source_ref,
+            raw_content=content,
+            content_type="text/plain",
+            metadata_json={"secondary_product_witness": True, "uploaded_by": "alice"},
+        )
+    )
+    storage.store_inbox_item(
+        InboxItem(
+            id=new_id("inbox"),
+            user_id="alice",
+            raw_object_id=witness.id,
+            promotion_score=1.0,
+        )
+    )
+
+    assert storage.count_inbox("alice", InboxStatus.PENDING) == _PROPOSE_INBOX_THRESHOLD - 1
+    assert await service.maybe_propose_from_backlog("alice") is None
+    assert storage.list_missions("alice", limit=10) == []

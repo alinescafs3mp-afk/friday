@@ -27,6 +27,7 @@ from friday.ingestion._base import (
     new_id,
     utc_now,
 )
+from friday.secondary_product_witness import is_secondary_product_witness_raw
 
 
 def _candidate_for_inbox(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -220,6 +221,9 @@ class ReviewMixin(PipelineShared):
         item = self.storage.get_inbox_item(inbox_id, user_id)
         if not item:
             return None
+        raw = self.storage.get_raw_object(str(item["raw_object_id"]), user_id)
+        if is_secondary_product_witness_raw(raw):
+            raise ValueError("Secondary product witness can only be handled by its reserved admin route")
         reviewer = reviewed_by or user_id
         if entity_id:
             entity = self.storage.get_entity(entity_id, user_id)
@@ -329,7 +333,6 @@ class ReviewMixin(PipelineShared):
             promotion_score=1.0 if ko_id else None,
             notes=notes if notes else None,
         )
-        raw = self.storage.get_raw_object(str(item["raw_object_id"]), user_id)
         raw_metadata = _json_dict(raw.get("metadata_json")) if raw else {}
         original_assessment = _json_dict(raw_metadata.get("promotion_assessment"))
         score = (

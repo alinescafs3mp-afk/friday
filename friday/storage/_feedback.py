@@ -337,15 +337,28 @@ def _feedback_target_is_visible(
         predicate = _not_private_raw_dependency("target_raw")
         row = conn.execute(
             f"""SELECT 1 FROM raw_objects target_raw
-                 WHERE id=? AND user_id=? AND {predicate}""",  # nosec B608
+                 WHERE id=? AND user_id=? AND {predicate}
+                   AND friday_secondary_product_witness_raw(
+                       target_raw.source, target_raw.source_ref, target_raw.raw_content,
+                       target_raw.content_hash, target_raw.metadata_json
+                   )=0""",  # nosec B608
             (target_id, user_id),
         ).fetchone()
         return row is not None
     if target_type == "inbox":
         predicate = _not_private_inbox_dependency("target_inbox")
+        raw_predicate = _not_private_raw_dependency("target_raw")
         row = conn.execute(
             f"""SELECT 1 FROM inbox target_inbox
-                 WHERE id=? AND user_id=? AND {predicate}""",  # nosec B608
+                 JOIN raw_objects target_raw
+                   ON target_raw.id=target_inbox.raw_object_id
+                  AND target_raw.user_id=target_inbox.user_id
+                 WHERE target_inbox.id=? AND target_inbox.user_id=?
+                   AND {predicate} AND {raw_predicate}
+                   AND friday_secondary_product_witness_raw(
+                       target_raw.source, target_raw.source_ref, target_raw.raw_content,
+                       target_raw.content_hash, target_raw.metadata_json
+                   )=0""",  # nosec B608
             (target_id, user_id),
         ).fetchone()
         return row is not None
