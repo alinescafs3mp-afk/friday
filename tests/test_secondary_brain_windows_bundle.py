@@ -383,7 +383,8 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
         "0.0.0.0-192.168.1.34",
         "192.168.1.36-192.168.1.77",
         "192.168.1.79-255.255.255.255",
-        "::/0",
+        "::/1",
+        "8000::/1",
     ):
         assert address_range in firewall
     assert "@($PrimaryFridayHost, $localFridayHost)" in firewall

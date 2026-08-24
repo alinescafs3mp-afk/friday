@@ -23,7 +23,7 @@ $ipv4BlockAddresses = @(
     '192.168.1.36-192.168.1.77',
     '192.168.1.79-255.255.255.255'
 )
-$ipv6BlockAddresses = @('::/0')
+$ipv6BlockAddresses = @('::/1', '8000::/1')
 $blockSpecs = @(
     [pscustomobject]@{
         name = $ipv4BlockName

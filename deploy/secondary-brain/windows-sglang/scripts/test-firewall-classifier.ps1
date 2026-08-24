@@ -295,11 +295,13 @@ $ipv4Complement = @(
     '192.168.1.79-255.255.255.255'
 )
 Assert-FridayTrue -Name 'exact_ipv4_ipv6_complement_is_complete' `
-    -Value (Test-FridayRemoteAddressComplementExact $ipv4Complement @('::/0'))
+    -Value (Test-FridayRemoteAddressComplementExact $ipv4Complement @('::/1', '8000::/1'))
 Assert-FridayFalse -Name 'missing_complement_range_fails_closed' `
-    -Value (Test-FridayRemoteAddressComplementExact $ipv4Complement[0..1] @('::/0'))
+    -Value (Test-FridayRemoteAddressComplementExact $ipv4Complement[0..1] @('::/1', '8000::/1'))
 Assert-FridayFalse -Name 'missing_ipv6_block_fails_closed' `
     -Value (Test-FridayRemoteAddressComplementExact $ipv4Complement @())
+Assert-FridayFalse -Name 'half_ipv6_space_fails_closed' `
+    -Value (Test-FridayRemoteAddressComplementExact $ipv4Complement @('::/1'))
 
 $managedBlockRule = [pscustomobject]@{
     Name = 'Friday.Secondary.SGLang.Block.Complement.IPv4.TCP8443'

@@ -356,7 +356,7 @@ function Test-FridayRemoteAddressComplementExact {
         '192.168.1.79-255.255.255.255'
     )
     (Test-FridayExactStringSet $IPv4RemoteAddresses $expectedIPv4) -and
-        (Test-FridayExactStringSet $IPv6RemoteAddresses @('::/0'))
+        (Test-FridayExactStringSet $IPv6RemoteAddresses @('::/1', '8000::/1'))
 }
 
 function Get-FridayAuthenticatedBypassAssessment {
