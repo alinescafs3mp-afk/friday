@@ -38,11 +38,7 @@ CURRENT_JOURNEYS = {
     "document_recall_answer": (
         "Document recall and answer",
         "DEGRADED",
-        (
-            "stable_source_passage_identity_missing",
-            "cross_lane_coverage_missing",
-            "durable_continuation_missing",
-        ),
+        ("cross_lane_coverage_missing",),
     ),
     "obsidian_write_sync": (
         "Obsidian write and synchronization",
@@ -100,18 +96,25 @@ _PROOF_REFS_BY_JOURNEY_CLASS = {
     ),
     ("conversation_recall", "integration path"): (
         "tests/test_message_window_runtime_integration.py::test_promoted_exact_window_is_deterministic_scoped_and_receipted",
+        "tests/test_archive_search_runtime_publication.py::test_selected_message_archive_evidence_replays_after_restart_then_drifts_closed",
     ),
     ("conversation_recall", "restart and recovery evidence"): (
         "tests/test_message_window_work_item_runtime.py::test_restart_temporal_followup_reuses_identity_role_and_zone_with_one_cas_update",
+        "tests/test_archive_search_runtime_publication.py::test_selected_message_archive_evidence_replays_after_restart_then_drifts_closed",
     ),
     ("document_recall_answer", "deterministic contract"): (
         "tests/test_v12_file_evidence_reader.py::test_current_turn_native_files_form_one_process_owned_bundle",
     ),
     ("document_recall_answer", "integration path"): (
         "tests/test_v12_file_evidence_reader.py::test_reader_contract_matches_real_ingestion_projections",
+        "tests/test_archive_search_runtime_publication.py::test_selected_canonical_archive_evidence_replays_exactly_after_runtime_restart",
     ),
     ("document_recall_answer", "synthetic live path"): (
         "tests/test_document_contour_live_battery.py::test_manifest_is_exactly_ten_unique_document_scenarios",
+    ),
+    ("document_recall_answer", "restart and recovery evidence"): (
+        "tests/test_archive_search_runtime_publication.py::test_selected_canonical_archive_evidence_replays_exactly_after_runtime_restart",
+        "tests/test_archive_search_runtime_publication.py::test_selected_archive_replay_failure_is_source_free_and_suspends",
     ),
     ("obsidian_write_sync", "deterministic contract"): (
         "tests/test_obsidian_structured_acceptance_core.py::test_conflict_preview_is_non_destructive_and_contains_both_versions",
@@ -910,6 +913,8 @@ def test_canonical_golden_journey_registry_is_closed_current_and_privacy_safe(
         for row in rows
         for evidence_class in _CURRENT_SNAPSHOT_MISSING_CLASSES
     )
+    document = next(row for row in rows if row.journey_id == "document_recall_answer")
+    assert document.evidence["restart and recovery evidence"].state == "AVAILABLE"
 
     detailed = (ROOT / "outer_sol" / "INTERACTION_CONTROL_PLANE_IMPLEMENTATION_STATUS.md").read_text(
         encoding="utf-8"

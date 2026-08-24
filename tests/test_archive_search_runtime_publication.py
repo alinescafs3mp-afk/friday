@@ -407,6 +407,29 @@ def _seed_document(
     return raw_id
 
 
+def _seed_message_archive(
+    storage: Any,
+    *,
+    suffix: str,
+) -> tuple[str, str]:
+    storage.ensure_user(_OWNER, preset_key="user")
+    conversation = storage.create_conversation(_OWNER, title=f"message archive{suffix}")
+    storage.store_message(
+        str(conversation["id"]),
+        _OWNER,
+        "user",
+        f"Исходный вопрос{suffix}.",
+    )
+    selected_text = f"Ответ до исходной границы{suffix}: {_QUERY}."
+    storage.store_message(
+        str(conversation["id"]),
+        _OWNER,
+        "assistant",
+        selected_text,
+    )
+    return str(conversation["id"]), selected_text
+
+
 async def _runtime(
     settings: Any,
     storage: Any,
@@ -1074,6 +1097,158 @@ async def test_selected_canonical_archive_evidence_replays_exactly_after_runtime
     assert advanced.transition is WorkTransition.EVIDENCE_REPLAYED
     assert advanced.revision == created.revision + 1
     assert advanced.anchor_assistant_message_id == replay["message_id"]
+
+
+@pytest.mark.asyncio
+async def test_selected_message_archive_evidence_replays_after_restart_then_drifts_closed(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_conversation_id, selected_text = _seed_message_archive(
+        storage,
+        suffix="-durable-message-restart",
+    )
+    search_model = _ArchiveModel(
+        first_arguments={"query": _QUERY, "corpora": ["messages"], "limit": 5},
+    )
+    initial_runtime, initial_kernel, actor, _model, initial_web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=search_model,
+    )
+    try:
+        initial = await _chat(
+            initial_runtime,
+            actor,
+            answer_with_voice=False,
+            message="Найди сообщения с контрольным значением в моём личном архиве.",
+        )
+    finally:
+        await initial_web.close()
+
+    assert [name for name, _arguments in initial_kernel.calls] == ["archive_search"]
+    assert initial_kernel.calls[0][1]["corpora"] == ["messages"]
+    row = storage.execute(
+        """SELECT id FROM work_items
+             WHERE user_id=? AND conversation_id=?
+               AND kind='recall_selected_archive_evidence'""",
+        (_OWNER, str(initial["conversation_id"])),
+    ).fetchone()
+    assert row is not None
+    with storage.transaction() as conn:
+        created = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=str(row["id"]),
+            user_id=_OWNER,
+            conversation_id=str(initial["conversation_id"]),
+        )
+    assert created is not None
+    assert created.selected_evidence.corpus.value == "messages"
+    assert created.selected_evidence.source_ref.canonical_object_id == source_conversation_id
+    assert created.state is WorkState.ACTIVE
+    assert created.transition is WorkTransition.CREATED
+    assert created.revision == 1
+
+    late_text = f"Сообщение после исходной границы: {_QUERY}-LATE."
+    storage.store_message(
+        source_conversation_id,
+        _OWNER,
+        "assistant",
+        late_text,
+    )
+
+    no_model = _DirectAnswerModel()
+    restarted, replay_kernel, replay_actor, _model, replay_web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=no_model,
+    )
+    replay_authorize_calls: list[tuple[str, str]] = []
+    original_authorize = replay_kernel.authorization.authorize
+
+    def observe_replay_authorize(fresh_actor: ActorContext, security_id: str) -> Any:
+        replay_authorize_calls.append((fresh_actor.own_id, security_id))
+        return original_authorize(fresh_actor, security_id)
+
+    monkeypatch.setattr(replay_kernel.authorization, "authorize", observe_replay_authorize)
+    try:
+        replay = await restarted.chat(
+            _OWNER,
+            "Что в нём сказано?",
+            actor=replay_actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            answer_with_voice=False,
+        )
+    finally:
+        await replay_web.close()
+
+    assert selected_text in replay["message"]
+    assert late_text not in replay["message"]
+    assert replay["context"]["selected_archive_evidence_replay"] in {"complete", "partial"}
+    assert replay["tools_used"] == []
+    assert no_model.calls == 0
+    assert replay_kernel.calls == []
+    assert replay_authorize_calls[-2:] == [
+        (_OWNER, "search.use"),
+        (_OWNER, "conversations.read"),
+    ]
+    with storage.transaction() as conn:
+        advanced = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert advanced is not None
+    assert advanced.state is WorkState.ACTIVE
+    assert advanced.transition is WorkTransition.EVIDENCE_REPLAYED
+    assert advanced.revision == created.revision + 1
+    assert advanced.anchor_assistant_message_id == replay["message_id"]
+
+    assert storage.archive_conversation(source_conversation_id, _OWNER) is True
+
+    drift_model = _DirectAnswerModel()
+    drifted_runtime, drift_kernel, drift_actor, _model, drift_web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=drift_model,
+    )
+    try:
+        drifted = await drifted_runtime.chat(
+            _OWNER,
+            "Покажи фрагмент.",
+            actor=drift_actor,
+            conversation_id=str(initial["conversation_id"]),
+            enable_tools=True,
+            answer_with_voice=False,
+        )
+    finally:
+        await drift_web.close()
+
+    assert drifted["context"]["selected_archive_evidence_replay"] == "drifted"
+    source_free = json.dumps(drifted, ensure_ascii=False)
+    assert selected_text not in source_free
+    assert late_text not in source_free
+    assert _QUERY not in source_free
+    assert drifted["tools_used"] == []
+    assert drift_model.calls == 0
+    assert drift_kernel.calls == []
+    with storage.transaction() as conn:
+        suspended = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert suspended is not None
+    assert suspended.state is WorkState.SUSPENDED
+    assert suspended.transition is WorkTransition.SUSPENDED
+    assert suspended.revision == advanced.revision + 1
 
 
 @pytest.mark.asyncio
