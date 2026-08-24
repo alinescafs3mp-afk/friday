@@ -88,6 +88,50 @@ MAX_OBSIDIAN_BACKUP_ENTRIES = 100_000
 MAX_OBSIDIAN_BACKUP_BYTES = 16 << 30
 _SMOKE_SCRATCH_ROOT = Path("/var/tmp/friday-immutable-smoke")
 _OBSIDIAN_ENABLE_TRANSITION = "obsidian_enable"
+_SECONDARY_SHADOW_ENABLE_TRANSITION = "secondary_shadow_enable"
+_STAGED_CONFIG_TRANSITIONS = frozenset({_OBSIDIAN_ENABLE_TRANSITION, _SECONDARY_SHADOW_ENABLE_TRANSITION})
+_SECONDARY_LLM_ENV_PREFIX = "FRIDAY_SECONDARY_LLM_"
+_SECONDARY_LLM_ENV_KEYS = frozenset(
+    {
+        "FRIDAY_SECONDARY_LLM_ADMISSION_TIMEOUT_SEC",
+        "FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT",
+        "FRIDAY_SECONDARY_LLM_API_KEY",
+        "FRIDAY_SECONDARY_LLM_BASE_URL",
+        "FRIDAY_SECONDARY_LLM_CALL_BUDGET_SEC",
+        "FRIDAY_SECONDARY_LLM_CA_FILE",
+        "FRIDAY_SECONDARY_LLM_CONNECT_TIMEOUT_SEC",
+        "FRIDAY_SECONDARY_LLM_COOLDOWN_SEC",
+        "FRIDAY_SECONDARY_LLM_ENABLED",
+        "FRIDAY_SECONDARY_LLM_HEALTH_INTERVAL_SEC",
+        "FRIDAY_SECONDARY_LLM_MAX_CONCURRENCY",
+        "FRIDAY_SECONDARY_LLM_MAX_CONTEXT_TOKENS",
+        "FRIDAY_SECONDARY_LLM_MODE",
+        "FRIDAY_SECONDARY_LLM_MODEL",
+        "FRIDAY_SECONDARY_LLM_PROFILE",
+        "FRIDAY_SECONDARY_LLM_READ_TIMEOUT_SEC",
+        "FRIDAY_SECONDARY_LLM_WORKLOADS",
+    }
+)
+_SECONDARY_V9_PROFILE_ID = "gptoss20b-ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3"
+_SECONDARY_V9_MODEL_ALIAS = f"friday-secondary-{_SECONDARY_V9_PROFILE_ID}"
+_SECONDARY_V9_CA_SHA256 = "392756a74fd9100635c42f4fbf7e5a5f1822d18ea898ebb7848b9fdd0bddc1fe"
+_SECONDARY_SHADOW_EXACT_VALUES = {
+    "FRIDAY_SECONDARY_LLM_ADMISSION_TIMEOUT_SEC": "0.10",
+    "FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT": "0",
+    "FRIDAY_SECONDARY_LLM_BASE_URL": "https://192.168.1.35:8443/v1",
+    "FRIDAY_SECONDARY_LLM_CALL_BUDGET_SEC": "15.0",
+    "FRIDAY_SECONDARY_LLM_CONNECT_TIMEOUT_SEC": "1.0",
+    "FRIDAY_SECONDARY_LLM_COOLDOWN_SEC": "60",
+    "FRIDAY_SECONDARY_LLM_ENABLED": "1",
+    "FRIDAY_SECONDARY_LLM_HEALTH_INTERVAL_SEC": "30",
+    "FRIDAY_SECONDARY_LLM_MAX_CONCURRENCY": "1",
+    "FRIDAY_SECONDARY_LLM_MAX_CONTEXT_TOKENS": "4096",
+    "FRIDAY_SECONDARY_LLM_MODE": "shadow",
+    "FRIDAY_SECONDARY_LLM_MODEL": _SECONDARY_V9_MODEL_ALIAS,
+    "FRIDAY_SECONDARY_LLM_PROFILE": _SECONDARY_V9_PROFILE_ID,
+    "FRIDAY_SECONDARY_LLM_READ_TIMEOUT_SEC": "12.0",
+    "FRIDAY_SECONDARY_LLM_WORKLOADS": "extract",
+}
 BOOTSTRAP_WHEELS = (("pip", "26.1.2", "pip-26.1.2-py3-none-any.whl"),)
 _ACTIVATION_SMOKE_RECEIPT = b"friday-activation-smoke:clear:v1\n"
 _OBSIDIAN_SETTINGS_IDENTITY_PROBE = """
@@ -407,6 +451,101 @@ def _read_private_regular_file(path: Path, *, maximum_bytes: int, code: str) -> 
     finally:
         if descriptor >= 0:
             os.close(descriptor)
+
+
+def _secondary_environment_view(raw: bytes) -> tuple[dict[str, str], bytes]:
+    """Mirror ``load_local_env_file`` while retaining unrelated bytes exactly."""
+
+    values: dict[str, str] = {}
+    unrelated: list[bytes] = []
+    try:
+        text = raw.decode("utf-8", errors="strict")
+    except UnicodeError as exc:
+        raise ReleaseFailure("secondary_shadow_environment_invalid") from exc
+    raw_lines = text.splitlines(keepends=True)
+    logical_lines = text.splitlines()
+    if len(raw_lines) != len(logical_lines):  # pragma: no cover - Python owns both operations
+        raise ReleaseFailure("secondary_shadow_environment_invalid")
+    previous_ending = ""
+    canonical_endings = {"", "\n", "\r", "\r\n"}
+    for raw_line, line in zip(raw_lines, logical_lines, strict=True):
+        ending = raw_line[len(line) :] if raw_line.startswith(line) else "\x00"
+        follows_canonical_line = previous_ending in canonical_endings
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            unrelated.append(raw_line.encode("utf-8"))
+            previous_ending = ending
+            continue
+        if stripped.startswith("export "):
+            stripped = stripped[7:].strip()
+        key, separator, value = stripped.partition("=")
+        key = key.strip()
+        if not separator or not key:
+            unrelated.append(raw_line.encode("utf-8"))
+            previous_ending = ending
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        if key.startswith("JERICHO_SECONDARY_LLM_"):
+            raise ReleaseFailure("secondary_shadow_legacy_environment_forbidden")
+        if not key.startswith(_SECONDARY_LLM_ENV_PREFIX):
+            unrelated.append(raw_line.encode("utf-8"))
+            previous_ending = ending
+            continue
+        if (
+            key not in _SECONDARY_LLM_ENV_KEYS
+            or key in values
+            or line != f"{key}={value}"
+            or ending not in canonical_endings
+            or not follows_canonical_line
+        ):
+            raise ReleaseFailure("secondary_shadow_environment_invalid")
+        if any(character in value for character in "\x00\r\n"):
+            raise ReleaseFailure("secondary_shadow_environment_invalid")
+        values[key] = value
+        previous_ending = ending
+    return values, b"".join(unrelated)
+
+
+def _validate_secondary_shadow_environment(
+    predecessor: bytes | None,
+    target: bytes,
+) -> None:
+    """Admit only the exact code-owned v9 shadow profile and its private CA."""
+
+    target_values, target_unrelated = _secondary_environment_view(target)
+    if set(target_values) != _SECONDARY_LLM_ENV_KEYS:
+        raise ReleaseFailure("secondary_shadow_environment_invalid")
+    if any(target_values.get(key) != value for key, value in _SECONDARY_SHADOW_EXACT_VALUES.items()):
+        raise ReleaseFailure("secondary_shadow_environment_invalid")
+    api_key = target_values["FRIDAY_SECONDARY_LLM_API_KEY"]
+    if _HEX64.fullmatch(api_key) is None:
+        raise ReleaseFailure("secondary_shadow_environment_invalid")
+    ca_raw = target_values["FRIDAY_SECONDARY_LLM_CA_FILE"]
+    ca_path = Path(ca_raw)
+    if (
+        not ca_path.is_absolute()
+        or Path(os.path.abspath(ca_path)) != ca_path
+        or any(character in ca_raw for character in "\x00\r\n")
+    ):
+        raise ReleaseFailure("secondary_shadow_ca_invalid")
+    ca = _read_private_regular_file(
+        ca_path,
+        maximum_bytes=1 << 20,
+        code="secondary_shadow_ca_invalid",
+    )
+    if _sha256_bytes(ca) != _SECONDARY_V9_CA_SHA256:
+        raise ReleaseFailure("secondary_shadow_ca_digest_mismatch")
+    if predecessor is None:
+        return
+    predecessor_values, predecessor_unrelated = _secondary_environment_view(predecessor)
+    if predecessor_unrelated != target_unrelated:
+        raise ReleaseFailure("secondary_shadow_unrelated_environment_changed")
+    if predecessor_values.get("FRIDAY_SECONDARY_LLM_ENABLED", "0") != "0" or (
+        predecessor_values.get("FRIDAY_SECONDARY_LLM_MODE", "disabled") not in {"disabled", "shadow"}
+    ):
+        raise ReleaseFailure("secondary_shadow_predecessor_not_disabled")
 
 
 def _runtime_pins(path: Path) -> dict[str, str]:
@@ -1929,7 +2068,7 @@ def _staged_config_transition(
     next_env_file_sha256 = str(state.get("next_env_file_sha256") or "")
     if transition == "" and predecessor_env_sha256 == next_env_file == next_env_file_sha256 == "":
         return None
-    if transition != _OBSIDIAN_ENABLE_TRANSITION:
+    if transition not in _STAGED_CONFIG_TRANSITIONS:
         raise ReleaseFailure("activation_prebackup_transition_invalid")
     next_path = Path(next_env_file)
     if (
@@ -2431,6 +2570,7 @@ class SystemdConfig:
     obsidian_root: Path | None = None
     next_env_file: Path | None = None
     next_env_file_sha256: str = ""
+    staged_config_transition: str = ""
     health_url: str = "https://127.0.0.1:8000/api/health"
     backend_unit: str = "friday-backend.service"
     bridge_unit: str = "friday-bridge.service"
@@ -2445,6 +2585,18 @@ def _obsidian_root_sha256(config: SystemdConfig) -> str:
     return _sha256_bytes(str(_obsidian_root(config)).encode("utf-8"))
 
 
+def _requested_staged_config_transition(config: SystemdConfig) -> str:
+    if config.staged_config_transition:
+        if config.staged_config_transition not in _STAGED_CONFIG_TRANSITIONS:
+            raise ReleaseFailure("staged_config_transition_invalid")
+        return config.staged_config_transition
+    if config.next_env_file is not None or config.next_env_file_sha256:
+        # Preserve the established Obsidian CLI/programmatic contract.  The new
+        # secondary transition must always be selected explicitly.
+        return _OBSIDIAN_ENABLE_TRANSITION
+    return ""
+
+
 def _activation_target_config(config: SystemdConfig) -> SystemdConfig:
     """Return the exact post-backup runtime identity for a staged activation."""
 
@@ -2452,8 +2604,11 @@ def _activation_target_config(config: SystemdConfig) -> SystemdConfig:
     has_digest = bool(config.next_env_file_sha256)
     if has_path != has_digest:
         raise ReleaseFailure("next_environment_arguments_incomplete")
+    if bool(config.staged_config_transition) and not has_path:
+        raise ReleaseFailure("next_environment_arguments_incomplete")
     if not has_path:
         return config
+    _requested_staged_config_transition(config)
     return replace(
         config,
         env_file_sha256=_closed_hash(
@@ -2462,6 +2617,7 @@ def _activation_target_config(config: SystemdConfig) -> SystemdConfig:
         ),
         next_env_file=None,
         next_env_file_sha256="",
+        staged_config_transition="",
     )
 
 
@@ -2470,12 +2626,15 @@ def _activation_predecessor_config(config: SystemdConfig) -> SystemdConfig:
 
     if config.next_env_file is None or not config.next_env_file_sha256:
         return config
-    return replace(
-        config,
-        obsidian_mode="disabled",
-        next_env_file=None,
-        next_env_file_sha256="",
-    )
+    transition = _requested_staged_config_transition(config)
+    changes: dict[str, Any] = {
+        "next_env_file": None,
+        "next_env_file_sha256": "",
+        "staged_config_transition": "",
+    }
+    if transition == _OBSIDIAN_ENABLE_TRANSITION:
+        changes["obsidian_mode"] = "disabled"
+    return replace(config, **changes)
 
 
 def _systemd_config_identity_v2(config: SystemdConfig) -> str:
@@ -2637,22 +2796,33 @@ def _activation_v2_config_identity(
     return _systemd_config_identity_v2(replace(config, env_file_sha256=predecessor_env_sha256))
 
 
-def _activation_obsidian_predecessor_identity(
+def _activation_transition_predecessor_identity(
     config: SystemdConfig,
     terminal_journal_env_sha256: str | None,
+    transition: str,
 ) -> str:
     if terminal_journal_env_sha256 is None:
         return ""
+    if transition not in _STAGED_CONFIG_TRANSITIONS:
+        raise ReleaseFailure("staged_config_transition_invalid")
     predecessor_env_sha256 = _closed_hash(
         terminal_journal_env_sha256,
         "terminal_journal_env_digest_invalid",
     )
-    return _systemd_config_identity(
-        replace(
-            config,
-            env_file_sha256=predecessor_env_sha256,
-            obsidian_mode="disabled",
-        )
+    predecessor = replace(config, env_file_sha256=predecessor_env_sha256)
+    if transition == _OBSIDIAN_ENABLE_TRANSITION:
+        predecessor = replace(predecessor, obsidian_mode="disabled")
+    return _systemd_config_identity(predecessor)
+
+
+def _activation_obsidian_predecessor_identity(
+    config: SystemdConfig,
+    terminal_journal_env_sha256: str | None,
+) -> str:
+    return _activation_transition_predecessor_identity(
+        config,
+        terminal_journal_env_sha256,
+        _OBSIDIAN_ENABLE_TRANSITION,
     )
 
 
@@ -2730,6 +2900,7 @@ class DurableActivationJournal:
         predecessor_env_sha256: str | None = None,
         next_env_file: Path | None = None,
         next_env_file_sha256: str | None = None,
+        staged_config_transition: str | None = None,
     ) -> None:
         parent = _private_directory(path.parent)
         lexical = Path(os.path.abspath(path))
@@ -2835,12 +3006,22 @@ class DurableActivationJournal:
             bool(self.next_env_file),
             bool(self.next_env_file_sha256),
         )
+        self.staged_config_transition = staged_config_transition or (
+            _OBSIDIAN_ENABLE_TRANSITION if all(staged_fields) else ""
+        )
+        if self.staged_config_transition and self.staged_config_transition not in _STAGED_CONFIG_TRANSITIONS:
+            raise ReleaseFailure("activation_staged_environment_policy_invalid")
         if any(staged_fields) and not all(staged_fields):
+            raise ReleaseFailure("activation_staged_environment_incomplete")
+        if bool(self.staged_config_transition) != all(staged_fields):
             raise ReleaseFailure("activation_staged_environment_incomplete")
         if all(staged_fields):
             if self.predecessor_env_sha256 == self.next_env_file_sha256:
                 raise ReleaseFailure("activation_environment_transition_not_distinct")
-            if self.obsidian_mode != "enabled" or self.alias_claim_count:
+            if self.alias_claim_count or (
+                self.staged_config_transition == _OBSIDIAN_ENABLE_TRANSITION
+                and self.obsidian_mode != "enabled"
+            ):
                 raise ReleaseFailure("activation_staged_environment_policy_invalid")
         self._accepted_terminal_transition = ""
         self._state: dict[str, Any] | None = None
@@ -2970,7 +3151,7 @@ class DurableActivationJournal:
             or (
                 payload_keys == current_expected
                 and (
-                    payload.get("prebackup_config_transition") not in {"", _OBSIDIAN_ENABLE_TRANSITION}
+                    payload.get("prebackup_config_transition") not in {"", *_STAGED_CONFIG_TRANSITIONS}
                     or (
                         payload.get("prebackup_config_transition") == ""
                         and any(
@@ -2983,7 +3164,7 @@ class DurableActivationJournal:
                         )
                     )
                     or (
-                        payload.get("prebackup_config_transition") == _OBSIDIAN_ENABLE_TRANSITION
+                        payload.get("prebackup_config_transition") in _STAGED_CONFIG_TRANSITIONS
                         and (
                             _HEX64.fullmatch(str(payload.get("predecessor_env_sha256") or "")) is None
                             or _HEX64.fullmatch(str(payload.get("next_env_file_sha256") or "")) is None
@@ -2994,7 +3175,10 @@ class DurableActivationJournal:
                             != Path(str(payload.get("next_env_file")))
                             or Path(str(payload.get("next_env_file"))).parent != self.path.parent
                             or any(character in str(payload.get("next_env_file")) for character in "\x00\r\n")
-                            or payload.get("obsidian_mode") != "enabled"
+                            or (
+                                payload.get("prebackup_config_transition") == _OBSIDIAN_ENABLE_TRANSITION
+                                and payload.get("obsidian_mode") != "enabled"
+                            )
                             or int(payload.get("alias_claim_count") or 0) != 0
                         )
                     )
@@ -3004,7 +3188,7 @@ class DurableActivationJournal:
                 payload.get("phase") in {"environment_swap_attempted", "environment_active"}
                 and (
                     payload_keys != current_expected
-                    or payload.get("prebackup_config_transition") != _OBSIDIAN_ENABLE_TRANSITION
+                    or payload.get("prebackup_config_transition") not in _STAGED_CONFIG_TRANSITIONS
                     or payload.get("backup") is None
                 )
             )
@@ -3125,6 +3309,7 @@ class DurableActivationJournal:
             )
             obsidian_enable_transition = bool(
                 allow_terminal_config_transition
+                and self.staged_config_transition == _OBSIDIAN_ENABLE_TRANSITION
                 and payload["phase"] == "clear"
                 and payload_keys in v3_expected
                 and self.transition_config_identity_sha256
@@ -3134,6 +3319,24 @@ class DurableActivationJournal:
                 and payload.get("memory_vault_mode") == self.memory_vault_mode
                 and payload.get("obsidian_mode") == "disabled"
                 and self.obsidian_mode == "enabled"
+                and payload.get("obsidian_root_sha256") == self.obsidian_root_sha256
+                and int(payload.get("alias_claim_count") or 0) == 0
+                and self.alias_claim_count == 0
+                and expected_previous is not None
+                and payload.get("candidate") == expected_previous
+                and expected_previous == expected_fallback
+            )
+            secondary_shadow_enable_transition = bool(
+                allow_terminal_config_transition
+                and self.staged_config_transition == _SECONDARY_SHADOW_ENABLE_TRANSITION
+                and payload["phase"] == "clear"
+                and payload_keys in v3_expected
+                and self.transition_config_identity_sha256
+                and payload.get("config_identity_sha256") == self.transition_config_identity_sha256
+                and self.config_scope_sha256
+                and payload.get("config_scope_sha256") == self.config_scope_sha256
+                and payload.get("memory_vault_mode") == self.memory_vault_mode
+                and payload.get("obsidian_mode") == self.obsidian_mode
                 and payload.get("obsidian_root_sha256") == self.obsidian_root_sha256
                 and int(payload.get("alias_claim_count") or 0) == 0
                 and self.alias_claim_count == 0
@@ -3169,11 +3372,14 @@ class DurableActivationJournal:
                 or v2_to_v3_transition
                 or phase_a_to_b_transition
                 or obsidian_enable_transition
+                or secondary_shadow_enable_transition
                 or phase_a_retry_after_fallback
             ):
                 raise ReleaseFailure("activation_config_identity_changed")
             if obsidian_enable_transition:
                 self._accepted_terminal_transition = _OBSIDIAN_ENABLE_TRANSITION
+            elif secondary_shadow_enable_transition:
+                self._accepted_terminal_transition = _SECONDARY_SHADOW_ENABLE_TRANSITION
         self._state = payload
         return dict(payload)
 
@@ -3194,6 +3400,11 @@ class DurableActivationJournal:
         next_env_file = ""
         next_env_file_sha256 = ""
         staged_requested = bool(self.next_env_file)
+        requested_descriptor = (
+            self.predecessor_env_sha256,
+            self.next_env_file,
+            self.next_env_file_sha256,
+        )
         if self.path.exists() or self.path.is_symlink():
             current = self._read(
                 allow_terminal_config_transition=True,
@@ -3205,7 +3416,7 @@ class DurableActivationJournal:
                 raise ReleaseFailure("unfinished_activation_requires_recovery")
             carry_prebackup_transition = bool(
                 current.get("phase") in {"rolled_back", "recovered"}
-                and current.get("prebackup_config_transition") == _OBSIDIAN_ENABLE_TRANSITION
+                and current.get("prebackup_config_transition") in _STAGED_CONFIG_TRANSITIONS
                 and _HEX64.fullmatch(str(current.get("predecessor_env_sha256") or "")) is not None
                 and isinstance(current.get("next_env_file"), str)
                 and Path(str(current.get("next_env_file"))).is_absolute()
@@ -3216,29 +3427,33 @@ class DurableActivationJournal:
             )
             if (
                 current.get("phase") in {"rolled_back", "recovered"}
-                and current.get("prebackup_config_transition") == _OBSIDIAN_ENABLE_TRANSITION
+                and current.get("prebackup_config_transition") in _STAGED_CONFIG_TRANSITIONS
                 and current.get("backup") is None
                 and not carry_prebackup_transition
             ):
                 raise ReleaseFailure("activation_prebackup_carry_invalid")
-            if self._accepted_terminal_transition == _OBSIDIAN_ENABLE_TRANSITION:
-                if not staged_requested:
+            if self._accepted_terminal_transition in _STAGED_CONFIG_TRANSITIONS:
+                if (
+                    not staged_requested
+                    or self.staged_config_transition != self._accepted_terminal_transition
+                ):
                     raise ReleaseFailure("activation_staged_environment_required")
             elif carry_prebackup_transition:
-                if not staged_requested or (
-                    self.predecessor_env_sha256,
-                    self.next_env_file,
-                    self.next_env_file_sha256,
-                ) != (
+                current_descriptor = (
                     str(current["predecessor_env_sha256"]),
                     str(current["next_env_file"]),
                     str(current["next_env_file_sha256"]),
+                )
+                if (
+                    not staged_requested
+                    or self.staged_config_transition != current.get("prebackup_config_transition")
+                    or requested_descriptor != current_descriptor
                 ):
                     raise ReleaseFailure("activation_staged_environment_changed")
             elif staged_requested:
                 raise ReleaseFailure("activation_staged_environment_not_permitted")
         if staged_requested:
-            prebackup_config_transition = _OBSIDIAN_ENABLE_TRANSITION
+            prebackup_config_transition = self.staged_config_transition
             predecessor_env_sha256 = self.predecessor_env_sha256
             next_env_file = self.next_env_file
             next_env_file_sha256 = self.next_env_file_sha256
@@ -5082,6 +5297,9 @@ class SystemdActivationPort:
         has_next_digest = bool(config.next_env_file_sha256)
         if has_next_path != has_next_digest:
             raise ReleaseFailure("next_environment_arguments_incomplete")
+        if bool(config.staged_config_transition) and not has_next_path:
+            raise ReleaseFailure("next_environment_arguments_incomplete")
+        requested_transition = _requested_staged_config_transition(config)
         next_env_sha256 = (
             _closed_hash(
                 config.next_env_file_sha256,
@@ -5093,7 +5311,7 @@ class SystemdActivationPort:
         if not has_next_path and canonical_env_sha256 != predecessor_env_sha256:
             raise ReleaseFailure("environment_file_digest_mismatch")
         if has_next_path and (
-            config.obsidian_mode != "enabled"
+            (requested_transition == _OBSIDIAN_ENABLE_TRANSITION and config.obsidian_mode != "enabled")
             or predecessor_env_sha256 == next_env_sha256
             or canonical_env_sha256 not in {predecessor_env_sha256, next_env_sha256}
         ):
@@ -5130,6 +5348,7 @@ class SystemdActivationPort:
                 or any(character in str(next_env_file) for character in "\x00\r\n")
             ):
                 raise ReleaseFailure("next_environment_file_path_invalid")
+            staged_bytes: bytes | None = None
             if canonical_env_sha256 == predecessor_env_sha256 or (
                 next_env_file.exists() or next_env_file.is_symlink()
             ):
@@ -5140,8 +5359,20 @@ class SystemdActivationPort:
                 )
                 if _sha256_bytes(staged_bytes) != next_env_sha256:
                     raise ReleaseFailure("next_environment_file_digest_mismatch")
+            if requested_transition == _SECONDARY_SHADOW_ENABLE_TRANSITION:
+                canonical_bytes = _read_private_regular_file(
+                    config.env_file,
+                    maximum_bytes=1 << 20,
+                    code="environment_file_invalid",
+                )
+                if canonical_env_sha256 == predecessor_env_sha256:
+                    if staged_bytes is None:  # pragma: no cover - read condition above proves it
+                        raise ReleaseFailure("next_environment_file_invalid")
+                    _validate_secondary_shadow_environment(canonical_bytes, staged_bytes)
+                else:
+                    _validate_secondary_shadow_environment(None, canonical_bytes)
             staged_descriptor = (
-                _OBSIDIAN_ENABLE_TRANSITION,
+                requested_transition,
                 predecessor_env_sha256,
                 next_env_file,
                 next_env_sha256,
@@ -5303,15 +5534,22 @@ class SystemdActivationPort:
         next_env_file: Path,
         next_env_file_sha256: str,
     ) -> None:
-        _transition, predecessor, staged_path, next_digest = self._require_staged_descriptor(
+        selected_transition, predecessor, staged_path, next_digest = self._require_staged_descriptor(
             transition,
             predecessor_env_sha256,
             next_env_file,
             next_env_file_sha256,
         )
-        if self._canonical_environment_digest() != predecessor:
+        canonical = _read_private_regular_file(
+            self.config.env_file,
+            maximum_bytes=1 << 20,
+            code="environment_file_invalid",
+        )
+        if _sha256_bytes(canonical) != predecessor:
             raise ReleaseFailure("staged_predecessor_environment_changed")
-        self._staged_environment_bytes(staged_path, next_digest)
+        staged = self._staged_environment_bytes(staged_path, next_digest)
+        if selected_transition == _SECONDARY_SHADOW_ENABLE_TRANSITION:
+            _validate_secondary_shadow_environment(canonical, staged)
 
     def activate_staged_config_transition(
         self,
@@ -5320,7 +5558,7 @@ class SystemdActivationPort:
         next_env_file: Path,
         next_env_file_sha256: str,
     ) -> None:
-        _transition, predecessor, staged_path, next_digest = self._require_staged_descriptor(
+        selected_transition, predecessor, staged_path, next_digest = self._require_staged_descriptor(
             transition,
             predecessor_env_sha256,
             next_env_file,
@@ -5329,10 +5567,26 @@ class SystemdActivationPort:
         current = self._canonical_environment_digest()
         if current == predecessor:
             staged = self._staged_environment_bytes(staged_path, next_digest)
+            if selected_transition == _SECONDARY_SHADOW_ENABLE_TRANSITION:
+                predecessor_bytes = _read_private_regular_file(
+                    self.config.env_file,
+                    maximum_bytes=1 << 20,
+                    code="environment_file_invalid",
+                )
+                _validate_secondary_shadow_environment(predecessor_bytes, staged)
             _replace_private_durable(self.config.env_file, staged)
         elif current == next_digest:
             if staged_path.exists() or staged_path.is_symlink():
-                self._staged_environment_bytes(staged_path, next_digest)
+                staged = self._staged_environment_bytes(staged_path, next_digest)
+                if selected_transition == _SECONDARY_SHADOW_ENABLE_TRANSITION:
+                    _validate_secondary_shadow_environment(None, staged)
+            elif selected_transition == _SECONDARY_SHADOW_ENABLE_TRANSITION:
+                target = _read_private_regular_file(
+                    self.config.env_file,
+                    maximum_bytes=1 << 20,
+                    code="environment_file_invalid",
+                )
+                _validate_secondary_shadow_environment(None, target)
         else:
             raise ReleaseFailure("staged_canonical_environment_changed")
         if self._canonical_environment_digest() != next_digest:
@@ -5361,15 +5615,22 @@ class SystemdActivationPort:
         next_env_file: Path,
         next_env_file_sha256: str,
     ) -> None:
-        _transition, predecessor, staged_path, next_digest = self._require_staged_descriptor(
+        selected_transition, predecessor, staged_path, next_digest = self._require_staged_descriptor(
             transition,
             predecessor_env_sha256,
             next_env_file,
             next_env_file_sha256,
         )
-        if self._canonical_environment_digest() != predecessor:
+        canonical = _read_private_regular_file(
+            self.config.env_file,
+            maximum_bytes=1 << 20,
+            code="environment_file_invalid",
+        )
+        if _sha256_bytes(canonical) != predecessor:
             raise ReleaseFailure("staged_predecessor_environment_changed")
-        self._staged_environment_bytes(staged_path, next_digest)
+        staged = self._staged_environment_bytes(staged_path, next_digest)
+        if selected_transition == _SECONDARY_SHADOW_ENABLE_TRANSITION:
+            _validate_secondary_shadow_environment(canonical, staged)
         if self._staged_predecessor_config is None:  # pragma: no cover - descriptor proves it
             raise ReleaseFailure("staged_environment_identity_changed")
         self.config = self._staged_predecessor_config
@@ -6800,6 +7061,7 @@ def _systemd_config(args: argparse.Namespace) -> SystemdConfig:
         obsidian_root=args.obsidian_root,
         next_env_file=getattr(args, "next_env_file", None),
         next_env_file_sha256=getattr(args, "next_env_file_sha256", None) or "",
+        staged_config_transition=getattr(args, "staged_config_transition", None) or "",
         alias_claim_manifests=tuple(args.alias_claim_manifest),
         alias_expected_counts=tuple(args.alias_expect_count),
         alias_expected_plan_sha256s=tuple(args.alias_expect_plan_sha256),
@@ -6814,12 +7076,13 @@ def _activation_recovery_systemd_config(
     transition = _staged_config_transition(state)
     if transition is None:
         return config
-    _transition_name, predecessor_env_sha256, next_env_file, next_env_file_sha256 = transition
+    transition_name, predecessor_env_sha256, next_env_file, next_env_file_sha256 = transition
     phase = str(state.get("phase") or "")
     if (
-        config.obsidian_mode != "enabled"
+        (transition_name == _OBSIDIAN_ENABLE_TRANSITION and config.obsidian_mode != "enabled")
         or config.next_env_file is not None
         or config.next_env_file_sha256
+        or config.staged_config_transition
         or Path(os.path.abspath(next_env_file)).parent != _private_directory(config.state_dir)
     ):
         raise ReleaseFailure("recovery_staged_transition_invalid")
@@ -6848,6 +7111,7 @@ def _activation_recovery_systemd_config(
         env_file_sha256=predecessor_env_sha256,
         next_env_file=next_env_file,
         next_env_file_sha256=next_env_file_sha256,
+        staged_config_transition=transition_name,
     )
 
 
@@ -6910,6 +7174,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Private staged ENV1 file used only after the verified backup boundary",
     )
     activate.add_argument("--next-env-file-sha256")
+    activate.add_argument(
+        "--staged-config-transition",
+        choices=tuple(sorted(_STAGED_CONFIG_TRANSITIONS)),
+        help=(
+            "Explicit immutable ENV0 to ENV1 transition; omitted staged activations "
+            "retain the established obsidian_enable contract"
+        ),
+    )
 
     recovery = commands.add_parser("recover-historical-album")
     recovery.add_argument("--release", required=True, type=Path)
@@ -7001,6 +7273,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
         }
     elif args.command == "activate":
         config = _systemd_config(args)
+        staged_config_transition = _requested_staged_config_transition(config)
         target_config = _activation_target_config(config)
         if config.next_env_file is not None and (
             args.terminal_journal_env_sha256 is None
@@ -7025,9 +7298,17 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                     target_config,
                     args.terminal_journal_env_sha256,
                 ),
-                transition_config_identity_sha256=_activation_obsidian_predecessor_identity(
-                    target_config,
-                    args.terminal_journal_env_sha256,
+                transition_config_identity_sha256=(
+                    _activation_transition_predecessor_identity(
+                        target_config,
+                        args.terminal_journal_env_sha256,
+                        staged_config_transition,
+                    )
+                    if staged_config_transition
+                    else _activation_obsidian_predecessor_identity(
+                        target_config,
+                        args.terminal_journal_env_sha256,
+                    )
                 ),
                 config_scope_sha256=_systemd_config_scope_identity(target_config),
                 config_retry_scope_sha256=_systemd_config_retry_scope_identity(target_config),
@@ -7038,6 +7319,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 predecessor_env_sha256=(config.env_file_sha256 if config.next_env_file is not None else None),
                 next_env_file=config.next_env_file,
                 next_env_file_sha256=config.next_env_file_sha256 or None,
+                staged_config_transition=staged_config_transition or None,
             )
             candidate = load_release_identity(
                 args.candidate,
@@ -7084,6 +7366,7 @@ def _run_cli(args: argparse.Namespace) -> dict[str, Any]:
                 predecessor_env_sha256=(config.env_file_sha256 if config.next_env_file is not None else None),
                 next_env_file=config.next_env_file,
                 next_env_file_sha256=config.next_env_file_sha256 or None,
+                staged_config_transition=(config.staged_config_transition or None),
             )
             executor = load_release_identity(
                 args.executor_release,

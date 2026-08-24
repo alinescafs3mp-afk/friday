@@ -64,8 +64,10 @@ def test_complete_trial_passes_and_json_grammar_request_remains_enabled(soak: An
 def test_mixed_soak_cases_use_closed_stable_contracts(soak: Any) -> None:
     cases = {case.name: case for case in soak._cases()}
 
-    assert cases["english"].validator("An optional node must fail soft.")
-    assert not cases["english"].validator("An optional node must fail soft")
+    assert cases["russian"].validator("Резервный узел готов.")
+    assert not cases["russian"].validator("Резервный узел готов")
+    assert cases["english"].validator("Node ready.")
+    assert not cases["english"].validator("Node ready")
     assert cases["contradiction"].validator("CONTRADICTION")
     assert not cases["contradiction"].validator("consistent")
     assert cases["arithmetic"].max_tokens == 512
@@ -77,7 +79,7 @@ def test_mixed_soak_cases_use_closed_stable_contracts(soak: Any) -> None:
 @pytest.mark.parametrize(
     "value",
     [
-        'Проекты/Ёж №17 — финал.txt',
+        "Проекты/Ёж №17 — финал.txt",
         '{"filename":"Проекты/Ёж №17\u202f—\u202fфинал.txt"}',
         '{"filename":"Проекты/Еж №17 — финал.txt"}',
         '{"filename":"Проекты/Ёж №18 — финал.txt"}',

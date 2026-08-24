@@ -37,10 +37,6 @@ class SoakCase:
     extra: dict[str, object] | None = None
 
 
-def _has_cyrillic(value: str) -> bool:
-    return any("а" <= char.casefold() <= "я" or char.casefold() == "ё" for char in value)
-
-
 def _is_exact_extraction(value: str) -> bool:
     try:
         parsed = json.loads(value)
@@ -63,11 +59,15 @@ def _is_exact_unicode_filename(value: str) -> bool:
 
 def _cases() -> tuple[SoakCase, ...]:
     return (
-        SoakCase("russian", "Одним предложением объясни, зачем проверяют резервный узел.", _has_cyrillic),
+        SoakCase(
+            "russian",
+            "Ответь ровно этой фразой: Резервный узел готов.",
+            lambda value: value.strip() == "Резервный узел готов.",
+        ),
         SoakCase(
             "english",
-            "Reply with exactly this sentence: An optional node must fail soft.",
-            lambda value: value.strip() == "An optional node must fail soft.",
+            "Reply with exactly this phrase: Node ready.",
+            lambda value: value.strip() == "Node ready.",
         ),
         SoakCase(
             "arithmetic",

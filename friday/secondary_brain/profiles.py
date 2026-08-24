@@ -244,9 +244,7 @@ class SecondaryRuntimeProfile:
         evidence_hashes = [value.get(key) for key in _EVIDENCE_HASH_KEYS]
         if expected_status == "accepted":
             if any(
-                not isinstance(item, str)
-                or _SHA256_RE.fullmatch(item) is None
-                or item == _ZERO_SHA256
+                not isinstance(item, str) or _SHA256_RE.fullmatch(item) is None or item == _ZERO_SHA256
                 for item in evidence_hashes
             ):
                 return False
@@ -320,8 +318,7 @@ class SecondaryRuntimeProfile:
             or value.get("moe_runner_backend") != self.moe_runner_backend
             or value.get("mxfp4_moe_precision") != self.mxfp4_moe_precision
             or value.get("mm_feature_transport") != self.mm_feature_transport
-            or value.get("deterministic_inference_enabled")
-            is not self.deterministic_inference_enabled
+            or value.get("deterministic_inference_enabled") is not self.deterministic_inference_enabled
             or value.get("context_tokens") != self.max_context_tokens
             or value.get("max_total_tokens") != self.max_total_tokens
             or value.get("mem_fraction_static") != self.mem_fraction_static
@@ -390,8 +387,7 @@ class SecondaryRuntimeProfile:
             and self.max_output_tokens < self.max_context_tokens
             and type(self.chunked_prefill_size) is int
             and self.chunked_prefill_size in _CHUNKED_PREFILL_GRID
-            and self.mem_fraction_static
-            in {"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"}
+            and self.mem_fraction_static in {"0.86", "0.88", "0.90", "0.92", "0.94", "0.95", "0.96", "0.97"}
             and self.quantization == "mxfp4"
             and self.dtype == "bfloat16"
             and self.kv_cache_dtype in {"bf16", "fp8_e4m3"}
@@ -453,15 +449,74 @@ class SecondaryRuntimeProfile:
         )
 
 
+# Exact content-free finalist admitted only for discarded shadow extraction.
+# Assist remains impossible until the physical-failure witness promotes an
+# accepted manifest with its own, different digest.
+_PROVISIONAL_GPT_OSS_20B_V9 = SecondaryRuntimeProfile(
+    profile_id=("gptoss20b-ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3"),
+    endpoint_base_url="https://192.168.1.35:8443/v1",
+    served_model_alias=(
+        "friday-secondary-gptoss20b-ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3"
+    ),
+    manifest_sha256="6607c9b865c8b1d89779327ac04ef7178b9b18f9d0daae198193b348955fb5cb",
+    engine_binding_sha256=("ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3"),
+    hardware_runtime_receipt_sha256=("0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"),
+    gateway_ca_certificate_sha256=("392756a74fd9100635c42f4fbf7e5a5f1822d18ea898ebb7848b9fdd0bddc1fe"),
+    max_context_tokens=4096,
+    max_total_tokens=4096,
+    max_concurrency=1,
+    max_output_tokens=512,
+    chunked_prefill_size=512,
+    mem_fraction_static="0.96",
+    quantization="mxfp4",
+    dtype="bfloat16",
+    kv_cache_dtype="bf16",
+    kv_cache_scale_policy="not_applicable",
+    attention_backend="triton",
+    prefill_attention_backend="triton",
+    decode_attention_backend="triton",
+    sampling_backend="pytorch",
+    moe_runner_backend="flashinfer_mxfp4",
+    mxfp4_moe_precision="default",
+    mm_feature_transport="cpu",
+    deterministic_inference_enabled=False,
+    page_size=1,
+    radix_cache_enabled=True,
+    overlap_schedule_enabled=True,
+    hybrid_swa_memory_enabled=True,
+    swa_full_tokens_ratio="0.80",
+    cuda_graph_backend_decode="disabled",
+    cuda_graph_backend_prefill="disabled",
+    cuda_graph_max_bs_decode=0,
+    cuda_graph_bs_decode=(),
+    no_cpu_offload=True,
+    allowed_modes=frozenset({"assist", "shadow"}),
+    allowed_workloads=frozenset({"extract"}),
+    model_repository="openai/gpt-oss-20b",
+    model_revision="6cee5e81ee83917806bbde320786a8fb61efebee",
+    source_model_manifest_sha256=("438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"),
+    model_path="/source/snapshot",
+    runtime_image=("lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"),
+    runtime_image_config_digest=("sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc"),
+    runtime_image_oci_manifest_digest=(
+        "sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405"
+    ),
+    runtime_source_revision="29481685462732237d80d86076d6563e1f658102",
+    sglang_compat_patch_sha256=("4ec4bbf76c047bf93d782525250ef79f8c2dae925d0035b95d97a41285052ffb"),
+    runtime_manifest_sha256=("15be7b3bdaa3cd76ace1bcc93ca461598a9583d920f4f3e55924db2f6b643428"),
+)
+
+
 # Filled only from a completed live battery and an immutable profile manifest.
 # An empty registry deliberately makes every private-LAN endpoint fail closed.
 ACCEPTED_SECONDARY_RUNTIME_PROFILES: Mapping[str, SecondaryRuntimeProfile] = MappingProxyType({})
 
 # Filled only with one exact matrix finalist after quality/capacity/soak screening.
-# This registry never grants assist authority and remains empty until that point.
-PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES: Mapping[
-    str, SecondaryRuntimeProfile
-] = MappingProxyType({})
+# This registry never grants assist authority; the resolver below restricts it
+# further to the exact shadow/extract contour.
+PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES: Mapping[str, SecondaryRuntimeProfile] = MappingProxyType(
+    {_PROVISIONAL_GPT_OSS_20B_V9.profile_id: _PROVISIONAL_GPT_OSS_20B_V9}
+)
 
 
 class SecondaryProfileAdmission(StrEnum):

@@ -56,9 +56,11 @@ class FakePort:
         fail: str = "",
         backup_schema: int = 33,
         memory_vault_mode: str = "disabled",
+        staged_config_transition: str = "obsidian_enable",
     ) -> None:
         self.fail = fail
         self.memory_vault_mode = memory_vault_mode
+        self.staged_config_transition = staged_config_transition
         self.failure_injected = False
         self.events: list[str] = []
         self.active: operator.ReleaseIdentity | None = None
@@ -133,7 +135,7 @@ class FakePort:
         next_env_file: Path,
         next_env_file_sha256: str,
     ) -> None:
-        assert transition == "obsidian_enable"
+        assert transition == self.staged_config_transition
         assert len(predecessor_env_sha256) == 64
         assert len(next_env_file_sha256) == 64
         if self.canonical_env_sha256:
@@ -151,7 +153,7 @@ class FakePort:
         next_env_file: Path,
         next_env_file_sha256: str,
     ) -> None:
-        assert transition == "obsidian_enable"
+        assert transition == self.staged_config_transition
         assert self.canonical_env_sha256 in {"", predecessor_env_sha256, next_env_file_sha256}
         self._event("activate_staged_config")
         self.predecessor_env_sha256 = predecessor_env_sha256
@@ -167,7 +169,7 @@ class FakePort:
         next_env_file: Path,
         next_env_file_sha256: str,
     ) -> None:
-        assert transition == "obsidian_enable"
+        assert transition == self.staged_config_transition
         assert self.canonical_env_sha256 in {"", predecessor_env_sha256}
         self.predecessor_env_sha256 = predecessor_env_sha256
         self.canonical_env_sha256 = predecessor_env_sha256
@@ -690,6 +692,62 @@ def test_obsidian_postbackup_recovery_converges_staged_env_before_writer_restart
     assert port.canonical_env_sha256 == "4" * 64
     assert port.events.index("activate_staged_config") < port.events.index("start_backend:clean-schema33")
     assert port.active is capable_previous
+
+
+def test_secondary_shadow_prebackup_rollback_keeps_disabled_environment(
+    releases: Releases,
+) -> None:
+    journal = MemoryJournal(
+        prebackup_config_transition="secondary_shadow_enable",
+        predecessor_env_sha256="5" * 64,
+        next_env_file=Path("/private-state/secondary-shadow.env"),
+        next_env_file_sha256="6" * 64,
+    )
+    port = FakePort(
+        fail="backup_db_wal_inbox",
+        staged_config_transition="secondary_shadow_enable",
+    )
+
+    with pytest.raises(operator.ReleaseFailure, match="activation_failed_rolled_back"):
+        operator.activate_release(
+            port,
+            journal,
+            candidate=releases.candidate,
+            previous=releases.previous,
+            schema_capable_fallback=releases.fallback,
+        )
+
+    assert "activate_staged_config" not in port.events
+    assert port.canonical_env_sha256 == "5" * 64
+    assert journal.state["backup"] is None
+    assert port.active is releases.previous
+
+
+def test_secondary_shadow_postbackup_recovery_converges_to_enabled_environment(
+    releases: Releases,
+) -> None:
+    journal = MemoryJournal(
+        prebackup_config_transition="secondary_shadow_enable",
+        predecessor_env_sha256="7" * 64,
+        next_env_file=Path("/private-state/secondary-shadow.env"),
+        next_env_file_sha256="8" * 64,
+    )
+    journal.begin(
+        candidate=releases.candidate,
+        previous=releases.previous,
+        fallback=releases.fallback,
+    )
+    journal.record("backup_complete", backup=FakePort().backup)
+    port = FakePort(staged_config_transition="secondary_shadow_enable")
+    port.predecessor_env_sha256 = "7" * 64
+    port.canonical_env_sha256 = "7" * 64
+
+    receipt = operator.recover_interrupted_activation(port, journal)
+
+    assert receipt["status"] == "recovered"
+    assert port.canonical_env_sha256 == "8" * 64
+    assert port.events.index("activate_staged_config") < port.events.index("start_backend:schema34-fallback")
+    assert port.active is releases.fallback
 
 
 def test_failure_after_bridge_start_never_runs_schema33_and_uses_schema34_fallback(
@@ -1549,6 +1607,376 @@ def _systemd_test_port(tmp_path: Path) -> operator.SystemdActivationPort:
             health_ca_sha256=hashlib.sha256(health_ca.read_bytes()).hexdigest(),
         )
     )
+
+
+def _secondary_shadow_environment(
+    predecessor: bytes,
+    ca_file: Path,
+    *,
+    overrides: dict[str, str | None] | None = None,
+) -> bytes:
+    values: dict[str, str] = {
+        "FRIDAY_SECONDARY_LLM_ADMISSION_TIMEOUT_SEC": "0.10",
+        "FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT": "0",
+        "FRIDAY_SECONDARY_LLM_API_KEY": "a" * 64,
+        "FRIDAY_SECONDARY_LLM_BASE_URL": "https://192.168.1.35:8443/v1",
+        "FRIDAY_SECONDARY_LLM_CALL_BUDGET_SEC": "15.0",
+        "FRIDAY_SECONDARY_LLM_CA_FILE": str(ca_file),
+        "FRIDAY_SECONDARY_LLM_CONNECT_TIMEOUT_SEC": "1.0",
+        "FRIDAY_SECONDARY_LLM_COOLDOWN_SEC": "60",
+        "FRIDAY_SECONDARY_LLM_ENABLED": "1",
+        "FRIDAY_SECONDARY_LLM_HEALTH_INTERVAL_SEC": "30",
+        "FRIDAY_SECONDARY_LLM_MAX_CONCURRENCY": "1",
+        "FRIDAY_SECONDARY_LLM_MAX_CONTEXT_TOKENS": "4096",
+        "FRIDAY_SECONDARY_LLM_MODE": "shadow",
+        "FRIDAY_SECONDARY_LLM_MODEL": (
+            "friday-secondary-gptoss20b-ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3"
+        ),
+        "FRIDAY_SECONDARY_LLM_PROFILE": (
+            "gptoss20b-ce6c00ff988e35c97d7381bde47cfa56f6e89c3eeb879bf6e7ba5e0b4a9d81e3"
+        ),
+        "FRIDAY_SECONDARY_LLM_READ_TIMEOUT_SEC": "12.0",
+        "FRIDAY_SECONDARY_LLM_WORKLOADS": "extract",
+    }
+    for key, value in (overrides or {}).items():
+        if value is None:
+            values.pop(key, None)
+        else:
+            values[key] = value
+    return predecessor + b"".join(f"{key}={value}\n".encode("ascii") for key, value in sorted(values.items()))
+
+
+def _secondary_shadow_stage(
+    base: operator.SystemdActivationPort,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    overrides: dict[str, str | None] | None = None,
+    unrelated: bytes | None = None,
+    ca_file: Path | None = None,
+) -> tuple[Path, bytes, str]:
+    ca = ca_file or (base.config.friday_home / "secondary-ca.pem")
+    if ca_file is None:
+        ca.write_bytes(b"synthetic-secondary-ca\n")
+        ca.chmod(0o600)
+    if not ca.is_symlink():
+        monkeypatch.setattr(
+            operator,
+            "_SECONDARY_V9_CA_SHA256",
+            hashlib.sha256(ca.read_bytes()).hexdigest(),
+        )
+    predecessor = base.config.env_file.read_bytes()
+    target = _secondary_shadow_environment(
+        predecessor if unrelated is None else unrelated,
+        ca,
+        overrides=overrides,
+    )
+    staged = base.config.state_dir / "secondary-shadow.env"
+    staged.write_bytes(target)
+    staged.chmod(0o600)
+    return staged, target, hashlib.sha256(target).hexdigest()
+
+
+def test_systemd_port_activates_exact_secondary_v9_shadow_without_journaling_secret(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    releases: Releases,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    predecessor = base.config.env_file.read_bytes()
+    predecessor_sha256 = hashlib.sha256(predecessor).hexdigest()
+    staged, target, target_sha256 = _secondary_shadow_stage(base, monkeypatch)
+    config = replace(
+        base.config,
+        next_env_file=staged,
+        next_env_file_sha256=target_sha256,
+        staged_config_transition="secondary_shadow_enable",
+    )
+    port = operator.SystemdActivationPort(config)
+    descriptor = ("secondary_shadow_enable", predecessor_sha256, staged, target_sha256)
+    target_config = operator._activation_target_config(config)  # noqa: SLF001
+    journal_path = base.config.state_dir / "immutable-release-activation.v1.json"
+    journal = operator.DurableActivationJournal(
+        journal_path,
+        backup_root=base.config.backup_dir,
+        config_identity_sha256=operator._systemd_config_identity(target_config),  # noqa: SLF001
+        config_scope_sha256=operator._systemd_config_scope_identity(target_config),  # noqa: SLF001
+        config_retry_scope_sha256=operator._systemd_config_retry_scope_identity(  # noqa: SLF001
+            target_config
+        ),
+        obsidian_mode=target_config.obsidian_mode,
+        obsidian_root_sha256=operator._obsidian_root_sha256(target_config),  # noqa: SLF001
+        predecessor_env_sha256=predecessor_sha256,
+        next_env_file=staged,
+        next_env_file_sha256=target_sha256,
+        staged_config_transition="secondary_shadow_enable",
+    )
+    journal.begin(
+        candidate=releases.candidate,
+        previous=releases.previous,
+        fallback=releases.fallback,
+    )
+    journal_raw = journal_path.read_bytes()
+    assert ("a" * 64).encode("ascii") not in journal_raw
+    assert b"secondary_shadow_enable" in journal_raw
+
+    port.validate_staged_config_transition(*descriptor)
+    port.activate_staged_config_transition(*descriptor)
+    port.activate_staged_config_transition(*descriptor)
+
+    assert port.config.env_file.read_bytes() == target
+    assert port.config.staged_config_transition == ""
+    assert not staged.exists()
+
+
+def test_systemd_port_accepts_standard_explicit_disabled_secondary_predecessor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    predecessor = base.config.env_file.read_bytes() + (
+        b"FRIDAY_SECONDARY_LLM_ENABLED=0\n"
+        b"FRIDAY_SECONDARY_LLM_MODE=disabled\n"
+        b"FRIDAY_SECONDARY_LLM_BASE_URL=\n"
+        b"FRIDAY_SECONDARY_LLM_MODEL=\n"
+        b"FRIDAY_SECONDARY_LLM_API_KEY=\n"
+        b"FRIDAY_SECONDARY_LLM_CA_FILE=\n"
+        b"FRIDAY_SECONDARY_LLM_PROFILE=\n"
+    )
+    base.config.env_file.write_bytes(predecessor)
+    base.config.env_file.chmod(0o600)
+    base = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            env_file_sha256=hashlib.sha256(predecessor).hexdigest(),
+        )
+    )
+    staged, _target, target_sha256 = _secondary_shadow_stage(
+        base,
+        monkeypatch,
+        unrelated=b"FRIDAY_PROFILE=production\n",
+    )
+
+    port = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            next_env_file=staged,
+            next_env_file_sha256=target_sha256,
+            staged_config_transition="secondary_shadow_enable",
+        )
+    )
+    port.validate_staged_config_transition(
+        "secondary_shadow_enable",
+        base.config.env_file_sha256,
+        staged,
+        target_sha256,
+    )
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("FRIDAY_SECONDARY_LLM_ENABLED", "0"),
+        ("FRIDAY_SECONDARY_LLM_MODE", "assist"),
+        ("FRIDAY_SECONDARY_LLM_BASE_URL", "https://192.168.1.35:9443/v1"),
+        ("FRIDAY_SECONDARY_LLM_MODEL", "friday-secondary-wrong"),
+        ("FRIDAY_SECONDARY_LLM_API_KEY", "short"),
+        ("FRIDAY_SECONDARY_LLM_MAX_CONTEXT_TOKENS", "8192"),
+        ("FRIDAY_SECONDARY_LLM_MAX_CONCURRENCY", "2"),
+        ("FRIDAY_SECONDARY_LLM_PROFILE", "gptoss20b-wrong"),
+        ("FRIDAY_SECONDARY_LLM_WORKLOADS", "extract,summarize"),
+        ("FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT", "1"),
+        ("FRIDAY_SECONDARY_LLM_PROFILE", None),
+        ("FRIDAY_SECONDARY_LLM_UNKNOWN", "1"),
+    ],
+)
+def test_systemd_port_rejects_nonexact_secondary_shadow_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    key: str,
+    value: str | None,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    staged, _target, target_sha256 = _secondary_shadow_stage(
+        base,
+        monkeypatch,
+        overrides={key: value},
+    )
+
+    with pytest.raises(operator.ReleaseFailure, match="secondary_shadow_environment_invalid"):
+        operator.SystemdActivationPort(
+            replace(
+                base.config,
+                next_env_file=staged,
+                next_env_file_sha256=target_sha256,
+                staged_config_transition="secondary_shadow_enable",
+            )
+        )
+
+
+def test_systemd_port_rejects_secondary_shadow_unrelated_environment_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    staged, _target, target_sha256 = _secondary_shadow_stage(
+        base,
+        monkeypatch,
+        unrelated=b"FRIDAY_PROFILE=staging\n",
+    )
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="secondary_shadow_unrelated_environment_changed",
+    ):
+        operator.SystemdActivationPort(
+            replace(
+                base.config,
+                next_env_file=staged,
+                next_env_file_sha256=target_sha256,
+                staged_config_transition="secondary_shadow_enable",
+            )
+        )
+
+
+def test_systemd_port_rejects_secondary_shadow_from_enabled_predecessor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    predecessor = base.config.env_file.read_bytes() + b"FRIDAY_SECONDARY_LLM_ENABLED=1\n"
+    base.config.env_file.write_bytes(predecessor)
+    base.config.env_file.chmod(0o600)
+    base_config = replace(
+        base.config,
+        env_file_sha256=hashlib.sha256(predecessor).hexdigest(),
+    )
+    base = operator.SystemdActivationPort(base_config)
+    staged, _target, target_sha256 = _secondary_shadow_stage(
+        base,
+        monkeypatch,
+        unrelated=b"FRIDAY_PROFILE=production\n",
+    )
+
+    with pytest.raises(operator.ReleaseFailure, match="secondary_shadow_predecessor_not_disabled"):
+        operator.SystemdActivationPort(
+            replace(
+                base.config,
+                next_env_file=staged,
+                next_env_file_sha256=target_sha256,
+                staged_config_transition="secondary_shadow_enable",
+            )
+        )
+
+
+@pytest.mark.parametrize("prefix", ["\u00a0".encode(), b"\v", b"\f"])
+def test_systemd_port_rejects_runtime_effective_noncanonical_secondary_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    prefix: bytes,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    predecessor = base.config.env_file.read_bytes() + prefix + b"FRIDAY_SECONDARY_LLM_MODE=assist\n"
+    base.config.env_file.write_bytes(predecessor)
+    base.config.env_file.chmod(0o600)
+    base = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            env_file_sha256=hashlib.sha256(predecessor).hexdigest(),
+        )
+    )
+    staged, _target, target_sha256 = _secondary_shadow_stage(base, monkeypatch)
+
+    with pytest.raises(operator.ReleaseFailure, match="secondary_shadow_environment_invalid"):
+        operator.SystemdActivationPort(
+            replace(
+                base.config,
+                next_env_file=staged,
+                next_env_file_sha256=target_sha256,
+                staged_config_transition="secondary_shadow_enable",
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "legacy_assignment",
+    [
+        b"JERICHO_SECONDARY_LLM_ENABLED=1\n",
+        b"JERICHO_SECONDARY_LLM_BASE_URL=https://192.168.1.35:8443/v1\n",
+        "\u00a0JERICHO_SECONDARY_LLM_MODE=assist\n".encode(),
+    ],
+)
+def test_systemd_port_rejects_every_runtime_effective_legacy_secondary_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    legacy_assignment: bytes,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    predecessor = base.config.env_file.read_bytes() + legacy_assignment
+    base.config.env_file.write_bytes(predecessor)
+    base.config.env_file.chmod(0o600)
+    base = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            env_file_sha256=hashlib.sha256(predecessor).hexdigest(),
+        )
+    )
+    staged, _target, target_sha256 = _secondary_shadow_stage(base, monkeypatch)
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="secondary_shadow_legacy_environment_forbidden",
+    ):
+        operator.SystemdActivationPort(
+            replace(
+                base.config,
+                next_env_file=staged,
+                next_env_file_sha256=target_sha256,
+                staged_config_transition="secondary_shadow_enable",
+            )
+        )
+
+
+@pytest.mark.parametrize("ca_failure", ["digest", "symlink", "relative"])
+def test_systemd_port_rejects_unsafe_secondary_shadow_ca(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ca_failure: str,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    real_ca = base.config.friday_home / "real-secondary-ca.pem"
+    real_ca.write_bytes(b"synthetic-secondary-ca\n")
+    real_ca.chmod(0o600)
+    ca_file = real_ca
+    if ca_failure == "symlink":
+        ca_file = base.config.friday_home / "linked-secondary-ca.pem"
+        ca_file.symlink_to(real_ca)
+    staged, _target, target_sha256 = _secondary_shadow_stage(
+        base,
+        monkeypatch,
+        ca_file=ca_file,
+        overrides=(
+            {"FRIDAY_SECONDARY_LLM_CA_FILE": "relative-secondary-ca.pem"}
+            if ca_failure == "relative"
+            else None
+        ),
+    )
+    if ca_failure == "digest":
+        monkeypatch.setattr(operator, "_SECONDARY_V9_CA_SHA256", "f" * 64)
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match=(
+            "secondary_shadow_ca_digest_mismatch" if ca_failure == "digest" else "secondary_shadow_ca_invalid"
+        ),
+    ):
+        operator.SystemdActivationPort(
+            replace(
+                base.config,
+                next_env_file=staged,
+                next_env_file_sha256=target_sha256,
+                staged_config_transition="secondary_shadow_enable",
+            )
+        )
 
 
 def test_systemd_port_stages_then_activates_environment_idempotently(tmp_path: Path) -> None:
@@ -4562,6 +4990,105 @@ def test_prebackup_recovery_reopens_staged_journal_with_canonical_env_unchanged(
     assert recovery_port.config.env_file.read_bytes() == predecessor
 
 
+def test_secondary_shadow_terminal_transition_and_prebackup_recovery_are_exact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    releases: Releases,
+) -> None:
+    base = _systemd_test_port(tmp_path)
+    disabled = base.config
+    predecessor_sha256 = disabled.env_file_sha256
+    journal_path = disabled.state_dir / "immutable-release-activation.v1.json"
+    prior = operator.DurableActivationJournal(
+        journal_path,
+        backup_root=disabled.backup_dir,
+        config_identity_sha256=operator._systemd_config_identity(disabled),  # noqa: SLF001
+        config_scope_sha256=operator._systemd_config_scope_identity(disabled),  # noqa: SLF001
+        config_retry_scope_sha256=operator._systemd_config_retry_scope_identity(  # noqa: SLF001
+            disabled
+        ),
+        obsidian_mode=disabled.obsidian_mode,
+        obsidian_root_sha256=operator._obsidian_root_sha256(disabled),  # noqa: SLF001
+    )
+    prior.begin(
+        candidate=releases.previous,
+        previous=releases.fallback,
+        fallback=releases.candidate,
+    )
+
+    def make_terminal(core: dict[str, object]) -> None:
+        core["phase"] = "clear"
+        core["terminal_receipt_sha256"] = "b" * 64
+
+    _rewrite_signed_journal(journal_path, make_terminal)
+    staged, _target, target_sha256 = _secondary_shadow_stage(base, monkeypatch)
+    staged_config = replace(
+        disabled,
+        next_env_file=staged,
+        next_env_file_sha256=target_sha256,
+        staged_config_transition="secondary_shadow_enable",
+    )
+    target = operator._activation_target_config(staged_config)  # noqa: SLF001
+    transition = operator.DurableActivationJournal(
+        journal_path,
+        backup_root=disabled.backup_dir,
+        config_identity_sha256=operator._systemd_config_identity(target),  # noqa: SLF001
+        transition_config_identity_sha256=(
+            operator._activation_transition_predecessor_identity(  # noqa: SLF001
+                target,
+                predecessor_sha256,
+                "secondary_shadow_enable",
+            )
+        ),
+        config_scope_sha256=operator._systemd_config_scope_identity(target),  # noqa: SLF001
+        config_retry_scope_sha256=operator._systemd_config_retry_scope_identity(target),  # noqa: SLF001
+        obsidian_mode=target.obsidian_mode,
+        obsidian_root_sha256=operator._obsidian_root_sha256(target),  # noqa: SLF001
+        predecessor_env_sha256=predecessor_sha256,
+        next_env_file=staged,
+        next_env_file_sha256=target_sha256,
+        staged_config_transition="secondary_shadow_enable",
+    )
+    transition.begin(
+        candidate=releases.candidate,
+        previous=releases.previous,
+        fallback=releases.previous,
+    )
+    transition.record("bridge_stop_attempted")
+    persisted = transition.load()
+
+    effective = operator._activation_recovery_systemd_config(  # noqa: SLF001
+        disabled,
+        persisted,
+    )
+    assert effective.staged_config_transition == "secondary_shadow_enable"
+    assert effective.obsidian_mode == disabled.obsidian_mode
+    assert effective.next_env_file == staged
+    recovery_port = operator.SystemdActivationPort(effective)
+    reopened = operator.DurableActivationJournal(
+        journal_path,
+        backup_root=effective.backup_dir,
+        config_identity_sha256=operator._systemd_config_identity(target),  # noqa: SLF001
+        config_scope_sha256=operator._systemd_config_scope_identity(target),  # noqa: SLF001
+        config_retry_scope_sha256=operator._systemd_config_retry_scope_identity(target),  # noqa: SLF001
+        obsidian_mode=target.obsidian_mode,
+        obsidian_root_sha256=operator._obsidian_root_sha256(target),  # noqa: SLF001
+        predecessor_env_sha256=predecessor_sha256,
+        next_env_file=staged,
+        next_env_file_sha256=target_sha256,
+        staged_config_transition="secondary_shadow_enable",
+    )
+    assert reopened.load()["phase"] == "bridge_stop_attempted"
+    recovery_port.select_predecessor_config_transition(
+        "secondary_shadow_enable",
+        predecessor_sha256,
+        staged,
+        target_sha256,
+    )
+    assert recovery_port.config.env_file.read_bytes() == disabled.env_file.read_bytes()
+    assert recovery_port.config.obsidian_mode == disabled.obsidian_mode
+
+
 def test_schema35_releases_require_exact_obsidian_cutover_capability(
     tmp_path: Path,
     releases: Releases,
@@ -4789,12 +5316,15 @@ def test_terminal_journal_env_digest_is_activate_only() -> None:
             "/runtime/state/next.env",
             "--next-env-file-sha256",
             "8" * 64,
+            "--staged-config-transition",
+            "secondary_shadow_enable",
             *common,
         ]
     )
     assert activate.terminal_journal_env_sha256 == "6" * 64
     assert activate.next_env_file == Path("/runtime/state/next.env")
     assert activate.next_env_file_sha256 == "8" * 64
+    assert activate.staged_config_transition == "secondary_shadow_enable"
 
     with pytest.raises(SystemExit):
         operator.build_parser().parse_args(
