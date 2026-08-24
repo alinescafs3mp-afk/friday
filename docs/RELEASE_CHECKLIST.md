@@ -97,7 +97,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 2 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.8`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.9`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными

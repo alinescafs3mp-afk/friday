@@ -1,3 +1,25 @@
+## 0.207.9 — 2026-08-24
+
+### Точное возобновление archive evidence и опциональное второе полушарие
+
+- Schema 39 добавляет закрытый body-free sidecar выбранного archive
+  evidence. Durable continuation после restart повторно разрешает тот же
+  source/passage и отклоняет drift, expiry, replay и потерю прав.
+- Добавлен отдельный default-off secondary-brain control plane для
+  private-CA OpenAI-compatible endpoint: независимые timeout, semaphore,
+  circuit state, admission и санитизированная диагностика.
+- Точный GPT-OSS 20B native-MXFP4 finalist может быть допущен только к
+  выбрасываемому `shadow/extract`; `assist` остаётся закрыт до полной
+  live-приёмки. Secondary не может вызывать tools, совершать эффекты
+  или публиковать ответ; его отсутствие не ухудшает primary-only path.
+- Windows/SGLang bundle реализует exact model/image/runtime/hardware привязки,
+  private TLS gateway, firewall, immutable receipts и закрытые runners для
+  capacity/quality/soak/failure batteries. Финалист остаётся provisional и
+  допускается только к shadow до завершения полной live-приёмки.
+- Первый production rollout выполняется default-off с отдельным schema-39
+  fallback; проверяемый immutable `disabled → shadow` ENV-transition идёт
+  отдельным cutover после приёмки базового релиза.
+
 ## 0.207.8 — 2026-08-24
 
 ### Авторизованный поиск по личному архиву и закрытый разбор документов

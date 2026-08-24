@@ -2,22 +2,16 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.8**. Это opt-in beta интеграции одного личного
-Obsidian vault с одним Android-устройством через изолированный Syncthing:
-приватный Telegram-onboarding, нативные операции с Markdown, точные delivery
-facts, preserve-both конфликты и единый crash-safe immutable cutover. Без
-`FRIDAY_OBSIDIAN_ENABLED=1` Organ не запускается. Релиз также включает все
-проверки подробного ревью из 0.206.4 и исправляет transient-разбор старых
-ODT/XLSX и локальные evidence scopes. Автосудья выведен из runtime-конфигурации;
-обычное ревью вложения выполняется одним synthesis-проходом, а
-точные Office-ответы остаются code-owned. Остальные возможности включают code-owned
-поиск собственной истории по точным временным окнам и тематической
-лексике, bounded-поиском по содержимому и сохранённым именам собственных
-файлов, строгими page/failure-границами поддерживаемых PDF/JPEG/OCR-путей и
-recoverable Telegram media groups. `DocumentCatalog`, единый `archive_search`,
-pending/conversation passages, semantic catalog titles, типизированные роли дат и
-полная MCP failure taxonomy/circuit breaker остаются следующим этапом
-[Proposal 86](sol/PROPOSALS.md). Opt-in V12 routes `file_read` и `archive_read`
+Текущая версия: **0.207.9**. Авторизованный read-only `archive_search`
+объединяет личные документы, знания, сообщения и Obsidian с точными
+источниками, покрытием и финальной повторной проверкой прав. Schema 39
+сохраняет body-free identity выбранного archive evidence для точного
+возобновления после restart. Добавлен выключенный по умолчанию контур
+опционального GPT-OSS secondary brain: отдельный private-CA endpoint,
+строго привязанный MXFP4 profile, bounded дедлайны и fail-soft fallback.
+Первичная модель остаётся финальной; secondary не имеет доступа к
+инструментам, эффектам и публикации. Obsidian core остаётся opt-in beta,
+а companion plugin не требуется. Opt-in V12 routes `file_read` и `archive_read`
 аттестуются как `qwen38-27b-nvfp4-sglang:dispatcher:v12.14` на точном
 graph-only SGLang deployment; всё неподдержанное остаётся в legacy без
 урезания контекста, concurrency или CUDA graphs.
@@ -315,7 +309,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Успешный canary startup должен показать в `/api/health` версию `0.207.8`,
+Успешный canary startup должен показать в `/api/health` версию `0.207.9`,
 точный profile id, `canary_ready`, `live_attestation_clear` и оба
 зарегистрированных route; простого HTTP `status=ok` недостаточно.
 

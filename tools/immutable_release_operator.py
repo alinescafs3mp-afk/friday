@@ -89,7 +89,14 @@ MAX_OBSIDIAN_BACKUP_BYTES = 16 << 30
 _SMOKE_SCRATCH_ROOT = Path("/var/tmp/friday-immutable-smoke")
 _OBSIDIAN_ENABLE_TRANSITION = "obsidian_enable"
 _SECONDARY_SHADOW_ENABLE_TRANSITION = "secondary_shadow_enable"
-_STAGED_CONFIG_TRANSITIONS = frozenset({_OBSIDIAN_ENABLE_TRANSITION, _SECONDARY_SHADOW_ENABLE_TRANSITION})
+_SECONDARY_SHADOW_DISABLE_TRANSITION = "secondary_shadow_disable"
+_STAGED_CONFIG_TRANSITIONS = frozenset(
+    {
+        _OBSIDIAN_ENABLE_TRANSITION,
+        _SECONDARY_SHADOW_ENABLE_TRANSITION,
+        _SECONDARY_SHADOW_DISABLE_TRANSITION,
+    }
+)
 _SECONDARY_LLM_ENV_PREFIX = "FRIDAY_SECONDARY_LLM_"
 _SECONDARY_LLM_ENV_KEYS = frozenset(
     {
@@ -131,6 +138,10 @@ _SECONDARY_SHADOW_EXACT_VALUES = {
     "FRIDAY_SECONDARY_LLM_PROFILE": _SECONDARY_V9_PROFILE_ID,
     "FRIDAY_SECONDARY_LLM_READ_TIMEOUT_SEC": "12.0",
     "FRIDAY_SECONDARY_LLM_WORKLOADS": "extract",
+}
+_SECONDARY_SHADOW_DISABLED_EXACT_VALUES = {
+    **_SECONDARY_SHADOW_EXACT_VALUES,
+    "FRIDAY_SECONDARY_LLM_ENABLED": "0",
 }
 BOOTSTRAP_WHEELS = (("pip", "26.1.2", "pip-26.1.2-py3-none-any.whl"),)
 _ACTIVATION_SMOKE_RECEIPT = b"friday-activation-smoke:clear:v1\n"
@@ -508,21 +519,24 @@ def _secondary_environment_view(raw: bytes) -> tuple[dict[str, str], bytes]:
     return values, b"".join(unrelated)
 
 
-def _validate_secondary_shadow_environment(
-    predecessor: bytes | None,
-    target: bytes,
-) -> None:
-    """Admit only the exact code-owned v9 shadow profile and its private CA."""
+def _canonical_secondary_environment(unrelated: bytes, values: Mapping[str, str]) -> bytes:
+    return unrelated + b"".join(f"{key}={value}\n".encode() for key, value in sorted(values.items()))
 
-    target_values, target_unrelated = _secondary_environment_view(target)
-    if set(target_values) != _SECONDARY_LLM_ENV_KEYS:
-        raise ReleaseFailure("secondary_shadow_environment_invalid")
-    if any(target_values.get(key) != value for key, value in _SECONDARY_SHADOW_EXACT_VALUES.items()):
-        raise ReleaseFailure("secondary_shadow_environment_invalid")
-    api_key = target_values["FRIDAY_SECONDARY_LLM_API_KEY"]
+
+def _validate_secondary_v9_values(
+    values: Mapping[str, str],
+    *,
+    exact_values: Mapping[str, str],
+    invalid_code: str,
+) -> None:
+    if set(values) != _SECONDARY_LLM_ENV_KEYS or any(
+        values.get(key) != value for key, value in exact_values.items()
+    ):
+        raise ReleaseFailure(invalid_code)
+    api_key = values["FRIDAY_SECONDARY_LLM_API_KEY"]
     if _HEX64.fullmatch(api_key) is None:
-        raise ReleaseFailure("secondary_shadow_environment_invalid")
-    ca_raw = target_values["FRIDAY_SECONDARY_LLM_CA_FILE"]
+        raise ReleaseFailure(invalid_code)
+    ca_raw = values["FRIDAY_SECONDARY_LLM_CA_FILE"]
     ca_path = Path(ca_raw)
     if (
         not ca_path.is_absolute()
@@ -537,6 +551,22 @@ def _validate_secondary_shadow_environment(
     )
     if _sha256_bytes(ca) != _SECONDARY_V9_CA_SHA256:
         raise ReleaseFailure("secondary_shadow_ca_digest_mismatch")
+
+
+def _validate_secondary_shadow_environment(
+    predecessor: bytes | None,
+    target: bytes,
+) -> None:
+    """Admit only the exact code-owned v9 shadow profile and its private CA."""
+
+    target_values, target_unrelated = _secondary_environment_view(target)
+    _validate_secondary_v9_values(
+        target_values,
+        exact_values=_SECONDARY_SHADOW_EXACT_VALUES,
+        invalid_code="secondary_shadow_environment_invalid",
+    )
+    if target != _canonical_secondary_environment(target_unrelated, target_values):
+        raise ReleaseFailure("secondary_shadow_environment_invalid")
     if predecessor is None:
         return
     predecessor_values, predecessor_unrelated = _secondary_environment_view(predecessor)
@@ -546,6 +576,47 @@ def _validate_secondary_shadow_environment(
         predecessor_values.get("FRIDAY_SECONDARY_LLM_MODE", "disabled") not in {"disabled", "shadow"}
     ):
         raise ReleaseFailure("secondary_shadow_predecessor_not_disabled")
+
+
+def _validate_secondary_shadow_disable_environment(
+    predecessor: bytes | None,
+    target: bytes,
+) -> None:
+    """Disable the exact v9 profile by changing its one code-owned admission bit."""
+
+    target_values, target_unrelated = _secondary_environment_view(target)
+    _validate_secondary_v9_values(
+        target_values,
+        exact_values=_SECONDARY_SHADOW_DISABLED_EXACT_VALUES,
+        invalid_code="secondary_shadow_disable_environment_invalid",
+    )
+    canonical_target = _canonical_secondary_environment(target_unrelated, target_values)
+    if target != canonical_target:
+        raise ReleaseFailure("secondary_shadow_disable_environment_invalid")
+    if predecessor is None:
+        return
+    predecessor_values, predecessor_unrelated = _secondary_environment_view(predecessor)
+    _validate_secondary_v9_values(
+        predecessor_values,
+        exact_values=_SECONDARY_SHADOW_EXACT_VALUES,
+        invalid_code="secondary_shadow_disable_predecessor_not_enabled",
+    )
+    if predecessor_unrelated != target_unrelated:
+        raise ReleaseFailure("secondary_shadow_unrelated_environment_changed")
+    canonical_predecessor = _canonical_secondary_environment(predecessor_unrelated, predecessor_values)
+    if predecessor != canonical_predecessor:
+        raise ReleaseFailure("secondary_shadow_disable_predecessor_not_enabled")
+    source = "FRIDAY_SECONDARY_LLM_ENABLED=1"
+    replacement = "FRIDAY_SECONDARY_LLM_ENABLED=0"
+    changed = 0
+    expected_lines: list[str] = []
+    for raw_line in predecessor.decode("utf-8", errors="strict").splitlines(keepends=True):
+        if raw_line in {source, f"{source}\n", f"{source}\r", f"{source}\r\n"}:
+            raw_line = replacement + raw_line[len(source) :]
+            changed += 1
+        expected_lines.append(raw_line)
+    if changed != 1 or "".join(expected_lines).encode("utf-8") != target:
+        raise ReleaseFailure("secondary_shadow_disable_environment_invalid")
 
 
 def _runtime_pins(path: Path) -> dict[str, str]:
@@ -2128,7 +2199,7 @@ def activate_release(
     )
     port.verify_release(candidate)
     # The predecessor is the currently live binary and must remain provable
-    # against ENV0 while a disabled->enabled ENV1 is only staged.
+    # against ENV0 while an authenticated ENV1 transition is only staged.
     port.verify_release(previous, use_predecessor_config=True)
     if previous.obsidian_cutover_contract == OBSIDIAN_CUTOVER_CONTRACT:
         # A capable predecessor can also be the exact post-backup rollback
@@ -3274,6 +3345,22 @@ class DurableActivationJournal:
             expected_candidate = (
                 _journal_release(transition_candidate) if transition_candidate is not None else None
             )
+            secondary_terminal_release_matches = bool(
+                expected_previous is not None
+                and expected_previous == expected_fallback
+                and (
+                    (payload["phase"] == "clear" and payload.get("candidate") == expected_previous)
+                    or (
+                        payload["phase"] in {"rolled_back", "recovered"}
+                        and payload.get("backup") is not None
+                        and payload.get("database_mutation_possible") is True
+                        and payload.get("network_writer_uncertain") is True
+                        and payload.get("writer_target") in {"previous", "fallback"}
+                        and payload.get("previous") == expected_previous
+                        and payload.get("fallback") == expected_previous
+                    )
+                )
+            )
             v2_to_v3_transition = bool(
                 allow_terminal_config_transition
                 and payload["phase"] == "clear"
@@ -3329,7 +3416,6 @@ class DurableActivationJournal:
             secondary_shadow_enable_transition = bool(
                 allow_terminal_config_transition
                 and self.staged_config_transition == _SECONDARY_SHADOW_ENABLE_TRANSITION
-                and payload["phase"] == "clear"
                 and payload_keys in v3_expected
                 and self.transition_config_identity_sha256
                 and payload.get("config_identity_sha256") == self.transition_config_identity_sha256
@@ -3340,9 +3426,22 @@ class DurableActivationJournal:
                 and payload.get("obsidian_root_sha256") == self.obsidian_root_sha256
                 and int(payload.get("alias_claim_count") or 0) == 0
                 and self.alias_claim_count == 0
-                and expected_previous is not None
-                and payload.get("candidate") == expected_previous
-                and expected_previous == expected_fallback
+                and secondary_terminal_release_matches
+            )
+            secondary_shadow_disable_transition = bool(
+                allow_terminal_config_transition
+                and self.staged_config_transition == _SECONDARY_SHADOW_DISABLE_TRANSITION
+                and payload_keys in v3_expected
+                and self.transition_config_identity_sha256
+                and payload.get("config_identity_sha256") == self.transition_config_identity_sha256
+                and self.config_scope_sha256
+                and payload.get("config_scope_sha256") == self.config_scope_sha256
+                and payload.get("memory_vault_mode") == self.memory_vault_mode
+                and payload.get("obsidian_mode") == self.obsidian_mode
+                and payload.get("obsidian_root_sha256") == self.obsidian_root_sha256
+                and int(payload.get("alias_claim_count") or 0) == 0
+                and self.alias_claim_count == 0
+                and secondary_terminal_release_matches
             )
             phase_a_retry_after_fallback = bool(
                 allow_terminal_config_transition
@@ -3373,6 +3472,7 @@ class DurableActivationJournal:
                 or phase_a_to_b_transition
                 or obsidian_enable_transition
                 or secondary_shadow_enable_transition
+                or secondary_shadow_disable_transition
                 or phase_a_retry_after_fallback
             ):
                 raise ReleaseFailure("activation_config_identity_changed")
@@ -3380,6 +3480,8 @@ class DurableActivationJournal:
                 self._accepted_terminal_transition = _OBSIDIAN_ENABLE_TRANSITION
             elif secondary_shadow_enable_transition:
                 self._accepted_terminal_transition = _SECONDARY_SHADOW_ENABLE_TRANSITION
+            elif secondary_shadow_disable_transition:
+                self._accepted_terminal_transition = _SECONDARY_SHADOW_DISABLE_TRANSITION
         self._state = payload
         return dict(payload)
 
@@ -3414,6 +3516,16 @@ class DurableActivationJournal:
             )
             if current["phase"] not in _TERMINAL_JOURNAL_PHASES:
                 raise ReleaseFailure("unfinished_activation_requires_recovery")
+            if (
+                self._accepted_terminal_transition
+                in {
+                    _SECONDARY_SHADOW_ENABLE_TRANSITION,
+                    _SECONDARY_SHADOW_DISABLE_TRANSITION,
+                }
+                and current["phase"] in {"rolled_back", "recovered"}
+                and self.database_backup() is None
+            ):
+                raise ReleaseFailure("activation_terminal_backup_required")
             carry_prebackup_transition = bool(
                 current.get("phase") in {"rolled_back", "recovered"}
                 and current.get("prebackup_config_transition") in _STAGED_CONFIG_TRANSITIONS
@@ -5359,7 +5471,10 @@ class SystemdActivationPort:
                 )
                 if _sha256_bytes(staged_bytes) != next_env_sha256:
                     raise ReleaseFailure("next_environment_file_digest_mismatch")
-            if requested_transition == _SECONDARY_SHADOW_ENABLE_TRANSITION:
+            if requested_transition in {
+                _SECONDARY_SHADOW_ENABLE_TRANSITION,
+                _SECONDARY_SHADOW_DISABLE_TRANSITION,
+            }:
                 canonical_bytes = _read_private_regular_file(
                     config.env_file,
                     maximum_bytes=1 << 20,
@@ -5368,9 +5483,15 @@ class SystemdActivationPort:
                 if canonical_env_sha256 == predecessor_env_sha256:
                     if staged_bytes is None:  # pragma: no cover - read condition above proves it
                         raise ReleaseFailure("next_environment_file_invalid")
-                    _validate_secondary_shadow_environment(canonical_bytes, staged_bytes)
+                    if requested_transition == _SECONDARY_SHADOW_ENABLE_TRANSITION:
+                        _validate_secondary_shadow_environment(canonical_bytes, staged_bytes)
+                    else:
+                        _validate_secondary_shadow_disable_environment(canonical_bytes, staged_bytes)
                 else:
-                    _validate_secondary_shadow_environment(None, canonical_bytes)
+                    if requested_transition == _SECONDARY_SHADOW_ENABLE_TRANSITION:
+                        _validate_secondary_shadow_environment(None, canonical_bytes)
+                    else:
+                        _validate_secondary_shadow_disable_environment(None, canonical_bytes)
             staged_descriptor = (
                 requested_transition,
                 predecessor_env_sha256,
@@ -5550,6 +5671,8 @@ class SystemdActivationPort:
         staged = self._staged_environment_bytes(staged_path, next_digest)
         if selected_transition == _SECONDARY_SHADOW_ENABLE_TRANSITION:
             _validate_secondary_shadow_environment(canonical, staged)
+        elif selected_transition == _SECONDARY_SHADOW_DISABLE_TRANSITION:
+            _validate_secondary_shadow_disable_environment(canonical, staged)
 
     def activate_staged_config_transition(
         self,
@@ -5574,12 +5697,21 @@ class SystemdActivationPort:
                     code="environment_file_invalid",
                 )
                 _validate_secondary_shadow_environment(predecessor_bytes, staged)
+            elif selected_transition == _SECONDARY_SHADOW_DISABLE_TRANSITION:
+                predecessor_bytes = _read_private_regular_file(
+                    self.config.env_file,
+                    maximum_bytes=1 << 20,
+                    code="environment_file_invalid",
+                )
+                _validate_secondary_shadow_disable_environment(predecessor_bytes, staged)
             _replace_private_durable(self.config.env_file, staged)
         elif current == next_digest:
             if staged_path.exists() or staged_path.is_symlink():
                 staged = self._staged_environment_bytes(staged_path, next_digest)
                 if selected_transition == _SECONDARY_SHADOW_ENABLE_TRANSITION:
                     _validate_secondary_shadow_environment(None, staged)
+                elif selected_transition == _SECONDARY_SHADOW_DISABLE_TRANSITION:
+                    _validate_secondary_shadow_disable_environment(None, staged)
             elif selected_transition == _SECONDARY_SHADOW_ENABLE_TRANSITION:
                 target = _read_private_regular_file(
                     self.config.env_file,
@@ -5587,6 +5719,13 @@ class SystemdActivationPort:
                     code="environment_file_invalid",
                 )
                 _validate_secondary_shadow_environment(None, target)
+            elif selected_transition == _SECONDARY_SHADOW_DISABLE_TRANSITION:
+                target = _read_private_regular_file(
+                    self.config.env_file,
+                    maximum_bytes=1 << 20,
+                    code="environment_file_invalid",
+                )
+                _validate_secondary_shadow_disable_environment(None, target)
         else:
             raise ReleaseFailure("staged_canonical_environment_changed")
         if self._canonical_environment_digest() != next_digest:
@@ -5631,6 +5770,8 @@ class SystemdActivationPort:
         staged = self._staged_environment_bytes(staged_path, next_digest)
         if selected_transition == _SECONDARY_SHADOW_ENABLE_TRANSITION:
             _validate_secondary_shadow_environment(canonical, staged)
+        elif selected_transition == _SECONDARY_SHADOW_DISABLE_TRANSITION:
+            _validate_secondary_shadow_disable_environment(canonical, staged)
         if self._staged_predecessor_config is None:  # pragma: no cover - descriptor proves it
             raise ReleaseFailure("staged_environment_identity_changed")
         self.config = self._staged_predecessor_config
@@ -7178,8 +7319,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--staged-config-transition",
         choices=tuple(sorted(_STAGED_CONFIG_TRANSITIONS)),
         help=(
-            "Explicit immutable ENV0 to ENV1 transition; omitted staged activations "
-            "retain the established obsidian_enable contract"
+            "Explicit immutable ENV0 to ENV1 transition (Obsidian enable or exact secondary "
+            "v9 shadow enable/disable); omitted staged activations retain the established "
+            "obsidian_enable contract"
         ),
     )
 

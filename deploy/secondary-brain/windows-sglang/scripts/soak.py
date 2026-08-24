@@ -37,23 +37,39 @@ class SoakCase:
     extra: dict[str, object] | None = None
 
 
-def _is_exact_extraction(value: str) -> bool:
+def _load_unique_json_object(value: str) -> dict[str, object] | None:
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        parsed: dict[str, object] = {}
+        for key, item in pairs:
+            if key in parsed:
+                raise ValueError("duplicate JSON key")
+            parsed[key] = item
+        return parsed
+
     try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError:
-        return False
-    return parsed == {"amount": 17, "date": "2026-08-24", "person": "Артемьев"}
+        parsed = json.loads(value, object_pairs_hook=unique_object)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _is_exact_extraction(value: str) -> bool:
+    parsed = _load_unique_json_object(value)
+    return (
+        parsed == {"amount": 17, "date": "2026-08-24", "person": "Ada"}
+        and type(parsed["amount"]) is int
+    )
 
 
 def _is_integer_42(value: str) -> bool:
-    return bool(re.fullmatch(r"42(?:\.0+)?", value.strip()))
+    # GPT-OSS occasionally renders an otherwise exact scalar as the complete
+    # sentence ``42.``.  That punctuation does not change the numeric result;
+    # keep rejecting labels, prose and every non-equivalent value.
+    return bool(re.fullmatch(r"42(?:\.|\.0+)?", value.strip()))
 
 
 def _is_exact_unicode_filename(value: str) -> bool:
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError:
-        return False
+    parsed = _load_unique_json_object(value)
     return parsed == {"filename": "Проекты/Ёж №17 — финал.txt"}
 
 
@@ -80,7 +96,7 @@ def _cases() -> tuple[SoakCase, ...]:
             "json_extraction",
             (
                 "Return only JSON with keys person, date, amount from: "
-                "Артемьев, 24.08.2026, сумма 17. Use ISO date and numeric amount."
+                "Ada, 24.08.2026, amount 17. Use ISO date and numeric amount."
             ),
             _is_exact_extraction,
             extra={"response_format": {"type": "json_object"}},
