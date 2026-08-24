@@ -158,9 +158,13 @@ function Get-FridayPortRelation8443 {
         if (-not [uint32]::TryParse($Matches.first, [ref]$first) -or $first -gt 65535) {
             return [pscustomobject]@{ state = 'unknown'; kind = 'unknown'; reason = 'local_port_out_of_range' }
         }
-        if ([string]::IsNullOrEmpty([string]$Matches.last)) {
+        $lastText = ''
+        if ($Matches.ContainsKey('last')) {
+            $lastText = [string]$Matches['last']
+        }
+        if ([string]::IsNullOrEmpty($lastText)) {
             $last = $first
-        } elseif (-not [uint32]::TryParse($Matches.last, [ref]$last) -or
+        } elseif (-not [uint32]::TryParse($lastText, [ref]$last) -or
             $last -gt 65535 -or $first -gt $last) {
             return [pscustomobject]@{ state = 'unknown'; kind = 'unknown'; reason = 'local_port_range_malformed' }
         }
