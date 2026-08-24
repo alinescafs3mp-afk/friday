@@ -687,6 +687,118 @@ async def test_optional_failure_never_duplicates_primary_or_retains_exception(se
 
 
 @pytest.mark.asyncio
+async def test_mid_submission_disconnect_falls_back_exactly_once(settings: Any) -> None:
+    submitted = 0
+    primary_calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal submitted
+        submitted += 1
+        raise httpx.ConnectError("synthetic disconnect", request=request)
+
+    async def primary() -> str:
+        nonlocal primary_calls
+        primary_calls += 1
+        return "primary"
+
+    scheduler = build_secondary_brain(
+        _configured_settings(settings),
+        transport=_after_admission(handler),
+    )
+    try:
+        assert await scheduler.secondary_preferred_required_result(_request(), primary) == "primary"
+        assert submitted == 1
+        assert primary_calls == 1
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
+async def test_deadline_hang_is_bounded_and_falls_back_exactly_once(settings: Any) -> None:
+    primary_calls = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def primary() -> str:
+        nonlocal primary_calls
+        primary_calls += 1
+        return "primary"
+
+    configured = replace(
+        _configured_settings(settings),
+        secondary_llm_connect_timeout_sec=0.05,
+        secondary_llm_read_timeout_sec=0.05,
+        secondary_llm_call_budget_sec=0.1,
+    )
+    scheduler = build_secondary_brain(configured, transport=_after_admission(handler))
+    started = time.monotonic()
+    try:
+        assert await scheduler.secondary_preferred_required_result(_request(), primary) == "primary"
+        assert time.monotonic() - started < 0.5
+        assert primary_calls == 1
+        assert scheduler.status().last_failure is SecondaryFailure.TIMEOUT
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
+async def test_malformed_json_falls_back_exactly_once(settings: Any) -> None:
+    primary_calls = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers=_PROFILE_HEADERS, content=b"{")
+
+    async def primary() -> str:
+        nonlocal primary_calls
+        primary_calls += 1
+        return "primary"
+
+    scheduler = build_secondary_brain(
+        _configured_settings(settings),
+        transport=_after_admission(handler),
+    )
+    try:
+        assert await scheduler.secondary_preferred_required_result(_request(), primary) == "primary"
+        assert primary_calls == 1
+        assert scheduler.status().last_failure is SecondaryFailure.MALFORMED_RESPONSE
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
+async def test_mutating_request_runs_primary_effect_once_without_secondary_replay(settings: Any) -> None:
+    network_calls = 0
+    effect_calls = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal network_calls
+        network_calls += 1
+        return _response()
+
+    async def primary_effect() -> str:
+        nonlocal effect_calls
+        effect_calls += 1
+        return "effect-result"
+
+    scheduler = build_secondary_brain(
+        _configured_settings(settings),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        result = await scheduler.secondary_preferred_required_result(
+            _request(effect_class=EffectClass.MUTATING),
+            primary_effect,
+        )
+        assert result == "effect-result"
+        assert network_calls == 0
+        assert effect_calls == 1
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("candidate", "failure"),
     [
@@ -1061,6 +1173,10 @@ async def test_workload_never_queues_behind_process_epoch_probe(settings: Any) -
         assert attempt.failure is SecondaryFailure.ADMISSION_BUSY
         assert time.monotonic() - started < 0.1
         assert workload_calls == 0
+        workload = scheduler.diagnostics_status()["workloads"]["classify"]
+        assert workload["queue_wait_count"] == 1
+        assert workload["queue_wait_sum_sec"] > 0.0
+        assert workload["queue_wait_max_sec"] > 0.0
     finally:
         release_probe.set()
         await scheduler.aclose()
@@ -1164,6 +1280,9 @@ async def test_wrong_models_inventory_opens_cooldown_without_generation(settings
         assert paths == ["/v1/friday-profile", "/v1/models"]
         assert scheduler.status().state is SecondaryState.COOLDOWN
         assert scheduler.status().last_failure is SecondaryFailure.WRONG_MODEL
+        diagnostics = scheduler.diagnostics_status()
+        assert diagnostics["protocol_rejection_total"] == 1
+        assert diagnostics["protocol_rejection_reasons"] == {"wrong_model": 1}
     finally:
         await scheduler.aclose()
 

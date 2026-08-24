@@ -102,6 +102,7 @@ class SecondaryEndpointClient:
         self._queue_wait_sum_sec = 0.0
         self._queue_wait_max_sec = 0.0
         self._protocol_rejection_total = 0
+        self._protocol_rejection_by_reason = {reason: 0 for reason in _PROTOCOL_REJECTIONS}
         timeout = httpx.Timeout(
             config.read_timeout_sec,
             connect=config.connect_timeout_sec,
@@ -172,17 +173,24 @@ class SecondaryEndpointClient:
     def record_fallback(self) -> None:
         self._fallback_total += 1
 
+    def protocol_rejection_counts(self) -> dict[SecondaryFailure, int]:
+        return dict(self._protocol_rejection_by_reason)
+
+    def _record_protocol_rejection(self, failure: SecondaryFailure) -> None:
+        if failure in _PROTOCOL_REJECTIONS:
+            self._protocol_rejection_total += 1
+            self._protocol_rejection_by_reason[failure] += 1
+
     def validate_request(self, request: ModelRequest) -> SecondaryFailure | None:
         """Run the pure protocol/context gate before any endpoint probe."""
 
         try:
             self._adapter.build_payload(self.config, request)
         except ProtocolRejection as rejection:
-            if rejection.failure in _PROTOCOL_REJECTIONS:
-                self._protocol_rejection_total += 1
+            self._record_protocol_rejection(rejection.failure)
             return rejection.failure
         except Exception:
-            self._protocol_rejection_total += 1
+            self._record_protocol_rejection(SecondaryFailure.MALFORMED_RESPONSE)
             return SecondaryFailure.MALFORMED_RESPONSE
         return None
 
@@ -196,8 +204,7 @@ class SecondaryEndpointClient:
                 self._served_model_match = False
             if failure is SecondaryFailure.WRONG_PROFILE:
                 self._profile_manifest_match = False
-            if failure in _PROTOCOL_REJECTIONS:
-                self._protocol_rejection_total += 1
+            self._record_protocol_rejection(failure)
             if failure in _ENDPOINT_FAILURES:
                 self._state = SecondaryState.COOLDOWN
                 self._cooldown_until = self._clock() + self.config.cooldown_sec
@@ -289,8 +296,7 @@ class SecondaryEndpointClient:
                 self._served_model_match = False
             if failure is SecondaryFailure.WRONG_PROFILE:
                 self._profile_manifest_match = False
-            if failure in _PROTOCOL_REJECTIONS:
-                self._protocol_rejection_total += 1
+            self._record_protocol_rejection(failure)
             if failure in _ENDPOINT_FAILURES:
                 self._state = SecondaryState.COOLDOWN
                 self._cooldown_until = self._clock() + self.config.cooldown_sec
@@ -305,13 +311,12 @@ class SecondaryEndpointClient:
         except ProtocolRejection as rejection:
             self._last_failure = rejection.failure
             self._skipped_total += 1
-            if rejection.failure in _PROTOCOL_REJECTIONS:
-                self._protocol_rejection_total += 1
+            self._record_protocol_rejection(rejection.failure)
             return SecondaryAttempt.rejected(rejection.failure)
         except Exception:
             self._last_failure = SecondaryFailure.MALFORMED_RESPONSE
             self._skipped_total += 1
-            self._protocol_rejection_total += 1
+            self._record_protocol_rejection(SecondaryFailure.MALFORMED_RESPONSE)
             return SecondaryAttempt.rejected(SecondaryFailure.MALFORMED_RESPONSE)
 
         now = self._clock()

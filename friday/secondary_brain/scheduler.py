@@ -51,16 +51,6 @@ _READMISSION_FAILURES = frozenset(
         SecondaryFailure.CANCELLED,
     }
 )
-_PROTOCOL_REJECTIONS = frozenset(
-    {
-        SecondaryFailure.WRONG_PROFILE,
-        SecondaryFailure.WRONG_MODEL,
-        SecondaryFailure.MALFORMED_RESPONSE,
-        SecondaryFailure.TOOL_CALL_REJECTED,
-        SecondaryFailure.REASONING_LEAK,
-        SecondaryFailure.DEGENERATION,
-    }
-)
 
 
 def _request_contains_image(request: ModelRequest) -> bool:
@@ -287,38 +277,46 @@ class SecondaryBrainScheduler:
     async def _ensure_epoch_admitted(
         self,
         absolute_deadline_monotonic: float,
-    ) -> SecondaryFailure | None:
+        *,
+        workload: ModelWorkload | None = None,
+    ) -> tuple[SecondaryFailure | None, float]:
         """Demand-probe one process epoch without queueing behind another probe."""
 
         if self._client is None:
-            return SecondaryFailure.MISCONFIGURED
+            return SecondaryFailure.MISCONFIGURED, 0.0
         if self._admission_is_fresh():
-            return None
+            return None, 0.0
+        lock_started = time.monotonic()
         try:
             await asyncio.wait_for(
                 self._probe_lock.acquire(),
                 timeout=self._client.config.admission_timeout_sec,
             )
+        except asyncio.CancelledError:
+            if workload is not None:
+                self._record_queue_wait(workload, time.monotonic() - lock_started)
+            raise
         except TimeoutError:
             self._probe_failure_total += 1
             self._probe_failure_by_reason[SecondaryFailure.ADMISSION_BUSY] += 1
-            return SecondaryFailure.ADMISSION_BUSY
+            return SecondaryFailure.ADMISSION_BUSY, max(0.0, time.monotonic() - lock_started)
+        lock_wait_sec = max(0.0, time.monotonic() - lock_started)
         try:
             if self._admission_is_fresh():
-                return None
+                return None, lock_wait_sec
             failure = await self._client.probe_models(absolute_deadline_monotonic=absolute_deadline_monotonic)
             if failure is not None:
                 self._epoch_admitted = False
                 self._probe_failure_total += 1
                 self._probe_failure_by_reason[failure] += 1
-                return failure
+                return failure, lock_wait_sec
             self._last_probe_success_monotonic = time.monotonic()
             # The expensive generation canary is once per admitted process epoch.
             # A stale health window needs only the exact inventory probe; the
             # following typed real call becomes the fresh generation signal.
             if self._epoch_admitted:
                 self._probe_success_total += 1
-                return None
+                return None, lock_wait_sec
             canary = ModelRequest(
                 workload=ModelWorkload.VERIFY,
                 messages=(
@@ -336,16 +334,20 @@ class SecondaryBrainScheduler:
                 self._probe_failure_total += 1
                 failure = attempt.failure or SecondaryFailure.MALFORMED_RESPONSE
                 self._probe_failure_by_reason[failure] += 1
-                return failure
+                return failure, lock_wait_sec
             if attempt.result.visible_content.strip().casefold() != "ready":
                 await self._client.invalidate(SecondaryFailure.MALFORMED_RESPONSE)
                 self._probe_failure_total += 1
                 self._probe_failure_by_reason[SecondaryFailure.MALFORMED_RESPONSE] += 1
-                return SecondaryFailure.MALFORMED_RESPONSE
+                return SecondaryFailure.MALFORMED_RESPONSE, lock_wait_sec
             self._epoch_admitted = True
             self._last_probe_success_monotonic = time.monotonic()
             self._probe_success_total += 1
-            return None
+            return None, lock_wait_sec
+        except asyncio.CancelledError:
+            if workload is not None:
+                self._record_queue_wait(workload, lock_wait_sec)
+            raise
         finally:
             self._probe_lock.release()
 
@@ -424,9 +426,12 @@ class SecondaryBrainScheduler:
             },
             "protocol_rejection_total": status.protocol_rejection_total,
             "protocol_rejection_reasons": {
-                reason.value: self._skipped_by_reason[reason]
-                for reason in sorted(_PROTOCOL_REJECTIONS, key=lambda value: value.value)
-                if self._skipped_by_reason[reason]
+                reason.value: count
+                for reason, count in sorted(
+                    (self._client.protocol_rejection_counts().items() if self._client is not None else ()),
+                    key=lambda item: item[0].value,
+                )
+                if count
             },
             "queue_wait": {
                 "count": status.queue_wait_count,
@@ -514,11 +519,16 @@ class SecondaryBrainScheduler:
             self._record_skip(request.workload, failure, local=True)
             return SecondaryAttempt.rejected(failure)
         assert self._client is not None
-        admission_failure = await self._ensure_epoch_admitted(request.absolute_deadline_monotonic)
+        admission_failure, probe_queue_wait_sec = await self._ensure_epoch_admitted(
+            request.absolute_deadline_monotonic,
+            workload=request.workload,
+        )
         if admission_failure is not None:
+            self._record_queue_wait(request.workload, probe_queue_wait_sec)
             self._record_skip(request.workload, admission_failure, local=True)
             return SecondaryAttempt.rejected(admission_failure)
         self._selected_by_workload[request.workload] += 1
+        self._record_queue_wait(request.workload, probe_queue_wait_sec)
         try:
             attempt = await self._client.call(request)
         except Exception:
@@ -527,11 +537,10 @@ class SecondaryBrainScheduler:
             self._record_skip(request.workload, SecondaryFailure.CONNECT_FAILED, local=True)
             self._epoch_admitted = False
             return SecondaryAttempt.rejected(SecondaryFailure.CONNECT_FAILED)
-        self._queue_wait_count_by_workload[request.workload] += 1
-        self._queue_wait_sum_by_workload[request.workload] += attempt.queue_wait_sec
-        self._queue_wait_max_by_workload[request.workload] = max(
-            self._queue_wait_max_by_workload[request.workload],
-            attempt.queue_wait_sec,
+        self._extend_queue_wait(
+            request.workload,
+            additional_sec=attempt.queue_wait_sec,
+            combined_sec=probe_queue_wait_sec + attempt.queue_wait_sec,
         )
         if attempt.result is not None:
             # Protocol-valid transport is a health signal, but it becomes a
@@ -543,6 +552,28 @@ class SecondaryBrainScheduler:
         if attempt_failure in _READMISSION_FAILURES:
             self._epoch_admitted = False
         return attempt
+
+    def _record_queue_wait(self, workload: ModelWorkload, waited_sec: float) -> None:
+        waited = max(0.0, waited_sec)
+        self._queue_wait_count_by_workload[workload] += 1
+        self._queue_wait_sum_by_workload[workload] += waited
+        self._queue_wait_max_by_workload[workload] = max(
+            self._queue_wait_max_by_workload[workload],
+            waited,
+        )
+
+    def _extend_queue_wait(
+        self,
+        workload: ModelWorkload,
+        *,
+        additional_sec: float,
+        combined_sec: float,
+    ) -> None:
+        self._queue_wait_sum_by_workload[workload] += max(0.0, additional_sec)
+        self._queue_wait_max_by_workload[workload] = max(
+            self._queue_wait_max_by_workload[workload],
+            max(0.0, combined_sec),
+        )
 
     def _record_skip(
         self,
