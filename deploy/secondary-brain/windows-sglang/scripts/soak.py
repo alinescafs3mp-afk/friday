@@ -55,10 +55,7 @@ def _load_unique_json_object(value: str) -> dict[str, object] | None:
 
 def _is_exact_extraction(value: str) -> bool:
     parsed = _load_unique_json_object(value)
-    return (
-        parsed == {"amount": 17, "date": "2026-08-24", "person": "Ada"}
-        and type(parsed["amount"]) is int
-    )
+    return parsed == {"amount": 17, "date": "2026-08-24", "person": "Ada"} and type(parsed["amount"]) is int
 
 
 def _is_integer_42(value: str) -> bool:
@@ -71,6 +68,30 @@ def _is_integer_42(value: str) -> bool:
 def _is_exact_unicode_filename(value: str) -> bool:
     parsed = _load_unique_json_object(value)
     return parsed == {"filename": "Проекты/Ёж №17 — финал.txt"}
+
+
+def _exact_unicode_response_format() -> dict[str, object]:
+    expected = "Проекты/Ёж №17 — финал.txt"
+    return {
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "exact_unicode_filename",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "filename": {
+                            "type": "string",
+                            "enum": [expected],
+                        }
+                    },
+                    "required": ["filename"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    }
 
 
 def _cases() -> tuple[SoakCase, ...]:
@@ -105,7 +126,10 @@ def _cases() -> tuple[SoakCase, ...]:
             "unicode",
             'Return only JSON in this exact form: {"filename":"Проекты/Ёж №17 — финал.txt"}',
             _is_exact_unicode_filename,
-            extra={"response_format": {"type": "json_object"}},
+            # ``json_object`` constrains only the shape and still permits rare
+            # Cyrillic value drift. The admitted SGLang endpoint supports an
+            # enum grammar, so the wire contract enforces the exact value too.
+            extra=_exact_unicode_response_format(),
         ),
         SoakCase(
             "contradiction",

@@ -72,7 +72,26 @@ def test_mixed_soak_cases_use_closed_stable_contracts(soak: Any) -> None:
     assert not cases["contradiction"].validator("consistent")
     assert cases["arithmetic"].max_tokens == 512
     assert cases["arithmetic"].reasoning_effort == "medium"
-    assert cases["unicode"].extra == {"response_format": {"type": "json_object"}}
+    assert cases["unicode"].extra == {
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "exact_unicode_filename",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "filename": {
+                            "type": "string",
+                            "enum": ["Проекты/Ёж №17 — финал.txt"],
+                        }
+                    },
+                    "required": ["filename"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    }
     assert cases["unicode"].validator('{"filename":"Проекты/Ёж №17 — финал.txt"}')
     assert cases["json_extraction"].validator('{"amount":17,"date":"2026-08-24","person":"Ada"}')
 
