@@ -1251,7 +1251,395 @@ def test_live_control_command_is_bounded_key_only_and_overrides_long_stop_grace(
         live._run_control("arbitrary-command")
 
 
+def test_physical_primary_observer_is_https_ca_verified_bounded_and_no_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live = importlib.import_module("live_failure_battery")
+    context = importlib.import_module("ssl").create_default_context()
+    observed: dict[str, Any] = {}
+
+    class Response:
+        status = 200
+
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def geturl(self) -> str:
+            return live.PRIMARY_DIAGNOSTICS_ENDPOINT
+
+        def read(self, _limit: int) -> bytes:
+            return b'{"secondary":{}}'
+
+    class Opener:
+        def open(self, request: Any, *, timeout: float) -> Response:
+            observed["url"] = request.full_url
+            observed["authorization"] = request.get_header("Authorization")
+            observed["timeout"] = timeout
+            return Response()
+
+    def build_opener(*handlers: Any) -> Opener:
+        observed["handlers"] = handlers
+        return Opener()
+
+    monkeypatch.setattr(live, "_primary_tls_context", lambda _path: (context, "8" * 64))
+    monkeypatch.setattr(live.urllib.request, "build_opener", build_opener)
+
+    value, ca_sha256 = live._primary_json(
+        live.PRIMARY_DIAGNOSTICS_ENDPOINT,
+        ca_file=Path("/not-read-after-mock"),
+        timeout_sec=15.0,
+        api_key="a" * 64,
+        maximum_bytes=1024,
+    )
+
+    assert live.PRIMARY_BASE_URL == "https://127.0.0.1:8000"
+    assert value == {"secondary": {}}
+    assert ca_sha256 == "8" * 64
+    assert observed["url"] == live.PRIMARY_DIAGNOSTICS_ENDPOINT
+    assert observed["authorization"] == f"Bearer {'a' * 64}"
+    assert any(isinstance(item, live._NoPrimaryRedirects) for item in observed["handlers"])
+    assert context.check_hostname is True
+    assert context.verify_mode == importlib.import_module("ssl").CERT_REQUIRED
+    with pytest.raises(live.LiveFailureBatteryError, match="closed set"):
+        live._primary_json(
+            "http://127.0.0.1:8000/api/health",
+            ca_file=Path("/not-read"),
+            timeout_sec=15.0,
+            maximum_bytes=1024,
+        )
+
+
+def test_primary_diagnostics_bearer_requires_owned_private_stable_regular_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live = importlib.import_module("live_failure_battery")
+    secret = "p" * 64
+    key_file = tmp_path / "primary.key"
+    key_file.write_text(secret + "\n", encoding="ascii")
+    key_file.chmod(0o600)
+
+    assert live._load_primary_api_key(key_file) == secret
+
+    key_file.write_text(secret + "\n\n", encoding="ascii")
+    with pytest.raises(live.LiveFailureBatteryError, match="one line"):
+        live._load_primary_api_key(key_file)
+    key_file.write_text(secret + "\n", encoding="ascii")
+    key_file.chmod(0o600)
+
+    key_file.chmod(0o644)
+    with pytest.raises(live.LiveFailureBatteryError, match="not private"):
+        live._load_primary_api_key(key_file)
+    key_file.chmod(0o600)
+
+    symlink = tmp_path / "primary-link.key"
+    symlink.symlink_to(key_file)
+    with pytest.raises(live.LiveFailureBatteryError, match="not private"):
+        live._load_primary_api_key(symlink)
+
+    if hasattr(live.os, "geteuid"):
+        with monkeypatch.context() as patch:
+            patch.setattr(live.os, "geteuid", lambda: key_file.stat().st_uid + 1)
+            with pytest.raises(live.LiveFailureBatteryError, match="not private"):
+                live._load_primary_api_key(key_file)
+
+    real_fstat = live.os.fstat
+    calls = 0
+
+    def changed_after_open(descriptor: int) -> Any:
+        nonlocal calls
+        calls += 1
+        observed = real_fstat(descriptor)
+        if calls == 1:
+            return observed
+        return SimpleNamespace(
+            st_dev=observed.st_dev,
+            st_ino=observed.st_ino,
+            st_mode=observed.st_mode,
+            st_uid=observed.st_uid,
+            st_size=observed.st_size,
+            st_mtime_ns=observed.st_mtime_ns + 1,
+            st_ctime_ns=observed.st_ctime_ns,
+        )
+
+    with monkeypatch.context() as patch:
+        patch.setattr(live.os, "fstat", changed_after_open)
+        with pytest.raises(live.LiveFailureBatteryError, match="identity changed"):
+            live._load_primary_api_key(key_file)
+
+
 def test_physical_failure_receipt_requires_the_code_owned_three_stage_witness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operator = importlib.import_module("runtime_profile_operator")
+    live = importlib.import_module("live_failure_battery")
+    args = _candidate_args(tmp_path)
+    operator.build_candidate(args)
+    api_key = tmp_path / "gateway.key"
+    api_key.write_text("a" * 64, encoding="ascii")
+    runner_sha = hashlib.sha256((SCRIPTS / "live_failure_battery.py").read_bytes()).hexdigest()
+    boot_epochs = iter(("4" * 64, "4" * 64, "5" * 64, "5" * 64))
+    monkeypatch.setattr(live, "_source_identity", lambda: ("a" * 40, runner_sha))
+    monkeypatch.setattr(live, "_friday_backend_main_pid", lambda: 2613)
+    monkeypatch.setattr(live, "_ready_epoch", lambda *_args, **_kwargs: "1700000000")
+    monkeypatch.setattr(live, "_primary_process_epoch_sha256", lambda _pid: "6" * 64)
+    monkeypatch.setattr(live, "_primary_health", lambda _timeout, _ca: ("0.207.8", "8" * 64))
+    monkeypatch.setattr(live, "_laptop_boot_epoch_sha256", lambda: next(boot_epochs))
+
+    candidate = json.loads(args.output.read_text(encoding="utf-8"))
+
+    def product_snapshot(
+        *,
+        state: str,
+        available: bool,
+        selected: int,
+        success: int,
+        fallback: int,
+        probe_success: int,
+        probe_failure: int,
+        inventory_success: int,
+        inventory_failure: int,
+        skip_reasons: dict[str, int],
+        fallback_reasons: dict[str, int],
+    ) -> dict[str, Any]:
+        return {
+            "schema": "friday.optional-secondary-health.v1",
+            "role": "optional_advisory",
+            "enabled": True,
+            "configured": True,
+            "mode": "assist",
+            "state": state,
+            "available": available,
+            "profile_id": candidate["profile_id"],
+            "profile_admission": "accepted",
+            "profile_manifest_match": True,
+            "served_model_match": True,
+            "context_cap_tokens": 4096,
+            "selected_total": selected,
+            "success_total": success,
+            "endpoint_request_total": selected + probe_success + probe_failure,
+            "endpoint_success_total": success + probe_success,
+            "skipped_total": sum(skip_reasons.values()),
+            "primary_fallback_total": fallback,
+            "probe_success_total": probe_success,
+            "probe_failure_total": probe_failure,
+            "model_inventory_probe_success_total": inventory_success,
+            "model_inventory_probe_failure_total": inventory_failure,
+            "fallback_reasons": fallback_reasons,
+            "workload": {
+                "name": "extract",
+                "selected_total": selected,
+                "success_total": success,
+                "skip_reasons": skip_reasons,
+                "fallback_reasons": fallback_reasons,
+            },
+        }
+
+    outage_reasons = {"connect_failed": 1, "cooldown": 1}
+    before_snapshot = product_snapshot(
+        state="healthy",
+        available=True,
+        selected=10,
+        success=10,
+        fallback=2,
+        probe_success=3,
+        probe_failure=0,
+        inventory_success=3,
+        inventory_failure=0,
+        skip_reasons={},
+        fallback_reasons={},
+    )
+    off_snapshot = product_snapshot(
+        state="cooldown",
+        available=False,
+        selected=11,
+        success=10,
+        fallback=4,
+        probe_success=3,
+        probe_failure=1,
+        inventory_success=3,
+        inventory_failure=1,
+        skip_reasons=outage_reasons,
+        fallback_reasons=outage_reasons,
+    )
+    recovered_snapshot = product_snapshot(
+        state="healthy",
+        available=True,
+        selected=12,
+        success=11,
+        fallback=4,
+        probe_success=4,
+        probe_failure=1,
+        inventory_success=4,
+        inventory_failure=1,
+        skip_reasons=outage_reasons,
+        fallback_reasons=outage_reasons,
+    )
+    snapshots = iter(
+        (
+            before_snapshot,
+            before_snapshot,
+            off_snapshot,
+            off_snapshot,
+            recovered_snapshot,
+            recovered_snapshot,
+        )
+    )
+    monkeypatch.setattr(
+        live,
+        "_product_snapshot",
+        lambda **_kwargs: (next(snapshots), "8" * 64),
+    )
+
+    begin = tmp_path / "physical.begin.json"
+    product_begin = tmp_path / "physical.product-begin.json"
+    with pytest.raises(live.LiveFailureBatteryError, match="friday-backend.service MainPID"):
+        live.begin_physical_observation(
+            candidate=args.output,
+            api_key_file=api_key,
+            ca_file=args.ca_certificate,
+            primary_api_key_file=api_key,
+            primary_ca_file=args.ca_certificate,
+            primary_pid=999,
+            output=tmp_path / "wrong-primary.json",
+            product_output=tmp_path / "wrong-primary-product.json",
+        )
+    blocked_begin_main = tmp_path / "blocked-physical.begin.json"
+    blocked_begin_product = tmp_path / "blocked-physical.product-begin.json"
+    blocked_begin_product.write_text("occupied", encoding="ascii")
+    with pytest.raises(live.LiveFailureBatteryError, match="output path is not new"):
+        live.begin_physical_observation(
+            candidate=args.output,
+            api_key_file=api_key,
+            ca_file=args.ca_certificate,
+            primary_api_key_file=api_key,
+            primary_ca_file=args.ca_certificate,
+            primary_pid=2613,
+            output=blocked_begin_main,
+            product_output=blocked_begin_product,
+        )
+    assert not blocked_begin_main.exists()
+    live.begin_physical_observation(
+        candidate=args.output,
+        api_key_file=api_key,
+        ca_file=args.ca_certificate,
+        primary_api_key_file=api_key,
+        primary_ca_file=args.ca_certificate,
+        primary_pid=2613,
+        output=begin,
+        product_output=product_begin,
+    )
+    monkeypatch.setattr(live, "_tls_handshake_available", lambda *_args, **_kwargs: False)
+    with pytest.raises(live.LiveFailureBatteryError, match="must be explicit"):
+        live.record_physical_power_loss(
+            candidate=args.output,
+            ca_file=args.ca_certificate,
+            primary_api_key_file=api_key,
+            primary_ca_file=args.ca_certificate,
+            state_path=begin,
+            product_state_path=product_begin,
+            output=tmp_path / "unconfirmed.json",
+            product_output=tmp_path / "unconfirmed-product.json",
+            physical_power_loss_observed=True,
+            ordinary_fallback_observed=True,
+            mid_turn_fallback_observed=False,
+            no_effect_replay_observed=True,
+            v12_readiness_unchanged_observed=True,
+        )
+    off = tmp_path / "physical.off.json"
+    product_off = tmp_path / "physical.product-off.json"
+    blocked_off_main = tmp_path / "blocked-physical.off.json"
+    blocked_off_product = tmp_path / "blocked-physical.product-off.json"
+    blocked_off_product.write_text("occupied", encoding="ascii")
+    with pytest.raises(live.LiveFailureBatteryError, match="output path is not new"):
+        live.record_physical_power_loss(
+            candidate=args.output,
+            ca_file=args.ca_certificate,
+            primary_api_key_file=api_key,
+            primary_ca_file=args.ca_certificate,
+            state_path=begin,
+            product_state_path=product_begin,
+            output=blocked_off_main,
+            product_output=blocked_off_product,
+            physical_power_loss_observed=True,
+            ordinary_fallback_observed=True,
+            mid_turn_fallback_observed=True,
+            no_effect_replay_observed=True,
+            v12_readiness_unchanged_observed=True,
+        )
+    assert not blocked_off_main.exists()
+    live.record_physical_power_loss(
+        candidate=args.output,
+        ca_file=args.ca_certificate,
+        primary_api_key_file=api_key,
+        primary_ca_file=args.ca_certificate,
+        state_path=begin,
+        product_state_path=product_begin,
+        output=off,
+        product_output=product_off,
+        physical_power_loss_observed=True,
+        ordinary_fallback_observed=True,
+        mid_turn_fallback_observed=True,
+        no_effect_replay_observed=True,
+        v12_readiness_unchanged_observed=True,
+    )
+    assert json.loads(off.read_text(encoding="utf-8"))["physical_begin_state_sha256"] == (
+        hashlib.sha256(begin.read_bytes()).hexdigest()
+    )
+    receipt = tmp_path / "physical.observed.json"
+    product_receipt = tmp_path / "physical.product-observed.json"
+    blocked_receipt = tmp_path / "blocked-physical.observed.json"
+    blocked_product_receipt = tmp_path / "blocked-physical.product-observed.json"
+    blocked_product_receipt.write_text("occupied", encoding="ascii")
+    with pytest.raises(live.LiveFailureBatteryError, match="output path is not new"):
+        live.finish_physical_observation(
+            candidate=args.output,
+            api_key_file=api_key,
+            ca_file=args.ca_certificate,
+            primary_api_key_file=api_key,
+            primary_ca_file=args.ca_certificate,
+            state_path=off,
+            product_state_path=product_off,
+            output=blocked_receipt,
+            product_output=blocked_product_receipt,
+            readmitted_without_primary_restart_observed=True,
+        )
+    assert not blocked_receipt.exists()
+    live.finish_physical_observation(
+        candidate=args.output,
+        api_key_file=api_key,
+        ca_file=args.ca_certificate,
+        primary_api_key_file=api_key,
+        primary_ca_file=args.ca_certificate,
+        state_path=off,
+        product_state_path=product_off,
+        output=receipt,
+        product_output=product_receipt,
+        readmitted_without_primary_restart_observed=True,
+    )
+    evidence = json.loads(receipt.read_text(encoding="utf-8"))
+    product_evidence = json.loads(product_receipt.read_text(encoding="utf-8"))
+
+    assert evidence["observation_method"] == "code_owned_manual_state_machine"
+    assert evidence["observer_runner_sha256"] == runner_sha
+    assert evidence["physical_laptop_power_loss_observed"] is True
+    assert (
+        evidence["friday_primary_process_epoch_before_sha256"]
+        == evidence["friday_primary_process_epoch_after_sha256"]
+    )
+    assert evidence["raw_content_retained"] is False
+    assert product_evidence["exact_profile_and_assist_mode_observed"] is True
+    assert product_evidence["primary_fallback_after_recovery_delta"] == 0
+    assert product_evidence["success_after_recovery_delta"] == 1
+    assert product_evidence["raw_content_retained"] is False
+    assert product_evidence["credentials_retained"] is False
+
+
+def test_physical_node_witness_keeps_product_counter_gate_default_off(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1267,42 +1655,29 @@ def test_physical_failure_receipt_requires_the_code_owned_three_stage_witness(
     monkeypatch.setattr(live, "_friday_backend_main_pid", lambda: 2613)
     monkeypatch.setattr(live, "_ready_epoch", lambda *_args, **_kwargs: "1700000000")
     monkeypatch.setattr(live, "_primary_process_epoch_sha256", lambda _pid: "6" * 64)
-    monkeypatch.setattr(live, "_primary_health", lambda _timeout: "0.207.8")
+    monkeypatch.setattr(live, "_primary_health", lambda _timeout, _ca: ("0.207.8", "8" * 64))
     monkeypatch.setattr(live, "_laptop_boot_epoch_sha256", lambda: next(boot_epochs))
+    monkeypatch.setattr(live, "_tls_handshake_available", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        live,
+        "_product_snapshot",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("product gate must stay off")),
+    )
 
-    begin = tmp_path / "physical.begin.json"
-    with pytest.raises(live.LiveFailureBatteryError, match="friday-backend.service MainPID"):
-        live.begin_physical_observation(
-            candidate=args.output,
-            api_key_file=api_key,
-            ca_file=args.ca_certificate,
-            primary_pid=999,
-            output=tmp_path / "wrong-primary.json",
-        )
-    live.begin_physical_observation(
+    begin = tmp_path / "node.begin.json"
+    begin_result = live.begin_physical_observation(
         candidate=args.output,
         api_key_file=api_key,
         ca_file=args.ca_certificate,
+        primary_ca_file=args.ca_certificate,
         primary_pid=2613,
         output=begin,
     )
-    monkeypatch.setattr(live, "_tls_handshake_available", lambda *_args, **_kwargs: False)
-    with pytest.raises(live.LiveFailureBatteryError, match="must be explicit"):
-        live.record_physical_power_loss(
-            candidate=args.output,
-            ca_file=args.ca_certificate,
-            state_path=begin,
-            output=tmp_path / "unconfirmed.json",
-            physical_power_loss_observed=True,
-            ordinary_fallback_observed=True,
-            mid_turn_fallback_observed=False,
-            no_effect_replay_observed=True,
-            v12_readiness_unchanged_observed=True,
-        )
-    off = tmp_path / "physical.off.json"
-    live.record_physical_power_loss(
+    off = tmp_path / "node.off.json"
+    off_result = live.record_physical_power_loss(
         candidate=args.output,
         ca_file=args.ca_certificate,
+        primary_ca_file=args.ca_certificate,
         state_path=begin,
         output=off,
         physical_power_loss_observed=True,
@@ -1311,28 +1686,20 @@ def test_physical_failure_receipt_requires_the_code_owned_three_stage_witness(
         no_effect_replay_observed=True,
         v12_readiness_unchanged_observed=True,
     )
-    assert json.loads(off.read_text(encoding="utf-8"))["physical_begin_state_sha256"] == (
-        hashlib.sha256(begin.read_bytes()).hexdigest()
-    )
-    receipt = tmp_path / "physical.observed.json"
-    live.finish_physical_observation(
+    observed = tmp_path / "node.observed.json"
+    finish_result = live.finish_physical_observation(
         candidate=args.output,
         api_key_file=api_key,
         ca_file=args.ca_certificate,
+        primary_ca_file=args.ca_certificate,
         state_path=off,
-        output=receipt,
+        output=observed,
         readmitted_without_primary_restart_observed=True,
     )
-    evidence = json.loads(receipt.read_text(encoding="utf-8"))
 
-    assert evidence["observation_method"] == "code_owned_manual_state_machine"
-    assert evidence["observer_runner_sha256"] == runner_sha
-    assert evidence["physical_laptop_power_loss_observed"] is True
-    assert (
-        evidence["friday_primary_process_epoch_before_sha256"]
-        == evidence["friday_primary_process_epoch_after_sha256"]
-    )
-    assert evidence["raw_content_retained"] is False
+    assert "product_output_sha256" not in begin_result
+    assert "product_output_sha256" not in off_result
+    assert "product_output_sha256" not in finish_result
 
 
 def test_composite_failure_rejects_a_forged_physical_observer_runner(tmp_path: Path) -> None:

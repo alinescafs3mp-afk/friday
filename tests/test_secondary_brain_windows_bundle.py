@@ -81,6 +81,25 @@ def test_bundle_has_the_closed_operator_surface() -> None:
     assert required <= {path.relative_to(BUNDLE).as_posix() for path in BUNDLE.rglob("*") if path.is_file()}
 
 
+def test_readme_pins_primary_tls_and_keeps_product_witness_post_accept_opt_in() -> None:
+    readme = (BUNDLE / "README.md").read_text(encoding="utf-8")
+    normalized = " ".join(readme.split())
+
+    assert readme.count("--primary-ca-file /secure/friday-primary-ca.crt") == 3
+    assert "https://127.0.0.1:8000" in readme
+    assert "including that IP in SAN" in readme
+    assert "never uses `-k`" in readme
+    assert "does not accept the ambient trust store" in normalized
+    assert "pre-acceptance node witness above deliberately leaves the product counter" in normalized
+    assert readme.count("--primary-api-key-file /secure/friday-primary-api-key") == 3
+    assert readme.count("--product-output evidence/failure.product-") == 3
+    assert "--product-state evidence/failure.product-begin.json" in readme
+    assert "--product-state evidence/failure.product-off.json" in readme
+    assert "prompts and responses are never written" in normalized
+    assert "owned by the runtime user with mode `0600`" in normalized
+    assert "create-only and must be new" in normalized
+
+
 def test_native_runtime_replaces_the_obsolete_internal_compat_image() -> None:
     assert not any(path.is_file() for path in (BUNDLE / "runtime-compat").glob("*"))
     obsolete = {

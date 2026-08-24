@@ -321,12 +321,14 @@ python scripts/live_failure_battery.py physical-begin \
   --candidate evidence/profile.candidate.json \
   --api-key-file /secure/friday-secondary-gateway-key \
   --ca-file /secure/friday-secondary-ca.crt \
+  --primary-ca-file /secure/friday-primary-ca.crt \
   --primary-pid "$primary_pid" \
   --output evidence/failure.physical-begin.json
 
 python scripts/live_failure_battery.py physical-off \
   --candidate evidence/profile.candidate.json \
   --ca-file /secure/friday-secondary-ca.crt \
+  --primary-ca-file /secure/friday-primary-ca.crt \
   --state evidence/failure.physical-begin.json \
   --physical-power-loss-observed \
   --ordinary-primary-fallback-exactly-once-operator-observed \
@@ -339,10 +341,47 @@ python scripts/live_failure_battery.py physical-finish \
   --candidate evidence/profile.candidate.json \
   --api-key-file /secure/friday-secondary-gateway-key \
   --ca-file /secure/friday-secondary-ca.crt \
+  --primary-ca-file /secure/friday-primary-ca.crt \
   --state evidence/failure.physical-off.json \
   --readmitted-without-primary-restart-operator-observed \
   --output evidence/failure.physical-observed.json
 ```
+
+`friday-primary-ca.crt` is the public CA or server certificate that validates
+the fixed `https://127.0.0.1:8000` authority, including that IP in SAN. The
+witness never uses `-k`, follows no redirect and does not accept the ambient
+trust store.
+
+The pre-acceptance node witness above deliberately leaves the product counter
+gate off: assist authority does not exist yet. After the exact accepted profile
+has been registered, deployed in `assist` mode and exercised through shadow,
+repeat the three physical stages with fresh `--output` paths and add this
+complete opt-in trio (a partial trio is rejected):
+
+```text
+physical-begin:
+  --primary-api-key-file /secure/friday-primary-api-key
+  --product-output evidence/failure.product-begin.json
+
+physical-off:
+  --primary-api-key-file /secure/friday-primary-api-key
+  --product-state evidence/failure.product-begin.json
+  --product-output evidence/failure.product-off.json
+
+physical-finish:
+  --primary-api-key-file /secure/friday-primary-api-key
+  --product-state evidence/failure.product-off.json
+  --product-output evidence/failure.product-observed.json
+```
+
+For that second cycle, start one eligible product request and power the laptop
+off while it is in flight; then run one more eligible request while the laptop
+is off. After power-on and cooldown, run one eligible request before
+`physical-finish`. The sidecars bind the accepted profile and `assist` mode and
+retain only bounded counters, reason enums and hashes. The bearer value, prompts
+and responses are never written. The primary API-key file must be a regular
+single-line file owned by the runtime user with mode `0600` (or stricter). Every
+main receipt and sidecar path is create-only and must be new.
 
 The witness checks TLS loss, laptop boot-epoch change, unchanged Friday process
 epoch and exact candidate recovery. It never turns a service stop or mocked test
