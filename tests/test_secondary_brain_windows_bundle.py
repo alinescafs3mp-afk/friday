@@ -239,6 +239,7 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     policy = (BUNDLE / "gateway.conf.template").read_text(encoding="utf-8")
     assert "listen 8443 ssl;" in policy
     assert "access_log off;" in policy
+    assert policy.count("map_hash_bucket_size 128;") == 1
     assert '"Bearer __GATEWAY_BEARER__" 1;' in policy
     assert 'Authorization "Bearer __SGLANG_BEARER__"' in policy
     assert "location = /v1/models" in policy
