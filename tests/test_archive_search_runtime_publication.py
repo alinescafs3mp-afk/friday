@@ -1100,10 +1100,19 @@ async def test_selected_canonical_archive_evidence_replays_exactly_after_runtime
 
 
 @pytest.mark.asyncio
-async def test_selected_message_archive_evidence_replays_after_restart_then_drifts_closed(
+@pytest.mark.parametrize(
+    ("late_failure", "expected_replay_status"),
+    [
+        ("denied", "denied"),
+        ("drifted", "drifted"),
+    ],
+)
+async def test_selected_message_archive_evidence_replays_after_restart_then_fails_closed(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
+    late_failure: str,
+    expected_replay_status: str,
 ) -> None:
     source_conversation_id, selected_text = _seed_message_archive(
         storage,
@@ -1209,7 +1218,10 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_drif
     assert advanced.revision == created.revision + 1
     assert advanced.anchor_assistant_message_id == replay["message_id"]
 
-    assert storage.archive_conversation(source_conversation_id, _OWNER) is True
+    if late_failure == "denied":
+        storage.set_permission_override(_OWNER, "conversations.read", "deny")
+    else:
+        assert storage.archive_conversation(source_conversation_id, _OWNER) is True
 
     drift_model = _DirectAnswerModel()
     drifted_runtime, drift_kernel, drift_actor, _model, drift_web, _contexts = await _runtime(
@@ -1230,7 +1242,7 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_drif
     finally:
         await drift_web.close()
 
-    assert drifted["context"]["selected_archive_evidence_replay"] == "drifted"
+    assert drifted["context"]["selected_archive_evidence_replay"] == expected_replay_status
     source_free = json.dumps(drifted, ensure_ascii=False)
     assert selected_text not in source_free
     assert late_text not in source_free

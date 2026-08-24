@@ -96,11 +96,11 @@ _PROOF_REFS_BY_JOURNEY_CLASS = {
     ),
     ("conversation_recall", "integration path"): (
         "tests/test_message_window_runtime_integration.py::test_promoted_exact_window_is_deterministic_scoped_and_receipted",
-        "tests/test_archive_search_runtime_publication.py::test_selected_message_archive_evidence_replays_after_restart_then_drifts_closed",
+        "tests/test_archive_search_runtime_publication.py::test_selected_message_archive_evidence_replays_after_restart_then_fails_closed",
     ),
     ("conversation_recall", "restart and recovery evidence"): (
         "tests/test_message_window_work_item_runtime.py::test_restart_temporal_followup_reuses_identity_role_and_zone_with_one_cas_update",
-        "tests/test_archive_search_runtime_publication.py::test_selected_message_archive_evidence_replays_after_restart_then_drifts_closed",
+        "tests/test_archive_search_runtime_publication.py::test_selected_message_archive_evidence_replays_after_restart_then_fails_closed",
     ),
     ("document_recall_answer", "deterministic contract"): (
         "tests/test_v12_file_evidence_reader.py::test_current_turn_native_files_form_one_process_owned_bundle",
