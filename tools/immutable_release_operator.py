@@ -90,12 +90,14 @@ _SMOKE_SCRATCH_ROOT = Path("/var/tmp/friday-immutable-smoke")
 _OBSIDIAN_ENABLE_TRANSITION = "obsidian_enable"
 _SECONDARY_SHADOW_ENABLE_TRANSITION = "secondary_shadow_enable"
 _SECONDARY_SHADOW_DISABLE_TRANSITION = "secondary_shadow_disable"
+_SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION = "secondary_shadow_to_private_shadow"
 _SECONDARY_SHADOW_TO_ASSIST_TRANSITION = "secondary_shadow_to_assist"
 _SECONDARY_ASSIST_TO_DISABLED_TRANSITION = "secondary_assist_to_disabled"
 _SECONDARY_CONFIG_TRANSITIONS = frozenset(
     {
         _SECONDARY_SHADOW_ENABLE_TRANSITION,
         _SECONDARY_SHADOW_DISABLE_TRANSITION,
+        _SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION,
         _SECONDARY_SHADOW_TO_ASSIST_TRANSITION,
         _SECONDARY_ASSIST_TO_DISABLED_TRANSITION,
     }
@@ -152,9 +154,16 @@ _SECONDARY_SHADOW_DISABLED_EXACT_VALUES = {
     **_SECONDARY_SHADOW_EXACT_VALUES,
     "FRIDAY_SECONDARY_LLM_ENABLED": "0",
 }
-_SECONDARY_ASSIST_EXACT_VALUES = {
+_SECONDARY_PRIVATE_SHADOW_EXACT_VALUES = {
     **_SECONDARY_SHADOW_EXACT_VALUES,
     "FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT": "1",
+}
+_SECONDARY_PRIVATE_SHADOW_DISABLED_EXACT_VALUES = {
+    **_SECONDARY_PRIVATE_SHADOW_EXACT_VALUES,
+    "FRIDAY_SECONDARY_LLM_ENABLED": "0",
+}
+_SECONDARY_ASSIST_EXACT_VALUES = {
+    **_SECONDARY_PRIVATE_SHADOW_EXACT_VALUES,
     "FRIDAY_SECONDARY_LLM_MODE": "assist",
 }
 _SECONDARY_ASSIST_DISABLED_EXACT_VALUES = {
@@ -482,11 +491,12 @@ def _read_private_regular_file(path: Path, *, maximum_bytes: int, code: str) -> 
             os.close(descriptor)
 
 
-def _secondary_environment_view(raw: bytes) -> tuple[dict[str, str], bytes]:
-    """Mirror ``load_local_env_file`` while retaining unrelated bytes exactly."""
+def _secondary_environment_parts(raw: bytes) -> tuple[dict[str, str], bytes, bytes]:
+    """Mirror ``load_local_env_file`` and retain both byte domains exactly."""
 
     values: dict[str, str] = {}
     unrelated: list[bytes] = []
+    secondary: list[bytes] = []
     try:
         text = raw.decode("utf-8", errors="strict")
     except UnicodeError as exc:
@@ -533,8 +543,34 @@ def _secondary_environment_view(raw: bytes) -> tuple[dict[str, str], bytes]:
         if any(character in value for character in "\x00\r\n"):
             raise ReleaseFailure("secondary_shadow_environment_invalid")
         values[key] = value
+        secondary.append(raw_line.encode("utf-8"))
         previous_ending = ending
-    return values, b"".join(unrelated)
+    return values, b"".join(unrelated), b"".join(secondary)
+
+
+def _secondary_environment_view(raw: bytes) -> tuple[dict[str, str], bytes]:
+    values, unrelated, _secondary = _secondary_environment_parts(raw)
+    return values, unrelated
+
+
+def _validate_staged_environment_transition(
+    transition: str,
+    predecessor: bytes | None,
+    target: bytes,
+) -> None:
+    """Close secondary policy changes behind the explicit secondary vocabulary."""
+
+    if transition in _SECONDARY_CONFIG_TRANSITIONS:
+        _validate_secondary_config_transition(transition, predecessor, target)
+        return
+    _target_values, _target_unrelated, target_secondary = _secondary_environment_parts(target)
+    if predecessor is None:
+        return
+    _predecessor_values, _predecessor_unrelated, predecessor_secondary = (
+        _secondary_environment_parts(predecessor)
+    )
+    if predecessor_secondary != target_secondary:
+        raise ReleaseFailure("nonsecondary_transition_changed_secondary_environment")
 
 
 def _canonical_secondary_environment(unrelated: bytes, values: Mapping[str, str]) -> bytes:
@@ -643,16 +679,44 @@ def _validate_secondary_shadow_disable_environment(
     predecessor: bytes | None,
     target: bytes,
 ) -> None:
-    """Disable exact shadow by changing its one code-owned admission bit."""
+    """Disable exact public/private shadow while preserving its privacy bit."""
+
+    target_values, _target_unrelated = _secondary_environment_view(target)
+    allow_private = target_values.get("FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT")
+    if allow_private == "0":
+        predecessor_values = _SECONDARY_SHADOW_EXACT_VALUES
+        target_values = _SECONDARY_SHADOW_DISABLED_EXACT_VALUES
+    elif allow_private == "1":
+        predecessor_values = _SECONDARY_PRIVATE_SHADOW_EXACT_VALUES
+        target_values = _SECONDARY_PRIVATE_SHADOW_DISABLED_EXACT_VALUES
+    else:
+        raise ReleaseFailure("secondary_shadow_disable_environment_invalid")
+
+    _validate_exact_secondary_transition(
+        predecessor,
+        target,
+        predecessor_exact_values=predecessor_values,
+        target_exact_values=target_values,
+        invalid_code="secondary_shadow_disable_environment_invalid",
+        predecessor_invalid_code="secondary_shadow_disable_predecessor_not_enabled",
+        replacements={"FRIDAY_SECONDARY_LLM_ENABLED": ("1", "0")},
+    )
+
+
+def _validate_secondary_shadow_to_private_shadow_environment(
+    predecessor: bytes | None,
+    target: bytes,
+) -> None:
+    """Admit private text in shadow while retaining discarded shadow output."""
 
     _validate_exact_secondary_transition(
         predecessor,
         target,
         predecessor_exact_values=_SECONDARY_SHADOW_EXACT_VALUES,
-        target_exact_values=_SECONDARY_SHADOW_DISABLED_EXACT_VALUES,
-        invalid_code="secondary_shadow_disable_environment_invalid",
-        predecessor_invalid_code="secondary_shadow_disable_predecessor_not_enabled",
-        replacements={"FRIDAY_SECONDARY_LLM_ENABLED": ("1", "0")},
+        target_exact_values=_SECONDARY_PRIVATE_SHADOW_EXACT_VALUES,
+        invalid_code="secondary_shadow_to_private_shadow_environment_invalid",
+        predecessor_invalid_code="secondary_shadow_to_private_shadow_predecessor_not_public_shadow",
+        replacements={"FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT": ("0", "1")},
     )
 
 
@@ -660,19 +724,16 @@ def _validate_secondary_shadow_to_assist_environment(
     predecessor: bytes | None,
     target: bytes,
 ) -> None:
-    """Promote exact shadow to narrow private-text assist and nothing else."""
+    """Promote exact private shadow to assist by changing only its mode."""
 
     _validate_exact_secondary_transition(
         predecessor,
         target,
-        predecessor_exact_values=_SECONDARY_SHADOW_EXACT_VALUES,
+        predecessor_exact_values=_SECONDARY_PRIVATE_SHADOW_EXACT_VALUES,
         target_exact_values=_SECONDARY_ASSIST_EXACT_VALUES,
         invalid_code="secondary_shadow_to_assist_environment_invalid",
-        predecessor_invalid_code="secondary_shadow_to_assist_predecessor_not_shadow",
-        replacements={
-            "FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT": ("0", "1"),
-            "FRIDAY_SECONDARY_LLM_MODE": ("shadow", "assist"),
-        },
+        predecessor_invalid_code="secondary_shadow_to_assist_predecessor_not_private_shadow",
+        replacements={"FRIDAY_SECONDARY_LLM_MODE": ("shadow", "assist")},
     )
 
 
@@ -701,6 +762,9 @@ def _validate_secondary_config_transition(
     validators = {
         _SECONDARY_SHADOW_ENABLE_TRANSITION: _validate_secondary_shadow_environment,
         _SECONDARY_SHADOW_DISABLE_TRANSITION: _validate_secondary_shadow_disable_environment,
+        _SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION: (
+            _validate_secondary_shadow_to_private_shadow_environment
+        ),
         _SECONDARY_SHADOW_TO_ASSIST_TRANSITION: _validate_secondary_shadow_to_assist_environment,
         _SECONDARY_ASSIST_TO_DISABLED_TRANSITION: _validate_secondary_assist_to_disabled_environment,
     }
@@ -5541,26 +5605,25 @@ class SystemdActivationPort:
                 )
                 if _sha256_bytes(staged_bytes) != next_env_sha256:
                     raise ReleaseFailure("next_environment_file_digest_mismatch")
-            if requested_transition in _SECONDARY_CONFIG_TRANSITIONS:
-                canonical_bytes = _read_private_regular_file(
-                    config.env_file,
-                    maximum_bytes=1 << 20,
-                    code="environment_file_invalid",
+            canonical_bytes = _read_private_regular_file(
+                config.env_file,
+                maximum_bytes=1 << 20,
+                code="environment_file_invalid",
+            )
+            if canonical_env_sha256 == predecessor_env_sha256:
+                if staged_bytes is None:  # pragma: no cover - read condition above proves it
+                    raise ReleaseFailure("next_environment_file_invalid")
+                _validate_staged_environment_transition(
+                    requested_transition,
+                    canonical_bytes,
+                    staged_bytes,
                 )
-                if canonical_env_sha256 == predecessor_env_sha256:
-                    if staged_bytes is None:  # pragma: no cover - read condition above proves it
-                        raise ReleaseFailure("next_environment_file_invalid")
-                    _validate_secondary_config_transition(
-                        requested_transition,
-                        canonical_bytes,
-                        staged_bytes,
-                    )
-                else:
-                    _validate_secondary_config_transition(
-                        requested_transition,
-                        None,
-                        canonical_bytes,
-                    )
+            else:
+                _validate_staged_environment_transition(
+                    requested_transition,
+                    None,
+                    canonical_bytes,
+                )
             staged_descriptor = (
                 requested_transition,
                 predecessor_env_sha256,
@@ -5738,8 +5801,7 @@ class SystemdActivationPort:
         if _sha256_bytes(canonical) != predecessor:
             raise ReleaseFailure("staged_predecessor_environment_changed")
         staged = self._staged_environment_bytes(staged_path, next_digest)
-        if selected_transition in _SECONDARY_CONFIG_TRANSITIONS:
-            _validate_secondary_config_transition(selected_transition, canonical, staged)
+        _validate_staged_environment_transition(selected_transition, canonical, staged)
 
     def activate_staged_config_transition(
         self,
@@ -5757,30 +5819,28 @@ class SystemdActivationPort:
         current = self._canonical_environment_digest()
         if current == predecessor:
             staged = self._staged_environment_bytes(staged_path, next_digest)
-            if selected_transition in _SECONDARY_CONFIG_TRANSITIONS:
-                predecessor_bytes = _read_private_regular_file(
-                    self.config.env_file,
-                    maximum_bytes=1 << 20,
-                    code="environment_file_invalid",
-                )
-                _validate_secondary_config_transition(
-                    selected_transition,
-                    predecessor_bytes,
-                    staged,
-                )
+            predecessor_bytes = _read_private_regular_file(
+                self.config.env_file,
+                maximum_bytes=1 << 20,
+                code="environment_file_invalid",
+            )
+            _validate_staged_environment_transition(
+                selected_transition,
+                predecessor_bytes,
+                staged,
+            )
             _replace_private_durable(self.config.env_file, staged)
         elif current == next_digest:
             if staged_path.exists() or staged_path.is_symlink():
                 staged = self._staged_environment_bytes(staged_path, next_digest)
-                if selected_transition in _SECONDARY_CONFIG_TRANSITIONS:
-                    _validate_secondary_config_transition(selected_transition, None, staged)
-            elif selected_transition in _SECONDARY_CONFIG_TRANSITIONS:
+                _validate_staged_environment_transition(selected_transition, None, staged)
+            else:
                 target = _read_private_regular_file(
                     self.config.env_file,
                     maximum_bytes=1 << 20,
                     code="environment_file_invalid",
                 )
-                _validate_secondary_config_transition(selected_transition, None, target)
+                _validate_staged_environment_transition(selected_transition, None, target)
         else:
             raise ReleaseFailure("staged_canonical_environment_changed")
         if self._canonical_environment_digest() != next_digest:
@@ -5823,8 +5883,7 @@ class SystemdActivationPort:
         if _sha256_bytes(canonical) != predecessor:
             raise ReleaseFailure("staged_predecessor_environment_changed")
         staged = self._staged_environment_bytes(staged_path, next_digest)
-        if selected_transition in _SECONDARY_CONFIG_TRANSITIONS:
-            _validate_secondary_config_transition(selected_transition, canonical, staged)
+        _validate_staged_environment_transition(selected_transition, canonical, staged)
         if self._staged_predecessor_config is None:  # pragma: no cover - descriptor proves it
             raise ReleaseFailure("staged_environment_identity_changed")
         self.config = self._staged_predecessor_config
@@ -7373,8 +7432,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=tuple(sorted(_STAGED_CONFIG_TRANSITIONS)),
         help=(
             "Explicit immutable ENV0 to ENV1 transition (Obsidian enable or exact secondary "
-            "finalist shadow/assist/disable state change); omitted staged activations retain the established "
-            "obsidian_enable contract"
+            "finalist public-shadow/private-shadow/assist/disable state change); omitted staged "
+            "activations retain the established obsidian_enable contract"
         ),
     )
 

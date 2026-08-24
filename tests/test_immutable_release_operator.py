@@ -1788,16 +1788,63 @@ def _secondary_shadow_disabled_environment(enabled: bytes) -> bytes:
     return enabled.replace(source, b"FRIDAY_SECONDARY_LLM_ENABLED=0\n", 1)
 
 
-def _secondary_assist_environment(shadow: bytes) -> bytes:
+def _secondary_private_shadow_environment(shadow: bytes) -> bytes:
     allow_private = b"FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=0\n"
-    shadow_mode = b"FRIDAY_SECONDARY_LLM_MODE=shadow\n"
     assert shadow.count(allow_private) == 1
-    assert shadow.count(shadow_mode) == 1
+    assert shadow.count(b"FRIDAY_SECONDARY_LLM_MODE=shadow\n") == 1
     return shadow.replace(
         allow_private,
         b"FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=1\n",
         1,
-    ).replace(shadow_mode, b"FRIDAY_SECONDARY_LLM_MODE=assist\n", 1)
+    )
+
+
+def _secondary_shadow_to_private_shadow_stage(
+    base: operator.SystemdActivationPort,
+    *,
+    target: bytes | None = None,
+) -> tuple[Path, bytes, str]:
+    private_shadow = (
+        target
+        if target is not None
+        else _secondary_private_shadow_environment(base.config.env_file.read_bytes())
+    )
+    staged = base.config.state_dir / "secondary-private-shadow.env"
+    staged.write_bytes(private_shadow)
+    staged.chmod(0o600)
+    return staged, private_shadow, hashlib.sha256(private_shadow).hexdigest()
+
+
+def _secondary_private_shadow_enabled_port(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    unrelated: bytes | None = None,
+) -> tuple[operator.SystemdActivationPort, bytes]:
+    shadow_port, shadow = _secondary_shadow_enabled_port(
+        tmp_path,
+        monkeypatch,
+        unrelated=unrelated,
+    )
+    private_shadow = _secondary_private_shadow_environment(shadow)
+    shadow_port.config.env_file.write_bytes(private_shadow)
+    shadow_port.config.env_file.chmod(0o600)
+    return (
+        operator.SystemdActivationPort(
+            replace(
+                shadow_port.config,
+                env_file_sha256=hashlib.sha256(private_shadow).hexdigest(),
+            )
+        ),
+        private_shadow,
+    )
+
+
+def _secondary_assist_environment(private_shadow: bytes) -> bytes:
+    shadow_mode = b"FRIDAY_SECONDARY_LLM_MODE=shadow\n"
+    assert private_shadow.count(b"FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=1\n") == 1
+    assert private_shadow.count(shadow_mode) == 1
+    return private_shadow.replace(shadow_mode, b"FRIDAY_SECONDARY_LLM_MODE=assist\n", 1)
 
 
 def _secondary_assist_disabled_environment(assist: bytes) -> bytes:
@@ -1826,12 +1873,12 @@ def _secondary_assist_enabled_port(
     *,
     unrelated: bytes | None = None,
 ) -> tuple[operator.SystemdActivationPort, bytes]:
-    shadow_port, shadow = _secondary_shadow_enabled_port(
+    shadow_port, private_shadow = _secondary_private_shadow_enabled_port(
         tmp_path,
         monkeypatch,
         unrelated=unrelated,
     )
-    assist = _secondary_assist_environment(shadow)
+    assist = _secondary_assist_environment(private_shadow)
     shadow_port.config.env_file.write_bytes(assist)
     shadow_port.config.env_file.chmod(0o600)
     return (
@@ -1968,8 +2015,11 @@ def _secondary_staged_transition_case(
     elif transition == "secondary_shadow_disable":
         base, _enabled = _secondary_shadow_enabled_port(tmp_path, monkeypatch)
         staged, _target, target_sha256 = _secondary_shadow_disable_stage(base)
-    elif transition == "secondary_shadow_to_assist":
+    elif transition == "secondary_shadow_to_private_shadow":
         base, _enabled = _secondary_shadow_enabled_port(tmp_path, monkeypatch)
+        staged, _target, target_sha256 = _secondary_shadow_to_private_shadow_stage(base)
+    elif transition == "secondary_shadow_to_assist":
+        base, _enabled = _secondary_private_shadow_enabled_port(tmp_path, monkeypatch)
         staged, _target, target_sha256 = _secondary_shadow_to_assist_stage(base)
     else:
         assert transition == "secondary_assist_to_disabled"
@@ -2041,15 +2091,20 @@ def test_systemd_port_activates_exact_secondary_finalist_shadow_without_journali
     assert not staged.exists()
 
 
+@pytest.mark.parametrize("private_shadow", [False, True])
 def test_systemd_port_disables_exact_secondary_finalist_shadow_with_one_admission_bit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     releases: Releases,
+    private_shadow: bool,
 ) -> None:
     unrelated = (
         b"# operator-owned bytes stay exact\r\nFRIDAY_PROFILE=production\nFRIDAY_OBSIDIAN_ENABLED=1\r\n"
     )
-    base, enabled = _secondary_shadow_enabled_port(
+    enabled_port = (
+        _secondary_private_shadow_enabled_port if private_shadow else _secondary_shadow_enabled_port
+    )
+    base, enabled = enabled_port(
         tmp_path,
         monkeypatch,
         unrelated=unrelated,
@@ -2100,6 +2155,7 @@ def test_systemd_port_disables_exact_secondary_finalist_shadow_with_one_admissio
     enabled_values, enabled_unrelated = operator._secondary_environment_view(enabled)  # noqa: SLF001
     target_values, target_unrelated = operator._secondary_environment_view(target)  # noqa: SLF001
     assert target_values == {**enabled_values, "FRIDAY_SECONDARY_LLM_ENABLED": "0"}
+    assert target_values["FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT"] == ("1" if private_shadow else "0")
     assert enabled_unrelated == target_unrelated == unrelated
     assert target == enabled.replace(
         b"FRIDAY_SECONDARY_LLM_ENABLED=1\n",
@@ -2112,9 +2168,85 @@ def test_systemd_port_disables_exact_secondary_finalist_shadow_with_one_admissio
     assert not staged.exists()
 
 
+def test_systemd_port_rejects_direct_public_shadow_to_assist(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base, public_shadow = _secondary_shadow_enabled_port(tmp_path, monkeypatch)
+    assist = _secondary_assist_environment(_secondary_private_shadow_environment(public_shadow))
+    staged, _target, target_sha256 = _secondary_shadow_to_assist_stage(base, target=assist)
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="secondary_shadow_to_assist_predecessor_not_private_shadow",
+    ):
+        operator.SystemdActivationPort(
+            replace(
+                base.config,
+                next_env_file=staged,
+                next_env_file_sha256=target_sha256,
+                staged_config_transition="secondary_shadow_to_assist",
+            )
+        )
+    assert base.config.env_file.read_bytes() == public_shadow
+
+
+@pytest.mark.parametrize(
+    ("transition", "target_mutation", "failure"),
+    [
+        (
+            "secondary_shadow_to_private_shadow",
+            "mode",
+            "secondary_shadow_to_private_shadow_environment_invalid",
+        ),
+        (
+            "secondary_shadow_to_assist",
+            "private_bit",
+            "secondary_shadow_to_assist_environment_invalid",
+        ),
+    ],
+)
+def test_systemd_port_rejects_secondary_staged_transition_that_changes_two_policy_bits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    transition: str,
+    target_mutation: str,
+    failure: str,
+) -> None:
+    if transition == "secondary_shadow_to_private_shadow":
+        base, public_shadow = _secondary_shadow_enabled_port(tmp_path, monkeypatch)
+        target = _secondary_private_shadow_environment(public_shadow).replace(
+            b"FRIDAY_SECONDARY_LLM_MODE=shadow\n",
+            b"FRIDAY_SECONDARY_LLM_MODE=assist\n",
+        )
+        staged, _target, target_sha256 = _secondary_shadow_to_private_shadow_stage(base, target=target)
+    else:
+        assert target_mutation == "private_bit"
+        base, private_shadow = _secondary_private_shadow_enabled_port(tmp_path, monkeypatch)
+        target = _secondary_assist_environment(private_shadow).replace(
+            b"FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=1\n",
+            b"FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=0\n",
+        )
+        staged, _target, target_sha256 = _secondary_shadow_to_assist_stage(base, target=target)
+
+    with pytest.raises(operator.ReleaseFailure, match=failure):
+        operator.SystemdActivationPort(
+            replace(
+                base.config,
+                next_env_file=staged,
+                next_env_file_sha256=target_sha256,
+                staged_config_transition=transition,
+            )
+        )
+
+
 @pytest.mark.parametrize(
     "transition",
-    ["secondary_shadow_to_assist", "secondary_assist_to_disabled"],
+    [
+        "secondary_shadow_to_private_shadow",
+        "secondary_shadow_to_assist",
+        "secondary_assist_to_disabled",
+    ],
 )
 def test_systemd_port_applies_exact_secondary_assist_transitions_without_journaling_secrets(
     tmp_path: Path,
@@ -2123,8 +2255,15 @@ def test_systemd_port_applies_exact_secondary_assist_transitions_without_journal
     transition: str,
 ) -> None:
     unrelated = b"# operator-owned bytes stay exact\r\nFRIDAY_PROFILE=production\n"
-    if transition == "secondary_shadow_to_assist":
+    if transition == "secondary_shadow_to_private_shadow":
         base, predecessor = _secondary_shadow_enabled_port(
+            tmp_path,
+            monkeypatch,
+            unrelated=unrelated,
+        )
+        staged, target, target_sha256 = _secondary_shadow_to_private_shadow_stage(base)
+    elif transition == "secondary_shadow_to_assist":
+        base, predecessor = _secondary_private_shadow_enabled_port(
             tmp_path,
             monkeypatch,
             unrelated=unrelated,
@@ -2174,6 +2313,9 @@ def test_systemd_port_applies_exact_secondary_assist_transitions_without_journal
     assert transition.encode("ascii") in journal_raw
     descriptor = (transition, predecessor_sha256, staged, target_sha256)
     port.validate_staged_config_transition(*descriptor)
+    port.select_predecessor_config_transition(*descriptor)
+    assert port.config.env_file.read_bytes() == predecessor
+    assert port.config.env_file_sha256 == predecessor_sha256
     port.activate_staged_config_transition(*descriptor)
     port.activate_staged_config_transition(*descriptor)
 
@@ -2185,10 +2327,14 @@ def test_systemd_port_applies_exact_secondary_assist_transitions_without_journal
     assert predecessor_unrelated == target_unrelated == unrelated
     assert target_values["FRIDAY_SECONDARY_LLM_API_KEY"] == predecessor_values["FRIDAY_SECONDARY_LLM_API_KEY"]
     assert target_values["FRIDAY_SECONDARY_LLM_CA_FILE"] == predecessor_values["FRIDAY_SECONDARY_LLM_CA_FILE"]
-    if transition == "secondary_shadow_to_assist":
+    if transition == "secondary_shadow_to_private_shadow":
         assert target_values == {
             **predecessor_values,
             "FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT": "1",
+        }
+    elif transition == "secondary_shadow_to_assist":
+        assert target_values == {
+            **predecessor_values,
             "FRIDAY_SECONDARY_LLM_MODE": "assist",
         }
     else:
@@ -2201,7 +2347,11 @@ def test_systemd_port_applies_exact_secondary_assist_transitions_without_journal
 
 @pytest.mark.parametrize(
     "transition",
-    ["secondary_shadow_to_assist", "secondary_assist_to_disabled"],
+    [
+        "secondary_shadow_to_private_shadow",
+        "secondary_shadow_to_assist",
+        "secondary_assist_to_disabled",
+    ],
 )
 @pytest.mark.parametrize("mutation", ["api_key", "ca_path", "unrelated", "reordered"])
 def test_systemd_port_rejects_secondary_assist_transition_drift(
@@ -2210,8 +2360,12 @@ def test_systemd_port_rejects_secondary_assist_transition_drift(
     transition: str,
     mutation: str,
 ) -> None:
-    if transition == "secondary_shadow_to_assist":
+    if transition == "secondary_shadow_to_private_shadow":
         base, _predecessor = _secondary_shadow_enabled_port(tmp_path, monkeypatch)
+        target = _secondary_private_shadow_environment(base.config.env_file.read_bytes())
+        stage = _secondary_shadow_to_private_shadow_stage
+    elif transition == "secondary_shadow_to_assist":
+        base, _predecessor = _secondary_private_shadow_enabled_port(tmp_path, monkeypatch)
         target = _secondary_assist_environment(base.config.env_file.read_bytes())
         stage = _secondary_shadow_to_assist_stage
     else:
@@ -2251,7 +2405,11 @@ def test_systemd_port_rejects_secondary_assist_transition_drift(
 
 @pytest.mark.parametrize(
     "transition",
-    ["secondary_shadow_to_assist", "secondary_assist_to_disabled"],
+    [
+        "secondary_shadow_to_private_shadow",
+        "secondary_shadow_to_assist",
+        "secondary_assist_to_disabled",
+    ],
 )
 @pytest.mark.parametrize("interruption", ["before_replace", "after_replace", "after_unlink"])
 def test_systemd_port_replays_secondary_assist_transition_after_each_durable_boundary(
@@ -2404,6 +2562,43 @@ def test_systemd_port_rejects_secondary_shadow_disable_unrelated_environment_dri
             replace(
                 base.config,
                 env_file_sha256=hashlib.sha256(enabled).hexdigest(),
+                next_env_file=staged,
+                next_env_file_sha256=target_sha256,
+                staged_config_transition="secondary_shadow_disable",
+            )
+        )
+
+
+@pytest.mark.parametrize("private_shadow", [False, True])
+def test_systemd_port_rejects_secondary_shadow_disable_that_changes_private_bit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    private_shadow: bool,
+) -> None:
+    enabled_port = (
+        _secondary_private_shadow_enabled_port if private_shadow else _secondary_shadow_enabled_port
+    )
+    base, enabled = enabled_port(tmp_path, monkeypatch)
+    source = (
+        b"FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=1\n"
+        if private_shadow
+        else b"FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=0\n"
+    )
+    replacement = (
+        b"FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=0\n"
+        if private_shadow
+        else b"FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=1\n"
+    )
+    target = _secondary_shadow_disabled_environment(enabled).replace(source, replacement)
+    staged, _target, target_sha256 = _secondary_shadow_disable_stage(base, target=target)
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="secondary_shadow_disable_predecessor_not_enabled",
+    ):
+        operator.SystemdActivationPort(
+            replace(
+                base.config,
                 next_env_file=staged,
                 next_env_file_sha256=target_sha256,
                 staged_config_transition="secondary_shadow_disable",
@@ -2571,13 +2766,18 @@ def test_systemd_port_rejects_secondary_shadow_disable_after_source_ca_drift(
         )
 
 
+@pytest.mark.parametrize("private_shadow", [False, True])
 @pytest.mark.parametrize("interruption", ["before_replace", "after_replace", "after_unlink"])
 def test_systemd_port_resumes_secondary_shadow_disable_after_each_durable_boundary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     interruption: str,
+    private_shadow: bool,
 ) -> None:
-    base, enabled = _secondary_shadow_enabled_port(tmp_path, monkeypatch)
+    enabled_port = (
+        _secondary_private_shadow_enabled_port if private_shadow else _secondary_shadow_enabled_port
+    )
+    base, enabled = enabled_port(tmp_path, monkeypatch)
     predecessor_sha256 = hashlib.sha256(enabled).hexdigest()
     staged, disabled, target_sha256 = _secondary_shadow_disable_stage(base)
     port = operator.SystemdActivationPort(
@@ -2615,6 +2815,8 @@ def test_systemd_port_resumes_secondary_shadow_disable_after_each_durable_bounda
     monkeypatch.setattr(operator, "_fsync_directory", fsync_directory)
     port.activate_staged_config_transition(*descriptor)
     assert port.config.env_file.read_bytes() == disabled
+    values, _unrelated = operator._secondary_environment_view(disabled)  # noqa: SLF001
+    assert values["FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT"] == ("1" if private_shadow else "0")
     assert port.config.env_file_sha256 == target_sha256
     assert not staged.exists()
 
@@ -2932,6 +3134,83 @@ def test_systemd_port_stages_then_activates_environment_idempotently(tmp_path: P
     assert port.config.obsidian_mode == "enabled"
     assert port.config.next_env_file is None
     assert not staged.exists()
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_obsidian_enable_preserves_an_existing_secondary_block_byte_for_byte(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    explicit: bool,
+) -> None:
+    base, predecessor = _secondary_shadow_enabled_port(tmp_path, monkeypatch)
+    target = predecessor + b"FRIDAY_OBSIDIAN_ENABLED=1\n"
+    target_sha256 = hashlib.sha256(target).hexdigest()
+    staged = base.config.state_dir / "obsidian-with-secondary.env"
+    staged.write_bytes(target)
+    staged.chmod(0o600)
+    operator._obsidian_root(base.config).mkdir(mode=0o700)  # noqa: SLF001
+    port = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            obsidian_mode="enabled",
+            next_env_file=staged,
+            next_env_file_sha256=target_sha256,
+            staged_config_transition="obsidian_enable" if explicit else "",
+        )
+    )
+
+    descriptor = ("obsidian_enable", base.config.env_file_sha256, staged, target_sha256)
+    port.validate_staged_config_transition(*descriptor)
+    port.activate_staged_config_transition(*descriptor)
+
+    assert port.config.env_file.read_bytes() == target
+    assert not staged.exists()
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("mutation", ["private", "assist", "api_key", "line_ending"])
+def test_obsidian_enable_cannot_carry_any_secondary_delta(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    explicit: bool,
+    mutation: str,
+) -> None:
+    base, predecessor = _secondary_shadow_enabled_port(tmp_path, monkeypatch)
+    if mutation == "private":
+        target = _secondary_private_shadow_environment(predecessor)
+    elif mutation == "assist":
+        target = _secondary_assist_environment(_secondary_private_shadow_environment(predecessor))
+    elif mutation == "api_key":
+        target = predecessor.replace(
+            b"FRIDAY_SECONDARY_LLM_API_KEY=" + b"a" * 64,
+            b"FRIDAY_SECONDARY_LLM_API_KEY=" + b"b" * 64,
+        )
+    else:
+        assert mutation == "line_ending"
+        target = predecessor.replace(
+            b"FRIDAY_SECONDARY_LLM_ADMISSION_TIMEOUT_SEC=0.10\n",
+            b"FRIDAY_SECONDARY_LLM_ADMISSION_TIMEOUT_SEC=0.10\r\n",
+            1,
+        )
+    target += b"FRIDAY_OBSIDIAN_ENABLED=1\n"
+    staged = base.config.state_dir / "obsidian-secondary-bypass.env"
+    staged.write_bytes(target)
+    staged.chmod(0o600)
+    operator._obsidian_root(base.config).mkdir(mode=0o700)  # noqa: SLF001
+
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="nonsecondary_transition_changed_secondary_environment",
+    ):
+        operator.SystemdActivationPort(
+            replace(
+                base.config,
+                obsidian_mode="enabled",
+                next_env_file=staged,
+                next_env_file_sha256=hashlib.sha256(target).hexdigest(),
+                staged_config_transition="obsidian_enable" if explicit else "",
+            )
+        )
 
 
 @pytest.mark.parametrize("interruption", ["before_replace", "after_replace"])
@@ -6012,12 +6291,17 @@ def test_secondary_shadow_terminal_transition_and_prebackup_recovery_are_exact(
     assert recovery_port.config.obsidian_mode == disabled.obsidian_mode
 
 
+@pytest.mark.parametrize("private_shadow", [False, True])
 def test_secondary_shadow_disable_terminal_transition_recovery_and_replay_are_exact(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     releases: Releases,
+    private_shadow: bool,
 ) -> None:
-    base, enabled = _secondary_shadow_enabled_port(tmp_path, monkeypatch)
+    enabled_port = (
+        _secondary_private_shadow_enabled_port if private_shadow else _secondary_shadow_enabled_port
+    )
+    base, enabled = enabled_port(tmp_path, monkeypatch)
     enabled_config = base.config
     predecessor_sha256 = hashlib.sha256(enabled).hexdigest()
     journal_path = enabled_config.state_dir / "immutable-release-activation.v1.json"
@@ -6120,6 +6404,7 @@ def test_secondary_shadow_disable_terminal_transition_recovery_and_replay_are_ex
     [
         "secondary_shadow_enable",
         "secondary_shadow_disable",
+        "secondary_shadow_to_private_shadow",
         "secondary_shadow_to_assist",
         "secondary_assist_to_disabled",
     ],
@@ -6182,6 +6467,7 @@ def test_secondary_transition_accepts_exact_postbackup_terminal_current_release(
     [
         "secondary_shadow_enable",
         "secondary_shadow_disable",
+        "secondary_shadow_to_private_shadow",
         "secondary_shadow_to_assist",
         "secondary_assist_to_disabled",
     ],
@@ -6266,6 +6552,7 @@ def test_secondary_transition_rejects_inexact_postbackup_terminal_claim(
     [
         "secondary_shadow_enable",
         "secondary_shadow_disable",
+        "secondary_shadow_to_private_shadow",
         "secondary_shadow_to_assist",
         "secondary_assist_to_disabled",
     ],

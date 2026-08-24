@@ -573,6 +573,12 @@ def test_provisional_configuration_is_exact_shadow_extract_and_public_text_only(
     assert replace(configured, secondary_llm_allow_private_text=True).secondary_llm_configured is False
 
 
+def test_accepted_profile_admits_private_shadow_before_assist(settings: Any) -> None:
+    configured = _configured_settings(settings, mode="shadow", private=True)
+
+    assert configured.secondary_llm_configured is True
+
+
 @pytest.mark.asyncio
 async def test_provisional_scheduler_only_runs_discarded_effect_free_extract_shadow(
     settings: Any,
