@@ -8,12 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from converted_model_manifest import verify_converted_model_snapshot
+from hardware_runtime_contract import verify_live_hardware_runtime
 from profile_contract import load_launch_profile
 
 _KEY_PATH = Path("/run/friday-secrets/sglang-api-key")
 _PROFILE_PATH = Path("/run/friday-profile/accepted.json")
 _PROFILE_ID_PATH = Path("/run/friday-profile/id")
 _CONVERTED_MODEL_MANIFEST_PATH = Path("/run/friday-model/accepted.json")
+_HARDWARE_RUNTIME_RECEIPT_PATH = Path("/run/friday-hardware/accepted.json")
 
 
 def main() -> None:
@@ -25,6 +27,10 @@ def main() -> None:
         _PROFILE_PATH,
         _PROFILE_ID_PATH,
         actual_runtime_image=os.environ["FRIDAY_SECONDARY_RUNTIME_IMAGE"],
+    )
+    verify_live_hardware_runtime(
+        _HARDWARE_RUNTIME_RECEIPT_PATH,
+        profile.hardware_runtime_receipt_sha256,
     )
     verify_converted_model_snapshot(
         Path(profile.model_path),

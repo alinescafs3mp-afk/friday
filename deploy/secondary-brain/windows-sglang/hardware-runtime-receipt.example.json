@@ -1,0 +1,36 @@
+{
+  "docker": {
+    "client_api_version": "1.55",
+    "client_version": "29.7.2",
+    "compose_version": "5.4.0",
+    "desktop_file_version": "4.87.0.236836",
+    "desktop_product_version": "4.87.0.236836",
+    "server_api_version": "1.55",
+    "server_architecture": "x86_64",
+    "server_os": "linux",
+    "server_version": "29.7.2"
+  },
+  "gpu": {
+    "compute_capability": "12.0",
+    "driver_version": "610.88",
+    "memory_total_mib": 16303,
+    "name": "NVIDIA GeForce RTX 5080 Laptop GPU",
+    "uuid": "GPU-d7ef849e-55f5-f33c-2812-9dc32b644b07"
+  },
+  "schema": "friday.secondary-hardware-runtime.v1",
+  "status": "template_not_accepted",
+  "windows": {
+    "build": "26200",
+    "caption": "Майкрософт Windows 11 Pro",
+    "version": "10.0.26200"
+  },
+  "wsl": {
+    "direct3d_version": "1.611.1-81528511",
+    "dxcore_version": "10.0.26100.1-240331-1435.ge-release",
+    "kernel_version": "6.6.114.1-1",
+    "msrdc_version": "1.2.6676",
+    "version": "2.7.3.0",
+    "windows_component_version": "10.0.26200.9168",
+    "wslg_version": "1.0.73"
+  }
+}

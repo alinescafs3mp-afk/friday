@@ -96,6 +96,7 @@ containers and never pull images.
   -RunGpuCanary `
   -InspectSglangHelp `
   -InspectGatewayImage `
+  -HardwareRuntimeReceiptOutputPath .\evidence\hardware-runtime.observed.json `
   -OutputPath .\evidence\preflight.observed.json
 ```
 
@@ -104,8 +105,36 @@ Desktop WSL2 setting, AC sleep policy and Docker Desktop startup policy. The
 script verifies the live Windows address, Linux-container engine, NVIDIA host
 projection, CUDA allocation/kernel execution and presence of every baseline
 SGLang flag, plus the exact gateway digest/platform/UID/version projection. It
-hashes verbose WSL/help output instead of retaining it. The report remains
-`inventory_incomplete` when any explicit container inspection is omitted.
+also rejects drift from the measured Windows 11 build, WSL/kernel components,
+Docker Desktop/Engine/Compose versions and the exact GPU UUID, name, VRAM,
+compute capability and driver. Expected identities are code-owned; environment
+variables cannot redefine them. It hashes verbose WSL/help output instead of
+retaining it. The report remains `inventory_incomplete` when any explicit
+container inspection is omitted.
+
+The hardware/runtime receipt is canonical and `observed_unaccepted`. Review it,
+then promote it without an editor (the first call is plan-only):
+
+```powershell
+.\scripts\accept-hardware-runtime-receipt.ps1 `
+  -ObservedPath .\evidence\hardware-runtime.observed.json `
+  -AcceptedPath .\evidence\hardware-runtime.accepted.json
+.\scripts\accept-hardware-runtime-receipt.ps1 `
+  -ObservedPath .\evidence\hardware-runtime.observed.json `
+  -AcceptedPath .\evidence\hardware-runtime.accepted.json `
+  -Apply
+```
+
+Promotion accepts only the one code-owned canonical observed byte sequence,
+creates the accepted file exclusively (never overwrites), and reports the
+closed accepted SHA-256
+`0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f`.
+Record it in the runtime profile as `hardware_runtime_receipt_sha256`. Configure
+`FRIDAY_SECONDARY_HARDWARE_RUNTIME_RECEIPT_PATH` to that protected copy. The
+receipt hash participates in the engine binding; before importing SGLang, the
+launcher runs one five-second, single-row `/usr/bin/nvidia-smi` probe and
+requires exact UUID/name/VRAM/compute-capability/driver equality. Any host,
+runtime or profile drift stops only the optional node.
 
 ## 3. Discover and seal the exact model volume
 

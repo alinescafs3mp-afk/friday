@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,7 @@ from typing import Any
 SCHEMA = "friday.secondary-runtime-profile.v1"
 EXPECTED_MODEL_PATH = "/models/gpt-oss-20b-nvfp4-modelopt/candidate"
 EXPECTED_SOURCE_REVISION = "6cee5e81ee83917806bbde320786a8fb61efebee"
+EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256 = "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _REVISION_RE = re.compile(r"[0-9a-f]{40}")
 _PROFILE_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}")
@@ -36,6 +39,7 @@ _KEYS = frozenset(
         "status",
         "profile_id",
         "engine_binding_sha256",
+        "hardware_runtime_receipt_sha256",
         "endpoint_base_url",
         "served_model_alias",
         "source_model_repository",
@@ -70,6 +74,7 @@ _KEYS = frozenset(
 _ENGINE_KEYS = (
     "source_model_repository",
     "source_model_revision",
+    "hardware_runtime_receipt_sha256",
     "converted_model_manifest_sha256",
     "conversion_manifest_sha256",
     "runtime_image",
@@ -93,6 +98,49 @@ _ENGINE_KEYS = (
 
 class ProfileContractError(RuntimeError):
     """Content-free rejection safe for startup logs."""
+
+
+def _read_bounded_regular(path: Path, *, maximum_bytes: int, label: str) -> bytes:
+    descriptor: int | None = None
+    try:
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or not 1 <= metadata.st_size <= maximum_bytes:
+            raise ProfileContractError(f"{label} size or file type is invalid")
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_dev != metadata.st_dev
+            or before.st_ino != metadata.st_ino
+            or before.st_size != metadata.st_size
+            or before.st_mtime_ns != metadata.st_mtime_ns
+        ):
+            raise ProfileContractError(f"{label} changed before verification")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = None
+            raw = stream.read(maximum_bytes + 1)
+            after = os.fstat(stream.fileno())
+        if len(raw) != before.st_size or (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            raise ProfileContractError(f"{label} changed during verification")
+        return raw
+    except ProfileContractError:
+        raise
+    except OSError as exc:
+        raise ProfileContractError(f"{label} is unavailable") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -151,6 +199,7 @@ class LaunchProfile:
     status: str
     runtime_image: str
     converted_model_manifest_sha256: str
+    hardware_runtime_receipt_sha256: str
     model_path: str
     served_model_alias: str
     quantization: str
@@ -213,9 +262,9 @@ def load_launch_profile(
     *,
     actual_runtime_image: str,
 ) -> LaunchProfile:
-    raw = manifest_path.read_bytes()
+    raw = _read_bounded_regular(manifest_path, maximum_bytes=65_536, label="profile manifest")
     value = _strict_json(raw)
-    profile_id_bytes = profile_id_path.read_bytes()
+    profile_id_bytes = _read_bounded_regular(profile_id_path, maximum_bytes=80, label="profile id file")
     try:
         profile_id = profile_id_bytes.decode("ascii", errors="strict")
     except UnicodeError:
@@ -242,6 +291,7 @@ def load_launch_profile(
         "converted_model_manifest_sha256",
         "conversion_manifest_sha256",
         "gateway_ca_certificate_sha256",
+        "hardware_runtime_receipt_sha256",
         "runtime_manifest_sha256",
         "quality_evidence_sha256",
         "capacity_evidence_sha256",
@@ -252,6 +302,8 @@ def load_launch_profile(
             raise ProfileContractError("profile evidence identity is invalid")
         if value["status"] == "accepted" and value[key] == "0" * 64:
             raise ProfileContractError("accepted profile has missing evidence")
+    if value["hardware_runtime_receipt_sha256"] != EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256:
+        raise ProfileContractError("profile hardware/runtime receipt identity is invalid")
     runtime_image = value["runtime_image"]
     runtime_revision = value["runtime_source_revision"]
     if (
@@ -292,6 +344,7 @@ def load_launch_profile(
         status=value["status"],
         runtime_image=runtime_image,
         converted_model_manifest_sha256=value["converted_model_manifest_sha256"],
+        hardware_runtime_receipt_sha256=value["hardware_runtime_receipt_sha256"],
         model_path=value["model_path"],
         served_model_alias=value["served_model_alias"],
         quantization=value["quantization"],

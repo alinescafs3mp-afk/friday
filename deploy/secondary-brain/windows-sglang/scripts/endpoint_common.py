@@ -21,10 +21,12 @@ from urllib.parse import urlsplit, urlunsplit
 
 MAX_RESPONSE_BYTES = 1_048_576
 EXPECTED_MODEL = "friday-secondary-gptoss20b"
+EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256 = "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
 _PROFILE_ID = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}\Z")
 _ENGINE_KEYS = (
     "source_model_repository",
     "source_model_revision",
+    "hardware_runtime_receipt_sha256",
     "converted_model_manifest_sha256",
     "conversion_manifest_sha256",
     "runtime_image",
@@ -77,6 +79,49 @@ class EndpointIdentity:
 _ENDPOINT_IDENTITY: EndpointIdentity | None = None
 
 
+def _reject_json_constant(_value: str) -> None:
+    raise EndpointError("runtime profile contains a non-finite number")
+
+
+def _read_bounded_regular(path: Path, *, maximum_bytes: int, label: str) -> bytes:
+    descriptor: int | None = None
+    try:
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or not 1 <= metadata.st_size <= maximum_bytes:
+            raise EndpointError(f"{label} is not a bounded regular file")
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size != metadata.st_size:
+            raise EndpointError(f"{label} identity changed")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = None
+            raw = stream.read(maximum_bytes + 1)
+            after = os.fstat(stream.fileno())
+        if len(raw) > maximum_bytes or (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            raise EndpointError(f"{label} identity changed")
+        return raw
+    except EndpointError:
+        raise
+    except OSError as exc:
+        raise EndpointError(f"{label} cannot be read") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
 @dataclass(frozen=True, slots=True)
 class SanitizedCompletion:
     content: str
@@ -95,10 +140,7 @@ class StreamedCompletion:
 
 def _load_ca_pem(ca_file: Path, expected_sha256: str = "") -> tuple[str, str]:
     try:
-        metadata = ca_file.lstat()
-        if not stat.S_ISREG(metadata.st_mode) or not 1 <= metadata.st_size <= 65_536:
-            raise EndpointError("CA path is not a bounded regular file")
-        raw = ca_file.read_bytes()
+        raw = _read_bounded_regular(ca_file, maximum_bytes=65_536, label="private CA file")
         digest = hashlib.sha256(raw).hexdigest()
         pem = raw.decode("ascii", errors="strict")
     except EndpointError:
@@ -119,11 +161,15 @@ def configure_expected_model(profile_manifest: Path, ca_file: Path | None = None
 
     global EXPECTED_MODEL, _ENDPOINT_IDENTITY
     try:
-        metadata = profile_manifest.lstat()
-        if not stat.S_ISREG(metadata.st_mode) or not 1 <= metadata.st_size <= 65_536:
-            raise EndpointError("runtime profile is not a bounded regular file")
-        raw = profile_manifest.read_bytes()
-        value = json.loads(raw.decode("utf-8", errors="strict"))
+        raw = _read_bounded_regular(
+            profile_manifest,
+            maximum_bytes=65_536,
+            label="runtime profile",
+        )
+        value = json.loads(
+            raw.decode("utf-8", errors="strict"),
+            parse_constant=_reject_json_constant,
+        )
     except EndpointError:
         raise
     except Exception as exc:
@@ -156,6 +202,7 @@ def configure_expected_model(profile_manifest: Path, ca_file: Path | None = None
         or not isinstance(profile_id, str)
         or _PROFILE_ID.fullmatch(profile_id) is None
         or value.get("engine_binding_sha256") != binding
+        or value.get("hardware_runtime_receipt_sha256") != EXPECTED_HARDWARE_RUNTIME_RECEIPT_SHA256
         or profile_id != f"gptoss20b-{binding}"
         or alias != f"friday-secondary-{profile_id}"
     ):
@@ -427,9 +474,11 @@ def _has_repeated_token_degeneration(content: str) -> bool:
 def parse_completion(
     body: dict[str, Any],
     *,
-    expected_model: str = EXPECTED_MODEL,
+    expected_model: str | None = None,
     latency_sec: float,
 ) -> SanitizedCompletion:
+    if expected_model is None:
+        expected_model = EXPECTED_MODEL
     if body.get("model") != expected_model:
         raise EndpointError("completion returned the wrong served-model alias")
     choices = body.get("choices")

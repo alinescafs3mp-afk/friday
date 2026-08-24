@@ -48,9 +48,12 @@ def test_bundle_has_the_closed_operator_surface() -> None:
         "gateway.conf.template",
         "model-manifest.example.json",
         "runtime-manifest.example.json",
+        "hardware-runtime-receipt.example.json",
+        "runtime/hardware_runtime_contract.py",
         "runtime/launch_sglang_secure.py",
         "runtime/profile_contract.py",
         "runtime/render_gateway_secure.sh",
+        "scripts/accept-hardware-runtime-receipt.ps1",
         "scripts/preflight.ps1",
         "scripts/install-openssh.ps1",
         "scripts/firewall.ps1",
@@ -133,6 +136,16 @@ def test_model_is_read_only_and_cache_and_tmp_are_the_only_mutable_runtime_surfa
         "read_only": True,
         "bind": {"create_host_path": False},
     }
+    accepted_hardware = next(row for row in volumes if row["target"] == "/run/friday-hardware/accepted.json")
+    assert accepted_hardware == {
+        "type": "bind",
+        "source": (
+            "${FRIDAY_SECONDARY_HARDWARE_RUNTIME_RECEIPT_PATH:?accepted hardware/runtime receipt is required}"
+        ),
+        "target": "/run/friday-hardware/accepted.json",
+        "read_only": True,
+        "bind": {"create_host_path": False},
+    }
     assert engine["tmpfs"] == ["/tmp:size=2g,mode=1777", "/run:size=16m,mode=0755"]
     assert not any(volume.get("target") == "/var/run/docker.sock" for volume in volumes)
     assert engine["environment"]["TRITON_CACHE_DIR"] == "/root/.cache/triton"
@@ -151,6 +164,8 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
         "/run/friday-bootstrap/launch_sglang_secure.py",
         "/run/friday-bootstrap/profile_contract.py",
         "/run/friday-bootstrap/converted_model_manifest.py",
+        "/run/friday-bootstrap/hardware_runtime_contract.py",
+        "/run/friday-hardware/accepted.json",
         "/run/friday-model/accepted.json",
         "/run/friday-profile/accepted.json",
         "/run/friday-profile/id",
@@ -188,6 +203,9 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     assert launcher.index("verify_converted_model_snapshot(") < launcher.index(
         "from sglang.launch_server import run_server"
     )
+    assert launcher.index("verify_live_hardware_runtime(") < launcher.index(
+        "verify_converted_model_snapshot("
+    )
     assert "FRIDAY_SECONDARY_CONTEXT_TOKENS" not in launcher
     assert 'if __name__ == "__main__":' in launcher
     assert launcher.index('if __name__ == "__main__":') < launcher.index(
@@ -221,6 +239,7 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
 def test_examples_are_honest_nonaccepted_placeholders() -> None:
     model = json.loads((BUNDLE / "model-manifest.example.json").read_text(encoding="utf-8"))
     runtime = json.loads((BUNDLE / "runtime-manifest.example.json").read_text(encoding="utf-8"))
+    hardware = json.loads((BUNDLE / "hardware-runtime-receipt.example.json").read_text(encoding="utf-8"))
     assert model["status"] == "template_not_accepted"
     assert model["files"] == []
     assert model["model_revision"] == "fb9848e169d5b38cbc00ecf3383283ea1fc33a21"
@@ -232,9 +251,21 @@ def test_examples_are_honest_nonaccepted_placeholders() -> None:
     )
     assert runtime["plain_sglang_lan_published"] is False
     assert runtime["published_endpoint"] == "https://192.168.1.35:8443/v1"
+    assert hardware["status"] == "template_not_accepted"
+    assert hardware["schema"] == "friday.secondary-hardware-runtime.v1"
+    assert hardware["docker"]["client_version"] == "29.7.2"
+    assert hardware["docker"]["client_api_version"] == "1.55"
+    assert hardware["gpu"] == {
+        "compute_capability": "12.0",
+        "driver_version": "610.88",
+        "memory_total_mib": 16303,
+        "name": "NVIDIA GeForce RTX 5080 Laptop GPU",
+        "uuid": "GPU-d7ef849e-55f5-f33c-2812-9dc32b644b07",
+    }
     env = (BUNDLE / ".env.example").read_text(encoding="utf-8")
     assert "REPLACE_WITH_lmsysorg_sglang_AT_sha256_DIGEST" in env
     assert "FRIDAY_SECONDARY_GATEWAY_IMAGE" not in env
+    assert ("FRIDAY_SECONDARY_HARDWARE_RUNTIME_RECEIPT_PATH=./evidence/hardware-runtime.accepted.json") in env
     assert "latest" not in env.casefold()
 
 
@@ -263,12 +294,35 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
     assert "$observed.AreAccessRulesProtected" in provisioning
     assert "Secret ACL readback differs from the exact owner/SYSTEM allowlist" in provisioning
     preflight = (SCRIPTS / "preflight.ps1").read_text(encoding="utf-8")
+    promotion = (SCRIPTS / "accept-hardware-runtime-receipt.ps1").read_text(encoding="utf-8")
     assert "[switch]$InspectGatewayImage" in preflight
     assert "NGINX_VERSION=1.31.3" in preflight
     assert "Config.User -cne '101'" in preflight
     assert 'test "$(id -u)" = 101' in preflight
     assert "nginx version: nginx/1.31.3" in preflight
     assert "inventory_incomplete" in preflight
+    for expected in (
+        "Майкрософт Windows 11 Pro",
+        "10.0.26200.9168",
+        "6.6.114.1-1",
+        "Docker Desktop.exe",
+        "4.87.0.236836",
+        "29.7.2",
+        "NVIDIA GeForce RTX 5080 Laptop GPU",
+        "GPU-d7ef849e-55f5-f33c-2812-9dc32b644b07",
+        "--query-gpu=uuid,name,memory.total,compute_cap,driver_version",
+        "HardwareRuntimeReceiptOutputPath",
+        "friday.secondary-hardware-runtime.v1",
+    ):
+        assert expected in preflight
+    assert "$env:" not in preflight.casefold()
+    assert "--pull', 'never" in preflight
+    assert "[switch]$Apply" in promotion
+    assert "if ($Apply)" in promotion
+    assert "[IO.FileMode]::CreateNew" in promotion
+    assert "observed_unaccepted" in promotion
+    assert "overwritten = $false" in promotion
+    assert "$env:" not in promotion.casefold()
 
 
 def test_missing_model_volume_is_a_normal_powershell5_discovery_state() -> None:
@@ -400,6 +454,9 @@ def _candidate_runtime_profile() -> dict[str, Any]:
         "served_model_alias": "pending",
         "source_model_repository": "openai/gpt-oss-20b",
         "source_model_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
+        "hardware_runtime_receipt_sha256": (
+            "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
+        ),
         "converted_model_manifest_sha256": "b" * 64,
         "conversion_manifest_sha256": "c" * 64,
         "gateway_ca_certificate_sha256": "1" * 64,
@@ -458,6 +515,9 @@ def test_shared_profile_contract_derives_every_capacity_argument(tmp_path: Path)
     assert profile.manifest_sha256 == hashlib.sha256(manifest.read_bytes()).hexdigest()
     assert profile.model_path == "/models/gpt-oss-20b-nvfp4-modelopt/candidate"
     assert profile.converted_model_manifest_sha256 == "b" * 64
+    assert profile.hardware_runtime_receipt_sha256 == (
+        "0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"
+    )
     assert arguments[arguments.index("--context-length") + 1] == "8192"
     assert arguments[arguments.index("--max-total-tokens") + 1] == "8192"
     assert arguments[arguments.index("--mem-fraction-static") + 1] == "0.92"
@@ -472,6 +532,7 @@ def test_shared_profile_contract_derives_every_capacity_argument(tmp_path: Path)
         ("status", "accepted"),
         ("endpoint_base_url", "https://192.168.1.36:8443/v1"),
         ("served_model_alias", "wrong"),
+        ("hardware_runtime_receipt_sha256", "3" * 64),
         ("runtime_image", "lmsysorg/sglang:latest"),
         ("context_tokens", 10_000),
         ("max_total_tokens", 12_288),
@@ -504,6 +565,151 @@ def test_shared_profile_rejects_actual_runtime_image_drift(tmp_path: Path) -> No
         )
 
 
+def test_hardware_receipt_hash_changes_the_engine_binding() -> None:
+    contract = importlib.import_module("profile_contract")
+    candidate = _candidate_runtime_profile()
+    original = candidate["engine_binding_sha256"]
+    candidate["hardware_runtime_receipt_sha256"] = "3" * 64
+    assert contract.engine_binding_sha256(candidate) != original
+
+
+def test_profile_contract_rejects_symlinks_and_oversized_inputs(tmp_path: Path) -> None:
+    contract = importlib.import_module("profile_contract")
+    manifest, profile_id = _write_profile_fixture(tmp_path, _candidate_runtime_profile())
+
+    manifest_link = tmp_path / "profile-link.json"
+    manifest_link.symlink_to(manifest)
+    with pytest.raises(contract.ProfileContractError):
+        contract.load_launch_profile(
+            manifest_link,
+            profile_id,
+            actual_runtime_image="lmsysorg/sglang@sha256:" + "d" * 64,
+        )
+
+    profile_id_link = tmp_path / "profile-link.id"
+    profile_id_link.symlink_to(profile_id)
+    with pytest.raises(contract.ProfileContractError):
+        contract.load_launch_profile(
+            manifest,
+            profile_id_link,
+            actual_runtime_image="lmsysorg/sglang@sha256:" + "d" * 64,
+        )
+
+    oversized_id = tmp_path / "oversized.id"
+    oversized_id.write_bytes(b"a" * 81)
+    with pytest.raises(contract.ProfileContractError):
+        contract.load_launch_profile(
+            manifest,
+            oversized_id,
+            actual_runtime_image="lmsysorg/sglang@sha256:" + "d" * 64,
+        )
+
+    oversized_manifest = tmp_path / "oversized.json"
+    oversized_manifest.write_bytes(b"{" + b" " * 65_536)
+    with pytest.raises(contract.ProfileContractError):
+        contract.load_launch_profile(
+            oversized_manifest,
+            profile_id,
+            actual_runtime_image="lmsysorg/sglang@sha256:" + "d" * 64,
+        )
+
+
+def _accepted_hardware_receipt(contract: Any) -> dict[str, Any]:
+    return {
+        "docker": copy.deepcopy(contract.EXPECTED_DOCKER),
+        "gpu": copy.deepcopy(contract.EXPECTED_GPU),
+        "schema": contract.SCHEMA,
+        "status": "accepted",
+        "windows": copy.deepcopy(contract.EXPECTED_WINDOWS),
+        "wsl": copy.deepcopy(contract.EXPECTED_WSL),
+    }
+
+
+def test_hardware_receipt_and_live_gpu_are_exactly_verified(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    contract = importlib.import_module("hardware_runtime_contract")
+    receipt = _accepted_hardware_receipt(contract)
+    raw = contract.canonical_receipt_json(receipt)
+    receipt_path = tmp_path / "hardware.accepted.json"
+    receipt_path.write_bytes(raw)
+    invocation: dict[str, Any] = {}
+
+    class Result:
+        returncode = 0
+        stdout = (
+            b"GPU-d7ef849e-55f5-f33c-2812-9dc32b644b07, "
+            b"NVIDIA GeForce RTX 5080 Laptop GPU, 16303, 12.0, 610.88\n"
+        )
+        stderr = b""
+
+    def fake_run(command: tuple[str, ...], **kwargs: Any) -> Result:
+        invocation["command"] = command
+        invocation.update(kwargs)
+        return Result()
+
+    monkeypatch.setenv("FRIDAY_UNTRUSTED_EXPECTED_GPU", "wrong")
+    monkeypatch.setattr(contract.subprocess, "run", fake_run)
+    verified = contract.verify_live_hardware_runtime(receipt_path, hashlib.sha256(raw).hexdigest())
+
+    assert hashlib.sha256(raw).hexdigest() == contract.EXPECTED_ACCEPTED_RECEIPT_SHA256
+    assert verified.gpu_uuid == contract.EXPECTED_GPU["uuid"]
+    assert invocation["command"] == contract.NVIDIA_SMI_COMMAND
+    assert invocation["timeout"] == 5
+    assert "FRIDAY_UNTRUSTED_EXPECTED_GPU" not in invocation["env"]
+    assert invocation["stdin"] is contract.subprocess.DEVNULL
+
+
+def test_hardware_receipt_fails_closed_on_status_hash_shape_and_gpu_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    contract = importlib.import_module("hardware_runtime_contract")
+    receipt = _accepted_hardware_receipt(contract)
+    receipt_path = tmp_path / "hardware.json"
+
+    def write(value: dict[str, Any]) -> str:
+        raw = contract.canonical_receipt_json(value)
+        receipt_path.write_bytes(raw)
+        return hashlib.sha256(raw).hexdigest()
+
+    receipt["status"] = "observed_unaccepted"
+    with pytest.raises(contract.HardwareRuntimeContractError):
+        contract.verify_live_hardware_runtime(receipt_path, write(receipt))
+
+    receipt["status"] = "accepted"
+    expected_hash = write(receipt)
+    with pytest.raises(contract.HardwareRuntimeContractError):
+        contract.verify_live_hardware_runtime(receipt_path, "0" * 64)
+
+    receipt["unexpected"] = True
+    with pytest.raises(contract.HardwareRuntimeContractError):
+        contract.verify_live_hardware_runtime(receipt_path, write(receipt))
+    receipt.pop("unexpected")
+
+    pretty = (json.dumps(receipt, ensure_ascii=False, indent=2) + "\n").encode()
+    receipt_path.write_bytes(pretty)
+    with pytest.raises(contract.HardwareRuntimeContractError):
+        contract.verify_live_hardware_runtime(receipt_path, hashlib.sha256(pretty).hexdigest())
+    expected_hash = write(receipt)
+
+    class DriftedResult:
+        returncode = 0
+        stdout = (
+            b"GPU-d7ef849e-55f5-f33c-2812-9dc32b644b07, "
+            b"NVIDIA GeForce RTX 5080 Laptop GPU, 16303, 12.0, 999.0\n"
+        )
+        stderr = b""
+
+    monkeypatch.setattr(contract.subprocess, "run", lambda *_args, **_kwargs: DriftedResult())
+    with pytest.raises(contract.HardwareRuntimeContractError):
+        contract.verify_live_hardware_runtime(receipt_path, expected_hash)
+
+    receipt_path.unlink()
+    receipt_path.symlink_to(tmp_path / "missing-receipt.json")
+    with pytest.raises(contract.HardwareRuntimeContractError):
+        contract.verify_live_hardware_runtime(receipt_path, expected_hash)
+
+
 def test_certification_profile_pins_ca_headers_and_exact_remote_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -518,6 +724,15 @@ def test_certification_profile_pins_ca_headers_and_exact_remote_bytes(
     manifest, _profile_id_path = _write_profile_fixture(tmp_path, candidate)
     alias = common.configure_expected_model(manifest, ca_file)
     assert alias == candidate["served_model_alias"]
+    completion_body = {
+        "model": alias,
+        "choices": [{"message": {"content": "ready"}, "finish_reason": "stop"}],
+        "usage": {},
+    }
+    assert common.parse_completion(completion_body, latency_sec=0.1).content == "ready"
+    completion_body["model"] = "friday-secondary-gptoss20b"
+    with pytest.raises(common.EndpointError):
+        common.parse_completion(completion_body, latency_sec=0.1)
     wrong_ca = tmp_path / "wrong-ca.crt"
     wrong_ca.write_bytes(ca_bytes + b"extra")
     with pytest.raises(common.EndpointError):

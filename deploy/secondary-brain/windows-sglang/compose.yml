@@ -52,6 +52,16 @@ services:
         target: /run/friday-bootstrap/converted_model_manifest.py
         read_only: true
       - type: bind
+        source: ./runtime/hardware_runtime_contract.py
+        target: /run/friday-bootstrap/hardware_runtime_contract.py
+        read_only: true
+      - type: bind
+        source: ${FRIDAY_SECONDARY_HARDWARE_RUNTIME_RECEIPT_PATH:?accepted hardware/runtime receipt is required}
+        target: /run/friday-hardware/accepted.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
         source: ${FRIDAY_SECONDARY_CONVERTED_MODEL_MANIFEST_PATH:?accepted converted model manifest is required}
         target: /run/friday-model/accepted.json
         read_only: true

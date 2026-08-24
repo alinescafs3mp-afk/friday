@@ -18,6 +18,9 @@ param(
     [string]$OutputPath,
 
     [Parameter()]
+    [string]$HardwareRuntimeReceiptOutputPath,
+
+    [Parameter()]
     [switch]$RunGpuCanary,
 
     [Parameter()]
@@ -31,6 +34,24 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $digestPattern = '\A[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}\z'
+$expectedObservedHardwareReceiptSha256 = '7b850221e7e11ac0063971d7baaf627c96eae5441368f1907cc070106832b0f3'
+$expectedSglangImage = 'lmsysorg/sglang@sha256:7a038aa31356fdd1a5b591fc756397bc2e9eb5ac91442c407f55cd2ae8bee738'
+$expectedGpu = [ordered]@{
+    compute_capability = '12.0'
+    driver_version = '610.88'
+    memory_total_mib = 16303
+    name = 'NVIDIA GeForce RTX 5080 Laptop GPU'
+    uuid = 'GPU-d7ef849e-55f5-f33c-2812-9dc32b644b07'
+}
+$expectedWslVersions = @(
+    '2.7.3.0',
+    '6.6.114.1-1',
+    '1.0.73',
+    '1.2.6676',
+    '1.611.1-81528511',
+    '10.0.26100.1-240331-1435.ge-release',
+    '10.0.26200.9168'
+)
 
 function Assert-ExactImageReference([string]$Value, [string]$Name) {
     if ([string]::IsNullOrWhiteSpace($Value) -or $Value -notmatch $digestPattern) {
@@ -56,8 +77,92 @@ function Get-TextSha256([string]$Value) {
     }
 }
 
+function Convert-ExactGpuProjection([string]$Text) {
+    $lines = @($Text -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($lines.Count -ne 1 -or $lines[0].Length -gt 512) {
+        throw 'nvidia-smi did not return one bounded GPU row.'
+    }
+    $parts = @($lines[0].Split(',') | ForEach-Object { $_.Trim() })
+    if ($parts.Count -ne 5) {
+        throw 'nvidia-smi returned an unexpected bounded projection.'
+    }
+    $memory = 0
+    if (-not [int]::TryParse($parts[2], [ref]$memory)) {
+        throw 'nvidia-smi returned an invalid memory projection.'
+    }
+    $projection = [ordered]@{
+        compute_capability = $parts[3]
+        driver_version = $parts[4]
+        memory_total_mib = $memory
+        name = $parts[1]
+        uuid = $parts[0]
+    }
+    foreach ($key in $expectedGpu.Keys) {
+        if ([string]$projection[$key] -cne [string]$expectedGpu[$key]) {
+            throw 'GPU identity differs from the code-owned hardware contract.'
+        }
+    }
+    return $projection
+}
+
+function Get-WslVersionProjection([string]$Text) {
+    $values = @()
+    foreach ($line in @($Text -split "`r?`n")) {
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+        $separator = $line.IndexOf(':')
+        if ($separator -lt 1 -or $separator -eq ($line.Length - 1)) {
+            throw 'wsl --version returned an unexpected row.'
+        }
+        $values += $line.Substring($separator + 1).Trim()
+    }
+    if ($values.Count -ne $expectedWslVersions.Count) {
+        throw 'wsl --version returned an unexpected component set.'
+    }
+    for ($index = 0; $index -lt $expectedWslVersions.Count; $index += 1) {
+        if ([string]$values[$index] -cne [string]$expectedWslVersions[$index]) {
+            throw 'WSL component version differs from the code-owned hardware contract.'
+        }
+    }
+    return [ordered]@{
+        direct3d_version = $values[4]
+        dxcore_version = $values[5]
+        kernel_version = $values[1]
+        msrdc_version = $values[3]
+        version = $values[0]
+        windows_component_version = $values[6]
+        wslg_version = $values[2]
+    }
+}
+
+function Write-NewUtf8File([string]$Path, [string]$Text) {
+    $resolved = [IO.Path]::GetFullPath($Path)
+    $parent = Split-Path -Parent $resolved
+    if ([string]::IsNullOrWhiteSpace($parent) -or -not (Test-Path -LiteralPath $parent -PathType Container)) {
+        throw 'Hardware receipt parent directory does not exist.'
+    }
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($Text)
+    $stream = $null
+    try {
+        $stream = [IO.File]::Open($resolved, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush($true)
+    } finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+    return $resolved
+}
+
 $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
 $computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem
+if ([string]$operatingSystem.Caption -cne 'Майкрософт Windows 11 Pro' -or
+    [string]$operatingSystem.Version -cne '10.0.26200' -or
+    [string]$operatingSystem.BuildNumber -cne '26200') {
+    throw 'Windows version differs from the code-owned hardware contract.'
+}
 $addresses = @(
     Get-NetIPAddress -AddressFamily IPv4 -AddressState Preferred |
         Where-Object { $_.IPAddress -notlike '127.*' } |
@@ -69,33 +174,31 @@ if ($addresses -notcontains $ExpectedAddress) {
 
 $wslVersion = Invoke-Captured 'wsl.exe' @('--version')
 $wslStatus = Invoke-Captured 'wsl.exe' @('--status')
+$wslProjection = Get-WslVersionProjection $wslVersion
 $dockerVersion = Invoke-Captured 'docker.exe' @('version', '--format', '{{json .}}') | ConvertFrom-Json
 $dockerInfo = Invoke-Captured 'docker.exe' @('info', '--format', '{{json .}}') | ConvertFrom-Json
 $composeVersion = Invoke-Captured 'docker.exe' @('compose', 'version', '--short')
-if ([string]$dockerInfo.OSType -cne 'linux') {
-    throw 'Docker Desktop is not using Linux containers.'
+$dockerDesktopPath = 'C:\Program Files\Docker\Docker\Docker Desktop.exe'
+$dockerDesktop = Get-Item -LiteralPath $dockerDesktopPath
+$dockerDesktopVersion = $dockerDesktop.VersionInfo
+if ([string]$dockerVersion.Client.Version -cne '29.7.2' -or
+    [string]$dockerVersion.Client.ApiVersion -cne '1.55' -or
+    [string]$dockerVersion.Server.Version -cne '29.7.2' -or
+    [string]$dockerVersion.Server.ApiVersion -cne '1.55' -or
+    [string]$dockerInfo.OSType -cne 'linux' -or
+    [string]$dockerInfo.Architecture -cne 'x86_64' -or
+    [string]$composeVersion -cne '5.4.0' -or
+    [string]$dockerDesktopVersion.ProductVersion -cne '4.87.0.236836' -or
+    [string]$dockerDesktopVersion.FileVersion -cne '4.87.0.236836') {
+    throw 'Docker runtime differs from the code-owned hardware contract.'
 }
 
-$hostGpuRows = @()
 $hostGpuText = Invoke-Captured 'nvidia-smi.exe' @(
-    '--query-gpu=name,driver_version,memory.total,compute_cap',
+    '--id=0',
+    '--query-gpu=uuid,name,memory.total,compute_cap,driver_version',
     '--format=csv,noheader,nounits'
 )
-foreach ($line in @($hostGpuText -split "`r?`n")) {
-    $parts = @($line.Split(',') | ForEach-Object { $_.Trim() })
-    if ($parts.Count -ne 4) {
-        throw 'nvidia-smi returned an unexpected bounded projection.'
-    }
-    $hostGpuRows += [ordered]@{
-        name = $parts[0]
-        driver_version = $parts[1]
-        memory_total_mib = [int]$parts[2]
-        compute_capability = $parts[3]
-    }
-}
-if ($hostGpuRows.Count -lt 1) {
-    throw 'No NVIDIA GPU was observed.'
-}
+$hostGpu = Convert-ExactGpuProjection $hostGpuText
 
 $gpuCanary = $null
 if ($RunGpuCanary) {
@@ -111,7 +214,7 @@ print(json.dumps({"name": p.name, "memory_total_bytes": p.total_memory,
                   "compute_capability": [p.major, p.minor], "kernel_sum": y}, sort_keys=True))
 '@
     $gpuCanaryText = Invoke-Captured 'docker.exe' @(
-        'run', '--rm', '--network', 'none', '--gpus', 'device=0',
+        'run', '--rm', '--pull', 'never', '--network', 'none', '--gpus', 'device=0',
         '--security-opt', 'no-new-privileges:true', '--cap-drop', 'ALL',
         '--read-only', '--tmpfs', '/tmp:size=64m', '--entrypoint', 'python3',
         $CudaCanaryImage, '-c', $canaryProgram
@@ -128,11 +231,15 @@ print(json.dumps({"name": p.name, "memory_total_bytes": p.total_memory,
 }
 
 $sglangHelp = $null
+$runtimeGpu = $null
 if ($InspectSglangHelp) {
     Assert-ExactImageReference $SglangImage 'SglangImage'
+    if ([string]$SglangImage -cne $expectedSglangImage) {
+        throw 'SglangImage differs from the code-owned hardware/runtime contract.'
+    }
     $sglangImageId = Invoke-Captured 'docker.exe' @('image', 'inspect', '--format', '{{.Id}}', $SglangImage)
     $helpText = Invoke-Captured 'docker.exe' @(
-        'run', '--rm', '--network', 'none', '--security-opt', 'no-new-privileges:true',
+        'run', '--rm', '--pull', 'never', '--network', 'none', '--security-opt', 'no-new-privileges:true',
         '--cap-drop', 'ALL', '--entrypoint', 'python3', $SglangImage,
         '-m', 'sglang.launch_server', '--help'
     )
@@ -153,6 +260,16 @@ if ($InspectSglangHelp) {
         required_flag_count = $requiredFlags.Count
         required_flags_present = $true
         help_sha256 = Get-TextSha256 $helpText
+    }
+    if ($RunGpuCanary) {
+        $runtimeGpuText = Invoke-Captured 'docker.exe' @(
+            'run', '--rm', '--pull', 'never', '--network', 'none', '--gpus', 'device=0',
+            '--security-opt', 'no-new-privileges:true', '--cap-drop', 'ALL', '--read-only',
+            '--entrypoint', '/usr/bin/nvidia-smi', $SglangImage,
+            '--id=0', '--query-gpu=uuid,name,memory.total,compute_cap,driver_version',
+            '--format=csv,noheader,nounits'
+        )
+        $runtimeGpu = Convert-ExactGpuProjection $runtimeGpuText
     }
 }
 
@@ -179,7 +296,7 @@ if ($InspectGatewayImage) {
         throw 'Local gateway image does not match the exact platform/user/version contract.'
     }
     $gatewayRuntimeProbe = Invoke-Captured 'docker.exe' @(
-        'run', '--rm', '--network', 'none', '--user', '101', '--read-only',
+        'run', '--rm', '--pull', 'never', '--network', 'none', '--user', '101', '--read-only',
         '--tmpfs', '/tmp:size=16m', '--security-opt', 'no-new-privileges:true',
         '--cap-drop', 'ALL', '--entrypoint', '/bin/sh', $GatewayImage, '-ceu',
         'test "$(id -u)" = 101; test "$(nginx -v 2>&1)" = "nginx version: nginx/1.31.3"; command -v sed >/dev/null; command -v wget >/dev/null; printf verified'
@@ -205,9 +322,49 @@ $dockerDesktopRun = Get-ItemProperty `
 $dockerAutoStart = $null -ne $dockerDesktopRun -and `
     -not [string]::IsNullOrWhiteSpace([string]$dockerDesktopRun.'Docker Desktop')
 
+$hardwareReceipt = $null
+$hardwareReceiptJson = $null
+$hardwareReceiptSha256 = $null
+$resolvedHardwareReceipt = $null
+if ($null -ne $runtimeGpu) {
+    $hardwareReceipt = [ordered]@{
+        docker = [ordered]@{
+            client_api_version = [string]$dockerVersion.Client.ApiVersion
+            client_version = [string]$dockerVersion.Client.Version
+            compose_version = [string]$composeVersion
+            desktop_file_version = [string]$dockerDesktopVersion.FileVersion
+            desktop_product_version = [string]$dockerDesktopVersion.ProductVersion
+            server_api_version = [string]$dockerVersion.Server.ApiVersion
+            server_architecture = [string]$dockerInfo.Architecture
+            server_os = [string]$dockerInfo.OSType
+            server_version = [string]$dockerVersion.Server.Version
+        }
+        gpu = $runtimeGpu
+        schema = 'friday.secondary-hardware-runtime.v1'
+        status = 'observed_unaccepted'
+        windows = [ordered]@{
+            build = [string]$operatingSystem.BuildNumber
+            caption = [string]$operatingSystem.Caption
+            version = [string]$operatingSystem.Version
+        }
+        wsl = $wslProjection
+    }
+    $hardwareReceiptJson = ($hardwareReceipt | ConvertTo-Json -Depth 6 -Compress) + "`n"
+    $hardwareReceiptSha256 = Get-TextSha256 $hardwareReceiptJson
+    if ([string]$hardwareReceiptSha256 -cne $expectedObservedHardwareReceiptSha256) {
+        throw 'Hardware/runtime receipt serialization differs from the canonical contract.'
+    }
+}
+if (-not [string]::IsNullOrWhiteSpace($HardwareRuntimeReceiptOutputPath)) {
+    if ($null -eq $hardwareReceiptJson) {
+        throw 'HardwareRuntimeReceiptOutputPath requires both GPU and SGLang runtime canaries.'
+    }
+    $resolvedHardwareReceipt = Write-NewUtf8File $HardwareRuntimeReceiptOutputPath $hardwareReceiptJson
+}
+
 $report = [ordered]@{
     schema = 'friday.secondary-windows-preflight.v1'
-    status = $(if ($RunGpuCanary -and $InspectSglangHelp -and $InspectGatewayImage) {
+    status = $(if ($RunGpuCanary -and $InspectSglangHelp -and $InspectGatewayImage -and $null -ne $runtimeGpu) {
         'automated_preflight_checks_passed'
     } else {
         'inventory_incomplete'
@@ -223,20 +380,32 @@ $report = [ordered]@{
         expected_address_present = $true
     }
     wsl = [ordered]@{
+        components = $wslProjection
         version_output_sha256 = Get-TextSha256 $wslVersion
         status_output_sha256 = Get-TextSha256 $wslStatus
     }
     docker = [ordered]@{
+        client_version = [string]$dockerVersion.Client.Version
+        client_api_version = [string]$dockerVersion.Client.ApiVersion
         server_version = [string]$dockerVersion.Server.Version
+        server_api_version = [string]$dockerVersion.Server.ApiVersion
         server_os = [string]$dockerInfo.OSType
         server_architecture = [string]$dockerInfo.Architecture
         compose_version = $composeVersion
+        desktop_product_version = [string]$dockerDesktopVersion.ProductVersion
+        desktop_file_version = [string]$dockerDesktopVersion.FileVersion
         desktop_autostart_observed = $dockerAutoStart
     }
-    host_gpus = $hostGpuRows
+    host_gpu = $hostGpu
+    runtime_gpu = $runtimeGpu
     gpu_container_canary = $gpuCanary
     sglang_help = $sglangHelp
     gateway_image = $gatewayImage
+    hardware_runtime_receipt = [ordered]@{
+        status = $(if ($null -ne $hardwareReceipt) { 'observed_unaccepted' } else { 'not_observed' })
+        sha256 = $hardwareReceiptSha256
+        output_path = $resolvedHardwareReceipt
+    }
     operator_checks_required = @('wsl_update_state', 'docker_desktop_wsl2_setting', 'ac_sleep_disabled')
     credentials_retained = $false
 }
