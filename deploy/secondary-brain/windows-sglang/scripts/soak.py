@@ -70,28 +70,45 @@ def _is_exact_unicode_filename(value: str) -> bool:
     return parsed == {"filename": "Проекты/Ёж №17 — финал.txt"}
 
 
-def _exact_unicode_response_format() -> dict[str, object]:
-    expected = "Проекты/Ёж №17 — финал.txt"
+def _is_exact_contradiction(value: str) -> bool:
+    parsed = _load_unique_json_object(value)
+    return parsed == {"verdict": "CONTRADICTION"}
+
+
+def _single_value_object_response_format(
+    *,
+    name: str,
+    property_name: str,
+    expected: str,
+) -> dict[str, object]:
     return {
         "response_format": {
             "type": "json_schema",
             "json_schema": {
-                "name": "exact_unicode_filename",
+                "name": name,
                 "strict": True,
                 "schema": {
                     "type": "object",
                     "properties": {
-                        "filename": {
+                        property_name: {
                             "type": "string",
                             "enum": [expected],
                         }
                     },
-                    "required": ["filename"],
+                    "required": [property_name],
                     "additionalProperties": False,
                 },
             },
         }
     }
+
+
+def _exact_unicode_response_format() -> dict[str, object]:
+    return _single_value_object_response_format(
+        name="exact_unicode_filename",
+        property_name="filename",
+        expected="Проекты/Ёж №17 — финал.txt",
+    )
 
 
 def _cases() -> tuple[SoakCase, ...]:
@@ -135,9 +152,19 @@ def _cases() -> tuple[SoakCase, ...]:
             "contradiction",
             (
                 "Statements A>B and A<B describe the same A and B at the same time. "
-                "Return exactly CONTRADICTION if they conflict, otherwise CONSISTENT."
+                'Return {"verdict":"CONTRADICTION"} if they conflict, otherwise return '
+                '{"verdict":"CONSISTENT"}.'
             ),
-            lambda value: value.strip() == "CONTRADICTION",
+            _is_exact_contradiction,
+            # The unconstrained semantic classification remains in the quality
+            # battery. This long thermal/protocol soak constrains the known
+            # answer so rare sampler spelling drift cannot impersonate an
+            # endpoint outage after thousands of otherwise valid requests.
+            extra=_single_value_object_response_format(
+                name="exact_contradiction_verdict",
+                property_name="verdict",
+                expected="CONTRADICTION",
+            ),
         ),
     )
 

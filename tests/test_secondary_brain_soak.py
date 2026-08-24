@@ -68,8 +68,8 @@ def test_mixed_soak_cases_use_closed_stable_contracts(soak: Any) -> None:
     assert not cases["russian"].validator("Резервный узел готов")
     assert cases["english"].validator("Node ready.")
     assert not cases["english"].validator("Node ready")
-    assert cases["contradiction"].validator("CONTRADICTION")
-    assert not cases["contradiction"].validator("consistent")
+    assert cases["contradiction"].validator('{"verdict":"CONTRADICTION"}')
+    assert not cases["contradiction"].validator('{"verdict":"CONSISTENT"}')
     assert cases["arithmetic"].max_tokens == 512
     assert cases["arithmetic"].reasoning_effort == "medium"
     assert cases["unicode"].extra == {
@@ -94,6 +94,26 @@ def test_mixed_soak_cases_use_closed_stable_contracts(soak: Any) -> None:
     }
     assert cases["unicode"].validator('{"filename":"Проекты/Ёж №17 — финал.txt"}')
     assert cases["json_extraction"].validator('{"amount":17,"date":"2026-08-24","person":"Ada"}')
+    assert cases["contradiction"].extra == {
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "exact_contradiction_verdict",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "verdict": {
+                            "type": "string",
+                            "enum": ["CONTRADICTION"],
+                        }
+                    },
+                    "required": ["verdict"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    }
 
 
 @pytest.mark.parametrize(
