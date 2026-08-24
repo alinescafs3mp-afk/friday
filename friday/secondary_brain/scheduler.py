@@ -17,6 +17,7 @@ from .contracts import (
     ADVISORY_WORKLOADS,
     EffectClass,
     ModelModality,
+    ModelPriority,
     ModelRequest,
     ModelWorkload,
     SecondaryAttempt,
@@ -28,7 +29,10 @@ from .contracts import (
     SecondaryStatus,
     secondary_configuration_is_admissible,
 )
-from .profiles import get_secondary_runtime_profile
+from .profiles import (
+    SecondaryProfileAdmission,
+    get_secondary_runtime_admission,
+)
 
 if TYPE_CHECKING:
     from friday.config import FridaySettings
@@ -82,12 +86,14 @@ class SecondaryBrainScheduler:
         allow_private_text: bool,
         client: SecondaryEndpointClient | None,
         unavailable_state: SecondaryState,
+        profile_admission: SecondaryProfileAdmission | None,
     ) -> None:
         self.mode = mode
         self.allowed_workloads = allowed_workloads & ADVISORY_WORKLOADS
         self.allow_private_text = allow_private_text
         self._client = client
         self._unavailable_state = unavailable_state
+        self._profile_admission = profile_admission
         self._local_skipped_total = 0
         self._local_fallback_total = 0
         self._startup_probe_task: asyncio.Task[None] | None = None
@@ -156,9 +162,14 @@ class SecondaryBrainScheduler:
                 allow_private_text=settings.secondary_llm_allow_private_text,
                 client=None,
                 unavailable_state=SecondaryState.DISABLED,
+                profile_admission=None,
             )
 
-        profile = get_secondary_runtime_profile(settings.secondary_llm_profile)
+        admission = get_secondary_runtime_admission(
+            settings.secondary_llm_profile,
+            mode=mode.value,
+        )
+        profile = admission.profile if admission is not None else None
         endpoint = SecondaryEndpointConfig(
             base_url=settings.secondary_llm_base_url,
             served_model_alias=settings.secondary_llm_model,
@@ -186,8 +197,10 @@ class SecondaryBrainScheduler:
                 primary_timeout_sec=settings.llm_timeout_sec,
                 workload_names=settings.secondary_llm_workloads,
                 mode=mode.value,
+                allow_private_text=settings.secondary_llm_allow_private_text,
             )
             or not effective_workloads
+            or admission is None
         ):
             return cls(
                 mode=mode,
@@ -195,9 +208,14 @@ class SecondaryBrainScheduler:
                 allow_private_text=settings.secondary_llm_allow_private_text,
                 client=None,
                 unavailable_state=SecondaryState.MISCONFIGURED,
+                profile_admission=None,
             )
         try:
-            client = SecondaryEndpointClient(endpoint, transport=transport)
+            client = SecondaryEndpointClient(
+                endpoint,
+                admission=admission,
+                transport=transport,
+            )
         except Exception:
             # Optional TLS/transport construction (including an invalid CA file)
             # may never turn into a primary startup failure or retain its raw error.
@@ -207,6 +225,7 @@ class SecondaryBrainScheduler:
                 allow_private_text=settings.secondary_llm_allow_private_text,
                 client=None,
                 unavailable_state=SecondaryState.MISCONFIGURED,
+                profile_admission=None,
             )
         return cls(
             mode=mode,
@@ -214,6 +233,7 @@ class SecondaryBrainScheduler:
             allow_private_text=settings.secondary_llm_allow_private_text,
             client=client,
             unavailable_state=SecondaryState.PROBING,
+            profile_admission=admission.kind,
         )
 
     async def aclose(self) -> None:
@@ -414,6 +434,9 @@ class SecondaryBrainScheduler:
             "context_cap_tokens": status.context_cap_tokens,
             "served_model_match": status.served_model_match,
             "profile": self._client.config.profile_id if self._client is not None else "",
+            "profile_admission": (
+                self._profile_admission.value if self._profile_admission is not None else ""
+            ),
             "profile_manifest_match": status.profile_manifest_match,
             "last_success_age_sec": (
                 round(status.last_success_age_sec, 3) if status.last_success_age_sec is not None else None
@@ -492,6 +515,19 @@ class SecondaryBrainScheduler:
             )
         if self._client is None:
             return SecondaryFailure.MISCONFIGURED
+        if self._profile_admission is SecondaryProfileAdmission.PROVISIONAL_SHADOW:
+            if not shadow:
+                return SecondaryFailure.MODE_DISALLOWED
+            if (
+                request.workload is not ModelWorkload.EXTRACT
+                or request.priority is not ModelPriority.BACKGROUND
+                or not request.require_structured_output
+            ):
+                return SecondaryFailure.WORKLOAD_DISALLOWED
+            if request.contains_private_text:
+                return SecondaryFailure.PRIVATE_TEXT_DISALLOWED
+            if request.effect_class is not EffectClass.NONE:
+                return SecondaryFailure.EFFECT_DENIED
         if request.workload not in self.allowed_workloads:
             return SecondaryFailure.WORKLOAD_DISALLOWED
         if request.modality is not ModelModality.TEXT or _request_contains_image(request):

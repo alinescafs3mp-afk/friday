@@ -7,6 +7,7 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 from urllib.parse import urlsplit
@@ -124,11 +125,14 @@ _REQUIRED_HASH_KEYS = (
     "hardware_runtime_receipt_sha256",
     "source_model_manifest_sha256",
     "runtime_manifest_sha256",
+)
+_EVIDENCE_HASH_KEYS = (
     "quality_evidence_sha256",
     "capacity_evidence_sha256",
     "soak_evidence_sha256",
     "failure_evidence_sha256",
 )
+_ZERO_SHA256 = "0" * 64
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -193,6 +197,17 @@ class SecondaryRuntimeProfile:
     def accepts_manifest(self, raw: bytes) -> bool:
         """Match one exact accepted manifest, never a candidate lookalike."""
 
+        return self._accepts_exact_manifest(raw, expected_status="accepted")
+
+    def accepts_provisional_candidate_manifest(self, raw: bytes) -> bool:
+        """Match one exact unelevated candidate for shadow-only observation."""
+
+        return self._accepts_exact_manifest(raw, expected_status="candidate")
+
+    def _accepts_exact_manifest(self, raw: bytes, *, expected_status: str) -> bool:
+        if expected_status not in {"accepted", "candidate"}:
+            return False
+
         if not 1 <= len(raw) <= 65_536 or hashlib.sha256(raw).hexdigest() != self.manifest_sha256:
             return False
         try:
@@ -207,14 +222,25 @@ class SecondaryRuntimeProfile:
             or set(value) != _PROFILE_KEYS
             or raw != _canonical_json(value)
             or value.get("schema") != _PROFILE_SCHEMA
-            or value.get("status") != "accepted"
+            or value.get("status") != expected_status
         ):
             return False
         hashes = [value.get(key) for key in _REQUIRED_HASH_KEYS]
         if any(
-            not isinstance(item, str) or _SHA256_RE.fullmatch(item) is None or item == "0" * 64
+            not isinstance(item, str) or _SHA256_RE.fullmatch(item) is None or item == _ZERO_SHA256
             for item in hashes
         ):
+            return False
+        evidence_hashes = [value.get(key) for key in _EVIDENCE_HASH_KEYS]
+        if expected_status == "accepted":
+            if any(
+                not isinstance(item, str)
+                or _SHA256_RE.fullmatch(item) is None
+                or item == _ZERO_SHA256
+                for item in evidence_hashes
+            ):
+                return False
+        elif evidence_hashes != [_ZERO_SHA256] * len(_EVIDENCE_HASH_KEYS):
             return False
         try:
             endpoint = urlsplit(self.endpoint_base_url)
@@ -413,9 +439,69 @@ class SecondaryRuntimeProfile:
 # An empty registry deliberately makes every private-LAN endpoint fail closed.
 ACCEPTED_SECONDARY_RUNTIME_PROFILES: Mapping[str, SecondaryRuntimeProfile] = MappingProxyType({})
 
+# Filled only with one exact matrix finalist after quality/capacity/soak screening.
+# This registry never grants assist authority and remains empty until that point.
+PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES: Mapping[
+    str, SecondaryRuntimeProfile
+] = MappingProxyType({})
+
+
+class SecondaryProfileAdmission(StrEnum):
+    ACCEPTED = "accepted"
+    PROVISIONAL_SHADOW = "provisional_shadow"
+
+
+@dataclass(frozen=True, slots=True)
+class SecondaryRuntimeAdmission:
+    """One code-owned profile plus the only manifest status it may serve."""
+
+    profile: SecondaryRuntimeProfile
+    kind: SecondaryProfileAdmission
+
+    @property
+    def is_provisional_shadow(self) -> bool:
+        return self.kind is SecondaryProfileAdmission.PROVISIONAL_SHADOW
+
+    def accepts_manifest(self, raw: bytes) -> bool:
+        if self.kind is SecondaryProfileAdmission.ACCEPTED:
+            return self.profile.accepts_manifest(raw)
+        return self.profile.accepts_provisional_candidate_manifest(raw)
+
 
 def get_secondary_runtime_profile(profile_id: str) -> SecondaryRuntimeProfile | None:
     profile = ACCEPTED_SECONDARY_RUNTIME_PROFILES.get(profile_id)
     if profile is None or not profile.is_well_formed:
         return None
     return profile
+
+
+def get_secondary_runtime_admission(
+    profile_id: str,
+    *,
+    mode: str,
+) -> SecondaryRuntimeAdmission | None:
+    """Resolve accepted profiles normally and candidates only for exact shadow mode."""
+
+    if profile_id in ACCEPTED_SECONDARY_RUNTIME_PROFILES and profile_id in (
+        PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES
+    ):
+        return None
+    accepted = get_secondary_runtime_profile(profile_id)
+    if accepted is not None:
+        if mode not in accepted.allowed_modes:
+            return None
+        return SecondaryRuntimeAdmission(accepted, SecondaryProfileAdmission.ACCEPTED)
+    if mode != "shadow":
+        return None
+    provisional = PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES.get(profile_id)
+    if (
+        provisional is None
+        or not provisional.is_well_formed
+        or "shadow" not in provisional.allowed_modes
+        or provisional.allowed_workloads != frozenset({"extract"})
+    ):
+        return None
+    return SecondaryRuntimeAdmission(
+        provisional,
+        SecondaryProfileAdmission.PROVISIONAL_SHADOW,
+    )

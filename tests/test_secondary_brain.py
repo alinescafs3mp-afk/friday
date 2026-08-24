@@ -23,6 +23,7 @@ from friday.config import load_settings, validate_settings
 from friday.secondary_brain import (
     EffectClass,
     ModelModality,
+    ModelPriority,
     ModelRequest,
     ModelWorkload,
     SecondaryEndpointConfig,
@@ -32,7 +33,11 @@ from friday.secondary_brain import (
     build_secondary_brain,
 )
 from friday.secondary_brain.client import SecondaryEndpointClient
-from friday.secondary_brain.profiles import SecondaryRuntimeProfile
+from friday.secondary_brain.profiles import (
+    SecondaryProfileAdmission,
+    SecondaryRuntimeAdmission,
+    SecondaryRuntimeProfile,
+)
 
 _API_KEY = "a" * 64
 _ENGINE_PROJECTION: dict[str, Any] = {
@@ -154,6 +159,46 @@ def _runtime_profile(**changes: Any) -> SecondaryRuntimeProfile:
     return replace(profile, **changes)
 
 
+def _provisional_candidate() -> tuple[SecondaryRuntimeProfile, bytes, dict[str, str]]:
+    value = {
+        **_PROFILE_VALUE,
+        "status": "candidate",
+        "allowed_workloads": ["extract"],
+        "quality_evidence_sha256": "0" * 64,
+        "capacity_evidence_sha256": "0" * 64,
+        "soak_evidence_sha256": "0" * 64,
+        "failure_evidence_sha256": "0" * 64,
+    }
+    raw = (
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
+    digest = hashlib.sha256(raw).hexdigest()
+    profile = _runtime_profile(
+        manifest_sha256=digest,
+        allowed_workloads=frozenset({"extract"}),
+    )
+    headers = {
+        "X-Friday-Secondary-Profile-Id": _PROFILE_ID,
+        "X-Friday-Secondary-Profile-Sha256": digest,
+    }
+    return profile, raw, headers
+
+
+def _install_provisional_candidate(monkeypatch: pytest.MonkeyPatch) -> tuple[bytes, dict[str, str]]:
+    profile, raw, headers = _provisional_candidate()
+    monkeypatch.setattr(
+        secondary_profiles,
+        "ACCEPTED_SECONDARY_RUNTIME_PROFILES",
+        MappingProxyType({}),
+    )
+    monkeypatch.setattr(
+        secondary_profiles,
+        "PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES",
+        MappingProxyType({_PROFILE_ID: profile}),
+    )
+    return raw, headers
+
+
 @pytest.fixture(autouse=True)
 def _accepted_test_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     profile = _runtime_profile()
@@ -170,6 +215,7 @@ def _request(
     messages: tuple[dict[str, Any], ...] = ({"role": "user", "content": "classify this"},),
     effect_class: EffectClass = EffectClass.NONE,
     modality: ModelModality = ModelModality.TEXT,
+    priority: ModelPriority = ModelPriority.BACKGROUND,
     structured: bool = False,
     private: bool = False,
 ) -> ModelRequest:
@@ -180,6 +226,7 @@ def _request(
         absolute_deadline_monotonic=time.monotonic() + 5.0,
         effect_class=effect_class,
         modality=modality,
+        priority=priority,
         require_structured_output=structured,
         contains_private_text=private,
     )
@@ -458,6 +505,210 @@ async def test_exact_hashed_candidate_profile_is_never_admitted(
         assert client.status().profile_manifest_match is False
     finally:
         await client.aclose()
+
+
+def test_provisional_candidate_has_a_separate_shadow_only_admission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile, candidate_raw, _headers = _provisional_candidate()
+    _install_provisional_candidate(monkeypatch)
+
+    assert secondary_profiles.get_secondary_runtime_profile(_PROFILE_ID) is None
+    assert secondary_profiles.get_secondary_runtime_admission(_PROFILE_ID, mode="assist") is None
+    admission = secondary_profiles.get_secondary_runtime_admission(_PROFILE_ID, mode="shadow")
+    assert admission == SecondaryRuntimeAdmission(
+        profile,
+        SecondaryProfileAdmission.PROVISIONAL_SHADOW,
+    )
+    assert admission.accepts_manifest(candidate_raw) is True
+    assert profile.accepts_manifest(candidate_raw) is False
+
+    accepted_lookalike = candidate_raw.replace(b'"status":"candidate"', b'"status":"accepted"')
+    lookalike_profile = replace(
+        profile,
+        manifest_sha256=hashlib.sha256(accepted_lookalike).hexdigest(),
+    )
+    lookalike_admission = SecondaryRuntimeAdmission(
+        lookalike_profile,
+        SecondaryProfileAdmission.PROVISIONAL_SHADOW,
+    )
+    assert lookalike_admission.accepts_manifest(accepted_lookalike) is False
+
+    monkeypatch.setattr(
+        secondary_profiles,
+        "PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES",
+        MappingProxyType(
+            {
+                _PROFILE_ID: replace(
+                    profile,
+                    allowed_workloads=frozenset({"extract", "critique"}),
+                )
+            }
+        ),
+    )
+    assert secondary_profiles.get_secondary_runtime_admission(_PROFILE_ID, mode="shadow") is None
+
+
+def test_provisional_configuration_is_exact_shadow_extract_and_public_text_only(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_provisional_candidate(monkeypatch)
+    configured = replace(
+        _configured_settings(settings, mode="shadow", private=False),
+        secondary_llm_workloads=("extract",),
+    )
+
+    assert configured.secondary_llm_configured is True
+    assert replace(configured, secondary_llm_mode="assist").secondary_llm_configured is False
+    assert replace(configured, secondary_llm_workloads=("critique",)).secondary_llm_configured is False
+    assert replace(configured, secondary_llm_allow_private_text=True).secondary_llm_configured is False
+
+
+@pytest.mark.asyncio
+async def test_provisional_scheduler_only_runs_discarded_effect_free_extract_shadow(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate_raw, candidate_headers = _install_provisional_candidate(monkeypatch)
+    workload_calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal workload_calls
+        if request.url.path.endswith("/friday-profile"):
+            return httpx.Response(200, headers=candidate_headers, content=candidate_raw)
+        if request.url.path.endswith("/models"):
+            return httpx.Response(
+                200,
+                headers=candidate_headers,
+                json={"data": [{"id": _ALIAS}]},
+            )
+        payload = json.loads(request.content)
+        messages = payload.get("messages", [])
+        content = "ready"
+        if not (messages and messages[-1].get("content") == "Reply with exactly: ready"):
+            workload_calls += 1
+            content = '{"label":"shadow-only"}'
+        return httpx.Response(
+            200,
+            headers=candidate_headers,
+            json={
+                "model": _ALIAS,
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": content},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+            },
+        )
+
+    configured = replace(
+        _configured_settings(settings, mode="shadow", private=False),
+        secondary_llm_workloads=("extract",),
+    )
+    scheduler = build_secondary_brain(
+        configured,
+        transport=httpx.MockTransport(handler),
+    )
+    primary_value = {"source": "primary"}
+    primary_calls = 0
+
+    async def primary() -> object:
+        nonlocal primary_calls
+        primary_calls += 1
+        return primary_value
+
+    valid = _request(workload=ModelWorkload.EXTRACT, structured=True)
+    try:
+        result = await scheduler.run_shadow(
+            lambda: valid,
+            primary,
+            validator=lambda value: value.structured_output == {"label": "shadow-only"},
+        )
+        assert result is primary_value
+        await scheduler.drain_shadow()
+        assert primary_calls == 1
+        assert workload_calls == 1
+        assert scheduler.diagnostics_status()["profile_admission"] == "provisional_shadow"
+
+        required = await scheduler.secondary_preferred_required_result(valid, primary)
+        assert required is primary_value
+        assert primary_calls == 2
+        assert workload_calls == 1
+
+        policy_cases = (
+            (
+                _request(workload=ModelWorkload.CRITIQUE, structured=True),
+                SecondaryFailure.WORKLOAD_DISALLOWED,
+            ),
+            (
+                _request(workload=ModelWorkload.EXTRACT),
+                SecondaryFailure.WORKLOAD_DISALLOWED,
+            ),
+            (
+                _request(
+                    workload=ModelWorkload.EXTRACT,
+                    priority=ModelPriority.FOREGROUND,
+                    structured=True,
+                ),
+                SecondaryFailure.WORKLOAD_DISALLOWED,
+            ),
+            (
+                _request(workload=ModelWorkload.EXTRACT, private=True, structured=True),
+                SecondaryFailure.PRIVATE_TEXT_DISALLOWED,
+            ),
+            (
+                _request(
+                    workload=ModelWorkload.EXTRACT,
+                    effect_class=EffectClass.READ_ONLY,
+                    structured=True,
+                ),
+                SecondaryFailure.EFFECT_DENIED,
+            ),
+            (
+                _request(
+                    workload=ModelWorkload.EXTRACT,
+                    modality=ModelModality.IMAGE,
+                    structured=True,
+                ),
+                SecondaryFailure.UNSUPPORTED_MODALITY,
+            ),
+        )
+        for request, expected in policy_cases:
+            attempt = await scheduler.attempt(request, shadow=True)
+            assert attempt.failure is expected
+        assert workload_calls == 1
+    finally:
+        await scheduler.aclose()
+
+
+def test_provisional_policy_mismatch_constructs_no_transport(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_provisional_candidate(monkeypatch)
+    for configured in (
+        replace(
+            _configured_settings(settings, mode="assist", private=False),
+            secondary_llm_workloads=("extract",),
+        ),
+        replace(
+            _configured_settings(settings, mode="shadow", private=True),
+            secondary_llm_workloads=("extract",),
+        ),
+        replace(
+            _configured_settings(settings, mode="shadow", private=False),
+            secondary_llm_workloads=("document_map",),
+        ),
+    ):
+        scheduler = build_secondary_brain(configured)
+        try:
+            assert scheduler.served_model_alias == ""
+            assert scheduler.status().state is SecondaryState.MISCONFIGURED
+        finally:
+            asyncio.run(scheduler.aclose())
 
 
 @pytest.mark.parametrize(

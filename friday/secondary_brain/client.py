@@ -21,6 +21,11 @@ from .contracts import (
     _load_pinned_ca_pem,
 )
 from .gpt_oss import GptOssProtocolAdapter, ProtocolRejection
+from .profiles import (
+    SecondaryProfileAdmission,
+    SecondaryRuntimeAdmission,
+    get_secondary_runtime_profile,
+)
 
 _ENDPOINT_FAILURES = frozenset(
     {
@@ -59,26 +64,34 @@ class SecondaryEndpointClient:
         self,
         config: SecondaryEndpointConfig,
         *,
+        admission: SecondaryRuntimeAdmission | None = None,
         adapter: GptOssProtocolAdapter | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if not config.is_complete:
             raise ValueError("secondary endpoint configuration is incomplete")
-        from .profiles import get_secondary_runtime_profile
-
-        accepted_profile = get_secondary_runtime_profile(config.profile_id)
+        if admission is None:
+            accepted_profile = get_secondary_runtime_profile(config.profile_id)
+            if accepted_profile is not None:
+                admission = SecondaryRuntimeAdmission(
+                    accepted_profile,
+                    SecondaryProfileAdmission.ACCEPTED,
+                )
+        admitted_profile = admission.profile if admission is not None else None
         if (
-            accepted_profile is None
-            or accepted_profile.endpoint_base_url.rstrip("/") != config.base_url.rstrip("/")
-            or accepted_profile.served_model_alias != config.served_model_alias
-            or accepted_profile.manifest_sha256 != config.profile_manifest_sha256
-            or accepted_profile.gateway_ca_certificate_sha256 != config.ca_sha256
-            or accepted_profile.max_context_tokens != config.max_context_tokens
-            or accepted_profile.max_concurrency != config.max_concurrency
-            or accepted_profile.max_output_tokens != config.max_output_tokens
+            admitted_profile is None
+            or admitted_profile.endpoint_base_url.rstrip("/") != config.base_url.rstrip("/")
+            or admitted_profile.served_model_alias != config.served_model_alias
+            or admitted_profile.manifest_sha256 != config.profile_manifest_sha256
+            or admitted_profile.gateway_ca_certificate_sha256 != config.ca_sha256
+            or admitted_profile.max_context_tokens != config.max_context_tokens
+            or admitted_profile.max_concurrency != config.max_concurrency
+            or admitted_profile.max_output_tokens != config.max_output_tokens
         ):
-            raise ValueError("secondary endpoint differs from the accepted profile")
+            raise ValueError("secondary endpoint differs from the code-owned profile admission")
+        assert admission is not None
+        self._profile_admission = admission
         self.config = config
         self._adapter = adapter or GptOssProtocolAdapter()
         self._clock = clock
@@ -395,7 +408,7 @@ class SecondaryEndpointClient:
             await self._finish(failure)
 
     async def probe_models(self, *, absolute_deadline_monotonic: float) -> SecondaryFailure | None:
-        """Verify the accepted profile manifest and exact served alias."""
+        """Verify the admitted profile manifest and exact served alias."""
 
         self._profile_manifest_match = False
         remaining = min(
@@ -436,10 +449,7 @@ class SecondaryEndpointClient:
                 if hashlib.sha256(response.content).hexdigest() != self.config.profile_manifest_sha256:
                     failure = SecondaryFailure.WRONG_PROFILE
                     return failure
-                from .profiles import get_secondary_runtime_profile
-
-                profile = get_secondary_runtime_profile(self.config.profile_id)
-                if profile is None or not profile.accepts_manifest(response.content):
+                if not self._profile_admission.accepts_manifest(response.content):
                     failure = SecondaryFailure.WRONG_PROFILE
                     return failure
                 self._profile_manifest_match = True

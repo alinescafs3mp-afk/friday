@@ -334,14 +334,21 @@ def secondary_configuration_is_admissible(
     primary_timeout_sec: float,
     workload_names: Iterable[str],
     mode: str,
+    allow_private_text: bool = False,
 ) -> bool:
     """One pure completeness/independence predicate for every projection."""
 
     allowed = {workload.value for workload in ADVISORY_WORKLOADS}
     workloads = {str(value).strip().casefold() for value in workload_names}
-    from .profiles import get_secondary_runtime_profile
+    from .profiles import get_secondary_runtime_admission
 
-    profile = get_secondary_runtime_profile(endpoint.profile_id)
+    admission = get_secondary_runtime_admission(endpoint.profile_id, mode=mode)
+    profile = admission.profile if admission is not None else None
+    provisional_policy_matches = bool(
+        admission is None
+        or not admission.is_provisional_shadow
+        or (mode == "shadow" and workloads == {"extract"} and not allow_private_text)
+    )
     profile_matches = bool(
         profile is not None
         and profile.endpoint_base_url.rstrip("/") == endpoint.base_url.rstrip("/")
@@ -354,6 +361,7 @@ def secondary_configuration_is_admissible(
         and mode in profile.allowed_modes
         and workloads
         and workloads <= profile.allowed_workloads
+        and provisional_policy_matches
     )
     return bool(
         endpoint.is_complete

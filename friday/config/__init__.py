@@ -1014,9 +1014,13 @@ class FridaySettings:
             SecondaryEndpointConfig,
             secondary_configuration_is_admissible,
         )
-        from friday.secondary_brain.profiles import get_secondary_runtime_profile
+        from friday.secondary_brain.profiles import get_secondary_runtime_admission
 
-        profile = get_secondary_runtime_profile(self.secondary_llm_profile)
+        admission = get_secondary_runtime_admission(
+            self.secondary_llm_profile,
+            mode=self.secondary_llm_mode,
+        )
+        profile = admission.profile if admission is not None else None
         endpoint = SecondaryEndpointConfig(
             base_url=self.secondary_llm_base_url,
             served_model_alias=self.secondary_llm_model,
@@ -1042,6 +1046,7 @@ class FridaySettings:
             primary_timeout_sec=self.llm_timeout_sec,
             workload_names=self.secondary_llm_workloads,
             mode=self.secondary_llm_mode,
+            allow_private_text=self.secondary_llm_allow_private_text,
         )
 
     def public_dict(self) -> dict[str, object]:
@@ -1817,7 +1822,7 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
     if settings.telegram_bridge_secret and len(settings.telegram_bridge_secret) < 32:
         errors.append("FRIDAY_TELEGRAM_BRIDGE_SECRET must contain at least 32 characters")
     if settings.secondary_llm_enabled:
-        from friday.secondary_brain.profiles import get_secondary_runtime_profile
+        from friday.secondary_brain.profiles import get_secondary_runtime_admission
 
         try:
             secondary_url = urlparse(settings.secondary_llm_base_url)
@@ -1834,7 +1839,11 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
         else:
             secondary_is_loopback = secondary_address.is_loopback
             secondary_is_private_ip = secondary_address.is_private and not secondary_address.is_loopback
-        secondary_profile = get_secondary_runtime_profile(settings.secondary_llm_profile)
+        secondary_admission = get_secondary_runtime_admission(
+            settings.secondary_llm_profile,
+            mode=settings.secondary_llm_mode,
+        )
+        secondary_profile = secondary_admission.profile if secondary_admission is not None else None
         missing_secondary = [
             name
             for name, present in (
