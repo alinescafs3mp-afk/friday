@@ -160,18 +160,19 @@ class SecondaryResult:
 class SecondaryAttempt:
     result: SecondaryResult | None = field(default=None, repr=False)
     failure: SecondaryFailure | None = None
+    queue_wait_sec: float = field(default=0.0, repr=False)
 
     @property
     def succeeded(self) -> bool:
         return self.result is not None and self.failure is None
 
     @classmethod
-    def success(cls, result: SecondaryResult) -> SecondaryAttempt:
-        return cls(result=result)
+    def success(cls, result: SecondaryResult, *, queue_wait_sec: float = 0.0) -> SecondaryAttempt:
+        return cls(result=result, queue_wait_sec=max(0.0, queue_wait_sec))
 
     @classmethod
-    def rejected(cls, failure: SecondaryFailure) -> SecondaryAttempt:
-        return cls(failure=failure)
+    def rejected(cls, failure: SecondaryFailure, *, queue_wait_sec: float = 0.0) -> SecondaryAttempt:
+        return cls(failure=failure, queue_wait_sec=max(0.0, queue_wait_sec))
 
 
 def _load_pinned_ca_pem(path_value: str, expected_sha256: str) -> str:

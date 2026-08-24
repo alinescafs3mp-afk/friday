@@ -87,8 +87,7 @@ _PROFILE_HEADERS = {
 }
 
 
-@pytest.fixture(autouse=True)
-def _accepted_test_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+def _runtime_profile(**changes: Any) -> SecondaryRuntimeProfile:
     profile = SecondaryRuntimeProfile(
         profile_id=_PROFILE_ID,
         endpoint_base_url="http://127.0.0.1:30001/v1",
@@ -114,6 +113,12 @@ def _accepted_test_profile(monkeypatch: pytest.MonkeyPatch) -> None:
         runtime_source_revision="d" * 40,
         runtime_manifest_sha256="e" * 64,
     )
+    return replace(profile, **changes)
+
+
+@pytest.fixture(autouse=True)
+def _accepted_test_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    profile = _runtime_profile()
     monkeypatch.setattr(
         secondary_profiles,
         "ACCEPTED_SECONDARY_RUNTIME_PROFILES",
@@ -144,7 +149,7 @@ def _request(
 
 def _endpoint_config(*, cooldown_sec: float = 1.0) -> SecondaryEndpointConfig:
     return SecondaryEndpointConfig(
-        base_url="http://127.0.0.1:30000/v1",
+        base_url="http://127.0.0.1:30001/v1",
         served_model_alias=_ALIAS,
         api_key=_API_KEY,
         connect_timeout_sec=0.1,
@@ -188,6 +193,18 @@ def test_https_ca_bytes_are_code_pinned_before_client_construction(
             loaded["cadata"] = cadata
 
     exact_context = ExactContext()
+    monkeypatch.setattr(
+        secondary_profiles,
+        "ACCEPTED_SECONDARY_RUNTIME_PROFILES",
+        MappingProxyType(
+            {
+                _PROFILE_ID: _runtime_profile(
+                    endpoint_base_url=base.base_url,
+                    gateway_ca_certificate_sha256=base.ca_sha256,
+                )
+            }
+        ),
+    )
     monkeypatch.setattr(secondary_client_module.ssl, "SSLContext", lambda _protocol: exact_context)
     monkeypatch.setattr(
         secondary_client_module.httpx,
@@ -340,12 +357,7 @@ async def test_wrong_profile_manifest_fails_before_model_inventory() -> None:
         requested_paths.append(request.url.path)
         return httpx.Response(200, content=b"wrong-profile")
 
-    config = replace(
-        _endpoint_config(),
-        profile_id="test-profile-v1",
-        profile_manifest_sha256="b" * 64,
-    )
-    client = SecondaryEndpointClient(config, transport=httpx.MockTransport(handler))
+    client = SecondaryEndpointClient(_endpoint_config(), transport=httpx.MockTransport(handler))
     try:
         failure = await client.probe_models(absolute_deadline_monotonic=time.monotonic() + 2.0)
         assert failure is SecondaryFailure.WRONG_PROFILE
@@ -356,7 +368,9 @@ async def test_wrong_profile_manifest_fails_before_model_inventory() -> None:
 
 
 @pytest.mark.asyncio
-async def test_exact_hashed_candidate_profile_is_never_admitted() -> None:
+async def test_exact_hashed_candidate_profile_is_never_admitted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     candidate = {**_PROFILE_VALUE, "status": "candidate"}
     for key in (
         "quality_evidence_sha256",
@@ -385,6 +399,19 @@ async def test_exact_hashed_candidate_profile_is_never_admitted() -> None:
         _endpoint_config(),
         profile_manifest_sha256=hashlib.sha256(candidate_bytes).hexdigest(),
     )
+    accepted_profile = secondary_profiles.ACCEPTED_SECONDARY_RUNTIME_PROFILES[_PROFILE_ID]
+    monkeypatch.setattr(
+        secondary_profiles,
+        "ACCEPTED_SECONDARY_RUNTIME_PROFILES",
+        MappingProxyType(
+            {
+                _PROFILE_ID: replace(
+                    accepted_profile,
+                    manifest_sha256=config.profile_manifest_sha256,
+                )
+            }
+        ),
+    )
     client = SecondaryEndpointClient(config, transport=httpx.MockTransport(handler))
     try:
         failure = await client.probe_models(absolute_deadline_monotonic=time.monotonic() + 2.0)
@@ -393,6 +420,18 @@ async def test_exact_hashed_candidate_profile_is_never_admitted() -> None:
         assert client.status().profile_manifest_match is False
     finally:
         await client.aclose()
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        _runtime_profile(max_context_tokens=5000, max_total_tokens=5000),
+        _runtime_profile(max_output_tokens=4096),
+        _runtime_profile(max_context_tokens=True, max_total_tokens=True),
+    ],
+)
+def test_product_profile_uses_the_deploy_capacity_bounds(profile: SecondaryRuntimeProfile) -> None:
+    assert profile.is_well_formed is False
 
 
 @pytest.mark.asyncio
@@ -982,6 +1021,7 @@ async def test_bad_process_epoch_canary_prevents_workload_admission(settings: An
         assert diagnostics["probe_failure_total"] == 1
         assert diagnostics["probe_failure_reasons"] == {"malformed_response": 1}
         assert diagnostics["protocol_rejection_total"] == 1
+        assert diagnostics["protocol_rejection_reasons"] == {"malformed_response": 1}
         assert diagnostics["queue_wait"]["count"] == 2
         assert diagnostics["queue_wait"]["sum_sec"] >= 0.0
         assert diagnostics["queue_wait"]["max_sec"] >= 0.0
@@ -1084,6 +1124,10 @@ async def test_stale_health_refresh_does_not_repeat_process_epoch_generation_can
         await asyncio.sleep(0.003)
         assert (await scheduler.attempt(_request())).result is not None
         assert canaries == 1
+        workload_metrics = scheduler.diagnostics_status()["workloads"]["classify"]
+        assert workload_metrics["queue_wait_count"] == 2
+        assert workload_metrics["queue_wait_sum_sec"] >= 0.0
+        assert workload_metrics["queue_wait_max_sec"] >= 0.0
         assert paths == [
             "/v1/friday-profile",
             "/v1/models",

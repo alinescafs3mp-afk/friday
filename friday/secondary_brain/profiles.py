@@ -15,6 +15,7 @@ _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _PROFILE_ID_RE = re.compile(r"[a-z0-9][a-z0-9._-]{2,79}")
 _PROFILE_SCHEMA = "friday.secondary-runtime-profile.v1"
 _EXPECTED_MODEL_PATH = "/models/gpt-oss-20b-nvfp4-modelopt/candidate"
+_CONTEXT_LADDER = frozenset({4096, 8192, 12288, 16384, 24576, 32768})
 _PROFILE_KEYS = frozenset(
     {
         "schema",
@@ -179,8 +180,18 @@ class SecondaryRuntimeProfile:
         engine_sha256 = hashlib.sha256(_canonical_json(engine_projection)).hexdigest()
         modes = value.get("allowed_modes")
         workloads = value.get("allowed_workloads")
+        exact_integer_fields = (
+            "context_tokens",
+            "max_total_tokens",
+            "max_running_requests",
+            "max_output_tokens",
+            "chunked_prefill_size",
+            "cuda_graph_max_bs",
+        )
         return not (
-            value.get("engine_binding_sha256") != engine_sha256
+            any(type(value.get(key)) is not int for key in exact_integer_fields)
+            or value.get("context_tokens") not in _CONTEXT_LADDER
+            or value.get("engine_binding_sha256") != engine_sha256
             or engine_sha256 != self.engine_binding_sha256
             or value.get("profile_id") != self.profile_id
             or self.profile_id != f"gptoss20b-{engine_sha256}"
@@ -246,10 +257,15 @@ class SecondaryRuntimeProfile:
             and self.served_model_alias == f"friday-secondary-{self.profile_id}"
             and all(_SHA256_RE.fullmatch(value) for value in hashes)
             and ca_is_bound
-            and self.max_context_tokens > 0
+            and type(self.max_context_tokens) is int
+            and self.max_context_tokens in _CONTEXT_LADDER
+            and type(self.max_total_tokens) is int
             and self.max_total_tokens == self.max_context_tokens
+            and type(self.max_concurrency) is int
             and self.max_concurrency == 1
-            and 1 <= self.max_output_tokens <= self.max_context_tokens
+            and type(self.max_output_tokens) is int
+            and 64 <= self.max_output_tokens <= 4096
+            and self.max_output_tokens < self.max_context_tokens
             and self.mem_fraction_static in {"0.86", "0.88", "0.90", "0.92", "0.94"}
             and self.quantization == "modelopt_fp4"
             and self.kv_cache_dtype in {"none", "fp8_e4m3"}

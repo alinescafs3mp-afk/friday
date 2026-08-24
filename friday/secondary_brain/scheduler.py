@@ -51,6 +51,16 @@ _READMISSION_FAILURES = frozenset(
         SecondaryFailure.CANCELLED,
     }
 )
+_PROTOCOL_REJECTIONS = frozenset(
+    {
+        SecondaryFailure.WRONG_PROFILE,
+        SecondaryFailure.WRONG_MODEL,
+        SecondaryFailure.MALFORMED_RESPONSE,
+        SecondaryFailure.TOOL_CALL_REJECTED,
+        SecondaryFailure.REASONING_LEAK,
+        SecondaryFailure.DEGENERATION,
+    }
+)
 
 
 def _request_contains_image(request: ModelRequest) -> bool:
@@ -102,6 +112,9 @@ class SecondaryBrainScheduler:
         self._success_by_workload = {workload: 0 for workload in ModelWorkload}
         self._latency_sum_by_workload = {workload: 0.0 for workload in ModelWorkload}
         self._latency_max_by_workload = {workload: 0.0 for workload in ModelWorkload}
+        self._queue_wait_count_by_workload = {workload: 0 for workload in ModelWorkload}
+        self._queue_wait_sum_by_workload = {workload: 0.0 for workload in ModelWorkload}
+        self._queue_wait_max_by_workload = {workload: 0.0 for workload in ModelWorkload}
         self._skipped_by_reason = {failure: 0 for failure in SecondaryFailure}
         self._fallback_by_reason = {failure: 0 for failure in SecondaryFailure}
         self._skipped_by_workload_reason = {
@@ -410,6 +423,11 @@ class SecondaryBrainScheduler:
                 reason.value: count for reason, count in self._probe_failure_by_reason.items() if count
             },
             "protocol_rejection_total": status.protocol_rejection_total,
+            "protocol_rejection_reasons": {
+                reason.value: self._skipped_by_reason[reason]
+                for reason in sorted(_PROTOCOL_REJECTIONS, key=lambda value: value.value)
+                if self._skipped_by_reason[reason]
+            },
             "queue_wait": {
                 "count": status.queue_wait_count,
                 "sum_sec": round(status.queue_wait_sum_sec, 6),
@@ -422,6 +440,9 @@ class SecondaryBrainScheduler:
                     "latency_count": self._success_by_workload[workload],
                     "latency_sum_sec": round(self._latency_sum_by_workload[workload], 6),
                     "latency_max_sec": round(self._latency_max_by_workload[workload], 6),
+                    "queue_wait_count": self._queue_wait_count_by_workload[workload],
+                    "queue_wait_sum_sec": round(self._queue_wait_sum_by_workload[workload], 6),
+                    "queue_wait_max_sec": round(self._queue_wait_max_by_workload[workload], 6),
                     "skip_reasons": {
                         reason.value: self._skipped_by_workload_reason[(workload, reason)]
                         for reason in SecondaryFailure
@@ -506,6 +527,12 @@ class SecondaryBrainScheduler:
             self._record_skip(request.workload, SecondaryFailure.CONNECT_FAILED, local=True)
             self._epoch_admitted = False
             return SecondaryAttempt.rejected(SecondaryFailure.CONNECT_FAILED)
+        self._queue_wait_count_by_workload[request.workload] += 1
+        self._queue_wait_sum_by_workload[request.workload] += attempt.queue_wait_sec
+        self._queue_wait_max_by_workload[request.workload] = max(
+            self._queue_wait_max_by_workload[request.workload],
+            attempt.queue_wait_sec,
+        )
         if attempt.result is not None:
             # Protocol-valid transport is a health signal, but it becomes a
             # workload success only after the caller's typed validator accepts it.

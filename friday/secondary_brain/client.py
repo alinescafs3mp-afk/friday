@@ -65,6 +65,20 @@ class SecondaryEndpointClient:
     ) -> None:
         if not config.is_complete:
             raise ValueError("secondary endpoint configuration is incomplete")
+        from .profiles import get_secondary_runtime_profile
+
+        accepted_profile = get_secondary_runtime_profile(config.profile_id)
+        if (
+            accepted_profile is None
+            or accepted_profile.endpoint_base_url.rstrip("/") != config.base_url.rstrip("/")
+            or accepted_profile.served_model_alias != config.served_model_alias
+            or accepted_profile.manifest_sha256 != config.profile_manifest_sha256
+            or accepted_profile.gateway_ca_certificate_sha256 != config.ca_sha256
+            or accepted_profile.max_context_tokens != config.max_context_tokens
+            or accepted_profile.max_concurrency != config.max_concurrency
+            or accepted_profile.max_output_tokens != config.max_output_tokens
+        ):
+            raise ValueError("secondary endpoint differs from the accepted profile")
         self.config = config
         self._adapter = adapter or GptOssProtocolAdapter()
         self._clock = clock
@@ -212,28 +226,32 @@ class SecondaryEndpointClient:
             return SecondaryFailure.WRONG_PROFILE
         return None
 
-    async def _admit(self) -> SecondaryFailure | None:
+    async def _admit(self) -> tuple[SecondaryFailure | None, float]:
         started = self._clock()
+        acquired = False
         try:
             await asyncio.wait_for(
                 self._state_lock.acquire(),
                 timeout=self.config.admission_timeout_sec,
             )
+            acquired = True
         except TimeoutError:
-            return SecondaryFailure.ADMISSION_BUSY
+            pass
         finally:
             waited = max(0.0, self._clock() - started)
             self._queue_wait_count += 1
             self._queue_wait_sum_sec += waited
             self._queue_wait_max_sec = max(self._queue_wait_max_sec, waited)
+        if not acquired:
+            return SecondaryFailure.ADMISSION_BUSY, waited
         try:
             now = self._clock()
             half_open = False
             if self._half_open_in_flight:
-                return SecondaryFailure.COOLDOWN
+                return SecondaryFailure.COOLDOWN, waited
             if self._state is SecondaryState.COOLDOWN:
                 if now < self._cooldown_until or self._half_open_in_flight:
-                    return SecondaryFailure.COOLDOWN
+                    return SecondaryFailure.COOLDOWN, waited
                 half_open = True
                 self._half_open_in_flight = True
                 self._state = SecondaryState.PROBING
@@ -245,11 +263,11 @@ class SecondaryEndpointClient:
                 if half_open:
                     self._half_open_in_flight = False
                     self._state = SecondaryState.COOLDOWN
-                return SecondaryFailure.ADMISSION_BUSY
+                return SecondaryFailure.ADMISSION_BUSY, waited
             await self._semaphore.acquire()
             self._active_requests += 1
             self._selected_total += 1
-            return None
+            return None, waited
         finally:
             self._state_lock.release()
 
@@ -306,11 +324,11 @@ class SecondaryEndpointClient:
             self._skipped_total += 1
             return SecondaryAttempt.rejected(SecondaryFailure.DEADLINE)
 
-        admission_failure = await self._admit()
+        admission_failure, queue_wait_sec = await self._admit()
         if admission_failure is not None:
             self._last_failure = admission_failure
             self._skipped_total += 1
-            return SecondaryAttempt.rejected(admission_failure)
+            return SecondaryAttempt.rejected(admission_failure, queue_wait_sec=queue_wait_sec)
 
         failure: SecondaryFailure | None = None
         task: asyncio.Task[httpx.Response] | None = None
@@ -321,22 +339,22 @@ class SecondaryEndpointClient:
                 response = await asyncio.wait_for(task, timeout=remaining)
             except TimeoutError:
                 failure = SecondaryFailure.TIMEOUT
-                return SecondaryAttempt.rejected(failure)
+                return SecondaryAttempt.rejected(failure, queue_wait_sec=queue_wait_sec)
 
             failure = self._http_failure(response.status_code)
             if failure is not None:
-                return SecondaryAttempt.rejected(failure)
+                return SecondaryAttempt.rejected(failure, queue_wait_sec=queue_wait_sec)
             failure = self._profile_header_failure(response)
             if failure is not None:
-                return SecondaryAttempt.rejected(failure)
+                return SecondaryAttempt.rejected(failure, queue_wait_sec=queue_wait_sec)
             if len(response.content) > 1_048_576:
                 failure = SecondaryFailure.MALFORMED_RESPONSE
-                return SecondaryAttempt.rejected(failure)
+                return SecondaryAttempt.rejected(failure, queue_wait_sec=queue_wait_sec)
             try:
                 body: Any = response.json()
             except Exception:
                 failure = SecondaryFailure.MALFORMED_RESPONSE
-                return SecondaryAttempt.rejected(failure)
+                return SecondaryAttempt.rejected(failure, queue_wait_sec=queue_wait_sec)
             try:
                 result = self._adapter.parse_response(
                     self.config,
@@ -346,8 +364,8 @@ class SecondaryEndpointClient:
                 )
             except ProtocolRejection as rejection:
                 failure = rejection.failure
-                return SecondaryAttempt.rejected(failure)
-            return SecondaryAttempt.success(result)
+                return SecondaryAttempt.rejected(failure, queue_wait_sec=queue_wait_sec)
+            return SecondaryAttempt.success(result, queue_wait_sec=queue_wait_sec)
         except asyncio.CancelledError:
             failure = SecondaryFailure.CANCELLED
             if task is not None and not task.done():
@@ -356,15 +374,15 @@ class SecondaryEndpointClient:
             raise
         except httpx.TimeoutException:
             failure = SecondaryFailure.TIMEOUT
-            return SecondaryAttempt.rejected(failure)
+            return SecondaryAttempt.rejected(failure, queue_wait_sec=queue_wait_sec)
         except (httpx.NetworkError, httpx.ProtocolError):
             failure = SecondaryFailure.CONNECT_FAILED
-            return SecondaryAttempt.rejected(failure)
+            return SecondaryAttempt.rejected(failure, queue_wait_sec=queue_wait_sec)
         except Exception:
             # Third-party transports can throw arbitrary exception objects which
             # may embed response bodies or credentials.  Retain only this enum.
             failure = SecondaryFailure.CONNECT_FAILED
-            return SecondaryAttempt.rejected(failure)
+            return SecondaryAttempt.rejected(failure, queue_wait_sec=queue_wait_sec)
         finally:
             if task is not None and not task.done():
                 task.cancel()
@@ -384,7 +402,7 @@ class SecondaryEndpointClient:
             self._skipped_total += 1
             self._probe_failure_total += 1
             return SecondaryFailure.DEADLINE
-        admission_failure = await self._admit()
+        admission_failure, _queue_wait_sec = await self._admit()
         if admission_failure is not None:
             self._last_failure = admission_failure
             self._skipped_total += 1
