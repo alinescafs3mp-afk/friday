@@ -1,4 +1,4 @@
-"""Run a secret-free, single-request mixed SGLang thermal and quality soak."""
+"""Run a secret-free, single-request mixed SGLang thermal and protocol soak."""
 
 from __future__ import annotations
 
@@ -58,11 +58,14 @@ def _is_exact_extraction(value: str) -> bool:
     return parsed == {"amount": 17, "date": "2026-08-24", "person": "Ada"} and type(parsed["amount"]) is int
 
 
+def _is_exact_text(value: str, expected: str) -> bool:
+    parsed = _load_unique_json_object(value)
+    return parsed == {"text": expected}
+
+
 def _is_integer_42(value: str) -> bool:
-    # GPT-OSS occasionally renders an otherwise exact scalar as the complete
-    # sentence ``42.``.  That punctuation does not change the numeric result;
-    # keep rejecting labels, prose and every non-equivalent value.
-    return bool(re.fullmatch(r"42(?:\.|\.0+)?", value.strip()))
+    parsed = _load_unique_json_object(value)
+    return parsed == {"result": 42} and type(parsed["result"]) is int
 
 
 def _is_exact_unicode_filename(value: str) -> bool:
@@ -79,8 +82,11 @@ def _single_value_object_response_format(
     *,
     name: str,
     property_name: str,
-    expected: str,
+    expected: str | int,
 ) -> dict[str, object]:
+    if isinstance(expected, bool) or not isinstance(expected, (str, int)):
+        raise ValueError("single-value schema requires a string or integer")
+    property_type = "integer" if type(expected) is int else "string"
     return {
         "response_format": {
             "type": "json_schema",
@@ -91,11 +97,33 @@ def _single_value_object_response_format(
                     "type": "object",
                     "properties": {
                         property_name: {
-                            "type": "string",
+                            "type": property_type,
                             "enum": [expected],
                         }
                     },
                     "required": [property_name],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    }
+
+
+def _exact_extraction_response_format() -> dict[str, object]:
+    return {
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "exact_extraction",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "amount": {"type": "integer", "enum": [17]},
+                        "date": {"type": "string", "enum": ["2026-08-24"]},
+                        "person": {"type": "string", "enum": ["Ada"]},
+                    },
+                    "required": ["amount", "date", "person"],
                     "additionalProperties": False,
                 },
             },
@@ -112,23 +140,41 @@ def _exact_unicode_response_format() -> dict[str, object]:
 
 
 def _cases() -> tuple[SoakCase, ...]:
+    # The mandatory quality battery independently exercises these abilities
+    # without singleton-value grammars.  This long run instead proves sustained
+    # endpoint, grammar, sampler, GPU and thermal stability with zero drift.
     return (
         SoakCase(
             "russian",
-            "Ответь ровно этой фразой: Резервный узел готов.",
-            lambda value: value.strip() == "Резервный узел готов.",
+            'Верни ровно JSON: {"text":"Резервный узел готов."}',
+            lambda value: _is_exact_text(value, "Резервный узел готов."),
+            extra=_single_value_object_response_format(
+                name="exact_russian_text",
+                property_name="text",
+                expected="Резервный узел готов.",
+            ),
         ),
         SoakCase(
             "english",
-            "Reply with exactly this phrase: Node ready.",
-            lambda value: value.strip() == "Node ready.",
+            'Return exactly this JSON: {"text":"Node ready."}',
+            lambda value: _is_exact_text(value, "Node ready."),
+            extra=_single_value_object_response_format(
+                name="exact_english_text",
+                property_name="text",
+                expected="Node ready.",
+            ),
         ),
         SoakCase(
             "arithmetic",
-            "Return only the decimal result of (19 * 3) - 15.",
+            'Calculate (19 * 3) - 15 and return only JSON with integer key "result".',
             _is_integer_42,
             max_tokens=512,
             reasoning_effort="medium",
+            extra=_single_value_object_response_format(
+                name="exact_arithmetic_result",
+                property_name="result",
+                expected=42,
+            ),
         ),
         SoakCase(
             "json_extraction",
@@ -137,7 +183,7 @@ def _cases() -> tuple[SoakCase, ...]:
                 "Ada, 24.08.2026, amount 17. Use ISO date and numeric amount."
             ),
             _is_exact_extraction,
-            extra={"response_format": {"type": "json_object"}},
+            extra=_exact_extraction_response_format(),
         ),
         SoakCase(
             "unicode",
@@ -170,10 +216,11 @@ def _cases() -> tuple[SoakCase, ...]:
 
 
 def _safe_trial(case: SoakCase, completion: SanitizedCompletion, sequence: int) -> dict[str, object]:
-    return {
+    passed = completion.finish_reason == "stop" and case.validator(completion.content)
+    trial: dict[str, object] = {
         "sequence": sequence,
         "case": case.name,
-        "passed": completion.finish_reason == "stop" and case.validator(completion.content),
+        "passed": passed,
         "latency_sec": round(completion.latency_sec, 6),
         "prompt_tokens": completion.prompt_tokens,
         "completion_tokens": completion.completion_tokens,
@@ -181,6 +228,37 @@ def _safe_trial(case: SoakCase, completion: SanitizedCompletion, sequence: int) 
         "reasoning_field_present": completion.reasoning_present,
         "raw_response_retained": False,
     }
+    if not passed:
+        trial["failure_class"] = (
+            "finish_reason" if completion.finish_reason != "stop" else "contract_mismatch"
+        )
+    return trial
+
+
+def _checkpoint_evidence(
+    *,
+    completed_requests: int,
+    failures: int,
+    elapsed_sec: float,
+    failures_by_case: dict[str, int],
+    last_failure: dict[str, object] | None,
+) -> dict[str, object]:
+    evidence: dict[str, object] = {
+        "schema": "friday.secondary-soak-checkpoint.v1",
+        "status": "running",
+        "completed_requests": completed_requests,
+        "failures": failures,
+        "failures_by_case": {name: count for name, count in sorted(failures_by_case.items()) if count > 0},
+        "elapsed_sec": round(elapsed_sec, 3),
+        "raw_content_retained": False,
+    }
+    if last_failure is not None:
+        evidence["last_failure"] = {
+            "sequence": last_failure["sequence"],
+            "case": last_failure["case"],
+            "failure_class": last_failure["failure_class"],
+        }
+    return evidence
 
 
 def run_soak(
@@ -210,6 +288,8 @@ def run_soak(
     started = time.monotonic()
     trials: list[dict[str, object]] = []
     failures = 0
+    failures_by_case = {case.name: 0 for case in cases}
+    last_failure: dict[str, object] | None = None
     consecutive_failures = 0
     with GpuSampler(interval_sec=0.5) as sampler:
         while time.monotonic() - started < duration_sec or len(trials) < minimum_requests:
@@ -242,6 +322,8 @@ def run_soak(
                 trial = _safe_trial(case, completion, len(trials) + 1)
                 if not trial["passed"]:
                     failures += 1
+                    failures_by_case[case.name] += 1
+                    last_failure = trial
                     consecutive_failures += 1
                 else:
                     consecutive_failures = 0
@@ -255,18 +337,19 @@ def run_soak(
                     "failure_class": "endpoint_or_protocol_rejection",
                     "raw_response_retained": False,
                 }
+                failures_by_case[case.name] += 1
+                last_failure = trial
             trials.append(trial)
-            if len(trials) % 10 == 0:
+            if not trial["passed"] or len(trials) % 10 == 0:
                 atomic_write_json(
                     checkpoint,
-                    {
-                        "schema": "friday.secondary-soak-checkpoint.v1",
-                        "status": "running",
-                        "completed_requests": len(trials),
-                        "failures": failures,
-                        "elapsed_sec": round(time.monotonic() - started, 3),
-                        "raw_content_retained": False,
-                    },
+                    _checkpoint_evidence(
+                        completed_requests=len(trials),
+                        failures=failures,
+                        elapsed_sec=time.monotonic() - started,
+                        failures_by_case=failures_by_case,
+                        last_failure=last_failure,
+                    ),
                 )
             if consecutive_failures >= 5:
                 break
@@ -303,6 +386,16 @@ def run_soak(
         "minimum_requests": minimum_requests,
         "completed_requests": len(trials),
         "failures": failures,
+        "failures_by_case": {name: count for name, count in sorted(failures_by_case.items()) if count > 0},
+        "last_failure": (
+            {
+                "sequence": last_failure["sequence"],
+                "case": last_failure["case"],
+                "failure_class": last_failure["failure_class"],
+            }
+            if last_failure is not None
+            else None
+        ),
         "maximum_temperature_c": maximum_temperature_c,
         "required_headroom_mib": round(required_headroom_mib, 3),
         "gpu": {key: round(value, 3) for key, value in gpu.items()},
