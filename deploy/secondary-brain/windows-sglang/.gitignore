@@ -1,0 +1,9 @@
+.env
+secrets/*
+evidence/*
+*.observed.json
+*.accepted.json
+!secrets/.gitkeep
+!secrets/tls/
+!secrets/tls/.gitkeep
+!evidence/.gitkeep

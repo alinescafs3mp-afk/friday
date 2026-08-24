@@ -1,0 +1,22 @@
+[req]
+prompt = no
+distinguished_name = server_dn
+
+[server_dn]
+CN = friday-secondary-gptoss20b
+
+[ca_ext]
+basicConstraints = critical,CA:TRUE,pathlen:0
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always
+
+[server_ext]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @server_names
+
+[server_names]
+IP.1 = 192.168.1.35
+IP.2 = 127.0.0.1

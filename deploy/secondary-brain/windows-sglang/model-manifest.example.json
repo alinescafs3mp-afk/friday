@@ -1,0 +1,11 @@
+{
+  "schema": "friday.secondary-model-snapshot.v1",
+  "status": "template_not_accepted",
+  "model_repository": "shanjiaz/gpt-oss-20b-nvfp4-modelopt",
+  "model_revision": "fb9848e169d5b38cbc00ecf3383283ea1fc33a21",
+  "snapshot_directory": "snapshot",
+  "file_count": 0,
+  "total_bytes": 0,
+  "files": [],
+  "note": "Replace only from live volume discovery; this template is deliberately not deployable."
+}

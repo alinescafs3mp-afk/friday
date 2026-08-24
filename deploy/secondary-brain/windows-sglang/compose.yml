@@ -1,0 +1,200 @@
+name: friday-secondary-brain
+
+services:
+  sglang:
+    image: ${FRIDAY_SECONDARY_SGLANG_IMAGE:?exact image repo@sha256 digest is required}
+    pull_policy: never
+    platform: linux/amd64
+    container_name: friday-secondary-gptoss20b
+    restart: unless-stopped
+    init: true
+    read_only: true
+    shm_size: "8gb"
+    entrypoint:
+      - /bin/bash
+      - -ceu
+    command:
+      - |
+        api_key="$$(tr -d '\r\n' < /run/friday-secrets/sglang-api-key)"
+        case "$${api_key}" in (*[!0-9a-f]*|'') exit 64;; esac
+        test "$${#api_key}" -eq 64
+        exec python3 -m sglang.launch_server \
+          --model-path /models/gpt-oss-20b-nvfp4-modelopt/snapshot \
+          --served-model-name friday-secondary-gptoss20b \
+          --host 0.0.0.0 \
+          --port 30000 \
+          --api-key "$${api_key}" \
+          --reasoning-parser gpt-oss \
+          --tool-call-parser gpt-oss \
+          --attention-backend triton \
+          --fp4-gemm-backend flashinfer_cutlass \
+          --kv-cache-dtype fp8_e4m3 \
+          --chunked-prefill-size 1024 \
+          --max-running-requests 1 \
+          --cuda-graph-max-bs 1 \
+          --context-length "$${FRIDAY_SECONDARY_CONTEXT_TOKENS}" \
+          --max-total-tokens "$${FRIDAY_SECONDARY_MAX_TOTAL_TOKENS}" \
+          --mem-fraction-static "$${FRIDAY_SECONDARY_MEM_FRACTION_STATIC}" \
+          --enable-metrics \
+          --enable-cache-report
+    environment:
+      FRIDAY_SECONDARY_CONTEXT_TOKENS: ${FRIDAY_SECONDARY_CONTEXT_TOKENS:?measured context is required}
+      FRIDAY_SECONDARY_MAX_TOTAL_TOKENS: ${FRIDAY_SECONDARY_MAX_TOTAL_TOKENS:?measured token pool is required}
+      FRIDAY_SECONDARY_MEM_FRACTION_STATIC: ${FRIDAY_SECONDARY_MEM_FRACTION_STATIC:?measured memory fraction is required}
+      NVIDIA_VISIBLE_DEVICES: "0"
+      CUDA_VISIBLE_DEVICES: "0"
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HUB_ENABLE_HF_TRANSFER: "0"
+      DO_NOT_TRACK: "1"
+    volumes:
+      - type: volume
+        source: model-snapshot
+        target: /models/gpt-oss-20b-nvfp4-modelopt
+        read_only: true
+      - type: volume
+        source: runtime-cache
+        target: /root/.cache
+      - type: bind
+        source: ./secrets/sglang-api-key
+        target: /run/friday-secrets/sglang-api-key
+        read_only: true
+    tmpfs:
+      - /tmp:size=2g,mode=1777
+      - /run:size=16m,mode=0755
+    expose:
+      - "30000"
+    networks:
+      - engine-internal
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request; k=open('/run/friday-secrets/sglang-api-key', encoding='ascii').read().strip(); r=urllib.request.Request('http://127.0.0.1:30000/health', headers={'Authorization': 'Bearer '+k}); urllib.request.urlopen(r, timeout=3)"
+      interval: 15s
+      timeout: 4s
+      retries: 20
+      start_period: 900s
+    stop_grace_period: 10m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 4096
+    logging:
+      driver: local
+      options:
+        max-size: 20m
+        max-file: "3"
+
+  gateway:
+    image: nginxinc/nginx-unprivileged@sha256:d61d7ef52430df468e74ed6ee6e914429b80e20ba988e3176278a73165f876cf
+    pull_policy: never
+    platform: linux/amd64
+    user: "101"
+    container_name: friday-secondary-gateway
+    restart: unless-stopped
+    init: true
+    read_only: true
+    entrypoint:
+      - /bin/sh
+      - -ceu
+    depends_on:
+      sglang:
+        condition: service_healthy
+    command:
+      - |
+        gateway_key="$$(tr -d '\r\n' < /run/friday-secrets/gateway-api-key)"
+        upstream_key="$$(tr -d '\r\n' < /run/friday-secrets/sglang-api-key)"
+        case "$${gateway_key}" in (*[!0-9a-f]*|'') exit 64;; esac
+        case "$${upstream_key}" in (*[!0-9a-f]*|'') exit 64;; esac
+        test "$${#gateway_key}" -eq 64
+        test "$${#upstream_key}" -eq 64
+        test "$${gateway_key}" != "$${upstream_key}"
+        sed \
+          -e "s/__GATEWAY_BEARER__/$${gateway_key}/g" \
+          -e "s/__SGLANG_BEARER__/$${upstream_key}/g" \
+          /etc/friday-gateway/gateway.conf.template > /tmp/gateway.conf
+        exec nginx -c /tmp/gateway.conf -g 'daemon off;'
+    volumes:
+      - type: bind
+        source: ./gateway.conf.template
+        target: /etc/friday-gateway/gateway.conf.template
+        read_only: true
+      - type: bind
+        source: ./secrets/gateway-api-key
+        target: /run/friday-secrets/gateway-api-key
+        read_only: true
+      - type: bind
+        source: ./secrets/sglang-api-key
+        target: /run/friday-secrets/sglang-api-key
+        read_only: true
+      - type: bind
+        source: ./secrets/tls/server.crt
+        target: /run/friday-tls/server.crt
+        read_only: true
+      - type: bind
+        source: ./secrets/tls/server.key
+        target: /run/friday-tls/server.key
+        read_only: true
+      - type: bind
+        source: ./secrets/tls/ca.crt
+        target: /run/friday-tls/ca.crt
+        read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      - /var/cache/nginx:size=16m,mode=0755
+      - /var/run:size=2m,mode=0755
+    ports:
+      - "${FRIDAY_SECONDARY_BIND_ADDRESS:?exact laptop LAN address is required}:8443:8443"
+    networks:
+      - engine-internal
+      - gateway-publish
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -q -O /dev/null
+          --no-check-certificate
+          --header="Authorization: Bearer $$(cat /run/friday-secrets/gateway-api-key)"
+          https://127.0.0.1:8443/health
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    stop_grace_period: 45s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  engine-internal:
+    name: friday-secondary-engine-internal
+    internal: true
+  gateway-publish:
+    name: friday-secondary-gateway-publish
+    internal: false
+    attachable: false
+
+volumes:
+  model-snapshot:
+    name: ${FRIDAY_SECONDARY_MODEL_VOLUME:?sealed model volume is required}
+    external: true
+  runtime-cache:
+    name: friday-secondary-sglang-cache

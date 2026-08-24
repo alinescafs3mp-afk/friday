@@ -1,0 +1,71 @@
+worker_processes 1;
+pid /tmp/nginx.pid;
+error_log stderr warn;
+
+events {
+    worker_connections 128;
+}
+
+http {
+    access_log off;
+    server_tokens off;
+    client_max_body_size 8m;
+    client_body_buffer_size 8m;
+    client_body_temp_path /tmp/client-body;
+    proxy_temp_path /tmp/proxy;
+
+    map $http_authorization $friday_authorized {
+        default 0;
+        "Bearer __GATEWAY_BEARER__" 1;
+    }
+
+    upstream friday_secondary_sglang {
+        server sglang:30000;
+        keepalive 2;
+    }
+
+    server {
+        listen 8443 ssl;
+        ssl_certificate /run/friday-tls/server.crt;
+        ssl_certificate_key /run/friday-tls/server.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_session_tickets off;
+        ssl_session_cache shared:TLS:1m;
+
+        if ($friday_authorized = 0) {
+            return 401;
+        }
+
+        location = /health {
+            limit_except GET { deny all; }
+            proxy_set_header Authorization "Bearer __SGLANG_BEARER__";
+            proxy_set_header Host sglang;
+            proxy_pass http://friday_secondary_sglang/health;
+        }
+
+        location = /v1/models {
+            limit_except GET { deny all; }
+            proxy_set_header Authorization "Bearer __SGLANG_BEARER__";
+            proxy_set_header Host sglang;
+            proxy_pass http://friday_secondary_sglang/v1/models;
+        }
+
+        location = /v1/chat/completions {
+            limit_except POST { deny all; }
+            proxy_http_version 1.1;
+            proxy_set_header Authorization "Bearer __SGLANG_BEARER__";
+            proxy_set_header Host sglang;
+            proxy_set_header Connection "";
+            proxy_request_buffering on;
+            proxy_buffering off;
+            proxy_connect_timeout 2s;
+            proxy_read_timeout 600s;
+            proxy_send_timeout 30s;
+            proxy_pass http://friday_secondary_sglang/v1/chat/completions;
+        }
+
+        location / {
+            return 404;
+        }
+    }
+}
