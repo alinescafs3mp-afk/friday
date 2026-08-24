@@ -1509,6 +1509,99 @@ def test_capacity_and_soak_minimums_are_not_decorative() -> None:
         soak._minimum_requests("10")
 
 
+def test_final_evidence_is_create_only_while_soak_checkpoints_remain_mutable(
+    tmp_path: Path,
+) -> None:
+    common = importlib.import_module("endpoint_common")
+    final = tmp_path / "final.json"
+    checkpoint = tmp_path / "soak.checkpoint.json"
+
+    common.write_new_json(final, {"sequence": 1})
+    original = final.read_bytes()
+    with pytest.raises(common.EndpointError, match="output path is not new"):
+        common.write_new_json(final, {"sequence": 2})
+    assert final.read_bytes() == original
+
+    common.atomic_write_json(checkpoint, {"sequence": 1})
+    common.atomic_write_json(checkpoint, {"sequence": 2})
+    assert json.loads(checkpoint.read_text(encoding="utf-8")) == {"sequence": 2}
+
+
+def test_all_live_final_evidence_clis_refuse_existing_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    common = importlib.import_module("endpoint_common")
+    tuner = importlib.import_module("tune_context")
+    quality = importlib.import_module("quality_battery")
+    probe = importlib.import_module("probe_endpoint")
+    soak = importlib.import_module("soak")
+    modules = (tuner, quality, probe, soak)
+    for module in (quality, probe):
+        monkeypatch.setattr(module, "EXPECTED_MODEL", module.EXPECTED_MODEL)
+    for module in modules:
+        monkeypatch.setattr(module, "configure_expected_model", lambda *_args: "fixture-model")
+        monkeypatch.setattr(module, "load_api_key", lambda _path: "a" * 64)
+
+    monkeypatch.setattr(tuner, "run_ladder", lambda **_kwargs: {"largest_passing_trial_tokens": 4096})
+    monkeypatch.setattr(quality, "verify_remote_profile_epoch", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(quality, "configured_profile_context_tokens", lambda: 4096)
+    monkeypatch.setattr(quality, "run_battery", lambda **_kwargs: {"status": "passed"})
+    monkeypatch.setattr(probe, "run_probe", lambda *_args, **_kwargs: {"status": "passed"})
+    monkeypatch.setattr(soak, "run_soak", lambda **_kwargs: {"status": "passed", "trials": []})
+
+    shared = [
+        "--api-key-file",
+        str(tmp_path / "api-key"),
+        "--profile-manifest",
+        str(tmp_path / "profile.json"),
+    ]
+    invocations = (
+        (
+            tuner,
+            [
+                "--base-url",
+                "https://192.168.1.35:8443/v1",
+                *shared,
+                "--ca-file",
+                str(tmp_path / "ca.crt"),
+                "--candidates",
+                "4096",
+                "--mem-fraction-static",
+                "0.96",
+            ],
+        ),
+        (
+            quality,
+            [
+                "--base-url",
+                "https://192.168.1.35:8443/v1",
+                *shared,
+                "--ca-file",
+                str(tmp_path / "ca.crt"),
+            ],
+        ),
+        (probe, shared),
+        (
+            soak,
+            [
+                "--base-url",
+                "https://192.168.1.35:8443/v1",
+                *shared,
+                "--ca-file",
+                str(tmp_path / "ca.crt"),
+            ],
+        ),
+    )
+    for index, (module, arguments) in enumerate(invocations):
+        output = tmp_path / f"existing-{index}.json"
+        sentinel = b"existing evidence must survive\n"
+        output.write_bytes(sentinel)
+        assert module.main([*arguments, "--output", str(output)]) == 2
+        assert output.read_bytes() == sentinel
+        assert module.write_new_json is common.write_new_json
+
+
 def test_capacity_accepts_profile_memory_grid_and_reserves_generation_tokens() -> None:
     tuner = importlib.import_module("tune_context")
     args = tuner._parser().parse_args(

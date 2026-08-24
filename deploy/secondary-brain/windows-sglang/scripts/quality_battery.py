@@ -21,7 +21,6 @@ from endpoint_common import (
     EXPECTED_MODEL,
     EndpointError,
     SanitizedCompletion,
-    atomic_write_json,
     build_tls_context,
     configure_expected_model,
     configured_profile_context_tokens,
@@ -33,6 +32,7 @@ from endpoint_common import (
     request_text,
     validate_profile_headers,
     verify_remote_profile_epoch,
+    write_new_json,
 )
 
 _EVIDENCE_KEYS = frozenset(
@@ -1021,7 +1021,7 @@ def main(argv: list[str] | None = None) -> int:
             ca_file=args.ca_file,
             context_tokens=configured_profile_context_tokens(),
         )
-        atomic_write_json(args.output, report)
+        write_new_json(args.output, report)
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
         return 0 if report["status"] == "passed" else 2
     except Exception:

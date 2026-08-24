@@ -13,7 +13,6 @@ from typing import Any
 
 from endpoint_common import (
     EndpointError,
-    atomic_write_json,
     configure_expected_model,
     configured_profile_context_tokens,
     configured_profile_mem_fraction_static,
@@ -22,6 +21,7 @@ from endpoint_common import (
     runtime_process_epoch,
     stream_chat_completion,
     verify_remote_profile_epoch,
+    write_new_json,
 )
 from gpu_telemetry import GpuSampler, GpuTelemetryError, expected_gpu_identity, sample_summary
 
@@ -284,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
             mem_fraction_static=args.mem_fraction_static,
             ca_file=args.ca_file,
         )
-        atomic_write_json(args.output, report)
+        write_new_json(args.output, report)
         print(json.dumps({key: value for key, value in report.items() if key != "trials"}, sort_keys=True))
         return 0 if report["largest_passing_trial_tokens"] else 2
     except (EndpointError, GpuTelemetryError) as exc:

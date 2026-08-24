@@ -22,6 +22,7 @@ from endpoint_common import (
     load_api_key,
     runtime_process_epoch,
     verify_remote_profile_epoch,
+    write_new_json,
 )
 from gpu_telemetry import GpuSampler, GpuTelemetryError, sample_summary
 
@@ -265,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
             checkpoint=checkpoint,
             ca_file=args.ca_file,
         )
-        atomic_write_json(args.output, report)
+        write_new_json(args.output, report)
         summary = {key: value for key, value in report.items() if key != "trials"}
         print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
         return 0 if report["status"] == "passed" else 2

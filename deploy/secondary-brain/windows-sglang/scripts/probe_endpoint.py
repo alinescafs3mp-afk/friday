@@ -13,7 +13,6 @@ from typing import Any
 from endpoint_common import (
     EXPECTED_MODEL,
     EndpointError,
-    atomic_write_json,
     chat_completion,
     configure_expected_model,
     evidence_identity,
@@ -21,6 +20,7 @@ from endpoint_common import (
     normalize_base_url,
     request_json,
     verify_remote_profile_epoch,
+    write_new_json,
 )
 
 
@@ -115,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         report = run_probe(args.base_url, api_key, args.timeout_sec, args.ca_file)
         if args.output:
-            atomic_write_json(args.output, report)
+            write_new_json(args.output, report)
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
         return 0
     except EndpointError as exc:

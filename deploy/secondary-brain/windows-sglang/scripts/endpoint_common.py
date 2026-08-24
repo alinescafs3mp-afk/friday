@@ -1004,3 +1004,36 @@ def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
     finally:
         with suppress(FileNotFoundError):
             os.unlink(temp_name)
+
+
+def write_new_json(path: Path, value: dict[str, Any]) -> None:
+    """Create one final evidence file without ever replacing an existing target."""
+    parent = path.absolute().parent
+    if not parent.is_dir() or path.exists() or path.is_symlink():
+        raise EndpointError("final evidence output path is not new")
+    encoded = (json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            path,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_BINARY", 0),
+            stat.S_IRUSR | stat.S_IWUSR,
+        )
+        view = memoryview(encoded)
+        written = 0
+        while written < len(view):
+            count = os.write(descriptor, view[written:])
+            if count <= 0:
+                raise OSError("short write")
+            written += count
+        os.fsync(descriptor)
+    except OSError as exc:
+        raise EndpointError("final evidence output could not be created") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
