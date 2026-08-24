@@ -61,6 +61,7 @@ _ENGINE_PROJECTION: dict[str, Any] = {
     "sampling_backend": "pytorch",
     "moe_runner_backend": "flashinfer_mxfp4",
     "mxfp4_moe_precision": "default",
+    "mm_feature_transport": "cpu",
     "context_tokens": 4096,
     "max_total_tokens": 4096,
     "mem_fraction_static": "0.97",
@@ -85,7 +86,7 @@ _PROFILE_ID = f"gptoss20b-{_ENGINE_BINDING_SHA256}"
 _ALIAS = f"friday-secondary-{_PROFILE_ID}"
 _PROFILE_VALUE: dict[str, Any] = {
     **_ENGINE_PROJECTION,
-    "schema": "friday.secondary-runtime-profile.v2",
+    "schema": "friday.secondary-runtime-profile.v3",
     "status": "accepted",
     "profile_id": _PROFILE_ID,
     "engine_binding_sha256": _ENGINE_BINDING_SHA256,
@@ -134,6 +135,7 @@ def _runtime_profile(**changes: Any) -> SecondaryRuntimeProfile:
         sampling_backend="pytorch",
         moe_runner_backend="flashinfer_mxfp4",
         mxfp4_moe_precision="default",
+        mm_feature_transport="cpu",
         page_size=1,
         radix_cache_enabled=True,
         overlap_schedule_enabled=True,

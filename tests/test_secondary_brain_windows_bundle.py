@@ -240,6 +240,8 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     assert 'value["quantization"] != "mxfp4"' in profile_contract
     assert 'value["moe_runner_backend"] != "flashinfer_mxfp4"' in profile_contract
     assert '"--flashinfer-mxfp4-moe-precision",' in profile_contract
+    assert '"--mm-feature-transport",' in profile_contract
+    assert 'value["mm_feature_transport"] != "cpu"' in profile_contract
     assert launcher.index("profile = load_launch_profile(") < launcher.index(
         "from sglang.launch_server import run_server"
     )
@@ -248,6 +250,12 @@ def test_gateway_uses_distinct_file_secrets_tls_and_a_closed_route_set() -> None
     )
     assert launcher.index("verify_live_hardware_runtime(") < launcher.index("verify_source_model_snapshot(")
     assert "FRIDAY_SECONDARY_CONTEXT_TOKENS" not in launcher
+    assert 'server_args.mm_feature_transport != "cpu"' in launcher
+    assert "server_args.language_only" in launcher
+    assert "server_args.get_model_config().is_multimodal" in launcher
+    assert launcher.index("server_args = prepare_server_args(arguments)") < launcher.index(
+        'server_args.mm_feature_transport != "cpu"'
+    ) < launcher.index("_publish_runtime_epoch()")
     assert 'if __name__ == "__main__":' in launcher
     assert launcher.index('if __name__ == "__main__":') < launcher.index(
         "main()", launcher.index('if __name__ == "__main__":')
@@ -668,6 +676,7 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
         "--dtype",
         "--moe-runner-backend",
         "--flashinfer-mxfp4-moe-precision",
+        "--mm-feature-transport",
         "--cuda-graph-backend-decode",
         "--cuda-graph-backend-prefill",
     ):
@@ -689,11 +698,11 @@ def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> N
         )
     ]
     required_flags = re.findall(r"'(--[a-z0-9][a-z0-9-]*)'", flag_contract)
-    assert len(required_flags) == len(set(required_flags)) == 29
+    assert len(required_flags) == len(set(required_flags)) == 30
     required_flags_sha256 = hashlib.sha256(
         "\n".join(sorted(required_flags)).encode("ascii")
     ).hexdigest()
-    assert required_flags_sha256 == "15defb43aa2cef5f5df941822bbacd170c787513ef136cd6f951a6c0580d1cd9"
+    assert required_flags_sha256 == "29bda2d9297054a71b1e939cced1afc04faaa0fd8ea4ecd0523ca93365d4c979"
     flag_pattern_match = re.search(r"\$flagPattern = '([^']+)'", preflight)
     assert flag_pattern_match is not None
     flag_pattern = flag_pattern_match.group(1).replace("(?<flag>", "(?P<flag>")
@@ -891,7 +900,7 @@ def test_model_volume_verifier_is_strict_and_fail_closed(
 
 def _candidate_runtime_profile() -> dict[str, Any]:
     value: dict[str, Any] = {
-        "schema": "friday.secondary-runtime-profile.v2",
+        "schema": "friday.secondary-runtime-profile.v3",
         "status": "candidate",
         "profile_id": "pending",
         "engine_binding_sha256": "0" * 64,
@@ -920,6 +929,7 @@ def _candidate_runtime_profile() -> dict[str, Any]:
         "sampling_backend": "pytorch",
         "moe_runner_backend": "flashinfer_mxfp4",
         "mxfp4_moe_precision": "default",
+        "mm_feature_transport": "cpu",
         "page_size": 1,
         "radix_cache_enabled": True,
         "overlap_schedule_enabled": True,
@@ -1013,6 +1023,8 @@ def test_shared_profile_contract_derives_every_capacity_argument(tmp_path: Path)
         "flashinfer_mxfp4",
         "--flashinfer-mxfp4-moe-precision",
         "default",
+        "--mm-feature-transport",
+        "cpu",
         "--kv-cache-dtype",
         "bf16",
         "--page-size",
@@ -1074,6 +1086,7 @@ def test_shared_profile_contract_emits_the_full_optimized_surface(tmp_path: Path
     assert arguments[arguments.index("--kv-cache-dtype") + 1] == "fp8_e4m3"
     assert arguments[arguments.index("--decode-attention-backend") + 1] == "trtllm_mha"
     assert arguments[arguments.index("--sampling-backend") + 1] == "flashinfer"
+    assert arguments[arguments.index("--mm-feature-transport") + 1] == "cpu"
     assert arguments[arguments.index("--page-size") + 1] == "16"
     assert arguments[arguments.index("--swa-full-tokens-ratio") + 1] == "1.00"
     assert arguments[arguments.index("--cuda-graph-max-bs-decode") + 1] == "1"
@@ -1106,6 +1119,7 @@ def test_shared_profile_contract_emits_the_full_optimized_surface(tmp_path: Path
         ("sampling_backend", "triton"),
         ("moe_runner_backend", "cutlass"),
         ("mxfp4_moe_precision", "bf16"),
+        ("mm_feature_transport", "cuda_ipc"),
         ("page_size", 8),
         ("radix_cache_enabled", 1),
         ("overlap_schedule_enabled", 1),
@@ -1534,6 +1548,90 @@ def test_capacity_accepts_profile_memory_grid_and_reserves_generation_tokens() -
     )
     assert overcommitted["generation_reserve_met"] is False
     assert overcommitted["prompt_near_limit"] is False
+
+
+def test_capacity_rejection_emits_content_free_failed_trial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tuner = importlib.import_module("tune_context")
+    common = importlib.import_module("endpoint_common")
+    telemetry = importlib.import_module("gpu_telemetry")
+    sample = telemetry.GpuSample(
+        telemetry.EXPECTED_GPU_UUID,
+        telemetry.EXPECTED_GPU_NAME,
+        telemetry.EXPECTED_GPU_MEMORY_TOTAL_MIB,
+        14_900.0,
+        1_403.0,
+        55.0,
+        100.0,
+        90.0,
+    )
+
+    class Sampler:
+        error = None
+        samples = [sample]
+
+        def __enter__(self) -> Sampler:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def reject(*_args: object, **_kwargs: object) -> None:
+        raise common.EndpointError("private upstream detail must not be retained")
+
+    monkeypatch.setattr(tuner, "GpuSampler", Sampler)
+    monkeypatch.setattr(tuner, "stream_chat_completion", reject)
+    row = tuner._trial(
+        base_url="https://192.168.1.35:8443/v1",
+        api_key="a" * 64,
+        context_tokens=4096,
+        repeat=1,
+        timeout_sec=1.0,
+        generation_tokens=320,
+        ca_file=Path("ca.crt"),
+    )
+
+    assert row["failure_class"] == "endpoint_or_capacity_rejection"
+    assert row["prompt_tokens"] == row["completion_tokens"] == 0
+    assert row["usage_accounting_present"] is False
+    assert row["prompt_near_limit"] is False
+    assert row["generated_envelope_met"] is False
+    assert row["raw_prompt_retained"] is False
+    assert row["raw_response_retained"] is False
+    assert "private upstream detail" not in json.dumps(row)
+
+
+def test_streaming_error_event_is_rejected_before_model_alias_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    common = importlib.import_module("endpoint_common")
+    monkeypatch.setattr(common, "EXPECTED_MODEL", "friday-secondary-fixture")
+    monkeypatch.setattr(common, "validate_profile_headers", lambda _headers: None)
+    monkeypatch.setattr(common, "build_tls_context", lambda *_args: None)
+
+    class Response:
+        status = 200
+        headers: dict[str, str] = {}
+
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def __iter__(self) -> Iterator[bytes]:
+            return iter((b'data: {"error":{"message":"oversized private prompt"}}\n',))
+
+    monkeypatch.setattr(common.urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
+    with pytest.raises(common.EndpointError, match="streaming endpoint returned an error event"):
+        common.stream_chat_completion(
+            "http://127.0.0.1:30000/v1",
+            api_key="a" * 64,
+            messages=[{"role": "user", "content": "bounded"}],
+            timeout_sec=1.0,
+            max_tokens=1,
+        )
 
 
 def test_capacity_and_soak_require_the_exact_profile_endpoint_and_capacity(

@@ -73,18 +73,51 @@ def _trial(
     generation_tokens: int,
     ca_file: Path | None,
 ) -> dict[str, Any]:
+    completion = None
+    endpoint_rejected = False
     with GpuSampler() as sampler:
-        completion = stream_chat_completion(
-            base_url,
-            api_key=api_key,
-            messages=_context_prompt(context_tokens, generation_tokens),
-            timeout_sec=timeout_sec,
-            max_tokens=generation_tokens,
-            ca_file=ca_file,
-        )
+        try:
+            completion = stream_chat_completion(
+                base_url,
+                api_key=api_key,
+                messages=_context_prompt(context_tokens, generation_tokens),
+                timeout_sec=timeout_sec,
+                max_tokens=generation_tokens,
+                ca_file=ca_file,
+            )
+        except EndpointError:
+            endpoint_rejected = True
     if sampler.error is not None:
         raise sampler.error
     gpu = sample_summary(sampler.samples)
+    required_headroom_mib = max(512.0, gpu["total_mib"] * 0.05)
+    headroom_met = gpu["minimum_free_mib"] >= required_headroom_mib
+    if endpoint_rejected:
+        return {
+            "repeat": repeat,
+            "context_target_tokens": context_tokens,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "ttft_sec": 0.0,
+            "end_to_end_sec": 0.0,
+            "decode_tokens_per_sec_after_first_token": 0.0,
+            "finish_reason": "rejected",
+            "reasoning_field_present": False,
+            "usage_accounting_present": False,
+            "generation_reserve_met": False,
+            "observed_total_within_context": False,
+            "prompt_near_limit": False,
+            "generated_envelope_met": False,
+            "required_headroom_mib": round(required_headroom_mib, 3),
+            "headroom_met": headroom_met,
+            "gpu": {key: round(number, 3) for key, number in gpu.items()},
+            "gpu_identity": expected_gpu_identity(),
+            "failure_class": "endpoint_or_capacity_rejection",
+            "raw_prompt_retained": False,
+            "raw_response_retained": False,
+        }
+    if completion is None:
+        raise EndpointError("capacity completion state is missing")
     value = completion.completion
     usage_checks = _usage_checks(
         context_tokens=context_tokens,
@@ -93,8 +126,6 @@ def _trial(
         completion_tokens=value.completion_tokens,
     )
     generated_envelope_met = value.completion_tokens >= 256
-    required_headroom_mib = max(512.0, gpu["total_mib"] * 0.05)
-    headroom_met = gpu["minimum_free_mib"] >= required_headroom_mib
     return {
         "repeat": repeat,
         "context_target_tokens": context_tokens,

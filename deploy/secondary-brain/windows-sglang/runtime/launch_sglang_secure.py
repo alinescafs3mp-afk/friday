@@ -173,6 +173,12 @@ def main() -> None:
     ServerArgs.__repr__ = redacted_repr
     load_plugins()
     server_args = prepare_server_args(arguments)
+    if (
+        server_args.mm_feature_transport != "cpu"
+        or server_args.language_only
+        or server_args.get_model_config().is_multimodal
+    ):
+        raise RuntimeError("runtime model/feature transport projection is invalid")
     arguments[arguments.index(api_key)] = "<redacted>"
     api_key = ""
     _publish_runtime_epoch()

@@ -30,7 +30,7 @@ from source_model_manifest import (  # type: ignore[import-not-found]  # noqa: E
     verify_source_model_manifest,
 )
 
-PROFILE_SCHEMA = "friday.secondary-runtime-profile.v2"
+PROFILE_SCHEMA = "friday.secondary-runtime-profile.v3"
 CAPACITY_SCHEMA = "friday.secondary-capacity-evidence.v1"
 DETERMINISTIC_FAILURE_SCHEMA = "friday.secondary-failure-battery.v1"
 PHYSICAL_FAILURE_SCHEMA = "friday.secondary-physical-failure-observation.v1"
@@ -253,6 +253,7 @@ PROFILE_KEYS = frozenset(
         "sampling_backend",
         "moe_runner_backend",
         "mxfp4_moe_precision",
+        "mm_feature_transport",
         "page_size",
         "radix_cache_enabled",
         "overlap_schedule_enabled",
@@ -298,6 +299,7 @@ ENGINE_KEYS = (
     "sampling_backend",
     "moe_runner_backend",
     "mxfp4_moe_precision",
+    "mm_feature_transport",
     "page_size",
     "radix_cache_enabled",
     "overlap_schedule_enabled",
@@ -744,6 +746,7 @@ def build_candidate(args: argparse.Namespace) -> dict[str, Any]:
         "sampling_backend": sampling_backend,
         "moe_runner_backend": "flashinfer_mxfp4",
         "mxfp4_moe_precision": "default",
+        "mm_feature_transport": "cpu",
         "page_size": page_size,
         "radix_cache_enabled": radix_cache_enabled,
         "overlap_schedule_enabled": overlap_schedule_enabled,
@@ -975,6 +978,7 @@ def _validate_candidate(value: dict[str, Any], raw: bytes) -> None:
         or value.get("sampling_backend") not in SAMPLING_BACKENDS
         or value.get("moe_runner_backend") != "flashinfer_mxfp4"
         or value.get("mxfp4_moe_precision") != "default"
+        or value.get("mm_feature_transport") != "cpu"
         or page_size not in PAGE_SIZES
         or not isinstance(value.get("radix_cache_enabled"), bool)
         or not isinstance(value.get("overlap_schedule_enabled"), bool)

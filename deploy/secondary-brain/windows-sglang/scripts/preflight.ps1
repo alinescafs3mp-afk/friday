@@ -392,6 +392,7 @@ if ($InspectSglangHelp) {
         '--tool-call-parser', '--attention-backend', '--quantization', '--moe-runner-backend',
         '--prefill-attention-backend', '--decode-attention-backend', '--sampling-backend',
         '--flashinfer-mxfp4-moe-precision',
+        '--mm-feature-transport',
         '--kv-cache-dtype', '--page-size', '--swa-full-tokens-ratio',
         '--chunked-prefill-size', '--max-running-requests',
         '--disable-radix-cache', '--disable-overlap-schedule',

@@ -141,9 +141,9 @@ EXPECTED_SGLANG_HELP = {
     "image_config_digest": SGLANG_CONFIG_DIGEST,
     "image_oci_manifest_digest": SGLANG_IMAGE_ID,
     "compose_exact_selector_verified": True,
-    "required_flag_count": 29,
+    "required_flag_count": 30,
     "required_flags_present": True,
-    "required_flags_sha256": "15defb43aa2cef5f5df941822bbacd170c787513ef136cd6f951a6c0580d1cd9",
+    "required_flags_sha256": "29bda2d9297054a71b1e939cced1afc04faaa0fd8ea4ecd0523ca93365d4c979",
     "runtime_versions": EXPECTED_RUNTIME_VERSIONS,
 }
 EXPECTED_GATEWAY = {

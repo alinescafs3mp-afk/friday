@@ -17,8 +17,9 @@ closed candidate surface may vary its reviewed engine settings:
   `sha256:f7adc6c05df9ff711b82ad291cf1db6eaf30590c4d929833d632abfef3895efc`;
 - SGLang source revision `29481685462732237d80d86076d6563e1f658102`;
 - native `mxfp4` weights, BF16 model dtype, `flashinfer_mxfp4` MoE on SM120,
-  one running request and no CPU offload. BF16 KV, Triton decode and disabled
-  CUDA graphs are the safe baseline, not a certified winner.
+  explicit CPU transport for the unused multimodal feature channel, one running
+  request and no weight/KV CPU offload. BF16 KV, Triton decode and disabled CUDA
+  graphs are the safe baseline, not a certified winner.
 
 The earlier community checkpoint, internal ModelOpt NVFP4 conversion and patched
 SGLang 0.5.16 image are rejected. Their conversion and calibration utilities
@@ -34,7 +35,7 @@ have been removed from this deployment bundle.
 - The source volume is read-only. Before importing SGLang or creating CUDA
   state, the launcher rehashes the exact source manifest and all 14 files
   (13,789,264,674 bytes).
-- The runtime profile is canonical schema `friday.secondary-runtime-profile.v2`.
+- The runtime profile is canonical schema `friday.secondary-runtime-profile.v3`.
   It binds source, runtime image/config/OCI identities, backend selection,
   context, memory, graph policy and every acceptance receipt.
 - The accepted-profile registry stays empty until protocol, quality, capacity,
@@ -182,7 +183,9 @@ python .\scripts\runtime_profile_operator.py candidate `
 The profile ID and served-model alias are derived from the complete engine
 projection. `dtype=bfloat16`, `quantization=mxfp4`, global/prefill attention
 `triton`, `moe_runner_backend=flashinfer_mxfp4`, hybrid SWA memory, one running
-request, prefill graphs disabled and no CPU offload are fixed.
+request, `mm_feature_transport=cpu`, prefill graphs disabled and no weight/KV
+CPU offload are fixed. SGLang `--language-only` is deliberately not used: that
+is an encoder-disaggregation mode and rejects this GPT-OSS architecture.
 
 Optional candidate flags have these closed choices and defaults:
 

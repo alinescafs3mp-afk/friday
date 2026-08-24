@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "friday.secondary-runtime-profile.v2"
+SCHEMA = "friday.secondary-runtime-profile.v3"
 EXPECTED_MODEL_PATH = "/source/snapshot"
 EXPECTED_SOURCE_REVISION = "6cee5e81ee83917806bbde320786a8fb61efebee"
 EXPECTED_SOURCE_MANIFEST_SHA256 = "438df0a0b2f6b4164c2fd9d9ed309925abbc94ed8deb056b692d2ccad7887fd9"
@@ -79,6 +79,7 @@ _KEYS = frozenset(
         "sampling_backend",
         "moe_runner_backend",
         "mxfp4_moe_precision",
+        "mm_feature_transport",
         "page_size",
         "radix_cache_enabled",
         "overlap_schedule_enabled",
@@ -124,6 +125,7 @@ _ENGINE_KEYS = (
     "sampling_backend",
     "moe_runner_backend",
     "mxfp4_moe_precision",
+    "mm_feature_transport",
     "page_size",
     "radix_cache_enabled",
     "overlap_schedule_enabled",
@@ -261,6 +263,7 @@ class LaunchProfile:
     sampling_backend: str
     moe_runner_backend: str
     mxfp4_moe_precision: str
+    mm_feature_transport: str
     page_size: int
     radix_cache_enabled: bool
     overlap_schedule_enabled: bool
@@ -309,6 +312,8 @@ class LaunchProfile:
             self.moe_runner_backend,
             "--flashinfer-mxfp4-moe-precision",
             self.mxfp4_moe_precision,
+            "--mm-feature-transport",
+            self.mm_feature_transport,
             "--kv-cache-dtype",
             self.kv_cache_dtype,
             "--page-size",
@@ -440,6 +445,7 @@ def load_launch_profile(
         or value["sampling_backend"] not in {"pytorch", "flashinfer"}
         or value["moe_runner_backend"] != "flashinfer_mxfp4"
         or value["mxfp4_moe_precision"] != "default"
+        or value["mm_feature_transport"] != "cpu"
     ):
         raise ProfileContractError("profile kernel selection is invalid")
     page_size = _exact_int(value["page_size"], minimum=1, maximum=16)
@@ -517,6 +523,7 @@ def load_launch_profile(
         sampling_backend=value["sampling_backend"],
         moe_runner_backend=value["moe_runner_backend"],
         mxfp4_moe_precision=value["mxfp4_moe_precision"],
+        mm_feature_transport=value["mm_feature_transport"],
         page_size=page_size,
         radix_cache_enabled=value["radix_cache_enabled"],
         overlap_schedule_enabled=value["overlap_schedule_enabled"],
