@@ -96,6 +96,7 @@ class SecondaryBrainScheduler:
         self._last_probe_success_monotonic: float | None = None
         self._probe_success_total = 0
         self._probe_failure_total = 0
+        self._probe_failure_by_reason = {failure: 0 for failure in SecondaryFailure}
         self._shadow_tasks: set[asyncio.Task[None]] = set()
         self._selected_by_workload = {workload: 0 for workload in ModelWorkload}
         self._success_by_workload = {workload: 0 for workload in ModelWorkload}
@@ -286,6 +287,8 @@ class SecondaryBrainScheduler:
                 timeout=self._client.config.admission_timeout_sec,
             )
         except TimeoutError:
+            self._probe_failure_total += 1
+            self._probe_failure_by_reason[SecondaryFailure.ADMISSION_BUSY] += 1
             return SecondaryFailure.ADMISSION_BUSY
         try:
             if self._admission_is_fresh():
@@ -294,6 +297,7 @@ class SecondaryBrainScheduler:
             if failure is not None:
                 self._epoch_admitted = False
                 self._probe_failure_total += 1
+                self._probe_failure_by_reason[failure] += 1
                 return failure
             self._last_probe_success_monotonic = time.monotonic()
             # The expensive generation canary is once per admitted process epoch.
@@ -317,10 +321,13 @@ class SecondaryBrainScheduler:
             attempt = await self._client.call(canary)
             if attempt.result is None:
                 self._probe_failure_total += 1
-                return attempt.failure or SecondaryFailure.MALFORMED_RESPONSE
+                failure = attempt.failure or SecondaryFailure.MALFORMED_RESPONSE
+                self._probe_failure_by_reason[failure] += 1
+                return failure
             if attempt.result.visible_content.strip().casefold() != "ready":
                 await self._client.invalidate(SecondaryFailure.MALFORMED_RESPONSE)
                 self._probe_failure_total += 1
+                self._probe_failure_by_reason[SecondaryFailure.MALFORMED_RESPONSE] += 1
                 return SecondaryFailure.MALFORMED_RESPONSE
             self._epoch_admitted = True
             self._last_probe_success_monotonic = time.monotonic()
@@ -399,6 +406,15 @@ class SecondaryBrainScheduler:
             "probe_failure_total": self._probe_failure_total,
             "model_inventory_probe_success_total": status.probe_success_total,
             "model_inventory_probe_failure_total": status.probe_failure_total,
+            "probe_failure_reasons": {
+                reason.value: count for reason, count in self._probe_failure_by_reason.items() if count
+            },
+            "protocol_rejection_total": status.protocol_rejection_total,
+            "queue_wait": {
+                "count": status.queue_wait_count,
+                "sum_sec": round(status.queue_wait_sum_sec, 6),
+                "max_sec": round(status.queue_wait_max_sec, 6),
+            },
             "workloads": {
                 workload.value: {
                     "selected_total": self._selected_by_workload[workload],

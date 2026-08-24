@@ -381,3 +381,7 @@ class SecondaryStatus:
     probe_success_total: int = 0
     probe_failure_total: int = 0
     profile_manifest_match: bool = False
+    queue_wait_count: int = 0
+    queue_wait_sum_sec: float = 0.0
+    queue_wait_max_sec: float = 0.0
+    protocol_rejection_total: int = 0

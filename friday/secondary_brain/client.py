@@ -40,6 +40,16 @@ _ENDPOINT_FAILURES = frozenset(
 )
 _PROFILE_ID_HEADER = b"x-friday-secondary-profile-id"
 _PROFILE_SHA_HEADER = b"x-friday-secondary-profile-sha256"
+_PROTOCOL_REJECTIONS = frozenset(
+    {
+        SecondaryFailure.WRONG_PROFILE,
+        SecondaryFailure.WRONG_MODEL,
+        SecondaryFailure.MALFORMED_RESPONSE,
+        SecondaryFailure.TOOL_CALL_REJECTED,
+        SecondaryFailure.REASONING_LEAK,
+        SecondaryFailure.DEGENERATION,
+    }
+)
 
 
 class SecondaryEndpointClient:
@@ -74,6 +84,10 @@ class SecondaryEndpointClient:
         self._last_success_at: float | None = None
         self._probe_success_total = 0
         self._probe_failure_total = 0
+        self._queue_wait_count = 0
+        self._queue_wait_sum_sec = 0.0
+        self._queue_wait_max_sec = 0.0
+        self._protocol_rejection_total = 0
         timeout = httpx.Timeout(
             config.read_timeout_sec,
             connect=config.connect_timeout_sec,
@@ -135,6 +149,10 @@ class SecondaryEndpointClient:
             probe_success_total=self._probe_success_total,
             probe_failure_total=self._probe_failure_total,
             profile_manifest_match=self._profile_manifest_match,
+            queue_wait_count=self._queue_wait_count,
+            queue_wait_sum_sec=self._queue_wait_sum_sec,
+            queue_wait_max_sec=self._queue_wait_max_sec,
+            protocol_rejection_total=self._protocol_rejection_total,
         )
 
     def record_fallback(self) -> None:
@@ -146,8 +164,11 @@ class SecondaryEndpointClient:
         try:
             self._adapter.build_payload(self.config, request)
         except ProtocolRejection as rejection:
+            if rejection.failure in _PROTOCOL_REJECTIONS:
+                self._protocol_rejection_total += 1
             return rejection.failure
         except Exception:
+            self._protocol_rejection_total += 1
             return SecondaryFailure.MALFORMED_RESPONSE
         return None
 
@@ -161,6 +182,8 @@ class SecondaryEndpointClient:
                 self._served_model_match = False
             if failure is SecondaryFailure.WRONG_PROFILE:
                 self._profile_manifest_match = False
+            if failure in _PROTOCOL_REJECTIONS:
+                self._protocol_rejection_total += 1
             if failure in _ENDPOINT_FAILURES:
                 self._state = SecondaryState.COOLDOWN
                 self._cooldown_until = self._clock() + self.config.cooldown_sec
@@ -190,6 +213,7 @@ class SecondaryEndpointClient:
         return None
 
     async def _admit(self) -> SecondaryFailure | None:
+        started = self._clock()
         try:
             await asyncio.wait_for(
                 self._state_lock.acquire(),
@@ -197,6 +221,11 @@ class SecondaryEndpointClient:
             )
         except TimeoutError:
             return SecondaryFailure.ADMISSION_BUSY
+        finally:
+            waited = max(0.0, self._clock() - started)
+            self._queue_wait_count += 1
+            self._queue_wait_sum_sec += waited
+            self._queue_wait_max_sec = max(self._queue_wait_max_sec, waited)
         try:
             now = self._clock()
             half_open = False
@@ -242,6 +271,8 @@ class SecondaryEndpointClient:
                 self._served_model_match = False
             if failure is SecondaryFailure.WRONG_PROFILE:
                 self._profile_manifest_match = False
+            if failure in _PROTOCOL_REJECTIONS:
+                self._protocol_rejection_total += 1
             if failure in _ENDPOINT_FAILURES:
                 self._state = SecondaryState.COOLDOWN
                 self._cooldown_until = self._clock() + self.config.cooldown_sec
@@ -256,10 +287,13 @@ class SecondaryEndpointClient:
         except ProtocolRejection as rejection:
             self._last_failure = rejection.failure
             self._skipped_total += 1
+            if rejection.failure in _PROTOCOL_REJECTIONS:
+                self._protocol_rejection_total += 1
             return SecondaryAttempt.rejected(rejection.failure)
         except Exception:
             self._last_failure = SecondaryFailure.MALFORMED_RESPONSE
             self._skipped_total += 1
+            self._protocol_rejection_total += 1
             return SecondaryAttempt.rejected(SecondaryFailure.MALFORMED_RESPONSE)
 
         now = self._clock()
@@ -370,10 +404,19 @@ class SecondaryEndpointClient:
                 failure = self._http_failure(response.status_code)
                 if failure is not None:
                     return failure
+                failure = self._profile_header_failure(response)
+                if failure is not None:
+                    return failure
                 if len(response.content) > 65_536:
                     failure = SecondaryFailure.WRONG_PROFILE
                     return failure
                 if hashlib.sha256(response.content).hexdigest() != self.config.profile_manifest_sha256:
+                    failure = SecondaryFailure.WRONG_PROFILE
+                    return failure
+                from .profiles import get_secondary_runtime_profile
+
+                profile = get_secondary_runtime_profile(self.config.profile_id)
+                if profile is None or not profile.accepts_manifest(response.content):
                     failure = SecondaryFailure.WRONG_PROFILE
                     return failure
                 self._profile_manifest_match = True

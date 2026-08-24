@@ -18,10 +18,53 @@ from friday.secondary_brain import SecondaryState, build_secondary_brain
 from friday.secondary_brain.profiles import SecondaryRuntimeProfile
 
 _API_KEY = "b" * 64
-_ENGINE_BINDING_SHA256 = "2" * 64
+_ENGINE_PROJECTION: dict[str, Any] = {
+    "source_model_repository": "openai/gpt-oss-20b",
+    "source_model_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
+    "hardware_runtime_receipt_sha256": "a" * 64,
+    "converted_model_manifest_sha256": "b" * 64,
+    "conversion_manifest_sha256": "f" * 64,
+    "runtime_image": "lmsysorg/sglang@sha256:" + "c" * 64,
+    "runtime_source_revision": "d" * 40,
+    "runtime_manifest_sha256": "e" * 64,
+    "model_path": "/models/gpt-oss-20b-nvfp4-modelopt/candidate",
+    "quantization": "modelopt_fp4",
+    "kv_cache_dtype": "none",
+    "attention_backend": "triton",
+    "fp4_gemm_backend": "flashinfer_cutlass",
+    "context_tokens": 16_384,
+    "max_total_tokens": 16_384,
+    "mem_fraction_static": "0.92",
+    "max_running_requests": 1,
+    "max_output_tokens": 2048,
+    "chunked_prefill_size": 1024,
+    "cuda_graph_max_bs": 1,
+    "no_cpu_offload": True,
+}
+_ENGINE_BINDING_SHA256 = hashlib.sha256(
+    (json.dumps(_ENGINE_PROJECTION, sort_keys=True, separators=(",", ":")) + "\n").encode()
+).hexdigest()
 _PROFILE_ID = f"gptoss20b-{_ENGINE_BINDING_SHA256}"
 _ALIAS = f"friday-secondary-{_PROFILE_ID}"
-_PROFILE_BYTES = f'{{"profile_id":"{_PROFILE_ID}","status":"accepted"}}\n'.encode("ascii")
+_PROFILE_VALUE: dict[str, Any] = {
+    **_ENGINE_PROJECTION,
+    "schema": "friday.secondary-runtime-profile.v1",
+    "status": "accepted",
+    "profile_id": _PROFILE_ID,
+    "engine_binding_sha256": _ENGINE_BINDING_SHA256,
+    "endpoint_base_url": "http://127.0.0.1:30001/v1",
+    "served_model_alias": _ALIAS,
+    "gateway_ca_certificate_sha256": "",
+    "allowed_modes": ["assist", "shadow"],
+    "allowed_workloads": ["extract"],
+    "quality_evidence_sha256": "6" * 64,
+    "capacity_evidence_sha256": "7" * 64,
+    "soak_evidence_sha256": "8" * 64,
+    "failure_evidence_sha256": "9" * 64,
+}
+_PROFILE_BYTES = (
+    json.dumps(_PROFILE_VALUE, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+).encode("utf-8")
 _PROFILE_SHA256 = hashlib.sha256(_PROFILE_BYTES).hexdigest()
 _PROFILE_HEADERS = {
     "X-Friday-Secondary-Profile-Id": _PROFILE_ID,
@@ -135,7 +178,7 @@ def _secondary_settings(
 def _after_admission(handler: Any) -> httpx.MockTransport:
     async def admitted(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/friday-profile"):
-            return httpx.Response(200, content=_PROFILE_BYTES)
+            return httpx.Response(200, headers=_PROFILE_HEADERS, content=_PROFILE_BYTES)
         if request.url.path.endswith("/models"):
             return httpx.Response(200, headers=_PROFILE_HEADERS, json={"data": [{"id": _ALIAS}]})
         payload = json.loads(request.content)

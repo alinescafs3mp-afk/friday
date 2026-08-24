@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import ssl
 import time
 from dataclasses import replace
@@ -32,10 +33,53 @@ from friday.secondary_brain.client import SecondaryEndpointClient
 from friday.secondary_brain.profiles import SecondaryRuntimeProfile
 
 _API_KEY = "a" * 64
-_ENGINE_BINDING_SHA256 = "1" * 64
+_ENGINE_PROJECTION: dict[str, Any] = {
+    "source_model_repository": "openai/gpt-oss-20b",
+    "source_model_revision": "6cee5e81ee83917806bbde320786a8fb61efebee",
+    "hardware_runtime_receipt_sha256": "a" * 64,
+    "converted_model_manifest_sha256": "b" * 64,
+    "conversion_manifest_sha256": "f" * 64,
+    "runtime_image": "lmsysorg/sglang@sha256:" + "c" * 64,
+    "runtime_source_revision": "d" * 40,
+    "runtime_manifest_sha256": "e" * 64,
+    "model_path": "/models/gpt-oss-20b-nvfp4-modelopt/candidate",
+    "quantization": "modelopt_fp4",
+    "kv_cache_dtype": "none",
+    "attention_backend": "triton",
+    "fp4_gemm_backend": "flashinfer_cutlass",
+    "context_tokens": 4096,
+    "max_total_tokens": 4096,
+    "mem_fraction_static": "0.92",
+    "max_running_requests": 1,
+    "max_output_tokens": 512,
+    "chunked_prefill_size": 1024,
+    "cuda_graph_max_bs": 1,
+    "no_cpu_offload": True,
+}
+_ENGINE_BINDING_SHA256 = hashlib.sha256(
+    (json.dumps(_ENGINE_PROJECTION, sort_keys=True, separators=(",", ":")) + "\n").encode()
+).hexdigest()
 _PROFILE_ID = f"gptoss20b-{_ENGINE_BINDING_SHA256}"
 _ALIAS = f"friday-secondary-{_PROFILE_ID}"
-_PROFILE_BYTES = f'{{"profile_id":"{_PROFILE_ID}","status":"accepted"}}\n'.encode("ascii")
+_PROFILE_VALUE: dict[str, Any] = {
+    **_ENGINE_PROJECTION,
+    "schema": "friday.secondary-runtime-profile.v1",
+    "status": "accepted",
+    "profile_id": _PROFILE_ID,
+    "engine_binding_sha256": _ENGINE_BINDING_SHA256,
+    "endpoint_base_url": "http://127.0.0.1:30001/v1",
+    "served_model_alias": _ALIAS,
+    "gateway_ca_certificate_sha256": "",
+    "allowed_modes": ["assist", "shadow"],
+    "allowed_workloads": ["classify", "critique"],
+    "quality_evidence_sha256": "6" * 64,
+    "capacity_evidence_sha256": "7" * 64,
+    "soak_evidence_sha256": "8" * 64,
+    "failure_evidence_sha256": "9" * 64,
+}
+_PROFILE_BYTES = (
+    json.dumps(_PROFILE_VALUE, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+).encode("utf-8")
 _PROFILE_SHA256 = hashlib.sha256(_PROFILE_BYTES).hexdigest()
 _PROFILE_HEADERS = {
     "X-Friday-Secondary-Profile-Id": _PROFILE_ID,
@@ -177,7 +221,7 @@ def _response(
 
 
 def _profile_response() -> httpx.Response:
-    return httpx.Response(200, content=_PROFILE_BYTES)
+    return httpx.Response(200, headers=_PROFILE_HEADERS, content=_PROFILE_BYTES)
 
 
 def _models_response(*, alias: str = _ALIAS) -> httpx.Response:
@@ -266,28 +310,19 @@ def test_private_endpoint_requires_an_immutable_profile_binding(tmp_path: Any) -
 
 @pytest.mark.asyncio
 async def test_profile_manifest_is_hashed_before_model_inventory() -> None:
-    manifest = b'{"schema":"friday.secondary-runtime-profile.v1","status":"accepted"}\n'
     requested_paths: list[str] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
         requested_paths.append(request.url.path)
         if request.url.path.endswith("/friday-profile"):
-            return httpx.Response(200, content=manifest)
+            return _profile_response()
         return httpx.Response(
             200,
-            headers={
-                "X-Friday-Secondary-Profile-Id": "test-profile-v1",
-                "X-Friday-Secondary-Profile-Sha256": hashlib.sha256(manifest).hexdigest(),
-            },
+            headers=_PROFILE_HEADERS,
             json={"data": [{"id": _ALIAS}]},
         )
 
-    config = replace(
-        _endpoint_config(),
-        profile_id="test-profile-v1",
-        profile_manifest_sha256=hashlib.sha256(manifest).hexdigest(),
-    )
-    client = SecondaryEndpointClient(config, transport=httpx.MockTransport(handler))
+    client = SecondaryEndpointClient(_endpoint_config(), transport=httpx.MockTransport(handler))
     try:
         failure = await client.probe_models(absolute_deadline_monotonic=time.monotonic() + 2.0)
         assert failure is None
@@ -309,6 +344,46 @@ async def test_wrong_profile_manifest_fails_before_model_inventory() -> None:
         _endpoint_config(),
         profile_id="test-profile-v1",
         profile_manifest_sha256="b" * 64,
+    )
+    client = SecondaryEndpointClient(config, transport=httpx.MockTransport(handler))
+    try:
+        failure = await client.probe_models(absolute_deadline_monotonic=time.monotonic() + 2.0)
+        assert failure is SecondaryFailure.WRONG_PROFILE
+        assert requested_paths == ["/v1/friday-profile"]
+        assert client.status().profile_manifest_match is False
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_exact_hashed_candidate_profile_is_never_admitted() -> None:
+    candidate = {**_PROFILE_VALUE, "status": "candidate"}
+    for key in (
+        "quality_evidence_sha256",
+        "capacity_evidence_sha256",
+        "soak_evidence_sha256",
+        "failure_evidence_sha256",
+    ):
+        candidate[key] = "0" * 64
+    candidate_bytes = (
+        json.dumps(candidate, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
+    requested_paths: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requested_paths.append(request.url.path)
+        return httpx.Response(
+            200,
+            headers={
+                "X-Friday-Secondary-Profile-Id": _PROFILE_ID,
+                "X-Friday-Secondary-Profile-Sha256": hashlib.sha256(candidate_bytes).hexdigest(),
+            },
+            content=candidate_bytes,
+        )
+
+    config = replace(
+        _endpoint_config(),
+        profile_manifest_sha256=hashlib.sha256(candidate_bytes).hexdigest(),
     )
     client = SecondaryEndpointClient(config, transport=httpx.MockTransport(handler))
     try:
@@ -904,6 +979,12 @@ async def test_bad_process_epoch_canary_prevents_workload_admission(settings: An
         assert scheduler.status().state is SecondaryState.COOLDOWN
         diagnostics: Any = scheduler.diagnostics_status()
         assert diagnostics["workloads"]["classify"]["selected_total"] == 0
+        assert diagnostics["probe_failure_total"] == 1
+        assert diagnostics["probe_failure_reasons"] == {"malformed_response": 1}
+        assert diagnostics["protocol_rejection_total"] == 1
+        assert diagnostics["queue_wait"]["count"] == 2
+        assert diagnostics["queue_wait"]["sum_sec"] >= 0.0
+        assert diagnostics["queue_wait"]["max_sec"] >= 0.0
     finally:
         await scheduler.aclose()
 
@@ -1199,3 +1280,20 @@ def test_server_stays_healthy_with_secondary_disabled_or_laptop_off(settings: An
             diagnostics = client.get("/api/admin/diagnostics", headers=owner).json()
             assert diagnostics["ok"] is True
             assert diagnostics["secondary"]["state"] in expected_states
+
+
+def test_enabled_secondary_cannot_change_primary_v12_identity(settings: Any) -> None:
+    from friday.v12_model_transport import create_attested_v12_model_runtime
+
+    primary_settings = replace(settings, llm_enabled=True)
+    secondary_settings = replace(_configured_settings(settings), llm_enabled=True)
+    primary_router = LLMRouter(primary_settings)
+    secondary_router = LLMRouter(secondary_settings)
+    primary_runtime = create_attested_v12_model_runtime(primary_router)
+    secondary_runtime = create_attested_v12_model_runtime(secondary_router)
+
+    assert secondary_router.model == primary_router.model
+    assert secondary_router.model != secondary_settings.secondary_llm_model
+    assert secondary_runtime.profile is primary_runtime.profile
+    assert secondary_runtime.profile.served_model_alias == primary_router.model
+    assert secondary_runtime.public_status() == primary_runtime.public_status()
