@@ -48175,15 +48175,29 @@ class AgentRuntime:
             ModelPriority,
             ModelRequest,
             ModelWorkload,
+            SecondaryBrainScheduler,
             SecondaryMode,
             SecondaryResult,
+        )
+
+        secondary_limits = self._secondary_document_map_profile_limits()
+        if isinstance(secondary, SecondaryBrainScheduler) and secondary_limits is None:
+            # A real product scheduler without an accepted document-map/private
+            # profile is not a candidate. Avoid even its admission probe; test
+            # doubles retain the legacy seam used by the closed contract suite.
+            return await primary_call()
+        secondary_max_tokens = (
+            min(max_tokens, secondary_limits[1]) if secondary_limits is not None else max_tokens
         )
 
         def request_factory() -> ModelRequest:
             return ModelRequest(
                 workload=ModelWorkload.DOCUMENT_MAP,
                 messages=tuple(messages),
-                max_output_tokens=max_tokens,
+                # Only the advisory request is capped. The closure above retains
+                # the exact primary kwargs, so laptop-off and protocol fallback
+                # still invoke the pre-existing primary request exactly once.
+                max_output_tokens=secondary_max_tokens,
                 absolute_deadline_monotonic=min(
                     effective_deadline,
                     secondary.new_advisory_deadline(),
@@ -48228,6 +48242,31 @@ class AgentRuntime:
         if isinstance(selected, SecondaryResult):
             return {"content": selected.visible_content, "finish_reason": "stop"}
         return selected
+
+    def _secondary_document_map_profile_limits(self) -> tuple[int, int] | None:
+        """Return the accepted context/output envelope for the real map scheduler."""
+
+        secondary = self.secondary_brain
+        if secondary is None:
+            return None
+        from friday.secondary_brain import ModelWorkload, SecondaryBrainScheduler
+        from friday.secondary_brain.profiles import get_secondary_runtime_profile
+
+        if not isinstance(secondary, SecondaryBrainScheduler):
+            return None
+        profile = get_secondary_runtime_profile(self.settings.secondary_llm_profile)
+        mode = str(getattr(secondary.mode, "value", secondary.mode))
+        if (
+            profile is None
+            or mode not in profile.allowed_modes
+            or ModelWorkload.DOCUMENT_MAP not in secondary.allowed_workloads
+            or "document_map" not in profile.allowed_workloads
+            or not secondary.allow_private_text
+            or secondary.served_model_alias != profile.served_model_alias
+            or self.settings.secondary_llm_max_context_tokens != profile.max_context_tokens
+        ):
+            return None
+        return profile.max_context_tokens, profile.max_output_tokens
 
     @staticmethod
     def _attachment_hierarchy_text(result: Any, *, max_chars: int) -> tuple[str, bool]:
@@ -48426,12 +48465,28 @@ class AgentRuntime:
                 max(1, int(self.settings.profile.document_map_max_concurrency)),
             ),
         )
-        map_chunk_chars = _attachment_hierarchy_map_chunk_chars(
+        primary_map_chunk_chars = _attachment_hierarchy_map_chunk_chars(
             attachments,
             max_model_len=self.settings.profile.max_model_len,
             request_chars=len(message[:8_000]),
             parallelism=map_parallelism,
         )
+        secondary_limits = self._secondary_document_map_profile_limits()
+        secondary_input_tokens = (
+            max(1, secondary_limits[0] - min(_ATTACHMENT_MAP_MODEL_OUTPUT_TOKENS, secondary_limits[1]) - 256)
+            if secondary_limits is not None
+            else 0
+        )
+        # Start below the accepted token envelope, then use the exact UTF-8
+        # content accounting enforced by the GPT-OSS adapter below. The ordinary
+        # primary chunk width remains available if the 4K plan would exceed the
+        # finite source-plan cap or cannot fit even one framed source character.
+        map_chunk_chars = (
+            min(primary_map_chunk_chars, secondary_input_tokens)
+            if secondary_input_tokens
+            else primary_map_chunk_chars
+        )
+        secondary_sized_plan = secondary_input_tokens > 0
 
         def map_model_messages(chunk: _AttachmentSourceChunk) -> list[dict[str, Any]]:
             payload = {
@@ -48489,11 +48544,32 @@ class AgentRuntime:
                 attachments,
                 chunk_chars=map_chunk_chars,
             )
-            oversized = any(
+            if secondary_sized_plan and chunks_required > _ATTACHMENT_MAP_MAX_CHUNKS:
+                secondary_sized_plan = False
+                map_chunk_chars = primary_map_chunk_chars
+                continue
+            primary_oversized = any(
                 sum(_message_chars(item) for item in map_model_messages(chunk)) > map_input_budget
                 for chunk in chunks
             )
-            if not oversized or map_chunk_chars <= 1:
+            secondary_oversized = bool(
+                secondary_sized_plan
+                and any(
+                    sum(
+                        len(str(item.get("content") or "").encode("utf-8", errors="surrogatepass"))
+                        for item in map_model_messages(chunk)
+                    )
+                    > secondary_input_tokens
+                    for chunk in chunks
+                )
+            )
+            if not primary_oversized and not secondary_oversized:
+                break
+            if map_chunk_chars <= 1:
+                if secondary_oversized:
+                    secondary_sized_plan = False
+                    map_chunk_chars = primary_map_chunk_chars
+                    continue
                 break
             map_chunk_chars = max(1, map_chunk_chars // 2)
         records: list[dict[str, Any]] = []
