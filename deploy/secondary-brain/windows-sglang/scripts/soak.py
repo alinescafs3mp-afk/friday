@@ -18,8 +18,10 @@ from endpoint_common import (
     atomic_write_json,
     chat_completion,
     configure_expected_model,
+    evidence_identity,
     load_api_key,
     normalize_base_url,
+    runtime_process_epoch,
     verify_remote_profile_epoch,
 )
 from gpu_telemetry import GpuSampler, GpuTelemetryError, sample_summary
@@ -106,6 +108,12 @@ def run_soak(
     ca_file: Path | None,
 ) -> dict[str, object]:
     cases = _cases()
+    runtime_epoch = runtime_process_epoch(
+        base_url,
+        api_key=api_key,
+        timeout_sec=min(timeout_sec, 10.0),
+        ca_file=ca_file,
+    )
     started = time.monotonic()
     trials: list[dict[str, object]] = []
     failures = 0
@@ -164,6 +172,16 @@ def run_soak(
     elapsed = time.monotonic() - started
     if sampler.error is not None:
         raise sampler.error
+    if (
+        runtime_process_epoch(
+            base_url,
+            api_key=api_key,
+            timeout_sec=min(timeout_sec, 10.0),
+            ca_file=ca_file,
+        )
+        != runtime_epoch
+    ):
+        raise EndpointError("runtime restarted during the soak")
     gpu = sample_summary(sampler.samples)
     required_headroom_mib = max(512.0, gpu["total_mib"] * 0.05)
     passed = (
@@ -176,6 +194,8 @@ def run_soak(
     return {
         "schema": "friday.secondary-sglang-soak.v1",
         "status": "passed" if passed else "failed",
+        **evidence_identity(),
+        "runtime_process_start_time_seconds": runtime_epoch,
         "observed_at": datetime.now(UTC).isoformat(),
         "duration_required_sec": duration_sec,
         "elapsed_sec": round(elapsed, 3),

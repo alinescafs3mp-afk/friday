@@ -53,6 +53,10 @@ def test_bundle_has_the_closed_operator_surface() -> None:
         "runtime/launch_sglang_secure.py",
         "runtime/profile_contract.py",
         "runtime/render_gateway_secure.sh",
+        "runtime-compat/.dockerignore",
+        "runtime-compat/Dockerfile",
+        "runtime-compat/apply_compat.py",
+        "runtime-compat/compat.patch",
         "scripts/accept-hardware-runtime-receipt.ps1",
         "scripts/preflight.ps1",
         "scripts/install-openssh.ps1",
@@ -62,10 +66,33 @@ def test_bundle_has_the_closed_operator_surface() -> None:
         "scripts/generate_calibration.py",
         "scripts/probe_endpoint.py",
         "scripts/quality_battery.py",
+        "scripts/failure_battery.py",
         "scripts/tune_context.py",
         "scripts/soak.py",
+        "scripts/runtime_profile_operator.py",
     }
     assert required <= {path.relative_to(BUNDLE).as_posix() for path in BUNDLE.rglob("*") if path.is_file()}
+
+
+def test_runtime_compatibility_image_is_exact_offline_and_minimal() -> None:
+    compat = BUNDLE / "runtime-compat"
+    expected_hashes = {
+        ".dockerignore": "2bcf7a28b6fd7575d1326a3f923e8750e1c1bcb38205b72c7d7e2a51fb898013",
+        "Dockerfile": "4be190b91e49176951055aa4c2a8068b08067c32e7965d980c97511483a2f547",
+        "apply_compat.py": "67182abfc5104facbf870af7ebd2a108445b2ace7e3da9194b9586ffa8b83726",
+        "compat.patch": "0408f38a639c4a477e9ba14dacb488cb3d120fda0f4019b280fc999fa5fe0b5e",
+    }
+    assert {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in compat.iterdir()
+        if path.is_file()
+    } == expected_hashes
+    dockerfile = (compat / "Dockerfile").read_text(encoding="utf-8")
+    assert (
+        "FROM lmsysorg/sglang@sha256:7a038aa31356fdd1a5b591fc756397bc2e9eb5ac91442c407f55cd2ae8bee738"
+        in dockerfile
+    )
+    assert "apt" not in dockerfile and "pip install" not in dockerfile and "curl" not in dockerfile
 
 
 def test_only_tls_gateway_is_published_to_lan() -> None:
@@ -267,6 +294,59 @@ def test_examples_are_honest_nonaccepted_placeholders() -> None:
     assert "FRIDAY_SECONDARY_GATEWAY_IMAGE" not in env
     assert ("FRIDAY_SECONDARY_HARDWARE_RUNTIME_RECEIPT_PATH=./evidence/hardware-runtime.accepted.json") in env
     assert "latest" not in env.casefold()
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (
+            "# HELP process_start_time_seconds start\nprocess_start_time_seconds 1700000000.5000\n",
+            "1700000000.5",
+        ),
+        ("process_start_time_seconds 1700000000\n", "1700000000"),
+    ],
+)
+def test_runtime_process_epoch_is_exact_and_normalized(
+    monkeypatch: pytest.MonkeyPatch,
+    body: str,
+    expected: str,
+) -> None:
+    endpoint = importlib.import_module("endpoint_common")
+    monkeypatch.setattr(endpoint, "request_text", lambda *_args, **_kwargs: (body, 0.01))
+
+    assert (
+        endpoint.runtime_process_epoch(
+            "https://192.168.1.35:8443/v1",
+            api_key="a" * 64,
+            timeout_sec=1.0,
+            ca_file=Path("ca.crt"),
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "",
+        "process_start_time_seconds NaN\n",
+        "process_start_time_seconds 1\nprocess_start_time_seconds 2\n",
+    ],
+)
+def test_runtime_process_epoch_rejects_missing_ambiguous_or_nonfinite(
+    monkeypatch: pytest.MonkeyPatch,
+    body: str,
+) -> None:
+    endpoint = importlib.import_module("endpoint_common")
+    monkeypatch.setattr(endpoint, "request_text", lambda *_args, **_kwargs: (body, 0.01))
+
+    with pytest.raises(endpoint.EndpointError, match="runtime process epoch"):
+        endpoint.runtime_process_epoch(
+            "https://192.168.1.35:8443/v1",
+            api_key="a" * 64,
+            timeout_sec=1.0,
+            ca_file=Path("ca.crt"),
+        )
 
 
 def test_windows_mutations_are_explicit_and_firewall_is_closed_to_primary() -> None:

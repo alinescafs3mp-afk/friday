@@ -1,0 +1,4 @@
+*
+!Dockerfile
+!apply_compat.py
+!compat.patch

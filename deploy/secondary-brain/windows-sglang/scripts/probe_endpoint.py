@@ -16,6 +16,7 @@ from endpoint_common import (
     atomic_write_json,
     chat_completion,
     configure_expected_model,
+    evidence_identity,
     load_api_key,
     normalize_base_url,
     request_json,
@@ -71,8 +72,8 @@ def run_probe(base_url: str, api_key: str, timeout_sec: float, ca_file: Path | N
     return {
         "schema": "friday.secondary-endpoint-probe.v1",
         "status": "passed",
+        **evidence_identity(),
         "observed_at": datetime.now(UTC).isoformat(),
-        "served_model_alias": EXPECTED_MODEL,
         "models_latency_ms": round(model_latency * 1000, 3),
         "completion_latency_ms": round(completion.latency_sec * 1000, 3),
         "prompt_tokens": completion.prompt_tokens,

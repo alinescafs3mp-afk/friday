@@ -165,6 +165,16 @@ def _run_with_fake(monkeypatch: pytest.MonkeyPatch, battery: Any, fake: FakeEndp
     monkeypatch.setattr(battery, "request_json", fake)
     monkeypatch.setattr(
         battery,
+        "evidence_identity",
+        lambda: {
+            "candidate_profile_id": "test-profile",
+            "candidate_profile_sha256": "c" * 64,
+            "served_model_alias": battery.EXPECTED_MODEL,
+            "gateway_ca_certificate_sha256": "b" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        battery,
         "_run_disconnect_protocol",
         lambda **_kwargs: [
             battery._evidence("stream_cancellation", passed=True),
@@ -215,8 +225,21 @@ def test_full_battery_covers_the_brief_and_retains_only_closed_evidence(
         "reject_degeneration",
         "reject_harmony",
     }
-    assert set(report) == {"status", "cases"}
+    assert set(report) == {
+        "schema",
+        "status",
+        "candidate_profile_id",
+        "candidate_profile_sha256",
+        "served_model_alias",
+        "gateway_ca_certificate_sha256",
+        "cases",
+        "raw_content_retained",
+        "api_key_retained",
+    }
+    assert report["schema"] == "friday.secondary-quality-battery.v1"
     assert report["status"] == "passed"
+    assert report["raw_content_retained"] is False
+    assert report["api_key_retained"] is False
     rows = report["cases"]
     assert isinstance(rows, list)
     assert {row["case"] for row in rows} == required

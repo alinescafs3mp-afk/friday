@@ -24,6 +24,7 @@ from endpoint_common import (
     atomic_write_json,
     build_tls_context,
     configure_expected_model,
+    evidence_identity,
     load_api_key,
     normalize_base_url,
     parse_completion,
@@ -863,8 +864,12 @@ def run_battery(
         rows.extend((_failed("stream_cancellation"), _failed("client_disconnect_recovery")))
     rows.extend(_protocol_rejection_rows())
     return {
+        "schema": "friday.secondary-quality-battery.v1",
         "status": "passed" if all(row["status"] == "passed" for row in rows) else "failed",
+        **evidence_identity(),
         "cases": rows,
+        "raw_content_retained": False,
+        "api_key_retained": False,
     }
 
 

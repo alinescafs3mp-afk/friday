@@ -136,6 +136,27 @@ launcher runs one five-second, single-row `/usr/bin/nvidia-smi` probe and
 requires exact UUID/name/VRAM/compute-capability/driver equality. Any host,
 runtime or profile drift stops only the optional node.
 
+### 2a. Build the closed SGLang compatibility image
+
+The pinned upstream image rejects the valid three-dimensional GPT-OSS expert
+tensors before its ModelOpt loader can consume them and omits the model's
+`quant_config` when constructing attention. `runtime-compat/` applies only
+those two exact, hash-gated edits to the exact local base image. The build has
+no network, package installation or remote source input:
+
+```powershell
+docker buildx build --load --pull=false --network=none --no-cache `
+  --provenance=false --sbom=false --build-arg SOURCE_DATE_EPOCH=0 `
+  --tag friday-secondary/sglang-compat:observed `
+  .\runtime-compat
+docker image inspect --format '{{.Id}}' friday-secondary/sglang-compat:observed
+```
+
+Repeat the build from the same committed context and require the identical
+full image ID. The tag is only a local discovery handle; the runtime manifest
+and deployment must use the measured immutable image ID. Acceptance still
+requires native loader/backend evidence and the complete batteries below.
+
 ## 3. Discover and seal the exact model volume
 
 `populate-model-volume.ps1` requires an exact, locally present downloader image
@@ -224,10 +245,12 @@ batch size 1, sequential device map, GPU memory fraction 0.70 and skipped
 generation. Low-memory mode is deliberately absent. The container runs with
 `--network none` and `--pull never`.
 
-The produced manifest is `observed_unaccepted`. Do not change its status until
-offline tensor inspection, exact SGLang loader/backend proof and the complete
-quality battery all pass. After that review, change only `status` to `accepted`
-in a protected copy and seal the live volume:
+The produced manifest is `observed_unaccepted`. Accept it only after the exact
+offline tensor and provenance audit passes. This acceptance seals model bytes;
+it does not certify the runtime. Exact SGLang loader/backend, protocol, quality,
+capacity and failure evidence later promote the separately bound runtime profile.
+After the offline review, change only `status` to `accepted` in a protected copy
+and seal the live volume:
 
 ```powershell
 .\scripts\convert-modelopt-nvfp4.ps1 -Mode Verify @common `
@@ -268,7 +291,35 @@ data mount exposes that exact container path. A Windows path or a path outside
 safely misconfigured. The production URL is
 `https://192.168.1.35:8443/v1`; Friday rejects plain LAN HTTP.
 
-## 5. Configure firewall and baseline Compose
+## 5. Build the candidate profile mechanically
+
+Materialize `evidence/runtime.accepted.json` from the exact preflight/runtime
+inspection: its schema/status must be
+`friday.secondary-sglang-runtime.v1`/`accepted`, the image and 40-hex SGLang
+revision must be exact, and `served_model_alias_policy` must remain
+`friday-secondary-{profile_id}`. The operator rejects the template, wrong
+hardware receipt, wrong source/conversion, mutable runtime, noncanonical profile
+or an output path that already exists.
+
+```powershell
+python .\scripts\runtime_profile_operator.py candidate `
+  --hardware-receipt .\evidence\hardware-runtime.accepted.json `
+  --converted-model-manifest .\evidence\modelopt-conversion.accepted.json `
+  --conversion-manifest .\evidence\modelopt-converter.accepted.json `
+  --runtime-manifest .\evidence\runtime.accepted.json `
+  --ca-certificate .\secrets\tls\ca.crt `
+  --context-tokens 4096 --max-output-tokens 512 `
+  --mem-fraction-static 0.86 --kv-cache-dtype none `
+  --allowed-modes assist,shadow --allowed-workloads extract `
+  --profile-id-output .\evidence\profile.id `
+  --output .\evidence\profile.candidate.json
+```
+
+The profile ID and served alias are derived from the immutable engine
+projection; they are never typed by hand. Evidence/status promotion later does
+not change that engine identity.
+
+## 6. Configure firewall and baseline Compose
 
 `firewall.ps1` defaults to the only approved source, `192.168.1.78`, and TCP
 8443. It audits exact-port and broad Docker allow rules after applying its own
@@ -280,8 +331,10 @@ rule. Resolve every reported conflict before rollout.
 ```
 
 Copy `.env.example` to the ignored `.env`, replace the SGLang image placeholder
-with its exact digest, set the verified external model volume, and leave the initial
-4K/0.86 values as discovery values. Validate before starting:
+with its exact digest, set the verified external model volume, point
+`FRIDAY_SECONDARY_PROFILE_MANIFEST_PATH` to the candidate during certification,
+and leave the initial 4K/0.86 values as discovery values. After promotion, change
+only that path to `profile.accepted.json`. Validate before starting:
 
 ```powershell
 docker compose --env-file .env -f compose.yml config
@@ -303,7 +356,7 @@ the GPT-OSS override selected an incompatible Triton MoE loader and rejected the
 checkpoint's three-dimensional tensors. The explicit pinned method is therefore
 a measured loader correction, not an online re-quantization request.
 
-## 6. Probe, tune and soak through TLS
+## 7. Probe, tune, soak and promote through TLS
 
 All external probes use the gateway bearer and explicit private CA. They never
 write raw prompts, responses or reasoning into evidence.
@@ -369,6 +422,43 @@ python scripts/soak.py \
   --profile-manifest evidence/profile.candidate.json \
   --duration-sec 1800 --minimum-requests 100 \
   --output evidence/soak.observed.json
+```
+
+Repeat the winning capacity trial after a cold container restart. Then seal the
+capacity and final profile; every evidence file must contain the exact candidate
+profile ID/SHA, alias and CA hash. `failure.accepted.json` must cover the closed
+15-journey laptop-off/disconnect/recovery set, exact-once primary fallback, no
+effect replay and unchanged V12 readiness. Empty, cross-epoch, failed or partial
+evidence is rejected. The two capacity receipts must expose different exact
+`process_start_time_seconds` values; copying a trial cannot certify a restart.
+
+Run the failure battery from the committed primary Friday checkout. It executes
+the code-owned journey assertions in an isolated temporary `FRIDAY_HOME`, retains
+no pytest output, and creates a new candidate-bound receipt only when every
+mapped assertion passes:
+
+```bash
+python deploy/secondary-brain/windows-sglang/scripts/failure_battery.py \
+  --candidate /protected/evidence/profile.candidate.json \
+  --ca-file /protected/secondary-brain/ca.crt \
+  --output /protected/evidence/failure.accepted.json
+```
+
+```powershell
+python .\scripts\runtime_profile_operator.py accept-capacity `
+  --candidate .\evidence\profile.candidate.json `
+  --initial-trial .\evidence\context-winning.observed.json `
+  --cold-restart-trial .\evidence\context-winning-cold.observed.json `
+  --soak .\evidence\soak.observed.json `
+  --output .\evidence\capacity.accepted.json
+
+python .\scripts\runtime_profile_operator.py accept-profile `
+  --candidate .\evidence\profile.candidate.json `
+  --quality .\evidence\quality.observed.json `
+  --capacity .\evidence\capacity.accepted.json `
+  --soak .\evidence\soak.observed.json `
+  --failure .\evidence\failure.accepted.json `
+  --output .\evidence\profile.accepted.json
 ```
 
 From `192.168.1.78`, prove: valid CA plus token succeeds; missing/wrong token is

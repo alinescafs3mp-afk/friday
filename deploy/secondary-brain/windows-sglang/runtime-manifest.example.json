@@ -20,7 +20,7 @@
   "gpu_name": "REPLACE_AFTER_LIVE_PROBE",
   "gpu_vram_mib": 0,
   "gpu_compute_capability": "REPLACE_AFTER_LIVE_PROBE",
-  "served_model_alias": "friday-secondary-gptoss20b",
+  "served_model_alias_policy": "friday-secondary-{profile_id}",
   "published_endpoint": "https://192.168.1.35:8443/v1",
   "plain_sglang_lan_published": false,
   "note": "No runtime identity is accepted until measured on 192.168.1.35."

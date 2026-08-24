@@ -14,8 +14,10 @@ from endpoint_common import (
     EndpointError,
     atomic_write_json,
     configure_expected_model,
+    evidence_identity,
     load_api_key,
     normalize_base_url,
+    runtime_process_epoch,
     stream_chat_completion,
     verify_remote_profile_epoch,
 )
@@ -100,6 +102,12 @@ def run_ladder(
     mem_fraction_static: float,
     ca_file: Path | None,
 ) -> dict[str, Any]:
+    runtime_epoch = runtime_process_epoch(
+        base_url,
+        api_key=api_key,
+        timeout_sec=min(timeout_sec, 10.0),
+        ca_file=ca_file,
+    )
     trials: list[dict[str, Any]] = []
     admitted: list[int] = []
     for candidate in candidates:
@@ -124,9 +132,21 @@ def run_ladder(
             admitted.append(candidate)
         else:
             break
+    if (
+        runtime_process_epoch(
+            base_url,
+            api_key=api_key,
+            timeout_sec=min(timeout_sec, 10.0),
+            ca_file=ca_file,
+        )
+        != runtime_epoch
+    ):
+        raise EndpointError("runtime restarted during the capacity trial")
     return {
         "schema": "friday.secondary-context-capacity-trial.v1",
         "status": "measured_not_yet_certified",
+        **evidence_identity(),
+        "runtime_process_start_time_seconds": runtime_epoch,
         "observed_at": datetime.now(UTC).isoformat(),
         "mem_fraction_static": mem_fraction_static,
         "candidates": list(candidates),
