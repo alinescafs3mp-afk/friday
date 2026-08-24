@@ -120,6 +120,12 @@ def _identity(profile: dict[str, Any], raw: bytes) -> dict[str, Any]:
     }
 
 
+def test_operator_forces_binary_descriptors_for_windows_exact_bytes() -> None:
+    source = (SCRIPTS / "runtime_profile_operator.py").read_text(encoding="utf-8")
+
+    assert source.count('getattr(os, "O_BINARY", 0)') == 2
+
+
 def _deterministic_failure(
     operator: Any,
     identity: dict[str, Any],
