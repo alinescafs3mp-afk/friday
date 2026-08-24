@@ -93,11 +93,16 @@ class FakeEndpoint:
             return {"data": [{"id": model}]}, 0.01
         assert payload is not None
         assert payload["model"] == self.battery.EXPECTED_MODEL
+        assert payload["reasoning_effort"] in {"low", "medium", "high"}
         messages = payload.get("messages")
         assert isinstance(messages, list)
         if any(isinstance(message, dict) and message.get("role") == "tool" for message in messages):
+            assert payload["reasoning_effort"] == "low"
+            assert payload["max_tokens"] == 256
             return self._completion("17", reasoning="PRIVATE_CONTINUATION_REASONING")
         if isinstance(payload.get("tool_choice"), dict):
+            assert payload["reasoning_effort"] == "low"
+            assert payload["max_tokens"] == 256
             city = "Paris" if self.invalid_tool else "Moscow"
             return (
                 {
@@ -127,6 +132,16 @@ class FakeEndpoint:
             )
         name = self.live_names[self.live_index]
         self.live_index += 1
+        assert payload["reasoning_effort"] == {
+            "reasoning_medium": "medium",
+            "reasoning_high": "high",
+        }.get(name, "low")
+        assert payload["max_tokens"] == {
+            "reasoning_medium": 512,
+            "reasoning_high": 1024,
+            "max_token_truncation": 8,
+            "stop_sequence": 32,
+        }.get(name, 256)
         content = self.overrides.get(name, _LIVE_OUTPUTS[name])
         finish_reason = "length" if name == "max_token_truncation" else "stop"
         completion_tokens = 8 if name == "max_token_truncation" else 5
@@ -293,6 +308,19 @@ def test_deterministic_validator_failure_is_hashed_but_not_retained(
     assert row["status"] == "failed"
     assert re.fullmatch(r"[0-9a-f]{64}", row["output_sha256"])
     assert "confirmed" not in json.dumps(report, ensure_ascii=False)
+
+
+def test_intentional_reasoning_only_length_stop_is_valid_and_content_free(
+    monkeypatch: pytest.MonkeyPatch, battery: Any
+) -> None:
+    fake = FakeEndpoint(battery, overrides={"max_token_truncation": ""})
+    report = _run_with_fake(monkeypatch, battery, fake)
+
+    row = next(item for item in report["cases"] if item["case"] == "max_token_truncation")
+    assert report["status"] == "passed"
+    assert row["status"] == "passed"
+    assert re.fullmatch(r"[0-9a-f]{64}", row["output_sha256"])
+    assert "PRIVATE_REASONING" not in json.dumps(report, ensure_ascii=False)
 
 
 def test_tool_probe_validates_shape_without_executing_or_forwarding_reasoning(

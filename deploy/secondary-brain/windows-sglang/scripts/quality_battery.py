@@ -48,8 +48,9 @@ class QualityCase:
     name: str
     messages: tuple[dict[str, Any], ...] = field(repr=False)
     validator: Callable[[SanitizedCompletion], bool] = field(repr=False)
-    max_tokens: int = 128
+    max_tokens: int = 256
     extra: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    allow_empty_length: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,11 +190,7 @@ def _stop_is_honoured(completion: SanitizedCompletion) -> bool:
 
 
 def _truncation_is_reported(completion: SanitizedCompletion) -> bool:
-    return (
-        completion.finish_reason == "length"
-        and 1 <= completion.completion_tokens <= 8
-        and bool(completion.content.strip())
-    )
+    return completion.finish_reason == "length" and completion.completion_tokens == 8
 
 
 def _base_messages(
@@ -253,18 +250,21 @@ def _live_cases() -> tuple[QualityCase, ...]:
             "reasoning_low",
             _base_messages("Return only the decimal result of (19 * 3) - 15."),
             _exact_with_separated_reasoning("42"),
+            max_tokens=256,
             extra={"reasoning_effort": "low"},
         ),
         QualityCase(
             "reasoning_medium",
             _base_messages("Return only the decimal result of (19 * 3) - 15."),
             _exact_with_separated_reasoning("42"),
+            max_tokens=512,
             extra={"reasoning_effort": "medium"},
         ),
         QualityCase(
             "reasoning_high",
             _base_messages("Return only the decimal result of (19 * 3) - 15."),
             _exact_with_separated_reasoning("42"),
+            max_tokens=1024,
             extra={"reasoning_effort": "high"},
         ),
         QualityCase(
@@ -305,6 +305,7 @@ def _live_cases() -> tuple[QualityCase, ...]:
             _base_messages("Write the integers from 1 through 200, separated by spaces, with no omissions."),
             _truncation_is_reported,
             max_tokens=8,
+            allow_empty_length=True,
         ),
         QualityCase(
             "arithmetic",
@@ -361,6 +362,7 @@ def _completion_request(
     max_tokens: int,
     extra: Mapping[str, Any],
     ca_file: Path,
+    allow_empty_length: bool = False,
 ) -> SanitizedCompletion:
     if not 1 <= max_tokens <= 4096:
         raise EndpointError("quality case max_tokens is outside the certification bound")
@@ -370,6 +372,7 @@ def _completion_request(
         "model": EXPECTED_MODEL,
         "messages": list(messages),
         "max_tokens": max_tokens,
+        "reasoning_effort": "low",
         "temperature": 0.0,
         "stream": False,
         **dict(extra),
@@ -387,7 +390,43 @@ def _completion_request(
         message = choices[0].get("message")
         if isinstance(message, dict) and (message.get("tool_calls") or message.get("function_call")):
             raise EndpointError("non-tool quality case unexpectedly returned a tool call")
-    return parse_completion(body, expected_model=EXPECTED_MODEL, latency_sec=latency)
+    try:
+        return parse_completion(body, expected_model=EXPECTED_MODEL, latency_sec=latency)
+    except EndpointError:
+        if not allow_empty_length:
+            raise
+    choices = body.get("choices")
+    choice = choices[0] if isinstance(choices, list) and len(choices) == 1 else None
+    message = choice.get("message") if isinstance(choice, dict) else None
+    usage = body.get("usage")
+    completion_tokens = (
+        _bounded_token_count(usage.get("completion_tokens")) if isinstance(usage, dict) else 0
+    )
+    content = message.get("content") if isinstance(message, dict) else None
+    reasoning = message.get("reasoning_content") if isinstance(message, dict) else None
+    if (
+        body.get("model") != EXPECTED_MODEL
+        or not isinstance(choice, dict)
+        or choice.get("finish_reason") != "length"
+        or not isinstance(message, dict)
+        or not (content is None or content == "")
+        or message.get("tool_calls")
+        or message.get("function_call")
+        or completion_tokens != max_tokens
+        or not math.isfinite(latency)
+        or latency < 0
+    ):
+        raise EndpointError("intentional truncation response is invalid") from None
+    return SanitizedCompletion(
+        content="",
+        latency_sec=latency,
+        prompt_tokens=(
+            _bounded_token_count(usage.get("prompt_tokens")) if isinstance(usage, dict) else 0
+        ),
+        completion_tokens=completion_tokens,
+        finish_reason="length",
+        reasoning_present=isinstance(reasoning, str) and bool(reasoning),
+    )
 
 
 def _run_live_case(
@@ -407,6 +446,7 @@ def _run_live_case(
             max_tokens=case.max_tokens,
             extra=case.extra,
             ca_file=ca_file,
+            allow_empty_length=case.allow_empty_length,
         )
         try:
             passed = bool(case.validator(completion))
@@ -418,7 +458,11 @@ def _run_live_case(
             latency_sec=completion.latency_sec,
             prompt_tokens=completion.prompt_tokens,
             completion_tokens=completion.completion_tokens,
-            hash_material=completion.content,
+            hash_material=(
+                f"intentional-length:{completion.completion_tokens}"
+                if case.name == "max_token_truncation"
+                else completion.content
+            ),
         )
     except EndpointError:
         return _failed(case.name)
@@ -440,7 +484,8 @@ def _tool_call_request(
         "messages": list(
             _base_messages(_TOOL_USER, system="Use the supplied function when explicitly required.")
         ),
-        "max_tokens": 128,
+        "max_tokens": 256,
+        "reasoning_effort": "low",
         "temperature": 0.0,
         "stream": False,
         "tools": [_tool_spec()],
@@ -552,7 +597,7 @@ def _run_tool_protocol(
             api_key=api_key,
             messages=continuation_messages,
             timeout_sec=timeout_sec,
-            max_tokens=32,
+            max_tokens=256,
             extra={"tools": [_tool_spec()], "tool_choice": "none"},
             ca_file=ca_file,
         )
@@ -587,7 +632,7 @@ def _run_disconnect_protocol(
             api_key=api_key,
             messages=_base_messages("Reply with exactly: ready"),
             timeout_sec=timeout_sec,
-            max_tokens=16,
+            max_tokens=256,
             extra={},
             ca_file=ca_file,
         )
@@ -629,6 +674,7 @@ def _run_disconnect_protocol(
                 "min_tokens": 2_048,
                 "ignore_eos": True,
                 "rid": f"friday-quality-{secrets.token_hex(16)}",
+                "reasoning_effort": "low",
                 "temperature": 0.0,
                 "stream": True,
             },
@@ -719,7 +765,7 @@ def _run_disconnect_protocol(
             api_key=api_key,
             messages=_base_messages("Reply with exactly: ready"),
             timeout_sec=recovery_budget,
-            max_tokens=16,
+            max_tokens=256,
             extra={},
             ca_file=ca_file,
         )
