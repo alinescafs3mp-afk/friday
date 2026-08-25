@@ -12,8 +12,10 @@ import pytest
 from friday.file_delivery import FileRecordUnavailable, read_authorized_file_in_transaction
 from friday.file_evidence_reader import (
     FileEvidenceUnavailable,
+    PinnedFileEvidenceReference,
     historical_file_selection_token,
     prepare_current_turn_file_evidence,
+    prepare_pinned_file_evidence,
     prepared_file_evidence_is_process_owned,
     reauthorize_prepared_file_evidence_in_transaction,
 )
@@ -201,6 +203,104 @@ def test_current_turn_native_files_form_one_process_owned_bundle(settings, stora
             settings.files_dir,
             _actor(),
             prepared,
+            max_bytes=settings.max_upload_bytes,
+        )
+
+
+def test_durable_raw_pin_is_reprepared_after_process_boundary(settings, storage) -> None:
+    raw, current = _register(
+        storage,
+        settings,
+        user_id="shared-tenant",
+        uploaded_by="person-a",
+        text="Durable comparison document.",
+        filename="durable.txt",
+    )
+    reference = PinnedFileEvidenceReference(
+        raw_object_id=raw.id,
+        source_identity_sha256=current.source_identity_sha256,
+        content_sha256=hashlib.sha256(b"Durable comparison document.").hexdigest(),
+    )
+
+    prepared = prepare_pinned_file_evidence(
+        storage,
+        AuthorizationService(storage),
+        settings.files_dir,
+        _actor(tenant="shared-tenant", person="person-a"),
+        uploaded_by="person-a",
+        reference=reference,
+        max_bytes=settings.max_upload_bytes,
+    )
+
+    assert prepared_file_evidence_is_process_owned(prepared)
+    assert prepared.raw_ids == (raw.id,)
+    assert prepared.bundle.parts[0].text == "Durable comparison document."
+    assert prepared.historical_selection is None
+    with storage.transaction() as conn:
+        assert reauthorize_prepared_file_evidence_in_transaction(
+            conn,
+            AuthorizationService(storage),
+            settings.files_dir,
+            _actor(tenant="shared-tenant", person="person-a"),
+            prepared,
+            max_bytes=settings.max_upload_bytes,
+        )
+
+
+def test_durable_raw_pin_rejects_identity_content_and_uploader_drift(settings, storage) -> None:
+    raw, current = _register(storage, settings, text="Pinned source.", filename="pin.txt")
+    good = PinnedFileEvidenceReference(
+        raw_object_id=raw.id,
+        source_identity_sha256=current.source_identity_sha256,
+        content_sha256=hashlib.sha256(b"Pinned source.").hexdigest(),
+    )
+    actor = _actor()
+    authorization = AuthorizationService(storage)
+
+    with pytest.raises(FileEvidenceUnavailable):
+        prepare_pinned_file_evidence(
+            storage,
+            authorization,
+            settings.files_dir,
+            actor,
+            uploaded_by="alice",
+            reference=replace(good, source_identity_sha256="f" * 64),
+            max_bytes=settings.max_upload_bytes,
+        )
+    with pytest.raises(FileEvidenceUnavailable, match="pinned_source_changed"):
+        prepare_pinned_file_evidence(
+            storage,
+            authorization,
+            settings.files_dir,
+            actor,
+            uploaded_by="alice",
+            reference=replace(good, content_sha256="f" * 64),
+            max_bytes=settings.max_upload_bytes,
+        )
+    storage.ensure_user("mallory", preset_key="owner")
+    with pytest.raises(FileEvidenceUnavailable):
+        prepare_pinned_file_evidence(
+            storage,
+            authorization,
+            settings.files_dir,
+            actor,
+            uploaded_by="mallory",
+            reference=good,
+            max_bytes=settings.max_upload_bytes,
+        )
+
+    storage.execute(
+        "UPDATE raw_objects SET raw_content=? WHERE id=?",
+        ("Changed source.", raw.id),
+    )
+    with pytest.raises(FileEvidenceUnavailable):
+        prepare_pinned_file_evidence(
+            storage,
+            authorization,
+            settings.files_dir,
+            actor,
+            uploaded_by="alice",
+            reference=good,
             max_bytes=settings.max_upload_bytes,
         )
 

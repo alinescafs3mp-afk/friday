@@ -130,6 +130,26 @@ class CurrentTurnFileReference(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class PinnedFileEvidenceReference:
+    """Body-free durable pin which grants no authority by itself."""
+
+    raw_object_id: str
+    source_identity_sha256: str
+    content_sha256: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.raw_object_id, str)
+            or _RAW_ID_RE.fullmatch(self.raw_object_id) is None
+            or not isinstance(self.source_identity_sha256, str)
+            or _SHA256_RE.fullmatch(self.source_identity_sha256) is None
+            or not isinstance(self.content_sha256, str)
+            or _SHA256_RE.fullmatch(self.content_sha256) is None
+        ):
+            raise ValueError("pinned file evidence reference is invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class _HistoricalSourceReference:
     """Transaction-local Raw identity created only after fresh authorization."""
 
@@ -1105,6 +1125,51 @@ def prepare_registered_file_evidence(
     )
 
 
+def prepare_pinned_file_evidence(
+    storage: Any,
+    authorization: AuthorizationService,
+    files_root: Path,
+    actor: ActorContext,
+    *,
+    uploaded_by: str,
+    reference: PinnedFileEvidenceReference,
+    max_bytes: int,
+    absolute_deadline: float | None = None,
+) -> PreparedFileEvidence:
+    """Reprepare one durable Raw pin after restart under fresh file authority."""
+
+    if type(reference) is not PinnedFileEvidenceReference:
+        raise FileEvidenceUnavailable("pinned_reference_invalid")
+    prepared = _prepare_registered_file_evidence(
+        storage,
+        authorization,
+        files_root,
+        actor,
+        (
+            _HistoricalSourceReference(
+                ordinal=1,
+                raw_object_id=reference.raw_object_id,
+                source_identity_sha256=reference.source_identity_sha256,
+            ),
+        ),
+        person_id=str(uploaded_by or "").strip(),
+        historical_selection=None,
+        max_bytes=max_bytes,
+        absolute_deadline=absolute_deadline,
+    )
+    token = prepared.snapshot_tokens[0]
+    if (
+        prepared.raw_ids != (reference.raw_object_id,)
+        or not hmac.compare_digest(
+            token.source.identity_sha256,
+            reference.source_identity_sha256,
+        )
+        or not hmac.compare_digest(token.content_sha256, reference.content_sha256)
+    ):
+        raise FileEvidenceUnavailable("pinned_source_changed")
+    return prepared
+
+
 def reauthorize_prepared_file_evidence_in_transaction(
     conn: Any,
     authorization: AuthorizationService,
@@ -1164,8 +1229,10 @@ def reauthorize_prepared_file_evidence_in_transaction(
 __all__ = [
     "FileEvidenceUnavailable",
     "HistoricalFileSelectionToken",
+    "PinnedFileEvidenceReference",
     "PreparedFileEvidence",
     "prepare_current_turn_file_evidence",
+    "prepare_pinned_file_evidence",
     "prepare_registered_file_evidence",
     "historical_file_selection_token",
     "historical_file_selection_is_current",
