@@ -199,7 +199,7 @@ class _UnreadableFirstPagesHarness:
 
 
 @pytest.mark.anyio
-async def test_the_spare_results_are_used_when_the_first_pages_are_unreadable() -> None:
+async def test_research_refills_all_unreadable_first_wave_to_source_target() -> None:
     """Мутация: убрать вторую волну чтения — тест краснеет.
 
     `search` спрашивает ВДВОЕ больше результатов, чем читает, и хвост просто
@@ -212,12 +212,14 @@ async def test_the_spare_results_are_used_when_the_first_pages_are_unreadable() 
     result = await harness.research("цена нефти Brent", max_sources=3)
 
     assert len(harness.fetched) > 3, "запас из выдачи так и не прочитан"
-    readable = [
-        item for item in result["sources"] if not item["error"] and str(item.get("text") or "").strip()
-    ]
-    assert readable, "все источники пусты, хотя четвёртая ссылка отвечала"
-    assert "78,40" in readable[0]["text"]
-    assert result["requested_sources"] >= 4
+    assert len(harness.fetched) == 6
+    assert len(result["sources"]) == 3
+    assert all("78,40" in item["text"] for item in result["sources"])
+    assert result["target_sources"] == 3
+    assert result["requested_sources"] == 6
+    assert result["completed_sources"] == 3
+    assert result["failed_sources"] == 3
+    assert result["timed_out_sources"] == 0
 
 
 class _ReadableHarness(_UnreadableFirstPagesHarness):
@@ -228,8 +230,158 @@ class _ReadableHarness(_UnreadableFirstPagesHarness):
 
 
 @pytest.mark.anyio
-async def test_a_readable_first_page_needs_no_second_wave() -> None:
-    """Контроль: лишних чтений не делаем, когда фактура уже есть."""
+async def test_research_does_not_fetch_spares_when_source_target_is_complete() -> None:
+    """A full first wave does not spend quota or time on speculative pages."""
     harness = _ReadableHarness()
-    await harness.research("ключевая ставка", max_sources=3)
+    result = await harness.research("ключевая ставка", max_sources=3)
     assert len(harness.fetched) == 3, f"прочитано лишнее: {harness.fetched}"
+    assert result["target_sources"] == 3
+    assert result["requested_sources"] == result["completed_sources"] == 3
+    assert result["failed_sources"] == result["timed_out_sources"] == 0
+
+
+@pytest.mark.anyio
+async def test_research_target_is_bounded_by_available_results() -> None:
+    harness = _ScriptedRefillHarness(["complete"])
+
+    result = await harness.research("one available source", max_sources=3)
+
+    assert harness.fetched == [1]
+    assert result["target_sources"] == 1
+    assert result["requested_sources"] == result["completed_sources"] == 1
+
+
+class _ScriptedRefillHarness:
+    research = WebSurfer.research
+
+    def __init__(self, outcomes: list[str]) -> None:
+        self.outcomes = outcomes
+        self.fetched: list[int] = []
+        self.cancelled: list[int] = []
+
+    async def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+        del query
+        return [
+            SearchResult(f"Source {number}", f"https://source-{number}.example/", "", "fixture")
+            for number in range(1, min(max_results, len(self.outcomes)) + 1)
+        ]
+
+    async def fetch(self, url: str, *, max_length: int) -> FetchResult:
+        del max_length
+        number = int(url.split("source-", 1)[1].split(".", 1)[0])
+        self.fetched.append(number)
+        outcome = self.outcomes[number - 1]
+        if outcome == "slow":
+            try:
+                await asyncio.sleep(10)
+            finally:
+                self.cancelled.append(number)
+        if outcome == "empty":
+            return FetchResult(url, "", "", 0, status_code=200)
+        if outcome == "error":
+            return FetchResult(url, "", "", 0, status_code=503, error="HTTP 503")
+        text = f"complete source {number}"
+        return FetchResult(
+            url,
+            f"Source {number}",
+            text,
+            len(text),
+            status_code=200,
+            truncated=outcome == "truncated",
+        )
+
+
+@pytest.mark.anyio
+async def test_research_refills_partial_first_wave_to_source_target() -> None:
+    harness = _ScriptedRefillHarness(["complete", "complete", "empty", "complete", "complete", "complete"])
+
+    result = await harness.research("synthetic fact", max_sources=3)
+
+    assert harness.fetched == [1, 2, 3, 4]
+    assert [item["url"] for item in result["sources"]] == [
+        "https://source-1.example/",
+        "https://source-2.example/",
+        "https://source-4.example/",
+    ]
+    assert (
+        result["target_sources"],
+        result["requested_sources"],
+        result["completed_sources"],
+        result["failed_sources"],
+        result["timed_out_sources"],
+    ) == (3, 4, 3, 1, 0)
+
+
+@pytest.mark.anyio
+async def test_research_replaces_truncated_page_with_complete_spare() -> None:
+    harness = _ScriptedRefillHarness(
+        ["complete", "complete", "truncated", "complete", "complete", "complete"]
+    )
+
+    result = await harness.research("synthetic fact", max_sources=3)
+
+    assert harness.fetched == [1, 2, 3, 4]
+    assert all(item["truncated"] is False for item in result["sources"])
+    assert all("source-3.example" not in item["url"] for item in result["sources"])
+    assert (
+        result["target_sources"],
+        result["requested_sources"],
+        result["completed_sources"],
+        result["failed_sources"],
+        result["timed_out_sources"],
+    ) == (3, 4, 3, 1, 0)
+
+
+@pytest.mark.anyio
+async def test_research_exhausted_spares_remains_partial_with_exact_attempt_counters() -> None:
+    harness = _ScriptedRefillHarness(["complete", "complete", "empty", "empty", "error", "empty"])
+
+    result = await harness.research("synthetic fact", max_sources=3)
+
+    assert harness.fetched == [1, 2, 3, 4, 5, 6]
+    assert len(result["sources"]) == 2
+    assert (
+        result["target_sources"],
+        result["requested_sources"],
+        result["completed_sources"],
+        result["failed_sources"],
+        result["timed_out_sources"],
+    ) == (3, 6, 2, 4, 0)
+
+
+@pytest.mark.anyio
+async def test_research_retains_useful_partial_row_only_when_target_cannot_be_filled() -> None:
+    harness = _ScriptedRefillHarness(["complete", "complete", "truncated", "empty", "error", "empty"])
+
+    result = await harness.research("synthetic fact", max_sources=3)
+
+    assert harness.fetched == [1, 2, 3, 4, 5, 6]
+    assert len(result["sources"]) == 3
+    assert result["sources"][-1]["url"] == "https://source-3.example/"
+    assert result["sources"][-1]["truncated"] is True
+    assert (
+        result["target_sources"],
+        result["requested_sources"],
+        result["completed_sources"],
+        result["failed_sources"],
+        result["timed_out_sources"],
+    ) == (3, 6, 3, 3, 0)
+
+
+@pytest.mark.anyio
+async def test_research_deadline_deficit_remains_partial_and_cancels_pending(monkeypatch) -> None:
+    monkeypatch.setattr(web_surfer_module, "_RESEARCH_TOTAL_BUDGET", 0.03, raising=False)
+    monkeypatch.setattr(web_surfer_module, "_RESEARCH_FETCH_BUDGET", 0.03, raising=False)
+    harness = _ScriptedRefillHarness(["complete", "complete", "slow", "complete", "complete", "complete"])
+
+    result = await asyncio.wait_for(harness.research("synthetic fact", max_sources=3), 0.2)
+
+    assert harness.fetched == [1, 2, 3]
+    assert harness.cancelled == [3]
+    assert (
+        result["target_sources"],
+        result["requested_sources"],
+        result["completed_sources"],
+        result["failed_sources"],
+        result["timed_out_sources"],
+    ) == (3, 3, 2, 0, 1)

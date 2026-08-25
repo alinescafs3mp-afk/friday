@@ -1624,6 +1624,123 @@ def test_bounded_distinct_source_ledger_is_explicitly_partial() -> None:
     assert len(payload["sources"]) == 5
 
 
+def _complete_research_rows(count: int) -> list[dict[str, Any]]:
+    return [
+        {
+            "url": f"https://refill-{index}.synthetic.example.com/fact",
+            "title": f"Refill {index}",
+            "text": f"Complete refill fact {index}.",
+            "text_length": len(f"Complete refill fact {index}."),
+            "status_code": 200,
+            "error": "",
+            "truncated": False,
+        }
+        for index in range(count)
+    ]
+
+
+def test_refilled_research_target_is_sourced_despite_discarded_attempts() -> None:
+    status, sources, payload = _project_web_tool_result(
+        "web_research",
+        {
+            "outbound_attempted": True,
+            "sources": _complete_research_rows(3),
+            "target_sources": 3,
+            "requested_sources": 4,
+            "completed_sources": 3,
+            "failed_sources": 1,
+            "timed_out_sources": 0,
+            "search_timed_out": False,
+        },
+    )
+
+    assert status == "sourced"
+    assert len(sources) == 3
+    assert payload is not None
+    assert payload["target_sources"] == 3
+    assert payload["failed_sources"] == 1
+
+
+def test_filled_research_target_stays_sourced_when_extra_direct_row_is_bounded_out() -> None:
+    status, sources, payload = _project_web_tool_result(
+        "web_research",
+        {
+            "outbound_attempted": True,
+            "sources": _complete_research_rows(4),
+            "target_sources": 3,
+            "requested_sources": 3,
+            "completed_sources": 4,
+            "failed_sources": 0,
+            "timed_out_sources": 0,
+            "search_timed_out": False,
+        },
+        limit=3,
+    )
+
+    assert status == "sourced"
+    assert len(sources) == 3
+    assert payload is not None
+    assert payload["target_sources"] == 3
+    assert payload["completed_sources"] == 4
+
+
+def test_unfilled_research_target_remains_partial_with_exact_counts() -> None:
+    status, sources, payload = _project_web_tool_result(
+        "web_research",
+        {
+            "outbound_attempted": True,
+            "sources": _complete_research_rows(2),
+            "target_sources": 3,
+            "requested_sources": 4,
+            "completed_sources": 2,
+            "failed_sources": 2,
+            "timed_out_sources": 0,
+            "search_timed_out": False,
+        },
+    )
+
+    assert status == "partial"
+    assert len(sources) == 2
+    assert payload is not None
+    assert payload["target_sources"] == 3
+    assert payload["requested_sources"] == 4
+
+
+@pytest.mark.parametrize("target", [True, 0, -1, "3", 4])
+def test_research_target_counter_is_fail_closed(target: Any) -> None:
+    assert _project_web_tool_result(
+        "web_research",
+        {
+            "outbound_attempted": True,
+            "sources": _complete_research_rows(1),
+            "target_sources": target,
+            "requested_sources": 3,
+            "completed_sources": 1,
+            "failed_sources": 2,
+            "timed_out_sources": 0,
+            "search_timed_out": False,
+        },
+    ) == ("failed", [], None)
+
+
+def test_research_without_target_keeps_legacy_completeness_semantics() -> None:
+    status, sources, payload = _project_web_tool_result(
+        "web_research",
+        {
+            "outbound_attempted": True,
+            "sources": _complete_research_rows(1),
+            "requested_sources": 1,
+            "completed_sources": 1,
+            "failed_sources": 0,
+            "timed_out_sources": 0,
+            "search_timed_out": False,
+        },
+    )
+    assert status == "sourced"
+    assert len(sources) == 1
+    assert payload is not None
+
+
 def test_research_counts_accept_direct_answers_but_reject_missing_source_rows() -> None:
     direct_and_page = [
         {

@@ -231,6 +231,7 @@ async def test_direct_sources_are_wired_into_research():
 
     source = inspect.getsource(WebSurfer.research)
     assert "direct_answers(query" in source
-    assert "sources: list[dict[str, Any]] = list(direct)" in source, (
-        "прямые числа не встают перед прочитанными страницами"
-    )
+    direct_admission = source.index("for item in direct:")
+    first_fetch = source.index("await fetch_batch(selected")
+    assert "record_item(item, attempted=False)" in source[direct_admission:first_fetch]
+    assert direct_admission < first_fetch, "прямые числа не встают перед страницами"

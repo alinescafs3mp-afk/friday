@@ -436,8 +436,8 @@ def test_an_empty_page_is_not_counted_as_a_readable_source():
     from friday.web_surfer import WebSurfer
 
     source = inspect.getsource(WebSurfer.research)
-    marker = source.index("readable_sources = ")
-    branch = source[marker : marker + 260]
+    marker = source.index("def record_item")
+    branch = source[marker : marker + 1_400]
     assert 'item.get("text")' in branch, "пустая страница считается читаемым источником"
 
 

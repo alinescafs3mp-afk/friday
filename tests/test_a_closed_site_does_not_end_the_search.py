@@ -44,8 +44,8 @@ def test_the_second_wave_prefers_other_sites() -> None:
     получает «цену узнать не удалось» вместо цены с соседнего сайта.
     """
     source = inspect.getsource(WebSurfer.research)
-    wave = source[source.index("readable_sources == 0 and spare") : source.index("requested_sources +=")]
-    assert "refused" in wave, "отказавшие домены больше не запоминаются"
+    wave = source[source.index("while len(complete) < target_sources") : source.index("missing = max")]
+    assert "attempted_hosts" in wave, "уже проверенные домены больше не запоминаются"
     assert "elsewhere" in wave and "same_place" in wave, (
         "вторая волна снова идёт по порядку выдачи — то есть туда же, откуда отказали"
     )
@@ -55,7 +55,7 @@ def test_the_second_wave_prefers_other_sites() -> None:
 def test_a_refused_domain_is_still_tried_when_there_is_nothing_else() -> None:
     """Порядок, а не запрет: единственный доступный сайт остаётся в очереди."""
     source = inspect.getsource(WebSurfer.research)
-    wave = source[source.index("readable_sources == 0 and spare") : source.index("requested_sources +=")]
+    wave = source[source.index("while len(complete) < target_sources") : source.index("missing = max")]
     # `same_place` идёт в тот же список, а не отбрасывается фильтром.
     assert "same_place = [" in wave
-    assert "(elsewhere + same_place)[:source_limit]" in wave
+    assert "(elsewhere + same_place)[:deficit]" in wave
