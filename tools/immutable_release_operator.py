@@ -71,6 +71,7 @@ FORBIDDEN_ROLLBACK_COMMITS = frozenset({"8345179af57a71cc6a64916c275cce5627abfd6
 
 _HEX40 = re.compile(r"[0-9a-f]{40}")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
+_BOOT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _VERSION = re.compile(r"[0-9]+(?:\.[0-9]+){2}(?:[a-z0-9.+-]*)?")
 _PIN = re.compile(r"(?P<name>[A-Za-z0-9_.-]+)==(?P<version>[^;\s]+)(?:\s*;.*)?$")
 _UNIT = re.compile(r"[A-Za-z0-9_.@:-]{1,128}\.service")
@@ -96,6 +97,7 @@ _SECONDARY_SHADOW_TO_ASSIST_TRANSITION = "secondary_shadow_to_assist"
 _SECONDARY_ASSIST_TO_DISABLED_TRANSITION = "secondary_assist_to_disabled"
 _SECONDARY_ASSIST_ENABLE_DOCUMENT_MAP_SHADOW_TRANSITION = "secondary_assist_enable_document_map_shadow"
 _SECONDARY_DOCUMENT_MAP_SHADOW_TO_ASSIST_TRANSITION = "secondary_document_map_shadow_to_assist"
+_PRIMARY_PROCESS_EPOCH_DOMAIN = b"friday.primary-process-epoch.v2\0"
 _SECONDARY_PRODUCT_STAGE_SCHEMA = "friday.secondary-product-stage-evidence.v2"
 _SECONDARY_PRODUCT_OPERATION_SCHEMA = "friday.secondary-product-operation-core.v1"
 _SECONDARY_PRODUCT_DIAGNOSTICS_SCHEMA = "friday.secondary-product-diagnostics.v1"
@@ -7979,7 +7981,34 @@ print(json.dumps({
                 raise ReleaseFailure("secondary_rollout_process_identity_invalid")
             return value
 
+        def boot_id() -> str:
+            descriptor = -1
+            try:
+                descriptor = os.open(
+                    proc_root / "sys/kernel/random/boot_id",
+                    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+                )
+                raw = os.read(descriptor, 38)
+                if not raw or len(raw) > 37 or b"\x00" in raw or os.read(descriptor, 1):
+                    raise ReleaseFailure("secondary_rollout_process_identity_invalid")
+            except ReleaseFailure:
+                raise
+            except OSError as exc:
+                raise ReleaseFailure("secondary_rollout_process_identity_invalid") from exc
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
+            try:
+                text = raw.decode("ascii", errors="strict")
+            except UnicodeError as exc:
+                raise ReleaseFailure("secondary_rollout_process_identity_invalid") from exc
+            value = text.strip()
+            if _BOOT_ID.fullmatch(value) is None or text not in {value, f"{value}\n"}:
+                raise ReleaseFailure("secondary_rollout_process_identity_invalid")
+            return value
+
         pid = main_pid()
+        observed_boot_id = boot_id()
         if not self._process_matches(pid, previous, "backend", proc_root=proc_root):
             raise ReleaseFailure("secondary_rollout_process_identity_invalid")
         descriptor = -1
@@ -8006,9 +8035,21 @@ print(json.dumps({
         fields = text[closing + 2 :].split() if closing > 0 else []
         if len(fields) < 20 or not fields[19].isdigit():
             raise ReleaseFailure("secondary_rollout_process_identity_invalid")
-        if main_pid() != pid or not self._process_matches(pid, previous, "backend", proc_root=proc_root):
+        if (
+            main_pid() != pid
+            or boot_id() != observed_boot_id
+            or not self._process_matches(pid, previous, "backend", proc_root=proc_root)
+        ):
             raise ReleaseFailure("secondary_rollout_process_identity_changed")
-        return pid, _sha256_bytes(f"{pid}:{fields[19]}".encode("ascii"))
+        epoch = (
+            _PRIMARY_PROCESS_EPOCH_DOMAIN
+            + observed_boot_id.encode("ascii")
+            + b"\0"
+            + str(pid).encode("ascii")
+            + b"\0"
+            + fields[19].encode("ascii")
+        )
+        return pid, _sha256_bytes(epoch)
 
     def _consume_secondary_rollout_attestation(
         self,

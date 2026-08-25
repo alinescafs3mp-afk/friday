@@ -19,6 +19,8 @@ import tools.immutable_release_operator as operator
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "deploy" / "secondary-brain" / "windows-sglang" / "scripts"
 RUNTIME = ROOT / "deploy" / "secondary-brain" / "windows-sglang" / "runtime"
+_BOOT_A = "11111111-2222-3333-4444-555555555555"
+_BOOT_B = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 
 def _previous(tmp_path: Path) -> operator.ReleaseIdentity:
@@ -40,6 +42,41 @@ def _candidate(tmp_path: Path) -> operator.ReleaseIdentity:
         tree_manifest_sha256="1" * 64,
         max_schema=39,
         secondary_product_runner_sha256="6" * 64,
+    )
+
+
+def _write_proc_identity(
+    proc_root: Path,
+    *,
+    pid: int,
+    starttime: str = "424242",
+    boot_id: str = _BOOT_A,
+) -> None:
+    process_root = proc_root / str(pid)
+    process_root.mkdir(parents=True, exist_ok=True)
+    fields = ["S", *("0" for _ in range(18)), starttime, "0"]
+    (process_root / "stat").write_text(f"{pid} (friday) {' '.join(fields)}\n", encoding="ascii")
+    boot_path = proc_root / "sys/kernel/random/boot_id"
+    boot_path.parent.mkdir(parents=True, exist_ok=True)
+    boot_path.write_text(f"{boot_id}\n", encoding="ascii")
+
+
+def _operator_process_identity(
+    tmp_path: Path,
+    proc_root: Path,
+    *,
+    pid: int,
+) -> tuple[int, str]:
+    port = object.__new__(operator.SystemdActivationPort)
+    port.config = SimpleNamespace(backend_unit="friday-backend.service")
+    port._systemctl = lambda *_args, **_kwargs: SimpleNamespace(  # type: ignore[method-assign]  # noqa: SLF001,E501
+        returncode=0,
+        stdout=f"{pid}\n".encode("ascii"),
+    )
+    port._process_matches = lambda *_args, **_kwargs: True  # type: ignore[method-assign]  # noqa: SLF001,E501
+    return port._current_backend_process_identity(  # noqa: SLF001
+        _previous(tmp_path),
+        proc_root=proc_root,
     )
 
 
@@ -834,15 +871,43 @@ def test_receipt_runner_must_match_the_exact_sealed_predecessor_artifact(
         operator._secondary_product_runner_artifact_sha256(previous)  # noqa: SLF001
 
 
+def test_process_epoch_is_identical_across_issuer_and_operator_and_bound_to_boot(
+    tmp_path: Path,
+) -> None:
+    pid = 2613
+    proc_root = tmp_path / "proc"
+    _write_proc_identity(proc_root, pid=pid)
+
+    issuer_epoch = witness.secondary_product_process_epoch_sha256(pid, proc_root=proc_root)
+    assert _operator_process_identity(tmp_path, proc_root, pid=pid) == (pid, issuer_epoch)
+
+    (proc_root / "sys/kernel/random/boot_id").write_text(f"{_BOOT_B}\n", encoding="ascii")
+    next_boot_epoch = witness.secondary_product_process_epoch_sha256(pid, proc_root=proc_root)
+    assert next_boot_epoch != issuer_epoch
+    assert _operator_process_identity(tmp_path, proc_root, pid=pid) == (pid, next_boot_epoch)
+
+
+@pytest.mark.parametrize("boot_id", ["", "not-a-boot-id", f"{_BOOT_A}x"])
+def test_process_epoch_rejects_missing_or_invalid_boot_identity(
+    tmp_path: Path,
+    boot_id: str,
+) -> None:
+    pid = 2613
+    proc_root = tmp_path / "proc"
+    _write_proc_identity(proc_root, pid=pid, boot_id=boot_id)
+
+    with pytest.raises(RuntimeError, match="boot identity"):
+        witness.secondary_product_process_epoch_sha256(pid, proc_root=proc_root)
+    with pytest.raises(operator.ReleaseFailure, match="process_identity_invalid"):
+        _operator_process_identity(tmp_path, proc_root, pid=pid)
+
+
 def test_process_epoch_attestation_rejects_systemd_pid_change(
     tmp_path: Path,
 ) -> None:
     pid = 2613
     proc_root = tmp_path / "proc"
-    process_root = proc_root / str(pid)
-    process_root.mkdir(parents=True)
-    fields = ["S", *("0" for _ in range(18)), "424242", "0"]
-    (process_root / "stat").write_text(f"{pid} (friday) {' '.join(fields)}\n", encoding="ascii")
+    _write_proc_identity(proc_root, pid=pid)
     port = object.__new__(operator.SystemdActivationPort)
     observed = iter((pid, pid + 1))
     port.config = SimpleNamespace(backend_unit="friday-backend.service")

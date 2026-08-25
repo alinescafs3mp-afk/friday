@@ -48,6 +48,8 @@ _SOURCE_REF = re.compile(
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _ATTESTATION_ID = re.compile(r"[0-9a-f]{32}\Z")
+_BOOT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
+_PRIMARY_PROCESS_EPOCH_DOMAIN = b"friday.primary-process-epoch.v2\0"
 
 SECONDARY_PRODUCT_ADVICE_PROOF_KEYS = frozenset(
     {
@@ -477,19 +479,61 @@ def secondary_product_diagnostics_receipt(
     return {**value, "binding_sha256": secondary_product_sha256(value)}
 
 
-def secondary_product_process_epoch_sha256(pid: int | None = None) -> str:
+def _secondary_product_boot_id(proc_root: Path) -> str:
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            proc_root / "sys/kernel/random/boot_id",
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        raw = os.read(descriptor, 38)
+        if not raw or len(raw) > 37 or b"\x00" in raw or os.read(descriptor, 1):
+            raise RuntimeError("secondary product boot identity is invalid")
+    except RuntimeError:
+        raise
+    except OSError as exc:
+        raise RuntimeError("secondary product boot identity is unavailable") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    try:
+        text = raw.decode("ascii", errors="strict")
+    except UnicodeError as exc:
+        raise RuntimeError("secondary product boot identity is invalid") from exc
+    boot_id = text.strip()
+    if _BOOT_ID.fullmatch(boot_id) is None or text not in {boot_id, f"{boot_id}\n"}:
+        raise RuntimeError("secondary product boot identity is invalid")
+    return boot_id
+
+
+def secondary_product_process_epoch_sha256(
+    pid: int | None = None,
+    *,
+    proc_root: Path = Path("/proc"),
+) -> str:
     process_id = os.getpid() if pid is None else pid
     if isinstance(process_id, bool) or process_id < 2:
         raise RuntimeError("secondary product primary process identity is invalid")
+    boot_id = _secondary_product_boot_id(proc_root)
     try:
-        text = (Path("/proc") / str(process_id) / "stat").read_text(encoding="ascii")
+        text = (proc_root / str(process_id) / "stat").read_text(encoding="ascii")
     except (OSError, UnicodeError) as exc:
         raise RuntimeError("secondary product primary process identity is unavailable") from exc
     closing = text.rfind(")")
     fields = text[closing + 2 :].split() if closing > 0 else []
     if len(fields) < 20 or not fields[19].isdigit():
         raise RuntimeError("secondary product primary process identity is invalid")
-    return secondary_product_sha256(f"{process_id}:{fields[19]}")
+    if _secondary_product_boot_id(proc_root) != boot_id:
+        raise RuntimeError("secondary product boot identity changed")
+    epoch = (
+        _PRIMARY_PROCESS_EPOCH_DOMAIN
+        + boot_id.encode("ascii")
+        + b"\0"
+        + str(process_id).encode("ascii")
+        + b"\0"
+        + fields[19].encode("ascii")
+    )
+    return secondary_product_sha256(epoch)
 
 
 def secondary_product_primary_certificate_sha256(settings: Any) -> str:
