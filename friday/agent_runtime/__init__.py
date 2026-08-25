@@ -9,6 +9,7 @@ import inspect
 import ipaddress
 import json
 import logging
+import math
 import re
 import time
 import unicodedata
@@ -205,6 +206,19 @@ from friday.orchestration.capability_outcome import (
     CapabilityOutcomeStatus,
     attach_accepted_capability_outcome_receipt,
     load_accepted_capability_outcome_receipt,
+)
+from friday.orchestration.effect_outcome import (
+    EffectAction,
+    EffectCapability,
+    EffectCompensationState,
+    EffectObservationState,
+    EffectObservationsV1,
+    EffectOutcomeV1,
+    EffectPublishability,
+    EffectReconciliationState,
+    EffectStatus,
+    attach_accepted_effect_outcome_receipt,
+    load_accepted_effect_outcome_receipt,
 )
 from friday.orchestration.message_window_outcome import (
     MESSAGE_WINDOW_MAX_MESSAGES,
@@ -28393,16 +28407,42 @@ def _obsidian_replayed_result_note_receipt(
         delivery = json.loads(str(row.get("delivery_json") or ""))
     except (TypeError, ValueError, json.JSONDecodeError):
         return None
-    if not isinstance(result, dict) or set(result) != {
+    base_fields = {
         "schema",
         "path",
         "revision",
         "previous_revision",
         "created",
         "applied",
-    }:
+    }
+    if not isinstance(result, dict):
         return None
-    if result.get("schema") != "friday.obsidian-note-operation.v1":
+    schema = result.get("schema")
+    if schema == "friday.obsidian-note-operation.v1":
+        if set(result) not in {frozenset(base_fields), frozenset({*base_fields, "target_revision"})}:
+            return None
+        if "target_revision" in result and result.get("target_revision") != result.get("revision"):
+            return None
+    elif schema == "friday.obsidian-note-operation.v2":
+        if set(result) != {
+            *base_fields,
+            "reconciliation_state",
+            "reconciliation_proof",
+            "sidecar_arguments_sha256",
+            "side_effect_receipt_sha256",
+        }:
+            return None
+        if (
+            result.get("reconciliation_state") != "settled"
+            or result.get("reconciliation_proof")
+            not in {"sidecar_committed", "legacy_exact_revision"}
+            or re.fullmatch(
+                r"[0-9a-f]{64}", str(result.get("side_effect_receipt_sha256") or "")
+            )
+            is None
+        ):
+            return None
+    else:
         return None
     if str(result.get("path") or "") != expected_path:
         return None
@@ -33697,6 +33737,451 @@ class AgentRuntime:
             return False
         fresh_actor = replace(actor, preset_key=str(principal_row["preset_key"] or "user"))
         return bool(authorization.authorize(fresh_actor, expected_security_id).allowed)
+
+    @staticmethod
+    def _effect_private_digest(namespace_key: bytes, domain: str, value: str) -> str:
+        if not isinstance(namespace_key, bytes) or len(namespace_key) < 32:
+            raise ValueError("effect outcome namespace key is unavailable")
+        if not domain or not value:
+            raise ValueError("effect outcome digest input is empty")
+        return hmac.new(
+            namespace_key,
+            b"friday.effect-outcome.v1\0"
+            + domain.encode("ascii", errors="strict")
+            + b"\0"
+            + value.encode("utf-8", errors="strict"),
+            hashlib.sha256,
+        ).hexdigest()
+
+    def _accepted_obsidian_effect_outcome(
+        self,
+        conn: Any,
+        *,
+        actor: ActorContext,
+        tool_name: str,
+        operation_id: str,
+        authority_allowed: bool,
+        publication_allowed: bool,
+    ) -> EffectOutcomeV1 | None:
+        """Build one body-free outcome from the durable owner-scoped ledger."""
+
+        action_by_tool = {
+            "obsidian_create_note": ("create", EffectAction.CREATE),
+            "obsidian_append_note": ("append", EffectAction.APPEND),
+        }
+        selected = action_by_tool.get(tool_name)
+        if selected is None or not operation_id or len(operation_id) > 200:
+            return None
+        expected_method, action = selected
+        principal = str(actor.own_id or "").strip()
+        if not principal:
+            return None
+        raw_row = conn.execute(
+            """SELECT id, user_id, work_item_id, vault_id, method,
+                      arguments_digest, status, result_json, delivery_json
+               FROM obsidian_operations WHERE id=? AND user_id=?""",
+            (operation_id, principal),
+        ).fetchone()
+        if raw_row is None:
+            return None
+        row = dict(raw_row)
+        arguments_digest = str(row.get("arguments_digest") or "")
+        if (
+            str(row.get("id") or "") != operation_id
+            or str(row.get("user_id") or "") != principal
+            or str(row.get("method") or "") != expected_method
+            or re.fullmatch(r"[0-9a-f]{64}", arguments_digest) is None
+        ):
+            return None
+
+        status_name = str(row.get("status") or "")
+        accepted_states = {
+            "committed",
+            "scan_pending",
+            "scan_complete",
+            "delivery_pending",
+            "delivered",
+            "reconciled",
+        }
+        if status_name in accepted_states:
+            effect_status = EffectStatus.SUCCEEDED
+            reconciliation = EffectReconciliationState.NOT_REQUIRED
+        elif status_name in {"prepared", "uncertain"}:
+            effect_status = EffectStatus.UNCERTAIN
+            reconciliation = EffectReconciliationState.REQUIRED
+        elif status_name in {"conflict", "cancelled"}:
+            effect_status = EffectStatus.REFUSED
+            reconciliation = EffectReconciliationState.NOT_REQUIRED
+        elif status_name == "failed":
+            effect_status = EffectStatus.UNAVAILABLE
+            reconciliation = EffectReconciliationState.NOT_REQUIRED
+        else:
+            return None
+
+        namespace_key = load_trace_namespace_key(conn)
+        result: dict[str, Any] = {}
+        delivery: dict[str, Any] = {}
+        side_effect_receipt_sha256: str | None = None
+        evidence_sha256: str | None = None
+        observations = EffectObservationsV1(
+            server_sync=EffectObservationState.PENDING,
+            reingest=EffectObservationState.PENDING,
+            physical_device=EffectObservationState.PENDING,
+        )
+        if effect_status is EffectStatus.SUCCEEDED:
+            try:
+                raw_result = json.loads(str(row.get("result_json") or ""))
+                raw_delivery = json.loads(str(row.get("delivery_json") or ""))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return None
+            if not isinstance(raw_result, dict) or not isinstance(raw_delivery, dict):
+                return None
+            result = raw_result
+            delivery = raw_delivery
+            delivery_fields = {
+                "local_write_complete",
+                "server_scan_complete",
+                "android_connected",
+                "android_completion",
+                "android_received",
+                "obsidian_opened",
+            }
+            completion = delivery.get("android_completion")
+            if (
+                set(delivery) != delivery_fields
+                or any(
+                    not isinstance(delivery.get(field), bool)
+                    for field in delivery_fields - {"android_completion"}
+                )
+                or (
+                    completion is not None
+                    and (
+                        isinstance(completion, bool)
+                        or not isinstance(completion, (int, float))
+                        or not math.isfinite(float(completion))
+                        or not 0.0 <= float(completion) <= 100.0
+                    )
+                )
+            ):
+                return None
+            if (
+                status_name in {"scan_complete", "delivery_pending", "delivered"}
+                and delivery.get("server_scan_complete") is not True
+                or status_name == "delivered"
+                and delivery.get("android_received") is not True
+                or delivery.get("android_received") is True
+                and (
+                    delivery.get("android_connected") is not True
+                    or delivery.get("server_scan_complete") is not True
+                )
+            ):
+                return None
+            v1_fields = {
+                "schema",
+                "path",
+                "revision",
+                "previous_revision",
+                "created",
+                "applied",
+            }
+            v2_fields = {
+                *v1_fields,
+                "reconciliation_state",
+                "reconciliation_proof",
+                "sidecar_arguments_sha256",
+                "side_effect_receipt_sha256",
+            }
+            schema = result.get("schema")
+            if schema == "friday.obsidian-note-operation.v1":
+                expected_v1_fields = {
+                    *v1_fields,
+                    "target_revision",
+                    *({"base_revision"} if expected_method == "append" else set()),
+                }
+                if (
+                    frozenset(result)
+                    not in {frozenset(v1_fields), frozenset(expected_v1_fields)}
+                    or "target_revision" in result
+                    and result.get("target_revision") != result.get("revision")
+                    or (
+                        "base_revision" in result
+                        and result.get("base_revision") != result.get("previous_revision")
+                    )
+                ):
+                    return None
+            elif schema == "friday.obsidian-note-operation.v2":
+                if (
+                    set(result) != v2_fields
+                    or result.get("reconciliation_state") != "settled"
+                    or result.get("reconciliation_proof")
+                    not in {"sidecar_committed", "legacy_exact_revision"}
+                    or (
+                        result.get("sidecar_arguments_sha256") is not None
+                        and re.fullmatch(
+                            r"[0-9a-f]{64}",
+                            str(result.get("sidecar_arguments_sha256") or ""),
+                        )
+                        is None
+                    )
+                    or re.fullmatch(
+                        r"[0-9a-f]{64}",
+                        str(result.get("side_effect_receipt_sha256") or ""),
+                    )
+                    is None
+                ):
+                    return None
+                reconciliation = EffectReconciliationState.SETTLED
+            else:
+                return None
+            path = result.get("path")
+            revision = result.get("revision")
+            previous_revision = result.get("previous_revision")
+            if (
+                not isinstance(path, str)
+                or not path
+                or len(path) > 1_024
+                or "\x00" in path
+                or re.fullmatch(r"[0-9a-f]{64}", str(revision or "")) is None
+                or (
+                    previous_revision is not None
+                    and re.fullmatch(r"[0-9a-f]{64}", str(previous_revision)) is None
+                )
+                or not isinstance(result.get("created"), bool)
+                or not isinstance(result.get("applied"), bool)
+                or bool(result.get("created")) is not (expected_method == "create")
+                or delivery.get("local_write_complete") is not True
+            ):
+                return None
+            if schema == "friday.obsidian-note-operation.v2":
+                proof_kind = str(result.get("reconciliation_proof") or "")
+                sidecar_arguments = result.get("sidecar_arguments_sha256")
+                if (
+                    proof_kind == "sidecar_committed"
+                    and (
+                        sidecar_arguments is None
+                        or expected_method == "create" and sidecar_arguments != revision
+                    )
+                    or proof_kind == "legacy_exact_revision"
+                    and (expected_method != "create" or sidecar_arguments is not None)
+                ):
+                    return None
+                local_receipt_payload = {
+                    "schema": "friday.obsidian-local-effect-receipt.v1",
+                    "operation_id_sha256": hashlib.sha256(
+                        operation_id.encode("utf-8", errors="strict")
+                    ).hexdigest(),
+                    "method": expected_method,
+                    "path_sha256": hashlib.sha256(
+                        path.encode("utf-8", errors="strict")
+                    ).hexdigest(),
+                    "revision": revision,
+                    "previous_revision": previous_revision,
+                    "proof_kind": proof_kind,
+                    "sidecar_arguments_sha256": sidecar_arguments,
+                }
+                expected_local_receipt = hashlib.sha256(
+                    json.dumps(
+                        local_receipt_payload,
+                        ensure_ascii=True,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("ascii")
+                ).hexdigest()
+                if result.get("side_effect_receipt_sha256") != expected_local_receipt:
+                    return None
+
+            canonical_effect = json.dumps(
+                {
+                    "operation_id": operation_id,
+                    "method": expected_method,
+                    "arguments_digest": arguments_digest,
+                    "result": result,
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            side_effect_receipt_sha256 = self._effect_private_digest(
+                namespace_key,
+                "side-effect-receipt",
+                canonical_effect,
+            )
+
+            server_sync = (
+                EffectObservationState.OBSERVED
+                if delivery.get("server_scan_complete") is True
+                else EffectObservationState.PENDING
+            )
+            physical_device = (
+                EffectObservationState.OBSERVED
+                if delivery.get("android_received") is True
+                else EffectObservationState.PENDING
+                if delivery.get("android_connected") is True
+                else EffectObservationState.UNAVAILABLE
+            )
+            indexed = conn.execute(
+                """SELECT b.current_revision, i.revision AS index_revision, i.state AS index_state
+                   FROM obsidian_note_bindings AS b
+                   LEFT JOIN obsidian_note_index AS i
+                     ON i.user_id=b.user_id AND i.binding_id=b.id AND i.vault_id=b.vault_id
+                   WHERE b.user_id=? AND b.vault_id=? AND b.current_path=?
+                     AND b.deleted_at IS NULL""",
+                (principal, str(row.get("vault_id") or ""), path),
+            ).fetchone()
+            if indexed is None:
+                reingest = EffectObservationState.PENDING
+            elif (
+                str(indexed["current_revision"] or "") == revision
+                and str(indexed["index_revision"] or "") == revision
+                and str(indexed["index_state"] or "") == "ready"
+            ):
+                reingest = EffectObservationState.OBSERVED
+            elif str(indexed["current_revision"] or "") != revision:
+                reingest = EffectObservationState.CONFLICT
+            else:
+                reingest = EffectObservationState.PENDING
+            observations = EffectObservationsV1(
+                server_sync=server_sync,
+                reingest=reingest,
+                physical_device=physical_device,
+            )
+            evidence_sha256 = self._effect_private_digest(
+                namespace_key,
+                "effect-evidence",
+                json.dumps(
+                    {
+                        "delivery": delivery,
+                        "observations": observations.to_payload(),
+                    },
+                    ensure_ascii=True,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
+        elif effect_status in {EffectStatus.REFUSED, EffectStatus.UNAVAILABLE}:
+            observations = EffectObservationsV1(
+                server_sync=EffectObservationState.UNAVAILABLE,
+                reingest=EffectObservationState.UNAVAILABLE,
+                physical_device=EffectObservationState.UNAVAILABLE,
+            )
+
+        work_item_id = str(row.get("work_item_id") or "").strip()
+        publishability = (
+            EffectPublishability.SUPPRESSED
+            if not authority_allowed or not publication_allowed
+            else EffectPublishability.ACCEPTED_FACTS
+            if effect_status is EffectStatus.SUCCEEDED
+            else EffectPublishability.UNCERTAINTY_ONLY
+            if effect_status is EffectStatus.UNCERTAIN
+            else EffectPublishability.NEGATIVE_ONLY
+        )
+        authorization_basis = json.dumps(
+            {
+                "allowed": bool(authority_allowed),
+                "principal": principal,
+                "security_id": "obsidian.write",
+                "tool": tool_name,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return EffectOutcomeV1(
+            effect_id_sha256=self._effect_private_digest(
+                namespace_key, "effect-id", operation_id
+            ),
+            work_item_sha256=(
+                self._effect_private_digest(namespace_key, "work-item", work_item_id)
+                if work_item_id
+                else None
+            ),
+            capability=EffectCapability.OBSIDIAN_NOTE_MUTATION,
+            action=action,
+            request_sha256=self._effect_private_digest(
+                namespace_key, "request", arguments_digest
+            ),
+            authorization_basis_sha256=self._effect_private_digest(
+                namespace_key, "authorization", authorization_basis
+            ),
+            idempotency_key_sha256=self._effect_private_digest(
+                namespace_key, "idempotency", operation_id
+            ),
+            status=effect_status,
+            reconciliation=reconciliation,
+            compensation=EffectCompensationState.NOT_REQUIRED,
+            side_effect_receipt_sha256=side_effect_receipt_sha256,
+            compensation_receipt_sha256=None,
+            evidence_sha256=evidence_sha256,
+            observations=observations,
+            publishability=publishability,
+            authority_rechecked=True,
+        )
+
+    def _unresolved_obsidian_effect_outcome(
+        self,
+        conn: Any,
+        *,
+        actor: ActorContext,
+        tool_name: str,
+        operation_id: str,
+        authority_allowed: bool,
+        publication_allowed: bool,
+    ) -> EffectOutcomeV1:
+        action = {
+            "obsidian_create_note": EffectAction.CREATE,
+            "obsidian_append_note": EffectAction.APPEND,
+        }.get(tool_name)
+        if action is None or not operation_id or len(operation_id) > 200:
+            raise ValueError("unresolved effect identity is invalid")
+        principal = str(actor.own_id or "").strip()
+        if not principal:
+            raise ValueError("unresolved effect principal is invalid")
+        namespace_key = load_trace_namespace_key(conn)
+        authorization_basis = json.dumps(
+            {
+                "allowed": bool(authority_allowed),
+                "principal": principal,
+                "security_id": "obsidian.write",
+                "tool": tool_name,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return EffectOutcomeV1(
+            effect_id_sha256=self._effect_private_digest(
+                namespace_key, "effect-id", operation_id
+            ),
+            work_item_sha256=None,
+            capability=EffectCapability.OBSIDIAN_NOTE_MUTATION,
+            action=action,
+            request_sha256=self._effect_private_digest(
+                namespace_key, "unresolved-request", operation_id
+            ),
+            authorization_basis_sha256=self._effect_private_digest(
+                namespace_key, "authorization", authorization_basis
+            ),
+            idempotency_key_sha256=self._effect_private_digest(
+                namespace_key, "idempotency", operation_id
+            ),
+            status=EffectStatus.UNCERTAIN,
+            reconciliation=EffectReconciliationState.BLOCKED,
+            compensation=EffectCompensationState.NOT_REQUIRED,
+            side_effect_receipt_sha256=None,
+            compensation_receipt_sha256=None,
+            evidence_sha256=None,
+            observations=EffectObservationsV1(
+                server_sync=EffectObservationState.PENDING,
+                reingest=EffectObservationState.PENDING,
+                physical_device=EffectObservationState.PENDING,
+            ),
+            publishability=(
+                EffectPublishability.UNCERTAINTY_ONLY
+                if authority_allowed and publication_allowed
+                else EffectPublishability.SUPPRESSED
+            ),
+            authority_rechecked=True,
+        )
 
     def _simple_public_news_publication_authorized(
         self,
@@ -47446,6 +47931,10 @@ class AgentRuntime:
                     response["_obsidian_publication_tool"] = str(
                         result_receipt.get("_obsidian_publication_tool") or ""
                     )
+                    if result_receipt.get("_obsidian_effect_operation_id"):
+                        response["_obsidian_effect_operation_id"] = str(
+                            result_receipt["_obsidian_effect_operation_id"]
+                        )
                     if result_receipt.get("_obsidian_open_url"):
                         response["_obsidian_open_url"] = result_receipt["_obsidian_open_url"]
                     if result_receipt.get("_obsidian_private_lineage_owned") is True:
@@ -48174,6 +48663,7 @@ class AgentRuntime:
         )
         accepted_simple_public_news_outcome = None
         accepted_archive_recall_outcome: ArchiveRecallOutcome | None = None
+        accepted_obsidian_effect_outcome: EffectOutcomeV1 | None = None
         accepted_archive_candidate_projection: ArchiveSearchAcceptedCandidateProjection | None = None
         selected_archive_work_evidence: SelectedArchiveEvidence | None = None
         archive_attestation = None
@@ -48499,6 +48989,40 @@ class AgentRuntime:
                     "attachment_query_files_matched",
                 ):
                     assistant_metadata.pop(private_key, None)
+
+            obsidian_effect_operation_id = str(
+                response.get("_obsidian_effect_operation_id") or ""
+            ).strip()
+            if obsidian_effect_operation_id:
+                accepted_obsidian_effect_outcome = self._accepted_obsidian_effect_outcome(
+                    publication_conn,
+                    actor=actor,
+                    tool_name=obsidian_publication_tool,
+                    operation_id=obsidian_effect_operation_id,
+                    authority_allowed=obsidian_publication_authorized,
+                    publication_allowed=publication_authorized,
+                )
+                if accepted_obsidian_effect_outcome is None:
+                    accepted_obsidian_effect_outcome = self._unresolved_obsidian_effect_outcome(
+                        publication_conn,
+                        actor=actor,
+                        tool_name=obsidian_publication_tool,
+                        operation_id=obsidian_effect_operation_id,
+                        authority_allowed=obsidian_publication_authorized,
+                        publication_allowed=publication_authorized,
+                    )
+                    if publication_authorized:
+                        content = (
+                            "Не удалось подтвердить завершение операции Obsidian: "
+                            "её итог остаётся неопределённым и требует сверки."
+                        )
+                        response["content"] = content
+                        response.pop("_obsidian_open_url", None)
+                        response["_obsidian_outcome"] = CapabilityStatus.UNCERTAIN.value
+                attach_accepted_effect_outcome_receipt(
+                    assistant_metadata,
+                    accepted_obsidian_effect_outcome,
+                )
 
             if (
                 archive_search_publication_reauth_required
@@ -48985,13 +49509,31 @@ class AgentRuntime:
                             accepted_outcome_sha256=stored_archive_receipt.outcome_sha256,
                         )
             else:
-                assistant_message = self.storage.store_message(
-                    conversation_id,
-                    user_id,
-                    "assistant",
-                    content,
-                    metadata=assistant_metadata,
-                    reply_to=source_search_lineage_user_message_id,
+                if accepted_obsidian_effect_outcome is not None:
+                    assistant_message = store_message_in_transaction(
+                        publication_conn,
+                        conversation_id,
+                        user_id,
+                        "assistant",
+                        content,
+                        metadata=assistant_metadata,
+                        reply_to=source_search_lineage_user_message_id,
+                    )
+                else:
+                    assistant_message = self.storage.store_message(
+                        conversation_id,
+                        user_id,
+                        "assistant",
+                        content,
+                        metadata=assistant_metadata,
+                        reply_to=source_search_lineage_user_message_id,
+                    )
+            if accepted_obsidian_effect_outcome is not None:
+                if assistant_message.get("content") != content:
+                    raise ValueError("Obsidian effect assistant durability reread changed content")
+                load_accepted_effect_outcome_receipt(
+                    assistant_message.get("metadata_json"),
+                    expected_outcome=accepted_obsidian_effect_outcome,
                 )
         publication_authority_changed_before_publication = bool(
             attachment_authority_changed_before_publication
@@ -51010,6 +51552,7 @@ class AgentRuntime:
         open_action_url = ""
         lineage_persisted = False
         obsidian_outcome = CapabilityStatus.NOT_STARTED
+        effect_operation_id = ""
         lineage_expected = bool(
             re.fullmatch(
                 r"msg_[0-9a-f]{16}",
@@ -51032,6 +51575,11 @@ class AgentRuntime:
                 "_obsidian_owned": True,
                 "_obsidian_outcome": obsidian_outcome.value,
                 "_obsidian_publication_tool": publication_tool,
+                **(
+                    {"_obsidian_effect_operation_id": effect_operation_id}
+                    if effect_operation_id
+                    else {}
+                ),
                 **({"_obsidian_open_url": open_action_url} if open_action_url else {}),
                 **({"_obsidian_private_lineage_owned": True} if private else {}),
             }
@@ -51270,43 +51818,61 @@ class AgentRuntime:
                     private=lineage_persisted,
                 )
             if existing_row is not None:
-                projected = _obsidian_replayed_result_note_receipt(
-                    existing_row,
-                    expected_operation_id=expected_operation_id,
-                    expected_path=intent.explicit_path,
-                )
-                if projected is None:
-                    obsidian_outcome = CapabilityStatus.UNCERTAIN
-                    return response(
-                        "Предыдущая операция Obsidian уже существует, но её итог нельзя "
-                        "подтвердить безопасной квитанцией. Повторную запись не запускала.",
-                        private=lineage_persisted,
+                existing_status = str(existing_row.get("status") or "")
+                existing_method = str(existing_row.get("method") or "")
+                reconcilable_retry = bool(
+                    existing_status in {"prepared", "uncertain"}
+                    and (
+                        selected_name == "obsidian_create_note"
+                        and existing_method == "create"
+                        or selected_name == "obsidian_append_note"
+                        and existing_method == "append"
                     )
-                rendered = render_obsidian_tool_result(
-                    selected_name,
-                    projected,
-                    expected_operation_id=expected_operation_id,
-                    expected_path=intent.explicit_path,
                 )
-                if not rendered:
-                    obsidian_outcome = CapabilityStatus.UNCERTAIN
-                    return response(
-                        "Предыдущая операция Obsidian уже существует, но её итог нельзя "
-                        "подтвердить безопасной квитанцией. Повторную запись не запускала.",
-                        private=lineage_persisted,
+                if not reconcilable_retry:
+                    effect_operation_id = (
+                        expected_operation_id
+                        if existing_method in {"create", "append"}
+                        else ""
                     )
-                if intent.resolved_local_date:
-                    rendered = f"{rendered}\nЛокальная дата: {intent.resolved_local_date}."
-                context.private_source_boundary_active = bool(
-                    context.private_source_boundary_active or lineage_persisted
-                )
-                obsidian_outcome = CapabilityStatus.SUCCEEDED
-                return response(rendered, private=lineage_persisted)
+                    projected = _obsidian_replayed_result_note_receipt(
+                        existing_row,
+                        expected_operation_id=expected_operation_id,
+                        expected_path=intent.explicit_path,
+                    )
+                    if projected is None:
+                        obsidian_outcome = CapabilityStatus.UNCERTAIN
+                        return response(
+                            "Предыдущая операция Obsidian уже существует, но её итог нельзя "
+                            "подтвердить безопасной квитанцией. Повторную запись не запускала.",
+                            private=lineage_persisted,
+                        )
+                    rendered = render_obsidian_tool_result(
+                        selected_name,
+                        projected,
+                        expected_operation_id=expected_operation_id,
+                        expected_path=intent.explicit_path,
+                    )
+                    if not rendered:
+                        obsidian_outcome = CapabilityStatus.UNCERTAIN
+                        return response(
+                            "Предыдущая операция Obsidian уже существует, но её итог нельзя "
+                            "подтвердить безопасной квитанцией. Повторную запись не запускала.",
+                            private=lineage_persisted,
+                        )
+                    if intent.resolved_local_date:
+                        rendered = f"{rendered}\nЛокальная дата: {intent.resolved_local_date}."
+                    context.private_source_boundary_active = bool(
+                        context.private_source_boundary_active or lineage_persisted
+                    )
+                    obsidian_outcome = CapabilityStatus.SUCCEEDED
+                    return response(rendered, private=lineage_persisted)
             obsidian_outcome = CapabilityStatus.EMPTY
-            return response(
-                "Предыдущая операция Obsidian не найдена в журнале; повторной записи не было.",
-                private=lineage_persisted,
-            )
+            if existing_row is None:
+                return response(
+                    "Предыдущая операция Obsidian не найдена в журнале; повторной записи не было.",
+                    private=lineage_persisted,
+                )
 
         fresh_actor = self._fresh_obsidian_actor(actor, selected_name)
         if fresh_actor is None:
@@ -51322,6 +51888,23 @@ class AgentRuntime:
         result = await self.kernel.execute(selected_name, arguments, actor=fresh_actor)
         used.append(selected_name)
         publication_tool = selected_name
+        if selected_name in {"obsidian_create_note", "obsidian_append_note"}:
+            try:
+                effect_row = self.storage.get_obsidian_operation(
+                    actor.own_id,
+                    expected_operation_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - publication will stay receipt-free
+                LOGGER.warning("Obsidian effect receipt lookup failed (%s)", type(exc).__name__)
+                effect_row = None
+            expected_effect_method = (
+                "create" if selected_name == "obsidian_create_note" else "append"
+            )
+            if (
+                isinstance(effect_row, Mapping)
+                and str(effect_row.get("method") or "") == expected_effect_method
+            ):
+                effect_operation_id = expected_operation_id
         if not result.success:
             tool_error = str(result.error or "")
             if tool_error.startswith("Authorization denied"):

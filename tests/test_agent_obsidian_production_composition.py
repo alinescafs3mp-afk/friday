@@ -9,6 +9,7 @@ physical Android delivery belongs to the manual acceptance battery.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
@@ -20,6 +21,13 @@ from test_obsidian_runtime import _Client, _DeletionAwareClient, _Manager
 
 from friday.agent_runtime import AgentRuntime
 from friday.execution_kernel import ExecutionKernel
+from friday.orchestration.effect_outcome import (
+    EffectAction,
+    EffectObservationState,
+    EffectPublishability,
+    EffectStatus,
+    load_accepted_effect_outcome_receipt,
+)
 from friday.organs import ServiceContext
 from friday.organs.obsidian import ObsidianOrgan
 from friday.organs.obsidian.frontmatter import parse_frontmatter
@@ -222,6 +230,13 @@ def _receipt(stack: _Stack, reply: dict[str, Any]) -> dict[str, Any]:
     return result.data
 
 
+def _effect_receipt(stack: _Stack, reply: dict[str, Any]):  # noqa: ANN202
+    stored = stack.storage.get_message(str(reply["message_id"]), "alice")
+    assert stored is not None
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    return load_accepted_effect_outcome_receipt(metadata), metadata
+
+
 @pytest.mark.asyncio
 async def test_note_create_append_and_daily_exact_messages_mutate_the_real_vault(
     settings: Any,
@@ -243,6 +258,19 @@ async def test_note_create_append_and_daily_exact_messages_mutate_the_real_vault
     )
     assert created_text.count("Заметка создана через Telegram.") == 1
     assert "Локальная дата: 2026-08-22." in created["message"]
+    created_effect, created_metadata = _effect_receipt(stack, created)
+    assert created_effect.outcome.status is EffectStatus.SUCCEEDED
+    assert created_effect.outcome.action is EffectAction.CREATE
+    assert created_effect.outcome.observations.server_sync is EffectObservationState.OBSERVED
+    assert created_effect.outcome.observations.reingest is EffectObservationState.OBSERVED
+    assert created_effect.outcome.observations.physical_device is EffectObservationState.OBSERVED
+    private_effect_json = json.dumps(
+        created_metadata["accepted_effect_outcome"], ensure_ascii=False
+    )
+    assert "Projects/Friday Test.md" not in private_effect_json
+    assert "Заметка создана через Telegram" not in private_effect_json
+    assert "alice" not in private_effect_json
+    assert str(created_receipt["operation_id"]) not in private_effect_json
 
     appended = await _chat(stack, _NOTE_APPEND, conversation_id=conversation_id)
     appended_receipt = _receipt(stack, appended)
@@ -253,6 +281,9 @@ async def test_note_create_append_and_daily_exact_messages_mutate_the_real_vault
     assert note.startswith("# Тест интеграции Friday\n\nЗаметка создана через Telegram.")
     assert note.count("## Проверка дополнения") == 1
     assert note.count("Этот текст был добавлен отдельной командой") == 1
+    appended_effect, _appended_metadata = _effect_receipt(stack, appended)
+    assert appended_effect.outcome.status is EffectStatus.SUCCEEDED
+    assert appended_effect.outcome.action is EffectAction.APPEND
 
     daily = await _chat(stack, _DAILY_APPEND, conversation_id=conversation_id)
     daily_receipt = _receipt(stack, daily)
@@ -261,6 +292,9 @@ async def test_note_create_append_and_daily_exact_messages_mutate_the_real_vault
     assert daily_receipt["path"] == "Daily/2026-08-22.md"
     assert daily_text.count("## Friday") == 1
     assert daily_text.count("- Проверена интеграция с Obsidian") == 1
+    daily_stored = storage.get_message(str(daily["message_id"]), "alice")
+    assert daily_stored is not None
+    assert "accepted_effect_outcome" not in json.loads(str(daily_stored["metadata_json"] or "{}"))
 
 
 @pytest.mark.asyncio
@@ -467,6 +501,68 @@ async def test_offline_exact_create_reports_pending_then_delivers_the_same_real_
     assert delivered["revision"] == receipt["revision"] == before.revision
     assert delivered["delivery"]["android_received"] is True
     assert stack.store.read_text(path).text() == before.text()
+
+
+@pytest.mark.asyncio
+async def test_committed_create_keeps_private_suppressed_effect_receipt_after_late_revoke(
+    settings: Any,
+    storage: Any,
+    tmp_path: Path,
+) -> None:
+    stack = await _ready_stack(settings, storage, tmp_path)
+    execute = stack.kernel.execute
+
+    async def execute_then_revoke(
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        actor: ActorContext | None = None,
+    ) -> Any:
+        result = await execute(name, arguments, actor=actor)
+        if name == "obsidian_create_note" and result.success:
+            storage.set_permission_override("alice", "obsidian.write", "deny")
+        return result
+
+    stack.kernel.execute = execute_then_revoke  # type: ignore[method-assign]
+
+    reply = await _chat(stack, _NOTE_CREATE)
+
+    assert stack.store.exists("Projects/Friday Test.md")
+    assert reply["obsidian_authority_changed_before_publication"] is True
+    assert "Путь:" not in reply["message"]
+    effect, metadata = _effect_receipt(stack, reply)
+    assert effect.outcome.status is EffectStatus.SUCCEEDED
+    assert effect.outcome.publishability is EffectPublishability.SUPPRESSED
+    assert effect.outcome.authority_rechecked is True
+    encoded = json.dumps(metadata["accepted_effect_outcome"], ensure_ascii=False)
+    assert "Projects/Friday Test.md" not in encoded
+    assert "Заметка создана через Telegram" not in encoded
+
+
+@pytest.mark.asyncio
+async def test_effect_receipt_validation_failure_rolls_back_the_assistant_message(
+    settings: Any,
+    storage: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stack = await _ready_stack(settings, storage, tmp_path)
+
+    def reject_receipt(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("synthetic accepted effect receipt rejection")
+
+    monkeypatch.setattr(
+        "friday.agent_runtime.load_accepted_effect_outcome_receipt",
+        reject_receipt,
+    )
+
+    with pytest.raises(RuntimeError, match="synthetic accepted effect receipt rejection"):
+        await _chat(stack, _NOTE_CREATE)
+
+    assert stack.store.exists("Projects/Friday Test.md")
+    conversation = storage.list_conversations("alice", limit=1)[0]
+    rows = storage.get_conversation_messages(str(conversation["id"]), user_id="alice")
+    assert [str(row["role"]) for row in rows] == ["user"]
 
 
 @pytest.mark.asyncio
