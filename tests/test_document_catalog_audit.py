@@ -447,9 +447,7 @@ def test_invalid_inbox_ordering_fails_closed(tmp_path: Path) -> None:
     path = tmp_path / "synthetic.sqlite3"
     conn = _make_database(path)
     _raw(conn, "bad-order", inbox_status="pending")
-    conn.execute(
-        "UPDATE inbox SET created_at='not-a-timestamp' WHERE raw_object_id='bad-order'"
-    )
+    conn.execute("UPDATE inbox SET created_at='not-a-timestamp' WHERE raw_object_id='bad-order'")
     conn.commit()
     conn.close()
 

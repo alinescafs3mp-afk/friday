@@ -243,9 +243,7 @@ _RAW_FTS_OBJECT_NAMES = (
     "raw_objects_ad",
     "raw_objects_au",
 )
-_RAW_FTS_SHADOW_TABLES = frozenset(
-    {"raw_fts_data", "raw_fts_idx", "raw_fts_docsize", "raw_fts_config"}
-)
+_RAW_FTS_SHADOW_TABLES = frozenset({"raw_fts_data", "raw_fts_idx", "raw_fts_docsize", "raw_fts_config"})
 
 
 def _normalized_schema_objects(
@@ -283,9 +281,7 @@ def _raw_fts_schema_fingerprint(conn: sqlite3.Connection) -> str | None:
         return None
     shadow_tables = {
         str(row[0])
-        for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name GLOB 'raw_fts_*'"
-        )
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name GLOB 'raw_fts_*'")
     }
     if shadow_tables != _RAW_FTS_SHADOW_TABLES:
         return None
@@ -569,11 +565,7 @@ def audit_document_catalog(
                0 AS has_semantic_title
         """
     )
-    catalog_join = (
-        "LEFT JOIN document_catalog c ON c.raw_object_id=r.id"
-        if catalog_available
-        else ""
-    )
+    catalog_join = "LEFT JOIN document_catalog c ON c.raw_object_id=r.id" if catalog_available else ""
     uploader_expression = _exact_uploader_raw_dependency("r") if exact_uploader else "1"
     query = f"""WITH current_inbox AS MATERIALIZED (
         SELECT inbox_id,raw_object_id,status FROM (
@@ -607,9 +599,7 @@ def audit_document_catalog(
          WHERE r.user_id=? AND r.content_type='file'
          ORDER BY r.rowid
     """  # nosec B608 - every interpolated fragment is a code-owned SQL predicate
-    params: tuple[Any, ...] = (
-        (tenant, exact_uploader, tenant) if exact_uploader else (tenant, tenant)
-    )
+    params: tuple[Any, ...] = (tenant, exact_uploader, tenant) if exact_uploader else (tenant, tenant)
 
     excluded: Counter[str] = Counter()
     registered = 0
@@ -659,10 +649,7 @@ def audit_document_catalog(
                 elif not bool(row["has_catalog_row"]):
                     catalog_state = "missing"
                     catalog_missing += 1
-                elif not (
-                    bool(row["catalog_source_current"])
-                    and bool(row["catalog_revision_current"])
-                ):
+                elif not (bool(row["catalog_source_current"]) and bool(row["catalog_revision_current"])):
                     catalog_state = "stale"
                     catalog_stale += 1
                 elif bool(row["catalog_current"]):
@@ -784,9 +771,7 @@ def audit_document_catalog(
             "uncapped": True,
             "scope_accounted": True,
             "catalog_complete": bool(
-                catalog_available
-                and catalogued == registered
-                and catalog_incomplete == 0
+                catalog_available and catalogued == registered and catalog_incomplete == 0
             ),
             "lexical_complete": bool(lexical_available and lexical == registered),
             "semantic_complete": bool(catalog_available and semantic_titles == registered),
@@ -922,18 +907,12 @@ def validate_report(report: dict[str, Any]) -> None:
     expected_reasons = {
         "catalog_projection_not_available": 0 if catalog_available else registered,
         "catalog_row_missing": (
-            registered
-            - counts["catalogued_files"]
-            - counts["files_with_stale_enrichment_revision"]
+            registered - counts["catalogued_files"] - counts["files_with_stale_enrichment_revision"]
             if catalog_available
             else 0
         ),
-        "catalog_row_stale": (
-            counts["files_with_stale_enrichment_revision"] if catalog_available else 0
-        ),
-        "catalog_row_incomplete": (
-            counts["files_with_incomplete_catalog"] if catalog_available else 0
-        ),
+        "catalog_row_stale": (counts["files_with_stale_enrichment_revision"] if catalog_available else 0),
+        "catalog_row_incomplete": (counts["files_with_incomplete_catalog"] if catalog_available else 0),
         "semantic_title_projection_not_available": 0 if catalog_available else registered,
         "semantic_title_missing": (
             registered - counts["files_with_semantic_title"] if catalog_available else 0
@@ -982,9 +961,7 @@ def validate_report(report: dict[str, Any]) -> None:
         and counts["catalogued_files"] == registered
         and counts["files_with_incomplete_catalog"] == 0
     )
-    expected_semantic_complete = bool(
-        catalog_available and counts["files_with_semantic_title"] == registered
-    )
+    expected_semantic_complete = bool(catalog_available and counts["files_with_semantic_title"] == registered)
     if completeness != {
         "status": "incomplete",
         "uncapped": True,
