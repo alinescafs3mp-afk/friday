@@ -1,3 +1,18 @@
+## 0.207.19 — 2026-08-25
+
+### Receipt-backed Obsidian effect reconciliation
+
+- Create and append now reconcile an interrupted commit only from an exact
+  private sidecar or the bounded legacy create postcondition; reconciliation
+  never replays or rewrites vault content after uncertainty.
+- Accepted operation results are immutable, prepared/uncertain work drains in
+  the owner-fair background tick, and later user edits preserve the historical
+  effect proof without being overwritten.
+- Every durable create/append reply stores a closed, body-free accepted effect
+  outcome atomically with the assistant message. Synchronization, re-ingest and
+  physical-device observations remain independent; late authorization loss
+  suppresses public details without erasing the historical receipt.
+
 ## 0.207.18 — 2026-08-25
 
 ### Skew-safe DocumentCatalog convergence
