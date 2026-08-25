@@ -20,6 +20,7 @@ import pytest
 
 import friday
 import tools.immutable_release_operator as operator
+from friday.storage import SCHEMA_VERSION
 
 
 def _release(tmp_path: Path, name: str, *, schema: int, commit: str) -> operator.ReleaseIdentity:
@@ -4950,11 +4951,13 @@ def test_actual_installed_source_smoke_ignores_a_poisoned_live_database(
         commit="a" * 40,
         version=version,
         tree_manifest_sha256="b" * 64,
-        max_schema=41,
+        max_schema=SCHEMA_VERSION,
         memory_vault_mode_contract=operator.MEMORY_VAULT_MODE_CONTRACT,
         obsidian_cutover_contract=operator.OBSIDIAN_CUTOVER_CONTRACT,
     )
-    receipt = b'{"memory_vault_mode_contract":"v1","schema":41,"status":"clear"}\n'
+    receipt = (f'{{"memory_vault_mode_contract":"v1","schema":{SCHEMA_VERSION},"status":"clear"}}\n').encode(
+        "ascii"
+    )
     assert operator.installed_surface_smoke(release) == hashlib.sha256(receipt).hexdigest()
     assert current_database.read_bytes() == b"live-current"
     assert legacy_database.read_bytes() == b"live-legacy"

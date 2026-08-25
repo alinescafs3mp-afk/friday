@@ -136,6 +136,12 @@ def test_run_command_passes_an_explicit_environment_to_the_child(
 def test_pytest_phases_share_one_private_non_live_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    fixture_manifest = json.loads(
+        (quality_gate._SCHEMA_FIXTURE_DIRECTORY / quality_gate._SCHEMA_FIXTURE_MANIFEST).read_text(
+            encoding="utf-8"
+        )
+    )
+    expected_schema_fixture_count = len(fixture_manifest["fixtures"])
     test_assets = {
         "FRIDAY_REAL_SYNCTHING_BINARY": "/test-assets/syncthing",
         "FRIDAY_SYNCTHING_AMD64_TARBALL": "/test-assets/syncthing.tar.gz",
@@ -189,7 +195,7 @@ def test_pytest_phases_share_one_private_non_live_environment(
         assert env_file.is_relative_to(home)
         assert backup_directory.is_dir()
         assert backup_directory.is_relative_to(home)
-        assert len(tuple(backup_directory.glob("schema-*.sqlite3"))) == 29
+        assert len(tuple(backup_directory.glob("schema-*.sqlite3"))) == expected_schema_fixture_count
         if os.name != "nt":
             assert stat.S_IMODE(home.stat().st_mode) == 0o700
             assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
