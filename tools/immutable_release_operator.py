@@ -1238,13 +1238,13 @@ def _validate_secondary_product_snapshot(
     profile_admission: str,
     after: bool,
 ) -> dict[str, Any]:
-    del after  # Both promotion witnesses require a healthy admitted endpoint throughout.
     if not isinstance(value, dict):
         raise ReleaseFailure("secondary_rollout_receipt_invalid")
     workload = value.get("workload")
     shadow = value.get("shadow")
     last_failure = value.get("last_failure")
     retry_after = value.get("circuit_retry_after_sec")
+    available = value.get("available")
     if (
         set(value) != _SECONDARY_PRODUCT_SNAPSHOT_KEYS
         or value.get("schema") != "friday.optional-secondary-health.v1"
@@ -1253,7 +1253,8 @@ def _validate_secondary_product_snapshot(
         or value.get("configured") is not True
         or value.get("mode") != "shadow"
         or value.get("state") != "healthy"
-        or value.get("available") is not True
+        or type(available) is not bool
+        or ((stage != "private-shadow" or after) and available is not True)
         or (last_failure is not None and last_failure not in _SECONDARY_PRODUCT_FAILURES)
         or value.get("profile_id") != profile_id
         or value.get("profile_admission") != profile_admission

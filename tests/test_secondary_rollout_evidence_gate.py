@@ -104,9 +104,17 @@ def _snapshot(*, stage: str) -> dict[str, Any]:
     }
 
 
-def _receipt(tmp_path: Path, *, stage: str) -> dict[str, Any]:
+def _receipt(
+    tmp_path: Path,
+    *,
+    stage: str,
+    before_available: bool = True,
+    after_available: bool = True,
+) -> dict[str, Any]:
     before = _snapshot(stage=stage)
+    before["available"] = before_available
     after = copy.deepcopy(before)
+    after["available"] = after_available
     if stage == "public-shadow":
         after["skipped_total"] += 1
         after["skip_reasons"]["private_text_disallowed"] = 1
@@ -328,6 +336,45 @@ def test_gate_contract_matches_the_automatic_product_runner() -> None:
 @pytest.mark.parametrize("stage", ["public-shadow", "private-shadow"])
 def test_exact_automatic_predecessor_receipt_is_accepted(tmp_path: Path, stage: str) -> None:
     _validate(tmp_path, _receipt(tmp_path, stage=stage), stage=stage)
+
+
+def test_private_shadow_accepts_stale_healthy_before_and_requires_fresh_after(
+    tmp_path: Path,
+) -> None:
+    _validate(
+        tmp_path,
+        _receipt(tmp_path, stage="private-shadow", before_available=False),
+        stage="private-shadow",
+    )
+
+    stale_after = _receipt(
+        tmp_path,
+        stage="private-shadow",
+        after_available=False,
+    )
+    with pytest.raises(operator.ReleaseFailure, match="secondary_rollout_receipt_invalid"):
+        _validate(tmp_path, stale_after, stage="private-shadow")
+
+
+def test_stale_private_before_must_still_be_healthy_and_public_remains_fresh(
+    tmp_path: Path,
+) -> None:
+    outage_before = _receipt(
+        tmp_path,
+        stage="private-shadow",
+        before_available=False,
+    )
+    outage_before["diagnostics_before"]["state"] = "degraded"
+    with pytest.raises(operator.ReleaseFailure, match="secondary_rollout_receipt_invalid"):
+        _validate(tmp_path, outage_before, stage="private-shadow")
+
+    stale_public = _receipt(
+        tmp_path,
+        stage="public-shadow",
+        before_available=False,
+    )
+    with pytest.raises(operator.ReleaseFailure, match="secondary_rollout_receipt_invalid"):
+        _validate(tmp_path, stale_public, stage="public-shadow")
 
 
 @pytest.mark.parametrize(
