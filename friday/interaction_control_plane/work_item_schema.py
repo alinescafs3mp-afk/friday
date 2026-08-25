@@ -815,37 +815,46 @@ WHEN NOT EXISTS (
            AND NEW.prompt_boundary_user_message_id=work.anchor_user_message_id
            AND NEW.prompt_assistant_message_id=work.anchor_assistant_message_id
            AND NEW.prompt_updated_at=work.created_at
-           AND NEW.prompt_revision=1
-           AND NEW.state='waiting'
-           AND NEW.selected_ordinal IS NULL
-           AND NEW.answered_at IS NULL
-           AND NEW.replay_boundary_user_message_id IS NULL
-           AND NEW.replay_assistant_message_id IS NULL
-           AND NEW.accepted_replay_plan_sha256 IS NULL
-           AND NEW.accepted_replay_outcome_sha256 IS NULL
-           AND NEW.failed_ordinal IS NULL
-           AND NEW.failure_boundary_user_message_id IS NULL
-           AND NEW.failure_assistant_message_id IS NULL
-           AND NEW.failure_recorded_at IS NULL
-           AND NEW.accepted_failure_plan_sha256 IS NULL
-           AND NEW.accepted_failure_outcome_sha256 IS NULL
-           AND NEW.minimum_ordinal=1
-           AND NEW.maximum_ordinal=(
-               SELECT COUNT(*)
-                 FROM work_item_archive_candidate_set_items item
-                WHERE item.candidate_set_id=candidate_set.id
-                  AND item.work_item_id=work.id
-           )
-           AND 1=(
-               SELECT MIN(item.ordinal)
-                 FROM work_item_archive_candidate_set_items item
-                WHERE item.candidate_set_id=candidate_set.id
-           )
-           AND NEW.maximum_ordinal=(
-               SELECT MAX(item.ordinal)
-                 FROM work_item_archive_candidate_set_items item
-                WHERE item.candidate_set_id=candidate_set.id
-           )
+    )
+BEGIN
+    SELECT RAISE(ABORT, 'archive candidate question scope is invalid');
+END;
+
+-- Keep each schema expression below SQLite's fixed parser-depth budget. The
+-- three BEFORE INSERT guards are one contract: scope, pristine initial state,
+-- and a complete contiguous candidate set.
+CREATE TRIGGER IF NOT EXISTS trg_work_item_archive_candidate_questions_initial_insert
+BEFORE INSERT ON work_item_archive_candidate_questions
+WHEN NEW.prompt_revision<>1
+  OR NEW.state<>'waiting'
+  OR NEW.selected_ordinal IS NOT NULL
+  OR NEW.answered_at IS NOT NULL
+  OR NEW.replay_boundary_user_message_id IS NOT NULL
+  OR NEW.replay_assistant_message_id IS NOT NULL
+  OR NEW.accepted_replay_plan_sha256 IS NOT NULL
+  OR NEW.accepted_replay_outcome_sha256 IS NOT NULL
+  OR NEW.failed_ordinal IS NOT NULL
+  OR NEW.failure_boundary_user_message_id IS NOT NULL
+  OR NEW.failure_assistant_message_id IS NOT NULL
+  OR NEW.failure_recorded_at IS NOT NULL
+  OR NEW.accepted_failure_plan_sha256 IS NOT NULL
+  OR NEW.accepted_failure_outcome_sha256 IS NOT NULL
+  OR NEW.minimum_ordinal<>1
+BEGIN
+    SELECT RAISE(ABORT, 'archive candidate question scope is invalid');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_archive_candidate_questions_cardinality_insert
+BEFORE INSERT ON work_item_archive_candidate_questions
+WHEN NOT EXISTS (
+        SELECT 1
+          FROM work_item_archive_candidate_set_items item
+         WHERE item.candidate_set_id=NEW.candidate_set_id
+           AND item.work_item_id=NEW.work_item_id
+         GROUP BY item.candidate_set_id,item.work_item_id
+        HAVING COUNT(*)=NEW.maximum_ordinal
+           AND MIN(item.ordinal)=1
+           AND MAX(item.ordinal)=NEW.maximum_ordinal
     )
 BEGIN
     SELECT RAISE(ABORT, 'archive candidate question scope is invalid');
