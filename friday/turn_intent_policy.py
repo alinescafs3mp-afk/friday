@@ -607,18 +607,26 @@ _MCP_META = re.compile(
 )
 
 _RU_IMAGE_OBJECT = (
-    r"(?:картин\w*|изображени\w*|рисунк\w*|иллюстраци\w*|"
+    r"(?:картин\w*|изображени\w*|рисунк\w*|иллюстраци\w*|фото(?:графи\w*)?|"
     r"png(?:[- ](?:картин\w*|изображени\w*))?)"
 )
 _RU_IMAGE_ACTION = (
     r"(?:рисовать|нарисовать|генерировать|сгенерировать|генерить|сгенерить|"
     r"создавать|создать|делать|сделать)"
 )
+_RU_IMAGE_FINITE_ACTION = (
+    r"(?:рисуешь|рисуете|генерируешь|генерируете|созда[её]шь|созда[её]те|"
+    r"делаешь|делаете)"
+)
 _RU_IMAGE_MODAL = r"(?:можешь|можете|умеешь|умеете|способна|способен|способны)"
 _RU_IMAGE_GENERATION_NOUN = rf"(?:генераци\w*|создани\w*)\s+{_RU_IMAGE_OBJECT}"
-_RU_IMAGE_DESCRIPTION_SUFFIX = r"(?:\s+по\s+(?:текстовому\s+)?описанию)?"
+_RU_IMAGE_DESCRIPTION_SUFFIX = (
+    r"(?:\s+(?:по\s+(?:текстовому\s+)?(?:описанию|промпту)|"
+    r"из\s+(?:текстового\s+)?(?:описания|промпта)))?"
+)
 _IMAGE_GENERATION_CAPABILITY_RU = re.compile(
-    rf"^(?:пятниц\w*(?:\s*[,—:-]\s*|\s+))?(?:а\s+)?(?:"
+    rf"^(?:пятниц\w*(?:\s*[,—:-]\s*|\s+))?(?:а\s+)?"
+    rf"(?:(?:скажи|подскажи)(?:\s+пожалуйста)?(?:\s*[,—:-]\s*|\s+))?(?:"
     rf"(?:(?:ты\s+)?(?:мне\s+)?(?:вообще\s+)?{_RU_IMAGE_MODAL}(?:\s+ли)?"
     rf"(?:\s+ты)?(?:\s+мне)?(?:\s+вообще)?\s+)"
     rf"(?:{_RU_IMAGE_ACTION}(?:\s+мне)?\s+{_RU_IMAGE_OBJECT}"
@@ -628,6 +636,8 @@ _IMAGE_GENERATION_CAPABILITY_RU = re.compile(
     rf"{_RU_IMAGE_ACTION}\s+{_RU_IMAGE_MODAL}(?:\s+ли)?(?:\s+ты)?)|"
     rf"(?:(?:ты\s+)?(?:вообще\s+)?{_RU_IMAGE_OBJECT}(?:\s+ты)?\s+"
     rf"{_RU_IMAGE_MODAL}(?:\s+ли)?(?:\s+ты)?\s+{_RU_IMAGE_ACTION})|"
+    rf"(?:(?:(?:ты|вы)\s+)?(?:вообще\s+)?{_RU_IMAGE_FINITE_ACTION}\s+"
+    rf"{_RU_IMAGE_OBJECT}{_RU_IMAGE_DESCRIPTION_SUFFIX})|"
     rf"(?:(?:ты\s+)?(?:вообще\s+)?поддержива(?:ешь|ете)(?:\s+ли)?"
     rf"(?:\s+ты)?\s+{_RU_IMAGE_GENERATION_NOUN})|"
     rf"(?:(?:есть|имеется)\s+ли\s+у\s+тебя\s+"
@@ -642,19 +652,24 @@ _IMAGE_GENERATION_CAPABILITY_RU = re.compile(
     rf")\s*[?!.]*\)*$",
     re.IGNORECASE,
 )
-_EN_IMAGE_OBJECT = r"(?:pictures?|images?|illustrations?)"
+_EN_IMAGE_OBJECT = r"(?:pictures?|images?|illustrations?|photos?|photographs?)"
 _EN_IMAGE_ACTION = r"(?:draw|generate|create|make)"
-_EN_IMAGE_DESCRIPTION_SUFFIX = r"(?:\s+from\s+(?:(?:a\s+)?(?:text\s+)?description|text))?"
+_EN_IMAGE_DESCRIPTION_SUFFIX = (
+    r"(?:\s+from\s+(?:an?\s+)?(?:(?:text(?:ual)?\s+)?descriptions?|"
+    r"(?:text\s+)?prompts?|text))?"
+)
 _IMAGE_GENERATION_CAPABILITY_EN = re.compile(
     r"^(?:friday(?:\s*[,—:-]\s*|\s+))?(?:"
     r"(?:(?:can|could)\s+you|are\s+you\s+able\s+to)\s+"
-    rf"{_EN_IMAGE_ACTION}\s+(?:me\s+)?(?:an?\s+)?{_EN_IMAGE_OBJECT}"
+    rf"(?:actually\s+)?{_EN_IMAGE_ACTION}\s+(?:me\s+)?(?:an?\s+)?{_EN_IMAGE_OBJECT}"
     rf"{_EN_IMAGE_DESCRIPTION_SUFFIX}|"
     r"are\s+you\s+capable\s+of\s+(?:drawing|generating|creating|making)\s+"
     rf"{_EN_IMAGE_OBJECT}|"
-    rf"do\s+you\s+{_EN_IMAGE_ACTION}\s+(?:an?\s+)?{_EN_IMAGE_OBJECT}"
+    rf"do\s+you\s+(?:actually\s+)?{_EN_IMAGE_ACTION}\s+(?:an?\s+)?{_EN_IMAGE_OBJECT}"
     rf"{_EN_IMAGE_DESCRIPTION_SUFFIX}|"
     r"do\s+you\s+support\s+(?:free[- ]?form\s+)?image\s+generation|"
+    r"do\s+you\s+support\s+(?:drawing|generating|creating|making)\s+"
+    rf"{_EN_IMAGE_OBJECT}{_EN_IMAGE_DESCRIPTION_SUFFIX}|"
     r"do\s+you\s+have\s+(?:an?\s+)?(?:image|picture)\s+generation"
     r"(?:\s+capability)?|"
     rf"do\s+you\s+have\s+(?:the\s+)?(?:ability|capability)\s+to\s+"
