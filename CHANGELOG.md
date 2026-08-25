@@ -1,3 +1,24 @@
+## 0.207.27 — 2026-08-25
+
+### Durable comparison reader and document reliability hotfix
+
+- Schema 42 installs the dormant body-free reader and lifecycle projection for
+  a later conversation/document comparison flow. Exact message selection, Raw
+  document pins, ambiguity history and accepted receipts survive restart; this
+  release enables no comparison writer, admission or runtime route.
+- Complete, authenticated read-only document reviews are no longer mistaken
+  for an unsupported created or delivered file merely because they describe
+  what the source document contains. Actual carrier, delivery and other effect
+  claims remain fail-closed.
+- Complete large spreadsheets with a section column before their dense row
+  ordinal now receive a deterministic all-row analysis profile instead of a
+  lossy model MAP. Ambiguous layouts still fall back, and a positional row
+  identity is never promoted to a semantic key for document comparison.
+- Bounded secondary Inbox advice now requests a code-owned strict JSON schema
+  within its admitted output envelope. Downstream validation and exact primary
+  fallback are unchanged; secondary authority remains limited to Inbox
+  extraction and does not include document review or web search.
+
 ## 0.207.26 — 2026-08-25
 
 ### Assist rollout witness hotfix

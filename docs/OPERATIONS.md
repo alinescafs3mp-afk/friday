@@ -91,6 +91,12 @@ write всё равно требует review, а tools, effects и publication
 недоступны. Любая ошибка ведёт в exact primary fallback; отсутствие
 ноутбука не меняе ответственность primary.
 
+Source 0.207.27 не расширяет полномочия secondary: bounded Inbox
+extraction запрашивает точную code-owned JSON Schema и по-прежнему
+проходит downstream validation. Malformed, truncated или unavailable
+secondary даёт exact primary fallback. Веб-поиск и ревью документов
+в этот workload не входят.
+
 На ноутбуке установлен и с 0.207.24 включён fail-closed at-logon
 gateway publication recovery. После готовности LAN, Docker и exact healthy
 `friday-secondary-gateway` он требует два последовательных совпавших
@@ -689,7 +695,7 @@ orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.26`.
+требуйте `status=ok` и `version=0.207.27`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

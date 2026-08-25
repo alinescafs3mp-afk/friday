@@ -2,9 +2,12 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.26**. Авторизованный read-only `archive_search`
+Текущая версия: **0.207.27**. Авторизованный read-only `archive_search`
 объединяет личные документы, знания, сообщения и Obsidian с точными
-источниками, покрытием и финальной повторной проверкой прав. Schema 41
+источниками, покрытием и финальной повторной проверкой прав. Schema 42
+добавляет dormant body-free reader/lifecycle projection для будущего
+сравнения переписки с документом; writer, admission и runtime route в
+этом релизе не включены. Schema 41
 использует rebuildable body-free DocumentCatalog с bounded durable
 обогащением, точно привязанный к версии
 авторитетного Raw Object и состоянию извлечения; schema 40 добавила immutable
@@ -273,7 +276,7 @@ VRAM обнаружился при старте, а не на первом по�
 2. Создайте новый sibling release только из wheel; установленный venv не правьте пофайлово.
 3. Дайте оператору остановить backend и Telegram bridge и сохранить проверенный согласованный снимок SQLite, WAL, Telegram inbox и exact Obsidian root.
 4. Выполните offline migration, переключите общий release anchor атомарно, примите backend и только затем запускайте bridge. При ошибке используйте exact rollback, а не повреждённый прежний каталог.
-5. Схема SQLite — **41**. Schema 31 один раз фиксирует `relation_history_complete_from`; schema 32 добавляет monotonic observed boundary и REPLACE/context guards; schema 33 — неизменяемые transport-id повторной загрузки; schema 34 — проверяемое имя, данное пользователем в конкретном сообщении; schema 35 — изолированные профили, vault, onboarding, журнал операций и конфликты Obsidian; schema 36 — стабильные note bindings, revision-aware index/link graph и expiring candidate/Active Frame state; schema 37 — ограниченное person-owned хранилище структурных ошибок до фиксации assistant-сообщения; schema 38 — короткоживущие owner-scoped `RecallConversation` Work Item и закрытый Active Frame, привязанные к точному принятому результату окна переписки; schema 39 — закрытые labels `RecallSelectedArchiveEvidence` и один body-free sidecar выбранного источника; schema 40 — immutable body-free набор archive-кандидатов и durable ordinal question; schema 41 — rebuildable body-free `document_catalog` с exact Raw revision/extraction binding и закрытыми explicit-incomplete состояниями. Миграция schema 35→36 сначала побайтно проверяет выпущенную Obsidian-схему и только затем атомарно расширяет operation contract; schema 37–41 отдельно проверяют свои точные DDL-проекции. Остальные авторитетные знания, Inbox и разговоры не переписываются; более новая неизвестная схема отклоняется без изменений.
+5. Схема SQLite — **42**. Schema 31 один раз фиксирует `relation_history_complete_from`; schema 32 добавляет monotonic observed boundary и REPLACE/context guards; schema 33 — неизменяемые transport-id повторной загрузки; schema 34 — проверяемое имя, данное пользователем в конкретном сообщении; schema 35 — изолированные профили, vault, onboarding, журнал операций и конфликты Obsidian; schema 36 — стабильные note bindings, revision-aware index/link graph и expiring candidate/Active Frame state; schema 37 — ограниченное person-owned хранилище структурных ошибок до фиксации assistant-сообщения; schema 38 — короткоживущие owner-scoped `RecallConversation` Work Item и закрытый Active Frame, привязанные к точному принятому результату окна переписки; schema 39 — закрытые labels `RecallSelectedArchiveEvidence` и один body-free sidecar выбранного источника; schema 40 — immutable body-free набор archive-кандидатов и durable ordinal question; schema 41 — rebuildable body-free `document_catalog` с exact Raw revision/extraction binding и закрытыми explicit-incomplete состояниями; schema 42 — dormant body-free проекции Work Item/Active Frame для будущего сравнения переписки с документом. Миграция schema 35→36 сначала побайтно проверяет выпущенную Obsidian-схему и только затем атомарно расширяет operation contract; schema 37–42 отдельно проверяют свои точные DDL-проекции. Остальные авторитетные знания, Inbox и разговоры не переписываются; более новая неизвестная схема отклоняется без изменений.
 
 Перед обновлением можно дополнительно выполнить
 `jericho backup --label before-upgrade` и `jericho verify-backup`. Это SQLite-only
@@ -316,7 +319,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Успешный canary startup должен показать в `/api/health` версию `0.207.26`,
+Успешный canary startup должен показать в `/api/health` версию `0.207.27`,
 точный profile id, `canary_ready`, `live_attestation_clear` и оба
 зарегистрированных route; простого HTTP `status=ok` недостаточно.
 
