@@ -180,7 +180,7 @@ def test_pytest_phases_share_one_private_non_live_environment(
         assert env_file.is_relative_to(home)
         assert backup_directory.is_dir()
         assert backup_directory.is_relative_to(home)
-        assert len(tuple(backup_directory.glob("schema-*.sqlite3"))) == 27
+        assert len(tuple(backup_directory.glob("schema-*.sqlite3"))) == 28
         if os.name != "nt":
             assert stat.S_IMODE(home.stat().st_mode) == 0o700
             assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
