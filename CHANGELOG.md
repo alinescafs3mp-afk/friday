@@ -1,3 +1,17 @@
+## 0.207.15 — 2026-08-25
+
+### Точный выбор источника из архивной выдачи
+
+- Ответ `archive_search` с 2–20 разными проверяемыми источниками
+  создаёт body-free durable выбор; строгий RU/EN порядковый ответ
+  повторно читает тот же source/revision без нового поиска или модели.
+- Restart, expiry, cancellation, mode/source/permission drift, replacement,
+  stale receipt и CAS-гонки закрыты детерминированно; `стоп`
+  всегда имеет приоритет, а любой drift не публикует источник.
+- Durable admission выполняется до ingestion вложений и связана с точным
+  user/conversation/work-item revision, поэтому старый ответ не может
+  изменить заменившую его кандидатуру.
+
 ## 0.207.14 — 2026-08-25
 
 ### Schema-capable foundation for durable archive source selection

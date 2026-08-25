@@ -2,11 +2,12 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.14**. Авторизованный read-only `archive_search`
+Текущая версия: **0.207.15**. Авторизованный read-only `archive_search`
 объединяет личные документы, знания, сообщения и Obsidian с точными
 источниками, покрытием и финальной повторной проверкой прав. Schema 40
 добавляет immutable body-free набор archive-кандидатов и durable ordinal
-question для точного возобновления после restart. Добавлен выключенный по умолчанию контур
+question: выбор номера точно возобновляет нужный источник после restart без
+повторного поиска или вызова модели. Добавлен выключенный по умолчанию контур
 опционального GPT-OSS secondary brain: отдельный private-CA endpoint,
 строго привязанный MXFP4 profile, bounded дедлайны и fail-soft fallback.
 Первичная модель остаётся финальной; secondary не имеет доступа к
@@ -309,7 +310,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Успешный canary startup должен показать в `/api/health` версию `0.207.14`,
+Успешный canary startup должен показать в `/api/health` версию `0.207.15`,
 точный profile id, `canary_ready`, `live_attestation_clear` и оба
 зарегистрированных route; простого HTTP `status=ok` недостаточно.
 
