@@ -1021,9 +1021,7 @@ async def test_reconcile_settles_oldest_prepared_create_from_historical_sidecar_
     operation_id = "prepared-create-historical-receipt"
     path = "Recovery/Historical.md"
     content = "Первоначальная версия Friday."
-    target_revision = hashlib.sha256(
-        notes.render_create_content(content).encode("utf-8")
-    ).hexdigest()
+    target_revision = hashlib.sha256(notes.render_create_content(content).encode("utf-8")).hexdigest()
     storage.prepare_obsidian_operation(
         "alice",
         operation_id=operation_id,

@@ -28434,12 +28434,8 @@ def _obsidian_replayed_result_note_receipt(
             return None
         if (
             result.get("reconciliation_state") != "settled"
-            or result.get("reconciliation_proof")
-            not in {"sidecar_committed", "legacy_exact_revision"}
-            or re.fullmatch(
-                r"[0-9a-f]{64}", str(result.get("side_effect_receipt_sha256") or "")
-            )
-            is None
+            or result.get("reconciliation_proof") not in {"sidecar_committed", "legacy_exact_revision"}
+            or re.fullmatch(r"[0-9a-f]{64}", str(result.get("side_effect_receipt_sha256") or "")) is None
         ):
             return None
     else:
@@ -33899,8 +33895,7 @@ class AgentRuntime:
                     *({"base_revision"} if expected_method == "append" else set()),
                 }
                 if (
-                    frozenset(result)
-                    not in {frozenset(v1_fields), frozenset(expected_v1_fields)}
+                    frozenset(result) not in {frozenset(v1_fields), frozenset(expected_v1_fields)}
                     or "target_revision" in result
                     and result.get("target_revision") != result.get("revision")
                     or (
@@ -33959,7 +33954,8 @@ class AgentRuntime:
                     proof_kind == "sidecar_committed"
                     and (
                         sidecar_arguments is None
-                        or expected_method == "create" and sidecar_arguments != revision
+                        or expected_method == "create"
+                        and sidecar_arguments != revision
                     )
                     or proof_kind == "legacy_exact_revision"
                     and (expected_method != "create" or sidecar_arguments is not None)
@@ -33971,9 +33967,7 @@ class AgentRuntime:
                         operation_id.encode("utf-8", errors="strict")
                     ).hexdigest(),
                     "method": expected_method,
-                    "path_sha256": hashlib.sha256(
-                        path.encode("utf-8", errors="strict")
-                    ).hexdigest(),
+                    "path_sha256": hashlib.sha256(path.encode("utf-8", errors="strict")).hexdigest(),
                     "revision": revision,
                     "previous_revision": previous_revision,
                     "proof_kind": proof_kind,
@@ -34087,9 +34081,7 @@ class AgentRuntime:
             separators=(",", ":"),
         )
         return EffectOutcomeV1(
-            effect_id_sha256=self._effect_private_digest(
-                namespace_key, "effect-id", operation_id
-            ),
+            effect_id_sha256=self._effect_private_digest(namespace_key, "effect-id", operation_id),
             work_item_sha256=(
                 self._effect_private_digest(namespace_key, "work-item", work_item_id)
                 if work_item_id
@@ -34097,15 +34089,11 @@ class AgentRuntime:
             ),
             capability=EffectCapability.OBSIDIAN_NOTE_MUTATION,
             action=action,
-            request_sha256=self._effect_private_digest(
-                namespace_key, "request", arguments_digest
-            ),
+            request_sha256=self._effect_private_digest(namespace_key, "request", arguments_digest),
             authorization_basis_sha256=self._effect_private_digest(
                 namespace_key, "authorization", authorization_basis
             ),
-            idempotency_key_sha256=self._effect_private_digest(
-                namespace_key, "idempotency", operation_id
-            ),
+            idempotency_key_sha256=self._effect_private_digest(namespace_key, "idempotency", operation_id),
             status=effect_status,
             reconciliation=reconciliation,
             compensation=EffectCompensationState.NOT_REQUIRED,
@@ -34149,21 +34137,15 @@ class AgentRuntime:
             separators=(",", ":"),
         )
         return EffectOutcomeV1(
-            effect_id_sha256=self._effect_private_digest(
-                namespace_key, "effect-id", operation_id
-            ),
+            effect_id_sha256=self._effect_private_digest(namespace_key, "effect-id", operation_id),
             work_item_sha256=None,
             capability=EffectCapability.OBSIDIAN_NOTE_MUTATION,
             action=action,
-            request_sha256=self._effect_private_digest(
-                namespace_key, "unresolved-request", operation_id
-            ),
+            request_sha256=self._effect_private_digest(namespace_key, "unresolved-request", operation_id),
             authorization_basis_sha256=self._effect_private_digest(
                 namespace_key, "authorization", authorization_basis
             ),
-            idempotency_key_sha256=self._effect_private_digest(
-                namespace_key, "idempotency", operation_id
-            ),
+            idempotency_key_sha256=self._effect_private_digest(namespace_key, "idempotency", operation_id),
             status=EffectStatus.UNCERTAIN,
             reconciliation=EffectReconciliationState.BLOCKED,
             compensation=EffectCompensationState.NOT_REQUIRED,
@@ -48990,9 +48972,7 @@ class AgentRuntime:
                 ):
                     assistant_metadata.pop(private_key, None)
 
-            obsidian_effect_operation_id = str(
-                response.get("_obsidian_effect_operation_id") or ""
-            ).strip()
+            obsidian_effect_operation_id = str(response.get("_obsidian_effect_operation_id") or "").strip()
             if obsidian_effect_operation_id:
                 accepted_obsidian_effect_outcome = self._accepted_obsidian_effect_outcome(
                     publication_conn,
@@ -51575,11 +51555,7 @@ class AgentRuntime:
                 "_obsidian_owned": True,
                 "_obsidian_outcome": obsidian_outcome.value,
                 "_obsidian_publication_tool": publication_tool,
-                **(
-                    {"_obsidian_effect_operation_id": effect_operation_id}
-                    if effect_operation_id
-                    else {}
-                ),
+                **({"_obsidian_effect_operation_id": effect_operation_id} if effect_operation_id else {}),
                 **({"_obsidian_open_url": open_action_url} if open_action_url else {}),
                 **({"_obsidian_private_lineage_owned": True} if private else {}),
             }
@@ -51831,9 +51807,7 @@ class AgentRuntime:
                 )
                 if not reconcilable_retry:
                     effect_operation_id = (
-                        expected_operation_id
-                        if existing_method in {"create", "append"}
-                        else ""
+                        expected_operation_id if existing_method in {"create", "append"} else ""
                     )
                     projected = _obsidian_replayed_result_note_receipt(
                         existing_row,
@@ -51897,9 +51871,7 @@ class AgentRuntime:
             except Exception as exc:  # noqa: BLE001 - publication will stay receipt-free
                 LOGGER.warning("Obsidian effect receipt lookup failed (%s)", type(exc).__name__)
                 effect_row = None
-            expected_effect_method = (
-                "create" if selected_name == "obsidian_create_note" else "append"
-            )
+            expected_effect_method = "create" if selected_name == "obsidian_create_note" else "append"
             if (
                 isinstance(effect_row, Mapping)
                 and str(effect_row.get("method") or "") == expected_effect_method

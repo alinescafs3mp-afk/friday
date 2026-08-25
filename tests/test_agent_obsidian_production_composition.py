@@ -264,9 +264,7 @@ async def test_note_create_append_and_daily_exact_messages_mutate_the_real_vault
     assert created_effect.outcome.observations.server_sync is EffectObservationState.OBSERVED
     assert created_effect.outcome.observations.reingest is EffectObservationState.OBSERVED
     assert created_effect.outcome.observations.physical_device is EffectObservationState.OBSERVED
-    private_effect_json = json.dumps(
-        created_metadata["accepted_effect_outcome"], ensure_ascii=False
-    )
+    private_effect_json = json.dumps(created_metadata["accepted_effect_outcome"], ensure_ascii=False)
     assert "Projects/Friday Test.md" not in private_effect_json
     assert "Заметка создана через Telegram" not in private_effect_json
     assert "alice" not in private_effect_json

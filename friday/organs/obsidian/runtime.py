@@ -2583,10 +2583,7 @@ class ObsidianRuntime:
             method = str(operation["method"])
             if (
                 owner_id in selected_owners
-                and (
-                    status not in {"prepared", "uncertain"}
-                    or method in {"create", "append"}
-                )
+                and (status not in {"prepared", "uncertain"} or method in {"create", "append"})
                 and owner_id not in oldest_by_owner
             ):
                 oldest_by_owner[owner_id] = operation

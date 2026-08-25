@@ -784,9 +784,7 @@ class ObsidianService:
                 or receipt.target_revision != target_revision
                 or receipt.created is not expected_created
             ):
-                raise IdempotencyConflictError(
-                    "operation receipt does not match the frozen ledger target"
-                )
+                raise IdempotencyConflictError("operation receipt does not match the frozen ledger target")
             if receipt.state == "committed":
                 return receipt
             try:
