@@ -161,6 +161,43 @@ def _synthetic_wide_unclassified_xlsx() -> dict[str, Any]:
     )
 
 
+def _synthetic_shifted_ordinal_schedule_xlsx() -> dict[str, Any]:
+    """A complete schedule whose ``№`` column follows a section column."""
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "STAFF"
+    sheet.append(["Подразделение", "№", "Должность", "Звание", "ФИО", "Код", "Статус"])
+    for position in range(1, 292):
+        sheet.append(
+            [
+                f"Группа {(position - 1) // 25 + 1}",
+                position,
+                f"Должность {position:03d} расширенного штатного расписания",
+                "специалист",
+                f"Сотрудник {position:03d}",
+                f"STAFF-{position:03d}",
+                "штат",
+            ]
+        )
+    stream = io.BytesIO()
+    workbook.save(stream)
+    workbook.close()
+    extracted = DocumentExtractor().extract(stream.getvalue(), "shifted-ordinal-schedule.xlsx")
+    assert extracted.success is True and isinstance(extracted.office_structure_index, dict)
+    assert extracted.office_structure_index["complete"] is False
+    assert len(extracted.text) > agent_runtime_module._ATTACHMENT_CONTEXT_CHARS
+    return trusted_office_attachment(
+        {
+            "filename": "shifted-ordinal-schedule.xlsx",
+            "transient_text": extracted.text,
+            "extraction_success": True,
+            "verification_eligible": True,
+            OFFICE_STRUCTURE_KEY: extracted.office_structure_index,
+        }
+    )
+
+
 def test_wide_unclassified_xlsx_never_certifies_an_authoritative_zero_record_count() -> None:
     attachment = _synthetic_wide_unclassified_xlsx()
     analysis = agent_runtime_module._tabular_file_analysis(0, attachment)
@@ -170,6 +207,29 @@ def test_wide_unclassified_xlsx_never_certifies_an_authoritative_zero_record_cou
         agent_runtime_module._attachment_tabular_profile_bundle(
             [attachment],
             task_kind="summary",
+        )
+        is None
+    )
+
+
+def test_shifted_ordinal_schedule_uses_a_complete_summary_profile_without_semantic_comparison() -> None:
+    attachment = _synthetic_shifted_ordinal_schedule_xlsx()
+    analysis = agent_runtime_module._tabular_file_analysis(0, attachment)
+
+    assert analysis is not None
+    assert analysis["records_total"] == 291
+    assert analysis["record_identity"] == "source_row"
+    summary = agent_runtime_module._attachment_tabular_profile_bundle(
+        [attachment],
+        task_kind="summary",
+    )
+    assert summary is not None
+    assert summary.source_complete is summary.map_complete is True
+    assert summary.ordered_record_count == 291
+    assert (
+        agent_runtime_module._attachment_tabular_profile_bundle(
+            [attachment, attachment],
+            task_kind="comparison",
         )
         is None
     )
@@ -1915,6 +1975,44 @@ async def test_four_ordinary_office_files_have_bounded_map_completion_headroom(
     assert bundle.files_total == bundle.files_readable == 4
     assert bundle.chunks_mapped == bundle.chunks_total == 4
     assert bundle.map_complete is complete is True
+
+
+@pytest.mark.asyncio
+async def test_large_bare_upload_with_shifted_ordinal_uses_one_complete_synthesis(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "synthetic-shifted-ordinal-owner"
+    storage.ensure_user(owner, preset_key="owner")
+    attachment = _synthetic_shifted_ordinal_schedule_xlsx()
+    llm = _HierarchyLLM("Полное ревью штатного расписания.")
+    runtime = AgentRuntime(
+        replace(settings, verify_answers=True, verify_min_answer_chars=1),
+        storage,
+        llm=llm,
+    )
+    monkeypatch.setattr(runtime, "_prepare_context", _prepare_without_archive)
+    actor = AuthorizationService(storage).actor_for_user(owner, source="test")
+
+    result = await runtime.chat(
+        owner,
+        "Загружен документ: shifted-ordinal-schedule.xlsx",
+        actor=actor,
+        attachments=[attachment],
+        enable_tools=True,
+        synthetic_document_notice=True,
+    )
+
+    assert result["message"] == "Полное ревью штатного расписания."
+    assert _chunk_payloads(llm) == []
+    assert len(llm.calls) == 1
+    assert agent_runtime_module._ATTACHMENT_TABULAR_PROFILE_PREFIX in _blob(llm.calls[0]["messages"])
+    assert result["attachment_context_expected_count"] == 1
+    assert result["attachment_context_readable_count"] == 1
+    assert result["attachment_coverage_complete"] is True
+    assert result["attachment_verification_complete"] is True
+    assert result["verification_status"] == "skipped"
 
 
 @pytest.mark.asyncio

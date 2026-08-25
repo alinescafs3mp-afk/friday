@@ -21462,6 +21462,56 @@ def _tabular_carrier_cells(line: str) -> tuple[str, ...]:
     )
 
 
+def _tabular_inferred_ordinal_column(rows: Sequence[Sequence[str]]) -> int | None:
+    """Find one unambiguous dense 1-based row-number column.
+
+    Incomplete Office indexes deliberately retain the complete line carrier but
+    may have no semantic row roles.  The previous fallback recognized only the
+    common ``№``-in-column-one layout.  Real staffing workbooks often put a
+    section/unit column before ``№``; treating those rows as miscellaneous sent
+    the whole sheet through lossy model MAP calls.
+
+    This inference is intentionally narrow.  A candidate must cover at least
+    half of the carrier rows, contain almost entirely distinct positive
+    integers, and advance by one (or restart at one) across at least three
+    quarters of adjacent numbered rows.  Ambiguity returns ``None`` and keeps
+    the existing fail-closed model hierarchy.  The inferred ordinal is used
+    only for complete-source summary/analysis profiles; it is not promoted to a
+    semantic identity for pairwise spreadsheet comparison.
+    """
+
+    if len(rows) < 3:
+        return None
+    max_columns = max((len(row) for row in rows), default=0)
+    candidates: list[tuple[int, int, int]] = []
+    minimum_numbered = max(3, (len(rows) + 1) // 2)
+    for column in range(max_columns):
+        values = [
+            int(row[column])
+            for row in rows
+            if column < len(row) and re.fullmatch(r"[1-9][0-9]{0,8}", row[column])
+        ]
+        if len(values) < minimum_numbered:
+            continue
+        unique_count = len(set(values))
+        if unique_count * 10 < len(values) * 9:
+            continue
+        transitions = sum(
+            1
+            for previous, current in zip(values, values[1:], strict=False)
+            if current == previous + 1 or current == 1
+        )
+        if len(values) > 1 and transitions * 4 < (len(values) - 1) * 3:
+            continue
+        candidates.append((len(values), transitions, column + 1))
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    if len(candidates) > 1 and candidates[0][:2] == candidates[1][:2]:
+        return None
+    return candidates[0][2]
+
+
 def _tabular_row_payload(source_line: int, cells: Sequence[str]) -> tuple[dict[str, Any], bool]:
     emitted: list[list[Any]] = []
     complete = len(cells) <= _ATTACHMENT_TABULAR_MAX_COLUMNS
@@ -21520,6 +21570,7 @@ def _tabular_file_analysis(position: int, item: Mapping[str, Any]) -> dict[str, 
     sheets: list[str] = []
     headers: list[dict[str, Any]] = []
     profile_complete = True
+    record_identity_semantic = True
     column_counts: dict[int, int] = {}
     column_values: dict[int, Counter[str]] = {}
     column_unique_overflow: set[int] = set()
@@ -21624,6 +21675,15 @@ def _tabular_file_analysis(position: int, item: Mapping[str, Any]) -> dict[str, 
         # schedules are exactly this case), so scan every line instead of falling
         # back to four expensive model leaves.  Rich-index files use the branch
         # above and therefore preserve embedded delimiter literals exactly.
+        carrier_rows = [
+            (source_line, _tabular_carrier_cells(line))
+            for source_line, line in enumerate(text.splitlines(), start=1)
+            if not re.fullmatch(r"---\s*Sheet:\s*(.*?)\s*---", line.strip(), re.IGNORECASE)
+        ]
+        inferred_ordinal_column = _tabular_inferred_ordinal_column(
+            [cells for _source_line, cells in carrier_rows]
+        )
+        carrier_row_by_line = dict(carrier_rows)
         for source_line, line in enumerate(text.splitlines(), start=1):
             cells = _tabular_carrier_cells(line)
             sheet_match = re.fullmatch(r"---\s*Sheet:\s*(.*?)\s*---", line.strip(), re.IGNORECASE)
@@ -21632,7 +21692,21 @@ def _tabular_file_analysis(position: int, item: Mapping[str, Any]) -> dict[str, 
                 profile_complete = profile_complete and sheet_complete
                 if sheet and sheet not in sheets:
                     sheets.append(sheet)
-            is_record = bool(len(cells) >= 4 and re.fullmatch(r"\d{1,9}", cells[0]) and cells[3])
+            carrier_cells = carrier_row_by_line.get(source_line, cells)
+            inferred_record = bool(
+                inferred_ordinal_column is not None
+                and inferred_ordinal_column <= len(carrier_cells)
+                and re.fullmatch(r"[1-9][0-9]{0,8}", carrier_cells[inferred_ordinal_column - 1])
+                and any(
+                    value
+                    for column, value in enumerate(carrier_cells, start=1)
+                    if column != inferred_ordinal_column
+                )
+            )
+            legacy_numbered_record = bool(
+                len(carrier_cells) >= 4 and re.fullmatch(r"\d{1,9}", carrier_cells[0]) and carrier_cells[3]
+            )
+            is_record = inferred_record or legacy_numbered_record
             if not is_record:
                 miscellaneous.append((source_line, cells))
                 if len(headers) < _ATTACHMENT_TABULAR_MAX_HEADER_ROWS and any(cells):
@@ -21641,14 +21715,17 @@ def _tabular_file_analysis(position: int, item: Mapping[str, Any]) -> dict[str, 
                     headers.append(header)
                 continue
             data_rows += 1
+            inferred_positional_identity = bool(inferred_record and inferred_ordinal_column != 1)
+            if inferred_positional_identity:
+                record_identity_semantic = False
             key = _tabular_record_key(
-                cells,
-                key_column=4,
+                carrier_cells,
+                key_column=None if inferred_positional_identity else 4,
                 source_order=0,
                 source_row=source_line,
             )
-            groups.setdefault(key, []).append((source_line, cells))
-            for column, value in enumerate(cells[:_ATTACHMENT_TABULAR_MAX_COLUMNS], start=1):
+            groups.setdefault(key, []).append((source_line, carrier_cells))
+            for column, value in enumerate(carrier_cells[:_ATTACHMENT_TABULAR_MAX_COLUMNS], start=1):
                 if not value:
                     continue
                 column_counts[column] = column_counts.get(column, 0) + 1
@@ -21660,7 +21737,7 @@ def _tabular_file_analysis(position: int, item: Mapping[str, Any]) -> dict[str, 
                 else:
                     column_unique_overflow.add(column)
                     profile_complete = False
-            if len(cells) > _ATTACHMENT_TABULAR_MAX_COLUMNS:
+            if len(carrier_cells) > _ATTACHMENT_TABULAR_MAX_COLUMNS:
                 profile_complete = False
 
     records: dict[str, tuple[int, tuple[str, ...]]] = {}
@@ -21719,6 +21796,7 @@ def _tabular_file_analysis(position: int, item: Mapping[str, Any]) -> dict[str, 
         "columns": columns,
         "record_samples": samples,
         "profile_complete": profile_complete,
+        "record_identity": "semantic" if record_identity_semantic else "source_row",
         "_records": records,
         "_miscellaneous": miscellaneous,
     }
@@ -21882,6 +21960,13 @@ def _attachment_tabular_profile_bundle(
             # empty record set.
             return None
         analyses.append(analysis)
+
+    if task_kind == "comparison" and any(item.get("record_identity") != "semantic" for item in analyses):
+        # A shifted ordinal proves that every row contributed to a summary, but
+        # source-row position is not a stable entity key across two versions.
+        # Keep comparisons on the full-source hierarchy until a semantic key is
+        # parser-owned rather than claiming exact add/remove/change deltas.
+        return None
 
     comparison_pairs = (
         [_tabular_comparison_pair(analyses[0], current) for current in analyses[1:]]
