@@ -37,6 +37,7 @@ from friday.interaction_control_plane.failure_schema import (
 from friday.interaction_control_plane.work_item_schema import (
     WORK_ITEM_SCHEMA,
     WORK_ITEM_SCHEMA_VERSION,
+    register_work_item_connection_functions,
     upgrade_work_item_schema_to_40,
     validate_work_item_schema,
 )
@@ -2308,6 +2309,7 @@ class CoreMixin(StorageShared):
                 _secondary_product_witness_raw,
                 deterministic=True,
             )
+            register_work_item_connection_functions(conn)
             # Даты из документов извлечены и лежат в метаданных СЫРЫМИ строками — так,
             # как они написаны в бумаге. Замерено на архиве владельца: 3180 значений у
             # 630 объектов, из них 2537 в форме дд.мм.гггг, 345 в ISO, 223 — вообще

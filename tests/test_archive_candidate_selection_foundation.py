@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -337,6 +338,108 @@ def _publish_replay_failure(
         reply_to=boundary["id"],
     )
     return boundary, assistant, outcome, outcome_sha256
+
+
+@pytest.mark.parametrize("mutation", ["accept", "reask", "failure"])
+def test_candidate_trigger_udf_is_installed_on_every_thread_connection(
+    storage: Any,
+    mutation: str,
+) -> None:
+    item = _create_work(storage, f"candidate-thread-udf-{mutation}")
+    if mutation == "accept":
+        boundary, assistant, outcome, outcome_sha256 = _publish_replay(
+            storage,
+            item,
+            ordinal=2,
+        )
+    elif mutation == "failure":
+        boundary, assistant, outcome, outcome_sha256 = _publish_replay_failure(
+            storage,
+            item,
+            ordinal=2,
+        )
+    else:
+        boundary = storage.store_message(
+            item.conversation_id,
+            item.user_id,
+            "user",
+            "не уверен",
+            reply_to=item.question.prompt_assistant_message_id,
+        )
+        assistant = storage.store_message(
+            item.conversation_id,
+            item.user_id,
+            "assistant",
+            archive_candidate_reask_prompt(item.question.maximum_ordinal),
+            metadata={
+                "structural": {
+                    "answer_present": True,
+                    "model_spoke": False,
+                    "verdict_kind": ARCHIVE_CANDIDATE_REASK_VERDICT_KIND,
+                }
+            },
+            reply_to=boundary["id"],
+        )
+        outcome = None
+        outcome_sha256 = ""
+
+    main_connection_id = id(storage.conn)
+
+    def mutate_from_fresh_thread() -> tuple[int, Any]:
+        with storage.transaction() as conn:
+            if mutation == "accept":
+                updated = accept_archive_candidate_selection_in_transaction(
+                    conn,
+                    work_item_id=item.id,
+                    user_id=item.user_id,
+                    conversation_id=item.conversation_id,
+                    expected_revision=item.revision,
+                    selected_ordinal=2,
+                    new_boundary_user_message_id=boundary["id"],
+                    new_assistant_message_id=assistant["id"],
+                    new_accepted_plan_sha256=outcome.plan_sha256,
+                    new_accepted_outcome_sha256=outcome_sha256,
+                    now="2026-08-25T05:01:00+00:00",
+                )
+            elif mutation == "failure":
+                updated = suspend_after_replay_failure_in_transaction(
+                    conn,
+                    work_item_id=item.id,
+                    user_id=item.user_id,
+                    conversation_id=item.conversation_id,
+                    expected_revision=item.revision,
+                    selected_ordinal=2,
+                    new_boundary_user_message_id=boundary["id"],
+                    new_assistant_message_id=assistant["id"],
+                    new_accepted_plan_sha256=outcome.plan_sha256,
+                    new_accepted_outcome_sha256=outcome_sha256,
+                    now="2026-08-25T05:01:00+00:00",
+                )
+            else:
+                updated = reask_archive_candidate_selection_in_transaction(
+                    conn,
+                    work_item_id=item.id,
+                    user_id=item.user_id,
+                    conversation_id=item.conversation_id,
+                    expected_revision=item.revision,
+                    invalid_boundary_user_message_id=boundary["id"],
+                    new_question_assistant_message_id=assistant["id"],
+                    now="2026-08-25T05:01:00+00:00",
+                )
+            return id(conn), updated
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        worker_connection_id, updated = executor.submit(mutate_from_fresh_thread).result(timeout=10)
+
+    assert worker_connection_id != main_connection_id
+    assert updated.revision == 2
+    assert updated.state is (
+        WorkState.COMPLETED
+        if mutation == "accept"
+        else WorkState.SUSPENDED
+        if mutation == "failure"
+        else WorkState.WAITING_FOR_INPUT
+    )
 
 
 def test_candidate_set_contract_is_closed_ordered_and_body_free() -> None:

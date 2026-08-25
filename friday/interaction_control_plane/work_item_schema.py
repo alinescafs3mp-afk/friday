@@ -1310,8 +1310,13 @@ def _related_schema_objects(conn: sqlite3.Connection) -> dict[tuple[str, str], s
     }
 
 
-def _register_candidate_ordinal_function(conn: sqlite3.Connection) -> None:
-    """Install the deterministic parser used by exact schema-40 mutation triggers."""
+def register_work_item_connection_functions(conn: sqlite3.Connection) -> None:
+    """Install deterministic UDFs required by persistent Work Item triggers.
+
+    SQLite functions belong to a connection, not to the database image.  This
+    registrar must therefore run for every application and offline connection,
+    including thread-local connections that do not perform schema migration.
+    """
 
     from friday.interaction_control_plane.archive_candidate_selection import (
         parse_archive_candidate_ordinal,
@@ -1678,7 +1683,7 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         if _related_schema_objects(conn):
             raise sqlite3.DatabaseError("Schema 40 work item DDL is incomplete or altered")
         return
-    _register_candidate_ordinal_function(conn)
+    register_work_item_connection_functions(conn)
     if _schema_objects(conn, current=True) != _canonical_work_item_schema_objects():
         raise sqlite3.DatabaseError("Schema 40 work item DDL is incomplete or altered")
 
@@ -1861,6 +1866,7 @@ def upgrade_work_item_schema_to_40(
 __all__ = [
     "WORK_ITEM_SCHEMA",
     "WORK_ITEM_SCHEMA_VERSION",
+    "register_work_item_connection_functions",
     "upgrade_work_item_schema_to_40",
     "validate_work_item_schema",
 ]
