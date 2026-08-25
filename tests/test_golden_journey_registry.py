@@ -44,8 +44,6 @@ CURRENT_JOURNEYS = {
         "Obsidian write and synchronization",
         "UNVERIFIED",
         (
-            "common_effect_envelope_missing",
-            "uncertain_effect_reconciliation_missing",
             "physical_android_round_trip_missing",
             "real_conflict_evidence_missing",
         ),

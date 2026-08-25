@@ -1,10 +1,9 @@
 # Obsidian free Android integration tracker
 
-- Updated: 2026-08-23
+- Updated: 2026-08-25
 - Branch: `main`
-- Source baseline: `main` at `321f8fa`
-- Deployed baseline: Friday `0.207.4` at `6a25cda`
-- Target: Friday `0.207.4`, schema 37
+- Source/deployed baseline: Friday `0.207.19` at `9b5b6e4`
+- Target: Friday `0.207.19`, schema 41
 - Architecture: `outer_sol/OBSIDIAN_INTEGRATION_ARCHITECTURE_AND_IMPLEMENTATION_PLAN.md`
 - Acceptance: `outer_sol/OBSIDIAN_INTEGRATION_ACCEPTANCE_BATTERY.md`
 
@@ -67,6 +66,10 @@ offline reconnect delivery and a real concurrent-edit conflict.
 - [x] Crash recovery after filesystem commit or projection failure for create,
   append, move, delete and conflict resolution. Resume reuses the original
   operation/Work Item identity and reconciles the postcondition before retrying.
+- [x] Create/append publish one body-free accepted effect outcome atomically
+  with the assistant message. Prepared/uncertain operations reconcile only by
+  exact private proof or bounded legacy observation and never replay a vault
+  mutation; accepted results remain immutable after later user edits.
 - [x] HTTPS Telegram `Open in Obsidian` action for the exact arbitrary note path;
   Friday does not claim the app opened without an explicit confirmation.
 - [x] Account deletion covers schema-37 Obsidian projections and owner-scoped
@@ -134,11 +137,12 @@ offline reconnect delivery and a real concurrent-edit conflict.
   zero skips. Toolchain preflight, Ruff, format (856 files), mypy (204 source
   files), compileall, Bandit HIGH and both JavaScript syntax checks passed.
   Docker and the separate unchanged browser/UI phase were not run.
-- 2026-08-23: current live lineage is `b50e63b` (previous/schema-capable
-  fallback) → `6a25cda` (template listing). The activation journal is clear;
-  backend and bridge are active, health is `ok`, database schema is 37 and
-  `integrity_check` is `ok`. `main` at `321f8fa` differs only by gate-required
-  formatting in the already deployed interaction-trace code.
+- 2026-08-25: `0.207.19` deployed the receipt-backed effect/reconciliation
+  vertical. The exact gate passed 18,436 non-UI and 31 UI tests with pinned
+  Syncthing 2.1.3 and zero skips; two wheels reproduced byte-for-byte.
+  Activation is `clear`, backend/bridge are active, health is `ok`, and schema
+  41 integrity and foreign-key checks are clean. Physical Android evidence is
+  still deliberately unclaimed.
 
 ## Physical-device acceptance still required
 

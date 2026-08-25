@@ -1,13 +1,14 @@
 # Interaction Control Plane implementation status
 
-Status: **SCHEMA-41 DOCUMENT CATALOG RUNTIME DEPLOYED; EFFECT VERTICAL ACTIVE**
+Status: **SCHEMA-41 EFFECT VERTICAL DEPLOYED; V12 REFINEMENT ACTIVE**
 Date: 2026-08-25
 Branch: `main`
-Source/live: Friday `0.207.18` / `94ceca1b92bb8546e5f53e5ed0e3fd966bedc0c9`,
-tree `68a724a8b63d1c986431ea784e3e2e39b8b69100d6ed12e8ec584ad4d973c2fb`,
-wheel `5f67c57f954ff7a53f015f34153a0add4edfede033dcb719a0269472f738cd35`,
-schema 41; immediate predecessor and schema-capable fallback Friday `0.207.17` /
-`6c6ba88b69c62ed6dc0c31842c6a596929fc5f32`, tree
+Source/live: Friday `0.207.19` / `9b5b6e45c421b73ba4813664f19948317785b1f9`,
+tree `51caf63d71edb29187276130e3a734fe60f1509971ee8a8b971735c1c3ab9db3`,
+wheel `85829483727cf551b203fe0a4287938bd2fa83df4dea045ee0ec14c38cc41836`,
+schema 41; immediate predecessor Friday `0.207.18` / `94ceca1`, tree
+`68a724a8b63d1c986431ea784e3e2e39b8b69100d6ed12e8ec584ad4d973c2fb`;
+schema-capable fallback Friday `0.207.17` / `6c6ba88`, tree
 `7ef44b47395f15b3f159cf8394b9f42ef4b07bb73198f82928731371419b442f`
 
 ## Release checkpoint
@@ -24,8 +25,8 @@ schema 41; immediate predecessor and schema-capable fallback Friday `0.207.17` /
 - `0.207.8` adds the authorized read-only federated `archive_search` foundation:
   stable source/passage identity, explicit per-corpus coverage, process-private
   carriers and same-transaction reauthorization/publication.
-- The live anchor resolves to `94ceca1`, with schema-41 `6c6ba88` as both its
-  immediate predecessor and rollback fallback. Backend and bridge are active,
+- The live anchor resolves to `9b5b6e4`, with schema-41 `94ceca1` as immediate
+  predecessor and `6c6ba88` as rollback fallback. Backend and bridge are active,
   trusted-CA health is `ok`, and
   schema 41, SQLite integrity, foreign keys, FTS and body-free catalog bindings
   are clean; semantic enrichment coverage remains honestly partial.
@@ -47,6 +48,11 @@ schema 41; immediate predecessor and schema-capable fallback Friday `0.207.17` /
   without widening the global bound or hiding failures. The first two
   production ticks backfilled 46 and 38 rows with zero phase failures; coverage
   remains honestly partial while converging.
+- `0.207.19` deploys a closed privacy-safe effect outcome and accepted receipt
+  for Obsidian create/append. Publication is atomic with the assistant message;
+  accepted results are immutable, and prepared/uncertain effects reconcile by
+  exact observation without replaying or rewriting the vault. Sync, re-ingest
+  and physical-device observations remain separate facts.
 
 ## P0A implemented
 
@@ -93,26 +99,30 @@ schema 41; immediate predecessor and schema-capable fallback Friday `0.207.17` /
   `RecallSelectedArchiveEvidence` continuation plus the bounded body-free
   archive candidate selection. They must not be generalized into a claim that
   generic document recall, Active Frames or WorkGraphs are complete.
+- The common effect contract is proven only for the released Obsidian
+  create/append vertical. It is not evidence that every reminder, connector or
+  future side effect has adopted the envelope.
 
 ## Next implementation order
 
 1. Use the canonical golden-journey/evidence registry in
    `outer_sol/PROJECT_IMPLEMENTATION_STATUS.md`; its machine validator owns the
    strict readiness and evidence rules.
-2. Implement the common privacy-safe effect envelope and one idempotent,
-   receipt-backed Obsidian uncertain-effect reconciliation vertical.
+2. Refine V12 with selected-archive evidence explanation and make the
+   cross-feature search/file/Obsidian/dialogue battery release-blocking.
 3. Register product-linked candidate evidence from natural production use; do
    not create a synthetic live test corpus.
 4. Keep generic autonomous WorkGraphs behind complete user journeys.
 
 ## Current cumulative gate
 
-- The exact live source passed 18,315 non-UI and 31 UI tests; the pinned real
+- The exact live source passed 18,436 non-UI and 31 UI tests; the pinned real
   Syncthing 2.1.3 smoke executed rather than remaining environment-skipped.
 - Schema-38 migration, lifecycle/privacy, revision-CAS, restart, temporal
   continuation, receipt/plan binding and named-inventory compatibility checks
   passed.
 - Ruff, mypy, compile and release diff checks passed with zero skips. The
-  `0.207.18` wheel reproduced byte-for-byte and immutable activation completed
+  `0.207.19` wheel reproduced byte-for-byte and immutable activation completed
   `clear`; Docker and companion-plugin work remained outside the primary
-  release checkpoint.
+  release checkpoint. Gate scratch is now owned and removed by the canonical
+  runner, preventing repeated full runs from exhausting `/tmp`.
