@@ -127,7 +127,8 @@ _CONTROL_META_RE = re.compile(
 )
 _RU_MIXED_ACTION_SUFFIX_RE = re.compile(
     r"(?:,|\b(?:и|а затем|а потом|а заодно|затем|потом|заодно|после этого)\b|[-—])\s*"
-    r"(?:пожалуйста\s+)?(?:найди|найдите|поищи|поищите|ищи|ищите|отыщи|"
+    r"(?:пожалуйста\s+)?(?:(?:как|где|когда)\s+|(?:можно|нужно|надо) ли\s+)?"
+    r"(?:найди|найдите|поищи|поищите|ищи|ищите|отыщи|"
     r"отыщите|разыщи|разыщите|"
     r"проверь|проверьте|посмотри|посмотрите|прочитай|прочитайте|покажи|покажите|"
     r"открой|откройте|закрой|закройте|перейди|перейдите|сравни|сравните|"
@@ -168,7 +169,8 @@ _SOURCE_OBLIGATION_PROPOSITION_RE = re.compile(
 )
 _SOURCE_ACTION_PROPOSITION_RE = re.compile(
     r"(?:"
-    r"\b(?:предлагается|рекомендуется|требуется|указан\w*|описан\w*|перечислен\w*|"
+    r"\b(?:предлагается|рекомендуется|требуется|нужно|надо|следует|"
+    r"указан\w*|описан\w*|перечислен\w*|"
     r"сказан\w*|написан\w*|упомянут\w*)\b"
     r".{0,56}\b(?:создать|удалить|запустить|отправить|открыть|закрыть|"
     r"сохранить|переместить|переименовать|обновить|синхронизировать|"
@@ -187,14 +189,23 @@ _SOURCE_ACTION_PROPOSITION_RE = re.compile(
 )
 _SOURCE_COMPOUND_ACTION_PROPOSITION_RE = re.compile(
     r"(?:"
-    r"\b(?:предлагается|рекомендуется|требуется)\b.{0,56}\b"
+    r"\b(?:предлагается|рекомендуется|требуется|нужно|надо|следует)\b.{0,56}\b"
     r"(?:создать|удалить|запустить|отправить|открыть|сохранить)\b.{0,24}"
     r"\b(?:и|или)\s+(?:создать|удалить|запустить|отправить|открыть|сохранить)\b|"
     r"\b(?:create|delete|remove|run|send|open|save)"
     r"(?:\s+(?:and|or|/|,)?\s*(?:create|delete|remove|run|send|open|save))+"
     r"\s+(?:operations?|commands?|steps?|actions?)\b.{0,40}"
     r"\b(?:described|listed|stated|required|recommended|описан\w*|перечислен\w*)\b"
+    r"|\b(?:про|about)\s+(?:search|create|delete|remove|run|send|open|save)\s+"
+    r"(?:and|or)\s+(?:search|create|delete|remove|run|send|open|save)\b"
     r")",
+    re.IGNORECASE,
+)
+_RU_IMPERATIVE_MIXED_ACTION_RE = re.compile(
+    r"\b(?:и|а)\s+(?:пожалуйста\s+)?(?:найди|поищи|проверь|посмотри|прочитай|"
+    r"покажи|открой|закрой|сравни|создай|добавь|измени|удали|перемести|"
+    r"переименуй|сохрани|отправь|опубликуй|запусти|напиши|пришли|обнови|"
+    r"переведи|суммируй|синхронизируй)\b",
     re.IGNORECASE,
 )
 _EN_MIXED_ACTION_SUFFIX_RE = re.compile(
@@ -309,7 +320,7 @@ _OUTPUT_TRANSFORM_SUFFIX_RE = re.compile(
     r"\b(?:таблицей|списком|кратко|в виде (?:таблицы|списка)|"
     r"(?:только )?(?:краткий|подробный) ответ|ответ в (?:markdown|json|yaml|xml|csv)|"
     r"(?:(?:в )?(?:одном|двух|тр[ёе]х) (?:предложени(?:и|ях)|абзац(?:е|ах))|"
-    r"одним абзацем|двумя предложениями)|"
+    r"одним (?:абзацем|предложением)|двумя предложениями|тезисами)|"
     r"(?:json|yaml|xml|csv)(?: only)?)\b|"
     r"\b(?:as (?:a )?table|as (?:a )?list|briefly|"
     r"(?:short|detailed) answer|answer in (?:markdown|json|yaml|xml|csv)|"
@@ -347,7 +358,8 @@ _SOURCE_LANGUAGE_PROPOSITION_RE = re.compile(
 _ADDITIONAL_SOURCE_CLAUSE_RE = re.compile(
     r"(?:,|\b(?:и|а|and|but)\b)\s+(?:[^.!?]{0,48}\s+)?(?:"
     r"(?:подтверждает ли это|подтверждает это|что об этом (?:говорит|пишет)) сайт|"
-    r"на сайте|в интернете|в вебе|в архиве|в базе|в (?:другом|других) "
+    r"(?:совпадает ли (?:он|она|оно|это) с|сверить (?:его|её|это) с) сайтом|"
+    r"на сайте|в интернете|в вебе|онлайн|в архиве|в базе|в (?:другом|других) "
     r"(?:документе|документах|файле|файлах|сообщении|сообщениях)|"
     r"по другим (?:документам|файлам|сообщениям)|в (?:моей|нашей) переписке|"
     r"(?:does (?:the )?(?:site|website) confirm it)|"
@@ -729,6 +741,7 @@ def parse_archive_evidence_followup(message: object) -> ArchiveEvidenceFollowupK
     )
     mixed_action = bool(
         _UNAMBIGUOUS_MIXED_ACTION_RE.search(surface)
+        or _RU_IMPERATIVE_MIXED_ACTION_RE.search(surface)
         or (
             (_RU_MIXED_ACTION_SUFFIX_RE.search(surface) or _EN_MIXED_ACTION_SUFFIX_RE.search(surface))
             and not source_compound_action_proposition
