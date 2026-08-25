@@ -386,6 +386,56 @@ def test_product_stage_oracles_require_exact_diagnostics(live: Any, stage: str) 
         live._product_stage_deltas(stage, before, mismatched)
 
 
+def test_public_shadow_accepts_stale_healthy_admission_on_both_snapshots(live: Any) -> None:
+    before, after = _stage_pair("public-shadow")
+    before["available"] = False
+    after["available"] = False
+
+    deltas = live._product_stage_deltas("public-shadow", before, after)
+
+    assert deltas["endpoint_request_total"] == 0
+    assert deltas["probe_success_total"] == 0
+    assert deltas["workload_skip_reason_deltas"] == {"private_text_disallowed": 1}
+
+
+@pytest.mark.parametrize("stage", ["private-shadow", "assist"])
+def test_private_product_stage_readmits_one_stale_healthy_process(live: Any, stage: str) -> None:
+    before, after = _stage_pair(stage)
+    before["available"] = False
+    after["endpoint_request_total"] += 2
+    after["endpoint_success_total"] += 2
+    after["probe_success_total"] += 1
+    after["model_inventory_probe_success_total"] += 1
+
+    deltas = live._product_stage_deltas(stage, before, after)
+
+    assert deltas["endpoint_request_total"] == 3
+    assert deltas["probe_success_total"] == 1
+    assert after["available"] is True
+
+
+@pytest.mark.parametrize("stage", ["private-shadow", "assist"])
+def test_private_product_stage_rejects_stale_post_success_snapshot(live: Any, stage: str) -> None:
+    before, after = _stage_pair(stage)
+    before["available"] = False
+    after["available"] = False
+
+    with pytest.raises(live.LiveFailureBatteryError, match="admitted healthy secondary"):
+        live._product_stage_deltas(stage, before, after)
+
+
+def test_public_shadow_stale_exception_does_not_relax_failure_stages(live: Any) -> None:
+    outage_before, outage_after = _stage_pair("outage")
+    outage_before["available"] = False
+    with pytest.raises(live.LiveFailureBatteryError, match="admitted healthy secondary"):
+        live._product_stage_deltas("outage", outage_before, outage_after)
+
+    recovery_before, recovery_after = _stage_pair("recovery")
+    recovery_after["available"] = False
+    with pytest.raises(live.LiveFailureBatteryError, match="admitted healthy secondary"):
+        live._product_stage_deltas("recovery", recovery_before, recovery_after)
+
+
 def test_product_source_seal_covers_the_full_isolation_boundary(live: Any) -> None:
     required = {
         "friday/admin_api/_inbox.py",

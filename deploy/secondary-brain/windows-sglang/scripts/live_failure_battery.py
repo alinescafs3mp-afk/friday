@@ -1271,26 +1271,36 @@ def _require_product_stage_identity(
         or snapshot.get("profile_manifest_match") is not True
         or snapshot.get("served_model_match") is not True
         or snapshot.get("context_cap_tokens") != configured_profile_context_tokens()
+        or type(snapshot.get("available")) is not bool
         or not isinstance(snapshot.get("shadow"), dict)
         or snapshot["shadow"].get("in_flight") != 0
     ):
         raise LiveFailureBatteryError("Friday product stage is not bound to the exact profile")
 
-    healthy_expected = stage in {"public-shadow", "private-shadow", "assist"}
-    if stage == "outage":
-        healthy_expected = not after
-    elif stage == "cooldown":
-        healthy_expected = False
-    elif stage == "recovery":
-        healthy_expected = after
-    if healthy_expected:
-        if snapshot.get("available") is not True or snapshot.get("state") != "healthy":
+    state = snapshot.get("state")
+    available = snapshot.get("available")
+    if stage == "public-shadow":
+        # The exact candidate was already proved directly by configure_expected_model.
+        # Public shadow rejects the code-owned private Inbox request before the
+        # scheduler's demand probe, so an otherwise healthy process may remain
+        # truthfully stale on both sides of this privacy-boundary observation.
+        if state != "healthy":
             raise LiveFailureBatteryError("Friday product stage expected an admitted healthy secondary")
-    elif snapshot.get("available") is not False or snapshot.get("state") not in {
-        "probing",
-        "degraded",
-        "cooldown",
-    }:
+        return
+    if stage in {"private-shadow", "assist"}:
+        # A stale healthy process is readmitted by the real private workload. Its
+        # post-call snapshot must therefore be fresh; a successful counter delta
+        # alone may not certify an unavailable secondary.
+        if state != "healthy" or (after and available is not True):
+            raise LiveFailureBatteryError("Friday product stage expected an admitted healthy secondary")
+        return
+
+    healthy_expected = (stage == "outage" and not after) or (stage == "recovery" and after)
+    if healthy_expected:
+        if available is not True or state != "healthy":
+            raise LiveFailureBatteryError("Friday product stage expected an admitted healthy secondary")
+        return
+    if available is not False or state not in {"probing", "degraded", "cooldown"}:
         raise LiveFailureBatteryError("Friday product stage expected an unavailable secondary")
 
 
