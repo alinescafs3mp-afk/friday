@@ -48,6 +48,7 @@ from friday.retrieval.archive_search_authority import (
     create_archive_model_batch_ledger,
     create_archive_search_run_binding,
     issue_archive_search_continuation,
+    preview_archive_search_candidate_projection_labels,
     redeem_archive_search_continuation,
 )
 from friday.retrieval.archive_search_contract import (
@@ -1766,6 +1767,11 @@ def test_turn_ledger_assigns_disjoint_monotonic_public_labels_to_three_runs() ->
     assert attestation.attests_answer("Page one [A1.1], page two [A21.1], page three [A41.1].")
     projection = attestation.candidate_projection
     assert tuple(item.ordinal for item in projection.candidates) == (1, 2, 3)
+    assert tuple(item.public_citation_label for item in projection.candidates) == (
+        "A1",
+        "A21",
+        "A41",
+    )
     assert tuple(item.source_ref.canonical_object_id for item in projection.candidates) == tuple(
         f"raw_{index:016d}" for index in range(3, 6)
     )
@@ -2039,7 +2045,7 @@ def test_phase_two_attestation_seals_body_free_single_selected_evidence() -> Non
 def test_phase_two_attestation_emits_body_free_ordered_candidate_projection() -> None:
     candidates = _candidates()
     run = _run(run=f"candidate-projection-{next(_TURN_SEQUENCE)}")
-    answer = "The first exact fact is supported here [A1.1]."
+    answer = "The first exact fact is here [A1.1], and the second is here [A2.1]."
     attestation = _attest(run, _batch(run, candidates=candidates), answer=answer)
 
     projection = attestation.candidate_projection
@@ -2053,6 +2059,7 @@ def test_phase_two_attestation_emits_body_free_ordered_candidate_projection() ->
         == hashlib.sha256(projection.to_private_json().encode("ascii")).hexdigest()
     )
     assert tuple(item.ordinal for item in projection.candidates) == (1, 2)
+    assert tuple(item.public_citation_label for item in projection.candidates) == ("A1", "A2")
     assert tuple(item.source_ref for item in projection.candidates) == tuple(
         item.resolved_source.source_ref for item in candidates
     )
@@ -2088,6 +2095,7 @@ def test_phase_two_attestation_emits_body_free_ordered_candidate_projection() ->
                 "corpus",
                 "ordinal",
                 "passage_refs",
+                "public_citation_label",
                 "resolved_snapshot_sha256",
                 "schema",
                 "source_ref",
@@ -2121,6 +2129,295 @@ def test_phase_two_attestation_emits_body_free_ordered_candidate_projection() ->
     assert projection.candidates[0].ordinal == 1
 
 
+def test_candidate_projection_uses_first_base_citation_order_and_exact_passage_union() -> None:
+    first, second = _candidates()
+    first_passage = first.passages[0]
+    second_passage = ArchiveSearchPassage(
+        replace(
+            first_passage.passage_ref,
+            locator=TextSpanLocator(chunk_index=1, start_char=24, end_char=48),
+        ),
+        "Second private projection excerpt",
+    )
+    multi_passage = replace(first, passages=(first_passage, second_passage))
+    candidates = (multi_passage, second)
+    answer = "Second source first [A2.1], then one exact passage [A1.2], repeated [A1.2]."
+    run = _run(run=f"candidate-citation-order-{next(_TURN_SEQUENCE)}")
+    attestation = _attest(run, _batch(run, candidates=candidates), answer=answer)
+
+    projection = attestation.candidate_projection
+    assert attestation.candidate_count == projection.candidate_count == 2
+    assert tuple(item.public_citation_label for item in projection.candidates) == ("A2", "A1")
+    assert tuple(item.ordinal for item in projection.candidates) == (1, 2)
+    assert projection.candidates[0].source_ref == second.resolved_source.source_ref
+    assert projection.candidates[0].passage_refs == (second.passages[0].passage_ref,)
+    assert projection.candidates[1].source_ref == multi_passage.resolved_source.source_ref
+    assert projection.candidates[1].passage_refs == (second_passage.passage_ref,)
+    assert projection.candidates[1].resolved_snapshot_sha256 == (
+        archive_selected_evidence_snapshot_sha256(
+            multi_passage.resolved_source,
+            (second_passage.passage_ref,),
+            (second_passage.excerpt,),
+        )
+    )
+    assert second_passage.excerpt not in projection.to_private_json()
+
+    base_run = _run(run=f"candidate-base-citation-{next(_TURN_SEQUENCE)}")
+    base_projection = _attest(
+        base_run,
+        _batch(base_run, candidates=(multi_passage,)),
+        answer="The whole candidate is cited [A1].",
+    ).candidate_projection
+    assert base_projection.candidates[0].passage_refs == tuple(
+        item.passage_ref for item in multi_passage.passages
+    )
+
+
+def test_candidate_projection_omits_uncited_search_candidates_without_changing_outcome_count() -> None:
+    candidates = _candidates()
+    run = _run(run=f"candidate-omitted-{next(_TURN_SEQUENCE)}")
+    answer = "Only the second search candidate is cited [A2.1]."
+    attestation = _attest(run, _batch(run, candidates=candidates), answer=answer)
+
+    projection = attestation.candidate_projection
+    assert attestation.candidate_count == 2
+    assert projection.candidate_count == 1
+    assert projection.candidates[0].ordinal == 1
+    assert projection.candidates[0].public_citation_label == "A2"
+    assert projection.candidates[0].source_ref == candidates[1].resolved_source.source_ref
+
+
+def test_candidate_projection_excludes_navigation_and_unsupported_factual_shapes() -> None:
+    first, second = _candidates()
+    navigation = replace(
+        first,
+        evidence_authority=ArchiveEvidenceAuthority.NAVIGATION_ONLY,
+        passages=(),
+    )
+    knowledge_revision = next(
+        item
+        for item in second.resolved_source.revisions
+        if item.representation.kind is RepresentationKind.KNOWLEDGE_OBJECT
+    )
+    incompatible_passage = replace(
+        second.passages[0],
+        passage_ref=replace(
+            second.passages[0].passage_ref,
+            source_revision=knowledge_revision,
+        ),
+    )
+    unsupported = replace(second, passages=(incompatible_passage,))
+    run = _run(run=f"candidate-exclusions-{next(_TURN_SEQUENCE)}")
+    answer = "Navigation [A1] and an unsupported factual shape [A2.1]."
+    attestation = _attest(
+        run,
+        _batch(run, candidates=(navigation, unsupported)),
+        answer=answer,
+    )
+
+    assert attestation.attests_answer(answer)
+    assert attestation.candidate_count == 2
+    assert attestation.candidate_projection.candidate_count == 0
+    assert attestation.candidate_projection.candidates == ()
+
+
+@pytest.mark.parametrize(
+    "answer",
+    (
+        "A known citation plus a malformed one [A1.1] [A1.9].",
+        "A known citation plus an unknown one [A1.1] [A3.1].",
+    ),
+)
+def test_malformed_or_unknown_citation_closes_candidate_projection(answer: str) -> None:
+    run = _run(run=f"candidate-closed-{next(_TURN_SEQUENCE)}")
+    attestation = _attest(run, _batch(run), answer=answer)
+
+    projection = attestation.candidate_projection
+    assert attestation.attests_answer(answer)
+    assert not attestation.attests_answer(answer + " changed")
+    assert attestation.candidate_count == 2
+    assert projection.candidate_count == 0
+    assert projection.candidates == ()
+    rendered = projection.to_private_json() + repr(projection)
+    assert answer not in rendered
+    assert QUERY not in rendered
+    assert "Model-visible excerpt" not in rendered
+
+
+def test_candidate_projection_label_preview_is_frozen_non_consuming_and_exact() -> None:
+    ledger = create_archive_model_batch_ledger(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        turn_discriminator=f"candidate-preview-{next(_TURN_SEQUENCE)}",
+    )
+    run = _run(ledger=ledger, run=f"candidate-preview-run-{next(_TURN_SEQUENCE)}")
+    batch = _batch(run)
+    answer = "Second first [A2.1], then first [A1.1]."
+    ledger.admit_model_tool_bytes(run, batch, batch.model_visible_canonical_bytes)
+
+    assert (
+        preview_archive_search_candidate_projection_labels(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            ledger=ledger,
+            answer=answer,
+        )
+        == ()
+    )
+    ledger.freeze_for_publication()
+    assert (
+        preview_archive_search_candidate_projection_labels(
+            tenant_id=TENANT,
+            principal_id="wrong-principal",
+            ledger=ledger,
+            answer=answer,
+        )
+        == ()
+    )
+    assert (
+        preview_archive_search_candidate_projection_labels(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            ledger=ledger,
+            answer=answer + " Unknown [A3.1].",
+        )
+        == ()
+    )
+    labels = preview_archive_search_candidate_projection_labels(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        ledger=ledger,
+        answer=answer,
+    )
+    assert labels == ("A2", "A1")
+    final_answer = answer + "\n\n1 — A2\n2 — A1"
+    assert (
+        preview_archive_search_candidate_projection_labels(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            ledger=ledger,
+            answer=final_answer,
+        )
+        == labels
+    )
+
+    attestation = _attest(
+        run,
+        batch,
+        ledger=ledger,
+        answer=final_answer,
+    )
+    assert tuple(item.public_citation_label for item in attestation.candidate_projection.candidates) == labels
+    assert attestation.attests_answer(final_answer)
+    assert (
+        preview_archive_search_candidate_projection_labels(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            ledger=ledger,
+            answer=final_answer,
+        )
+        == ()
+    )
+
+
+def test_duplicate_source_citations_merge_under_first_visible_label_or_close() -> None:
+    original = _candidates()[0]
+    first_passage = original.passages[0]
+    second_passage = ArchiveSearchPassage(
+        replace(
+            first_passage.passage_ref,
+            locator=TextSpanLocator(chunk_index=1, start_char=24, end_char=48),
+        ),
+        "Second private duplicate-source excerpt",
+    )
+    first_candidate = replace(original, passages=(first_passage,))
+    second_candidate = replace(original, passages=(second_passage,))
+    ledger = create_archive_model_batch_ledger(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        turn_discriminator=f"duplicate-source-{next(_TURN_SEQUENCE)}",
+    )
+    first_run = _run(ledger=ledger, run=f"duplicate-source-first-{next(_TURN_SEQUENCE)}")
+    second_run = _run(ledger=ledger, run=f"duplicate-source-second-{next(_TURN_SEQUENCE)}")
+    first_batch = _batch(first_run, candidates=(first_candidate,))
+    second_batch = _batch(second_run, candidates=(second_candidate,))
+    ledger.admit_model_tool_bytes(first_run, first_batch, first_batch.model_visible_canonical_bytes)
+    ledger.admit_model_tool_bytes(second_run, second_batch, second_batch.model_visible_canonical_bytes)
+    ledger.freeze_for_publication()
+    answer = "The later label occurs first [A21.1], then the earlier label [A1.1]."
+
+    assert preview_archive_search_candidate_projection_labels(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        ledger=ledger,
+        answer=answer,
+    ) == ("A21",)
+    attestation = _attest(
+        first_run,
+        first_batch,
+        ledger=ledger,
+        answer=answer,
+    )
+    projection = attestation.candidate_projection
+    assert attestation.candidate_count == 2
+    assert projection.candidate_count == 1
+    assert projection.candidates[0].public_citation_label == "A21"
+    assert projection.candidates[0].source_ref == original.resolved_source.source_ref
+    assert projection.candidates[0].passage_refs == (
+        first_passage.passage_ref,
+        second_passage.passage_ref,
+    )
+
+    conflict_ledger = create_archive_model_batch_ledger(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL,
+        turn_discriminator=f"duplicate-source-conflict-{next(_TURN_SEQUENCE)}",
+    )
+    conflict_first_run = _run(
+        ledger=conflict_ledger,
+        run=f"duplicate-conflict-first-{next(_TURN_SEQUENCE)}",
+    )
+    conflict_second_run = _run(
+        ledger=conflict_ledger,
+        run=f"duplicate-conflict-second-{next(_TURN_SEQUENCE)}",
+    )
+    conflict_first_batch = _batch(conflict_first_run, candidates=(first_candidate,))
+    conflicting = replace(
+        first_candidate,
+        passages=(replace(first_passage, excerpt="Conflicting private body"),),
+    )
+    conflict_second_batch = _batch(conflict_second_run, candidates=(conflicting,))
+    conflict_ledger.admit_model_tool_bytes(
+        conflict_first_run,
+        conflict_first_batch,
+        conflict_first_batch.model_visible_canonical_bytes,
+    )
+    conflict_ledger.admit_model_tool_bytes(
+        conflict_second_run,
+        conflict_second_batch,
+        conflict_second_batch.model_visible_canonical_bytes,
+    )
+    conflict_ledger.freeze_for_publication()
+    conflict_answer = "Conflicting snapshots [A1.1] [A21.1]."
+    assert (
+        preview_archive_search_candidate_projection_labels(
+            tenant_id=TENANT,
+            principal_id=PRINCIPAL,
+            ledger=conflict_ledger,
+            answer=conflict_answer,
+        )
+        == ()
+    )
+    conflict_attestation = _attest(
+        conflict_first_run,
+        conflict_first_batch,
+        ledger=conflict_ledger,
+        answer=conflict_answer,
+    )
+    assert conflict_attestation.attests_answer(conflict_answer)
+    assert conflict_attestation.candidate_projection.candidates == ()
+
+
 def test_candidate_projection_snapshot_changes_with_unstored_body_bytes() -> None:
     original = _candidates()[0]
     changed = replace(
@@ -2152,14 +2449,13 @@ def test_candidate_projection_snapshot_changes_with_unstored_body_bytes() -> Non
         passages=(),
     )
     navigation_run = _run(run=f"candidate-navigation-{next(_TURN_SEQUENCE)}")
-    navigation_entry = _attest(
+    navigation_projection = _attest(
         navigation_run,
         _batch(navigation_run, candidates=(navigation,)),
         answer="One navigation result [A1].",
-    ).candidate_projection.candidates[0]
-    assert navigation_entry.source_ref == navigation.resolved_source.source_ref
-    assert navigation_entry.passage_refs == ()
-    assert re.fullmatch(r"[0-9a-f]{64}", navigation_entry.resolved_snapshot_sha256)
+    ).candidate_projection
+    assert navigation_projection.candidate_count == 0
+    assert navigation_projection.candidates == ()
 
 
 def test_candidate_projection_is_phase_two_only_and_tamper_evident() -> None:
@@ -2175,9 +2471,9 @@ def test_candidate_projection_is_phase_two_only_and_tamper_evident() -> None:
         with pytest.raises(TypeError, match="process-private"):
             operation(projection)
 
-    for index, mutation in enumerate(("order", "coverage", "source", "snapshot"), 1):
+    for index, mutation in enumerate(("order", "coverage", "citation", "source", "snapshot"), 1):
         current_run = _run(run=f"candidate-projection-tamper-{index}-{next(_TURN_SEQUENCE)}")
-        current_answer = "Accepted answer [A1.1]."
+        current_answer = "Accepted answer [A1.1] and [A2.1]."
         current_attestation = _attest(
             current_run,
             _batch(current_run),
@@ -2192,6 +2488,9 @@ def test_candidate_projection_is_phase_two_only_and_tamper_evident() -> None:
             )
         elif mutation == "coverage":
             object.__setattr__(current_projection, "_coverage_sha256", "f" * 64)
+        elif mutation == "citation":
+            entry = current_projection.candidates[0]
+            object.__setattr__(entry, "public_citation_label", "A3")
         elif mutation == "source":
             entry = current_projection.candidates[0]
             object.__setattr__(entry, "source_ref", _candidates()[1].resolved_source.source_ref)

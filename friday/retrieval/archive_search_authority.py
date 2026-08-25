@@ -25,6 +25,7 @@ from friday.retrieval.archive_search_contract import (
     ArchiveSearchCandidate,
     ArchiveSearchCorpus,
     ArchiveSearchPage,
+    ArchiveSearchPassage,
     ArchiveSearchRequest,
     ArchiveSearchWarning,
 )
@@ -57,6 +58,7 @@ _CONTINUATION_TOKEN_CHARS = 43
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _PUBLIC_CITATION = re.compile(r"\[(A[1-9][0-9]{0,2}(?:\.[1-8])?)\]")
 _PUBLIC_CITATION_LABEL = re.compile(r"A([1-9][0-9]{0,2})(?:\.[1-8])?\Z")
+_PUBLIC_BASE_CITATION_LABEL = re.compile(r"A([1-9][0-9]{0,2})\Z")
 _PUBLIC_CITATION_PREFIX = re.compile(r"\[A", re.IGNORECASE)
 _MAX_ACTOR_ID_BYTES = 200
 _MAX_MODEL_BYTES = 7_900
@@ -65,12 +67,11 @@ _BATCH_SCHEMA = "friday.archive-search-model-batch.private.v2"
 _ATTESTATION_SCHEMA = "friday.archive-search-publication-attestation.private.v4"
 ARCHIVE_SEARCH_SELECTED_EVIDENCE_SCHEMA = "friday.archive-search-selected-evidence.private.v1"
 ARCHIVE_SEARCH_CANDIDATE_PROJECTION_ENTRY_SCHEMA = (
-    "friday.archive-search-candidate-projection-entry.private.v1"
+    "friday.archive-search-candidate-projection-entry.private.v2"
 )
 ARCHIVE_SEARCH_ACCEPTED_CANDIDATE_PROJECTION_SCHEMA = (
-    "friday.archive-search-accepted-candidate-projection.private.v1"
+    "friday.archive-search-accepted-candidate-projection.private.v2"
 )
-_NAVIGATION_CANDIDATE_SNAPSHOT_SCHEMA = "friday.archive-search-navigation-candidate-snapshot.private.v1"
 _REDEMPTION_SCHEMA = "friday.archive-search-continuation-redemption.private.v3"
 _SELECTED_CONTINUATION_SCHEMA = "friday.archive-search-continuation-selection.private.v1"
 _LEDGER_SCHEMA = "friday.archive-search-model-batch-ledger.private.v2"
@@ -91,6 +92,13 @@ def _public_citation_label_is_valid(value: object) -> bool:
     if type(value) is not str:
         return False
     match = _PUBLIC_CITATION_LABEL.fullmatch(value)
+    return bool(match is not None and int(match.group(1)) <= 640)
+
+
+def _public_base_citation_label_is_valid(value: object) -> bool:
+    if type(value) is not str:
+        return False
+    match = _PUBLIC_BASE_CITATION_LABEL.fullmatch(value)
     return bool(match is not None and int(match.group(1)) <= 640)
 
 
@@ -3466,9 +3474,10 @@ class ArchiveSearchSelectedEvidence:
 
 @dataclass(frozen=True, slots=True, repr=False)
 class ArchiveSearchCandidateProjectionEntry:
-    """One ordered, body-free identity from an accepted phase-2 page."""
+    """One cited, replayable, body-free identity from accepted phase 2."""
 
     ordinal: int
+    public_citation_label: str
     corpus: ArchiveSearchCorpus
     source_ref: SourceRef
     passage_refs: tuple[PassageRef, ...]
@@ -3479,13 +3488,15 @@ class ArchiveSearchCandidateProjectionEntry:
             1 <= self.ordinal <= ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES * ARCHIVE_AUTHORITY_MAX_CANDIDATES
         ):
             raise ArchiveSearchAuthorityError("archive candidate projection ordinal is invalid")
+        if not _public_base_citation_label_is_valid(self.public_citation_label):
+            raise ArchiveSearchAuthorityError("archive candidate projection citation is invalid")
         if type(self.corpus) is not ArchiveSearchCorpus:
             raise ArchiveSearchAuthorityError("archive candidate projection corpus is invalid")
         if type(self.source_ref) is not SourceRef:
             raise ArchiveSearchAuthorityError("archive candidate projection source is invalid")
         if (
             type(self.passage_refs) is not tuple
-            or len(self.passage_refs) > 8
+            or not 1 <= len(self.passage_refs) <= 8
             or any(type(item) is not PassageRef for item in self.passage_refs)
             or any(item.source_ref != self.source_ref for item in self.passage_refs)
         ):
@@ -3493,6 +3504,12 @@ class ArchiveSearchCandidateProjectionEntry:
         identities = tuple(item.to_private_json() for item in self.passage_refs)
         if identities != tuple(sorted(identities)) or len(identities) != len(set(identities)):
             raise ArchiveSearchAuthorityError("archive candidate projection passages are not canonical")
+        if not _selected_evidence_shape_is_compatible(
+            self.corpus,
+            self.source_ref,
+            self.passage_refs,
+        ):
+            raise ArchiveSearchAuthorityError("archive candidate projection source is not replayable")
         if (
             type(self.resolved_snapshot_sha256) is not str
             or _DIGEST.fullmatch(self.resolved_snapshot_sha256) is None
@@ -3502,7 +3519,8 @@ class ArchiveSearchCandidateProjectionEntry:
     def __repr__(self) -> str:
         return (
             "<ArchiveSearchCandidateProjectionEntry body-free "
-            f"ordinal={self.ordinal} corpus={self.corpus.value!r}>"
+            f"ordinal={self.ordinal} citation={self.public_citation_label!r} "
+            f"corpus={self.corpus.value!r}>"
         )
 
     def to_private_payload(self) -> dict[str, object]:
@@ -3510,6 +3528,7 @@ class ArchiveSearchCandidateProjectionEntry:
             "corpus": self.corpus.value,
             "ordinal": self.ordinal,
             "passage_refs": [item.to_private_payload() for item in self.passage_refs],
+            "public_citation_label": self.public_citation_label,
             "resolved_snapshot_sha256": self.resolved_snapshot_sha256,
             "schema": ARCHIVE_SEARCH_CANDIDATE_PROJECTION_ENTRY_SCHEMA,
             "source_ref": self.source_ref.to_private_payload(),
@@ -3528,11 +3547,12 @@ def _candidate_projection_entry_is_valid(value: object) -> bool:
         return bool(
             type(entry.ordinal) is int
             and 1 <= entry.ordinal <= ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES * ARCHIVE_AUTHORITY_MAX_CANDIDATES
+            and _public_base_citation_label_is_valid(entry.public_citation_label)
             and type(entry.corpus) is ArchiveSearchCorpus
             and type(entry.source_ref) is SourceRef
             and canonical_source == entry.source_ref
             and type(entry.passage_refs) is tuple
-            and len(entry.passage_refs) <= 8
+            and 1 <= len(entry.passage_refs) <= 8
             and canonical_passages == entry.passage_refs
             and all(
                 type(item) is PassageRef and item.source_ref == entry.source_ref
@@ -3541,6 +3561,11 @@ def _candidate_projection_entry_is_valid(value: object) -> bool:
             and tuple(item.to_private_json() for item in entry.passage_refs)
             == tuple(sorted(item.to_private_json() for item in entry.passage_refs))
             and len({item.to_private_json() for item in entry.passage_refs}) == len(entry.passage_refs)
+            and _selected_evidence_shape_is_compatible(
+                entry.corpus,
+                entry.source_ref,
+                entry.passage_refs,
+            )
             and type(entry.resolved_snapshot_sha256) is str
             and _DIGEST.fullmatch(entry.resolved_snapshot_sha256) is not None
         )
@@ -3548,25 +3573,28 @@ def _candidate_projection_entry_is_valid(value: object) -> bool:
         return False
 
 
-def _candidate_projection_snapshot_sha256(candidate: ArchiveSearchCandidate) -> str:
+def _candidate_projection_snapshot_sha256(
+    candidate: ArchiveSearchCandidate,
+    passages: tuple[ArchiveSearchPassage, ...],
+) -> str:
     """Bind exact source state and passage bytes while retaining no body."""
 
     if type(candidate) is not ArchiveSearchCandidate:
         raise ArchiveSearchAuthorityError("archive candidate projection source is invalid")
     try:
-        if candidate.passages:
-            return archive_selected_evidence_snapshot_sha256(
-                candidate.resolved_source,
-                tuple(item.passage_ref for item in candidate.passages),
-                tuple(item.excerpt for item in candidate.passages),
-            )
-        return _sha256(
-            _canonical_json(
-                {
-                    "resolved_source": candidate.resolved_source.to_private_payload(),
-                    "schema": _NAVIGATION_CANDIDATE_SNAPSHOT_SCHEMA,
-                }
-            )
+        if (
+            type(passages) is not tuple
+            or not 1 <= len(passages) <= 8
+            or any(type(item) is not ArchiveSearchPassage for item in passages)
+        ):
+            raise ArchiveSearchAuthorityError("archive candidate projection passages are invalid")
+        passage_refs = tuple(item.passage_ref for item in passages)
+        if any(not item.revision_matches(candidate.resolved_source) for item in passage_refs):
+            raise ArchiveSearchAuthorityError("archive candidate projection passages are invalid")
+        return archive_selected_evidence_snapshot_sha256(
+            candidate.resolved_source,
+            passage_refs,
+            tuple(item.excerpt for item in passages),
         )
     except Exception:
         raise ArchiveSearchAuthorityError("archive candidate projection snapshot is invalid") from None
@@ -3574,19 +3602,22 @@ def _candidate_projection_snapshot_sha256(candidate: ArchiveSearchCandidate) -> 
 
 def _new_candidate_projection_entry(
     ordinal: int,
+    public_citation_label: str,
     candidate: ArchiveSearchCandidate,
+    passages: tuple[ArchiveSearchPassage, ...],
 ) -> ArchiveSearchCandidateProjectionEntry:
     try:
         source_ref = SourceRef.parse_private(candidate.resolved_source.source_ref.to_private_json())
         passage_refs = tuple(
-            PassageRef.parse_private(item.passage_ref.to_private_json()) for item in candidate.passages
+            PassageRef.parse_private(item.passage_ref.to_private_json()) for item in passages
         )
         return ArchiveSearchCandidateProjectionEntry(
             ordinal=ordinal,
+            public_citation_label=public_citation_label,
             corpus=candidate.corpus,
             source_ref=source_ref,
             passage_refs=passage_refs,
-            resolved_snapshot_sha256=_candidate_projection_snapshot_sha256(candidate),
+            resolved_snapshot_sha256=_candidate_projection_snapshot_sha256(candidate, passages),
         )
     except Exception:
         raise ArchiveSearchAuthorityError("archive candidate projection entry is invalid") from None
@@ -3671,6 +3702,8 @@ class ArchiveSearchAcceptedCandidateProjection(_ProcessPrivate):
                 and all(_candidate_projection_entry_is_valid(item) for item in self._candidates)
                 and tuple(item.ordinal for item in self._candidates)
                 == tuple(range(1, len(self._candidates) + 1))
+                and len({item.public_citation_label for item in self._candidates}) == len(self._candidates)
+                and len({item.source_ref for item in self._candidates}) == len(self._candidates)
                 and type(self._coverage_grade) is ArchiveSearchCoverageGrade
                 and all(
                     type(value) is str and _DIGEST.fullmatch(value) is not None
@@ -3690,7 +3723,7 @@ class ArchiveSearchAcceptedCandidateProjection(_ProcessPrivate):
                 and hmac.compare_digest(
                     self._seal,
                     _mac(
-                        b"friday/archive-search-accepted-candidate-projection/v1",
+                        b"friday/archive-search-accepted-candidate-projection/v2",
                         _candidate_projection_material(self),
                     ),
                 )
@@ -3755,7 +3788,7 @@ def _new_accepted_candidate_projection(
         projection,
         "_seal",
         _mac(
-            b"friday/archive-search-accepted-candidate-projection/v1",
+            b"friday/archive-search-accepted-candidate-projection/v2",
             _candidate_projection_material(projection),
         ),
     )
@@ -3881,7 +3914,7 @@ class ArchiveSearchPublicationAttestation(_ProcessPrivate):
                 <= ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES * ARCHIVE_AUTHORITY_MAX_CANDIDATES
                 and type(self._candidate_projection) is ArchiveSearchAcceptedCandidateProjection
                 and self._candidate_projection._is_valid()
-                and len(self._candidate_projection._candidates) == self._candidate_count
+                and len(self._candidate_projection._candidates) <= self._candidate_count
                 and self._candidate_projection._coverage_grade is self._coverage_grade
                 and hmac.compare_digest(
                     self._candidate_projection._coverage_sha256,
@@ -3961,6 +3994,174 @@ def _attestation_material(attestation: ArchiveSearchPublicationAttestation) -> b
     )
 
 
+_ArchiveCitationTarget = tuple[
+    tuple[int, int],
+    ArchiveSearchCandidate,
+    tuple[PassageRef, ...] | None,
+]
+_ArchiveProjectionSelection = tuple[
+    str,
+    ArchiveSearchCandidate,
+    tuple[ArchiveSearchPassage, ...],
+]
+
+
+def _archive_candidate_label_map(
+    entries: tuple[tuple[ArchiveSearchRunBinding, AuthorizedArchiveBatch, bytes], ...],
+) -> dict[str, _ArchiveCitationTarget]:
+    label_map: dict[str, _ArchiveCitationTarget] = {}
+    for entry_index, (_run, batch, _visible) in enumerate(entries, 1):
+        for result in batch._page.results:
+            candidate = result.candidate
+            public_ordinal = (batch._model_page_index - 1) * ARCHIVE_AUTHORITY_MAX_CANDIDATES + result.ordinal
+            candidate_label = f"A{public_ordinal}"
+            candidate_key = (entry_index, result.ordinal)
+            passage_refs = tuple(item.passage_ref for item in candidate.passages)
+            if candidate_label in label_map:
+                raise ArchiveSearchAuthorityError("archive citation labels are ambiguous")
+            label_map[candidate_label] = (candidate_key, candidate, None)
+            for passage_index, passage_ref in enumerate(passage_refs, 1):
+                passage_label = f"{candidate_label}.{passage_index}"
+                if passage_label in label_map:
+                    raise ArchiveSearchAuthorityError("archive citation labels are ambiguous")
+                label_map[passage_label] = (candidate_key, candidate, (passage_ref,))
+    return label_map
+
+
+def _resolve_archive_answer_citations(
+    answer: str,
+    label_map: dict[str, _ArchiveCitationTarget],
+) -> tuple[tuple[str, ...], tuple[_ArchiveCitationTarget, ...] | None]:
+    _answer_digest(answer)
+    citation_matches = tuple(_PUBLIC_CITATION.finditer(answer))
+    valid_citation_matches = tuple(
+        match for match in citation_matches if _public_citation_label_is_valid(match.group(1))
+    )
+    used_citation_labels = tuple(dict.fromkeys(match.group(1) for match in valid_citation_matches))
+    valid_citation_starts = {match.start() for match in valid_citation_matches}
+    malformed_citation_present = any(
+        match.start() not in valid_citation_starts for match in _PUBLIC_CITATION_PREFIX.finditer(answer)
+    )
+    maximum_labels = ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES * ARCHIVE_AUTHORITY_MAX_CANDIDATES * 9
+    if len(used_citation_labels) > maximum_labels:
+        raise ArchiveSearchAuthorityError("archive answer has too many citation labels")
+    mapped = tuple(label_map.get(label) for label in used_citation_labels)
+    if malformed_citation_present or not used_citation_labels or any(item is None for item in mapped):
+        return used_citation_labels, None
+    return used_citation_labels, cast(tuple[_ArchiveCitationTarget, ...], mapped)
+
+
+def _archive_candidate_projection_selections(
+    used_citation_labels: tuple[str, ...],
+    exact_mapped: tuple[_ArchiveCitationTarget, ...] | None,
+) -> tuple[_ArchiveProjectionSelection, ...]:
+    if exact_mapped is None:
+        return ()
+    grouped: OrderedDict[str, list[_ArchiveCitationTarget]] = OrderedDict()
+    for label, target in zip(used_citation_labels, exact_mapped, strict=True):
+        grouped.setdefault(label.partition(".")[0], []).append(target)
+
+    selections: list[_ArchiveProjectionSelection] = []
+    source_indexes: dict[SourceRef, int] = {}
+    for public_citation_label, targets in grouped.items():
+        candidate_key, candidate, _passages = targets[0]
+        if any(item[0] != candidate_key or item[1] is not candidate for item in targets):
+            return ()
+        if (
+            candidate.evidence_authority is not ArchiveEvidenceAuthority.CANONICAL
+            or candidate.navigation_only
+            or not 1 <= len(candidate.passages) <= 8
+        ):
+            continue
+        selected_passages = (
+            candidate.passages
+            if any(item[2] is None for item in targets)
+            else tuple(
+                passage
+                for passage in candidate.passages
+                if any(item[2] is not None and passage.passage_ref in item[2] for item in targets)
+            )
+        )
+        passage_refs = tuple(item.passage_ref for item in selected_passages)
+        if not _selected_evidence_shape_is_compatible(
+            candidate.corpus,
+            candidate.resolved_source.source_ref,
+            passage_refs,
+        ):
+            continue
+        source_ref = candidate.resolved_source.source_ref
+        prior_index = source_indexes.get(source_ref)
+        if prior_index is None:
+            source_indexes[source_ref] = len(selections)
+            selections.append((public_citation_label, candidate, selected_passages))
+            continue
+
+        prior_label, prior_candidate, prior_passages = selections[prior_index]
+        try:
+            if (
+                candidate.corpus is not prior_candidate.corpus
+                or candidate.resolved_source.to_private_json()
+                != prior_candidate.resolved_source.to_private_json()
+            ):
+                return ()
+            by_identity = {item.passage_ref.to_private_json(): item for item in prior_passages}
+            for passage in selected_passages:
+                identity = passage.passage_ref.to_private_json()
+                previous = by_identity.get(identity)
+                if previous is not None and previous != passage:
+                    return ()
+                by_identity[identity] = passage
+            merged_passages = tuple(by_identity[key] for key in sorted(by_identity))
+            merged_refs = tuple(item.passage_ref for item in merged_passages)
+            if not 1 <= len(merged_passages) <= 8 or not _selected_evidence_shape_is_compatible(
+                prior_candidate.corpus,
+                source_ref,
+                merged_refs,
+            ):
+                return ()
+        except Exception:
+            return ()
+        selections[prior_index] = (prior_label, prior_candidate, merged_passages)
+    return tuple(selections)
+
+
+def preview_archive_search_candidate_projection_labels(
+    *,
+    tenant_id: str,
+    principal_id: str,
+    ledger: ArchiveModelBatchLedger,
+    answer: str,
+) -> tuple[str, ...]:
+    """Preview only safe public labels from a frozen ledger without consuming it."""
+
+    try:
+        if type(ledger) is not ArchiveModelBatchLedger:
+            return ()
+        actor_handle = _actor_handle(tenant_id, principal_id)
+        with ledger._lock:
+            if (
+                not _ledger_is_valid(ledger)
+                or ledger._state is not _ArchiveModelLedgerState.FROZEN
+                or not ledger._entries
+                or not hmac.compare_digest(ledger._actor_handle, actor_handle)
+            ):
+                return ()
+            label_map = _archive_candidate_label_map(ledger._entries)
+            used_citation_labels, exact_mapped = _resolve_archive_answer_citations(
+                answer,
+                label_map,
+            )
+            return tuple(
+                item[0]
+                for item in _archive_candidate_projection_selections(
+                    used_citation_labels,
+                    exact_mapped,
+                )
+            )
+    except Exception:
+        return ()
+
+
 def _publication_projection(
     entries: tuple[tuple[ArchiveSearchRunBinding, AuthorizedArchiveBatch, bytes], ...],
     answer: str,
@@ -3979,17 +4180,9 @@ def _publication_projection(
     request_identities: list[str] = []
     evidence_records: list[dict[str, object]] = []
     coverage_records: list[dict[str, object]] = []
-    label_map: dict[
-        str,
-        tuple[
-            tuple[int, int],
-            ArchiveSearchCandidate,
-            tuple[PassageRef, ...] | None,
-        ],
-    ] = {}
-    candidate_projection_entries: list[ArchiveSearchCandidateProjectionEntry] = []
+    label_map = _archive_candidate_label_map(entries)
     candidate_count = 0
-    for entry_index, (run, batch, _visible) in enumerate(entries, 1):
+    for run, batch, _visible in entries:
         request_identity_sha256 = _sha256(run._request.identity_digest_material())
         if request_identity_sha256 not in request_identities:
             request_identities.append(request_identity_sha256)
@@ -3998,15 +4191,6 @@ def _publication_projection(
             candidate = result.candidate
             public_ordinal = (batch._model_page_index - 1) * ARCHIVE_AUTHORITY_MAX_CANDIDATES + result.ordinal
             candidate_label = f"A{public_ordinal}"
-            candidate_key = (entry_index, result.ordinal)
-            passage_refs = tuple(item.passage_ref for item in candidate.passages)
-            label_map[candidate_label] = (candidate_key, candidate, None)
-            for passage_index, passage_ref in enumerate(passage_refs, 1):
-                label_map[f"{candidate_label}.{passage_index}"] = (
-                    candidate_key,
-                    candidate,
-                    (passage_ref,),
-                )
             page_candidates.append(
                 {
                     "candidate_sha256": _sha256(candidate.to_private_json().encode("ascii")),
@@ -4014,7 +4198,6 @@ def _publication_projection(
                 }
             )
             candidate_count += 1
-            candidate_projection_entries.append(_new_candidate_projection_entry(candidate_count, candidate))
         evidence_records.append(
             {
                 "candidates": page_candidates,
@@ -4031,32 +4214,26 @@ def _publication_projection(
             }
         )
 
-    citation_matches = tuple(_PUBLIC_CITATION.finditer(answer))
-    valid_citation_matches = tuple(
-        match for match in citation_matches if _public_citation_label_is_valid(match.group(1))
+    used_citation_labels, exact_mapped = _resolve_archive_answer_citations(answer, label_map)
+    candidate_projection_selections = _archive_candidate_projection_selections(
+        used_citation_labels,
+        exact_mapped,
     )
-    used_citation_labels = tuple(dict.fromkeys(match.group(1) for match in valid_citation_matches))
-    valid_citation_starts = {match.start() for match in valid_citation_matches}
-    malformed_citation_present = any(
-        match.start() not in valid_citation_starts for match in _PUBLIC_CITATION_PREFIX.finditer(answer)
+    candidate_projection_entries = tuple(
+        _new_candidate_projection_entry(
+            ordinal,
+            public_citation_label,
+            candidate,
+            passages,
+        )
+        for ordinal, (public_citation_label, candidate, passages) in enumerate(
+            candidate_projection_selections,
+            1,
+        )
     )
-    maximum_labels = ARCHIVE_AUTHORITY_MAX_MODEL_BATCHES * ARCHIVE_AUTHORITY_MAX_CANDIDATES * 9
-    if len(used_citation_labels) > maximum_labels:
-        raise ArchiveSearchAuthorityError("archive answer has too many citation labels")
 
     selected: ArchiveSearchSelectedEvidence | None = None
-    mapped = [label_map.get(label) for label in used_citation_labels]
-    if not malformed_citation_present and used_citation_labels and all(item is not None for item in mapped):
-        exact_mapped = cast(
-            list[
-                tuple[
-                    tuple[int, int],
-                    ArchiveSearchCandidate,
-                    tuple[PassageRef, ...] | None,
-                ]
-            ],
-            mapped,
-        )
+    if exact_mapped is not None:
         candidate_keys = {item[0] for item in exact_mapped}
         candidate = exact_mapped[0][1]
         if (
@@ -4130,7 +4307,7 @@ def _publication_projection(
     evidence_sha256 = _sha256(_canonical_json(evidence_records))
     coverage_sha256 = _sha256(_canonical_json(coverage_records))
     candidate_projection = _new_accepted_candidate_projection(
-        candidates=tuple(candidate_projection_entries),
+        candidates=candidate_projection_entries,
         coverage_grade=coverage_grade,
         coverage_sha256=coverage_sha256,
         evidence_sha256=evidence_sha256,
@@ -4393,5 +4570,6 @@ __all__ = [
     "create_archive_model_batch_ledger",
     "create_archive_search_run_binding",
     "issue_archive_search_continuation",
+    "preview_archive_search_candidate_projection_labels",
     "redeem_archive_search_continuation",
 ]
