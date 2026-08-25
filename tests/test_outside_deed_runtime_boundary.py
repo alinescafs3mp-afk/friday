@@ -301,6 +301,98 @@ async def test_a_bare_upload_keeps_a_passive_preparation_preamble_with_substanti
     assert output_guards.get("supported_deed_replaced") is not True
 
 
+@pytest.mark.asyncio
+async def test_a_verified_bare_docx_keeps_content_level_ready_objects(
+    settings,
+    storage,
+    monkeypatch,
+) -> None:
+    """Regression for the live 2026-08-25 20:33 bare-upload failure."""
+
+    runtime = _runtime(settings, storage, monkeypatch)
+    filename = "Образец рапортов.docx"
+    attachment = await _registered_docx_attachment(
+        settings,
+        storage,
+        filename=filename,
+        source_text=(
+            "Рапорт об основном отпуске. Рапорт о прекращении командировки. "
+            "Рапорт об отпуске по личным обстоятельствам."
+        ),
+    )
+    model_answer = (
+        "Документ содержит три готовых образца рапортов: об основном отпуске, "
+        "о прекращении командировки и об отпуске по личным обстоятельствам."
+    )
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {"content": model_answer, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        f"Загружен документ: {filename}",
+        actor=_actor(),
+        attachments=[attachment],
+        enable_tools=False,
+        synthetic_document_notice=True,
+    )
+
+    assert reply["message"] == model_answer
+    assert reply["attachment_coverage_complete"] is True
+    assert reply["attachment_verification_complete"] is True
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    guards = metadata["structural"].get("output_guards", {})
+    assert guards.get("supported_deed_replaced") is not True
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Документ содержит три готовых образца рапортов.",
+        "Исходный документ представляет собой готовый набор форм.",
+        "Загруженный файл подготовлен как подборка шаблонов.",
+        "Образец рапортов.docx содержит готовые формы.",
+    ],
+)
+def test_a_complete_read_only_source_description_is_not_a_new_file_deed(claim: str) -> None:
+    assert not _claims_an_unconfirmed_supported_deed(
+        claim,
+        has_file=False,
+        reminder_succeeded=False,
+        read_only_attachment_review=True,
+        read_only_attachment_descriptors=[
+            "Образец рапортов.docx application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "PDF готов.",
+        "Документ готов и прикреплён.",
+        "Я подготовила документ с образцами рапортов.",
+        "Документ содержит три готовых образца. Прикрепляю новый PDF.",
+        "Документ содержит готовый образец. Я загрузила новый PDF.",
+        "Документ содержит готовый образец. Новый PDF загружен.",
+        "Документ представляет собой готовый шаблон, скачать его можно здесь.",
+        "Образец рапортов.docx готов, а новый PDF отправлен.",
+        "Документ содержит готовый образец. Напоминание установлено.",
+    ],
+)
+def test_read_only_source_scope_does_not_license_a_current_or_mixed_deed(claim: str) -> None:
+    assert _claims_an_unconfirmed_supported_deed(
+        claim,
+        has_file=False,
+        reminder_succeeded=False,
+        read_only_attachment_review=True,
+        read_only_attachment_descriptors=["Образец рапортов.docx"],
+    )
+
+
 @pytest.mark.parametrize(
     ("kind", "filename", "source_text", "model_answer"),
     [

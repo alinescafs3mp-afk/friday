@@ -7332,20 +7332,21 @@ _SUPPORTED_FILE_COMPLETION = re.compile(
     rf"\b{_SUPPORTED_FILE_OBJECT}\b[^.!?\n]{{0,256}}"
     r"\b(?:готов\w*|создан\w*|сделан\w*|сформирован\w*|сгенерирован\w*|"
     r"сохран[её]н\w*|экспортирован\w*|подготовлен\w*|собран\w*|"
-    r"прикрепл[её]н\w*|приложен\w*|отправлен\w*|выгружен\w*|во\s+вложени\w*)\b|"
+    r"прикрепл[её]н\w*|приложен\w*|отправлен\w*|выгружен\w*|загружен\w*|"
+    r"во\s+вложени\w*)\b|"
     r"\b(?:готов\w*|создан\w*|сделан\w*|сформирован\w*|сгенерирован\w*|"
     r"сохран[её]н\w*|экспортирован\w*|подготовлен\w*|собран\w*)\b"
     rf"[^.!?\n]{{0,64}}\b{_SUPPORTED_FILE_OBJECT}\b|"
     r"\b(?:создал\w*|сделал\w*|сформировал\w*|сгенерировал\w*|сохранил\w*|"
     r"экспортировал\w*|подготовил\w*|собрал\w*|"
     r"прикрепил\w*|прикрепля\w*|приложил\w*|прилага\w*|отправил\w*|"
-    r"отправля\w*|выгрузил\w*)\b"
+    r"отправля\w*|выгрузил\w*|загрузил\w*|загружа\w*)\b"
     rf"[^.!?\n]{{0,256}}\b(?:{_SUPPORTED_FILE_OBJECT}|его)\b"
     rf"|\b{_SUPPORTED_FILE_OBJECT}\b"
     r"[^.!?\n]{0,128}\b(?:я\s+)?(?:создал\w*|сделал\w*|сформировал\w*|"
     r"сгенерировал\w*|сохранил\w*|экспортировал\w*|"
     r"подготовил\w*|собрал\w*|прикрепил\w*|приложил\w*|прилага\w*|"
-    r"отправил\w*|отправля\w*|выгрузил\w*)\b|"
+    r"отправил\w*|отправля\w*|выгрузил\w*|загрузил\w*|загружа\w*)\b|"
     # A bare hand-off (``Вот файл.`` / ``Держите документ.``) claims a
     # carrier that must exist.  ``Вот список документов ...`` and
     # ``вот этот документ есть в базе`` are ordinary answer/deictic clauses,
@@ -7553,7 +7554,7 @@ _SUPPORTED_DEED_NONACTUAL = re.compile(
     r"\b(?:будет|должен\w*\s+быть)\b[^.!?\n]{0,48}"
     r"\b(?:готов\w*|создан\w*|сформирован\w*|поставлен\w*|установлен\w*)\b|"
     r"\b(?:создан\w*|сделан\w*|сформирован\w*|подготовлен\w*|собран\w*|"
-    r"прикрепл[её]н\w*|приложен\w*|отправлен\w*|выгружен\w*|поставлен\w*|"
+    r"прикрепл[её]н\w*|приложен\w*|отправлен\w*|выгружен\w*|загружен\w*|поставлен\w*|"
     r"установлен\w*|сохран[её]н\w*|добавлен\w*)"
     r"[^.!?\n]{0,32}\b(?:не\s+мной|клиент\w*|пользовател\w*|автор\w*|"
     r"приложени\w*|сервис\w*)\b|"
@@ -7565,7 +7566,7 @@ _SUPPORTED_DEED_NEGATED = re.compile(
     r"\b(?:не|ещ[её]\s+не)\b[^.!?\n]{0,32}\b(?:готов\w*|создан\w*|сделан\w*|"
     r"сформирован\w*|сгенерирован\w*|сохран[её]н\w*|экспортирован\w*|"
     r"подготовлен\w*|собран\w*|прикрепл[её]н\w*|приложен\w*|"
-    r"отправлен\w*|выгружен\w*|поставлен\w*|установлен\w*|сохран[её]н\w*|"
+    r"отправлен\w*|выгружен\w*|загружен\w*|поставлен\w*|установлен\w*|сохран[её]н\w*|"
     r"добавлен\w*|запланирован\w*|активирован\w*|озвучен\w*|записан\w*)\b",
     re.IGNORECASE,
 )
@@ -7573,7 +7574,7 @@ _SUPPORTED_DEED_ACTIVE_NEGATED = re.compile(
     r"\b(?:я\s+)?(?:ещ[её]\s+)?не\s+(?:создал\w*|сделал\w*|сформировал\w*|"
     r"сгенерировал\w*|сохранил\w*|экспортировал\w*|"
     r"подготовил\w*|собрал\w*|прикрепил\w*|прикрепля\w*|приложил\w*|"
-    r"отправил\w*|выгрузил\w*|поставил\w*|сохранил\w*|установил\w*|"
+    r"отправил\w*|выгрузил\w*|загрузил\w*|загружа\w*|поставил\w*|сохранил\w*|"
     r"добавил\w*|запланировал\w*|зав[её]л\w*|активировал\w*|озвучил\w*|записал\w*)\b",
     re.IGNORECASE,
 )
@@ -7593,7 +7594,7 @@ _SUPPORTED_FILE_ACTIVE_ACTION = (
     r"(?:создал\w*|сделал\w*|сформировал\w*|сгенерировал\w*|"
     r"сохранил\w*|экспортировал\w*|подготовил\w*|собрал\w*|"
     r"прикрепил\w*|прикрепля\w*|приложил\w*|прилага\w*|"
-    r"отправил\w*|отправля\w*|выгрузил\w*)"
+    r"отправил\w*|отправля\w*|выгрузил\w*|загрузил\w*|загружа\w*)"
 )
 _SUPPORTED_FILE_ACTIVE_COMPLETION = re.compile(
     rf"^\W*(?:я\s+)?{_SUPPORTED_FILE_ACTIVE_ACTION}\b",
@@ -7677,6 +7678,8 @@ _SUPPORTED_FILE_GENERIC_TERMS = frozenset(
         "adobe",
         "выгруз",
         "выгруж",
+        "загруз",
+        "загруж",
         "чат",
         "верс",
         "pdf",
@@ -8092,6 +8095,25 @@ _READ_ONLY_ATTACHMENT_READY_SOURCE_DESCRIPTION = re.compile(
     r"представля\w*\s+собой\s+(?:\*\*|__)?готов\w*(?:\*\*|__)?\s+",
     re.IGNORECASE,
 )
+_READ_ONLY_ATTACHMENT_CONTENT_DESCRIPTION = re.compile(
+    r"^\W*(?:"
+    r"(?:(?:этот|данн|исходн|загруженн|предоставленн|полученн|"
+    r"рассматриваем|анализируем)\w*\s+){0,2}"
+    r"(?:файл|документ|материал)\w*\s+"
+    r"(?:содерж|включ|объедин|описыва|перечисля|показыва|фиксиру|"
+    r"состоит\s+из)\w*|"
+    r"(?:в|внутри)\s+"
+    r"(?:(?:этом|данном|исходном|загруженном|предоставленном|полученном)\s+)?"
+    r"(?:файл|документ|материал)\w*\b"
+    r")",
+    re.IGNORECASE,
+)
+_READ_ONLY_ATTACHMENT_QUALIFIED_SOURCE = re.compile(
+    r"^\W*(?:(?:этот|данн|исходн|загруженн|предоставленн|полученн|"
+    r"рассматриваем|анализируем)\w*\s+){1,2}"
+    r"(?:файл|документ|материал)\w*\b",
+    re.IGNORECASE,
+)
 _READ_ONLY_ATTACHMENT_CARRIER_CLAIM = re.compile(
     r"\bво\s+вложени\w*\b|\b(?:уже|теперь|наход\w*|леж\w*)\s+в\s+чат\w*\b|"
     r"\bготов\w*\s+к\s+скачивани\w*\b|"
@@ -8121,7 +8143,8 @@ _READ_ONLY_ATTACHMENT_UNSAFE_DESCRIPTION_SUFFIX = re.compile(
     r"лови(?:те)?|скачай(?:те)?|загрузи(?:те)?|открой(?:те)?|получи(?:те)?)\b|"
     r"\b(?:можете?|можно)\s+(?:(?:его|е[её]|их)\s+)?"
     r"(?:взять|забрать|скачать|загрузить|открыть|получить)\b|"
-    r"\b(?:взять|забрать|скачать|загрузить|открыть|получить)\s+можно"
+    r"\b(?:взять|забрать|скачать|загрузить|открыть|получить)\s+"
+    r"(?:(?:его|е[её]|их)\s+)?можно"
     r"(?:\s+(?:здесь|тут|ниже))?\b|"
     r"\b(?:скачивани|загрузк)\w*\s+(?:доступн\w*|здесь|ниже)\b|"
     # Predicative carrier state. Requiring a clause boundary/conjunction keeps
@@ -8205,6 +8228,51 @@ def _read_only_attachment_passive_file_description(
     return bool(claim_terms and claim_terms.issubset(evidence_terms))
 
 
+def _read_only_attachment_source_file_description(
+    clause: str,
+    source_descriptors: Sequence[str],
+) -> bool:
+    """Recognise the proved input carrier without licensing a new effect.
+
+    The supported-deed regex is intentionally recall-oriented and therefore
+    also sees attributive words in ordinary source reviews, for example
+    ``Документ содержит три готовых образца``.  In a complete authenticated
+    read-only turn, grammar and the registered input filename can identify the
+    referent as the source carrier.  Effect language remains fail-closed.
+    """
+
+    file_claim = _SUPPORTED_FILE_COMPLETION.search(clause)
+    if file_claim is None:
+        return False
+    if (
+        _OUTSIDE_SELF_SUBJECT.search(clause)
+        or _OUTSIDE_DEED_SELF_AGENT.search(clause)
+        or re.search(rf"\b{_SUPPORTED_FILE_ACTIVE_ACTION}\b", clause, re.IGNORECASE)
+        or _SUPPORTED_FILE_BARE_HANDOFF.search(clause)
+        or _READ_ONLY_ATTACHMENT_CARRIER_CLAIM.search(clause)
+        or _READ_ONLY_ATTACHMENT_UNSAFE_DESCRIPTION_SUFFIX.search(clause)
+        or _PASSIVE_INPUT_CURRENT_DELIVERY.search(clause)
+        or _PASSIVE_INPUT_CURRENT_AVAILABILITY.search(clause)
+        or _SUPPORTED_EXTERNAL_WORKSPACE_COMPLETION.search(clause)
+    ):
+        return False
+    if _READ_ONLY_ATTACHMENT_CONTENT_DESCRIPTION.search(
+        clause
+    ) or _READ_ONLY_ATTACHMENT_QUALIFIED_SOURCE.search(clause):
+        return True
+
+    claimed_filenames = set(_attachment_filename_mentions(clause))
+    source_filenames = {
+        filename
+        for descriptor in source_descriptors
+        for filename in _attachment_filename_mentions(str(descriptor or ""))
+    }
+    if not claimed_filenames or not claimed_filenames.issubset(source_filenames):
+        return False
+    first_filename = _ATTACHMENT_FILENAME_REFERENCE.search(_classification_text(clause))
+    return bool(first_filename is not None and first_filename.start() <= file_claim.start() + 32)
+
+
 def _read_only_attachment_preamble_is_grounded(
     answer: str,
     evidence: Sequence[str],
@@ -8242,9 +8310,11 @@ def _claims_an_unconfirmed_supported_deed(
     passive_source_state: bool = False,
     passive_input_file_state_evidence: Sequence[str] = (),
     bounded_historical_archive_report: bool = False,
+    read_only_attachment_review: bool = False,
+    read_only_attachment_descriptors: Sequence[str] = (),
 ) -> bool:
     if (
-        passive_source_state
+        (passive_source_state or read_only_attachment_review)
         and _SUPPORTED_FILE_COMPLETION.search(answer)
         and (
             _SUPPORTED_FILE_BARE_HANDOFF.search(answer)
@@ -8287,6 +8357,18 @@ def _claims_an_unconfirmed_supported_deed(
             # This is a statement about where document data came from, not an
             # assertion that Friday created or delivered a carrier this turn.
             # Active first-person actions and hand-offs remain guarded above.
+            file_claim = None
+        if (
+            file_claim is not None
+            and read_only_attachment_review
+            and _read_only_attachment_source_file_description(
+                clause,
+                read_only_attachment_descriptors,
+            )
+        ):
+            # The current source carrier is already verified.  This consumes
+            # only its passive/content description; reminders, voice claims and
+            # any independent file-effect clause are still checked below.
             file_claim = None
         if file_claim and read_only_timeline_file_report and _SUPPORTED_FILE_HISTORICAL_REPORT.search(clause):
             # This is a fact reported from the bounded archive timeline,
@@ -46290,6 +46372,22 @@ class AgentRuntime:
             if read_only_attachment_review_scope
             else ()
         )
+        read_only_attachment_descriptors = (
+            tuple(
+                " ".join(
+                    part
+                    for part in (
+                        str(item.get("filename") or item.get("name") or "").strip(),
+                        str(item.get("mime_type") or "").strip(),
+                    )
+                    if part
+                )
+                for item in active_attachment_set
+                if isinstance(item, Mapping) and str(item.get("filename") or item.get("name") or "").strip()
+            )
+            if read_only_attachment_review_scope
+            else ()
+        )
         passive_attachment_preamble_normalized = False
         if read_only_attachment_review_scope and _read_only_attachment_preamble_is_grounded(
             content,
@@ -46713,6 +46811,8 @@ class AgentRuntime:
                     passive_source_state=passive_attachment_summary_scope,
                     passive_input_file_state_evidence=passive_input_file_state_evidence,
                     bounded_historical_archive_report=named_person_passive_source_scope,
+                    read_only_attachment_review=read_only_attachment_review_scope,
+                    read_only_attachment_descriptors=read_only_attachment_descriptors,
                 )
             )
         ):
@@ -47561,6 +47661,8 @@ class AgentRuntime:
                     passive_source_state=passive_attachment_summary_scope,
                     passive_input_file_state_evidence=passive_input_file_state_evidence,
                     bounded_historical_archive_report=named_person_passive_source_scope,
+                    read_only_attachment_review=read_only_attachment_review_scope,
+                    read_only_attachment_descriptors=read_only_attachment_descriptors,
                 ):
                     LOGGER.warning("supported-deed: repair вернул неподтверждённое завершение")
                     repaired_model_said = _UNCONFIRMED_SUPPORTED_DEED
