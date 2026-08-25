@@ -1,3 +1,18 @@
+## 0.207.28 — 2026-08-25
+
+### Bounded document-map shadow on the optional GPT-OSS node
+
+- Large-document MAP/REDUCE leaves can now be copied to the accepted laptop
+  runtime as private, text-only, read-only discarded shadow work. The primary
+  MAP result and final synthesis remain authoritative and are produced exactly
+  as before, including when the laptop is absent, busy, slow or malformed.
+- A strict code-owned `{summary}` schema, 4K/512 envelope and concurrency-one
+  policy bind the new workload to the unchanged accepted runtime identity;
+  tools, effects and direct publication remain impossible.
+- The immutable operator admits only the exact existing `assist/extract` to
+  `assist/extract+document_map(shadow)` transition. Document-map assist remains
+  fail-closed until this shadow phase produces separately bound evidence.
+
 ## 0.207.27 — 2026-08-25
 
 ### Durable comparison reader and document reliability hotfix
