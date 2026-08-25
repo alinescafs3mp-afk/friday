@@ -139,6 +139,22 @@ class NoteOperationReceiptStore:
             raise IdempotencyConflictError("operation ID was reused with different note arguments")
         return _receipt(row)
 
+    def inspect(self, operation_digest: str) -> NoteOperationReceipt | None:
+        """Read one private receipt without replaying its vault mutation."""
+
+        if (
+            not isinstance(operation_digest, str)
+            or len(operation_digest) != 64
+            or any(character not in "0123456789abcdef" for character in operation_digest)
+        ):
+            raise ValueError("operation_digest must be a lowercase SHA-256 digest")
+        with self._lock, closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT * FROM note_operation_receipts WHERE operation_digest=?",
+                (operation_digest,),
+            ).fetchone()
+        return None if row is None else _receipt(row)
+
     def commit(self, operation_digest: str) -> NoteOperationReceipt:
         with self._lock, closing(self._connect()) as conn:
             conn.execute("BEGIN IMMEDIATE")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
@@ -23,6 +24,8 @@ from friday.organs.obsidian.operations import (
     OperationCommitUncertain,
     OperationLedgerError,
     OperationTerminalError,
+    _legacy_marker_row_proves_note,
+    _pending_operation_paths,
     canonical_arguments_digest,
 )
 from friday.organs.obsidian.service import ObsidianService
@@ -349,6 +352,333 @@ def test_prepared_append_reconciles_after_receipt_commit_failure(
     assert recovered.replayed is True
     assert notes.read_note("Recovery").body.count("once only") == 1
     assert "<!-- friday:" not in notes.read_note("Recovery").content
+
+
+def test_observe_only_create_settles_an_exact_prepared_sidecar_without_vault_write(
+    storage: FridayStorage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operations, notes, _ = _make_operations(storage, tmp_path, "alice")
+    receipt_store = notes._receipt_store()  # noqa: SLF001 - fault injection at the durable seam
+    original_commit = receipt_store.commit
+    fail_once = True
+
+    def lose_sidecar_commit(operation_digest: str):
+        nonlocal fail_once
+        if fail_once:
+            fail_once = False
+            raise OSError("synthetic sidecar commit interruption")
+        return original_commit(operation_digest)
+
+    monkeypatch.setattr(receipt_store, "commit", lose_sidecar_commit)
+    with pytest.raises(OperationCommitUncertain):
+        operations.create_note("create-prepared-sidecar", "Recovery/Create", "exact target")
+
+    operation_digest = hashlib.sha256(b"create-prepared-sidecar").hexdigest()
+    prepared_receipt = receipt_store.inspect(operation_digest)
+    assert prepared_receipt is not None and prepared_receipt.state == "prepared"
+    before = notes.read_note("Recovery/Create.md")
+
+    def forbid_vault_write(*_args: Any, **_kwargs: Any):
+        raise AssertionError("observe-only reconciliation attempted a vault write")
+
+    monkeypatch.setattr(notes.store, "write_text", forbid_vault_write)
+    reconciled = operations.reconcile_local_effect("create-prepared-sidecar")
+
+    assert reconciled.status == "scan_pending"
+    assert reconciled.replayed is True
+    assert reconciled.revision == before.revision
+    assert reconciled.applied is False
+    assert notes.read_note("Recovery/Create.md").content == before.content
+    committed_receipt = receipt_store.inspect(operation_digest)
+    assert committed_receipt is not None and committed_receipt.state == "committed"
+    row = storage.get_obsidian_operation("alice", "create-prepared-sidecar")
+    assert row is not None
+    payload = json.loads(row["result_json"])
+    assert payload == {
+        "applied": False,
+        "created": True,
+        "path": "Recovery/Create.md",
+        "previous_revision": None,
+        "reconciliation_proof": "sidecar_committed",
+        "reconciliation_state": "settled",
+        "revision": before.revision,
+        "schema": "friday.obsidian-note-operation.v2",
+        "side_effect_receipt_sha256": payload["side_effect_receipt_sha256"],
+        "sidecar_arguments_sha256": before.revision,
+    }
+    assert len(payload["side_effect_receipt_sha256"]) == 64
+    assert operations.get_operation("create-prepared-sidecar") == reconciled
+    assert _pending_operation_paths(row) == frozenset({"Recovery/Create.md"})
+
+    marker = f'<!-- friday:create operation="{operation_digest}" arguments="{before.revision}" -->'
+    marked_content = before.content + marker + "\n"
+    match = re.search(r"<!-- friday:create .*? -->", marked_content)
+    assert match is not None
+    assert _legacy_marker_row_proves_note(
+        row,
+        path=before.path,
+        revision=hashlib.sha256(marked_content.encode()).hexdigest(),
+        content=marked_content,
+        marker=match,
+    )
+
+
+def test_committed_append_sidecar_remains_historical_proof_after_a_later_edit(
+    storage: FridayStorage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operations, notes, _ = _make_operations(storage, tmp_path, "alice")
+    created = operations.create_note("history-create", "Recovery/History", "start")
+    original_transition = storage.transition_obsidian_operation
+    fail_once = True
+
+    def lose_main_receipt(owner_id: str, operation_id: str, state: str, **kwargs: Any) -> dict:
+        nonlocal fail_once
+        if operation_id == "history-append" and state == "committed" and fail_once:
+            fail_once = False
+            raise OSError("synthetic main receipt interruption")
+        return original_transition(owner_id, operation_id, state, **kwargs)
+
+    monkeypatch.setattr(storage, "transition_obsidian_operation", lose_main_receipt)
+    with pytest.raises(OperationCommitUncertain):
+        operations.append_note(
+            "history-append",
+            "Recovery/History.md",
+            "accepted once",
+            expected_revision=created.revision,
+        )
+    target = notes.read_note("Recovery/History.md")
+    receipt_store = notes._receipt_store()  # noqa: SLF001 - inspect exact historical proof
+    operation_digest = hashlib.sha256(b"history-append").hexdigest()
+    sidecar = receipt_store.inspect(operation_digest)
+    assert sidecar is not None and sidecar.state == "committed"
+
+    monkeypatch.setattr(storage, "transition_obsidian_operation", original_transition)
+    edited = notes.store.write_text(
+        target.path,
+        target.content + "\nmanual later edit\n",
+        expected_revision=target.revision,
+    )
+
+    def forbid_vault_write(*_args: Any, **_kwargs: Any):
+        raise AssertionError("historical reconciliation attempted a vault write")
+
+    monkeypatch.setattr(notes.store, "write_text", forbid_vault_write)
+    reconciled = operations.reconcile_local_effect("history-append")
+
+    assert reconciled.status == "scan_pending"
+    assert reconciled.revision == target.revision
+    assert reconciled.previous_revision == created.revision
+    assert reconciled.applied is False
+    assert notes.read_note(target.path).revision == edited.revision
+    assert "manual later edit" in notes.read_note(target.path).body
+    row = storage.get_obsidian_operation("alice", "history-append")
+    assert row is not None
+    payload = json.loads(row["result_json"])
+    assert payload["schema"] == "friday.obsidian-note-operation.v2"
+    assert payload["reconciliation_proof"] == "sidecar_committed"
+    assert payload["sidecar_arguments_sha256"] == sidecar.arguments_digest
+    assert operations.get_operation("history-append") == reconciled
+
+
+@pytest.mark.parametrize("sidecar_mode", ("missing", "identity_mismatch", "target_mismatch"))
+def test_unproved_append_stays_uncertain_and_never_mutates_the_vault(
+    storage: FridayStorage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    sidecar_mode: str,
+) -> None:
+    operations, notes, bundle = _make_operations(storage, tmp_path, "alice")
+    notes.create_note("Recovery/Unproved.md", "base")
+    current = notes.read_note("Recovery/Unproved.md")
+    target_content = notes.render_append_content(current.content, "must not be replayed")
+    target_revision = hashlib.sha256(target_content.encode()).hexdigest()
+    operation_id = f"append-{sidecar_mode}"
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id=operation_id,
+        vault_id=str(bundle["vault"]["id"]),
+        method="append",
+        arguments_digest="3" * 64,
+        expected_revision=current.revision,
+        prepared_result={
+            "schema": "friday.obsidian-note-operation.v1",
+            "path": current.path,
+            "target_revision": target_revision,
+            "base_revision": current.revision,
+        },
+    )
+    if sidecar_mode != "missing":
+        notes._receipt_store().prepare(  # noqa: SLF001 - deliberate corrupt-proof fixture
+            operation_digest=hashlib.sha256(operation_id.encode()).hexdigest(),
+            method="append",
+            arguments_digest="4" * 64,
+            note_path=current.path,
+            base_revision=current.revision,
+            target_revision=("5" * 64 if sidecar_mode == "identity_mismatch" else target_revision),
+            created=False,
+        )
+    before = notes.read_note(current.path)
+
+    def forbid_vault_write(*_args: Any, **_kwargs: Any):
+        raise AssertionError("uncertain reconciliation attempted a vault write")
+
+    monkeypatch.setattr(notes.store, "write_text", forbid_vault_write)
+    with pytest.raises(OperationCommitUncertain):
+        operations.reconcile_local_effect(operation_id)
+
+    row = storage.get_obsidian_operation("alice", operation_id)
+    assert row is not None and row["status"] == "uncertain"
+    assert json.loads(row["result_json"]) == {
+        "base_revision": current.revision,
+        "error": "local_commit_uncertain",
+        "path": current.path,
+        "schema": "friday.obsidian-note-operation.v1",
+        "target_revision": target_revision,
+    }
+    with pytest.raises(OperationCommitUncertain):
+        operations.reconcile_local_effect(operation_id)
+    assert notes.read_note(current.path).content == before.content
+
+
+@pytest.mark.parametrize("exact", (True, False))
+def test_sidecar_free_legacy_create_requires_the_exact_frozen_revision(
+    storage: FridayStorage,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    exact: bool,
+) -> None:
+    operations, notes, bundle = _make_operations(storage, tmp_path, "alice")
+    rendered = notes.render_create_content("legacy exact bytes")
+    current = notes.store.write_text("Recovery/Legacy.md", rendered, create_only=True)
+    target_revision = current.revision if exact else "6" * 64
+    operation_id = f"legacy-create-{'exact' if exact else 'mismatch'}"
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id=operation_id,
+        vault_id=str(bundle["vault"]["id"]),
+        method="create",
+        arguments_digest="7" * 64,
+        prepared_result={
+            "schema": "friday.obsidian-note-operation.v1",
+            "path": current.path,
+            "target_revision": target_revision,
+        },
+    )
+
+    def forbid_vault_write(*_args: Any, **_kwargs: Any):
+        raise AssertionError("legacy observation attempted a vault write")
+
+    monkeypatch.setattr(notes.store, "write_text", forbid_vault_write)
+    if not exact:
+        with pytest.raises(OperationCommitUncertain):
+            operations.reconcile_local_effect(operation_id)
+        row = storage.get_obsidian_operation("alice", operation_id)
+        assert row is not None and row["status"] == "uncertain"
+        assert notes.read_note(current.path).content == rendered
+        return
+
+    reconciled = operations.reconcile_local_effect(operation_id)
+    row = storage.get_obsidian_operation("alice", operation_id)
+    assert row is not None and row["status"] == "scan_pending"
+    payload = json.loads(row["result_json"])
+    assert reconciled.revision == current.revision
+    assert payload["reconciliation_proof"] == "legacy_exact_revision"
+    assert payload["sidecar_arguments_sha256"] is None
+    assert operations.get_operation(operation_id) == reconciled
+    assert notes.read_note(current.path).content == rendered
+
+
+def test_result_reader_rejects_widened_or_inconsistent_v1_payloads(
+    storage: FridayStorage,
+    tmp_path: Path,
+) -> None:
+    operations, _notes, _ = _make_operations(storage, tmp_path, "alice")
+    result = operations.create_note("strict-v1", "Strict/V1.md", "body")
+    row = storage.get_obsidian_operation("alice", result.operation_id)
+    assert row is not None
+    payload = json.loads(row["result_json"])
+    payload["private_body"] = "must never be admitted"
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE obsidian_operations SET result_json=? WHERE user_id=? AND id=?",
+            (json.dumps(payload, sort_keys=True), "alice", result.operation_id),
+        )
+    with pytest.raises(OperationLedgerError, match="v1 fields"):
+        operations.get_operation(result.operation_id)
+
+    del payload["private_body"]
+    payload["target_revision"] = "8" * 64
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE obsidian_operations SET result_json=? WHERE user_id=? AND id=?",
+            (json.dumps(payload, sort_keys=True), "alice", result.operation_id),
+        )
+    with pytest.raises(OperationLedgerError, match="target revision"):
+        operations.get_operation(result.operation_id)
+
+    payload["target_revision"] = result.revision
+    duplicate = json.dumps(payload, sort_keys=True).replace(
+        '"schema":',
+        '"schema":"duplicate","schema":',
+        1,
+    )
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE obsidian_operations SET result_json=? WHERE user_id=? AND id=?",
+            (duplicate, "alice", result.operation_id),
+        )
+    with pytest.raises(OperationLedgerError, match="duplicate key"):
+        operations.get_operation(result.operation_id)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("private_body", "forbidden", "v2 fields"),
+        ("reconciliation_state", "required", "settled"),
+        ("side_effect_receipt_sha256", "9" * 64, "receipt digest"),
+        ("sidecar_arguments_sha256", "a" * 64, "legacy proof shape"),
+        ("created", False, "mutation shape"),
+    ),
+)
+def test_result_reader_strictly_rejects_tampered_v2_settled_proof(
+    storage: FridayStorage,
+    tmp_path: Path,
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    operations, notes, bundle = _make_operations(storage, tmp_path, "alice")
+    current = notes.store.write_text("Strict/V2.md", "exact", create_only=True)
+    storage.prepare_obsidian_operation(
+        "alice",
+        operation_id="strict-v2",
+        vault_id=str(bundle["vault"]["id"]),
+        method="create",
+        arguments_digest="b" * 64,
+        prepared_result={
+            "schema": "friday.obsidian-note-operation.v1",
+            "path": current.path,
+            "target_revision": current.revision,
+        },
+    )
+    operations.reconcile_local_effect("strict-v2")
+    row = storage.get_obsidian_operation("alice", "strict-v2")
+    assert row is not None
+    payload = json.loads(row["result_json"])
+    payload[field] = value
+    with storage.transaction() as conn:
+        conn.execute(
+            "UPDATE obsidian_operations SET result_json=? WHERE user_id=? AND id=?",
+            (json.dumps(payload, sort_keys=True), "alice", "strict-v2"),
+        )
+
+    with pytest.raises(OperationLedgerError, match=message):
+        operations.get_operation("strict-v2")
 
 
 def test_legacy_marker_migration_cas_cleans_body_and_restarts_delivery(

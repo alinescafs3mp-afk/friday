@@ -748,6 +748,55 @@ class ObsidianService:
             legacy_methods=("create", "append"),
         )
 
+    def reconcile_operation_receipt(
+        self,
+        operation_id: str,
+        *,
+        method: str,
+        path: str | PurePosixPath,
+        base_revision: str | None,
+        target_revision: str,
+    ) -> NoteOperationReceipt | None:
+        """Observe and settle a local receipt without replaying the note write.
+
+        A committed sidecar remains historical proof after a later user edit.
+        A prepared sidecar is committed only when the current file is still the
+        exact frozen target.  Missing or mismatched evidence causes no vault
+        write and remains available to the caller as unresolved uncertainty.
+        """
+
+        if method not in {"create", "append"}:
+            raise ValueError("only create and append receipts are reconcilable")
+        note_path = self._note_path(path)
+        if base_revision is not None:
+            validate_revision(base_revision)
+        validate_revision(target_revision)
+        operation_digest = _operation_digest(operation_id)
+        with self._lock:
+            receipt = self._receipt_store().inspect(operation_digest)
+            if receipt is None:
+                return None
+            expected_created = method == "create"
+            if (
+                receipt.method != method
+                or receipt.note_path != note_path
+                or receipt.base_revision != base_revision
+                or receipt.target_revision != target_revision
+                or receipt.created is not expected_created
+            ):
+                raise IdempotencyConflictError(
+                    "operation receipt does not match the frozen ledger target"
+                )
+            if receipt.state == "committed":
+                return receipt
+            try:
+                current = self.store.read_text(note_path)
+            except NoteNotFoundError:
+                return receipt
+            if current.revision != target_revision:
+                return receipt
+            return self._receipt_store().commit(operation_digest)
+
     def _note_path(self, path: str | PurePosixPath) -> str:
         normalized = self.store.normalize_path(path)
         pure = PurePosixPath(normalized)

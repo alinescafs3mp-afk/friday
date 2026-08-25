@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path, PurePosixPath
-from typing import Any, Protocol
+from typing import Any, NoReturn, Protocol
 
 from friday.storage import FridayStorage
 
@@ -49,6 +49,18 @@ from .wikilinks import (
 )
 
 _RESULT_SCHEMA = "friday.obsidian-note-operation.v1"
+_RESULT_SCHEMA_V2 = "friday.obsidian-note-operation.v2"
+_RESULT_SCHEMAS = frozenset({_RESULT_SCHEMA, _RESULT_SCHEMA_V2})
+_RESULT_CORE_FIELDS = frozenset({"schema", "path", "revision", "previous_revision", "created", "applied"})
+_RESULT_V2_FIELDS = frozenset(
+    {
+        *_RESULT_CORE_FIELDS,
+        "reconciliation_state",
+        "reconciliation_proof",
+        "sidecar_arguments_sha256",
+        "side_effect_receipt_sha256",
+    }
+)
 _WORKFLOW_RESULT_SCHEMA = "friday.obsidian-workflow-operation.v1"
 _MAX_WORKFLOW_RESULT_BYTES = 240 * 1024
 _DAILY_TOKEN = re.compile(r"YYYY|YY|MM|DD")
@@ -254,51 +266,55 @@ class ObsidianOperationService:
         context = {"path": canonical_path, "target_revision": target_revision}
 
         def mutate(reconcile: bool) -> NoteWriteResult:
-            try:
-                current = self._notes.store.read_text(canonical_path)
-            except NoteNotFoundError:
-                written = self._notes.store.write_text(
-                    canonical_path,
-                    rendered,
-                    create_only=True,
-                )
-                return _note_write_result(
-                    canonical_path,
-                    written.revision,
-                    previous_revision=None,
-                    applied=True,
-                    created=True,
-                )
-            if reconcile and current.revision == target_revision:
-                return _note_write_result(
-                    canonical_path,
-                    target_revision,
-                    previous_revision=None,
-                    applied=False,
-                    created=True,
-                )
             if reconcile:
-                legacy = _legacy_marker_clean_content(
-                    current.text(),
+                receipt = self._notes.reconcile_operation_receipt(
                     operation_id,
-                    rendered,
-                    methods=("create",),
+                    method="create",
+                    path=canonical_path,
+                    base_revision=None,
                     target_revision=target_revision,
                 )
-                if legacy is not None:
-                    cleaned = self._notes.store.write_text(
-                        canonical_path,
-                        legacy,
-                        expected_revision=current.revision,
-                    )
+                if receipt is not None and receipt.state == "committed":
                     return _note_write_result(
                         canonical_path,
-                        cleaned.revision,
+                        target_revision,
                         previous_revision=None,
                         applied=False,
                         created=True,
                     )
-            raise NoteAlreadyExistsError(canonical_path)
+                # Pre-sidecar create rows are the sole legacy fallback.  Exact
+                # current bytes prove the frozen postcondition; every mismatch
+                # remains uncertain and is never rewritten by reconciliation.
+                if receipt is None:
+                    try:
+                        current = self._notes.store.read_text(canonical_path)
+                    except NoteNotFoundError:
+                        current = None
+                    if current is not None and current.revision == target_revision:
+                        return _note_write_result(
+                            canonical_path,
+                            target_revision,
+                            previous_revision=None,
+                            applied=False,
+                            created=True,
+                        )
+                raise OperationCommitUncertain("prepared create has no exact committed local proof")
+
+            written = self._notes.create_note(
+                canonical_path,
+                content,
+                properties=typed_properties,
+                operation_id=operation_id,
+            )
+            if written.revision != target_revision:
+                raise RevisionConflictError(target_revision, written.revision)
+            return _note_write_result(
+                canonical_path,
+                written.revision,
+                previous_revision=written.previous_revision,
+                applied=written.applied,
+                created=True,
+            )
 
         return self._execute(
             operation_id,
@@ -384,34 +400,23 @@ class ObsidianOperationService:
         self._freeze_existing_context(existing_operation, operation_id, context)
 
         def mutate(reconcile: bool) -> NoteWriteResult:
-            current = self._notes.store.read_text(canonical_path)
-            if reconcile and current.revision == target_revision:
-                return _note_write_result(
-                    canonical_path,
-                    target_revision,
-                    previous_revision=base_revision,
-                    applied=False,
-                )
             if reconcile:
-                cleaned = _legacy_marker_clean_content(
-                    current.text(),
+                receipt = self._notes.reconcile_operation_receipt(
                     operation_id,
-                    text,
-                    methods=("append",),
+                    method="append",
+                    path=canonical_path,
+                    base_revision=base_revision,
                     target_revision=target_revision,
                 )
-                if cleaned is not None and _content_revision(cleaned) == target_revision:
-                    written = self._notes.store.write_text(
-                        canonical_path,
-                        cleaned,
-                        expected_revision=current.revision,
-                    )
+                if receipt is not None and receipt.state == "committed":
                     return _note_write_result(
                         canonical_path,
-                        written.revision,
+                        target_revision,
                         previous_revision=base_revision,
                         applied=False,
                     )
+                raise OperationCommitUncertain("prepared append has no exact committed local proof")
+            current = self._notes.store.read_text(canonical_path)
             if base_revision is None:
                 raise OperationLedgerError("prepared append base revision is missing")
             if current.revision != base_revision:
@@ -428,7 +433,7 @@ class ObsidianOperationService:
                 canonical_path,
                 note_result.revision,
                 previous_revision=base_revision,
-                applied=True,
+                applied=note_result.applied,
             )
 
         return self._execute(
@@ -1599,6 +1604,169 @@ class ObsidianOperationService:
         if _row_has_workflow_schema(row):
             return _workflow_result_from_row(row, replayed=True)
         return _result_from_row(row, replayed=True)
+
+    def reconcile_local_effect(self, operation_id: str) -> DurableNoteResult:
+        """Settle one create/append by observation without replaying its mutation."""
+
+        operation_id = _operation_id(operation_id)
+        with self._lock:
+            self._assert_owner_vault()
+            row = self._storage.get_obsidian_operation(self._owner_id, operation_id)
+            if row is None:
+                raise OperationLedgerError("Obsidian operation not found for owner")
+            status = str(row.get("status") or "")
+            if status in _REPLAYABLE_RESULTS:
+                result = _result_from_row(row, replayed=True)
+                if status in {"committed", "reconciled"}:
+                    row = self._storage.transition_obsidian_operation(
+                        self._owner_id,
+                        operation_id,
+                        "scan_pending",
+                    )
+                    result = _result_from_row(row, replayed=True)
+                    self._request_scan(result)
+                return result
+            if status in _TERMINAL_FAILURES:
+                raise OperationTerminalError(operation_id, status, _error_from_row(row))
+            if status not in {"prepared", "uncertain"}:
+                raise OperationLedgerError(f"unsupported Obsidian operation state: {status}")
+
+            method = str(row.get("method") or "")
+            if method not in {"create", "append"}:
+                raise OperationCommitUncertain("operation has no observe-only local reconciliation adapter")
+            context = _closed_result_object(row.get("result_json"), label="operation result")
+            expected_context_fields = {
+                "create": {"schema", "path", "target_revision"},
+                "append": {"schema", "path", "target_revision", "base_revision"},
+            }[method]
+            if status == "uncertain":
+                expected_context_fields.add("error")
+            if (
+                context.get("schema") != _RESULT_SCHEMA
+                or set(context) != expected_context_fields
+                or (status == "uncertain" and context.get("error") != "local_commit_uncertain")
+            ):
+                raise OperationLedgerError("prepared operation result fields are invalid")
+            path = _note_path(
+                self._notes,
+                _durable_path(context.get("path"), label="prepared operation path"),
+            )
+            try:
+                target_revision = validate_revision(context.get("target_revision"))  # type: ignore[arg-type]
+                raw_base = context.get("base_revision")
+                base_revision = (
+                    validate_revision(raw_base)  # type: ignore[arg-type]
+                    if raw_base is not None
+                    else None
+                )
+            except ValueError as exc:
+                raise OperationLedgerError("prepared operation revision is invalid") from exc
+            if method == "create" and base_revision is not None:
+                raise OperationLedgerError("prepared create unexpectedly has a base revision")
+            if method == "append" and base_revision is None:
+                self._raise_local_effect_uncertain(
+                    operation_id,
+                    status=status,
+                    context=context,
+                    message="prepared append has no frozen base revision",
+                )
+
+            try:
+                receipt = self._notes.reconcile_operation_receipt(
+                    operation_id,
+                    method=method,
+                    path=path,
+                    base_revision=base_revision,
+                    target_revision=target_revision,
+                )
+            except IdempotencyConflictError as exc:
+                self._raise_local_effect_uncertain(
+                    operation_id,
+                    status=status,
+                    context=context,
+                    message="local sidecar receipt does not match the frozen operation",
+                    cause=exc,
+                )
+            proof_kind = "sidecar_committed"
+            if receipt is None and method == "create":
+                try:
+                    current = self._notes.store.read_text(path)
+                except NoteNotFoundError:
+                    current = None
+                if current is not None and current.revision == target_revision:
+                    proof_kind = "legacy_exact_revision"
+                else:
+                    self._raise_local_effect_uncertain(
+                        operation_id,
+                        status=status,
+                        context=context,
+                        message="prepared create has no exact committed local proof",
+                    )
+            elif receipt is None or receipt.state != "committed":
+                self._raise_local_effect_uncertain(
+                    operation_id,
+                    status=status,
+                    context=context,
+                    message=f"prepared {method} has no exact committed local proof",
+                )
+
+            local = _note_write_result(
+                path,
+                target_revision,
+                previous_revision=base_revision,
+                applied=False,
+                created=method == "create",
+            )
+            result_payload = _reconciled_result_json(
+                local,
+                operation_id=operation_id,
+                method=method,
+                proof_kind=proof_kind,
+                sidecar_arguments_sha256=(receipt.arguments_digest if receipt is not None else None),
+            )
+            row = self._storage.transition_obsidian_operation(
+                self._owner_id,
+                operation_id,
+                "reconciled",
+                result=result_payload,
+                delivery=_delivery_json(local.delivery),
+            )
+            row = self._storage.transition_obsidian_operation(
+                self._owner_id,
+                operation_id,
+                "scan_pending",
+            )
+            durable = _result_from_row(row, replayed=True)
+            self._request_scan(durable)
+            return durable
+
+    def _raise_local_effect_uncertain(
+        self,
+        operation_id: str,
+        *,
+        status: str,
+        context: Mapping[str, object],
+        message: str,
+        cause: Exception | None = None,
+    ) -> NoReturn:
+        """Keep unresolved observation failures durable without touching the vault."""
+
+        if status == "prepared":
+            uncertain_payload = dict(context)
+            uncertain_payload["error"] = "local_commit_uncertain"
+            try:
+                self._storage.transition_obsidian_operation(
+                    self._owner_id,
+                    operation_id,
+                    "uncertain",
+                    result=uncertain_payload,
+                    delivery=_delivery_json(_uncommitted_delivery()),
+                )
+            except Exception as exc:
+                raise OperationCommitUncertain(
+                    "local effect is unresolved and its uncertain state could not be persisted"
+                ) from exc
+        raise OperationCommitUncertain(message) from cause
 
     def refresh_delivery(self, operation_id: str) -> DurableNoteResult | DurableWorkflowResult:
         """Persist only delivery facts explicitly observed by the injected adapter."""
@@ -3255,10 +3423,16 @@ def _pending_operation_paths(row: Mapping[str, Any]) -> frozenset[str] | None:
     """Return every safely parsed path, or None to require a global migration fence."""
 
     try:
-        payload = _json_object(row.get("result_json"), label="operation result")
+        payload = _closed_result_object(row.get("result_json"), label="operation result")
         schema = payload.get("schema")
         if schema == _RESULT_SCHEMA:
             return frozenset({_durable_path(payload.get("path"), label="pending operation path")})
+        if schema == _RESULT_SCHEMA_V2:
+            path, _revision, _previous, _created, _applied = _validated_note_result_payload(
+                row,
+                payload,
+            )
+            return frozenset({path})
         if schema == _WORKFLOW_RESULT_SCHEMA:
             phase = payload.get("phase")
             if phase not in {"prepared", "result"}:
@@ -3294,11 +3468,17 @@ def _legacy_marker_row_proves_note(
     marker: re.Match[str],
 ) -> bool:
     try:
-        result = _json_object(row.get("result_json"), label="operation result")
+        result = _closed_result_object(row.get("result_json"), label="operation result")
     except OperationLedgerError:
         return False
-    if result.get("schema") == _RESULT_SCHEMA:
-        return result.get("path") == path
+    if result.get("schema") in _RESULT_SCHEMAS:
+        try:
+            proven_path, _stored_revision, _previous, _created, _applied = _validated_note_result_payload(
+                row, result
+            )
+        except OperationLedgerError:
+            return False
+        return proven_path == path
     if str(row.get("method") or "") != "verification_note" or marker.group("method") != "create":
         return False
     if set(result) != {"path", "revision", "applied"}:
@@ -3443,6 +3623,86 @@ def _result_json(result: NoteWriteResult) -> dict[str, object]:
     }
 
 
+def _reconciled_result_json(
+    result: NoteWriteResult,
+    *,
+    operation_id: str,
+    method: str,
+    proof_kind: str,
+    sidecar_arguments_sha256: str | None,
+) -> dict[str, object]:
+    if method not in {"create", "append"}:
+        raise OperationLedgerError("local reconciliation method is unsupported")
+    if result.created is not (method == "create") or result.applied:
+        raise OperationLedgerError("local reconciliation result shape is invalid")
+    if method == "create" and result.previous_revision is not None:
+        raise OperationLedgerError("reconciled create cannot claim a base revision")
+    if method == "append" and result.previous_revision is None:
+        raise OperationLedgerError("reconciled append requires its frozen base revision")
+    if proof_kind not in {"sidecar_committed", "legacy_exact_revision"}:
+        raise OperationLedgerError("local reconciliation proof kind is unsupported")
+    if sidecar_arguments_sha256 is not None:
+        try:
+            validate_revision(sidecar_arguments_sha256)
+        except ValueError as exc:
+            raise OperationLedgerError("sidecar arguments digest is invalid") from exc
+    if proof_kind == "sidecar_committed" and sidecar_arguments_sha256 is None:
+        raise OperationLedgerError("committed sidecar proof requires its arguments digest")
+    if proof_kind == "legacy_exact_revision" and (method != "create" or sidecar_arguments_sha256 is not None):
+        raise OperationLedgerError("legacy exact proof is admitted only for sidecar-free create")
+    receipt_sha256 = _local_effect_receipt_sha256(
+        operation_id=operation_id,
+        method=method,
+        path=result.path,
+        revision=result.revision,
+        previous_revision=result.previous_revision,
+        proof_kind=proof_kind,
+        sidecar_arguments_sha256=sidecar_arguments_sha256,
+    )
+    return {
+        "schema": _RESULT_SCHEMA_V2,
+        "path": result.path,
+        "revision": result.revision,
+        "previous_revision": result.previous_revision,
+        "created": result.created,
+        "applied": result.applied,
+        "reconciliation_state": "settled",
+        "reconciliation_proof": proof_kind,
+        "sidecar_arguments_sha256": sidecar_arguments_sha256,
+        "side_effect_receipt_sha256": receipt_sha256,
+    }
+
+
+def _local_effect_receipt_sha256(
+    *,
+    operation_id: str,
+    method: str,
+    path: str,
+    revision: str,
+    previous_revision: str | None,
+    proof_kind: str,
+    sidecar_arguments_sha256: str | None,
+) -> str:
+    proof_payload = {
+        "schema": "friday.obsidian-local-effect-receipt.v1",
+        "operation_id_sha256": hashlib.sha256(operation_id.encode("utf-8", errors="strict")).hexdigest(),
+        "method": method,
+        "path_sha256": hashlib.sha256(path.encode("utf-8", errors="strict")).hexdigest(),
+        "revision": revision,
+        "previous_revision": previous_revision,
+        "proof_kind": proof_kind,
+        "sidecar_arguments_sha256": sidecar_arguments_sha256,
+    }
+    return hashlib.sha256(
+        json.dumps(
+            proof_payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+    ).hexdigest()
+
+
 def _delivery_json(delivery: VaultDeliveryState) -> dict[str, object]:
     return {
         "local_write_complete": delivery.local_write_complete,
@@ -3476,24 +3736,9 @@ def _result_from_row(row: Mapping[str, Any], *, replayed: bool) -> DurableNoteRe
         )
     if status in _TERMINAL_FAILURES:
         raise OperationTerminalError(operation_id, status, _error_from_row(row))
-    result = _json_object(row.get("result_json"), label="operation result")
+    result = _closed_result_object(row.get("result_json"), label="operation result")
     delivery_raw = _json_object(row.get("delivery_json"), label="operation delivery")
-    if result.get("schema") != _RESULT_SCHEMA:
-        raise OperationLedgerError("operation result schema is missing or unsupported")
-    path = result.get("path")
-    revision = result.get("revision")
-    if not isinstance(path, str) or not path:
-        raise OperationLedgerError("operation result path is invalid")
-    try:
-        validate_revision(revision)  # type: ignore[arg-type]
-    except ValueError as exc:
-        raise OperationLedgerError("operation result revision is invalid") from exc
-    previous = result.get("previous_revision")
-    if previous is not None:
-        try:
-            validate_revision(previous)  # type: ignore[arg-type]
-        except ValueError as exc:
-            raise OperationLedgerError("operation previous revision is invalid") from exc
+    path, revision, previous, created, applied = _validated_note_result_payload(row, result)
     delivery = _delivery_from_json(delivery_raw)
     if not delivery.local_write_complete:
         raise OperationLedgerError("successful operation has no proven local commit")
@@ -3506,13 +3751,220 @@ def _result_from_row(row: Mapping[str, Any], *, replayed: bool) -> DurableNoteRe
         method=str(row.get("method") or ""),
         status=status,
         path=path,
-        revision=str(revision),
-        previous_revision=str(previous) if previous is not None else None,
-        created=_strict_bool(result.get("created"), label="created"),
-        applied=_strict_bool(result.get("applied"), label="applied"),
+        revision=revision,
+        previous_revision=previous,
+        created=created,
+        applied=applied,
         replayed=replayed,
         delivery=delivery,
     )
+
+
+def _validated_note_result_payload(
+    row: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> tuple[str, str, str | None, bool, bool]:
+    """Strictly decode one historical v1 or settled receipt-bearing v2 result."""
+
+    schema = result.get("schema")
+    method = str(row.get("method") or "")
+    if schema == _RESULT_SCHEMA:
+        allowed_fields = _v1_result_fields(method)
+        if frozenset(result) not in allowed_fields:
+            raise OperationLedgerError("operation result v1 fields do not match the closed contract")
+    elif schema == _RESULT_SCHEMA_V2:
+        if frozenset(result) != _RESULT_V2_FIELDS:
+            raise OperationLedgerError("operation result v2 fields do not match the closed contract")
+    else:
+        raise OperationLedgerError("operation result schema is missing or unsupported")
+
+    path = _durable_path(result.get("path"), label="operation result path")
+    try:
+        revision = validate_revision(result.get("revision"))  # type: ignore[arg-type]
+    except ValueError as exc:
+        raise OperationLedgerError("operation result revision is invalid") from exc
+    previous_raw = result.get("previous_revision")
+    try:
+        previous = (
+            validate_revision(previous_raw)  # type: ignore[arg-type]
+            if previous_raw is not None
+            else None
+        )
+    except ValueError as exc:
+        raise OperationLedgerError("operation previous revision is invalid") from exc
+    created = _strict_bool(result.get("created"), label="created")
+    applied = _strict_bool(result.get("applied"), label="applied")
+
+    if schema == _RESULT_SCHEMA:
+        _validate_v1_result_context(
+            method,
+            result,
+            revision=revision,
+            previous_revision=previous,
+        )
+    else:
+        _validate_v2_settled_result(
+            row,
+            result,
+            path=path,
+            revision=revision,
+            previous_revision=previous,
+            created=created,
+            applied=applied,
+        )
+    return path, revision, previous, created, applied
+
+
+def _v1_result_fields(method: str) -> frozenset[frozenset[str]]:
+    """Return the finite result shapes emitted by historical v1 writers."""
+
+    core = _RESULT_CORE_FIELDS
+    shapes = {core}
+    if method in {"create", "base"}:
+        shapes.add(core | {"target_revision"})
+    elif method in {"append", "prepend"}:
+        shapes.add(core | {"target_revision", "base_revision"})
+    elif method == "replace":
+        shapes.update(
+            {
+                core | {"target_revision"},
+                core | {"target_revision", "base_revision"},
+                core | {_LEGACY_MARKER_MIGRATION_KEY},
+            }
+        )
+    elif method == "set_properties":
+        pass
+    elif method == "conflict_merge":
+        shapes.add(
+            core
+            | {
+                "target_revision",
+                "conflict_id",
+                "conflict_path",
+                "conflict_revision",
+            }
+        )
+    elif method == "daily_note":
+        shapes.add(core | {"resolved_day", "target_revision", "base_revision"})
+    return frozenset(frozenset(shape) for shape in shapes)
+
+
+def _validate_v1_result_context(
+    method: str,
+    result: Mapping[str, Any],
+    *,
+    revision: str,
+    previous_revision: str | None,
+) -> None:
+    target = result.get("target_revision")
+    if "target_revision" in result:
+        try:
+            validated_target = validate_revision(target)  # type: ignore[arg-type]
+        except ValueError as exc:
+            raise OperationLedgerError("operation target revision is invalid") from exc
+        if validated_target != revision:
+            raise OperationLedgerError("operation target revision does not match its result")
+    if "base_revision" in result:
+        raw_base = result.get("base_revision")
+        try:
+            base = (
+                validate_revision(raw_base)  # type: ignore[arg-type]
+                if raw_base is not None
+                else None
+            )
+        except ValueError as exc:
+            raise OperationLedgerError("operation base revision is invalid") from exc
+        if base != previous_revision:
+            raise OperationLedgerError("operation base revision does not match its result")
+    if method == "daily_note" and "resolved_day" in result:
+        raw_day = result.get("resolved_day")
+        if not isinstance(raw_day, str):
+            raise OperationLedgerError("operation resolved day is invalid")
+        try:
+            parsed_day = date.fromisoformat(raw_day)
+        except ValueError as exc:
+            raise OperationLedgerError("operation resolved day is invalid") from exc
+        if parsed_day.isoformat() != raw_day:
+            raise OperationLedgerError("operation resolved day is invalid")
+    if method == "conflict_merge" and "conflict_id" in result:
+        try:
+            conflict_id = _conflict_id(result.get("conflict_id"))
+        except (TypeError, ValueError) as exc:
+            raise OperationLedgerError("operation conflict ID is invalid") from exc
+        if conflict_id != result.get("conflict_id"):
+            raise OperationLedgerError("operation conflict ID is not canonical")
+        _durable_path(result.get("conflict_path"), label="operation conflict path")
+        try:
+            validate_revision(result.get("conflict_revision"))  # type: ignore[arg-type]
+        except ValueError as exc:
+            raise OperationLedgerError("operation conflict revision is invalid") from exc
+    if method == "replace" and _LEGACY_MARKER_MIGRATION_KEY in result:
+        raw_cleanup = result.get(_LEGACY_MARKER_MIGRATION_KEY)
+        if not isinstance(raw_cleanup, Mapping):
+            raise OperationLedgerError("legacy marker cleanup result is invalid")
+        cleanup = _legacy_marker_cleanup_context(raw_cleanup)
+        if cleanup["target_revision"] != revision or cleanup["source_revision"] != previous_revision:
+            raise OperationLedgerError("legacy marker cleanup result revisions do not match")
+
+
+def _validate_v2_settled_result(
+    row: Mapping[str, Any],
+    result: Mapping[str, Any],
+    *,
+    path: str,
+    revision: str,
+    previous_revision: str | None,
+    created: bool,
+    applied: bool,
+) -> None:
+    method = str(row.get("method") or "")
+    operation_id = str(row.get("id") or "")
+    if method not in {"create", "append"}:
+        raise OperationLedgerError("operation result v2 method is unsupported")
+    try:
+        if _operation_id(operation_id) != operation_id:
+            raise OperationLedgerError("operation result v2 operation ID is not canonical")
+    except InvalidOperationIdError as exc:
+        raise OperationLedgerError("operation result v2 operation ID is invalid") from exc
+    if result.get("reconciliation_state") != "settled":
+        raise OperationLedgerError("operation result v2 has no settled reconciliation proof")
+    proof_kind = result.get("reconciliation_proof")
+    if proof_kind not in {"sidecar_committed", "legacy_exact_revision"}:
+        raise OperationLedgerError("operation result v2 reconciliation proof is invalid")
+    sidecar_arguments = result.get("sidecar_arguments_sha256")
+    if sidecar_arguments is not None:
+        try:
+            sidecar_arguments = validate_revision(sidecar_arguments)  # type: ignore[arg-type]
+        except ValueError as exc:
+            raise OperationLedgerError("operation result v2 sidecar digest is invalid") from exc
+    try:
+        receipt_sha256 = validate_revision(result.get("side_effect_receipt_sha256"))  # type: ignore[arg-type]
+    except ValueError as exc:
+        raise OperationLedgerError("operation result v2 receipt digest is invalid") from exc
+    if created is not (method == "create") or applied:
+        raise OperationLedgerError("operation result v2 mutation shape is invalid")
+    if method == "create" and previous_revision is not None:
+        raise OperationLedgerError("operation result v2 create has a base revision")
+    if method == "append" and previous_revision is None:
+        raise OperationLedgerError("operation result v2 append has no base revision")
+    if proof_kind == "sidecar_committed":
+        if sidecar_arguments is None:
+            raise OperationLedgerError("operation result v2 sidecar proof has no arguments digest")
+        if method == "create" and sidecar_arguments != revision:
+            raise OperationLedgerError("operation result v2 create sidecar digest is inconsistent")
+    elif method != "create" or sidecar_arguments is not None:
+        raise OperationLedgerError("operation result v2 legacy proof shape is invalid")
+    expected_receipt = _local_effect_receipt_sha256(
+        operation_id=operation_id,
+        method=method,
+        path=path,
+        revision=revision,
+        previous_revision=previous_revision,
+        proof_kind=str(proof_kind),
+        sidecar_arguments_sha256=(str(sidecar_arguments) if sidecar_arguments is not None else None),
+    )
+    if receipt_sha256 != expected_receipt:
+        raise OperationLedgerError("operation result v2 receipt digest does not match its proof")
 
 
 def _json_object(raw: object, *, label: str) -> dict[str, Any]:
@@ -3522,6 +3974,33 @@ def _json_object(raw: object, *, label: str) -> dict[str, Any]:
         raise OperationLedgerError(f"{label} is not JSON")
     try:
         value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise OperationLedgerError(f"{label} is not valid JSON") from exc
+    if not isinstance(value, dict):
+        raise OperationLedgerError(f"{label} must be an object")
+    return value
+
+
+def _closed_result_object(raw: object, *, label: str) -> dict[str, Any]:
+    """Decode a note result without accepting duplicate or non-string keys."""
+
+    if isinstance(raw, Mapping):
+        if any(not isinstance(key, str) for key in raw):
+            raise OperationLedgerError(f"{label} contains a non-string key")
+        return dict(raw)
+    if not isinstance(raw, str):
+        raise OperationLedgerError(f"{label} is not JSON")
+
+    def closed(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise OperationLedgerError(f"{label} contains a duplicate key")
+            result[key] = value
+        return result
+
+    try:
+        value = json.loads(raw, object_pairs_hook=closed)
     except json.JSONDecodeError as exc:
         raise OperationLedgerError(f"{label} is not valid JSON") from exc
     if not isinstance(value, dict):
