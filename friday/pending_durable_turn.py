@@ -3,10 +3,24 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
+from friday.file_evidence import current_turn_file_reference_of
+
 _WORK_ITEM_ID_RE = re.compile(r"work_[0-9a-f]{16}\Z")
+
+
+def pending_comparison_current_attachment_count(attachments: object) -> int:
+    """Recognize the one process-owned current-upload surface, and nothing else."""
+
+    if type(attachments) is not list or len(attachments) != 1:
+        return 0
+    carrier = attachments[0]
+    if not isinstance(carrier, Mapping):
+        return 0
+    return int(current_turn_file_reference_of(carrier) is not None)
 
 
 class PendingDurableAdmissionState(StrEnum):
@@ -86,4 +100,5 @@ class PendingDurableTurnAdmission:
 __all__ = [
     "PendingDurableAdmissionState",
     "PendingDurableTurnAdmission",
+    "pending_comparison_current_attachment_count",
 ]

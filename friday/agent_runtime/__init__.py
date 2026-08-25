@@ -143,6 +143,16 @@ from friday.interaction_control_plane.archive_evidence_work_item_store import (
     new_recall_selected_archive_evidence_work_item_id,
     suspend_recall_selected_archive_evidence_replay_in_transaction,
 )
+from friday.interaction_control_plane.compare_conversation_document import (
+    DocumentReferenceQuestionKind,
+    DocumentReferenceQuestionState,
+)
+from friday.interaction_control_plane.compare_conversation_document_store import (
+    get_current_compare_conversation_with_document_work_item_in_transaction,
+)
+from friday.interaction_control_plane.conversation_document_comparison_followup import (
+    parse_conversation_document_comparison_followup,
+)
 from friday.interaction_control_plane.legacy_trace import (
     CapabilityStatus,
     LegacyTurnSignals,
@@ -181,6 +191,7 @@ from friday.interaction_control_plane.turn_trace import (
 from friday.interaction_control_plane.work_item_contract import (
     RecallConversationWorkItem,
     RecallMessageRole,
+    WorkState,
 )
 from friday.interaction_control_plane.work_item_store import (
     WorkItemConflictError,
@@ -32657,6 +32668,7 @@ class AgentRuntime:
         *,
         actor: ActorContext,
         conversation_id: str | None,
+        current_attachment_count: int = 0,
     ) -> bool:
         """Synchronously admit one exact owner-scoped durable continuation.
 
@@ -32671,6 +32683,7 @@ class AgentRuntime:
                 message,
                 actor=actor,
                 conversation_id=conversation_id,
+                current_attachment_count=current_attachment_count,
             )
             is not False
         )
@@ -32682,9 +32695,12 @@ class AgentRuntime:
         *,
         actor: ActorContext,
         conversation_id: str | None,
+        current_attachment_count: int = 0,
     ) -> PendingDurableTurnAdmission | bool:
         """Bind pre-ingestion ownership to one exact durable revision."""
 
+        if type(current_attachment_count) is not int or current_attachment_count not in {0, 1}:
+            return False
         if not conversation_id:
             return False
         if not actor.shared_tenant and actor.user_id != user_id and not actor.is_owner:
@@ -32701,6 +32717,34 @@ class AgentRuntime:
                 conversation is None
                 or normalize_conversation_mode(str(conversation["mode"] or "dialogue")) != "dialogue"
             ):
+                return False
+            comparison = get_current_compare_conversation_with_document_work_item_in_transaction(
+                conn,
+                user_id=person_id,
+                conversation_id=conversation_id,
+            )
+            if comparison is not None:
+                if current_attachment_count:
+                    questions = comparison.document_questions
+                    if not (
+                        comparison.state is WorkState.WAITING_FOR_INPUT
+                        and comparison.revision == 1
+                        and len(questions) == 1
+                        and questions[0].kind
+                        is DocumentReferenceQuestionKind.PROVIDE_DOCUMENT_REFERENCE
+                        and questions[0].state is DocumentReferenceQuestionState.WAITING
+                    ):
+                        return False
+                return PendingDurableTurnAdmission.owned(
+                    person_id=person_id,
+                    conversation_id=conversation_id,
+                    work_item_id=comparison.id,
+                    revision=comparison.revision,
+                )
+            # A current attachment is admitted only as the answer to an
+            # already-persisted first comparison question.  It can never open
+            # a comparison or widen archive candidate/selected routing.
+            if current_attachment_count:
                 return False
             waiting = get_waiting_archive_candidate_selection_work_item_in_transaction(
                 conn,
@@ -32722,6 +32766,27 @@ class AgentRuntime:
                     conversation_id=conversation_id,
                     work_item_id=waiting.id,
                     revision=waiting.revision,
+                )
+            comparison_followup = parse_conversation_document_comparison_followup(message)
+            if comparison_followup is not None:
+                selected_evidence = (
+                    get_current_recall_selected_archive_evidence_work_item_in_transaction(
+                        conn,
+                        user_id=person_id,
+                        conversation_id=conversation_id,
+                    )
+                )
+                if (
+                    selected_evidence is None
+                    or selected_evidence.selected_evidence.corpus
+                    is not SelectedArchiveCorpus.MESSAGES
+                ):
+                    return False
+                return PendingDurableTurnAdmission.owned(
+                    person_id=person_id,
+                    conversation_id=conversation_id,
+                    work_item_id=selected_evidence.id,
+                    revision=selected_evidence.revision,
                 )
             if parse_archive_evidence_followup(message) is None:
                 return False

@@ -121,7 +121,10 @@ from friday.organs.obsidian.conversation import (
     obsidian_conversation_intent,
     obsidian_result_note_request,
 )
-from friday.pending_durable_turn import PendingDurableTurnAdmission
+from friday.pending_durable_turn import (
+    PendingDurableTurnAdmission,
+    pending_comparison_current_attachment_count,
+)
 from friday.permissions import (
     LEGACY_OWNER_USER_ID,
     ActorContext,
@@ -448,6 +451,7 @@ def _pending_durable_turn_admission_before_ingestion(
     message: str,
     actor: ActorContext,
     conversation_id: str | None,
+    current_attachment_count: int = 0,
 ) -> PendingDurableTurnAdmission | bool:
     """Return exact ownership, ordinary, or uncertainty before text ingestion."""
 
@@ -459,12 +463,13 @@ def _pending_durable_turn_admission_before_ingestion(
     if not callable(owner_check):
         return False
     try:
-        result = owner_check(
-            person_id,
-            message,
-            actor=actor,
-            conversation_id=conversation_id,
-        )
+        owner_kwargs = {
+            "actor": actor,
+            "conversation_id": conversation_id,
+        }
+        if current_attachment_count:
+            owner_kwargs["current_attachment_count"] = current_attachment_count
+        result = owner_check(person_id, message, **owner_kwargs)
         if inspect.isawaitable(result):
             if inspect.iscoroutine(result):
                 result.close()
@@ -4342,6 +4347,9 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             pending_durable_original_attachment_surface = bool(
                 attachments or incoming_documents or staged_document_message_ids or file_already_ingested
             )
+            pending_comparison_attachment_count = pending_comparison_current_attachment_count(
+                attachments
+            )
             pending_durable_original_reply_surface = bool(
                 str(body.get("reply_to") or "").strip()
                 or reply_assistant_pointer_present
@@ -4358,7 +4366,10 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             pending_durable_intake_admission: PendingDurableTurnAdmission | bool = False
             if (
                 conversation_id is not None
-                and not pending_durable_original_attachment_surface
+                and (
+                    not pending_durable_original_attachment_surface
+                    or pending_comparison_attachment_count == 1
+                )
                 and not pending_durable_original_reply_surface
                 and enable_tools is True
                 and not force_knowledge
@@ -4375,6 +4386,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     message=message,
                     actor=actor,
                     conversation_id=conversation_id,
+                    current_attachment_count=pending_comparison_attachment_count,
                 )
 
             ingestion_result = None

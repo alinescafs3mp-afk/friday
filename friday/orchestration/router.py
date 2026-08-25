@@ -34,6 +34,7 @@ from friday.orchestration.planner import AttestedPlannerRuntime, PlannerModel, V
 from friday.pending_durable_turn import (
     PendingDurableAdmissionState,
     PendingDurableTurnAdmission,
+    pending_comparison_current_attachment_count,
 )
 from friday.permissions import ActorContext
 from friday.turn_intent_policy import TurnPolicyDecision
@@ -120,6 +121,7 @@ class PendingDurableTurnOwner(Protocol):
         *,
         actor: ActorContext,
         conversation_id: str | None,
+        current_attachment_count: int = 0,
     ) -> bool: ...
 
 
@@ -521,6 +523,7 @@ class OrchestrationRouter:
         *,
         actor: ActorContext,
         conversation_id: str | None,
+        current_attachment_count: int = 0,
     ) -> bool:
         """Expose exact synchronous ownership to the HTTP pre-ingestion seam."""
 
@@ -529,6 +532,7 @@ class OrchestrationRouter:
             message,
             actor=actor,
             conversation_id=conversation_id,
+            current_attachment_count=current_attachment_count,
         )
         if admission is None:
             raise RuntimeError("pending durable ownership is uncertain")
@@ -541,9 +545,12 @@ class OrchestrationRouter:
         *,
         actor: ActorContext,
         conversation_id: str | None,
+        current_attachment_count: int = 0,
     ) -> PendingDurableTurnAdmission | bool | None:
         """Return a bound owner decision when the legacy runtime can provide one."""
 
+        if type(current_attachment_count) is not int or current_attachment_count not in {0, 1}:
+            return False
         if not conversation_id:
             return False
         if not actor.shared_tenant and actor.user_id != user_id and not actor.is_owner:
@@ -556,12 +563,13 @@ class OrchestrationRouter:
                 owner_check = getattr(self._legacy, "owns_pending_durable_turn", None)
             if not callable(owner_check):
                 return False
-            result = owner_check(
-                person_id,
-                message,
-                actor=actor,
-                conversation_id=conversation_id,
-            )
+            owner_kwargs = {
+                "actor": actor,
+                "conversation_id": conversation_id,
+            }
+            if current_attachment_count:
+                owner_kwargs["current_attachment_count"] = current_attachment_count
+            result = owner_check(person_id, message, **owner_kwargs)
             if inspect.isawaitable(result):
                 if inspect.iscoroutine(result):
                     result.close()
@@ -741,8 +749,15 @@ class OrchestrationRouter:
             "reply_assistant_message_id": reply_assistant_message_id,
             "turn_deadline": turn_deadline,
         }
+        carried_durable_admission: PendingDurableTurnAdmission | None = None
         if _pending_durable_admission is not None:
-            legacy_kwargs["_pending_durable_admission"] = _pending_durable_admission
+            person_id = actor.own_id if actor.shared_tenant else user_id
+            if _pending_durable_admission.matches_scope(
+                person_id=person_id,
+                conversation_id=str(conversation_id or ""),
+            ):
+                carried_durable_admission = _pending_durable_admission
+                legacy_kwargs["_pending_durable_admission"] = carried_durable_admission
         if turn_policy is not None:
             legacy_kwargs["turn_policy"] = turn_policy
         if turn_policy is not None and turn_policy.handled:
@@ -754,11 +769,13 @@ class OrchestrationRouter:
 
         started = time.monotonic()
         # A durable code-owned question remains legacy-owned even while V12 is
-        # sampled.  Admission is deliberately synchronous and scalar-only: no
-        # file carrier, reply/replay context, voice request or policy decision
-        # crosses this optional compatibility boundary.
+        # sampled.  Admission is deliberately synchronous and admits only a
+        # scalar reply or one process-owned current upload for an existing
+        # comparison q1. Reply/replay, voice, mode and policy surfaces remain
+        # outside this optional compatibility boundary.
+        comparison_attachment_count = pending_comparison_current_attachment_count(attachments)
         plain_durable_surface = bool(
-            not attachments
+            (not attachments or comparison_attachment_count == 1)
             and enable_tools is True
             and ingestion_result is None
             and synthetic_document_notice is False
@@ -773,26 +790,26 @@ class OrchestrationRouter:
         )
         durable_receipt: PendingDurableTurnAdmission | bool | None
         if _pending_durable_admission is not None:
-            person_id = actor.own_id if actor.shared_tenant else user_id
-            durable_receipt = (
-                _pending_durable_admission
-                if _pending_durable_admission.matches_scope(
-                    person_id=person_id,
-                    conversation_id=str(conversation_id or ""),
-                )
-                else None
-            )
+            durable_receipt = carried_durable_admission
         else:
-            durable_receipt = (
-                self.pending_durable_turn_admission(
-                    user_id,
-                    message,
-                    actor=actor,
-                    conversation_id=conversation_id,
-                )
-                if plain_durable_surface
-                else False
-            )
+            if plain_durable_surface:
+                if comparison_attachment_count:
+                    durable_receipt = self.pending_durable_turn_admission(
+                        user_id,
+                        message,
+                        actor=actor,
+                        conversation_id=conversation_id,
+                        current_attachment_count=comparison_attachment_count,
+                    )
+                else:
+                    durable_receipt = self.pending_durable_turn_admission(
+                        user_id,
+                        message,
+                        actor=actor,
+                        conversation_id=conversation_id,
+                    )
+            else:
+                durable_receipt = False
         if durable_receipt is False:
             durable_admission = _PendingDurableAdmission.ORDINARY
         elif (
