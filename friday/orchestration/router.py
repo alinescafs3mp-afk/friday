@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import re
 import time
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Protocol
 
 from friday.file_evidence import CurrentTurnFileReferenceToken, current_turn_file_reference_of
@@ -34,6 +36,12 @@ from friday.turn_intent_policy import TurnPolicyDecision
 
 LOGGER = logging.getLogger(__name__)
 _MAX_PENDING_SHADOW_PLANS = 4
+
+
+class _PendingDurableAdmission(StrEnum):
+    ORDINARY = "ordinary"
+    OWNED = "owned"
+    UNCERTAIN = "uncertain"
 
 
 def _observe_failure_route(route: str) -> None:
@@ -90,7 +98,15 @@ class ChatRuntime(Protocol):
 
 
 class PendingDurableTurnOwner(Protocol):
-    """Optional synchronous admission surface implemented by the legacy owner."""
+    """Optional synchronous admission surface implemented by the legacy owner.
+
+    The first identifier is the same person-scoped conversation owner used by
+    ``AgentRuntime.chat``: ``actor.own_id`` in a shared archive, otherwise the
+    requested user after the ordinary impersonation check.  Implementations
+    must validate that the conversation belongs to that exact person and is in
+    dialogue mode before consulting pending state.  No cross-person or
+    cross-conversation lookup may influence the result.
+    """
 
     def owns_pending_durable_turn(
         self,
@@ -493,36 +509,62 @@ class OrchestrationRouter:
             or (actor.is_owner and "owner" in self._canary_user_ids)
         )
 
-    def _legacy_owns_pending_durable_turn(
+    def _legacy_pending_durable_turn_admission(
         self,
         user_id: str,
         message: str,
         *,
         actor: ActorContext,
         conversation_id: str | None,
-    ) -> bool:
-        """Ask only the proven owner, without exposing effect-bearing turn carriers."""
+    ) -> _PendingDurableAdmission:
+        """Ask only the proven owner, failing uncertainty closed to legacy."""
+
+        # Mirror AgentRuntime.chat before any optional hook can touch storage.
+        # The real legacy call below remains the final authorization owner.
+        if not actor.shared_tenant and actor.user_id != user_id and not actor.is_owner:
+            return _PendingDurableAdmission.UNCERTAIN
+        person_id = actor.own_id if actor.shared_tenant else user_id
 
         try:
             owner_check = getattr(self._legacy, "owns_pending_durable_turn", None)
             if not callable(owner_check):
-                return False
-            return (
-                owner_check(
-                    user_id,
-                    message,
-                    actor=actor,
-                    conversation_id=conversation_id,
-                )
-                is True
+                return _PendingDurableAdmission.ORDINARY
+            result = owner_check(
+                person_id,
+                message,
+                actor=actor,
+                conversation_id=conversation_id,
             )
-        except Exception as exc:  # noqa: BLE001 - optional admission must fail to ordinary routing
+            if inspect.isawaitable(result):
+                if inspect.iscoroutine(result):
+                    result.close()
+                elif isinstance(result, asyncio.Future):
+                    result.cancel()
+                else:
+                    iterator = result.__await__()
+                    close = getattr(iterator, "close", None)
+                    if callable(close):
+                        close()
+                LOGGER.warning(
+                    "pending durable turn admission returned an awaitable; retaining legacy"
+                )
+                return _PendingDurableAdmission.UNCERTAIN
+            if result is True:
+                return _PendingDurableAdmission.OWNED
+            if result is False:
+                return _PendingDurableAdmission.ORDINARY
+            LOGGER.warning(
+                "pending durable turn admission returned an invalid result; retaining legacy (%s)",
+                type(result).__name__,
+            )
+            return _PendingDurableAdmission.UNCERTAIN
+        except Exception as exc:  # noqa: BLE001 - uncertain admission must retain legacy
             # Exception bodies and request values may contain private state.
             LOGGER.warning(
-                "pending durable turn admission rejected; retaining ordinary routing (%s)",
+                "pending durable turn admission rejected; retaining legacy (%s)",
                 type(exc).__name__,
             )
-            return False
+            return _PendingDurableAdmission.UNCERTAIN
 
     async def _complete_shadow_plan(
         self,
@@ -651,6 +693,7 @@ class OrchestrationRouter:
         # crosses this optional compatibility boundary.
         plain_durable_surface = bool(
             not attachments
+            and enable_tools is True
             and ingestion_result is None
             and synthetic_document_notice is False
             and replay_source_message_id is None
@@ -660,16 +703,26 @@ class OrchestrationRouter:
             and reply_assistant_reference is False
             and reply_assistant_message_id is None
             and turn_policy is None
+            and mode is None
         )
-        if plain_durable_surface and self._legacy_owns_pending_durable_turn(
-            user_id,
-            message,
-            actor=actor,
-            conversation_id=conversation_id,
-        ):
+        durable_admission = (
+            self._legacy_pending_durable_turn_admission(
+                user_id,
+                message,
+                actor=actor,
+                conversation_id=conversation_id,
+            )
+            if plain_durable_surface
+            else _PendingDurableAdmission.ORDINARY
+        )
+        if durable_admission is not _PendingDurableAdmission.ORDINARY:
             self._observe(
                 started=started,
-                status="durable_turn_owned",
+                status=(
+                    "durable_turn_owned"
+                    if durable_admission is _PendingDurableAdmission.OWNED
+                    else "durable_turn_ownership_uncertain"
+                ),
                 plan=None,
                 selected_runtime="legacy",
             )
