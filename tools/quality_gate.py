@@ -566,7 +566,12 @@ def static_commands(python: str = sys.executable) -> tuple[GateCommand, ...]:
     )
 
 
-def collection_command(*, manifest_path: str | Path, python: str = sys.executable) -> GateCommand:
+def collection_command(
+    *,
+    manifest_path: str | Path,
+    basetemp_path: str | Path | None = None,
+    python: str = sys.executable,
+) -> GateCommand:
     """Collect the complete canonical test inventory without running a test."""
 
     return GateCommand(
@@ -587,6 +592,7 @@ def collection_command(*, manifest_path: str | Path, python: str = sys.executabl
             "-n",
             "0",
             f"{_COLLECTION_OPTION}={manifest_path}",
+            *((f"--basetemp={basetemp_path}",) if basetemp_path is not None else ()),
         ),
     )
 
@@ -596,6 +602,7 @@ def non_ui_command(
     report_path: str | Path,
     collection_path: str | Path,
     workers: int,
+    basetemp_path: str | Path | None = None,
     python: str = sys.executable,
 ) -> GateCommand:
     """Build the parallel pytest command with all browser modules excluded."""
@@ -621,6 +628,7 @@ def non_ui_command(
             *distribution,
             f"--junitxml={report_path}",
             f"{_COLLECTION_OPTION}={collection_path}",
+            *((f"--basetemp={basetemp_path}",) if basetemp_path is not None else ()),
             *ignores,
         ),
     )
@@ -631,6 +639,7 @@ def ui_command(
     report_path: str | Path,
     collection_path: str | Path,
     workers: int,
+    basetemp_path: str | Path | None = None,
     python: str = sys.executable,
 ) -> GateCommand:
     """Build the isolated UI command.
@@ -659,6 +668,7 @@ def ui_command(
             *distribution,
             f"--junitxml={report_path}",
             f"{_COLLECTION_OPTION}={collection_path}",
+            *((f"--basetemp={basetemp_path}",) if basetemp_path is not None else ()),
             *UI_TEST_MODULES,
         ),
     )
@@ -1054,7 +1064,15 @@ def execute(
                 if args.dry_run
                 else Path(str(report_directory)) / "all-tests-collection.json"
             )
-            command = collection_command(manifest_path=all_collection_path)
+            collection_basetemp: str | Path = (
+                "<temporary>/pytest-collection"
+                if args.dry_run
+                else Path(str(report_directory)) / "pytest-collection"
+            )
+            command = collection_command(
+                manifest_path=all_collection_path,
+                basetemp_path=collection_basetemp,
+            )
             if test_environment is not None:
                 command = _command_with_environment(command, test_environment)
             if args.dry_run:
@@ -1084,6 +1102,11 @@ def execute(
                 report_path=report_path,
                 collection_path=collection_path,
                 workers=args.workers,
+                basetemp_path=(
+                    "<temporary>/pytest-non-ui"
+                    if args.dry_run
+                    else Path(str(report_directory)) / "pytest-non-ui"
+                ),
             )
             if test_environment is not None:
                 command = _command_with_environment(command, test_environment)
@@ -1116,6 +1139,7 @@ def execute(
                 report_path="<temporary>/ui-results.xml",
                 collection_path="<temporary>/ui-collection.json",
                 workers=args.ui_workers,
+                basetemp_path="<temporary>/pytest-ui",
             )
             print(f"[{command.name}] {_display_command(command.argv)}")
         elif "ui" in phases:
@@ -1127,6 +1151,7 @@ def execute(
                 report_path=report_path,
                 collection_path=collection_path,
                 workers=args.ui_workers,
+                basetemp_path=Path(str(report_directory)) / "pytest-ui",
             )
             if test_environment is not None:
                 command = _command_with_environment(command, test_environment)

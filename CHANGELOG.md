@@ -12,6 +12,8 @@
   outcome atomically with the assistant message. Synchronization, re-ingest and
   physical-device observations remain independent; late authorization loss
   suppresses public details without erasing the historical receipt.
+- The canonical quality gate now owns and removes every pytest scratch tree, so
+  repeated full runs cannot retain multi-gigabyte artifacts in `/tmp`.
 
 ## 0.207.18 — 2026-08-25
 

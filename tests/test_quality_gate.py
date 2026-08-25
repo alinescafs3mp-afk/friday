@@ -148,6 +148,7 @@ def test_pytest_phases_share_one_private_non_live_environment(
             monkeypatch.setenv(prefix + suffix, f"/sentinel/{suffix.casefold()}")
 
     observed_homes: set[Path] = set()
+    observed_basetemps: set[Path] = set()
     observed_commands: list[str] = []
     non_ui_nodeid = "tests/test_quality_gate.py::test_non_ui_probe"
     ui_nodeid = "tests/test_admin_ui_activity.py::test_ui_probe"
@@ -159,6 +160,10 @@ def test_pytest_phases_share_one_private_non_live_environment(
             return 0
         environment = command.environment
         assert environment is not None
+        basetemp_argument = next(argument for argument in command.argv if argument.startswith("--basetemp="))
+        basetemp = Path(basetemp_argument.partition("=")[2])
+        observed_basetemps.add(basetemp)
+        assert basetemp.parent.is_dir()
         home = Path(environment["FRIDAY_HOME"])
         env_file = Path(environment["FRIDAY_ENV_FILE"])
         backup_directory = Path(environment["FRIDAY_TEST_BACKUPS_DIR"])
@@ -227,6 +232,12 @@ def test_pytest_phases_share_one_private_non_live_environment(
     ]
     assert len(observed_homes) == 1
     assert all(not home.exists() for home in observed_homes)
+    assert {path.name for path in observed_basetemps} == {
+        "pytest-collection",
+        "pytest-non-ui",
+        "pytest-ui",
+    }
+    assert all(not path.parent.exists() for path in observed_basetemps)
 
 
 def test_eager_settings_import_derives_the_database_from_the_scratch_home(
