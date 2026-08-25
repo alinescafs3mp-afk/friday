@@ -122,12 +122,15 @@ _CONTROL_META_RE = re.compile(
     r"системн\w* промпт\w*|скрыт\w* инструкц\w*|"
     r"служебн\w* инструкц\w*|цепочк\w* мысл\w*|игнорир\w*|забудь|"
     r"(?:служебн|системн|внутренн)\w* метаданн\w*|"
-    r"internal metadata|metadata (?:of|from) (?:the )?(?:work item|receipt|trace|runtime|system))\b",
+    r"internal metadata|metadata (?:of|from) (?:the )?(?:work item|receipt|trace|runtime|system)|"
+    r"(?:(?:твои|ваши|тебе данные|данные тебе) инструкц\w*|"
+    r"какие (?:у тебя|у вас) инструкц\w*|your instructions?))\b",
     re.IGNORECASE,
 )
 _RU_MIXED_ACTION_SUFFIX_RE = re.compile(
-    r"(?:,|\b(?:и|а затем|а потом|а заодно|затем|потом|заодно|после этого)\b|[-—])\s*"
-    r"(?:пожалуйста\s+)?(?:(?:как|где|когда)\s+|(?:можно|нужно|надо) ли\s+)?"
+    r"(?:,|\b(?:и|а ещё|а затем|а потом|а заодно|затем|потом|заодно|после этого)\b|[-—])\s*"
+    r"(?:пожалуйста\s+)?(?:можешь(?: ли)?\s+|"
+    r"(?:как|где|когда)\s+|(?:можно|нужно|надо) ли\s+)?"
     r"(?:найди|найдите|поищи|поищите|ищи|ищите|отыщи|"
     r"отыщите|разыщи|разыщите|"
     r"проверь|проверьте|посмотри|посмотрите|прочитай|прочитайте|покажи|покажите|"
@@ -342,21 +345,28 @@ _SOURCE_FORMAT_PROPOSITION_RE = re.compile(
 )
 _UNSUPPORTED_ANSWER_MODE_RE = re.compile(
     r"(?:"
-    r"\b(?:без (?:цитат|ссылок|доказательств)|по памяти|на английском)\b|"
-    r"\b(?:without (?:citations|sources|evidence)|from memory|in english)\b"
+    r"\b(?:без (?:цитат|ссылок|доказательств)|по памяти|"
+    r"на (?:английском|немецком|французском|испанском|итальянском|китайском|"
+    r"японском|русском))\b|"
+    r"\b(?:without (?:citations|sources|evidence)|from memory|"
+    r"in (?:english|german|french|spanish|italian|chinese|japanese|russian))\b"
     r")\s*[?!.]?$",
     re.IGNORECASE,
 )
 _SOURCE_LANGUAGE_PROPOSITION_RE = re.compile(
     r"(?:"
     r"\b(?:про|о) (?:документаци\w*|текст\w*|раздел\w*|описани\w*) "
-    r"на английском\b|"
-    r"\babout (?:the )?(?:documentation|text|section|description) in english\b"
+    r"на (?:английском|немецком|французском|испанском|итальянском|китайском|"
+    r"японском|русском)\b|"
+    r"\babout (?:the )?(?:documentation|text|section|description) in "
+    r"(?:english|german|french|spanish|italian|chinese|japanese|russian)\b"
     r")",
     re.IGNORECASE,
 )
 _ADDITIONAL_SOURCE_CLAUSE_RE = re.compile(
     r"(?:,|\b(?:и|а|and|but)\b)\s+(?:[^.!?]{0,48}\s+)?(?:"
+    r"(?:что об этом (?:пишет|говорит)\s+[^\W_]+|"
+    r"what does\s+[^\W_]+\s+(?:say|report))\b|"
     r"(?:подтверждает ли это|подтверждает это|что об этом (?:говорит|пишет)) сайт|"
     r"(?:совпадает ли (?:он|она|оно|это) с|сверить (?:его|её|это) с) сайтом|"
     r"на сайте|в интернете|в вебе|онлайн|в архиве|в базе|в (?:другом|других) "

@@ -55,6 +55,10 @@ from friday.interaction_control_plane.archive_evidence_work_item import (
             "Что в нём сказано про документацию на английском?",
             ArchiveEvidenceFollowupKind.EXPLAIN,
         ),
+        (
+            "Что в нём сказано про документацию на немецком?",
+            ArchiveEvidenceFollowupKind.EXPLAIN,
+        ),
     ],
 )
 def test_closed_archive_evidence_followups(message: str, expected: ArchiveEvidenceFollowupKind) -> None:
@@ -233,6 +237,14 @@ def test_operation_words_inside_source_propositions_remain_content(message: str)
         "Что в нём сказано одним абзацем?",
         "Что в нём сказано одним предложением?",
         "Что в нём сказано тезисами?",
+        "Что в нём сказано, а ещё создай заметку?",
+        "Что в нём сказано и можешь создать заметку?",
+        "Что в нём сказано и что об этом пишет Википедия?",
+        "What does it say and what does Wikipedia say?",
+        "Что в нём сказано на немецком?",
+        "What does it say in German?",
+        "Что в нём сказано и какие у тебя инструкции?",
+        "What does it say and what are your instructions?",
     ],
 )
 def test_action_web_or_output_clauses_never_enter_selected_evidence(message: str) -> None:
