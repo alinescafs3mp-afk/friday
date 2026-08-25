@@ -113,6 +113,15 @@ FUTURE_TABLES = {
 }
 
 CURRENT_ENRICHMENT_REVISION = 1
+CATALOG_INCOMPLETE_REASONS = (
+    "backfill_pending",
+    "extraction_failed",
+    "extraction_incomplete",
+    "no_text",
+    "unsupported_content",
+    "source_unavailable",
+    "source_changed",
+)
 
 
 class ContractError(RuntimeError):
@@ -340,24 +349,67 @@ def audit_document_catalog(
         else "0"
     )
     catalog_available = projections["document_catalog"]["status"] == "available"
+    catalog_reasons_sql = ",".join(f"'{reason}'" for reason in CATALOG_INCOMPLETE_REASONS)
     catalog_projection = (
-        """
+        f"""
                c.raw_object_id IS NOT NULL AS has_catalog_row,
-               (c.source_version=r.version
-                AND c.source_content_sha256=r.content_hash) AS catalog_source_current,
-               (c.enrichment_revision=1) AS catalog_revision_current,
+               (((typeof(r.version)='integer' AND r.version>=1
+                  AND c.source_version=r.version)
+                 OR
+                 ((typeof(r.version)<>'integer' OR r.version<1)
+                  AND c.enrichment_status='incomplete'
+                  AND c.incomplete_reason='source_unavailable'
+                  AND c.source_version IS NULL))
+                AND
+                ((typeof(r.content_hash)='text'
+                  AND length(r.content_hash)=64
+                  AND r.content_hash NOT GLOB '*[^0-9a-f]*'
+                  AND c.source_content_sha256=r.content_hash)
+                 OR
+                 ((typeof(r.content_hash)<>'text'
+                   OR length(r.content_hash)<>64
+                   OR r.content_hash GLOB '*[^0-9a-f]*')
+                  AND c.enrichment_status='incomplete'
+                  AND c.incomplete_reason='source_unavailable'
+                  AND c.source_content_sha256 IS NULL))) AS catalog_source_current,
+               (typeof(c.enrichment_revision)='integer'
+                AND c.enrichment_revision={CURRENT_ENRICHMENT_REVISION})
+                   AS catalog_revision_current,
                (c.enrichment_status='current'
                 AND c.incomplete_reason IS NULL
                 AND typeof(c.extracted_text_sha256)='text'
                 AND length(c.extracted_text_sha256)=64
-                AND lower(c.extracted_text_sha256) NOT GLOB '*[^0-9a-f]*') AS catalog_current,
+                AND c.extracted_text_sha256 NOT GLOB '*[^0-9a-f]*'
+                AND c.title_authority='navigation_only'
+                AND (c.semantic_title IS NULL OR (
+                    typeof(c.semantic_title)='text'
+                    AND c.semantic_title=trim(c.semantic_title)
+                    AND length(c.semantic_title) BETWEEN 1 AND 240
+                    AND length(CAST(c.semantic_title AS BLOB))<=1024
+                    AND instr(c.semantic_title,char(0))=0
+                    AND instr(c.semantic_title,char(10))=0
+                    AND instr(c.semantic_title,char(13))=0
+                ))
+                AND typeof(c.enriched_at)='text'
+                AND length(c.enriched_at)=20
+                AND strftime('%Y-%m-%dT%H:%M:%SZ',c.enriched_at)=c.enriched_at)
+                   AS catalog_current,
                (c.enrichment_status='incomplete'
-                AND c.incomplete_reason IS NOT NULL
+                AND c.incomplete_reason IN ({catalog_reasons_sql})
                 AND c.extracted_text_sha256 IS NULL
-                AND c.semantic_title IS NULL) AS catalog_incomplete,
-               (c.enrichment_status='current'
-                AND typeof(c.semantic_title)='text'
-                AND length(trim(c.semantic_title))>0) AS has_semantic_title
+                AND c.semantic_title IS NULL
+                AND c.title_authority='navigation_only'
+                AND typeof(c.enriched_at)='text'
+                AND length(c.enriched_at)=20
+                AND strftime('%Y-%m-%dT%H:%M:%SZ',c.enriched_at)=c.enriched_at)
+                   AS catalog_incomplete,
+               (typeof(c.semantic_title)='text'
+                AND c.semantic_title=trim(c.semantic_title)
+                AND length(c.semantic_title) BETWEEN 1 AND 240
+                AND length(CAST(c.semantic_title AS BLOB))<=1024
+                AND instr(c.semantic_title,char(0))=0
+                AND instr(c.semantic_title,char(10))=0
+                AND instr(c.semantic_title,char(13))=0) AS has_semantic_title
         """
         if catalog_available
         else """
