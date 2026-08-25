@@ -6,26 +6,24 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-25
 - Branch: `main`
-- Secondary acceptance base: Friday `0.207.16` is live in provisional public
+- Secondary acceptance base: Friday `0.207.18` is live in provisional public
   shadow. The accepted-profile registry remains empty pending physical
   acceptance; private text and `assist` remain closed.
-- Deployed implementation head: `9a49da4f2c0771d2ddfd1529dd06394a3e6cee19`
-- Live: Friday `0.207.16` / `9a49da4f2c0771d2ddfd1529dd06394a3e6cee19`;
-  tree `9cb3d4e28f4e172cfd08be00ffc73de0c4c06c94ef93009a1c850d7ce2a19e46`;
-  wheel `14b355c7c11c3037b6659f096be7379fd695890a2d41d254f379dfba8b75b1e2`
-- Immediate predecessor: Friday `0.207.15` /
-  `8f260ce05bc9ad7384df9780e2383c727b9ab35d`, tree
-  `b538ac0f07a72ee89a1837b62f318db236f56203f7f7aa91f420b38be1fd4ec0`.
-- Schema-capable fallback: code-identical Friday `0.207.16` /
-  `551b27aeb93b9e93f9806d047e922d0b1989cd01`, tree
-  `8bf0cbf3038a65829c2b5efd923a07b1ce3afc246ad19b8700bbe9bef61003b1`.
+- Deployed implementation head: `94ceca1b92bb8546e5f53e5ed0e3fd966bedc0c9`
+- Live: Friday `0.207.18` / `94ceca1b92bb8546e5f53e5ed0e3fd966bedc0c9`;
+  tree `68a724a8b63d1c986431ea784e3e2e39b8b69100d6ed12e8ec584ad4d973c2fb`;
+  wheel `5f67c57f954ff7a53f015f34153a0add4edfede033dcb719a0269472f738cd35`
+- Immediate predecessor and schema-capable fallback: Friday `0.207.17` /
+  `6c6ba88b69c62ed6dc0c31842c6a596929fc5f32`, tree
+  `7ef44b47395f15b3f159cf8394b9f42ef4b07bb73198f82928731371419b442f`.
 - Database schema: 41
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean;
   exact provisional profile is configured in public `shadow/extract`, while
-  primary remains final and no private material is eligible. Schema-41
-  DocumentCatalog is exact and body-free; its bounded runtime enrichment is the
-  active package.
+  primary remains final and no private material is eligible. The exact,
+  body-free schema-41 DocumentCatalog now has its bounded durable worker and
+  archive consumer in production; coverage remains honestly incomplete while
+  the backlog converges.
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
@@ -38,9 +36,9 @@ behavior whenever the laptop is absent. The provisional public-shadow cutover
 is complete. Its causal request witness is deployed and the exact deterministic
 and controlled-live evidence was rebuilt from that release. Work requiring a
 physical laptop power cut waits for the owner. The schema-41 DocumentCatalog
-foundation and schema-40 ICP candidate runtime are live. Bounded catalog
-enrichment/consumption is the active autonomous package; the common effect
-envelope and V12 refinement follow it.
+foundation, bounded convergence worker, archive consumer and schema-40 ICP
+candidate runtime are live. The common effect envelope and Obsidian uncertain-
+effect reconciliation are the active autonomous package; V12 refinement follows.
 
 The measured provisional finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -139,14 +137,29 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Complete the bounded durable DocumentCatalog enrichment/reconciliation
-   worker and archive-consumption runtime without persisting source bodies or
-   model prose.
+1. Add one privacy-safe common effect envelope and an idempotent,
+   receipt-backed Obsidian uncertain-effect reconciliation vertical.
 2. When the owner is present, perform the real causal laptop cut/on and accept
    only the exact bound finalist; then promote distinct private-shadow/assist
    candidates with product-linked fallback evidence.
 
 ## Completed and deployed (current package)
+
+### Bounded DocumentCatalog convergence and archive consumption (`0.207.18`)
+
+- The durable worker performs bounded, checkpointed body-free catalog
+  backfill/reconciliation outside startup and request paths. The archive
+  consumer uses only current authorized navigation metadata; stale, missing or
+  incomplete rows remain explicitly non-current rather than proving absence.
+- The `0.207.18` hotfix preserves the fair first pass, then reclaims only
+  measured unused tenant/phase reservations for successful phases that still
+  have work. The global tick bound and failure reservations remain intact.
+- The first two production ticks backfilled 46 and 38 rows with zero phase
+  failures. Coverage is still converging and is not claimed complete.
+- The exact source passed 18,315 non-UI and 31 UI tests with zero skips. Two
+  clean wheels reproduced byte-for-byte; immutable activation completed
+  `clear`, both services are active, health is `ok`, and schema 41 integrity
+  and foreign-key checks are clean.
 
 ### Body-free DocumentCatalog foundation (`0.207.16`)
 
@@ -410,32 +423,31 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- The exact `0.207.16` canonical gate passed 18,280 non-UI tests plus 31 UI
+- The exact `0.207.18` canonical gate passed 18,315 non-UI tests plus 31 UI
   tests, including the pinned Syncthing 2.1.3 smoke; static checks and focused
-  schema-41 migration/catalog gates are green with zero skips.
-- Friday `0.207.16` public shadow is live at the exact source/tree/wheel identity
-  above, schema 41, with code-identical `551b27a` as its schema-capable fallback.
-  Immutable activation completed `clear`; all 15 active file tenants passed the
-  private offline catalog/raw-FTS audit and the disabled tenant remains counted
-  by the exact global coverage check.
+  schema-41 catalog/worker/archive gates are green with zero skips. Two clean
+  wheels reproduced byte-for-byte.
+- Friday `0.207.18` public shadow is live at the exact source/tree/wheel identity
+  above, schema 41, with `0.207.17` as both its immediate predecessor and
+  schema-capable fallback. Immutable activation completed `clear`; backend and
+  bridge are active, health is `ok`, and SQLite integrity and FK checks are
+  clean. The first two bounded worker ticks backfilled 46 and 38 rows with zero
+  phase failures; catalog coverage remains honestly partial while converging.
 
 ## Next order
 
-1. Activate the bounded durable DocumentCatalog enrichment/reconciliation
-   worker and archive consumer, converging the honest `backfill_pending` rows
-   without startup or request-path corpus scans.
+1. Add one uncertainty-aware common effect envelope and prove one idempotent,
+   receipt-backed Obsidian mutation/reconciliation vertical.
 2. Complete the owner-observed causal cut/on when the owner is present; only then
    accept/register and promote distinct private-shadow/assist candidates.
-3. Add one uncertainty-aware common effect envelope and prove one idempotent,
-   receipt-backed Obsidian mutation/reconciliation vertical.
-4. Extend existing immutable-release evidence into machine-reconcilable
+3. Extend existing immutable-release evidence into machine-reconcilable
    source/wheel/schema/activation/fallback manifests, then register exact-release
    journey evidence without promoting generic component gates.
-5. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
+4. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
    certification; simulations remain labelled separately.
-6. Begin V12 refinement with `ExplainSelectedArchiveEvidence`, and make the
+5. Begin V12 refinement with `ExplainSelectedArchiveEvidence`, and make the
    cross-feature search/file/Obsidian/dialogue battery mandatory for releases.
-7. Evaluate generic WorkGraph, broader effects or connectors only from the
+6. Evaluate generic WorkGraph, broader effects or connectors only from the
    golden journeys still failing after the preceding packages. Companion work
    remains out of scope.
 

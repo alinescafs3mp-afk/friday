@@ -4,13 +4,13 @@
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
 - Phase: **provisional public shadow live; physical/profile acceptance pending**
-- Live production: Friday `0.207.16` /
-  `9a49da4f2c0771d2ddfd1529dd06394a3e6cee19`, tree
-  `9cb3d4e28f4e172cfd08be00ffc73de0c4c06c94ef93009a1c850d7ce2a19e46`, wheel
-  `14b355c7c11c3037b6659f096be7379fd695890a2d41d254f379dfba8b75b1e2`,
-  schema 41; code-identical schema-capable fallback
-  `551b27aeb93b9e93f9806d047e922d0b1989cd01` / tree
-  `8bf0cbf3038a65829c2b5efd923a07b1ce3afc246ad19b8700bbe9bef61003b1`
+- Live production: Friday `0.207.18` /
+  `94ceca1b92bb8546e5f53e5ed0e3fd966bedc0c9`, tree
+  `68a724a8b63d1c986431ea784e3e2e39b8b69100d6ed12e8ec584ad4d973c2fb`, wheel
+  `5f67c57f954ff7a53f015f34153a0add4edfede033dcb719a0269472f738cd35`,
+  schema 41; immediate predecessor and schema-capable fallback Friday `0.207.17`
+  / `6c6ba88b69c62ed6dc0c31842c6a596929fc5f32`, tree
+  `7ef44b47395f15b3f159cf8394b9f42ef4b07bb73198f82928731371419b442f`
 - Rollout policy: the primary model remains required and final. The secondary
   is enabled only for non-private discarded `shadow/extract`; it has no tool,
   effect, publication or V12 authority. The accepted registry is empty and
@@ -91,8 +91,9 @@
 
 ## Current production evidence
 
-- Exact live source `1ea5a1dd7e9fab4c483e176726071ed55100721c` passed the 101-case
-  deterministic failure battery; receipt SHA-256 is
+- The source-bound secondary evidence from
+  `1ea5a1dd7e9fab4c483e176726071ed55100721c` passed the 101-case deterministic
+  failure battery; receipt SHA-256 is
   `7a66c9a02628f0cc31c0ddfb33f52220386dcfe268d5873292189689abf0fc8b`.
   Earlier source-bound receipts remain history and are ineligible for current
   acceptance.
@@ -127,9 +128,10 @@
 
 ## Parallel parent checkpoint
 
-- ICP schema 40 and the durable exact archive candidate-selection runtime are
-  deployed. DocumentCatalog/enrichment proceeds while the owner-dependent
-  physical cut waits.
+- ICP schema 40, the durable exact archive candidate-selection runtime and the
+  bounded body-free DocumentCatalog worker/archive consumer are deployed.
+  Common effect-envelope/Obsidian reconciliation work proceeds while the
+  owner-dependent physical cut waits.
 
 ## Active order
 
@@ -140,8 +142,8 @@
 3. Prove the separate private product-shadow stage before narrow assist,
    then repeat the physical cycle with product-linked counters in assist,
    including laptop-off and mid-turn disconnect behavior.
-4. Continue DocumentCatalog, the common effect envelope and scheduled V12
-   refinement without widening secondary authority.
+4. Continue the common effect envelope and scheduled V12 refinement without
+   widening secondary authority.
 
 ## Not yet claimed
 
