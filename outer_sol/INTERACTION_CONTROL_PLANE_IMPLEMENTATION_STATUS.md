@@ -25,8 +25,8 @@ schema 41; immediate predecessor and schema-capable fallback Friday `0.207.20` /
   stable source/passage identity, explicit per-corpus coverage, process-private
   carriers and same-transaction reauthorization/publication.
 - The live anchor resolves to `27b9fc5`, with reader-first schema-41 `05b7a81`
-  as both immediate predecessor and rollback fallback. Backend and bridge are active,
-  trusted-CA health is `ok`, and
+  as both immediate predecessor and rollback fallback. Backend and bridge are
+  active, trusted-CA health is `ok`, and
   schema 41, SQLite integrity, foreign keys, FTS and body-free catalog bindings
   are clean; semantic enrichment coverage remains honestly partial.
 - The `912dc1a` schema-39 vertical is now deployed in `0.207.9`: one durable,

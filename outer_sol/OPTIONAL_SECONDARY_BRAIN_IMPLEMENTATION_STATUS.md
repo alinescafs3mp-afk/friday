@@ -15,9 +15,9 @@
   is enabled only for non-private discarded `shadow/extract`; it has no tool,
   effect, publication or V12 authority. The accepted registry is empty and
   private shadow/`assist` admission remain closed.
-- `0.207.21` post-deploy health observed the optional endpoint as unavailable while the
-  primary V12 profile remained `canary_ready`; this is a successful fail-soft
-  observation, not physical finalist acceptance.
+- `0.207.21` post-deploy health observed the optional endpoint as unavailable
+  while the primary V12 profile remained `canary_ready`; this is a successful
+  fail-soft observation, not physical finalist acceptance.
 
 ## Durable access and measured host
 
