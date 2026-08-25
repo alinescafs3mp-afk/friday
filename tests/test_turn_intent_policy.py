@@ -218,6 +218,11 @@ def test_weather_horizon_rejects_ambient_free_text() -> None:
         TurnPolicyContext(weather_followup=True, weather_horizon="на выходных")  # type: ignore[arg-type]
 
 
+def test_turn_policy_context_accepts_only_a_code_owned_attachment_marker() -> None:
+    with pytest.raises(ValueError, match="current attachment marker"):
+        TurnPolicyContext(current_attachment_present=1)  # type: ignore[arg-type]
+
+
 def test_weather_correction_needs_adjacent_weather_context() -> None:
     assert decide_turn_policy("Меня Донецк интересовал))").intent is TurnIntent.PASSTHROUGH
 
@@ -294,6 +299,7 @@ def test_data_read_commands_are_not_meta_capability_questions(message: str) -> N
 @pytest.mark.parametrize(
     "message",
     [
+        "Можешь сделать картинку?",
         "а ты мне можешь картинку нарисовать?",
         "Пятница, а ты мне можешь картинку нарисовать?",
         "Ты вообще умеешь рисовать картинки?",
@@ -341,6 +347,27 @@ def test_image_generation_capability_fails_closed_without_a_visible_png_renderer
     assert decision.image_generation_projection == ImageGenerationProjection(False)
     assert decision.public_response == ImageGenerationProjection(False).render_ru()
     assert "сейчас тоже недоступна" in str(decision.public_response)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Можешь сделать картинку?",
+        "Can you make an image?",
+    ],
+)
+def test_current_attachment_keeps_terse_image_wording_on_the_runtime_path(
+    message: str,
+) -> None:
+    decision = decide_turn_policy(
+        message,
+        context=TurnPolicyContext(current_attachment_present=True),
+        image_generation=ImageGenerationProjection(structured_png_card_available=True),
+    )
+
+    assert decision.intent is TurnIntent.PASSTHROUGH
+    assert decision.attachments is AttachmentDisposition.UNCHANGED
+    assert decision.public_response is None
 
 
 @pytest.mark.parametrize(
@@ -700,6 +727,11 @@ def test_api_uses_code_owned_weather_meta_mcp_and_safe_diagnostics(
         ),
         (
             "а ты мне можешь картинку нарисовать?",
+            "Обычные картинки и рисунки по описанию сейчас не генерирую.",
+            TurnIntent.META_IMAGE_GENERATION,
+        ),
+        (
+            "Можешь сделать картинку?",
             "Обычные картинки и рисунки по описанию сейчас не генерирую.",
             TurnIntent.META_IMAGE_GENERATION,
         ),

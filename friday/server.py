@@ -48,6 +48,7 @@ from friday.agent_runtime import (
 from friday.agent_runtime._office_attachments import (
     OFFICE_STRUCTURE_KEY,
     bounded_raw_file_metadata,
+    is_trusted_office_attachment,
     trusted_office_attachment,
     validate_runtime_office_index,
 )
@@ -4346,9 +4347,16 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     limit=4,
                 )
             archive_search_current_text = _archive_search_private_turn_requested(message)
+            policy_context = replace(
+                _turn_policy_context_from_history(policy_history),
+                current_attachment_present=any(
+                    isinstance(item, _OwnedAttachment) or is_trusted_office_attachment(item)
+                    for item in attachments
+                ),
+            )
             turn_policy: TurnPolicyDecision = decide_turn_policy(
                 message,
-                context=_turn_policy_context_from_history(policy_history),
+                context=policy_context,
                 diagnostics=DiagnosticsAuthority(
                     capability_allowed=state.auth_service.authorize(
                         actor,

@@ -288,11 +288,12 @@ class DiagnosticsAuthority:
 
 @dataclass(frozen=True, slots=True)
 class TurnPolicyContext:
-    """Minimal adjacent-turn state; it deliberately contains no ambient location."""
+    """Minimal trusted routing state; it deliberately contains no ambient location."""
 
     weather_followup: bool = False
     weather_horizon: WeatherHorizon | None = None
     weather_location_missing: bool = False
+    current_attachment_present: bool = False
 
     def __post_init__(self) -> None:
         if type(self.weather_followup) is not bool:
@@ -308,6 +309,8 @@ class TurnPolicyContext:
             raise ValueError("weather location marker must be an exact boolean")
         if self.weather_location_missing and not self.weather_followup:
             raise ValueError("missing weather location requires an adjacent weather turn")
+        if type(self.current_attachment_present) is not bool:
+            raise ValueError("current attachment marker must be an exact boolean")
 
 
 @dataclass(frozen=True, slots=True)
@@ -823,6 +826,13 @@ def decide_turn_policy(
         )
 
     if _is_image_generation_capability_question(text):
+        # A terse caption such as "Можешь сделать картинку?" is ambiguous only
+        # in isolation.  A server-authorized current file makes it a request to
+        # work on that file, so keep both the request and its private carrier on
+        # the ordinary runtime path.  The marker is code-owned; user text or
+        # conversation history cannot set it.
+        if turn_context.current_attachment_present:
+            return TurnPolicyDecision(intent=TurnIntent.PASSTHROUGH)
         image_projection = image_generation or ImageGenerationProjection(False)
         return TurnPolicyDecision(
             intent=TurnIntent.META_IMAGE_GENERATION,

@@ -30,6 +30,7 @@ from friday.storage.models import (
     new_id,
 )
 from friday.telegram_bridge import TelegramBridge, TelegramConfig
+from friday.turn_intent_policy import TurnIntent
 
 
 class _Response:
@@ -265,6 +266,96 @@ def _stored_reply_file(
         )
         storage.commit()
     return raw
+
+
+def test_terse_image_wording_preserves_current_upload_and_reply_carriers(
+    settings,
+    monkeypatch,
+) -> None:
+    import friday.server as server_module
+
+    scoped = replace(settings, verify_answers=False, shared_archive=True)
+    app = server_module.create_app(scoped)
+    captured: list[dict[str, Any]] = []
+    decisions = []
+    uploader = ""
+    original_decide = server_module.decide_turn_policy
+
+    def decide_spy(message, **kwargs):  # noqa: ANN001, ANN003
+        decision = original_decide(message, **kwargs)
+        if message == "Можешь сделать картинку?":
+            decisions.append((kwargs.get("context"), decision))
+        return decision
+
+    async def chat_spy(user_id, message, **kwargs):  # noqa: ANN001, ANN003
+        captured.append({"user_id": user_id, "message": message, "kwargs": kwargs})
+        conversation_id = str(kwargs.get("conversation_id") or "")
+        if not conversation_id:
+            conversation_id = str(app.state.storage.create_conversation(uploader)["id"])
+        return {
+            "conversation_id": conversation_id,
+            "message": "runtime accepted the file",
+            "context": {"interaction_mode": "dialogue"},
+        }
+
+    with TestClient(app) as client:
+        me = _bridge_call(client, scoped, "GET", "/api/me", user="1001")
+        assert me.status_code == 200, me.text
+        uploader = str(me.json()["actor"]["user_id"])
+        app.state.storage.update_user(uploader, preset_key="user")
+        monkeypatch.setattr(app.state.agent, "chat", chat_spy)
+        monkeypatch.setattr(server_module, "decide_turn_policy", decide_spy)
+
+        current = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Можешь сделать картинку?",
+                "source_ref": "telegram-update:terse-image-current",
+                "telegram_message_id": 811,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "document": {
+                    "filename": "brief.txt",
+                    "mime_type": "text/plain",
+                    "media_kind": "document",
+                    "source_ref": "telegram-file:terse-image-brief",
+                    "content_base64": base64.b64encode(b"CURRENT IMAGE BRIEF").decode("ascii"),
+                },
+            },
+            user="1001",
+        )
+        assert current.status_code == 200, current.text
+
+        reply = _bridge_call(
+            client,
+            scoped,
+            "POST",
+            "/api/chat",
+            {
+                "message": "Можешь сделать картинку?",
+                "source_ref": "telegram-update:terse-image-reply",
+                "telegram_message_id": 812,
+                "telegram_user": {"id": 1001, "first_name": "Alice"},
+                "reply_document_source_ref": "telegram-file:terse-image-brief",
+            },
+            user="1001",
+        )
+        assert reply.status_code == 200, reply.text
+
+    assert len(captured) == 2
+    assert len(decisions) == 2
+    assert all(context.current_attachment_present is True for context, _decision in decisions)
+    assert all(decision.intent is TurnIntent.PASSTHROUGH for _context, decision in decisions)
+    raw_ids: list[str] = []
+    for call in captured:
+        # Passthrough is intentionally represented by no handled runtime
+        # override; the ordinary runtime receives the original carrier.
+        assert call["kwargs"]["turn_policy"] is None
+        [attachment] = call["kwargs"]["attachments"]
+        raw_ids.append(str(attachment["raw_object_id"]))
+    assert raw_ids[0] and raw_ids[1] == raw_ids[0]
 
 
 def test_server_reply_to_assistant_uses_only_that_answers_authorized_file_lineage(
