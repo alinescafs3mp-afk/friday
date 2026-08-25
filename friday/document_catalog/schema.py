@@ -64,6 +64,16 @@ _EXTRACTION_COUNTERS = (
     "archive_files",
     "archive_files_read",
 )
+_EXTRACTION_RECEIPT_V1_FALSE_FLAGS = (
+    "text_truncated",
+    "archive_truncated",
+    "source_truncated_for_parse",
+    "parse_deadline_reached",
+    "parse_pages_truncated",
+    "vision_used",
+    "vision_review_required",
+    "unsupported_format",
+)
 
 DOCUMENT_CATALOG_SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS document_catalog (
@@ -350,7 +360,14 @@ BEGIN
            semantic_title=NULL,
            enrichment_revision={DOCUMENT_CATALOG_ENRICHMENT_REVISION},
            enrichment_status='incomplete',
-           incomplete_reason='source_changed',
+           incomplete_reason=CASE
+               WHEN typeof(NEW.version)<>'integer' OR NEW.version<1
+                 OR typeof(NEW.content_hash)<>'text'
+                 OR length(NEW.content_hash)<>64
+                 OR NEW.content_hash GLOB '*[^0-9a-f]*'
+               THEN 'source_unavailable'
+               ELSE 'source_changed'
+           END,
            enriched_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')
      WHERE raw_object_id=NEW.id;
 END;
@@ -423,15 +440,8 @@ def deterministic_document_extraction_state(raw_content: Any, metadata_json: Any
     expected_digest = (
         hashlib.sha256(normalized.encode("utf-8", errors="strict")).hexdigest() if normalized else ""
     )
-    optional_receipt_valid = bool(
+    legacy_optional_fields_valid = bool(
         (
-            "extraction_receipt_version" not in metadata
-            or (
-                type(metadata.get("extraction_receipt_version")) is int
-                and metadata.get("extraction_receipt_version") == 1
-            )
-        )
-        and (
             "extraction_chars" not in metadata
             or (
                 type(metadata.get("extraction_chars")) is int
@@ -456,13 +466,44 @@ def deterministic_document_extraction_state(raw_content: Any, metadata_json: Any
         and metadata.get("vision_pages_total", 0) == 0
         and metadata.get("vision_pages_read", 0) == 0
     )
+    receipt_version_present = "extraction_receipt_version" in metadata
+    if receipt_version_present:
+        counters: dict[str, int] = {}
+        for field in _EXTRACTION_COUNTERS:
+            value = metadata.get(field)
+            if type(value) is not int or value < 0:
+                break
+            counters[field] = value
+        receipt_valid = bool(
+            type(metadata.get("extraction_receipt_version")) is int
+            and metadata.get("extraction_receipt_version") == 1
+            and metadata.get("extraction_success") is True
+            and metadata.get("extraction_error") == ""
+            and type(metadata.get("text_extraction_success")) is bool
+            and type(metadata.get("extraction_chars")) is int
+            and metadata.get("extraction_chars") == len(raw_content)
+            and type(metadata.get("text_sha256")) is str
+            and metadata.get("text_sha256") == expected_digest
+            and all(metadata.get(field) is False for field in _EXTRACTION_RECEIPT_V1_FALSE_FLAGS)
+            and len(counters) == len(_EXTRACTION_COUNTERS)
+            and counters.get("parse_pages_read") == counters.get("parse_total_pages")
+            and counters.get("archive_files") == counters.get("archive_files_read")
+            and counters.get("vision_pages_total") == 0
+            and counters.get("vision_pages_read") == 0
+            and exact_present_flags
+        )
+    else:
+        # Legacy rows predate the canonical receipt.  Preserve the independently
+        # provable dual-success contract, while validating every newer field that
+        # happens to be present instead of upgrading a partial v1 receipt.
+        receipt_valid = legacy_optional_fields_valid
     if not raw_content.strip():
         if (
             extraction_success is True
             and text_success is False
             and (not extraction_error_present or extraction_error == "")
             and exact_present_flags
-            and optional_receipt_valid
+            and receipt_valid
         ):
             return DocumentCatalogIncompleteReason.NO_TEXT.value
         return DocumentCatalogIncompleteReason.EXTRACTION_INCOMPLETE.value
@@ -471,7 +512,7 @@ def deterministic_document_extraction_state(raw_content: Any, metadata_json: Any
         or text_success is not True
         or (extraction_error_present and extraction_error != "")
         or not exact_present_flags
-        or not optional_receipt_valid
+        or not receipt_valid
     ):
         return DocumentCatalogIncompleteReason.EXTRACTION_INCOMPLETE.value
     return DocumentCatalogStatus.CURRENT.value

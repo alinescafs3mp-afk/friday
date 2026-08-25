@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+import friday.storage._document_catalog as document_catalog_storage
 from friday.account_deletion import (
     _DELETE_SCOPES,
     _mark_account_deletion_history_clean,
@@ -286,6 +287,76 @@ def test_compatible_extraction_receipt_requires_two_success_attestations(
 
 
 @pytest.mark.parametrize(
+    "missing_field",
+    (
+        "parse_total_pages",
+        "archive_files_read",
+        "extraction_chars",
+        "text_truncated",
+    ),
+)
+def test_v1_receipt_requires_every_field_and_complete_counter_pairs(
+    storage: FridayStorage,
+    missing_field: str,
+) -> None:
+    body = "# Strict v1 receipt\nComplete extracted body"
+    metadata = _receipt(body)
+    metadata.pop(missing_field)
+    raw = _file(storage, 200 + len(missing_field), body=body, metadata=metadata)
+    row = storage.get_document_catalog_entry("alice", raw.id)
+    assert row is not None
+    assert row["enrichment_status"] == "incomplete"
+    assert row["incomplete_reason"] == "extraction_incomplete"
+
+    with pytest.raises(sqlite3.DatabaseError, match="source binding"):
+        storage.execute(
+            """UPDATE document_catalog
+                  SET enrichment_status='current',incomplete_reason=NULL,
+                      extracted_text_sha256=?,semantic_title='Strict v1 receipt'
+                WHERE raw_object_id=?""",
+            (hashlib.sha256(body.encode()).hexdigest(), raw.id),
+        )
+    storage.conn.rollback()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "digest_mismatch",
+        "length_mismatch",
+        "non_false_flag",
+        "non_integer_counter",
+        "partial_pages",
+        "partial_archive",
+    ),
+)
+def test_v1_receipt_requires_exact_digest_length_flags_and_counters(
+    storage: FridayStorage,
+    mutation: str,
+) -> None:
+    body = "# Exact v1 receipt\nComplete extracted body"
+    metadata = _receipt(body)
+    if mutation == "digest_mismatch":
+        metadata["text_sha256"] = "0" * 64
+    elif mutation == "length_mismatch":
+        metadata["extraction_chars"] = len(body) + 1
+    elif mutation == "non_false_flag":
+        metadata["text_truncated"] = "false"
+    elif mutation == "non_integer_counter":
+        metadata["parse_pages_read"] = 0.0
+    elif mutation == "partial_pages":
+        metadata.update(parse_pages_read=1, parse_total_pages=2)
+    else:
+        metadata.update(archive_files=2, archive_files_read=1)
+
+    raw = _file(storage, 260 + len(mutation), body=body, metadata=metadata)
+    row = storage.get_document_catalog_entry("alice", raw.id)
+    assert row is not None
+    assert row["enrichment_status"] == "incomplete"
+    assert row["incomplete_reason"] == "extraction_incomplete"
+
+
+@pytest.mark.parametrize(
     ("assignment", "params"),
     (
         ("source_version=0", ()),
@@ -442,11 +513,16 @@ def test_invalid_legacy_revision_is_explicit_incomplete_not_a_raw_write_failure(
     assert row["incomplete_reason"] == "source_unavailable"
     coverage = storage.document_catalog_coverage("alice")
     assert coverage["catalogued"] == 1 and coverage["stale"] == 0
+    storage.execute("UPDATE raw_objects SET metadata_json='malformed{' WHERE id=?", (raw.id,))
+    after_metadata_update = storage.get_document_catalog_entry("alice", raw.id)
+    assert after_metadata_update is not None
+    assert after_metadata_update["incomplete_reason"] == "source_unavailable"
     assert storage.reconcile_document_catalog("alice") == {
         "examined": 0,
         "inserted": 0,
         "reset": 0,
         "removed": 0,
+        "has_more": False,
     }
 
 
@@ -479,23 +555,97 @@ def test_backfill_converges_across_pages_and_restart_without_cursor_starvation(
                 ((raw_id,) for raw_id in raw_ids),
             )
         one = first.backfill_document_catalog("alice", limit=2)
-        assert one["processed"] == 2 and one["remaining_retryable"] == 5
+        assert one["processed"] == 2 and one["has_more"] is True
     finally:
         first.close(final=True)
 
     reopened = FridayStorage(settings)
     try:
-        assert reopened.backfill_document_catalog("alice", limit=2)["remaining_retryable"] == 3
-        assert reopened.backfill_document_catalog("alice", limit=2)["remaining_retryable"] == 1
+        assert reopened.backfill_document_catalog("alice", limit=2)["has_more"] is True
+        assert reopened.backfill_document_catalog("alice", limit=2)["has_more"] is True
         final = reopened.backfill_document_catalog("alice", limit=2)
-        assert final["processed"] == 1 and final["remaining_retryable"] == 0
-        assert reopened.backfill_document_catalog("alice", limit=2)["processed"] == 0
+        assert final["processed"] == 1 and final["has_more"] is False
+        empty = reopened.backfill_document_catalog("alice", limit=2)
+        assert empty["processed"] == 0 and empty["has_more"] is False
         coverage = reopened.document_catalog_coverage("alice")
         assert coverage["coverage_complete"] is True
         assert coverage["explicit_incomplete"] == 7
         assert coverage["incomplete_reasons"]["extraction_incomplete"] == 7
     finally:
         reopened.close(final=True)
+
+
+def test_backfill_streams_bodies_under_a_strict_byte_budget_with_oversized_progress(
+    storage: FridayStorage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = "# Oversized\n" + ("x" * 40)
+    raw_ids = [_file(storage, 230 + index, body=body).id for index in range(3)]
+    with storage.transaction() as conn:
+        conn.executemany(
+            """UPDATE document_catalog
+                  SET enrichment_status='incomplete',incomplete_reason='backfill_pending',
+                      extracted_text_sha256=NULL,semantic_title=NULL
+                WHERE raw_object_id=?""",
+            ((raw_id,) for raw_id in raw_ids),
+        )
+    monkeypatch.setattr(
+        document_catalog_storage,
+        "DOCUMENT_CATALOG_RAW_TEXT_WORK_BUDGET_BYTES",
+        16,
+    )
+
+    first = storage.backfill_document_catalog("alice", limit=10)
+    assert first["processed"] == 1
+    assert first["has_more"] is True
+    assert first["byte_budget_reached"] is True
+    assert first["raw_text_bytes_examined"] == len(body.encode()) > 16
+    second = storage.backfill_document_catalog("alice", limit=10)
+    assert second["processed"] == 1 and second["has_more"] is True
+    final = storage.backfill_document_catalog("alice", limit=10)
+    assert final["processed"] == 1 and final["has_more"] is False
+
+
+def test_rebuild_byte_budget_cursor_and_reconcile_has_more_are_bounded(
+    storage: FridayStorage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = "# Rebuild\n" + ("y" * 40)
+    raw_ids = [_file(storage, 240 + index, body=body).id for index in range(3)]
+    monkeypatch.setattr(
+        document_catalog_storage,
+        "DOCUMENT_CATALOG_RAW_TEXT_WORK_BUDGET_BYTES",
+        16,
+    )
+    first = storage.rebuild_document_catalog("alice", limit=10)
+    assert first["processed"] == 1
+    assert first["has_more"] is True
+    assert first["byte_budget_reached"] is True
+    assert first["next_after_raw_object_id"] == raw_ids[0]
+    second = storage.rebuild_document_catalog(
+        "alice",
+        after_raw_object_id=str(first["next_after_raw_object_id"]),
+        limit=10,
+    )
+    assert second["processed"] == 1
+    assert second["next_after_raw_object_id"] == raw_ids[1]
+
+    with storage.transaction() as conn:
+        conn.executemany(
+            "DELETE FROM document_catalog WHERE raw_object_id=?",
+            ((raw_id,) for raw_id in raw_ids),
+        )
+    reconciled = storage.reconcile_document_catalog("alice", limit=1)
+    assert reconciled == {
+        "examined": 1,
+        "inserted": 1,
+        "reset": 0,
+        "removed": 0,
+        "has_more": True,
+    }
+    assert storage.reconcile_document_catalog("alice", limit=256)["has_more"] is False
+    with pytest.raises(ValueError, match="between 1 and 256"):
+        storage.backfill_document_catalog("alice", limit=257)
 
 
 def test_exact_schema_validator_rejects_missing_and_extra_objects(storage: FridayStorage) -> None:
