@@ -1,3 +1,17 @@
+## 0.207.17 — 2026-08-25
+
+### Bounded DocumentCatalog convergence and archive navigation
+
+- A restart-safe, globally bounded worker reconciles and enriches every active
+  file tenant with exact per-phase keyset cursors, fair sticky retries and one
+  atomic privacy-keyed checkpoint per tick.
+- Account deletion, cancellation, malformed state, concurrent checkpoints and
+  disabled tenants fail closed without resurrecting work or exposing account
+  identifiers in durable worker state.
+- Authorized document archive results now consume only current catalog titles
+  for navigation. Missing, stale or incomplete coverage remains explicitly
+  `backfill_pending`; Raw evidence and final reauthorization stay authoritative.
+
 ## 0.207.16 — 2026-08-25
 
 ### Schema-capable DocumentCatalog foundation
