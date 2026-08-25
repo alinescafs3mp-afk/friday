@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import base64
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from test_compare_conversation_document_schema42 import (  # noqa: PLC2701
+    _create_writer_followup_waiting,
+)
 
 from friday.orchestration import OrchestrationRouter
 from friday.permissions import LEGACY_OWNER_USER_ID
@@ -152,6 +157,77 @@ def test_pre_ingestion_owned_receipt_survives_router_race_without_second_admissi
     assert len(legacy_calls) == 1
     assert legacy_calls[0]["ingestion_result"] is None
     assert legacy_calls[0]["_pending_durable_admission"].is_owned
+
+
+def test_document_only_api_upload_answers_waiting_comparison_q1(
+    settings: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from friday.server import create_app
+
+    app = create_app(replace(settings, router_mode="shadow"))
+    headers = {"Authorization": f"Bearer {settings.api_token}"}
+    captured: list[Any] = []
+
+    with TestClient(app) as client:
+        router = app.state.agent
+        assert isinstance(router, OrchestrationRouter)
+        legacy = router._legacy  # noqa: SLF001 - production composition regression
+        conversation, waiting, _evidence = _create_writer_followup_waiting(
+            app.state.storage,
+            owner=LEGACY_OWNER_USER_ID,
+            now=datetime.now(UTC).isoformat(timespec="seconds"),
+        )
+
+        async def capture_active(**kwargs: Any) -> dict[str, Any]:
+            captured.append(kwargs["admitted_item"])
+            return {
+                "conversation_id": conversation["id"],
+                "message_id": "msg_0123456789abcdef",
+                "message": "comparison active",
+                "message_format": "plain",
+                "tools_used": [],
+                "files": [],
+                "voice": None,
+                "context": {"compare_conversation_with_document": "active"},
+            }
+
+        monkeypatch.setattr(
+            legacy,
+            "_execute_active_conversation_document_comparison",
+            capture_active,
+        )
+        response = client.post(
+            "/api/chat",
+            json={
+                "conversation_id": conversation["id"],
+                "document": {
+                    "filename": "bare-api-q1.txt",
+                    "mime_type": "text/plain",
+                    "content_base64": base64.b64encode(b"exact bare API comparison document").decode("ascii"),
+                    "source_ref": "api-document:bare-comparison-q1",
+                },
+            },
+            headers=headers,
+        )
+        alias = app.state.storage.execute(
+            """SELECT alias.source_ref
+                 FROM work_item_compare_document_evidence evidence
+                 JOIN file_source_aliases alias
+                   ON alias.raw_object_id=evidence.raw_object_id
+                  AND alias.user_id=? AND alias.uploaded_by=?
+                WHERE evidence.work_item_id=?
+                ORDER BY alias.source_ref LIMIT 1""",
+            (LEGACY_OWNER_USER_ID, LEGACY_OWNER_USER_ID, waiting.id),
+        ).fetchone()
+
+    assert response.status_code == 200, response.text
+    assert len(captured) == 1
+    assert captured[0].id == waiting.id
+    assert captured[0].state.value == "active"
+    assert captured[0].document_questions[0].state.value == "answered"
+    assert alias is not None
+    assert alias[0].startswith("friday-compare-current:msg_")
 
 
 @pytest.mark.parametrize(

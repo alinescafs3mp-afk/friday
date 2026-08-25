@@ -54,12 +54,10 @@ COMPARE_CONVERSATION_DOCUMENT_OUTCOME_SCHEMA = "friday.compare-conversation-docu
 COMPARE_CONVERSATION_DOCUMENT_OUTCOME_RECEIPT_SCHEMA = (
     "friday.compare-conversation-document-outcome-receipt.v1"
 )
-COMPARE_DOCUMENT_CANDIDATE_OUTCOME_SCHEMA = "friday.compare-document-candidate-outcome.v1"
-COMPARE_DOCUMENT_CANDIDATE_OUTCOME_RECEIPT_SCHEMA = "friday.compare-document-candidate-outcome-receipt.v1"
 COMPARE_DOCUMENT_REFERENCE_REQUIRED_VERDICT_KIND = "compare_conversation_document_reference_required"
 COMPARE_DOCUMENT_CANDIDATE_REQUIRED_VERDICT_KIND = "compare_conversation_document_candidate_required"
+COMPARE_DOCUMENT_CANDIDATE_REASK_VERDICT_KIND = "compare_conversation_document_candidate_reask"
 ACCEPTED_COMPARISON_METADATA_KEY = "accepted_compare_conversation_document_outcome"
-ACCEPTED_COMPARE_DOCUMENT_CANDIDATE_METADATA_KEY = "accepted_compare_document_candidate_outcome"
 
 _WORK_ITEM_ID_RE = re.compile(r"work_[0-9a-f]{16}\Z")
 _QUESTION_ID_RE = re.compile(r"question_[0-9a-f]{16}\Z")
@@ -179,168 +177,6 @@ class CompareConversationDocumentActiveFrame:
 
     def to_json(self) -> str:
         return COMPARE_CONVERSATION_DOCUMENT_ACTIVE_FRAME_JSON
-
-
-@dataclass(frozen=True, slots=True)
-class CompareDocumentCandidateOutcome:
-    """Body-free receipt for one code-owned exact-filename ambiguity."""
-
-    plan_sha256: str
-    evidence_sha256: str
-    coverage_sha256: str
-    candidate_projection_sha256: str
-    answer_sha256: str
-    candidate_count: int
-    publication_attested: bool
-    authority_rechecked: bool
-
-    def __post_init__(self) -> None:
-        for label in (
-            "plan_sha256",
-            "evidence_sha256",
-            "coverage_sha256",
-            "candidate_projection_sha256",
-            "answer_sha256",
-        ):
-            _digest(getattr(self, label), label=label)
-        if (
-            not isinstance(self.candidate_count, int)
-            or isinstance(self.candidate_count, bool)
-            or not 2 <= self.candidate_count <= 20
-            or self.publication_attested is not True
-            or self.authority_rechecked is not True
-        ):
-            raise WorkItemContractError("comparison candidate outcome is invalid")
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            "answer_sha256": self.answer_sha256,
-            "authority_rechecked": self.authority_rechecked,
-            "candidate_count": self.candidate_count,
-            "candidate_projection_sha256": self.candidate_projection_sha256,
-            "coverage_sha256": self.coverage_sha256,
-            "evidence_sha256": self.evidence_sha256,
-            "plan_sha256": self.plan_sha256,
-            "publication_attested": self.publication_attested,
-            "schema": COMPARE_DOCUMENT_CANDIDATE_OUTCOME_SCHEMA,
-        }
-
-    @classmethod
-    def parse(cls, value: object) -> CompareDocumentCandidateOutcome:
-        if not isinstance(value, Mapping):
-            raise WorkItemContractError("comparison candidate outcome must be an object")
-        _exact_keys(
-            value,
-            frozenset(
-                {
-                    "answer_sha256",
-                    "authority_rechecked",
-                    "candidate_count",
-                    "candidate_projection_sha256",
-                    "coverage_sha256",
-                    "evidence_sha256",
-                    "plan_sha256",
-                    "publication_attested",
-                    "schema",
-                }
-            ),
-            label="comparison candidate outcome",
-        )
-        if value["schema"] != COMPARE_DOCUMENT_CANDIDATE_OUTCOME_SCHEMA:
-            raise WorkItemContractError("comparison candidate outcome schema is invalid")
-        return cls(
-            plan_sha256=value["plan_sha256"],  # type: ignore[arg-type]
-            evidence_sha256=value["evidence_sha256"],  # type: ignore[arg-type]
-            coverage_sha256=value["coverage_sha256"],  # type: ignore[arg-type]
-            candidate_projection_sha256=value["candidate_projection_sha256"],  # type: ignore[arg-type]
-            answer_sha256=value["answer_sha256"],  # type: ignore[arg-type]
-            candidate_count=value["candidate_count"],  # type: ignore[arg-type]
-            publication_attested=value["publication_attested"],  # type: ignore[arg-type]
-            authority_rechecked=value["authority_rechecked"],  # type: ignore[arg-type]
-        )
-
-    @property
-    def canonical_sha256(self) -> str:
-        return hashlib.sha256(_canonical_json(self.to_payload()).encode("ascii")).hexdigest()
-
-
-@dataclass(frozen=True, slots=True)
-class CompareDocumentCandidateOutcomeReceipt:
-    outcome: CompareDocumentCandidateOutcome
-    outcome_sha256: str
-
-    def __post_init__(self) -> None:
-        if type(self.outcome) is not CompareDocumentCandidateOutcome or not hmac.compare_digest(
-            _digest(self.outcome_sha256, label="outcome_sha256"),
-            self.outcome.canonical_sha256,
-        ):
-            raise WorkItemContractError("comparison candidate receipt is invalid")
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            "outcome": self.outcome.to_payload(),
-            "outcome_sha256": self.outcome_sha256,
-            "schema": COMPARE_DOCUMENT_CANDIDATE_OUTCOME_RECEIPT_SCHEMA,
-        }
-
-    @classmethod
-    def parse(cls, value: object) -> CompareDocumentCandidateOutcomeReceipt:
-        if not isinstance(value, Mapping):
-            raise WorkItemContractError("comparison candidate receipt must be an object")
-        _exact_keys(
-            value,
-            frozenset({"outcome", "outcome_sha256", "schema"}),
-            label="comparison candidate receipt",
-        )
-        if value["schema"] != COMPARE_DOCUMENT_CANDIDATE_OUTCOME_RECEIPT_SCHEMA:
-            raise WorkItemContractError("comparison candidate receipt schema is invalid")
-        return cls(
-            outcome=CompareDocumentCandidateOutcome.parse(value["outcome"]),
-            outcome_sha256=value["outcome_sha256"],  # type: ignore[arg-type]
-        )
-
-
-def attach_accepted_compare_document_candidate_outcome_receipt(
-    metadata: dict[str, object],
-    outcome: CompareDocumentCandidateOutcome,
-) -> CompareDocumentCandidateOutcomeReceipt:
-    if type(metadata) is not dict or ACCEPTED_COMPARE_DOCUMENT_CANDIDATE_METADATA_KEY in metadata:
-        raise WorkItemContractError("comparison candidate receipt metadata slot is not pristine")
-    receipt = CompareDocumentCandidateOutcomeReceipt(outcome, outcome.canonical_sha256)
-    candidate = dict(metadata)
-    candidate[ACCEPTED_COMPARE_DOCUMENT_CANDIDATE_METADATA_KEY] = receipt.to_payload()
-    _receipt_payload_bytes(candidate)
-    metadata[ACCEPTED_COMPARE_DOCUMENT_CANDIDATE_METADATA_KEY] = receipt.to_payload()
-    return receipt
-
-
-def load_accepted_compare_document_candidate_outcome_receipt(
-    metadata: object,
-) -> CompareDocumentCandidateOutcomeReceipt:
-    try:
-        if isinstance(metadata, str):
-            encoded = metadata.encode("utf-8", errors="strict")
-            if not encoded or len(encoded) > _RECEIPT_MAX_BYTES:
-                raise WorkItemContractError("assistant metadata exceeds its closed byte limit")
-            decoded = json.loads(
-                metadata,
-                object_pairs_hook=_closed_json_object,
-                parse_constant=lambda _value: (_ for _ in ()).throw(
-                    WorkItemContractError("assistant metadata contains a non-finite number")
-                ),
-            )
-        else:
-            decoded = metadata
-    except (TypeError, ValueError, UnicodeEncodeError, RecursionError) as exc:
-        raise WorkItemContractError("assistant metadata is invalid") from exc
-    if not isinstance(decoded, Mapping) or ACCEPTED_COMPARE_DOCUMENT_CANDIDATE_METADATA_KEY not in decoded:
-        raise WorkItemContractError("assistant has no accepted comparison candidate receipt")
-    _receipt_payload_bytes(decoded)
-    receipt = CompareDocumentCandidateOutcomeReceipt.parse(
-        decoded[ACCEPTED_COMPARE_DOCUMENT_CANDIDATE_METADATA_KEY]
-    )
-    _receipt_payload_bytes(receipt.to_payload())
-    return receipt
 
 
 @dataclass(frozen=True, slots=True)
@@ -1377,16 +1213,14 @@ class CompareConversationWithDocumentWorkItem:
 
 
 __all__ = [
-    "ACCEPTED_COMPARE_DOCUMENT_CANDIDATE_METADATA_KEY",
     "ACCEPTED_COMPARISON_METADATA_KEY",
     "ACCEPTED_COMPARISON_RESULT_SCHEMA",
     "COMPARE_CONVERSATION_DOCUMENT_ACTIVE_FRAME_SCHEMA",
     "COMPARE_CONVERSATION_DOCUMENT_OUTCOME_RECEIPT_SCHEMA",
     "COMPARE_CONVERSATION_DOCUMENT_OUTCOME_SCHEMA",
     "COMPARE_CONVERSATION_DOCUMENT_WORK_ITEM_SCHEMA",
-    "COMPARE_DOCUMENT_CANDIDATE_OUTCOME_RECEIPT_SCHEMA",
-    "COMPARE_DOCUMENT_CANDIDATE_OUTCOME_SCHEMA",
     "COMPARE_DOCUMENT_CANDIDATE_REQUIRED_VERDICT_KIND",
+    "COMPARE_DOCUMENT_CANDIDATE_REASK_VERDICT_KIND",
     "COMPARE_DOCUMENT_REFERENCE_REQUIRED_VERDICT_KIND",
     "COMPARE_DOCUMENT_REFERENCE_PROMPT",
     "DOCUMENT_REFERENCE_QUESTION_SCHEMA",
@@ -1396,8 +1230,6 @@ __all__ = [
     "CompareConversationDocumentOutcomeReceipt",
     "CompareConversationDocumentStatus",
     "CompareConversationWithDocumentWorkItem",
-    "CompareDocumentCandidateOutcome",
-    "CompareDocumentCandidateOutcomeReceipt",
     "DocumentReferenceAdmissionShape",
     "DocumentReferenceQuestion",
     "DocumentReferenceQuestionCloseReason",
@@ -1405,10 +1237,8 @@ __all__ = [
     "DocumentReferenceQuestionState",
     "ResolvedDocumentIdentity",
     "ResolvedDocumentProvenance",
-    "attach_accepted_compare_document_candidate_outcome_receipt",
     "attach_accepted_comparison_outcome_receipt",
     "comparison_evidence_bundle_sha256",
     "load_accepted_comparison_outcome_receipt",
-    "load_accepted_compare_document_candidate_outcome_receipt",
     "selected_evidence_sha256",
 ]

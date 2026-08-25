@@ -54,7 +54,7 @@ def _comparison(*, state: WorkState = WorkState.WAITING_FOR_INPUT, q1: bool = Tr
 
 @pytest.mark.parametrize("message", ["report.pdf", "это совсем не имя файла"])
 @pytest.mark.parametrize("state", [WorkState.WAITING_FOR_INPUT, WorkState.ACTIVE])
-def test_current_comparison_owns_scalar_before_archive_parsers(
+def test_waiting_q1_owns_scalar_but_active_work_does_not_consume_arbitrary_text(
     settings: Any,
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -83,11 +83,36 @@ def test_current_comparison_owns_scalar_before_archive_parsers(
         conversation_id=conversation_id,
     )
 
-    assert isinstance(admission, PendingDurableTurnAdmission)
-    assert (admission.work_item_id, admission.revision) == (
-        _WORK_ID,
-        1 if state is WorkState.WAITING_FOR_INPUT else 2,
+    if state is WorkState.ACTIVE:
+        assert admission is False
+    else:
+        assert isinstance(admission, PendingDurableTurnAdmission)
+        assert (admission.work_item_id, admission.revision) == (_WORK_ID, 1)
+
+
+@pytest.mark.parametrize("message", ["продолжи", "resume comparison", "отмена", "Молчи"])
+def test_active_comparison_owns_only_closed_control_commands(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+) -> None:
+    runtime, actor, conversation_id = _runtime_scope(settings, storage)
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "get_current_compare_conversation_with_document_work_item_in_transaction",
+        lambda *_args, **_kwargs: _comparison(state=WorkState.ACTIVE),
     )
+
+    admission = runtime.pending_durable_turn_admission(
+        _OWNER,
+        message,
+        actor=actor,
+        conversation_id=conversation_id,
+    )
+
+    assert isinstance(admission, PendingDurableTurnAdmission)
+    assert (admission.work_item_id, admission.revision) == (_WORK_ID, 2)
 
 
 @pytest.mark.parametrize(

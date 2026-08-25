@@ -2543,9 +2543,7 @@ class CoreMixin(StorageShared):
                 # idempotent DDL; never let IF NOT EXISTS conceal a weaker table.
                 validate_interaction_failure_schema(conn, required=False)
             if parsed_version is not None and parsed_version >= WORK_ITEM_SCHEMA_VERSION:
-                # Authenticate either exact released schema-42 trigger image,
-                # then atomically install the current compatible receipt guard.
-                upgrade_work_item_schema_to_42(conn, required=True)
+                validate_work_item_schema(conn)
             else:
                 # Schema 42 adds the dormant comparison reader projection.
                 # Authenticate exact released schema 38/39/40 DDL before rebuild;

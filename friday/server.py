@@ -4373,7 +4373,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 and not force_knowledge
                 and not explicit_no_save
                 and not forward_meta
-                and not synthetic_document_notice
+                and (not synthetic_document_notice or pending_comparison_attachment_count == 1)
                 and not spoken_question
                 and requested_mode is None
                 and not turn_policy.handled

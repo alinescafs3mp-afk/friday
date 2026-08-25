@@ -154,6 +154,7 @@ from friday.interaction_control_plane.archive_evidence_work_item_store import (
     suspend_recall_selected_archive_evidence_replay_in_transaction,
 )
 from friday.interaction_control_plane.compare_conversation_document import (
+    COMPARE_DOCUMENT_CANDIDATE_REASK_VERDICT_KIND,
     COMPARE_DOCUMENT_CANDIDATE_REQUIRED_VERDICT_KIND,
     COMPARE_DOCUMENT_REFERENCE_PROMPT,
     COMPARE_DOCUMENT_REFERENCE_REQUIRED_VERDICT_KIND,
@@ -164,7 +165,6 @@ from friday.interaction_control_plane.compare_conversation_document import (
     DocumentReferenceQuestionState,
     ResolvedDocumentIdentity,
     ResolvedDocumentProvenance,
-    attach_accepted_compare_document_candidate_outcome_receipt,
     attach_accepted_comparison_outcome_receipt,
     comparison_evidence_bundle_sha256,
     load_accepted_comparison_outcome_receipt,
@@ -175,12 +175,15 @@ from friday.interaction_control_plane.compare_conversation_document_store import
     cancel_compare_conversation_with_document_in_transaction,
     complete_compare_conversation_with_document_in_transaction,
     create_compare_conversation_with_document_from_selected_followup_in_transaction,
+    expire_due_compare_conversation_with_document_work_items_in_transaction,
     get_current_compare_conversation_with_document_work_item_in_transaction,
+    new_compare_conversation_with_document_work_item_id,
     prepare_compare_conversation_document_filename_candidates_in_transaction,
     reauthorize_compare_conversation_document_filename_candidate_in_transaction,
     resolve_compare_conversation_document_candidate_in_transaction,
     resolve_compare_conversation_document_reference_in_transaction,
     suspend_compare_conversation_with_document_in_transaction,
+    validate_compare_conversation_document_candidate_reask_in_transaction,
 )
 from friday.interaction_control_plane.conversation_document_comparison_followup import (
     parse_conversation_document_comparison_followup,
@@ -32671,6 +32674,38 @@ class _ComparisonCurrentFileReference:
     media_type: str
 
 
+_COMPARISON_RESUME_COMMANDS = frozenset(
+    {
+        "продолжи",
+        "продолжить",
+        "продолжи сравнение",
+        "продолжить сравнение",
+        "возобнови",
+        "возобновить",
+        "возобнови сравнение",
+        "возобновить сравнение",
+        "continue",
+        "continue comparison",
+        "resume",
+        "resume comparison",
+    }
+)
+
+
+def _comparison_resume_requested(value: object) -> bool:
+    """Recognize only a closed, standalone resume command."""
+
+    if type(value) is not str:
+        return False
+    try:
+        encoded = value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError:
+        return False
+    if not encoded or len(encoded) > 64:
+        return False
+    return value.strip(" \t\r\n.,!?;:()[]{}\"'«»“”„`").casefold() in _COMPARISON_RESUME_COMMANDS
+
+
 class AgentRuntime:
     def __init__(
         self,
@@ -32776,9 +32811,63 @@ class AgentRuntime:
                 not in {
                     COMPARE_DOCUMENT_REFERENCE_REQUIRED_VERDICT_KIND,
                     COMPARE_DOCUMENT_CANDIDATE_REQUIRED_VERDICT_KIND,
+                    COMPARE_DOCUMENT_CANDIDATE_REASK_VERDICT_KIND,
                 },
             },
         }
+
+    @staticmethod
+    def _attach_comparison_work_trace(
+        conn: Any,
+        metadata: dict[str, Any],
+        *,
+        turn_identifier: str,
+        conversation_identifier: str,
+        work_item_identifier: str,
+        work_relation: WorkRelation,
+        continuation: ContinuationKind,
+        completion: CompletionDecision,
+        capability_outcomes: tuple[tuple[CapabilityClass, OutcomeStatus], ...] = (),
+        failure_stage: FailureStage = FailureStage.NONE,
+        failure_reason: FailureReason = FailureReason.NONE,
+        ambiguity_present: bool = False,
+        state_restored: bool = False,
+        authority_rechecked: bool = False,
+        model_calls: int = 0,
+        turn_started: float | None = None,
+    ) -> None:
+        """Make WorkTrace a mandatory part of every comparison publication."""
+
+        latency_ms = (
+            0
+            if turn_started is None
+            else min(86_400_000, max(0, int((time.monotonic() - turn_started) * 1_000)))
+        )
+        trace = build_work_trace(
+            namespace_key=load_trace_namespace_key(conn),
+            turn_identifier=turn_identifier,
+            conversation_identifier=conversation_identifier,
+            work_item_identifier=work_item_identifier,
+            work_relation=work_relation,
+            intent=IntentClass.MIXED,
+            playbook=PlaybookClass.COMPARE_INTERNAL_AND_EXTERNAL_SOURCES,
+            capability_outcomes=capability_outcomes,
+            continuation=continuation,
+            completion=completion,
+            failure_stage=failure_stage,
+            failure_reason=failure_reason,
+            ambiguity_present=ambiguity_present,
+            partial_coverage=False,
+            state_restored=state_restored,
+            latency_ms=latency_ms,
+            model_calls=model_calls,
+            model_call_accounting=CountAccounting.COMPLETE,
+            capability_calls=len(capability_outcomes),
+            capability_call_accounting=CountAccounting.COMPLETE,
+            authority_rechecked=authority_rechecked,
+        )
+        if not attach_trace_to_metadata(metadata, trace):
+            raise RuntimeError("comparison WorkTrace could not be stored")
 
     def _comparison_replay_in_transaction(
         self,
@@ -32834,6 +32923,20 @@ class AgentRuntime:
         )
         metadata["structural"]["failure_class"] = reason  # type: ignore[index]
         with self.storage.transaction() as conn:
+            self._attach_comparison_work_trace(
+                conn,
+                metadata,
+                turn_identifier=reply_to or work_item_id,
+                conversation_identifier=conversation_id,
+                work_item_identifier=work_item_id,
+                work_relation=WorkRelation.CONTINUED,
+                continuation=ContinuationKind.SAME_GOAL,
+                completion=CompletionDecision.FAILED,
+                capability_outcomes=((CapabilityClass.DOCUMENT_RETRIEVAL, OutcomeStatus.UNAVAILABLE),),
+                failure_stage=FailureStage.CAPABILITY,
+                failure_reason=FailureReason.SOURCE_UNAVAILABLE,
+                authority_rechecked=True,
+            )
             assistant = store_message_in_transaction(
                 conn,
                 conversation_id,
@@ -32890,6 +32993,16 @@ class AgentRuntime:
                 "user",
                 request,
                 metadata={"private_context_lineage": True},
+            )
+            self._attach_comparison_work_trace(
+                conn,
+                metadata,
+                turn_identifier=str(boundary["id"]),
+                conversation_identifier=conversation_id,
+                work_item_identifier=current.id,
+                work_relation=WorkRelation.CONTINUED,
+                continuation=ContinuationKind.CORRECTION,
+                completion=CompletionDecision.INCOMPLETE,
             )
             assistant = store_message_in_transaction(
                 conn,
@@ -32952,6 +33065,21 @@ class AgentRuntime:
                 request,
                 metadata={"private_context_lineage": True},
             )
+            self._attach_comparison_work_trace(
+                conn,
+                metadata,
+                turn_identifier=str(boundary["id"]),
+                conversation_identifier=conversation_id,
+                work_item_identifier=current.id,
+                work_relation=WorkRelation.CONTINUED,
+                continuation=ContinuationKind.CANDIDATE_SELECTION,
+                completion=CompletionDecision.FAILED,
+                capability_outcomes=((CapabilityClass.DOCUMENT_RETRIEVAL, OutcomeStatus.UNAVAILABLE),),
+                failure_stage=FailureStage.REFERENCE,
+                failure_reason=FailureReason.SOURCE_UNAVAILABLE,
+                ambiguity_present=current.document_candidate_set is not None,
+                authority_rechecked=True,
+            )
             assistant = store_message_in_transaction(
                 conn,
                 conversation_id,
@@ -32974,6 +33102,155 @@ class AgentRuntime:
             content=content,
             verified=False,
             lifecycle="suspended",
+        )
+
+    def _reask_comparison_candidate_source_free(
+        self,
+        *,
+        conversation_id: str,
+        person_id: str,
+        request: str,
+        work_item_id: str,
+        expected_revision: int,
+        maximum_ordinal: int,
+        turn_started: float,
+    ) -> dict[str, Any]:
+        """Append one authenticated re-ask pair while preserving the frozen Q2."""
+
+        if not mark_request_effect_possible():
+            raise RuntimeError("request fence failed before comparison candidate re-ask")
+        content = archive_candidate_reask_prompt(maximum_ordinal)
+        metadata = self._comparison_structural_metadata(
+            verdict_kind=COMPARE_DOCUMENT_CANDIDATE_REASK_VERDICT_KIND,
+            model_spoke=False,
+        )
+        with self.storage.transaction() as conn:
+            current = get_current_compare_conversation_with_document_work_item_in_transaction(
+                conn,
+                user_id=person_id,
+                conversation_id=conversation_id,
+            )
+            if current is None or current.id != work_item_id or current.revision != expected_revision:
+                raise WorkItemConflictError("comparison candidate re-ask admission is no longer current")
+            candidate_set = current.document_candidate_set
+            if candidate_set is None or len(candidate_set.candidates) != maximum_ordinal:
+                raise WorkItemConflictError("comparison candidate re-ask set changed")
+            boundary = store_message_in_transaction(
+                conn,
+                conversation_id,
+                person_id,
+                "user",
+                request,
+                metadata={"private_context_lineage": True},
+            )
+            self._attach_comparison_work_trace(
+                conn,
+                metadata,
+                turn_identifier=str(boundary["id"]),
+                conversation_identifier=conversation_id,
+                work_item_identifier=current.id,
+                work_relation=WorkRelation.CONTINUED,
+                continuation=ContinuationKind.CANDIDATE_SELECTION,
+                completion=CompletionDecision.WAITING_FOR_INPUT,
+                failure_stage=FailureStage.REFERENCE,
+                failure_reason=FailureReason.INVALID_INPUT,
+                ambiguity_present=True,
+                state_restored=True,
+                turn_started=turn_started,
+            )
+            assistant = store_message_in_transaction(
+                conn,
+                conversation_id,
+                person_id,
+                "assistant",
+                content,
+                metadata=metadata,
+                reply_to=str(boundary["id"]),
+            )
+            validate_compare_conversation_document_candidate_reask_in_transaction(
+                conn,
+                work_item_id=current.id,
+                user_id=person_id,
+                conversation_id=conversation_id,
+                expected_revision=current.revision,
+                invalid_boundary_user_message_id=str(boundary["id"]),
+                reask_assistant_message_id=str(assistant["id"]),
+            )
+        return self._comparison_public_response(
+            conversation_id=conversation_id,
+            assistant_message=assistant,
+            content=content,
+            verified=False,
+            lifecycle="waiting_for_input",
+        )
+
+    def _stop_comparison_source_free(
+        self,
+        *,
+        conversation_id: str,
+        person_id: str,
+        request: str,
+        work_item_id: str,
+        expected_revision: int,
+        turn_started: float,
+    ) -> dict[str, Any]:
+        """Let the global emergency stop win and atomically close comparison work."""
+
+        if not mark_request_effect_possible():
+            raise RuntimeError("request fence failed before comparison emergency stop")
+        content = "Молчу."
+        metadata = self._comparison_structural_metadata(verdict_kind="приказ", model_spoke=False)
+        metadata["structural"]["llm_failed"] = False  # type: ignore[index]
+        with self.storage.transaction() as conn:
+            current = get_current_compare_conversation_with_document_work_item_in_transaction(
+                conn,
+                user_id=person_id,
+                conversation_id=conversation_id,
+            )
+            if current is None or current.id != work_item_id or current.revision != expected_revision:
+                raise WorkItemConflictError("comparison emergency-stop admission is no longer current")
+            boundary = store_message_in_transaction(
+                conn,
+                conversation_id,
+                person_id,
+                "user",
+                request,
+                metadata={"private_context_lineage": True},
+            )
+            self._attach_comparison_work_trace(
+                conn,
+                metadata,
+                turn_identifier=str(boundary["id"]),
+                conversation_identifier=conversation_id,
+                work_item_identifier=current.id,
+                work_relation=WorkRelation.CONTINUED,
+                continuation=ContinuationKind.CORRECTION,
+                completion=CompletionDecision.INCOMPLETE,
+                state_restored=current.state is WorkState.ACTIVE,
+                turn_started=turn_started,
+            )
+            assistant = store_message_in_transaction(
+                conn,
+                conversation_id,
+                person_id,
+                "assistant",
+                content,
+                metadata=metadata,
+                reply_to=str(boundary["id"]),
+            )
+            cancel_compare_conversation_with_document_in_transaction(
+                conn,
+                work_item_id=current.id,
+                user_id=person_id,
+                conversation_id=conversation_id,
+                expected_revision=current.revision,
+            )
+        return self._comparison_public_response(
+            conversation_id=conversation_id,
+            assistant_message=assistant,
+            content=content,
+            verified=False,
+            lifecycle="cancelled",
         )
 
     def _comparison_document_identity(
@@ -33101,6 +33378,8 @@ class AgentRuntime:
         admitted_item: Any,
         turn_started: float,
         turn_deadline: float | None,
+        trace_continuation: ContinuationKind,
+        trace_state_restored: bool,
     ) -> dict[str, Any]:
         document = admitted_item.resolved_document_evidence
         boundary_id = admitted_item.document_questions[-1].answer_user_message_id
@@ -33324,6 +33603,26 @@ class AgentRuntime:
                     verified=True,
                 )
                 receipt = attach_accepted_comparison_outcome_receipt(metadata, outcome)
+                self._attach_comparison_work_trace(
+                    conn,
+                    metadata,
+                    turn_identifier=boundary_id,
+                    conversation_identifier=conversation_id,
+                    work_item_identifier=current.id,
+                    work_relation=WorkRelation.CONTINUED,
+                    continuation=trace_continuation,
+                    completion=CompletionDecision.COMPLETE,
+                    capability_outcomes=(
+                        (CapabilityClass.MESSAGE_RETRIEVAL, OutcomeStatus.SUCCEEDED),
+                        (CapabilityClass.DOCUMENT_RETRIEVAL, OutcomeStatus.SUCCEEDED),
+                        (CapabilityClass.MODEL_SYNTHESIS, OutcomeStatus.SUCCEEDED),
+                        (CapabilityClass.VERIFICATION, OutcomeStatus.SUCCEEDED),
+                    ),
+                    state_restored=trace_state_restored,
+                    authority_rechecked=True,
+                    model_calls=1,
+                    turn_started=turn_started,
+                )
                 if time.monotonic() >= deadline:
                     raise TimeoutError("comparison deadline expired before assistant publication")
                 assistant = store_message_in_transaction(
@@ -33426,8 +33725,13 @@ class AgentRuntime:
         malformed_binding: tuple[str, int, str | None] | None = None
         raw_binding: tuple[str, int] | None = None
         selected: RecallSelectedArchiveEvidenceWorkItem | None = None
+        emergency_stop = file_turn_authority(request).proved("silence")
         try:
             with self.storage.transaction() as conn:
+                expire_due_compare_conversation_with_document_work_items_in_transaction(
+                    conn,
+                    user_id=person_id,
+                )
                 state_row = conn.execute(
                     """SELECT id,revision,state FROM work_items
                          WHERE user_id=? AND conversation_id=?
@@ -33445,7 +33749,7 @@ class AgentRuntime:
                     raw_binding = (str(state_row["id"]), int(state_row["revision"]))
                     if not carried_binding_matches(*raw_binding):
                         raise WorkItemConflictError("carried comparison admission is no longer current")
-                    if not durable_surface:
+                    if not durable_surface and not emergency_stop:
                         displaced_binding = raw_binding
                     else:
                         try:
@@ -33541,9 +33845,21 @@ class AgentRuntime:
                     metadata={"private_context_lineage": True},
                     reply_to=selected_refreshed.anchor_assistant_message_id,
                 )
+                comparison_work_item_id = new_compare_conversation_with_document_work_item_id()
                 prompt_metadata = self._comparison_structural_metadata(
                     verdict_kind=COMPARE_DOCUMENT_REFERENCE_REQUIRED_VERDICT_KIND,
                     model_spoke=False,
+                )
+                self._attach_comparison_work_trace(
+                    conn,
+                    prompt_metadata,
+                    turn_identifier=str(boundary["id"]),
+                    conversation_identifier=conversation_id,
+                    work_item_identifier=comparison_work_item_id,
+                    work_relation=WorkRelation.NEW,
+                    continuation=ContinuationKind.NONE,
+                    completion=CompletionDecision.WAITING_FOR_INPUT,
+                    turn_started=turn_started,
                 )
                 prompt = store_message_in_transaction(
                     conn,
@@ -33562,6 +33878,7 @@ class AgentRuntime:
                     expected_selected_revision=selected_refreshed.revision,
                     prompt_boundary_user_message_id=str(boundary["id"]),
                     prompt_assistant_message_id=str(prompt["id"]),
+                    work_item_id=comparison_work_item_id,
                 )
             return self._comparison_public_response(
                 conversation_id=conversation_id,
@@ -33572,6 +33889,15 @@ class AgentRuntime:
             )
 
         question = current.document_questions[-1]
+        if emergency_stop:
+            return self._stop_comparison_source_free(
+                conversation_id=conversation_id,
+                person_id=person_id,
+                request=request,
+                work_item_id=current.id,
+                expected_revision=current.revision,
+                turn_started=turn_started,
+            )
         q1_current_attachment_surface = bool(
             current.state is WorkState.WAITING_FOR_INPUT
             and current.revision == 1
@@ -33601,6 +33927,8 @@ class AgentRuntime:
             )
 
         if current.state is WorkState.ACTIVE:
+            if not _comparison_resume_requested(request):
+                return None
             return await self._execute_active_conversation_document_comparison(
                 actor=actor,
                 conversation_id=conversation_id,
@@ -33608,6 +33936,8 @@ class AgentRuntime:
                 admitted_item=current,
                 turn_started=turn_started,
                 turn_deadline=turn_deadline,
+                trace_continuation=ContinuationKind.RESUME,
+                trace_state_restored=True,
             )
 
         if (
@@ -33619,13 +33949,23 @@ class AgentRuntime:
             candidate_set = current.document_candidate_set
             ordinal = parse_archive_candidate_ordinal(request)
             if candidate_set is None or ordinal is None or ordinal > len(candidate_set.candidates):
-                return self._suspend_comparison_answer_source_free(
+                if candidate_set is None:
+                    return self._suspend_comparison_answer_source_free(
+                        conversation_id=conversation_id,
+                        person_id=person_id,
+                        request=request,
+                        work_item_id=current.id,
+                        expected_revision=current.revision,
+                        reason="candidate_set_unavailable",
+                    )
+                return self._reask_comparison_candidate_source_free(
                     conversation_id=conversation_id,
                     person_id=person_id,
                     request=request,
                     work_item_id=current.id,
                     expected_revision=current.revision,
-                    reason="candidate_ordinal_invalid",
+                    maximum_ordinal=len(candidate_set.candidates),
+                    turn_started=turn_started,
                 )
 
             authorization = getattr(self.kernel, "authorization", None)
@@ -33799,6 +34139,8 @@ class AgentRuntime:
                 admitted_item=active,
                 turn_started=turn_started,
                 turn_deadline=turn_deadline,
+                trace_continuation=ContinuationKind.CANDIDATE_SELECTION,
+                trace_state_restored=False,
             )
 
         if (
@@ -33930,9 +34272,23 @@ class AgentRuntime:
                         verdict_kind=COMPARE_DOCUMENT_CANDIDATE_REQUIRED_VERDICT_KIND,
                         model_spoke=False,
                     )
-                    attach_accepted_compare_document_candidate_outcome_receipt(
+                    attach_accepted_archive_recall_outcome_receipt(
                         metadata,
                         prepared_candidates.outcome,
+                    )
+                    self._attach_comparison_work_trace(
+                        conn,
+                        metadata,
+                        turn_identifier=str(boundary["id"]),
+                        conversation_identifier=conversation_id,
+                        work_item_identifier=comparison_refreshed.id,
+                        work_relation=WorkRelation.CONTINUED,
+                        continuation=ContinuationKind.REFERENCE,
+                        completion=CompletionDecision.WAITING_FOR_INPUT,
+                        capability_outcomes=((CapabilityClass.DOCUMENT_RETRIEVAL, OutcomeStatus.SUCCEEDED),),
+                        ambiguity_present=True,
+                        authority_rechecked=True,
+                        turn_started=turn_started,
                     )
                     assistant = store_message_in_transaction(
                         conn,
@@ -33985,6 +34341,21 @@ class AgentRuntime:
                 metadata = self._comparison_structural_metadata(
                     verdict_kind="conversation_document_comparison_suspended",
                     model_spoke=False,
+                )
+                self._attach_comparison_work_trace(
+                    conn,
+                    metadata,
+                    turn_identifier=str(boundary["id"]),
+                    conversation_identifier=conversation_id,
+                    work_item_identifier=current.id,
+                    work_relation=WorkRelation.CONTINUED,
+                    continuation=ContinuationKind.REFERENCE,
+                    completion=CompletionDecision.FAILED,
+                    capability_outcomes=((CapabilityClass.DOCUMENT_RETRIEVAL, OutcomeStatus.UNAVAILABLE),),
+                    failure_stage=FailureStage.REFERENCE,
+                    failure_reason=FailureReason.SOURCE_UNAVAILABLE,
+                    authority_rechecked=True,
+                    turn_started=turn_started,
                 )
                 assistant = store_message_in_transaction(
                     conn,
@@ -34071,6 +34442,8 @@ class AgentRuntime:
             admitted_item=active,
             turn_started=turn_started,
             turn_deadline=turn_deadline,
+            trace_continuation=ContinuationKind.REFERENCE,
+            trace_state_restored=False,
         )
 
     def _selected_archive_explanation_enabled(self, actor: ActorContext) -> bool:
@@ -34156,6 +34529,12 @@ class AgentRuntime:
                 conversation_id=conversation_id,
             )
             if comparison is not None:
+                if comparison.state is WorkState.ACTIVE and not (
+                    _comparison_resume_requested(message)
+                    or archive_candidate_cancel_requested(message)
+                    or file_turn_authority(message).proved("silence")
+                ):
+                    return False
                 if current_attachment_count:
                     questions = comparison.document_questions
                     if not (
@@ -42549,7 +42928,7 @@ class AgentRuntime:
             (not attachments or comparison_attachment_count == 1)
             and enable_tools is True
             and ingestion_result is None
-            and synthetic_document_notice is False
+            and (synthetic_document_notice is False or comparison_attachment_count == 1)
             and replay_source_message_id is None
             and answer_with_voice is False
             and reply_to is None

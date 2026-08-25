@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -9,9 +12,11 @@ from test_compare_conversation_document_schema42 import (  # noqa: PLC2701
     _NOW,
     _RESOLVED_AT,
     _archive_metadata,
-    _create_writer_followup_waiting,
     _prepare_writer_document,
     _selected_messages,
+)
+from test_compare_conversation_document_schema42 import (
+    _create_writer_followup_waiting as _schema_create_writer_followup_waiting,
 )
 from test_conversation_document_comparison import (  # noqa: PLC2701
     _ComparisonModel,
@@ -27,9 +32,9 @@ from friday.interaction_control_plane.archive_evidence_work_item_store import (
     get_recall_selected_archive_evidence_work_item_in_transaction,
 )
 from friday.interaction_control_plane.compare_conversation_document import (
+    COMPARE_DOCUMENT_CANDIDATE_REASK_VERDICT_KIND,
     COMPARE_DOCUMENT_CANDIDATE_REQUIRED_VERDICT_KIND,
     DocumentReferenceQuestionKind,
-    load_accepted_compare_document_candidate_outcome_receipt,
 )
 from friday.interaction_control_plane.compare_conversation_document_store import (
     get_compare_conversation_with_document_work_item_in_transaction,
@@ -37,8 +42,17 @@ from friday.interaction_control_plane.compare_conversation_document_store import
     resolve_compare_conversation_document_reference_in_transaction,
     suspend_compare_conversation_with_document_in_transaction,
 )
+from friday.interaction_control_plane.turn_trace import (
+    CompletionDecision,
+    ContinuationKind,
+    TurnTrace,
+    WorkRelation,
+)
 from friday.interaction_control_plane.work_item_contract import WorkState
 from friday.interaction_control_plane.work_item_store import WorkItemConflictError
+from friday.orchestration.archive_recall_outcome import (
+    load_accepted_archive_recall_outcome_receipt,
+)
 from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import AuthorizationService
 from friday.retrieval.archive_evidence_replay import (
@@ -53,6 +67,21 @@ from friday.retrieval.contracts import (
     RevalidationTarget,
 )
 from friday.storage.models import RawObject, new_id
+
+
+def _create_writer_followup_waiting(
+    storage: Any,
+    *,
+    owner: str = "compare-writer-owner",
+    now: str | None = None,
+) -> tuple[dict[str, Any], Any, Any]:
+    """Keep runtime fixtures live while schema fixtures retain fixed instants."""
+
+    return _schema_create_writer_followup_waiting(
+        storage,
+        owner=owner,
+        now=now or datetime.now(UTC).isoformat(timespec="seconds"),
+    )
 
 
 def _register_exact_text_document(
@@ -201,7 +230,7 @@ async def test_selected_message_followup_atomically_creates_q1_and_suspends_old_
             anchor_assistant_message_id=origin_assistant["id"],
             accepted_plan_sha256=outcome.plan_sha256,
             accepted_outcome_sha256=outcome_sha256,
-            now=_NOW,
+            now=datetime.now(UTC).isoformat(timespec="seconds"),
         )
     actor = AuthorizationService(storage).actor_for_user(owner, source="comparison-runtime-test")
     runtime = AgentRuntime(settings, storage)
@@ -231,10 +260,13 @@ async def test_selected_message_followup_atomically_creates_q1_and_suspends_old_
         assert current is not None
         assert current.state is WorkState.WAITING_FOR_INPUT
         rows = conn.execute(
-            "SELECT role FROM messages WHERE user_id=? AND conversation_id=? ORDER BY rowid",
+            "SELECT role,metadata_json FROM messages WHERE user_id=? AND conversation_id=? ORDER BY rowid",
             (owner, conversation["id"]),
         ).fetchall()
     assert [row[0] for row in rows[-2:]] == ["user", "assistant"]
+    trace = TurnTrace.parse(json.loads(rows[-1]["metadata_json"])["interaction_trace"])
+    assert trace.work_relation is WorkRelation.NEW
+    assert trace.completion is CompletionDecision.WAITING_FOR_INPUT
 
 
 @pytest.mark.asyncio
@@ -309,6 +341,29 @@ async def test_active_comparison_restarts_without_an_intervening_ordinary_row(
         "mark_request_effect_possible",
         lambda: not fence_calls.append("publication"),
     )
+    arbitrary = await restarted._conversation_document_comparison_state_first_response(  # noqa: SLF001
+        actor=actor,
+        conversation_id=conversation["id"],
+        person_id=owner,
+        request="Найди свежую документацию в интернете",
+        attachments=None,
+        turn_started=0.0,
+        turn_deadline=None,
+        durable_surface=True,
+        carried_admission=None,
+    )
+    assert arbitrary is None
+    assert (
+        restarted.pending_durable_turn_admission(
+            owner,
+            "Найди свежую документацию в интернете",
+            actor=actor,
+            conversation_id=conversation["id"],
+        )
+        is False
+    )
+    storage.store_message(conversation["id"], owner, "user", "ordinary web turn")
+    storage.store_message(conversation["id"], owner, "assistant", "ordinary web answer")
     result = await restarted.chat(
         owner,
         "продолжи",
@@ -332,12 +387,66 @@ async def test_active_comparison_restarts_without_an_intervening_ordinary_row(
             "SELECT role,content FROM messages WHERE user_id=? AND conversation_id=? ORDER BY rowid",
             (owner, conversation["id"]),
         ).fetchall()
-    assert len(rows) == rows_before_restart + 1
+    assert len(rows) == rows_before_restart + 3
     assert not any(row[0] == "user" and row[1] == "продолжи" for row in rows)
+    completion_metadata = json.loads(
+        storage.execute("SELECT metadata_json FROM messages WHERE id=?", (result["message_id"],)).fetchone()[
+            0
+        ]
+    )
+    completion_trace = TurnTrace.parse(completion_metadata["interaction_trace"])
+    assert completion_trace.continuation is ContinuationKind.RESUME
+    assert completion_trace.state_restored is True
+
+
+@pytest.mark.asyncio
+async def test_synthetic_bare_upload_answers_waiting_q1_in_runtime(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "compare-bare-upload-runtime-owner"
+    conversation, waiting, _evidence = _create_writer_followup_waiting(storage, owner=owner)
+    raw = _register_exact_text_document(
+        storage,
+        settings,
+        owner=owner,
+        filename="bare-upload.txt",
+    )
+
+    class Carrier(dict[str, Any]):
+        pass
+
+    carrier = Carrier(raw_object_id=raw.id, filename="bare-upload.txt", mime_type="text/plain")
+    stamp_current_turn_file_reference(carrier, raw.to_row())
+    actor = AuthorizationService(storage).actor_for_user(owner, source="comparison-runtime-test")
+    runtime = AgentRuntime(settings, storage, selected_archive_model=_ComparisonModel())
+    captured: list[Any] = []
+
+    async def capture_active(**kwargs: Any) -> dict[str, Any]:
+        captured.append(kwargs["admitted_item"])
+        return {"message": "captured", "context": {"compare_conversation_with_document": "active"}}
+
+    monkeypatch.setattr(runtime, "_execute_active_conversation_document_comparison", capture_active)
+    result = await runtime.chat(
+        owner,
+        "Загружен документ: bare-upload.txt",
+        actor=actor,
+        conversation_id=conversation["id"],
+        attachments=[carrier],
+        synthetic_document_notice=True,
+    )
+
+    assert result["message"] == "captured"
+    assert len(captured) == 1
+    assert captured[0].id == waiting.id
+    assert captured[0].state is WorkState.ACTIVE
+    assert captured[0].document_questions[0].state.value == "answered"
+    assert captured[0].resolved_document_evidence.raw_object_id == raw.id
 
 
 def test_source_drift_can_only_cas_active_comparison_to_suspended(storage: Any) -> None:
-    conversation, waiting, _evidence = _create_writer_followup_waiting(storage)
+    conversation, waiting, _evidence = _create_writer_followup_waiting(storage, now=_NOW)
     boundary, document = _prepare_writer_document(
         storage,
         conversation=conversation,
@@ -361,6 +470,7 @@ def test_source_drift_can_only_cas_active_comparison_to_suspended(storage: Any) 
             user_id=active.user_id,
             conversation_id=active.conversation_id,
             expected_revision=active.revision,
+            now=_RESOLVED_AT,
         )
     assert suspended.state is WorkState.SUSPENDED
     with storage.transaction() as conn, pytest.raises(WorkItemConflictError):
@@ -419,6 +529,55 @@ async def test_carried_comparison_revision_mismatch_preserves_newer_question(
 
 
 @pytest.mark.asyncio
+async def test_speculative_admission_leaves_expired_row_unchanged_and_handler_reclaims_slot(
+    settings: Any,
+    storage: Any,
+) -> None:
+    owner = "compare-expired-admission-owner"
+    conversation, waiting, _evidence = _create_writer_followup_waiting(
+        storage,
+        owner=owner,
+        now="2026-08-24T00:00:00+00:00",
+    )
+    actor = AuthorizationService(storage).actor_for_user(owner, source="comparison-runtime-test")
+    runtime = AgentRuntime(settings, storage)
+
+    admission = runtime.pending_durable_turn_admission(
+        owner,
+        "document.txt",
+        actor=actor,
+        conversation_id=conversation["id"],
+    )
+
+    assert admission is False
+    row = storage.execute(
+        "SELECT state,revision,transition,closed_at FROM work_items WHERE id=?",
+        (waiting.id,),
+    ).fetchone()
+    assert tuple(row) == ("waiting_for_input", waiting.revision, "question_asked", None)
+
+    result = await runtime._conversation_document_comparison_state_first_response(  # noqa: SLF001
+        actor=actor,
+        conversation_id=conversation["id"],
+        person_id=owner,
+        request="document.txt",
+        attachments=None,
+        turn_started=0.0,
+        turn_deadline=None,
+        durable_surface=True,
+        carried_admission=None,
+    )
+
+    assert result is None
+    row = storage.execute(
+        "SELECT state,transition,closed_at FROM work_items WHERE id=?",
+        (waiting.id,),
+    ).fetchone()
+    assert tuple(row[:2]) == ("expired", "expired")
+    assert row["closed_at"] is not None
+
+
+@pytest.mark.asyncio
 async def test_exact_cancel_command_closes_waiting_comparison_without_model_use(
     settings: Any,
     storage: Any,
@@ -454,6 +613,89 @@ async def test_exact_cancel_command_closes_waiting_comparison_without_model_use(
         ("user", "отмена"),
         ("assistant", "Сравнение отменено."),
     ]
+    metadata = json.loads(
+        storage.execute("SELECT metadata_json FROM messages WHERE id=?", (result["message_id"],)).fetchone()[
+            0
+        ]
+    )
+    assert TurnTrace.parse(metadata["interaction_trace"]).work_relation is WorkRelation.CONTINUED
+
+
+@pytest.mark.asyncio
+async def test_comparison_publication_rolls_back_when_worktrace_cannot_attach(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "compare-mandatory-trace-owner"
+    conversation, waiting, _evidence = _create_writer_followup_waiting(storage, owner=owner)
+    actor = AuthorizationService(storage).actor_for_user(owner, source="comparison-runtime-test")
+    runtime = AgentRuntime(settings, storage)
+    before = storage.execute(
+        "SELECT COUNT(*) FROM messages WHERE user_id=? AND conversation_id=?",
+        (owner, conversation["id"]),
+    ).fetchone()[0]
+    monkeypatch.setattr(agent_runtime_module, "attach_trace_to_metadata", lambda *_args, **_kwargs: False)
+
+    with pytest.raises(RuntimeError, match="WorkTrace"):
+        await runtime._conversation_document_comparison_state_first_response(  # noqa: SLF001
+            actor=actor,
+            conversation_id=conversation["id"],
+            person_id=owner,
+            request="отмена",
+            attachments=None,
+            turn_started=0.0,
+            turn_deadline=None,
+            durable_surface=True,
+            carried_admission=None,
+        )
+
+    row = storage.execute("SELECT state,revision FROM work_items WHERE id=?", (waiting.id,)).fetchone()
+    after = storage.execute(
+        "SELECT COUNT(*) FROM messages WHERE user_id=? AND conversation_id=?",
+        (owner, conversation["id"]),
+    ).fetchone()[0]
+    assert tuple(row) == ("waiting_for_input", waiting.revision)
+    assert after == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["Стой", "Молчи"])
+async def test_global_emergency_stop_wins_before_disallowed_comparison_surface(
+    settings: Any,
+    storage: Any,
+    command: str,
+) -> None:
+    owner = "compare-emergency-stop-owner"
+    conversation, waiting, _evidence = _create_writer_followup_waiting(storage, owner=owner)
+    actor = AuthorizationService(storage).actor_for_user(owner, source="comparison-runtime-test")
+    runtime = AgentRuntime(settings, storage)
+
+    result = await runtime._conversation_document_comparison_state_first_response(  # noqa: SLF001
+        actor=actor,
+        conversation_id=conversation["id"],
+        person_id=owner,
+        request=command,
+        attachments=[
+            {"raw_object_id": "raw_1111111111111111"},
+            {"raw_object_id": "raw_2222222222222222"},
+        ],
+        turn_started=0.0,
+        turn_deadline=None,
+        durable_surface=False,
+        carried_admission=None,
+    )
+
+    assert result is not None
+    assert result["message"] == "Молчу."
+    row = storage.execute("SELECT state FROM work_items WHERE id=?", (waiting.id,)).fetchone()
+    assert row[0] == "cancelled"
+    metadata = json.loads(
+        storage.execute("SELECT metadata_json FROM messages WHERE id=?", (result["message_id"],)).fetchone()[
+            0
+        ]
+    )
+    assert TurnTrace.parse(metadata["interaction_trace"]).completion is CompletionDecision.INCOMPLETE
 
 
 @pytest.mark.asyncio
@@ -557,8 +799,15 @@ async def test_duplicate_filename_publishes_complete_durable_q2(
         "SELECT content,metadata_json FROM messages WHERE id=?",
         (prompt_id,),
     ).fetchone()
-    receipt = load_accepted_compare_document_candidate_outcome_receipt(prompt["metadata_json"])
+    receipt = load_accepted_archive_recall_outcome_receipt(prompt["metadata_json"])
     assert receipt.outcome.candidate_count == 2
+    prompt_metadata = json.loads(prompt["metadata_json"])
+    q2_trace = TurnTrace.parse(prompt_metadata["interaction_trace"])
+    assert q2_trace.work_relation is WorkRelation.CONTINUED
+    assert q2_trace.ambiguity_present is True
+    labels = re.findall(r"A[12] \[(D0[12]-[0-9A-F]{8})\]", prompt["content"])
+    assert len(labels) == len(set(labels)) == 2
+    assert all(raw.id not in prompt["content"] for raw in raws)
     assert prompt["content"].endswith(
         "Выберите источник:\n1 — A1\n2 — A2\n"
         "Ответьте только номером от 1 до 2 или одним порядковым словом (RU/EN)."
@@ -571,6 +820,16 @@ async def test_duplicate_filename_publishes_complete_durable_q2(
         == COMPARE_DOCUMENT_CANDIDATE_REQUIRED_VERDICT_KIND
     )
     assert conversation["id"] == q2.conversation_id
+    with storage.transaction() as conn:
+        repeated = conn.execute(
+            """SELECT id FROM raw_objects
+                 WHERE user_id=? AND content_type='file' AND deleted_at IS NULL
+                 ORDER BY received_at,id""",
+            (owner,),
+        ).fetchall()
+    assert tuple(row[0] for row in repeated) == tuple(
+        item.source_ref.canonical_object_id for item in q2.document_candidate_set.candidates
+    )
 
 
 @pytest.mark.asyncio
@@ -606,6 +865,14 @@ async def test_exact_q2_ordinal_reauthorizes_and_completes_comparison(
     )
 
     assert result["verified"] is True
+    final_metadata = json.loads(
+        storage.execute("SELECT metadata_json FROM messages WHERE id=?", (result["message_id"],)).fetchone()[
+            0
+        ]
+    )
+    final_trace = TurnTrace.parse(final_metadata["interaction_trace"])
+    assert final_trace.completion is CompletionDecision.COMPLETE
+    assert final_trace.continuation is ContinuationKind.CANDIDATE_SELECTION
     with storage.transaction() as conn:
         completed = get_compare_conversation_with_document_work_item_in_transaction(
             conn,
@@ -621,6 +888,67 @@ async def test_exact_q2_ordinal_reauthorizes_and_completes_comparison(
         completed.resolved_document_evidence.raw_object_id
         == q2.document_candidate_set.candidates[1].source_ref.canonical_object_id
     )
+
+
+@pytest.mark.asyncio
+async def test_invalid_q2_ordinal_reasks_durably_then_accepts_exact_selection(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "compare-q2-reask-owner"
+    conversation, q2, actor, _raws = await _open_duplicate_filename_q2(
+        settings,
+        storage,
+        owner=owner,
+    )
+    runtime = AgentRuntime(settings, storage, selected_archive_model=_ComparisonModel())
+
+    reask = await runtime.chat(
+        owner,
+        "3",
+        actor=actor,
+        conversation_id=conversation["id"],
+    )
+
+    assert reask["context"]["compare_conversation_with_document"] == "waiting_for_input"
+    reask_row = storage.execute(
+        "SELECT metadata_json FROM messages WHERE id=?",
+        (reask["message_id"],),
+    ).fetchone()
+    reask_metadata = json.loads(reask_row[0])
+    assert reask_metadata["structural"]["verdict_kind"] == COMPARE_DOCUMENT_CANDIDATE_REASK_VERDICT_KIND
+    reask_trace = TurnTrace.parse(reask_metadata["interaction_trace"])
+    assert reask_trace.completion is CompletionDecision.WAITING_FOR_INPUT
+    assert reask_trace.continuation is ContinuationKind.CANDIDATE_SELECTION
+    with storage.transaction() as conn:
+        still_waiting = get_current_compare_conversation_with_document_work_item_in_transaction(
+            conn,
+            user_id=owner,
+            conversation_id=conversation["id"],
+        )
+    assert still_waiting is not None
+    assert still_waiting.revision == q2.revision
+    assert still_waiting.document_candidate_set == q2.document_candidate_set
+
+    replay = _exact_replay(still_waiting)
+    monkeypatch.setattr(
+        runtime,
+        "_comparison_replay_in_transaction",
+        lambda *_args, **_kwargs: replay,
+    )
+    monkeypatch.setattr(
+        comparison_module,
+        "archive_selected_evidence_snapshot_sha256",
+        lambda *_args, **_kwargs: still_waiting.selected_message_evidence.source_snapshot_sha256,
+    )
+    selected = await runtime.chat(
+        owner,
+        "2",
+        actor=actor,
+        conversation_id=conversation["id"],
+    )
+    assert selected["verified"] is True
 
 
 @pytest.mark.asyncio

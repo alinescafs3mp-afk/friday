@@ -118,7 +118,7 @@ _CANDIDATE_RESOLVED_AT = "2026-08-25T08:11:00+00:00"
 _CANDIDATE_COMPLETED_AT = "2026-08-25T08:12:00+00:00"
 
 
-def test_exact_released_schema42_upgrades_candidate_receipt_trigger_in_place() -> None:
+def test_exact_released_schema42_candidate_trigger_remains_byte_stable() -> None:
     conn = sqlite3.connect(":memory:")
     try:
         conn.execute("PRAGMA foreign_keys=ON")
@@ -144,7 +144,8 @@ def test_exact_released_schema42_upgrades_candidate_receipt_trigger_in_place() -
             "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
             ("trg_work_item_compare_questions_insert",),
         ).fetchone()[0]
-        assert "accepted_compare_document_candidate_outcome" in after
+        assert after == before
+        assert "accepted_compare_document_candidate_outcome" not in after
         validate_work_item_schema(conn)
     finally:
         conn.close()
@@ -1274,7 +1275,9 @@ def test_shared_tenant_attachment_active_and_completed_reader_survive_restart(st
     assert "PRIVATE-DOCUMENT-NAME.pdf" not in encoded
 
 
-def test_active_reader_requires_latest_attachment_boundary_and_exact_membership(storage: Any) -> None:
+def test_active_reader_allows_intervening_turn_but_requires_exact_attachment_membership(
+    storage: Any,
+) -> None:
     conversation, evidence = _create_direct_waiting(storage)
     document, answer_boundary = _resolve_shared_tenant_attachment(
         storage,
@@ -1282,13 +1285,15 @@ def test_active_reader_requires_latest_attachment_boundary_and_exact_membership(
         evidence=evidence,
     )
     storage.store_message(conversation["id"], "compare-owner", "user", "unrelated later turn")
-    with storage.transaction() as conn, pytest.raises(WorkItemAnchorError, match="latest"):
-        get_current_compare_conversation_with_document_work_item_in_transaction(
+    with storage.transaction() as conn:
+        active = get_current_compare_conversation_with_document_work_item_in_transaction(
             conn,
             user_id="compare-owner",
             conversation_id=conversation["id"],
             now=_RESOLVED_AT,
         )
+    assert active is not None
+    assert active.state is WorkState.ACTIVE
 
     storage.execute(
         "UPDATE messages SET metadata_json=? WHERE id=?",
@@ -1452,6 +1457,7 @@ def _create_writer_followup_waiting(
     storage: Any,
     *,
     owner: str = "compare-writer-owner",
+    now: str = _NOW,
 ) -> tuple[dict[str, Any], Any, SelectedArchiveEvidence]:
     storage.ensure_user(owner, source="local")
     conversation = storage.create_conversation(owner, "writer followup")
@@ -1497,7 +1503,7 @@ def _create_writer_followup_waiting(
             anchor_assistant_message_id=origin_assistant["id"],
             accepted_plan_sha256=outcome.plan_sha256,
             accepted_outcome_sha256=outcome_sha256,
-            now=_NOW,
+            now=now,
         )
     followup = storage.store_message(
         conversation["id"],
@@ -1531,7 +1537,7 @@ def _create_writer_followup_waiting(
             prompt_assistant_message_id=prompt["id"],
             work_item_id=compare_work_id,
             question_id=compare_question_id,
-            now=_NOW,
+            now=now,
         )
     return conversation, item, old_evidence
 

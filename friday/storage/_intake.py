@@ -90,6 +90,8 @@ def _owned_filename_candidates_query(limit: int) -> str:
     return f"""WITH candidates AS (
                    SELECT r.id, r.content_type, r.received_at,
                           substr(json_extract(r.metadata_json,'$.filename'),1,260) AS filename,
+                          json_extract(r.metadata_json,'$.sha256') AS file_sha256,
+                          json_extract(r.metadata_json,'$.size_bytes') AS size_bytes,
                           1 AS lane
                      FROM raw_objects r
                     WHERE {base}
@@ -100,7 +102,10 @@ def _owned_filename_candidates_query(limit: int) -> str:
                           ),'ё','е')=replace(jericho_casefold(?),'ё','е')
                    UNION ALL
                    SELECT r.id, r.content_type, r.received_at,
-                          a.supplied_filename AS filename, 0 AS lane
+                          a.supplied_filename AS filename,
+                          json_extract(r.metadata_json,'$.sha256') AS file_sha256,
+                          json_extract(r.metadata_json,'$.size_bytes') AS size_bytes,
+                          0 AS lane
                      FROM file_source_aliases a
                      JOIN raw_objects r ON r.id=a.raw_object_id
                     WHERE a.user_id=? AND a.uploaded_by=?
@@ -116,10 +121,10 @@ def _owned_filename_candidates_query(limit: int) -> str:
                      FROM candidates
                ),
                selected AS (
-                   SELECT id, content_type, received_at, filename
+                   SELECT id, content_type, received_at, filename, file_sha256, size_bytes
                      FROM ranked WHERE _choice=1
                )
-               SELECT id, content_type, received_at, filename,
+               SELECT id, content_type, received_at, filename, file_sha256, size_bytes,
                       COUNT(*) OVER () AS exact_total
                  FROM selected
                 ORDER BY received_at ASC, id ASC
@@ -170,7 +175,18 @@ def select_owned_filename_candidates_in_transaction(
     total = int(rows[0]["exact_total"]) if rows else 0
     return {
         "items": [
-            {key: row[key] for key in ("id", "content_type", "received_at", "filename")} for row in rows
+            {
+                key: row[key]
+                for key in (
+                    "id",
+                    "content_type",
+                    "received_at",
+                    "filename",
+                    "file_sha256",
+                    "size_bytes",
+                )
+            }
+            for row in rows
         ],
         "total": total,
         "complete": len(rows) == total,

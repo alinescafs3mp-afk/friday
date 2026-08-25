@@ -16,6 +16,7 @@ from friday.interaction_control_plane.archive_candidate_selection import (
     ArchiveCandidateItem,
     ArchiveCandidateSelectionError,
     ArchiveCandidateSet,
+    archive_candidate_reask_prompt,
     archive_candidate_selection_offer_suffix,
     parse_archive_candidate_ordinal,
 )
@@ -29,21 +30,19 @@ from friday.interaction_control_plane.archive_evidence_work_item_store import (
     get_recall_selected_archive_evidence_work_item_in_transaction,
 )
 from friday.interaction_control_plane.compare_conversation_document import (
-    ACCEPTED_COMPARE_DOCUMENT_CANDIDATE_METADATA_KEY,
+    COMPARE_DOCUMENT_CANDIDATE_REASK_VERDICT_KIND,
     COMPARE_DOCUMENT_CANDIDATE_REQUIRED_VERDICT_KIND,
     COMPARE_DOCUMENT_REFERENCE_PROMPT,
     COMPARE_DOCUMENT_REFERENCE_REQUIRED_VERDICT_KIND,
     AcceptedComparisonResultIdentity,
     CompareConversationDocumentActiveFrame,
     CompareConversationWithDocumentWorkItem,
-    CompareDocumentCandidateOutcome,
     DocumentReferenceAdmissionShape,
     DocumentReferenceQuestion,
     DocumentReferenceQuestionKind,
     DocumentReferenceQuestionState,
     ResolvedDocumentIdentity,
     ResolvedDocumentProvenance,
-    load_accepted_compare_document_candidate_outcome_receipt,
     load_accepted_comparison_outcome_receipt,
 )
 from friday.interaction_control_plane.selected_archive_evidence import (
@@ -72,15 +71,18 @@ from friday.interaction_control_plane.work_item_store import (
     _rollback_work_item_mutation_savepoint,
 )
 from friday.orchestration.archive_recall_outcome import (
-    ACCEPTED_ARCHIVE_RECALL_OUTCOME_METADATA_KEY,
     ArchiveRecallLane,
+    ArchiveRecallOutcome,
     ArchiveRecallOutcomeError,
     ArchiveRecallStatus,
     load_accepted_archive_recall_outcome_receipt,
 )
 from friday.permissions import ActorContext, AuthorizationService
 from friday.retrieval.archive_evidence_snapshot import archive_selected_evidence_snapshot_sha256
-from friday.retrieval.archive_search_authority import ArchiveSearchAcceptedCandidateProjection
+from friday.retrieval.archive_search_authority import (
+    ArchiveSearchAcceptedCandidateProjection,
+    ArchiveSearchCoverageGrade,
+)
 from friday.retrieval.contracts import (
     AuthorityScope,
     CanonicalObjectKind,
@@ -304,6 +306,68 @@ def _require_adjacent(
         raise WorkItemAnchorError("comparison message anchors are not adjacent")
 
 
+def _validate_candidate_reask_chain(
+    conn: sqlite3.Connection,
+    item: CompareConversationWithDocumentWorkItem,
+    *,
+    original_prompt_rowid: int,
+    stop_before_rowid: int | None = None,
+) -> int:
+    """Authenticate every source-free invalid-ordinal/re-ask pair after Q2."""
+
+    candidate_set = item.document_candidate_set
+    if candidate_set is None:
+        raise WorkItemAnchorError("comparison candidate re-ask has no candidate set")
+    parameters: tuple[object, ...] = (
+        item.user_id,
+        item.conversation_id,
+        original_prompt_rowid,
+    )
+    upper = ""
+    if stop_before_rowid is not None:
+        upper = " AND rowid<?"
+        parameters = (*parameters, stop_before_rowid)
+    rows = conn.execute(
+        f"""SELECT rowid,id,role,content,reply_to,metadata_json
+              FROM messages
+             WHERE user_id=? AND conversation_id=? AND rowid>?{upper}
+             ORDER BY rowid""",  # nosec B608 - closed optional rowid bound
+        parameters,
+    ).fetchall()
+    if len(rows) % 2:
+        raise WorkItemAnchorError("comparison candidate re-ask is incomplete or no longer latest")
+    expected_prompt = archive_candidate_reask_prompt(len(candidate_set.candidates))
+    latest_prompt_rowid = original_prompt_rowid
+    for offset in range(0, len(rows), 2):
+        boundary, assistant = rows[offset], rows[offset + 1]
+        ordinal = parse_archive_candidate_ordinal(boundary[3])
+        if (
+            boundary[2] != "user"
+            or ordinal is not None
+            and ordinal <= len(candidate_set.candidates)
+            or assistant[2] != "assistant"
+            or assistant[3] != expected_prompt
+            or assistant[4] != boundary[1]
+            or int(boundary[0]) >= int(assistant[0])
+        ):
+            raise WorkItemAnchorError("comparison candidate re-ask chain is invalid")
+        try:
+            metadata = json.loads(str(assistant[5] or ""))
+        except (TypeError, ValueError, RecursionError) as exc:
+            raise WorkItemAnchorError("comparison candidate re-ask metadata is invalid") from exc
+        structural = metadata.get("structural") if isinstance(metadata, Mapping) else None
+        if not (
+            isinstance(structural, Mapping)
+            and structural.get("verdict_kind") == COMPARE_DOCUMENT_CANDIDATE_REASK_VERDICT_KIND
+            and structural.get("answer_present") is True
+            and structural.get("model_spoke") is False
+            and isinstance(metadata.get("interaction_trace"), Mapping)
+        ):
+            raise WorkItemAnchorError("comparison candidate re-ask is not code-owned")
+        latest_prompt_rowid = int(assistant[0])
+    return latest_prompt_rowid
+
+
 def _validate_candidate_publication(
     *,
     metadata: object,
@@ -311,11 +375,7 @@ def _validate_candidate_publication(
     question: DocumentReferenceQuestion,
     candidate_set: ArchiveCandidateSet | None,
 ) -> bool:
-    """Validate either archive-search or exact-filename publication.
-
-    ``True`` identifies the code-owned exact-filename lane.  Both receipt
-    families bind the same immutable candidate projection and exact prompt.
-    """
+    """Validate the released candidate receipt and identify its code-owned lane."""
 
     if candidate_set is None:
         raise WorkItemAnchorError("candidate publication has no durable candidate set")
@@ -325,60 +385,34 @@ def _validate_candidate_publication(
         raise WorkItemAnchorError("candidate publication metadata is invalid") from exc
     if not isinstance(decoded_metadata, Mapping):
         raise WorkItemAnchorError("candidate publication metadata is invalid")
-    has_archive_receipt = ACCEPTED_ARCHIVE_RECALL_OUTCOME_METADATA_KEY in decoded_metadata
-    has_exact_receipt = ACCEPTED_COMPARE_DOCUMENT_CANDIDATE_METADATA_KEY in decoded_metadata
-    if has_archive_receipt == has_exact_receipt:
-        raise WorkItemAnchorError("candidate publication receipt family is ambiguous")
-    if has_archive_receipt:
-        try:
-            receipt = load_accepted_archive_recall_outcome_receipt(metadata)
-        except (ArchiveRecallOutcomeError, TypeError, ValueError) as exc:
-            raise WorkItemAnchorError("candidate publication search receipt is invalid") from exc
-    else:
-        receipt = None
-    if receipt is not None:
-        outcome = receipt.outcome
-        if (
-            outcome.lane is not ArchiveRecallLane.FEDERATED_SEARCH
-            or outcome.status not in {ArchiveRecallStatus.COMPLETE, ArchiveRecallStatus.PARTIAL}
-            or outcome.plan_sha256 != question.accepted_search_plan_sha256
-            or receipt.outcome_sha256 != question.accepted_search_outcome_sha256
-            or not hmac.compare_digest(
-                outcome.answer_sha256,
-                _text_sha256(content, label="candidate answer"),
-            )
-            or outcome.evidence_sha256 != candidate_set.evidence_sha256
-            or outcome.coverage_sha256 != candidate_set.coverage_sha256
-            or outcome.coverage_grade.value != candidate_set.coverage_grade.value
-            or outcome.candidate_projection_sha256 != candidate_set.authority_projection_sha256
-            or outcome.candidate_count < len(candidate_set.candidates)
-            or outcome.selected_evidence is not None
-            or not _candidate_offer_is_exact(content, candidate_set)
-        ):
-            raise WorkItemAnchorError("candidate publication receipt does not match its set")
-        return False
     try:
-        exact_receipt = load_accepted_compare_document_candidate_outcome_receipt(metadata)
-    except (TypeError, ValueError, WorkItemContractError) as exc:
-        raise WorkItemAnchorError("candidate publication has no accepted search receipt") from exc
-    exact = exact_receipt.outcome
+        receipt = load_accepted_archive_recall_outcome_receipt(metadata)
+    except (ArchiveRecallOutcomeError, TypeError, ValueError) as exc:
+        raise WorkItemAnchorError("candidate publication search receipt is invalid") from exc
+    outcome = receipt.outcome
     if (
-        exact.plan_sha256 != question.accepted_search_plan_sha256
-        or exact_receipt.outcome_sha256 != question.accepted_search_outcome_sha256
+        outcome.lane is not ArchiveRecallLane.FEDERATED_SEARCH
+        or outcome.status not in {ArchiveRecallStatus.COMPLETE, ArchiveRecallStatus.PARTIAL}
+        or outcome.plan_sha256 != question.accepted_search_plan_sha256
+        or receipt.outcome_sha256 != question.accepted_search_outcome_sha256
         or not hmac.compare_digest(
-            exact.answer_sha256,
+            outcome.answer_sha256,
             _text_sha256(content, label="candidate answer"),
         )
-        or exact.evidence_sha256 != candidate_set.evidence_sha256
-        or exact.coverage_sha256 != candidate_set.coverage_sha256
-        or exact.candidate_projection_sha256 != candidate_set.authority_projection_sha256
-        or exact.candidate_count != len(candidate_set.candidates)
-        or exact.publication_attested is not True
-        or exact.authority_rechecked is not True
+        or outcome.evidence_sha256 != candidate_set.evidence_sha256
+        or outcome.coverage_sha256 != candidate_set.coverage_sha256
+        or outcome.coverage_grade.value != candidate_set.coverage_grade.value
+        or outcome.candidate_projection_sha256 != candidate_set.authority_projection_sha256
+        or outcome.candidate_count < len(candidate_set.candidates)
+        or outcome.selected_evidence is not None
         or not _candidate_offer_is_exact(content, candidate_set)
     ):
         raise WorkItemAnchorError("candidate publication receipt does not match its set")
-    return True
+    structural = decoded_metadata.get("structural")
+    return bool(
+        isinstance(structural, Mapping)
+        and structural.get("verdict_kind") == COMPARE_DOCUMENT_CANDIDATE_REQUIRED_VERDICT_KIND
+    )
 
 
 def _validate_question_anchors(
@@ -488,8 +522,14 @@ def _validate_question_anchors(
             answer_rowid = _message_rowid(
                 conn, item=item, message_id=question.answer_user_message_id, role="user"
             )
-            _require_adjacent(conn, item, prompt_rowid, answer_rowid)
             if question.kind is DocumentReferenceQuestionKind.SELECT_DOCUMENT_CANDIDATE:
+                effective_prompt_rowid = _validate_candidate_reask_chain(
+                    conn,
+                    item,
+                    original_prompt_rowid=prompt_rowid,
+                    stop_before_rowid=answer_rowid,
+                )
+                _require_adjacent(conn, item, effective_prompt_rowid, answer_rowid)
                 _validate_boundary_ordinal(
                     conn,
                     user_id=item.user_id,
@@ -497,11 +537,22 @@ def _validate_question_anchors(
                     boundary_user_message_id=question.answer_user_message_id,
                     expected_ordinal=question.selected_ordinal,
                 )
+            else:
+                _require_adjacent(conn, item, prompt_rowid, answer_rowid)
             previous_answer = question.answer_user_message_id
             last_rowid = answer_rowid
         else:
             previous_answer = None
-            last_rowid = prompt_rowid
+            last_rowid = (
+                _validate_candidate_reask_chain(
+                    conn,
+                    item,
+                    original_prompt_rowid=prompt_rowid,
+                )
+                if require_latest_message
+                and question.kind is DocumentReferenceQuestionKind.SELECT_DOCUMENT_CANDIDATE
+                else prompt_rowid
+            )
     if (
         require_latest_message
         and conn.execute(
@@ -534,7 +585,8 @@ def _validate_result_anchor(conn: sqlite3.Connection, item: CompareConversationW
     row = cursor.fetchone()
     if row is None or row[1] != result.answer_boundary_user_message_id:
         raise WorkItemAnchorError("comparison result publication anchor is invalid")
-    _require_adjacent(conn, item, boundary_rowid, int(row[0]))
+    if boundary_rowid >= int(row[0]):
+        raise WorkItemAnchorError("comparison result precedes its answer boundary")
     try:
         receipt = load_accepted_comparison_outcome_receipt(row[3])
         answer = row[2]
@@ -650,7 +702,17 @@ def _validate_pending_answer_boundary(
     )
     boundary = _scope(boundary_user_message_id, _MESSAGE_ID_RE, label="boundary_user_message_id")
     boundary_rowid = _message_rowid(conn, item=item, message_id=boundary, role="user")
-    _require_adjacent(conn, item, prompt_rowid, boundary_rowid)
+    effective_prompt_rowid = (
+        _validate_candidate_reask_chain(
+            conn,
+            item,
+            original_prompt_rowid=prompt_rowid,
+            stop_before_rowid=boundary_rowid,
+        )
+        if question.kind is DocumentReferenceQuestionKind.SELECT_DOCUMENT_CANDIDATE
+        else prompt_rowid
+    )
+    _require_adjacent(conn, item, effective_prompt_rowid, boundary_rowid)
     if (
         conn.execute(
             """SELECT 1 FROM messages
@@ -781,7 +843,9 @@ def get_current_compare_conversation_with_document_work_item_in_transaction(
     _validate_stored_item(
         conn,
         item,
-        require_latest_message=boundary_user_message_id is None,
+        require_latest_message=(
+            boundary_user_message_id is None and item.state is WorkState.WAITING_FOR_INPUT
+        ),
     )
     if boundary_user_message_id is not None:
         if item.state is not WorkState.WAITING_FOR_INPUT:
@@ -806,6 +870,61 @@ def new_compare_document_candidate_set_id() -> str:
     """Return one opaque ID for a frozen ambiguous-document candidate set."""
 
     return f"cset_{uuid.uuid4().hex[:16]}"
+
+
+def validate_compare_conversation_document_candidate_reask_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    invalid_boundary_user_message_id: str,
+    reask_assistant_message_id: str,
+) -> CompareConversationWithDocumentWorkItem:
+    """Authenticate one appended invalid-ordinal/re-ask pair without closing Q2."""
+
+    _require_transaction(conn)
+    identifier = _scope(work_item_id, _WORK_ITEM_ID_RE, label="work_item_id")
+    user = _scope(user_id, _USER_ID_RE, label="user_id")
+    conversation = _scope(conversation_id, _CONVERSATION_ID_RE, label="conversation_id")
+    revision = _revision(expected_revision)
+    boundary = _scope(
+        invalid_boundary_user_message_id,
+        _MESSAGE_ID_RE,
+        label="invalid_boundary_user_message_id",
+    )
+    assistant = _scope(
+        reask_assistant_message_id,
+        _MESSAGE_ID_RE,
+        label="reask_assistant_message_id",
+    )
+    item = _fetch(
+        conn,
+        work_item_id=identifier,
+        user_id=user,
+        conversation_id=conversation,
+    )
+    if (
+        item is None
+        or item.state is not WorkState.WAITING_FOR_INPUT
+        or item.revision != revision
+        or item.document_questions[-1].kind is not DocumentReferenceQuestionKind.SELECT_DOCUMENT_CANDIDATE
+        or item.document_questions[-1].state is not DocumentReferenceQuestionState.WAITING
+    ):
+        raise WorkItemConflictError("comparison candidate re-ask admission is no longer current")
+    tail = conn.execute(
+        """SELECT id,role FROM messages
+             WHERE user_id=? AND conversation_id=? ORDER BY rowid DESC LIMIT 2""",
+        (user, conversation),
+    ).fetchall()
+    if [(str(row[0]), str(row[1])) for row in reversed(tail)] != [
+        (boundary, "user"),
+        (assistant, "assistant"),
+    ]:
+        raise WorkItemAnchorError("comparison candidate re-ask is no longer latest")
+    _validate_stored_item(conn, item, require_latest_message=True)
+    return item
 
 
 def _digest(value: object, *, label: str) -> str:
@@ -913,6 +1032,7 @@ def _validate_answer_chain(
     item: CompareConversationWithDocumentWorkItem,
     boundary_user_message_id: str,
     following_assistant_message_id: str | None = None,
+    allow_intervening_before_assistant: bool = False,
 ) -> tuple[int, int | None]:
     question = item.document_questions[-1]
     boundary = _scope(
@@ -927,7 +1047,17 @@ def _validate_answer_chain(
         role="assistant",
     )
     boundary_rowid = _message_rowid(conn, item=item, message_id=boundary, role="user")
-    _require_adjacent(conn, item, prompt_rowid, boundary_rowid)
+    effective_prompt_rowid = (
+        _validate_candidate_reask_chain(
+            conn,
+            item,
+            original_prompt_rowid=prompt_rowid,
+            stop_before_rowid=boundary_rowid,
+        )
+        if question.kind is DocumentReferenceQuestionKind.SELECT_DOCUMENT_CANDIDATE
+        else prompt_rowid
+    )
+    _require_adjacent(conn, item, effective_prompt_rowid, boundary_rowid)
     if following_assistant_message_id is None:
         last_rowid = boundary_rowid
         assistant_rowid = None
@@ -946,7 +1076,11 @@ def _validate_answer_chain(
         if row is None or not isinstance(row[0], int):
             raise WorkItemAnchorError("comparison answer publication is not owned and exact")
         assistant_rowid = int(row[0])
-        _require_adjacent(conn, item, boundary_rowid, assistant_rowid)
+        if allow_intervening_before_assistant:
+            if assistant_rowid <= boundary_rowid:
+                raise WorkItemAnchorError("comparison answer publication precedes its boundary")
+        else:
+            _require_adjacent(conn, item, boundary_rowid, assistant_rowid)
         last_rowid = assistant_rowid
     if (
         conn.execute(
@@ -1031,6 +1165,74 @@ def _insert_document_evidence(
                     :candidate_source_snapshot_sha256,:origin_boundary_user_message_id,
                     :resolved_revision,:resolved_at,:candidate_set_id,:selected_ordinal)""",
         document.to_storage_payload(),
+    )
+
+
+def _ensure_current_upload_alias_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    item: CompareConversationWithDocumentWorkItem,
+    document: ResolvedDocumentIdentity,
+) -> None:
+    """Durably bind an exact current upload for released schema-42 authority.
+
+    API uploads historically kept their immutable Raw ``source_ref`` but did
+    not create a ``file_source_aliases`` row, while the released schema-42
+    evidence trigger requires that uploader binding.  Mint one narrow,
+    code-owned message alias only after the current-turn boundary, Raw
+    registration and uploader metadata all agree.  Older runtimes safely
+    ignore the extra alias and the released trigger remains byte-for-byte
+    unchanged.
+    """
+
+    if document.provenance is not ResolvedDocumentProvenance.CURRENT_TURN_ATTACHMENT:
+        return
+    existing = conn.execute(
+        """SELECT 1 FROM file_source_aliases
+            WHERE user_id=? AND uploaded_by=? AND raw_object_id=? LIMIT 1""",
+        (document.source_ref.tenant_id, item.user_id, document.raw_object_id),
+    ).fetchone()
+    if existing is not None:
+        return
+    exact = conn.execute(
+        """SELECT 1
+             FROM raw_objects raw
+             JOIN users uploader ON uploader.id=? AND uploader.status='active'
+             JOIN messages boundary
+               ON boundary.id=? AND boundary.user_id=?
+              AND boundary.conversation_id=? AND boundary.role='user'
+            WHERE raw.id=? AND raw.user_id=? AND raw.source='upload'
+              AND raw.content_type='file' AND raw.deleted_at IS NULL
+              AND json_type(raw.metadata_json,'$.uploaded_by')='text'
+              AND json_extract(raw.metadata_json,'$.uploaded_by')=?
+              AND json_type(boundary.metadata_json,'$.conversation_uploaded_raw_ids')='array'
+              AND json_array_length(boundary.metadata_json,'$.conversation_uploaded_raw_ids')=1
+              AND json_extract(boundary.metadata_json,'$.conversation_uploaded_raw_ids[0]')=raw.id
+            LIMIT 1""",
+        (
+            item.user_id,
+            document.origin_boundary_user_message_id,
+            item.user_id,
+            item.conversation_id,
+            document.raw_object_id,
+            document.source_ref.tenant_id,
+            item.user_id,
+        ),
+    ).fetchone()
+    if exact is None:
+        raise WorkItemAnchorError("current upload has no exact uploader authority")
+    conn.execute(
+        """INSERT INTO file_source_aliases(
+               user_id,uploaded_by,source_ref,raw_object_id,supplied_filename,created_at
+           ) VALUES(?,?,?,?,?,?)""",
+        (
+            document.source_ref.tenant_id,
+            item.user_id,
+            f"friday-compare-current:{document.origin_boundary_user_message_id}",
+            document.raw_object_id,
+            "",
+            document.resolved_at,
+        ),
     )
 
 
@@ -1272,7 +1474,7 @@ class _PreparedCompareDocumentFilenameCandidates:
 
     candidate_set: ArchiveCandidateSet
     prompt: str
-    outcome: CompareDocumentCandidateOutcome
+    outcome: ArchiveRecallOutcome
     _process_authority: object
 
 
@@ -1570,11 +1772,19 @@ def prepare_compare_conversation_document_filename_candidates_in_transaction(
                 source_snapshot_sha256=snapshot,
             )
         )
+        file_sha256 = str(row.get("file_sha256") or "").casefold()
+        if re.fullmatch(r"[0-9a-f]{64}", file_sha256) is None:
+            raise WorkItemAnchorError("comparison filename candidate file digest is invalid")
+        size_bytes = row.get("size_bytes")
+        if type(size_bytes) is not int or not 0 <= size_bytes <= 2**63 - 1:
+            raise WorkItemAnchorError("comparison filename candidate size is invalid")
         display_rows.append(
             (
                 label,
+                f"D{ordinal:02d}-{file_sha256[:8].upper()}",
                 _safe_candidate_display(row.get("filename"), fallback="документ", maximum=180),
                 _safe_candidate_display(row.get("received_at"), fallback="дата неизвестна", maximum=40),
+                size_bytes,
             )
         )
 
@@ -1607,7 +1817,8 @@ def prepare_compare_conversation_document_filename_candidates_in_transaction(
         candidates=tuple(candidates),
     )
     summary = "Нашёл несколько доступных документов с таким именем:\n" + "\n".join(
-        f"{label} — {display_name} — {received_at}" for label, display_name, received_at in display_rows
+        f"{label} [{stable_label}] — {display_name} — {received_at} — {size_bytes} байт"
+        for label, stable_label, display_name, received_at, size_bytes in display_rows
     )
     prompt = (
         summary
@@ -1624,15 +1835,20 @@ def prepare_compare_conversation_document_filename_candidates_in_transaction(
             "work_item_id": identifier,
         }
     )
-    outcome = CompareDocumentCandidateOutcome(
+    outcome = ArchiveRecallOutcome(
+        lane=ArchiveRecallLane.FEDERATED_SEARCH,
+        status=ArchiveRecallStatus.COMPLETE,
         plan_sha256=plan_sha256,
         evidence_sha256=candidate_set.evidence_sha256,
         coverage_sha256=candidate_set.coverage_sha256,
+        coverage_grade=ArchiveSearchCoverageGrade.COMPLETE,
+        candidate_count=len(candidate_set.candidates),
+        used_citation_labels=tuple(item.public_citation_label for item in candidate_set.candidates),
+        selected_evidence=None,
+        publication_attested=True,
+        semantic_verified=False,
         candidate_projection_sha256=candidate_set.authority_projection_sha256,
         answer_sha256=_text_sha256(prompt, label="candidate answer"),
-        candidate_count=len(candidate_set.candidates),
-        publication_attested=True,
-        authority_rechecked=True,
     )
     return _PreparedCompareDocumentFilenameCandidates(
         candidate_set=candidate_set,
@@ -1740,6 +1956,11 @@ def _resolve_compare_document_in_transaction(
         )
         if question_cursor.rowcount != 1:
             raise WorkItemConflictError("comparison question CAS lost its state race")
+        _ensure_current_upload_alias_in_transaction(
+            conn,
+            item=current,
+            document=document_evidence,
+        )
         _insert_document_evidence(conn, document_evidence)
         work_cursor = conn.execute(
             """UPDATE work_items
@@ -1976,7 +2197,7 @@ def ask_compare_conversation_document_filename_candidate_question_in_transaction
         type(prepared_candidates) is not _PreparedCompareDocumentFilenameCandidates
         or prepared_candidates._process_authority is not _PREPARED_EXACT_CANDIDATES_AUTHORITY
         or type(prepared_candidates.candidate_set) is not ArchiveCandidateSet
-        or type(prepared_candidates.outcome) is not CompareDocumentCandidateOutcome
+        or type(prepared_candidates.outcome) is not ArchiveRecallOutcome
         or not isinstance(prepared_candidates.prompt, str)
     ):
         raise WorkItemContractError("candidate question requires process-owned exact candidates")
@@ -2044,7 +2265,7 @@ def ask_compare_conversation_document_filename_candidate_question_in_transaction
         work_revision=2,
         candidate_set_id=candidate_set.id,
         accepted_search_plan_sha256=outcome.plan_sha256,
-        accepted_search_outcome_sha256=outcome.canonical_sha256,
+        accepted_search_outcome_sha256=outcome.canonical_sha256(),
     )
     candidate_row = conn.execute(
         "SELECT metadata_json,content FROM messages WHERE id=?",
@@ -2156,6 +2377,7 @@ def complete_compare_conversation_with_document_in_transaction(
         item=current,
         boundary_user_message_id=accepted_result.answer_boundary_user_message_id,
         following_assistant_message_id=accepted_result.answer_assistant_message_id,
+        allow_intervening_before_assistant=True,
     )
     savepoint = _begin_work_item_mutation_savepoint(conn)
     try:
@@ -2448,4 +2670,5 @@ __all__ = [
     "resolve_compare_conversation_document_candidate_in_transaction",
     "resolve_compare_conversation_document_reference_in_transaction",
     "suspend_compare_conversation_with_document_in_transaction",
+    "validate_compare_conversation_document_candidate_reask_in_transaction",
 ]
