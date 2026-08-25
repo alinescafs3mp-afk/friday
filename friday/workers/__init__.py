@@ -1035,6 +1035,24 @@ class WorkersManager:
             "backfill_has_more": 0,
             "phase_failures": 0,
         }
+        reports_by_user: dict[str, dict[str, Any]] = {}
+
+        def record_report(user_id: str, report: dict[str, Any]) -> None:
+            tenant_state = state.tenants[tenant_keys[user_id]]
+            for phase, phase_cursor in report["phase_updates"].items():
+                setattr(tenant_state, phase, phase_cursor)
+            for phase in report["successful_phases"]:
+                setattr(tenant_state, f"{phase}_failed", False)
+            for phase in report["failed_phases"]:
+                setattr(tenant_state, f"{phase}_failed", True)
+            for key in (
+                "reconciled",
+                "backfilled",
+                "reconcile_has_more",
+                "backfill_has_more",
+                "phase_failures",
+            ):
+                totals[key] += report[key]
 
         async def converge(user_id: str) -> None:
             share, visit_round, forced_phase = allocations[user_id]
@@ -1051,21 +1069,9 @@ class WorkersManager:
                     forced_phase == "backfill" or (forced_phase is None and share == 1 and visit_round % 2)
                 ),
             )
-            for phase, phase_cursor in report["phase_updates"].items():
-                setattr(tenant_state, phase, phase_cursor)
-            for phase in report["successful_phases"]:
-                setattr(tenant_state, f"{phase}_failed", False)
-            for phase in report["failed_phases"]:
-                setattr(tenant_state, f"{phase}_failed", True)
+            reports_by_user[user_id] = report
+            record_report(user_id, report)
             totals["tenants"] += 1
-            for key in (
-                "reconciled",
-                "backfilled",
-                "reconcile_has_more",
-                "backfill_has_more",
-                "phase_failures",
-            ):
-                totals[key] += report[key]
             if report["phase_failures"]:
                 raise _DocumentCatalogPhaseError(
                     f"{report['phase_failures']} document catalog phase(s) failed"
@@ -1077,6 +1083,55 @@ class WorkersManager:
                 await self._for_each_user(converge, user_ids=selected_tenants)
             except WorkerBatchError as exc:
                 batch_failure = exc
+
+            # Equal tenant reservations keep the first pass fair, but owners with
+            # short corpora often return most of their share unused. Give that
+            # *reported* remainder to phases which proved that they have a tail.
+            # Backfill goes first so a large legacy owner does not advance only one
+            # item per minute while healthy reconciliation repeatedly scans it.
+            # A failed or missing report keeps its whole reservation: storage work
+            # may have happened before the exception, so reclaiming it could exceed
+            # the hard global item bound.
+            spent = sum(
+                reports_by_user[user_id]["budget_spent"]
+                if user_id in reports_by_user
+                else allocations[user_id][0]
+                for user_id in selected_tenants
+            )
+            remaining = _DOCUMENT_CATALOG_TICK_LIMIT - spent
+            redistribution_order = [
+                tenant_ids[(cursor + round_number + offset) % tenant_count] for offset in range(tenant_count)
+            ]
+            selected = set(selected_tenants)
+            for phase in ("backfill", "reconcile"):
+                candidates = [
+                    user_id
+                    for user_id in redistribution_order
+                    if user_id in selected
+                    and user_id in reports_by_user
+                    and reports_by_user[user_id][f"{phase}_has_more"]
+                    and phase in reports_by_user[user_id]["successful_phases"]
+                ]
+                for user_id in candidates:
+                    if remaining <= 0:
+                        break
+                    tenant_state = state.tenants[tenant_keys[user_id]]
+                    report = await self._document_catalog_reconcile(
+                        user_id,
+                        limit=remaining,
+                        phase_cursors={
+                            "reconcile": tenant_state.reconcile,
+                            "backfill": tenant_state.backfill,
+                        },
+                        backfill_only=phase == "backfill",
+                        reconcile_only=phase == "reconcile",
+                    )
+                    record_report(user_id, report)
+                    remaining -= report["budget_spent"]
+                    if report["phase_failures"]:
+                        break
+                if remaining <= 0:
+                    break
 
             unresolved_failures = sum(
                 int(tenant_state.reconcile_failed) + int(tenant_state.backfill_failed)
@@ -1125,9 +1180,12 @@ class WorkersManager:
         limit: int,
         phase_cursors: dict[str, str | None],
         backfill_only: bool = False,
+        reconcile_only: bool = False,
     ) -> dict[str, Any]:
         """Spend one share in order, or use a fair single-item backfill slot."""
 
+        if backfill_only and reconcile_only:
+            raise ValueError("document catalog phase selection is ambiguous")
         phase_updates: dict[str, str | None] = {}
         successful_phases: set[str] = set()
         failed_phases: set[str] = set()
@@ -1157,6 +1215,7 @@ class WorkersManager:
             except Exception as exc:
                 failures = 1
                 failed_phases.add("backfill")
+                _spent = limit
                 LOGGER.error("Document catalog backfill phase failed (%s)", type(exc).__name__)
             return {
                 "reconciled": 0,
@@ -1167,6 +1226,45 @@ class WorkersManager:
                 "phase_updates": phase_updates,
                 "successful_phases": successful_phases,
                 "failed_phases": failed_phases,
+                "budget_spent": _spent,
+            }
+
+        if reconcile_only:
+            failures = 0
+            reconciled = 0
+            reconcile_has_more = 0
+            try:
+                reconcile_page = await run_blocking(
+                    self.storage.reconcile_document_catalog,
+                    user_id,
+                    after_raw_object_id=phase_cursors["reconcile"],
+                    limit=limit,
+                )
+                reconciled, has_more, next_cursor = _document_catalog_phase_page(
+                    reconcile_page,
+                    spent_key="examined",
+                    limit=limit,
+                )
+                phase_updates["reconcile"] = next_cursor
+                reconcile_has_more = int(has_more)
+                successful_phases.add("reconcile")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                failures = 1
+                failed_phases.add("reconcile")
+                reconciled = limit
+                LOGGER.error("Document catalog reconcile phase failed (%s)", type(exc).__name__)
+            return {
+                "reconciled": reconciled if not failures else 0,
+                "backfilled": 0,
+                "reconcile_has_more": reconcile_has_more,
+                "backfill_has_more": 0,
+                "phase_failures": failures,
+                "phase_updates": phase_updates,
+                "successful_phases": successful_phases,
+                "failed_phases": failed_phases,
+                "budget_spent": reconciled,
             }
 
         # Keep one item for backfill whenever the tenant owns at least two. A
@@ -1175,6 +1273,7 @@ class WorkersManager:
         reconcile: dict[str, Any] = {}
         failures = 0
         reconcile_has_more = 0
+        budget_spent = 0
         try:
             reconcile = await run_blocking(
                 self.storage.reconcile_document_catalog,
@@ -1200,8 +1299,10 @@ class WorkersManager:
             # raising. Spending the whole apparent remainder would not be bounded.
             backfill_limit = 1 if limit >= 2 else 0
             reconciled = 0
+            budget_spent = reconcile_limit
         else:
             backfill_limit = limit - reconciled
+            budget_spent = reconciled
         backfill: dict[str, Any] = {}
         backfilled = 0
         backfill_has_more = 0
@@ -1227,7 +1328,10 @@ class WorkersManager:
             except Exception as exc:
                 failures += 1
                 failed_phases.add("backfill")
+                budget_spent += backfill_limit
                 LOGGER.error("Document catalog backfill phase failed (%s)", type(exc).__name__)
+            else:
+                budget_spent += backfill_spent
         return {
             "reconciled": reconciled,
             "backfilled": backfilled,
@@ -1237,6 +1341,7 @@ class WorkersManager:
             "phase_updates": phase_updates,
             "successful_phases": successful_phases,
             "failed_phases": failed_phases,
+            "budget_spent": budget_spent,
         }
 
     async def _knowledge_dedup_all(self) -> None:

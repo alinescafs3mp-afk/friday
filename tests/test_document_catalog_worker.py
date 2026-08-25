@@ -238,6 +238,52 @@ class _KeysetCatalogStorage(_CatalogStorage):
         }
 
 
+class _SkewedCatalogStorage(_CatalogStorage):
+    """Independent phase pages for one large and several tiny owners."""
+
+    def __init__(self, sizes: dict[str, int]) -> None:
+        super().__init__(list(sizes), reconcile_used=0)
+        self.sizes = sizes
+
+    def _phase_page(
+        self,
+        phase: str,
+        user_id: str,
+        after_raw_object_id: str | None,
+        limit: int,
+    ) -> dict[str, object]:
+        start = 0 if after_raw_object_id is None else int(after_raw_object_id) + 1
+        examined = min(limit, max(0, self.sizes[user_id] - start))
+        end = start + examined
+        has_more = end < self.sizes[user_id]
+        self._thread()
+        self.calls.append((phase, user_id, after_raw_object_id, limit, examined))
+        return {
+            "examined": examined,
+            "processed": examined,
+            "has_more": has_more,
+            "next_after_raw_object_id": str(end - 1) if has_more and examined else None,
+        }
+
+    def reconcile_document_catalog(
+        self,
+        user_id: str,
+        *,
+        after_raw_object_id: str | None,
+        limit: int,
+    ) -> dict[str, object]:
+        return self._phase_page("reconcile", user_id, after_raw_object_id, limit)
+
+    def backfill_document_catalog(
+        self,
+        user_id: str,
+        *,
+        after_raw_object_id: str | None,
+        limit: int,
+    ) -> dict[str, object]:
+        return self._phase_page("backfill", user_id, after_raw_object_id, limit)
+
+
 class _RecordingCatalogStorage:
     def __init__(self, storage) -> None:
         self.storage = storage
@@ -369,6 +415,25 @@ async def test_catalog_calls_are_off_loop_sorted_and_share_one_global_budget(
     assert all(tenant not in caplog.text for tenant in tenants)
     assert "reconcile_has_more=3" in caplog.text
     assert "backfill_has_more=0" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_skewed_tenants_reclaim_unused_share_for_backfill_without_overspending(settings) -> None:
+    storage = _SkewedCatalogStorage(
+        {
+            "tenant-large": 1_000,
+            "tenant-small-a": 1,
+            "tenant-small-b": 1,
+        }
+    )
+
+    await _manager(settings, storage)._document_catalog_reconcile_all()  # noqa: SLF001
+
+    large_backfill = [call for call in storage.calls if call[0] == "backfill" and call[1] == "tenant-large"]
+    assert [limit for _phase, _tenant, _cursor, limit, _examined in large_backfill] == [1, 81]
+    assert sum(examined for *_prefix, examined in large_backfill) == 82
+    assert sum(examined for *_prefix, examined in storage.calls) == _DOCUMENT_CATALOG_TICK_LIMIT
+    assert len(storage.kv_writes) == 1
 
 
 @pytest.mark.asyncio
