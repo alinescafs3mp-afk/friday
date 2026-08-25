@@ -798,13 +798,13 @@ def decide_turn_policy(
         )
 
     if _is_image_generation_capability_question(text):
-        projection = image_generation or ImageGenerationProjection(False)
+        image_projection = image_generation or ImageGenerationProjection(False)
         return TurnPolicyDecision(
             intent=TurnIntent.META_IMAGE_GENERATION,
             web=WebDisposition.DENY,
             attachments=AttachmentDisposition.NONE,
-            public_response=projection.render_ru(),
-            image_generation_projection=projection,
+            public_response=image_projection.render_ru(),
+            image_generation_projection=image_projection,
         )
 
     if _WEATHER_CUE.search(text):
