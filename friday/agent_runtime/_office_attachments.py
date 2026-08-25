@@ -873,7 +873,7 @@ def build_office_prompt_bundle(
     )
 
 
-_BALANCED_QUOTED_TEXT = re.compile(r"«[^»\n]*»|“[^”\n]*”|„[^“\n]*“|\"[^\"\n]*\"|'[^'\n]*'")
+_BALANCED_QUOTED_TEXT = re.compile(r"«[^»\n]*»|“[^”\n]*”|„[^“\n]*“|\"[^\"\n]*\"|(?<!\w)'[^'\n]*'(?!\w)")
 _FILENAME_NAVIGATION_PREFIX = re.compile(
     r"^(?:файл|документ|таблица)\s+"
     r"[^\s,:;!?\"'«»“”„/\\]{1,255}\s*[:,]\s*",

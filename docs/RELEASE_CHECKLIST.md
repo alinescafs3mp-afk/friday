@@ -78,10 +78,10 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   root одним recovery set, а staged ENV1 публикуется только после verified
   backup и удаляется durable после успеха.
 
-Для optional GPT-OSS secondary brain в 0.207.11 дополнительно:
+Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.11`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.12`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` пуст; code-owned provisional-реестр
   содержит ровно finalist
@@ -139,7 +139,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 2 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.11`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.12`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
@@ -167,8 +167,8 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Проверить:
 
 - schema version = 39;
-- предыдущий release 0.207.10 уже имеет schema 39; переход
-  0.207.10 → 0.207.11 не повышает schema version и не добавляет DDL-проекцию,
+- предыдущий release 0.207.11 уже имеет schema 39; переход
+  0.207.11 → 0.207.12 не повышает schema version и не добавляет DDL-проекцию,
   но штатный `offline-migrate`/validation всё равно выполняется и может менять
   bytes базы;
 - исторический переход 38 → 39 атомарно перестраивает/copy-переносит

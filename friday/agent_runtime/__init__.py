@@ -3394,9 +3394,8 @@ _ASKS_FOR_FRESH_PUBLIC_NEWS = re.compile(
     re.IGNORECASE,
 )
 _FRESH_PUBLIC_NEWS_LOCAL_SCOPE = re.compile(
-    r"\b(?:в|из|по)\s+(?:этом|этих|том|мо[её]м|нашем|присланн\w*|загруженн\w*)?\s*"
-    r"(?:файл|документ|вложен|архив|баз|переписк|чат)\w*\b|"
-    r"\b(?:файл|документ|вложен|архив|баз|переписк|чат)\w*\b",
+    r"\b(?:в|из|по)\s+(?:этом|этих|том|мо[её]м|нашем|присланн\w*|загруженн\w*)\s+"
+    r"(?:файл|документ|вложен|архив|баз|переписк|чат)\w*\b",
     re.IGNORECASE,
 )
 #: Вводные слова просьбы: в поисковую строку они не нужны.
@@ -3408,6 +3407,13 @@ _WEB_REQUEST_FILLER = re.compile(
     r"в\s+интернете|в\s+инете|в\s+сети|в\s+вебе|в\s+гугле|в\s+яндексе|"
     r"search\s+(?:the\s+)?(?:web|internet)|google\s+it"
     r")(?=$|\W)",
+    re.IGNORECASE,
+)
+_WEB_QUERY_SALUTATION_PREFIX = re.compile(
+    r"^\W*(?:(?:(?:привет(?:ствую)?|здравствуй(?:те)?|доброе\s+утро|"
+    r"добрый\s+(?:день|вечер)|hello|hi|hey)"
+    r"(?:\W+(?:пятниц\w*|friday))?\W+)+|"
+    r"(?:пятниц\w*|friday)\s*[,!:—–-]\s*)",
     re.IGNORECASE,
 )
 #: Реплика в разговоре: приветствие, благодарность, «проверка связи», «ага».
@@ -24764,22 +24770,99 @@ _PUBLIC_NEWS_TOPIC = re.compile(r"\bновост\w*\b|\bnews\b", re.IGNORECASE)
 _PUBLIC_NEWS_SOURCE_SCOPE = re.compile(
     r"\b(?:сайт\w*|источник\w*|сми|пресс\w*|медиа|"
     r"зарубежн\w*|иностранн\w*|международн\w*|миров\w*|"
-    r"foreign|international|world)\b",
+    r"foreign|international|world|sites?|sources?|media|press)\b",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_COMPLETE_SOURCE_SCOPE = re.compile(
+    r"\b(?:"
+    r"(?:с|из|на|по)\s+(?:зарубежн|иностранн|международн|миров)\w*\s+"
+    r"(?:сайт|сми|медиа|источник|пресс)\w*|"
+    r"(?:зарубежн|иностранн|международн|миров)\w*\s+"
+    r"(?:сайт|сми|медиа|источник|пресс|новост)\w*|"
+    r"(?:с|из|на|по)\s+(?:сайт|сми|медиа|источник|пресс)\w*|"
+    r"(?:from|on)\s+(?:foreign|international|world)\s+"
+    r"(?:sites?|media|press|sources?|news)|"
+    r"(?:from|on)\s+(?:sites?|media|press|sources?)|"
+    r"(?:foreign|international|world)\s+(?:sites?|media|press|sources?|news)"
+    r")\b",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_ENGLISH_MONTH_DAY_SCOPE = re.compile(
+    r"\b(?:january|february|march|april|may|june|july|august|september|"
+    r"october|november|december)\s+(?:[12]?\d|3[01])(?:st|nd|rd|th)?"
+    r"(?:,?\s+(?:19|20)\d{2})?\b",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_RUSSIAN_MONTH_SCOPE = re.compile(
+    r"\b(?:(?:за|на|в|с)\s+)?(?:"
+    r"(?:январ|феврал|март|апрел|ма[йяе]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*"
+    r"(?:\s+(?:[12]?\d|3[01]))?|"
+    r"(?:[12]?\d|3[01])\s+"
+    r"(?:январ|феврал|март|апрел|ма[йяе]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*"
+    r")(?:\s+(?:19|20)\d{2}(?:\s+года?)?)?\b",
     re.IGNORECASE,
 )
 _PUBLIC_NEWS_REQUEST_COMMAND = re.compile(
-    r"^\W*(?:(?:а|и|ну|пожалуйста|мож(?:ешь|ете)|давай(?:те)?)\W+)*"
-    r"(?:сдела\w*|дай|дайте|подготов\w*|состав\w*|собер\w*|покаж\w*|"
-    r"расскаж\w*|найд\w*|поищ\w*|привед\w*|give|show|find|summari[sz]e)\b",
+    r"^\W*(?:(?:а|и|ну|пожалуйста|please|давай(?:те)?|"
+    r"(?:can|could|would)\s+you|"
+    r"не\s+мог(?:ла|ли)?\s+бы\s+(?:ты|вы))\W+)*"
+    r"(?:"
+    r"мне\s+нужн\w*|"
+    r"(?:я\s+)?(?:хочу|хотел(?:а|и)?\s+бы)\s+(?:узнать|получить|увидеть)|"
+    r"можно(?:\s+ли)?(?:\s+(?:мне|нам))?"
+    r"(?:\s+(?:дать|показать|подготовить|собрать|составить))?|"
+    r"мож(?:ешь|ете)(?:\s+(?:дать|показать|подготовить|собрать|составить))?|"
+    r"смож(?:ешь|ете)\s+(?:дать|показать|подготовить|собрать|составить)|"
+    r"(?:рассказать|показать|подготовить|собрать|составить|дать|найти|привести|подвести)|"
+    r"сдела\w*|дай|дайте|подготов\w*|состав\w*|собер\w*|покаж\w*|"
+    r"расскаж\w*|скаж\w*|подскаж\w*|найд\w*|поищ\w*|привед\w*|подвед\w*|"
+    r"(?:can|could|may)\s+i\s+(?:get|have)|"
+    r"i(?:['’]d|\s+would)\s+like(?:\s+to\s+(?:get|have|see|hear))?|"
+    r"i\s+want(?:\s+to\s+(?:get|know|see|hear))?|"
+    r"(?:(?:can|could|would)\s+you\s+)?"
+    r"(?:give|show|find|summari[sz]e|tell|prepare|compile|collect)"
+    r")\b",
     re.IGNORECASE,
 )
 _PUBLIC_NEWS_REQUEST_QUESTION = re.compile(
-    r"^\W*(?:(?:а|и|ну|пожалуйста)\W+)*"
+    r"^\W*(?:(?:а|и|ну|пожалуйста|please)\W+)*"
     r"(?:какие\b[^.!?\n]{0,90}\bновост\w*|"
+    r"каков\w*\s+(?:(?:главн|важн|последн|свеж|сегодняшн|актуальн|текущ)\w*\s+)?"
+    r"новост\w*|"
+    r"что\s+по\s+новост\w*|"
+    r"что\s+(?:нового\s+|было\s+|произошл\w*\s+|случил\w*\s+)?"
+    r"(?:в\s+)?новост\w*|"
     r"что\s+(?:нового\s+)?(?:пиш\w*|сообща\w*|вышл\w*|произошл\w*)\b"
     r"[^.!?\n]{0,90}\b(?:новост\w*|сми|пресс\w*)|"
-    r"what\b[^.!?\n]{0,90}\bnews\b)",
+    r"(?:есть(?:\s+ли)?|имеются\s+ли)\b[^.!?\n]{0,90}\bновост\w*|"
+    r"(?:what(?:['’]s|\s+is)?|which|any)\b[^.!?\n]{0,90}\bnews\b|"
+    r"(?:do\s+you\s+have|is\s+there|are\s+there)\b[^.!?\n]{0,90}\bnews\b)",
     re.IGNORECASE | re.DOTALL,
+)
+_PUBLIC_NEWS_NOUN_FIRST_REQUEST = re.compile(
+    r"^\W*(?:(?:пожалуйста|please)\W+)?(?:"
+    r"(?:сводк\w*|подборк\w*|дайджест\w*|обзор\w*|новост\w*)\b[^.!?\n]{0,180}"
+    r"(?:\b(?:пожалуйста)\b|\?)|"
+    r"(?:news\s+(?:roundup|summary|digest|brief(?:ing)?)|"
+    r"(?:roundup|summary|digest|brief(?:ing)?)\s+(?:of\s+)?(?:the\s+)?news)"
+    r"[^.!?\n]{0,180}(?:\bplease\b|\?)|"
+    r"news\b[^.!?\n]{0,180}(?:\bplease\b|\?)|"
+    r"(?:новост\w*|news)\b[^.!?\n]{0,180}"
+    r")[.!?…]*\s*$",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_NOUN_FIRST_NARRATION = re.compile(
+    r"\b(?:обсужда\w*|говорил\w*|писал\w*|упомина\w*|"
+    r"опубликова\w*|показыва\w*|подготовил\w*|подготовлен\w*|"
+    r"составил\w*|собрал\w*|сделал\w*|явля\w*|был\w*|оказал\w*|"
+    r"reported|discussed|mentioned|published|is|are|was|were)\b",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_BARE_FRESH_NOUN_REQUEST = re.compile(
+    r"^\W*(?:(?:свеж|последн|актуальн|главн|важн)\w*|"
+    r"fresh|latest|current|top|main|headline)\b"
+    r"(?=[^.!?\n]{0,180}\b(?:новост\w*|news)\b)[^.!?\n]{0,220}[.!?…]*\s*$",
+    re.IGNORECASE,
 )
 
 # The simple lane can enforce only the four provider windows exposed by
@@ -24789,8 +24872,9 @@ _PUBLIC_NEWS_REQUEST_QUESTION = re.compile(
 _SIMPLE_PUBLIC_NEWS_FRESHNESS_PATTERNS: dict[str, re.Pattern[str]] = {
     "day": re.compile(
         r"\b(?:сегодня\w*|за\s+(?:(?:последн|прошедш)\w*\s+)?сут\w*|"
+        r"(?:за\s+)?последн\w*\s+(?:день|дн[яе])|"
         r"за\s+(?:(?:последн|прошедш)\w*\s+)?24\s*час\w*|"
-        r"today|(?:past|last)\s+24\s+hours?)\b",
+        r"today|(?:past|last)\s+(?:day|24\s+hours?))\b",
         re.IGNORECASE,
     ),
     "week": re.compile(
@@ -24822,8 +24906,14 @@ _SIMPLE_PUBLIC_NEWS_UNSUPPORTED_TIME_SCOPE = re.compile(
     r"january|february|march|april|june|july|august|september|october|november|december|"
     r"(?:in|during)\s+may|"
     r"назад|ago|between|с\s+\d{1,2}\s+по\s+\d{1,2})\b|"
-    r"(?<!\d)(?:19|20)\d{2}(?!\d)|"
-    r"(?<!\d)\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?(?!\d)",
+    r"(?<!\d)(?:19|20)\d{2}[./-]\d{1,2}[./-]\d{1,2}(?!\d)|"
+    r"(?<![\w-])(?:19|20)\d{2}(?![\w-])|"
+    r"\b(?:за|на|on|for)\s+\d{1,2}[./-]\d{1,2}"
+    r"(?:[./-]\d{2,4})?(?![\d./-])|"
+    r"\b(?:за|на)\s+(?:[12]?\d|3[01])(?:-?(?:е|ое|го))?\s+числ\w*\b|"
+    r"(?<!\d)(?:[12]?\d|3[01])(?:-?(?:е|ое|го))?\s+числ\w*\b|"
+    r"\bmay\s+(?:[12]?\d|3[01])(?:st|nd|rd|th)?\b|"
+    r"\b(?:[12]?\d|3[01])(?:st|nd|rd|th)?\s+may\b",
     re.IGNORECASE,
 )
 _SIMPLE_PUBLIC_NEWS_ANY_TIME_SCOPE = re.compile(
@@ -24832,9 +24922,289 @@ _SIMPLE_PUBLIC_NEWS_ANY_TIME_SCOPE = re.compile(
     r"\b(?:последн|предыдущ|прошл|прошедш|эт|текущ)\w*\s+"
     r"(?:\d+\s*)?(?:час|сут|дн|недел|месяц|год)\w*\b|"
     r"\b(?:past|last|previous|this|current|over\s+the\s+last)\b"
-    r"[^.!?\n]{0,24}\b(?:hours?|days?|weeks?|months?|years?)\b",
+    r"[^.!?\n]{0,24}\b(?:hours?|days?|weeks?|months?|years?)\b|"
+    r"\b(?:for|over)\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+"
+    r"(?:hours?|days?|weeks?|months?|years?)\b",
     re.IGNORECASE,
 )
+_PUBLIC_NEWS_STRICT_TIME_SCOPE = re.compile(
+    r"\b(?:(?:(?:за|в\s+течение|на\s+протяжении)\s+)?"
+    r"(?:последн|предыдущ|прошл|прошедш|эт|текущ)\w*\s+"
+    r"(?:\d+\s*)?(?:час|сут|дн|недел|месяц|год)\w*|"
+    r"(?:за|в\s+течение|на\s+протяжении)\s+\d+\s*"
+    r"(?:час|сут|дн|недел|месяц|год)\w*|"
+    r"(?:(?:over\s+the\s+)?(?:past|last|previous|this|current))\s+"
+    r"(?:\d+\s*)?(?:hours?|days?|weeks?|months?|years?))\b",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_CLOSED_TEMPORAL_DEICTIC = re.compile(
+    r"\b(?:(?:на|за)\s+)?(?:эт|текущ|предыдущ|прошл)\w*\s+"
+    r"(?:дн|недел|месяц|год)\w*\b|"
+    r"\b(?:this|current|previous|last)\s+(?:day|week|month|year)\b",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_PRIVATE_WORK_CARRIER = re.compile(
+    r"\b(?:из|по|в|внутри|для|на\s+основе|from|in|inside|within|for|based\s+on)\s+"
+    r"(?:мо\w*|наш\w*|сво\w*|личн\w*|внутренн\w*|особист\w*|внутрішн\w*|"
+    r"my|our|private|internal)\s+"
+    r"(?:проект\w*|проєкт\w*|задач\w*|робот\w*|работ\w*|project\w*|tasks?|work)\b|"
+    r"\b(?:мо\w*|наш\w*|сво\w*|личн\w*|внутренн\w*|особист\w*|внутрішн\w*|"
+    r"my|our|private|internal)\s+"
+    r"(?:проект\w*|проєкт\w*|задач\w*|робот\w*|работ\w*|project\w*|tasks?|work)\b",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_PRIVATE_CONTEXT_CARRIER = re.compile(
+    r"\b(?:мо\w*|наш\w*|сво\w*|личн\w*|внутренн\w*|приватн\w*|закрыт\w*|"
+    r"особист\w*|внутрішн\w*|конфіденційн\w*|закрит\w*|"
+    r"конфиденциальн\w*|my|our|personal|private|closed|internal|confidential)\s+"
+    r"(?:файл\w*|документ\w*|проект\w*|бюджет\w*|план\w*|дорожн\w*\s+карт\w*|"
+    r"репозитор\w*|архив\w*|заметк\w*|клиент\w*|заказчик\w*|канал\w*|контракт\w*|"
+    r"сделк\w*|встреч\w*|зарплат\w*|сч[её]т\w*|тикет\w*|начальник\w*|"
+    r"сотрудник\w*|медицинск\w*|запис\w*|аккаунт\w*|данн\w*|crm|slack|"
+    r"file\w*|document\w*|project\w*|budget\w*|roadmap\w*|plan\w*|repo\w*|"
+    r"archive\w*|notes?|clients?|customers?|channels?|contracts?|deals?|meetings?|"
+    r"salary|invoices?|tickets?|boss|employees?|medical|records?|accounts?|data|"
+    r"нотатк\w*|листуван\w*|дані|crm|slack)\b",
+    re.IGNORECASE,
+)
+_UKRAINIAN_POSSESSIVE_PRONOUN = (
+    r"(?:мій|моя|моє|мої|мого|моєму|моїм|моєю|моїх|"
+    r"твій|твоя|твоє|твої|твого|твоєму|твоїм|твоєю|твоїх|"
+    r"свій|своя|своє|свої|свого|своєму|своїм|своєю|своїх|"
+    r"наш|наша|наше|наші|нашого|нашому|нашим|нашою|наших|"
+    r"ваш|ваша|ваше|ваші|вашого|вашому|вашим|вашою|ваших)"
+)
+_PUBLIC_NEWS_STANDALONE_PRIVATE_DETERMINER = re.compile(
+    rf"\b(?:{_POSSESSIVE_PRONOUN}|{_UKRAINIAN_POSSESSIVE_PRONOUN}|"
+    r"my|our|your|mine|ours|yours)\b",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_PRIVATE_SOURCE_RELATION = re.compile(
+    r"\b(?:из|по|в|с|со|через|from|in|inside|within|via)\s+(?:the\s+)?"
+    r"(?:закрыт\w*|приватн\w*|конфиденциальн\w*|внутренн\w*|"
+    r"закрит\w*|конфіденційн\w*|внутрішн\w*|особист\w*|"
+    r"closed|private|confidential|internal)\s+[\w-]+\b",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_UNBOUND_EFFECT = re.compile(
+    r"\bremind\s+(?:me|us)\b|"
+    r"\b(?:run|execute)\s+(?:the\s+)?(?:code|python|scripts?)\b|"
+    r"\b(?:speak|say|read)\b[^.!?\n]{0,24}\baloud\b|"
+    r"\b(?:reply|answer)\b[^.!?\n]{0,16}\b(?:by\s+voice|aloud)\b|"
+    r"\b(?:call|message|email|contact)\s+(?-i:[A-Z])[\w-]+\b|"
+    r"\b(?:read|open|summari[sz]e|analy[sz]e|review|check|compare|search|find|"
+    r"delete|remove|update|edit|tag|show)\s+"
+    r"(?:(?:the|this|that|my|our|attached)\s+){0,2}"
+    r"(?:files?|documents?|archives?|notes?|people|person|contacts?|crm)\b|"
+    r"\b(?:create|write|save|send|publish|post|upload|download|export|import|attach)\s+"
+    r"(?:(?:the|this|that|my|our|a|an)\s+)?"
+    r"(?:files?|documents?|notes?|messages?|emails?|posts?|reports?|reminders?|tasks?|crm)\b|"
+    r"\b(?:schedule|book)\s+(?:(?:the|my|our|a)\s+)?(?:meetings?|calls?|reminders?)\b|"
+    r"\border\s+(?:(?:the|my|a)\s+)?(?:pizza|food|taxi|ride)\b|"
+    r"\bpay\s+(?:(?:the|my|our|a)\s+)?(?:bills?|invoices?)\b|"
+    r"\brestart\s+(?:(?:the|my|our|a)\s+)?(?:servers?|services?|computers?|laptops?)\b|"
+    r"\b(?:напомни|напомните)\s+(?:мне|нам)\b|"
+    r"\b(?:запусти|запустите|выполни|выполните)\s+(?:код|python|скрипт)\w*\b|"
+    r"\b(?:прочитай|прочитайте|открой|откройте|суммируй|суммируйте|"
+    r"проанализируй|проанализируйте|проверь|проверьте|сравни|сравните|"
+    r"найди|найдите|покажи|покажите|обнови|обновите|измени|измените)\s+"
+    r"(?:(?:этот|эти|мой|наш|приложенн)\w*\s+)?"
+    r"(?:файл|документ|архив|заметк|контакт|человек|crm)\w*\b|"
+    r"\b(?:напиши|напишите|позвони|позвоните)\s+[А-ЯЁ][а-яё-]+\b|"
+    r"\b(?:закажи|закажите)\s+(?:пицц\w*|ед\w*|такси)\b|"
+    r"\b(?:оплати|оплатите)\s+(?:сч[её]т|инвойс)\w*\b|"
+    r"\b(?:перезапусти|перезапустите)\s+(?:сервер|сервис|компьютер|ноутбук)\w*\b",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_ENGLISH_ACTION_HEAD = (
+    r"(?:read|open|inspect|show|find|search|extract|analy[sz]e|summari[sz]e|"
+    r"review|compare|list|count|tell|explain|describe|update|edit|delete|remove|"
+    r"tag|mark|save|send|email|message|forward|create|write|publish|post|"
+    r"upload|download|export|import|attach|schedule|book|order|pay|restart|"
+    r"run|execute|speak|say|call|contact|remind|archive|convert|set|reset|"
+    r"shut\s+down|turn\s+(?:on|off)|deploy|install|uninstall|configure|print|"
+    r"generate|translate|transcribe|submit|approve|reject|merge|commit|copy|"
+    r"move|rename|share|add|replace|clear|lock|unlock|start|stop|kill|wake|"
+    r"enable|disable|invoke|launch|buy|purchase|sell|place|change|turn|reboot)"
+)
+_PUBLIC_NEWS_ENGLISH_EFFECT_CARRIER = (
+    r"(?:files?|documents?|messages?|emails?|reports?|responses?|replies|notes?|"
+    r"archives?|contacts?|people|person|"
+    r"attachments?|tasks?|reminders?|events?|meetings?|images?|photos?|audio|video|"
+    r"pdfs?|docx?|xlsx?|csv|json|xml|code|scripts?|servers?|services?|bills?|"
+    r"invoices?|voice|attached|alarms?|apps?|applications?|devices?|lights?|doors?|"
+    r"requests?|changes?|settings?|systems?|computers?|laptops?|machines?|jobs?|"
+    r"processes?|containers?|databases?|accounts?|users?|permissions?|records?|"
+    r"entries|items?|folders?|directories|paths?|branches?|commits?|repositories|"
+    r"repos?|packages?|programs?|commands?|shell|terminal|ls|bash|powershell|"
+    r"browsers?|routers?|stocks?|shares?|orders?|passwords?|"
+    r"tomorrow|tonight|later|"
+    r"(?-i:[A-Z][A-Z0-9.+-]{1,12}))"
+)
+_PUBLIC_NEWS_COORDINATED_ACTION = re.compile(
+    r"(?:(?:[,;:!?]|\.(?!\w))\s*|"
+    r"\b(?:и|а\s+затем|затем|потом|также|заодно|and|then|also)\s+)"
+    r"(?:"
+    r"(?:пожалуйста\s+)?(?:"
+    r"прочитай(?:те)?|открой(?:те)?|осмотр(?:и|ите)|покаж(?:и|ите)|"
+    r"найд(?:и|ите)|поищ(?:и|ите)|извлек(?:и|ите)|проанализируй(?:те)?|"
+    r"суммируй(?:те)?|обобщ(?:и|ите)|перескаж(?:и|ите)|проверь(?:те)?|"
+    r"сравн(?:и|ите)|перечисл(?:и|ите)|посчитай(?:те)?|объясн(?:и|ите)|"
+    r"опиш(?:и|ите)|обнов(?:и|ите)|измен(?:и|ите)|отредактируй(?:те)?|"
+    r"удал(?:и|ите)|пометь(?:те)?|тегируй(?:те)?|сохран(?:и|ите)|"
+    r"отправ(?:ь|ьте)|перешл(?:и|ите)|напиш(?:и|ите)|созда(?:й|йте)|"
+    r"опубликуй(?:те)?|загруз(?:и|ите)|выгруз(?:и|ите)|экспортируй(?:те)?|"
+    r"импортируй(?:те)?|прилож(?:и|ите)|запланируй(?:те)?|забронируй(?:те)?|"
+    r"закаж(?:и|ите)|оплат(?:и|ите)|перезапуст(?:и|ите)|запуст(?:и|ите)|"
+    r"выполн(?:и|ите)|произнес(?:и|ите)|скаж(?:и|ите)|позвон(?:и|ите)|"
+    r"напомн(?:и|ите)|архивируй(?:те)?|конвертируй(?:те)?|"
+    r"включ(?:и|ите)|выключ(?:и|ите)|отключ(?:и|ите)|разверн(?:и|ите)|"
+    r"установ(?:и|ите)|настро(?:й|йте)|распечат(?:ай|айте)|перевед(?:и|ите)|"
+    r"заполн(?:и|ите)|подпиш(?:и|ите)|переименуй(?:те)?|перемест(?:и|ите)|"
+    r"скопируй(?:те)?|заблокируй(?:те)?|разблокируй(?:те)?"
+    r"|куп(?:и|ите)|продай(?:те)?|смен(?:и|ите)|размест(?:и|ите)|"
+    r"запусти(?:те)?|запуст(?:и|ите)|перезагруз(?:и|ите)"
+    r")\b|"
+    rf"(?:(?:please\s+)?{_PUBLIC_NEWS_ENGLISH_ACTION_HEAD}\s+"
+    rf"(?:me|us|it|them|this|that|the|a|an|my|our|your|attached)\b|"
+    rf"{_PUBLIC_NEWS_ENGLISH_ACTION_HEAD}\s+{_PUBLIC_NEWS_ENGLISH_EFFECT_CARRIER}\b|"
+    rf"please\s+{_PUBLIC_NEWS_ENGLISH_ACTION_HEAD}\b)"
+    r")",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_COORDINATED_PERSON_ACTION = re.compile(
+    r"(?:(?:[,;:!?]|\.(?!\w))\s*|\b(?:and|then|also)\s+)"
+    r"(?:please\s+)?(?:email|call|message|contact)\s+"
+    r"(?P<target>[a-z][a-z-]{1,31})\b",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_PRIVATE_IDENTIFIER = re.compile(
+    r"\b(?i:private|confidential|internal|приватн\w*|конфиденциальн\w*|внутренн\w*|"
+    r"конфіденційн\w*|внутрішн\w*|особист\w*)"
+    r"\s+(?:[A-ZА-ЯЁ]{2,}[A-ZА-ЯЁ0-9_-]*|"
+    r"(?=[\w-]*\d)[A-Za-zА-Яа-яЁё0-9_-]{2,})\b|"
+    r"\b(?i:private|confidential|internal)(?:[A-Z]{2,}[A-Z0-9_-]*|"
+    r"(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{2,})\b|"
+    r"\b(?i:приватн[а-яё]*?|конфиденциальн[а-яё]*?|внутренн[а-яё]*?|"
+    r"конфіденційн[а-яіїєґ]*?|внутрішн[а-яіїєґ]*?|особист[а-яіїєґ]*?)"
+    r"(?:[A-ZА-ЯЁ]{2,}[A-ZА-ЯЁ0-9_-]*|"
+    r"(?=[A-Za-zА-Яа-яЁё0-9_-]*\d)[A-Za-zА-Яа-яЁё0-9_-]{2,})\b|"
+    r"\b(?i:project|проект|проєкт)[\w-]{2,}\b|"
+    r"\b(?i:projects?|проект\w*|проєкт\w*)\s+(?:[A-ZА-ЯЁІЇЄҐ]{2,}[A-ZА-ЯЁІЇЄҐ0-9_-]*|"
+    r"(?!(?:19|20)\d{2}\b)(?=[\w-]*\d)[A-Za-zА-Яа-яЁё0-9_-]{2,})\b|"
+    r"\b(?i:code|token|password|credential|secret)(?:[A-Z]{2,}[A-Z0-9_-]*)\b|"
+    r"\b(?i:код|токен|парол[ья]?|секрет)(?:[A-ZА-ЯЁ]{2,}[A-ZА-ЯЁ0-9_-]*)\b|"
+    r"\b(?i:api[-_ ]?(?:key|ключ)|ssh[-_ ]?(?:key|ключ)|secret|login|pin|cookie|"
+    r"session|логин|пин|куки|сесси\w*)\s+"
+    r"(?:[A-ZА-ЯЁІЇЄҐ]{2,}[A-ZА-ЯЁІЇЄҐ0-9_-]*|"
+    r"(?=[A-Za-zА-Яа-яЁёІіЇїЄєҐґ0-9_-]*\d)"
+    r"[A-Za-zА-Яа-яЁёІіЇїЄєҐґ0-9_-]{2,})\b|"
+    r"\b(?i:code|код|token|токен|password|парол\w*|credential\w*|секрет\w*)"
+    r"(?:[\w-]*\d[\w-]*|\s+(?:[A-ZА-ЯЁ]{2,}[A-ZА-ЯЁ0-9_-]*|"
+    r"(?=[\w-]*\d)[A-Za-zА-Яа-яЁё0-9_-]{2,}))\b|"
+    r"\b\w{2,}(?i:credentials?|парол\w*|токен\w*)\b",
+)
+_PUBLIC_NEWS_EXPLICIT_SECRET_ASSIGNMENT = re.compile(
+    r"\b(?:api[-_ ]?key|api[-_ ]?ключ|ssh[-_ ]?key|password|token|secret|code|"
+    r"login|credential|pin|cookie|session|пароль|токен|секрет|код|логин|пин|"
+    r"куки|сесси\w*)\s+(?:is|equals?|равен\w*|значени\w*)\s+[\w-]+\b",
+    re.IGNORECASE,
+)
+_PUBLIC_NEWS_DENSE_HYPHEN_OBFUSCATION = re.compile(
+    r"(?<!\w)(?:[^\W_]-){3,}[^\W_](?!\w)",
+)
+_PUBLIC_NEWS_NO_SCOPE_TOPIC = re.compile(
+    r"^(?:(?:о|об|про|по|about|on)\s+)?[\w-]{2,48}"
+    r"(?:\s+[\w-]{2,48}){0,3}\s*$",
+    re.IGNORECASE,
+)
+
+_PUBLIC_NEWS_IN_TOKEN_DASH = re.compile(r"(?<=\w)[\u2010\u2011\u2012\u2013\u2014\u2212](?=\w)")
+
+
+def _public_news_typography_projection(value: str) -> str:
+    """Normalize only typography which is internal to a topic token."""
+
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    return _PUBLIC_NEWS_IN_TOKEN_DASH.sub("-", normalized)
+
+
+def _public_news_topic_atom_is_safe(atom: str) -> bool:
+    """Accept one bounded word or ordinary technical-name token."""
+
+    token = _public_news_typography_projection(atom)
+    if not token or len(token) > 48:
+        return False
+    if re.fullmatch(r"[^\W_]+(?:[-.][^\W_]+)*(?:\.)?", token) and "_" not in token and ".." not in token:
+        return True
+    if len(token) == 1:
+        return token.isalpha() and token.isupper()
+    return bool(
+        re.fullmatch(r"[^\W_]{1,24}(?:[&/][^\W_]{1,24})+", token)
+        or re.fullmatch(r"[^\W\d_]+(?:['’][^\W\d_]+)+", token)
+        or re.fullmatch(r"[\w-]{1,40}\+{1,2}\d*", token)
+        or re.fullmatch(r"[\w-]{1,40}#", token)
+        or re.fullmatch(r"\.[^\W\d_][\w-]{1,40}", token)
+        or re.fullmatch(r"[\w-]{1,32}(?:\.[\w-]{1,16})+", token)
+    )
+
+
+def _public_news_topic_expression_is_safe(surface: str) -> bool:
+    """Validate at most four topic atoms without enumerating public subjects."""
+
+    topic = " ".join(_public_news_typography_projection(surface).split()).strip(" ,")
+    topic = re.sub(
+        r"^(?:(?:о|об|про|по\s+теме|about|on|of)\s+)+",
+        "",
+        topic,
+        flags=re.IGNORECASE,
+    ).strip()
+    if not topic:
+        return False
+    parts = [
+        part.strip()
+        for part in re.split(
+            r"\s*(?:,|\b(?:и|а\s+также|а\s+затем|затем|потом|также|заодно|"
+            r"далее|после\s+этого|плюс|and|then|also|after\s+that|afterwards|"
+            r"next|plus)\b)\s*",
+            topic,
+            flags=re.IGNORECASE,
+        )
+        if part.strip()
+    ]
+    atoms = [atom for part in parts for atom in part.split()]
+    return bool(
+        1 <= len(parts) <= 4
+        and 1 <= len(atoms) <= 4
+        and (len(parts) == 1 or all(len(part.split()) == 1 for part in parts))
+        and sum(len(atom) == 1 for atom in atoms) <= 1
+        and all(
+            _public_news_topic_atom_is_safe(atom) or (len(atoms) > 1 and len(atom) == 1 and atom.isdecimal())
+            for atom in atoms
+        )
+    )
+
+
+def _public_news_topic_first_request_is_safe(visible: str) -> bool:
+    """Accept a bounded Telegram-style ``OpenAI news today`` request."""
+
+    topic = _PUBLIC_NEWS_TOPIC.search(visible)
+    if topic is None or topic.start() == 0:
+        return False
+    prefix = _WEB_QUERY_SALUTATION_PREFIX.sub("", visible[: topic.start()]).strip(" ,")
+    prefix = re.sub(
+        r"^(?:please\s+)|\s+(?:(?:свеж|последн|актуальн|главн|важн)\w*|"
+        r"fresh|latest|current|top|main|headline)\s*$",
+        "",
+        prefix,
+        flags=re.IGNORECASE,
+    ).strip()
+    return bool(
+        prefix
+        and not _PUBLIC_NEWS_NOUN_FIRST_NARRATION.search(visible)
+        and _public_news_topic_expression_is_safe(prefix)
+    )
+
 
 # A plain public-news roundup is one read followed by one synthesis, not an
 # open-ended agentic research session.  Keep this deadline local to that route:
@@ -25009,30 +25379,42 @@ _EXPLICIT_PUBLIC_WEB_UNRESOLVED_PRONOUN = re.compile(
 _EXPLICIT_PUBLIC_WEB_PRIVATE_SOURCE_CARRIER = re.compile(
     r"\b(?:из|по|в|внутри|с|со|на\s+основе|from|in|inside|within|based\s+on)\s+"
     r"(?:(?:мо\w*|наш\w*|сво\w*|эт\w*|данн\w*|присланн\w*|загруженн\w*|"
-    r"прикрепл[её]нн\w*|my|our|this|that|the|a|an|uploaded|attached|sent)\s+)?"
-    r"(?:файл\w*|документ\w*|вложен\w*|архив\w*|заметк\w*|переписк\w*|"
+    r"прикрепл[её]нн\w*|my|our|this|that|the|a|an|uploaded|attached|sent)\s+){0,3}"
+    r"(?:файл\w*|документ\w*|вложен\w*|архив\w*|замет\w*|нотатк\w*|"
+    r"переписк\w*|листуван\w*|"
     r"чат\w*|сообщен\w*|таблиц\w*|скан\w*|изображен\w*|фотограф\w*|фото|"
-    r"письм\w*|презентац\w*|отч[её]т\w*|реестр\w*|список\w*|источник\w*|"
+    r"письм\w*|презентац\w*|отч[её]т\w*|реестр\w*|спис\w*|источник\w*|канал\w*|"
     r"материал\w*|баз\w*|хранилищ\w*|crm|инбокс\w*|files?|documents?|"
     r"attachments?|archives?|notes?|messages?|conversation\w*|chat|tables?|"
     r"spreadsheets?|scans?|images?|photos?|pictures?|emails?|letters?|"
-    r"presentations?|reports?|registr(?:y|ies)|lists?|sources?|materials?|"
+    r"presentations?|reports?|registr(?:y|ies)|lists?|sources?|channels?|materials?|"
     r"databases?|storage|crm|inboxes?)\b|"
+    r"\b(?:from|based\s+on)\s+(?:(?:the\s+)?(?:client|customer|employee|"
+    r"colleague|coworker|boss|team|company|account)\s+|"
+    r"[^\W_]{1,40}['’]s\s+)"
+    r"(?:files?|documents?|attachments?|archives?|notes?|messages?|chats?|"
+    r"emails?|reports?|lists?|sources?|channels?|materials?|databases?|storage|crm)\b|"
+    r"\b(?:про|about)\s+(?:спис\w*|реестр\w*|канал\w*|list|registry|channel)\s+"
+    r"(?:клиент\w*|заказчик\w*|сотрудник\w*|client\w*|customer\w*|employee\w*)\b|"
     r"\b(?:мо\w*|наш\w*|сво\w*|личн\w*|внутренн\w*|private|internal|my|our)\s+"
     r"(?:файл\w*|документ\w*|вложен\w*|архив\w*|баз\w*|хранилищ\w*|"
-    r"заметк\w*|переписк\w*|чат\w*|сообщен\w*|таблиц\w*|скан\w*|"
+    r"замет\w*|нотатк\w*|переписк\w*|листуван\w*|чат\w*|сообщен\w*|"
+    r"таблиц\w*|скан\w*|"
     r"изображен\w*|фотограф\w*|фото|письм\w*|презентац\w*|отч[её]т\w*|"
-    r"реестр\w*|список\w*|источник\w*|материал\w*|crm|инбокс\w*|files?|"
+    r"реестр\w*|список\w*|источник\w*|канал\w*|материал\w*|crm|инбокс\w*|files?|"
     r"documents?|attachments?|archives?|databases?|storage|notes?|messages?|"
     r"conversation\w*|chat|tables?|spreadsheets?|scans?|images?|photos?|"
     r"pictures?|emails?|letters?|presentations?|reports?|registr(?:y|ies)|"
-    r"lists?|sources?|materials?|crm|inboxes?)\b",
+    r"lists?|sources?|channels?|materials?|crm|inboxes?)\b",
     re.IGNORECASE,
 )
 _EXPLICIT_PUBLIC_WEB_PRIVATE_PERSON_CARRIER = re.compile(
     r"\b(?:мо\w*|наш\w*|сво\w*|эт\w*|данн\w*|my|our|this|that)\s+"
     r"(?:человек\w*|сотрудник\w*|коллег\w*|пользовател\w*|person|employee\w*|"
     r"colleague\w*|coworker\w*|user)\b|"
+    r"\b(?:from|based\s+on)\s+(?:the\s+)?"
+    r"(?:employee\w*|client\w*|customer\w*|colleague\w*|coworker\w*|boss|user)\s+"
+    r"[A-Za-z][\w-]{1,48}\b|"
     r"\b(?:профил\w*|активност\w*|сообщен\w*|переписк\w*)\s+"
     r"(?:сотрудник\w*|коллег\w*|пользовател\w*|employee\w*|colleague\w*|user)\b",
     re.IGNORECASE,
@@ -25169,26 +25551,668 @@ def _self_contained_explicit_public_web_query(message: str) -> str:
     return cleaned[:140]
 
 
-def _public_news_site_request(speech: str) -> bool:
-    """A command/question for a public-news source set, not a mere mention."""
+def _public_news_request_is_self_contained(visible: str) -> bool:
+    """Whether a news request carries no private, secret, or deictic source."""
 
-    visible = " ".join(str(speech or "").split())
+    if not visible or len(visible) > 320:
+        return False
+    visible = _public_news_typography_projection(visible)
+
+    letter_hyphen = re.compile(r"(?<=[^\W\d_])-(?=[^\W\d_])")
+    in_token_separator = re.compile(r"(?:(?<=[^\W\d_])[./&,+](?=\w)|(?<=\w)[./&,+](?=[^\W\d_]))")
+    hyphen_probes = (
+        visible,
+        letter_hyphen.sub(" ", visible),
+        letter_hyphen.sub("", visible),
+    )
+    carrier_probes = tuple(
+        dict.fromkeys(
+            projection
+            for probe in hyphen_probes
+            for normalized_probe in (
+                probe,
+                "".join(
+                    character
+                    for character in unicodedata.normalize("NFKD", probe)
+                    if not unicodedata.category(character).startswith("M")
+                ),
+            )
+            for projection in (
+                normalized_probe,
+                in_token_separator.sub(" ", normalized_probe),
+                in_token_separator.sub("", normalized_probe),
+            )
+        )
+    )
+    deictic_probes = tuple(_PUBLIC_NEWS_CLOSED_TEMPORAL_DEICTIC.sub(" ", probe) for probe in carrier_probes)
+    secret_probes = tuple(
+        re.sub(
+            r"(?<!\d)(?:(?:19|20)\d{2}[./-]\d{1,2}[./-]\d{1,2}|"
+            r"\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?)(?!\d)",
+            " DATE ",
+            probe,
+        )
+        for probe in carrier_probes
+    )
+
+    def carries(pattern: re.Pattern[str], probes: tuple[str, ...] = carrier_probes) -> bool:
+        return any(pattern.search(probe) for probe in probes)
+
+    def without_fronted_scope_delimiter(probe: str) -> str:
+        scope_patterns = (
+            _PUBLIC_NEWS_ENGLISH_MONTH_DAY_SCOPE,
+            _PUBLIC_NEWS_RUSSIAN_MONTH_SCOPE,
+            _SIMPLE_PUBLIC_NEWS_UNSUPPORTED_TIME_SCOPE,
+            _PUBLIC_NEWS_STRICT_TIME_SCOPE,
+            *_SIMPLE_PUBLIC_NEWS_FRESHNESS_PATTERNS.values(),
+        )
+        for pattern in scope_patterns:
+            for match in pattern.finditer(probe):
+                prefix = probe[: match.start()].strip().casefold()
+                if prefix not in {"", "за", "на", "for", "on"}:
+                    continue
+                tail = probe[match.end() :]
+                delimiter = re.match(r"\s*,\s*", tail)
+                if delimiter is not None:
+                    return tail[delimiter.end() :]
+        return probe
+
+    coordinated_probes = tuple(without_fronted_scope_delimiter(probe) for probe in carrier_probes)
+
+    def has_coordinated_person_action(probe: str) -> bool:
+        safe_topic_suffixes = (
+            "ing",
+            "tion",
+            "ment",
+            "ics",
+            "ism",
+            "ity",
+            "ship",
+            "ance",
+            "ence",
+            "ology",
+            "graphy",
+            "ware",
+            "ers",
+            "ies",
+        )
+        return any(
+            not match.group("target").casefold().endswith(safe_topic_suffixes)
+            for match in _PUBLIC_NEWS_COORDINATED_PERSON_ACTION.finditer(probe)
+        )
+
+    def has_mixed_script_token(probe: str) -> bool:
+        for token in re.findall(r"[\w-]+", unicodedata.normalize("NFKC", probe)):
+            scripts = {
+                unicodedata.name(character, "").partition(" ")[0]
+                for character in token
+                if unicodedata.category(character).startswith("L") and bool(unicodedata.name(character, ""))
+            }
+            if len(scripts) > 1:
+                return True
+        return False
+
+    private_markers = frozenset(
+        {
+            "project",
+            "проект",
+            "проєкт",
+            "code",
+            "код",
+            "credential",
+            "credentials",
+            "password",
+            "пароль",
+            "token",
+            "токен",
+            "secret",
+            "секрет",
+            "login",
+            "логин",
+            "private",
+            "internal",
+            "confidential",
+            "приватный",
+            "внутренний",
+            "конфиденциальный",
+            "приватний",
+            "особистий",
+            "внутрішній",
+            "конфіденційний",
+        }
+    )
+    ascii_private_markers = frozenset(marker for marker in private_markers if marker.isascii())
+
+    def has_fragmented_private_marker(probe: str) -> bool:
+        words = re.findall(r"[^\W\d_]+", unicodedata.normalize("NFKC", probe).casefold())
+        for start in range(len(words)):
+            joined = words[start]
+            for word in words[start + 1 : start + 12]:
+                joined += word
+                if joined in private_markers:
+                    return True
+                if len(joined) > 16:
+                    break
+        return False
+
+    def has_mark_obfuscated_private_marker(probe: str) -> bool:
+        canonical = unicodedata.normalize("NFKC", probe).casefold()
+        for word in re.findall(r"[^\W\d_]+", canonical):
+            skeleton = "".join(
+                character
+                for character in unicodedata.normalize("NFKD", word)
+                if not unicodedata.category(character).startswith("M")
+            )
+            if skeleton != word and skeleton in private_markers:
+                return True
+        return False
+
+    def has_latin_substitution_private_marker(probe: str) -> bool:
+        for word in re.findall(r"[^\W\d_]+", unicodedata.normalize("NFKC", probe).casefold()):
+            for marker in ascii_private_markers:
+                if len(word) != len(marker):
+                    continue
+                mismatches = [
+                    character
+                    for character, expected in zip(word, marker, strict=True)
+                    if character != expected
+                ]
+                if (
+                    len(mismatches) == 1
+                    and ord(mismatches[0]) > 127
+                    and unicodedata.name(mismatches[0], "").startswith("LATIN ")
+                ):
+                    return True
+        return False
+
+    def has_cyrillic_substitution_private_marker(probe: str) -> bool:
+        cyrillic_markers = tuple(
+            marker
+            for marker in private_markers
+            if marker and all(re.fullmatch(r"[а-яё]", character) for character in marker)
+        )
+        for word in re.findall(r"[^\W\d_]+", unicodedata.normalize("NFKC", probe).casefold()):
+            for marker in cyrillic_markers:
+                if len(word) != len(marker):
+                    continue
+                mismatches = [
+                    character
+                    for character, expected in zip(word, marker, strict=True)
+                    if character != expected
+                ]
+                if (
+                    len(mismatches) == 1
+                    and unicodedata.name(mismatches[0], "").startswith("CYRILLIC ")
+                    and re.fullmatch(r"[а-яё]", mismatches[0]) is None
+                ):
+                    return True
+        return False
+
+    def has_leetspeak_private_marker(probe: str) -> bool:
+        substitutions = {
+            "0": frozenset({"o", "о"}),
+            "1": frozenset({"i", "l", "і"}),
+            "3": frozenset({"e", "е"}),
+            "4": frozenset({"a", "а"}),
+            "5": frozenset({"s"}),
+            "7": frozenset({"t"}),
+            "8": frozenset({"b", "в"}),
+            "9": frozenset({"g"}),
+        }
+        for word in re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", probe).casefold()):
+            if not any(character in substitutions for character in word):
+                continue
+            for marker in private_markers:
+                if len(word) == len(marker) and all(
+                    character == expected or expected in substitutions.get(character, ())
+                    for character, expected in zip(word, marker, strict=True)
+                ):
+                    return True
+        return False
+
+    def has_near_private_marker_with_identifier(probe: str) -> bool:
+        private_carriers = frozenset(
+            {
+                "budget",
+                "vault",
+                "client",
+                "customer",
+                "archive",
+                "notes",
+                "file",
+                "document",
+                "channel",
+                "contract",
+                "crm",
+                "бюджет",
+                "хранилище",
+                "клиент",
+                "архив",
+                "заметки",
+                "файл",
+                "документ",
+                "канал",
+                "контракт",
+            }
+        )
+
+        def one_edit_apart(left: str, right: str) -> bool:
+            if left == right or abs(len(left) - len(right)) > 1:
+                return False
+            if len(left) == len(right):
+                mismatches = [
+                    index for index, pair in enumerate(zip(left, right, strict=True)) if pair[0] != pair[1]
+                ]
+                if len(mismatches) == 1:
+                    return True
+                return bool(
+                    len(mismatches) == 2
+                    and mismatches[1] == mismatches[0] + 1
+                    and left[mismatches[0]] == right[mismatches[1]]
+                    and left[mismatches[1]] == right[mismatches[0]]
+                )
+            shorter, longer = (left, right) if len(left) < len(right) else (right, left)
+            index = 0
+            while index < len(shorter) and shorter[index] == longer[index]:
+                index += 1
+            return shorter[index:] == longer[index + 1 :]
+
+        words = re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", probe))
+        for index, raw_word in enumerate(words[:-1]):
+            follower = words[index + 1]
+            identifier_evidence = bool(
+                any(character.isdigit() for character in follower)
+                or (len(follower) >= 2 and follower.isupper())
+                or follower.casefold() in private_carriers
+            )
+            if not identifier_evidence:
+                continue
+            candidate = raw_word.casefold()
+            if candidate in private_markers:
+                continue
+            if any(one_edit_apart(candidate, marker) for marker in private_markers):
+                return True
+        return False
+
+    return not bool(
+        carries(_FRESH_PUBLIC_NEWS_LOCAL_SCOPE)
+        or carries(_PUBLIC_NEWS_COORDINATED_ACTION, coordinated_probes)
+        or any(has_coordinated_person_action(probe) for probe in coordinated_probes)
+        or carries(_PUBLIC_NEWS_PRIVATE_WORK_CARRIER)
+        or carries(_PUBLIC_NEWS_STANDALONE_PRIVATE_DETERMINER)
+        or carries(_PUBLIC_NEWS_PRIVATE_CONTEXT_CARRIER)
+        or carries(_PUBLIC_NEWS_PRIVATE_SOURCE_RELATION)
+        or carries(_PUBLIC_NEWS_UNBOUND_EFFECT)
+        or carries(_PUBLIC_NEWS_PRIVATE_IDENTIFIER)
+        or carries(_PUBLIC_NEWS_EXPLICIT_SECRET_ASSIGNMENT)
+        or carries(_PUBLIC_NEWS_DENSE_HYPHEN_OBFUSCATION, (visible,))
+        or any(has_mixed_script_token(probe) for probe in carrier_probes)
+        or any(has_fragmented_private_marker(probe) for probe in carrier_probes)
+        or any(has_mark_obfuscated_private_marker(probe) for probe in hyphen_probes)
+        or any(has_latin_substitution_private_marker(probe) for probe in hyphen_probes)
+        or any(has_cyrillic_substitution_private_marker(probe) for probe in hyphen_probes)
+        or any(has_leetspeak_private_marker(probe) for probe in hyphen_probes)
+        or any(has_near_private_marker_with_identifier(probe) for probe in hyphen_probes)
+        or carries(_WEB_ISOLATION_DEICTIC, deictic_probes)
+        or carries(_WEB_ISOLATION_UNRESOLVED_TOPIC, deictic_probes)
+        or carries(_EXPLICIT_PUBLIC_WEB_ENGLISH_DEICTIC, deictic_probes)
+        or carries(_EXPLICIT_PUBLIC_WEB_ENGLISH_IT_DEICTIC, deictic_probes)
+        or carries(_EXPLICIT_PUBLIC_WEB_UNRESOLVED_PRONOUN, deictic_probes)
+        or carries(_EXPLICIT_PUBLIC_WEB_PRIVATE_SOURCE_CARRIER)
+        or carries(_EXPLICIT_PUBLIC_WEB_PRIVATE_PERSON_CARRIER)
+        or carries(_EXPLICIT_PUBLIC_WEB_FILENAME_OR_PATH)
+        or carries(_EXPLICIT_PUBLIC_WEB_SECRET_VALUE, secret_probes)
+        or carries(_ASKS_ABOUT_PERSONAL_STORAGE)
+        or any(_requests_foreign_private_data(probe) for probe in carrier_probes)
+        or any(_person_action_on_speech(probe) for probe in carrier_probes)
+        or _ASKS_FOR_A_REMINDER.search(visible)
+        or _ASKS_FOR_VOICE.search(visible)
+    )
+
+
+def _public_news_topic_surface_before_scope(visible: str) -> str:
+    """Return the bounded topic surface between ``news`` and its first scope."""
+
+    visible = _public_news_typography_projection(visible)
+    topic = _PUBLIC_NEWS_TOPIC.search(visible)
+    if topic is None:
+        return ""
+    scope_patterns = (
+        _PUBLIC_NEWS_ENGLISH_MONTH_DAY_SCOPE,
+        _PUBLIC_NEWS_RUSSIAN_MONTH_SCOPE,
+        _SIMPLE_PUBLIC_NEWS_UNSUPPORTED_TIME_SCOPE,
+        _PUBLIC_NEWS_STRICT_TIME_SCOPE,
+        _PUBLIC_NEWS_COMPLETE_SOURCE_SCOPE,
+        *_SIMPLE_PUBLIC_NEWS_FRESHNESS_PATTERNS.values(),
+    )
+    scope_starts = [
+        match.start()
+        for pattern in scope_patterns
+        for match in pattern.finditer(visible)
+        if match.start() >= topic.end()
+    ]
+    if not scope_starts:
+        return ""
+    topics = visible[topic.end() : min(scope_starts)]
+    return re.sub(r"\b(?:за|на|в|for|on|from)\s*$", "", topics, flags=re.IGNORECASE).strip()
+
+
+def _public_news_topic_list_commas_are_safe(visible: str) -> bool:
+    """Admit only a short comma/coordinator list of closed public topics."""
+
+    topics = _public_news_topic_surface_before_scope(visible)
+    if not topics:
+        return False
+    parts = [
+        part.strip()
+        for part in re.split(r"\s*(?:,|\b(?:и|and)\b)\s*", topics, flags=re.IGNORECASE)
+        if part.strip()
+    ]
+    return bool(2 <= len(parts) <= 4 and _public_news_topic_expression_is_safe(topics))
+
+
+def _public_news_raw_surface_is_safe(message: str) -> bool:
+    """One visible clause which may become a current-only public-news query."""
+
+    raw = str(message or "").strip()
+    if not raw or len(raw) > 320:
+        return False
+    for index, character in enumerate(raw):
+        if character in "'’" and not (
+            index > 0 and index + 1 < len(raw) and raw[index - 1].isalpha() and raw[index + 1].isalpha()
+        ):
+            return False
+    raw_guard = re.sub(r"\bwhat(?:['’]s)\b", "whats", raw, flags=re.IGNORECASE)
+    raw_guard = re.sub(
+        r"\b(today|tonight|yesterday)(?:['’]s)\b",
+        r"\1s",
+        raw_guard,
+        flags=re.IGNORECASE,
+    )
+    if any(character in raw_guard for character in '\x00\r\n`"«»“”„[]<>{}\\') or any(
+        unicodedata.category(character) == "Cf"
+        or unicodedata.category(character) == "Cc"
+        or unicodedata.category(character) in {"Zl", "Zp"}
+        or (unicodedata.category(character).startswith("S") and character not in "+&")
+        for character in raw_guard
+    ):
+        return False
+    visible = _public_news_typography_projection(raw).strip()
+    if _markdown_visible_projection(visible) != visible or re.search(
+        r"https?://|www\.", visible, flags=re.IGNORECASE
+    ):
+        return False
+    visible = _WEB_QUERY_SALUTATION_PREFIX.sub("", visible).strip()
+    body = visible.rstrip()
+    while body and unicodedata.category(body[-1]).startswith("P"):
+        body = body[:-1].rstrip()
+    # Commas are admitted only for a closed politeness form. Otherwise a
+    # public first clause could smuggle an unrelated private suffix into the
+    # implicit outbound query.
+    body = re.sub(
+        r"^(?:пожалуйста|please)\s*,\s*",
+        "",
+        body,
+        flags=re.IGNORECASE,
+    )
+    body = re.sub(
+        r",\s*(?:пожалуйста|please)\s*,",
+        " ",
+        body,
+        flags=re.IGNORECASE,
+    )
+    body = re.sub(
+        r",\s*(?:пожалуйста|please)\s*$",
+        "",
+        body,
+        flags=re.IGNORECASE,
+    )
+    topic_surface = _public_news_topic_surface_before_scope(body)
+    if (
+        "," in topic_surface or re.search(r"\b(?:и|and)\b", topic_surface, flags=re.IGNORECASE)
+    ) and not _public_news_topic_list_commas_are_safe(body):
+        return False
+    punctuation_probe = re.sub(
+        r"(?<!\d)(?:19|20)\d{2}[./-]\d{1,2}[./-]\d{1,2}(?!\d)",
+        "DATE",
+        body,
+    )
+    punctuation_probe = _PUBLIC_NEWS_ENGLISH_MONTH_DAY_SCOPE.sub(" DATE ", punctuation_probe)
+    punctuation_probe = _PUBLIC_NEWS_RUSSIAN_MONTH_SCOPE.sub(" DATE ", punctuation_probe)
+    punctuation_probe = re.sub(r"\bwhat(?:['’]s)\b", "whats", punctuation_probe, flags=re.IGNORECASE)
+    punctuation_probe = re.sub(
+        r"\b(today|tonight|yesterday)(?:['’]s)\b",
+        r"\1s",
+        punctuation_probe,
+        flags=re.IGNORECASE,
+    )
+    punctuation_probe = punctuation_probe.replace(",", " ")
+    if not body:
+        return False
+    for index, character in enumerate(punctuation_probe):
+        if character == " " or character.isalnum() or unicodedata.category(character).startswith("M"):
+            continue
+        if (
+            character == "-"
+            and index > 0
+            and index + 1 < len(punctuation_probe)
+            and punctuation_probe[index - 1].isalnum()
+            and punctuation_probe[index + 1].isalnum()
+        ):
+            continue
+        if (
+            character in "&/"
+            and index > 0
+            and index + 1 < len(punctuation_probe)
+            and punctuation_probe[index - 1].isalnum()
+            and punctuation_probe[index + 1].isalnum()
+        ):
+            continue
+        if character == "." and index + 1 < len(punctuation_probe):
+            left_is_word = index > 0 and punctuation_probe[index - 1].isalnum()
+            right_is_word = punctuation_probe[index + 1].isalnum()
+            leading_technical = (index == 0 or punctuation_probe[index - 1].isspace()) and (
+                punctuation_probe[index + 1].isalpha()
+            )
+            if left_is_word and right_is_word or leading_technical:
+                continue
+        if character == "." and re.search(
+            r"(?:^|[-\s])(?:[A-Za-z]\.){2,}$",
+            punctuation_probe[: index + 1],
+        ):
+            continue
+        if (
+            character in "'’"
+            and index > 0
+            and index + 1 < len(punctuation_probe)
+            and punctuation_probe[index - 1].isalpha()
+            and punctuation_probe[index + 1].isalpha()
+        ):
+            continue
+        if character == "+":
+            run_start = index
+            run_end = index + 1
+            while run_start > 0 and punctuation_probe[run_start - 1] == "+":
+                run_start -= 1
+            while run_end < len(punctuation_probe) and punctuation_probe[run_end] == "+":
+                run_end += 1
+            if (
+                1 <= run_end - run_start <= 2
+                and run_start > 0
+                and punctuation_probe[run_start - 1].isalnum()
+                and (
+                    run_end == len(punctuation_probe)
+                    or punctuation_probe[run_end].isspace()
+                    or punctuation_probe[run_end].isalnum()
+                )
+            ):
+                continue
+        if (
+            character == "#"
+            and index > 0
+            and punctuation_probe[index - 1].isalnum()
+            and (index + 1 == len(punctuation_probe) or punctuation_probe[index + 1].isspace())
+        ):
+            continue
+        return False
+    return True
+
+
+def _public_news_authority_anchor_closes_surface(visible: str) -> bool:
+    """Require every post-``news`` byte to be a scope or bounded topic."""
+
+    if not visible or len(visible) > 320:
+        return False
+
+    normalized = " ".join(_public_news_typography_projection(visible).split())
+    normalized = _WEB_QUERY_SALUTATION_PREFIX.sub("", normalized)
+    normalized = normalized.rstrip(" .!?…")
+    normalized = re.sub(
+        r"\s*,?\s*(?:(?:покаж(?:и|ите|ешь|ете)|расскаж(?:и|ите|ешь|ете)|"
+        r"show|tell)(?:\s+me)?|пожалуйста|please)\s*$",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    ).rstrip()
+    topic = _PUBLIC_NEWS_TOPIC.search(normalized)
+    if topic is None:
+        return False
+    scope_patterns = (
+        _PUBLIC_NEWS_ENGLISH_MONTH_DAY_SCOPE,
+        _PUBLIC_NEWS_RUSSIAN_MONTH_SCOPE,
+        _SIMPLE_PUBLIC_NEWS_UNSUPPORTED_TIME_SCOPE,
+        _PUBLIC_NEWS_STRICT_TIME_SCOPE,
+        _PUBLIC_NEWS_COMPLETE_SOURCE_SCOPE,
+        *_SIMPLE_PUBLIC_NEWS_FRESHNESS_PATTERNS.values(),
+    )
+    matches = [match for pattern in scope_patterns for match in pattern.finditer(normalized)]
+    tail_start = topic.end()
+    mask = [False] * len(normalized)
+    for match in matches:
+        if match.end() <= tail_start:
+            continue
+        for index in range(max(tail_start, match.start()), match.end()):
+            mask[index] = True
+    residue = "".join(
+        character if not mask[index] else " "
+        for index, character in enumerate(normalized[tail_start:], start=tail_start)
+    )
+    residue = re.sub(
+        r"\b(?:за|на|из|по|с|в|про|о|об|from|on|for|the|over|during|of|about)\b",
+        " ",
+        residue,
+        flags=re.IGNORECASE,
+    )
+    residue = " ".join(residue.split()).strip(" ,")
+    return not residue or _public_news_topic_expression_is_safe(residue)
+
+
+def _public_news_site_request(speech: str) -> bool:
+    """A self-contained public-news command/question, not a mere mention.
+
+    Public authority may be explicit (sites/media) or temporal (today, a
+    provider window, or a literal calendar date).  The latter matters for
+    ordinary requests such as ``дай сводку новостей за 24 число``: the date is
+    preserved in the outbound query and never rounded to the trailing day.
+    """
+
+    raw = str(speech or "").strip()
+    if not raw or len(raw) > 320:
+        return False
+    visible = " ".join(_public_news_typography_projection(raw).split())
+    visible = _WEB_QUERY_SALUTATION_PREFIX.sub("", visible)
+    temporal_scope = bool(
+        _SIMPLE_PUBLIC_NEWS_UNSUPPORTED_TIME_SCOPE.search(visible)
+        or _SIMPLE_PUBLIC_NEWS_ANY_TIME_SCOPE.search(visible)
+        or any(pattern.search(visible) for pattern in _SIMPLE_PUBLIC_NEWS_FRESHNESS_PATTERNS.values())
+        or re.search(
+            r"\b(?:(?:свеж|последн|актуальн|главн|важн)\w*|"
+            r"fresh|latest|current|top|main|headline)\b",
+            visible,
+            re.IGNORECASE,
+        )
+    )
+    request_surface = visible
+    scope_patterns = (
+        _PUBLIC_NEWS_ENGLISH_MONTH_DAY_SCOPE,
+        _PUBLIC_NEWS_RUSSIAN_MONTH_SCOPE,
+        _SIMPLE_PUBLIC_NEWS_UNSUPPORTED_TIME_SCOPE,
+        _PUBLIC_NEWS_STRICT_TIME_SCOPE,
+        _PUBLIC_NEWS_COMPLETE_SOURCE_SCOPE,
+        *_SIMPLE_PUBLIC_NEWS_FRESHNESS_PATTERNS.values(),
+    )
+    fronted_scopes = []
+    for pattern in scope_patterns:
+        for match in pattern.finditer(visible):
+            prefix = visible[: match.start()].strip(" ,").casefold()
+            if not prefix or prefix in {"за", "на", "for", "on", "from"}:
+                fronted_scopes.append(match)
+    if fronted_scopes:
+        fronted_scope = max(fronted_scopes, key=lambda match: match.end())
+        request_surface = visible[fronted_scope.end() :].lstrip(" ,:—–-")
     return bool(
         visible
         and _PUBLIC_NEWS_TOPIC.search(visible)
-        and _PUBLIC_NEWS_SOURCE_SCOPE.search(visible)
-        and not _FRESH_PUBLIC_NEWS_LOCAL_SCOPE.search(visible)
-        and (_PUBLIC_NEWS_REQUEST_COMMAND.search(visible) or _PUBLIC_NEWS_REQUEST_QUESTION.search(visible))
+        and (_PUBLIC_NEWS_SOURCE_SCOPE.search(visible) or temporal_scope)
+        and _public_news_request_is_self_contained(visible)
+        and _public_news_authority_anchor_closes_surface(visible)
+        and (
+            _PUBLIC_NEWS_REQUEST_COMMAND.search(request_surface)
+            or _PUBLIC_NEWS_REQUEST_QUESTION.search(request_surface)
+            or (
+                _PUBLIC_NEWS_NOUN_FIRST_REQUEST.fullmatch(request_surface)
+                and not _PUBLIC_NEWS_NOUN_FIRST_NARRATION.search(request_surface)
+            )
+            or (
+                _PUBLIC_NEWS_BARE_FRESH_NOUN_REQUEST.fullmatch(request_surface)
+                and not _PUBLIC_NEWS_NOUN_FIRST_NARRATION.search(request_surface)
+            )
+            or _public_news_topic_first_request_is_safe(request_surface)
+            or _ASKS_FOR_FRESH_PUBLIC_NEWS.fullmatch(request_surface)
+        )
+    )
+
+
+def _public_news_has_real_unsupported_time_scope(visible: str) -> bool:
+    """Ignore calendar words only when they are inside an explicit topic."""
+
+    unsupported = list(_SIMPLE_PUBLIC_NEWS_UNSUPPORTED_TIME_SCOPE.finditer(visible))
+    if not unsupported:
+        return False
+    news = _PUBLIC_NEWS_TOPIC.search(visible)
+    if news is None:
+        return True
+    protected: list[tuple[int, int]] = []
+    topic_introducer = re.compile(r"\b(?:о|об|про|по\s+теме|about)\s+", re.IGNORECASE)
+    for freshness_pattern in _SIMPLE_PUBLIC_NEWS_FRESHNESS_PATTERNS.values():
+        for freshness in freshness_pattern.finditer(visible):
+            if freshness.start() <= news.end():
+                continue
+            introducers = [
+                match for match in topic_introducer.finditer(visible, news.end(), freshness.start())
+            ]
+            if not introducers:
+                continue
+            introducer = introducers[-1]
+            topic_surface = visible[introducer.end() : freshness.start()].strip(" ,")
+            if _public_news_topic_expression_is_safe(topic_surface):
+                protected.append((introducer.end(), freshness.start()))
+    return any(
+        not any(start <= match.start() and match.end() <= end for start, end in protected)
+        for match in unsupported
     )
 
 
 def _simple_public_news_freshness(speech: str) -> str | None:
     """Exact provider window for the closed lane, or ``None`` when unsupported."""
 
-    visible = " ".join(str(speech or "").split())
+    raw = str(speech or "").strip()
+    if not raw or len(raw) > 320:
+        return None
+    visible = " ".join(_public_news_typography_projection(raw).split())
     if not _public_news_site_request(visible):
         return None
-    if _SIMPLE_PUBLIC_NEWS_UNSUPPORTED_TIME_SCOPE.search(visible):
+    if _public_news_has_real_unsupported_time_scope(visible):
         return None
     matched = {
         freshness
@@ -25204,6 +26228,23 @@ def _simple_public_news_freshness(speech: str) -> str | None:
         # down.  The ordinary route retains the user's literal query instead.
         return None
     return "day"
+
+
+def _implicit_public_news_action(speech: str) -> bool:
+    """Current-text news authority shared by routing and public wrappers."""
+
+    raw = str(speech or "").strip()
+    if not raw or len(raw) > 320:
+        return False
+    visible = " ".join(_public_news_typography_projection(raw).split())
+    return bool(
+        (
+            _ASKS_FOR_FRESH_PUBLIC_NEWS.fullmatch(visible)
+            and _public_news_request_is_self_contained(visible)
+            and _public_news_authority_anchor_closes_surface(visible)
+        )
+        or _public_news_site_request(visible)
+    )
 
 
 def _web_source_class_on_speech(speech: str) -> str:
@@ -25250,14 +26291,11 @@ def _web_action_on_speech(speech: str) -> bool:
     visible = " ".join(str(speech or "").split())
     if not visible:
         return False
-    fresh_public_news = bool(
-        _ASKS_FOR_FRESH_PUBLIC_NEWS.fullmatch(visible) and not _FRESH_PUBLIC_NEWS_LOCAL_SCOPE.search(visible)
-    )
+    implicit_public_news = _implicit_public_news_action(visible)
     return bool(
         _ASKS_FOR_THE_WEB.search(visible)
         or _ASKS_FOR_THE_WEB_AFTER_COORDINATOR.search(visible)
-        or fresh_public_news
-        or _public_news_site_request(visible)
+        or implicit_public_news
         or (_DIRECT_FILE_WEB_SOURCE.search(visible) and _is_direct_file_request(visible))
     )
 
@@ -25270,15 +26308,15 @@ def asks_for_the_web(message: str) -> bool:
     команда, а не факт: замерено, что пятнадцать таких просьб подряд дали
     пятнадцать записей в Inbox.
     """
-    visible = _record_source_command_text(message)
-    fresh_public_news = bool(
-        _ASKS_FOR_FRESH_PUBLIC_NEWS.fullmatch(visible) and not _FRESH_PUBLIC_NEWS_LOCAL_SCOPE.search(visible)
-    )
+    raw = str(message or "")
+    if len(raw) > 4096:
+        return False
+    visible = _record_source_command_text(raw)
+    implicit_public_news = _implicit_public_news_action(visible)
     return bool(
         _ASKS_FOR_THE_WEB.search(visible)
         or _ASKS_FOR_THE_WEB_AFTER_COORDINATOR.search(visible)
-        or fresh_public_news
-        or _public_news_site_request(visible)
+        or (implicit_public_news and _public_news_raw_surface_is_safe(message))
         or _direct_file_request_uses_the_web(visible)
     )
 
@@ -25539,6 +26577,7 @@ _FILE_TURN_EFFECTS = frozenset(
     }
 )
 _FILE_TURN_TOOL_EFFECTS = _FILE_TURN_EFFECTS - {"person"}
+_FILE_TURN_AUTHORITY_MAX_CHARS = 4096
 _FILE_TURN_EFFECT_TOOL_NAMES: dict[str, frozenset[str]] = {
     "web": frozenset({"web_search", "web_fetch", "web_research"}),
     "reminder": frozenset({"remind"}),
@@ -26879,7 +27918,18 @@ def _generic_event_has_positive_source_relation(
 def file_turn_authority(message: str) -> FileTurnAuthority:
     """Single file-turn calculation: unquoted proofs and exact locator roles."""
 
-    raw_surface = str(message or "").strip()
+    delivered_surface = str(message or "")
+    if len(delivered_surface) > _FILE_TURN_AUTHORITY_MAX_CHARS:
+        classified = _classification_text(delivered_surface[:_FILE_TURN_AUTHORITY_MAX_CHARS])
+        return FileTurnAuthority(
+            original=delivered_surface,
+            classified=classified,
+            speech=file_authority_speech(classified),
+            quotes=(),
+            locators=(),
+            actions=frozenset(),
+        )
+    raw_surface = delivered_surface.strip()
     classified = _classification_text(raw_surface)
     generic_event_raw_surface_is_plain = raw_surface == classified
     speech = file_authority_speech(classified)
@@ -26976,7 +28026,15 @@ def file_turn_authority(message: str) -> FileTurnAuthority:
         # projects away `message_search` before the code-owned prefetch can run
         # and leaves the model to answer from its short prompt history.
         actions.discard("local_read")
-    if _web_action_on_speech(speech):
+    implicit_public_news = _implicit_public_news_action(speech)
+    explicit_web_action = bool(
+        _ASKS_FOR_THE_WEB.search(speech)
+        or _ASKS_FOR_THE_WEB_AFTER_COORDINATOR.search(speech)
+        or (_DIRECT_FILE_WEB_SOURCE.search(speech) and _is_direct_file_request(speech))
+    )
+    if _web_action_on_speech(speech) and (
+        explicit_web_action or not implicit_public_news or _public_news_raw_surface_is_safe(raw_surface)
+    ):
         actions.add("web")
     if _ASKS_FOR_A_REMINDER.search(speech):
         actions.add("reminder")
@@ -27008,6 +28066,11 @@ def file_turn_authority(message: str) -> FileTurnAuthority:
         actions.add("silence")
     if _quoted_record_source_command_is_data(message):
         actions.add("quote_data")
+    if implicit_public_news and "web" in actions:
+        # The closed current-only grammar has already rejected compounds and
+        # private carriers. Topic nouns such as ``documents``, ``updates``,
+        # ``CRM`` or ``tags`` must not mint unrelated private/effect tools.
+        actions.intersection_update({"web"})
     return FileTurnAuthority(
         original=str(message or ""),
         classified=classified,
@@ -52588,7 +53651,7 @@ class AgentRuntime:
                 if subject:
                     return subject[:140]
 
-        cleaned = message
+        cleaned = _WEB_QUERY_SALUTATION_PREFIX.sub("", message)
         if direct_web_file:
             # The provider needs the research subject, not carrier directives
             # such as ``сделай красивый Excel по данным из интернета``.  The

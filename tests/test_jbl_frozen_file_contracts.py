@@ -1693,15 +1693,24 @@ class _WebKernel:
     def get_tool_definitions(self, actor, topic=""):  # noqa: ANN001, ARG002
         return [_tool("web_research")]
 
+    def get_tool(self, name: str):  # noqa: ANN201
+        if name != "web_research":
+            return None
+        return SimpleNamespace(name="web_research", security_id="web.research", risk="mutate")
+
     async def execute(self, tool, params, actor=None):  # noqa: ANN001, ARG002
         assert tool == "web_research"
         self.calls.append((str(tool), dict(params)))
         public_text = "At normal pressure the synthetic boiling point is 100 C."
+        freshness = str(params.get("freshness") or "")
         return ToolResult(
             tool,
             True,
             {
                 "outbound_attempted": True,
+                "query": str(params.get("query") or ""),
+                "freshness": freshness,
+                "applied_search_filters": {"freshness": freshness},
                 "sources": [
                     {
                         "url": "https://public.synthetic.example.com/fact",
@@ -1780,7 +1789,7 @@ def test_fresh_public_news_is_an_explicit_web_request_but_local_news_is_not() ->
 
 
 @pytest.mark.asyncio
-async def test_recent_private_file_then_fresh_news_denies_web_and_history_use(
+async def test_recent_private_file_then_self_contained_news_uses_current_only_web(
     settings,
     storage,
     monkeypatch,
@@ -1805,13 +1814,25 @@ async def test_recent_private_file_then_fresh_news_denies_web_and_history_use(
         conversation_id=conversation_id,
     )
 
-    assert kernel.calls == []
-    assert reply["tools_used"] == []
-    assert reply["web_evidence_status"] == "none"
+    assert kernel.calls == [
+        (
+            "web_research",
+            {
+                "query": runtime.web_query_from(request),
+                "max_sources": 3,
+                "freshness": "day",
+            },
+        )
+    ]
+    assert reply["tools_used"] == ["web_research"]
+    assert reply["web_evidence_status"] == "sourced"
     exposed = json.dumps(model.calls, ensure_ascii=False)
     assert "PRIVATE-HISTORY-CANARY" not in exposed
     assert "PRIVATE-ANSWER-CANARY" not in exposed
-    assert "приватные вложения" in reply["message"].casefold()
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    assert metadata["private_context_lineage"] is True
+    assert metadata["structural"].get("private_web_search_blocked") is not True
 
 
 @pytest.mark.asyncio

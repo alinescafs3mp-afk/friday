@@ -6,16 +6,17 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-25
 - Branch: `main`
-- Secondary candidate source: Friday `0.207.11` in this revision (sealed product
-  evidence and rollout-consume boundary; physical/profile acceptance pending)
-- Deployed implementation head: `aaae455a3eec6024c1e4e338d8f00b31ee90f995`
-- Live: Friday `0.207.10` / `aaae455a3eec6024c1e4e338d8f00b31ee90f995`;
+- Secondary acceptance base: released Friday `0.207.11` (sealed product
+  evidence and rollout-consume boundary); physical/profile acceptance will bind
+  the next immutable release after the current web hotfix
+- Deployed implementation head: `0c985cf41ee01e6beb2187134f42ff8dd8088deb`
+- Live: Friday `0.207.11` / `0c985cf41ee01e6beb2187134f42ff8dd8088deb`;
+  tree `3fd9b4730bcd55d61f426d9eb0d77bb24d0c62ba41e745923d62e44c4671aff4`;
+  wheel `a2d785d980b8b6b0208af7007c7fa39bd2230a1551221e63b35d6b710b1b9736`
+- Schema-capable fallback: Friday `0.207.10` /
+  `aaae455a3eec6024c1e4e338d8f00b31ee90f995`;
   tree `4f5c5e9a130e33f47fbf8f9282362f77b18b8f625d00f313b0cda4124d7ab76e`;
   wheel `a563ad94c678ca5332f0cfe142ef65a18c6cc4a12f7e07b9d64c2734d06181f6`
-- Schema-capable fallback: Friday `0.207.9` /
-  `f1426ca561f8914574cebf3a69f8dde83f79b568`;
-  tree `eb8102ccf759b0f2a2d9a0a38584d9cda0c4938f14d389ac55246d87e536e6f7`;
-  wheel `cd8ab7320718cce4c7d15caef1f8ee36e4d2c25c063578d02980bf59fcc4af48`
 - Database schema: 39
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean
@@ -25,11 +26,12 @@ the current production identity, completed packages, active work and next order.
 
 ## Active objective
 
-Build the optional detachable GPT-OSS-20B/SGLang secondary node described in
-`OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`, preserving
-exact primary-only behavior whenever that node is absent. The narrow schema-39
-archive-evidence continuation is deployed in `0.207.9`; broader Interaction
-Control Plane work remains paused until the urgent secondary-brain package.
+First restore the general `web_read` contour and release it with a cross-feature
+regression gate. Then finish the optional detachable GPT-OSS-20B/SGLang node
+through physical acceptance, public shadow, private shadow and bounded assist,
+preserving exact primary-only behavior whenever the laptop is absent. After the
+final incoming ICP checkpoint is independently accepted, resume the broader
+Interaction Control Plane and V12 work.
 
 The measured provisional finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -123,17 +125,17 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Release this exact `0.207.11` implementation default-off, then complete
-   deterministic, controlled-live and pre-acceptance physical laptop-loss
-   evidence from that immutable source and accept only the exact bound finalist.
-2. Register only the accepted manifest in a separate default-off release, then
-   prove private product shadow before bounded assist with exact primary
-   fallback.
-3. Repeat the physical cycle with product-linked counters after assist is
-   admitted.
-4. Resume `INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md`; extend durable
-   recall only through the deployed source/passage, coverage and
-   late-reauthorization contracts.
+1. Release the general `web_read` hotfix as `0.207.12` after its complete
+   cross-feature gate and immutable production verification.
+2. Complete deterministic, controlled-live and physical laptop-loss evidence
+   from the exact immutable release; accept and register only the bound
+   finalist in a separate default-off release.
+3. Promote distinct candidates through public shadow, private shadow and
+   bounded assist, proving exact primary fallback and repeating the physical
+   cycle with product-linked counters.
+4. Independently accept the incoming durable-recall checkpoint, then resume
+   `INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md` through the deployed
+   source/passage, coverage and late-reauthorization contracts.
 
 ## Completed and deployed (current package)
 
@@ -241,6 +243,15 @@ course, with these repository-specific constraints:
   30-minute soak are exact. Capacity v2 is accepted; failure/profile acceptance
   and profile registration remain pending.
 
+### Secondary rollout boundary released default-off (`0.207.11`)
+
+- Source is `0c985cf41ee01e6beb2187134f42ff8dd8088deb`; immutable release,
+  trusted-CA health, schema 39, SQLite integrity and foreign keys passed.
+- The sealed product runner and one-use rollout receipt consumption boundary
+  are deployed. The accepted profile registry remains empty, so production
+  still sends no traffic to GPT-OSS and `assist` remains closed pending physical
+  and product-stage evidence.
+
 ## Document-contour WIP audit disposition
 
 The recovered 0.207.4 inventory was revalidated against current `main`; no old
@@ -259,9 +270,12 @@ blob or migration is a release candidate:
   false `pending` locks, three obsolete gate caches and stale missing-worktree
   registrations were removed. Current `main`, live immutable releases,
   rollback/evidence roots and companion code were untouched;
-- ambiguous forensic refs (`document-file-contour-wip`, `de37c64` and G45) remain
-  retained until their separate semantic/retention review; cleanup did not trade
-  recoverability for disk space.
+- `archive/de37c64-wip-20260822` and `g45-pdf-scan-live-repair` are proven
+  code-superseded and may be removed after a retained forensic bundle is
+  verified;
+- `refs/archive/document-file-contour-wip-20260822` remains held until its 824
+  unique evidence blobs are bundled or explicitly discarded. Product code in
+  that ref is superseded, but the evidence is not otherwise retained.
 
 ## Canonical golden-journey/evidence registry
 
@@ -305,28 +319,26 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- The canonical gate passed 18,021 tests. Static and focused secondary gates are
-  green.
-- Friday `0.207.10` is live at the exact source/tree/wheel identity above,
-  schema 39, with schema-capable fallback
-  `f1426ca561f8914574cebf3a69f8dde83f79b568` / tree
-  `eb8102ccf759b0f2a2d9a0a38584d9cda0c4938f14d389ac55246d87e536e6f7`.
+- The `0.207.11` canonical gate passed 18,040 non-UI tests plus 31 UI tests;
+  static and focused secondary gates are green.
+- Friday `0.207.11` is live at the exact source/tree/wheel identity above,
+  schema 39, with `0.207.10` as the schema-capable fallback.
 
 ## Next order
 
-1. Release this exact `0.207.11` implementation default-off, then complete
-   deterministic, controlled-live and pre-acceptance physical laptop-loss node
-   certification from that immutable source and accept only the fully
-   evidence-bound finalist.
-2. Register only its accepted manifest in a separate default-off release; then
-   prove private product shadow before bounded assist, including laptop-off and
-   disconnect-mid-turn.
-3. Repeat the physical cycle with product-linked counters after assist is
-   admitted.
-4. Resume broader ICP work from the deployed schema-39 archive-evidence
-   vertical.
-5. Add durable candidate selection/pending-question state only when it preserves
-   exact archive coverage and survives restart without persisting model prose.
+1. Release the general `web_read` hotfix after the exact live regression, a
+   varied intent/privacy matrix and the complete canonical gate pass.
+2. Complete deterministic, controlled-live and physical laptop-loss evidence;
+   accept and register only the exact finalist in a separate default-off
+   release.
+3. Promote distinct immutable candidates through public shadow, private shadow
+   and bounded assist; repeat laptop-off/disconnect-mid-turn with product-linked
+   counters and prove primary fallback exactly once.
+4. Independently accept the final incoming ICP checkpoint, then resume broader
+   ICP work from the deployed schema-39 archive-evidence vertical.
+5. Build durable DocumentCatalog/enrichment and add durable candidate
+   selection/pending-question state only when it preserves exact archive
+   coverage and survives restart without persisting model prose.
 6. Add one uncertainty-aware common effect envelope and prove one idempotent,
    receipt-backed Obsidian mutation/reconciliation vertical.
 7. Extend existing immutable-release evidence into machine-reconcilable
@@ -334,8 +346,11 @@ claims at this checkpoint.
    journey evidence without promoting generic component gates.
 8. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
    certification; simulations remain labelled separately.
-9. Evaluate generic WorkGraph, broader effects, connectors or companion work
-   only from the golden journeys still failing after the preceding packages.
+9. Begin V12 refinement with `ExplainSelectedArchiveEvidence`, and make the
+   cross-feature search/file/Obsidian/dialogue battery mandatory for releases.
+10. Evaluate generic WorkGraph, broader effects or connectors only from the
+   golden journeys still failing after the preceding packages. Companion work
+   remains out of scope.
 
 ## WIP source retention
 

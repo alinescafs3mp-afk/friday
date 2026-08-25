@@ -69,7 +69,7 @@ journal, без ручного запуска systemd или восстанов�
 
 ### Optional GPT-OSS secondary brain
 
-Release 0.207.11 запускается с secondary в состоянии `disabled`:
+Release 0.207.11 и последующий 0.207.12 запускаются с secondary в состоянии `disabled`:
 переменные `FRIDAY_SECONDARY_LLM_*` в ENV0 не нужны. В этом релизе
 accepted-реестр пуст; единственная разрешённая ступень для exact
 finalist — provisional `shadow/extract` без private text. Его результат
@@ -660,7 +660,7 @@ orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.11`.
+требуйте `status=ok` и `version=0.207.12`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

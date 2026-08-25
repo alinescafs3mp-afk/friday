@@ -560,6 +560,24 @@ def test_international_news_wording_preserves_the_foreign_source_class(news_prom
         ("Собери новости зарубежных СМИ предыдущей недели.", None),
         ("Show foreign media news since Monday.", None),
         ("Show world news this week.", None),
+        ("Привет! дай сводку по новостям СВО за 24 число", None),
+        ("Пожалуйста, подготовь новости экономики за 24.08.2026", None),
+        ("Можно сводку новостей за 24 число?", None),
+        ("Сводку новостей за 24 число, пожалуйста", None),
+        ("Что было в новостях 24 числа?", None),
+        ("Можешь дать сводку новостей за 24 число?", None),
+        ("Подведи итоги новостей за 24 число", None),
+        ("Give me news for August 24", None),
+        ("Please give me news for August 24", None),
+        ("Tell me the news for August 24", None),
+        ("Пятница, дай сводку новостей за 24 число", None),
+        ("Каковы главные новости за 24 число?", None),
+        ("Give me news for August 24, 2026", None),
+        ("Дай новости за 2026-08-24", None),
+        ("Дай новости России, Украины и мира за 24 августа", None),
+        ("Show latest news about OpenAI", "day"),
+        ("Расскажи последние новости науки", "day"),
+        ("Свежие новости за прошедшие сутки покажешь?", "day"),
     ),
 )
 def test_simple_news_never_narrows_an_explicit_time_window(
@@ -623,7 +641,8 @@ class _OrdinaryHistoricalNewsModel:
     model = "synthetic-ordinary-historical-news"
     total_budget_sec = 360.0
 
-    def __init__(self) -> None:
+    def __init__(self, prompt: str = "Какие мировые новости вышли вчера?") -> None:
+        self.prompt = prompt
         self.calls: list[dict[str, Any]] = []
 
     async def chat(self, messages, tools=None, **kwargs):  # noqa: ANN001
@@ -636,7 +655,7 @@ class _OrdinaryHistoricalNewsModel:
         )
         assert tools == [], "an isolated historical-news turn retained effect authority"
         rendered = json.dumps(messages, ensure_ascii=False)
-        assert "Какие мировые новости вышли вчера?" in rendered
+        assert self.prompt in rendered
         assert PUBLIC_FACT in rendered
         return {
             "content": f"Обычный маршрут: {PUBLIC_FACT}",
@@ -645,15 +664,54 @@ class _OrdinaryHistoricalNewsModel:
         }
 
 
+@pytest.mark.parametrize(
+    ("prompt", "expected_query", "expected_source_class"),
+    (
+        ("Какие мировые новости вышли вчера?", "Какие мировые новости вышли вчера?", "foreign"),
+        (
+            "Привет! дай сводку по новостям СВО за 24 число",
+            "сводку по новостям СВО за 24 число",
+            "",
+        ),
+        (
+            "Пожалуйста, подготовь новости экономики за 24.08.2026",
+            "подготовь новости экономики за 24.08.2026",
+            "",
+        ),
+        ("Можно сводку новостей за 24 число?", "Можно сводку новостей за 24 число?", ""),
+        (
+            "Сводку новостей за 24 число, пожалуйста",
+            "Сводку новостей за 24 число",
+            "",
+        ),
+        ("Что было в новостях 24 числа?", "Что было в новостях 24 числа?", ""),
+        ("Give me news for August 24", "Give me news for August 24", ""),
+        ("Please give me news for August 24", "Please give me news for August 24", ""),
+        ("Tell me the news for August 24", "Tell me the news for August 24", ""),
+    ),
+)
 @pytest.mark.asyncio
 async def test_unsupported_historical_news_stays_isolated_without_a_day_filter(
+    prompt: str,
+    expected_query: str,
+    expected_source_class: str,
     settings,
     storage,
     monkeypatch,
 ) -> None:
-    prompt = "Какие мировые новости вышли вчера?"
+    private_canary = "PRIVATE-NEWS-HISTORY-MUST-NOT-LEAVE"
+    storage.ensure_user(OWNER, preset_key="owner")
+    conversation = storage.create_conversation(OWNER, title="private-news-history")
+    conversation_id = str(conversation["id"])
+    storage.store_message(
+        conversation_id,
+        OWNER,
+        "user",
+        private_canary,
+        metadata={"had_attachments": True, "private_context_lineage": True},
+    )
     kernel = _SyntheticNewsKernel()
-    model = _OrdinaryHistoricalNewsModel()
+    model = _OrdinaryHistoricalNewsModel(prompt)
     runtime = _runtime(
         settings,
         storage,
@@ -668,22 +726,26 @@ async def test_unsupported_historical_news_stays_isolated_without_a_day_filter(
 
     monkeypatch.setattr(runtime, "_prepare_context", forbidden_context)
 
-    reply = await runtime.chat(OWNER, prompt, actor=_actor())
+    reply = await runtime.chat(
+        OWNER,
+        prompt,
+        actor=_actor(),
+        conversation_id=conversation_id,
+    )
 
-    assert kernel.calls == [
-        (
-            "web_research",
-            {
-                "query": runtime.web_query_from(prompt),
-                "max_sources": 3,
-                "source_class": "foreign",
-            },
-        )
-    ]
+    expected_arguments = {
+        "query": expected_query,
+        "max_sources": 3,
+    }
+    assert runtime.web_query_from(prompt) == expected_query
+    if expected_source_class:
+        expected_arguments["source_class"] = expected_source_class
+    assert kernel.calls == [("web_research", expected_arguments)]
     assert len(model.calls) == 1
     assert reply["tools_used"] == ["web_research"]
     assert reply["web_evidence_status"] == "sourced"
     assert "Обычный маршрут" in reply["message"]
+    assert private_canary not in json.dumps([model.calls, kernel.calls], ensure_ascii=False)
 
 
 @pytest.mark.asyncio
@@ -1241,7 +1303,7 @@ class _NeverModel:
 
 
 @pytest.mark.asyncio
-async def test_news_plus_reminder_remains_on_the_compound_agentic_route(
+async def test_news_plus_reminder_keeps_outbound_web_out_of_the_compound_route(
     settings,
     storage,
     monkeypatch,
@@ -1282,7 +1344,7 @@ async def test_news_plus_reminder_remains_on_the_compound_agentic_route(
     assert agentic_calls == [
         {
             "message": compound,
-            "tools": ["web_research", "remind"],
+            "tools": ["remind"],
         }
     ]
     assert kernel.calls == []
