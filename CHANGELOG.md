@@ -1,3 +1,14 @@
+## 0.207.20 — 2026-08-25
+
+### Reader-first archive explanation compatibility
+
+- Durable archive outcome and Work Item readers now understand a verified
+  selected-evidence explanation receipt while preserving every exact passage
+  citation identity and re-deriving its request/evidence plan on reload.
+- The product runtime does not write the new receipt in this release. This
+  reader-first cut makes the following writer activation rollback-safe without
+  changing schema 41 or existing exact replay behaviour.
+
 ## 0.207.19 — 2026-08-25
 
 ### Receipt-backed Obsidian effect reconciliation
