@@ -1051,7 +1051,9 @@ def execute(
         _isolated_test_environment() if dynamic_phases and not args.dry_run else nullcontext(None)
     )
     report_context = (
-        tempfile.TemporaryDirectory(prefix="friday-quality-gate-")
+        # Keep this path deliberately short: several transport tests bind an
+        # AF_UNIX socket below pytest's per-worker/per-test hierarchy.
+        tempfile.TemporaryDirectory(prefix="fq-")
         if dynamic_phases and not args.dry_run
         else nullcontext(None)
     )
@@ -1065,9 +1067,7 @@ def execute(
                 else Path(str(report_directory)) / "all-tests-collection.json"
             )
             collection_basetemp: str | Path = (
-                "<temporary>/pytest-collection"
-                if args.dry_run
-                else Path(str(report_directory)) / "pytest-collection"
+                "<temporary>/c" if args.dry_run else Path(str(report_directory)) / "c"
             )
             command = collection_command(
                 manifest_path=all_collection_path,
@@ -1102,11 +1102,7 @@ def execute(
                 report_path=report_path,
                 collection_path=collection_path,
                 workers=args.workers,
-                basetemp_path=(
-                    "<temporary>/pytest-non-ui"
-                    if args.dry_run
-                    else Path(str(report_directory)) / "pytest-non-ui"
-                ),
+                basetemp_path=("<temporary>/n" if args.dry_run else Path(str(report_directory)) / "n"),
             )
             if test_environment is not None:
                 command = _command_with_environment(command, test_environment)
@@ -1139,7 +1135,7 @@ def execute(
                 report_path="<temporary>/ui-results.xml",
                 collection_path="<temporary>/ui-collection.json",
                 workers=args.ui_workers,
-                basetemp_path="<temporary>/pytest-ui",
+                basetemp_path="<temporary>/u",
             )
             print(f"[{command.name}] {_display_command(command.argv)}")
         elif "ui" in phases:
@@ -1151,7 +1147,7 @@ def execute(
                 report_path=report_path,
                 collection_path=collection_path,
                 workers=args.ui_workers,
-                basetemp_path=Path(str(report_directory)) / "pytest-ui",
+                basetemp_path=Path(str(report_directory)) / "u",
             )
             if test_environment is not None:
                 command = _command_with_environment(command, test_environment)

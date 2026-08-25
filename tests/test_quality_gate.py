@@ -232,11 +232,7 @@ def test_pytest_phases_share_one_private_non_live_environment(
     ]
     assert len(observed_homes) == 1
     assert all(not home.exists() for home in observed_homes)
-    assert {path.name for path in observed_basetemps} == {
-        "pytest-collection",
-        "pytest-non-ui",
-        "pytest-ui",
-    }
+    assert {path.name for path in observed_basetemps} == {"c", "n", "u"}
     assert all(not path.parent.exists() for path in observed_basetemps)
 
 
