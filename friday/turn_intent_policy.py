@@ -33,6 +33,7 @@ class TurnIntent(str, Enum):
     WEATHER_LOCATION_CHALLENGE = "weather_location_challenge"
     WEATHER_WITH_LOCATION = "weather_with_location"
     META_CAPABILITIES = "meta_capabilities"
+    META_IMAGE_GENERATION = "meta_image_generation"
     META_INTEGRATIONS = "meta_integrations"
     LOCAL_DIAGNOSTICS = "local_diagnostics"
     LOCAL_DIAGNOSTICS_DENIED = "local_diagnostics_denied"
@@ -114,6 +115,37 @@ class CapabilityProjection:
 
 
 CODE_OWNED_CAPABILITY_PROJECTION = CapabilityProjection()
+
+
+@dataclass(frozen=True, slots=True)
+class ImageGenerationProjection:
+    """Code-owned truth about Friday's two materially different PNG abilities.
+
+    ``make_file(kind=png)`` renders a structured text report.  It is not a
+    free-form image generator, and a language model may not blur that boundary
+    merely because both results use the word "picture" in ordinary speech.
+    """
+
+    structured_png_card_available: bool
+    freeform_generation_available: bool = False
+    schema: ClassVar[str] = "friday.image-generation-projection.v1"
+
+    def __post_init__(self) -> None:
+        if type(self.structured_png_card_available) is not bool:
+            raise ValueError("structured PNG availability must be an exact boolean")
+        if self.freeform_generation_available is not False:
+            raise ValueError("free-form image generation is not a shipped capability")
+
+    def render_ru(self) -> str:
+        """Render only product-owned facts, without model capability claims."""
+
+        limitation = "Обычные картинки и рисунки по описанию сейчас не генерирую."
+        if not self.structured_png_card_available:
+            return f"{limitation} Текстовая PNG-карточка в этом чате сейчас тоже недоступна."
+        return (
+            f"{limitation} Могу оформить в PNG текстовую карточку или сводку "
+            "из заголовков, абзацев, списков и таблиц."
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -290,6 +322,7 @@ class TurnPolicyDecision:
     weather_horizon: WeatherHorizon | None = None
     public_response: str | None = None
     capability_projection: CapabilityProjection | None = None
+    image_generation_projection: ImageGenerationProjection | None = None
     integration_projection: IntegrationProjection | None = None
     required_capability: str | None = None
     local_diagnostics_allowed: bool = False
@@ -570,6 +603,39 @@ _MCP_META = re.compile(
     re.IGNORECASE,
 )
 
+_RU_IMAGE_OBJECT = (
+    r"(?:картинк\w*|изображени\w*|рисунк\w*|иллюстраци\w*|"
+    r"png(?:[- ](?:картинк\w*|изображени\w*))?)"
+)
+_RU_IMAGE_ACTION = (
+    r"(?:рисовать|нарисовать|генерировать|сгенерировать|"
+    r"создавать|создать|делать|сделать)"
+)
+_IMAGE_GENERATION_CAPABILITY_RU = re.compile(
+    rf"^(?:пятниц\w*\s*[,—:-]\s*)?(?:а\s+)?(?:"
+    rf"(?:(?:ты\s+)?(?:мне\s+)?(?:можешь|умеешь|способна)(?:\s+ли)?"
+    rf"(?:\s+ты)?(?:\s+мне)?\s+)"
+    rf"(?:{_RU_IMAGE_ACTION}(?:\s+мне)?\s+{_RU_IMAGE_OBJECT}"
+    rf"(?:\s+по\s+(?:текстовому\s+)?описанию)?|"
+    rf"{_RU_IMAGE_OBJECT}(?:\s+мне)?\s+{_RU_IMAGE_ACTION})|"
+    rf"(?:ты\s+)?поддерживаешь(?:\s+ли)?(?:\s+ты)?\s+"
+    rf"(?:генераци\w*|создани\w*)\s+{_RU_IMAGE_OBJECT}"
+    rf")\s*[?!.]*$",
+    re.IGNORECASE,
+)
+_IMAGE_GENERATION_CAPABILITY_EN = re.compile(
+    r"^(?:friday\s*[,—:-]\s*)?(?:"
+    r"(?:(?:can|could)\s+you|are\s+you\s+able\s+to)\s+"
+    r"(?:draw|generate|create|make)\s+(?:me\s+)?(?:an?\s+)?"
+    r"(?:pictures?|images?|illustrations?)"
+    r"(?:\s+from\s+(?:(?:a\s+)?(?:text\s+)?description|text))?|"
+    r"are\s+you\s+capable\s+of\s+(?:drawing|generating|creating|making)\s+"
+    r"(?:pictures?|images?|illustrations?)|"
+    r"do\s+you\s+support\s+(?:free[- ]?form\s+)?image\s+generation"
+    r")\s*[?!.]*$",
+    re.IGNORECASE,
+)
+
 
 def _bounded_text(message: str) -> str:
     return " ".join(str(message or "")[:_MAX_CLASSIFICATION_CHARS].split()).strip()
@@ -635,6 +701,20 @@ def _is_meta_capability_question(text: str) -> bool:
     )
 
 
+def _is_image_generation_capability_question(text: str) -> bool:
+    """Recognise only a whole, content-free image capability question.
+
+    The same modal grammar is commonly used for real requests in Russian.
+    Requiring the entire utterance to contain only a generic image object keeps
+    imperatives, creative briefs, reported speech and compound work on their
+    established runtime paths.
+    """
+
+    return bool(
+        _IMAGE_GENERATION_CAPABILITY_RU.fullmatch(text) or _IMAGE_GENERATION_CAPABILITY_EN.fullmatch(text)
+    )
+
+
 def _is_data_read_request(text: str) -> bool:
     """Keep quoted/history/file subjects out of live system intents.
 
@@ -656,6 +736,7 @@ def decide_turn_policy(
     context: TurnPolicyContext | None = None,
     diagnostics: DiagnosticsAuthority | None = None,
     integrations: IntegrationProjection | None = None,
+    image_generation: ImageGenerationProjection | None = None,
 ) -> TurnPolicyDecision:
     """Return a deterministic, immutable pre-routing decision.
 
@@ -716,6 +797,16 @@ def decide_turn_policy(
             capability_projection=projection,
         )
 
+    if _is_image_generation_capability_question(text):
+        projection = image_generation or ImageGenerationProjection(False)
+        return TurnPolicyDecision(
+            intent=TurnIntent.META_IMAGE_GENERATION,
+            web=WebDisposition.DENY,
+            attachments=AttachmentDisposition.NONE,
+            public_response=projection.render_ru(),
+            image_generation_projection=projection,
+        )
+
     if _WEATHER_CUE.search(text):
         location = _explicit_weather_location(text)
         horizon = _weather_horizon(text)
@@ -766,6 +857,7 @@ __all__ = [
     "CapabilityProjection",
     "DiagnosticsAuthority",
     "DiagnosticsState",
+    "ImageGenerationProjection",
     "IntegrationProjection",
     "LocationSource",
     "SafeDiagnosticsProjection",

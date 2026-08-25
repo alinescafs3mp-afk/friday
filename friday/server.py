@@ -168,6 +168,7 @@ from friday.turn_intent_policy import (
     ADMIN_DIAGNOSTICS_CAPABILITY,
     AttachmentDisposition,
     DiagnosticsAuthority,
+    ImageGenerationProjection,
     IntegrationProjection,
     TurnIntent,
     TurnPolicyContext,
@@ -273,6 +274,40 @@ def _live_integration_projection(settings: FridaySettings, manager: object) -> I
     is_available = getattr(manager, "is_available", None)
     connected = bool(callable(is_available) and is_available("workspace") is True)
     return IntegrationProjection(True, connected, len(definition.allowed_tools))
+
+
+def _live_image_generation_projection(
+    kernel: object,
+    actor: ActorContext,
+) -> ImageGenerationProjection:
+    """Project only the caller-visible structured PNG renderer.
+
+    The pure turn policy does not know runtime authorization or tool schemas.
+    Bind both here: a registered ``make_file`` name is insufficient if the
+    caller cannot see it or if its closed ``kind`` enum no longer contains
+    ``png``.  Any malformed/foreign kernel shape fails closed.
+    """
+
+    available = False
+    get_tool = getattr(kernel, "get_tool", None)
+    get_tool_names = getattr(kernel, "get_tool_names", None)
+    try:
+        spec = get_tool("make_file") if callable(get_tool) else None
+        parameters = getattr(spec, "parameters", None)
+        properties = parameters.get("properties") if isinstance(parameters, Mapping) else None
+        kind = properties.get("kind") if isinstance(properties, Mapping) else None
+        supported = kind.get("enum") if isinstance(kind, Mapping) else None
+        visible = get_tool_names(actor) if callable(get_tool_names) else []
+        available = bool(
+            isinstance(supported, list)
+            and all(isinstance(item, str) for item in supported)
+            and "png" in supported
+            and isinstance(visible, list)
+            and "make_file" in visible
+        )
+    except Exception:  # noqa: BLE001 - a public capability claim must fail closed
+        available = False
+    return ImageGenerationProjection(structured_png_card_available=available)
 
 
 def _idempotency_uncertain_response() -> dict[str, Any]:
@@ -4321,6 +4356,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     ).allowed
                 ),
                 integrations=_live_integration_projection(state.settings, state.mcp),
+                image_generation=_live_image_generation_projection(state.kernel, actor),
             )
             if archive_search_current_text:
                 # Private-store current-text authority wins before any

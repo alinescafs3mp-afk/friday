@@ -16,6 +16,7 @@ from friday.turn_intent_policy import (
     AttachmentDisposition,
     DiagnosticsAuthority,
     DiagnosticsState,
+    ImageGenerationProjection,
     IntegrationProjection,
     LocationSource,
     SafeDiagnosticsProjection,
@@ -291,6 +292,121 @@ def test_data_read_commands_are_not_meta_capability_questions(message: str) -> N
 
 
 @pytest.mark.parametrize(
+    "message",
+    [
+        "а ты мне можешь картинку нарисовать?",
+        "Пятница, а ты мне можешь картинку нарисовать?",
+        "Ты умеешь генерировать изображения?",
+        "Умеешь ли ты создавать картинки?",
+        "Способна ли ты нарисовать изображение по текстовому описанию?",
+        "Поддерживаешь генерацию изображений?",
+        "Can you draw pictures?",
+        "Are you able to generate an image from a text description?",
+        "Are you capable of drawing pictures?",
+        "Do you support image generation?",
+    ],
+)
+def test_image_generation_capability_has_code_owned_truth(message: str) -> None:
+    projection = ImageGenerationProjection(structured_png_card_available=True)
+
+    decision = decide_turn_policy(message, image_generation=projection)
+
+    assert decision.intent is TurnIntent.META_IMAGE_GENERATION
+    assert decision.web is WebDisposition.DENY
+    assert decision.attachments is AttachmentDisposition.NONE
+    assert decision.image_generation_projection is projection
+    assert decision.public_response == projection.render_ru()
+    assert "Обычные картинки и рисунки по описанию сейчас не генерирую" in str(decision.public_response)
+    assert "текстовую карточку или сводку" in str(decision.public_response)
+
+
+def test_image_generation_capability_fails_closed_without_a_visible_png_renderer() -> None:
+    decision = decide_turn_policy("Ты умеешь рисовать картинки?")
+
+    assert decision.intent is TurnIntent.META_IMAGE_GENERATION
+    assert decision.image_generation_projection == ImageGenerationProjection(False)
+    assert decision.public_response == ImageGenerationProjection(False).render_ru()
+    assert "сейчас тоже недоступна" in str(decision.public_response)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Нарисуй картинку.",
+        "Можешь нарисовать картинку с рыжим котом?",
+        "Можешь нарисовать картинку и поискать последние новости?",
+        "Если можешь, нарисуй картинку.",
+        "Ты уже нарисовала картинку?",
+        "Можешь проанализировать эту картинку?",
+        "Можешь сделать картинку по этому файлу?",
+        "Он спросил: «ты можешь картинку нарисовать?»",
+        "`ты можешь картинку нарисовать?`",
+        "Can you draw me a cat?",
+        "Can you draw an image and search for the latest news?",
+    ],
+)
+def test_image_creation_work_and_reported_capability_text_stay_on_the_runtime_path(
+    message: str,
+) -> None:
+    decision = decide_turn_policy(
+        message,
+        image_generation=ImageGenerationProjection(structured_png_card_available=True),
+    )
+
+    assert decision.intent is TurnIntent.PASSTHROUGH
+    assert decision.public_response is None
+    assert decision.attachments is AttachmentDisposition.UNCHANGED
+
+
+def test_image_generation_projection_accepts_only_the_shipped_capability_shape() -> None:
+    with pytest.raises(ValueError, match="exact boolean"):
+        ImageGenerationProjection(structured_png_card_available=1)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="not a shipped capability"):
+        ImageGenerationProjection(
+            structured_png_card_available=True,
+            freeform_generation_available=True,
+        )
+
+
+@pytest.mark.parametrize(
+    ("visible_tools", "supported_kinds", "available"),
+    [
+        (["make_file"], ["docx", "pdf", "png", "xlsx"], True),
+        ([], ["docx", "pdf", "png", "xlsx"], False),
+        (["make_file"], ["docx", "pdf", "xlsx"], False),
+    ],
+)
+def test_live_image_projection_requires_both_caller_visibility_and_png_schema(
+    visible_tools: list[str],
+    supported_kinds: list[str],
+    available: bool,
+    settings: Any,
+) -> None:
+    del settings  # importing ``friday.server`` requires the isolated test environment
+    from friday.server import _live_image_generation_projection
+
+    class _Spec:
+        parameters = {
+            "type": "object",
+            "properties": {"kind": {"type": "string", "enum": supported_kinds}},
+        }
+
+    class _Kernel:
+        @staticmethod
+        def get_tool(name: str) -> object | None:
+            return _Spec() if name == "make_file" else None
+
+        @staticmethod
+        def get_tool_names(_actor: object) -> list[str]:
+            return visible_tools
+
+    projection = _live_image_generation_projection(_Kernel(), object())  # type: ignore[arg-type]
+
+    assert projection.structured_png_card_available is available
+    assert projection.freeform_generation_available is False
+
+
+@pytest.mark.parametrize(
     ("message", "projection", "expected_fragment"),
     [
         (
@@ -535,31 +651,65 @@ def test_api_uses_code_owned_weather_meta_mcp_and_safe_diagnostics(
     app = server_module.create_app(replace(settings, verify_answers=False))
     headers = {"Authorization": f"Bearer {settings.api_token}"}
     expected_fragments = (
-        ("Что по погоде?", WEATHER_LOCATION_CLARIFICATION),
-        ("ты хранишь всю историю переписки?", "message_search читает всю принятую историю"),
-        ("у тебя подключён MCP?", "MCP для этой установки не настроен."),
-        ("а mcp какие тебе доступны?", "MCP для этой установки не настроен."),
-        ("проведи самодиагностику", "Действия: ошибок — 1, предупреждений — 1"),
+        (
+            "Что по погоде?",
+            WEATHER_LOCATION_CLARIFICATION,
+            TurnIntent.WEATHER_NEEDS_LOCATION,
+        ),
+        (
+            "ты хранишь всю историю переписки?",
+            "message_search читает всю принятую историю",
+            TurnIntent.META_CAPABILITIES,
+        ),
+        (
+            "у тебя подключён MCP?",
+            "MCP для этой установки не настроен.",
+            TurnIntent.META_INTEGRATIONS,
+        ),
+        (
+            "а mcp какие тебе доступны?",
+            "MCP для этой установки не настроен.",
+            TurnIntent.META_INTEGRATIONS,
+        ),
+        (
+            "а ты мне можешь картинку нарисовать?",
+            "Обычные картинки и рисунки по описанию сейчас не генерирую.",
+            TurnIntent.META_IMAGE_GENERATION,
+        ),
+        (
+            "проведи самодиагностику",
+            "Действия: ошибок — 1, предупреждений — 1",
+            TurnIntent.LOCAL_DIAGNOSTICS,
+        ),
     )
 
     with TestClient(app) as client:
 
+        class _ForbiddenModel:
+            enabled = True
+            model = "forbidden-policy-model"
+            total_budget_sec = 1.0
+
+            async def chat(self, *_args: Any, **_kwargs: Any) -> Any:
+                raise AssertionError("code-owned policy turn reached the model")
+
         async def forbidden_kernel(*_args: Any, **_kwargs: Any) -> Any:
             raise AssertionError("code-owned policy turn reached a tool")
 
+        app.state.agent.llm = _ForbiddenModel()
         app.state.kernel.execute = forbidden_kernel
-        conversation_ids: list[str] = []
-        for message, expected in expected_fragments:
+        conversation_ids: list[tuple[str, TurnIntent]] = []
+        for message, expected, intent in expected_fragments:
             response = client.post("/api/chat", json={"message": message}, headers=headers)
             assert response.status_code == 200, response.text
             payload = response.json()
             assert expected in str(payload["message"])
             assert secret not in response.text
             assert payload["tools_used"] == []
-            conversation_ids.append(str(payload["conversation_id"]))
+            conversation_ids.append((str(payload["conversation_id"]), intent))
 
         owner = str(client.get("/api/me", headers=headers).json()["actor"]["user_id"])
-        for conversation_id in conversation_ids:
+        for conversation_id, intent in conversation_ids:
             rows = app.state.storage.get_conversation_messages(
                 conversation_id,
                 user_id=owner,
@@ -569,6 +719,11 @@ def test_api_uses_code_owned_weather_meta_mcp_and_safe_diagnostics(
             assert rows[0]["role"] == "user"
             assert rows[1]["role"] == "assistant"
             assert rows[1]["reply_to"] == rows[0]["id"]
+            user_metadata = json.loads(str(rows[0]["metadata_json"] or "{}"))
+            assistant_metadata = json.loads(str(rows[1]["metadata_json"] or "{}"))
+            assert user_metadata["turn_policy_intent"] == intent.value
+            assert assistant_metadata["turn_policy_intent"] == intent.value
+            assert assistant_metadata["structural"]["model_spoke"] is False
         assert int(app.state.storage.execute("SELECT COUNT(*) FROM inbox").fetchone()[0]) == 0
 
 
