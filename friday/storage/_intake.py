@@ -69,6 +69,163 @@ _KNOWLEDGE_OBJECT_ID_RE = re.compile(r"ko_[A-Za-z0-9_-]{8,120}\Z")
 _PUBLIC_FILE_CITATION_MAX = 12
 
 
+def _owned_filename_candidates_query(limit: int) -> str:
+    base = f"""r.user_id=? AND r.deleted_at IS NULL
+               AND r.content_type='file'
+               AND json_valid(r.metadata_json)
+               AND json_type(r.metadata_json,'$.uploaded_by')='text'
+               AND json_extract(r.metadata_json,'$.uploaded_by')=?
+               AND EXISTS (
+                   SELECT 1 FROM users exact_filename_uploader
+                    WHERE exact_filename_uploader.id=?
+                      AND exact_filename_uploader.status='active'
+               )
+               AND {_not_audio_document("r")}
+               AND {_not_private_raw_dependency("r")}
+               AND NOT EXISTS (
+                   SELECT 1 FROM inbox i
+                    WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
+                      AND i.status='ignored'
+               )"""
+    return f"""WITH candidates AS (
+                   SELECT r.id, r.content_type, r.received_at,
+                          substr(json_extract(r.metadata_json,'$.filename'),1,260) AS filename,
+                          1 AS lane
+                     FROM raw_objects r
+                    WHERE {base}
+                      AND json_type(r.metadata_json,'$.filename')='text'
+                      AND length(json_extract(r.metadata_json,'$.filename')) BETWEEN 1 AND 260
+                      AND replace(jericho_casefold(
+                              substr(json_extract(r.metadata_json,'$.filename'),1,261)
+                          ),'ё','е')=replace(jericho_casefold(?),'ё','е')
+                   UNION ALL
+                   SELECT r.id, r.content_type, r.received_at,
+                          a.supplied_filename AS filename, 0 AS lane
+                     FROM file_source_aliases a
+                     JOIN raw_objects r ON r.id=a.raw_object_id
+                    WHERE a.user_id=? AND a.uploaded_by=?
+                      AND {base}
+                      AND length(a.supplied_filename) BETWEEN 1 AND 260
+                      AND replace(jericho_casefold(a.supplied_filename),'ё','е')=
+                          replace(jericho_casefold(?),'ё','е')
+               ),
+               ranked AS (
+                   SELECT *, ROW_NUMBER() OVER (
+                       PARTITION BY id ORDER BY lane ASC, received_at ASC
+                   ) AS _choice
+                     FROM candidates
+               ),
+               selected AS (
+                   SELECT id, content_type, received_at, filename
+                     FROM ranked WHERE _choice=1
+               )
+               SELECT id, content_type, received_at, filename,
+                      COUNT(*) OVER () AS exact_total
+                 FROM selected
+                ORDER BY received_at ASC, id ASC
+                LIMIT {limit}"""  # nosec B608 - fixed integer and privacy predicates
+
+
+def _owned_filename_candidates_parameters(
+    tenant: str,
+    person: str,
+    filename: str,
+) -> tuple[str, ...]:
+    return (
+        tenant,
+        person,
+        person,
+        filename,
+        tenant,
+        person,
+        tenant,
+        person,
+        person,
+        filename,
+    )
+
+
+def select_owned_filename_candidates_in_transaction(
+    conn: sqlite3.Connection,
+    user_id: str,
+    uploaded_by: str,
+    filename: str,
+    *,
+    limit: int = 21,
+) -> dict[str, Any]:
+    """Return an exact, fully counted filename page inside a caller-owned snapshot."""
+
+    if type(conn) is not sqlite3.Connection or not conn.in_transaction:
+        raise RuntimeError("exact filename candidates require a transaction")
+    tenant = str(user_id or "").strip()
+    person = str(uploaded_by or "").strip()
+    clean_filename = str(filename or "").strip()
+    page_size = max(2, min(int(limit), 21))
+    if not tenant or not person or not clean_filename or len(clean_filename) > 260:
+        return {"items": [], "total": 0, "complete": True}
+    rows = conn.execute(
+        _owned_filename_candidates_query(page_size),
+        _owned_filename_candidates_parameters(tenant, person, clean_filename),
+    ).fetchall()
+    total = int(rows[0]["exact_total"]) if rows else 0
+    return {
+        "items": [
+            {key: row[key] for key in ("id", "content_type", "received_at", "filename")} for row in rows
+        ],
+        "total": total,
+        "complete": len(rows) == total,
+    }
+
+
+def select_owned_file_candidate_source_in_transaction(
+    conn: sqlite3.Connection,
+    user_id: str,
+    uploaded_by: str,
+    raw_object_id: str,
+) -> dict[str, Any] | None:
+    """Re-authorize one frozen candidate Raw and return its private snapshot."""
+
+    if type(conn) is not sqlite3.Connection or not conn.in_transaction:
+        raise RuntimeError("exact file candidate source requires a transaction")
+    tenant = str(user_id or "").strip()
+    person = str(uploaded_by or "").strip()
+    raw_id = str(raw_object_id or "").strip()
+    if not tenant or not person or not re.fullmatch(r"raw_[0-9a-f]{16}", raw_id):
+        return None
+    row = conn.execute(
+        f"""SELECT r.id,r.source,r.source_ref,r.content_type,r.received_at,
+                   r.content_hash,substr(r.raw_content,1,720) AS _raw_content,
+                   r.metadata_json AS _raw_metadata
+              FROM raw_objects r
+             WHERE r.id=? AND r.user_id=? AND r.deleted_at IS NULL
+               AND r.content_type='file'
+               AND json_valid(r.metadata_json)
+               AND json_type(r.metadata_json,'$.uploaded_by')='text'
+               AND json_extract(r.metadata_json,'$.uploaded_by')=?
+               AND EXISTS (
+                   SELECT 1 FROM users exact_candidate_uploader
+                    WHERE exact_candidate_uploader.id=?
+                      AND exact_candidate_uploader.status='active'
+               )
+               AND EXISTS (
+                   SELECT 1 FROM file_source_aliases exact_candidate_alias
+                    WHERE exact_candidate_alias.user_id=r.user_id
+                      AND exact_candidate_alias.uploaded_by=?
+                      AND exact_candidate_alias.raw_object_id=r.id
+               )
+               AND {_not_audio_document("r")}
+               AND {_not_private_raw_dependency("r")}
+               AND NOT EXISTS (
+                   SELECT 1 FROM inbox i
+                    WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
+                      AND i.status='ignored'
+               )
+             LIMIT 2""",  # nosec B608 - fixed privacy predicates
+        (raw_id, tenant, person, person, person),
+    ).fetchall()
+    return dict(row[0]) if len(row) == 1 else None
+
+
 def _not_secondary_product_witness_dependency(raw_alias: str) -> str:
     """Keep the exact transient product probe out of every generic Inbox consumer."""
 
@@ -1972,70 +2129,11 @@ class IntakeMixin(StorageShared):
         clean_filename = str(filename or "").strip()
         if not tenant or not person or not clean_filename or len(clean_filename) > 260:
             return []
-        base = f"""r.user_id=? AND r.deleted_at IS NULL
-                   AND r.content_type='file'
-                   AND json_valid(r.metadata_json)
-                   AND json_type(r.metadata_json,'$.uploaded_by')='text'
-                   AND json_extract(r.metadata_json,'$.uploaded_by')=?
-                   AND EXISTS (
-                       SELECT 1 FROM users exact_filename_uploader
-                        WHERE exact_filename_uploader.id=?
-                          AND exact_filename_uploader.status='active'
-                   )
-                   AND {_not_audio_document("r")}
-                   AND {_not_private_raw_dependency("r")}
-                   AND NOT EXISTS (
-                       SELECT 1 FROM inbox i
-                        WHERE i.raw_object_id=r.id AND i.user_id=r.user_id
-                          AND i.status='ignored'
-                   )"""
         rows = self.execute(
-            f"""WITH candidates AS (
-                       SELECT r.id, r.content_type, r.received_at,
-                              substr(json_extract(r.metadata_json,'$.filename'),1,260) AS filename,
-                              1 AS lane
-                         FROM raw_objects r
-                        WHERE {base}
-                          AND json_type(r.metadata_json,'$.filename')='text'
-                          AND length(json_extract(r.metadata_json,'$.filename')) BETWEEN 1 AND 260
-                          AND replace(jericho_casefold(
-                                  substr(json_extract(r.metadata_json,'$.filename'),1,261)
-                              ),'ё','е')=replace(jericho_casefold(?),'ё','е')
-                       UNION ALL
-                       SELECT r.id, r.content_type, r.received_at,
-                              a.supplied_filename AS filename, 0 AS lane
-                         FROM file_source_aliases a
-                         JOIN raw_objects r ON r.id=a.raw_object_id
-                        WHERE a.user_id=? AND a.uploaded_by=?
-                          AND {base}
-                          AND length(a.supplied_filename) BETWEEN 1 AND 260
-                          AND replace(jericho_casefold(a.supplied_filename),'ё','е')=
-                              replace(jericho_casefold(?),'ё','е')
-                   ),
-                   ranked AS (
-                       SELECT *, ROW_NUMBER() OVER (
-                           PARTITION BY id ORDER BY lane ASC, received_at ASC
-                       ) AS _choice
-                         FROM candidates
-                   )
-                   SELECT id, content_type, received_at, filename
-                     FROM ranked WHERE _choice=1
-                    ORDER BY received_at ASC, id ASC
-                    LIMIT 2""",  # nosec B608 - only fixed privacy predicates
-            (
-                tenant,
-                person,
-                person,
-                clean_filename,
-                tenant,
-                person,
-                tenant,
-                person,
-                person,
-                clean_filename,
-            ),
+            _owned_filename_candidates_query(2),
+            _owned_filename_candidates_parameters(tenant, person, clean_filename),
         ).fetchall()
-        return [dict(row) for row in rows]
+        return [{key: row[key] for key in ("id", "content_type", "received_at", "filename")} for row in rows]
 
     def search_owned_file_content(
         self,

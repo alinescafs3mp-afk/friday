@@ -473,6 +473,41 @@ class ArchiveCandidateSet:
         )
 
     @classmethod
+    def from_code_owned_exact_candidates(
+        cls,
+        *,
+        id: str,
+        work_item_id: str,
+        origin_boundary_user_message_id: str,
+        evidence_sha256: str,
+        coverage_sha256: str,
+        coverage_grade: SelectedArchiveCoverageGrade,
+        candidates: tuple[ArchiveCandidateItem, ...],
+    ) -> ArchiveCandidateSet:
+        """Freeze already-authorized exact identities without granting authority.
+
+        The caller must obtain the candidates from a code-owned, transaction-local
+        selector.  This constructor only canonicalizes and hashes the body-free
+        projection; every later read still revalidates its Raw source and uploader.
+        """
+
+        return cls(
+            id=id,
+            work_item_id=work_item_id,
+            evidence_sha256=evidence_sha256,
+            coverage_sha256=coverage_sha256,
+            coverage_grade=coverage_grade,
+            authority_projection_sha256=_authority_projection_sha256(
+                candidates=candidates,
+                coverage_grade=coverage_grade,
+                coverage_sha256=coverage_sha256,
+                evidence_sha256=evidence_sha256,
+            ),
+            origin_boundary_user_message_id=origin_boundary_user_message_id,
+            candidates=candidates,
+        )
+
+    @classmethod
     def from_accepted_projection(
         cls,
         *,

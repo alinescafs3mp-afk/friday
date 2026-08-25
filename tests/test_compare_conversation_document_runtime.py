@@ -26,6 +26,11 @@ from friday.interaction_control_plane.archive_evidence_work_item_store import (
     create_recall_selected_archive_evidence_work_item_in_transaction,
     get_recall_selected_archive_evidence_work_item_in_transaction,
 )
+from friday.interaction_control_plane.compare_conversation_document import (
+    COMPARE_DOCUMENT_CANDIDATE_REQUIRED_VERDICT_KIND,
+    DocumentReferenceQuestionKind,
+    load_accepted_compare_document_candidate_outcome_receipt,
+)
 from friday.interaction_control_plane.compare_conversation_document_store import (
     get_compare_conversation_with_document_work_item_in_transaction,
     get_current_compare_conversation_with_document_work_item_in_transaction,
@@ -487,4 +492,370 @@ async def test_disallowed_attachment_surface_suspends_comparison_without_interce
     ).fetchone()[0]
     assert result is None
     assert tuple(row) == ("suspended", waiting.revision + 1)
+    assert after == before
+
+
+async def _open_duplicate_filename_q2(
+    settings: Any,
+    storage: Any,
+    *,
+    owner: str,
+) -> tuple[Any, Any, Any, Any]:
+    conversation, waiting, _evidence = _create_writer_followup_waiting(storage, owner=owner)
+    first = _register_exact_text_document(
+        storage,
+        settings,
+        owner=owner,
+        filename="duplicate-decision.txt",
+    )
+    second = _register_exact_text_document(
+        storage,
+        settings,
+        owner=owner,
+        filename="duplicate-decision.txt",
+    )
+    actor = AuthorizationService(storage).actor_for_user(owner, source="comparison-runtime-test")
+    runtime = AgentRuntime(settings, storage, selected_archive_model=_ComparisonModel())
+    result = await runtime.chat(
+        owner,
+        "duplicate-decision.txt",
+        actor=actor,
+        conversation_id=conversation["id"],
+    )
+    with storage.transaction() as conn:
+        q2 = get_current_compare_conversation_with_document_work_item_in_transaction(
+            conn,
+            user_id=owner,
+            conversation_id=conversation["id"],
+        )
+    assert result["context"]["compare_conversation_with_document"] == "waiting_for_input"
+    assert q2 is not None
+    assert q2.id == waiting.id
+    assert q2.revision == 2
+    return conversation, q2, actor, (first, second)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_filename_publishes_complete_durable_q2(
+    settings: Any,
+    storage: Any,
+) -> None:
+    owner = "compare-duplicate-q2-owner"
+    conversation, q2, _actor, raws = await _open_duplicate_filename_q2(
+        settings,
+        storage,
+        owner=owner,
+    )
+
+    assert q2.document_questions[-1].kind is DocumentReferenceQuestionKind.SELECT_DOCUMENT_CANDIDATE
+    assert q2.document_candidate_set is not None
+    assert tuple(
+        item.source_ref.canonical_object_id for item in q2.document_candidate_set.candidates
+    ) == tuple(sorted((raws[0].id, raws[1].id)))
+    prompt_id = q2.document_questions[-1].prompt_assistant_message_id
+    prompt = storage.execute(
+        "SELECT content,metadata_json FROM messages WHERE id=?",
+        (prompt_id,),
+    ).fetchone()
+    receipt = load_accepted_compare_document_candidate_outcome_receipt(prompt["metadata_json"])
+    assert receipt.outcome.candidate_count == 2
+    assert prompt["content"].endswith(
+        "Выберите источник:\n1 — A1\n2 — A2\n"
+        "Ответьте только номером от 1 до 2 или одним порядковым словом (RU/EN)."
+    )
+    assert (
+        storage.execute(
+            "SELECT json_extract(metadata_json,'$.structural.verdict_kind') FROM messages WHERE id=?",
+            (prompt_id,),
+        ).fetchone()[0]
+        == COMPARE_DOCUMENT_CANDIDATE_REQUIRED_VERDICT_KIND
+    )
+    assert conversation["id"] == q2.conversation_id
+
+
+@pytest.mark.asyncio
+async def test_exact_q2_ordinal_reauthorizes_and_completes_comparison(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "compare-q2-complete-owner"
+    conversation, q2, actor, _raws = await _open_duplicate_filename_q2(
+        settings,
+        storage,
+        owner=owner,
+    )
+    replay = _exact_replay(q2)
+    runtime = AgentRuntime(settings, storage, selected_archive_model=_ComparisonModel())
+    monkeypatch.setattr(
+        runtime,
+        "_comparison_replay_in_transaction",
+        lambda *_args, **_kwargs: replay,
+    )
+    monkeypatch.setattr(
+        comparison_module,
+        "archive_selected_evidence_snapshot_sha256",
+        lambda *_args, **_kwargs: q2.selected_message_evidence.source_snapshot_sha256,
+    )
+
+    result = await runtime.chat(
+        owner,
+        "2",
+        actor=actor,
+        conversation_id=conversation["id"],
+    )
+
+    assert result["verified"] is True
+    with storage.transaction() as conn:
+        completed = get_compare_conversation_with_document_work_item_in_transaction(
+            conn,
+            work_item_id=q2.id,
+            user_id=owner,
+            conversation_id=conversation["id"],
+        )
+    assert completed is not None
+    assert completed.state is WorkState.COMPLETED
+    assert completed.document_questions[-1].selected_ordinal == 2
+    assert completed.resolved_document_evidence is not None
+    assert (
+        completed.resolved_document_evidence.raw_object_id
+        == q2.document_candidate_set.candidates[1].source_ref.canonical_object_id
+    )
+
+
+@pytest.mark.asyncio
+async def test_q2_active_state_resumes_after_runtime_restart_without_user_row(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "compare-q2-restart-owner"
+    conversation, q2, actor, _raws = await _open_duplicate_filename_q2(
+        settings,
+        storage,
+        owner=owner,
+    )
+    first_runtime = AgentRuntime(settings, storage, selected_archive_model=_ComparisonModel())
+
+    class SimulatedRestart(RuntimeError):
+        pass
+
+    async def stop_after_active(**_kwargs: Any) -> dict[str, Any]:
+        raise SimulatedRestart
+
+    monkeypatch.setattr(
+        first_runtime,
+        "_execute_active_conversation_document_comparison",
+        stop_after_active,
+    )
+    with pytest.raises(SimulatedRestart):
+        await first_runtime.chat(
+            owner,
+            "1",
+            actor=actor,
+            conversation_id=conversation["id"],
+        )
+    with storage.transaction() as conn:
+        active = get_current_compare_conversation_with_document_work_item_in_transaction(
+            conn,
+            user_id=owner,
+            conversation_id=conversation["id"],
+        )
+        rows_before_restart = conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE user_id=? AND conversation_id=?",
+            (owner, conversation["id"]),
+        ).fetchone()[0]
+    assert active is not None
+    assert active.state is WorkState.ACTIVE
+    replay = _exact_replay(active)
+    restarted = AgentRuntime(settings, storage, selected_archive_model=_ComparisonModel())
+    monkeypatch.setattr(
+        restarted,
+        "_comparison_replay_in_transaction",
+        lambda *_args, **_kwargs: replay,
+    )
+    monkeypatch.setattr(
+        comparison_module,
+        "archive_selected_evidence_snapshot_sha256",
+        lambda *_args, **_kwargs: active.selected_message_evidence.source_snapshot_sha256,
+    )
+
+    result = await restarted.chat(
+        owner,
+        "продолжи",
+        actor=actor,
+        conversation_id=conversation["id"],
+    )
+
+    assert result["verified"] is True
+    rows = storage.execute(
+        "SELECT role,content FROM messages WHERE user_id=? AND conversation_id=? ORDER BY rowid",
+        (owner, conversation["id"]),
+    ).fetchall()
+    assert len(rows) == rows_before_restart + 1
+    assert not any(row["role"] == "user" and row["content"] == "продолжи" for row in rows)
+    assert q2.id == active.id
+
+
+@pytest.mark.asyncio
+async def test_q2_cancel_closes_frozen_candidate_set_without_model_use(
+    settings: Any,
+    storage: Any,
+) -> None:
+    owner = "compare-q2-cancel-owner"
+    conversation, q2, actor, _raws = await _open_duplicate_filename_q2(
+        settings,
+        storage,
+        owner=owner,
+    )
+    runtime = AgentRuntime(settings, storage)
+
+    result = await runtime.chat(
+        owner,
+        "отмена",
+        actor=actor,
+        conversation_id=conversation["id"],
+    )
+
+    assert result["context"]["compare_conversation_with_document"] == "cancelled"
+    with storage.transaction() as conn:
+        cancelled = get_compare_conversation_with_document_work_item_in_transaction(
+            conn,
+            work_item_id=q2.id,
+            user_id=owner,
+            conversation_id=conversation["id"],
+        )
+    assert cancelled is not None
+    assert cancelled.state is WorkState.CANCELLED
+    assert cancelled.document_questions[-1].close_reason.value == "cancelled"
+    assert cancelled.document_candidate_set == q2.document_candidate_set
+
+
+@pytest.mark.asyncio
+async def test_stale_carried_q2_revision_cannot_append_or_select(
+    settings: Any,
+    storage: Any,
+) -> None:
+    owner = "compare-q2-race-owner"
+    conversation, q2, actor, _raws = await _open_duplicate_filename_q2(
+        settings,
+        storage,
+        owner=owner,
+    )
+    runtime = AgentRuntime(settings, storage)
+    stale = PendingDurableTurnAdmission.owned(
+        person_id=owner,
+        conversation_id=conversation["id"],
+        work_item_id=q2.id,
+        revision=q2.revision - 1,
+    )
+    before = storage.execute(
+        "SELECT COUNT(*) FROM messages WHERE user_id=? AND conversation_id=?",
+        (owner, conversation["id"]),
+    ).fetchone()[0]
+
+    with pytest.raises(WorkItemConflictError):
+        await runtime._conversation_document_comparison_state_first_response(  # noqa: SLF001
+            actor=actor,
+            conversation_id=conversation["id"],
+            person_id=owner,
+            request="1",
+            attachments=None,
+            turn_started=0.0,
+            turn_deadline=None,
+            durable_surface=True,
+            carried_admission=stale,
+        )
+
+    row = storage.execute("SELECT state,revision FROM work_items WHERE id=?", (q2.id,)).fetchone()
+    after = storage.execute(
+        "SELECT COUNT(*) FROM messages WHERE user_id=? AND conversation_id=?",
+        (owner, conversation["id"]),
+    ).fetchone()[0]
+    assert tuple(row) == ("waiting_for_input", 2)
+    assert after == before
+
+
+@pytest.mark.asyncio
+async def test_q2_rechecks_current_file_permission_before_selection(
+    settings: Any,
+    storage: Any,
+) -> None:
+    owner = "compare-q2-reauth-owner"
+    conversation, q2, actor, _raws = await _open_duplicate_filename_q2(
+        settings,
+        storage,
+        owner=owner,
+    )
+    authorization = AuthorizationService(storage)
+    authorization.deny_permission(owner, "files.read")
+    runtime = AgentRuntime(settings, storage)
+
+    result = await runtime.chat(
+        owner,
+        "1",
+        actor=actor,
+        conversation_id=conversation["id"],
+    )
+
+    assert result["verified"] is False
+    assert result["context"]["compare_conversation_with_document"] == "suspended"
+    row = storage.execute("SELECT state,revision FROM work_items WHERE id=?", (q2.id,)).fetchone()
+    assert tuple(row) == ("suspended", 3)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("surface", ["one_current", "multiple"])
+async def test_q2_does_not_intercept_attachment_surfaces(
+    settings: Any,
+    storage: Any,
+    surface: str,
+) -> None:
+    owner = f"compare-q2-displaced-{surface}-owner"
+    conversation, q2, actor, raws = await _open_duplicate_filename_q2(
+        settings,
+        storage,
+        owner=owner,
+    )
+    if surface == "one_current":
+
+        class Carrier(dict[str, Any]):
+            pass
+
+        carrier = Carrier(
+            raw_object_id=raws[0].id,
+            filename="duplicate-decision.txt",
+            mime_type="text/plain",
+        )
+        stamp_current_turn_file_reference(carrier, raws[0].to_row())
+        attachments = [carrier]
+        durable_surface = True
+    else:
+        attachments = [{"raw_object_id": raws[0].id}, {"raw_object_id": raws[1].id}]
+        durable_surface = False
+    runtime = AgentRuntime(settings, storage)
+    before = storage.execute(
+        "SELECT COUNT(*) FROM messages WHERE user_id=? AND conversation_id=?",
+        (owner, conversation["id"]),
+    ).fetchone()[0]
+
+    result = await runtime._conversation_document_comparison_state_first_response(  # noqa: SLF001
+        actor=actor,
+        conversation_id=conversation["id"],
+        person_id=owner,
+        request="отмена",
+        attachments=attachments,
+        turn_started=0.0,
+        turn_deadline=None,
+        durable_surface=durable_surface,
+        carried_admission=None,
+    )
+
+    row = storage.execute("SELECT state,revision FROM work_items WHERE id=?", (q2.id,)).fetchone()
+    after = storage.execute(
+        "SELECT COUNT(*) FROM messages WHERE user_id=? AND conversation_id=?",
+        (owner, conversation["id"]),
+    ).fetchone()[0]
+    assert result is None
+    assert tuple(row) == ("suspended", 3)
     assert after == before

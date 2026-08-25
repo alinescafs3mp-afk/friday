@@ -1296,8 +1296,111 @@ END;
 """
 
 
-def _schema_42_full_from_40() -> str:
+def _schema_42_full_from_40(*, exact_filename_candidate_receipt: bool) -> str:
     """Expand the exact schema-40 image with the complete dormant reader shape."""
+
+    candidate_message_receipt_sql = """AND json_extract(assistant.metadata_json,
+                             '$.accepted_archive_recall_outcome.schema')
+                ='friday.accepted-archive-recall-outcome-receipt.v1'
+            AND json_extract(assistant.metadata_json,
+                             '$.accepted_archive_recall_outcome.outcome.plan_sha256')
+                =NEW.accepted_search_plan_sha256
+            AND json_extract(assistant.metadata_json,
+                             '$.accepted_archive_recall_outcome.outcome_sha256')
+                =NEW.accepted_search_outcome_sha256"""
+    candidate_set_receipt_sql = """AND json_extract(assistant.metadata_json,
+                                    '$.accepted_archive_recall_outcome.outcome.lane')
+                       ='federated_search'
+                   AND json_extract(assistant.metadata_json,
+                                    '$.accepted_archive_recall_outcome.outcome.status')
+                       IN ('complete','partial')
+                   AND json_extract(assistant.metadata_json,
+                                    '$.accepted_archive_recall_outcome.outcome.evidence_sha256')
+                       =candidate_set.evidence_sha256
+                   AND json_extract(assistant.metadata_json,
+                                    '$.accepted_archive_recall_outcome.outcome.coverage_sha256')
+                       =candidate_set.coverage_sha256
+                   AND json_extract(assistant.metadata_json,
+                                    '$.accepted_archive_recall_outcome.outcome.coverage_grade')
+                       =candidate_set.coverage_grade
+                   AND json_extract(assistant.metadata_json,
+                                    '$.accepted_archive_recall_outcome.outcome.candidate_projection_sha256')
+                       =candidate_set.authority_projection_sha256
+                   AND json_extract(assistant.metadata_json,
+                                    '$.accepted_archive_recall_outcome.outcome.selected_evidence')
+                       IS NULL"""
+    if exact_filename_candidate_receipt:
+        candidate_message_receipt_sql = """AND (
+                (json_extract(assistant.metadata_json,
+                              '$.accepted_archive_recall_outcome.schema')
+                     ='friday.accepted-archive-recall-outcome-receipt.v1'
+                 AND json_extract(assistant.metadata_json,
+                                  '$.accepted_archive_recall_outcome.outcome.plan_sha256')
+                     =NEW.accepted_search_plan_sha256
+                 AND json_extract(assistant.metadata_json,
+                                  '$.accepted_archive_recall_outcome.outcome_sha256')
+                     =NEW.accepted_search_outcome_sha256)
+                OR
+                (json_extract(assistant.metadata_json,
+                              '$.accepted_compare_document_candidate_outcome.schema')
+                     ='friday.compare-document-candidate-outcome-receipt.v1'
+                 AND json_extract(assistant.metadata_json,
+                                  '$.accepted_compare_document_candidate_outcome.outcome.plan_sha256')
+                     =NEW.accepted_search_plan_sha256
+                 AND json_extract(assistant.metadata_json,
+                                  '$.accepted_compare_document_candidate_outcome.outcome_sha256')
+                     =NEW.accepted_search_outcome_sha256
+                 AND json_extract(assistant.metadata_json,
+                                  '$.structural.verdict_kind')
+                     ='compare_conversation_document_candidate_required'
+                 AND json_extract(assistant.metadata_json,
+                                  '$.structural.answer_present')=1
+                 AND json_extract(assistant.metadata_json,
+                                  '$.structural.model_spoke')=0)
+            )"""
+        candidate_set_receipt_sql = """AND (
+                       (json_extract(assistant.metadata_json,
+                                     '$.accepted_archive_recall_outcome.outcome.lane')
+                            ='federated_search'
+                        AND json_extract(assistant.metadata_json,
+                                     '$.accepted_archive_recall_outcome.outcome.status')
+                            IN ('complete','partial')
+                        AND json_extract(assistant.metadata_json,
+                                     '$.accepted_archive_recall_outcome.outcome.evidence_sha256')
+                            =candidate_set.evidence_sha256
+                        AND json_extract(assistant.metadata_json,
+                                     '$.accepted_archive_recall_outcome.outcome.coverage_sha256')
+                            =candidate_set.coverage_sha256
+                        AND json_extract(assistant.metadata_json,
+                                     '$.accepted_archive_recall_outcome.outcome.coverage_grade')
+                            =candidate_set.coverage_grade
+                        AND json_extract(assistant.metadata_json,
+                                     '$.accepted_archive_recall_outcome.outcome.candidate_projection_sha256')
+                            =candidate_set.authority_projection_sha256
+                        AND json_extract(assistant.metadata_json,
+                                     '$.accepted_archive_recall_outcome.outcome.selected_evidence')
+                            IS NULL)
+                       OR
+                       (json_extract(assistant.metadata_json,
+                                     '$.accepted_compare_document_candidate_outcome.outcome.evidence_sha256')
+                            =candidate_set.evidence_sha256
+                        AND json_extract(assistant.metadata_json,
+                                     '$.accepted_compare_document_candidate_outcome.outcome.coverage_sha256')
+                            =candidate_set.coverage_sha256
+                        AND candidate_set.coverage_grade='complete'
+                        AND json_extract(assistant.metadata_json,
+                                     '$.accepted_compare_document_candidate_outcome.outcome.candidate_projection_sha256')
+                            =candidate_set.authority_projection_sha256
+                        AND json_extract(assistant.metadata_json,
+                                     '$.accepted_compare_document_candidate_outcome.outcome.publication_attested')=1
+                        AND json_extract(assistant.metadata_json,
+                                     '$.accepted_compare_document_candidate_outcome.outcome.authority_rechecked')=1
+                        AND json_extract(assistant.metadata_json,
+                                     '$.accepted_compare_document_candidate_outcome.outcome.candidate_count')
+                            =(SELECT COUNT(*) FROM work_item_archive_candidate_set_items exact_item
+                               WHERE exact_item.candidate_set_id=candidate_set.id
+                                 AND exact_item.work_item_id=work.id))
+                   )"""
 
     schema = _WORK_ITEM_SCHEMA_40
     replacements = (
@@ -1681,15 +1784,7 @@ WHEN NOT EXISTS (
            OR
            (NEW.kind='select_document_candidate' AND NEW.work_revision=2
             AND work.revision=1 AND work.transition='question_asked'
-            AND json_extract(assistant.metadata_json,
-                             '$.accepted_archive_recall_outcome.schema')
-                ='friday.accepted-archive-recall-outcome-receipt.v1'
-            AND json_extract(assistant.metadata_json,
-                             '$.accepted_archive_recall_outcome.outcome.plan_sha256')
-                =NEW.accepted_search_plan_sha256
-            AND json_extract(assistant.metadata_json,
-                             '$.accepted_archive_recall_outcome.outcome_sha256')
-                =NEW.accepted_search_outcome_sha256
+            {candidate_message_receipt_sql}
             AND EXISTS (
                 SELECT 1 FROM work_item_compare_document_questions first
                  WHERE first.work_item_id=work.id AND first.work_revision=1
@@ -1704,27 +1799,7 @@ WHEN NOT EXISTS (
                    AND candidate_set.work_item_id=work.id
                    AND candidate_set.origin_boundary_user_message_id
                        =NEW.prompt_boundary_user_message_id
-                   AND json_extract(assistant.metadata_json,
-                                    '$.accepted_archive_recall_outcome.outcome.lane')
-                       ='federated_search'
-                   AND json_extract(assistant.metadata_json,
-                                    '$.accepted_archive_recall_outcome.outcome.status')
-                       IN ('complete','partial')
-                   AND json_extract(assistant.metadata_json,
-                                    '$.accepted_archive_recall_outcome.outcome.evidence_sha256')
-                       =candidate_set.evidence_sha256
-                   AND json_extract(assistant.metadata_json,
-                                    '$.accepted_archive_recall_outcome.outcome.coverage_sha256')
-                       =candidate_set.coverage_sha256
-                   AND json_extract(assistant.metadata_json,
-                                    '$.accepted_archive_recall_outcome.outcome.coverage_grade')
-                       =candidate_set.coverage_grade
-                   AND json_extract(assistant.metadata_json,
-                                    '$.accepted_archive_recall_outcome.outcome.candidate_projection_sha256')
-                       =candidate_set.authority_projection_sha256
-                   AND json_extract(assistant.metadata_json,
-                                    '$.accepted_archive_recall_outcome.outcome.selected_evidence')
-                       IS NULL
+                   {candidate_set_receipt_sql}
                    AND (SELECT COUNT(*) FROM work_item_archive_candidate_set_items item
                          WHERE item.candidate_set_id=candidate_set.id
                            AND item.work_item_id=work.id) BETWEEN 2 AND {ARCHIVE_CANDIDATE_MAX_COUNT}
@@ -2019,7 +2094,8 @@ BEGIN SELECT RAISE(ABORT,'comparison Work Item lifecycle is invalid'); END;
     )
 
 
-WORK_ITEM_SCHEMA = _schema_42_full_from_40()
+_WORK_ITEM_SCHEMA_42 = _schema_42_full_from_40(exact_filename_candidate_receipt=False)
+WORK_ITEM_SCHEMA = _schema_42_full_from_40(exact_filename_candidate_receipt=True)
 
 
 def _normalize_schema_sql(value: str) -> str:
@@ -2068,6 +2144,16 @@ def _canonical_work_item_schema_objects() -> dict[tuple[str, str], str]:
     conn = sqlite3.connect(":memory:")
     try:
         _execute_schema(conn, WORK_ITEM_SCHEMA)
+        return _schema_objects(conn, current=True)
+    finally:
+        conn.close()
+
+
+@lru_cache(maxsize=1)
+def _canonical_schema_42_objects() -> dict[tuple[str, str], str]:
+    conn = sqlite3.connect(":memory:")
+    try:
+        _execute_schema(conn, _WORK_ITEM_SCHEMA_42)
         return _schema_objects(conn, current=True)
     finally:
         conn.close()
@@ -2863,7 +2949,7 @@ def upgrade_work_item_schema_to_42(
     *,
     required: bool,
 ) -> None:
-    """Authenticate and atomically rebuild only exact released schemas 38/39/40."""
+    """Authenticate and atomically advance exact released Work Item schemas."""
 
     if not conn.in_transaction:
         raise RuntimeError("Work Item schema upgrade requires an existing transaction")
@@ -2873,6 +2959,13 @@ def upgrade_work_item_schema_to_42(
             raise sqlite3.DatabaseError("Work Item store is missing")
         return
     if _schema_objects(conn, current=True) == _canonical_work_item_schema_objects():
+        validate_work_item_schema(conn)
+        return
+
+    installed_42 = _schema_objects(conn, current=True)
+    if installed_42 == _canonical_schema_42_objects() and related == installed_42:
+        conn.execute("DROP TRIGGER trg_work_item_compare_questions_insert")
+        _execute_schema(conn, WORK_ITEM_SCHEMA)
         validate_work_item_schema(conn)
         return
 

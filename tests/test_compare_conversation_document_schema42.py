@@ -60,7 +60,12 @@ from friday.interaction_control_plane.work_item_contract import (
     WorkState,
     WorkTransition,
 )
-from friday.interaction_control_plane.work_item_schema import validate_work_item_schema
+from friday.interaction_control_plane.work_item_schema import (
+    _WORK_ITEM_SCHEMA_42,
+    _execute_schema,
+    upgrade_work_item_schema_to_42,
+    validate_work_item_schema,
+)
 from friday.interaction_control_plane.work_item_store import (
     WorkItemAnchorError,
     WorkItemConflictError,
@@ -111,6 +116,38 @@ _SECOND_QUESTION_ID = "question_4343434343434343"
 _CANDIDATE_ANSWERED_AT = "2026-08-25T08:10:00+00:00"
 _CANDIDATE_RESOLVED_AT = "2026-08-25T08:11:00+00:00"
 _CANDIDATE_COMPLETED_AT = "2026-08-25T08:12:00+00:00"
+
+
+def test_exact_released_schema42_upgrades_candidate_receipt_trigger_in_place() -> None:
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("CREATE TABLE users(id TEXT PRIMARY KEY)")
+        conn.execute("CREATE TABLE conversations(id TEXT PRIMARY KEY,user_id TEXT)")
+        conn.execute(
+            """CREATE TABLE messages(
+                   id TEXT PRIMARY KEY,user_id TEXT,conversation_id TEXT,role TEXT)"""
+        )
+        conn.execute("CREATE TABLE raw_objects(id TEXT PRIMARY KEY)")
+        _execute_schema(conn, _WORK_ITEM_SCHEMA_42)
+        before = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+            ("trg_work_item_compare_questions_insert",),
+        ).fetchone()[0]
+        assert "accepted_compare_document_candidate_outcome" not in before
+
+        conn.execute("BEGIN")
+        upgrade_work_item_schema_to_42(conn, required=True)
+        conn.commit()
+
+        after = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+            ("trg_work_item_compare_questions_insert",),
+        ).fetchone()[0]
+        assert "accepted_compare_document_candidate_outcome" in after
+        validate_work_item_schema(conn)
+    finally:
+        conn.close()
 
 
 def _sha(value: str) -> str:

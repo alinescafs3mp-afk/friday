@@ -9,11 +9,14 @@ import re
 import sqlite3
 import uuid
 from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 from friday.interaction_control_plane.archive_candidate_selection import (
+    ArchiveCandidateItem,
     ArchiveCandidateSelectionError,
     ArchiveCandidateSet,
+    archive_candidate_selection_offer_suffix,
     parse_archive_candidate_ordinal,
 )
 from friday.interaction_control_plane.archive_candidate_selection_store import (
@@ -26,21 +29,26 @@ from friday.interaction_control_plane.archive_evidence_work_item_store import (
     get_recall_selected_archive_evidence_work_item_in_transaction,
 )
 from friday.interaction_control_plane.compare_conversation_document import (
+    ACCEPTED_COMPARE_DOCUMENT_CANDIDATE_METADATA_KEY,
+    COMPARE_DOCUMENT_CANDIDATE_REQUIRED_VERDICT_KIND,
     COMPARE_DOCUMENT_REFERENCE_PROMPT,
     COMPARE_DOCUMENT_REFERENCE_REQUIRED_VERDICT_KIND,
     AcceptedComparisonResultIdentity,
     CompareConversationDocumentActiveFrame,
     CompareConversationWithDocumentWorkItem,
+    CompareDocumentCandidateOutcome,
     DocumentReferenceAdmissionShape,
     DocumentReferenceQuestion,
     DocumentReferenceQuestionKind,
     DocumentReferenceQuestionState,
     ResolvedDocumentIdentity,
     ResolvedDocumentProvenance,
+    load_accepted_compare_document_candidate_outcome_receipt,
     load_accepted_comparison_outcome_receipt,
 )
 from friday.interaction_control_plane.selected_archive_evidence import (
     SelectedArchiveCorpus,
+    SelectedArchiveCoverageGrade,
     SelectedArchiveEvidence,
 )
 from friday.interaction_control_plane.work_item_contract import (
@@ -64,14 +72,40 @@ from friday.interaction_control_plane.work_item_store import (
     _rollback_work_item_mutation_savepoint,
 )
 from friday.orchestration.archive_recall_outcome import (
+    ACCEPTED_ARCHIVE_RECALL_OUTCOME_METADATA_KEY,
     ArchiveRecallLane,
     ArchiveRecallOutcomeError,
     ArchiveRecallStatus,
     load_accepted_archive_recall_outcome_receipt,
 )
+from friday.permissions import ActorContext, AuthorizationService
+from friday.retrieval.archive_evidence_snapshot import archive_selected_evidence_snapshot_sha256
 from friday.retrieval.archive_search_authority import ArchiveSearchAcceptedCandidateProjection
+from friday.retrieval.contracts import (
+    AuthorityScope,
+    CanonicalObjectKind,
+    EmbeddingCompatibility,
+    EmbeddingIdentity,
+    LifecycleRef,
+    LifecycleState,
+    PassageRef,
+    RepresentationKind,
+    ResolvedSource,
+    RevalidationTarget,
+    RevisionKind,
+    SourceKind,
+    SourceRef,
+    SourceRepresentation,
+    SourceRevision,
+    TextSpanLocator,
+)
 from friday.retrieval.passage_contract import MessageWindowLocator
 from friday.source_identity import raw_source_identity_sha256
+from friday.storage._archive_search_documents import PASSAGE_INDEX_VERSION
+from friday.storage._intake import (
+    select_owned_file_candidate_source_in_transaction,
+    select_owned_filename_candidates_in_transaction,
+)
 
 _WORK_ITEM_ID_RE = re.compile(r"work_[0-9a-f]{16}\Z")
 _CONVERSATION_ID_RE = re.compile(r"conv_[0-9a-f]{16}\Z")
@@ -80,6 +114,7 @@ _USER_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@+-]{0,199}\Z")
 _QUESTION_ID_RE = re.compile(r"question_[0-9a-f]{16}\Z")
 _CANDIDATE_SET_ID_RE = re.compile(r"cset_[0-9a-f]{16}\Z")
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
+_PREPARED_EXACT_CANDIDATES_AUTHORITY = object()
 
 
 def _require_transaction(conn: sqlite3.Connection) -> None:
@@ -275,29 +310,75 @@ def _validate_candidate_publication(
     content: object,
     question: DocumentReferenceQuestion,
     candidate_set: ArchiveCandidateSet | None,
-) -> None:
+) -> bool:
+    """Validate either archive-search or exact-filename publication.
+
+    ``True`` identifies the code-owned exact-filename lane.  Both receipt
+    families bind the same immutable candidate projection and exact prompt.
+    """
+
     if candidate_set is None:
         raise WorkItemAnchorError("candidate publication has no durable candidate set")
     try:
-        receipt = load_accepted_archive_recall_outcome_receipt(metadata)
-    except (ArchiveRecallOutcomeError, TypeError, ValueError) as exc:
+        decoded_metadata = json.loads(metadata) if isinstance(metadata, str) else metadata
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise WorkItemAnchorError("candidate publication metadata is invalid") from exc
+    if not isinstance(decoded_metadata, Mapping):
+        raise WorkItemAnchorError("candidate publication metadata is invalid")
+    has_archive_receipt = ACCEPTED_ARCHIVE_RECALL_OUTCOME_METADATA_KEY in decoded_metadata
+    has_exact_receipt = ACCEPTED_COMPARE_DOCUMENT_CANDIDATE_METADATA_KEY in decoded_metadata
+    if has_archive_receipt == has_exact_receipt:
+        raise WorkItemAnchorError("candidate publication receipt family is ambiguous")
+    if has_archive_receipt:
+        try:
+            receipt = load_accepted_archive_recall_outcome_receipt(metadata)
+        except (ArchiveRecallOutcomeError, TypeError, ValueError) as exc:
+            raise WorkItemAnchorError("candidate publication search receipt is invalid") from exc
+    else:
+        receipt = None
+    if receipt is not None:
+        outcome = receipt.outcome
+        if (
+            outcome.lane is not ArchiveRecallLane.FEDERATED_SEARCH
+            or outcome.status not in {ArchiveRecallStatus.COMPLETE, ArchiveRecallStatus.PARTIAL}
+            or outcome.plan_sha256 != question.accepted_search_plan_sha256
+            or receipt.outcome_sha256 != question.accepted_search_outcome_sha256
+            or not hmac.compare_digest(
+                outcome.answer_sha256,
+                _text_sha256(content, label="candidate answer"),
+            )
+            or outcome.evidence_sha256 != candidate_set.evidence_sha256
+            or outcome.coverage_sha256 != candidate_set.coverage_sha256
+            or outcome.coverage_grade.value != candidate_set.coverage_grade.value
+            or outcome.candidate_projection_sha256 != candidate_set.authority_projection_sha256
+            or outcome.candidate_count < len(candidate_set.candidates)
+            or outcome.selected_evidence is not None
+            or not _candidate_offer_is_exact(content, candidate_set)
+        ):
+            raise WorkItemAnchorError("candidate publication receipt does not match its set")
+        return False
+    try:
+        exact_receipt = load_accepted_compare_document_candidate_outcome_receipt(metadata)
+    except (TypeError, ValueError, WorkItemContractError) as exc:
         raise WorkItemAnchorError("candidate publication has no accepted search receipt") from exc
-    outcome = receipt.outcome
+    exact = exact_receipt.outcome
     if (
-        outcome.lane is not ArchiveRecallLane.FEDERATED_SEARCH
-        or outcome.status not in {ArchiveRecallStatus.COMPLETE, ArchiveRecallStatus.PARTIAL}
-        or outcome.plan_sha256 != question.accepted_search_plan_sha256
-        or receipt.outcome_sha256 != question.accepted_search_outcome_sha256
-        or not hmac.compare_digest(outcome.answer_sha256, _text_sha256(content, label="candidate answer"))
-        or outcome.evidence_sha256 != candidate_set.evidence_sha256
-        or outcome.coverage_sha256 != candidate_set.coverage_sha256
-        or outcome.coverage_grade.value != candidate_set.coverage_grade.value
-        or outcome.candidate_projection_sha256 != candidate_set.authority_projection_sha256
-        or outcome.candidate_count < len(candidate_set.candidates)
-        or outcome.selected_evidence is not None
+        exact.plan_sha256 != question.accepted_search_plan_sha256
+        or exact_receipt.outcome_sha256 != question.accepted_search_outcome_sha256
+        or not hmac.compare_digest(
+            exact.answer_sha256,
+            _text_sha256(content, label="candidate answer"),
+        )
+        or exact.evidence_sha256 != candidate_set.evidence_sha256
+        or exact.coverage_sha256 != candidate_set.coverage_sha256
+        or exact.candidate_projection_sha256 != candidate_set.authority_projection_sha256
+        or exact.candidate_count != len(candidate_set.candidates)
+        or exact.publication_attested is not True
+        or exact.authority_rechecked is not True
         or not _candidate_offer_is_exact(content, candidate_set)
     ):
         raise WorkItemAnchorError("candidate publication receipt does not match its set")
+    return True
 
 
 def _validate_question_anchors(
@@ -378,12 +459,27 @@ def _validate_question_anchors(
             if structural is None:
                 raise WorkItemAnchorError("document-reference publication is not source-free and exact")
         else:
-            _validate_candidate_publication(
+            exact_filename_publication = _validate_candidate_publication(
                 metadata=prompt_row[2],
                 content=prompt_row[3],
                 question=question,
                 candidate_set=item.document_candidate_set,
             )
+            if exact_filename_publication and (
+                conn.execute(
+                    """SELECT 1 FROM messages
+                        WHERE id=?
+                          AND json_extract(metadata_json,'$.structural.verdict_kind')=?
+                          AND json_extract(metadata_json,'$.structural.answer_present')=1
+                          AND json_extract(metadata_json,'$.structural.model_spoke')=0""",
+                    (
+                        question.prompt_assistant_message_id,
+                        COMPARE_DOCUMENT_CANDIDATE_REQUIRED_VERDICT_KIND,
+                    ),
+                ).fetchone()
+                is None
+            ):
+                raise WorkItemAnchorError("exact candidate publication is not code-owned")
         if index and question.prompt_boundary_user_message_id != previous_answer:
             raise WorkItemAnchorError("candidate question is not bound to the document reply")
         if question.state is DocumentReferenceQuestionState.ANSWERED:
@@ -1170,6 +1266,382 @@ def resolve_compare_conversation_document_candidate_in_transaction(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedCompareDocumentFilenameCandidates:
+    """Process-owned Q2 material produced from one transaction snapshot."""
+
+    candidate_set: ArchiveCandidateSet
+    prompt: str
+    outcome: CompareDocumentCandidateOutcome
+    _process_authority: object
+
+
+def _require_compare_candidate_file_authority(
+    conn: sqlite3.Connection,
+    *,
+    authorization: AuthorizationService,
+    actor: ActorContext,
+    user_id: str,
+) -> None:
+    if type(authorization) is not AuthorizationService or type(actor) is not ActorContext:
+        raise WorkItemContractError("comparison candidate authority is invalid")
+    if actor.own_id != user_id or not actor.user_id:
+        raise WorkItemAnchorError("comparison candidate actor scope changed")
+    principal = conn.execute(
+        "SELECT preset_key,status FROM users WHERE id=?",
+        (user_id,),
+    ).fetchone()
+    if principal is None or str(principal["status"] or "") != "active":
+        raise WorkItemAnchorError("comparison candidate owner is unavailable")
+    fresh_actor = replace(actor, preset_key=str(principal["preset_key"] or "guest"))
+    if not authorization.authorize(fresh_actor, "files.read").allowed:
+        raise WorkItemAnchorError("comparison candidate file authority was denied")
+
+
+def _compare_candidate_raw_snapshot(
+    raw: Mapping[str, object],
+    *,
+    tenant_id: str,
+    user_id: str,
+) -> tuple[ResolvedSource, str]:
+    raw_id = str(raw.get("id") or "")
+    content_hash = _digest(raw.get("content_hash"), label="candidate Raw content_sha256")
+    body = raw.get("_raw_content")
+    if not isinstance(body, str) or not body:
+        raise WorkItemAnchorError("comparison filename candidate body is unavailable")
+    source_ref = SourceRef(
+        SourceKind.DOCUMENT,
+        AuthorityScope.TENANT_PRINCIPAL,
+        tenant_id,
+        user_id,
+        CanonicalObjectKind.RAW_OBJECT,
+        raw_id,
+    )
+    representation = SourceRepresentation(RepresentationKind.RAW_OBJECT, raw_id)
+    revision = SourceRevision(
+        representation,
+        RevisionKind.RAW_CONTENT_SHA256,
+        content_hash,
+    )
+    return (
+        ResolvedSource.create(
+            source_ref=source_ref,
+            representations=(representation,),
+            lifecycle=(LifecycleRef(representation, LifecycleState.ACTIVE),),
+            revisions=(revision,),
+            revalidation_targets=(RevalidationTarget(representation, AuthorityScope.TENANT_PRINCIPAL),),
+        ),
+        body,
+    )
+
+
+def _validate_compare_candidate_snapshot(
+    selected: SelectedArchiveEvidence,
+    *,
+    resolved_source: ResolvedSource,
+    body: str,
+) -> None:
+    excerpts: list[str] = []
+    for passage in selected.passage_refs:
+        locator = passage.locator
+        if (
+            type(locator) is not TextSpanLocator
+            or not passage.revision_matches(resolved_source)
+            or locator.start_char < 0
+            or locator.end_char > len(body)
+        ):
+            raise WorkItemAnchorError("comparison filename candidate passage changed")
+        excerpt = body[locator.start_char : locator.end_char]
+        if not excerpt:
+            raise WorkItemAnchorError("comparison filename candidate passage changed")
+        excerpts.append(excerpt)
+    snapshot = archive_selected_evidence_snapshot_sha256(
+        resolved_source,
+        selected.passage_refs,
+        tuple(excerpts),
+    )
+    if not hmac.compare_digest(snapshot, selected.source_snapshot_sha256):
+        raise WorkItemAnchorError("comparison filename candidate snapshot changed")
+
+
+def reauthorize_compare_conversation_document_filename_candidate_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    authorization: AuthorizationService,
+    actor: ActorContext,
+    item: CompareConversationWithDocumentWorkItem,
+    selected_ordinal: int,
+) -> SelectedArchiveEvidence:
+    """Re-prove one frozen ordinal against current Raw authority and bytes."""
+
+    _require_transaction(conn)
+    if type(item) is not CompareConversationWithDocumentWorkItem:
+        raise WorkItemContractError("comparison candidate item is invalid")
+    _require_compare_candidate_file_authority(
+        conn,
+        authorization=authorization,
+        actor=actor,
+        user_id=item.user_id,
+    )
+    candidate_set = item.document_candidate_set
+    if candidate_set is None:
+        raise WorkItemAnchorError("comparison candidate set is unavailable")
+    try:
+        selected = candidate_set.selected_evidence(selected_ordinal, work_item_id=item.id)
+    except ArchiveCandidateSelectionError as exc:
+        raise WorkItemAnchorError("comparison candidate ordinal is invalid") from exc
+    if (
+        selected.corpus is not SelectedArchiveCorpus.DOCUMENTS
+        or selected.source_ref.tenant_id != actor.user_id
+        or selected.source_ref.principal_id != item.user_id
+    ):
+        raise WorkItemAnchorError("comparison candidate scope changed")
+    raw = select_owned_file_candidate_source_in_transaction(
+        conn,
+        actor.user_id,
+        item.user_id,
+        selected.source_ref.canonical_object_id,
+    )
+    if raw is None:
+        raise WorkItemAnchorError("comparison candidate Raw is unavailable")
+    resolved_source, body = _compare_candidate_raw_snapshot(
+        raw,
+        tenant_id=actor.user_id,
+        user_id=item.user_id,
+    )
+    if resolved_source.source_ref != selected.source_ref:
+        raise WorkItemAnchorError("comparison candidate source changed")
+    _validate_compare_candidate_snapshot(
+        selected,
+        resolved_source=resolved_source,
+        body=body,
+    )
+    return selected
+
+
+def _candidate_material_sha256(value: Mapping[str, object]) -> str:
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise WorkItemContractError("comparison candidate material is invalid") from exc
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _safe_candidate_display(value: object, *, fallback: str, maximum: int) -> str:
+    text = " ".join(str(value or "").split()).strip()
+    return (text or fallback)[:maximum]
+
+
+def prepare_compare_conversation_document_filename_candidates_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    authorization: AuthorizationService,
+    actor: ActorContext,
+    work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    boundary_user_message_id: str,
+    filename: str,
+    candidate_set_id: str | None = None,
+) -> _PreparedCompareDocumentFilenameCandidates:
+    """Freeze every exact, readable duplicate filename as one durable Q2 set."""
+
+    _require_transaction(conn)
+    revision = _revision(expected_revision)
+    if revision != 1:
+        raise WorkItemConflictError("only Q1 can advance to a candidate question")
+    identifier = _scope(work_item_id, _WORK_ITEM_ID_RE, label="work_item_id")
+    user = _scope(user_id, _USER_ID_RE, label="user_id")
+    conversation = _scope(conversation_id, _CONVERSATION_ID_RE, label="conversation_id")
+    boundary = _scope(
+        boundary_user_message_id,
+        _MESSAGE_ID_RE,
+        label="boundary_user_message_id",
+    )
+    exact_filename = str(filename or "").strip()
+    if not exact_filename or len(exact_filename) > 260:
+        raise WorkItemContractError("comparison filename is outside the closed limit")
+    _require_compare_candidate_file_authority(
+        conn,
+        authorization=authorization,
+        actor=actor,
+        user_id=user,
+    )
+
+    current = _fetch(
+        conn,
+        work_item_id=identifier,
+        user_id=user,
+        conversation_id=conversation,
+    )
+    if (
+        current is None
+        or current.state is not WorkState.WAITING_FOR_INPUT
+        or current.revision != revision
+        or len(current.document_questions) != 1
+        or current.document_questions[0].kind is not DocumentReferenceQuestionKind.PROVIDE_DOCUMENT_REFERENCE
+        or current.document_questions[0].state is not DocumentReferenceQuestionState.WAITING
+    ):
+        raise WorkItemConflictError("comparison Work Item revision/state is no longer current")
+    _validate_stored_item(conn, current, require_latest_message=False)
+    _validate_answer_chain(
+        conn,
+        item=current,
+        boundary_user_message_id=boundary,
+    )
+    selected = select_owned_filename_candidates_in_transaction(
+        conn,
+        actor.user_id,
+        user,
+        exact_filename,
+        limit=21,
+    )
+    rows = selected.get("items")
+    total = selected.get("total")
+    if (
+        type(rows) is not list
+        or not isinstance(total, int)
+        or isinstance(total, bool)
+        or selected.get("complete") is not True
+        or total != len(rows)
+        or not 2 <= total <= 20
+    ):
+        raise WorkItemAnchorError("comparison filename ambiguity is not a complete closed set")
+
+    candidates: list[ArchiveCandidateItem] = []
+    display_rows: list[tuple[str, str, str]] = []
+    for ordinal, row in enumerate(rows, start=1):
+        if not isinstance(row, Mapping):
+            raise WorkItemAnchorError("comparison filename candidate row is invalid")
+        raw_id = str(row.get("id") or "")
+        raw = select_owned_file_candidate_source_in_transaction(
+            conn,
+            actor.user_id,
+            user,
+            raw_id,
+        )
+        if raw is None:
+            raise WorkItemAnchorError("comparison filename candidate is no longer readable")
+        resolved_source, body = _compare_candidate_raw_snapshot(
+            raw,
+            tenant_id=actor.user_id,
+            user_id=user,
+        )
+        source_ref = resolved_source.source_ref
+        excerpt = body[:720]
+        raw_revision = next(
+            (
+                item
+                for item in resolved_source.revisions
+                if item.kind is RevisionKind.RAW_CONTENT_SHA256
+                and item.representation.kind is RepresentationKind.RAW_OBJECT
+            ),
+            None,
+        )
+        if raw_revision is None:
+            raise WorkItemAnchorError("comparison filename candidate has no Raw revision")
+        passage = PassageRef.from_resolved_source(
+            resolved_source,
+            source_revision=raw_revision,
+            locator=TextSpanLocator(chunk_index=0, start_char=0, end_char=len(excerpt)),
+            passage_index_version=PASSAGE_INDEX_VERSION,
+            embedding=EmbeddingIdentity.unindexed(EmbeddingCompatibility.NOT_APPLICABLE),
+        )
+        snapshot = archive_selected_evidence_snapshot_sha256(
+            resolved_source,
+            (passage,),
+            (excerpt,),
+        )
+        label = f"A{ordinal}"
+        candidates.append(
+            ArchiveCandidateItem(
+                ordinal=ordinal,
+                public_citation_label=label,
+                corpus=SelectedArchiveCorpus.DOCUMENTS,
+                source_ref=source_ref,
+                passage_refs=(passage,),
+                source_snapshot_sha256=snapshot,
+            )
+        )
+        display_rows.append(
+            (
+                label,
+                _safe_candidate_display(row.get("filename"), fallback="документ", maximum=180),
+                _safe_candidate_display(row.get("received_at"), fallback="дата неизвестна", maximum=40),
+            )
+        )
+
+    evidence_sha256 = _candidate_material_sha256(
+        {
+            "candidates": [item.to_payload() for item in candidates],
+            "schema": "friday.compare-document-exact-filename-evidence.v1",
+        }
+    )
+    coverage_sha256 = _candidate_material_sha256(
+        {
+            "authority_rechecked": True,
+            "complete": True,
+            "count": total,
+            "schema": "friday.compare-document-exact-filename-coverage.v1",
+        }
+    )
+    set_identifier = _scope(
+        candidate_set_id or new_compare_document_candidate_set_id(),
+        _CANDIDATE_SET_ID_RE,
+        label="candidate_set_id",
+    )
+    candidate_set = ArchiveCandidateSet.from_code_owned_exact_candidates(
+        id=set_identifier,
+        work_item_id=identifier,
+        origin_boundary_user_message_id=boundary,
+        evidence_sha256=evidence_sha256,
+        coverage_sha256=coverage_sha256,
+        coverage_grade=SelectedArchiveCoverageGrade.COMPLETE,
+        candidates=tuple(candidates),
+    )
+    summary = "Нашёл несколько доступных документов с таким именем:\n" + "\n".join(
+        f"{label} — {display_name} — {received_at}" for label, display_name, received_at in display_rows
+    )
+    prompt = (
+        summary
+        + "\n\n"
+        + archive_candidate_selection_offer_suffix(
+            tuple(item.public_citation_label for item in candidate_set.candidates)
+        )
+    )
+    plan_sha256 = _candidate_material_sha256(
+        {
+            "candidate_set_id": candidate_set.id,
+            "filename_sha256": hashlib.sha256(exact_filename.encode("utf-8")).hexdigest(),
+            "schema": "friday.compare-document-exact-filename-plan.v1",
+            "work_item_id": identifier,
+        }
+    )
+    outcome = CompareDocumentCandidateOutcome(
+        plan_sha256=plan_sha256,
+        evidence_sha256=candidate_set.evidence_sha256,
+        coverage_sha256=candidate_set.coverage_sha256,
+        candidate_projection_sha256=candidate_set.authority_projection_sha256,
+        answer_sha256=_text_sha256(prompt, label="candidate answer"),
+        candidate_count=len(candidate_set.candidates),
+        publication_attested=True,
+        authority_rechecked=True,
+    )
+    return _PreparedCompareDocumentFilenameCandidates(
+        candidate_set=candidate_set,
+        prompt=prompt,
+        outcome=outcome,
+        _process_authority=_PREPARED_EXACT_CANDIDATES_AUTHORITY,
+    )
+
+
 def _resolve_compare_document_in_transaction(
     conn: sqlite3.Connection,
     *,
@@ -1417,6 +1889,178 @@ def ask_compare_conversation_document_candidate_question_in_transaction(
         question=candidate_question,
         candidate_set=candidate_set,
     )
+    savepoint = _begin_work_item_mutation_savepoint(conn)
+    try:
+        first = current.document_questions[0]
+        answered = conn.execute(
+            """UPDATE work_item_compare_document_questions
+                  SET state='answered',answered_at=?,answer_user_message_id=?,
+                      closed_at=?,close_reason='answered'
+                WHERE id=? AND work_item_id=? AND work_revision=1
+                  AND state='waiting'""",
+            (timestamp, boundary, timestamp, first.id, identifier),
+        )
+        if answered.rowcount != 1:
+            raise WorkItemConflictError("comparison Q1 CAS lost its state race")
+        _insert_candidate_set(conn, candidate_set)
+        _insert_question(conn, candidate_question)
+        work_cursor = conn.execute(
+            """UPDATE work_items
+                  SET transition='question_reasked',revision=revision+1,
+                      updated_at=?,expires_at=?
+                WHERE id=? AND user_id=? AND conversation_id=?
+                  AND kind='compare_conversation_with_document'
+                  AND state='waiting_for_input' AND revision=1 AND expires_at>?""",
+            (
+                timestamp,
+                _expiry(timestamp),
+                identifier,
+                user,
+                conversation,
+                timestamp,
+            ),
+        )
+        if work_cursor.rowcount != 1:
+            raise WorkItemConflictError("comparison Q2 CAS lost its revision race")
+        updated = _fetch(
+            conn,
+            work_item_id=identifier,
+            user_id=user,
+            conversation_id=conversation,
+        )
+        if updated is None:  # pragma: no cover
+            raise WorkItemConflictError("candidate comparison Work Item is not durable")
+        _validate_stored_item(conn, updated, require_latest_message=True)
+    except BaseException as exc:
+        _rollback_work_item_mutation_savepoint(conn, savepoint)
+        if isinstance(exc, sqlite3.IntegrityError):
+            raise WorkItemConflictError("comparison candidate question lost its state race") from exc
+        raise
+    _release_work_item_mutation_savepoint(conn, savepoint)
+    return updated
+
+
+def ask_compare_conversation_document_filename_candidate_question_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    boundary_user_message_id: str,
+    candidate_question_assistant_message_id: str,
+    prepared_candidates: _PreparedCompareDocumentFilenameCandidates,
+    question_id: str | None = None,
+    now: str | None = None,
+) -> CompareConversationWithDocumentWorkItem:
+    """CAS-publish code-owned exact-filename ambiguity as durable Q2."""
+
+    _require_transaction(conn)
+    revision = _revision(expected_revision)
+    if revision != 1:
+        raise WorkItemConflictError("only Q1 can advance to a candidate question")
+    identifier = _scope(work_item_id, _WORK_ITEM_ID_RE, label="work_item_id")
+    user = _scope(user_id, _USER_ID_RE, label="user_id")
+    conversation = _scope(conversation_id, _CONVERSATION_ID_RE, label="conversation_id")
+    boundary = _scope(
+        boundary_user_message_id,
+        _MESSAGE_ID_RE,
+        label="boundary_user_message_id",
+    )
+    assistant = _scope(
+        candidate_question_assistant_message_id,
+        _MESSAGE_ID_RE,
+        label="candidate_question_assistant_message_id",
+    )
+    if (
+        type(prepared_candidates) is not _PreparedCompareDocumentFilenameCandidates
+        or prepared_candidates._process_authority is not _PREPARED_EXACT_CANDIDATES_AUTHORITY
+        or type(prepared_candidates.candidate_set) is not ArchiveCandidateSet
+        or type(prepared_candidates.outcome) is not CompareDocumentCandidateOutcome
+        or not isinstance(prepared_candidates.prompt, str)
+    ):
+        raise WorkItemContractError("candidate question requires process-owned exact candidates")
+    candidate_set = prepared_candidates.candidate_set
+    outcome = prepared_candidates.outcome
+    if (
+        candidate_set.work_item_id != identifier
+        or candidate_set.origin_boundary_user_message_id != boundary
+        or outcome.evidence_sha256 != candidate_set.evidence_sha256
+        or outcome.coverage_sha256 != candidate_set.coverage_sha256
+        or outcome.candidate_projection_sha256 != candidate_set.authority_projection_sha256
+        or outcome.candidate_count != len(candidate_set.candidates)
+        or not hmac.compare_digest(
+            outcome.answer_sha256,
+            _text_sha256(prepared_candidates.prompt, label="candidate answer"),
+        )
+    ):
+        raise WorkItemContractError("prepared comparison candidates changed")
+    question_identifier = _scope(
+        question_id or new_compare_document_question_id(),
+        _QUESTION_ID_RE,
+        label="question_id",
+    )
+    current = _fetch(
+        conn,
+        work_item_id=identifier,
+        user_id=user,
+        conversation_id=conversation,
+    )
+    if (
+        current is None
+        or current.state is not WorkState.WAITING_FOR_INPUT
+        or current.revision != revision
+        or len(current.document_questions) != 1
+    ):
+        raise WorkItemConflictError("comparison Work Item revision/state is no longer current")
+    timestamp = _logical_now(now, current_updated_at=current.updated_at)
+    if current.expires_at <= timestamp:
+        raise WorkItemConflictError("comparison Work Item revision/state is no longer current")
+    _validate_stored_item(conn, current, require_latest_message=False)
+    _validate_answer_chain(
+        conn,
+        item=current,
+        boundary_user_message_id=boundary,
+        following_assistant_message_id=assistant,
+    )
+    if (
+        any(
+            candidate.corpus is not SelectedArchiveCorpus.DOCUMENTS
+            or candidate.source_ref.principal_id != user
+            for candidate in candidate_set.candidates
+        )
+        or len({candidate.source_ref.tenant_id for candidate in candidate_set.candidates}) != 1
+    ):
+        raise WorkItemAnchorError("comparison candidate set is not one owned document tenant")
+    candidate_question = DocumentReferenceQuestion(
+        id=question_identifier,
+        work_item_id=identifier,
+        kind=DocumentReferenceQuestionKind.SELECT_DOCUMENT_CANDIDATE,
+        admission_shape=current.document_questions[0].admission_shape,
+        state=DocumentReferenceQuestionState.WAITING,
+        created_at=timestamp,
+        prompt_boundary_user_message_id=boundary,
+        prompt_assistant_message_id=assistant,
+        work_revision=2,
+        candidate_set_id=candidate_set.id,
+        accepted_search_plan_sha256=outcome.plan_sha256,
+        accepted_search_outcome_sha256=outcome.canonical_sha256,
+    )
+    candidate_row = conn.execute(
+        "SELECT metadata_json,content FROM messages WHERE id=?",
+        (assistant,),
+    ).fetchone()
+    if (
+        candidate_row is None
+        or candidate_row[1] != prepared_candidates.prompt
+        or not _validate_candidate_publication(
+            metadata=candidate_row[0],
+            content=candidate_row[1],
+            question=candidate_question,
+            candidate_set=candidate_set,
+        )
+    ):
+        raise WorkItemAnchorError("exact candidate publication is unavailable")
     savepoint = _begin_work_item_mutation_savepoint(conn)
     try:
         first = current.document_questions[0]
@@ -1787,6 +2431,7 @@ def expire_due_compare_conversation_with_document_work_items_in_transaction(
 
 __all__ = [
     "ask_compare_conversation_document_candidate_question_in_transaction",
+    "ask_compare_conversation_document_filename_candidate_question_in_transaction",
     "cancel_compare_conversation_with_document_in_transaction",
     "complete_compare_conversation_with_document_in_transaction",
     "create_compare_conversation_with_document_from_selected_followup_in_transaction",
@@ -1798,6 +2443,8 @@ __all__ = [
     "new_compare_conversation_with_document_work_item_id",
     "new_compare_document_candidate_set_id",
     "new_compare_document_question_id",
+    "prepare_compare_conversation_document_filename_candidates_in_transaction",
+    "reauthorize_compare_conversation_document_filename_candidate_in_transaction",
     "resolve_compare_conversation_document_candidate_in_transaction",
     "resolve_compare_conversation_document_reference_in_transaction",
     "suspend_compare_conversation_with_document_in_transaction",
