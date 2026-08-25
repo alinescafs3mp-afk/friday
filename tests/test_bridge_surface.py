@@ -264,6 +264,8 @@ EXPECTED_COMMANDS = {
     "/relations",
     "/rename",
     "/research",
+    "/engineer",
+    "/engeneer",
     "/retry",
     "/search",
     # /source — дословный provenance-поиск по исходным файлам: 93% загруженных

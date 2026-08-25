@@ -10,6 +10,7 @@ import ipaddress
 import os
 import platform
 import re
+import stat
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -598,6 +599,10 @@ class FridaySettings:
     # resurrect both the account and every credential removed with it.
     account_hard_delete_enabled: bool
 
+    # Owner-only engineering workbench. Keep the organ absent until the operator
+    # deliberately admits its parser and outbound-diagnostics surface.
+    engineer_mode_enabled: bool
+
     llm_base_url: str
     llm_model: str
     llm_enabled: bool
@@ -1058,6 +1063,7 @@ class FridaySettings:
         return {
             "home": str(self.home),
             "profile": profile_public_dict(self.profile),
+            "engineer_mode": {"enabled": self.engineer_mode_enabled},
             "llm": {
                 "enabled": self.llm_enabled,
                 "base_url": self.llm_base_url,
@@ -1269,6 +1275,7 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
         # Code-owned quarantine: this must not be an operator/env escape hatch.
         # Restore replaces the SQLite image which currently owns the tombstones.
         account_hard_delete_enabled=False,
+        engineer_mode_enabled=_bool_env("FRIDAY_ENGINEER_MODE_ENABLED", False),
         llm_base_url=llm_base_url,
         llm_model=env("FRIDAY_LLM_MODEL", "dispatcher"),
         llm_enabled=_bool_env("FRIDAY_LLM_ENABLED", True),
@@ -1832,6 +1839,22 @@ def validate_settings(settings: FridaySettings, *, production: bool = False) -> 
         warnings.append("FRIDAY_API_TOKEN is shorter than 32 characters")
     if settings.telegram_bridge_secret and len(settings.telegram_bridge_secret) < 32:
         errors.append("FRIDAY_TELEGRAM_BRIDGE_SECRET must contain at least 32 characters")
+    if settings.engineer_mode_enabled:
+        bubblewrap = Path("/usr/bin/bwrap")
+        try:
+            bubblewrap_stat = bubblewrap.stat()
+        except OSError:
+            bubblewrap_stat = None
+        if platform.system() != "Linux":
+            errors.append("FRIDAY_ENGINEER_MODE_ENABLED requires the Linux sandbox profile")
+        elif (
+            bubblewrap_stat is None
+            or not stat.S_ISREG(bubblewrap_stat.st_mode)
+            or bubblewrap_stat.st_uid != 0
+            or bubblewrap_stat.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+            or not os.access(bubblewrap, os.X_OK)
+        ):
+            errors.append("FRIDAY_ENGINEER_MODE_ENABLED requires trusted executable /usr/bin/bwrap")
     if settings.secondary_llm_enabled:
         from friday.secondary_brain.profiles import get_secondary_runtime_admission
 

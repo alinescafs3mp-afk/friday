@@ -2463,6 +2463,7 @@ def _run_telegram_bridge() -> int:
         telegram_proxy=settings.telegram_proxy,
         open_registration=settings.telegram_open_registration,
         obsidian_enabled=settings.obsidian_enabled,
+        engineer_mode_enabled=settings.engineer_mode_enabled,
         # Outbound delivery polls faster than the reminder scan so a queued
         # message reaches the user promptly rather than on the next scan.
     )

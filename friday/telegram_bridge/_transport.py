@@ -430,11 +430,12 @@ class TransportMixin(BridgeShared):
         The command surface is otherwise discoverable only by remembering /help.
         Best-effort: a failure here must never stop the bridge from starting.
         """
-        commands = (
-            BOT_COMMANDS
-            if self.config.obsidian_enabled
-            else tuple(item for item in BOT_COMMANDS if item[0] not in {"obsidian", "obsidian_alias"})
-        )
+        hidden: set[str] = set()
+        if not self.config.obsidian_enabled:
+            hidden.update({"obsidian", "obsidian_alias"})
+        if not self.config.engineer_mode_enabled:
+            hidden.add("engineer")
+        commands = tuple(item for item in BOT_COMMANDS if item[0] not in hidden)
         payload = {"commands": [{"command": name, "description": desc} for name, desc in commands]}
         try:
             response = await telegram.post(f"{self._api_url}/setMyCommands", json=payload)

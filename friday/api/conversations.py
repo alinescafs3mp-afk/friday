@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from friday.api.deps import _json_load, _parse_json_bool, _request_json, _require
 from friday.api.projections import is_public_opaque_id, public_conversation_message
+from friday.permissions import AuthorizationError
 from friday.storage import normalize_conversation_mode
 
 router = APIRouter(prefix="/api/conversations", tags=["chat"])
@@ -202,6 +203,12 @@ async def set_channel_mode(request: Request) -> dict[str, Any]:
         mode = normalize_conversation_mode(str(body.get("mode") or "dialogue"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if mode == "engineer":
+        if not request.app.state.settings.engineer_mode_enabled:
+            raise HTTPException(status_code=503, detail="Engineer mode is disabled")
+        if not actor.is_owner:
+            raise AuthorizationError("Engineer mode is available only to the installation owner")
+        _require(request, "engineer.use")
     session = request.app.state.storage.get_channel_session(actor.own_id, channel, channel_id)
     if session:
         updated = request.app.state.storage.set_channel_mode(

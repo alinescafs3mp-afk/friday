@@ -2991,6 +2991,25 @@ _MAX_OUTBOUND_QUERY_CHARS = MAX_OUTBOUND_WEB_QUERY_CHARS
 _GLOBAL_OPERATOR_TOOLS = frozenset(
     {"workspace_create", "workspace_list", "workspace_read", "workspace_search"}
 )
+_ENGINEER_NETWORK_AUDIT_TOOLS = frozenset(
+    {
+        "engineer_hunt",
+        "engineer_audit_host",
+        "engineer_http_enum",
+        "engineer_dns",
+        "engineer_adversary_rehearsal",
+    }
+)
+_ENGINEER_ARTIFACT_AUDIT_TOOLS = frozenset({"engineer_analyze_artifact", "engineer_patch_artifact"})
+_ENGINEER_TOOLS = frozenset(
+    {
+        *_ENGINEER_NETWORK_AUDIT_TOOLS,
+        *_ENGINEER_ARTIFACT_AUDIT_TOOLS,
+        "engineer_local_tools",
+    }
+)
+_ENGINEER_PATCH_OPERATION_KINDS = frozenset({"write_at", "replace_bytes", "zip_replace"})
+_ENGINEER_RAW_ID_RE = re.compile(r"^raw_[0-9a-f]{16}$")
 _PERSON_DIRECTORY_LIMIT = 5000
 
 
@@ -3569,6 +3588,8 @@ class ExecutionKernel:
                 continue
             if tool.name == "code_run" and not (self.settings and self.settings.code_execution_enabled):
                 continue
+            if tool.name in _ENGINEER_TOOLS and not actor.is_owner:
+                continue
             if tool.name in _GLOBAL_OPERATOR_TOOLS and not (actor.is_owner or actor.preset_key == "admin"):
                 continue
             if not self.authorization.authorize(actor, tool.security_id).allowed:
@@ -3618,6 +3639,9 @@ class ExecutionKernel:
             and not arguments.get("analysis")
         )
         effective_security_id = "files.read" if self_document_inventory else tool.security_id
+        if name in _ENGINEER_TOOLS and not actor.is_owner:
+            await self._audit(actor, name, False, "authorization_denied", details=details)
+            return ToolResult(name, False, error="Authorization denied")
         if name in _GLOBAL_OPERATOR_TOOLS and not (actor.is_owner or actor.preset_key == "admin"):
             await self._audit(actor, name, False, "authorization_denied", details=details)
             return ToolResult(name, False, error="Authorization denied")
@@ -3721,6 +3745,29 @@ class ExecutionKernel:
             if isinstance(data, dict) and "_attachment" in data:
                 data = dict(data)
                 attachment = data.pop("_attachment")
+            if (
+                name in _ENGINEER_NETWORK_AUDIT_TOOLS | _ENGINEER_ARTIFACT_AUDIT_TOOLS
+                and isinstance(data, Mapping)
+                and data.get("ok") is False
+            ):
+                # Engineer handlers use a bounded data envelope for expected
+                # target/file/sandbox refusals.  A normal coroutine return must
+                # not turn that envelope into a successful kernel result/audit.
+                reason = "failed_after_start" if changes_data else "failed"
+                await self._audit(actor, name, False, reason, details=details)
+                if changes_data:
+                    return ToolResult(
+                        name,
+                        False,
+                        error=(
+                            "Инженерный инструмент завершился после начала операции. "
+                            "Проверьте результат, прежде чем повторять."
+                        ),
+                    )
+                error_code = str(data.get("error") or "")
+                if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", error_code):
+                    error_code = "engineer_tool_refused"
+                return ToolResult(name, False, error=f"Engineer tool refused: {error_code}")
             await self._audit(actor, name, True, "ok", details=details)
             return ToolResult(
                 name,
@@ -3731,6 +3778,14 @@ class ExecutionKernel:
                 archive_exact_file_reader=archive_exact_file_reader,
                 archive_exact_file_reader_owner_id=archive_exact_file_reader_owner_id,
             )
+        except asyncio.CancelledError:
+            # A request/turn cancellation can arrive after an observe handler
+            # has crossed an external boundary (DNS, TCP, HTTP, subprocess) and
+            # after a mutate handler has changed state.  The immutable start row
+            # protects mutations; this terminal row makes cancelled observations
+            # equally visible instead of looking as if the tool never ran.
+            await self._audit(actor, name, False, "uncertain", details=details)
+            raise
         except TimeoutError:
             # Таймаут наступает ПОСЛЕ начала работы, а значит эффект мог случиться.
             #
@@ -4103,6 +4158,95 @@ class ExecutionKernel:
         on my behalf yesterday».
         """
         args = arguments or {}
+        if tool_name in _ENGINEER_NETWORK_AUDIT_TOOLS | _ENGINEER_ARTIFACT_AUDIT_TOOLS:
+            # This is an actor-independent transient projection. Storage later
+            # domain-separates each ``*_sha256`` with the installation-local HMAC
+            # key; the append-only row must never receive a host, signed ticket,
+            # patch bytes/string, or malformed Raw handle in plaintext.
+            engineer_details: dict[str, Any] = {}
+            if tool_name in _ENGINEER_NETWORK_AUDIT_TOOLS:
+                host = args.get("host")
+                if isinstance(host, str) and host:
+                    canonical_host = host.strip().casefold().rstrip(".")
+                    if canonical_host:
+                        engineer_details["host_sha256"] = hashlib.sha256(
+                            canonical_host.encode("utf-8")
+                        ).hexdigest()
+                        engineer_details["host_chars"] = len(host)
+
+                target_ticket = args.get("target_ticket")
+                if isinstance(target_ticket, str) and target_ticket:
+                    engineer_details["target_ticket_sha256"] = hashlib.sha256(
+                        target_ticket.encode("utf-8")
+                    ).hexdigest()
+                    engineer_details["target_ticket_chars"] = len(target_ticket)
+
+                supplied_ports: list[Any] = []
+                if "ports" in args:
+                    ports = args.get("ports")
+                    if isinstance(ports, list | tuple):
+                        supplied_ports.extend(ports)
+                    else:
+                        supplied_ports.append(ports)
+                if "port" in args:
+                    supplied_ports.append(args.get("port"))
+                if supplied_ports:
+                    valid_ports = [
+                        value
+                        for value in supplied_ports
+                        if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 65_535
+                    ]
+                    engineer_details["ports_count"] = len(supplied_ports)
+                    engineer_details["ports_valid_count"] = len(valid_ports)
+                    if valid_ports:
+                        engineer_details["ports_min"] = min(valid_ports)
+                        engineer_details["ports_max"] = max(valid_ports)
+
+            if tool_name in _ENGINEER_ARTIFACT_AUDIT_TOOLS:
+                raw_id = args.get("raw_id")
+                if isinstance(raw_id, str) and raw_id:
+                    if _ENGINEER_RAW_ID_RE.fullmatch(raw_id):
+                        # Storage retains this only when it is a real generated
+                        # Raw identifier; otherwise it becomes an opaque idref.
+                        engineer_details["raw_object_id"] = raw_id
+                    else:
+                        engineer_details["raw_id_sha256"] = hashlib.sha256(raw_id.encode("utf-8")).hexdigest()
+                        engineer_details["raw_id_chars"] = len(raw_id)
+
+            if tool_name == "engineer_patch_artifact":
+                operations = args.get("operations")
+                if isinstance(operations, list | tuple):
+                    operation_list = list(operations)
+                    engineer_details["operations_count"] = len(operation_list)
+                    kinds = sorted(
+                        {
+                            kind
+                            for operation in operation_list
+                            if isinstance(operation, Mapping)
+                            and isinstance(kind := operation.get("kind"), str)
+                            and kind in _ENGINEER_PATCH_OPERATION_KINDS
+                        }
+                    )
+                    if kinds:
+                        engineer_details["operation_kinds"] = kinds
+                    try:
+                        canonical_operations = json.dumps(
+                            operation_list,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            allow_nan=False,
+                        ).encode("utf-8")
+                    except (TypeError, ValueError):
+                        # Invalid calls still retain count/kind shape and the
+                        # kernel outcome. Avoid repr/default=str: either could
+                        # reflect attacker-controlled text into logging.
+                        pass
+                    else:
+                        engineer_details["operations_sha256"] = hashlib.sha256(
+                            canonical_operations
+                        ).hexdigest()
+            return engineer_details
         if tool_name == "code_run":
             code = args.get("code")
             if not isinstance(code, str):

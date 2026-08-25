@@ -23,6 +23,7 @@ import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
@@ -309,6 +310,18 @@ def build_registry(settings: FridaySettings) -> OrganRegistry:
         SentinelOrgan(),
         CompactorOrgan(),
     ]
+    if settings.engineer_mode_enabled:
+        from friday.organs.engineer import EngineerOrgan
+        from friday.organs.engineer.sandbox import smoke_preflight
+
+        admission = smoke_preflight(
+            workspace_root=Path(settings.state_dir) / "engineer-tmp",
+        )
+        if admission.get("ok") is not True:
+            reason = str(admission.get("reason") or "sandbox_smoke_failed")[:80]
+            raise RuntimeError(f"Engineer mode sandbox preflight failed: {reason}")
+
+        organs.append(EngineerOrgan())
     if settings.obsidian_enabled:
         organs.append(ObsidianOrgan())
     return OrganRegistry(organs)
@@ -338,4 +351,5 @@ BUILTIN_ORGAN_NAMES: tuple[str, ...] = (
     "monitors",
     "sentinel",
     "compactor",
+    "engineer",
 )

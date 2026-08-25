@@ -203,3 +203,22 @@ and leaves headroom for the normal outbound queue to deliver the alert).
 
 - **Кому.** Только аккаунты, держащие `admin.diagnostics` — тот же гейт, что и у HTTP-чтения того же отчёта. Иначе исходящий канал становится способом **обойти** модель прав, а не воспользоваться ею. Раньше рассылка шла по всем активным аккаунтам, и `guest`, заведённый одним сообщением в разрешённой группе, получал состояние воркеров, бэкапов и отчёт гигиены секретов чужой машины. Если получателя нет, а неполадка есть, — в лог уходит `WARNING`: молчание не должно быть неотличимо от здоровья.
 - **Что.** Из уходящего сообщения вырезается любой абсолютный путь (`‹путь скрыт›` + отсылка к `jericho doctor`). Деталь гигиены секретов — это буквально «‹путь› содержит значение ‹секрет›»; за пределы машины может уехать имя секрета, но не его местоположение. URL-адреса не трогаются, иначе алерт «vLLM недоступен» перестанет называть эндпоинт.
+
+**`engineer`** (`friday/organs/engineer/`) — disabled-by-default defensive
+workbench for the installation owner. Capabilities `engineer.use` /
+`engineer.artifact.analyze` / `engineer.artifact.patch` /
+`engineer.host.audit` are additionally protected by a hard owner check; an
+`owner` preset in a shared tenant is not sufficient. Network tools accept only
+the single target named by the human in the current turn. Runtime pins its
+addresses and supplies an actor-bound, short-lived ticket which the model cannot
+see or mint. Operations are bounded DNS/TCP/TLS/HTTP observations; cloud
+metadata destinations and exploit payloads are refused.
+
+Owned artifact analysis and closed patch operations run in bubblewrap without
+network access and produce a derived copy without rewriting the source Raw.
+Startup fails closed unless a real sandbox smoke succeeds. The optional
+secondary brain may refine an admitted, secret-stripped finding list but has no
+tools or effect authority. `FRIDAY_ENGINEER_MODE_ENABLED=0` leaves the organ,
+capabilities, tools and Telegram command absent. The normative shipped contract
+and exact-release acceptance requirements are in
+[`docs/ENGINEER_MODE.md`](ENGINEER_MODE.md).

@@ -1,5 +1,14 @@
 # Friday Engineer Mode: Reverse Engineering, Binary Patching, and Single-Host Security Assessment
 
+> **Historical, aspirational, non-normative design brief.** This document
+> records an early exploration and includes capabilities that are not shipped
+> or authorized by Engineer mode v1, including exploit-validation workers,
+> multi-container job infrastructure and broader continuity. It must not be used
+> as an operator runbook, release contract or statement of available behavior.
+> The normative production-candidate contract is
+> [`docs/ENGINEER_MODE.md`](../docs/ENGINEER_MODE.md); where the documents differ,
+> that contract and the implementation win.
+
 > Document ID: FRIDAY-ENGINEER-001  
 > Status: Architect implementation instruction  
 > Date: 25 August 2026  

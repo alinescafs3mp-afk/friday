@@ -1297,6 +1297,39 @@ def _ensure_newcomer_preset(auth_service: Any, storage: Any) -> str:
     return "newcomer"
 
 
+def _fresh_chat_capability_actor(
+    state: Any,
+    actor: ActorContext,
+    capability: str,
+) -> ActorContext:
+    """Re-read the request principal before admitting a privileged chat mode.
+
+    Authentication binds an actor near the start of the HTTP request. A preset,
+    explicit deny, or account status can change while the body is being decoded,
+    so that actor proves identity but is not fresh capability evidence for a
+    later engineer action.
+    """
+
+    principal = str(actor.own_id or "").strip()
+    user = state.storage.get_user(principal)
+    if not user or str(user.get("status") or "") != "active":
+        raise AuthorizationError("Engineer mode is unavailable for this account")
+    fresh_actor = replace(actor, preset_key=str(user.get("preset_key") or "user"))
+    state.auth_service.require(fresh_actor, capability)
+    return fresh_actor
+
+
+def _require_fresh_engineer_chat_actor(state: Any, actor: ActorContext) -> ActorContext:
+    """Fail closed while the experimental mode is disabled or no longer granted."""
+
+    if getattr(state.settings, "engineer_mode_enabled", False) is not True:
+        raise AuthorizationError("Engineer mode is disabled")
+    fresh_actor = _fresh_chat_capability_actor(state, actor, "engineer.use")
+    if not fresh_actor.is_owner:
+        raise AuthorizationError("Engineer mode is available only to the installation owner")
+    return fresh_actor
+
+
 def _chat_request_fingerprint(
     *,
     actor_source: str,
@@ -1332,6 +1365,7 @@ def _chat_request_fingerprint(
         "message": message,
         "force_knowledge": force_knowledge,
         "enable_tools": enable_tools,
+        "mode": body.get("mode"),
         "conversation_id": str(body.get("conversation_id") or "").strip(),
         "telegram_message_id": str(body.get("telegram_message_id") or ""),
         "reply_document_source_ref": (
@@ -2594,11 +2628,16 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             )
         # Разговор личный: в общем архиве `actor.user_id` у всех один, а
         # переписка сохраняется под самим человеком.
-        if not state.storage.get_conversation(conversation_id, actor.own_id):
+        persisted_conversation = state.storage.get_conversation(conversation_id, actor.own_id)
+        if not persisted_conversation:
             raise HTTPException(
                 status_code=400,
                 detail="Разговор не найден",
             )
+        persisted_mode = normalize_conversation_mode(str(persisted_conversation.get("mode") or "dialogue"))
+        if persisted_mode == "engineer":
+            actor = _require_fresh_engineer_chat_actor(state, actor)
+            request.state.actor = actor
         # Хвост из 4: обычно user+assistant (+ещё пара). Берём ПОСЛЕДНЕЕ user —
         # не «первое в окне», иначе два user подряд без ответа дали бы старый вопрос.
         recent = state.storage.get_conversation_messages(
@@ -2638,6 +2677,11 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             )
         last_meta = _json_load(last_user.get("metadata_json"), {})
         had_attachments = bool(last_meta.get("had_attachments"))
+        replay_enable_tools = (
+            last_meta.get("tools_enabled") is True
+            if "tools_enabled" in last_meta
+            else persisted_mode != "engineer"
+        )
         # A replay row points to the request which appended it.  When that
         # parent's durable outcome is uncertain we keep its key; after a normal
         # completion the tail gets a fresh key so another deliberate click can
@@ -2717,7 +2761,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     actor=actor,
                     conversation_id=conversation_id,
                     attachments=[],
-                    enable_tools=True,
+                    enable_tools=replay_enable_tools,
                     kg=state.kg,
                     hybrid_searcher=state.hybrid_searcher,
                     ingestion_result=None,
@@ -2727,6 +2771,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     # на повторе получал бы графовое расширение, которого первый ход
                     # не получал, — при одном и том же тексте.
                     synthetic_document_notice=bool(last_meta.get("synthetic_document_notice")),
+                    mode=persisted_mode if persisted_mode == "engineer" else None,
                     # Exact immutable source, not caption equality. Repeated plain
                     # text such as «сделай сводку» must never bind itself to an old
                     # or newer private file merely because the words match.
@@ -3077,6 +3122,12 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if requested_mode == "engineer":
+            # The body is enough authority to ask for the mode, never to enter it.
+            # Re-read the account even though authentication already supplied an
+            # actor; a revoked preset/override must win on every request.
+            actor = _require_fresh_engineer_chat_actor(state, actor)
+            request.state.actor = actor
         message = str(body.get("message") or body.get("caption") or "").strip()
         # «Текст сочинил backend» и «файл уже принят отдельно» — разные факты; см.
         # разбор ниже, где они расходятся у голосового вопроса.
@@ -3301,6 +3352,37 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             ).penalties
         )
 
+        # Resolve the conversation before claiming an idempotency lease or
+        # ingesting bytes. A caller can omit ``mode`` while continuing an
+        # engineer conversation, and a Telegram channel session can restore the
+        # mode without putting it in the request body. Both are effective mode
+        # requests and need a fresh engineer.use decision on every /api/chat.
+        conversation_id = str(body.get("conversation_id") or "").strip() or None
+        if actor.source == "telegram-bridge":
+            channel_chat_id = getattr(request.state, "bridge_chat_id", None)
+            if channel_chat_id:
+                session = state.storage.get_channel_session(
+                    actor.own_id,
+                    "telegram",
+                    str(channel_chat_id),
+                )
+                if session and not session.get("is_archived"):
+                    conversation_id = str(session["conversation_id"])
+                    if requested_mode is None:
+                        requested_mode = normalize_conversation_mode(str(session.get("mode") or "dialogue"))
+        persisted_conversation = (
+            state.storage.get_conversation(conversation_id, actor.own_id) if conversation_id else None
+        )
+        persisted_mode = (
+            normalize_conversation_mode(str(persisted_conversation.get("mode") or "dialogue"))
+            if persisted_conversation
+            else "dialogue"
+        )
+        effective_mode = requested_mode or persisted_mode
+        if effective_mode == "engineer":
+            actor = _require_fresh_engineer_chat_actor(state, actor)
+            request.state.actor = actor
+
         # Claim the key atomically before any side effect. A plain lookup followed
         # by a later insert allows concurrent retries to invoke the agent twice.
         lease_token = ""
@@ -3403,18 +3485,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
         try:
             file_ingestion = None
             file_ingestions: list[dict[str, Any]] = []
-            conversation_id = str(body.get("conversation_id") or "").strip() or None
             channel_chat_id = getattr(request.state, "bridge_chat_id", None)
-            if actor.source == "telegram-bridge" and channel_chat_id:
-                session = state.storage.get_channel_session(
-                    actor.own_id,
-                    "telegram",
-                    str(channel_chat_id),
-                )
-                if session and not session.get("is_archived"):
-                    conversation_id = str(session["conversation_id"])
-                    if requested_mode is None:
-                        requested_mode = normalize_conversation_mode(str(session.get("mode") or "dialogue"))
             failure_scope.bind_conversation(conversation_id)
             if staged_document_message_ids:
                 # Staging persisted exact sibling bytes without running the
@@ -4554,7 +4625,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     hybrid_searcher=state.hybrid_searcher,
                     ingestion_result=ingestion_result,
                     synthetic_document_notice=synthetic_document_notice,
-                    mode=requested_mode,
+                    mode=effective_mode if effective_mode == "engineer" else requested_mode,
                     answer_with_voice=spoken_question,
                     # На что человек показал репликой. Едет ОТДЕЛЬНЫМ полем до самой
                     # сборки контекста: приклеенная к тексту хода цитата попала бы и в

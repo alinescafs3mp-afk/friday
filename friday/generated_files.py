@@ -80,10 +80,18 @@ def persist_generated_response_files(
         public["files"] = [_without_claimed_handle(item) for item in items]
         return public
 
-    # Validate the whole batch before writing even its first byte.  A malformed
-    # second item must not leave the first one as an invisible Raw Object/blob.
+    # Validate and account for the whole batch before writing even its first
+    # byte.  A malformed or cumulatively oversized second item must not leave
+    # the first one as an invisible Raw Object/blob.
+    byte_limit = max(0, int(max_bytes))
+    batch_bytes = 0
     for item in items:
-        _validated_item(item, max_bytes=max(0, int(max_bytes)))
+        payload, _filename, _mime_type, _digest = _validated_item(item, max_bytes=byte_limit)
+        batch_bytes += len(payload)
+        if batch_bytes > byte_limit:
+            raise GeneratedFilePersistenceError(
+                "generated attachment batch exceeds the configured file limit"
+            )
 
     persisted_items: list[dict[str, Any]] = []
     history_descriptors: list[dict[str, Any]] = []
@@ -102,7 +110,7 @@ def persist_generated_response_files(
                     person_id=str(person_id),
                     message_id=message_id,
                     index=index,
-                    max_bytes=max(0, int(max_bytes)),
+                    max_bytes=byte_limit,
                     created_paths=created_paths,
                     inserted_raw_ids=inserted_raw_ids,
                 )

@@ -550,6 +550,7 @@ class LLMRouter:
         require_full_context: bool = False,
         require_exact_response_model: bool = False,
         request_submitted_event: asyncio.Event | None = None,
+        enable_thinking: bool | None = None,
     ) -> dict[str, Any]:
         if not self.enabled:
             raise LLMUnavailableError("LLM is disabled")
@@ -609,6 +610,7 @@ class LLMRouter:
                     require_full_context=require_full_context,
                     require_exact_response_model=require_exact_response_model,
                     request_submitted_event=request_submitted_event,
+                    enable_thinking=enable_thinking,
                 )
             except BaseException:
                 # A full ReadTimeout replaces the sentinel with a fresh finite
@@ -636,6 +638,7 @@ class LLMRouter:
         tool_choice: str | None = None,
         *,
         require_full_context: bool = False,
+        enable_thinking: bool | None = None,
     ) -> dict[str, Any]:
         requested_output = max_tokens if max_tokens is not None else self.max_tokens
         requested_output = max(64, min(int(requested_output), self.settings.profile.max_model_len - 512))
@@ -680,7 +683,9 @@ class LLMRouter:
                     "type": "function",
                     "function": {"name": tool_choice},
                 }
-        if self.settings.profile.suppress_model_thinking:
+        if enable_thinking is not None:
+            payload["chat_template_kwargs"] = {"enable_thinking": bool(enable_thinking)}
+        elif self.settings.profile.suppress_model_thinking:
             # This is the supported Qwen path; post-processing below is only a
             # defense-in-depth fallback for non-conforming model responses.
             payload["chat_template_kwargs"] = {"enable_thinking": False}
@@ -702,6 +707,7 @@ class LLMRouter:
         require_full_context: bool = False,
         require_exact_response_model: bool = False,
         request_submitted_event: asyncio.Event | None = None,
+        enable_thinking: bool | None = None,
     ) -> dict[str, Any]:
         payload = self._prepare_payload(
             messages,
@@ -710,6 +716,7 @@ class LLMRouter:
             tools,
             tool_choice,
             require_full_context=require_full_context,
+            enable_thinking=enable_thinking,
         )
         last_error: Exception | None = None
 
@@ -856,7 +863,7 @@ class LLMRouter:
                     tool_calls = []
 
                 finish_reason = str(choice.get("finish_reason") or "stop")
-                if self.settings.profile.suppress_model_thinking and content:
+                if (self.settings.profile.suppress_model_thinking or enable_thinking is True) and content:
                     content = self._strip_thinking(content, finish_reason, thinking_seen=self._thinking_seen)
                 if "</think>" in content or "<think>" in content:
                     # Профиль всё-таки рассуждает вслух — значит обрыв по длине у

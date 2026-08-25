@@ -95,7 +95,7 @@ backend-клиентом.
 2. Update до обработки записывается в `telegram-inbox.sqlite3`; Telegram offset повышается только после durable insert.
 3. Bridge подписывает method/path/user/chat/body через HMAC-SHA256.
 4. Backend проверяет timestamp, подпись, allowlist и rate limits, затем до любых side effects захватывает durable idempotency lease, связанный с SHA-256 payload.
-5. Telegram identity преобразуется в стабильный tenant ID, сообщение сохраняется в текущий channel conversation; режим `dialogue`, `knowledge_work` или `research` хранится вместе с conversation/channel session.
+5. Telegram identity преобразуется в стабильный tenant ID, сообщение сохраняется в текущий channel conversation; режим `dialogue`, `knowledge_work`, `research` или owner-only `engineer` хранится вместе с conversation/channel session.
 6. `ingestion` оценивает сообщение до долговременного сохранения и выбирает один из трёх исходов:
    - `transient` — приветствие, подтверждение, чистый вопрос/команда или слабый chatter остаются только в conversation;
    - `review` — создаются Raw Object и pending Inbox item с объяснением и предложенной структурой, но без Knowledge Object;
@@ -458,7 +458,7 @@ Agent Runtime строит контекст в явных слоях. Все д�
 
 Высокая agency ограничена полезностью и контролем: инструмент вызывается, когда он реально улучшает ответ; proactive structuring допускает максимум одно ненавязчивое предложение, а изменение долговременной структуры не маскируется под обычный разговор.
 
-Режимы определяют глубину работы, а не уровень доверия: `dialogue` минимизирует tool use, `knowledge_work` допускает несколько шагов над личным контекстом, `research` получает расширенный bounded budget и обязан отделять план, evidence и synthesis. Ни один режим не обходит permissions, provenance или Inbox review.
+Режимы определяют глубину работы, а не уровень доверия: `dialogue` минимизирует tool use, `knowledge_work` допускает несколько шагов над личным контекстом, `research` получает расширенный bounded budget и обязан отделять план, evidence и synthesis. `engineer` — выключенный по умолчанию защитный верстак владельца установки: ограниченные наблюдения DNS/TCP/TLS/HTTP только для одной цели, названной человеком в текущей реплике, либо изолированный разбор принадлежащего ему Raw-файла. Цель и адреса закрепляет код, а не модель; разбор и патчинг артефактов идут в bubblewrap без сети; эксплуатационные payload-ы не входят в v1. Ни один режим не обходит permissions, provenance или Inbox review. Нормативный контракт: [`docs/ENGINEER_MODE.md`](ENGINEER_MODE.md).
 
 Результат `web_research` сохраняет множественность источников до самой модели:
 общий контекстный бюджет делится между страницами, а не отдаётся первой длинной

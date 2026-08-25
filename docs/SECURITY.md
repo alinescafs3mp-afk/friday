@@ -311,6 +311,17 @@ installation-local 256-bit HMAC key. Обычный SHA для коротког�
       bridge; публичный CA/cert установлен как trust anchor без private key.
 - [ ] HTTPS health/identity проверены без `-k`/`verify=False`.
 - [ ] `FRIDAY_WEB_ALLOW_PRIVATE_NETWORKS=0`.
+- [ ] `FRIDAY_ENGINEER_MODE_ENABLED=0`, пока точный candidate commit не прошёл
+      полный `python tools/quality_gate.py`, Engineer contract tests и реальный
+      startup smoke bubblewrap на целевом хосте.
+- [ ] При включённом Engineer mode `/engineer`, видимость и исполнение tools
+      доступны только владельцу установки (не shared-участнику с preset
+      `owner`), а каждая сетевая операция связана с единственной целью из
+      текущей человеческой реплики и её code-pinned адресами; список портов
+      остаётся в закрытом лимите 64 для того же хоста.
+- [ ] На целевом хосте подтверждены no-network sandbox артефактов, отказ для
+      неоднозначной/запрещённой цели и отсутствие exploit payloads; пройден
+      rollout smoke из [`docs/ENGINEER_MODE.md`](ENGINEER_MODE.md).
 - [ ] `FRIDAY_CODE_EXECUTION_ENABLED=0`.
 - [ ] Backend bind только loopback/VPN/private interface.
 - [ ] vLLM не опубликован наружу.

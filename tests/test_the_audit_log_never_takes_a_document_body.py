@@ -281,6 +281,47 @@ def test_payload_schema_does_not_reflect_private_keys_hosts_suffixes_or_tokens()
     assert projected["private_items_count"] >= 3
 
 
+def test_engineer_tool_audit_projection_keeps_only_keyed_refs_and_closed_shape():
+    private_host = "private-customer.example.test"
+    private_ticket = "signed-current-turn-ticket-4815"
+    private_patch = "50415353574f52442d34383135"
+    projected = sanitize_audit_payload(
+        {
+            "host_sha256": hashlib.sha256(private_host.encode()).hexdigest(),
+            "host_chars": len(private_host),
+            "target_ticket_sha256": hashlib.sha256(private_ticket.encode()).hexdigest(),
+            "target_ticket_chars": len(private_ticket),
+            "raw_id_sha256": hashlib.sha256(b"raw_private-customer").hexdigest(),
+            "raw_id_chars": len("raw_private-customer"),
+            "operations_sha256": hashlib.sha256(private_patch.encode()).hexdigest(),
+            "operations_count": 3,
+            "operation_kinds": ["write_at", "private-kind", "zip_replace"],
+            "ports_count": 4,
+            "ports_valid_count": 2,
+            "ports_min": 22,
+            "ports_max": 443,
+        },
+        key=b"e" * 32,
+    )
+
+    assert projected is not None
+    encoded = json.dumps(projected, ensure_ascii=False, sort_keys=True)
+    assert private_host not in encoded
+    assert private_ticket not in encoded
+    assert private_patch not in encoded
+    assert all(
+        str(projected[key]).startswith("fpref_")
+        for key in ("host_ref", "target_ticket_ref", "raw_id_ref", "operations_ref")
+    )
+    assert projected["operation_kinds"] == ["write_at", "zip_replace"]
+    assert projected["operation_kinds_count"] == 3
+    assert projected["ports_count"] == 4
+    assert projected["ports_valid_count"] == 2
+    assert projected["ports_min"] == 22
+    assert projected["ports_max"] == 443
+    assert "private_fields_count" not in projected
+
+
 def test_only_exact_safe_file_suffixes_survive_audit_projection():
     projected = sanitize_audit_payload({"filename": "synthetic.pdf", "path": "/tmp/synthetic.privateword"})
     assert projected is not None

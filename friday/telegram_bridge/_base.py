@@ -72,6 +72,7 @@ BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("chat", "обычный разговор"),
     ("work", "работа с личными знаниями"),
     ("research", "многошаговое исследование"),
+    ("engineer", "разбор файлов и аудит хостов"),
     ("search", "поиск по базе без ответа модели"),
     ("history", "поиск по истории переписки"),
     ("source", "дословный поиск по исходным файлам"),
@@ -133,6 +134,9 @@ class TelegramConfig:
     open_registration: bool = False
     # Optional backend organ; hidden from the Telegram menu when unavailable.
     obsidian_enabled: bool = False
+    # Optional owner workbench; hidden from the menu and rejected locally when
+    # the matching backend organ is not admitted for this release.
+    engineer_mode_enabled: bool = False
 
     def validate(self) -> None:
         if not self.bot_token or ":" not in self.bot_token:

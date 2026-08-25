@@ -562,6 +562,11 @@ class CommandsMixin(BridgeShared):
             return
         if command == "/help":
             await register_backend_user()
+            engineer_help = (
+                "/engineer — разбор файлов и аудит хостов владельца\n"
+                if self.config.engineer_mode_enabled
+                else ""
+            )
             await self._send_message(
                 telegram,
                 chat_id,
@@ -569,6 +574,7 @@ class CommandsMixin(BridgeShared):
                 "/chat — обычный разговор\n"
                 "/work — работа с личными знаниями\n"
                 "/research — многошаговое исследование\n"
+                f"{engineer_help}"
                 "/mission цель — многошаговая миссия в фоне\n"
                 "/missions — список миссий и управление\n"
                 "/inbox — разобрать ближайшие предложения\n"
@@ -746,34 +752,60 @@ class CommandsMixin(BridgeShared):
                 "Пожелание снято." if not clean else f"Принято: {clean}",
             )
             return
-        if command in {"/chat", "/work", "/research"}:
+        if command in {"/chat", "/work", "/research", "/engineer", "/engeneer"}:
             mode = {
                 "/chat": "dialogue",
                 "/work": "knowledge_work",
                 "/research": "research",
+                "/engineer": "engineer",
+                "/engeneer": "engineer",
             }[command]
-            data = await self._backend_json(
-                backend,
-                "POST",
-                "/api/conversations/channel/mode",
-                {
-                    "channel": "telegram",
-                    "channel_id": str(chat_id),
-                    "mode": mode,
-                    "telegram_user": user,
-                },
-                external_user_id,
-                str(chat_id),
-            )
+            if mode == "engineer" and not self.config.engineer_mode_enabled:
+                await self._send_message(
+                    telegram,
+                    chat_id,
+                    "Инженерный режим не включён в этом экземпляре Friday.",
+                )
+                return
+            try:
+                data = await self._backend_json(
+                    backend,
+                    "POST",
+                    "/api/conversations/channel/mode",
+                    {
+                        "channel": "telegram",
+                        "channel_id": str(chat_id),
+                        "mode": mode,
+                        "telegram_user": user,
+                    },
+                    external_user_id,
+                    str(chat_id),
+                )
+            except PermanentUpdateError as error:
+                if mode == "engineer" and getattr(error, "status_code", None) == 403:
+                    await self._send_message(
+                        telegram,
+                        chat_id,
+                        "Инженерный режим доступен только владельцу.",
+                    )
+                    return
+                raise
             labels = {
                 "dialogue": "Обычный диалог",
                 "knowledge_work": "Работа со знаниями",
                 "research": "Исследование",
+                "engineer": "Инженерный разбор",
             }
+            extra = ""
+            if str(data.get("mode")) == "engineer":
+                extra = (
+                    " Назовите хост, URL или киньте exe/apk — пойду сразу. "
+                    "Координаты берёт из чата. Эксплойт-пейлоадов нет."
+                )
             await self._send_message(
                 telegram,
                 chat_id,
-                f"Режим: {labels.get(str(data.get('mode')), mode)}.",
+                f"Режим: {labels.get(str(data.get('mode')), mode)}.{extra}",
             )
             return
         if command == "/inbox":
@@ -1457,6 +1489,7 @@ class CommandsMixin(BridgeShared):
                 "dialogue": "обычный диалог",
                 "knowledge_work": "работа со знаниями",
                 "research": "исследование",
+                "engineer": "инженерный разбор",
             }.get(str(data.get("interaction_mode") or "dialogue"), "обычный диалог")
             await self._send_message(
                 telegram,

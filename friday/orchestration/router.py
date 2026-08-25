@@ -763,6 +763,11 @@ class OrchestrationRouter:
         if turn_policy is not None and turn_policy.handled:
             _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)
+        requested_mode = str(mode or "").strip().casefold().replace("-", "_")
+        if requested_mode in {"engineer", "engeneer"}:
+            # Owner workbench: never a V12 file/archive judge, never a shadow plan.
+            _observe_legacy_capability_owner()
+            return await self._legacy.chat(user_id, message, **legacy_kwargs)
         if self.mode is RouterMode.LEGACY:
             _observe_legacy_capability_owner()
             return await self._legacy.chat(user_id, message, **legacy_kwargs)

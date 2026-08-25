@@ -8,6 +8,8 @@ re-import, format rejection, and capability gating.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -179,6 +181,10 @@ def test_registry_has_all_organs(settings):
         # 2026-08-04; обезличивание делает структура, модель корпуса не видит.
         "compactor",
     }
+    enabled_names = {
+        organ.name for organ in build_registry(replace(settings, engineer_mode_enabled=True)).organs
+    }
+    assert enabled_names == {*names, "engineer"}
 
 
 # --- mail (mbox / eml) ----------------------------------------------------

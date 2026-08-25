@@ -353,6 +353,14 @@ _SAFE_TOOL_TARGETS = frozenset(
         "entity_lookup",
         "entity_merge_decide",
         "entity_merge_undo",
+        "engineer_adversary_rehearsal",
+        "engineer_analyze_artifact",
+        "engineer_audit_host",
+        "engineer_dns",
+        "engineer_hunt",
+        "engineer_http_enum",
+        "engineer_local_tools",
+        "engineer_patch_artifact",
         "inbox_list",
         "kg_stats",
         "list_tags",
@@ -444,6 +452,8 @@ _SAFE_CHANGED_FIELDS = frozenset(
         "title",
     }
 )
+
+_SAFE_ENGINEER_OPERATION_KINDS = frozenset({"replace_bytes", "write_at", "zip_replace"})
 
 # Values from validated enums or code-owned branches.  A free-form value under
 # one of these keys is redacted instead of being trusted merely because it looks
@@ -756,13 +766,17 @@ _HASH_KEYS = frozenset(
         "content_sha256",
         "exclude_domains_sha256",
         "include_domains_sha256",
+        "host_sha256",
+        "operations_sha256",
         "prompt_sha256",
         "path_sha256",
         "query_sha256",
+        "raw_id_sha256",
         "response_sha256",
         "restored_sha256",
         "site_sha256",
         "summary_sha256",
+        "target_ticket_sha256",
         "text_sha256",
         "transcript_sha256",
         "url_sha256",
@@ -809,6 +823,14 @@ _DERIVED_NUMBER_KEYS = frozenset(
         "url_chars",
         "changed_fields_count",
         "days_count",
+        "host_chars",
+        "operations_count",
+        "ports_count",
+        "ports_max",
+        "ports_min",
+        "ports_valid_count",
+        "raw_id_chars",
+        "target_ticket_chars",
         *(f"{key}_chars" for key in _CONTENT_KEYS | _LOW_ENTROPY_PRIVATE_KEYS),
         *(f"{key}_count" for key in _LOW_ENTROPY_PRIVATE_KEYS),
         *(f"{key}_fields" for key in _LOW_ENTROPY_PRIVATE_KEYS),
@@ -833,7 +855,7 @@ _KNOWN_PAYLOAD_KEYS = frozenset().union(
     _SUFFIX_KEYS,
     _TIMESTAMP_KEYS,
     _URL_KEYS,
-    {"changed_fields", "days"},
+    {"changed_fields", "days", "operation_kinds"},
 )
 
 
@@ -1155,6 +1177,13 @@ def _safe_sequence(
             item for item in value[:_MAX_LIST_ITEMS] if isinstance(item, str) and item in _SAFE_CHANGED_FIELDS
         ]
         return field_items, count
+    if key == "operation_kinds":
+        kinds = [
+            item
+            for item in value[:_MAX_LIST_ITEMS]
+            if isinstance(item, str) and item in _SAFE_ENGINEER_OPERATION_KINDS
+        ]
+        return kinds, count
     if key in _STRUCTURAL_ID_LIST_KEYS:
         id_items: list[str] = []
         for item in value[:_MAX_LIST_ITEMS]:

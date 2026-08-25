@@ -244,6 +244,86 @@ def test_a_generated_file_batch_is_all_or_nothing(settings) -> None:
         assert json.loads(stored["metadata_json"] or "{}").get("generated_files") is None
 
 
+def test_generated_file_batch_cannot_exceed_the_decoded_byte_limit(settings) -> None:
+    from friday.server import create_app
+
+    app = create_app(settings)
+    with TestClient(app):
+        conversation = app.state.storage.create_conversation(LEGACY_OWNER_USER_ID, "bounded files")
+        assistant = app.state.storage.store_message(
+            conversation["id"], LEGACY_OWNER_USER_ID, "assistant", "Файлы готовы."
+        )
+        items = [
+            {
+                "filename": f"part-{index}.bin",
+                "mime_type": "application/octet-stream",
+                "content_base64": base64.b64encode(payload).decode("ascii"),
+            }
+            for index, payload in enumerate((b"123456", b"abcdef"), start=1)
+        ]
+
+        with pytest.raises(GeneratedFilePersistenceError, match="batch exceeds"):
+            persist_generated_response_files(
+                app.state.storage,
+                settings.files_dir,
+                {"message_id": assistant["id"], "files": items},
+                tenant_id=LEGACY_OWNER_USER_ID,
+                person_id=LEGACY_OWNER_USER_ID,
+                max_bytes=10,
+            )
+
+        assert (
+            app.state.storage.execute(
+                "SELECT COUNT(*) FROM raw_objects WHERE content_type='generated_file'"
+            ).fetchone()[0]
+            == 0
+        )
+        assert not list(settings.files_dir.rglob("*.blob"))
+        stored = app.state.storage.execute(
+            "SELECT metadata_json FROM messages WHERE id=?",
+            (assistant["id"],),
+        ).fetchone()
+        assert json.loads(stored["metadata_json"] or "{}").get("generated_files") is None
+
+
+def test_generated_file_batch_accepts_exact_decoded_byte_limit(settings) -> None:
+    from friday.server import create_app
+
+    app = create_app(settings)
+    with TestClient(app):
+        conversation = app.state.storage.create_conversation(LEGACY_OWNER_USER_ID, "exact files")
+        assistant = app.state.storage.store_message(
+            conversation["id"], LEGACY_OWNER_USER_ID, "assistant", "Файлы готовы."
+        )
+        payloads = (b"1234", b"abcdef")
+        result = persist_generated_response_files(
+            app.state.storage,
+            settings.files_dir,
+            {
+                "message_id": assistant["id"],
+                "files": [
+                    {
+                        "filename": f"part-{index}.bin",
+                        "mime_type": "application/octet-stream",
+                        "content_base64": base64.b64encode(payload).decode("ascii"),
+                    }
+                    for index, payload in enumerate(payloads, start=1)
+                ],
+            },
+            tenant_id=LEGACY_OWNER_USER_ID,
+            person_id=LEGACY_OWNER_USER_ID,
+            max_bytes=sum(map(len, payloads)),
+        )
+
+        assert [item["size_bytes"] for item in result["files"]] == [4, 6]
+        assert (
+            app.state.storage.execute(
+                "SELECT COUNT(*) FROM raw_objects WHERE content_type='generated_file'"
+            ).fetchone()[0]
+            == 2
+        )
+
+
 def test_a_database_failure_rolls_back_every_generated_file(
     settings,
     monkeypatch: pytest.MonkeyPatch,
