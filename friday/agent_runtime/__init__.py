@@ -53734,11 +53734,18 @@ class AgentRuntime:
             return None
         profile = get_secondary_runtime_profile(self.settings.secondary_llm_profile)
         mode = str(getattr(secondary.mode, "value", secondary.mode))
+        document_map_mode = secondary.workload_mode(ModelWorkload.DOCUMENT_MAP)
+        document_map_mode_value = str(getattr(document_map_mode, "value", document_map_mode))
         if (
             profile is None
             or mode not in profile.allowed_modes
             or ModelWorkload.DOCUMENT_MAP not in secondary.allowed_workloads
-            or "document_map" not in secondary_effective_workloads(profile, global_mode=mode)
+            or "document_map"
+            not in secondary_effective_workloads(
+                profile,
+                global_mode=mode,
+                document_map_mode=document_map_mode_value,
+            )
             or not secondary.allow_private_text
             or secondary.served_model_alias != profile.served_model_alias
             or self.settings.secondary_llm_max_context_tokens != profile.max_context_tokens

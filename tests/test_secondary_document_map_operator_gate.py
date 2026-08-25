@@ -139,9 +139,15 @@ def _validate(receipt: dict[str, Any], digest: str) -> dict[str, Any]:
     )
 
 
-def test_operator_keeps_assist_closed_while_live_acceptance_binding_is_empty() -> None:
+def test_operator_pins_exact_policy_and_live_receipt_without_env_authority() -> None:
+    assert operator._SECONDARY_DOCUMENT_MAP_ASSIST_POLICY_SHA256 == (  # noqa: SLF001
+        "d2ab9b67ff24a54727fec9592dcd0db1c35036e1b5ee91ac6a5daf4d3694e92e"
+    )
+    assert operator._SECONDARY_DOCUMENT_MAP_ACCEPTED_SHADOW_RECEIPT_SHA256 == (  # noqa: SLF001
+        "a00f18f8c50a7449d1fa6a357d8d5bb1ca37b0c397c81a96c0e621231bc09e2d"
+    )
     receipt, digest = _receipt()
-    with pytest.raises(operator.ReleaseFailure, match="secondary_document_map_assist_acceptance_pending"):
+    with pytest.raises(operator.ReleaseFailure, match="secondary_document_map_shadow_receipt_not_accepted"):
         _validate(receipt, digest)
 
 

@@ -6,7 +6,8 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-26
 - Branch: `main`
-- Secondary acceptance base: live `0.207.29` admits exactly one accepted
+- Secondary acceptance base: source candidate `0.207.31` binds the exact v2
+  document-map assist policy and live receipt; live `0.207.29` admits one accepted
   profile with extraction in bounded `assist` and document mapping in
   discarded `shadow`; the provisional registry is empty and the primary
   remains the only publication, tool and effect authority.
@@ -41,10 +42,8 @@ the current production identity, completed packages, active work and next order.
 
 ## Active objective
 
-Release the fail-closed document-map live-evidence boundary while preserving
-discarded shadow and exact primary-only behavior whenever the laptop is absent.
-Then obtain one exact same-process witness and bind it only in a later distinct
-candidate before any document-map assist promotion. Public shadow, private
+Activate the distinct evidence-bound document-map assist candidate while
+preserving exact primary-only behavior whenever the laptop is absent. Public shadow, private
 shadow, bounded extraction assist, exact physical loss and automatic recovery
 are complete. The schema-41 DocumentCatalog, archive candidate runtime,
 receipt-backed Obsidian effect vertical, selected-evidence V12 explanation and
@@ -152,14 +151,11 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Release the document-map evidence gate without changing live ENV or
-   secondary authority, then obtain one identity-, policy- and process-bound
-   live shadow witness.
-2. Bind that receipt only in a later distinct candidate before any
-   `document_map=assist` promotion; counters alone cannot authorize promotion.
-3. Extend machine-reconcilable release evidence without promoting
+1. Activate `0.207.31` through the one-use exact shadow→assist operator gate,
+   then verify assist plus laptop-off primary fallback.
+2. Extend machine-reconcilable release evidence without promoting
    component-only gates, then start the next V12 refinement package.
-4. Continue with the next ICP/V12 refinement package after the complete golden
+3. Continue with the next ICP/V12 refinement package after the complete golden
    journey. The accepted laptop runtime and gateway manifest remain unchanged.
 
 ## Completed and deployed packages
@@ -186,7 +182,8 @@ course, with these repository-specific constraints:
   `clear` with receipt
   `601134e2830b5e55e6821ea56c3a630bd4a4a39e93d8637276766ab74a5b45f7`.
 - The post-cutover endpoint canary returned the exact accepted model/result;
-  document-map assist remains closed pending separately bound live evidence.
+  document-map assist remains closed in that historical live release; the
+  distinct `0.207.31` source candidate now contains the exact accepted binding.
 
 ### Systemic document-contour reliability (`0.207.27`)
 

@@ -144,6 +144,13 @@ _EVIDENCE_HASH_KEYS = (
 )
 _ZERO_SHA256 = "0" * 64
 _WORKLOAD_POLICY_SCHEMA = "friday.secondary-workload-policy.v1"
+_DOCUMENT_MAP_SHADOW_POLICY_SHA256 = "7d57947d7ecda675e8a4da3f56332baf32484c08c0504afd7fa420b9c6323cd9"
+_DOCUMENT_MAP_ASSIST_POLICY_SHA256 = "d2ab9b67ff24a54727fec9592dcd0db1c35036e1b5ee91ac6a5daf4d3694e92e"
+_DOCUMENT_MAP_ASSIST_ACCEPTANCE_SHA256 = "933c671759724e36fe686185aa8ad03fa09f90e26e3095900796707cfef36855"
+_ACCEPTED_DOCUMENT_MAP_SHADOW_RECEIPT_SHA256 = (
+    "a00f18f8c50a7449d1fa6a357d8d5bb1ca37b0c397c81a96c0e621231bc09e2d"
+)
+_DOCUMENT_MAP_ASSIST_ACCEPTANCE_SCHEMA = "friday.secondary-document-map-assist-acceptance.v1"
 _WORKLOAD_POLICY_KEYS = frozenset(
     {
         "schema",
@@ -167,6 +174,26 @@ _WORKLOAD_POLICY_KEYS = frozenset(
         "secondary_effects_allowed",
         "gateway_manifest_change_required",
         "windows_container_restart_required",
+    }
+)
+_DOCUMENT_MAP_ASSIST_ACCEPTANCE_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        "candidate_policy_id",
+        "candidate_policy_manifest_sha256",
+        "predecessor_policy_id",
+        "predecessor_policy_manifest_sha256",
+        "accepted_shadow_receipt_sha256",
+        "runtime_profile_id",
+        "runtime_profile_manifest_sha256",
+        "max_receipt_age_sec",
+        "required_transition",
+        "primary_fallback_required",
+        "primary_final_synthesis_required",
+        "secondary_publication_allowed",
+        "secondary_tools_allowed",
+        "secondary_effects_allowed",
     }
 )
 
@@ -486,6 +513,7 @@ class SecondaryWorkloadPolicy:
     """Code-owned product policy layered over one unchanged runtime identity."""
 
     policy_id: str
+    status: str
     manifest_sha256: str
     runtime_profile_id: str
     runtime_profile_manifest_sha256: str
@@ -511,7 +539,7 @@ class SecondaryWorkloadPolicy:
             and set(value) == _WORKLOAD_POLICY_KEYS
             and raw == _canonical_json(value)
             and value.get("schema") == _WORKLOAD_POLICY_SCHEMA
-            and value.get("status") == "shadow_ready"
+            and value.get("status") == self.status
             and value.get("policy_id") == self.policy_id
             and value.get("runtime_profile_id") == self.runtime_profile_id
             and value.get("runtime_profile_manifest_sha256") == self.runtime_profile_manifest_sha256
@@ -535,13 +563,26 @@ class SecondaryWorkloadPolicy:
 
     @property
     def is_well_formed(self) -> bool:
+        identity = (self.policy_id, self.status, self.manifest_sha256, self.document_map_modes)
         return bool(
-            self.policy_id == "gptoss20b-document-map-v1"
-            and _SHA256_RE.fullmatch(self.manifest_sha256)
+            identity
+            in {
+                (
+                    "gptoss20b-document-map-v1",
+                    "shadow_ready",
+                    _DOCUMENT_MAP_SHADOW_POLICY_SHA256,
+                    frozenset({"shadow"}),
+                ),
+                (
+                    "gptoss20b-document-map-v2",
+                    "assist_ready",
+                    _DOCUMENT_MAP_ASSIST_POLICY_SHA256,
+                    frozenset({"assist"}),
+                ),
+            }
             and _PROFILE_ID_RE.fullmatch(self.runtime_profile_id)
             and _SHA256_RE.fullmatch(self.runtime_profile_manifest_sha256)
             and self.allowed_global_modes == frozenset({"assist"})
-            and self.document_map_modes == frozenset({"shadow"})
             and self.additional_workloads == frozenset({"document_map"})
             and self.max_context_tokens == 4096
             and self.max_output_tokens == 512
@@ -564,20 +605,48 @@ class SecondaryDocumentMapAssistAcceptance:
     runtime_profile_manifest_sha256: str
     max_receipt_age_sec: int
 
+    def accepts_manifest(self, raw: bytes) -> bool:
+        if not 1 <= len(raw) <= 16_384 or hashlib.sha256(raw).hexdigest() != self.acceptance_manifest_sha256:
+            return False
+        try:
+            value = json.loads(
+                raw.decode("utf-8", errors="strict"),
+                parse_constant=_reject_constant,
+            )
+        except (UnicodeError, ValueError, TypeError):
+            return False
+        return bool(
+            isinstance(value, dict)
+            and set(value) == _DOCUMENT_MAP_ASSIST_ACCEPTANCE_KEYS
+            and raw == _canonical_json(value)
+            and value.get("schema") == _DOCUMENT_MAP_ASSIST_ACCEPTANCE_SCHEMA
+            and value.get("status") == self.status
+            and value.get("candidate_policy_id") == self.candidate_policy_id
+            and value.get("candidate_policy_manifest_sha256") == self.candidate_policy_manifest_sha256
+            and value.get("predecessor_policy_id") == self.predecessor_policy_id
+            and value.get("predecessor_policy_manifest_sha256") == self.predecessor_policy_manifest_sha256
+            and value.get("accepted_shadow_receipt_sha256") == self.accepted_shadow_receipt_sha256
+            and value.get("runtime_profile_id") == self.runtime_profile_id
+            and value.get("runtime_profile_manifest_sha256") == self.runtime_profile_manifest_sha256
+            and value.get("max_receipt_age_sec") == self.max_receipt_age_sec
+            and value.get("required_transition") == "secondary_document_map_shadow_to_assist"
+            and value.get("primary_fallback_required") is True
+            and value.get("primary_final_synthesis_required") is True
+            and value.get("secondary_publication_allowed") is False
+            and value.get("secondary_tools_allowed") is False
+            and value.get("secondary_effects_allowed") is False
+        )
+
     @property
     def is_bound(self) -> bool:
         return bool(
             self.status == "accepted"
-            and _SHA256_RE.fullmatch(self.acceptance_manifest_sha256)
-            and self.acceptance_manifest_sha256 != _ZERO_SHA256
+            and self.acceptance_manifest_sha256 == _DOCUMENT_MAP_ASSIST_ACCEPTANCE_SHA256
             and self.candidate_policy_id == "gptoss20b-document-map-v2"
-            and _SHA256_RE.fullmatch(self.candidate_policy_manifest_sha256)
-            and self.candidate_policy_manifest_sha256 != _ZERO_SHA256
+            and self.candidate_policy_manifest_sha256 == _DOCUMENT_MAP_ASSIST_POLICY_SHA256
             and self.predecessor_policy_id == "gptoss20b-document-map-v1"
-            and self.predecessor_policy_manifest_sha256
-            == "7d57947d7ecda675e8a4da3f56332baf32484c08c0504afd7fa420b9c6323cd9"
-            and _SHA256_RE.fullmatch(self.accepted_shadow_receipt_sha256)
-            and self.accepted_shadow_receipt_sha256 != _ZERO_SHA256
+            and self.predecessor_policy_manifest_sha256 == _DOCUMENT_MAP_SHADOW_POLICY_SHA256
+            and self.accepted_shadow_receipt_sha256 == _ACCEPTED_DOCUMENT_MAP_SHADOW_RECEIPT_SHA256
             and self.runtime_profile_id == _ACCEPTED_GPT_OSS_20B_FINALIST.profile_id
             and self.runtime_profile_manifest_sha256 == _ACCEPTED_GPT_OSS_20B_FINALIST.manifest_sha256
             and self.max_receipt_age_sec == 3_600
@@ -642,15 +711,13 @@ _ACCEPTED_GPT_OSS_20B_FINALIST = SecondaryRuntimeProfile(
     runtime_manifest_sha256=("15be7b3bdaa3cd76ace1bcc93ca461598a9583d920f4f3e55924db2f6b643428"),
 )
 
-# This policy deliberately does not alter the gateway-served runtime manifest.
-# The engine, Windows bundle, profile ID and accepted manifest digest remain
-# exactly the already-certified finalist.  It only admits one additional
-# product workload in discarded shadow through an explicit release-operator
-# transition; assist remains closed until a later evidence-bound policy. The
-# model still receives bounded text and can neither publish nor execute anything.
-_DOCUMENT_MAP_WORKLOAD_POLICY = SecondaryWorkloadPolicy(
+# These product policies do not alter the gateway-served runtime manifest. The
+# v1 policy owns discarded shadow; evidence-bound v2 owns assist. Both keep the
+# model text-only and unable to publish or execute anything.
+_DOCUMENT_MAP_SHADOW_WORKLOAD_POLICY = SecondaryWorkloadPolicy(
     policy_id="gptoss20b-document-map-v1",
-    manifest_sha256="7d57947d7ecda675e8a4da3f56332baf32484c08c0504afd7fa420b9c6323cd9",
+    status="shadow_ready",
+    manifest_sha256=_DOCUMENT_MAP_SHADOW_POLICY_SHA256,
     runtime_profile_id=_ACCEPTED_GPT_OSS_20B_FINALIST.profile_id,
     runtime_profile_manifest_sha256=_ACCEPTED_GPT_OSS_20B_FINALIST.manifest_sha256,
     allowed_global_modes=frozenset({"assist"}),
@@ -661,22 +728,37 @@ _DOCUMENT_MAP_WORKLOAD_POLICY = SecondaryWorkloadPolicy(
     max_concurrency=1,
 )
 
-SECONDARY_WORKLOAD_POLICIES: Mapping[str, SecondaryWorkloadPolicy] = MappingProxyType(
-    {_DOCUMENT_MAP_WORKLOAD_POLICY.policy_id: _DOCUMENT_MAP_WORKLOAD_POLICY}
+_DOCUMENT_MAP_ASSIST_WORKLOAD_POLICY = SecondaryWorkloadPolicy(
+    policy_id="gptoss20b-document-map-v2",
+    status="assist_ready",
+    manifest_sha256=_DOCUMENT_MAP_ASSIST_POLICY_SHA256,
+    runtime_profile_id=_ACCEPTED_GPT_OSS_20B_FINALIST.profile_id,
+    runtime_profile_manifest_sha256=_ACCEPTED_GPT_OSS_20B_FINALIST.manifest_sha256,
+    allowed_global_modes=frozenset({"assist"}),
+    document_map_modes=frozenset({"assist"}),
+    additional_workloads=frozenset({"document_map"}),
+    max_context_tokens=4096,
+    max_output_tokens=512,
+    max_concurrency=1,
 )
 
-# The implementation is intentionally present before the acceptance.  The two
-# empty fields are not wildcards: they keep assist fail-closed until a later,
-# distinct candidate binds the exact receipt emitted by live v1 shadow and the
-# exact accepted v2 policy manifest.  Never populate these from ENV.
+SECONDARY_WORKLOAD_POLICIES: Mapping[str, SecondaryWorkloadPolicy] = MappingProxyType(
+    {
+        _DOCUMENT_MAP_SHADOW_WORKLOAD_POLICY.policy_id: _DOCUMENT_MAP_SHADOW_WORKLOAD_POLICY,
+        _DOCUMENT_MAP_ASSIST_WORKLOAD_POLICY.policy_id: _DOCUMENT_MAP_ASSIST_WORKLOAD_POLICY,
+    }
+)
+
+# The acceptance is a code-owned binding to one exact live v1 shadow receipt
+# and one exact v2 policy. Never populate either identity from ENV or CLI.
 SECONDARY_DOCUMENT_MAP_ASSIST_ACCEPTANCE = SecondaryDocumentMapAssistAcceptance(
-    status="acceptance_pending",
-    acceptance_manifest_sha256=("a9cc1dfa34aa34eb41dc6ca7b6d3129248e755cc2bf4d6f060859c95fcd828e7"),
-    candidate_policy_id="gptoss20b-document-map-v2",
-    candidate_policy_manifest_sha256="",
-    predecessor_policy_id=_DOCUMENT_MAP_WORKLOAD_POLICY.policy_id,
-    predecessor_policy_manifest_sha256=_DOCUMENT_MAP_WORKLOAD_POLICY.manifest_sha256,
-    accepted_shadow_receipt_sha256="",
+    status="accepted",
+    acceptance_manifest_sha256=_DOCUMENT_MAP_ASSIST_ACCEPTANCE_SHA256,
+    candidate_policy_id=_DOCUMENT_MAP_ASSIST_WORKLOAD_POLICY.policy_id,
+    candidate_policy_manifest_sha256=_DOCUMENT_MAP_ASSIST_WORKLOAD_POLICY.manifest_sha256,
+    predecessor_policy_id=_DOCUMENT_MAP_SHADOW_WORKLOAD_POLICY.policy_id,
+    predecessor_policy_manifest_sha256=_DOCUMENT_MAP_SHADOW_WORKLOAD_POLICY.manifest_sha256,
+    accepted_shadow_receipt_sha256=_ACCEPTED_DOCUMENT_MAP_SHADOW_RECEIPT_SHA256,
     runtime_profile_id=_ACCEPTED_GPT_OSS_20B_FINALIST.profile_id,
     runtime_profile_manifest_sha256=_ACCEPTED_GPT_OSS_20B_FINALIST.manifest_sha256,
     max_receipt_age_sec=3_600,
@@ -726,16 +808,22 @@ def get_secondary_workload_policy(
     profile: SecondaryRuntimeProfile,
     *,
     global_mode: str,
+    document_map_mode: str,
 ) -> SecondaryWorkloadPolicy | None:
     """Resolve the exact product overlay without changing endpoint identity."""
 
-    policy = SECONDARY_WORKLOAD_POLICIES.get("gptoss20b-document-map-v1")
+    policy_id = {
+        "shadow": "gptoss20b-document-map-v1",
+        "assist": "gptoss20b-document-map-v2",
+    }.get(document_map_mode)
+    policy = SECONDARY_WORKLOAD_POLICIES.get(policy_id or "")
     if (
         policy is None
         or not policy.is_well_formed
         or policy.runtime_profile_id != profile.profile_id
         or policy.runtime_profile_manifest_sha256 != profile.manifest_sha256
         or global_mode not in policy.allowed_global_modes
+        or document_map_mode not in policy.document_map_modes
         or policy.max_context_tokens != profile.max_context_tokens
         or policy.max_output_tokens != profile.max_output_tokens
         or policy.max_concurrency != profile.max_concurrency
@@ -748,10 +836,15 @@ def secondary_effective_workloads(
     profile: SecondaryRuntimeProfile,
     *,
     global_mode: str,
+    document_map_mode: str,
 ) -> frozenset[str]:
-    """Return runtime-certified workloads plus one exact shadow-only overlay."""
+    """Return runtime-certified workloads plus one exact document-map overlay."""
 
-    policy = get_secondary_workload_policy(profile, global_mode=global_mode)
+    policy = get_secondary_workload_policy(
+        profile,
+        global_mode=global_mode,
+        document_map_mode=document_map_mode,
+    )
     if policy is None:
         return profile.allowed_workloads
     return profile.allowed_workloads | policy.additional_workloads
@@ -763,8 +856,24 @@ def get_secondary_document_map_assist_acceptance(
     """Return only a complete code-owned live-shadow→v2 acceptance binding."""
 
     acceptance = SECONDARY_DOCUMENT_MAP_ASSIST_ACCEPTANCE
+    policy = SECONDARY_WORKLOAD_POLICIES.get(acceptance.candidate_policy_id)
+    predecessor = SECONDARY_WORKLOAD_POLICIES.get(acceptance.predecessor_policy_id)
     if (
         not acceptance.is_bound
+        or predecessor is None
+        or not predecessor.is_well_formed
+        or predecessor.policy_id != acceptance.predecessor_policy_id
+        or predecessor.manifest_sha256 != acceptance.predecessor_policy_manifest_sha256
+        or predecessor.document_map_modes != frozenset({"shadow"})
+        or predecessor.runtime_profile_id != profile.profile_id
+        or predecessor.runtime_profile_manifest_sha256 != profile.manifest_sha256
+        or policy is None
+        or not policy.is_well_formed
+        or policy.policy_id != acceptance.candidate_policy_id
+        or policy.manifest_sha256 != acceptance.candidate_policy_manifest_sha256
+        or policy.document_map_modes != frozenset({"assist"})
+        or policy.runtime_profile_id != profile.profile_id
+        or policy.runtime_profile_manifest_sha256 != profile.manifest_sha256
         or acceptance.runtime_profile_id != profile.profile_id
         or acceptance.runtime_profile_manifest_sha256 != profile.manifest_sha256
     ):

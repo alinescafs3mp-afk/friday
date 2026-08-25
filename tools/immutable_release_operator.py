@@ -117,11 +117,14 @@ _SECONDARY_DOCUMENT_MAP_SHADOW_POLICY_SHA256 = (
     "7d57947d7ecda675e8a4da3f56332baf32484c08c0504afd7fa420b9c6323cd9"
 )
 _SECONDARY_DOCUMENT_MAP_ASSIST_POLICY_ID = "gptoss20b-document-map-v2"
-# Deliberately unfilled until real live v1 shadow emits the exact receipt. A
-# later distinct candidate fills both values; empty strings are fail-closed,
-# never operator-supplied wildcards.
-_SECONDARY_DOCUMENT_MAP_ASSIST_POLICY_SHA256 = ""
-_SECONDARY_DOCUMENT_MAP_ACCEPTED_SHADOW_RECEIPT_SHA256 = ""
+# Exact code-owned v2 policy and the fresh one-shot live v1 shadow receipt it
+# earned. Neither identity may be supplied or overridden through ENV/CLI.
+_SECONDARY_DOCUMENT_MAP_ASSIST_POLICY_SHA256 = (
+    "d2ab9b67ff24a54727fec9592dcd0db1c35036e1b5ee91ac6a5daf4d3694e92e"
+)
+_SECONDARY_DOCUMENT_MAP_ACCEPTED_SHADOW_RECEIPT_SHA256 = (
+    "a00f18f8c50a7449d1fa6a357d8d5bb1ca37b0c397c81a96c0e621231bc09e2d"
+)
 _SECONDARY_DOCUMENT_MAP_RECEIPT_SCHEMA = "friday.secondary-document-map-shadow-receipt.v1"
 _SECONDARY_DOCUMENT_MAP_ATTESTATION_SCHEMA = "friday.secondary-document-map-shadow-attestation.v1"
 _SECONDARY_DOCUMENT_MAP_CONSUME_REQUEST_SCHEMA = "friday.secondary-document-map-shadow-consume-request.v1"

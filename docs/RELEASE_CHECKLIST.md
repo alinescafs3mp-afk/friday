@@ -86,7 +86,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.30`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.31`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -146,10 +146,14 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - promotion-grade receipt не хранит body, model output, их digests
   или cumulative counters; он связан с PID/epoch, accepted profile/CA,
   v1 policy и exact sealed predecessor commit/tree/metadata/wheel/ENV;
-- pending v2 manifest с пустыми candidate-policy и accepted-receipt digests
-  обязан fail-closed отклонить assist; только последующий distinct
-  candidate может атомарно consume-ить свежий exact receipt и
-  изменить только `DOCUMENT_MAP_MODE=shadow→assist`;
+- candidate 0.207.31 содержит canonical v2 assist policy SHA-256
+  `d2ab9b67ff24a54727fec9592dcd0db1c35036e1b5ee91ac6a5daf4d3694e92e`
+  и accepted manifest SHA-256
+  `933c671759724e36fe686185aa8ad03fa09f90e26e3095900796707cfef36855`,
+  привязанные к exact live receipt без raw receipt/lookup token в source;
+- только `secondary_document_map_shadow_to_assist` может одноразово consume-ить
+  этот fresh receipt и изменить `DOCUMENT_MAP_MODE=shadow→assist`; v2 сохраняет
+  primary fallback/final synthesis и запрещает secondary tools/effects/publication;
 - на Windows-узле установлен и в release включён at-logon gateway
   publication recovery: exact healthy gateway перезапускается не более
   одного раза только после двух совпавших доказательств отсутствия
@@ -184,7 +188,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 2 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.30`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.31`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
@@ -223,6 +227,9 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   ENV или полномочия; он только устанавливает fail-closed live-evidence
   gate, а document-map assist остаётся закрыт до отдельного
   evidence-bound candidate;
+- переход 0.207.30 → 0.207.31 не меняет schema 42, endpoint, accepted runtime
+  profile или extract assist; он меняет только document-map shadow→assist через
+  exact code-owned v2 policy и одноразовый accepted live receipt;
 - live release 0.207.24 уже имеет schema 41; переход 0.207.24 → 0.207.26
   не меняет schema и готовит только distinct bounded assist из
   уже принятого private discarded shadow;

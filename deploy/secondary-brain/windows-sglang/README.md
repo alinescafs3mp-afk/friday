@@ -239,11 +239,10 @@ Never point
 `FRIDAY_SECONDARY_PROFILE_MANIFEST_PATH` at this policy file. The v1 policy is
 shadow-only: enabling discarded document-map shadow changes neither file
 mounted by Compose nor the running SGLang/gateway containers, so the laptop
-needs no restart for that product-only transition. Assist requires a later
-evidence-bound policy and operator gate; v1 must never be used to promote it.
+needs no restart for that product-only transition. V1 must never be used to
+promote assist.
 
-The server-side next gate is implementation-ready but deliberately acceptance
-pending. Natural valid owner shadow can emit a content-free receipt; only the
+Natural valid owner shadow can emit a content-free receipt; only the
 owner-token-only, empty-body `secondary-document-map-witness/observe-shadow`
 route emits promotion-grade evidence. It runs one real same-process
 `DOCUMENT_MAP` through the exclusive scheduler seam, preserves one exact
@@ -258,10 +257,16 @@ request/candidate retry reconstructs the identical signed consume response
 without mutation; a new PID/epoch may issue a new current receipt while every
 historical consumed row remains immutable. The operator fully verifies the
 sealed predecessor tree before and after consume.
-`workload-policy.document-map.v2.acceptance-pending.json` keeps
-the candidate-policy and accepted live-receipt digests empty, so a distinct
-candidate and exact live receipt are still required. ENV alone never opens the
-gate.
+The historical `workload-policy.document-map.v2.acceptance-pending.json`
+remains fail-closed. Release 0.207.31 uses canonical
+`workload-policy.document-map.v2.json` plus
+`workload-policy.document-map.v2.acceptance.json`, whose SHA-256 values are
+`d2ab9b67ff24a54727fec9592dcd0db1c35036e1b5ee91ac6a5daf4d3694e92e` and
+`933c671759724e36fe686185aa8ad03fa09f90e26e3095900796707cfef36855`.
+The acceptance binds exact receipt SHA-256
+`a00f18f8c50a7449d1fa6a357d8d5bb1ca37b0c397c81a96c0e621231bc09e2d`;
+raw receipt and lookup token stay outside source. ENV alone never opens the
+gate, and this product-only transition requires no laptop container restart.
 
 The profile ID and served-model alias are derived from the complete engine
 projection. `dtype=bfloat16`, `quantization=mxfp4`, global/prefill attention

@@ -357,13 +357,20 @@ def secondary_configuration_is_admissible(
     from .profiles import (
         get_secondary_document_map_assist_acceptance,
         get_secondary_runtime_admission,
+        get_secondary_workload_policy,
         secondary_effective_workloads,
     )
 
     admission = get_secondary_runtime_admission(endpoint.profile_id, mode=mode)
     profile = admission.profile if admission is not None else None
     effective_profile_workloads = (
-        secondary_effective_workloads(profile, global_mode=mode) if profile is not None else frozenset()
+        secondary_effective_workloads(
+            profile,
+            global_mode=mode,
+            document_map_mode=document_map_mode,
+        )
+        if profile is not None
+        else frozenset()
     )
     document_map_requested = "document_map" in workloads
     document_map_is_runtime_certified = bool(
@@ -371,6 +378,15 @@ def secondary_configuration_is_admissible(
     )
     document_map_assist_is_evidence_bound = bool(
         profile is not None and get_secondary_document_map_assist_acceptance(profile) is not None
+    )
+    document_map_policy = (
+        get_secondary_workload_policy(
+            profile,
+            global_mode=mode,
+            document_map_mode=document_map_mode,
+        )
+        if profile is not None
+        else None
     )
     document_map_policy_matches = bool(
         (not document_map_requested and document_map_mode == "disabled")
@@ -385,6 +401,8 @@ def secondary_configuration_is_admissible(
             document_map_requested
             and not document_map_is_runtime_certified
             and mode == "assist"
+            and document_map_policy is not None
+            and document_map_mode in document_map_policy.document_map_modes
             and (
                 document_map_mode == "shadow"
                 or (document_map_mode == "assist" and document_map_assist_is_evidence_bound)

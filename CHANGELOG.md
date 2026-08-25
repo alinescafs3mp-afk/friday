@@ -1,3 +1,16 @@
+## 0.207.31 — 2026-08-26
+
+### Evidence-bound document-map assist
+
+- The canonical read-only v2 policy admits only bounded text document-map
+  assist while primary final synthesis, exact primary fallback and the ban on
+  secondary tools, effects and publication remain unchanged.
+- A separate accepted manifest binds that policy to the exact one-shot live
+  shadow receipt and unchanged accepted GPT-OSS runtime profile; the raw
+  receipt and its lookup token are not stored in source.
+- The immutable operator pins both digests and permits only the existing
+  one-use, distinct-candidate `DOCUMENT_MAP_MODE=shadow→assist` transition.
+
 ## 0.207.30 — 2026-08-26
 
 ### Live-evidence gate for document-map assist

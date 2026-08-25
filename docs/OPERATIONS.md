@@ -106,16 +106,13 @@ gateway manifest `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059
 env. Из текущего exact `assist/extract` добавьте
 `FRIDAY_SECONDARY_LLM_WORKLOADS=document_map,extract` и
 `FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE=shadow`, затем используйте transition
-`secondary_assist_enable_document_map_shadow`. В этой фазе primary MAP остаётся
-пользовательским результатом, а secondary результат валидируется и
-выбрасывается. V1 намеренно не содержит operator path в assist: отдельный
-shadow checkpoint должен сначала породить evidence-bound policy/gate в новом
-release. Ручная установка `DOCUMENT_MAP_MODE=assist` fail-closed как
-misconfigured.
+`secondary_assist_enable_document_map_shadow`. В shadow-фазе primary MAP
+остаётся пользовательским результатом, а secondary результат валидируется и
+выбрасывается. V1 не допускает assist.
 Owner diagnostics показывает отдельный
 `workloads.document_map.routing_mode` и content-free counters этой ступени.
 
-Следующий gate уже подготовлен, но принятие намеренно не заполнено. Natural
+Promotion gate принимает natural
 owner document-map shadow через product seam может создать content-free
 receipt, однако promotion-grade receipt выдаёт только одноразовый same-process
 `POST /api/admin/secondary-document-map-witness/observe-shadow` с owner token и
@@ -138,11 +135,15 @@ failed one-shot, non-exact replay или несовпадение durable one-sh
 current receipt, сохранив прежние consumed audit rows. Оператор полностью
 перепроверяет sealed predecessor tree и до, и после consume.
 
-До реального live receipt code-owned поля v2 policy SHA-256 и accepted receipt
-SHA-256 пусты, поэтому `secondary_document_map_shadow_to_assist` всегда
-fail-closed. После live checkpoint отдельный candidate обязан заполнить оба
-exact digest; только distinct commit и atomic owner-only consume могут сменить
-ровно `DOCUMENT_MAP_MODE=shadow→assist`.
+Release `0.207.31` связывает canonical v2 policy SHA-256
+`d2ab9b67ff24a54727fec9592dcd0db1c35036e1b5ee91ac6a5daf4d3694e92e`
+с exact live-shadow receipt SHA-256
+`a00f18f8c50a7449d1fa6a357d8d5bb1ca37b0c397c81a96c0e621231bc09e2d`.
+Accepted manifest SHA-256 —
+`933c671759724e36fe686185aa8ad03fa09f90e26e3095900796707cfef36855`;
+raw receipt и lookup token в source отсутствуют. Только distinct commit и
+atomic owner-only consume могут сменить ровно
+`DOCUMENT_MAP_MODE=shadow→assist`; ENV/CLI не могут подменить эти digests.
 
 На GPU эта дорога заметна только для документов, которые runtime разбивает на
 иерархические MAP/REDUCE-фрагменты. Небольшой документ, обычный диалог,
@@ -754,7 +755,7 @@ orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.30`.
+требуйте `status=ok` и `version=0.207.31`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

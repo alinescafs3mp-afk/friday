@@ -3,7 +3,7 @@
 - Updated: 2026-08-26
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
-- Phase: **document-map evidence gate prepared; shadow remains live**
+- Phase: **evidence-bound document-map assist candidate ready; live remains shadow until activation**
 - Live production: Friday `0.207.29` /
   `7f217aa96561532240203f63729e17160b03ebfb`, tree
   `beefea549b9c568e8573b39582b1af14a67dd5a3a4ef6c724ca0c5beb0a33c1b`, wheel
@@ -169,7 +169,7 @@
   evidence gate before secondary output may influence document mapping. The
   source/operator shadow path is now live; promotion-grade product evidence is
   the next separate checkpoint.
-- The next evidence boundary is implemented without claiming acceptance.
+- The evidence boundary produced one accepted promotion receipt.
   Natural owner shadow remains causal/content-free, but promotion evidence is
   restricted to one owner-token-only empty-body same-process call. It proves a
   real `DOCUMENT_MAP`, primary-once/preserved and exact isolated scheduler
@@ -181,10 +181,15 @@
   immutable, while a new PID/epoch may issue a new current receipt without
   deleting that audit. The operator re-verifies the full sealed predecessor
   tree after consume. It has a distinct-candidate
-  `secondary_document_map_shadow_to_assist` path, but v2
-  policy and accepted live-receipt digests remain empty in the pending manifest,
-  so runtime/operator still keep assist closed until a later candidate binds
-  genuine live evidence.
+  `secondary_document_map_shadow_to_assist` path. Release candidate `0.207.31`
+  binds v2 policy SHA-256
+  `d2ab9b67ff24a54727fec9592dcd0db1c35036e1b5ee91ac6a5daf4d3694e92e`,
+  accepted-manifest SHA-256
+  `933c671759724e36fe686185aa8ad03fa09f90e26e3095900796707cfef36855`
+  and exact live receipt SHA-256
+  `a00f18f8c50a7449d1fa6a357d8d5bb1ca37b0c397c81a96c0e621231bc09e2d`.
+  Raw receipt/lookup token remain outside source. Activation may change only
+  document-map `shadow→assist`; the laptop runtime and extract assist stay exact.
 
 ## Parallel parent checkpoint
 
@@ -196,8 +201,8 @@
 
 ## Active order
 
-1. Produce identity-, policy- and process-bound live document-map shadow
-   evidence, then release a distinct fail-closed assist gate.
+1. Activate the distinct evidence-bound `0.207.31` candidate while the exact
+   receipt is fresh, then verify assist and laptop-off primary fallback.
 2. Retain a separate product-counter outage/recovery drill as operational
    evidence; it is not a prerequisite for ordinary optional operation.
 3. Continue the next durable ICP journey and V12 refinement with the secondary
