@@ -1,0 +1,559 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import time
+from collections.abc import Callable
+from dataclasses import replace
+from typing import Any
+
+import pytest
+
+import friday.orchestration.conversation_document_comparison as comparison_module
+from friday.evidence_bundle import CitationBinding, EvidenceBundle, EvidencePart
+from friday.file_evidence import FileBodyKind, FileEvidenceSet, FileEvidenceView, FileRegistrationKind
+from friday.file_evidence_reader import (
+    _PROCESS_AUTHORITY as _FILE_EVIDENCE_AUTHORITY,  # noqa: PLC2701
+)
+from friday.file_evidence_reader import (
+    PreparedFileEvidence,
+)
+from friday.interaction_control_plane.selected_archive_evidence import (
+    SelectedArchiveCorpus,
+    SelectedArchiveCoverageGrade,
+    SelectedArchiveEvidence,
+)
+from friday.interaction_control_plane.turn_trace import FailureReason, OutcomeStatus
+from friday.model_profiles import ModelProfileLease, ModelRequirements
+from friday.orchestration.conversation_document_comparison import (
+    ConversationDocumentComparisonError,
+    compare_conversation_with_document,
+    conversation_document_comparison_is_process_owned,
+    conversation_document_comparison_lease_is_current,
+    conversation_document_model_evidence_identity,
+)
+from friday.retrieval.archive_evidence_replay import (
+    ArchiveEvidenceReplayCoverageGrade,
+    ArchiveEvidenceReplayResult,
+    _exact_result,  # noqa: PLC2701
+)
+from friday.retrieval.archive_evidence_snapshot import archive_selected_evidence_snapshot_sha256
+from friday.retrieval.archive_search_contract import ArchiveSearchCorpus
+from friday.retrieval.archive_search_message_adapter import MESSAGE_PASSAGE_INDEX_VERSION
+from friday.retrieval.contracts import (
+    AuthorityScope,
+    CanonicalObjectKind,
+    EmbeddingCompatibility,
+    EmbeddingIdentity,
+    LifecycleRef,
+    LifecycleState,
+    MessageWindowLocator,
+    PassageRef,
+    RepresentationKind,
+    ResolvedSource,
+    RevalidationTarget,
+    RevisionKind,
+    SourceKind,
+    SourceRef,
+    SourceRepresentation,
+    SourceRevision,
+)
+from friday.source_identity import authorized_file_snapshot_token
+
+
+def _message_evidence(
+    *,
+    text: str = "В переписке решили оставить точный режим CUDA graphs.",
+    coverage: ArchiveEvidenceReplayCoverageGrade = ArchiveEvidenceReplayCoverageGrade.COMPLETE,
+) -> tuple[ArchiveEvidenceReplayResult, SelectedArchiveEvidence]:
+    conversation_id = "conv_0123456789abcdef"
+    source = SourceRef(
+        SourceKind.CONVERSATION,
+        AuthorityScope.PRINCIPAL,
+        None,
+        "person-main",
+        CanonicalObjectKind.CONVERSATION,
+        conversation_id,
+    )
+    representation = SourceRepresentation(RepresentationKind.CONVERSATION, conversation_id)
+    revision = SourceRevision(
+        representation,
+        RevisionKind.MESSAGE_LEDGER_SHA256,
+        "e" * 64,
+    )
+    resolved = ResolvedSource.create(
+        source_ref=source,
+        representations=(representation,),
+        lifecycle=(LifecycleRef(representation, LifecycleState.ACTIVE),),
+        revisions=(revision,),
+        revalidation_targets=(RevalidationTarget(representation, AuthorityScope.PRINCIPAL),),
+    )
+    passage = PassageRef(
+        source,
+        revision,
+        MessageWindowLocator(
+            first_message_id="msg_1111111111111111",
+            last_message_id="msg_2222222222222222",
+            start_at="2026-08-20T08:00:00+00:00",
+            end_at="2026-08-20T09:00:00+00:00",
+            context_before=1,
+            context_after=1,
+        ),
+        MESSAGE_PASSAGE_INDEX_VERSION,
+        EmbeddingIdentity.unindexed(EmbeddingCompatibility.NOT_APPLICABLE),
+    )
+    snapshot = archive_selected_evidence_snapshot_sha256(resolved, (passage,), (text,))
+    replay = _exact_result(
+        corpus=ArchiveSearchCorpus.MESSAGES,
+        coverage_grade=coverage,
+        resolved_source=resolved,
+        passage_refs=(passage,),
+        texts=(text,),
+    )
+    selected = SelectedArchiveEvidence(
+        work_item_id="work_0123456789abcdef",
+        corpus=SelectedArchiveCorpus.MESSAGES,
+        source_ref=source,
+        passage_refs=(passage,),
+        source_snapshot_sha256=snapshot,
+        coverage_sha256="c" * 64,
+        coverage_grade=SelectedArchiveCoverageGrade(coverage.value),
+        origin_boundary_user_message_id="msg_3333333333333333",
+    )
+    return replay, selected
+
+
+def _prepared_document(
+    *,
+    text: str = "В документе зафиксирован обычный режим без CUDA graphs.",
+    raw_id: str = "raw_0123456789abcdef",
+) -> PreparedFileEvidence:
+    content_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    raw = {
+        "id": raw_id,
+        "source": "upload",
+        "source_ref": "telegram-file:test",
+        "content_type": "file",
+        "received_at": "2026-08-25T01:00:00+00:00",
+        "content_hash": content_sha256,
+        "_raw_content": text,
+        "_raw_metadata": '{"filename":"decision.txt"}',
+    }
+    token = authorized_file_snapshot_token(raw, content_sha256=content_sha256)
+    assert token is not None
+    view = FileEvidenceView(
+        raw_id=raw_id,
+        source_identity_sha256=token.source.identity_sha256,
+        registration=FileRegistrationKind.VALID,
+        disk_verified=True,
+        workspace_relative_path=None,
+        workspace_sha256=None,
+        workspace_source_sha256=None,
+        body_kind=FileBodyKind.EXTRACTED,
+        source_complete=True,
+        projection_applied=False,
+        projection_empty_no_match=False,
+        source_readable=True,
+        verification_eligible=True,
+    )
+    evidence_set = FileEvidenceSet(items=(view,), expected_count=1)
+    part = EvidencePart(
+        label="A1",
+        display_name="decision.txt",
+        media_type="text/plain",
+        source_identity_sha256=token.source.identity_sha256,
+        text=text,
+    )
+    bundle = EvidenceBundle(
+        parts=(part,),
+        citations=(CitationBinding("A1", token.source.identity_sha256),),
+        file_evidence_set_sha256=evidence_set.identity_sha256(),
+    )
+    return PreparedFileEvidence(
+        tenant_id="tenant-main",
+        person_id="person-main",
+        raw_ids=(raw_id,),
+        snapshot_tokens=(token,),
+        file_evidence_set=evidence_set,
+        bundle=bundle,
+        historical_selection=None,
+        _process_authority=_FILE_EVIDENCE_AUTHORITY,
+    )
+
+
+class _ComparisonModel:
+    def __init__(
+        self,
+        *,
+        answer: str = ("В сообщениях выбран CUDA graphs [M1.1], а документ фиксирует обычный режим [D1]."),
+        verifier_supported: bool = True,
+        synthesis_tool_call: bool = False,
+        verifier_tool_call: bool = False,
+        verifier_finish_reason: str = "stop",
+        lease_current: bool = True,
+        after_verifier: Callable[[], None] | None = None,
+    ) -> None:
+        self.answer = answer
+        self.verifier_supported = verifier_supported
+        self.synthesis_tool_call = synthesis_tool_call
+        self.verifier_tool_call = verifier_tool_call
+        self.verifier_finish_reason = verifier_finish_reason
+        self.current = lease_current
+        self.after_verifier = after_verifier
+        self.lease: ModelProfileLease | None = None
+        self.calls: list[list[dict[str, Any]]] = []
+        self.requirements: ModelRequirements | None = None
+        self.verifier_answer = ""
+
+    async def acquire_lease(
+        self,
+        requirements: ModelRequirements,
+        *,
+        absolute_deadline: float,
+    ) -> ModelProfileLease:
+        assert absolute_deadline > time.monotonic()
+        assert requirements.prepared_evidence_items == 2
+        assert requirements.max_tool_steps == 0
+        assert requirements.verifier_required is True
+        self.requirements = requirements
+        self.lease = ModelProfileLease(
+            profile_id="conversation-document-test:dispatcher",
+            attestation_sha256="a" * 64,
+            requirements_sha256=requirements.canonical_sha256(),
+            capabilities=requirements.capabilities,
+            required_context_tokens=requirements.required_context_tokens,
+            prepared_evidence_items=requirements.prepared_evidence_items,
+            max_tool_steps=requirements.max_tool_steps,
+            effect=requirements.effect,
+            verifier_required=requirements.verifier_required,
+            process_epoch_sha256="b" * 64,
+            _gate_authority=self,
+            _gate_generation=1,
+        )
+        return self.lease
+
+    async def lease_is_current(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+        *,
+        absolute_deadline: float,
+    ) -> bool:
+        return bool(
+            self.current
+            and absolute_deadline > time.monotonic()
+            and lease is self.lease
+            and requirements is self.requirements
+        )
+
+    async def complete(
+        self,
+        lease: object,
+        requirements: ModelRequirements,
+        messages: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        assert lease is self.lease
+        assert requirements is self.requirements
+        assert kwargs["max_tokens"] > 0
+        assert kwargs["temperature"] == 0.0
+        assert "tools" not in kwargs
+        self.calls.append(messages)
+        if len(self.calls) == 1:
+            payload = json.loads(str(messages[-1]["content"]))
+            assert payload["evidence"]["messages"]["fragments"] == [
+                {
+                    "label": "M1.1",
+                    "text": "В переписке решили оставить точный режим CUDA graphs.",
+                }
+            ]
+            assert payload["evidence"]["document"]["label"] == "D1"
+            if self.synthesis_tool_call:
+                return {
+                    "content": "",
+                    "tool_calls": [{"id": "forbidden"}],
+                    "finish_reason": "tool_calls",
+                }
+            return {"content": self.answer, "tool_calls": None, "finish_reason": "stop"}
+        verifier_input = json.loads(str(messages[-1]["content"]))
+        self.verifier_answer = str(verifier_input["answer"])
+        assert self.verifier_answer.endswith(self.answer)
+        assert verifier_input["evidence"]["document"]["label"] == "D1"
+        if self.after_verifier is not None:
+            self.after_verifier()
+        if self.verifier_tool_call:
+            return {
+                "content": "",
+                "tool_calls": [{"id": "forbidden-verifier"}],
+                "finish_reason": "tool_calls",
+            }
+        return {
+            "content": json.dumps(
+                {
+                    "schema": "friday.v12-file-verifier.v1",
+                    "supported": self.verifier_supported,
+                    "citation_labels": ["M1.1", "D1"],
+                    "unsupported_claims": 0 if self.verifier_supported else 1,
+                }
+            ),
+            "tool_calls": None,
+            "finish_reason": self.verifier_finish_reason,
+        }
+
+
+@pytest.mark.asyncio
+async def test_exact_two_source_comparison_uses_two_tools_disabled_calls_and_rechecks_lease() -> None:
+    replay, selected = _message_evidence()
+    document = _prepared_document()
+    model = _ComparisonModel()
+
+    comparison = await compare_conversation_with_document(
+        model,
+        request="Сопоставь выбранные сообщения с этим документом",
+        message_replay=replay,
+        selected_message_evidence=selected,
+        prepared_document=document,
+        absolute_deadline=time.monotonic() + 10,
+    )
+
+    assert len(model.calls) == 2
+    assert comparison.answer == model.answer
+    assert comparison.citation_labels == ("M1.1", "D1")
+    assert comparison.message_coverage_grade is ArchiveEvidenceReplayCoverageGrade.COMPLETE
+    assert conversation_document_model_evidence_identity(
+        replay,
+        selected,
+        document,
+    ) == (
+        comparison.message_model_evidence_sha256,
+        comparison.document_model_evidence_sha256,
+        comparison.model_evidence_sha256,
+    )
+    assert await conversation_document_comparison_lease_is_current(
+        model,
+        comparison,
+        absolute_deadline=time.monotonic() + 10,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "expected_calls", "reason", "synthesis", "verification"),
+    (
+        (
+            _ComparisonModel(answer="Нет нужной метки [D1]."),
+            1,
+            FailureReason.INVALID_CONTRACT,
+            OutcomeStatus.FAILED,
+            OutcomeStatus.NOT_STARTED,
+        ),
+        (
+            _ComparisonModel(verifier_supported=False),
+            2,
+            FailureReason.VERIFICATION_REJECTED,
+            OutcomeStatus.SUCCEEDED,
+            OutcomeStatus.FAILED,
+        ),
+        (
+            _ComparisonModel(synthesis_tool_call=True),
+            1,
+            FailureReason.INVALID_CONTRACT,
+            OutcomeStatus.FAILED,
+            OutcomeStatus.NOT_STARTED,
+        ),
+        (
+            _ComparisonModel(verifier_tool_call=True),
+            2,
+            FailureReason.INVALID_CONTRACT,
+            OutcomeStatus.SUCCEEDED,
+            OutcomeStatus.FAILED,
+        ),
+        (
+            _ComparisonModel(verifier_finish_reason="length"),
+            2,
+            FailureReason.INVALID_CONTRACT,
+            OutcomeStatus.SUCCEEDED,
+            OutcomeStatus.FAILED,
+        ),
+    ),
+)
+async def test_synthesis_and_verifier_fail_closed(
+    model: _ComparisonModel,
+    expected_calls: int,
+    reason: FailureReason,
+    synthesis: OutcomeStatus,
+    verification: OutcomeStatus,
+) -> None:
+    replay, selected = _message_evidence()
+
+    with pytest.raises(ConversationDocumentComparisonError) as captured:
+        await compare_conversation_with_document(
+            model,
+            request="Сопоставь выбранные сообщения с этим документом",
+            message_replay=replay,
+            selected_message_evidence=selected,
+            prepared_document=_prepared_document(),
+            absolute_deadline=time.monotonic() + 10,
+        )
+
+    assert len(model.calls) == expected_calls
+    assert captured.value.model_calls == expected_calls
+    assert captured.value.failure_reason is reason
+    assert captured.value.synthesis_outcome is synthesis
+    assert captured.value.verification_outcome is verification
+
+
+@pytest.mark.asyncio
+async def test_stale_lease_and_message_snapshot_are_rejected_before_model_dispatch() -> None:
+    replay, selected = _message_evidence()
+    stale_model = _ComparisonModel(lease_current=False)
+    with pytest.raises(ConversationDocumentComparisonError) as stale:
+        await compare_conversation_with_document(
+            stale_model,
+            request="Сопоставь выбранные сообщения с этим документом",
+            message_replay=replay,
+            selected_message_evidence=selected,
+            prepared_document=_prepared_document(),
+            absolute_deadline=time.monotonic() + 10,
+        )
+    assert stale.value.failure_reason is FailureReason.STALE_STATE
+    assert stale_model.calls == []
+
+    drifted = replace(selected, source_snapshot_sha256="f" * 64)
+    untouched_model = _ComparisonModel()
+    with pytest.raises(ConversationDocumentComparisonError):
+        await compare_conversation_with_document(
+            untouched_model,
+            request="Сопоставь выбранные сообщения с этим документом",
+            message_replay=replay,
+            selected_message_evidence=drifted,
+            prepared_document=_prepared_document(),
+            absolute_deadline=time.monotonic() + 10,
+        )
+    assert untouched_model.lease is None
+    assert untouched_model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_verifier_max_answer_is_reserved_before_model_dispatch() -> None:
+    replay, selected = _message_evidence()
+    model = _ComparisonModel()
+
+    with pytest.raises(ConversationDocumentComparisonError) as captured:
+        await compare_conversation_with_document(
+            model,
+            request="Сопоставь выбранные сообщения с этим документом",
+            message_replay=replay,
+            selected_message_evidence=selected,
+            prepared_document=_prepared_document(text="слово " * 50),
+            absolute_deadline=time.monotonic() + 10,
+        )
+
+    assert str(captured.value) == "comparison evidence exceeds the attested context"
+    assert model.lease is None
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_unsafe_model_projection_is_rejected_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    replay, selected = _message_evidence()
+    model = _ComparisonModel()
+    monkeypatch.setattr(comparison_module, "model_messages_are_secret_free", lambda _messages: False)
+
+    with pytest.raises(ConversationDocumentComparisonError):
+        await compare_conversation_with_document(
+            model,
+            request="Сопоставь выбранные сообщения с этим документом",
+            message_replay=replay,
+            selected_message_evidence=selected,
+            prepared_document=_prepared_document(),
+            absolute_deadline=time.monotonic() + 10,
+        )
+
+    assert model.lease is None
+    assert model.calls == []
+
+
+def test_plan_and_evidence_identities_are_body_sensitive_but_body_free() -> None:
+    replay, selected = _message_evidence()
+    first = conversation_document_model_evidence_identity(
+        replay,
+        selected,
+        _prepared_document(text="Первая версия документа."),
+    )
+    second = conversation_document_model_evidence_identity(
+        replay,
+        selected,
+        _prepared_document(text="Вторая версия документа."),
+    )
+
+    assert first != second
+    encoded = json.dumps(first + second)
+    assert "Первая" not in encoded
+    assert "Вторая" not in encoded
+
+
+@pytest.mark.asyncio
+async def test_partial_message_coverage_is_visible_and_verified() -> None:
+    replay, selected = _message_evidence(coverage=ArchiveEvidenceReplayCoverageGrade.PARTIAL)
+    model = _ComparisonModel()
+
+    comparison = await compare_conversation_with_document(
+        model,
+        request="Сопоставь выбранные сообщения с этим документом",
+        message_replay=replay,
+        selected_message_evidence=selected,
+        prepared_document=_prepared_document(),
+        absolute_deadline=time.monotonic() + 10,
+    )
+
+    assert comparison.message_coverage_grade is ArchiveEvidenceReplayCoverageGrade.PARTIAL
+    assert comparison.answer.startswith("Охват выбранных сообщений неполный;")
+    assert model.verifier_answer == comparison.answer
+
+
+@pytest.mark.asyncio
+async def test_accepted_value_revalidates_answer_contract_on_construction() -> None:
+    replay, selected = _message_evidence()
+    comparison = await compare_conversation_with_document(
+        _ComparisonModel(),
+        request="Сопоставь выбранные сообщения с этим документом",
+        message_replay=replay,
+        selected_message_evidence=selected,
+        prepared_document=_prepared_document(),
+        absolute_deadline=time.monotonic() + 10,
+    )
+
+    with pytest.raises(ConversationDocumentComparisonError):
+        replace(comparison, answer="Подмена без сообщения [D1].")
+    with pytest.raises(ConversationDocumentComparisonError):
+        replace(comparison, answer="<tool>подмена</tool> [M1.1] [D1].")
+    with pytest.raises(ConversationDocumentComparisonError):
+        replace(comparison, _process_authority=object())
+    with pytest.raises(ConversationDocumentComparisonError):
+        replace(
+            comparison,
+            answer="Иной вывод из сообщений [M1.1], а документ подтверждает его [D1].",
+        )
+    with pytest.raises(ConversationDocumentComparisonError):
+        replace(comparison, model_evidence_sha256="f" * 64)
+    with pytest.raises(ConversationDocumentComparisonError):
+        replace(
+            comparison,
+            requirements=replace(comparison.requirements, required_context_tokens=4_096),
+        )
+
+    object.__setattr__(
+        comparison,
+        "answer",
+        "Иной вывод из сообщений [M1.1], а документ подтверждает его [D1].",
+    )
+    assert not conversation_document_comparison_is_process_owned(comparison)
+    with pytest.raises(TypeError):
+        await conversation_document_comparison_lease_is_current(
+            _ComparisonModel(),
+            comparison,
+            absolute_deadline=time.monotonic() + 10,
+        )
