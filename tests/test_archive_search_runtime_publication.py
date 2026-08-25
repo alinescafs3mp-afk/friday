@@ -16,6 +16,7 @@ from typing import Any, cast
 import httpx
 import pytest
 
+import friday.agent_runtime as agent_runtime_module
 from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
@@ -30,13 +31,24 @@ from friday.agent_runtime import (
 from friday.agent_runtime.llm import LLMRouter
 from friday.execution_kernel import ExecutionKernel, ToolResult
 from friday.ingestion import IngestionPipeline
+from friday.interaction_control_plane.archive_candidate_selection import (
+    archive_candidate_reask_prompt,
+    archive_candidate_selection_offer_suffix,
+)
+from friday.interaction_control_plane.archive_candidate_selection_store import (
+    cancel_archive_candidate_selection_in_transaction,
+    expire_archive_candidate_selection_in_transaction,
+    get_archive_candidate_selection_work_item_in_transaction,
+)
 from friday.interaction_control_plane.archive_evidence_work_item_store import (
     get_recall_selected_archive_evidence_work_item_in_transaction,
 )
 from friday.interaction_control_plane.legacy_trace import CapabilityStatus
 from friday.interaction_control_plane.work_item_contract import WorkState, WorkTransition
+from friday.interaction_control_plane.work_item_store import WorkItemConflictError
 from friday.knowledge_graph import KnowledgeGraph
 from friday.orchestration.archive_recall_outcome import (
+    ARCHIVE_EVIDENCE_REPLAY_UNAVAILABLE,
     ArchiveRecallLane,
     ArchiveRecallStatus,
     load_accepted_archive_recall_outcome_receipt,
@@ -60,6 +72,7 @@ from friday.web_surfer import WebSurfer
 
 _OWNER = "archive-runtime-owner"
 _QUERY = "ARCHIVE-RUNTIME-PRIVATE-CANARY-7421"
+_CANDIDATE_QUERY = "needle7421"
 _ANSWER = f"В личном архиве найдено значение {_QUERY} [A1.1]."
 
 
@@ -75,6 +88,7 @@ class _ArchiveModel:
         second_round_calls: list[dict[str, Any]] | None = None,
         final_answer: str = _ANSWER,
         first_arguments: dict[str, Any] | None = None,
+        expected_marker: str = _QUERY,
     ) -> None:
         self.before_answer = before_answer
         self.second_round_calls = second_round_calls
@@ -84,6 +98,7 @@ class _ArchiveModel:
             "corpora": ["documents"],
             "limit": 5,
         }
+        self.expected_marker = expected_marker
         self.calls = 0
         self.archive_tool_body = ""
         self.second_round_tool_names: list[str] = []
@@ -121,7 +136,7 @@ class _ArchiveModel:
         public_page = json.loads(self.archive_tool_body)
         assert public_page["schema"] == "friday.archive-search-page.public.v1"
         if public_page.get("candidates"):
-            assert _QUERY in self.archive_tool_body
+            assert self.expected_marker in self.archive_tool_body
         self.second_round_tool_names = tool_names
 
         if self.calls == 2 and self.second_round_calls is not None:
@@ -415,6 +430,8 @@ def _seed_message_archive(
     storage: Any,
     *,
     suffix: str,
+    compact: bool = False,
+    selected_text: str | None = None,
 ) -> tuple[str, str]:
     storage.ensure_user(_OWNER, preset_key="user")
     conversation = storage.create_conversation(_OWNER, title=f"message archive{suffix}")
@@ -422,9 +439,9 @@ def _seed_message_archive(
         str(conversation["id"]),
         _OWNER,
         "user",
-        f"Исходный вопрос{suffix}.",
+        "q" if compact else f"Исходный вопрос{suffix}.",
     )
-    selected_text = f"Ответ до исходной границы{suffix}: {_QUERY}."
+    selected_text = selected_text or (_QUERY if compact else f"Ответ до исходной границы{suffix}: {_QUERY}.")
     storage.store_message(
         str(conversation["id"]),
         _OWNER,
@@ -576,6 +593,7 @@ async def _runtime(
     verify_answers: bool = False,
     outward_kind: str = "архив",
     context_initializer: Callable[[AgentContext], None] | None = None,
+    archive_query: str = _QUERY,
 ) -> tuple[AgentRuntime, _SpyKernel, ActorContext, Any, WebSurfer, list[AgentContext]]:
     configured = replace(settings, verify_answers=verify_answers)
     storage.ensure_user(_OWNER, preset_key="user")
@@ -611,8 +629,8 @@ async def _runtime(
             conversation_id=conversation_id,
             user_id=user_id,
             person_id=str(kwargs.get("person_id") or user_id),
-            search_query=_QUERY,
-            outward_verdict=(outward_kind, _QUERY) if outward_kind else None,
+            search_query=archive_query,
+            outward_verdict=(outward_kind, archive_query) if outward_kind else None,
             interaction_mode="dialogue",
             turn_deadline=kwargs.get("turn_deadline"),
         )
@@ -688,6 +706,53 @@ async def _create_durable_selected_archive_work(
     assert item.transition is WorkTransition.CREATED
     assert item.revision == 1
     return raw_id, response, item
+
+
+async def _create_durable_archive_candidate_work(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[dict[str, Any], Any, AgentRuntime, _SpyKernel, ActorContext, Any, WebSurfer]:
+    _seed_message_archive(storage, suffix="", compact=True, selected_text=_CANDIDATE_QUERY)
+    _seed_message_archive(storage, suffix="", compact=True, selected_text=_CANDIDATE_QUERY)
+    model = _ArchiveModel(
+        final_answer=(f"Сначала второй источник [A2.1], затем первый [A1.1]: {_CANDIDATE_QUERY}."),
+        first_arguments={
+            "query": _CANDIDATE_QUERY,
+            "corpora": ["messages"],
+            "limit": 2,
+        },
+        expected_marker=_CANDIDATE_QUERY,
+    )
+    runtime, kernel, actor, _model, web, _contexts = await _runtime(
+        settings,
+        storage,
+        monkeypatch,
+        model_override=model,
+        archive_query=_CANDIDATE_QUERY,
+    )
+    response = await _chat(
+        runtime,
+        actor,
+        answer_with_voice=False,
+        message="Найди сообщения с контрольным значением в моём личном архиве.",
+    )
+    row = storage.execute(
+        """SELECT id FROM work_items
+             WHERE user_id=? AND conversation_id=?
+               AND kind='select_archive_candidate_and_replay_evidence'""",
+        (_OWNER, str(response["conversation_id"])),
+    ).fetchone()
+    assert row is not None
+    with storage.transaction() as conn:
+        item = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=str(row["id"]),
+            user_id=_OWNER,
+            conversation_id=str(response["conversation_id"]),
+        )
+    assert item is not None
+    return response, item, runtime, kernel, actor, model, web
 
 
 def _assert_archive_ledger_consumed(context: AgentContext) -> None:
@@ -1173,6 +1238,501 @@ async def test_exact_archive_bytes_are_admitted_and_committed_in_phase2_transact
     receipt = load_accepted_archive_recall_outcome_receipt(stored["metadata_json"])
     assert receipt.outcome.lane is ArchiveRecallLane.FEDERATED_SEARCH
     assert receipt.outcome.semantic_verified is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selection", ["2", "второй", "second"])
+async def test_archive_candidate_offer_preserves_citation_order_and_replays_strict_ordinal(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    selection: str,
+) -> None:
+    initial, created, runtime, kernel, actor, model, web = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    expected_offer = archive_candidate_selection_offer_suffix(("A2", "A1"))
+    try:
+        assert initial["message"].endswith(f"\n\n{expected_offer}")
+        assert tuple(item.public_citation_label for item in created.candidate_set.candidates) == ("A2", "A1")
+        assert created.state is WorkState.WAITING_FOR_INPUT
+        assert created.transition is WorkTransition.QUESTION_ASKED
+        assert created.revision == 1
+        assert runtime.owns_pending_durable_turn(
+            _OWNER,
+            selection,
+            actor=actor,
+            conversation_id=created.conversation_id,
+        )
+
+        replay = await runtime.chat(
+            _OWNER,
+            selection,
+            actor=actor,
+            conversation_id=created.conversation_id,
+            enable_tools=True,
+        )
+    finally:
+        await web.close()
+
+    assert _CANDIDATE_QUERY in replay["message"]
+    assert replay["verified"] is True
+    assert replay["context"]["archive_candidate_selection"] == "partial"
+    assert replay["tools_used"] == []
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert not runtime.owns_pending_durable_turn(
+        _OWNER,
+        selection,
+        actor=actor,
+        conversation_id=created.conversation_id,
+    )
+    with storage.transaction() as conn:
+        completed = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert completed is not None
+    assert completed.state is WorkState.COMPLETED
+    assert completed.transition is WorkTransition.CANDIDATE_REPLAYED
+    assert completed.revision == 2
+    assert completed.question.selected_ordinal == 2
+
+
+@pytest.mark.asyncio
+async def test_archive_candidate_invalid_and_out_of_range_replies_reask_without_second_calls(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _initial, created, runtime, kernel, actor, model, web = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    responses: list[dict[str, Any]] = []
+    try:
+        for invalid in ("источник A1, пожалуйста", "3"):
+            response = await runtime.chat(
+                _OWNER,
+                invalid,
+                actor=actor,
+                conversation_id=created.conversation_id,
+                enable_tools=True,
+            )
+            responses.append(response)
+            assert response["message"] == archive_candidate_reask_prompt(2)
+            assert response["context"]["archive_candidate_selection"] == "waiting_for_input"
+            assert runtime.owns_pending_durable_turn(
+                _OWNER,
+                invalid,
+                actor=actor,
+                conversation_id=created.conversation_id,
+            )
+    finally:
+        await web.close()
+
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    for response in responses:
+        source_free = json.dumps(response, ensure_ascii=False)
+        assert _CANDIDATE_QUERY not in source_free
+        assert "A1" not in source_free
+    with storage.transaction() as conn:
+        waiting = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert waiting is not None
+    assert waiting.state is WorkState.WAITING_FOR_INPUT
+    assert waiting.transition is WorkTransition.QUESTION_REASKED
+    assert waiting.revision == 3
+    assert waiting.question.prompt_revision == 3
+
+
+@pytest.mark.asyncio
+async def test_archive_candidate_replays_ordinal_after_runtime_restart(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        _initial,
+        created,
+        _runtime_instance,
+        _kernel,
+        _actor,
+        _model,
+        web,
+    ) = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    await web.close()
+    restarted_storage = _reopen_storage(settings, storage)
+    no_model = _DirectAnswerModel()
+    try:
+        restarted, kernel, actor, _model, restarted_web, _contexts = await _runtime(
+            settings,
+            restarted_storage,
+            monkeypatch,
+            model_override=no_model,
+            archive_query=_CANDIDATE_QUERY,
+        )
+        try:
+            assert restarted.owns_pending_durable_turn(
+                _OWNER,
+                "2-й",
+                actor=actor,
+                conversation_id=created.conversation_id,
+            )
+            replay = await restarted.chat(
+                _OWNER,
+                "2-й",
+                actor=actor,
+                conversation_id=created.conversation_id,
+                enable_tools=True,
+            )
+        finally:
+            await restarted_web.close()
+    finally:
+        restarted_storage.close(final=True)
+
+    assert replay["verified"] is True
+    assert _CANDIDATE_QUERY in replay["message"]
+    assert replay["tools_used"] == []
+    assert no_model.calls == 0
+    assert kernel.calls == []
+    with storage.transaction() as conn:
+        completed = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert completed is not None
+    assert completed.state is WorkState.COMPLETED
+    assert completed.question.selected_ordinal == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "expected_status"),
+    [
+        pytest.param("denied", ArchiveRecallStatus.DENIED, id="denied"),
+        pytest.param("drifted", ArchiveRecallStatus.DRIFTED, id="drifted"),
+        pytest.param("unavailable", ArchiveRecallStatus.UNAVAILABLE, id="unavailable"),
+    ],
+)
+async def test_archive_candidate_replay_failure_is_source_free_receipted_and_suspends(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+    expected_status: ArchiveRecallStatus,
+) -> None:
+    _initial, created, runtime, kernel, actor, model, web = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    selected = created.candidate_set.selected_evidence(2)
+    original = runtime._archive_candidate_evidence_replay_response
+    late_mutations: list[str] = []
+
+    def mutate_after_admission(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        if failure == "denied":
+            storage.set_permission_override(_OWNER, "search.use", "deny")
+        elif failure == "drifted":
+            assert storage.archive_conversation(
+                selected.source_ref.canonical_object_id,
+                _OWNER,
+            )
+        late_mutations.append(failure)
+        return original(*args, **kwargs)
+
+    if failure == "unavailable":
+
+        def unavailable(*_args: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError("resolver unavailable")
+
+        monkeypatch.setattr(
+            agent_runtime_module,
+            "replay_archive_evidence_in_transaction",
+            unavailable,
+        )
+    monkeypatch.setattr(
+        runtime,
+        "_archive_candidate_evidence_replay_response",
+        mutate_after_admission,
+    )
+    try:
+        replay = await runtime.chat(
+            _OWNER,
+            "2",
+            actor=actor,
+            conversation_id=created.conversation_id,
+            enable_tools=True,
+        )
+    finally:
+        await web.close()
+
+    assert late_mutations == [failure]
+    assert replay["message"] == ARCHIVE_EVIDENCE_REPLAY_UNAVAILABLE
+    assert replay["context"]["archive_candidate_selection"] == expected_status.value
+    assert replay["context"]["selected_archive_evidence_replay"] == expected_status.value
+    assert replay["tools_used"] == []
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    source_free = json.dumps(replay, ensure_ascii=False)
+    assert _CANDIDATE_QUERY not in source_free
+    assert selected.source_ref.canonical_object_id not in source_free
+    stored = storage.get_message(str(replay["message_id"]), _OWNER)
+    assert stored is not None and stored["content"] == ARCHIVE_EVIDENCE_REPLAY_UNAVAILABLE
+    durable_source_free = json.dumps(stored, ensure_ascii=False)
+    assert _CANDIDATE_QUERY not in durable_source_free
+    assert selected.source_ref.canonical_object_id not in durable_source_free
+    receipt = load_accepted_archive_recall_outcome_receipt(stored["metadata_json"])
+    assert receipt.outcome.status is expected_status
+    assert receipt.outcome.selected_evidence is None
+    with storage.transaction() as conn:
+        suspended = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert suspended is not None
+    assert suspended.state is WorkState.SUSPENDED
+    assert suspended.transition is WorkTransition.SUSPENDED
+    assert suspended.revision == 2
+    assert suspended.question.failed_ordinal == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply", ["не номер", "2"])
+async def test_archive_candidate_rechecks_dialogue_mode_before_any_continuation_row(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    reply: str,
+) -> None:
+    _initial, created, runtime, kernel, actor, model, web = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    helper_name = (
+        "_archive_candidate_evidence_replay_response" if reply == "2" else "_archive_candidate_reask_response"
+    )
+    original = getattr(runtime, helper_name)
+
+    def change_mode_after_admission(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        assert storage.set_conversation_mode(created.conversation_id, _OWNER, "research")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(runtime, helper_name, change_mode_after_admission)
+    before = int(
+        storage.execute(
+            "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=? AND user_id=?",
+            (created.conversation_id, _OWNER),
+        ).fetchone()["count"]
+    )
+    try:
+        with pytest.raises(WorkItemConflictError):
+            await runtime.chat(
+                _OWNER,
+                reply,
+                actor=actor,
+                conversation_id=created.conversation_id,
+                enable_tools=True,
+            )
+    finally:
+        await web.close()
+    after = int(
+        storage.execute(
+            "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=? AND user_id=?",
+            (created.conversation_id, _OWNER),
+        ).fetchone()["count"]
+    )
+    assert after == before
+    assert not runtime.owns_pending_durable_turn(
+        _OWNER,
+        reply,
+        actor=actor,
+        conversation_id=created.conversation_id,
+    )
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("race", ["cancelled", "mutation_rollback"])
+async def test_archive_candidate_replay_cas_and_mutation_failures_leave_no_turn_rows(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    race: str,
+) -> None:
+    _initial, created, runtime, kernel, actor, model, web = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    expected_exception: type[Exception]
+    if race == "cancelled":
+        original = runtime._archive_candidate_evidence_replay_response
+
+        def cancel_after_admission(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            with storage.transaction() as conn:
+                cancel_archive_candidate_selection_in_transaction(
+                    conn,
+                    work_item_id=created.id,
+                    user_id=_OWNER,
+                    conversation_id=created.conversation_id,
+                    expected_revision=created.revision,
+                )
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(
+            runtime,
+            "_archive_candidate_evidence_replay_response",
+            cancel_after_admission,
+        )
+        expected_exception = WorkItemConflictError
+    else:
+
+        def fail_candidate_accept(*_args: Any, **_kwargs: Any) -> Any:
+            raise RuntimeError("candidate accept failed")
+
+        monkeypatch.setattr(
+            agent_runtime_module,
+            "accept_archive_candidate_selection_in_transaction",
+            fail_candidate_accept,
+        )
+        expected_exception = RuntimeError
+
+    before = int(
+        storage.execute(
+            "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=? AND user_id=?",
+            (created.conversation_id, _OWNER),
+        ).fetchone()["count"]
+    )
+    try:
+        with pytest.raises(expected_exception):
+            await runtime.chat(
+                _OWNER,
+                "2",
+                actor=actor,
+                conversation_id=created.conversation_id,
+                enable_tools=True,
+            )
+    finally:
+        await web.close()
+    after = int(
+        storage.execute(
+            "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=? AND user_id=?",
+            (created.conversation_id, _OWNER),
+        ).fetchone()["count"]
+    )
+    assert after == before
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    with storage.transaction() as conn:
+        current = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert current is not None
+    assert current.state is (WorkState.CANCELLED if race == "cancelled" else WorkState.WAITING_FOR_INPUT)
+    assert current.revision == (2 if race == "cancelled" else 1)
+
+
+@pytest.mark.asyncio
+async def test_archive_candidate_hook_is_exact_owner_conversation_and_live_scope(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _initial, created, runtime, _kernel, actor, _model, web = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    storage.ensure_user("archive-runtime-foreign-owner", preset_key="owner")
+    foreign_actor = AuthorizationService(storage).actor_for_user(
+        "archive-runtime-foreign-owner",
+        source="archive-candidate-hook-test",
+    )
+    foreign_conversation = storage.create_conversation(_OWNER, title="foreign scope")
+    try:
+        assert runtime.owns_pending_durable_turn(
+            _OWNER,
+            "anything",
+            actor=actor,
+            conversation_id=created.conversation_id,
+        )
+        assert not runtime.owns_pending_durable_turn(
+            _OWNER,
+            "2",
+            actor=foreign_actor,
+            conversation_id=created.conversation_id,
+        )
+        assert not runtime.owns_pending_durable_turn(
+            _OWNER,
+            "2",
+            actor=actor,
+            conversation_id=str(foreign_conversation["id"]),
+        )
+        with storage.transaction() as conn:
+            expire_archive_candidate_selection_in_transaction(
+                conn,
+                work_item_id=created.id,
+                user_id=_OWNER,
+                conversation_id=created.conversation_id,
+                expected_revision=created.revision,
+                now="2999-01-01T00:00:00+00:00",
+            )
+        assert not runtime.owns_pending_durable_turn(
+            _OWNER,
+            "2",
+            actor=actor,
+            conversation_id=created.conversation_id,
+        )
+    finally:
+        await web.close()
+
+
+def test_interaction_control_plane_and_runtime_cold_import_together() -> None:
+    source_root = str(Path(__file__).resolve().parents[1])
+    completed = subprocess.run(  # noqa: S603 - fixed interpreter and inline probe
+        (
+            sys.executable,
+            "-I",
+            "-c",
+            (
+                "import sys; "
+                "sys.path.insert(0, sys.argv[1]); "
+                "import friday.interaction_control_plane; "
+                "import friday.agent_runtime"
+            ),
+            source_root,
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 @pytest.mark.asyncio

@@ -107,6 +107,20 @@ from friday.file_evidence import (
     FileRegistrationKind,
     current_turn_file_reference_of,
 )
+from friday.interaction_control_plane.archive_candidate_selection import (
+    ARCHIVE_CANDIDATE_REASK_VERDICT_KIND,
+    ArchiveCandidateSelectionWorkItem,
+    archive_candidate_reask_prompt,
+    archive_candidate_selection_offer_suffix,
+    parse_archive_candidate_ordinal,
+)
+from friday.interaction_control_plane.archive_candidate_selection_store import (
+    accept_archive_candidate_selection_in_transaction,
+    create_archive_candidate_selection_work_item_in_transaction,
+    get_current_archive_candidate_selection_work_item_in_transaction,
+    reask_archive_candidate_selection_in_transaction,
+    suspend_after_replay_failure_in_transaction,
+)
 from friday.interaction_control_plane.archive_evidence_work_item import (
     RecallSelectedArchiveEvidenceWorkItem,
     parse_archive_evidence_followup,
@@ -251,6 +265,7 @@ from friday.retrieval.archive_evidence_replay import (
 )
 from friday.retrieval.archive_search_authority import (
     ArchiveModelBatchLedger,
+    ArchiveSearchAcceptedCandidateProjection,
     ArchiveSearchCoverageGrade,
     ArchiveSearchPublicationDenied,
     ArchiveSearchSelectedEvidence,
@@ -258,6 +273,7 @@ from friday.retrieval.archive_search_authority import (
     attest_archive_search_before_publication,
     consume_archive_model_batch_ledger_fail_closed,
     create_archive_model_batch_ledger,
+    preview_archive_search_candidate_projection_labels,
 )
 from friday.retrieval.archive_search_contract import ArchiveSearchCorpus
 from friday.retrieval.archive_search_service import (
@@ -32386,6 +32402,49 @@ class AgentRuntime:
         # without authorization now denies everything by design).
         self.kernel = kernel or ExecutionKernel(AuthorizationService(storage), settings=settings)
 
+    def owns_pending_durable_turn(
+        self,
+        user_id: str,
+        message: str,
+        *,
+        actor: ActorContext,
+        conversation_id: str | None,
+    ) -> bool:
+        """Synchronously admit one exact owner-scoped candidate question.
+
+        The router calls this only for its scalar, effect-free compatibility
+        surface.  Any plain immediate reply belongs to the durable question:
+        strict ordinal parsing happens later, after the user row is durable,
+        while every other spelling receives the code-owned re-ask.
+        """
+
+        del message
+        if not conversation_id:
+            return False
+        if not actor.shared_tenant and actor.user_id != user_id and not actor.is_owner:
+            return False
+        person_id = actor.own_id if actor.shared_tenant else user_id
+        if person_id != user_id or actor.own_id != person_id:
+            return False
+        with self.storage.transaction() as conn:
+            conversation = conn.execute(
+                "SELECT mode FROM conversations WHERE id=? AND user_id=?",
+                (conversation_id, person_id),
+            ).fetchone()
+            if (
+                conversation is None
+                or normalize_conversation_mode(str(conversation["mode"] or "dialogue")) != "dialogue"
+            ):
+                return False
+            return (
+                get_current_archive_candidate_selection_work_item_in_transaction(
+                    conn,
+                    user_id=person_id,
+                    conversation_id=conversation_id,
+                )
+                is not None
+            )
+
     @staticmethod
     def _workspace_listing_page(
         data: Any,
@@ -34159,6 +34218,431 @@ class AgentRuntime:
                 "interaction_mode": "dialogue",
                 "llm_failed": False,
                 "message_window_continuation": "unresolved",
+            },
+        }
+
+    @staticmethod
+    def _require_archive_candidate_conversation(
+        conn: Any,
+        *,
+        person_id: str,
+        conversation_id: str,
+    ) -> None:
+        """Recheck the exact dialogue owner inside the publication transaction."""
+
+        current = conn.execute(
+            """SELECT 1
+                 FROM users owner
+                 JOIN conversations conversation
+                   ON conversation.user_id=owner.id
+                WHERE owner.id=? AND owner.status='active'
+                  AND conversation.id=? AND conversation.mode='dialogue'
+                LIMIT 1""",
+            (person_id, conversation_id),
+        ).fetchone()
+        if current is None:
+            raise WorkItemConflictError("archive candidate conversation is no longer an owned dialogue")
+
+    def _archive_candidate_reask_response(
+        self,
+        *,
+        conversation_id: str,
+        person_id: str,
+        request: str,
+        admitted_work_item: ArchiveCandidateSelectionWorkItem,
+        turn_started: float,
+    ) -> dict[str, Any]:
+        """Publish the sole source-free answer for a non-ordinal candidate reply."""
+
+        with self.storage.transaction() as publication_conn:
+            self._require_archive_candidate_conversation(
+                publication_conn,
+                person_id=person_id,
+                conversation_id=conversation_id,
+            )
+            boundary_message = store_message_in_transaction(
+                publication_conn,
+                conversation_id,
+                person_id,
+                "user",
+                request,
+                metadata={"private_context_lineage": True},
+            )
+            boundary_message_id = str(boundary_message.get("id") or "").strip()
+            if not re.fullmatch(r"msg_[0-9a-f]{16}", boundary_message_id):
+                raise RuntimeError("Stored user message has no valid durable identity")
+            current = get_current_archive_candidate_selection_work_item_in_transaction(
+                publication_conn,
+                user_id=person_id,
+                conversation_id=conversation_id,
+                boundary_user_message_id=boundary_message_id,
+            )
+            if current is None or (
+                current.id != admitted_work_item.id or current.revision != admitted_work_item.revision
+            ):
+                raise WorkItemConflictError("archive candidate admission is no longer current")
+            content = archive_candidate_reask_prompt(current.question.maximum_ordinal)
+            assistant_metadata: dict[str, Any] = {
+                "answer_mode": "structural",
+                "interaction_mode": "dialogue",
+                "tools_used": [],
+                "private_context_lineage": True,
+                "verified": False,
+                "verification_status": VERDICT_UNKNOWN,
+                "verification": {
+                    "status": VERDICT_UNKNOWN,
+                    "ok": False,
+                    "score": None,
+                    "issues": [],
+                    "attachment_evidence_used": False,
+                },
+                "structural": {
+                    "verdict_kind": ARCHIVE_CANDIDATE_REASK_VERDICT_KIND,
+                    "answer_present": True,
+                    "model_spoke": False,
+                    "remainder_known": True,
+                    "llm_failed": False,
+                },
+            }
+            candidate_corpora = {item.corpus for item in current.candidate_set.candidates}
+            work_trace = build_work_trace(
+                namespace_key=load_trace_namespace_key(publication_conn),
+                turn_identifier=boundary_message_id,
+                conversation_identifier=conversation_id,
+                work_item_identifier=current.id,
+                work_relation=WorkRelation.CONTINUED,
+                intent=(
+                    IntentClass.MESSAGE_RECALL
+                    if candidate_corpora == {SelectedArchiveCorpus.MESSAGES}
+                    else IntentClass.DOCUMENT_WORK
+                    if SelectedArchiveCorpus.MESSAGES not in candidate_corpora
+                    else IntentClass.MIXED
+                ),
+                playbook=PlaybookClass.OTHER,
+                capability_outcomes=(),
+                continuation=ContinuationKind.CANDIDATE_SELECTION,
+                completion=CompletionDecision.WAITING_FOR_INPUT,
+                failure_stage=FailureStage.REFERENCE,
+                failure_reason=FailureReason.INVALID_INPUT,
+                ambiguity_present=True,
+                partial_coverage=(
+                    current.candidate_set.coverage_grade is SelectedArchiveCoverageGrade.PARTIAL
+                ),
+                state_restored=True,
+                latency_ms=min(
+                    86_400_000,
+                    max(0, int((time.monotonic() - turn_started) * 1_000)),
+                ),
+                model_calls=0,
+                model_call_accounting=CountAccounting.COMPLETE,
+                capability_calls=0,
+                capability_call_accounting=CountAccounting.COMPLETE,
+                authority_rechecked=False,
+            )
+            if not attach_trace_to_metadata(assistant_metadata, work_trace):
+                raise RuntimeError("archive candidate re-ask trace could not be stored")
+            assistant_message = store_message_in_transaction(
+                publication_conn,
+                conversation_id,
+                person_id,
+                "assistant",
+                content,
+                metadata=assistant_metadata,
+                reply_to=boundary_message_id,
+            )
+            if assistant_message.get("content") != content:
+                raise ValueError("archive candidate re-ask durability reread changed content")
+            reask_archive_candidate_selection_in_transaction(
+                publication_conn,
+                work_item_id=current.id,
+                user_id=person_id,
+                conversation_id=conversation_id,
+                expected_revision=current.revision,
+                invalid_boundary_user_message_id=boundary_message_id,
+                new_question_assistant_message_id=str(assistant_message["id"]),
+            )
+
+        return {
+            "conversation_id": conversation_id,
+            "message_id": assistant_message.get("id"),
+            "message": content,
+            "message_format": "plain",
+            "verified": False,
+            "verification_status": VERDICT_UNKNOWN,
+            "verification": {"status": VERDICT_UNKNOWN, "score": None, "issues": []},
+            "verification_caution": "",
+            "citations": [],
+            "answer_grounded": None,
+            "citation_notice": "",
+            "grounding_warning": "",
+            "citation_check": {"status": "skipped", "checked": 0},
+            "tools_used": [],
+            "obsidian_open_url": "",
+            "web_evidence_status": "none",
+            "web_evidence_scope": "none",
+            "web_sources": [],
+            "web_query_notice": "",
+            "voice": None,
+            "files": [],
+            "attachment_context_available": False,
+            "attachment_context_expected_count": 0,
+            "attachment_context_readable_count": 0,
+            "attachment_coverage_complete": False,
+            "attachment_verification_complete": False,
+            "restored_attachment_count": 0,
+            "context": {
+                "interaction_mode": "dialogue",
+                "llm_failed": False,
+                "archive_candidate_selection": "waiting_for_input",
+            },
+        }
+
+    def _archive_candidate_evidence_replay_response(
+        self,
+        *,
+        actor: ActorContext,
+        conversation_id: str,
+        person_id: str,
+        request: str,
+        selected_ordinal: int,
+        admitted_work_item: ArchiveCandidateSelectionWorkItem,
+        turn_started: float,
+    ) -> dict[str, Any]:
+        """Replay one selected durable candidate without search or model use."""
+
+        with self.storage.transaction() as publication_conn:
+            self._require_archive_candidate_conversation(
+                publication_conn,
+                person_id=person_id,
+                conversation_id=conversation_id,
+            )
+            boundary_message = store_message_in_transaction(
+                publication_conn,
+                conversation_id,
+                person_id,
+                "user",
+                request,
+                metadata={"private_context_lineage": True},
+            )
+            boundary_message_id = str(boundary_message.get("id") or "").strip()
+            if not re.fullmatch(r"msg_[0-9a-f]{16}", boundary_message_id):
+                raise RuntimeError("Stored user message has no valid durable identity")
+            current = get_current_archive_candidate_selection_work_item_in_transaction(
+                publication_conn,
+                user_id=person_id,
+                conversation_id=conversation_id,
+                boundary_user_message_id=boundary_message_id,
+            )
+            if current is None or (
+                current.id != admitted_work_item.id or current.revision != admitted_work_item.revision
+            ):
+                raise WorkItemConflictError("archive candidate admission is no longer current")
+            evidence = current.candidate_set.selected_evidence(selected_ordinal)
+            selected = ArchiveSearchSelectedEvidence(
+                corpus=ArchiveSearchCorpus(evidence.corpus.value),
+                source_ref=evidence.source_ref,
+                passage_refs=evidence.passage_refs,
+                resolved_snapshot_sha256=evidence.source_snapshot_sha256,
+            )
+            authorization = getattr(self.kernel, "authorization", None)
+            if type(authorization) is AuthorizationService:
+                try:
+                    replay = replay_archive_evidence_in_transaction(
+                        publication_conn,
+                        authorization=authorization,
+                        actor=actor,
+                        tenant_id=actor.user_id,
+                        principal_id=person_id,
+                        origin_boundary_user_message_id=(evidence.origin_boundary_user_message_id),
+                        corpus=selected.corpus,
+                        source_ref=selected.source_ref,
+                        passage_refs=selected.passage_refs,
+                        expected_source_snapshot_sha256=evidence.source_snapshot_sha256,
+                        expected_coverage_grade=ArchiveEvidenceReplayCoverageGrade(
+                            evidence.coverage_grade.value
+                        ),
+                    )
+                except Exception as exc:  # noqa: BLE001 - source-free terminal
+                    LOGGER.warning(
+                        "archive-candidate: exact resolver unavailable (%s)",
+                        type(exc).__name__,
+                    )
+                    replay = unavailable_archive_evidence_replay_result(selected.corpus)
+            else:
+                replay = unavailable_archive_evidence_replay_result(selected.corpus)
+            content, outcome = accept_archive_evidence_replay(
+                request=request,
+                result=replay,
+                selected_evidence=selected,
+                coverage_sha256=evidence.coverage_sha256,
+                coverage_grade=ArchiveSearchCoverageGrade(evidence.coverage_grade.value),
+            )
+            exact = replay.status is ArchiveEvidenceReplayStatus.EXACT
+            verification_status = VERDICT_PASSED if exact else VERDICT_UNKNOWN
+            assistant_metadata: dict[str, Any] = {
+                "answer_mode": "structural",
+                "interaction_mode": "dialogue",
+                "tools_used": [],
+                "private_context_lineage": True,
+                "verified": exact,
+                "verification_status": verification_status,
+                "verification": {
+                    "status": verification_status,
+                    "ok": exact,
+                    "score": 1.0 if exact else None,
+                    "issues": [],
+                    "attachment_evidence_used": False,
+                },
+                "structural": {
+                    "verdict_kind": "archive_candidate_evidence_replay",
+                    "answer_present": True,
+                    "model_spoke": False,
+                    "remainder_known": True,
+                    "llm_failed": False,
+                    "archive_replay_status": outcome.status.value,
+                },
+            }
+            attach_accepted_archive_recall_outcome_receipt(assistant_metadata, outcome)
+            trace_outcome = {
+                ArchiveRecallStatus.COMPLETE: OutcomeStatus.SUCCEEDED,
+                ArchiveRecallStatus.PARTIAL: OutcomeStatus.PARTIAL,
+                ArchiveRecallStatus.DENIED: OutcomeStatus.DENIED,
+                ArchiveRecallStatus.DRIFTED: OutcomeStatus.UNAVAILABLE,
+                ArchiveRecallStatus.UNAVAILABLE: OutcomeStatus.UNAVAILABLE,
+            }[outcome.status]
+            trace_completion = (
+                CompletionDecision.COMPLETE
+                if outcome.status is ArchiveRecallStatus.COMPLETE
+                else CompletionDecision.PARTIAL
+                if outcome.status is ArchiveRecallStatus.PARTIAL
+                else CompletionDecision.FAILED
+            )
+            failure_stage, failure_reason = {
+                ArchiveRecallStatus.COMPLETE: (FailureStage.NONE, FailureReason.NONE),
+                ArchiveRecallStatus.PARTIAL: (FailureStage.NONE, FailureReason.NONE),
+                ArchiveRecallStatus.DENIED: (
+                    FailureStage.CAPABILITY,
+                    FailureReason.AUTHORITY_DENIED,
+                ),
+                ArchiveRecallStatus.DRIFTED: (
+                    FailureStage.STATE_LOSS,
+                    FailureReason.STALE_STATE,
+                ),
+                ArchiveRecallStatus.UNAVAILABLE: (
+                    FailureStage.CAPABILITY,
+                    FailureReason.SOURCE_UNAVAILABLE,
+                ),
+            }[outcome.status]
+            capability = (
+                CapabilityClass.MESSAGE_RETRIEVAL
+                if evidence.corpus is SelectedArchiveCorpus.MESSAGES
+                else CapabilityClass.DOCUMENT_RETRIEVAL
+            )
+            work_trace = build_work_trace(
+                namespace_key=load_trace_namespace_key(publication_conn),
+                turn_identifier=boundary_message_id,
+                conversation_identifier=conversation_id,
+                work_item_identifier=current.id,
+                work_relation=WorkRelation.CONTINUED,
+                intent=(
+                    IntentClass.MESSAGE_RECALL
+                    if evidence.corpus is SelectedArchiveCorpus.MESSAGES
+                    else IntentClass.DOCUMENT_WORK
+                ),
+                playbook=PlaybookClass.OTHER,
+                capability_outcomes=((capability, trace_outcome),),
+                continuation=ContinuationKind.CANDIDATE_SELECTION,
+                completion=trace_completion,
+                failure_stage=failure_stage,
+                failure_reason=failure_reason,
+                ambiguity_present=False,
+                partial_coverage=outcome.status is ArchiveRecallStatus.PARTIAL,
+                state_restored=True,
+                latency_ms=min(
+                    86_400_000,
+                    max(0, int((time.monotonic() - turn_started) * 1_000)),
+                ),
+                model_calls=0,
+                model_call_accounting=CountAccounting.COMPLETE,
+                capability_calls=1,
+                capability_call_accounting=CountAccounting.COMPLETE,
+                authority_rechecked=True,
+            )
+            if not attach_trace_to_metadata(assistant_metadata, work_trace):
+                raise RuntimeError("archive candidate replay trace could not be stored")
+            assistant_message = store_message_in_transaction(
+                publication_conn,
+                conversation_id,
+                person_id,
+                "assistant",
+                content,
+                metadata=assistant_metadata,
+                reply_to=boundary_message_id,
+            )
+            if assistant_message.get("content") != content:
+                raise ValueError("archive candidate replay durability reread changed content")
+            stored_receipt = load_accepted_archive_recall_outcome_receipt(
+                assistant_message.get("metadata_json"),
+                expected_outcome=outcome,
+            )
+            mutation = (
+                accept_archive_candidate_selection_in_transaction
+                if exact
+                else suspend_after_replay_failure_in_transaction
+            )
+            mutation(
+                publication_conn,
+                work_item_id=current.id,
+                user_id=person_id,
+                conversation_id=conversation_id,
+                expected_revision=current.revision,
+                selected_ordinal=selected_ordinal,
+                new_boundary_user_message_id=boundary_message_id,
+                new_assistant_message_id=str(assistant_message["id"]),
+                new_accepted_plan_sha256=outcome.plan_sha256,
+                new_accepted_outcome_sha256=stored_receipt.outcome_sha256,
+            )
+
+        return {
+            "conversation_id": conversation_id,
+            "message_id": assistant_message.get("id"),
+            "message": content,
+            "message_format": "plain",
+            "verified": exact,
+            "verification_status": verification_status,
+            "verification": {
+                "status": verification_status,
+                "score": 1.0 if exact else None,
+                "issues": [],
+            },
+            "verification_caution": "",
+            "citations": [],
+            "answer_grounded": True if exact else None,
+            "citation_notice": "",
+            "grounding_warning": "",
+            "citation_check": {
+                "status": "passed" if exact else "skipped",
+                "checked": len(outcome.used_citation_labels),
+            },
+            "tools_used": [],
+            "obsidian_open_url": "",
+            "web_evidence_status": "none",
+            "web_evidence_scope": "none",
+            "web_sources": [],
+            "web_query_notice": "",
+            "voice": None,
+            "files": [],
+            "attachment_context_available": False,
+            "attachment_context_expected_count": 0,
+            "attachment_context_readable_count": 0,
+            "attachment_coverage_complete": False,
+            "attachment_verification_complete": False,
+            "restored_attachment_count": 0,
+            "context": {
+                "interaction_mode": "dialogue",
+                "llm_failed": False,
+                "archive_candidate_selection": outcome.status.value,
+                "selected_archive_evidence_replay": outcome.status.value,
             },
         }
 
@@ -38984,6 +39468,7 @@ class AgentRuntime:
                 turn_deadline = turn_started + float(configured_budget)
         clean_message = (message or "").strip()
         archive_evidence_followup_kind = parse_archive_evidence_followup(clean_message)
+        archive_candidate_surface_has_attachments = bool(attachments)
         archive_structural_supplied_attachment_count = sum(
             1 for item in (attachments or []) if isinstance(item, dict)
         )
@@ -39107,6 +39592,55 @@ class AgentRuntime:
             user_id=user_id,
             limit=20,
         )
+        archive_candidate_plain_surface = bool(
+            not archive_candidate_surface_has_attachments
+            and enable_tools is True
+            and ingestion_result is None
+            and synthetic_document_notice is False
+            and replay_source_message_id is None
+            and answer_with_voice is False
+            and reply_to is None
+            and quoted_attachment_reference is False
+            and reply_assistant_reference is False
+            and reply_assistant_message_id is None
+            and turn_policy is None
+            and mode is None
+            and interaction_mode == "dialogue"
+            and actor.own_id == person_id
+        )
+        if archive_candidate_plain_surface:
+            with self.storage.transaction() as candidate_conn:
+                admitted_archive_candidate = get_current_archive_candidate_selection_work_item_in_transaction(
+                    candidate_conn,
+                    user_id=person_id,
+                    conversation_id=str(conversation_id),
+                )
+            if admitted_archive_candidate is not None:
+                if not mark_request_effect_possible():
+                    raise RuntimeError(
+                        "Request idempotency fence could not be committed before message storage"
+                    )
+                selected_ordinal = parse_archive_candidate_ordinal(clean_message)
+                if (
+                    selected_ordinal is None
+                    or selected_ordinal > admitted_archive_candidate.question.maximum_ordinal
+                ):
+                    return self._archive_candidate_reask_response(
+                        conversation_id=str(conversation_id),
+                        person_id=person_id,
+                        request=clean_message,
+                        admitted_work_item=admitted_archive_candidate,
+                        turn_started=turn_started,
+                    )
+                return self._archive_candidate_evidence_replay_response(
+                    actor=actor,
+                    conversation_id=str(conversation_id),
+                    person_id=person_id,
+                    request=clean_message,
+                    selected_ordinal=selected_ordinal,
+                    admitted_work_item=admitted_archive_candidate,
+                    turn_started=turn_started,
+                )
         informational_consent_history = _informational_consent_history(
             clean_message,
             [item for item in prior_history if isinstance(item, Mapping)],
@@ -47040,6 +47574,26 @@ class AgentRuntime:
         archive_search_ledger_ready = bool(
             archive_empty_ledger_closed and self._freeze_archive_search_ledger(context)
         )
+        archive_candidate_offer_labels: tuple[str, ...] = ()
+        archive_ledger_for_candidate_offer = context.archive_model_batch_ledger
+        if (
+            archive_search_ledger_ready
+            and context.archive_search_used
+            and type(archive_ledger_for_candidate_offer) is ArchiveModelBatchLedger
+        ):
+            candidate_answer = content.rstrip("\r\n")
+            candidate_labels = preview_archive_search_candidate_projection_labels(
+                tenant_id=context.user_id,
+                principal_id=context.person_id or actor.own_id,
+                ledger=archive_ledger_for_candidate_offer,
+                answer=candidate_answer,
+            )
+            if candidate_answer and 2 <= len(candidate_labels) <= 20:
+                archive_candidate_offer_labels = candidate_labels
+                content = (
+                    f"{candidate_answer}\n\n{archive_candidate_selection_offer_suffix(candidate_labels)}"
+                )
+                response["content"] = content
         if not (
             foreign_private_request
             or dangerous_instruction_request
@@ -47168,6 +47722,7 @@ class AgentRuntime:
         )
         accepted_simple_public_news_outcome = None
         accepted_archive_recall_outcome: ArchiveRecallOutcome | None = None
+        accepted_archive_candidate_projection: ArchiveSearchAcceptedCandidateProjection | None = None
         selected_archive_work_evidence: SelectedArchiveEvidence | None = None
         archive_attestation = None
         with self.storage.transaction() as publication_conn:
@@ -47503,6 +48058,14 @@ class AgentRuntime:
                     assistant_metadata,
                     accepted_archive_recall_outcome,
                 )
+                if archive_candidate_offer_labels:
+                    candidate_projection = archive_attestation.candidate_projection
+                    projection_labels = tuple(
+                        item.public_citation_label for item in candidate_projection.candidates
+                    )
+                    if projection_labels != archive_candidate_offer_labels:
+                        raise ValueError("accepted archive candidate projection changed after preview")
+                    accepted_archive_candidate_projection = candidate_projection
                 selected_archive_evidence = accepted_archive_recall_outcome.selected_evidence
                 if selected_archive_evidence is not None:
                     selected_archive_work_evidence = SelectedArchiveEvidence(
@@ -47947,7 +48510,18 @@ class AgentRuntime:
                         assistant_message.get("metadata_json"),
                         expected_outcome=accepted_archive_recall_outcome,
                     )
-                    if selected_archive_work_evidence is not None:
+                    if accepted_archive_candidate_projection is not None:
+                        create_archive_candidate_selection_work_item_in_transaction(
+                            publication_conn,
+                            user_id=user_id,
+                            conversation_id=conversation_id,
+                            accepted_candidate_projection=(accepted_archive_candidate_projection),
+                            anchor_user_message_id=source_search_lineage_user_message_id,
+                            anchor_assistant_message_id=str(assistant_message["id"]),
+                            accepted_plan_sha256=accepted_archive_recall_outcome.plan_sha256,
+                            accepted_outcome_sha256=stored_archive_receipt.outcome_sha256,
+                        )
+                    elif selected_archive_work_evidence is not None:
                         create_recall_selected_archive_evidence_work_item_in_transaction(
                             publication_conn,
                             user_id=user_id,
