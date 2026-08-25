@@ -6,6 +6,9 @@
   completed-file claims when they mention a supported output carrier.
 - Explicit completed effects, passive object-ready assertions and hand-offs
   remain evidence-guarded, including when mixed with capability language.
+- Generic image-generation capability questions now receive a code-owned,
+  caller-visible capability answer: free-form drawing is not advertised, while
+  the existing structured PNG card renderer is reported only when authorized.
 - Schema, endpoints and secondary-brain routing policy are unchanged.
 
 ## 0.207.31 — 2026-08-26
