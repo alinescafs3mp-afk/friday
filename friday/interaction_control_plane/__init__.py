@@ -1,25 +1,9 @@
 """Typed, privacy-safe contracts for Friday's interaction control plane."""
 
-from friday.interaction_control_plane.archive_candidate_selection import (
-    ARCHIVE_CANDIDATE_ITEM_SCHEMA,
-    ARCHIVE_CANDIDATE_MAX_COUNT,
-    ARCHIVE_CANDIDATE_QUESTION_SCHEMA,
-    ARCHIVE_CANDIDATE_REASK_VERDICT_KIND,
-    ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_SCHEMA,
-    ARCHIVE_CANDIDATE_SET_SCHEMA,
-    ARCHIVE_CANDIDATE_WORK_ITEM_SCHEMA,
-    ArchiveCandidateItem,
-    ArchiveCandidateOrdinalQuestion,
-    ArchiveCandidateQuestionKind,
-    ArchiveCandidateQuestionState,
-    ArchiveCandidateSelectionActiveFrame,
-    ArchiveCandidateSelectionError,
-    ArchiveCandidateSelectionWorkItem,
-    ArchiveCandidateSet,
-    archive_candidate_reask_prompt,
-    archive_candidate_selection_offer_suffix,
-    parse_archive_candidate_ordinal,
-)
+# Import trace exports before the candidate contract. The latter reaches the
+# retrieval/storage graph, whose cold-start router imports FailureStage from
+# this package while it is still being initialized.
+# isort: off
 from friday.interaction_control_plane.turn_trace import (
     TURN_TRACE_SCHEMA,
     CapabilityClass,
@@ -41,6 +25,28 @@ from friday.interaction_control_plane.turn_trace import (
     WorkRelation,
     derive_trace_identifier,
 )
+from friday.interaction_control_plane.archive_candidate_selection import (
+    ARCHIVE_CANDIDATE_ITEM_SCHEMA,
+    ARCHIVE_CANDIDATE_MAX_COUNT,
+    ARCHIVE_CANDIDATE_QUESTION_SCHEMA,
+    ARCHIVE_CANDIDATE_REASK_VERDICT_KIND,
+    ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_SCHEMA,
+    ARCHIVE_CANDIDATE_SET_SCHEMA,
+    ARCHIVE_CANDIDATE_WORK_ITEM_SCHEMA,
+    ArchiveCandidateItem,
+    ArchiveCandidateOrdinalQuestion,
+    ArchiveCandidateQuestionKind,
+    ArchiveCandidateQuestionState,
+    ArchiveCandidateSelectionActiveFrame,
+    ArchiveCandidateSelectionError,
+    ArchiveCandidateSelectionWorkItem,
+    ArchiveCandidateSet,
+    archive_candidate_reask_prompt,
+    archive_candidate_selection_offer_suffix,
+    parse_archive_candidate_ordinal,
+)
+
+# isort: on
 from friday.interaction_control_plane.work_item_contract import (
     RECALL_CONVERSATION_ACTIVE_FRAME_SCHEMA,
     RECALL_CONVERSATION_WORK_ITEM_SCHEMA,
