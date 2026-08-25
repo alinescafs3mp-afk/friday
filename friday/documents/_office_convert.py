@@ -2,9 +2,11 @@
 
 LibreOffice cannot consume an upload through stdin, so this is the one document
 parser that uses disk.  It receives a private, mode-0700 temporary root, a fixed
-basename, no inherited environment, and one caller-owned deadline.  Only the
-declared source/target pairs are accepted; the converted container is parsed by
-Friday's existing bounded OOXML/ODG readers before any text is trusted.
+basename, no inherited environment, and one caller-owned deadline.  The root is
+created directly below ``/tmp`` because Friday's sandbox wrapper admits exactly
+that host path; an ambient ``TMPDIR`` must never alter this security boundary.
+Only the declared source/target pairs are accepted; the converted container is
+parsed by Friday's existing bounded OOXML/ODG readers before any text is trusted.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from friday.config import env as config_env
 _DEFAULT_CONVERSION_TIMEOUT_SEC = 45.0
 _MAX_CONVERSION_INPUT_BYTES = 64 * 1024 * 1024
 _MAX_CONVERSION_OUTPUT_BYTES = 128 * 1024 * 1024
+_OFFICE_TEMP_PARENT = "/tmp"  # nosec B108 - fixed sandbox-wrapper contract
 _TARGET_BY_SOURCE = {
     "doc": "docx",
     "dot": "docx",
@@ -220,7 +223,10 @@ def convert_legacy_office(
 
     process: subprocess.Popen[bytes] | None = None
     try:
-        with tempfile.TemporaryDirectory(prefix="friday-office-") as temporary:
+        with tempfile.TemporaryDirectory(
+            prefix="friday-office-",
+            dir=_OFFICE_TEMP_PARENT,
+        ) as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             output_dir = root / "output"

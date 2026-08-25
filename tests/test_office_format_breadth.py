@@ -705,6 +705,27 @@ def test_libreoffice_rootless_loader_path_is_explicit_and_ambient_state_is_strip
     assert converted.target_format == "xlsx"
 
 
+def test_libreoffice_private_root_does_not_follow_ambient_tmpdir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ambient = tmp_path / "ambient-tmp"
+    ambient.mkdir()
+    executable = _fake_libreoffice_action(
+        tmp_path / "soffice",
+        "if source.parent.parent != pathlib.Path('/tmp') "
+        "or not source.parent.name.startswith('friday-office-'):\n"
+        "    raise SystemExit(64)\n"
+        "target.write_bytes(source.read_bytes())",
+    )
+    monkeypatch.setenv("TMPDIR", str(ambient))
+
+    converted = convert_legacy_office(b"synthetic", "xls", executable=str(executable))
+
+    assert converted.success is True, converted.error
+    assert list(ambient.iterdir()) == []
+
+
 def test_relative_libreoffice_executable_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FRIDAY_LIBREOFFICE_PATH", "relative/soffice")
     monkeypatch.setenv("PATH", "")
