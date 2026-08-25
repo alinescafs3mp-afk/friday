@@ -21,6 +21,15 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from friday.config import FridaySettings
+from friday.document_catalog.worker_state import (
+    DOCUMENT_CATALOG_WORKER_STATE_KEY,
+    DocumentCatalogTenantState,
+    DocumentCatalogWorkerState,
+    decode_document_catalog_worker_state,
+    document_catalog_worker_tenant_key,
+    encode_document_catalog_worker_state,
+    load_document_catalog_worker_namespace_key,
+)
 from friday.retrieval import (
     chunk_scheme,
     knowledge_chunk_units,
@@ -179,49 +188,46 @@ _VAULT_PAGE = 250
 # bound that keeps one minute of catalog maintenance from turning into a corpus
 # scan.
 _DOCUMENT_CATALOG_TICK_LIMIT = 128
-_DOCUMENT_CATALOG_CURSOR_KEY = "workers:document_catalog_reconcile:cursor:v1"
+_DOCUMENT_CATALOG_CURSOR_KEY = DOCUMENT_CATALOG_WORKER_STATE_KEY
 
 # Ниже этого тик не считается нагрузкой и отдыха не назначает: пауза защищает
 # внешний сервис, а не расписание.
 _EMBED_REST_MIN_WORK_SEC = 1.0
 
 
-def _bounded_report_count(report: Any, key: str, *, maximum: int | None = None) -> int:
-    """Read one count-only storage report field without echoing report contents."""
+def _document_catalog_phase_page(
+    report: Any,
+    *,
+    spent_key: str,
+    limit: int,
+) -> tuple[int, bool, str | None]:
+    """Authenticate one bounded storage page before checkpointing it."""
 
     if not isinstance(report, dict):
-        return 0
-    value = report.get(key)
-    if type(value) is not int:
-        return 0
-    count = max(0, value)
-    return min(count, maximum) if maximum is not None else count
+        raise ValueError("document catalog phase report is invalid")
+    spent = report.get(spent_key)
+    has_more = report.get("has_more")
+    if type(spent) is not int or spent < 0 or spent > limit or type(has_more) is not bool:
+        raise ValueError("document catalog phase report is out of bounds")
+    next_cursor = report.get("next_after_raw_object_id")
+    if has_more:
+        if not isinstance(next_cursor, str):
+            raise ValueError("document catalog phase did not return an exact TEXT cursor")
+        return spent, True, next_cursor
+    if next_cursor is not None:
+        raise ValueError("exhausted document catalog phase returned a cursor")
+    return spent, False, None
 
 
-def _bounded_report_flag(report: Any, key: str) -> int:
-    """Return a report boolean as an aggregate-safe integer."""
+def _document_catalog_processed(report: Any, *, maximum: int) -> int:
+    """Require a processed count that cannot exceed its examined phase page."""
 
     if not isinstance(report, dict):
-        return 0
-    return int(report.get(key) is True)
-
-
-def _document_catalog_cursor(value: Any, tenant_count: int) -> tuple[int, int]:
-    """Decode the restart-safe numeric cursor without persisting tenant identity."""
-
-    try:
-        parsed = json.loads(str(value or "{}"))
-    except (TypeError, ValueError):
-        parsed = {}
-    if not isinstance(parsed, dict):
-        parsed = {}
-    cursor = parsed.get("cursor")
-    round_number = parsed.get("round")
-    if type(cursor) is not int or cursor < 0:
-        cursor = 0
-    if type(round_number) is not int or round_number < 0:
-        round_number = 0
-    return cursor % tenant_count, round_number
+        raise ValueError("document catalog phase report is invalid")
+    processed = report.get("processed")
+    if type(processed) is not int or processed < 0 or processed > maximum:
+        raise ValueError("document catalog processed count is out of bounds")
+    return processed
 
 
 class WorkerBatchError(RuntimeError):
@@ -922,32 +928,104 @@ class WorkersManager:
         """Converge the body-free document catalog within one global item budget."""
 
         # list_user_ids has a stable contract, but not a stable presentation order.
-        # The durable cursor below is numeric deliberately: sorting makes its meaning
-        # restart-safe without writing tenant identifiers to worker state.
-        tenant_ids = sorted(set(await self._tenants()))
+        # Sorting gives the numeric rotation a restart-safe meaning. Tenant phase
+        # cursors live under one-way identifiers and their exact TEXT is base64
+        # encoded, so this one compact runtime row contains no plaintext account id.
+        tenant_ids = sorted(set(await run_blocking(self.storage.list_document_catalog_owner_ids)))
         tenant_count = len(tenant_ids)
+        raw_state = await run_blocking(self.storage.kv_get, _DOCUMENT_CATALOG_CURSOR_KEY)
+        state, state_supported = decode_document_catalog_worker_state(raw_state)
+        if raw_state is not None and not state_supported:
+            raise RuntimeError("document catalog worker state is unsupported")
+        namespace_key = await run_blocking(
+            load_document_catalog_worker_namespace_key,
+            self.storage,
+        )
+        tenant_keys = {
+            user_id: document_catalog_worker_tenant_key(
+                user_id,
+                namespace_key=namespace_key,
+            )
+            for user_id in tenant_ids
+        }
+        active_tenant_keys = set(tenant_keys.values())
+        state.tenants = {
+            tenant_key: phases
+            for tenant_key, phases in state.tenants.items()
+            if tenant_key in active_tenant_keys
+        }
         if tenant_count == 0:
+            empty = DocumentCatalogWorkerState()
+            payload = encode_document_catalog_worker_state(empty)
+            if raw_state is not None and raw_state != payload:
+                stored = await run_blocking(
+                    self.storage.checkpoint_document_catalog_worker_state,
+                    expected_value=raw_state,
+                    value=payload,
+                    tenant_ids=tenant_ids,
+                )
+                if not stored:
+                    raise RuntimeError("document catalog worker state changed during checkpoint")
             return
 
-        raw_cursor = await run_blocking(self.storage.kv_get, _DOCUMENT_CATALOG_CURSOR_KEY)
-        cursor, round_number = _document_catalog_cursor(raw_cursor, tenant_count)
+        cursor = state.cursor % tenant_count
+        round_number = state.round
         base_share, remainder = divmod(_DOCUMENT_CATALOG_TICK_LIMIT, tenant_count)
-        selected_count = tenant_count if base_share else remainder
-        extra_positions = {
-            (round_number + offset) % tenant_count for offset in range(remainder)
-        }
-        allocations: dict[str, tuple[int, int, int, int]] = {}
-        selected_tenants: list[str] = []
-        for offset in range(selected_count):
+        ordinary_count = tenant_count if base_share else remainder
+        failed_tenants = [
+            user_id
+            for user_id in tenant_ids
+            if (
+                (tenant_state := state.tenants.get(tenant_keys[user_id])) is not None
+                and (tenant_state.reconcile_failed or tenant_state.backfill_failed)
+            )
+        ]
+        retry_user_id = (
+            sorted(failed_tenants, key=tenant_keys.__getitem__)[state.retry % len(failed_tenants)]
+            if failed_tenants
+            else None
+        )
+        ordinary_user_ids = [tenant_ids[(cursor + offset) % tenant_count] for offset in range(ordinary_count)]
+        if retry_user_id is not None and retry_user_id not in ordinary_user_ids:
+            # Reserve one slot for sticky failure health, but advance the ordinary
+            # rotation by only the slots actually visited. No healthy tenant is
+            # skipped and a broken tenant cannot pin a fixed 128-tenant window.
+            ordinary_count -= 1
+            ordinary_user_ids = ordinary_user_ids[:ordinary_count]
+            selected_tenants = [retry_user_id, *ordinary_user_ids]
+        else:
+            selected_tenants = ordinary_user_ids
+        extra_positions = {(round_number + offset) % tenant_count for offset in range(remainder)}
+        allocations: dict[str, tuple[int, int, str | None]] = {}
+        for offset, user_id in enumerate(ordinary_user_ids):
             absolute_position = cursor + offset
             index = absolute_position % tenant_count
             visit_round = round_number + absolute_position // tenant_count
             share = 1 if base_share == 0 else base_share + int(index in extra_positions)
-            next_cursor = (index + 1) % tenant_count
-            next_round = visit_round + int(index == tenant_count - 1)
-            user_id = tenant_ids[index]
-            selected_tenants.append(user_id)
-            allocations[user_id] = (share, visit_round, next_cursor, next_round)
+            tenant_key = tenant_keys[user_id]
+            state.tenants.setdefault(tenant_key, DocumentCatalogTenantState())
+            # An ordinary visit keeps the round-based phase alternation even
+            # while its sibling phase is failing. Only the separately reserved
+            # retry slot below is allowed to force a failed phase; otherwise a
+            # permanent reconcile failure would starve healthy backfill forever.
+            allocations[user_id] = (share, visit_round, None)
+        if retry_user_id is not None and retry_user_id not in allocations:
+            tenant_key = tenant_keys[retry_user_id]
+            tenant_state = state.tenants[tenant_key]
+            failed_phases = [
+                phase for phase in ("reconcile", "backfill") if getattr(tenant_state, f"{phase}_failed")
+            ]
+            assert failed_phases
+            allocations[retry_user_id] = (
+                1,
+                round_number,
+                failed_phases[state.retry % len(failed_phases)],
+            )
+        rotation_position = cursor + ordinary_count
+        rotation_checkpoint = (
+            rotation_position % tenant_count,
+            round_number + rotation_position // tenant_count,
+        )
 
         totals = {
             "tenants": 0,
@@ -957,42 +1035,41 @@ class WorkersManager:
             "backfill_has_more": 0,
             "phase_failures": 0,
         }
-        checkpoint_open = True
-        checkpoint = (cursor, round_number)
 
         async def converge(user_id: str) -> None:
-            nonlocal checkpoint, checkpoint_open
-            share, visit_round, next_cursor, next_round = allocations[user_id]
-            try:
-                report = await self._document_catalog_reconcile(
-                    user_id,
-                    limit=share,
-                    backfill_only=bool(share == 1 and visit_round % 2),
+            share, visit_round, forced_phase = allocations[user_id]
+            tenant_key = tenant_keys[user_id]
+            tenant_state = state.tenants[tenant_key]
+            report = await self._document_catalog_reconcile(
+                user_id,
+                limit=share,
+                phase_cursors={
+                    "reconcile": tenant_state.reconcile,
+                    "backfill": tenant_state.backfill,
+                },
+                backfill_only=bool(
+                    forced_phase == "backfill" or (forced_phase is None and share == 1 and visit_round % 2)
+                ),
+            )
+            for phase, phase_cursor in report["phase_updates"].items():
+                setattr(tenant_state, phase, phase_cursor)
+            for phase in report["successful_phases"]:
+                setattr(tenant_state, f"{phase}_failed", False)
+            for phase in report["failed_phases"]:
+                setattr(tenant_state, f"{phase}_failed", True)
+            totals["tenants"] += 1
+            for key in (
+                "reconciled",
+                "backfilled",
+                "reconcile_has_more",
+                "backfill_has_more",
+                "phase_failures",
+            ):
+                totals[key] += report[key]
+            if report["phase_failures"]:
+                raise _DocumentCatalogPhaseError(
+                    f"{report['phase_failures']} document catalog phase(s) failed"
                 )
-                totals["tenants"] += 1
-                for key in (
-                    "reconciled",
-                    "backfilled",
-                    "reconcile_has_more",
-                    "backfill_has_more",
-                    "phase_failures",
-                ):
-                    totals[key] += report[key]
-                if report["phase_failures"]:
-                    raise _DocumentCatalogPhaseError(
-                        f"{report['phase_failures']} document catalog phase(s) failed"
-                    )
-                if checkpoint_open:
-                    checkpoint = (next_cursor, next_round)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                # Later tenants still get their bounded attempt, but none may move
-                # the durable checkpoint past the first allocation that did not
-                # complete successfully. The next tick therefore retries it and
-                # worker health cannot report a false recovery.
-                checkpoint_open = False
-                raise
 
         try:
             batch_failure: WorkerBatchError | None = None
@@ -1001,22 +1078,31 @@ class WorkersManager:
             except WorkerBatchError as exc:
                 batch_failure = exc
 
-            # One compact numeric checkpoint per completed sweep, including the
-            # successful prefix before an isolated failure. Cancellation skips this
-            # write deliberately: replaying a completed prefix is idempotent and is
-            # safer than advancing past an allocation whose outcome is unresolved.
-            if checkpoint != (cursor, round_number):
-                payload = json.dumps(
-                    {"cursor": checkpoint[0], "round": checkpoint[1]},
-                    ensure_ascii=True,
-                    sort_keys=True,
-                    separators=(",", ":"),
+            unresolved_failures = sum(
+                int(tenant_state.reconcile_failed) + int(tenant_state.backfill_failed)
+                for tenant_state in state.tenants.values()
+            )
+            if unresolved_failures and batch_failure is None:
+                batch_failure = WorkerBatchError(
+                    f"{unresolved_failures} unresolved document catalog phase failure(s)"
                 )
-                await run_blocking(
-                    self.storage.kv_set,
-                    _DOCUMENT_CATALOG_CURSOR_KEY,
-                    payload,
+
+            # Rotation progresses independently of tenant health. Sticky phase
+            # flags keep worker health failed and reserve a bounded retry slot.
+            # Cancellation skips this one write: replay remains idempotent.
+            state.cursor, state.round = rotation_checkpoint
+            if failed_tenants:
+                state.retry += 1
+            payload = encode_document_catalog_worker_state(state)
+            if raw_state != payload:
+                stored = await run_blocking(
+                    self.storage.checkpoint_document_catalog_worker_state,
+                    expected_value=raw_state,
+                    value=payload,
+                    tenant_ids=tenant_ids,
                 )
+                if not stored:
+                    raise RuntimeError("document catalog worker state changed during checkpoint")
             if batch_failure is not None:
                 raise batch_failure
         finally:
@@ -1037,30 +1123,50 @@ class WorkersManager:
         user_id: str,
         *,
         limit: int,
+        phase_cursors: dict[str, str | None],
         backfill_only: bool = False,
-    ) -> dict[str, int]:
+    ) -> dict[str, Any]:
         """Spend one share in order, or use a fair single-item backfill slot."""
 
+        phase_updates: dict[str, str | None] = {}
+        successful_phases: set[str] = set()
+        failed_phases: set[str] = set()
         if backfill_only:
             reserved_backfill: dict[str, Any] = {}
             failures = 0
+            backfilled = 0
+            backfill_has_more = 0
             try:
                 reserved_backfill = await run_blocking(
                     self.storage.backfill_document_catalog,
                     user_id,
+                    after_raw_object_id=phase_cursors["backfill"],
                     limit=limit,
                 )
+                _spent, has_more, next_cursor = _document_catalog_phase_page(
+                    reserved_backfill,
+                    spent_key="examined",
+                    limit=limit,
+                )
+                backfilled = _document_catalog_processed(reserved_backfill, maximum=_spent)
+                phase_updates["backfill"] = next_cursor
+                backfill_has_more = int(has_more)
+                successful_phases.add("backfill")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 failures = 1
+                failed_phases.add("backfill")
                 LOGGER.error("Document catalog backfill phase failed (%s)", type(exc).__name__)
             return {
                 "reconciled": 0,
-                "backfilled": _bounded_report_count(reserved_backfill, "processed", maximum=limit),
+                "backfilled": backfilled,
                 "reconcile_has_more": 0,
-                "backfill_has_more": _bounded_report_flag(reserved_backfill, "has_more"),
+                "backfill_has_more": backfill_has_more,
                 "phase_failures": failures,
+                "phase_updates": phase_updates,
+                "successful_phases": successful_phases,
+                "failed_phases": failed_phases,
             }
 
         # Keep one item for backfill whenever the tenant owns at least two. A
@@ -1068,43 +1174,69 @@ class WorkersManager:
         reconcile_limit = limit - 1 if limit >= 2 else limit
         reconcile: dict[str, Any] = {}
         failures = 0
+        reconcile_has_more = 0
         try:
             reconcile = await run_blocking(
                 self.storage.reconcile_document_catalog,
                 user_id,
+                after_raw_object_id=phase_cursors["reconcile"],
                 limit=reconcile_limit,
             )
+            reconciled, has_more, next_cursor = _document_catalog_phase_page(
+                reconcile,
+                spent_key="examined",
+                limit=reconcile_limit,
+            )
+            phase_updates["reconcile"] = next_cursor
+            reconcile_has_more = int(has_more)
+            successful_phases.add("reconcile")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             failures += 1
+            failed_phases.add("reconcile")
             LOGGER.error("Document catalog reconcile phase failed (%s)", type(exc).__name__)
             # The reserved item is safe even if an implementation did work before
             # raising. Spending the whole apparent remainder would not be bounded.
             backfill_limit = 1 if limit >= 2 else 0
             reconciled = 0
         else:
-            reconciled = _bounded_report_count(reconcile, "examined", maximum=reconcile_limit)
             backfill_limit = limit - reconciled
         backfill: dict[str, Any] = {}
+        backfilled = 0
+        backfill_has_more = 0
         if backfill_limit > 0:
             try:
                 backfill = await run_blocking(
                     self.storage.backfill_document_catalog,
                     user_id,
+                    after_raw_object_id=phase_cursors["backfill"],
                     limit=backfill_limit,
                 )
+                backfill_spent, has_more, next_cursor = _document_catalog_phase_page(
+                    backfill,
+                    spent_key="examined",
+                    limit=backfill_limit,
+                )
+                backfilled = _document_catalog_processed(backfill, maximum=backfill_spent)
+                phase_updates["backfill"] = next_cursor
+                backfill_has_more = int(has_more)
+                successful_phases.add("backfill")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 failures += 1
+                failed_phases.add("backfill")
                 LOGGER.error("Document catalog backfill phase failed (%s)", type(exc).__name__)
         return {
             "reconciled": reconciled,
-            "backfilled": _bounded_report_count(backfill, "processed", maximum=backfill_limit),
-            "reconcile_has_more": _bounded_report_flag(reconcile, "has_more"),
-            "backfill_has_more": _bounded_report_flag(backfill, "has_more"),
+            "backfilled": backfilled,
+            "reconcile_has_more": reconcile_has_more,
+            "backfill_has_more": backfill_has_more,
             "phase_failures": failures,
+            "phase_updates": phase_updates,
+            "successful_phases": successful_phases,
+            "failed_phases": failed_phases,
         }
 
     async def _knowledge_dedup_all(self) -> None:

@@ -25,6 +25,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from friday.document_catalog.worker_state import (
+    DOCUMENT_CATALOG_WORKER_STATE_KEY,
+    document_catalog_worker_entry_fingerprint,
+    load_document_catalog_worker_namespace_key,
+    remove_document_catalog_worker_entry,
+)
 from friday.memory import MemoryVaultDeletionHandle, VaultProjectionBoundaryError
 from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.storage._base import (
@@ -311,12 +317,36 @@ def _runtime_key_inventory(conn: sqlite3.Connection, user_id: str) -> tuple[list
     ambiguous_hashes: list[str] = []
     for row in conn.execute("SELECT key FROM runtime_kv ORDER BY key"):
         key = str(row["key"])
+        if key == DOCUMENT_CATALOG_WORKER_STATE_KEY:
+            # Account ownership is hash-keyed inside this one shared row and is
+            # inventoried independently below; substring matching its global key
+            # would both miss ownership and falsely claim accounts named "catalog".
+            continue
         owners = known_runtime_key_owners(key)
         if owners == {user_id}:
             owned.append(key)
         elif user_id in owners or (not owners and user_id in key):
             ambiguous_hashes.append(hashlib.sha256(key.encode("utf-8")).hexdigest())
     return owned, ambiguous_hashes
+
+
+def _document_catalog_worker_runtime_inventory(
+    conn: sqlite3.Connection,
+    user_id: str,
+) -> tuple[str | None, bool]:
+    """Inventory one hash-owned cursor inside the worker's shared state row."""
+
+    row = conn.execute(
+        "SELECT value FROM runtime_kv WHERE key=?",
+        (DOCUMENT_CATALOG_WORKER_STATE_KEY,),
+    ).fetchone()
+    if row is None:
+        return None, True
+    return document_catalog_worker_entry_fingerprint(
+        row["value"],
+        user_id,
+        namespace_key=load_document_catalog_worker_namespace_key(conn),
+    )
 
 
 def _identity_tombstone_plan(
@@ -1135,6 +1165,11 @@ def _preflight(
 
     runtime_keys, ambiguous_runtime_hashes = _runtime_key_inventory(conn, user_id)
     counts["runtime_kv"] = len(runtime_keys)
+    catalog_worker_fingerprint, catalog_worker_state_supported = _document_catalog_worker_runtime_inventory(
+        conn, user_id
+    )
+    if catalog_worker_fingerprint is not None:
+        counts["document_catalog_worker_state"] = 1
 
     raw_files_row = conn.execute(
         "SELECT COUNT(*) AS count FROM raw_objects WHERE user_id=? AND content_type='file'",
@@ -1254,8 +1289,9 @@ def _preflight(
         block("runtime_event_history", runtime_event_references)
     if cross_account_chat_derivatives:
         block("cross_account_chat_derivatives", cross_account_chat_derivatives)
-    if ambiguous_runtime_hashes:
-        block("unknown_runtime_scope", len(ambiguous_runtime_hashes))
+    unknown_runtime_count = len(ambiguous_runtime_hashes) + int(not catalog_worker_state_supported)
+    if unknown_runtime_count:
+        block("unknown_runtime_scope", unknown_runtime_count)
     if identity_collisions:
         block("identity_collision", identity_collisions)
     if external_identity_state:
@@ -1285,6 +1321,7 @@ def _preflight(
     nonzero_counts = {key: value for key, value in counts.items() if value}
     deletion_keys = {scope.key for scope in _DELETE_SCOPES} | {
         "deletion_eligibility",
+        "document_catalog_worker_state",
         "runtime_kv",
         "users",
     }
@@ -1312,6 +1349,8 @@ def _preflight(
         "path_states": path_states,
         "runtime_key_hashes": [hashlib.sha256(key.encode("utf-8")).hexdigest() for key in runtime_keys],
         "ambiguous_runtime_hashes": ambiguous_runtime_hashes,
+        "document_catalog_worker_fingerprint": catalog_worker_fingerprint,
+        "document_catalog_worker_state_supported": catalog_worker_state_supported,
         # Keys are opaque hashes.  Including them makes an identity swap with the
         # same row count invalidate the reviewed plan without exposing login ids.
         "identity_tombstone_keys": sorted(identity_tombstones),
@@ -1344,6 +1383,7 @@ def _preflight(
         "runtime_event_references": runtime_event_references,
         "cross_account_chat_derivatives": cross_account_chat_derivatives,
         "unknown_scopes": unknown_scopes,
+        "document_catalog_worker_fingerprint": catalog_worker_fingerprint,
     }
 
 
@@ -1476,6 +1516,48 @@ def delete_account(
             if runtime_cursor.rowcount != len(runtime_keys):
                 raise AccountDeletionConflict("Runtime-состояние изменилось во время удаления")
             deleted["runtime_kv"] = int(runtime_cursor.rowcount)
+
+        if int(report["counts"].get("document_catalog_worker_state") or 0):
+            catalog_state_row = conn.execute(
+                "SELECT value FROM runtime_kv WHERE key=?",
+                (DOCUMENT_CATALOG_WORKER_STATE_KEY,),
+            ).fetchone()
+            if catalog_state_row is None:
+                raise AccountDeletionConflict("DocumentCatalog runtime-состояние исчезло")
+            catalog_namespace_key = load_document_catalog_worker_namespace_key(conn)
+            current_catalog_fingerprint, current_catalog_supported = (
+                document_catalog_worker_entry_fingerprint(
+                    catalog_state_row["value"],
+                    user_id,
+                    namespace_key=catalog_namespace_key,
+                )
+            )
+            if not current_catalog_supported or current_catalog_fingerprint != report.get(
+                "document_catalog_worker_fingerprint"
+            ):
+                raise AccountDeletionConflict("DocumentCatalog runtime-состояние изменилось")
+            try:
+                catalog_state_payload, catalog_state_removed = remove_document_catalog_worker_entry(
+                    catalog_state_row["value"],
+                    user_id,
+                    namespace_key=catalog_namespace_key,
+                )
+            except ValueError as exc:
+                raise AccountDeletionConflict("DocumentCatalog runtime-состояние изменило формат") from exc
+            if not catalog_state_removed:
+                raise AccountDeletionConflict("DocumentCatalog runtime-состояние изменилось")
+            catalog_state_cursor = conn.execute(
+                "UPDATE runtime_kv SET value=?,updated_at=? WHERE key=? AND value=?",
+                (
+                    catalog_state_payload,
+                    utc_now(),
+                    DOCUMENT_CATALOG_WORKER_STATE_KEY,
+                    catalog_state_row["value"],
+                ),
+            )
+            if catalog_state_cursor.rowcount != 1:
+                raise AccountDeletionConflict("DocumentCatalog runtime-состояние изменилось")
+            deleted["document_catalog_worker_state"] = 1
 
         eligibility_cursor = conn.execute(
             "DELETE FROM runtime_kv WHERE key=?",

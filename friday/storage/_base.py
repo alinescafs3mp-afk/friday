@@ -54,6 +54,8 @@ from friday.storage.models import (
     new_id,
     utc_now,
 )
+from friday.user_ids import USER_ID_RE as _USER_ID_RE
+from friday.user_ids import validate_user_id
 
 _AUDIT_GENERATED_ID_LOCATIONS: dict[str, tuple[tuple[str, str], ...]] = {
     "apr": (("action_approvals", "id"),),
@@ -267,7 +269,6 @@ class StorageClosedError(RuntimeError):
     """
 
 
-_USER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,199}$")
 DELETED_ACCOUNT_TOMBSTONE_PREFIX = "deleted_account:v1:"
 DELETED_IDENTITY_TOMBSTONE_PREFIX = "deleted_identity:v1:"
 ACCOUNT_DELETION_ELIGIBILITY_PREFIX = "account_deletion_eligible:v1:"
@@ -286,16 +287,6 @@ _ACCOUNT_RUNTIME_EXACT_USER_PREFIXES = (
 _ACCOUNT_RUNTIME_LENGTH_NAMESPACES = ("candidate", "present", "validation", "winner")
 _ACCOUNT_RUNTIME_QUOTA_NAMES = ("web",)
 CONVERSATION_MODES = {"dialogue", "knowledge_work", "research"}
-
-
-def validate_user_id(user_id: str) -> str:
-    """Validate stable tenant identifiers before they reach SQL or UI routes."""
-    value = str(user_id or "").strip()
-    if not _USER_ID_RE.fullmatch(value):
-        raise ValueError(
-            "user_id must be 1-200 characters using letters, digits, dot, underscore, colon, @, +, or -"
-        )
-    return value
 
 
 def normalize_identity_source(source: str) -> str:

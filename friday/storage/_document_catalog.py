@@ -6,6 +6,7 @@ import hashlib
 import re
 import sqlite3
 from collections import Counter
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -18,7 +19,18 @@ from friday.document_catalog.schema import (
     deterministic_document_semantic_title,
     document_catalog_source_binding_sql,
 )
-from friday.storage._base import StorageShared, utc_now, validate_user_id
+from friday.document_catalog.worker_state import (
+    DOCUMENT_CATALOG_WORKER_STATE_KEY,
+    decode_document_catalog_worker_state,
+    document_catalog_worker_tenant_key,
+    load_document_catalog_worker_namespace_key,
+)
+from friday.storage._base import (
+    StorageShared,
+    deleted_account_tombstone_key,
+    utc_now,
+    validate_user_id,
+)
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
@@ -257,7 +269,84 @@ def project_document_catalog_raw_in_transaction(
     )
 
 
+def _document_catalog_owner_ids(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute(
+        """SELECT owner.id AS user_id
+             FROM users AS owner
+            WHERE owner.status='active' AND EXISTS (
+                  SELECT 1
+                    FROM raw_objects AS source
+                         INDEXED BY idx_document_catalog_source_owner_id
+                   WHERE source.user_id=owner.id AND source.content_type='file'
+                     AND source.deleted_at IS NULL
+                   LIMIT 1)
+            ORDER BY owner.id"""
+    ).fetchall()
+    return [validate_user_id(row["user_id"]) for row in rows]
+
+
 class DocumentCatalogMixin(StorageShared):
+    def list_document_catalog_owner_ids(self) -> list[str]:
+        """Return every extant live-file owner, independent of shared-archive mode."""
+
+        return _document_catalog_owner_ids(self.conn)
+
+    def checkpoint_document_catalog_worker_state(
+        self,
+        *,
+        expected_value: str | None,
+        value: str,
+        tenant_ids: Sequence[str],
+    ) -> bool:
+        """CAS worker state only while its exact file-owner snapshot is still live."""
+
+        if expected_value is not None and type(expected_value) is not str:
+            raise ValueError("expected worker state must be TEXT or None")
+        if type(value) is not str:
+            raise ValueError("worker state must be TEXT")
+        if isinstance(tenant_ids, str):
+            raise ValueError("tenant_ids must be a sequence of exact user ids")
+        owners = tuple(validate_user_id(item) for item in tenant_ids)
+        if owners != tuple(sorted(set(owners))):
+            raise ValueError("tenant_ids must be exact, unique and sorted")
+        state, supported = decode_document_catalog_worker_state(value)
+        if not supported:
+            raise ValueError("worker state must use the closed supported format")
+
+        with self.transaction() as conn:
+            current_owners = tuple(_document_catalog_owner_ids(conn))
+            if current_owners != owners:
+                return False
+            namespace_key = load_document_catalog_worker_namespace_key(conn)
+            owner_keys = {
+                document_catalog_worker_tenant_key(owner, namespace_key=namespace_key) for owner in owners
+            }
+            if not set(state.tenants).issubset(owner_keys):
+                return False
+            tombstone_keys = tuple(deleted_account_tombstone_key(owner) for owner in owners)
+            for offset in range(0, len(tombstone_keys), 500):
+                chunk = tombstone_keys[offset : offset + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                if conn.execute(
+                    f"SELECT 1 FROM runtime_kv WHERE key IN ({placeholders}) LIMIT 1",  # nosec B608
+                    chunk,
+                ).fetchone():
+                    return False
+            row = conn.execute(
+                "SELECT value FROM runtime_kv WHERE key=?",
+                (DOCUMENT_CATALOG_WORKER_STATE_KEY,),
+            ).fetchone()
+            current_value = str(row["value"]) if row is not None else None
+            if current_value != expected_value:
+                return False
+            conn.execute(
+                """INSERT INTO runtime_kv(key,value,updated_at) VALUES(?,?,?)
+                   ON CONFLICT(key) DO UPDATE SET
+                       value=excluded.value,updated_at=excluded.updated_at""",
+                (DOCUMENT_CATALOG_WORKER_STATE_KEY, value, utc_now()),
+            )
+        return True
+
     def get_document_catalog_entry(
         self,
         user_id: str,

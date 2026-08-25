@@ -183,11 +183,15 @@ def test_no_method_is_defined_twice_across_the_class_hierarchy() -> None:
 # 410 → 411: one-shot server-origin secondary rollout attestation consumption.
 # 411 -> 417: schema 41 adds the owner-derived DocumentCatalog get/CAS,
 # deterministic rebuild/backfill, bounded reconciliation and coverage surface.
-EXPECTED_MEMBER_COUNT = 417
+# 417 -> 419: the runtime uses one active file-owner inventory and an atomic
+# owner-snapshot/CAS checkpoint instead of a blind shared runtime-kv overwrite.
+EXPECTED_MEMBER_COUNT = 419
 EXPECTED_SIGNATURES: dict[str, str] = {
     "backfill_document_catalog": "(self, user_id: 'str', *, after_raw_object_id: 'str | None', limit: 'int' = 64) -> 'dict[str, Any]'",
+    "checkpoint_document_catalog_worker_state": "(self, *, expected_value: 'str | None', value: 'str', tenant_ids: 'Sequence[str]') -> 'bool'",
     "document_catalog_coverage": "(self, user_id: 'str') -> 'dict[str, Any]'",
     "get_document_catalog_entry": "(self, user_id: 'str', raw_object_id: 'str') -> 'dict[str, Any] | None'",
+    "list_document_catalog_owner_ids": "(self) -> 'list[str]'",
     "rebuild_document_catalog": "(self, user_id: 'str', *, after_raw_object_id: 'str | None' = None, limit: 'int' = 64) -> 'dict[str, Any]'",
     "reconcile_document_catalog": "(self, user_id: 'str', *, after_raw_object_id: 'str | None', limit: 'int' = 64) -> 'dict[str, Any]'",
     "upsert_document_catalog_entry": "(self, user_id: 'str', raw_object_id: 'str', *, expected_source_version: 'int', expected_source_content_sha256: 'str', enrichment_status: 'str' = 'current', incomplete_reason: 'str | None' = None, enriched_at: 'str | None' = None) -> 'dict[str, Any] | None'",
