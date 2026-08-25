@@ -287,7 +287,7 @@ def _raw_fts_schema_fingerprint(conn: sqlite3.Connection) -> str | None:
             "SELECT name FROM sqlite_master WHERE type='table' AND name GLOB 'raw_fts_*'"
         )
     }
-    if not _RAW_FTS_SHADOW_TABLES.issubset(shadow_tables):
+    if shadow_tables != _RAW_FTS_SHADOW_TABLES:
         return None
     marker = conn.execute("SELECT value FROM schema_meta WHERE key='fts_build'").fetchone()
     if marker is None or str(marker[0]) != str(SCHEMA_VERSION):
@@ -478,6 +478,15 @@ def audit_document_catalog(
     catalog_projection = (
         f"""
                c.raw_object_id IS NOT NULL AS has_catalog_row,
+               c.source_content_sha256 AS catalog_source_material,
+               c.extracted_text_sha256 AS catalog_text_material,
+               c.enrichment_revision AS catalog_revision_material,
+               c.enrichment_status AS catalog_status_material,
+               c.incomplete_reason AS catalog_reason_material,
+               c.enriched_at AS catalog_time_material,
+               CASE WHEN typeof(c.semantic_title)='text'
+                    THEN friday_exact_text_sha256(c.semantic_title) ELSE '' END
+                   AS catalog_title_material,
                (((typeof(r.version)='integer' AND r.version>=1
                   AND c.source_version=r.version)
                  OR
@@ -508,6 +517,10 @@ def audit_document_catalog(
                 AND CASE WHEN typeof(r.raw_content)='text'
                          THEN friday_exact_text_sha256(r.raw_content)=c.extracted_text_sha256
                          ELSE 0 END
+                AND friday_document_catalog_extraction_state(
+                        r.raw_content,r.metadata_json)='current'
+                AND c.semantic_title IS
+                    friday_document_catalog_semantic_title(r.raw_content)
                 AND c.title_authority='navigation_only'
                 AND (c.semantic_title IS NULL OR (
                     typeof(c.semantic_title)='text'
@@ -542,6 +555,13 @@ def audit_document_catalog(
         if catalog_available
         else """
                0 AS has_catalog_row,
+               NULL AS catalog_source_material,
+               NULL AS catalog_text_material,
+               NULL AS catalog_revision_material,
+               NULL AS catalog_status_material,
+               NULL AS catalog_reason_material,
+               NULL AS catalog_time_material,
+               NULL AS catalog_title_material,
                0 AS catalog_source_current,
                0 AS catalog_revision_current,
                0 AS catalog_current,
@@ -571,6 +591,7 @@ def audit_document_catalog(
     )
         SELECT r.id AS opaque_id,
                r.version AS source_version,
+               r.content_hash AS source_content_material,
                r.deleted_at IS NOT NULL AS is_deleted,
                (ci.status='ignored') AS is_ignored,
                ({_not_private_raw_dependency("r")}) AS is_public,
@@ -664,7 +685,16 @@ def audit_document_catalog(
                         int(row["source_version"] or 0),
                         state,
                         int(bool(row["has_lexical_row"])),
+                        int(bool(row["is_pending"])),
                         catalog_state if state == "registered" else "excluded",
+                        str(row["source_content_material"] or ""),
+                        str(row["catalog_source_material"] or ""),
+                        str(row["catalog_text_material"] or ""),
+                        str(row["catalog_revision_material"] or ""),
+                        str(row["catalog_status_material"] or ""),
+                        str(row["catalog_reason_material"] or ""),
+                        str(row["catalog_time_material"] or ""),
+                        str(row["catalog_title_material"] or ""),
                     ]
                 )
             )

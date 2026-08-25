@@ -403,6 +403,27 @@ def test_foreign_tenant_mutation_cannot_change_scoped_report(tmp_path: Path) -> 
     assert after == before
 
 
+def test_scope_fingerprint_binds_private_source_revision_material(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.sqlite3"
+    conn = _make_database(path)
+    _seed_scope(conn)
+    conn.close()
+    before = _audit_path(path)
+
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "UPDATE raw_objects SET content_hash=? WHERE id='eligible'",
+        (hashlib.sha256(b"changed bytes").hexdigest(),),
+    )
+    conn.commit()
+    conn.close()
+    after = _audit_path(path)
+
+    assert after["counts"] == before["counts"]
+    assert after["scope_fingerprint_sha256"] != before["scope_fingerprint_sha256"]
+    assert after["report_sha256"] != before["report_sha256"]
+
+
 @pytest.mark.parametrize(
     "mutation",
     (
