@@ -7396,18 +7396,31 @@ _SUPPORTED_READY_MASCULINE_OBJECT = r"(?:файл|документ|отч[её]�
 _SUPPORTED_READY_FEMININE_OBJECT = r"(?:картинка)"
 _SUPPORTED_READY_NEUTER_OBJECT = r"(?:вложение|изображение)"
 _SUPPORTED_READY_PLURAL_OBJECT = r"(?:файлы|документы|отч[её]ты|архивы|вложения|картинки|изображения)"
-_SUPPORTED_READY_SOURCE_QUALIFIER = r"(?:\s+из\s+[а-яё0-9._-]{2,40})?"
+_SUPPORTED_READY_GENITIVE_QUALIFIER = r"(?:[а-яё][а-яё-]{1,38}(?:а|я|ов|ев|ей|ых|их))"
+_SUPPORTED_READY_PREPOSITIONAL_MODIFIER = (
+    r"(?:[а-яё][а-яё-]{1,38}"
+    r"(?:ому|ему|ого|его|ыми|ими|ой|ей|ую|юю|ым|им|ых|их))"
+)
+_SUPPORTED_READY_NOMINAL_QUALIFIER = (
+    rf"(?:\s+(?:(?:из|по|для|с)\s+"
+    rf"(?:{_SUPPORTED_READY_PREPOSITIONAL_MODIFIER}\s+)?[а-яё0-9._-]{{2,40}}|"
+    rf"{_SUPPORTED_READY_GENITIVE_QUALIFIER}"
+    rf"(?:\s+{_SUPPORTED_READY_GENITIVE_QUALIFIER})?))?"
+)
 _SUPPORTED_FILE_READY_COMPLETION = (
     rf"(?:\b{_SUPPORTED_FILE_OBJECT}\b(?:\s+и\s+\b{_SUPPORTED_FILE_OBJECT}\b)+"
     rf"{_SUPPORTED_READY_STATE_MODIFIERS}\s+готовы\b|"
-    rf"\b{_SUPPORTED_READY_MASCULINE_OBJECT}\b{_SUPPORTED_READY_SOURCE_QUALIFIER}"
+    rf"\b{_SUPPORTED_READY_MASCULINE_OBJECT}\b{_SUPPORTED_READY_NOMINAL_QUALIFIER}"
     rf"{_SUPPORTED_READY_STATE_MODIFIERS}{_SUPPORTED_READY_STATE_NEGATION}\s+готов\b"
     rf"{_SUPPORTED_READY_STATE_TRAILER}|"
-    rf"\b{_SUPPORTED_READY_FEMININE_OBJECT}\b{_SUPPORTED_READY_STATE_MODIFIERS}"
+    rf"\b{_SUPPORTED_READY_FEMININE_OBJECT}\b{_SUPPORTED_READY_NOMINAL_QUALIFIER}"
+    rf"{_SUPPORTED_READY_STATE_MODIFIERS}"
     rf"{_SUPPORTED_READY_STATE_NEGATION}\s+готова\b{_SUPPORTED_READY_STATE_TRAILER}|"
-    rf"\b{_SUPPORTED_READY_NEUTER_OBJECT}\b{_SUPPORTED_READY_STATE_MODIFIERS}"
+    rf"\b{_SUPPORTED_READY_NEUTER_OBJECT}\b{_SUPPORTED_READY_NOMINAL_QUALIFIER}"
+    rf"{_SUPPORTED_READY_STATE_MODIFIERS}"
     rf"{_SUPPORTED_READY_STATE_NEGATION}\s+готово\b{_SUPPORTED_READY_STATE_TRAILER}|"
-    rf"\b{_SUPPORTED_READY_PLURAL_OBJECT}\b{_SUPPORTED_READY_STATE_MODIFIERS}"
+    rf"\b{_SUPPORTED_READY_PLURAL_OBJECT}\b{_SUPPORTED_READY_NOMINAL_QUALIFIER}"
+    rf"{_SUPPORTED_READY_STATE_MODIFIERS}"
     rf"{_SUPPORTED_READY_STATE_NEGATION}\s+готовы\b{_SUPPORTED_READY_STATE_TRAILER}|"
     rf"\b(?:pdf|xlsx?|excel|word|docx?|png|jpe?g)[-\s]+версия\b"
     rf"{_SUPPORTED_READY_STATE_MODIFIERS}\s+готова\b|"
@@ -7417,7 +7430,11 @@ _SUPPORTED_FILE_READY_COMPLETION = (
     rf"\bготовы\s+{_SUPPORTED_READY_PLURAL_OBJECT}\b|"
     rf"\bготово\s*[—–:-]\s*{_SUPPORTED_FILE_OBJECT}\b)"
 )
-_SUPPORTED_READY_FILE_REFERENCE = rf"\bготов(?:ый|ая|ое|ые)\s+{_SUPPORTED_FILE_OBJECT}\b"
+_SUPPORTED_READY_FILE_REFERENCE = (
+    rf"\bготов(?:ый|ая|ое|ые|ую|ого|ой|ых|ым|ыми)\s+"
+    rf"{_SUPPORTED_FILE_OBJECT}\b"
+)
+_SUPPORTED_FILE_CARRIER_BRIDGE = r"\s*(?:[,;:—–-]\s*)?"
 _SUPPORTED_FILE_STRONG_CARRIER_SUFFIX = (
     r"(?:\b(?:он|она|оно|они)?\s*(?:уже\s+|теперь\s+)?"
     r"(?:доступ\w*|наход\w*|леж\w*|открыва\w*)\b[^.!?\n]{0,24}"
@@ -7427,12 +7444,17 @@ _SUPPORTED_FILE_STRONG_CARRIER_SUFFIX = (
     r"(?:у\s+(?:тебя|вас)|в\s+чат\w*)\b)"
 )
 _SUPPORTED_FILE_WEAK_CARRIER_SUFFIX = (
-    r"(?:\b(?:(?:он|она|оно|они)\s+)?"
+    r"(?:\b(?:(?:он|она|оно|они)\s+)?(?:уже\s+|теперь\s+)?"
     r"(?:здесь|тут|ниже|в\s+чат\w*|для\s+(?:тебя|вас))\b|"
     r"\b(?:вот\s+)?ссылк\w*(?:\s+(?:здесь|тут|ниже))?\b|"
     r"https?://[^\s)\]>]+|\[[^\]\n]{1,120}\]\(https?://[^\s)]+\)|"
     r"\b(?:держи(?:те)?|забирай(?:те)?|забери(?:те)?)\b"
     r"[^.!?\n]{0,24}(?:\b(?:по|через)\s+ссылк\w*\b)?)"
+)
+_SUPPORTED_READY_FILE_CARRIER_COMPLETION = (
+    rf"{_SUPPORTED_READY_FILE_REFERENCE}{_SUPPORTED_FILE_CARRIER_BRIDGE}(?:"
+    rf"{_SUPPORTED_FILE_STRONG_CARRIER_SUFFIX}|{_SUPPORTED_FILE_WEAK_CARRIER_SUFFIX}|"
+    rf"(?:скачать|открыть|забрать)\b)"
 )
 _SUPPORTED_FILE_COMPLETION = re.compile(
     rf"(?:"
@@ -7467,9 +7489,9 @@ _SUPPORTED_FILE_COMPLETION = re.compile(
     rf"{_SUPPORTED_FILE_OBJECT}\b(?=\s*(?:[.!?]|$))|"
     rf"\b{_SUPPORTED_FILE_OBJECT}\b[^.!?\n]{{0,32}}\b(?:уже|теперь)\s+в\s+чат\w*\b|"
     rf"\b{_SUPPORTED_FILE_OBJECT}\b[^.!?\n]{{0,24}}\b(?:наход\w*|леж\w*)\s+в\s+чат\w*\b"
-    rf"|\b{_SUPPORTED_FILE_OBJECT}\b[^.!?\n]{{0,96}}{_SUPPORTED_FILE_STRONG_CARRIER_SUFFIX}"
-    rf"|{_SUPPORTED_READY_FILE_REFERENCE}[^.!?\n]{{0,96}}{_SUPPORTED_FILE_WEAK_CARRIER_SUFFIX}"
-    rf"|{_SUPPORTED_READY_FILE_REFERENCE}\s*[:—–-]\s*(?:скачать|открыть|забрать)\b"
+    rf"|\b{_SUPPORTED_FILE_OBJECT}\b{_SUPPORTED_READY_NOMINAL_QUALIFIER}"
+    rf"{_SUPPORTED_FILE_CARRIER_BRIDGE}{_SUPPORTED_FILE_STRONG_CARRIER_SUFFIX}"
+    rf"|{_SUPPORTED_READY_FILE_CARRIER_COMPLETION}"
     r")",
     re.IGNORECASE,
 )
@@ -8447,6 +8469,38 @@ def _claims_an_unconfirmed_supported_deed(
         # Sentence splitting must not detach a current-delivery handoff from the
         # passive file state it tries to launder as source content.
         return True
+    # Markdown transport normalization and clause segmentation deliberately
+    # remove URLs and split semicolons.  Preserve one bounded ready-carrier
+    # claim before that normalization so ``готовый PDF; он уже для тебя``
+    # cannot lose its asserted delivery state.  The scope starts at the file
+    # reference, excluding modal offer words before it.
+    carrier_surface, carrier_literals_valid = _masked_locate_literals(_classification_text(answer))
+    raw_ready_carrier_claim = (
+        re.search(
+            _SUPPORTED_READY_FILE_CARRIER_COMPLETION,
+            carrier_surface,
+            re.IGNORECASE,
+        )
+        if carrier_literals_valid
+        else None
+    )
+    if raw_ready_carrier_claim is not None:
+        raw_scope = raw_ready_carrier_claim.group(0)
+        format_evidence = file_descriptors if file_format_descriptors is None else file_format_descriptors
+        if (
+            not has_file
+            or (not format_evidence and _claimed_supported_file_formats(raw_scope))
+            or (
+                file_descriptors
+                and not _supported_claim_matches_evidence(
+                    raw_scope,
+                    file_descriptors,
+                    generic=_SUPPORTED_FILE_GENERIC_TERMS,
+                    format_descriptors=format_evidence,
+                )
+            )
+        ):
+            return True
     for clause in _supported_deed_claim_clauses(answer):
         if clause.rstrip().endswith("?") or _SUPPORTED_DEED_NONACTUAL.search(clause):
             continue

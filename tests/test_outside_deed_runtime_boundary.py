@@ -1123,6 +1123,11 @@ def test_common_file_reminder_and_voice_completions_need_evidence(claim: str) ->
         "Yes, I can review an image after you upload it.",
         "I am able to prepare a document after you provide the source text.",
         "I can help analyze a picture once you upload it.",
+        "Документ объясняет, как получить доступ по ссылке.",
+        "Документ содержит доступную по ссылке форму.",
+        "Документ содержит кнопку, которая открывается здесь.",
+        "Документ для проекта объясняет, как получить доступ по ссылке.",
+        "Статус «готовый документ; он уже для тебя» означает успех.",
     ],
 )
 def test_capability_and_readiness_propositions_are_not_completed_deeds(offer: str) -> None:
@@ -1154,6 +1159,20 @@ def test_capability_and_readiness_propositions_are_not_completed_deeds(offer: st
         "Готовый документ открывается по ссылке.",
         "Готовый документ: забирай по ссылке.",
         "Готовая картинка: она ниже.",
+        "Файл отчёта готов.",
+        "Документ по проекту готов.",
+        "Отчёт для клиента готов.",
+        "Картинка для тебя готова.",
+        "Изображение по описанию готово.",
+        "Файл с данными готов.",
+        "Файл с актуальными данными готов.",
+        "Документ по новому проекту готов.",
+        "Архив материалов готов.",
+        "Файлы проекта готовы.",
+        "Готова поделиться готовым документом — ссылка здесь.",
+        "Готова показать готовую картинку: она ниже.",
+        "Могу выслать готовый PDF; он уже для тебя.",
+        "Могу показать готовый документ [скачать](https://example.test/file).",
     ],
 )
 def test_capability_language_cannot_hide_an_independent_completed_effect(claim: str) -> None:
