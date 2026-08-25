@@ -4347,9 +4347,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
             pending_durable_original_attachment_surface = bool(
                 attachments or incoming_documents or staged_document_message_ids or file_already_ingested
             )
-            pending_comparison_attachment_count = pending_comparison_current_attachment_count(
-                attachments
-            )
+            pending_comparison_attachment_count = pending_comparison_current_attachment_count(attachments)
             pending_durable_original_reply_surface = bool(
                 str(body.get("reply_to") or "").strip()
                 or reply_assistant_pointer_present

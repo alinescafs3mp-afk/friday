@@ -169,6 +169,7 @@ from friday.interaction_control_plane.compare_conversation_document import (
     selected_evidence_sha256,
 )
 from friday.interaction_control_plane.compare_conversation_document_store import (
+    cancel_compare_conversation_with_document_in_transaction,
     complete_compare_conversation_with_document_in_transaction,
     create_compare_conversation_with_document_from_selected_followup_in_transaction,
     get_current_compare_conversation_with_document_work_item_in_transaction,
@@ -328,7 +329,10 @@ from friday.organs.obsidian.conversation import (
     obsidian_result_note_request,
     render_obsidian_tool_result,
 )
-from friday.pending_durable_turn import PendingDurableTurnAdmission
+from friday.pending_durable_turn import (
+    PendingDurableTurnAdmission,
+    pending_comparison_current_attachment_count,
+)
 from friday.people import unambiguous
 from friday.permissions import ActorContext, AuthorizationService
 from friday.reports import SUPPORTED_KINDS, sheet_title_from_report_title, spec_from_payload
@@ -32811,6 +32815,8 @@ class AgentRuntime:
         reply_to: str | None,
         reason: str,
     ) -> dict[str, Any]:
+        if not mark_request_effect_possible():
+            raise RuntimeError("request fence failed before comparison suspension")
         content = "Не удалось завершить это сравнение. Запустите его заново."
         metadata = self._comparison_structural_metadata(
             verdict_kind="conversation_document_comparison_suspended",
@@ -32840,6 +32846,63 @@ class AgentRuntime:
             content=content,
             verified=False,
             lifecycle="suspended",
+        )
+
+    def _cancel_comparison_source_free(
+        self,
+        *,
+        conversation_id: str,
+        person_id: str,
+        request: str,
+        work_item_id: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        if not mark_request_effect_possible():
+            raise RuntimeError("request fence failed before comparison cancellation")
+        content = "Сравнение отменено."
+        metadata = self._comparison_structural_metadata(
+            verdict_kind="conversation_document_comparison_cancelled",
+            model_spoke=False,
+        )
+        metadata["structural"]["llm_failed"] = False  # type: ignore[index]
+        with self.storage.transaction() as conn:
+            current = get_current_compare_conversation_with_document_work_item_in_transaction(
+                conn,
+                user_id=person_id,
+                conversation_id=conversation_id,
+            )
+            if current is None or current.id != work_item_id or current.revision != expected_revision:
+                raise WorkItemConflictError("comparison cancellation admission is no longer current")
+            boundary = store_message_in_transaction(
+                conn,
+                conversation_id,
+                person_id,
+                "user",
+                request,
+                metadata={"private_context_lineage": True},
+            )
+            assistant = store_message_in_transaction(
+                conn,
+                conversation_id,
+                person_id,
+                "assistant",
+                content,
+                metadata=metadata,
+                reply_to=str(boundary["id"]),
+            )
+            cancel_compare_conversation_with_document_in_transaction(
+                conn,
+                work_item_id=current.id,
+                user_id=person_id,
+                conversation_id=conversation_id,
+                expected_revision=current.revision,
+            )
+        return self._comparison_public_response(
+            conversation_id=conversation_id,
+            assistant_message=assistant,
+            content=content,
+            verified=False,
+            lifecycle="cancelled",
         )
 
     def _comparison_document_identity(
@@ -32891,6 +32954,26 @@ class AgentRuntime:
             origin_boundary_user_message_id=boundary_message_id,
             resolved_revision=item.revision + 1,
             resolved_at=resolved_at,
+        )
+
+    @staticmethod
+    def _comparison_answer_is_read_only(
+        answer: str,
+        prepared: PreparedFileEvidence,
+    ) -> bool:
+        descriptors = tuple(f"{part.display_name}\n{part.text}" for part in prepared.bundle.parts)
+        return not (
+            claims_a_deed_it_cannot_do(answer, passive_source_state=True)
+            or _claims_an_unconfirmed_obsidian_deed(answer)
+            or _claims_an_unconfirmed_supported_deed(
+                answer,
+                has_file=False,
+                reminder_succeeded=False,
+                reminder_delivery_scheduled=False,
+                voice_succeeded=False,
+                read_only_attachment_review=True,
+                read_only_attachment_descriptors=descriptors,
+            )
         )
 
     async def _execute_active_conversation_document_comparison(
@@ -33025,10 +33108,21 @@ class AgentRuntime:
                 reply_to=boundary_id,
                 reason="invalid_comparison",
             )
+        if not self._comparison_answer_is_read_only(comparison.answer, prepared):
+            return self._suspend_comparison_source_free(
+                conversation_id=conversation_id,
+                person_id=person_id,
+                work_item_id=admitted_item.id,
+                expected_revision=admitted_item.revision,
+                reply_to=boundary_id,
+                reason="effect_claim_rejected",
+            )
 
         try:
             if time.monotonic() >= deadline:
                 raise TimeoutError("comparison deadline expired before final publication")
+            if not mark_request_effect_possible():
+                raise RuntimeError("request fence failed before comparison publication")
             with self.storage.transaction() as conn:
                 if time.monotonic() >= deadline:
                     raise TimeoutError("comparison deadline expired before final transaction")
@@ -33193,10 +33287,26 @@ class AgentRuntime:
         attachments: list[dict[str, Any]] | None,
         turn_started: float,
         turn_deadline: float | None,
+        durable_surface: bool,
+        carried_admission: PendingDurableTurnAdmission | None,
     ) -> dict[str, Any] | None:
         """Own the complete durable comparison journey before ordinary routing."""
 
+        def carried_binding_matches(work_item_id: str, revision: int) -> bool:
+            return bool(
+                carried_admission is None
+                or carried_admission.is_owned
+                and carried_admission.is_bound
+                and carried_admission.matches_scope(
+                    person_id=person_id,
+                    conversation_id=conversation_id,
+                )
+                and carried_admission.work_item_id == work_item_id
+                and carried_admission.revision == revision
+            )
+
         current: Any | None = None
+        displaced_binding: tuple[str, int] | None = None
         malformed_binding: tuple[str, int, str | None] | None = None
         raw_binding: tuple[str, int] | None = None
         selected: RecallSelectedArchiveEvidenceWorkItem | None = None
@@ -33217,26 +33327,35 @@ class AgentRuntime:
                 ).fetchone()
                 if state_row is not None:
                     raw_binding = (str(state_row["id"]), int(state_row["revision"]))
-                    try:
-                        current = get_current_compare_conversation_with_document_work_item_in_transaction(
-                            conn,
-                            user_id=person_id,
-                            conversation_id=conversation_id,
-                        )
-                    except (WorkItemAnchorError, ValueError):
-                        answer_row = conn.execute(
-                            """SELECT answer_user_message_id
-                                 FROM work_item_compare_document_questions
-                                WHERE work_item_id=? AND answer_user_message_id IS NOT NULL
-                                ORDER BY work_revision DESC LIMIT 1""",
-                            (str(state_row["id"]),),
-                        ).fetchone()
-                        malformed_binding = (
-                            str(state_row["id"]),
-                            int(state_row["revision"]),
-                            None if answer_row is None else str(answer_row[0]),
-                        )
-                elif parse_conversation_document_comparison_followup(request) is not None:
+                    if not carried_binding_matches(*raw_binding):
+                        raise WorkItemConflictError("carried comparison admission is no longer current")
+                    if not durable_surface:
+                        displaced_binding = raw_binding
+                    else:
+                        try:
+                            current = get_current_compare_conversation_with_document_work_item_in_transaction(
+                                conn,
+                                user_id=person_id,
+                                conversation_id=conversation_id,
+                            )
+                        except (WorkItemAnchorError, ValueError):
+                            answer_row = conn.execute(
+                                """SELECT answer_user_message_id
+                                     FROM work_item_compare_document_questions
+                                    WHERE work_item_id=? AND answer_user_message_id IS NOT NULL
+                                    ORDER BY work_revision DESC LIMIT 1""",
+                                (str(state_row["id"]),),
+                            ).fetchone()
+                            malformed_binding = (
+                                str(state_row["id"]),
+                                int(state_row["revision"]),
+                                None if answer_row is None else str(answer_row[0]),
+                            )
+                elif (
+                    durable_surface
+                    and not attachments
+                    and parse_conversation_document_comparison_followup(request) is not None
+                ):
                     selected = get_current_recall_selected_archive_evidence_work_item_in_transaction(
                         conn,
                         user_id=person_id,
@@ -33251,6 +33370,19 @@ class AgentRuntime:
             if raw_binding is None:
                 return None
             malformed_binding = (*raw_binding, None)
+
+        if displaced_binding is not None:
+            if not mark_request_effect_possible():
+                raise RuntimeError("request fence failed before displaced comparison suspension")
+            with self.storage.transaction() as conn:
+                suspend_compare_conversation_with_document_in_transaction(
+                    conn,
+                    work_item_id=displaced_binding[0],
+                    user_id=person_id,
+                    conversation_id=conversation_id,
+                    expected_revision=displaced_binding[1],
+                )
+            return None
 
         if malformed_binding is not None:
             if not mark_request_effect_possible():
@@ -33268,6 +33400,8 @@ class AgentRuntime:
         if current is None:
             if selected is None or selected.selected_evidence.corpus is not SelectedArchiveCorpus.MESSAGES:
                 return None
+            if not carried_binding_matches(selected.id, selected.revision):
+                raise WorkItemConflictError("carried selected-evidence admission is no longer current")
             if not mark_request_effect_possible():
                 raise RuntimeError("request fence failed before comparison question")
             with self.storage.transaction() as conn:
@@ -33319,6 +33453,15 @@ class AgentRuntime:
                 content=COMPARE_DOCUMENT_REFERENCE_PROMPT,
                 verified=False,
                 lifecycle="waiting_for_input",
+            )
+
+        if archive_candidate_cancel_requested(request):
+            return self._cancel_comparison_source_free(
+                conversation_id=conversation_id,
+                person_id=person_id,
+                request=request,
+                work_item_id=current.id,
+                expected_revision=current.revision,
             )
 
         if current.state is WorkState.ACTIVE:
@@ -41989,6 +42132,21 @@ class AgentRuntime:
             user_id=user_id,
             limit=20,
         )
+        comparison_attachment_count = pending_comparison_current_attachment_count(attachments)
+        comparison_durable_surface = bool(
+            (not attachments or comparison_attachment_count == 1)
+            and enable_tools is True
+            and ingestion_result is None
+            and synthetic_document_notice is False
+            and replay_source_message_id is None
+            and answer_with_voice is False
+            and reply_to is None
+            and quoted_attachment_reference is False
+            and reply_assistant_reference is False
+            and reply_assistant_message_id is None
+            and turn_policy is None
+            and mode is None
+        )
         if interaction_mode == "dialogue" and actor.own_id == person_id:
             comparison_response = await self._conversation_document_comparison_state_first_response(
                 actor=actor,
@@ -41998,6 +42156,12 @@ class AgentRuntime:
                 attachments=attachments,
                 turn_started=turn_started,
                 turn_deadline=turn_deadline,
+                durable_surface=comparison_durable_surface,
+                carried_admission=(
+                    _pending_durable_admission
+                    if isinstance(_pending_durable_admission, PendingDurableTurnAdmission)
+                    else None
+                ),
             )
             if comparison_response is not None:
                 return comparison_response

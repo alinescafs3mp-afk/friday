@@ -1426,13 +1426,9 @@ def _create_writer_followup_waiting(
     )
     default_owner = owner == "compare-writer-owner"
     old_work_id = (
-        "work_3131313131313131"
-        if default_owner
-        else new_compare_conversation_with_document_work_item_id()
+        "work_3131313131313131" if default_owner else new_compare_conversation_with_document_work_item_id()
     )
-    compare_work_id = (
-        _WORK_ID if default_owner else new_compare_conversation_with_document_work_item_id()
-    )
+    compare_work_id = _WORK_ID if default_owner else new_compare_conversation_with_document_work_item_id()
     compare_question_id = _QUESTION_ID if default_owner else new_compare_document_question_id()
     old_evidence, selected = _selected_messages(
         storage,

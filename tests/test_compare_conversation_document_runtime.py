@@ -13,8 +13,12 @@ from test_compare_conversation_document_schema42 import (  # noqa: PLC2701
     _prepare_writer_document,
     _selected_messages,
 )
-from test_conversation_document_comparison import _ComparisonModel  # noqa: PLC2701
+from test_conversation_document_comparison import (  # noqa: PLC2701
+    _ComparisonModel,
+    _prepared_document,
+)
 
+import friday.agent_runtime as agent_runtime_module
 import friday.orchestration.conversation_document_comparison as comparison_module
 from friday.agent_runtime import AgentRuntime
 from friday.file_evidence import stamp_current_turn_file_reference
@@ -30,6 +34,7 @@ from friday.interaction_control_plane.compare_conversation_document_store import
 )
 from friday.interaction_control_plane.work_item_contract import WorkState
 from friday.interaction_control_plane.work_item_store import WorkItemConflictError
+from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import AuthorizationService
 from friday.retrieval.archive_evidence_replay import (
     ArchiveEvidenceReplayCoverageGrade,
@@ -131,6 +136,23 @@ def _exact_replay(item: Any) -> Any:
         resolved_source=resolved,
         passage_refs=(passage,),
         texts=("В переписке решили оставить точный режим CUDA graphs.",),
+    )
+
+
+def test_comparison_output_cannot_claim_an_unperformed_effect(
+    settings: Any,
+    storage: Any,
+) -> None:
+    runtime = AgentRuntime(settings, storage)
+    prepared = _prepared_document()
+
+    assert runtime._comparison_answer_is_read_only(  # noqa: SLF001
+        "В сообщениях выбран CUDA graphs [M1.1], а документ фиксирует обычный режим [D1].",
+        prepared,
+    )
+    assert not runtime._comparison_answer_is_read_only(  # noqa: SLF001
+        "Я отправил документ [M1.1], и итоговый файл готов [D1].",
+        prepared,
     )
 
 
@@ -276,6 +298,12 @@ async def test_active_comparison_restarts_without_an_intervening_ordinary_row(
         "_comparison_replay_in_transaction",
         lambda *_args, **_kwargs: replay,
     )
+    fence_calls: list[str] = []
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "mark_request_effect_possible",
+        lambda: not fence_calls.append("publication"),
+    )
     result = await restarted.chat(
         owner,
         "продолжи",
@@ -285,6 +313,7 @@ async def test_active_comparison_restarts_without_an_intervening_ordinary_row(
 
     assert result["verified"] is True
     assert result["tools_used"] == []
+    assert fence_calls == ["publication"]
     with storage.transaction() as conn:
         completed = get_compare_conversation_with_document_work_item_in_transaction(
             conn,
@@ -337,3 +366,125 @@ def test_source_drift_can_only_cas_active_comparison_to_suspended(storage: Any) 
             conversation_id=active.conversation_id,
             expected_revision=active.revision,
         )
+
+
+@pytest.mark.asyncio
+async def test_carried_comparison_revision_mismatch_preserves_newer_question(
+    settings: Any,
+    storage: Any,
+) -> None:
+    owner = "compare-carried-race-owner"
+    conversation, waiting, _evidence = _create_writer_followup_waiting(storage, owner=owner)
+    actor = AuthorizationService(storage).actor_for_user(owner, source="comparison-runtime-test")
+    runtime = AgentRuntime(settings, storage)
+    stale = PendingDurableTurnAdmission.owned(
+        person_id=owner,
+        conversation_id=conversation["id"],
+        work_item_id=waiting.id,
+        revision=waiting.revision + 1,
+    )
+    before = storage.execute(
+        "SELECT COUNT(*) FROM messages WHERE user_id=? AND conversation_id=?",
+        (owner, conversation["id"]),
+    ).fetchone()[0]
+
+    with pytest.raises(WorkItemConflictError):
+        await runtime._conversation_document_comparison_state_first_response(  # noqa: SLF001
+            actor=actor,
+            conversation_id=conversation["id"],
+            person_id=owner,
+            request="report.pdf",
+            attachments=None,
+            turn_started=0.0,
+            turn_deadline=None,
+            durable_surface=True,
+            carried_admission=stale,
+        )
+
+    row = storage.execute(
+        "SELECT state,revision FROM work_items WHERE id=?",
+        (waiting.id,),
+    ).fetchone()
+    after = storage.execute(
+        "SELECT COUNT(*) FROM messages WHERE user_id=? AND conversation_id=?",
+        (owner, conversation["id"]),
+    ).fetchone()[0]
+    assert tuple(row) == ("waiting_for_input", waiting.revision)
+    assert after == before
+
+
+@pytest.mark.asyncio
+async def test_exact_cancel_command_closes_waiting_comparison_without_model_use(
+    settings: Any,
+    storage: Any,
+) -> None:
+    owner = "compare-cancel-owner"
+    conversation, waiting, _evidence = _create_writer_followup_waiting(storage, owner=owner)
+    actor = AuthorizationService(storage).actor_for_user(owner, source="comparison-runtime-test")
+    runtime = AgentRuntime(settings, storage)
+
+    result = await runtime._conversation_document_comparison_state_first_response(  # noqa: SLF001
+        actor=actor,
+        conversation_id=conversation["id"],
+        person_id=owner,
+        request="отмена",
+        attachments=None,
+        turn_started=0.0,
+        turn_deadline=None,
+        durable_surface=True,
+        carried_admission=None,
+    )
+
+    row = storage.execute(
+        "SELECT state,revision FROM work_items WHERE id=?",
+        (waiting.id,),
+    ).fetchone()
+    messages = storage.execute(
+        "SELECT role,content FROM messages WHERE user_id=? AND conversation_id=? ORDER BY rowid DESC LIMIT 2",
+        (owner, conversation["id"]),
+    ).fetchall()
+    assert result["context"]["compare_conversation_with_document"] == "cancelled"
+    assert tuple(row) == ("cancelled", waiting.revision + 1)
+    assert [(item["role"], item["content"]) for item in reversed(messages)] == [
+        ("user", "отмена"),
+        ("assistant", "Сравнение отменено."),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_disallowed_attachment_surface_suspends_comparison_without_intercepting_turn(
+    settings: Any,
+    storage: Any,
+) -> None:
+    owner = "compare-displaced-surface-owner"
+    conversation, waiting, _evidence = _create_writer_followup_waiting(storage, owner=owner)
+    actor = AuthorizationService(storage).actor_for_user(owner, source="comparison-runtime-test")
+    runtime = AgentRuntime(settings, storage)
+    before = storage.execute(
+        "SELECT COUNT(*) FROM messages WHERE user_id=? AND conversation_id=?",
+        (owner, conversation["id"]),
+    ).fetchone()[0]
+
+    result = await runtime._conversation_document_comparison_state_first_response(  # noqa: SLF001
+        actor=actor,
+        conversation_id=conversation["id"],
+        person_id=owner,
+        request="ordinary multi-file turn",
+        attachments=[{"raw_object_id": "raw_1111111111111111"}],
+        turn_started=0.0,
+        turn_deadline=None,
+        durable_surface=False,
+        carried_admission=None,
+    )
+
+    row = storage.execute(
+        "SELECT state,revision FROM work_items WHERE id=?",
+        (waiting.id,),
+    ).fetchone()
+    after = storage.execute(
+        "SELECT COUNT(*) FROM messages WHERE user_id=? AND conversation_id=?",
+        (owner, conversation["id"]),
+    ).fetchone()[0]
+    assert result is None
+    assert tuple(row) == ("suspended", waiting.revision + 1)
+    assert after == before
