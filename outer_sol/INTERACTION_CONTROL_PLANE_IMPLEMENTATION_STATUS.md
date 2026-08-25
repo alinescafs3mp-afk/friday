@@ -1,11 +1,11 @@
 # Interaction Control Plane implementation status
 
-Status: **SCHEMA-39 ARCHIVE-EVIDENCE VERTICAL DEPLOYED; DURABLE CANDIDATE SELECTION IN PROGRESS**
+Status: **SCHEMA-40 CANDIDATE FOUNDATION DEPLOYED; AUDITED RUNTIME READY FOR RELEASE**
 Date: 2026-08-25
 Branch: `main`
-Source: `main` / `1ea5a1dd7e9fab4c483e176726071ed55100721c`
-Live: Friday `0.207.13` / `1ea5a1dd7e9fab4c483e176726071ed55100721c`,
-schema 39; previous/fallback `e5a7ba73be4091968630a3db0f459686bc9ddff5`
+Source/live: Friday `0.207.14` / `cce33d5daef12fa4ae239e4b3d891a0a4d907c93`,
+schema 40; previous `1ea5a1dd7e9fab4c483e176726071ed55100721c`;
+schema-capable fallback `4286f3ec5ff2415bc1754e1e4109141d9cd71b50`
 
 ## Release checkpoint
 
@@ -21,10 +21,10 @@ schema 39; previous/fallback `e5a7ba73be4091968630a3db0f459686bc9ddff5`
 - `0.207.8` adds the authorized read-only federated `archive_search` foundation:
   stable source/passage identity, explicit per-corpus coverage, process-private
   carriers and same-transaction reauthorization/publication.
-- The live anchor resolves to `1ea5a1d`, with schema-39 `e5a7ba7` as both
-  immediate predecessor and fallback. Backend and bridge are active,
+- The live anchor resolves to `cce33d5`, with code-identical schema-40
+  `4286f3e` as rollback fallback. Backend and bridge are active,
   trusted-CA health is `ok`, and
-  schema 39, SQLite quick-check, foreign keys and exact Work Item DDL are clean.
+  schema 40, SQLite integrity, foreign keys and FTS are clean.
 - The `912dc1a` schema-39 vertical is now deployed in `0.207.9`: one durable,
   body-free selected archive evidence continuation. Exact restart replay
   performs fresh authority and revision checks without search or model use;
@@ -32,6 +32,10 @@ schema 39; previous/fallback `e5a7ba73be4091968630a3db0f459686bc9ddff5`
   now has restart, late-denial and source-drift evidence across document and
   message lanes. The next ordered-candidate/ordinal-question slice is being
   implemented without widening into a generic WorkGraph.
+- `0.207.14` deploys only the schema-capable candidate-set/question foundation.
+  The prompt is intentionally dormant. Runtime HEAD `5e27be9` passed 722 focused
+  integration tests plus an independent race/atomicity audit with no remaining
+  HIGH/MED finding and is the next release package.
 
 ## P0A implemented
 
@@ -84,21 +88,20 @@ schema 39; previous/fallback `e5a7ba73be4091968630a3db0f459686bc9ddff5`
 1. Use the canonical golden-journey/evidence registry in
    `outer_sol/PROJECT_IMPLEMENTATION_STATUS.md`; its machine validator owns the
    strict readiness and evidence rules.
-2. Persist one body-free ordered candidate set from a sealed accepted search
-   projection and one typed owner-scoped ordinal question.
-3. On a strict Russian/English ordinal answer, recheck authority and revision,
-   consume by CAS and hand the exact evidence atomically into the existing
-   selected-evidence replay without a second search or model call. Prove restart,
-   expiry, foreign owner, out-of-range, late denial, source drift and CAS races.
+2. Release the already-audited body-free candidate runtime on the live schema-40
+   fallback.
+3. After activation, run the bounded production journey and register evidence
+   for strict RU/EN ordinal replay, restart, expiry, late denial, source drift,
+   stop/mode precedence and CAS races without a second search or model call.
 4. Keep generic autonomous WorkGraphs behind that complete user journey.
 
 ## Current cumulative gate
 
-- The exact live source passed 18,074 non-UI and 31 UI tests; the pinned real
+- The exact live source passed 18,164 non-UI and 31 UI tests; the pinned real
   Syncthing 2.1.3 smoke executed rather than remaining environment-skipped.
 - Schema-38 migration, lifecycle/privacy, revision-CAS, restart, temporal
   continuation, receipt/plan binding and named-inventory compatibility checks
   passed.
-- Ruff, mypy, compile and release diff checks passed. The `0.207.13` wheel
+- Ruff, mypy, compile and release diff checks passed. The `0.207.14` wheel
   reproduced byte-for-byte and immutable activation completed `clear`; Docker and
   companion-plugin work remained outside the primary release checkpoint.

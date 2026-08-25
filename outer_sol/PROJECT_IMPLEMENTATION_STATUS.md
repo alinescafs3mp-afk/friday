@@ -6,18 +6,18 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-25
 - Branch: `main`
-- Secondary acceptance base: Friday `0.207.13` is live in provisional public
+- Secondary acceptance base: Friday `0.207.14` is live in provisional public
   shadow. The accepted-profile registry remains empty pending physical
   acceptance; private text and `assist` remain closed.
-- Deployed implementation head: `1ea5a1dd7e9fab4c483e176726071ed55100721c`
-- Live: Friday `0.207.13` / `1ea5a1dd7e9fab4c483e176726071ed55100721c`;
-  tree `8238b99d8ecc1b36814a02986dbf4ba615953a6319b14d216177c04773390d8a`;
-  wheel `1eb583ba44fecbb180d4cb6665260511082152599a2073dcdbe8003f38a6e8a9`
-- Immediate predecessor and schema-capable fallback: Friday `0.207.13` /
-  `e5a7ba73be4091968630a3db0f459686bc9ddff5`;
-  tree `65a6af7ebd02e87b50a458e535e55f1cb7e356fa93ade2b996553ca20bf43bc6`;
-  wheel `c694de274b0be1d4a2376014253f181a640eea5d651856a78b6d8f56e0b9a692`
-- Database schema: 39
+- Deployed implementation head: `cce33d5daef12fa4ae239e4b3d891a0a4d907c93`
+- Live: Friday `0.207.14` / `cce33d5daef12fa4ae239e4b3d891a0a4d907c93`;
+  tree `d8b2d67dfe2099c900546e2157d451163fcace1e6befa3195966fb576b8cc5f2`;
+  wheel `b46ac29f6c190c325fd3593c4ba54a61700f6ab2c9bc151acd2ccc3145105c16`
+- Immediate predecessor: Friday `0.207.13` /
+  `1ea5a1dd7e9fab4c483e176726071ed55100721c`; schema-capable fallback:
+  Friday `0.207.14` / `4286f3ec5ff2415bc1754e1e4109141d9cd71b50`, tree
+  `2c7b14d2ba7586bbc9d503549f837890b0ef19ffc2d396347072a780e8d30eb6`
+- Database schema: 40
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean;
   exact provisional profile is configured in public `shadow/extract`, while
@@ -33,8 +33,8 @@ acceptance, private shadow and bounded assist, preserving exact primary-only
 behavior whenever the laptop is absent. The provisional public-shadow cutover
 is complete. Its causal request witness is deployed and the exact deterministic
 and controlled-live evidence was rebuilt from that release. Work requiring a
-physical laptop power cut waits for the owner; ICP implementation continues in
-an isolated branch meanwhile.
+physical laptop power cut waits for the owner. The schema-40 ICP foundation is
+live; its audited runtime continuation is the active autonomous package.
 
 The measured provisional finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -110,6 +110,10 @@ course, with these repository-specific constraints:
   owner, conversation, role and timezone identity. Expiry, cancellation,
   revision-CAS, restart, receipt/plan binding and atomic rollback are covered;
   unresolved references fail closed without a model or judge fallback.
+- Schema 40 is deployed as a dormant rollback-safe foundation: immutable,
+  body-free ordered archive candidates and a durable ordinal question are
+  restart/migration ready, but the user-visible runtime hook is not enabled in
+  this package.
 - Detailed status: `outer_sol/INTERACTION_CONTROL_PLANE_IMPLEMENTATION_STATUS.md`.
 
 ### Typed read outcomes and durable receipts
@@ -129,15 +133,24 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Perform the real owner-observed causal laptop cut/on and accept only the
-   exact bound finalist; the request-submission witness itself is deployed.
-2. Register the accepted profile in a separate immutable release; promote
-   distinct candidates through private shadow and bounded assist, then repeat
-   the physical cycle with product-linked counters.
-3. Finish the durable body-free ordered archive-candidate set and typed ordinal
-   question, then connect it atomically to the deployed selected-evidence replay.
+1. Merge, gate and release the audited candidate-selection runtime on top of the
+   live schema-40 fallback.
+2. When the owner is present, perform the real causal laptop cut/on and accept
+   only the exact bound finalist; then promote distinct private-shadow/assist
+   candidates with product-linked fallback evidence.
 
 ## Completed and deployed (current package)
+
+### Schema-40 durable candidate foundation (`0.207.14`)
+
+- Immutable body-free ordered archive candidate sets and ordinal questions are
+  migration/restart ready; the prompt remains deliberately dormant until the
+  separately audited runtime package is released.
+- A distinct code-identical schema-40 rollback twin was sealed before migration.
+  Activation completed `clear`; backend/bridge are active, optional secondary
+  public shadow remains healthy, and SQLite integrity/FK/FTS checks are clean.
+- The exact source passed 18,164 non-UI and 31 UI tests, including real pinned
+  Syncthing 2.1.3; two clean wheels reproduced byte-for-byte.
 
 ### Causal physical-loss witness (`0.207.13`)
 
@@ -358,35 +371,32 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- The exact `0.207.13` canonical gate passed 18,074 non-UI tests plus 31 UI
+- The exact `0.207.14` canonical gate passed 18,164 non-UI tests plus 31 UI
   tests, including the pinned Syncthing 2.1.3 smoke; static checks and focused
   causal-secondary gates are green.
-- Friday `0.207.13` public shadow is live at the exact source/tree/wheel identity
-  above, schema 39, with `e5a7ba7` as both immediate predecessor and
-  schema-capable fallback. Independent post-activation audit found no drift.
+- Friday `0.207.14` public shadow is live at the exact source/tree/wheel identity
+  above, schema 40, with distinct code-identical `4286f3e` as its schema-capable
+  fallback. Immutable activation completed `clear`.
 
 ## Next order
 
-1. Complete the owner-observed causal cut/on; accept and register only the exact
-   finalist in a separate immutable release.
-2. Promote distinct immutable candidates through private shadow and bounded
-   assist; repeat laptop-off/disconnect-mid-turn with product-linked counters
-   and prove primary fallback exactly once.
-3. Finish the durable body-free archive candidate-set/ordinal-question vertical,
-   including restart, expiry, authority/revision drift and CAS races, then
-   connect it to selected-evidence replay without a second search or model call.
-4. Build durable DocumentCatalog/enrichment only after that vertical preserves
+1. Release the audit-clean archive candidate-selection runtime, including
+   restart, expiry, authority/revision drift, stop/mode races and exact replay
+   without a second search or model call.
+2. Complete the owner-observed causal cut/on when the owner is present; only then
+   accept/register and promote distinct private-shadow/assist candidates.
+3. Build durable DocumentCatalog/enrichment only after that vertical preserves
    exact archive coverage without persisting model prose.
-5. Add one uncertainty-aware common effect envelope and prove one idempotent,
+4. Add one uncertainty-aware common effect envelope and prove one idempotent,
    receipt-backed Obsidian mutation/reconciliation vertical.
-6. Extend existing immutable-release evidence into machine-reconcilable
+5. Extend existing immutable-release evidence into machine-reconcilable
    source/wheel/schema/activation/fallback manifests, then register exact-release
    journey evidence without promoting generic component gates.
-7. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
+6. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
    certification; simulations remain labelled separately.
-8. Begin V12 refinement with `ExplainSelectedArchiveEvidence`, and make the
+7. Begin V12 refinement with `ExplainSelectedArchiveEvidence`, and make the
    cross-feature search/file/Obsidian/dialogue battery mandatory for releases.
-9. Evaluate generic WorkGraph, broader effects or connectors only from the
+8. Evaluate generic WorkGraph, broader effects or connectors only from the
    golden journeys still failing after the preceding packages. Companion work
    remains out of scope.
 
