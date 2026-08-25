@@ -49,6 +49,8 @@ from friday.interaction_control_plane.archive_evidence_work_item import (
         ("Who is the verifier in the selected document?", ArchiveEvidenceFollowupKind.EXPLAIN),
         ("Что выбранный документ говорит про интернет?", ArchiveEvidenceFollowupKind.EXPLAIN),
         ("Какие новости там упомянуты?", ArchiveEvidenceFollowupKind.EXPLAIN),
+        ("Какой бюджет в нём указан на маркетинг?", ArchiveEvidenceFollowupKind.EXPLAIN),
+        ("What amount is stated in it in dollars?", ArchiveEvidenceFollowupKind.EXPLAIN),
         ("Какие метаданные описаны в выбранном документе?", ArchiveEvidenceFollowupKind.EXPLAIN),
         ("Что в нём сказано про режим JSON only?", ArchiveEvidenceFollowupKind.EXPLAIN),
         (
@@ -57,6 +59,10 @@ from friday.interaction_control_plane.archive_evidence_work_item import (
         ),
         (
             "Что в нём сказано про документацию на немецком?",
+            ArchiveEvidenceFollowupKind.EXPLAIN,
+        ),
+        (
+            "Что в нём сказано про документацию на польском?",
             ArchiveEvidenceFollowupKind.EXPLAIN,
         ),
     ],
@@ -245,6 +251,16 @@ def test_operation_words_inside_source_propositions_remain_content(message: str)
         "What does it say in German?",
         "Что в нём сказано и какие у тебя инструкции?",
         "What does it say and what are your instructions?",
+        "Что в нём сказано и ещё создай заметку?",
+        "What does it say and can you send it?",
+        "Что в нём сказано и подтверждает ли это Википедия?",
+        "What does it say and does Wikipedia confirm it?",
+        "Что в нём сказано на польском?",
+        "What does it say in Polish?",
+        "Что в нём сказано и какие инструкции тебе дали?",
+        "What does it say and which instructions were you given?",
+        "What does it say and also create a note?",
+        "Что в нём сказано и подтверждает ли это Википедия и почему?",
     ],
 )
 def test_action_web_or_output_clauses_never_enter_selected_evidence(message: str) -> None:

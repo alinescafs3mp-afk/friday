@@ -123,12 +123,13 @@ _CONTROL_META_RE = re.compile(
     r"служебн\w* инструкц\w*|цепочк\w* мысл\w*|игнорир\w*|забудь|"
     r"(?:служебн|системн|внутренн)\w* метаданн\w*|"
     r"internal metadata|metadata (?:of|from) (?:the )?(?:work item|receipt|trace|runtime|system)|"
-    r"(?:(?:твои|ваши|тебе данные|данные тебе) инструкц\w*|"
-    r"какие (?:у тебя|у вас) инструкц\w*|your instructions?))\b",
+    r"(?:(?:тебе|тебя|тво\w*|вам|вас|ваш\w*).{0,32}инструкц\w*|"
+    r"инструкц\w*.{0,32}(?:тебе|тебя|тво\w*|вам|вас|ваш\w*)|"
+    r"(?:you|your).{0,32}instructions?|instructions?.{0,32}(?:you|your)))\b",
     re.IGNORECASE,
 )
 _RU_MIXED_ACTION_SUFFIX_RE = re.compile(
-    r"(?:,|\b(?:и|а ещё|а затем|а потом|а заодно|затем|потом|заодно|после этого)\b|[-—])\s*"
+    r"(?:,|\b(?:и|и ещё|а ещё|а затем|а потом|а заодно|затем|потом|заодно|после этого)\b|[-—])\s*"
     r"(?:пожалуйста\s+)?(?:можешь(?: ли)?\s+|"
     r"(?:как|где|когда)\s+|(?:можно|нужно|надо) ли\s+)?"
     r"(?:найди|найдите|поищи|поищите|ищи|ищите|отыщи|"
@@ -212,7 +213,7 @@ _RU_IMPERATIVE_MIXED_ACTION_RE = re.compile(
     re.IGNORECASE,
 )
 _EN_MIXED_ACTION_SUFFIX_RE = re.compile(
-    r"(?:,|\band(?: then)?\b|\bthen\b|[-—])\s*(?:please\s+)?"
+    r"(?:,|\band(?: then)?\b|\bthen\b|[-—])\s*(?:please\s+)?(?:also\s+)?"
     r"(?:check|verify|open|visit|search|find|browse|compare|contrast|create|add|"
     r"append|write|edit|change|delete|remove|move|rename|save|send|publish|"
     r"export|upload|download|remind|schedule|execute|run|call|translate|summarize|"
@@ -347,9 +348,11 @@ _UNSUPPORTED_ANSWER_MODE_RE = re.compile(
     r"(?:"
     r"\b(?:без (?:цитат|ссылок|доказательств)|по памяти|"
     r"на (?:английском|немецком|французском|испанском|итальянском|китайском|"
-    r"японском|русском))\b|"
+    r"японском|русском)|на (?:[^\W_]{2,24}(?:ском|цком)|иврите|латыни|эсперанто))\b|"
     r"\b(?:without (?:citations|sources|evidence)|from memory|"
     r"in (?:english|german|french|spanish|italian|chinese|japanese|russian))\b"
+    r"|\bin (?:[^\W_]{2,24}(?:ish|ese|ian|ean|ic)|german|french|dutch|latin|"
+    r"hebrew|urdu|hindi|greek|turkish)\b"
     r")\s*[?!.]?$",
     re.IGNORECASE,
 )
@@ -358,9 +361,26 @@ _SOURCE_LANGUAGE_PROPOSITION_RE = re.compile(
     r"\b(?:про|о) (?:документаци\w*|текст\w*|раздел\w*|описани\w*) "
     r"на (?:английском|немецком|французском|испанском|итальянском|китайском|"
     r"японском|русском)\b|"
+    r"\b(?:про|о) (?:документаци\w*|текст\w*|раздел\w*|описани\w*) "
+    r"на [^\W_]{2,24}\b|"
     r"\babout (?:the )?(?:documentation|text|section|description) in "
     r"(?:english|german|french|spanish|italian|chinese|japanese|russian)\b"
+    r"|\babout (?:the )?(?:documentation|text|section|description) in [^\W_]{2,24}\b"
     r")",
+    re.IGNORECASE,
+)
+_SECONDARY_INTERROGATIVE_CLAUSE_RE = re.compile(
+    r"\b(?:и|а|and|but)\s+(?:ещ[ёе]\s+|also\s+)?(?:"
+    r"что|кто|какой|какая|какое|какие|как|где|когда|почему|зачем|"
+    r"есть ли|можно ли|нужно ли|надо ли|можешь(?: ли)?|"
+    r"[^\W_]{2,24}\s+ли|"
+    r"what|who|which|how|where|when|why|"
+    r"does|do|did|is|are|was|were|has|have|had|can|could|would|should|will"
+    r")\b",
+    re.IGNORECASE,
+)
+_SAFE_REASON_TAIL_RE = re.compile(
+    r"\b(?:и\s+(?:почему|зачем)|and\s+why)\s*[?!.]?$",
     re.IGNORECASE,
 )
 _ADDITIONAL_SOURCE_CLAUSE_RE = re.compile(
@@ -764,6 +784,18 @@ def parse_archive_evidence_followup(message: object) -> ArchiveEvidenceFollowupK
         _UNSUPPORTED_ANSWER_MODE_RE.search(surface)
         and _SOURCE_LANGUAGE_PROPOSITION_RE.search(surface) is None
     )
+    secondary_interrogative_matches = tuple(
+        match for match in _SECONDARY_INTERROGATIVE_CLAUSE_RE.finditer(surface) if match.start() > 0
+    )
+    safe_reason_tail = _SAFE_REASON_TAIL_RE.search(surface)
+    secondary_interrogative_clause = bool(
+        secondary_interrogative_matches
+        and not (
+            len(secondary_interrogative_matches) == 1
+            and safe_reason_tail is not None
+            and secondary_interrogative_matches[0].start() == safe_reason_tail.start()
+        )
+    )
     requests_capability = bool(
         _CONTROL_META_RE.search(surface)
         or _DIRECT_ACTION_REQUEST_RE.search(surface)
@@ -772,6 +804,7 @@ def parse_archive_evidence_followup(message: object) -> ArchiveEvidenceFollowupK
         or mixed_action
         or output_transform
         or unsupported_answer_mode
+        or secondary_interrogative_clause
         or _ADDITIONAL_SOURCE_CLAUSE_RE.search(surface)
     )
     natural_body = surface[:-1] if surface[-1:] in {".", "?", "!"} else surface
