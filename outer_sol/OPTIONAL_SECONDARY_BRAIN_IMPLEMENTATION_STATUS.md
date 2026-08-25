@@ -145,7 +145,7 @@
 
 - The existing bounded attachment MAP/REDUCE seam is now wired to a separate
   code-owned product policy `gptoss20b-document-map-v1`, manifest SHA-256
-  `c881eefe53d5b02baee3feb133605838021fabe642578b163bdd46e6bd8a2fc2`.
+  `7d57947d7ecda675e8a4da3f56332baf32484c08c0504afd7fa420b9c6323cd9`.
   It binds the unchanged accepted runtime profile and gateway manifest
   `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3`;
   no Windows image, model, launch arguments, served alias or container restart
@@ -158,10 +158,11 @@
   tools, effects and publication.
 - Rollout is independently staged while current Inbox extraction remains in
   assist: `secondary_assist_enable_document_map_shadow` adds discarded
-  document-map shadow; `secondary_document_map_shadow_to_assist` changes only
-  that workload's mode after a separate shadow checkpoint. These source and
-  operator paths are implementation-ready, not evidence that either transition
-  has run on production.
+  document-map shadow. V1 deliberately has no assist transition: a later
+  release must bind the separate shadow checkpoint to a new policy and operator
+  evidence gate before secondary output may influence document mapping. This
+  source/operator shadow path is ready, not evidence that it has run in
+  production.
 
 ## Parallel parent checkpoint
 
@@ -173,7 +174,7 @@
 ## Active order
 
 1. Release the document-map policy dormant, activate its discarded shadow
-   transition, and inspect the separate shadow checkpoint before assist.
+   transition, and build an evidence-bound assist gate from that checkpoint.
 2. Retain a separate product-counter outage/recovery drill as operational
    evidence; it is not a prerequisite for ordinary optional operation.
 3. Continue the next durable ICP journey and V12 refinement with the secondary

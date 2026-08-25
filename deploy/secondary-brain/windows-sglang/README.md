@@ -232,14 +232,15 @@ and the exact candidate bytes must hash to
 
 `workload-policy.document-map.v1.json` is a Friday-side product rollout
 manifest, not a replacement runtime profile. Its SHA-256 is
-`c881eefe53d5b02baee3feb133605838021fabe642578b163bdd46e6bd8a2fc2` and it
+`7d57947d7ecda675e8a4da3f56332baf32484c08c0504afd7fa420b9c6323cd9` and it
 binds the already accepted gateway manifest
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3`.
 Never point
-`FRIDAY_SECONDARY_PROFILE_MANIFEST_PATH` at this policy file. Enabling its
-document-map shadow/assist stages changes neither file mounted by Compose nor
-the running SGLang/gateway containers, so the laptop needs no restart for that
-product-only transition.
+`FRIDAY_SECONDARY_PROFILE_MANIFEST_PATH` at this policy file. The v1 policy is
+shadow-only: enabling discarded document-map shadow changes neither file
+mounted by Compose nor the running SGLang/gateway containers, so the laptop
+needs no restart for that product-only transition. Assist requires a later
+evidence-bound policy and operator gate; v1 must never be used to promote it.
 
 The profile ID and served-model alias are derived from the complete engine
 projection. `dtype=bfloat16`, `quantization=mxfp4`, global/prefill attention

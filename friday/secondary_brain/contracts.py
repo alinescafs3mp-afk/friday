@@ -362,12 +362,23 @@ def secondary_configuration_is_admissible(
         secondary_effective_workloads(profile, global_mode=mode) if profile is not None else frozenset()
     )
     document_map_requested = "document_map" in workloads
+    document_map_is_runtime_certified = bool(
+        profile is not None and "document_map" in profile.allowed_workloads
+    )
     document_map_policy_matches = bool(
         (not document_map_requested and document_map_mode == "disabled")
         or (
             document_map_requested
-            and mode == "assist"
+            and document_map_is_runtime_certified
             and document_map_mode in {"shadow", "assist"}
+            and (mode == "assist" or document_map_mode == "shadow")
+            and allow_private_text
+        )
+        or (
+            document_map_requested
+            and not document_map_is_runtime_certified
+            and mode == "assist"
+            and document_map_mode == "shadow"
             and allow_private_text
         )
     )

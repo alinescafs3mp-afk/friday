@@ -511,7 +511,7 @@ class SecondaryWorkloadPolicy:
             and set(value) == _WORKLOAD_POLICY_KEYS
             and raw == _canonical_json(value)
             and value.get("schema") == _WORKLOAD_POLICY_SCHEMA
-            and value.get("status") == "implementation_ready"
+            and value.get("status") == "shadow_ready"
             and value.get("policy_id") == self.policy_id
             and value.get("runtime_profile_id") == self.runtime_profile_id
             and value.get("runtime_profile_manifest_sha256") == self.runtime_profile_manifest_sha256
@@ -541,7 +541,7 @@ class SecondaryWorkloadPolicy:
             and _PROFILE_ID_RE.fullmatch(self.runtime_profile_id)
             and _SHA256_RE.fullmatch(self.runtime_profile_manifest_sha256)
             and self.allowed_global_modes == frozenset({"assist"})
-            and self.document_map_modes == frozenset({"assist", "shadow"})
+            and self.document_map_modes == frozenset({"shadow"})
             and self.additional_workloads == frozenset({"document_map"})
             and self.max_context_tokens == 4096
             and self.max_output_tokens == 512
@@ -610,15 +610,16 @@ _ACCEPTED_GPT_OSS_20B_FINALIST = SecondaryRuntimeProfile(
 # This policy deliberately does not alter the gateway-served runtime manifest.
 # The engine, Windows bundle, profile ID and accepted manifest digest remain
 # exactly the already-certified finalist.  It only admits one additional
-# product workload through an explicit release-operator transition; the model
-# still receives bounded text and can neither publish nor execute anything.
+# product workload in discarded shadow through an explicit release-operator
+# transition; assist remains closed until a later evidence-bound policy. The
+# model still receives bounded text and can neither publish nor execute anything.
 _DOCUMENT_MAP_WORKLOAD_POLICY = SecondaryWorkloadPolicy(
     policy_id="gptoss20b-document-map-v1",
-    manifest_sha256="c881eefe53d5b02baee3feb133605838021fabe642578b163bdd46e6bd8a2fc2",
+    manifest_sha256="7d57947d7ecda675e8a4da3f56332baf32484c08c0504afd7fa420b9c6323cd9",
     runtime_profile_id=_ACCEPTED_GPT_OSS_20B_FINALIST.profile_id,
     runtime_profile_manifest_sha256=_ACCEPTED_GPT_OSS_20B_FINALIST.manifest_sha256,
     allowed_global_modes=frozenset({"assist"}),
-    document_map_modes=frozenset({"assist", "shadow"}),
+    document_map_modes=frozenset({"shadow"}),
     additional_workloads=frozenset({"document_map"}),
     max_context_tokens=4096,
     max_output_tokens=512,
@@ -696,7 +697,7 @@ def secondary_effective_workloads(
     *,
     global_mode: str,
 ) -> frozenset[str]:
-    """Return runtime-certified workloads plus one exact product overlay."""
+    """Return runtime-certified workloads plus one exact shadow-only overlay."""
 
     policy = get_secondary_workload_policy(profile, global_mode=global_mode)
     if policy is None:

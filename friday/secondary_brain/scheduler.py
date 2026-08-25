@@ -156,6 +156,8 @@ class SecondaryBrainScheduler:
         """Return the code-owned rollout mode for one advisory workload."""
 
         if workload is ModelWorkload.DOCUMENT_MAP:
+            if self.mode is SecondaryMode.DISABLED or self._client is None:
+                return SecondaryMode.DISABLED
             return self._document_map_mode
         return self.mode
 

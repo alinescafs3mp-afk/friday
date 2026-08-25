@@ -5,6 +5,10 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
+import friday.secondary_brain.contracts as secondary_contracts
+from friday.secondary_brain.contracts import SecondaryEndpointConfig
 from friday.secondary_brain.profiles import (
     ACCEPTED_SECONDARY_RUNTIME_PROFILES,
     PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES,
@@ -105,8 +109,47 @@ def test_document_map_policy_extends_product_work_only_without_rebinding_windows
     assert policy.accepts_manifest(raw) is True
     assert policy.runtime_profile_id == profile.profile_id
     assert policy.runtime_profile_manifest_sha256 == profile.manifest_sha256 == _ACCEPTED_SHA256
+    assert policy.document_map_modes == frozenset({"shadow"})
     assert secondary_effective_workloads(profile, global_mode="shadow") == frozenset({"extract"})
     assert secondary_effective_workloads(profile, global_mode="assist") == frozenset(
         {"document_map", "extract"}
     )
     assert policy.accepts_manifest(raw + b" ") is False
+
+
+def test_document_map_overlay_is_shadow_only_until_evidence_bound_promotion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = ACCEPTED_SECONDARY_RUNTIME_PROFILES[_PROFILE_ID]
+    monkeypatch.setattr(secondary_contracts, "_load_pinned_ca_pem", lambda *_args: "certificate")
+    endpoint = SecondaryEndpointConfig(
+        base_url=profile.endpoint_base_url,
+        served_model_alias=profile.served_model_alias,
+        api_key="a" * 64,
+        ca_file="/private/friday-secondary-ca.pem",
+        ca_sha256=profile.gateway_ca_certificate_sha256,
+        max_context_tokens=profile.max_context_tokens,
+        max_concurrency=profile.max_concurrency,
+        max_output_tokens=profile.max_output_tokens,
+        profile_id=profile.profile_id,
+        profile_manifest_sha256=profile.manifest_sha256,
+    )
+    arguments = {
+        "primary_base_url": "http://127.0.0.1:30000/v1",
+        "primary_model": "primary-model",
+        "primary_timeout_sec": 60.0,
+        "workload_names": ("document_map", "extract"),
+        "mode": "assist",
+        "allow_private_text": True,
+    }
+
+    assert secondary_contracts.secondary_configuration_is_admissible(
+        endpoint,
+        **arguments,
+        document_map_mode="shadow",
+    )
+    assert not secondary_contracts.secondary_configuration_is_admissible(
+        endpoint,
+        **arguments,
+        document_map_mode="assist",
+    )
