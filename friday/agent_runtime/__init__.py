@@ -5742,13 +5742,15 @@ def _markdown_visible_projection(text: str) -> str:
     return _VISIBLE_MD_ITALIC.sub(lambda match: match.group(1) or match.group(2), candidate)
 
 
-def _classification_text(text: str) -> str:
+def _normalized_classification_surface(text: str) -> str:
+    """Normalize invisible controls without consuming Markdown delimiters."""
+
     # Format controls are invisible on the delivered surface but split every
     # regex token (``зака\u200bзала``).  Normalise a classification-only copy;
     # the person's original text is never rewritten.  NFKC also folds fullwidth
     # punctuation/letters into the same visible form the renderer presents.
     candidate = unicodedata.normalize("NFKC", str(text or ""))
-    candidate = "".join(
+    return "".join(
         char
         for char in candidate
         if unicodedata.category(char) != "Cf"
@@ -5756,6 +5758,10 @@ def _classification_text(text: str) -> str:
         and not ("\ufe00" <= char <= "\ufe0f")
         and not ("\U000e0100" <= char <= "\U000e01ef")
     )
+
+
+def _classification_text(text: str) -> str:
+    candidate = _normalized_classification_surface(text)
     # Telegram turns Markdown links/code/emphasis into one visible token only
     # after this safety boundary.  Classify that exact visible projection: a
     # model must not split ``заказала`` across ``[ка](url)`` or backticks while
@@ -7396,16 +7402,38 @@ _SUPPORTED_READY_MASCULINE_OBJECT = r"(?:файл|документ|отч[её]�
 _SUPPORTED_READY_FEMININE_OBJECT = r"(?:картинка)"
 _SUPPORTED_READY_NEUTER_OBJECT = r"(?:вложение|изображение)"
 _SUPPORTED_READY_PLURAL_OBJECT = r"(?:файлы|документы|отч[её]ты|архивы|вложения|картинки|изображения)"
-_SUPPORTED_READY_GENITIVE_QUALIFIER = r"(?:[а-яё][а-яё-]{1,38}(?:а|я|ов|ев|ей|ых|их))"
-_SUPPORTED_READY_PREPOSITIONAL_MODIFIER = (
-    r"(?:[а-яё][а-яё-]{1,38}"
-    r"(?:ому|ему|ого|его|ыми|ими|ой|ей|ую|юю|ым|им|ых|их))"
+_SUPPORTED_READY_GENITIVE_ADJECTIVE = r"(?:[а-яё][а-яё-]{1,38}(?:ого|его|ой|ей|ых|их))"
+_SUPPORTED_READY_GENITIVE_NOUN = (
+    r"(?!(?:из|по|для|с|за|у|в|на)\b)"
+    r"(?:[а-яё][а-яё-]{1,38}(?:а|я|ы|и|ии|ов|ев|ей|ых|их))"
+)
+_SUPPORTED_READY_ZERO_GENITIVE_NOUN = (
+    r"(?!(?:можно|сейчас|здесь|тут|ниже|уже|теперь|"
+    r"доступ\w*|наход\w*|леж\w*|открыва\w*|ссылк\w*)\b)"
+    r"(?!(?:[а-яё-]*)(?:(?:ть|ти|чь)(?:ся|сь)?|"
+    r"ет|ит|ют|ут|ат|ят|ла|ли|ем|им)\b)"
+    r"(?:[а-яё][а-яё-]{2,38})"
+)
+_SUPPORTED_READY_GENITIVE_PHRASE = (
+    rf"(?:{_SUPPORTED_READY_GENITIVE_ADJECTIVE}\s+)?"
+    rf"{_SUPPORTED_READY_GENITIVE_NOUN}"
+    rf"(?:\s+(?:{_SUPPORTED_READY_GENITIVE_NOUN}|"
+    rf"{_SUPPORTED_READY_ZERO_GENITIVE_NOUN}|\d{{1,6}})){{0,2}}"
+)
+_SUPPORTED_READY_QUALIFIER_TOKEN = (
+    r"(?!(?:можно|сейчас|здесь|тут|ниже|уже|теперь|"
+    r"тебя|вас|он|она|оно|они|"
+    r"доступ\w*|наход\w*|леж\w*|открыва\w*|ссылк\w*)\b)"
+    r"(?:[а-яё0-9][а-яё0-9._-]{1,39})"
+)
+_SUPPORTED_READY_PREPOSITIONAL_PHRASE = (
+    rf"(?:из|по|для|с|за)\s+{_SUPPORTED_READY_QUALIFIER_TOKEN}"
+    rf"(?:\s+{_SUPPORTED_READY_QUALIFIER_TOKEN}){{0,2}}"
 )
 _SUPPORTED_READY_NOMINAL_QUALIFIER = (
-    rf"(?:\s+(?:(?:из|по|для|с)\s+"
-    rf"(?:{_SUPPORTED_READY_PREPOSITIONAL_MODIFIER}\s+)?[а-яё0-9._-]{{2,40}}|"
-    rf"{_SUPPORTED_READY_GENITIVE_QUALIFIER}"
-    rf"(?:\s+{_SUPPORTED_READY_GENITIVE_QUALIFIER})?))?"
+    rf"(?:\s+{_SUPPORTED_READY_GENITIVE_PHRASE})?"
+    rf"(?:\s+(?:{_SUPPORTED_READY_PREPOSITIONAL_PHRASE}|"
+    r"для\s+(?:тебя|вас)))?"
 )
 _SUPPORTED_FILE_READY_COMPLETION = (
     rf"(?:\b{_SUPPORTED_FILE_OBJECT}\b(?:\s+и\s+\b{_SUPPORTED_FILE_OBJECT}\b)+"
@@ -7430,13 +7458,53 @@ _SUPPORTED_FILE_READY_COMPLETION = (
     rf"\bготовы\s+{_SUPPORTED_READY_PLURAL_OBJECT}\b|"
     rf"\bготово\s*[—–:-]\s*{_SUPPORTED_FILE_OBJECT}\b)"
 )
-_SUPPORTED_READY_FILE_REFERENCE = (
-    rf"\bготов(?:ый|ая|ое|ые|ую|ого|ой|ых|ым|ыми)\s+"
-    rf"{_SUPPORTED_FILE_OBJECT}\b"
+_SUPPORTED_READY_MASCULINE_DESCRIPTOR = r"(?:[а-яё][а-яё-]{1,38}(?:ый|ий|ой))"
+_SUPPORTED_READY_FEMININE_DESCRIPTOR = r"(?:[а-яё][а-яё-]{1,38}(?:ая|яя))"
+_SUPPORTED_READY_NEUTER_DESCRIPTOR = r"(?:[а-яё][а-яё-]{1,38}(?:ое|ее))"
+_SUPPORTED_READY_PLURAL_DESCRIPTOR = r"(?:[а-яё][а-яё-]{1,38}(?:ые|ие))"
+_SUPPORTED_READY_FORMAT_OBJECT = r"(?:pdf|xlsx?|excel|word|docx?|png|jpe?g)"
+_SUPPORTED_READY_MASCULINE_HEAD = (
+    rf"{_SUPPORTED_READY_MASCULINE_OBJECT}"
+    rf"(?:[-–—\s]+{_SUPPORTED_READY_MASCULINE_OBJECT})?"
 )
-_SUPPORTED_FILE_CARRIER_BRIDGE = r"\s*(?:[,;:—–-]\s*)?"
+_SUPPORTED_READY_FEMININE_HEAD = (
+    rf"(?:{_SUPPORTED_READY_FEMININE_OBJECT}|"
+    rf"{_SUPPORTED_READY_FORMAT_OBJECT}[-–—\s]+версия|"
+    rf"версия[-–—\s]+{_SUPPORTED_READY_FORMAT_OBJECT})"
+)
+_SUPPORTED_READY_FILENAME_DESCRIPTOR = (
+    r"(?:[A-Za-zА-ЯЁа-яё0-9@+(),\[\]-]+"
+    r"(?:\.[A-Za-zА-ЯЁа-яё0-9@+(),\[\]-]+)*\.[A-Za-z0-9]{1,16})"
+)
+_SUPPORTED_READY_FILE_POSTFIX = (
+    rf"(?:\s+{_SUPPORTED_READY_GENITIVE_PHRASE})?"
+    rf"(?:\s+{_SUPPORTED_READY_PREPOSITIONAL_PHRASE})?"
+    rf"(?:\s+(?:\ufffc{{2,256}}|{_SUPPORTED_READY_FILENAME_DESCRIPTOR}))?"
+)
+_SUPPORTED_READY_FILE_NOMINATIVE_REFERENCE = (
+    rf"(?:\bготовый(?:\s+{_SUPPORTED_READY_MASCULINE_DESCRIPTOR}){{0,2}}\s+"
+    rf"{_SUPPORTED_READY_MASCULINE_HEAD}\b|"
+    rf"\bготовая(?:\s+{_SUPPORTED_READY_FEMININE_DESCRIPTOR}){{0,2}}\s+"
+    rf"{_SUPPORTED_READY_FEMININE_HEAD}\b|"
+    rf"\bготовое(?:\s+{_SUPPORTED_READY_NEUTER_DESCRIPTOR}){{0,2}}\s+"
+    rf"{_SUPPORTED_READY_NEUTER_OBJECT}\b|"
+    rf"\bготовые(?:\s+{_SUPPORTED_READY_PLURAL_DESCRIPTOR}){{0,2}}\s+"
+    rf"{_SUPPORTED_READY_PLURAL_OBJECT}\b)"
+    rf"{_SUPPORTED_READY_FILE_POSTFIX}"
+)
+_SUPPORTED_READY_FILE_OBLIQUE_REFERENCE = (
+    rf"\bготов(?:ую|ого|ой|ых|ым|ыми)\s+"
+    rf"{_SUPPORTED_FILE_OBJECT}\b"
+    rf"{_SUPPORTED_READY_FILE_POSTFIX}"
+)
+_SUPPORTED_READY_FILE_REFERENCE = (
+    rf"(?:{_SUPPORTED_READY_FILE_NOMINATIVE_REFERENCE}|"
+    rf"{_SUPPORTED_READY_FILE_OBLIQUE_REFERENCE})"
+)
+_SUPPORTED_FILE_CARRIER_BRIDGE = r"\s*(?:(?:[,;:—–-]|\.(?=\s))\s*)?"
 _SUPPORTED_FILE_STRONG_CARRIER_SUFFIX = (
-    r"(?:\b(?:он|она|оно|они)?\s*(?:уже\s+|теперь\s+)?"
+    r"(?:\b(?:он|она|оно|они)?\s*"
+    r"(?:(?:прямо\s+)?сейчас\s+|уже\s+|теперь\s+)?"
     r"(?:доступ\w*|наход\w*|леж\w*|открыва\w*)\b[^.!?\n]{0,24}"
     r"(?:\b(?:здесь|тут|ниже)\b|\b(?:по|через)\s+ссылк\w*\b|"
     r"\bв\s+чат\w*\b|\b(?:у|для)\s+(?:тебя|вас)\b)|"
@@ -7444,17 +7512,33 @@ _SUPPORTED_FILE_STRONG_CARRIER_SUFFIX = (
     r"(?:у\s+(?:тебя|вас)|в\s+чат\w*)\b)"
 )
 _SUPPORTED_FILE_WEAK_CARRIER_SUFFIX = (
-    r"(?:\b(?:(?:он|она|оно|они)\s+)?(?:уже\s+|теперь\s+)?"
-    r"(?:здесь|тут|ниже|в\s+чат\w*|для\s+(?:тебя|вас))\b|"
+    r"(?:\b(?:(?:он|она|оно|они)\s+)?"
+    r"(?:(?:прямо\s+)?сейчас\s+|уже\s+|теперь\s+)?"
+    r"(?:здесь|тут|ниже|в\s+чат\w*|для\s+(?:тебя|вас)|"
+    r"у\s+(?:тебя|вас))\b|"
     r"\b(?:вот\s+)?ссылк\w*(?:\s+(?:здесь|тут|ниже))?\b|"
     r"https?://[^\s)\]>]+|\[[^\]\n]{1,120}\]\(https?://[^\s)]+\)|"
     r"\b(?:держи(?:те)?|забирай(?:те)?|забери(?:те)?)\b"
     r"[^.!?\n]{0,24}(?:\b(?:по|через)\s+ссылк\w*\b)?)"
 )
 _SUPPORTED_READY_FILE_CARRIER_COMPLETION = (
-    rf"{_SUPPORTED_READY_FILE_REFERENCE}{_SUPPORTED_FILE_CARRIER_BRIDGE}(?:"
+    rf"(?P<reference>{_SUPPORTED_READY_FILE_REFERENCE})"
+    rf"{_SUPPORTED_FILE_CARRIER_BRIDGE}(?:"
     rf"{_SUPPORTED_FILE_STRONG_CARRIER_SUFFIX}|{_SUPPORTED_FILE_WEAK_CARRIER_SUFFIX}|"
-    rf"(?:скачать|открыть|забрать)\b)"
+    rf"(?:можно\s+)?(?:скачать|открыть|забрать)\b)"
+)
+_SUPPORTED_READY_FILE_CARRIER_COMPLETION_RE = re.compile(
+    _SUPPORTED_READY_FILE_CARRIER_COMPLETION,
+    re.IGNORECASE,
+)
+_SUPPORTED_READY_FILE_NOMINATIVE_REFERENCE_RE = re.compile(
+    _SUPPORTED_READY_FILE_NOMINATIVE_REFERENCE,
+    re.IGNORECASE,
+)
+_SUPPORTED_READY_FILE_BARE_COMPLETION_RE = re.compile(
+    rf"^\W*(?:вот\s+)?(?P<reference>{_SUPPORTED_READY_FILE_NOMINATIVE_REFERENCE})"
+    r"\s*[.!]?\s*$",
+    re.IGNORECASE,
 )
 _SUPPORTED_FILE_COMPLETION = re.compile(
     rf"(?:"
@@ -7489,9 +7573,6 @@ _SUPPORTED_FILE_COMPLETION = re.compile(
     rf"{_SUPPORTED_FILE_OBJECT}\b(?=\s*(?:[.!?]|$))|"
     rf"\b{_SUPPORTED_FILE_OBJECT}\b[^.!?\n]{{0,32}}\b(?:уже|теперь)\s+в\s+чат\w*\b|"
     rf"\b{_SUPPORTED_FILE_OBJECT}\b[^.!?\n]{{0,24}}\b(?:наход\w*|леж\w*)\s+в\s+чат\w*\b"
-    rf"|\b{_SUPPORTED_FILE_OBJECT}\b{_SUPPORTED_READY_NOMINAL_QUALIFIER}"
-    rf"{_SUPPORTED_FILE_CARRIER_BRIDGE}{_SUPPORTED_FILE_STRONG_CARRIER_SUFFIX}"
-    rf"|{_SUPPORTED_READY_FILE_CARRIER_COMPLETION}"
     r")",
     re.IGNORECASE,
 )
@@ -8435,6 +8516,167 @@ def _read_only_attachment_preamble_is_grounded(
     )
 
 
+_SUPPORTED_READY_CONTEXT_BOUNDARY = re.compile(
+    r"[!?;\n]+|\.(?=\s|$)|"
+    r",\s*(?=(?:а|но|зато|однако|при\s+этом|хотя|вс[её]\s+же)\b)",
+    re.IGNORECASE,
+)
+_SUPPORTED_READY_REPORTED_SOURCE_CONTEXT = re.compile(
+    r"^(?:(?:на|в)\s+(?:сайт|портал|страниц|стат|публикац|источник)\w*"
+    r"(?:\s+[A-Za-zА-ЯЁа-яё0-9._-]{2,80})?\s*,?\s+(?=готов)|"
+    r"(?:на|в)\s+(?:сайт|портал|страниц|стат|публикац|источник)\w*"
+    r"[^.!?;\n]{0,64}\b(?:сообщ|пиш|написа|сказа|утвержда|указа)\w*\s*[:;,]|"
+    r"(?:сайт|портал|статья|публикация|источник|автор|он|она|они)\b"
+    r"[^.!?;\n]{0,96}\b(?:сообщ|пиш|написа|сказа|утвержда|указа)\w*\b"
+    r"(?:\s*,?\s*что\b|\s*[:;,]))",
+    re.IGNORECASE,
+)
+_SUPPORTED_READY_MODAL_OFFER_PREFIX = re.compile(
+    r"^\W*(?:да\W+)?"
+    r"(?:(?:при\s+необходимости|без\s+проблем|с\s+радостью|также)\s+){0,3}"
+    r"(?:(?:я\s+)?(?:могу|можем|готова?|способна?|"
+    r"предлагаю|хочу)\b[^.!?;\n]{0,96}"
+    r"\b[а-яё][а-яё-]{1,38}(?:ть|ти|чь)(?:ся|сь)?"
+    r"(?:\s+(?:для\s+(?:тебя|вас)|по\s+твоему\s+описанию)){0,2}|"
+    r"(?:я\s+)?(?:подготовлю|сделаю|создам|сформирую|соберу)\b"
+    r"[^.!?;\n]{0,64})\s*$",
+    re.IGNORECASE,
+)
+_SUPPORTED_READY_RECIPIENT_ONLY_CARRIER = re.compile(
+    r"^\s*[,:—–-]?\s*для\s+(?:тебя|вас)\b\s*$",
+    re.IGNORECASE,
+)
+
+
+def _bounded_supported_ready_claim_context(
+    surface: str,
+    start: int,
+    end: int,
+) -> tuple[str, int, int]:
+    """Return the sentence owning a ready reference and its adjacent carrier."""
+
+    leading_boundaries = list(_SUPPORTED_READY_CONTEXT_BOUNDARY.finditer(surface, 0, start))
+    left = leading_boundaries[-1].end() if leading_boundaries else 0
+    if leading_boundaries and any(mark in leading_boundaries[-1].group(0) for mark in (".", "\n")):
+        previous_end = leading_boundaries[-1].start()
+        previous_start = leading_boundaries[-2].end() if len(leading_boundaries) > 1 else 0
+        possible_header = _classification_text(surface[previous_start:previous_end]).strip()
+        if (
+            _OUTSIDE_DEED_STANDALONE_SOURCE.fullmatch(possible_header)
+            or _model_text_is_reported(possible_header)
+            or _model_text_has_external_source(possible_header)
+        ):
+            left = previous_start
+    right_boundary = _SUPPORTED_READY_CONTEXT_BOUNDARY.search(surface, end)
+    right = len(surface) if right_boundary is None else right_boundary.end()
+    return surface[left:right].strip(), left, right
+
+
+def _supported_ready_claim_is_actual(context: str, *, literals_valid: bool) -> bool:
+    """Reject examples, questions and sourced states before classifying a handoff."""
+
+    if not literals_valid:
+        # An unmatched quote/backtick cannot safely establish where quoted or
+        # code content ends.  A visible ready-carrier assertion therefore
+        # remains a claim instead of becoming an unverified literal escape.
+        return True
+    candidate = context.strip()
+    return bool(
+        candidate
+        and not candidate.rstrip().endswith("?")
+        and _SUPPORTED_DEED_NONACTUAL.search(candidate) is None
+        and _SUPPORTED_DEED_NEGATED.search(candidate) is None
+        and _SUPPORTED_DEED_ACTIVE_NEGATED.search(candidate) is None
+        and not _model_text_is_reported(candidate)
+        and not _model_text_has_external_source(candidate)
+        and _SUPPORTED_READY_REPORTED_SOURCE_CONTEXT.search(candidate) is None
+    )
+
+
+def _supported_ready_reference_evidence_scope(
+    normalized: str,
+    masked: str,
+    reference: str,
+    reference_offset: int,
+) -> str:
+    """Recover an adjacent quoted filename without unmasking quoted examples."""
+
+    if "\ufffc" not in reference:
+        return reference
+    starts: list[int] = []
+    cursor = 0
+    while (start := masked.find(reference, cursor)) >= 0:
+        starts.append(start)
+        cursor = start + 1
+    if not starts:
+        # Formatting projection may make an exact offset unrecoverable.  Never
+        # downgrade an opaque artifact identity to a generic ``document``.
+        return f"{reference} неподтвержденная-идентичность-вложения"
+    start = min(starts, key=lambda candidate: abs(candidate - reference_offset))
+    return _classification_text(normalized[start : start + len(reference)])
+
+
+def _actual_supported_ready_file_claims(answer: str) -> tuple[str, ...]:
+    """Find actual ready-file handoffs while keeping literals and evidence bounded.
+
+    Markdown/code delimiters are parsed before visible-text projection.  Each
+    Each result is only the ready-file reference: a link/location proves the
+    delivery channel, never the artifact descriptor.
+    """
+
+    normalized = _normalized_classification_surface(answer)
+    masked, literals_valid = _masked_locate_literals(normalized)
+    surface = _classification_text(masked if literals_valid else normalized)
+    claims: list[str] = []
+    for match in _SUPPORTED_READY_FILE_CARRIER_COMPLETION_RE.finditer(surface):
+        context, context_start, _context_end = _bounded_supported_ready_claim_context(
+            surface,
+            match.start(),
+            match.end(),
+        )
+        prefix = surface[context_start : match.start()]
+        carrier = match.group(0)[match.end("reference") - match.start() :]
+        if _SUPPORTED_READY_MODAL_OFFER_PREFIX.search(
+            prefix
+        ) and _SUPPORTED_READY_RECIPIENT_ONLY_CARRIER.fullmatch(carrier):
+            continue
+        if _supported_ready_claim_is_actual(context, literals_valid=literals_valid):
+            reference = match.group("reference")
+            claims.append(
+                _supported_ready_reference_evidence_scope(
+                    normalized,
+                    masked,
+                    reference,
+                    match.start("reference"),
+                )
+            )
+
+    # A standalone attributive result (``Готовый документ.``) is already a
+    # current handoff even without a carrier suffix.  Sentence-local matching
+    # prevents capability prose from lending that meaning to the same words.
+    for reference_match in _SUPPORTED_READY_FILE_NOMINATIVE_REFERENCE_RE.finditer(surface):
+        context, _context_start, _context_end = _bounded_supported_ready_claim_context(
+            surface,
+            reference_match.start(),
+            reference_match.end(),
+        )
+        match = _SUPPORTED_READY_FILE_BARE_COMPLETION_RE.fullmatch(context)
+        if match is not None and _supported_ready_claim_is_actual(
+            context,
+            literals_valid=literals_valid,
+        ):
+            reference = match.group("reference")
+            claims.append(
+                _supported_ready_reference_evidence_scope(
+                    normalized,
+                    masked,
+                    reference,
+                    reference_match.start(),
+                )
+            )
+    return tuple(claims)
+
+
 def _claims_an_unconfirmed_supported_deed(
     answer: str,
     *,
@@ -8469,31 +8711,15 @@ def _claims_an_unconfirmed_supported_deed(
         # Sentence splitting must not detach a current-delivery handoff from the
         # passive file state it tries to launder as source content.
         return True
-    # Markdown transport normalization and clause segmentation deliberately
-    # remove URLs and split semicolons.  Preserve one bounded ready-carrier
-    # claim before that normalization so ``готовый PDF; он уже для тебя``
-    # cannot lose its asserted delivery state.  The scope starts at the file
-    # reference, excluding modal offer words before it.
-    carrier_surface, carrier_literals_valid = _masked_locate_literals(_classification_text(answer))
-    raw_ready_carrier_claim = (
-        re.search(
-            _SUPPORTED_READY_FILE_CARRIER_COMPLETION,
-            carrier_surface,
-            re.IGNORECASE,
-        )
-        if carrier_literals_valid
-        else None
-    )
-    if raw_ready_carrier_claim is not None:
-        raw_scope = raw_ready_carrier_claim.group(0)
+    for evidence_scope in _actual_supported_ready_file_claims(answer):
         format_evidence = file_descriptors if file_format_descriptors is None else file_format_descriptors
         if (
             not has_file
-            or (not format_evidence and _claimed_supported_file_formats(raw_scope))
+            or (not format_evidence and _claimed_supported_file_formats(evidence_scope))
             or (
                 file_descriptors
                 and not _supported_claim_matches_evidence(
-                    raw_scope,
+                    evidence_scope,
                     file_descriptors,
                     generic=_SUPPORTED_FILE_GENERIC_TERMS,
                     format_descriptors=format_evidence,
