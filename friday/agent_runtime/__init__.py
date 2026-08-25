@@ -108,17 +108,26 @@ from friday.file_evidence import (
     current_turn_file_reference_of,
 )
 from friday.interaction_control_plane.archive_candidate_selection import (
+    ARCHIVE_CANDIDATE_CANCELLED,
+    ARCHIVE_CANDIDATE_EXPIRED,
     ARCHIVE_CANDIDATE_REASK_VERDICT_KIND,
+    ARCHIVE_CANDIDATE_STALE,
     ArchiveCandidateSelectionWorkItem,
+    archive_candidate_cancel_requested,
     archive_candidate_reask_prompt,
     archive_candidate_selection_offer_suffix,
     parse_archive_candidate_ordinal,
 )
 from friday.interaction_control_plane.archive_candidate_selection_store import (
     accept_archive_candidate_selection_in_transaction,
+    archive_candidate_selection_is_displaced_in_transaction,
+    cancel_archive_candidate_selection_in_transaction,
     create_archive_candidate_selection_work_item_in_transaction,
+    expire_archive_candidate_selection_in_transaction,
     get_current_archive_candidate_selection_work_item_in_transaction,
+    get_waiting_archive_candidate_selection_work_item_in_transaction,
     reask_archive_candidate_selection_in_transaction,
+    retire_displaced_archive_candidate_selection_in_transaction,
     suspend_after_replay_failure_in_transaction,
 )
 from friday.interaction_control_plane.archive_evidence_work_item import (
@@ -253,6 +262,7 @@ from friday.organs.obsidian.conversation import (
     obsidian_result_note_request,
     render_obsidian_tool_result,
 )
+from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.people import unambiguous
 from friday.permissions import ActorContext, AuthorizationService
 from friday.reports import SUPPORTED_KINDS, sheet_title_from_report_title, spec_from_payload
@@ -297,7 +307,7 @@ from friday.storage._conversations import (
     select_promoted_current_conversation_window_in_transaction,
     store_message_in_transaction,
 )
-from friday.storage._core import iso_date
+from friday.storage._core import iso_date, read_only_storage_snapshot
 from friday.storage._intake import (
     resolve_explicit_file_citation_sources,
     resolve_owned_file_exact_filename_direct_read,
@@ -32418,6 +32428,23 @@ class AgentRuntime:
         while every other spelling receives the code-owned re-ask.
         """
 
+        return self.pending_durable_turn_admission(
+            user_id,
+            message,
+            actor=actor,
+            conversation_id=conversation_id,
+        ) is not False
+
+    def pending_durable_turn_admission(
+        self,
+        user_id: str,
+        message: str,
+        *,
+        actor: ActorContext,
+        conversation_id: str | None,
+    ) -> PendingDurableTurnAdmission | bool:
+        """Bind pre-ingestion ownership to one exact candidate revision."""
+
         del message
         if not conversation_id:
             return False
@@ -32426,7 +32453,7 @@ class AgentRuntime:
         person_id = actor.own_id if actor.shared_tenant else user_id
         if person_id != user_id or actor.own_id != person_id:
             return False
-        with self.storage.transaction() as conn:
+        with read_only_storage_snapshot(self.storage) as conn:
             conversation = conn.execute(
                 "SELECT mode FROM conversations WHERE id=? AND user_id=?",
                 (conversation_id, person_id),
@@ -32436,13 +32463,27 @@ class AgentRuntime:
                 or normalize_conversation_mode(str(conversation["mode"] or "dialogue")) != "dialogue"
             ):
                 return False
-            return (
-                get_current_archive_candidate_selection_work_item_in_transaction(
-                    conn,
-                    user_id=person_id,
-                    conversation_id=conversation_id,
-                )
-                is not None
+            waiting = get_waiting_archive_candidate_selection_work_item_in_transaction(
+                conn,
+                user_id=person_id,
+                conversation_id=conversation_id,
+                require_latest_message=False,
+            )
+            if waiting is None:
+                return False
+            if archive_candidate_selection_is_displaced_in_transaction(
+                conn,
+                work_item_id=waiting.id,
+                user_id=person_id,
+                conversation_id=conversation_id,
+                expected_revision=waiting.revision,
+            ):
+                return False
+            return PendingDurableTurnAdmission.owned(
+                person_id=person_id,
+                conversation_id=conversation_id,
+                work_item_id=waiting.id,
+                revision=waiting.revision,
             )
 
     @staticmethod
@@ -34242,6 +34283,251 @@ class AgentRuntime:
         ).fetchone()
         if current is None:
             raise WorkItemConflictError("archive candidate conversation is no longer an owned dialogue")
+
+    @staticmethod
+    def _archive_candidate_terminal_metadata(verdict_kind: str) -> dict[str, Any]:
+        return {
+            "answer_mode": "structural",
+            "interaction_mode": "dialogue",
+            "tools_used": [],
+            "private_context_lineage": True,
+            "structural": {
+                "verdict_kind": verdict_kind,
+                "answer_present": True,
+                "model_spoke": False,
+                "remainder_known": True,
+                "rule_learned": False,
+                "rule_forgotten": False,
+                "rule_refused": False,
+                "correction_learned": False,
+                "self_description_replaced": False,
+                "llm_failed": False,
+            },
+        }
+
+    @staticmethod
+    def _archive_candidate_terminal_payload(
+        *,
+        conversation_id: str,
+        assistant_message: Mapping[str, Any],
+        content: str,
+    ) -> dict[str, Any]:
+        return {
+            "conversation_id": conversation_id,
+            "message_id": assistant_message.get("id"),
+            "message": content,
+            "verified": False,
+            "verification_status": "skipped",
+            "verification": {"status": "skipped", "score": None, "issues": []},
+            "verification_caution": "",
+            "citations": [],
+            "answer_grounded": None,
+            "citation_notice": "",
+            "grounding_warning": "",
+            "citation_check": {"status": "skipped", "checked": 0},
+            "tools_used": [],
+            "web_query_notice": "",
+            "voice": None,
+            "attachments": [],
+            "attachment_context_available": False,
+            "restored_attachment_count": 0,
+            "knowledge_hits": 0,
+            "entity_hits": 0,
+        }
+
+    def _archive_candidate_lifecycle_response(
+        self,
+        *,
+        conversation_id: str,
+        person_id: str,
+        request: str,
+        admitted_work_item: ArchiveCandidateSelectionWorkItem,
+        content: str,
+        verdict_kind: str,
+        lifecycle: Literal["cancel", "expire"],
+        lifecycle_now: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically publish a source-free boundary and close its exact question."""
+
+        with self.storage.transaction() as publication_conn:
+            self._require_archive_candidate_conversation(
+                publication_conn,
+                person_id=person_id,
+                conversation_id=conversation_id,
+            )
+            boundary_message = store_message_in_transaction(
+                publication_conn,
+                conversation_id,
+                person_id,
+                "user",
+                request,
+                metadata={"private_context_lineage": True},
+            )
+            boundary_message_id = str(boundary_message.get("id") or "").strip()
+            if not re.fullmatch(r"msg_[0-9a-f]{16}", boundary_message_id):
+                raise RuntimeError("Stored user message has no valid durable identity")
+            current = get_waiting_archive_candidate_selection_work_item_in_transaction(
+                publication_conn,
+                user_id=person_id,
+                conversation_id=conversation_id,
+                boundary_user_message_id=boundary_message_id,
+            )
+            if current is None or (
+                current.id != admitted_work_item.id
+                or current.revision != admitted_work_item.revision
+            ):
+                raise WorkItemConflictError("archive candidate admission is no longer current")
+            assistant_message = store_message_in_transaction(
+                publication_conn,
+                conversation_id,
+                person_id,
+                "assistant",
+                content,
+                metadata=self._archive_candidate_terminal_metadata(verdict_kind),
+                reply_to=boundary_message_id,
+            )
+            if assistant_message.get("content") != content:
+                raise ValueError("archive candidate terminal durability reread changed content")
+            mutation = (
+                cancel_archive_candidate_selection_in_transaction
+                if lifecycle == "cancel"
+                else expire_archive_candidate_selection_in_transaction
+            )
+            mutation(
+                publication_conn,
+                work_item_id=current.id,
+                user_id=person_id,
+                conversation_id=conversation_id,
+                expected_revision=current.revision,
+                now=lifecycle_now,
+            )
+
+        return self._archive_candidate_terminal_payload(
+            conversation_id=conversation_id,
+            assistant_message=assistant_message,
+            content=content,
+        )
+
+    def _archive_candidate_silence_response(
+        self,
+        *,
+        conversation_id: str,
+        person_id: str,
+        request: str,
+        admitted_work_item: ArchiveCandidateSelectionWorkItem,
+    ) -> dict[str, Any]:
+        """Atomically acknowledge emergency silence and cancel its question."""
+
+        response = self._archive_candidate_lifecycle_response(
+            conversation_id=conversation_id,
+            person_id=person_id,
+            request=request,
+            admitted_work_item=admitted_work_item,
+            content="Молчу.",
+            verdict_kind="приказ",
+            lifecycle="cancel",
+        )
+        LOGGER.info("silence-order: pending archive candidate cancelled atomically")
+        return response
+
+    def _archive_candidate_stale_admission_response(
+        self,
+        *,
+        conversation_id: str,
+        person_id: str,
+        request: str,
+    ) -> dict[str, Any]:
+        """Settle an already-owned race without replay, search, planning or model use."""
+
+        with self.storage.transaction() as publication_conn:
+            self._require_archive_candidate_conversation(
+                publication_conn,
+                person_id=person_id,
+                conversation_id=conversation_id,
+            )
+            replacement = get_waiting_archive_candidate_selection_work_item_in_transaction(
+                publication_conn,
+                user_id=person_id,
+                conversation_id=conversation_id,
+                require_latest_message=False,
+            )
+            if replacement is not None:
+                raise WorkItemConflictError(
+                    "stale archive candidate admission cannot supersede a newer question"
+                )
+            boundary_message = store_message_in_transaction(
+                publication_conn,
+                conversation_id,
+                person_id,
+                "user",
+                request,
+                metadata={"private_context_lineage": True},
+            )
+            boundary_message_id = str(boundary_message.get("id") or "").strip()
+            if not re.fullmatch(r"msg_[0-9a-f]{16}", boundary_message_id):
+                raise RuntimeError("Stored user message has no valid durable identity")
+            assistant_message = store_message_in_transaction(
+                publication_conn,
+                conversation_id,
+                person_id,
+                "assistant",
+                ARCHIVE_CANDIDATE_STALE,
+                metadata=self._archive_candidate_terminal_metadata(
+                    "archive_candidate_admission_stale"
+                ),
+                reply_to=boundary_message_id,
+            )
+            if assistant_message.get("content") != ARCHIVE_CANDIDATE_STALE:
+                raise ValueError("archive candidate stale receipt durability reread changed content")
+        return self._archive_candidate_terminal_payload(
+            conversation_id=conversation_id,
+            assistant_message=assistant_message,
+            content=ARCHIVE_CANDIDATE_STALE,
+        )
+
+    def _archive_candidate_unbound_silence_response(
+        self,
+        *,
+        conversation_id: str,
+        person_id: str,
+        request: str,
+    ) -> dict[str, Any]:
+        """Publish emergency silence atomically after the admitted item already closed."""
+
+        with self.storage.transaction() as publication_conn:
+            self._require_archive_candidate_conversation(
+                publication_conn,
+                person_id=person_id,
+                conversation_id=conversation_id,
+            )
+            boundary_message = store_message_in_transaction(
+                publication_conn,
+                conversation_id,
+                person_id,
+                "user",
+                request,
+                metadata={"private_context_lineage": True},
+            )
+            boundary_message_id = str(boundary_message.get("id") or "").strip()
+            if not re.fullmatch(r"msg_[0-9a-f]{16}", boundary_message_id):
+                raise RuntimeError("Stored user message has no valid durable identity")
+            assistant_message = store_message_in_transaction(
+                publication_conn,
+                conversation_id,
+                person_id,
+                "assistant",
+                "Молчу.",
+                metadata=self._archive_candidate_terminal_metadata("приказ"),
+                reply_to=boundary_message_id,
+            )
+            if assistant_message.get("content") != "Молчу.":
+                raise ValueError("archive candidate silence durability reread changed content")
+        LOGGER.info("silence-order: stale archive candidate admission stopped atomically")
+        return self._archive_candidate_terminal_payload(
+            conversation_id=conversation_id,
+            assistant_message=assistant_message,
+            content="Молчу.",
+        )
 
     def _archive_candidate_reask_response(
         self,
@@ -39451,6 +39737,7 @@ class AgentRuntime:
         reply_assistant_message_id: str | None = None,
         turn_policy: TurnPolicyDecision | None = None,
         turn_deadline: float | None = None,
+        _pending_durable_admission: PendingDurableTurnAdmission | None = None,
     ) -> dict[str, Any]:
         turn_started = time.monotonic()
         if turn_deadline is None:
@@ -39608,17 +39895,194 @@ class AgentRuntime:
             and interaction_mode == "dialogue"
             and actor.own_id == person_id
         )
-        if archive_candidate_plain_surface:
-            with self.storage.transaction() as candidate_conn:
-                admitted_archive_candidate = get_current_archive_candidate_selection_work_item_in_transaction(
+        admitted_archive_candidate: ArchiveCandidateSelectionWorkItem | None = None
+        archive_candidate_is_displaced = False
+        candidate_transaction = getattr(self.storage, "transaction", None)
+        if actor.own_id == person_id and callable(candidate_transaction):
+            with read_only_storage_snapshot(self.storage) as candidate_conn:
+                admitted_archive_candidate = get_waiting_archive_candidate_selection_work_item_in_transaction(
                     candidate_conn,
                     user_id=person_id,
                     conversation_id=str(conversation_id),
+                    require_latest_message=False,
                 )
-            if admitted_archive_candidate is not None:
+                if admitted_archive_candidate is not None:
+                    archive_candidate_is_displaced = (
+                        archive_candidate_selection_is_displaced_in_transaction(
+                            candidate_conn,
+                            work_item_id=admitted_archive_candidate.id,
+                            user_id=person_id,
+                            conversation_id=str(conversation_id),
+                            expected_revision=admitted_archive_candidate.revision,
+                        )
+                    )
+
+        if archive_candidate_is_displaced:
+            assert admitted_archive_candidate is not None
+            if not mark_request_effect_possible():
+                raise RuntimeError(
+                    "Request idempotency fence could not be committed before Work Item retirement"
+                )
+            with self.storage.transaction() as retirement_conn:
+                retired = retire_displaced_archive_candidate_selection_in_transaction(
+                    retirement_conn,
+                    work_item_id=admitted_archive_candidate.id,
+                    user_id=person_id,
+                    conversation_id=str(conversation_id),
+                    expected_revision=admitted_archive_candidate.revision,
+                )
+                if retired is None:
+                    raise WorkItemConflictError(
+                        "displaced archive candidate admission is no longer current"
+                    )
+            admitted_archive_candidate = None
+
+        carried_admission = (
+            _pending_durable_admission
+            if isinstance(_pending_durable_admission, PendingDurableTurnAdmission)
+            else None
+        )
+        carried_scope_is_exact = bool(
+            carried_admission is not None
+            and carried_admission.matches_scope(
+                person_id=person_id,
+                conversation_id=str(conversation_id),
+            )
+        )
+        carried_binding_is_current = bool(
+            carried_admission is not None
+            and carried_admission.is_bound
+            and admitted_archive_candidate is not None
+            and carried_admission.work_item_id == admitted_archive_candidate.id
+            and carried_admission.revision == admitted_archive_candidate.revision
+        )
+        if (
+            archive_candidate_plain_surface
+            and file_turn.proved("silence")
+            and (admitted_archive_candidate is not None or _pending_durable_admission is not None)
+        ):
+            if not mark_request_effect_possible():
+                raise RuntimeError(
+                    "Request idempotency fence could not be committed before message storage"
+                )
+            if admitted_archive_candidate is None:
+                return self._archive_candidate_unbound_silence_response(
+                    conversation_id=str(conversation_id),
+                    person_id=person_id,
+                    request=clean_message,
+                )
+            candidate_now = datetime.now(UTC).isoformat(timespec="seconds")
+            try:
+                if admitted_archive_candidate.expires_at <= candidate_now:
+                    return self._archive_candidate_lifecycle_response(
+                        conversation_id=str(conversation_id),
+                        person_id=person_id,
+                        request=clean_message,
+                        admitted_work_item=admitted_archive_candidate,
+                        content="Молчу.",
+                        verdict_kind="приказ",
+                        lifecycle="expire",
+                        lifecycle_now=candidate_now,
+                    )
+                return self._archive_candidate_silence_response(
+                    conversation_id=str(conversation_id),
+                    person_id=person_id,
+                    request=clean_message,
+                    admitted_work_item=admitted_archive_candidate,
+                )
+            except WorkItemConflictError:
+                with read_only_storage_snapshot(self.storage) as conflict_conn:
+                    conflict_current = (
+                        get_waiting_archive_candidate_selection_work_item_in_transaction(
+                            conflict_conn,
+                            user_id=person_id,
+                            conversation_id=str(conversation_id),
+                            require_latest_message=False,
+                        )
+                    )
+                if conflict_current is not None and (
+                    conflict_current.id == admitted_archive_candidate.id
+                    and conflict_current.revision == admitted_archive_candidate.revision
+                ):
+                    raise
+                return self._archive_candidate_unbound_silence_response(
+                    conversation_id=str(conversation_id),
+                    person_id=person_id,
+                    request=clean_message,
+                )
+        if _pending_durable_admission is not None and (
+            not archive_candidate_plain_surface
+            or not carried_scope_is_exact
+            or admitted_archive_candidate is None
+            or carried_admission is not None
+            and carried_admission.is_bound
+            and not carried_binding_is_current
+        ):
+            if not mark_request_effect_possible():
+                raise RuntimeError(
+                    "Request idempotency fence could not be committed before message storage"
+                )
+            return self._archive_candidate_stale_admission_response(
+                conversation_id=str(conversation_id),
+                person_id=person_id,
+                request=clean_message,
+            )
+        if admitted_archive_candidate is not None:
+            candidate_now = datetime.now(UTC).isoformat(timespec="seconds")
+            if admitted_archive_candidate.expires_at <= candidate_now:
                 if not mark_request_effect_possible():
                     raise RuntimeError(
                         "Request idempotency fence could not be committed before message storage"
+                    )
+                if archive_candidate_plain_surface:
+                    return self._archive_candidate_lifecycle_response(
+                        conversation_id=str(conversation_id),
+                        person_id=person_id,
+                        request=clean_message,
+                        admitted_work_item=admitted_archive_candidate,
+                        content=ARCHIVE_CANDIDATE_EXPIRED,
+                        verdict_kind="archive_candidate_expired",
+                        lifecycle="expire",
+                        lifecycle_now=candidate_now,
+                    )
+                with self.storage.transaction() as expiry_conn:
+                    current_expired = get_waiting_archive_candidate_selection_work_item_in_transaction(
+                        expiry_conn,
+                        user_id=person_id,
+                        conversation_id=str(conversation_id),
+                        require_latest_message=False,
+                    )
+                    if current_expired is None or (
+                        current_expired.id != admitted_archive_candidate.id
+                        or current_expired.revision != admitted_archive_candidate.revision
+                    ):
+                        raise WorkItemConflictError(
+                            "archive candidate expiry admission is no longer current"
+                        )
+                    expire_archive_candidate_selection_in_transaction(
+                        expiry_conn,
+                        work_item_id=current_expired.id,
+                        user_id=person_id,
+                        conversation_id=str(conversation_id),
+                        expected_revision=current_expired.revision,
+                        now=candidate_now,
+                    )
+                admitted_archive_candidate = None
+            if archive_candidate_plain_surface:
+                assert admitted_archive_candidate is not None
+                if not mark_request_effect_possible():
+                    raise RuntimeError(
+                        "Request idempotency fence could not be committed before message storage"
+                    )
+                if archive_candidate_cancel_requested(clean_message):
+                    return self._archive_candidate_lifecycle_response(
+                        conversation_id=str(conversation_id),
+                        person_id=person_id,
+                        request=clean_message,
+                        admitted_work_item=admitted_archive_candidate,
+                        content=ARCHIVE_CANDIDATE_CANCELLED,
+                        verdict_kind="archive_candidate_cancelled",
+                        lifecycle="cancel",
                     )
                 selected_ordinal = parse_archive_candidate_ordinal(clean_message)
                 if (

@@ -2150,6 +2150,29 @@ def guarded_storage_transaction(
         storage._write_lock.release()  # noqa: SLF001
 
 
+@contextmanager
+def read_only_storage_snapshot(storage: Any) -> Iterator[sqlite3.Connection]:
+    """Hold one effect-free SQLite snapshot and always roll it back.
+
+    ``FridayStorage.transaction()`` is deliberately a writer boundary: even a
+    caller that only issues SELECTs advances the relation-history authority
+    clock before commit.  Admission probes run before the HTTP idempotency
+    effect fence, so they need a deferred snapshot that cannot publish any
+    accidental mutation.  A thread-local connection also means this reader
+    needs no process-wide writer lock under WAL.
+    """
+
+    conn: sqlite3.Connection = storage.conn
+    if conn.in_transaction:
+        raise RuntimeError("read-only storage snapshot requires an outer-free connection")
+    conn.execute("BEGIN DEFERRED")
+    try:
+        yield conn
+    finally:
+        if conn.in_transaction:
+            conn.rollback()
+
+
 class CoreMixin(StorageShared):
     def __init__(self, settings: FridaySettings) -> None:
         self.settings = settings

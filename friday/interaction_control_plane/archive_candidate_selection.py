@@ -54,6 +54,9 @@ ARCHIVE_CANDIDATE_SET_SCHEMA = "friday.archive-candidate-set.v1"
 ARCHIVE_CANDIDATE_QUESTION_SCHEMA = "friday.archive-candidate-ordinal-question.v1"
 ARCHIVE_CANDIDATE_WORK_ITEM_SCHEMA = "friday.archive-candidate-selection-work-item.v1"
 ARCHIVE_CANDIDATE_REASK_VERDICT_KIND = "archive_candidate_ordinal_reask"
+ARCHIVE_CANDIDATE_CANCELLED = "Выбор источника отменён."
+ARCHIVE_CANDIDATE_EXPIRED = "Выбор источника истёк; повторите поиск."
+ARCHIVE_CANDIDATE_STALE = "Выбор источника уже изменился; повторите поиск."
 
 _WORK_ITEM_ID_RE = re.compile(r"work_[0-9a-f]{16}\Z")
 _CANDIDATE_SET_ID_RE = re.compile(r"cset_[0-9a-f]{16}\Z")
@@ -161,6 +164,20 @@ def parse_archive_candidate_ordinal(value: object) -> int | None:
         )
     )
     return ordinal if english.group(2) == expected_suffix else None
+
+
+def archive_candidate_cancel_requested(value: object) -> bool:
+    """Recognize only the two exact, source-free cancellation commands."""
+
+    if type(value) is not str:
+        return False
+    try:
+        encoded = value.encode("utf-8", errors="strict")
+    except UnicodeEncodeError:
+        return False
+    if not encoded or len(encoded) > 32:
+        return False
+    return value.strip(_ORDINAL_TRIM).casefold() in {"отмена", "cancel"}
 
 
 def archive_candidate_reask_prompt(maximum_ordinal: object) -> str:
@@ -1194,7 +1211,11 @@ __all__ = [
     "ArchiveCandidateSelectionError",
     "ArchiveCandidateSelectionWorkItem",
     "ArchiveCandidateSet",
+    "ARCHIVE_CANDIDATE_CANCELLED",
+    "ARCHIVE_CANDIDATE_EXPIRED",
     "archive_candidate_selection_offer_suffix",
+    "ARCHIVE_CANDIDATE_STALE",
+    "archive_candidate_cancel_requested",
     "archive_candidate_reask_prompt",
     "parse_archive_candidate_ordinal",
 ]

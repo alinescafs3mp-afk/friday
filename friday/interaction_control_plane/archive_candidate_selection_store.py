@@ -938,6 +938,27 @@ def get_current_archive_candidate_selection_work_item_in_transaction(
     boundary_user_message_id: str | None = None,
     now: str | None = None,
 ) -> ArchiveCandidateSelectionWorkItem | None:
+    item = get_waiting_archive_candidate_selection_work_item_in_transaction(
+        conn,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        boundary_user_message_id=boundary_user_message_id,
+    )
+    if item is None or item.expires_at <= _now(now):
+        return None
+    return item
+
+
+def get_waiting_archive_candidate_selection_work_item_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    conversation_id: str,
+    boundary_user_message_id: str | None = None,
+    require_latest_message: bool = True,
+) -> ArchiveCandidateSelectionWorkItem | None:
+    """Return the exact open question, including one whose bounded TTL elapsed."""
+
     _require_transaction(conn)
     user = _scope(user_id, _USER_ID_RE, label="user_id")
     conversation = _scope(conversation_id, _CONVERSATION_ID_RE, label="conversation_id")
@@ -945,8 +966,8 @@ def get_current_archive_candidate_selection_work_item_in_transaction(
         """SELECT id FROM work_items
             WHERE user_id=? AND conversation_id=?
               AND kind='select_archive_candidate_and_replay_evidence'
-              AND state='waiting_for_input' AND expires_at>? LIMIT 1""",
-        (user, conversation, _now(now)),
+              AND state='waiting_for_input' LIMIT 1""",
+        (user, conversation),
     )
     row = cursor.fetchone()
     if row is None:
@@ -963,7 +984,7 @@ def get_current_archive_candidate_selection_work_item_in_transaction(
     _validate_stored_anchor(
         conn,
         item,
-        require_latest_message=boundary_user_message_id is None,
+        require_latest_message=(boundary_user_message_id is None and require_latest_message),
     )
     if boundary_user_message_id is not None:
         _validate_immediate_followup(
@@ -993,6 +1014,96 @@ def get_current_archive_candidate_selection_work_item_in_transaction(
         ):
             raise WorkItemAnchorError("candidate selection boundary is no longer latest")
     return item
+
+
+def archive_candidate_selection_is_displaced_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+) -> bool:
+    """Read whether another durable message already superseded the prompt."""
+
+    _require_transaction(conn)
+    identifier = _scope(work_item_id, _WORK_ITEM_ID_RE, label="work_item_id")
+    user = _scope(user_id, _USER_ID_RE, label="user_id")
+    conversation = _scope(conversation_id, _CONVERSATION_ID_RE, label="conversation_id")
+    current = _fetch_candidate_work_item(
+        conn,
+        work_item_id=identifier,
+        user_id=user,
+        conversation_id=conversation,
+    )
+    if (
+        current is None
+        or current.state is not WorkState.WAITING_FOR_INPUT
+        or current.revision != _revision(expected_revision)
+    ):
+        raise WorkItemConflictError("candidate Work Item revision/state is no longer current")
+    _validate_stored_anchor(conn, current, require_latest_message=False)
+    prompt_row = conn.execute(
+        """SELECT rowid FROM messages
+             WHERE id=? AND user_id=? AND conversation_id=? AND role='assistant'""",
+        (current.question.prompt_assistant_message_id, user, conversation),
+    ).fetchone()
+    if prompt_row is None:  # pragma: no cover - validated directly above
+        raise WorkItemAnchorError("candidate prompt assistant is unavailable")
+    displaced = conn.execute(
+        """SELECT 1 FROM messages
+             WHERE user_id=? AND conversation_id=? AND rowid>? LIMIT 1""",
+        (user, conversation, int(prompt_row[0])),
+    ).fetchone()
+    return displaced is not None
+
+
+def retire_displaced_archive_candidate_selection_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    now: str | None = None,
+) -> ArchiveCandidateSelectionWorkItem | None:
+    """Lazily close a question only after another durable turn displaced it."""
+
+    displaced = archive_candidate_selection_is_displaced_in_transaction(
+        conn,
+        work_item_id=work_item_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        expected_revision=expected_revision,
+    )
+    if not displaced:
+        return None
+    current = _fetch_candidate_work_item(
+        conn,
+        work_item_id=_scope(work_item_id, _WORK_ITEM_ID_RE, label="work_item_id"),
+        user_id=_scope(user_id, _USER_ID_RE, label="user_id"),
+        conversation_id=_scope(
+            conversation_id,
+            _CONVERSATION_ID_RE,
+            label="conversation_id",
+        ),
+    )
+    if current is None:  # pragma: no cover - validated by the read above
+        raise WorkItemConflictError("candidate Work Item revision/state is no longer current")
+    timestamp = _now(now)
+    mutation = (
+        expire_archive_candidate_selection_in_transaction
+        if current.expires_at <= timestamp
+        else cancel_archive_candidate_selection_in_transaction
+    )
+    return mutation(
+        conn,
+        work_item_id=current.id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        expected_revision=current.revision,
+        now=timestamp,
+    )
 
 
 def reask_archive_candidate_selection_in_transaction(
@@ -1523,6 +1634,7 @@ def expire_due_archive_candidate_selection_work_items_in_transaction(
 
 __all__ = [
     "accept_archive_candidate_selection_in_transaction",
+    "archive_candidate_selection_is_displaced_in_transaction",
     "cancel_archive_candidate_selection_in_transaction",
     "create_archive_candidate_selection_work_item_in_transaction",
     "expire_archive_candidate_selection_in_transaction",
@@ -1530,9 +1642,11 @@ __all__ = [
     "get_archive_candidate_selection_work_item_for_export_in_transaction",
     "get_archive_candidate_selection_work_item_in_transaction",
     "get_current_archive_candidate_selection_work_item_in_transaction",
+    "get_waiting_archive_candidate_selection_work_item_in_transaction",
     "new_archive_candidate_question_id",
     "new_archive_candidate_selection_work_item_id",
     "new_archive_candidate_set_id",
     "reask_archive_candidate_selection_in_transaction",
+    "retire_displaced_archive_candidate_selection_in_transaction",
     "suspend_after_replay_failure_in_transaction",
 ]

@@ -8,6 +8,7 @@ import binascii
 import functools
 import hashlib
 import hmac
+import inspect
 import ipaddress
 import json
 import logging
@@ -120,6 +121,7 @@ from friday.organs.obsidian.conversation import (
     obsidian_conversation_intent,
     obsidian_result_note_request,
 )
+from friday.pending_durable_turn import PendingDurableTurnAdmission
 from friday.permissions import (
     LEGACY_OWNER_USER_ID,
     ActorContext,
@@ -437,6 +439,84 @@ def _public_chat_for_actor(
                 if type(stage_ready) is bool:
                     projected["telegram_stage_ready"] = stage_ready
     return public
+
+
+def _pending_durable_turn_admission_before_ingestion(
+    agent: Any,
+    *,
+    person_id: str,
+    message: str,
+    actor: ActorContext,
+    conversation_id: str | None,
+) -> PendingDurableTurnAdmission | bool:
+    """Return exact ownership, ordinary, or uncertainty before text ingestion."""
+
+    if not conversation_id:
+        return False
+    owner_check = getattr(agent, "pending_durable_turn_admission", None)
+    if not callable(owner_check):
+        owner_check = getattr(agent, "owns_pending_durable_turn", None)
+    if not callable(owner_check):
+        return False
+    try:
+        result = owner_check(
+            person_id,
+            message,
+            actor=actor,
+            conversation_id=conversation_id,
+        )
+        if inspect.isawaitable(result):
+            if inspect.iscoroutine(result):
+                result.close()
+            elif isinstance(result, asyncio.Future):
+                result.cancel()
+            else:
+                iterator = result.__await__()
+                close = getattr(iterator, "close", None)
+                if callable(close):
+                    close()
+            LOGGER.warning(
+                "pending durable pre-ingestion admission returned an awaitable; suppressing intake"
+            )
+            return PendingDurableTurnAdmission.uncertain(
+                person_id=person_id,
+                conversation_id=str(conversation_id or ""),
+            )
+        if isinstance(result, PendingDurableTurnAdmission):
+            if result.matches_scope(
+                person_id=person_id,
+                conversation_id=str(conversation_id or ""),
+            ):
+                return result
+            LOGGER.warning("pending durable pre-ingestion admission returned a foreign binding")
+            return PendingDurableTurnAdmission.uncertain(
+                person_id=person_id,
+                conversation_id=str(conversation_id or ""),
+            )
+        if result is True:
+            return PendingDurableTurnAdmission.owned(
+                person_id=person_id,
+                conversation_id=str(conversation_id or ""),
+            )
+        if result is not False:
+            LOGGER.warning(
+                "pending durable pre-ingestion admission returned an invalid result (%s)",
+                type(result).__name__,
+            )
+            return PendingDurableTurnAdmission.uncertain(
+                person_id=person_id,
+                conversation_id=str(conversation_id or ""),
+            )
+        return False
+    except Exception as exc:  # noqa: BLE001 - request/private state never enters logs
+        LOGGER.warning(
+            "pending durable pre-ingestion admission rejected (%s)",
+            type(exc).__name__,
+        )
+        return PendingDurableTurnAdmission.uncertain(
+            person_id=person_id,
+            conversation_id=str(conversation_id or ""),
+        )
 
 
 class RequestBodyTooLargeError(RuntimeError):
@@ -4258,14 +4338,57 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     turn_policy,
                     public_response=safe_diagnostics.render_ru(),
                 )
+            pending_durable_original_attachment_surface = bool(
+                attachments
+                or incoming_documents
+                or staged_document_message_ids
+                or file_already_ingested
+            )
+            pending_durable_original_reply_surface = bool(
+                str(body.get("reply_to") or "").strip()
+                or reply_assistant_pointer_present
+                or reply_pointer_present
+                or quoted_attachment_reference
+                or reply_assistant_reference
+                or reply_source_message_id
+            )
             if turn_policy.attachments is AttachmentDisposition.NONE:
                 attachments = []
                 quoted_attachment_reference = False
                 reply_assistant_reference = False
 
+            pending_durable_intake_admission: PendingDurableTurnAdmission | bool = False
+            if (
+                conversation_id is not None
+                and not pending_durable_original_attachment_surface
+                and not pending_durable_original_reply_surface
+                and enable_tools is True
+                and not force_knowledge
+                and not explicit_no_save
+                and not forward_meta
+                and not synthetic_document_notice
+                and not spoken_question
+                and requested_mode is None
+                and not turn_policy.handled
+            ):
+                pending_durable_intake_admission = (
+                    _pending_durable_turn_admission_before_ingestion(
+                        state.agent,
+                        person_id=actor.own_id,
+                        message=message,
+                        actor=actor,
+                        conversation_id=conversation_id,
+                    )
+                )
+
             ingestion_result = None
             if state.auth_service.authorize(actor, "knowledge.create").allowed:
-                if file_already_ingested:
+                if pending_durable_intake_admission is not False:
+                    # Exact ownership and uncertainty both stay side-effect
+                    # free until the router/runtime performs its own fresh
+                    # owner+conversation+revision check.
+                    ingestion_result = None
+                elif file_already_ingested:
                     # The uploaded file already has its own Raw Object and Knowledge Object. The
                     # generated chat text exists only so the agent can acknowledge the upload.
                     ingestion_result = {
@@ -4395,6 +4518,14 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     reply_assistant_message_id=reply_source_message_id or None,
                     turn_policy=turn_policy if turn_policy.handled else None,
                     turn_deadline=_turn_deadline,
+                    _pending_durable_admission=(
+                        pending_durable_intake_admission
+                        if isinstance(
+                            pending_durable_intake_admission,
+                            PendingDurableTurnAdmission,
+                        )
+                        else None
+                    ),
                 )
             if staged_duplicate_count:
                 duplicate_notice = (

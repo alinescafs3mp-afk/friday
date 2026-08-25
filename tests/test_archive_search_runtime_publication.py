@@ -17,6 +17,7 @@ import httpx
 import pytest
 
 import friday.agent_runtime as agent_runtime_module
+import friday.interaction_control_plane.archive_candidate_selection_store as candidate_store_module
 from friday.agent_runtime import (
     AgentContext,
     AgentRuntime,
@@ -32,6 +33,10 @@ from friday.agent_runtime.llm import LLMRouter
 from friday.execution_kernel import ExecutionKernel, ToolResult
 from friday.ingestion import IngestionPipeline
 from friday.interaction_control_plane.archive_candidate_selection import (
+    ARCHIVE_CANDIDATE_CANCELLED,
+    ARCHIVE_CANDIDATE_EXPIRED,
+    ARCHIVE_CANDIDATE_STALE,
+    archive_candidate_cancel_requested,
     archive_candidate_reask_prompt,
     archive_candidate_selection_offer_suffix,
 )
@@ -73,7 +78,19 @@ from friday.web_surfer import WebSurfer
 _OWNER = "archive-runtime-owner"
 _QUERY = "ARCHIVE-RUNTIME-PRIVATE-CANARY-7421"
 _CANDIDATE_QUERY = "needle7421"
+_CANDIDATE_FIRST_BODY = f"{_CANDIDATE_QUERY} exact alpha source body"
+_CANDIDATE_SECOND_BODY = f"{_CANDIDATE_QUERY} exact beta source body"
 _ANSWER = f"В личном архиве найдено значение {_QUERY} [A1.1]."
+
+
+@pytest.mark.parametrize("value", ["отмена", "Отмена!", "cancel", "CANCEL."])
+def test_archive_candidate_cancel_parser_accepts_only_exact_ru_en_commands(value: str) -> None:
+    assert archive_candidate_cancel_requested(value)
+
+
+@pytest.mark.parametrize("value", ["отмени", "cancel selection", "please cancel", 1, None])
+def test_archive_candidate_cancel_parser_rejects_free_form_values(value: object) -> None:
+    assert not archive_candidate_cancel_requested(value)
 
 
 class _ArchiveModel:
@@ -713,8 +730,18 @@ async def _create_durable_archive_candidate_work(
     storage: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[dict[str, Any], Any, AgentRuntime, _SpyKernel, ActorContext, Any, WebSurfer]:
-    _seed_message_archive(storage, suffix="", compact=True, selected_text=_CANDIDATE_QUERY)
-    _seed_message_archive(storage, suffix="", compact=True, selected_text=_CANDIDATE_QUERY)
+    _seed_message_archive(
+        storage,
+        suffix="-alpha",
+        compact=True,
+        selected_text=_CANDIDATE_FIRST_BODY,
+    )
+    _seed_message_archive(
+        storage,
+        suffix="-beta",
+        compact=True,
+        selected_text=_CANDIDATE_SECOND_BODY,
+    )
     model = _ArchiveModel(
         final_answer=(f"Сначала второй источник [A2.1], затем первый [A1.1]: {_CANDIDATE_QUERY}."),
         first_arguments={
@@ -753,6 +780,18 @@ async def _create_durable_archive_candidate_work(
         )
     assert item is not None
     return response, item, runtime, kernel, actor, model, web
+
+
+def _candidate_message_body(storage: Any, item: Any, ordinal: int) -> str:
+    selected = item.candidate_set.selected_evidence(ordinal)
+    row = storage.execute(
+        """SELECT content FROM messages
+             WHERE user_id=? AND conversation_id=? AND role='assistant'
+             ORDER BY rowid DESC LIMIT 1""",
+        (_OWNER, selected.source_ref.canonical_object_id),
+    ).fetchone()
+    assert row is not None
+    return str(row["content"])
 
 
 def _assert_archive_ledger_consumed(context: AgentContext) -> None:
@@ -1254,9 +1293,17 @@ async def test_archive_candidate_offer_preserves_citation_order_and_replays_stri
         monkeypatch,
     )
     expected_offer = archive_candidate_selection_offer_suffix(("A2", "A1"))
+    selected_body = _candidate_message_body(storage, created, 2)
+    other_body = (
+        _CANDIDATE_SECOND_BODY
+        if selected_body == _CANDIDATE_FIRST_BODY
+        else _CANDIDATE_FIRST_BODY
+    )
     try:
         assert initial["message"].endswith(f"\n\n{expected_offer}")
         assert tuple(item.public_citation_label for item in created.candidate_set.candidates) == ("A2", "A1")
+        assert created.candidate_set.candidates[1].public_citation_label == "A1"
+        assert selected_body in {_CANDIDATE_FIRST_BODY, _CANDIDATE_SECOND_BODY}
         assert created.state is WorkState.WAITING_FOR_INPUT
         assert created.transition is WorkTransition.QUESTION_ASKED
         assert created.revision == 1
@@ -1277,7 +1324,8 @@ async def test_archive_candidate_offer_preserves_citation_order_and_replays_stri
     finally:
         await web.close()
 
-    assert _CANDIDATE_QUERY in replay["message"]
+    assert selected_body in replay["message"]
+    assert other_body not in replay["message"]
     assert replay["verified"] is True
     assert replay["context"]["archive_candidate_selection"] == "partial"
     assert replay["tools_used"] == []
@@ -1301,6 +1349,783 @@ async def test_archive_candidate_offer_preserves_citation_order_and_replays_stri
     assert completed.transition is WorkTransition.CANDIDATE_REPLAYED
     assert completed.revision == 2
     assert completed.question.selected_ordinal == 2
+
+
+@pytest.mark.asyncio
+async def test_archive_candidate_stop_is_atomic_emergency_cancel_and_does_not_own_next_turn(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _initial, created, runtime, kernel, actor, model, web = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    cancellation_transactions: list[bool] = []
+    original_cancel = agent_runtime_module.cancel_archive_candidate_selection_in_transaction
+
+    def observe_cancel(conn: Any, **kwargs: Any) -> Any:
+        cancellation_transactions.append(bool(conn.in_transaction))
+        return original_cancel(conn, **kwargs)
+
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "cancel_archive_candidate_selection_in_transaction",
+        observe_cancel,
+    )
+    before = int(
+        storage.execute(
+            "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=? AND user_id=?",
+            (created.conversation_id, _OWNER),
+        ).fetchone()["count"]
+    )
+    try:
+        stopped = await runtime.chat(
+            _OWNER,
+            "стоп",
+            actor=actor,
+            conversation_id=created.conversation_id,
+            enable_tools=True,
+        )
+        next_model = _DirectAnswerModel()
+        runtime.llm = next_model  # type: ignore[assignment]
+        following = await runtime.chat(
+            _OWNER,
+            "Объясни кратко теорию множеств.",
+            actor=actor,
+            conversation_id=created.conversation_id,
+            enable_tools=True,
+        )
+    finally:
+        await web.close()
+
+    assert stopped["message"] == "Молчу."
+    assert stopped["voice"] is None
+    assert stopped["tools_used"] == []
+    assert cancellation_transactions == [True]
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    assert not runtime.owns_pending_durable_turn(
+        _OWNER,
+        "2",
+        actor=actor,
+        conversation_id=created.conversation_id,
+    )
+    assert following["message"] != archive_candidate_reask_prompt(2)
+    assert next_model.calls == 1
+    after = int(
+        storage.execute(
+            "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=? AND user_id=?",
+            (created.conversation_id, _OWNER),
+        ).fetchone()["count"]
+    )
+    assert after == before + 4
+    with storage.transaction() as conn:
+        cancelled = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert cancelled is not None
+    assert cancelled.state is WorkState.CANCELLED
+    assert cancelled.transition is WorkTransition.CANCELLED
+    assert cancelled.revision == 2
+    assert cancelled.expires_at == created.expires_at
+
+
+@pytest.mark.asyncio
+async def test_archive_candidate_stop_rolls_back_both_rows_when_cancel_cas_fails(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _initial, created, runtime, kernel, actor, model, web = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+
+    def fail_cancel(*_args: Any, **_kwargs: Any) -> Any:
+        raise WorkItemConflictError("candidate stop lost its CAS race")
+
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "cancel_archive_candidate_selection_in_transaction",
+        fail_cancel,
+    )
+    before = int(
+        storage.execute(
+            "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=? AND user_id=?",
+            (created.conversation_id, _OWNER),
+        ).fetchone()["count"]
+    )
+    try:
+        with pytest.raises(WorkItemConflictError):
+            await runtime.chat(
+                _OWNER,
+                "стоп",
+                actor=actor,
+                conversation_id=created.conversation_id,
+                enable_tools=True,
+            )
+    finally:
+        await web.close()
+
+    after = int(
+        storage.execute(
+            "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=? AND user_id=?",
+            (created.conversation_id, _OWNER),
+        ).fetchone()["count"]
+    )
+    assert after == before
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    with storage.transaction() as conn:
+        waiting = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert waiting is not None
+    assert waiting.state is WorkState.WAITING_FOR_INPUT
+    assert waiting.revision == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_request", ["отмена", "cancel"])
+async def test_archive_candidate_cancel_survives_restart_and_never_resurrects(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    cancel_request: str,
+) -> None:
+    _initial, created, _runtime_instance, _kernel, _actor, _model, web = (
+        await _create_durable_archive_candidate_work(settings, storage, monkeypatch)
+    )
+    await web.close()
+    restarted_storage = _reopen_storage(settings, storage)
+    no_model = _DirectAnswerModel()
+    try:
+        restarted, kernel, actor, _model, restarted_web, _contexts = await _runtime(
+            settings,
+            restarted_storage,
+            monkeypatch,
+            model_override=no_model,
+            archive_query=_CANDIDATE_QUERY,
+        )
+        try:
+            cancelled_response = await restarted.chat(
+                _OWNER,
+                cancel_request,
+                actor=actor,
+                conversation_id=created.conversation_id,
+                enable_tools=True,
+            )
+            assert not restarted.owns_pending_durable_turn(
+                _OWNER,
+                "2",
+                actor=actor,
+                conversation_id=created.conversation_id,
+            )
+            following = await restarted.chat(
+                _OWNER,
+                "Объясни кратко теорию множеств.",
+                actor=actor,
+                conversation_id=created.conversation_id,
+                enable_tools=True,
+            )
+            with restarted_storage.transaction() as conn:
+                cancelled = get_archive_candidate_selection_work_item_in_transaction(
+                    conn,
+                    work_item_id=created.id,
+                    user_id=_OWNER,
+                    conversation_id=created.conversation_id,
+                )
+        finally:
+            await restarted_web.close()
+    finally:
+        restarted_storage.close(final=True)
+
+    assert cancelled_response["message"] == ARCHIVE_CANDIDATE_CANCELLED
+    assert cancelled_response["tools_used"] == []
+    assert cancelled_response["voice"] is None
+    assert _CANDIDATE_QUERY not in json.dumps(cancelled_response, ensure_ascii=False)
+    assert following["message"] not in {
+        ARCHIVE_CANDIDATE_CANCELLED,
+        archive_candidate_reask_prompt(2),
+    }
+    assert no_model.calls == 1
+    assert kernel.calls == []
+    assert cancelled is not None
+    assert cancelled.state is WorkState.CANCELLED
+    assert cancelled.transition is WorkTransition.CANCELLED
+    assert cancelled.revision == 2
+    assert cancelled.expires_at == created.expires_at
+
+
+@pytest.mark.asyncio
+async def test_expired_candidate_is_owned_source_free_after_restart_and_never_resurrects(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_now = candidate_store_module._now
+
+    def historical_now(value: str | None) -> str:
+        return original_now(value or "2000-01-01T00:00:00+00:00")
+
+    monkeypatch.setattr(candidate_store_module, "_now", historical_now)
+    _initial, created, _runtime_instance, _kernel, _actor, _model, web = (
+        await _create_durable_archive_candidate_work(settings, storage, monkeypatch)
+    )
+    monkeypatch.setattr(candidate_store_module, "_now", original_now)
+    await web.close()
+    restarted_storage = _reopen_storage(settings, storage)
+    no_model = _DirectAnswerModel()
+    try:
+        restarted, kernel, actor, _model, restarted_web, _contexts = await _runtime(
+            settings,
+            restarted_storage,
+            monkeypatch,
+            model_override=no_model,
+            archive_query=_CANDIDATE_QUERY,
+        )
+        try:
+            from friday.server import _pending_durable_turn_admission_before_ingestion
+
+            admission = _pending_durable_turn_admission_before_ingestion(
+                restarted,
+                person_id=_OWNER,
+                message="2",
+                actor=actor,
+                conversation_id=created.conversation_id,
+            )
+            assert admission is not False
+            assert restarted.owns_pending_durable_turn(
+                _OWNER,
+                "2",
+                actor=actor,
+                conversation_id=created.conversation_id,
+            )
+            expired_response = await restarted.chat(
+                _OWNER,
+                "2",
+                actor=actor,
+                conversation_id=created.conversation_id,
+                enable_tools=True,
+                _pending_durable_admission=admission,
+            )
+            assert not restarted.owns_pending_durable_turn(
+                _OWNER,
+                "2",
+                actor=actor,
+                conversation_id=created.conversation_id,
+            )
+            following = await restarted.chat(
+                _OWNER,
+                "Объясни кратко теорию множеств.",
+                actor=actor,
+                conversation_id=created.conversation_id,
+                enable_tools=True,
+            )
+            with restarted_storage.transaction() as conn:
+                expired = get_archive_candidate_selection_work_item_in_transaction(
+                    conn,
+                    work_item_id=created.id,
+                    user_id=_OWNER,
+                    conversation_id=created.conversation_id,
+                )
+        finally:
+            await restarted_web.close()
+    finally:
+        restarted_storage.close(final=True)
+
+    assert expired_response["message"] == ARCHIVE_CANDIDATE_EXPIRED
+    assert expired_response["tools_used"] == []
+    assert expired_response["voice"] is None
+    assert _CANDIDATE_QUERY not in json.dumps(expired_response, ensure_ascii=False)
+    assert following["message"] not in {
+        ARCHIVE_CANDIDATE_EXPIRED,
+        archive_candidate_reask_prompt(2),
+    }
+    assert no_model.calls == 1
+    assert kernel.calls == []
+    assert expired is not None
+    assert expired.state is WorkState.EXPIRED
+    assert expired.transition is WorkTransition.EXPIRED
+    assert expired.revision == 2
+
+
+@pytest.mark.asyncio
+async def test_emergency_stop_precedes_due_candidate_expiry_receipt(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_now = candidate_store_module._now
+
+    def historical_now(value: str | None) -> str:
+        return original_now(value or "2000-01-01T00:00:00+00:00")
+
+    monkeypatch.setattr(candidate_store_module, "_now", historical_now)
+    _initial, created, runtime, kernel, actor, model, web = (
+        await _create_durable_archive_candidate_work(settings, storage, monkeypatch)
+    )
+    monkeypatch.setattr(candidate_store_module, "_now", original_now)
+    admission = runtime.pending_durable_turn_admission(
+        _OWNER,
+        "стоп",
+        actor=actor,
+        conversation_id=created.conversation_id,
+    )
+    assert admission is not False
+    try:
+        stopped = await runtime.chat(
+            _OWNER,
+            "стоп",
+            actor=actor,
+            conversation_id=created.conversation_id,
+            enable_tools=True,
+            _pending_durable_admission=admission,
+        )
+    finally:
+        await web.close()
+
+    assert stopped["message"] == "Молчу."
+    assert stopped["voice"] is None
+    assert stopped["tools_used"] == []
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    with storage.transaction() as conn:
+        expired = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert expired is not None
+    assert expired.state is WorkState.EXPIRED
+    assert expired.revision == 2
+
+
+@pytest.mark.asyncio
+async def test_emergency_stop_precedes_stale_bound_admission_after_completion(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _initial, created, runtime, kernel, actor, model, web = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    admission = runtime.pending_durable_turn_admission(
+        _OWNER,
+        "стоп",
+        actor=actor,
+        conversation_id=created.conversation_id,
+    )
+    assert admission is not False
+    try:
+        await runtime.chat(
+            _OWNER,
+            "1",
+            actor=actor,
+            conversation_id=created.conversation_id,
+            enable_tools=True,
+        )
+        stopped = await runtime.chat(
+            _OWNER,
+            "стоп",
+            actor=actor,
+            conversation_id=created.conversation_id,
+            enable_tools=True,
+            _pending_durable_admission=admission,
+        )
+    finally:
+        await web.close()
+
+    assert stopped["message"] == "Молчу."
+    assert stopped["voice"] is None
+    assert stopped["tools_used"] == []
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    with storage.transaction() as conn:
+        completed = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert completed is not None
+    assert completed.state is WorkState.COMPLETED
+    assert completed.revision == 2
+    assert completed.question.selected_ordinal == 1
+
+
+@pytest.mark.asyncio
+async def test_emergency_stop_ack_survives_terminal_cas_race_after_initial_lookup(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _initial, created, runtime, kernel, actor, model, web = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    original = runtime._archive_candidate_silence_response
+
+    def cancel_after_initial_lookup(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        with storage.transaction() as conn:
+            cancel_archive_candidate_selection_in_transaction(
+                conn,
+                work_item_id=created.id,
+                user_id=_OWNER,
+                conversation_id=created.conversation_id,
+                expected_revision=created.revision,
+            )
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        runtime,
+        "_archive_candidate_silence_response",
+        cancel_after_initial_lookup,
+    )
+    try:
+        stopped = await runtime.chat(
+            _OWNER,
+            "стоп",
+            actor=actor,
+            conversation_id=created.conversation_id,
+            enable_tools=True,
+        )
+    finally:
+        await web.close()
+
+    assert stopped["message"] == "Молчу."
+    assert stopped["voice"] is None
+    assert stopped["tools_used"] == []
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    with storage.transaction() as conn:
+        cancelled = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert cancelled is not None
+    assert cancelled.state is WorkState.CANCELLED
+    assert cancelled.revision == 2
+
+
+@pytest.mark.asyncio
+async def test_bound_candidate_admission_race_never_replays_or_reaches_model_twice(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _initial, created, runtime, kernel, actor, model, web = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    admission = runtime.pending_durable_turn_admission(
+        _OWNER,
+        "2",
+        actor=actor,
+        conversation_id=created.conversation_id,
+    )
+    assert admission is not False
+    try:
+        first = await runtime.chat(
+            _OWNER,
+            "1",
+            actor=actor,
+            conversation_id=created.conversation_id,
+            enable_tools=True,
+        )
+        stale = await runtime.chat(
+            _OWNER,
+            "2",
+            actor=actor,
+            conversation_id=created.conversation_id,
+            enable_tools=True,
+            _pending_durable_admission=admission,
+        )
+    finally:
+        await web.close()
+
+    assert first["verified"] is True
+    assert stale["message"] == ARCHIVE_CANDIDATE_STALE
+    assert stale["tools_used"] == []
+    assert stale["voice"] is None
+    assert _CANDIDATE_QUERY not in json.dumps(stale, ensure_ascii=False)
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    with storage.transaction() as conn:
+        completed = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert completed is not None
+    assert completed.state is WorkState.COMPLETED
+    assert completed.revision == 2
+    assert completed.question.selected_ordinal == 1
+
+
+@pytest.mark.asyncio
+async def test_stale_bound_admission_never_cancels_a_newer_reasked_revision(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _initial, created, runtime, kernel, actor, model, web = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    admission = runtime.pending_durable_turn_admission(
+        _OWNER,
+        "2",
+        actor=actor,
+        conversation_id=created.conversation_id,
+    )
+    assert admission is not False
+    try:
+        await runtime.chat(
+            _OWNER,
+            "не номер",
+            actor=actor,
+            conversation_id=created.conversation_id,
+            enable_tools=True,
+        )
+        before = int(
+            storage.execute(
+                "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=? AND user_id=?",
+                (created.conversation_id, _OWNER),
+            ).fetchone()["count"]
+        )
+        with pytest.raises(WorkItemConflictError):
+            await runtime.chat(
+                _OWNER,
+                "2",
+                actor=actor,
+                conversation_id=created.conversation_id,
+                enable_tools=True,
+                _pending_durable_admission=admission,
+            )
+    finally:
+        await web.close()
+
+    after = int(
+        storage.execute(
+            "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=? AND user_id=?",
+            (created.conversation_id, _OWNER),
+        ).fetchone()["count"]
+    )
+    assert after == before
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    with storage.transaction() as conn:
+        waiting = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert waiting is not None
+    assert waiting.state is WorkState.WAITING_FOR_INPUT
+    assert waiting.revision == 2
+
+
+@pytest.mark.asyncio
+async def test_competing_policy_surface_is_lazily_cancelled_after_publication_and_next_turn(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _initial, created, runtime, kernel, actor, model, web = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    try:
+        policy = await runtime.chat(
+            _OWNER,
+            "Какая погода?",
+            actor=actor,
+            conversation_id=created.conversation_id,
+            enable_tools=True,
+            turn_policy=TurnPolicyDecision(
+                intent=TurnIntent.WEATHER_NEEDS_LOCATION,
+                public_response=WEATHER_LOCATION_CLARIFICATION,
+            ),
+        )
+        assert not runtime.owns_pending_durable_turn(
+            _OWNER,
+            "2",
+            actor=actor,
+            conversation_id=created.conversation_id,
+        )
+        next_model = _DirectAnswerModel()
+        runtime.llm = next_model  # type: ignore[assignment]
+        following = await runtime.chat(
+            _OWNER,
+            "Объясни кратко теорию множеств.",
+            actor=actor,
+            conversation_id=created.conversation_id,
+            enable_tools=True,
+        )
+    finally:
+        await web.close()
+
+    assert policy["message"] == WEATHER_LOCATION_CLARIFICATION
+    assert following["message"] != archive_candidate_reask_prompt(2)
+    assert next_model.calls == 1
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    with storage.transaction() as conn:
+        cancelled = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert cancelled is not None
+    assert cancelled.state is WorkState.CANCELLED
+    assert cancelled.transition is WorkTransition.CANCELLED
+    assert cancelled.revision == 2
+    assert cancelled.expires_at == created.expires_at
+
+
+@pytest.mark.asyncio
+async def test_failed_competing_surface_keeps_candidate_current_until_successful_retry(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _initial, created, runtime, kernel, actor, model, web = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    original_store = runtime.storage.store_message
+
+    def fail_policy_publication(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("policy publication failed")
+
+    policy = TurnPolicyDecision(
+        intent=TurnIntent.WEATHER_NEEDS_LOCATION,
+        public_response=WEATHER_LOCATION_CLARIFICATION,
+    )
+    monkeypatch.setattr(runtime.storage, "store_message", fail_policy_publication)
+    try:
+        with pytest.raises(RuntimeError, match="policy publication failed"):
+            await runtime.chat(
+                _OWNER,
+                "Какая погода?",
+                actor=actor,
+                conversation_id=created.conversation_id,
+                enable_tools=True,
+                turn_policy=policy,
+            )
+        with storage.transaction() as conn:
+            still_waiting = get_archive_candidate_selection_work_item_in_transaction(
+                conn,
+                work_item_id=created.id,
+                user_id=_OWNER,
+                conversation_id=created.conversation_id,
+            )
+        assert still_waiting is not None
+        assert still_waiting.state is WorkState.WAITING_FOR_INPUT
+        assert still_waiting.revision == 1
+        assert runtime.owns_pending_durable_turn(
+            _OWNER,
+            "2",
+            actor=actor,
+            conversation_id=created.conversation_id,
+        )
+
+        monkeypatch.setattr(runtime.storage, "store_message", original_store)
+        retried = await runtime.chat(
+            _OWNER,
+            "Какая погода?",
+            actor=actor,
+            conversation_id=created.conversation_id,
+            enable_tools=True,
+            turn_policy=policy,
+        )
+        with storage.transaction() as conn:
+            displaced_waiting = get_archive_candidate_selection_work_item_in_transaction(
+                conn,
+                work_item_id=created.id,
+                user_id=_OWNER,
+                conversation_id=created.conversation_id,
+            )
+        assert displaced_waiting is not None
+        assert displaced_waiting.state is WorkState.WAITING_FOR_INPUT
+        observed_before = str(
+            storage.execute(
+                "SELECT observed_at FROM relation_revision_context WHERE singleton=1"
+            ).fetchone()["observed_at"]
+        )
+        assert not runtime.owns_pending_durable_turn(
+            _OWNER,
+            "2",
+            actor=actor,
+            conversation_id=created.conversation_id,
+        )
+        observed_after = str(
+            storage.execute(
+                "SELECT observed_at FROM relation_revision_context WHERE singleton=1"
+            ).fetchone()["observed_at"]
+        )
+        assert observed_after == observed_before
+        with storage.transaction() as conn:
+            still_displaced = get_archive_candidate_selection_work_item_in_transaction(
+                conn,
+                work_item_id=created.id,
+                user_id=_OWNER,
+                conversation_id=created.conversation_id,
+            )
+        assert still_displaced is not None
+        assert still_displaced.state is WorkState.WAITING_FOR_INPUT
+        assert still_displaced.revision == 1
+
+        next_model = _DirectAnswerModel()
+        runtime.llm = next_model  # type: ignore[assignment]
+        following = await runtime.chat(
+            _OWNER,
+            "Объясни кратко теорию множеств.",
+            actor=actor,
+            conversation_id=created.conversation_id,
+            enable_tools=True,
+        )
+    finally:
+        await web.close()
+
+    assert retried["message"] == WEATHER_LOCATION_CLARIFICATION
+    assert following["message"] != archive_candidate_reask_prompt(2)
+    assert next_model.calls == 1
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    with storage.transaction() as conn:
+        cancelled = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert cancelled is not None
+    assert cancelled.state is WorkState.CANCELLED
+    assert cancelled.revision == 2
 
 
 @pytest.mark.asyncio
@@ -1571,6 +2396,65 @@ async def test_archive_candidate_rechecks_dialogue_mode_before_any_continuation_
     )
     assert model.calls == 2
     assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+
+
+@pytest.mark.asyncio
+async def test_bound_candidate_admission_never_reaches_model_after_early_mode_drift(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _initial, created, runtime, kernel, actor, model, web = await _create_durable_archive_candidate_work(
+        settings,
+        storage,
+        monkeypatch,
+    )
+    admission = runtime.pending_durable_turn_admission(
+        _OWNER,
+        "2",
+        actor=actor,
+        conversation_id=created.conversation_id,
+    )
+    assert admission is not False
+    assert storage.set_conversation_mode(created.conversation_id, _OWNER, "research")
+    before = int(
+        storage.execute(
+            "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=? AND user_id=?",
+            (created.conversation_id, _OWNER),
+        ).fetchone()["count"]
+    )
+    try:
+        with pytest.raises(WorkItemConflictError):
+            await runtime.chat(
+                _OWNER,
+                "2",
+                actor=actor,
+                conversation_id=created.conversation_id,
+                enable_tools=True,
+                _pending_durable_admission=admission,
+            )
+    finally:
+        await web.close()
+
+    after = int(
+        storage.execute(
+            "SELECT COUNT(*) AS count FROM messages WHERE conversation_id=? AND user_id=?",
+            (created.conversation_id, _OWNER),
+        ).fetchone()["count"]
+    )
+    assert after == before
+    assert model.calls == 2
+    assert [name for name, _arguments in kernel.calls] == ["archive_search"]
+    with storage.transaction() as conn:
+        waiting = get_archive_candidate_selection_work_item_in_transaction(
+            conn,
+            work_item_id=created.id,
+            user_id=_OWNER,
+            conversation_id=created.conversation_id,
+        )
+    assert waiting is not None
+    assert waiting.state is WorkState.WAITING_FOR_INPUT
+    assert waiting.revision == 1
 
 
 @pytest.mark.asyncio
