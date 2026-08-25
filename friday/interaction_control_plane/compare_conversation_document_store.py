@@ -1,4 +1,4 @@
-"""Strict schema-42 reader for dormant conversation/document Work Items."""
+"""Transaction-local reader/writer for schema-42 conversation/document Work Items."""
 
 from __future__ import annotations
 
@@ -7,10 +7,12 @@ import hmac
 import json
 import re
 import sqlite3
+import uuid
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from friday.interaction_control_plane.archive_candidate_selection import (
+    ArchiveCandidateSelectionError,
     ArchiveCandidateSet,
     parse_archive_candidate_ordinal,
 )
@@ -21,17 +23,20 @@ from friday.interaction_control_plane.archive_candidate_selection_store import (
 )
 from friday.interaction_control_plane.archive_evidence_work_item_store import (
     _validate_archive_anchor,
+    get_recall_selected_archive_evidence_work_item_in_transaction,
 )
 from friday.interaction_control_plane.compare_conversation_document import (
     COMPARE_DOCUMENT_REFERENCE_PROMPT,
     COMPARE_DOCUMENT_REFERENCE_REQUIRED_VERDICT_KIND,
     AcceptedComparisonResultIdentity,
+    CompareConversationDocumentActiveFrame,
     CompareConversationWithDocumentWorkItem,
     DocumentReferenceAdmissionShape,
     DocumentReferenceQuestion,
     DocumentReferenceQuestionKind,
     DocumentReferenceQuestionState,
     ResolvedDocumentIdentity,
+    ResolvedDocumentProvenance,
     load_accepted_comparison_outcome_receipt,
 )
 from friday.interaction_control_plane.selected_archive_evidence import (
@@ -40,17 +45,31 @@ from friday.interaction_control_plane.selected_archive_evidence import (
 )
 from friday.interaction_control_plane.work_item_contract import (
     COMPARE_CONVERSATION_DOCUMENT_ANSWER_MAX_BYTES,
+    WORK_ITEM_MAX_REVISION,
+    WORK_ITEM_TTL_HOURS,
+    WorkCompletionContract,
+    WorkGoal,
     WorkItemContractError,
+    WorkKind,
+    WorkPlaybook,
     WorkState,
+    WorkTransition,
     canonical_work_item_instant,
 )
-from friday.interaction_control_plane.work_item_store import WorkItemAnchorError
+from friday.interaction_control_plane.work_item_store import (
+    WorkItemAnchorError,
+    WorkItemConflictError,
+    _begin_work_item_mutation_savepoint,
+    _release_work_item_mutation_savepoint,
+    _rollback_work_item_mutation_savepoint,
+)
 from friday.orchestration.archive_recall_outcome import (
     ArchiveRecallLane,
     ArchiveRecallOutcomeError,
     ArchiveRecallStatus,
     load_accepted_archive_recall_outcome_receipt,
 )
+from friday.retrieval.archive_search_authority import ArchiveSearchAcceptedCandidateProjection
 from friday.retrieval.passage_contract import MessageWindowLocator
 from friday.source_identity import raw_source_identity_sha256
 
@@ -58,6 +77,9 @@ _WORK_ITEM_ID_RE = re.compile(r"work_[0-9a-f]{16}\Z")
 _CONVERSATION_ID_RE = re.compile(r"conv_[0-9a-f]{16}\Z")
 _MESSAGE_ID_RE = re.compile(r"msg_[0-9a-f]{16}\Z")
 _USER_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@+-]{0,199}\Z")
+_QUESTION_ID_RE = re.compile(r"question_[0-9a-f]{16}\Z")
+_CANDIDATE_SET_ID_RE = re.compile(r"cset_[0-9a-f]{16}\Z")
+_DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def _require_transaction(conn: sqlite3.Connection) -> None:
@@ -672,8 +694,1098 @@ def get_current_compare_conversation_with_document_work_item_in_transaction(
     return item
 
 
+def new_compare_conversation_with_document_work_item_id() -> str:
+    """Return one opaque ID suitable for a comparison Work Item."""
+
+    return f"work_{uuid.uuid4().hex[:16]}"
+
+
+def new_compare_document_question_id() -> str:
+    """Return one opaque ID suitable for either closed comparison question."""
+
+    return f"question_{uuid.uuid4().hex[:16]}"
+
+
+def new_compare_document_candidate_set_id() -> str:
+    """Return one opaque ID for a frozen ambiguous-document candidate set."""
+
+    return f"cset_{uuid.uuid4().hex[:16]}"
+
+
+def _digest(value: object, *, label: str) -> str:
+    if not isinstance(value, str) or _DIGEST_RE.fullmatch(value) is None:
+        raise WorkItemContractError(f"{label} must be a lowercase SHA-256 digest")
+    return value
+
+
+def _revision(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value < WORK_ITEM_MAX_REVISION:
+        raise WorkItemContractError("expected_revision is outside the closed limit")
+    return value
+
+
+def _logical_now(value: str | None, *, current_updated_at: str | None = None) -> str:
+    timestamp = _now(value)
+    if current_updated_at is None:
+        return timestamp
+    current = canonical_work_item_instant(current_updated_at, label="current_updated_at")
+    if current != current_updated_at:
+        raise WorkItemContractError("stored Work Item timestamp is not canonical")
+    return max(timestamp, current)
+
+
+def _expiry(now: str) -> str:
+    return (datetime.fromisoformat(now) + timedelta(hours=WORK_ITEM_TTL_HOURS)).isoformat(timespec="seconds")
+
+
+def _validate_selected_followup_question_publication(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    conversation_id: str,
+    origin_assistant_message_id: str,
+    boundary_user_message_id: str,
+    question_assistant_message_id: str,
+) -> None:
+    cursor = conn.execute(
+        """SELECT question.rowid
+             FROM users owner
+             JOIN conversations conversation
+               ON conversation.id=? AND conversation.user_id=owner.id
+             JOIN messages origin
+               ON origin.id=? AND origin.user_id=owner.id
+              AND origin.conversation_id=conversation.id AND origin.role='assistant'
+             JOIN messages boundary
+               ON boundary.id=? AND boundary.user_id=owner.id
+              AND boundary.conversation_id=conversation.id AND boundary.role='user'
+              AND origin.rowid<boundary.rowid
+              AND NOT EXISTS (
+                  SELECT 1 FROM messages intervening
+                   WHERE intervening.user_id=owner.id
+                     AND intervening.conversation_id=conversation.id
+                     AND intervening.rowid>origin.rowid
+                     AND intervening.rowid<boundary.rowid
+              )
+             JOIN messages question
+               ON question.id=? AND question.user_id=owner.id
+              AND question.conversation_id=conversation.id AND question.role='assistant'
+              AND question.reply_to=boundary.id AND boundary.rowid<question.rowid
+              AND NOT EXISTS (
+                  SELECT 1 FROM messages intervening
+                   WHERE intervening.user_id=owner.id
+                     AND intervening.conversation_id=conversation.id
+                     AND intervening.rowid>boundary.rowid
+                     AND intervening.rowid<question.rowid
+              )
+            WHERE owner.id=? AND owner.status='active'
+              AND question.content=?
+              AND json_extract(question.metadata_json,'$.structural.verdict_kind')=?
+              AND json_extract(question.metadata_json,'$.structural.answer_present')=1
+              AND json_extract(question.metadata_json,'$.structural.model_spoke')=0
+              AND NOT EXISTS (
+                  SELECT 1 FROM json_each(question.metadata_json) receipt
+                   WHERE receipt.key GLOB 'accepted_*_outcome'
+              )
+            LIMIT 1""",
+        (
+            conversation_id,
+            origin_assistant_message_id,
+            boundary_user_message_id,
+            question_assistant_message_id,
+            user_id,
+            COMPARE_DOCUMENT_REFERENCE_PROMPT,
+            COMPARE_DOCUMENT_REFERENCE_REQUIRED_VERDICT_KIND,
+        ),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        raise WorkItemAnchorError("comparison question publication is not source-free and exact")
+    if (
+        conn.execute(
+            """SELECT 1 FROM messages
+                WHERE user_id=? AND conversation_id=? AND rowid>? LIMIT 1""",
+            (user_id, conversation_id, int(row[0])),
+        ).fetchone()
+        is not None
+    ):
+        raise WorkItemAnchorError("comparison question publication is no longer latest")
+
+
+def _validate_answer_chain(
+    conn: sqlite3.Connection,
+    *,
+    item: CompareConversationWithDocumentWorkItem,
+    boundary_user_message_id: str,
+    following_assistant_message_id: str | None = None,
+) -> tuple[int, int | None]:
+    question = item.document_questions[-1]
+    boundary = _scope(
+        boundary_user_message_id,
+        _MESSAGE_ID_RE,
+        label="boundary_user_message_id",
+    )
+    prompt_rowid = _message_rowid(
+        conn,
+        item=item,
+        message_id=question.prompt_assistant_message_id,
+        role="assistant",
+    )
+    boundary_rowid = _message_rowid(conn, item=item, message_id=boundary, role="user")
+    _require_adjacent(conn, item, prompt_rowid, boundary_rowid)
+    if following_assistant_message_id is None:
+        last_rowid = boundary_rowid
+        assistant_rowid = None
+    else:
+        assistant = _scope(
+            following_assistant_message_id,
+            _MESSAGE_ID_RE,
+            label="following_assistant_message_id",
+        )
+        row = conn.execute(
+            """SELECT rowid FROM messages
+                WHERE id=? AND user_id=? AND conversation_id=? AND role='assistant'
+                  AND reply_to=?""",
+            (assistant, item.user_id, item.conversation_id, boundary),
+        ).fetchone()
+        if row is None or not isinstance(row[0], int):
+            raise WorkItemAnchorError("comparison answer publication is not owned and exact")
+        assistant_rowid = int(row[0])
+        _require_adjacent(conn, item, boundary_rowid, assistant_rowid)
+        last_rowid = assistant_rowid
+    if (
+        conn.execute(
+            """SELECT 1 FROM messages
+                WHERE user_id=? AND conversation_id=? AND rowid>? LIMIT 1""",
+            (item.user_id, item.conversation_id, last_rowid),
+        ).fetchone()
+        is not None
+    ):
+        raise WorkItemAnchorError("comparison answer boundary is no longer latest")
+    return boundary_rowid, assistant_rowid
+
+
+def _insert_selected_evidence(
+    conn: sqlite3.Connection,
+    evidence: SelectedArchiveEvidence,
+) -> None:
+    conn.execute(
+        """INSERT INTO work_item_selected_evidence(
+               work_item_id,corpus,source_ref_json,passage_refs_json,
+               source_snapshot_sha256,coverage_sha256,coverage_grade,
+               origin_boundary_user_message_id
+           ) VALUES(:work_item_id,:corpus,:source_ref_json,:passage_refs_json,
+                    :source_snapshot_sha256,:coverage_sha256,:coverage_grade,
+                    :origin_boundary_user_message_id)""",
+        evidence.to_storage_payload(),
+    )
+
+
+def _insert_question(conn: sqlite3.Connection, question: DocumentReferenceQuestion) -> None:
+    payload = question.to_payload()
+    conn.execute(
+        """INSERT INTO work_item_compare_document_questions(
+               id,work_item_id,kind,admission_shape,state,created_at,
+               prompt_boundary_user_message_id,prompt_assistant_message_id,
+               work_revision,candidate_set_id,answered_at,answer_user_message_id,
+               selected_ordinal,accepted_search_plan_sha256,
+               accepted_search_outcome_sha256,closed_at,close_reason
+           ) VALUES(:id,:work_item_id,:kind,:admission_shape,:state,:created_at,
+                    :prompt_boundary_user_message_id,:prompt_assistant_message_id,
+                    :work_revision,:candidate_set_id,:answered_at,:answer_user_message_id,
+                    :selected_ordinal,:accepted_search_plan_sha256,
+                    :accepted_search_outcome_sha256,:closed_at,:close_reason)""",
+        payload,
+    )
+
+
+def _insert_candidate_set(conn: sqlite3.Connection, candidate_set: ArchiveCandidateSet) -> None:
+    conn.execute(
+        """INSERT INTO work_item_archive_candidate_sets(
+               id,work_item_id,evidence_sha256,coverage_sha256,coverage_grade,
+               authority_projection_sha256,origin_boundary_user_message_id,
+               candidate_set_sha256
+           ) VALUES(:id,:work_item_id,:evidence_sha256,:coverage_sha256,:coverage_grade,
+                    :authority_projection_sha256,:origin_boundary_user_message_id,
+                    :candidate_set_sha256)""",
+        candidate_set.set_storage_payload(),
+    )
+    for payload in candidate_set.item_storage_payloads():
+        conn.execute(
+            """INSERT INTO work_item_archive_candidate_set_items(
+                   candidate_set_id,work_item_id,ordinal,public_citation_label,
+                   corpus,source_ref_json,passage_refs_json,source_snapshot_sha256
+               ) VALUES(:candidate_set_id,:work_item_id,:ordinal,:public_citation_label,
+                        :corpus,:source_ref_json,:passage_refs_json,:source_snapshot_sha256)""",
+            payload,
+        )
+
+
+def _insert_document_evidence(
+    conn: sqlite3.Connection,
+    document: ResolvedDocumentIdentity,
+) -> None:
+    conn.execute(
+        """INSERT INTO work_item_compare_document_evidence(
+               work_item_id,provenance,source_ref_json,raw_object_id,
+               raw_source_identity_sha256,raw_content_sha256,content_sha256,
+               candidate_source_snapshot_sha256,origin_boundary_user_message_id,
+               resolved_revision,resolved_at,candidate_set_id,selected_ordinal
+           ) VALUES(:work_item_id,:provenance,:source_ref_json,:raw_object_id,
+                    :raw_source_identity_sha256,:raw_content_sha256,:content_sha256,
+                    :candidate_source_snapshot_sha256,:origin_boundary_user_message_id,
+                    :resolved_revision,:resolved_at,:candidate_set_id,:selected_ordinal)""",
+        document.to_storage_payload(),
+    )
+
+
+def _insert_comparison_result(
+    conn: sqlite3.Connection,
+    result: AcceptedComparisonResultIdentity,
+) -> None:
+    conn.execute(
+        """INSERT INTO work_item_compare_outcomes(
+               work_item_id,answer_boundary_user_message_id,answer_assistant_message_id,
+               accepted_plan_sha256,accepted_outcome_sha256,comparison_status,
+               message_coverage_grade,document_verification_complete,
+               publication_attested,semantic_verified,message_evidence_sha256,
+               document_evidence_sha256,evidence_bundle_sha256,model_evidence_sha256,
+               completed_revision,completed_at
+           ) VALUES(:work_item_id,:answer_boundary_user_message_id,:answer_assistant_message_id,
+                    :accepted_plan_sha256,:accepted_outcome_sha256,:comparison_status,
+                    :message_coverage_grade,:document_verification_complete,
+                    :publication_attested,:semantic_verified,:message_evidence_sha256,
+                    :document_evidence_sha256,:evidence_bundle_sha256,:model_evidence_sha256,
+                    :completed_revision,:completed_at)""",
+        result.to_storage_payload(),
+    )
+
+
+def create_compare_conversation_with_document_from_selected_followup_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    selected_work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_selected_revision: int,
+    prompt_boundary_user_message_id: str,
+    prompt_assistant_message_id: str,
+    work_item_id: str | None = None,
+    question_id: str | None = None,
+    now: str | None = None,
+) -> CompareConversationWithDocumentWorkItem:
+    """Atomically retire one current selected-evidence Work Item and ask Q1."""
+
+    _require_transaction(conn)
+    user = _scope(user_id, _USER_ID_RE, label="user_id")
+    conversation = _scope(conversation_id, _CONVERSATION_ID_RE, label="conversation_id")
+    selected_identifier = _scope(
+        selected_work_item_id,
+        _WORK_ITEM_ID_RE,
+        label="selected_work_item_id",
+    )
+    selected_revision = _revision(expected_selected_revision)
+    identifier = _scope(
+        work_item_id or new_compare_conversation_with_document_work_item_id(),
+        _WORK_ITEM_ID_RE,
+        label="work_item_id",
+    )
+    question_identifier = _scope(
+        question_id or new_compare_document_question_id(),
+        _QUESTION_ID_RE,
+        label="question_id",
+    )
+    boundary = _scope(
+        prompt_boundary_user_message_id,
+        _MESSAGE_ID_RE,
+        label="prompt_boundary_user_message_id",
+    )
+    prompt = _scope(
+        prompt_assistant_message_id,
+        _MESSAGE_ID_RE,
+        label="prompt_assistant_message_id",
+    )
+    if identifier == selected_identifier:
+        raise WorkItemContractError("comparison Work Item must have a fresh identifier")
+    selected = get_recall_selected_archive_evidence_work_item_in_transaction(
+        conn,
+        work_item_id=selected_identifier,
+        user_id=user,
+        conversation_id=conversation,
+    )
+    if selected is None or selected.state is not WorkState.ACTIVE or selected.revision != selected_revision:
+        raise WorkItemConflictError("selected evidence Work Item is no longer current")
+    timestamp = _logical_now(now, current_updated_at=selected.updated_at)
+    if selected.expires_at <= timestamp:
+        raise WorkItemConflictError("selected evidence Work Item is no longer current")
+    _validate_selected_followup_question_publication(
+        conn,
+        user_id=user,
+        conversation_id=conversation,
+        origin_assistant_message_id=selected.anchor_assistant_message_id,
+        boundary_user_message_id=boundary,
+        question_assistant_message_id=prompt,
+    )
+    evidence = SelectedArchiveEvidence(
+        work_item_id=identifier,
+        corpus=selected.selected_evidence.corpus,
+        source_ref=selected.selected_evidence.source_ref,
+        passage_refs=selected.selected_evidence.passage_refs,
+        source_snapshot_sha256=selected.selected_evidence.source_snapshot_sha256,
+        coverage_sha256=selected.selected_evidence.coverage_sha256,
+        coverage_grade=selected.selected_evidence.coverage_grade,
+        origin_boundary_user_message_id=selected.anchor_user_message_id,
+    )
+    if evidence.corpus is not SelectedArchiveCorpus.MESSAGES:
+        raise WorkItemAnchorError("comparison follow-up requires selected message evidence")
+    question = DocumentReferenceQuestion(
+        id=question_identifier,
+        work_item_id=identifier,
+        kind=DocumentReferenceQuestionKind.PROVIDE_DOCUMENT_REFERENCE,
+        admission_shape=DocumentReferenceAdmissionShape.SELECTED_EVIDENCE_FOLLOWUP,
+        state=DocumentReferenceQuestionState.WAITING,
+        created_at=timestamp,
+        prompt_boundary_user_message_id=boundary,
+        prompt_assistant_message_id=prompt,
+        work_revision=1,
+    )
+    savepoint = _begin_work_item_mutation_savepoint(conn)
+    try:
+        retired = conn.execute(
+            """UPDATE work_items
+                  SET state='suspended',transition='suspended',revision=revision+1,
+                      updated_at=?,closed_at=NULL
+                WHERE id=? AND user_id=? AND conversation_id=?
+                  AND kind='recall_selected_archive_evidence'
+                  AND state='active' AND revision=? AND expires_at>?""",
+            (
+                timestamp,
+                selected_identifier,
+                user,
+                conversation,
+                selected_revision,
+                timestamp,
+            ),
+        )
+        if retired.rowcount != 1:
+            raise WorkItemConflictError("selected evidence retirement lost its revision race")
+        conn.execute(
+            """INSERT INTO work_items(
+                   id,user_id,conversation_id,kind,goal,state,playbook,
+                   completion_contract,active_frame_json,anchor_user_message_id,
+                   anchor_assistant_message_id,accepted_plan_sha256,
+                   accepted_outcome_sha256,revision,transition,created_at,
+                   updated_at,expires_at,closed_at
+               ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)""",
+            (
+                identifier,
+                user,
+                conversation,
+                WorkKind.COMPARE_CONVERSATION_WITH_DOCUMENT.value,
+                WorkGoal.COMPARE_EXACT_MESSAGE_EVIDENCE_WITH_DOCUMENT.value,
+                WorkState.WAITING_FOR_INPUT.value,
+                WorkPlaybook.COMPARE_CONVERSATION_WITH_DOCUMENT.value,
+                WorkCompletionContract.ACCEPTED_EXACT_MESSAGE_AND_DOCUMENT_COMPARISON.value,
+                CompareConversationDocumentActiveFrame().to_json(),
+                selected.anchor_user_message_id,
+                selected.anchor_assistant_message_id,
+                selected.accepted_plan_sha256,
+                selected.accepted_outcome_sha256,
+                1,
+                WorkTransition.QUESTION_ASKED.value,
+                timestamp,
+                timestamp,
+                _expiry(timestamp),
+            ),
+        )
+        _insert_selected_evidence(conn, evidence)
+        _insert_question(conn, question)
+        created = _fetch(
+            conn,
+            work_item_id=identifier,
+            user_id=user,
+            conversation_id=conversation,
+        )
+        if created is None:  # pragma: no cover - inserted in this transaction
+            raise WorkItemConflictError("created comparison Work Item is not durable")
+        _validate_stored_item(conn, created, require_latest_message=True)
+    except BaseException as exc:
+        _rollback_work_item_mutation_savepoint(conn, savepoint)
+        if isinstance(exc, sqlite3.IntegrityError):
+            raise WorkItemConflictError("comparison creation lost its state race") from exc
+        raise
+    _release_work_item_mutation_savepoint(conn, savepoint)
+    return created
+
+
+def resolve_compare_conversation_document_reference_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    boundary_user_message_id: str,
+    document_evidence: ResolvedDocumentIdentity,
+    now: str | None = None,
+) -> CompareConversationWithDocumentWorkItem:
+    """Answer Q1 with one exact current or historical Raw document pin."""
+
+    return _resolve_compare_document_in_transaction(
+        conn,
+        work_item_id=work_item_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        expected_revision=expected_revision,
+        boundary_user_message_id=boundary_user_message_id,
+        selected_ordinal=None,
+        document_evidence=document_evidence,
+        now=now,
+    )
+
+
+def resolve_compare_conversation_document_candidate_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    boundary_user_message_id: str,
+    selected_ordinal: int,
+    document_evidence: ResolvedDocumentIdentity,
+    now: str | None = None,
+) -> CompareConversationWithDocumentWorkItem:
+    """Answer Q2 with an exact ordinal and activate its frozen Raw document pin."""
+
+    return _resolve_compare_document_in_transaction(
+        conn,
+        work_item_id=work_item_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        expected_revision=expected_revision,
+        boundary_user_message_id=boundary_user_message_id,
+        selected_ordinal=selected_ordinal,
+        document_evidence=document_evidence,
+        now=now,
+    )
+
+
+def _resolve_compare_document_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    boundary_user_message_id: str,
+    selected_ordinal: int | None,
+    document_evidence: ResolvedDocumentIdentity,
+    now: str | None,
+) -> CompareConversationWithDocumentWorkItem:
+    _require_transaction(conn)
+    revision = _revision(expected_revision)
+    identifier = _scope(work_item_id, _WORK_ITEM_ID_RE, label="work_item_id")
+    user = _scope(user_id, _USER_ID_RE, label="user_id")
+    conversation = _scope(conversation_id, _CONVERSATION_ID_RE, label="conversation_id")
+    boundary = _scope(
+        boundary_user_message_id,
+        _MESSAGE_ID_RE,
+        label="boundary_user_message_id",
+    )
+    if type(document_evidence) is not ResolvedDocumentIdentity:
+        raise WorkItemContractError("document_evidence must use the exact typed contract")
+    current = _fetch(
+        conn,
+        work_item_id=identifier,
+        user_id=user,
+        conversation_id=conversation,
+    )
+    if current is None or current.state is not WorkState.WAITING_FOR_INPUT or current.revision != revision:
+        raise WorkItemConflictError("comparison Work Item revision/state is no longer current")
+    timestamp = _logical_now(now, current_updated_at=current.updated_at)
+    if current.expires_at <= timestamp:
+        raise WorkItemConflictError("comparison Work Item revision/state is no longer current")
+    _validate_stored_item(conn, current, require_latest_message=False)
+    _validate_answer_chain(
+        conn,
+        item=current,
+        boundary_user_message_id=boundary,
+    )
+    question = current.document_questions[-1]
+    candidate_mode = question.kind is DocumentReferenceQuestionKind.SELECT_DOCUMENT_CANDIDATE
+    if candidate_mode != (selected_ordinal is not None):
+        raise WorkItemConflictError("comparison question kind no longer matches the answer")
+    if candidate_mode:
+        candidate_set = current.document_candidate_set
+        parsed = conn.execute("SELECT content FROM messages WHERE id=?", (boundary,)).fetchone()
+        ordinal = None if parsed is None else parse_archive_candidate_ordinal(parsed[0])
+        if (
+            candidate_set is None
+            or ordinal != selected_ordinal
+            or selected_ordinal is None
+            or not 1 <= selected_ordinal <= len(candidate_set.candidates)
+        ):
+            raise WorkItemAnchorError("comparison candidate ordinal is not exact")
+        _validate_boundary_ordinal(
+            conn,
+            user_id=user,
+            conversation_id=conversation,
+            boundary_user_message_id=boundary,
+            expected_ordinal=selected_ordinal,
+        )
+    if (
+        document_evidence.work_item_id != identifier
+        or document_evidence.origin_boundary_user_message_id != boundary
+        or document_evidence.resolved_revision != revision + 1
+        or document_evidence.resolved_at != timestamp
+    ):
+        raise WorkItemContractError("resolved document does not match the exact revision boundary")
+    if candidate_mode:
+        if document_evidence.provenance is not ResolvedDocumentProvenance.HISTORICAL_CANDIDATE_ORDINAL:
+            raise WorkItemContractError("ordinal resolution requires candidate provenance")
+    elif document_evidence.provenance not in {
+        ResolvedDocumentProvenance.CURRENT_TURN_ATTACHMENT,
+        ResolvedDocumentProvenance.HISTORICAL_EXACT_REFERENCE,
+    }:
+        raise WorkItemContractError("Q1 resolution requires exact non-candidate provenance")
+    savepoint = _begin_work_item_mutation_savepoint(conn)
+    try:
+        question_cursor = conn.execute(
+            """UPDATE work_item_compare_document_questions
+                  SET state='answered',answered_at=?,answer_user_message_id=?,
+                      selected_ordinal=?,closed_at=?,close_reason='answered'
+                WHERE id=? AND work_item_id=? AND work_revision=?
+                  AND state='waiting'""",
+            (
+                timestamp,
+                boundary,
+                selected_ordinal,
+                timestamp,
+                question.id,
+                identifier,
+                revision,
+            ),
+        )
+        if question_cursor.rowcount != 1:
+            raise WorkItemConflictError("comparison question CAS lost its state race")
+        _insert_document_evidence(conn, document_evidence)
+        work_cursor = conn.execute(
+            """UPDATE work_items
+                  SET state='active',transition='document_resolved',
+                      revision=revision+1,updated_at=?
+                WHERE id=? AND user_id=? AND conversation_id=?
+                  AND kind='compare_conversation_with_document'
+                  AND state='waiting_for_input' AND revision=? AND expires_at>?""",
+            (timestamp, identifier, user, conversation, revision, timestamp),
+        )
+        if work_cursor.rowcount != 1:
+            raise WorkItemConflictError("comparison document CAS lost its revision race")
+        updated = _fetch(
+            conn,
+            work_item_id=identifier,
+            user_id=user,
+            conversation_id=conversation,
+        )
+        if updated is None:  # pragma: no cover
+            raise WorkItemConflictError("resolved comparison Work Item is not durable")
+        _validate_stored_item(conn, updated, require_latest_message=False)
+    except BaseException as exc:
+        _rollback_work_item_mutation_savepoint(conn, savepoint)
+        if isinstance(exc, sqlite3.IntegrityError):
+            raise WorkItemAnchorError("resolved document authority is not exact") from exc
+        raise
+    _release_work_item_mutation_savepoint(conn, savepoint)
+    return updated
+
+
+def ask_compare_conversation_document_candidate_question_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    boundary_user_message_id: str,
+    candidate_question_assistant_message_id: str,
+    accepted_candidate_projection: ArchiveSearchAcceptedCandidateProjection,
+    accepted_search_plan_sha256: str,
+    accepted_search_outcome_sha256: str,
+    candidate_set_id: str | None = None,
+    question_id: str | None = None,
+    now: str | None = None,
+) -> CompareConversationWithDocumentWorkItem:
+    """Answer ambiguous Q1 and durably ask ordinal Q2 over one frozen set."""
+
+    _require_transaction(conn)
+    revision = _revision(expected_revision)
+    if revision != 1:
+        raise WorkItemConflictError("only Q1 can advance to a candidate question")
+    identifier = _scope(work_item_id, _WORK_ITEM_ID_RE, label="work_item_id")
+    user = _scope(user_id, _USER_ID_RE, label="user_id")
+    conversation = _scope(conversation_id, _CONVERSATION_ID_RE, label="conversation_id")
+    boundary = _scope(
+        boundary_user_message_id,
+        _MESSAGE_ID_RE,
+        label="boundary_user_message_id",
+    )
+    assistant = _scope(
+        candidate_question_assistant_message_id,
+        _MESSAGE_ID_RE,
+        label="candidate_question_assistant_message_id",
+    )
+    if type(accepted_candidate_projection) is not ArchiveSearchAcceptedCandidateProjection:
+        raise WorkItemContractError("candidate question requires the exact accepted projection")
+    plan_digest = _digest(accepted_search_plan_sha256, label="accepted_search_plan_sha256")
+    outcome_digest = _digest(
+        accepted_search_outcome_sha256,
+        label="accepted_search_outcome_sha256",
+    )
+    set_identifier = _scope(
+        candidate_set_id or new_compare_document_candidate_set_id(),
+        _CANDIDATE_SET_ID_RE,
+        label="candidate_set_id",
+    )
+    question_identifier = _scope(
+        question_id or new_compare_document_question_id(),
+        _QUESTION_ID_RE,
+        label="question_id",
+    )
+    current = _fetch(
+        conn,
+        work_item_id=identifier,
+        user_id=user,
+        conversation_id=conversation,
+    )
+    if (
+        current is None
+        or current.state is not WorkState.WAITING_FOR_INPUT
+        or current.revision != revision
+        or len(current.document_questions) != 1
+    ):
+        raise WorkItemConflictError("comparison Work Item revision/state is no longer current")
+    timestamp = _logical_now(now, current_updated_at=current.updated_at)
+    if current.expires_at <= timestamp:
+        raise WorkItemConflictError("comparison Work Item revision/state is no longer current")
+    _validate_stored_item(conn, current, require_latest_message=False)
+    _validate_answer_chain(
+        conn,
+        item=current,
+        boundary_user_message_id=boundary,
+        following_assistant_message_id=assistant,
+    )
+    try:
+        candidate_set = ArchiveCandidateSet.from_accepted_projection(
+            id=set_identifier,
+            work_item_id=identifier,
+            origin_boundary_user_message_id=boundary,
+            projection=accepted_candidate_projection,
+        )
+    except ArchiveCandidateSelectionError as exc:
+        raise WorkItemContractError("comparison candidate projection is invalid") from exc
+    if (
+        any(
+            candidate.corpus is not SelectedArchiveCorpus.DOCUMENTS
+            or candidate.source_ref.principal_id != user
+            for candidate in candidate_set.candidates
+        )
+        or len({candidate.source_ref.tenant_id for candidate in candidate_set.candidates}) != 1
+    ):
+        raise WorkItemAnchorError("comparison candidate set is not one owned document tenant")
+    candidate_question = DocumentReferenceQuestion(
+        id=question_identifier,
+        work_item_id=identifier,
+        kind=DocumentReferenceQuestionKind.SELECT_DOCUMENT_CANDIDATE,
+        admission_shape=current.document_questions[0].admission_shape,
+        state=DocumentReferenceQuestionState.WAITING,
+        created_at=timestamp,
+        prompt_boundary_user_message_id=boundary,
+        prompt_assistant_message_id=assistant,
+        work_revision=2,
+        candidate_set_id=set_identifier,
+        accepted_search_plan_sha256=plan_digest,
+        accepted_search_outcome_sha256=outcome_digest,
+    )
+    candidate_row = conn.execute(
+        "SELECT metadata_json,content FROM messages WHERE id=?",
+        (assistant,),
+    ).fetchone()
+    if candidate_row is None:
+        raise WorkItemAnchorError("candidate publication is unavailable")
+    _validate_candidate_publication(
+        metadata=candidate_row[0],
+        content=candidate_row[1],
+        question=candidate_question,
+        candidate_set=candidate_set,
+    )
+    savepoint = _begin_work_item_mutation_savepoint(conn)
+    try:
+        first = current.document_questions[0]
+        answered = conn.execute(
+            """UPDATE work_item_compare_document_questions
+                  SET state='answered',answered_at=?,answer_user_message_id=?,
+                      closed_at=?,close_reason='answered'
+                WHERE id=? AND work_item_id=? AND work_revision=1
+                  AND state='waiting'""",
+            (timestamp, boundary, timestamp, first.id, identifier),
+        )
+        if answered.rowcount != 1:
+            raise WorkItemConflictError("comparison Q1 CAS lost its state race")
+        _insert_candidate_set(conn, candidate_set)
+        _insert_question(conn, candidate_question)
+        work_cursor = conn.execute(
+            """UPDATE work_items
+                  SET transition='question_reasked',revision=revision+1,
+                      updated_at=?,expires_at=?
+                WHERE id=? AND user_id=? AND conversation_id=?
+                  AND kind='compare_conversation_with_document'
+                  AND state='waiting_for_input' AND revision=1 AND expires_at>?""",
+            (
+                timestamp,
+                _expiry(timestamp),
+                identifier,
+                user,
+                conversation,
+                timestamp,
+            ),
+        )
+        if work_cursor.rowcount != 1:
+            raise WorkItemConflictError("comparison Q2 CAS lost its revision race")
+        updated = _fetch(
+            conn,
+            work_item_id=identifier,
+            user_id=user,
+            conversation_id=conversation,
+        )
+        if updated is None:  # pragma: no cover
+            raise WorkItemConflictError("candidate comparison Work Item is not durable")
+        _validate_stored_item(conn, updated, require_latest_message=True)
+    except BaseException as exc:
+        _rollback_work_item_mutation_savepoint(conn, savepoint)
+        if isinstance(exc, sqlite3.IntegrityError):
+            raise WorkItemConflictError("comparison candidate question lost its state race") from exc
+        raise
+    _release_work_item_mutation_savepoint(conn, savepoint)
+    return updated
+
+
+def complete_compare_conversation_with_document_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    accepted_result: AcceptedComparisonResultIdentity,
+    now: str | None = None,
+) -> CompareConversationWithDocumentWorkItem:
+    """CAS-accept one latest attested assistant/result pair and complete atomically."""
+
+    _require_transaction(conn)
+    revision = _revision(expected_revision)
+    identifier = _scope(work_item_id, _WORK_ITEM_ID_RE, label="work_item_id")
+    user = _scope(user_id, _USER_ID_RE, label="user_id")
+    conversation = _scope(conversation_id, _CONVERSATION_ID_RE, label="conversation_id")
+    if type(accepted_result) is not AcceptedComparisonResultIdentity:
+        raise WorkItemContractError("accepted_result must use the exact typed contract")
+    current = _fetch(
+        conn,
+        work_item_id=identifier,
+        user_id=user,
+        conversation_id=conversation,
+    )
+    if current is None or current.state is not WorkState.ACTIVE or current.revision != revision:
+        raise WorkItemConflictError("comparison Work Item revision/state is no longer current")
+    timestamp = _logical_now(now, current_updated_at=current.updated_at)
+    if current.expires_at <= timestamp:
+        raise WorkItemConflictError("comparison Work Item revision/state is no longer current")
+    _validate_stored_item(conn, current, require_latest_message=False)
+    latest_question = current.document_questions[-1]
+    if (
+        accepted_result.work_item_id != identifier
+        or accepted_result.answer_boundary_user_message_id != latest_question.answer_user_message_id
+        or accepted_result.completed_revision != revision + 1
+        or accepted_result.completed_at != timestamp
+    ):
+        raise WorkItemContractError("accepted comparison result does not match its revision boundary")
+    _validate_answer_chain(
+        conn,
+        item=current,
+        boundary_user_message_id=accepted_result.answer_boundary_user_message_id,
+        following_assistant_message_id=accepted_result.answer_assistant_message_id,
+    )
+    savepoint = _begin_work_item_mutation_savepoint(conn)
+    try:
+        _insert_comparison_result(conn, accepted_result)
+        work_cursor = conn.execute(
+            """UPDATE work_items
+                  SET state='completed',transition='comparison_published',
+                      revision=revision+1,updated_at=?,closed_at=?
+                WHERE id=? AND user_id=? AND conversation_id=?
+                  AND kind='compare_conversation_with_document'
+                  AND state='active' AND revision=? AND expires_at>?""",
+            (
+                timestamp,
+                timestamp,
+                identifier,
+                user,
+                conversation,
+                revision,
+                timestamp,
+            ),
+        )
+        if work_cursor.rowcount != 1:
+            raise WorkItemConflictError("comparison completion CAS lost its revision race")
+        updated = _fetch(
+            conn,
+            work_item_id=identifier,
+            user_id=user,
+            conversation_id=conversation,
+        )
+        if updated is None:  # pragma: no cover
+            raise WorkItemConflictError("completed comparison Work Item is not durable")
+        _validate_stored_item(conn, updated, require_latest_message=False)
+    except BaseException as exc:
+        _rollback_work_item_mutation_savepoint(conn, savepoint)
+        if isinstance(exc, sqlite3.IntegrityError):
+            raise WorkItemAnchorError("comparison publication receipt is not exact") from exc
+        raise
+    _release_work_item_mutation_savepoint(conn, savepoint)
+    return updated
+
+
+def _cas_compare_lifecycle(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    from_states: frozenset[WorkState],
+    target_state: WorkState,
+    now: str | None,
+    require_due: bool,
+) -> CompareConversationWithDocumentWorkItem:
+    _require_transaction(conn)
+    revision = _revision(expected_revision)
+    identifier = _scope(work_item_id, _WORK_ITEM_ID_RE, label="work_item_id")
+    user = _scope(user_id, _USER_ID_RE, label="user_id")
+    conversation = _scope(conversation_id, _CONVERSATION_ID_RE, label="conversation_id")
+    current = _fetch(
+        conn,
+        work_item_id=identifier,
+        user_id=user,
+        conversation_id=conversation,
+    )
+    if current is None or current.state not in from_states or current.revision != revision:
+        raise WorkItemConflictError("comparison Work Item revision/state is no longer current")
+    timestamp = _logical_now(now, current_updated_at=current.updated_at)
+    if (current.expires_at <= timestamp) is not require_due:
+        raise WorkItemConflictError("comparison Work Item revision/state is no longer current")
+    _validate_stored_item(
+        conn,
+        current,
+        allow_disabled_owner=True,
+        require_latest_message=False,
+    )
+    savepoint = _begin_work_item_mutation_savepoint(conn)
+    try:
+        if current.state is WorkState.WAITING_FOR_INPUT:
+            question = current.document_questions[-1]
+            question_cursor = conn.execute(
+                """UPDATE work_item_compare_document_questions
+                      SET state='closed',closed_at=?,close_reason=?
+                    WHERE id=? AND work_item_id=? AND work_revision=?
+                      AND state='waiting'""",
+                (
+                    timestamp,
+                    target_state.value,
+                    question.id,
+                    identifier,
+                    revision,
+                ),
+            )
+            if question_cursor.rowcount != 1:
+                raise WorkItemConflictError("comparison question lifecycle CAS lost its state race")
+        states = tuple(sorted(state.value for state in from_states))
+        placeholders = ",".join("?" for _item in states)
+        due_predicate = "expires_at<=?" if require_due else "expires_at>?"
+        cursor = conn.execute(
+            f"""UPDATE work_items
+                   SET state=?,transition=?,revision=revision+1,updated_at=?,closed_at=?
+                 WHERE id=? AND user_id=? AND conversation_id=?
+                   AND kind='compare_conversation_with_document' AND revision=?
+                   AND state IN ({placeholders}) AND {due_predicate}""",  # nosec B608
+            (
+                target_state.value,
+                target_state.value,
+                timestamp,
+                timestamp if target_state in {WorkState.CANCELLED, WorkState.EXPIRED} else None,
+                identifier,
+                user,
+                conversation,
+                revision,
+                *states,
+                timestamp,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise WorkItemConflictError("comparison lifecycle CAS lost its revision race")
+        updated = _fetch(
+            conn,
+            work_item_id=identifier,
+            user_id=user,
+            conversation_id=conversation,
+        )
+        if updated is None:  # pragma: no cover
+            raise WorkItemConflictError("comparison lifecycle state is not durable")
+        _validate_stored_item(
+            conn,
+            updated,
+            allow_disabled_owner=True,
+            require_latest_message=False,
+        )
+    except BaseException:
+        _rollback_work_item_mutation_savepoint(conn, savepoint)
+        raise
+    _release_work_item_mutation_savepoint(conn, savepoint)
+    return updated
+
+
+def suspend_compare_conversation_with_document_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    now: str | None = None,
+) -> CompareConversationWithDocumentWorkItem:
+    """Suspend without retaining failure prose or a source-bearing outcome."""
+
+    return _cas_compare_lifecycle(
+        conn,
+        work_item_id=work_item_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        expected_revision=expected_revision,
+        from_states=frozenset({WorkState.WAITING_FOR_INPUT, WorkState.ACTIVE}),
+        target_state=WorkState.SUSPENDED,
+        now=now,
+        require_due=False,
+    )
+
+
+def cancel_compare_conversation_with_document_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    now: str | None = None,
+) -> CompareConversationWithDocumentWorkItem:
+    return _cas_compare_lifecycle(
+        conn,
+        work_item_id=work_item_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        expected_revision=expected_revision,
+        from_states=frozenset({WorkState.WAITING_FOR_INPUT, WorkState.ACTIVE, WorkState.SUSPENDED}),
+        target_state=WorkState.CANCELLED,
+        now=now,
+        require_due=False,
+    )
+
+
+def expire_compare_conversation_with_document_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: str,
+    user_id: str,
+    conversation_id: str,
+    expected_revision: int,
+    now: str | None = None,
+) -> CompareConversationWithDocumentWorkItem:
+    return _cas_compare_lifecycle(
+        conn,
+        work_item_id=work_item_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        expected_revision=expected_revision,
+        from_states=frozenset({WorkState.WAITING_FOR_INPUT, WorkState.ACTIVE, WorkState.SUSPENDED}),
+        target_state=WorkState.EXPIRED,
+        now=now,
+        require_due=True,
+    )
+
+
+def expire_due_compare_conversation_with_document_work_items_in_transaction(
+    conn: sqlite3.Connection,
+    *,
+    now: str | None = None,
+    user_id: str | None = None,
+) -> int:
+    """Expire due comparison rows while closing each open typed question first."""
+
+    _require_transaction(conn)
+    timestamp = _now(now)
+    parameters: tuple[object, ...] = (timestamp,)
+    scope = ""
+    if user_id is not None:
+        scope = " AND user_id=?"
+        parameters = (timestamp, _scope(user_id, _USER_ID_RE, label="user_id"))
+    cursor = conn.execute(
+        f"""SELECT id,user_id,conversation_id,revision
+              FROM work_items
+             WHERE kind='compare_conversation_with_document'
+               AND state IN ('waiting_for_input','active','suspended')
+               AND expires_at<=?{scope}
+             ORDER BY id""",  # nosec B608 - closed optional owner predicate
+        parameters,
+    )
+    rows = tuple(cursor.fetchall())
+    count = 0
+    for row in rows:
+        identifier, owner, conversation, revision = row
+        if not isinstance(revision, int) or isinstance(revision, bool):
+            raise WorkItemContractError("stored comparison revision is invalid")
+        if revision >= WORK_ITEM_MAX_REVISION:
+            deleted = conn.execute(
+                """DELETE FROM work_items
+                    WHERE id=? AND user_id=? AND conversation_id=?
+                      AND kind='compare_conversation_with_document'
+                      AND state IN ('waiting_for_input','active','suspended')
+                      AND revision=? AND expires_at<=?""",
+                (identifier, owner, conversation, revision, timestamp),
+            )
+            count += max(0, int(deleted.rowcount or 0))
+            continue
+        expire_compare_conversation_with_document_in_transaction(
+            conn,
+            work_item_id=str(identifier),
+            user_id=str(owner),
+            conversation_id=str(conversation),
+            expected_revision=revision,
+            now=timestamp,
+        )
+        count += 1
+    return count
+
+
 __all__ = [
+    "ask_compare_conversation_document_candidate_question_in_transaction",
+    "cancel_compare_conversation_with_document_in_transaction",
+    "complete_compare_conversation_with_document_in_transaction",
+    "create_compare_conversation_with_document_from_selected_followup_in_transaction",
+    "expire_compare_conversation_with_document_in_transaction",
+    "expire_due_compare_conversation_with_document_work_items_in_transaction",
     "get_compare_conversation_with_document_work_item_for_export_in_transaction",
     "get_compare_conversation_with_document_work_item_in_transaction",
     "get_current_compare_conversation_with_document_work_item_in_transaction",
+    "new_compare_conversation_with_document_work_item_id",
+    "new_compare_document_candidate_set_id",
+    "new_compare_document_question_id",
+    "resolve_compare_conversation_document_candidate_in_transaction",
+    "resolve_compare_conversation_document_reference_in_transaction",
+    "suspend_compare_conversation_with_document_in_transaction",
 ]

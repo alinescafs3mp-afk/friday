@@ -17,6 +17,9 @@ from friday.interaction_control_plane.archive_candidate_selection import (
     ArchiveCandidateSet,
     archive_candidate_selection_offer_suffix,
 )
+from friday.interaction_control_plane.archive_evidence_work_item_store import (
+    create_recall_selected_archive_evidence_work_item_in_transaction,
+)
 from friday.interaction_control_plane.compare_conversation_document import (
     COMPARE_DOCUMENT_REFERENCE_PROMPT,
     COMPARE_DOCUMENT_REFERENCE_REQUIRED_VERDICT_KIND,
@@ -24,6 +27,7 @@ from friday.interaction_control_plane.compare_conversation_document import (
     CompareConversationDocumentOutcome,
     CompareConversationDocumentStatus,
     DocumentReferenceAdmissionShape,
+    DocumentReferenceQuestionState,
     ResolvedDocumentIdentity,
     ResolvedDocumentProvenance,
     attach_accepted_comparison_outcome_receipt,
@@ -31,8 +35,19 @@ from friday.interaction_control_plane.compare_conversation_document import (
     selected_evidence_sha256,
 )
 from friday.interaction_control_plane.compare_conversation_document_store import (
+    ask_compare_conversation_document_candidate_question_in_transaction,
+    cancel_compare_conversation_with_document_in_transaction,
+    complete_compare_conversation_with_document_in_transaction,
+    create_compare_conversation_with_document_from_selected_followup_in_transaction,
+    expire_compare_conversation_with_document_in_transaction,
+    expire_due_compare_conversation_with_document_work_items_in_transaction,
     get_compare_conversation_with_document_work_item_in_transaction,
     get_current_compare_conversation_with_document_work_item_in_transaction,
+    new_compare_conversation_with_document_work_item_id,
+    new_compare_document_question_id,
+    resolve_compare_conversation_document_candidate_in_transaction,
+    resolve_compare_conversation_document_reference_in_transaction,
+    suspend_compare_conversation_with_document_in_transaction,
 )
 from friday.interaction_control_plane.selected_archive_evidence import (
     SelectedArchiveCorpus,
@@ -46,7 +61,10 @@ from friday.interaction_control_plane.work_item_contract import (
     WorkTransition,
 )
 from friday.interaction_control_plane.work_item_schema import validate_work_item_schema
-from friday.interaction_control_plane.work_item_store import WorkItemAnchorError
+from friday.interaction_control_plane.work_item_store import (
+    WorkItemAnchorError,
+    WorkItemConflictError,
+)
 from friday.orchestration.archive_recall_outcome import (
     ArchiveRecallLane,
     ArchiveRecallOutcome,
@@ -1391,3 +1409,579 @@ def test_export_conversation_retirement_and_account_inventory_cover_compare_side
     assert plan["counts"]["work_items"] == 1
     assert plan["counts"]["work_item_compare_document_questions"] == 1
     assert plan["unknown_scopes"] == []
+
+
+def _create_writer_followup_waiting(
+    storage: Any,
+    *,
+    owner: str = "compare-writer-owner",
+) -> tuple[dict[str, Any], Any, SelectedArchiveEvidence]:
+    storage.ensure_user(owner, source="local")
+    conversation = storage.create_conversation(owner, "writer followup")
+    origin_boundary = storage.store_message(
+        conversation["id"],
+        owner,
+        "user",
+        "find exact message evidence",
+    )
+    default_owner = owner == "compare-writer-owner"
+    old_work_id = (
+        "work_3131313131313131"
+        if default_owner
+        else new_compare_conversation_with_document_work_item_id()
+    )
+    compare_work_id = (
+        _WORK_ID if default_owner else new_compare_conversation_with_document_work_item_id()
+    )
+    compare_question_id = _QUESTION_ID if default_owner else new_compare_document_question_id()
+    old_evidence, selected = _selected_messages(
+        storage,
+        owner=owner,
+        work_item_id=old_work_id,
+        origin_boundary_id=origin_boundary["id"],
+    )
+    archive_answer = "Exact message evidence [A1.1]."
+    archive_metadata, outcome, outcome_sha256 = _archive_metadata(
+        answer=archive_answer,
+        selected=selected,
+        evidence=old_evidence,
+    )
+    origin_assistant = storage.store_message(
+        conversation["id"],
+        owner,
+        "assistant",
+        archive_answer,
+        metadata=archive_metadata,
+        reply_to=origin_boundary["id"],
+    )
+    with storage.transaction() as conn:
+        create_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            user_id=owner,
+            conversation_id=conversation["id"],
+            selected_evidence=old_evidence,
+            anchor_user_message_id=origin_boundary["id"],
+            anchor_assistant_message_id=origin_assistant["id"],
+            accepted_plan_sha256=outcome.plan_sha256,
+            accepted_outcome_sha256=outcome_sha256,
+            now=_NOW,
+        )
+    followup = storage.store_message(
+        conversation["id"],
+        owner,
+        "user",
+        "compare those messages with a document",
+        reply_to=origin_assistant["id"],
+    )
+    prompt = storage.store_message(
+        conversation["id"],
+        owner,
+        "assistant",
+        COMPARE_DOCUMENT_REFERENCE_PROMPT,
+        metadata={
+            "structural": {
+                "answer_present": True,
+                "model_spoke": False,
+                "verdict_kind": COMPARE_DOCUMENT_REFERENCE_REQUIRED_VERDICT_KIND,
+            }
+        },
+        reply_to=followup["id"],
+    )
+    with storage.transaction() as conn:
+        item = create_compare_conversation_with_document_from_selected_followup_in_transaction(
+            conn,
+            selected_work_item_id=old_work_id,
+            user_id=owner,
+            conversation_id=conversation["id"],
+            expected_selected_revision=1,
+            prompt_boundary_user_message_id=followup["id"],
+            prompt_assistant_message_id=prompt["id"],
+            work_item_id=compare_work_id,
+            question_id=compare_question_id,
+            now=_NOW,
+        )
+    return conversation, item, old_evidence
+
+
+def _prepare_writer_document(
+    storage: Any,
+    *,
+    conversation: dict[str, Any],
+    item: Any,
+    owner: str = "compare-writer-owner",
+    tenant: str = "compare-shared-tenant",
+    provenance: ResolvedDocumentProvenance = ResolvedDocumentProvenance.CURRENT_TURN_ATTACHMENT,
+    raw_identity_override: str | None = None,
+) -> tuple[dict[str, Any], ResolvedDocumentIdentity]:
+    storage.ensure_user(tenant, source="local")
+    body = "WRITER-PRIVATE-DOCUMENT-BODY"
+    digest = _sha(body)
+    raw = RawObject(
+        id=new_id("raw"),
+        user_id=tenant,
+        source="upload",
+        source_ref="telegram-file:writer-document",
+        raw_content=body,
+        content_type="file",
+        content_hash=digest,
+        metadata_json={
+            "filename": "writer-private-document.pdf",
+            "sha256": digest,
+            "size_bytes": len(body.encode("utf-8")),
+            "uploaded_by": owner,
+        },
+    )
+    storage.store_raw_object(raw)
+    metadata_key = (
+        "conversation_uploaded_raw_ids"
+        if provenance is ResolvedDocumentProvenance.CURRENT_TURN_ATTACHMENT
+        else "conversation_attachment_raw_ids"
+    )
+    boundary = storage.store_message(
+        conversation["id"],
+        owner,
+        "user",
+        "this exact document",
+        metadata={metadata_key: [raw.id], "had_attachments": True},
+        reply_to=item.document_questions[-1].prompt_assistant_message_id,
+    )
+    source = SourceRef(
+        SourceKind.DOCUMENT,
+        AuthorityScope.TENANT_PRINCIPAL,
+        tenant,
+        owner,
+        CanonicalObjectKind.RAW_OBJECT,
+        raw.id,
+    )
+    with storage.transaction() as conn:
+        conn.execute(
+            """INSERT INTO file_source_aliases(
+                   user_id,uploaded_by,source_ref,raw_object_id,supplied_filename,created_at
+               ) VALUES(?,?,?,?,?,?)""",
+            (tenant, owner, raw.source_ref, raw.id, "writer-private-document.pdf", _ANSWERED_AT),
+        )
+        cursor = conn.execute(
+            """SELECT id,source,source_ref,content_type,received_at,content_hash,
+                      raw_content AS _raw_content,metadata_json AS _raw_metadata
+                 FROM raw_objects WHERE id=?""",
+            (raw.id,),
+        )
+        raw_identity = raw_source_identity_sha256(dict(cursor.fetchone()))
+    document = ResolvedDocumentIdentity(
+        work_item_id=item.id,
+        provenance=provenance,
+        source_ref=source,
+        raw_object_id=raw.id,
+        raw_source_identity_sha256=raw_identity_override or raw_identity,
+        raw_content_sha256=digest,
+        content_sha256=digest,
+        candidate_source_snapshot_sha256=None,
+        origin_boundary_user_message_id=boundary["id"],
+        resolved_revision=item.revision + 1,
+        resolved_at=_RESOLVED_AT,
+    )
+    return boundary, document
+
+
+def _writer_comparison_result(
+    storage: Any,
+    *,
+    conversation: dict[str, Any],
+    item: Any,
+    owner: str = "compare-writer-owner",
+    document_digest_override: str | None = None,
+) -> AcceptedComparisonResultIdentity:
+    document = item.resolved_document_evidence
+    assert document is not None
+    answer = "Accepted exact comparison [A1.1] [D1.1]."
+    outcome = CompareConversationDocumentOutcome(
+        plan_sha256="7" * 64,
+        answer_sha256=_sha(answer),
+        status=CompareConversationDocumentStatus(item.selected_message_evidence.coverage_grade.value),
+        message_coverage_grade=item.selected_message_evidence.coverage_grade,
+        document_verification_complete=True,
+        publication_attested=True,
+        semantic_verified=True,
+        message_evidence_sha256=selected_evidence_sha256(item.selected_message_evidence),
+        document_evidence_sha256=document_digest_override or document.canonical_sha256,
+        evidence_bundle_sha256=comparison_evidence_bundle_sha256(
+            item.selected_message_evidence,
+            document,
+        ),
+        model_evidence_sha256="8" * 64,
+    )
+    metadata: dict[str, object] = {"structural": {"answer_present": True, "model_spoke": True}}
+    receipt = attach_accepted_comparison_outcome_receipt(metadata, outcome)
+    boundary_id = item.document_questions[-1].answer_user_message_id
+    assert boundary_id is not None
+    assistant = storage.store_message(
+        conversation["id"],
+        owner,
+        "assistant",
+        answer,
+        metadata=metadata,
+        reply_to=boundary_id,
+    )
+    return AcceptedComparisonResultIdentity(
+        work_item_id=item.id,
+        answer_boundary_user_message_id=boundary_id,
+        answer_assistant_message_id=assistant["id"],
+        accepted_plan_sha256=outcome.plan_sha256,
+        accepted_outcome_sha256=receipt.outcome_sha256,
+        comparison_status=outcome.status,
+        message_coverage_grade=outcome.message_coverage_grade,
+        document_verification_complete=True,
+        publication_attested=True,
+        semantic_verified=True,
+        message_evidence_sha256=outcome.message_evidence_sha256,
+        document_evidence_sha256=outcome.document_evidence_sha256,
+        evidence_bundle_sha256=outcome.evidence_bundle_sha256,
+        model_evidence_sha256=outcome.model_evidence_sha256,
+        completed_revision=item.revision + 1,
+        completed_at=_COMPLETED_AT,
+    )
+
+
+def test_writer_selected_followup_clones_exact_evidence_and_retires_old_atomically(
+    storage: Any,
+) -> None:
+    conversation, item, old_evidence = _create_writer_followup_waiting(storage)
+
+    assert item.state is WorkState.WAITING_FOR_INPUT
+    assert item.revision == 1
+    assert item.selected_message_evidence.work_item_id == _WORK_ID
+    assert item.selected_message_evidence.passage_refs == old_evidence.passage_refs
+    assert item.selected_message_evidence.source_ref == old_evidence.source_ref
+    assert (
+        item.document_questions[0].admission_shape
+        is DocumentReferenceAdmissionShape.SELECTED_EVIDENCE_FOLLOWUP
+    )
+    old = storage.execute("SELECT state,revision FROM work_items WHERE id='work_3131313131313131'").fetchone()
+    assert tuple(old) == ("suspended", 2)
+    with storage.transaction() as conn:
+        restarted = get_current_compare_conversation_with_document_work_item_in_transaction(
+            conn,
+            user_id="compare-writer-owner",
+            conversation_id=conversation["id"],
+            now="2026-08-25T09:00:00+00:00",
+        )
+    assert restarted == item
+    assert new_compare_conversation_with_document_work_item_id().startswith("work_")
+    assert new_compare_document_question_id().startswith("question_")
+
+
+def test_writer_q1_resolution_is_shared_tenant_restart_safe_and_rolls_back_tamper(
+    storage: Any,
+) -> None:
+    conversation, item, _old = _create_writer_followup_waiting(storage)
+    boundary, tampered = _prepare_writer_document(
+        storage,
+        conversation=conversation,
+        item=item,
+        raw_identity_override="f" * 64,
+    )
+    with storage.transaction() as conn:
+        with pytest.raises(WorkItemAnchorError, match="identity"):
+            resolve_compare_conversation_document_reference_in_transaction(
+                conn,
+                work_item_id=item.id,
+                user_id=item.user_id,
+                conversation_id=item.conversation_id,
+                expected_revision=1,
+                boundary_user_message_id=boundary["id"],
+                document_evidence=tampered,
+                now=_RESOLVED_AT,
+            )
+        question = conn.execute(
+            "SELECT state FROM work_item_compare_document_questions WHERE work_item_id=?",
+            (item.id,),
+        ).fetchone()
+        assert tuple(question) == ("waiting",)
+        assert (
+            conn.execute(
+                "SELECT 1 FROM work_item_compare_document_evidence WHERE work_item_id=?",
+                (item.id,),
+            ).fetchone()
+            is None
+        )
+        raw_cursor = conn.execute(
+            """SELECT id,source,source_ref,content_type,received_at,content_hash,
+                      raw_content AS _raw_content,metadata_json AS _raw_metadata
+                 FROM raw_objects WHERE id=?""",
+            (tampered.raw_object_id,),
+        )
+        exact = replace(
+            tampered,
+            raw_source_identity_sha256=raw_source_identity_sha256(dict(raw_cursor.fetchone())),
+        )
+        active = resolve_compare_conversation_document_reference_in_transaction(
+            conn,
+            work_item_id=item.id,
+            user_id=item.user_id,
+            conversation_id=item.conversation_id,
+            expected_revision=1,
+            boundary_user_message_id=boundary["id"],
+            document_evidence=exact,
+            now=_RESOLVED_AT,
+        )
+    assert active.state is WorkState.ACTIVE
+    assert active.revision == 2
+    assert active.resolved_document_evidence is not None
+    assert active.resolved_document_evidence.source_ref.tenant_id == "compare-shared-tenant"
+    with storage.transaction() as conn, pytest.raises(WorkItemConflictError):
+        resolve_compare_conversation_document_reference_in_transaction(
+            conn,
+            work_item_id=item.id,
+            user_id=item.user_id,
+            conversation_id=item.conversation_id,
+            expected_revision=1,
+            boundary_user_message_id=boundary["id"],
+            document_evidence=exact,
+            now=_RESOLVED_AT,
+        )
+
+
+def test_writer_q1_ambiguity_and_q2_ordinal_activate_frozen_candidate(storage: Any) -> None:
+    owner = "compare-writer-owner"
+    tenant = "compare-candidate-tenant"
+    conversation, item, _old = _create_writer_followup_waiting(storage, owner=owner)
+    storage.ensure_user(tenant, source="local")
+    boundary = storage.store_message(
+        conversation["id"],
+        owner,
+        "user",
+        "the quarterly report",
+        reply_to=item.document_questions[0].prompt_assistant_message_id,
+    )
+    projection = _candidate_projection(owner=owner, tenant=tenant)
+    answer = "Two exact documents match.\n\n" + archive_candidate_selection_offer_suffix(("A1", "A2"))
+    outcome = ArchiveRecallOutcome(
+        lane=ArchiveRecallLane.FEDERATED_SEARCH,
+        status=ArchiveRecallStatus.COMPLETE,
+        plan_sha256="9" * 64,
+        evidence_sha256=projection.evidence_sha256,
+        coverage_sha256=projection.coverage_sha256,
+        coverage_grade=projection.coverage_grade,
+        candidate_count=projection.candidate_count,
+        used_citation_labels=("A1.1", "A2.1"),
+        selected_evidence=None,
+        publication_attested=True,
+        semantic_verified=False,
+        answer_sha256=_sha(answer),
+        candidate_projection_sha256=projection.canonical_sha256,
+    )
+    metadata: dict[str, Any] = {"structural": {"answer_present": True}}
+    receipt = attach_accepted_archive_recall_outcome_receipt(metadata, outcome)
+    assistant = storage.store_message(
+        conversation["id"],
+        owner,
+        "assistant",
+        answer,
+        metadata=metadata,
+        reply_to=boundary["id"],
+    )
+    with storage.transaction() as conn:
+        waiting_q2 = ask_compare_conversation_document_candidate_question_in_transaction(
+            conn,
+            work_item_id=item.id,
+            user_id=owner,
+            conversation_id=conversation["id"],
+            expected_revision=1,
+            boundary_user_message_id=boundary["id"],
+            candidate_question_assistant_message_id=assistant["id"],
+            accepted_candidate_projection=projection,
+            accepted_search_plan_sha256=outcome.plan_sha256,
+            accepted_search_outcome_sha256=receipt.outcome_sha256,
+            candidate_set_id=_CANDIDATE_SET_ID,
+            question_id=_SECOND_QUESTION_ID,
+            now=_ANSWERED_AT,
+        )
+    assert waiting_q2.revision == 2
+    assert waiting_q2.document_candidate_set is not None
+    assert waiting_q2.document_questions[-1].state is DocumentReferenceQuestionState.WAITING
+
+    selected = waiting_q2.document_candidate_set.selected_evidence(1)
+    body = "PRIVATE-SELECTED-CANDIDATE-BODY"
+    digest = _sha(body)
+    raw = RawObject(
+        id=selected.source_ref.canonical_object_id,
+        user_id=tenant,
+        source="upload",
+        source_ref="telegram-file:selected-writer-candidate",
+        raw_content=body,
+        content_type="file",
+        content_hash=digest,
+        metadata_json={
+            "filename": "selected-writer-candidate.docx",
+            "sha256": digest,
+            "size_bytes": len(body.encode("utf-8")),
+            "uploaded_by": owner,
+        },
+    )
+    storage.store_raw_object(raw)
+    ordinal_boundary = storage.store_message(
+        conversation["id"],
+        owner,
+        "user",
+        "1",
+        reply_to=waiting_q2.document_questions[-1].prompt_assistant_message_id,
+    )
+    with storage.transaction() as conn:
+        conn.execute(
+            """INSERT INTO file_source_aliases(
+                   user_id,uploaded_by,source_ref,raw_object_id,supplied_filename,created_at
+               ) VALUES(?,?,?,?,?,?)""",
+            (tenant, owner, raw.source_ref, raw.id, "selected-writer-candidate.docx", _CANDIDATE_ANSWERED_AT),
+        )
+        raw_cursor = conn.execute(
+            """SELECT id,source,source_ref,content_type,received_at,content_hash,
+                      raw_content AS _raw_content,metadata_json AS _raw_metadata
+                 FROM raw_objects WHERE id=?""",
+            (raw.id,),
+        )
+        document = ResolvedDocumentIdentity(
+            work_item_id=item.id,
+            provenance=ResolvedDocumentProvenance.HISTORICAL_CANDIDATE_ORDINAL,
+            source_ref=selected.source_ref,
+            raw_object_id=raw.id,
+            raw_source_identity_sha256=raw_source_identity_sha256(dict(raw_cursor.fetchone())),
+            raw_content_sha256=digest,
+            content_sha256=digest,
+            candidate_source_snapshot_sha256=selected.source_snapshot_sha256,
+            origin_boundary_user_message_id=ordinal_boundary["id"],
+            resolved_revision=3,
+            resolved_at=_CANDIDATE_RESOLVED_AT,
+            candidate_set_id=_CANDIDATE_SET_ID,
+            selected_ordinal=1,
+        )
+        active = resolve_compare_conversation_document_candidate_in_transaction(
+            conn,
+            work_item_id=item.id,
+            user_id=owner,
+            conversation_id=conversation["id"],
+            expected_revision=2,
+            boundary_user_message_id=ordinal_boundary["id"],
+            selected_ordinal=1,
+            document_evidence=document,
+            now=_CANDIDATE_RESOLVED_AT,
+        )
+    assert active.state is WorkState.ACTIVE
+    assert active.revision == 3
+    assert active.resolved_document_evidence == document
+    with storage.transaction() as conn:
+        restarted = get_compare_conversation_with_document_work_item_in_transaction(
+            conn,
+            work_item_id=item.id,
+            user_id=owner,
+            conversation_id=conversation["id"],
+        )
+    assert restarted == active
+
+
+def test_writer_completion_is_atomic_latest_and_digest_bound(storage: Any) -> None:
+    conversation, waiting, _old = _create_writer_followup_waiting(storage)
+    boundary, document = _prepare_writer_document(
+        storage,
+        conversation=conversation,
+        item=waiting,
+    )
+    with storage.transaction() as conn:
+        active = resolve_compare_conversation_document_reference_in_transaction(
+            conn,
+            work_item_id=waiting.id,
+            user_id=waiting.user_id,
+            conversation_id=waiting.conversation_id,
+            expected_revision=1,
+            boundary_user_message_id=boundary["id"],
+            document_evidence=document,
+            now=_RESOLVED_AT,
+        )
+    result = _writer_comparison_result(
+        storage,
+        conversation=conversation,
+        item=active,
+    )
+    with storage.transaction() as conn:
+        completed = complete_compare_conversation_with_document_in_transaction(
+            conn,
+            work_item_id=active.id,
+            user_id=active.user_id,
+            conversation_id=active.conversation_id,
+            expected_revision=2,
+            accepted_result=result,
+            now=_COMPLETED_AT,
+        )
+    assert completed.state is WorkState.COMPLETED
+    assert completed.accepted_comparison == result
+    with storage.transaction() as conn, pytest.raises(WorkItemConflictError):
+        complete_compare_conversation_with_document_in_transaction(
+            conn,
+            work_item_id=active.id,
+            user_id=active.user_id,
+            conversation_id=active.conversation_id,
+            expected_revision=2,
+            accepted_result=result,
+            now=_COMPLETED_AT,
+        )
+
+
+def test_writer_lifecycle_closes_q1_and_expire_due_is_owner_scoped(storage: Any) -> None:
+    conversation, waiting, _old = _create_writer_followup_waiting(storage)
+    with storage.transaction() as conn:
+        suspended = suspend_compare_conversation_with_document_in_transaction(
+            conn,
+            work_item_id=waiting.id,
+            user_id=waiting.user_id,
+            conversation_id=conversation["id"],
+            expected_revision=1,
+            now=_ANSWERED_AT,
+        )
+        cancelled = cancel_compare_conversation_with_document_in_transaction(
+            conn,
+            work_item_id=suspended.id,
+            user_id=suspended.user_id,
+            conversation_id=suspended.conversation_id,
+            expected_revision=2,
+            now=_RESOLVED_AT,
+        )
+    assert cancelled.state is WorkState.CANCELLED
+    assert cancelled.document_questions[-1].close_reason.value == "suspended"
+
+    other_conversation, other, _old = _create_writer_followup_waiting(
+        storage,
+        owner="compare-expire-owner",
+    )
+    with storage.transaction() as conn:
+        count = expire_due_compare_conversation_with_document_work_items_in_transaction(
+            conn,
+            user_id="compare-expire-owner",
+            now="2026-08-25T20:01:00+00:00",
+        )
+        expired = get_compare_conversation_with_document_work_item_in_transaction(
+            conn,
+            work_item_id=other.id,
+            user_id=other.user_id,
+            conversation_id=other_conversation["id"],
+        )
+    assert count == 1
+    assert expired is not None and expired.state is WorkState.EXPIRED
+    assert expired.document_questions[-1].close_reason.value == "expired"
+
+
+def test_writer_expire_rejects_not_due_without_partial_question_close(storage: Any) -> None:
+    conversation, waiting, _old = _create_writer_followup_waiting(storage)
+    with storage.transaction() as conn:
+        with pytest.raises(WorkItemConflictError):
+            expire_compare_conversation_with_document_in_transaction(
+                conn,
+                work_item_id=waiting.id,
+                user_id=waiting.user_id,
+                conversation_id=conversation["id"],
+                expected_revision=1,
+                now=_ANSWERED_AT,
+            )
+        state = conn.execute(
+            "SELECT state FROM work_item_compare_document_questions WHERE work_item_id=?",
+            (waiting.id,),
+        ).fetchone()
+    assert tuple(state) == ("waiting",)
