@@ -604,35 +604,60 @@ _MCP_META = re.compile(
 )
 
 _RU_IMAGE_OBJECT = (
-    r"(?:картинк\w*|изображени\w*|рисунк\w*|иллюстраци\w*|"
-    r"png(?:[- ](?:картинк\w*|изображени\w*))?)"
+    r"(?:картин\w*|изображени\w*|рисунк\w*|иллюстраци\w*|"
+    r"png(?:[- ](?:картин\w*|изображени\w*))?)"
 )
 _RU_IMAGE_ACTION = (
-    r"(?:рисовать|нарисовать|генерировать|сгенерировать|"
+    r"(?:рисовать|нарисовать|генерировать|сгенерировать|генерить|сгенерить|"
     r"создавать|создать|делать|сделать)"
 )
+_RU_IMAGE_MODAL = r"(?:можешь|можете|умеешь|умеете|способна|способен|способны)"
+_RU_IMAGE_GENERATION_NOUN = rf"(?:генераци\w*|создани\w*)\s+{_RU_IMAGE_OBJECT}"
+_RU_IMAGE_DESCRIPTION_SUFFIX = r"(?:\s+по\s+(?:текстовому\s+)?описанию)?"
 _IMAGE_GENERATION_CAPABILITY_RU = re.compile(
-    rf"^(?:пятниц\w*\s*[,—:-]\s*)?(?:а\s+)?(?:"
-    rf"(?:(?:ты\s+)?(?:мне\s+)?(?:можешь|умеешь|способна)(?:\s+ли)?"
-    rf"(?:\s+ты)?(?:\s+мне)?\s+)"
+    rf"^(?:пятниц\w*(?:\s*[,—:-]\s*|\s+))?(?:а\s+)?(?:"
+    rf"(?:(?:ты\s+)?(?:мне\s+)?(?:вообще\s+)?{_RU_IMAGE_MODAL}(?:\s+ли)?"
+    rf"(?:\s+ты)?(?:\s+мне)?(?:\s+вообще)?\s+)"
     rf"(?:{_RU_IMAGE_ACTION}(?:\s+мне)?\s+{_RU_IMAGE_OBJECT}"
-    rf"(?:\s+по\s+(?:текстовому\s+)?описанию)?|"
+    rf"{_RU_IMAGE_DESCRIPTION_SUFFIX}|"
     rf"{_RU_IMAGE_OBJECT}(?:\s+мне)?\s+{_RU_IMAGE_ACTION})|"
-    rf"(?:ты\s+)?поддерживаешь(?:\s+ли)?(?:\s+ты)?\s+"
-    rf"(?:генераци\w*|создани\w*)\s+{_RU_IMAGE_OBJECT}"
-    rf")\s*[?!.]*$",
+    rf"(?:(?:ты\s+)?(?:вообще\s+)?{_RU_IMAGE_OBJECT}(?:\s+ты)?\s+"
+    rf"{_RU_IMAGE_ACTION}\s+{_RU_IMAGE_MODAL}(?:\s+ли)?(?:\s+ты)?)|"
+    rf"(?:(?:ты\s+)?(?:вообще\s+)?{_RU_IMAGE_OBJECT}(?:\s+ты)?\s+"
+    rf"{_RU_IMAGE_MODAL}(?:\s+ли)?(?:\s+ты)?\s+{_RU_IMAGE_ACTION})|"
+    rf"(?:(?:ты\s+)?(?:вообще\s+)?поддержива(?:ешь|ете)(?:\s+ли)?"
+    rf"(?:\s+ты)?\s+{_RU_IMAGE_GENERATION_NOUN})|"
+    rf"(?:(?:есть|имеется)\s+ли\s+у\s+тебя\s+"
+    rf"(?:функци\w+\s+)?{_RU_IMAGE_GENERATION_NOUN})|"
+    rf"(?:(?:у\s+тебя\s+)?(?:есть|имеется)\s+"
+    rf"(?:функци\w+\s+)?{_RU_IMAGE_GENERATION_NOUN})|"
+    rf"(?:{_RU_IMAGE_GENERATION_NOUN}\s+у\s+тебя\s+(?:есть|имеется))|"
+    rf"(?:(?:есть|имеется)\s+ли\s+у\s+тебя\s+возможност\w*\s+"
+    rf"{_RU_IMAGE_ACTION}\s+{_RU_IMAGE_OBJECT}{_RU_IMAGE_DESCRIPTION_SUFFIX})|"
+    rf"(?:у\s+тебя\s+(?:есть|имеется)\s+возможност\w*\s+"
+    rf"{_RU_IMAGE_ACTION}\s+{_RU_IMAGE_OBJECT}{_RU_IMAGE_DESCRIPTION_SUFFIX})"
+    rf")\s*[?!.]*\)*$",
     re.IGNORECASE,
 )
+_EN_IMAGE_OBJECT = r"(?:pictures?|images?|illustrations?)"
+_EN_IMAGE_ACTION = r"(?:draw|generate|create|make)"
+_EN_IMAGE_DESCRIPTION_SUFFIX = r"(?:\s+from\s+(?:(?:a\s+)?(?:text\s+)?description|text))?"
 _IMAGE_GENERATION_CAPABILITY_EN = re.compile(
-    r"^(?:friday\s*[,—:-]\s*)?(?:"
+    r"^(?:friday(?:\s*[,—:-]\s*|\s+))?(?:"
     r"(?:(?:can|could)\s+you|are\s+you\s+able\s+to)\s+"
-    r"(?:draw|generate|create|make)\s+(?:me\s+)?(?:an?\s+)?"
-    r"(?:pictures?|images?|illustrations?)"
-    r"(?:\s+from\s+(?:(?:a\s+)?(?:text\s+)?description|text))?|"
+    rf"{_EN_IMAGE_ACTION}\s+(?:me\s+)?(?:an?\s+)?{_EN_IMAGE_OBJECT}"
+    rf"{_EN_IMAGE_DESCRIPTION_SUFFIX}|"
     r"are\s+you\s+capable\s+of\s+(?:drawing|generating|creating|making)\s+"
-    r"(?:pictures?|images?|illustrations?)|"
-    r"do\s+you\s+support\s+(?:free[- ]?form\s+)?image\s+generation"
-    r")\s*[?!.]*$",
+    rf"{_EN_IMAGE_OBJECT}|"
+    rf"do\s+you\s+{_EN_IMAGE_ACTION}\s+(?:an?\s+)?{_EN_IMAGE_OBJECT}"
+    rf"{_EN_IMAGE_DESCRIPTION_SUFFIX}|"
+    r"do\s+you\s+support\s+(?:free[- ]?form\s+)?image\s+generation|"
+    r"do\s+you\s+have\s+(?:an?\s+)?(?:image|picture)\s+generation"
+    r"(?:\s+capability)?|"
+    rf"do\s+you\s+have\s+(?:the\s+)?(?:ability|capability)\s+to\s+"
+    rf"{_EN_IMAGE_ACTION}\s+(?:an?\s+)?{_EN_IMAGE_OBJECT}|"
+    r"is\s+(?:free[- ]?form\s+)?image\s+generation\s+(?:available|supported)"
+    r")\s*[?!.]*\)*$",
     re.IGNORECASE,
 )
 

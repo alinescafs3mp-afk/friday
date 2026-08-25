@@ -296,14 +296,28 @@ def test_data_read_commands_are_not_meta_capability_questions(message: str) -> N
     [
         "а ты мне можешь картинку нарисовать?",
         "Пятница, а ты мне можешь картинку нарисовать?",
+        "Ты вообще умеешь рисовать картинки?",
+        "Ты можешь генерить картинки?",
         "Ты умеешь генерировать изображения?",
         "Умеешь ли ты создавать картинки?",
         "Способна ли ты нарисовать изображение по текстовому описанию?",
         "Поддерживаешь генерацию изображений?",
+        "Есть ли у тебя генерация изображений?",
+        "А изображения генерировать умеешь?",
+        "Генерация картинок у тебя есть?",
+        "Рисунки делать можешь?",
+        "Ты картинки рисовать умеешь?",
+        "Картинки умеешь рисовать?",
+        "Есть ли у тебя возможность генерировать изображения?",
         "Can you draw pictures?",
+        "Friday can you generate images?",
+        "Do you generate images?",
+        "Do you have image generation?",
         "Are you able to generate an image from a text description?",
         "Are you capable of drawing pictures?",
         "Do you support image generation?",
+        "Do you have the ability to generate images?",
+        "Is image generation available?",
     ],
 )
 def test_image_generation_capability_has_code_owned_truth(message: str) -> None:
@@ -330,22 +344,35 @@ def test_image_generation_capability_fails_closed_without_a_visible_png_renderer
 
 
 @pytest.mark.parametrize(
-    "message",
+    ("category", "message"),
     [
-        "Нарисуй картинку.",
-        "Можешь нарисовать картинку с рыжим котом?",
-        "Можешь нарисовать картинку и поискать последние новости?",
-        "Если можешь, нарисуй картинку.",
-        "Ты уже нарисовала картинку?",
-        "Можешь проанализировать эту картинку?",
-        "Можешь сделать картинку по этому файлу?",
-        "Он спросил: «ты можешь картинку нарисовать?»",
-        "`ты можешь картинку нарисовать?`",
-        "Can you draw me a cat?",
-        "Can you draw an image and search for the latest news?",
+        ("imperative", "Нарисуй картинку."),
+        ("imperative", "Сгенерируй изображение."),
+        ("content-brief", "Можешь нарисовать картинку с рыжим котом?"),
+        ("content-brief", "Ты можешь генерить картинку космического корабля?"),
+        ("compound", "Можешь нарисовать картинку и поискать последние новости?"),
+        ("conditional-work", "Если можешь, нарисуй картинку."),
+        ("history", "Ты уже нарисовала картинку?"),
+        ("history", "Ты раньше умела рисовать картинки?"),
+        ("current-work", "Ты сейчас генерируешь изображение?"),
+        ("current-work", "Ты можешь сейчас сгенерировать картинку?"),
+        ("different-capability", "Можешь проанализировать эту картинку?"),
+        ("attached-work", "Можешь сделать картинку по этому файлу?"),
+        ("reported", "Он спросил: «ты можешь картинку нарисовать?»"),
+        ("quoted", "«Ты вообще умеешь рисовать картинки?»"),
+        ("quoted", "`ты можешь картинку нарисовать?`"),
+        ("english-content-brief", "Can you draw me a cat?"),
+        ("english-compound", "Can you draw an image and search for the latest news?"),
+        ("english-content-brief", "Do you generate images from the attached file?"),
+        ("english-history", "Did you generate images yesterday?"),
+        ("english-current-work", "Are you generating an image now?"),
+        ("english-current-work", "Do you generate images now?"),
+        ("english-reported", "He asked: ‘Do you generate images?’"),
+        ("english-quoted", "`Do you have image generation?`"),
     ],
 )
 def test_image_creation_work_and_reported_capability_text_stay_on_the_runtime_path(
+    category: str,
     message: str,
 ) -> None:
     decision = decide_turn_policy(
@@ -353,7 +380,7 @@ def test_image_creation_work_and_reported_capability_text_stay_on_the_runtime_pa
         image_generation=ImageGenerationProjection(structured_png_card_available=True),
     )
 
-    assert decision.intent is TurnIntent.PASSTHROUGH
+    assert decision.intent is TurnIntent.PASSTHROUGH, category
     assert decision.public_response is None
     assert decision.attachments is AttachmentDisposition.UNCHANGED
 
