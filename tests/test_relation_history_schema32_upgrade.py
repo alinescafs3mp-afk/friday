@@ -53,6 +53,10 @@ def _make_schema_32(settings: Any, tmp_path: Path, name: str) -> Path:
         predecessor.execute("DROP TRIGGER document_catalog_raw_au_reconcile")
         predecessor.execute("DROP TRIGGER document_catalog_raw_au_extraction_state")
         predecessor.execute("DROP TABLE document_catalog")
+        # The catalog's owner keyset index lives on raw_objects, so dropping the
+        # sidecar table cannot remove it.  A synthetic v32 predecessor must not
+        # retain that schema-41 authority artifact.
+        predecessor.execute("DROP INDEX idx_document_catalog_source_owner_id")
         predecessor.execute("DROP TABLE file_source_aliases")
         predecessor.execute("UPDATE schema_meta SET value='32' WHERE key IN ('schema_version','fts_build')")
     return database
