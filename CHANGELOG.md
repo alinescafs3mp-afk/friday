@@ -1,3 +1,17 @@
+## 0.207.30 — 2026-08-26
+
+### Live-evidence gate for document-map assist
+
+- Valid owner document-map shadow may now emit a content-free operational
+  receipt, while only one owner-token-only, empty-body same-process witness can
+  create promotion-grade evidence without creating product data.
+- The signed one-shot receipt binds the exact process, accepted runtime,
+  private CA, shadow policy and sealed predecessor commit, tree, metadata,
+  wheel and environment identities without retaining document or model output.
+- Document-map assist remains fail-closed: the pending v2 policy has no accepted
+  receipt or candidate-policy digest, and only a later distinct candidate may
+  consume fresh exact evidence for the isolated shadow-to-assist transition.
+
 ## 0.207.29 — 2026-08-25
 
 ### Durable conversation-to-document comparison journey

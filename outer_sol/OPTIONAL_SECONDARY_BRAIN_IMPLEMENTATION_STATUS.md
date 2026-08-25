@@ -1,20 +1,23 @@
 # Optional secondary brain implementation status
 
-- Updated: 2026-08-25
+- Updated: 2026-08-26
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
-- Phase: **bounded extraction assist plus discarded document-map shadow live**
-- Live production: Friday `0.207.28` /
+- Phase: **document-map evidence gate prepared; shadow remains live**
+- Live production: Friday `0.207.29` /
+  `7f217aa96561532240203f63729e17160b03ebfb`, tree
+  `beefea549b9c568e8573b39582b1af14a67dd5a3a4ef6c724ca0c5beb0a33c1b`, wheel
+  `0b575041a636385541cc932bb55e959e074b2ba51bd295d3892d8fb286020140`,
+  schema 42; immediate predecessor Friday `0.207.28` /
   `6007c9f05fdb63b1ab8c2ccc0e086efd849c77c8`, tree
-  `5fe37a037bc99f845ef6695dd53bfcc90eac3cb6ff7808920cc4b191e5f7cc4c`, wheel
-  `159896429c4c796dcb47dcfecf681ac2df1e674ed1b40b105c671a60532893ca`,
-  schema 42; immediate predecessor and schema-capable fallback Friday
-  `0.207.27` / `b7378686a70465fbdc9a7b27aef1e0bbae5edd52`, tree
+  `5fe37a037bc99f845ef6695dd53bfcc90eac3cb6ff7808920cc4b191e5f7cc4c`;
+  schema-capable fallback Friday `0.207.27` /
+  `b7378686a70465fbdc9a7b27aef1e0bbae5edd52`, tree
   `7ce723b56aafcf80cdde21c86717d3973e79884c605d175df87c7cf4b0c0f076`,
   wheel `60b05e50a08107dc185e8a6cbd52f3bf2e18d5dd53a08b805a1a9f0390b128ae`
 - Rollout policy: the primary model remains required and final. The secondary
   is live only as bounded optional advice; it has no tool, effect, publication,
-  knowledge-write or V12 authority. Live `0.207.28` binds exactly one accepted
+  knowledge-write or V12 authority. Live `0.207.29` binds exactly one accepted
   profile and an empty provisional registry. Extraction is bounded assist;
   document mapping is discarded shadow. Unavailability skips/falls back to the
   unchanged primary path.
@@ -185,10 +188,11 @@
 
 ## Parallel parent checkpoint
 
-- ICP schema 40, the durable exact archive candidate-selection runtime and the
-  bounded body-free DocumentCatalog worker/archive consumer are deployed.
-  The next durable conversation/document comparison journey now proceeds while
-  the deployed assist remains a separate optional advisory contour.
+- ICP schema 40, the durable exact archive candidate-selection runtime, bounded
+  body-free DocumentCatalog worker/archive consumer and complete durable
+  conversation/document comparison are deployed. The document-map evidence
+  boundary remains a separate optional advisory contour until genuine live
+  evidence is bound by a later distinct candidate.
 
 ## Active order
 

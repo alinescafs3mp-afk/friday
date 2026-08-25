@@ -86,7 +86,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.29`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.30`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -139,6 +139,17 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   атомарно добавляет workload и `DOCUMENT_MAP_MODE=shadow`; v1 не допускает
   assist, пока отдельный shadow checkpoint не будет связан с новой policy и
   новым operator evidence gate;
+- candidate 0.207.30 не меняет live ENV и оставляет
+  `DOCUMENT_MAP_MODE=shadow`; owner-token-only empty-body one-shot должен
+  доказать ровно один реальный `DOCUMENT_MAP`, exact scheduler deltas и
+  неизменный primary sentinel без создания product data;
+- promotion-grade receipt не хранит body, model output, их digests
+  или cumulative counters; он связан с PID/epoch, accepted profile/CA,
+  v1 policy и exact sealed predecessor commit/tree/metadata/wheel/ENV;
+- pending v2 manifest с пустыми candidate-policy и accepted-receipt digests
+  обязан fail-closed отклонить assist; только последующий distinct
+  candidate может атомарно consume-ить свежий exact receipt и
+  изменить только `DOCUMENT_MAP_MODE=shadow→assist`;
 - на Windows-узле установлен и в release включён at-logon gateway
   publication recovery: exact healthy gateway перезапускается не более
   одного раза только после двух совпавших доказательств отсутствия
@@ -173,7 +184,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 2 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.29`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.30`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
@@ -208,6 +219,10 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - переход 0.207.28 → 0.207.29 не меняет schema 42 и активирует полный
   selected-message → durable Q1/Q2 → exact comparison vertical с повторной
   авторизацией источников, независимой проверкой и WorkTrace;
+- переход 0.207.29 → 0.207.30 не меняет schema 42, secondary
+  ENV или полномочия; он только устанавливает fail-closed live-evidence
+  gate, а document-map assist остаётся закрыт до отдельного
+  evidence-bound candidate;
 - live release 0.207.24 уже имеет schema 41; переход 0.207.24 → 0.207.26
   не меняет schema и готовит только distinct bounded assist из
   уже принятого private discarded shadow;

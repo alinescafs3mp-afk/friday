@@ -4,17 +4,20 @@ This is the canonical short status register for the active Friday work. Detailed
 design and acceptance evidence remains in the linked documents; this file owns
 the current production identity, completed packages, active work and next order.
 
-- Updated: 2026-08-25
+- Updated: 2026-08-26
 - Branch: `main`
-- Secondary acceptance base: live `0.207.28` admits exactly one accepted
+- Secondary acceptance base: live `0.207.29` admits exactly one accepted
   profile with extraction in bounded `assist` and document mapping in
   discarded `shadow`; the provisional registry is empty and the primary
   remains the only publication, tool and effect authority.
-- Deployed implementation head: `6007c9f05fdb63b1ab8c2ccc0e086efd849c77c8`
-- Live: Friday `0.207.28` / `6007c9f05fdb63b1ab8c2ccc0e086efd849c77c8`;
-  tree `5fe37a037bc99f845ef6695dd53bfcc90eac3cb6ff7808920cc4b191e5f7cc4c`;
-  wheel `159896429c4c796dcb47dcfecf681ac2df1e674ed1b40b105c671a60532893ca`
-- Immediate predecessor and schema-capable fallback: Friday `0.207.27` /
+- Deployed implementation head: `7f217aa96561532240203f63729e17160b03ebfb`
+- Live: Friday `0.207.29` / `7f217aa96561532240203f63729e17160b03ebfb`;
+  tree `beefea549b9c568e8573b39582b1af14a67dd5a3a4ef6c724ca0c5beb0a33c1b`;
+  wheel `0b575041a636385541cc932bb55e959e074b2ba51bd295d3892d8fb286020140`
+- Immediate predecessor: Friday `0.207.28` /
+  `6007c9f05fdb63b1ab8c2ccc0e086efd849c77c8`, tree
+  `5fe37a037bc99f845ef6695dd53bfcc90eac3cb6ff7808920cc4b191e5f7cc4c`.
+  Schema-capable fallback: Friday `0.207.27` /
   `b7378686a70465fbdc9a7b27aef1e0bbae5edd52`, tree
   `7ce723b56aafcf80cdde21c86717d3973e79884c605d175df87c7cf4b0c0f076`.
 - Database schema: 42
@@ -29,21 +32,23 @@ the current production identity, completed packages, active work and next order.
   body-free schema-41 DocumentCatalog now has its bounded durable worker and
   archive consumer in production. Obsidian create/append now publish an atomic
   body-free effect outcome and reconcile uncertainty by observation without
-  replaying a vault mutation. Catalog coverage remains honestly incomplete
-  while the backlog converges.
+  replaying a vault mutation. The selected-message to exact-document comparison
+  journey is restart-safe and live. Catalog coverage remains honestly
+  incomplete while the backlog converges.
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
 
 ## Active objective
 
-Complete the next bounded ICP/V12 golden journey while preserving the deployed
-optional GPT-OSS-20B/SGLang assist and exact primary-only behavior whenever the
-laptop is absent. Public shadow, private shadow, bounded assist, exact physical
-loss and automatic recovery are complete. The schema-41 DocumentCatalog,
-archive candidate runtime, receipt-backed Obsidian effect vertical and
-selected-evidence V12 explanation are live. The next autonomous package is the
-next incomplete ICP/V12 golden journey and its release evidence.
+Release the fail-closed document-map live-evidence boundary while preserving
+discarded shadow and exact primary-only behavior whenever the laptop is absent.
+Then obtain one exact same-process witness and bind it only in a later distinct
+candidate before any document-map assist promotion. Public shadow, private
+shadow, bounded extraction assist, exact physical loss and automatic recovery
+are complete. The schema-41 DocumentCatalog, archive candidate runtime,
+receipt-backed Obsidian effect vertical, selected-evidence V12 explanation and
+durable conversation/document comparison are live.
 
 The measured and accepted finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -69,7 +74,7 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Live `0.207.28` admits exactly that profile, with no provisional entries:
+Live `0.207.29` admits exactly that profile, with no provisional entries:
 extraction is in bounded `assist`, document mapping remains discarded
 `shadow`. It grants no tools, effects, publication or knowledge-write authority;
 failure preserves the exact primary-only path.
@@ -147,20 +152,29 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Bind fresh, identity- and policy-specific live shadow evidence before any
-   separately released `document_map=assist` promotion; counters alone cannot
-   authorize promotion.
-2. Complete the durable `CompareConversationWithDocument` journey: preserve
-   exact selected message evidence, wait durably for the document, survive
-   restart, recheck both authorities/revisions and publish one verified answer.
-3. Release that journey reader-first, then activate its writer/runtime in a
-   separate safe package with schema-capable fallback.
-4. Extend machine-reconcilable release evidence without promoting
+1. Release the document-map evidence gate without changing live ENV or
+   secondary authority, then obtain one identity-, policy- and process-bound
+   live shadow witness.
+2. Bind that receipt only in a later distinct candidate before any
+   `document_map=assist` promotion; counters alone cannot authorize promotion.
+3. Extend machine-reconcilable release evidence without promoting
    component-only gates, then start the next V12 refinement package.
-5. Continue with the next ICP/V12 refinement package after the complete golden
+4. Continue with the next ICP/V12 refinement package after the complete golden
    journey. The accepted laptop runtime and gateway manifest remain unchanged.
 
 ## Completed and deployed packages
+
+### Durable conversation-to-document comparison (`0.207.29`)
+
+- Exact selected-message evidence now continues through restart-safe Q1/Q2,
+  pins one authorized Raw document revision and publishes only after independent
+  model verification plus final source/permission rechecks.
+- Bare single-file replies, ambiguity, invalid ordinals, explicit resume and
+  stop behavior are deterministic; historical API uploads receive only the
+  minimum authority alias required after final transactional recheck.
+- The canonical gate passed and the wheel reproduced byte-for-byte. Immutable
+  activation completed `clear` with terminal receipt
+  `056d7ef0502b4c811d39184ac212de5f85a504736afacc7c6669306fb57f3fc0`.
 
 ### Bounded GPT-OSS document-map shadow (`0.207.28`)
 

@@ -2,7 +2,7 @@
 
 **Friday** (по-русски — **Пятница**; ex codename Jericho) — локальная многопользовательская Knowledge Operating System: она принимает текст и документы, сохраняет первоисточник, строит граф знаний, ищет по личной базе и отвечает через Telegram или HTTP API. Веб-панель предназначена для администрирования, разбора Inbox, работы с сущностями, правами, резервными копиями и диагностикой.
 
-Текущая версия: **0.207.29**. Авторизованный read-only `archive_search`
+Текущая версия: **0.207.30**. Авторизованный read-only `archive_search`
 объединяет личные документы, знания, сообщения и Obsidian с точными
 источниками, покрытием и финальной повторной проверкой прав. Schema 42
 обслуживает активный restart-safe путь сравнения: точный результат выбранных
@@ -28,6 +28,9 @@ graph-only SGLang deployment; всё неподдержанное остаётс
 любой недоступности ноутбука или drift. Иерархический MAP больших
 документов может параллельно пройти через GPT-OSS в discarded shadow;
 пользовательский результат пока по-прежнему целиком принадлежит primary.
+Одноразовый content-free live-evidence gate для этого shadow уже
+входит в release, но document-map assist остаётся fail-closed до
+отдельного candidate, связанного с фактическим live receipt.
 
 ```text
 Telegram → подписанный durable bridge → Conversation + mode
@@ -322,7 +325,7 @@ fan-out одной задачи. Иерархическое чтение док�
 `/v1/models`, bounded `/metrics`, `/server_info` и per-process deployment
 witness с code-owned identities и launch graph. Любой drift, неполный
 witness или незамкнутый same-origin proxy оставляют routes в `legacy`.
-Успешный canary startup должен показать в `/api/health` версию `0.207.29`,
+Успешный canary startup должен показать в `/api/health` версию `0.207.30`,
 точный profile id, `canary_ready`, `live_attestation_clear` и оба
 зарегистрированных route; простого HTTP `status=ok` недостаточно.
 
