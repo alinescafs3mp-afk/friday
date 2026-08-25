@@ -1855,6 +1855,50 @@ async def test_workload_never_queues_behind_process_epoch_probe(settings: Any) -
 
 
 @pytest.mark.asyncio
+async def test_exclusive_observation_rejects_a_live_startup_probe(settings: Any) -> None:
+    probe_entered = asyncio.Event()
+    release_probe = asyncio.Event()
+    primary_calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/friday-profile"):
+            return _profile_response()
+        if request.url.path.endswith("/models"):
+            probe_entered.set()
+            await release_probe.wait()
+            return _models_response()
+        return _response(content="ready")
+
+    async def primary() -> object:
+        nonlocal primary_calls
+        primary_calls += 1
+        return object()
+
+    scheduler = build_secondary_brain(
+        _configured_settings(settings),
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        scheduler._exclusive_observation = True  # noqa: SLF001
+        scheduler.start()
+        assert scheduler._startup_probe_task is None  # noqa: SLF001
+        scheduler._exclusive_observation = False  # noqa: SLF001
+        scheduler.start()
+        await asyncio.wait_for(probe_entered.wait(), timeout=0.5)
+        with pytest.raises(RuntimeError, match="observation is not idle"):
+            await scheduler.run_shadow_observed(
+                _request,
+                primary,
+                validator=lambda _value: True,
+                exclusive=True,
+            )
+        assert primary_calls == 0
+    finally:
+        release_probe.set()
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
 async def test_process_epoch_probe_checks_models_then_generation(settings: Any) -> None:
     paths: list[str] = []
 

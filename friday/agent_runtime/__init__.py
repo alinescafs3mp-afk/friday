@@ -15,7 +15,7 @@ import time
 import unicodedata
 import urllib.parse
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as datetime_time
@@ -53659,10 +53659,45 @@ class AgentRuntime:
             else secondary.mode
         )
         if workload_mode is SecondaryMode.SHADOW:
+            if not isinstance(secondary, SecondaryBrainScheduler):
+                return await secondary.run_shadow(
+                    request_factory,
+                    primary_call,
+                    validator=valid_secondary_hint,
+                )
+            valid_result_observer: Callable[[ModelRequest, SecondaryResult], Awaitable[None]] | None = None
+            owner_user_id = str(context.person_id or context.user_id or "")
+            from friday.permissions import LEGACY_OWNER_USER_ID
+
+            if owner_user_id == LEGACY_OWNER_USER_ID:
+
+                async def record_valid_document_map_shadow(
+                    request: ModelRequest,
+                    result: SecondaryResult,
+                ) -> None:
+                    # This callback is reached only after the exact scheduler
+                    # attempt and typed validator succeeded. The recorder keeps
+                    # no document/model body (or digest of either) and failures
+                    # are isolated by ``run_shadow`` from primary traffic.
+                    from friday.secondary_brain.document_map_evidence import (
+                        record_document_map_shadow_result,
+                    )
+
+                    record_document_map_shadow_result(
+                        self.storage,
+                        owner_user_id=owner_user_id,
+                        request=request,
+                        result=result,
+                        settings=self.settings,
+                        secondary=secondary,
+                    )
+
+                valid_result_observer = record_valid_document_map_shadow
             return await secondary.run_shadow(
                 request_factory,
                 primary_call,
                 validator=valid_secondary_hint,
+                valid_result_observer=valid_result_observer,
             )
         if workload_mode is not SecondaryMode.ASSIST:
             return await primary_call()

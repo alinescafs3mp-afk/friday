@@ -12,9 +12,11 @@ from friday.secondary_brain.contracts import SecondaryEndpointConfig
 from friday.secondary_brain.profiles import (
     ACCEPTED_SECONDARY_RUNTIME_PROFILES,
     PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES,
+    SECONDARY_DOCUMENT_MAP_ASSIST_ACCEPTANCE,
     SECONDARY_WORKLOAD_POLICIES,
     SecondaryProfileAdmission,
     SecondaryRuntimeAdmission,
+    get_secondary_document_map_assist_acceptance,
     get_secondary_runtime_admission,
     get_secondary_runtime_profile,
     secondary_effective_workloads,
@@ -31,6 +33,13 @@ _DOCUMENT_MAP_POLICY_PATH = (
     / "secondary-brain"
     / "windows-sglang"
     / "workload-policy.document-map.v1.json"
+)
+_DOCUMENT_MAP_ASSIST_PENDING_PATH = (
+    Path(__file__).parents[1]
+    / "deploy"
+    / "secondary-brain"
+    / "windows-sglang"
+    / "workload-policy.document-map.v2.acceptance-pending.json"
 )
 _EVIDENCE_KEYS = (
     "quality_evidence_sha256",
@@ -151,5 +160,62 @@ def test_document_map_overlay_is_shadow_only_until_evidence_bound_promotion(
     assert not secondary_contracts.secondary_configuration_is_admissible(
         endpoint,
         **arguments,
+        document_map_mode="assist",
+    )
+
+
+def test_document_map_assist_binding_is_explicitly_pending_not_an_env_wildcard() -> None:
+    profile = ACCEPTED_SECONDARY_RUNTIME_PROFILES[_PROFILE_ID]
+    raw = _DOCUMENT_MAP_ASSIST_PENDING_PATH.read_bytes()
+    value = json.loads(raw)
+
+    assert (
+        hashlib.sha256(raw).hexdigest() == SECONDARY_DOCUMENT_MAP_ASSIST_ACCEPTANCE.acceptance_manifest_sha256
+    )
+    assert value["status"] == SECONDARY_DOCUMENT_MAP_ASSIST_ACCEPTANCE.status == "acceptance_pending"
+    assert value["candidate_policy_manifest_sha256"] == ""
+    assert value["accepted_shadow_receipt_sha256"] == ""
+    assert SECONDARY_DOCUMENT_MAP_ASSIST_ACCEPTANCE.is_bound is False
+    assert get_secondary_document_map_assist_acceptance(profile) is None
+
+
+def test_exact_code_owned_acceptance_binding_is_the_only_runtime_assist_opening(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import friday.secondary_brain.profiles as profiles
+
+    profile = ACCEPTED_SECONDARY_RUNTIME_PROFILES[_PROFILE_ID]
+    accepted = replace(
+        SECONDARY_DOCUMENT_MAP_ASSIST_ACCEPTANCE,
+        status="accepted",
+        candidate_policy_manifest_sha256="a" * 64,
+        accepted_shadow_receipt_sha256="b" * 64,
+    )
+    assert replace(accepted, candidate_policy_manifest_sha256="0" * 64).is_bound is False
+    assert replace(accepted, accepted_shadow_receipt_sha256="0" * 64).is_bound is False
+    monkeypatch.setattr(profiles, "SECONDARY_DOCUMENT_MAP_ASSIST_ACCEPTANCE", accepted)
+    monkeypatch.setattr(secondary_contracts, "_load_pinned_ca_pem", lambda *_args: "certificate")
+    endpoint = SecondaryEndpointConfig(
+        base_url=profile.endpoint_base_url,
+        served_model_alias=profile.served_model_alias,
+        api_key="a" * 64,
+        ca_file="/private/friday-secondary-ca.pem",
+        ca_sha256=profile.gateway_ca_certificate_sha256,
+        max_context_tokens=profile.max_context_tokens,
+        max_concurrency=profile.max_concurrency,
+        max_output_tokens=profile.max_output_tokens,
+        profile_id=profile.profile_id,
+        profile_manifest_sha256=profile.manifest_sha256,
+    )
+
+    assert get_secondary_document_map_assist_acceptance(profile) == accepted
+    assert secondary_contracts.secondary_configuration_is_admissible(
+        endpoint,
+        primary_base_url="http://127.0.0.1:30000/v1",
+        primary_model="primary-model",
+        primary_timeout_sec=60.0,
+        workload_names=("document_map", "extract"),
+        mode="assist",
+        allow_private_text=True,
         document_map_mode="assist",
     )

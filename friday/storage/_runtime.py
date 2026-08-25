@@ -513,6 +513,8 @@ class RuntimeMixin(StorageShared):
                                < datetime('now', '-24 hours')
                          )
                        )
+                     AND request_key NOT LIKE 'secondary-document-map-shadow:%'
+                     AND request_key NOT LIKE 'secondary-document-map-shadow-one-shot:%'
                      AND CASE WHEN json_valid(response_json)
                               THEN COALESCE(
                                   json_extract(response_json, '$.idempotency_effect_uncertain'),

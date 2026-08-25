@@ -354,7 +354,11 @@ def secondary_configuration_is_admissible(
 
     allowed = {workload.value for workload in ADVISORY_WORKLOADS}
     workloads = {str(value).strip().casefold() for value in workload_names}
-    from .profiles import get_secondary_runtime_admission, secondary_effective_workloads
+    from .profiles import (
+        get_secondary_document_map_assist_acceptance,
+        get_secondary_runtime_admission,
+        secondary_effective_workloads,
+    )
 
     admission = get_secondary_runtime_admission(endpoint.profile_id, mode=mode)
     profile = admission.profile if admission is not None else None
@@ -364,6 +368,9 @@ def secondary_configuration_is_admissible(
     document_map_requested = "document_map" in workloads
     document_map_is_runtime_certified = bool(
         profile is not None and "document_map" in profile.allowed_workloads
+    )
+    document_map_assist_is_evidence_bound = bool(
+        profile is not None and get_secondary_document_map_assist_acceptance(profile) is not None
     )
     document_map_policy_matches = bool(
         (not document_map_requested and document_map_mode == "disabled")
@@ -378,7 +385,10 @@ def secondary_configuration_is_admissible(
             document_map_requested
             and not document_map_is_runtime_certified
             and mode == "assist"
-            and document_map_mode == "shadow"
+            and (
+                document_map_mode == "shadow"
+                or (document_map_mode == "assist" and document_map_assist_is_evidence_bound)
+            )
             and allow_private_text
         )
     )

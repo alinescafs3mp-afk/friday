@@ -115,6 +115,35 @@ misconfigured.
 Owner diagnostics показывает отдельный
 `workloads.document_map.routing_mode` и content-free counters этой ступени.
 
+Следующий gate уже подготовлен, но принятие намеренно не заполнено. Natural
+owner document-map shadow через product seam может создать content-free
+receipt, однако promotion-grade receipt выдаёт только одноразовый same-process
+`POST /api/admin/secondary-document-map-witness/observe-shadow` с owner token и
+пустым body. Он синхронно проводит реальный `DOCUMENT_MAP`, доказывает exact
+`selected+1/success+1/shadow.valid+1`, неизменность invalid/skipped/in-flight и
+сохранение primary sentinel ровно за один вызов. Product/Telegram/документы при
+этом не создаются.
+
+`$FRIDAY_STATE_DIR/secondary-document-map-shadow-receipt.v1.json` имеет mode
+0600 и не содержит текст/ответ модели, их digests или cumulative counters.
+Подписанная аттестация привязана к PID/epoch, profile/CA/policy и точному sealed
+predecessor: commit, release-tree/metadata/wheel SHA-256, live ENV и lexical
+ENV/anchor path SHA-256. Полная tree-проверка выполняется до model attempt и ещё
+раз перед durable receipt. Receipt действует не более часа; identity drift,
+failed one-shot, non-exact replay или несовпадение durable one-shot latch
+закрывают consume. Потерянный consume-ответ можно получить повторно только тем
+же exact request/candidate: сервер восстанавливает идентичный подписанный ответ
+без повторной мутации. Consumed receipt/tombstone не удаляется общим prune и не
+заменяется последующим natural shadow; новый PID/epoch может выпустить новый
+current receipt, сохранив прежние consumed audit rows. Оператор полностью
+перепроверяет sealed predecessor tree и до, и после consume.
+
+До реального live receipt code-owned поля v2 policy SHA-256 и accepted receipt
+SHA-256 пусты, поэтому `secondary_document_map_shadow_to_assist` всегда
+fail-closed. После live checkpoint отдельный candidate обязан заполнить оба
+exact digest; только distinct commit и atomic owner-only consume могут сменить
+ровно `DOCUMENT_MAP_MODE=shadow→assist`.
+
 На GPU эта дорога заметна только для документов, которые runtime разбивает на
 иерархические MAP/REDUCE-фрагменты. Небольшой документ, обычный диалог,
 web-search и финальный ответ по-прежнему могут вообще не обращаться к ноутбуку.

@@ -95,6 +95,7 @@ _SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION = "secondary_shadow_to_private_sh
 _SECONDARY_SHADOW_TO_ASSIST_TRANSITION = "secondary_shadow_to_assist"
 _SECONDARY_ASSIST_TO_DISABLED_TRANSITION = "secondary_assist_to_disabled"
 _SECONDARY_ASSIST_ENABLE_DOCUMENT_MAP_SHADOW_TRANSITION = "secondary_assist_enable_document_map_shadow"
+_SECONDARY_DOCUMENT_MAP_SHADOW_TO_ASSIST_TRANSITION = "secondary_document_map_shadow_to_assist"
 _SECONDARY_PRODUCT_STAGE_SCHEMA = "friday.secondary-product-stage-evidence.v2"
 _SECONDARY_PRODUCT_OPERATION_SCHEMA = "friday.secondary-product-operation-core.v1"
 _SECONDARY_PRODUCT_DIAGNOSTICS_SCHEMA = "friday.secondary-product-diagnostics.v1"
@@ -106,6 +107,23 @@ _SECONDARY_PRODUCT_CONSUME_RESPONSE_SCHEMA = "friday.secondary-product-rollout-c
 _SECONDARY_PRODUCT_CONSUME_URL = (
     "https://127.0.0.1:8000/api/admin/secondary-product-witness/consume-rollout-attestation"
 )
+_SECONDARY_DOCUMENT_MAP_CONSUME_URL = (
+    "https://127.0.0.1:8000/api/admin/secondary-document-map-witness/consume-rollout-attestation"
+)
+_SECONDARY_DOCUMENT_MAP_SHADOW_POLICY_ID = "gptoss20b-document-map-v1"
+_SECONDARY_DOCUMENT_MAP_SHADOW_POLICY_SHA256 = (
+    "7d57947d7ecda675e8a4da3f56332baf32484c08c0504afd7fa420b9c6323cd9"
+)
+_SECONDARY_DOCUMENT_MAP_ASSIST_POLICY_ID = "gptoss20b-document-map-v2"
+# Deliberately unfilled until real live v1 shadow emits the exact receipt. A
+# later distinct candidate fills both values; empty strings are fail-closed,
+# never operator-supplied wildcards.
+_SECONDARY_DOCUMENT_MAP_ASSIST_POLICY_SHA256 = ""
+_SECONDARY_DOCUMENT_MAP_ACCEPTED_SHADOW_RECEIPT_SHA256 = ""
+_SECONDARY_DOCUMENT_MAP_RECEIPT_SCHEMA = "friday.secondary-document-map-shadow-receipt.v1"
+_SECONDARY_DOCUMENT_MAP_ATTESTATION_SCHEMA = "friday.secondary-document-map-shadow-attestation.v1"
+_SECONDARY_DOCUMENT_MAP_CONSUME_REQUEST_SCHEMA = "friday.secondary-document-map-shadow-consume-request.v1"
+_SECONDARY_DOCUMENT_MAP_CONSUME_RESPONSE_SCHEMA = "friday.secondary-document-map-shadow-consume-response.v1"
 _SECONDARY_PRODUCT_RUNNER_SOURCE = Path(
     "deploy/secondary-brain/windows-sglang/scripts/live_failure_battery.py"
 )
@@ -113,6 +131,7 @@ _SECONDARY_PRODUCT_RUNNER_ARTIFACT = Path("artifacts/secondary-product-witness-r
 _SECONDARY_ROLLOUT_RECEIPT_STAGE = {
     _SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION: "public-shadow",
     _SECONDARY_SHADOW_TO_ASSIST_TRANSITION: "private-shadow",
+    _SECONDARY_DOCUMENT_MAP_SHADOW_TO_ASSIST_TRANSITION: "document-map-shadow",
 }
 _SECONDARY_CONFIG_TRANSITIONS = frozenset(
     {
@@ -122,6 +141,7 @@ _SECONDARY_CONFIG_TRANSITIONS = frozenset(
         _SECONDARY_SHADOW_TO_ASSIST_TRANSITION,
         _SECONDARY_ASSIST_TO_DISABLED_TRANSITION,
         _SECONDARY_ASSIST_ENABLE_DOCUMENT_MAP_SHADOW_TRANSITION,
+        _SECONDARY_DOCUMENT_MAP_SHADOW_TO_ASSIST_TRANSITION,
     }
 )
 _STAGED_CONFIG_TRANSITIONS = frozenset(
@@ -432,6 +452,113 @@ _SECONDARY_PRODUCT_CONSUME_RESPONSE_KEYS = frozenset(
         "consume_binding_sha256",
     }
 )
+_SECONDARY_DOCUMENT_MAP_RECEIPT_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        "server_rollout_attestation",
+        "server_rollout_attestation_sha256",
+        "server_rollout_lookup_token",
+        "document_text_retained_in_evidence",
+        "model_response_retained_in_evidence",
+        "document_text_digest_retained_in_evidence",
+        "model_response_digest_retained_in_evidence",
+    }
+)
+_SECONDARY_DOCUMENT_MAP_ATTESTATION_KEYS = frozenset(
+    {
+        "schema",
+        "attestation_id",
+        "workload",
+        "routing_mode",
+        "shadow_policy_id",
+        "shadow_policy_manifest_sha256",
+        "observation_kind",
+        "scheduler_selected_delta",
+        "scheduler_success_delta",
+        "shadow_valid_delta",
+        "shadow_invalid_delta",
+        "shadow_skipped_delta",
+        "shadow_in_flight_before",
+        "shadow_in_flight_after",
+        "observation_binding_sha256",
+        "owner_binding_sha256",
+        "primary_pid",
+        "primary_process_epoch_sha256",
+        "primary_backend_version",
+        "primary_ca_certificate_sha256",
+        "predecessor_release_commit",
+        "predecessor_release_tree_manifest_sha256",
+        "predecessor_release_metadata_sha256",
+        "predecessor_release_wheel_sha256",
+        "predecessor_live_env_sha256",
+        "predecessor_live_env_path_sha256",
+        "predecessor_release_anchor_path_sha256",
+        "candidate_profile_id",
+        "candidate_profile_mode",
+        "candidate_profile_allow_private_text",
+        "candidate_profile_context_tokens",
+        "candidate_profile_sha256",
+        "candidate_profile_manifest_sha256",
+        "candidate_profile_admission",
+        "served_model_alias",
+        "gateway_ca_certificate_sha256",
+        "document_text_retained",
+        "model_response_retained",
+        "document_text_digest_retained",
+        "model_response_digest_retained",
+        "state_version",
+        "issued_at",
+        "expires_at",
+        "lookup_token_sha256",
+        "signature",
+    }
+)
+_SECONDARY_DOCUMENT_MAP_CONSUME_REQUEST_KEYS = frozenset(
+    {
+        "schema",
+        "attestation_lookup_token",
+        "server_rollout_attestation_sha256",
+        "transition",
+        "predecessor_commit",
+        "predecessor_tree_sha256",
+        "predecessor_env_sha256",
+        "candidate_commit",
+        "candidate_tree_sha256",
+        "next_env_sha256",
+        "product_receipt_sha256",
+        "predecessor_policy_id",
+        "predecessor_policy_manifest_sha256",
+        "candidate_policy_id",
+        "candidate_policy_manifest_sha256",
+        "accepted_shadow_receipt_sha256",
+    }
+)
+_SECONDARY_DOCUMENT_MAP_CONSUME_RESPONSE_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        "transition",
+        "predecessor_commit",
+        "predecessor_tree_sha256",
+        "predecessor_env_sha256",
+        "candidate_commit",
+        "candidate_tree_sha256",
+        "next_env_sha256",
+        "product_receipt_sha256",
+        "predecessor_policy_id",
+        "predecessor_policy_manifest_sha256",
+        "candidate_policy_id",
+        "candidate_policy_manifest_sha256",
+        "accepted_shadow_receipt_sha256",
+        "server_rollout_attestation_sha256",
+        "lookup_token_sha256",
+        "request_sha256",
+        "consumed_at",
+        "state_version",
+        "consume_binding_sha256",
+    }
+)
 _SECONDARY_SHADOW_EXACT_VALUES = {
     "FRIDAY_SECONDARY_LLM_ADMISSION_TIMEOUT_SEC": "0.10",
     "FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT": "0",
@@ -474,8 +601,16 @@ _SECONDARY_DOCUMENT_MAP_SHADOW_EXACT_VALUES = {
     "FRIDAY_SECONDARY_LLM_WORKLOADS": "document_map,extract",
     "FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE": "shadow",
 }
+_SECONDARY_DOCUMENT_MAP_ASSIST_EXACT_VALUES = {
+    **_SECONDARY_DOCUMENT_MAP_SHADOW_EXACT_VALUES,
+    "FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE": "assist",
+}
 _SECONDARY_DOCUMENT_MAP_SHADOW_DISABLED_EXACT_VALUES = {
     **_SECONDARY_DOCUMENT_MAP_SHADOW_EXACT_VALUES,
+    "FRIDAY_SECONDARY_LLM_ENABLED": "0",
+}
+_SECONDARY_DOCUMENT_MAP_ASSIST_DISABLED_EXACT_VALUES = {
+    **_SECONDARY_DOCUMENT_MAP_ASSIST_EXACT_VALUES,
     "FRIDAY_SECONDARY_LLM_ENABLED": "0",
 }
 BOOTSTRAP_WHEELS = (("pip", "26.1.2", "pip-26.1.2-py3-none-any.whl"),)
@@ -1180,6 +1315,23 @@ def _validate_secondary_assist_enable_document_map_shadow_environment(
         raise ReleaseFailure("secondary_document_map_shadow_environment_invalid")
 
 
+def _validate_secondary_document_map_shadow_to_assist_environment(
+    predecessor: bytes | None,
+    target: bytes,
+) -> None:
+    """Change only document-map routing after its exact receipt is accepted."""
+
+    _validate_exact_secondary_transition(
+        predecessor,
+        target,
+        predecessor_exact_values=_SECONDARY_DOCUMENT_MAP_SHADOW_EXACT_VALUES,
+        target_exact_values=_SECONDARY_DOCUMENT_MAP_ASSIST_EXACT_VALUES,
+        invalid_code="secondary_document_map_assist_environment_invalid",
+        predecessor_invalid_code="secondary_document_map_assist_predecessor_not_shadow",
+        replacements={"FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE": ("shadow", "assist")},
+    )
+
+
 def _validate_secondary_assist_to_disabled_environment(
     predecessor: bytes | None,
     target: bytes,
@@ -1192,6 +1344,9 @@ def _validate_secondary_assist_to_disabled_environment(
     if document_map_mode == "shadow" and workloads == "document_map,extract":
         predecessor_values = _SECONDARY_DOCUMENT_MAP_SHADOW_EXACT_VALUES
         disabled_values = _SECONDARY_DOCUMENT_MAP_SHADOW_DISABLED_EXACT_VALUES
+    elif document_map_mode == "assist" and workloads == "document_map,extract":
+        predecessor_values = _SECONDARY_DOCUMENT_MAP_ASSIST_EXACT_VALUES
+        disabled_values = _SECONDARY_DOCUMENT_MAP_ASSIST_DISABLED_EXACT_VALUES
     elif document_map_mode is None and workloads == "extract":
         predecessor_values = _SECONDARY_ASSIST_EXACT_VALUES
         disabled_values = _SECONDARY_ASSIST_DISABLED_EXACT_VALUES
@@ -1224,6 +1379,9 @@ def _validate_secondary_config_transition(
         _SECONDARY_ASSIST_TO_DISABLED_TRANSITION: _validate_secondary_assist_to_disabled_environment,
         _SECONDARY_ASSIST_ENABLE_DOCUMENT_MAP_SHADOW_TRANSITION: (
             _validate_secondary_assist_enable_document_map_shadow_environment
+        ),
+        _SECONDARY_DOCUMENT_MAP_SHADOW_TO_ASSIST_TRANSITION: (
+            _validate_secondary_document_map_shadow_to_assist_environment
         ),
     }
     try:
@@ -1882,6 +2040,234 @@ def _validate_secondary_rollout_consume_response(
         or set(str(value.get("consume_binding_sha256"))) == {"0"}
     ):
         raise ReleaseFailure("secondary_rollout_consume_response_invalid")
+
+
+def _validate_secondary_document_map_rollout_receipt(
+    receipt: Mapping[str, Any],
+    *,
+    receipt_sha256: str,
+    previous: ReleaseIdentity,
+    predecessor_release_metadata_sha256: str,
+    predecessor_release_wheel_sha256: str,
+    predecessor_live_env_sha256: str,
+    predecessor_live_env_path_sha256: str,
+    predecessor_release_anchor_path_sha256: str,
+    profile_identity: Mapping[str, Any],
+    primary_pid: int,
+    primary_process_epoch_sha256: str,
+    primary_ca_certificate_sha256: str,
+) -> dict[str, Any]:
+    """Validate one exclusive causal shadow receipt without trusting cumulative counters."""
+
+    if (
+        _HEX64.fullmatch(_SECONDARY_DOCUMENT_MAP_ASSIST_POLICY_SHA256) is None
+        or _HEX64.fullmatch(_SECONDARY_DOCUMENT_MAP_ACCEPTED_SHADOW_RECEIPT_SHA256) is None
+    ):
+        raise ReleaseFailure("secondary_document_map_assist_acceptance_pending")
+    if receipt_sha256 != _SECONDARY_DOCUMENT_MAP_ACCEPTED_SHADOW_RECEIPT_SHA256:
+        raise ReleaseFailure("secondary_document_map_shadow_receipt_not_accepted")
+    attestation = receipt.get("server_rollout_attestation")
+    lookup_token = receipt.get("server_rollout_lookup_token")
+    issued_at = attestation.get("issued_at") if isinstance(attestation, dict) else None
+    expires_at = attestation.get("expires_at") if isinstance(attestation, dict) else None
+    now = int(time.time())
+    if (
+        set(receipt) != _SECONDARY_DOCUMENT_MAP_RECEIPT_KEYS
+        or receipt.get("schema") != _SECONDARY_DOCUMENT_MAP_RECEIPT_SCHEMA
+        or receipt.get("status") != "passed"
+        or receipt.get("document_text_retained_in_evidence") is not False
+        or receipt.get("model_response_retained_in_evidence") is not False
+        or receipt.get("document_text_digest_retained_in_evidence") is not False
+        or receipt.get("model_response_digest_retained_in_evidence") is not False
+        or not isinstance(attestation, dict)
+        or set(attestation) != _SECONDARY_DOCUMENT_MAP_ATTESTATION_KEYS
+        or attestation.get("schema") != _SECONDARY_DOCUMENT_MAP_ATTESTATION_SCHEMA
+        or re.fullmatch(r"[0-9a-f]{32}", str(attestation.get("attestation_id") or "")) is None
+        or set(str(attestation.get("attestation_id") or "")) == {"0"}
+        or attestation.get("workload") != "document_map"
+        or attestation.get("routing_mode") != "shadow"
+        or attestation.get("shadow_policy_id") != _SECONDARY_DOCUMENT_MAP_SHADOW_POLICY_ID
+        or attestation.get("shadow_policy_manifest_sha256") != _SECONDARY_DOCUMENT_MAP_SHADOW_POLICY_SHA256
+        or attestation.get("observation_kind") != "exclusive_owner_one_shot"
+        or any(
+            type(attestation.get(name)) is not int
+            for name in (
+                "scheduler_selected_delta",
+                "scheduler_success_delta",
+                "shadow_valid_delta",
+                "shadow_invalid_delta",
+                "shadow_skipped_delta",
+                "shadow_in_flight_before",
+                "shadow_in_flight_after",
+            )
+        )
+        or (
+            attestation.get("scheduler_selected_delta"),
+            attestation.get("scheduler_success_delta"),
+            attestation.get("shadow_valid_delta"),
+            attestation.get("shadow_invalid_delta"),
+            attestation.get("shadow_skipped_delta"),
+            attestation.get("shadow_in_flight_before"),
+            attestation.get("shadow_in_flight_after"),
+        )
+        != (1, 1, 1, 0, 0, 0, 0)
+        or attestation.get("primary_pid") != primary_pid
+        or attestation.get("primary_process_epoch_sha256") != primary_process_epoch_sha256
+        or attestation.get("primary_backend_version") != previous.version
+        or attestation.get("primary_ca_certificate_sha256") != primary_ca_certificate_sha256
+        or attestation.get("predecessor_release_commit") != previous.commit
+        or attestation.get("predecessor_release_tree_manifest_sha256") != previous.tree_manifest_sha256
+        or attestation.get("predecessor_release_metadata_sha256") != predecessor_release_metadata_sha256
+        or attestation.get("predecessor_release_wheel_sha256") != predecessor_release_wheel_sha256
+        or attestation.get("predecessor_live_env_sha256") != predecessor_live_env_sha256
+        or attestation.get("predecessor_live_env_path_sha256") != predecessor_live_env_path_sha256
+        or attestation.get("predecessor_release_anchor_path_sha256") != predecessor_release_anchor_path_sha256
+        or attestation.get("candidate_profile_id") != profile_identity.get("profile_id")
+        or attestation.get("candidate_profile_mode") != "assist"
+        or attestation.get("candidate_profile_mode") != profile_identity.get("mode")
+        or attestation.get("candidate_profile_allow_private_text") is not True
+        or attestation.get("candidate_profile_allow_private_text")
+        is not profile_identity.get("allow_private_text")
+        or attestation.get("candidate_profile_context_tokens") != 4096
+        or attestation.get("candidate_profile_context_tokens") != profile_identity.get("context_tokens")
+        or attestation.get("candidate_profile_sha256") != _SECONDARY_FINALIST_CANDIDATE_PROFILE_SHA256
+        or attestation.get("candidate_profile_manifest_sha256") != profile_identity.get("manifest_sha256")
+        or attestation.get("candidate_profile_admission") != "accepted"
+        or attestation.get("candidate_profile_admission") != profile_identity.get("admission")
+        or attestation.get("served_model_alias") != profile_identity.get("served_model_alias")
+        or attestation.get("gateway_ca_certificate_sha256")
+        != profile_identity.get("gateway_ca_certificate_sha256")
+        or attestation.get("document_text_retained") is not False
+        or attestation.get("model_response_retained") is not False
+        or attestation.get("document_text_digest_retained") is not False
+        or attestation.get("model_response_digest_retained") is not False
+        or attestation.get("state_version") != 1
+        or type(issued_at) is not int
+        or type(expires_at) is not int
+        or not 0 < expires_at - issued_at <= 3_600
+        or now < issued_at - 30
+        or now > expires_at
+        or not isinstance(lookup_token, str)
+        or _HEX64.fullmatch(lookup_token) is None
+        or set(lookup_token) == {"0"}
+        or attestation.get("lookup_token_sha256") != _sha256_bytes(lookup_token.encode("ascii"))
+        or receipt.get("server_rollout_attestation_sha256")
+        != _sha256_bytes(_secondary_product_canonical(attestation))
+    ):
+        raise ReleaseFailure("secondary_document_map_shadow_receipt_invalid")
+    for key, value in attestation.items():
+        if (key.endswith("_sha256") or key == "signature") and (
+            not isinstance(value, str) or _HEX64.fullmatch(value) is None or set(value) == {"0"}
+        ):
+            raise ReleaseFailure("secondary_document_map_shadow_receipt_invalid")
+    return dict(attestation)
+
+
+def _secondary_document_map_rollout_consume_request(
+    *,
+    lookup_token: str,
+    attestation_sha256: str,
+    previous: ReleaseIdentity,
+    candidate: ReleaseIdentity,
+    predecessor_env_sha256: str,
+    next_env_sha256: str,
+    product_receipt_sha256: str,
+) -> dict[str, Any]:
+    request = {
+        "schema": _SECONDARY_DOCUMENT_MAP_CONSUME_REQUEST_SCHEMA,
+        "attestation_lookup_token": lookup_token,
+        "server_rollout_attestation_sha256": attestation_sha256,
+        "transition": _SECONDARY_DOCUMENT_MAP_SHADOW_TO_ASSIST_TRANSITION,
+        "predecessor_commit": previous.commit,
+        "predecessor_tree_sha256": previous.tree_manifest_sha256,
+        "predecessor_env_sha256": predecessor_env_sha256,
+        "candidate_commit": candidate.commit,
+        "candidate_tree_sha256": candidate.tree_manifest_sha256,
+        "next_env_sha256": next_env_sha256,
+        "product_receipt_sha256": product_receipt_sha256,
+        "predecessor_policy_id": _SECONDARY_DOCUMENT_MAP_SHADOW_POLICY_ID,
+        "predecessor_policy_manifest_sha256": _SECONDARY_DOCUMENT_MAP_SHADOW_POLICY_SHA256,
+        "candidate_policy_id": _SECONDARY_DOCUMENT_MAP_ASSIST_POLICY_ID,
+        "candidate_policy_manifest_sha256": _SECONDARY_DOCUMENT_MAP_ASSIST_POLICY_SHA256,
+        "accepted_shadow_receipt_sha256": (_SECONDARY_DOCUMENT_MAP_ACCEPTED_SHADOW_RECEIPT_SHA256),
+    }
+    if (
+        set(request) != _SECONDARY_DOCUMENT_MAP_CONSUME_REQUEST_KEYS
+        or candidate.commit == previous.commit
+        or predecessor_env_sha256 == next_env_sha256
+        or product_receipt_sha256 != _SECONDARY_DOCUMENT_MAP_ACCEPTED_SHADOW_RECEIPT_SHA256
+    ):
+        raise ReleaseFailure("secondary_document_map_consume_request_invalid")
+    for field in (
+        "attestation_lookup_token",
+        "server_rollout_attestation_sha256",
+        "predecessor_tree_sha256",
+        "predecessor_env_sha256",
+        "candidate_tree_sha256",
+        "next_env_sha256",
+        "product_receipt_sha256",
+        "predecessor_policy_manifest_sha256",
+        "candidate_policy_manifest_sha256",
+        "accepted_shadow_receipt_sha256",
+    ):
+        _closed_hash(str(request[field]), "secondary_document_map_consume_request_invalid")
+    _closed_commit(previous.commit)
+    _closed_commit(candidate.commit)
+    return request
+
+
+def _validate_secondary_document_map_consume_response(
+    value: Mapping[str, Any],
+    *,
+    request: Mapping[str, Any],
+    attestation: Mapping[str, Any],
+) -> None:
+    request_sha256 = _sha256_bytes(_secondary_product_canonical(request))
+    attestation_sha256 = _sha256_bytes(_secondary_product_canonical(attestation))
+    lookup_sha256 = _sha256_bytes(str(request["attestation_lookup_token"]).encode("ascii"))
+    consumed_at = value.get("consumed_at")
+    copied = _SECONDARY_DOCUMENT_MAP_CONSUME_RESPONSE_KEYS - {
+        "schema",
+        "status",
+        "lookup_token_sha256",
+        "request_sha256",
+        "consumed_at",
+        "state_version",
+        "consume_binding_sha256",
+    }
+    if (
+        set(value) != _SECONDARY_DOCUMENT_MAP_CONSUME_RESPONSE_KEYS
+        or value.get("schema") != _SECONDARY_DOCUMENT_MAP_CONSUME_RESPONSE_SCHEMA
+        or value.get("status") != "consumed"
+        or any(value.get(field) != request.get(field) for field in copied)
+        or value.get("server_rollout_attestation_sha256") != attestation_sha256
+        or value.get("lookup_token_sha256") != lookup_sha256
+        or value.get("lookup_token_sha256") != attestation.get("lookup_token_sha256")
+        or value.get("request_sha256") != request_sha256
+        or type(consumed_at) is not int
+        or consumed_at < int(attestation["issued_at"])
+        or consumed_at > int(attestation["expires_at"])
+        or consumed_at > int(time.time()) + 30
+        or value.get("state_version") != 2
+        or _HEX64.fullmatch(str(value.get("consume_binding_sha256") or "")) is None
+        or set(str(value.get("consume_binding_sha256") or "")) == {"0"}
+    ):
+        raise ReleaseFailure("secondary_document_map_consume_response_invalid")
+
+
+def _consume_secondary_document_map_after_exact_rechecks(
+    previous: ReleaseIdentity,
+    *,
+    recheck_identity: Callable[[], None],
+    consume: Callable[[], None],
+) -> None:
+    """Keep irreversible consume strictly between two full-tree checks."""
+
+    verify_release_tree(previous)
+    recheck_identity()
+    consume()
+    verify_release_tree(previous)
+    recheck_identity()
 
 
 def _load_secondary_rollout_receipt(
@@ -7534,8 +7920,10 @@ print(json.dumps({
         except (OSError, subprocess.SubprocessError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
             raise ReleaseFailure("secondary_rollout_profile_identity_invalid") from exc
         expected_admissions = {"provisional_shadow", "accepted"}
-        if expected_stage == "private-shadow":
+        if expected_stage in {"private-shadow", "document-map-shadow"}:
             expected_admissions = {"accepted"}
+        expected_private = expected_stage in {"private-shadow", "document-map-shadow"}
+        expected_mode = "assist" if expected_stage == "document-map-shadow" else "shadow"
         if (
             result.returncode != 0
             or result.stderr
@@ -7551,11 +7939,11 @@ print(json.dumps({
                 "served_model_alias",
             }
             or identity.get("admission") not in expected_admissions
-            or identity.get("allow_private_text") is not (expected_stage == "private-shadow")
+            or identity.get("allow_private_text") is not expected_private
             or identity.get("context_tokens") != 4096
             or identity.get("gateway_ca_certificate_sha256") != _SECONDARY_FINALIST_CA_SHA256
             or _HEX64.fullmatch(str(identity.get("manifest_sha256") or "")) is None
-            or identity.get("mode") != "shadow"
+            or identity.get("mode") != expected_mode
             or identity.get("profile_id") != _SECONDARY_FINALIST_PROFILE_ID
             or identity.get("served_model_alias") != _SECONDARY_FINALIST_MODEL_ALIAS
         ):
@@ -7672,6 +8060,245 @@ print(json.dumps({
             attestation=attestation,
         )
 
+    def _consume_secondary_document_map_rollout_attestation(
+        self,
+        request_payload: Mapping[str, Any],
+        *,
+        attestation: Mapping[str, Any],
+        api_token: str,
+        primary_ca: bytes,
+    ) -> None:
+        if set(request_payload) != _SECONDARY_DOCUMENT_MAP_CONSUME_REQUEST_KEYS:
+            raise ReleaseFailure("secondary_document_map_consume_request_invalid")
+        try:
+            context = ssl.create_default_context(cadata=primary_ca.decode("ascii", errors="strict"))
+            context.check_hostname = True
+            context.verify_mode = ssl.CERT_REQUIRED
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({}),
+                urllib.request.HTTPSHandler(context=context),
+                _NoRedirect(),
+            )
+            request = urllib.request.Request(
+                _SECONDARY_DOCUMENT_MAP_CONSUME_URL,
+                data=_secondary_product_canonical(request_payload),
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {api_token}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            with opener.open(  # noqa: S310 - exact pinned loopback TLS endpoint
+                request,
+                timeout=10.0,
+            ) as response:
+                status = response.status
+                response_url = response.geturl()
+                raw = response.read(65_537)
+        except (OSError, UnicodeError, ValueError, ssl.SSLError, urllib.error.URLError):
+            raise ReleaseFailure("secondary_document_map_attestation_consume_failed") from None
+        if status != 200 or response_url != _SECONDARY_DOCUMENT_MAP_CONSUME_URL or len(raw) > 65_536:
+            raise ReleaseFailure("secondary_document_map_attestation_consume_failed")
+        try:
+            payload = _secondary_product_json(raw)
+        except ReleaseFailure:
+            raise ReleaseFailure("secondary_document_map_consume_response_invalid") from None
+        _validate_secondary_document_map_consume_response(
+            payload,
+            request=request_payload,
+            attestation=attestation,
+        )
+
+    def _validate_secondary_document_map_rollout_gate(
+        self,
+        previous: ReleaseIdentity,
+        candidate: ReleaseIdentity,
+        *,
+        secondary_rollout_receipt: Path,
+    ) -> None:
+        canonical = _read_private_regular_file(
+            self.config.env_file,
+            maximum_bytes=1 << 20,
+            code="environment_file_invalid",
+        )
+        if _sha256_bytes(canonical) != self.config.env_file_sha256:
+            raise ReleaseFailure("secondary_document_map_config_identity_mismatch")
+        predecessor_env_sha256 = _sha256_bytes(canonical)
+        predecessor_env_path = Path(os.path.abspath(self.config.env_file))
+        predecessor_anchor_path = Path(os.path.abspath(self.config.anchor))
+        if predecessor_env_path != self.config.env_file or predecessor_anchor_path != self.config.anchor:
+            raise ReleaseFailure("secondary_document_map_config_identity_mismatch")
+        predecessor_env_path_sha256 = _sha256_bytes(str(predecessor_env_path).encode("utf-8"))
+        predecessor_anchor_path_sha256 = _sha256_bytes(str(predecessor_anchor_path).encode("utf-8"))
+        predecessor_metadata_path = Path(os.path.abspath(previous.root / "artifacts/immutable-release.json"))
+        expected_metadata_path = Path(os.path.abspath(previous.root)) / "artifacts/immutable-release.json"
+        if predecessor_metadata_path != expected_metadata_path:
+            raise ReleaseFailure("secondary_document_map_predecessor_release_identity_invalid")
+        predecessor_metadata = _read_stable_regular_file(
+            predecessor_metadata_path,
+            maximum_bytes=1 << 20,
+            code="secondary_document_map_predecessor_release_identity_invalid",
+        )
+        try:
+            predecessor_metadata_value = _unique_json(predecessor_metadata.decode("ascii", errors="strict"))
+        except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+            raise ReleaseFailure("secondary_document_map_predecessor_release_identity_invalid") from exc
+        if (
+            not isinstance(predecessor_metadata_value, dict)
+            or predecessor_metadata_value.get("commit") != previous.commit
+            or predecessor_metadata_value.get("version") != previous.version
+            or predecessor_metadata_value.get("max_schema") != previous.max_schema
+        ):
+            raise ReleaseFailure("secondary_document_map_predecessor_release_identity_invalid")
+        predecessor_metadata_sha256 = _sha256_bytes(predecessor_metadata)
+        predecessor_wheel_sha256 = _closed_hash(
+            str(predecessor_metadata_value.get("wheel_sha256") or ""),
+            "secondary_document_map_predecessor_release_identity_invalid",
+        )
+        values, unrelated = _secondary_environment_view(canonical)
+        _validate_secondary_finalist_values(
+            values,
+            exact_values=_SECONDARY_DOCUMENT_MAP_SHADOW_EXACT_VALUES,
+            invalid_code="secondary_document_map_config_identity_mismatch",
+        )
+        if canonical != _canonical_secondary_environment(unrelated, values):
+            raise ReleaseFailure("secondary_document_map_config_identity_mismatch")
+        api_token = _secondary_rollout_api_token(canonical)
+        secondary_ca_path = Path(values["FRIDAY_SECONDARY_LLM_CA_FILE"])
+        secondary_ca = _read_private_regular_file(
+            secondary_ca_path,
+            maximum_bytes=1 << 20,
+            code="secondary_shadow_ca_invalid",
+        )
+        if _sha256_bytes(secondary_ca) != _SECONDARY_FINALIST_CA_SHA256:
+            raise ReleaseFailure("secondary_shadow_ca_digest_mismatch")
+        primary_ca = _read_private_regular_file(
+            self.config.health_ca,
+            maximum_bytes=1 << 20,
+            code="health_ca_invalid",
+        )
+        primary_ca_sha256 = _sha256_bytes(primary_ca)
+        if primary_ca_sha256 != self.config.health_ca_sha256:
+            raise ReleaseFailure("health_ca_digest_mismatch")
+        next_env_file = self.config.next_env_file
+        if next_env_file is None:
+            raise ReleaseFailure("secondary_document_map_next_environment_invalid")
+        next_environment = _read_private_regular_file(
+            next_env_file,
+            maximum_bytes=1 << 20,
+            code="secondary_document_map_next_environment_invalid",
+        )
+        next_env_sha256 = _closed_hash(
+            self.config.next_env_file_sha256,
+            "secondary_document_map_next_environment_invalid",
+        )
+        if _sha256_bytes(next_environment) != next_env_sha256:
+            raise ReleaseFailure("secondary_document_map_next_environment_invalid")
+        transition = _requested_staged_config_transition(self.config)
+        if transition != _SECONDARY_DOCUMENT_MAP_SHADOW_TO_ASSIST_TRANSITION:
+            raise ReleaseFailure("secondary_document_map_transition_invalid")
+        _validate_staged_environment_transition(transition, canonical, next_environment)
+        receipt = _load_secondary_rollout_receipt(
+            secondary_rollout_receipt,
+            self.config.secondary_rollout_receipt_sha256,
+        )
+        profile_identity = self._secondary_rollout_profile_identity(
+            previous,
+            expected_stage="document-map-shadow",
+        )
+        primary_pid, process_epoch = self._current_backend_process_identity(previous)
+        attestation = _validate_secondary_document_map_rollout_receipt(
+            receipt,
+            receipt_sha256=self.config.secondary_rollout_receipt_sha256,
+            previous=previous,
+            predecessor_release_metadata_sha256=predecessor_metadata_sha256,
+            predecessor_release_wheel_sha256=predecessor_wheel_sha256,
+            predecessor_live_env_sha256=predecessor_env_sha256,
+            predecessor_live_env_path_sha256=predecessor_env_path_sha256,
+            predecessor_release_anchor_path_sha256=predecessor_anchor_path_sha256,
+            profile_identity=profile_identity,
+            primary_pid=primary_pid,
+            primary_process_epoch_sha256=process_epoch,
+            primary_ca_certificate_sha256=primary_ca_sha256,
+        )
+
+        def anchor_is_exact_predecessor() -> bool:
+            try:
+                return self.config.anchor.is_symlink() and self.config.anchor.resolve(
+                    strict=True
+                ) == previous.root.resolve(strict=True)
+            except OSError:
+                return False
+
+        def recheck_identity() -> None:
+            if (
+                _read_private_regular_file(
+                    self.config.env_file,
+                    maximum_bytes=1 << 20,
+                    code="environment_file_invalid",
+                )
+                != canonical
+                or _read_stable_regular_file(
+                    predecessor_metadata_path,
+                    maximum_bytes=1 << 20,
+                    code="secondary_document_map_predecessor_release_identity_invalid",
+                )
+                != predecessor_metadata
+                or not anchor_is_exact_predecessor()
+                or _read_private_regular_file(
+                    self.config.health_ca,
+                    maximum_bytes=1 << 20,
+                    code="health_ca_invalid",
+                )
+                != primary_ca
+                or _read_private_regular_file(
+                    secondary_ca_path,
+                    maximum_bytes=1 << 20,
+                    code="secondary_shadow_ca_invalid",
+                )
+                != secondary_ca
+                or _read_private_regular_file(
+                    next_env_file,
+                    maximum_bytes=1 << 20,
+                    code="secondary_document_map_next_environment_invalid",
+                )
+                != next_environment
+                or _load_secondary_rollout_receipt(
+                    secondary_rollout_receipt,
+                    self.config.secondary_rollout_receipt_sha256,
+                )
+                != receipt
+                or self._secondary_rollout_profile_identity(
+                    previous,
+                    expected_stage="document-map-shadow",
+                )
+                != profile_identity
+                or self._current_backend_process_identity(previous) != (primary_pid, process_epoch)
+            ):
+                raise ReleaseFailure("secondary_document_map_rollout_identity_changed")
+
+        attestation_sha256 = _sha256_bytes(_secondary_product_canonical(attestation))
+        request_payload = _secondary_document_map_rollout_consume_request(
+            lookup_token=str(receipt["server_rollout_lookup_token"]),
+            attestation_sha256=attestation_sha256,
+            previous=previous,
+            candidate=candidate,
+            predecessor_env_sha256=predecessor_env_sha256,
+            next_env_sha256=next_env_sha256,
+            product_receipt_sha256=self.config.secondary_rollout_receipt_sha256,
+        )
+        _consume_secondary_document_map_after_exact_rechecks(
+            previous,
+            recheck_identity=recheck_identity,
+            consume=lambda: self._consume_secondary_document_map_rollout_attestation(
+                request_payload,
+                attestation=attestation,
+                api_token=api_token,
+                primary_ca=primary_ca,
+            ),
+        )
+
     def _validate_secondary_rollout_gate(
         self,
         previous: ReleaseIdentity,
@@ -7682,6 +8309,13 @@ print(json.dumps({
             return
         secondary_rollout_receipt = self.config.secondary_rollout_receipt
         assert secondary_rollout_receipt is not None
+        if expected_stage == "document-map-shadow":
+            self._validate_secondary_document_map_rollout_gate(
+                previous,
+                candidate,
+                secondary_rollout_receipt=secondary_rollout_receipt,
+            )
+            return
         canonical = _read_private_regular_file(
             self.config.env_file,
             maximum_bytes=1 << 20,

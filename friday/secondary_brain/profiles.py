@@ -549,6 +549,41 @@ class SecondaryWorkloadPolicy:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class SecondaryDocumentMapAssistAcceptance:
+    """Code-owned binding filled only after a real v1 shadow receipt exists."""
+
+    status: str
+    acceptance_manifest_sha256: str
+    candidate_policy_id: str
+    candidate_policy_manifest_sha256: str
+    predecessor_policy_id: str
+    predecessor_policy_manifest_sha256: str
+    accepted_shadow_receipt_sha256: str
+    runtime_profile_id: str
+    runtime_profile_manifest_sha256: str
+    max_receipt_age_sec: int
+
+    @property
+    def is_bound(self) -> bool:
+        return bool(
+            self.status == "accepted"
+            and _SHA256_RE.fullmatch(self.acceptance_manifest_sha256)
+            and self.acceptance_manifest_sha256 != _ZERO_SHA256
+            and self.candidate_policy_id == "gptoss20b-document-map-v2"
+            and _SHA256_RE.fullmatch(self.candidate_policy_manifest_sha256)
+            and self.candidate_policy_manifest_sha256 != _ZERO_SHA256
+            and self.predecessor_policy_id == "gptoss20b-document-map-v1"
+            and self.predecessor_policy_manifest_sha256
+            == "7d57947d7ecda675e8a4da3f56332baf32484c08c0504afd7fa420b9c6323cd9"
+            and _SHA256_RE.fullmatch(self.accepted_shadow_receipt_sha256)
+            and self.accepted_shadow_receipt_sha256 != _ZERO_SHA256
+            and self.runtime_profile_id == _ACCEPTED_GPT_OSS_20B_FINALIST.profile_id
+            and self.runtime_profile_manifest_sha256 == _ACCEPTED_GPT_OSS_20B_FINALIST.manifest_sha256
+            and self.max_receipt_age_sec == 3_600
+        )
+
+
 # Exact finalist accepted by the complete quality/capacity/soak/failure chain.
 # Product policy remains separate: the initial release keeps public discarded
 # shadow/extract, while private shadow and assist require distinct activations.
@@ -630,6 +665,23 @@ SECONDARY_WORKLOAD_POLICIES: Mapping[str, SecondaryWorkloadPolicy] = MappingProx
     {_DOCUMENT_MAP_WORKLOAD_POLICY.policy_id: _DOCUMENT_MAP_WORKLOAD_POLICY}
 )
 
+# The implementation is intentionally present before the acceptance.  The two
+# empty fields are not wildcards: they keep assist fail-closed until a later,
+# distinct candidate binds the exact receipt emitted by live v1 shadow and the
+# exact accepted v2 policy manifest.  Never populate these from ENV.
+SECONDARY_DOCUMENT_MAP_ASSIST_ACCEPTANCE = SecondaryDocumentMapAssistAcceptance(
+    status="acceptance_pending",
+    acceptance_manifest_sha256=("a9cc1dfa34aa34eb41dc6ca7b6d3129248e755cc2bf4d6f060859c95fcd828e7"),
+    candidate_policy_id="gptoss20b-document-map-v2",
+    candidate_policy_manifest_sha256="",
+    predecessor_policy_id=_DOCUMENT_MAP_WORKLOAD_POLICY.policy_id,
+    predecessor_policy_manifest_sha256=_DOCUMENT_MAP_WORKLOAD_POLICY.manifest_sha256,
+    accepted_shadow_receipt_sha256="",
+    runtime_profile_id=_ACCEPTED_GPT_OSS_20B_FINALIST.profile_id,
+    runtime_profile_manifest_sha256=_ACCEPTED_GPT_OSS_20B_FINALIST.manifest_sha256,
+    max_receipt_age_sec=3_600,
+)
+
 
 # Filled only from a completed live battery and an immutable profile manifest.
 ACCEPTED_SECONDARY_RUNTIME_PROFILES: Mapping[str, SecondaryRuntimeProfile] = MappingProxyType(
@@ -703,6 +755,21 @@ def secondary_effective_workloads(
     if policy is None:
         return profile.allowed_workloads
     return profile.allowed_workloads | policy.additional_workloads
+
+
+def get_secondary_document_map_assist_acceptance(
+    profile: SecondaryRuntimeProfile,
+) -> SecondaryDocumentMapAssistAcceptance | None:
+    """Return only a complete code-owned live-shadow→v2 acceptance binding."""
+
+    acceptance = SECONDARY_DOCUMENT_MAP_ASSIST_ACCEPTANCE
+    if (
+        not acceptance.is_bound
+        or acceptance.runtime_profile_id != profile.profile_id
+        or acceptance.runtime_profile_manifest_sha256 != profile.manifest_sha256
+    ):
+        return None
+    return acceptance
 
 
 def get_secondary_runtime_admission(

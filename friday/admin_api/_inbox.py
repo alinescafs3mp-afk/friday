@@ -27,6 +27,12 @@ from friday.admin_api._deps import (
     _target_user,
 )
 from friday.diagnostics.runtime_lease import ProcessLease, RuntimeLeaseError
+from friday.secondary_brain.document_map_evidence import (
+    DocumentMapShadowOneShotReplayError,
+    DocumentMapShadowOneShotUnavailable,
+    consume_document_map_shadow_rollout_attestation,
+    run_document_map_shadow_one_shot,
+)
 from friday.secondary_product_witness import (
     SECONDARY_PRODUCT_BACKUP_LEASE_FILENAME,
     SECONDARY_PRODUCT_BACKUP_LEASE_PROTOCOL,
@@ -450,6 +456,87 @@ async def consume_secondary_witness_rollout_attestation(request: Request) -> Res
             "stage": result.get("stage"),
             "transition": result.get("transition"),
             "request_sha256": result.get("request_sha256"),
+        },
+    )
+    return Response(content=secondary_product_canonical(result), media_type="application/json")
+
+
+@router.post("/secondary-document-map-witness/consume-rollout-attestation")
+async def consume_secondary_document_map_rollout_attestation(request: Request) -> Response:
+    """Atomically burn one natural document-map shadow receipt before promotion."""
+
+    actor = _require(request, "admin.all_data.manage")
+    if not actor.is_owner or actor.identity_id != "owner-token":
+        raise HTTPException(status_code=403, detail="Document-map witness доступен только владельцу")
+    body = await _request_json(request)
+    try:
+        result = consume_document_map_shadow_rollout_attestation(
+            _services(request).storage,
+            actor.user_id,
+            request_value=body,
+            settings=_services(request).settings,
+            secondary=_services(request).secondary_brain,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Некорректное подтверждение document-map shadow",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Подтверждение document-map shadow уже использовано или изменилось",
+        ) from exc
+    _audit(
+        request,
+        "admin.inbox.consume_secondary_document_map_rollout_attestation",
+        "inbox",
+        None,
+        after={
+            "status": "consumed",
+            "transition": result.get("transition"),
+            "request_sha256": result.get("request_sha256"),
+        },
+    )
+    return Response(content=secondary_product_canonical(result), media_type="application/json")
+
+
+@router.post("/secondary-document-map-witness/observe-shadow")
+async def observe_secondary_document_map_shadow(request: Request) -> Response:
+    """Run one bodyless, code-owned, same-process promotion observation."""
+
+    actor = _require(request, "admin.all_data.manage")
+    if not actor.is_owner or actor.identity_id != "owner-token":
+        raise HTTPException(status_code=403, detail="Document-map witness доступен только владельцу")
+    if await request.body() != b"":
+        raise HTTPException(status_code=400, detail="Document-map witness не принимает тело запроса")
+    state = _services(request)
+    try:
+        result = await run_document_map_shadow_one_shot(
+            state.storage,
+            owner_user_id=actor.user_id,
+            settings=state.settings,
+            secondary=state.secondary_brain,
+        )
+    except DocumentMapShadowOneShotReplayError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Document-map shadow observation уже запускалось для этого процесса",
+        ) from exc
+    except (DocumentMapShadowOneShotUnavailable, ValueError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Document-map shadow observation не дало promotion-grade подтверждение",
+        ) from exc
+    _audit(
+        request,
+        "admin.inbox.observe_secondary_document_map_shadow",
+        "inbox",
+        None,
+        after={
+            "status": result.get("status"),
+            "receipt_sha256": result.get("receipt_sha256"),
+            "server_rollout_attestation_sha256": result.get("server_rollout_attestation_sha256"),
         },
     )
     return Response(content=secondary_product_canonical(result), media_type="application/json")

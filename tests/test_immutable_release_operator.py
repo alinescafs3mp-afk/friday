@@ -2542,7 +2542,10 @@ def test_document_map_cannot_skip_its_discarded_shadow_transition(
             )
         )
 
-    with pytest.raises(operator.ReleaseFailure, match="staged_config_transition_invalid"):
+    with pytest.raises(
+        operator.ReleaseFailure,
+        match="secondary_document_map_assist_predecessor_not_shadow",
+    ):
         operator.SystemdActivationPort(
             replace(
                 base.config,

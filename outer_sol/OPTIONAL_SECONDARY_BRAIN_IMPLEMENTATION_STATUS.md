@@ -166,6 +166,22 @@
   evidence gate before secondary output may influence document mapping. The
   source/operator shadow path is now live; promotion-grade product evidence is
   the next separate checkpoint.
+- The next evidence boundary is implemented without claiming acceptance.
+  Natural owner shadow remains causal/content-free, but promotion evidence is
+  restricted to one owner-token-only empty-body same-process call. It proves a
+  real `DOCUMENT_MAP`, primary-once/preserved and exact isolated scheduler
+  deltas, then durably writes a 0600 body/body-digest-free receipt. The signed
+  receipt also binds exact sealed commit/tree/metadata/wheel, ENV, process,
+  profile, policy and CA identities; failed, non-exact replayed or drifted
+  observations cannot be consumed. Exact request/candidate consume retry is
+  response-idempotent; consumed rows and one-shot latches are prune-exempt and
+  immutable, while a new PID/epoch may issue a new current receipt without
+  deleting that audit. The operator re-verifies the full sealed predecessor
+  tree after consume. It has a distinct-candidate
+  `secondary_document_map_shadow_to_assist` path, but v2
+  policy and accepted live-receipt digests remain empty in the pending manifest,
+  so runtime/operator still keep assist closed until a later candidate binds
+  genuine live evidence.
 
 ## Parallel parent checkpoint
 

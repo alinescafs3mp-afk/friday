@@ -242,6 +242,27 @@ mounted by Compose nor the running SGLang/gateway containers, so the laptop
 needs no restart for that product-only transition. Assist requires a later
 evidence-bound policy and operator gate; v1 must never be used to promote it.
 
+The server-side next gate is implementation-ready but deliberately acceptance
+pending. Natural valid owner shadow can emit a content-free receipt; only the
+owner-token-only, empty-body `secondary-document-map-witness/observe-shadow`
+route emits promotion-grade evidence. It runs one real same-process
+`DOCUMENT_MAP` through the exclusive scheduler seam, preserves one exact
+primary sentinel and requires exact `selected/success/shadow.valid` deltas of
+`1/1/1` with invalid/skipped/in-flight unchanged. Product data is not created.
+The 0600 receipt retains neither bodies, body digests nor cumulative counters;
+it binds process/profile/CA/v1 policy plus the sealed predecessor commit,
+release-tree, metadata, wheel and live-ENV identities. Its durable one-shot
+latch and attestation are consumed atomically and cannot be replaced by later
+natural shadow or removed by the generic idempotency prune. An exact
+request/candidate retry reconstructs the identical signed consume response
+without mutation; a new PID/epoch may issue a new current receipt while every
+historical consumed row remains immutable. The operator fully verifies the
+sealed predecessor tree before and after consume.
+`workload-policy.document-map.v2.acceptance-pending.json` keeps
+the candidate-policy and accepted live-receipt digests empty, so a distinct
+candidate and exact live receipt are still required. ENV alone never opens the
+gate.
+
 The profile ID and served-model alias are derived from the complete engine
 projection. `dtype=bfloat16`, `quantization=mxfp4`, global/prefill attention
 `triton`, `moe_runner_backend=flashinfer_mxfp4`, hybrid SWA memory, one running

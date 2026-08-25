@@ -103,6 +103,11 @@ class SecondaryBrainScheduler:
         self._local_fallback_total = 0
         self._startup_probe_task: asyncio.Task[None] | None = None
         self._probe_lock = asyncio.Lock()
+        # Ordinary attempts register here so a rare promotion witness can
+        # observe one causal attempt without unrelated counter interleaving.
+        self._observation_condition = asyncio.Condition()
+        self._ordinary_attempts_in_flight = 0
+        self._exclusive_observation = False
         self._epoch_admitted = False
         self._last_probe_success_monotonic: float | None = None
         self._probe_success_total = 0
@@ -296,7 +301,12 @@ class SecondaryBrainScheduler:
     def start(self) -> None:
         """Start one non-blocking process-epoch probe; never a noisy loop."""
 
-        if self._closed or self._client is None or self._startup_probe_task is not None:
+        if (
+            self._closed
+            or self._client is None
+            or self._startup_probe_task is not None
+            or self._exclusive_observation
+        ):
             return
         self._startup_probe_task = asyncio.create_task(self._startup_probe())
 
@@ -606,6 +616,29 @@ class SecondaryBrainScheduler:
         return None
 
     async def attempt(self, request: ModelRequest, *, shadow: bool = False) -> SecondaryAttempt:
+        """Run an attempt while respecting the causal-observation barrier."""
+
+        async with self._observation_condition:
+            if self._exclusive_observation:
+                # Evidence never queues product traffic behind a laptop call.
+                # The caller immediately takes its ordinary fail-soft path; the
+                # resulting skip also invalidates the supposedly isolated proof.
+                self._record_skip(request.workload, SecondaryFailure.ADMISSION_BUSY, local=True)
+                return SecondaryAttempt.rejected(SecondaryFailure.ADMISSION_BUSY)
+            self._ordinary_attempts_in_flight += 1
+        try:
+            return await self._attempt_unobserved(request, shadow=shadow)
+        finally:
+            async with self._observation_condition:
+                self._ordinary_attempts_in_flight -= 1
+                self._observation_condition.notify_all()
+
+    async def _attempt_unobserved(
+        self,
+        request: ModelRequest,
+        *,
+        shadow: bool = False,
+    ) -> SecondaryAttempt:
         failure = self._eligibility_failure(request, shadow=shadow)
         if failure is not None:
             self._record_skip(request.workload, failure, local=True)
@@ -793,6 +826,7 @@ class SecondaryBrainScheduler:
         primary: Callable[[], Awaitable[T]],
         *,
         validator: Callable[[SecondaryResult], bool] | None = None,
+        valid_result_observer: Callable[[ModelRequest, SecondaryResult], Awaitable[None]] | None = None,
     ) -> T:
         """Return primary first; evaluate and discard shadow work asynchronously."""
 
@@ -802,7 +836,13 @@ class SecondaryBrainScheduler:
         except Exception:
             self._shadow_invalid_total += 1
             return primary_result
-        task = asyncio.create_task(self._run_shadow_attempt(request, validator))
+        task = asyncio.create_task(
+            self._run_shadow_attempt(
+                request,
+                validator,
+                valid_result_observer=valid_result_observer,
+            )
+        )
         self._shadow_tasks.add(task)
         task.add_done_callback(self._shadow_tasks.discard)
         return primary_result
@@ -813,34 +853,89 @@ class SecondaryBrainScheduler:
         primary: Callable[[], Awaitable[T]],
         *,
         validator: Callable[[SecondaryResult], bool] | None = None,
+        valid_result_observer: Callable[[ModelRequest, SecondaryResult], Awaitable[None]] | None = None,
+        exclusive: bool = False,
     ) -> tuple[T, dict[str, object], dict[str, object]]:
         """Return primary plus snapshots around one synchronously drained shadow."""
 
-        primary_result = await primary()
-        try:
-            request = request_factory()
-        except Exception:
+        if not exclusive:
+            primary_result = await primary()
+            try:
+                request = request_factory()
+            except Exception:
+                before = self.diagnostics_status()
+                self._shadow_invalid_total += 1
+                after = self.diagnostics_status()
+                return primary_result, before, after
             before = self.diagnostics_status()
-            self._shadow_invalid_total += 1
+            await self._run_shadow_attempt(
+                request,
+                validator,
+                valid_result_observer=valid_result_observer,
+            )
             after = self.diagnostics_status()
             return primary_result, before, after
-        before = self.diagnostics_status()
-        await self._run_shadow_attempt(request, validator)
-        after = self.diagnostics_status()
-        return primary_result, before, after
+
+        async with self._observation_condition:
+            startup_probe_active = (
+                self._startup_probe_task is not None and not self._startup_probe_task.done()
+            )
+            if (
+                self._exclusive_observation
+                or self._ordinary_attempts_in_flight
+                or self._shadow_tasks
+                or startup_probe_active
+            ):
+                raise RuntimeError("secondary shadow observation is not idle")
+            self._exclusive_observation = True
+        try:
+            primary_result = await primary()
+            request = request_factory()
+            before = self.diagnostics_status()
+            await self._run_shadow_attempt(
+                request,
+                validator,
+                valid_result_observer=valid_result_observer,
+                observation_owner=True,
+            )
+            after = self.diagnostics_status()
+            return primary_result, before, after
+        finally:
+            async with self._observation_condition:
+                self._exclusive_observation = False
+                self._observation_condition.notify_all()
 
     async def _run_shadow_attempt(
         self,
         request: ModelRequest,
         validator: Callable[[SecondaryResult], bool] | None,
+        *,
+        valid_result_observer: Callable[[ModelRequest, SecondaryResult], Awaitable[None]] | None = None,
+        observation_owner: bool = False,
     ) -> None:
         try:
-            attempt = await self.attempt(request, shadow=True)
+            attempt = await (
+                self._attempt_unobserved(request, shadow=True)
+                if observation_owner
+                else self.attempt(request, shadow=True)
+            )
             if attempt.result is None:
                 self._shadow_skipped_total += 1
             elif self._validated(attempt.result, validator):
                 self._record_success(request, attempt.result)
                 self._shadow_valid_total += 1
+                if valid_result_observer is not None:
+                    try:
+                        await valid_result_observer(request, attempt.result)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        if observation_owner:
+                            raise
+                        # Evidence is optional to product traffic. A private
+                        # receipt write must never alter the already-returned
+                        # primary result or poison the secondary circuit.
+                        pass
             else:
                 await self._reject_valid_result(request)
                 self._shadow_invalid_total += 1
@@ -848,6 +943,8 @@ class SecondaryBrainScheduler:
             raise
         except Exception:
             self._shadow_invalid_total += 1
+            if observation_owner:
+                raise
 
     async def drain_shadow(self) -> None:
         """Test/operator drain for already launched shadow comparisons."""
