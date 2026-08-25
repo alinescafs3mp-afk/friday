@@ -348,6 +348,15 @@ def _capturable_web_sources(report: Any) -> list[dict[str, Any]]:
             return []
         normalized_numeric_fields.append(value)
     requested, completed, failed, timed_out = normalized_numeric_fields
+    target = report.get("target_sources")
+    if "target_sources" in report and (
+        not isinstance(target, int)
+        or isinstance(target, bool)
+        or not 0 <= target <= 8
+        or (bool(raw_sources) and target == 0)
+        or target > requested
+    ):
+        return []
     if (
         completed != len(raw_sources)
         or requested == 0
@@ -1878,6 +1887,7 @@ def _web_research_for_llm(data: dict[str, Any]) -> tuple[str, bool]:
         SEARCH_FILTER_ATTESTATION_KEY,
         "source_class",
         "source_class_satisfied",
+        "target_sources",
         "requested_sources",
         "completed_sources",
         "timed_out_sources",

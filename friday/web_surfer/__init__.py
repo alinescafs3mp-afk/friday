@@ -2327,6 +2327,7 @@ class WebSurfer:
                 {
                     "query": query,
                     "sources": [],
+                    "target_sources": 0,
                     "requested_sources": 0,
                     "completed_sources": 0,
                     "timed_out_sources": 0,
@@ -2347,6 +2348,7 @@ class WebSurfer:
                 {
                     "query": query,
                     "sources": [],
+                    "target_sources": 0,
                     "requested_sources": 0,
                     "completed_sources": 0,
                     "timed_out_sources": 0,
@@ -2364,6 +2366,7 @@ class WebSurfer:
                 {
                     "query": query,
                     "sources": [],
+                    "target_sources": 0,
                     "requested_sources": 0,
                     "completed_sources": 0,
                     "timed_out_sources": 0,
@@ -2399,107 +2402,116 @@ class WebSurfer:
                 and web_source_matches_class(str(item.get("url") or ""), source_class)
             ]
 
-        selected = results[:source_limit]
-        tasks = [asyncio.create_task(self.fetch(result.url, max_length=20_000)) for result in selected]
-        done: set[asyncio.Task[FetchResult]] = set()
-        pending: set[asyncio.Task[FetchResult]] = set(tasks)
-        remaining_total = max(0.0, _RESEARCH_TOTAL_BUDGET - (loop.time() - started_at))
-        fetch_budget = min(_RESEARCH_FETCH_BUDGET, remaining_total)
-        try:
-            done, pending = await asyncio.wait(tasks, timeout=fetch_budget)
-        finally:
-            unfinished = [task for task in tasks if not task.done()]
-            for task in unfinished:
-                task.cancel()
-            if unfinished:
-                await asyncio.gather(*unfinished, return_exceptions=True)
-
-        sources: list[dict[str, Any]] = list(direct)
+        target_sources = min(source_limit, len(results))
+        selected = list(results[:target_sources])
+        spare = list(results[target_sources : source_limit * 2])
+        complete: list[dict[str, Any]] = []
+        partial: list[tuple[dict[str, Any], bool]] = []
+        complete_keys: set[str] = set()
+        partial_keys: set[str] = set()
+        failed_hosts: set[str] = set()
+        attempted_hosts: set[str] = set()
+        requested_sources = 0
         failed_sources = 0
-        requested_sources = len(selected)
-        for search_result, task in zip(selected, tasks, strict=False):
-            if task not in done:
-                continue
-            try:
-                fetch_result = task.result()
-            except asyncio.CancelledError:
-                # Cancellation of the parent research must not be counted as a
-                # failed source and swallowed — same contract as workers/transport.
-                raise
-            except Exception:
-                failed_sources += 1
-                continue
-            # Выдержка по ИСХОДНОМУ запросу исследования, а не по адресу страницы.
-            item = fetch_result.to_dict(preview_chars=20_000, query=query)
-            item["search_title"] = search_result.title
-            item["snippet"] = search_result.snippet
-            item["source"] = search_result.source
-            if source_class and not web_source_matches_class(str(item.get("url") or ""), source_class):
-                # ``fetch`` follows safe public redirects; the final host must
-                # independently satisfy the source class proved for this turn.
-                failed_sources += 1
-                continue
-            sources.append(item)
+        timed_out_sources = 0
 
-        # «Читаемый» — это страница, из которой ЧТО-ТО извлеклось. HTML-ветка
-        # `fetch` при пустом извлечении не ставит ошибку и возвращает text="" со
-        # статусом 200, поэтому пустышки считались наравне с настоящими: сводка
-        # обещала «собрано 3 читаемых источника», а текста не было ни в одном.
-        # PDF-ветка тот же случай уже отмечает явной ошибкой.
-        readable_sources = sum(
-            1 for item in sources if not item["error"] and str(item.get("text") or "").strip()
-        )
-        timed_out_sources = len(pending)
+        def record_item(item: Mapping[str, Any], *, attempted: bool) -> None:
+            """Admit complete evidence and hold useful partial evidence for fallback."""
 
-        # Запас из выдачи наконец используется. `search` спрашивает ВДВОЕ больше
-        # результатов, чем читает, и хвост просто лежал: первые три страницы
-        # оказались нечитаемыми — ответ уходил без фактуры, хотя четвёртая
-        # ссылка в той же выдаче отвечала. Замерено на «сколько стоит нефть
-        # Brent»: TradingView отдаёт котировку скриптом, текста нет, и человек
-        # получал «точная цифра в текстовом фрагменте не раскрылась» при
-        # одиннадцати из двенадцати остальных вопросов с конкретным значением.
-        spare = results[len(selected) :]
-        remaining = max(0.0, _RESEARCH_TOTAL_BUDGET - (loop.time() - started_at))
-        if readable_sources == 0 and spare and remaining > 2.0:
-            # Вторая волна идёт на ДРУГИЕ сайты, а не на тот же самый.
-            #
-            # Замерено на живом вопросе владельца «сколько стоит самая дешёвая
-            # 5090 в ДНС»: магазин закрыт от роботов и отвечает 401 на КАЖДОЙ
-            # своей странице. Запрос содержал название магазина, поэтому вся
-            # выдача — с одного домена, и запасные ссылки повторяли отказ
-            # пять раз подряд. Человек получил «точную цену получить не удалось»
-            # при том, что цена есть на десятке других сайтов.
-            #
-            # Домен, уже ответивший отказом, отодвигается в конец очереди, а не
-            # выбрасывается: если других нет, попытаться всё равно стоит.
-            refused = {
-                _host_of(str(item.get("url") or ""))
-                for item in sources
-                if item.get("error") and _host_of(str(item.get("url") or ""))
-            }
-            elsewhere = [item for item in spare if _host_of(item.url) not in refused]
-            same_place = [item for item in spare if _host_of(item.url) in refused]
-            extra = (elsewhere + same_place)[:source_limit]
-            requested_sources += len(extra)
-            extra_tasks = [asyncio.create_task(self.fetch(item.url, max_length=20_000)) for item in extra]
+            nonlocal failed_sources
+            url = str(item.get("url") or "")
+            key = _canonical_url(url)
+            text = str(item.get("text") or "").strip()
+            status_code = item.get("status_code")
+            error = item.get("error")
+            truncated = item.get("truncated")
+            text_length = item.get("text_length")
+            valid = bool(
+                key
+                and text
+                and isinstance(status_code, int)
+                and not isinstance(status_code, bool)
+                and 200 <= status_code < 300
+                and isinstance(error, str)
+                and not error.strip()
+                and isinstance(truncated, bool)
+                and isinstance(text_length, int)
+                and not isinstance(text_length, bool)
+                and text_length >= len(text)
+            )
+            if not valid:
+                if attempted:
+                    failed_sources += 1
+                    host = _host_of(url)
+                    if host:
+                        failed_hosts.add(host)
+                return
+            incomplete = bool(
+                truncated is True
+                or isinstance(text_length, int)
+                and not isinstance(text_length, bool)
+                and text_length > len(text)
+            )
+            if incomplete:
+                if key in complete_keys or key in partial_keys:
+                    if attempted:
+                        failed_sources += 1
+                    return
+                partial_keys.add(key)
+                partial.append((dict(item), attempted))
+                return
+            if key in complete_keys:
+                if attempted:
+                    failed_sources += 1
+                return
+            if key in partial_keys:
+                for index, (old_item, old_attempted) in enumerate(partial):
+                    if _canonical_url(str(old_item.get("url") or "")) != key:
+                        continue
+                    partial.pop(index)
+                    partial_keys.remove(key)
+                    if old_attempted:
+                        failed_sources += 1
+                    break
+            complete_keys.add(key)
+            complete.append(dict(item))
+
+        for item in direct:
+            if isinstance(item, Mapping):
+                record_item(item, attempted=False)
+
+        async def fetch_batch(batch: Sequence[SearchResult], *, timeout: float) -> None:
+            """Fetch one deficit-sized wave and always reap every child task."""
+
+            nonlocal failed_sources, requested_sources, timed_out_sources
+            if not batch:
+                return
+            requested_sources += len(batch)
+            attempted_hosts.update(host for result in batch if (host := _host_of(result.url)))
+            tasks = [asyncio.create_task(self.fetch(result.url, max_length=20_000)) for result in batch]
+            done: set[asyncio.Task[FetchResult]] = set()
+            pending: set[asyncio.Task[FetchResult]] = set(tasks)
             try:
-                extra_done, extra_pending = await asyncio.wait(
-                    extra_tasks, timeout=min(_RESEARCH_FETCH_BUDGET, remaining - 1.0)
-                )
+                done, pending = await asyncio.wait(tasks, timeout=max(0.0, timeout))
             finally:
-                for task in extra_tasks:
-                    if not task.done():
-                        task.cancel()
-                await asyncio.gather(*extra_tasks, return_exceptions=True)
-            for search_result, task in zip(extra, extra_tasks, strict=False):
-                if task not in extra_done:
+                unfinished = [task for task in tasks if not task.done()]
+                for task in unfinished:
+                    task.cancel()
+                if unfinished:
+                    await asyncio.gather(*unfinished, return_exceptions=True)
+            timed_out_sources += len(pending)
+            for search_result, task in zip(batch, tasks, strict=False):
+                if task not in done:
                     continue
                 try:
                     fetch_result = task.result()
                 except asyncio.CancelledError:
                     raise
-                except Exception:  # noqa: BLE001 — нечитаемый запасной источник не беда
+                except Exception:
                     failed_sources += 1
+                    host = _host_of(search_result.url)
+                    if host:
+                        failed_hosts.add(host)
                     continue
                 item = fetch_result.to_dict(preview_chars=20_000, query=query)
                 item["search_title"] = search_result.title
@@ -2507,44 +2519,47 @@ class WebSurfer:
                 item["source"] = search_result.source
                 if source_class and not web_source_matches_class(str(item.get("url") or ""), source_class):
                     failed_sources += 1
+                    host = _host_of(search_result.url)
+                    if host:
+                        failed_hosts.add(host)
                     continue
-                sources.append(item)
-            timed_out_sources += len(extra_pending)
-            readable_sources = sum(
-                1 for item in sources if not item["error"] and str(item.get("text") or "").strip()
-            )
-        if sources and readable_sources == 0:
-            # Все страницы закрылись — сказать об этом ПРЯМО, а не отдать модели
-            # пустоту под видом собранных источников.
-            #
-            # Живой вопрос владельца: «сколько стоит самая дешёвая 5090 в ДНС».
-            # Магазин отвечает 401 на каждой странице, и вся выдача по такому
-            # запросу — с него одного, так что перебирать было нечего. Человек
-            # получил «точную цену получить не удалось» и не понял, почему.
-            # Теперь модель знает причину и может сказать её словами, а заодно
-            # предложить посмотреть в другом месте.
-            refused_hosts = sorted(
-                {
-                    _host_of(str(item.get("url") or ""))
-                    for item in sources
-                    if item.get("error") and _host_of(str(item.get("url") or ""))
-                }
-            )
-            where = ", ".join(refused_hosts[:3]) or "источники"
-            # Только факты о случившемся, без указаний себе.
-            #
-            # Прежняя редакция кончалась словами «Скажи это человеку прямо,
-            # перескажи… и предложи…» — служебная строка внутри ДАННЫХ. Модель не
-            # отличает данные от инструкции, и такая строка однажды уехала
-            # владельцу целиком. Что делать дальше, она решает сама; здесь ей
-            # сообщается, ЧТО произошло и чего в результате нет.
+                record_item(item, attempted=True)
+
+        remaining_total = max(0.0, _RESEARCH_TOTAL_BUDGET - (loop.time() - started_at))
+        await fetch_batch(selected, timeout=min(_RESEARCH_FETCH_BUDGET, remaining_total))
+
+        # Refill every missing COMPLETE slot, one deficit-sized wave at a time.
+        # Failed spares do not hide later candidates, while the search-stage 2x
+        # ceiling and the original total/fetch deadlines remain authoritative.
+        unused = list(spare)
+        while len(complete) < target_sources and unused:
+            remaining_total = max(0.0, _RESEARCH_TOTAL_BUDGET - (loop.time() - started_at))
+            if remaining_total <= 0:
+                break
+            elsewhere = [item for item in unused if _host_of(item.url) not in attempted_hosts]
+            same_place = [item for item in unused if _host_of(item.url) in attempted_hosts]
+            deficit = target_sources - len(complete)
+            extra = (elsewhere + same_place)[:deficit]
+            chosen = {id(item) for item in extra}
+            unused = [item for item in unused if id(item) not in chosen]
+            await fetch_batch(extra, timeout=min(_RESEARCH_FETCH_BUDGET, remaining_total))
+
+        missing = max(0, target_sources - len(complete))
+        retained_partial = partial[:missing]
+        for _item, attempted in partial[missing:]:
+            if attempted:
+                failed_sources += 1
+        sources = [*complete, *(item for item, _attempted in retained_partial)]
+        if sources and len(complete) < target_sources:
             summary = (
-                f"Ни одну страницу прочитать не удалось: {where} закрывает содержимое от "
-                "автоматического чтения. В выдаче остались только заголовки и краткие "
-                "описания; цифр и подробностей с самих страниц в этом результате нет."
+                f"Collected {len(complete)} complete public sources; "
+                f"the target of {target_sources} could not be filled."
             )
         elif sources:
-            summary = f"Collected {readable_sources} readable public sources."
+            summary = f"Collected {len(complete)} complete public sources."
+        elif failed_hosts:
+            where = ", ".join(sorted(failed_hosts)[:3])
+            summary = f"No page could be read completely: {where} did not provide usable public text."
         else:
             summary = "Search results were found, but no source could be fetched safely."
         if timed_out_sources:
@@ -2557,6 +2572,7 @@ class WebSurfer:
             {
                 "query": query,
                 "sources": sources,
+                "target_sources": target_sources,
                 "requested_sources": requested_sources,
                 "completed_sources": len(sources),
                 "timed_out_sources": timed_out_sources,

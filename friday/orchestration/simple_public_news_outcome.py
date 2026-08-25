@@ -29,7 +29,7 @@ from friday.orchestration.contracts import RouteClass
 from friday.web_surfer import web_source_matches_class
 
 SIMPLE_PUBLIC_NEWS_PLAN_SCHEMA = "friday.legacy-simple-public-news-plan.v1"
-SIMPLE_PUBLIC_NEWS_EVIDENCE_SCHEMA = "friday.simple-public-news-evidence.v1"
+SIMPLE_PUBLIC_NEWS_EVIDENCE_SCHEMA = "friday.simple-public-news-evidence.v2"
 SIMPLE_PUBLIC_NEWS_EVIDENCE_MARKER = "simple_public_news_full"
 SIMPLE_PUBLIC_NEWS_EVIDENCE_MAX_CHARS = 12_100
 
@@ -137,6 +137,7 @@ _EVIDENCE_SEAL_FIELDS = frozenset(
         "status",
         "outbound_attempted",
         "research_call_count",
+        "target_sources",
         "requested_sources",
         "completed_sources",
         "failed_sources",
@@ -159,7 +160,7 @@ def _evidence_seal_sha256(fields: Mapping[str, object]) -> str:
         raise SimplePublicNewsOutcomeError("news evidence seal fields are not closed")
     return _canonical_sha256(
         {
-            "schema": "friday.simple-public-news-evidence-seal.v1",
+            "schema": "friday.simple-public-news-evidence-seal.v2",
             **dict(fields),
         }
     )
@@ -261,6 +262,68 @@ def _validated_empty_proof_sha256(
     )
 
 
+def _canonical_news_source_url(url: str) -> str:
+    """Match the runtime's source identity before minting typed evidence."""
+
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        port = parsed.port
+        hostname = (parsed.hostname or "").rstrip(".").casefold().encode("idna").decode("ascii")
+    except (UnicodeError, ValueError):
+        return ""
+    scheme = parsed.scheme.casefold()
+    if scheme not in {"http", "https"} or not hostname:
+        return ""
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    if port is not None and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
+        host = f"{host}:{port}"
+    unreserved = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+
+    def normalize_component(value: str) -> str:
+        return re.sub(
+            r"%([0-9A-Fa-f]{2})",
+            lambda match: (
+                decoded
+                if (decoded := chr(int(match.group(1), 16))) in unreserved
+                else f"%{match.group(1).upper()}"
+            ),
+            value,
+        )
+
+    def remove_dot_segments(path: str) -> str:
+        absolute = path.startswith("/")
+        trailing = path.endswith(("/.", "/.."))
+        output: list[str] = []
+        for segment in path.split("/"):
+            if segment == ".":
+                continue
+            if segment == "..":
+                if output and output[-1] != ".." and not (absolute and len(output) == 1 and output[0] == ""):
+                    output.pop()
+                elif not absolute:
+                    output.append(segment)
+                continue
+            output.append(segment)
+        result = "/".join(output)
+        if absolute and not result.startswith("/"):
+            result = f"/{result}"
+        if absolute and not result:
+            result = "/"
+        if trailing and result != "/" and not result.endswith("/"):
+            result = f"{result}/"
+        return result
+
+    return urllib.parse.urlunsplit(
+        (
+            scheme,
+            host,
+            remove_dot_segments(normalize_component(parsed.path or "/")),
+            normalize_component(parsed.query),
+            "",
+        )
+    )
+
+
 def simple_public_news_source_ledger_identity(
     sources: object,
 ) -> tuple[str | None, tuple[str, ...]]:
@@ -271,6 +334,7 @@ def simple_public_news_source_ledger_identity(
     if len(sources) > _MAX_SOURCES:
         raise SimplePublicNewsOutcomeError("news source ledger exceeds its closed limit")
     projected: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
     for item in sources:
         if not isinstance(item, Mapping) or set(item) != {"url", "title"}:
             raise SimplePublicNewsOutcomeError("news source ledger has an open row shape")
@@ -291,6 +355,10 @@ def simple_public_news_source_ledger_identity(
             or parsed.password is not None
         ):
             raise SimplePublicNewsOutcomeError("news source ledger has an unsafe URL")
+        identity = _canonical_news_source_url(url)
+        if not identity or identity in seen_urls:
+            raise SimplePublicNewsOutcomeError("news source ledger has a duplicate or invalid URL")
+        seen_urls.add(identity)
         projected.append({"label": f"A{len(projected) + 1}", "title": title, "url": url})
     if not projected:
         return None, ()
@@ -396,6 +464,7 @@ class SimplePublicNewsEvidence:
     status: SimplePublicNewsEvidenceStatus
     outbound_attempted: bool
     research_call_count: int
+    target_sources: int | None
     requested_sources: int | None
     completed_sources: int | None
     failed_sources: int | None
@@ -421,6 +490,7 @@ class SimplePublicNewsEvidence:
         if self.research_call_count not in {0, 1}:
             raise SimplePublicNewsOutcomeError("news evidence call count must be zero or one")
         for label, value in (
+            ("target_sources", self.target_sources),
             ("requested_sources", self.requested_sources),
             ("completed_sources", self.completed_sources),
             ("failed_sources", self.failed_sources),
@@ -428,6 +498,8 @@ class SimplePublicNewsEvidence:
         ):
             if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
                 raise SimplePublicNewsOutcomeError(f"news evidence {label} is invalid")
+        if self.target_sources is not None and self.target_sources > _MAX_SOURCES:
+            raise SimplePublicNewsOutcomeError("news evidence target_sources exceeds its closed limit")
         if self.search_timed_out is not None and not isinstance(self.search_timed_out, bool):
             raise SimplePublicNewsOutcomeError("news evidence timeout flag is invalid")
         if (
@@ -504,6 +576,7 @@ class SimplePublicNewsEvidence:
             "status": self.status.value,
             "outbound_attempted": self.outbound_attempted,
             "research_call_count": self.research_call_count,
+            "target_sources": self.target_sources,
             "requested_sources": self.requested_sources,
             "completed_sources": self.completed_sources,
             "failed_sources": self.failed_sources,
@@ -567,11 +640,19 @@ class SimplePublicNewsEvidence:
         envelope_digest = (
             _sha256_text(model_envelope, label="news evidence envelope") if model_envelope else None
         )
+        target_sources = _optional_count(report, "target_sources")
         requested_sources = _optional_count(report, "requested_sources")
         completed_sources = _optional_count(report, "completed_sources")
         failed_sources = _optional_count(report, "failed_sources")
         timed_out_sources = _optional_count(report, "timed_out_sources")
         search_timed_out = _optional_boolean(report, "search_timed_out")
+        if "target_sources" in (report or {}) and (
+            target_sources is None
+            or target_sources > plan.max_sources
+            or requested_sources is None
+            or target_sources > requested_sources
+        ):
+            raise SimplePublicNewsOutcomeError("news report target_sources is malformed")
         report_incomplete = report is None
         source_bearing = status in {
             SimplePublicNewsEvidenceStatus.SOURCED,
@@ -664,6 +745,7 @@ class SimplePublicNewsEvidence:
             if report_source_digest != source_digest or report_labels != labels:
                 raise SimplePublicNewsOutcomeError("news report rows changed before evidence projection")
             for key, value in (
+                ("target_sources", target_sources),
                 ("requested_sources", requested_sources),
                 ("completed_sources", completed_sources),
                 ("failed_sources", failed_sources),
@@ -682,6 +764,12 @@ class SimplePublicNewsEvidence:
                     failed_sources + timed_out_sources > requested_sources
                     or requested_sources > completed_sources + failed_sources + timed_out_sources
                     or completed_sources < len(labels)
+                    or target_sources is not None
+                    and (
+                        target_sources == 0
+                        or target_sources > plan.max_sources
+                        or target_sources > requested_sources
+                    )
                 )
             ):
                 raise SimplePublicNewsOutcomeError("news report counters are contradictory")
@@ -692,7 +780,7 @@ class SimplePublicNewsEvidence:
                 and timed_out_sources is not None
                 and search_timed_out is not None
             )
-            complete_projection = bool(
+            legacy_complete_projection = bool(
                 complete_shape
                 and requested_sources == completed_sources == len(labels)
                 and failed_sources == 0
@@ -702,11 +790,30 @@ class SimplePublicNewsEvidence:
                 and not projection_truncated
                 and not report_incomplete
             )
+            target_complete_projection = bool(
+                complete_shape
+                and target_sources is not None
+                and target_sources > 0
+                and len(labels) >= target_sources
+                and retained_topic_filtered_sources == 0
+                and search_timed_out is False
+                and not projection_truncated
+                and not report_incomplete
+            )
+            complete_projection = (
+                target_complete_projection if target_sources is not None else legacy_complete_projection
+            )
             if status is SimplePublicNewsEvidenceStatus.SOURCED and not complete_projection:
                 raise SimplePublicNewsOutcomeError("sourced news evidence is not complete")
             if status is SimplePublicNewsEvidenceStatus.PARTIAL and complete_projection:
                 raise SimplePublicNewsOutcomeError("partial news evidence has no degradation reason")
         elif status is SimplePublicNewsEvidenceStatus.EMPTY:
+            if empty_kind is SimplePublicNewsEmptyKind.VALIDATED_ZERO and target_sources not in {None, 0}:
+                raise SimplePublicNewsOutcomeError("zero-result news evidence has a nonzero target")
+            if empty_kind is SimplePublicNewsEmptyKind.TOPIC_MISMATCH and not (
+                target_sources is None or 0 < target_sources <= retained_topic_filtered_sources
+            ):
+                raise SimplePublicNewsOutcomeError("topic-mismatch news evidence changed its target")
             report_incomplete = False
 
         evidence_fields: dict[str, object] = {
@@ -715,6 +822,7 @@ class SimplePublicNewsEvidence:
             "status": status.value,
             "outbound_attempted": outbound_attempted,
             "research_call_count": research_call_count,
+            "target_sources": target_sources,
             "requested_sources": requested_sources,
             "completed_sources": completed_sources,
             "failed_sources": failed_sources,
@@ -739,6 +847,7 @@ class SimplePublicNewsEvidence:
             status=status,
             outbound_attempted=outbound_attempted,
             research_call_count=research_call_count,
+            target_sources=target_sources,
             requested_sources=requested_sources,
             completed_sources=completed_sources,
             failed_sources=failed_sources,
@@ -767,6 +876,7 @@ class SimplePublicNewsEvidence:
                 "status": self.status.value,
                 "outbound_attempted": self.outbound_attempted,
                 "research_call_count": self.research_call_count,
+                "target_sources": self.target_sources,
                 "requested_sources": self.requested_sources,
                 "completed_sources": self.completed_sources,
                 "failed_sources": self.failed_sources,
@@ -921,6 +1031,42 @@ def simple_public_news_topic_mismatch_is_empty(
     failed = report.get("failed_sources")
     requested = report.get("requested_sources")
     timed_out = report.get("timed_out_sources")
+    target = report.get("target_sources")
+    filtered_count = (
+        filtered if isinstance(filtered, int) and not isinstance(filtered, bool) and filtered > 0 else None
+    )
+    failed_count = failed if isinstance(failed, int) and not isinstance(failed, bool) else None
+    requested_count = requested if isinstance(requested, int) and not isinstance(requested, bool) else None
+    timed_out_count = (
+        timed_out
+        if isinstance(timed_out, int) and not isinstance(timed_out, bool) and timed_out >= 0
+        else None
+    )
+    valid_counts = bool(
+        filtered_count is not None
+        and failed_count is not None
+        and failed_count >= filtered_count
+        and requested_count is not None
+        and timed_out_count is not None
+    )
+    legacy_complete = bool(
+        target is None
+        and valid_counts
+        and failed_count == filtered_count
+        and requested_count == filtered_count
+        and timed_out_count == 0
+    )
+    target_complete = bool(
+        isinstance(target, int)
+        and not isinstance(target, bool)
+        and filtered_count is not None
+        and 0 < target <= filtered_count
+        and failed_count is not None
+        and failed_count >= filtered_count
+        and requested_count is not None
+        and timed_out_count is not None
+        and requested_count == failed_count + timed_out_count
+    )
     return bool(
         report.get("topic_class") == expected_topic_class
         and report.get("topic_class_satisfied") is False
@@ -929,19 +1075,8 @@ def simple_public_news_topic_mismatch_is_empty(
         and report.get("error") == "topic_mismatch"
         and isinstance(sources, list)
         and not sources
-        and isinstance(filtered, int)
-        and not isinstance(filtered, bool)
-        and filtered > 0
         and completed == 0
-        and isinstance(failed, int)
-        and not isinstance(failed, bool)
-        and failed == filtered
-        and isinstance(requested, int)
-        and not isinstance(requested, bool)
-        and requested == filtered
-        and isinstance(timed_out, int)
-        and not isinstance(timed_out, bool)
-        and timed_out == 0
+        and (legacy_complete or target_complete)
         and report.get("search_timed_out") is False
     )
 
@@ -972,13 +1107,25 @@ def _require_canonical_retained_empty_proof(
         if not plan.topic_class:
             raise SimplePublicNewsOutcomeError("retained topic-mismatch proof has no topic plan")
         filtered = evidence.topic_filtered_sources
+        legacy_counts = bool(
+            evidence.target_sources is None
+            and evidence.requested_sources == filtered
+            and evidence.failed_sources == filtered
+            and evidence.timed_out_sources == 0
+        )
+        target_counts = bool(
+            evidence.target_sources is not None
+            and 0 < evidence.target_sources <= filtered
+            and evidence.failed_sources is not None
+            and evidence.failed_sources >= filtered
+            and evidence.timed_out_sources is not None
+            and evidence.requested_sources == evidence.failed_sources + evidence.timed_out_sources
+        )
         if (
             filtered <= 0
-            or evidence.requested_sources != filtered
             or evidence.completed_sources != 0
-            or evidence.failed_sources != filtered
-            or evidence.timed_out_sources != 0
             or evidence.search_timed_out is not False
+            or not (legacy_counts or target_counts)
         ):
             raise SimplePublicNewsOutcomeError("retained topic-mismatch proof is not canonical")
         expected = _canonical_sha256(
@@ -987,15 +1134,16 @@ def _require_canonical_retained_empty_proof(
                 "kind": "topic_mismatch",
                 "plan_sha256": plan.canonical_sha256(),
                 "executed_query_sha256": evidence.executed_query_sha256,
-                "requested_sources": filtered,
-                "failed_sources": filtered,
-                "timed_out_sources": 0,
+                "requested_sources": evidence.requested_sources,
+                "failed_sources": evidence.failed_sources,
+                "timed_out_sources": evidence.timed_out_sources,
                 "topic_filtered_sources": filtered,
             }
         )
     elif evidence.empty_kind is SimplePublicNewsEmptyKind.VALIDATED_ZERO:
         if (
-            evidence.requested_sources != 0
+            evidence.target_sources not in {None, 0}
+            or evidence.requested_sources != 0
             or evidence.completed_sources != 0
             or evidence.failed_sources != 0
             or evidence.timed_out_sources != 0

@@ -26040,7 +26040,10 @@ def _project_web_tool_result(
     raw_items: list[Any]
     usable: list[dict[str, str]] = []
     usable_payload_items: list[dict[str, Any]] = []
+    usable_complete: list[bool] = []
     unusable_count = 0
+    incomplete_usable_count = 0
+    target_sources: int | None = None
 
     if tool_name == "web_research":
         candidates = data.get("sources")
@@ -26121,19 +26124,21 @@ def _project_web_tool_result(
             )
             usable_payload_items[-1]["url"] = url
             usable_payload_items[-1]["title"] = usable[-1]["title"]
-            if truncated or (isinstance(text_length, int) and text_length > len(text)):
+            item_incomplete = bool(
+                item_shape_incomplete
+                or truncated
+                or (isinstance(text_length, int) and text_length > len(text))
+            )
+            usable_complete.append(not item_incomplete)
+            if item_incomplete:
                 # The item is fact-bearing but incomplete.  Preserve it as
                 # partial evidence; never call the whole research complete.
-                unusable_count += 1
-            if item_shape_incomplete:
-                # A legacy/source-shaped mapping still carries a bounded fact,
-                # but without FetchResult completeness fields it can never
-                # authorize a complete/exhaustive answer.
-                unusable_count += 1
+                incomplete_usable_count += 1
         failed_sources = data.get("failed_sources")
         timed_out_sources = data.get("timed_out_sources")
         completed_sources = data.get("completed_sources")
         requested_sources = data.get("requested_sources")
+        raw_target_sources = data.get("target_sources")
         count_fields = {
             "failed_sources": failed_sources,
             "timed_out_sources": timed_out_sources,
@@ -26157,13 +26162,34 @@ def _project_web_tool_result(
                 or requested_sources > completed_sources + failed_sources + timed_out_sources
             )
         )
-        if invalid_counts or count_contradiction:
+        if "target_sources" in data:
+            if (
+                not isinstance(raw_target_sources, int)
+                or isinstance(raw_target_sources, bool)
+                or not 0 <= raw_target_sources <= 8
+                or report_shape_incomplete
+                or not isinstance(requested_sources, int)
+                or isinstance(requested_sources, bool)
+                or raw_target_sources > requested_sources
+                or raw_target_sources == 0
+                and (
+                    bool(raw_items)
+                    or requested_sources != 0
+                    or completed_sources != 0
+                    or failed_sources != 0
+                    or timed_out_sources != 0
+                )
+            ):
+                return "failed", [], None
+            target_sources = raw_target_sources
+        if invalid_counts or count_contradiction or (target_sources is not None and unusable_count):
             return "failed", [], None
         incomplete = bool(
             report_shape_incomplete
             or (isinstance(failed_sources, int) and failed_sources > 0)
             or (isinstance(timed_out_sources, int) and timed_out_sources > 0)
             or unusable_count
+            or incomplete_usable_count
         )
     elif tool_name == "web_search":
         candidates = data.get("results")
@@ -26201,6 +26227,7 @@ def _project_web_tool_result(
                     "source": str(item.get("source") or "")[:80],
                 }
             )
+            usable_complete.append(not item_shape_incomplete)
             if item_shape_incomplete:
                 unusable_count += 1
         search_count_keys = ("requested_results", "returned_results", "underfilled")
@@ -26273,6 +26300,12 @@ def _project_web_tool_result(
                     "truncated": truncated,
                 }
             )
+            usable_complete.append(
+                not fetch_shape_incomplete
+                and not truncated
+                and isinstance(text_length, int)
+                and text_length == len(text)
+            )
             unusable_count = 1 if fetch_shape_incomplete else 0
         else:
             unusable_count = 1
@@ -26293,6 +26326,39 @@ def _project_web_tool_result(
         # into a foreign-source result merely because its transport succeeded.
         return "failed", [], None
 
+    if tool_name == "web_research" and target_sources is not None:
+        complete_identities = {
+            identity
+            for source, is_complete in zip(usable, usable_complete, strict=True)
+            if is_complete and (identity := _canonical_web_url_key(source["url"]))
+        }
+        target_met = len(complete_identities) >= target_sources
+        if target_met:
+            if incomplete_usable_count:
+                # New target-attested producers must already have discarded
+                # replaceable partial rows.  Silently repairing a contradictory
+                # report here would detach its attempt counters from its rows.
+                return "failed", [], None
+            # A filled target is complete even when speculative attempts failed.
+            # Partial rows are fallback evidence only and never ride beside a
+            # complete accepted target.
+            retained = [
+                (source, payload)
+                for source, payload, is_complete in zip(
+                    usable,
+                    usable_payload_items,
+                    usable_complete,
+                    strict=True,
+                )
+                if is_complete
+            ]
+            usable = [source for source, _payload in retained]
+            usable_payload_items = [payload for _source, payload in retained]
+            usable_complete = [True] * len(retained)
+            incomplete = False
+        else:
+            incomplete = True
+
     all_distinct: list[dict[str, str]] = []
     seen: set[str] = set()
     for source in usable:
@@ -26308,10 +26374,14 @@ def _project_web_tool_result(
         incomplete = True
     source_limit = max(1, min(int(limit), 10))
     deduplicated = all_distinct[:source_limit]
-    if len(all_distinct) > source_limit:
+    if len(all_distinct) > source_limit and (target_sources is None or len(deduplicated) < target_sources):
         # The bounded ledger is also the verifier's evidence universe.  If a
-        # distinct readable source is omitted, calling that universe complete
-        # would permit exhaustive claims about a deliberately truncated set.
+        # distinct readable source is omitted, legacy reports remain partial.
+        # A target-attested report is complete once the accepted bounded ledger
+        # still carries its whole target; extra direct rows are not a larger
+        # promise about the web universe.
+        incomplete = True
+    if target_sources is not None and len(deduplicated) < target_sources:
         incomplete = True
     if deduplicated:
         if outbound_attempted is False:
@@ -26332,6 +26402,7 @@ def _project_web_tool_result(
                     "query",
                     "freshness",
                     SEARCH_FILTER_ATTESTATION_KEY,
+                    "target_sources",
                     "requested_sources",
                     "completed_sources",
                     "timed_out_sources",
