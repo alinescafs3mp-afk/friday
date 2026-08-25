@@ -1,11 +1,11 @@
 # Interaction Control Plane implementation status
 
-Status: **DEPLOYED CANARY + SCHEMA-39 ARCHIVE-EVIDENCE VERTICAL DEPLOYED; BROADER ICP PAUSED**
-Date: 2026-08-24
+Status: **SCHEMA-39 ARCHIVE-EVIDENCE VERTICAL DEPLOYED; DURABLE CANDIDATE SELECTION IN PROGRESS**
+Date: 2026-08-25
 Branch: `main`
-Source: `main` / `1e3834dd5d987f84c6ca6a490c0cd9b3ac2756ed`
-Live: Friday `0.207.9` / `2b197e1e467e93a085a1b4cc330fbda8b5b7b982`,
-schema 39; fallback `f1426ca561f8914574cebf3a69f8dde83f79b568`
+Source: `main` / `1ea5a1dd7e9fab4c483e176726071ed55100721c`
+Live: Friday `0.207.13` / `1ea5a1dd7e9fab4c483e176726071ed55100721c`,
+schema 39; previous/fallback `e5a7ba73be4091968630a3db0f459686bc9ddff5`
 
 ## Release checkpoint
 
@@ -16,19 +16,22 @@ schema 39; fallback `f1426ca561f8914574cebf3a69f8dde83f79b568`
 - `0f47870` introduced the dormant schema-38 Work Item foundation; `cb1b3f7`
   established its first sealed schema-capable fallback.
 - `d1c5d6f` added the exact message-window continuation canary; `4b6bc49`
-  preserved the existing named-inventory follow-up lane. The later live source
-  is `2b197e1`; `c91260d` is only a superseded historical checkpoint.
+  preserved the existing named-inventory follow-up lane. The later `2b197e1`
+  checkpoint superseded `c91260d`; both are now historical.
 - `0.207.8` adds the authorized read-only federated `archive_search` foundation:
   stable source/passage identity, explicit per-corpus coverage, process-private
   carriers and same-transaction reauthorization/publication.
-- The live anchor resolves to `2b197e1`, with `f1426ca` (`0.207.9`, schema 39)
-  as fallback. Backend and bridge are active, trusted-CA health is `ok`, and
+- The live anchor resolves to `1ea5a1d`, with schema-39 `e5a7ba7` as both
+  immediate predecessor and fallback. Backend and bridge are active,
+  trusted-CA health is `ok`, and
   schema 39, SQLite quick-check, foreign keys and exact Work Item DDL are clean.
 - The `912dc1a` schema-39 vertical is now deployed in `0.207.9`: one durable,
   body-free selected archive evidence continuation. Exact restart replay
   performs fresh authority and revision checks without search or model use;
   late denial and source drift suspend source-free. Broader ICP implementation
-  remains paused while the urgent optional-secondary-brain package is active.
+  now has restart, late-denial and source-drift evidence across document and
+  message lanes. The next ordered-candidate/ordinal-question slice is being
+  implemented without widening into a generic WorkGraph.
 
 ## P0A implemented
 
@@ -81,21 +84,21 @@ schema 39; fallback `f1426ca561f8914574cebf3a69f8dde83f79b568`
 1. Use the canonical golden-journey/evidence registry in
    `outer_sol/PROJECT_IMPLEMENTATION_STATUS.md`; its machine validator owns the
    strict readiness and evidence rules.
-2. Use the now-deployed retrieval identity, honest coverage and federated
-   `archive_search` foundation to extend durable recall across documents and
-   messages through exact current references.
-3. Add durable candidate selection and pending questions only after that narrow
-   vertical proves restart, expiry, authority and revision behavior; keep generic
-   autonomous WorkGraphs behind the proof.
+2. Persist one body-free ordered candidate set from a sealed accepted search
+   projection and one typed owner-scoped ordinal question.
+3. On a strict Russian/English ordinal answer, recheck authority and revision,
+   consume by CAS and hand the exact evidence atomically into the existing
+   selected-evidence replay without a second search or model call. Prove restart,
+   expiry, foreign owner, out-of-range, late denial, source drift and CAS races.
+4. Keep generic autonomous WorkGraphs behind that complete user journey.
 
 ## Current cumulative gate
 
-- The latest completed full non-UI gate before the secondary soak-protocol-only
-  follow-ups passed 17,951 tests; one real-Syncthing case remained explicitly
-  environment-gated.
+- The exact live source passed 18,074 non-UI and 31 UI tests; the pinned real
+  Syncthing 2.1.3 smoke executed rather than remaining environment-skipped.
 - Schema-38 migration, lifecycle/privacy, revision-CAS, restart, temporal
   continuation, receipt/plan binding and named-inventory compatibility checks
   passed.
-- Ruff, compile and release diff checks passed. The `0.207.9` wheel reproduced
-  byte-for-byte and immutable activation completed `clear`; Docker and
+- Ruff, mypy, compile and release diff checks passed. The `0.207.13` wheel
+  reproduced byte-for-byte and immutable activation completed `clear`; Docker and
   companion-plugin work remained outside the primary release checkpoint.

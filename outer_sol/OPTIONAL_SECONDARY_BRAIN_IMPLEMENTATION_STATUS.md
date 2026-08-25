@@ -4,12 +4,13 @@
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
 - Phase: **provisional public shadow live; physical/profile acceptance pending**
-- Live production: Friday `0.207.12` /
-  `a6e3c093939116d0e953db72c60de5dd54438812`, tree
-  `ce35dcf1bb68347f99e7e8037291043cee3d1b2651795766b0f8ba5f80e751c8`, wheel
-  `fcf502d5058c27b1b9c671f94ec5604281cac9123dc3705e17089cd54e72f6ad`,
-  schema 39; default-off transition fallback `7913c633954d3da2df042b598cd08b4fb4e94a91`
-  / tree `ae7dfe4d659b8dbc43246d7f38d823ae86d8c562e36c3be1713965060f66ff40`
+- Live production: Friday `0.207.13` /
+  `1ea5a1dd7e9fab4c483e176726071ed55100721c`, tree
+  `8238b99d8ecc1b36814a02986dbf4ba615953a6319b14d216177c04773390d8a`, wheel
+  `1eb583ba44fecbb180d4cb6665260511082152599a2073dcdbe8003f38a6e8a9`,
+  schema 39; immediate predecessor and schema-capable fallback
+  `e5a7ba73be4091968630a3db0f459686bc9ddff5` / tree
+  `65a6af7ebd02e87b50a458e535e55f1cb7e356fa93ade2b996553ca20bf43bc6`
 - Rollout policy: the primary model remains required and final. The secondary
   is enabled only for non-private discarded `shadow/extract`; it has no tool,
   effect, publication or V12 authority. The accepted registry is empty and
@@ -90,18 +91,20 @@
 
 ## Current production evidence
 
-- Exact source `7913c633954d3da2df042b598cd08b4fb4e94a91` passed a fresh endpoint
-  probe; receipt SHA-256 is
-  `73a8e0036b81aecfaa2ac2a6f4a323ec60956d9947aa7a198c3e059adfd41269`.
-- Its 101-case deterministic failure receipt hashes to
-  `669da889b7fadb681df17aca7f9de68507bfc43bf029147bd47ff5d7929f8ff2`.
-  The old `aaae455` receipt is retained only as history and is ineligible for
-  acceptance against the current source epoch.
+- Exact live source `1ea5a1dd7e9fab4c483e176726071ed55100721c` passed the 101-case
+  deterministic failure battery; receipt SHA-256 is
+  `7a66c9a02628f0cc31c0ddfb33f52220386dcfe268d5873292189689abf0fc8b`.
+  Earlier source-bound receipts remain history and are ineligible for current
+  acceptance.
 - Controlled gateway loss, exact recovery, runtime restart and changed runtime
   epoch passed; the receipt SHA-256 is
-  `26cf1c88f683aa1b0b85184a68cb7e321ea59460845ffdfe5bbaeb498dfff0bc`.
-- Distinct-candidate activation `a6e3c09` published the exact public-shadow ENV
-  atomically. Production health is `ok`; diagnostics bind
+  `4d344b3d810ebb0e2bb4e7af3c5750f3bdc79a8ed54b55bb1b6a59570440d395`.
+- Release `0.207.13` adds a mandatory causal request receipt before a physical
+  power-loss claim: the full request body must have been submitted to the
+  pinned-CA endpoint before transport loss. The deployed runner SHA-256 is
+  `826607fbb48bd3192141a99b3d7ba81d32aa2e31948553d7524760f9eb8b30ac`.
+- Production retained the exact public-shadow ENV atomically. Health is `ok`;
+  diagnostics bind
   `profile_admission=provisional_shadow`, matching profile/manifest/model and a
   healthy endpoint. No private text is eligible and all shadow output is
   discarded.
@@ -119,26 +122,26 @@
   choice. Quality now includes deterministic near-limit recall derived from the
   profile context; endpoint/capacity evidence is bound to exact HTTPS, private
   CA, profile epoch, context and memory without retaining raw prompts.
-- The exact public-shadow source passed 18,067 non-UI and 31 UI tests. Static
+- The exact public-shadow source passed 18,074 non-UI and 31 UI tests. Static
   and focused secondary gates are green.
 
-## Paused parent checkpoint
+## Parallel parent checkpoint
 
 - ICP schema 39 and the narrow durable exact selected-archive-evidence replay
-  remain deployed. Broader ICP work remains paused until the urgent
-  secondary package reaches its safe rollout checkpoint.
+  remain deployed. The next body-free candidate-selection foundation is under
+  isolated implementation while the owner-dependent physical cut waits.
 
 ## Active order
 
-1. Strengthen the physical witness so a mid-turn loss is causally bound to a
-   code-owned submitted request, then perform the owner-observed laptop cut/on
-   without restarting Friday.
+1. Perform the owner-observed causal laptop cut/on without restarting Friday;
+   the code-owned submitted-request witness is already deployed.
 2. Run `accept-failure` and `accept-profile`, then register the resulting exact
    accepted manifest in a separate immutable release.
 3. Prove the separate private product-shadow stage before narrow assist,
    then repeat the physical cycle with product-linked counters in assist,
    including laptop-off and mid-turn disconnect behavior.
-4. Resume the paused ICP durable vertical, then the scheduled V12 refinement.
+4. Finish the active ICP candidate-selection vertical, then continue broader ICP
+   and the scheduled V12 refinement.
 
 ## Not yet claimed
 

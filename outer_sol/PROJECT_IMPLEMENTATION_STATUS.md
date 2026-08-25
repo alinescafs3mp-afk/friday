@@ -6,17 +6,17 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-25
 - Branch: `main`
-- Secondary acceptance base: Friday `0.207.12` is live in provisional public
+- Secondary acceptance base: Friday `0.207.13` is live in provisional public
   shadow. The accepted-profile registry remains empty pending physical
   acceptance; private text and `assist` remain closed.
-- Deployed implementation head: `a6e3c093939116d0e953db72c60de5dd54438812`
-- Live: Friday `0.207.12` / `a6e3c093939116d0e953db72c60de5dd54438812`;
-  tree `ce35dcf1bb68347f99e7e8037291043cee3d1b2651795766b0f8ba5f80e751c8`;
-  wheel `fcf502d5058c27b1b9c671f94ec5604281cac9123dc3705e17089cd54e72f6ad`
-- Immediate predecessor and transition fallback: Friday `0.207.12` /
-  `7913c633954d3da2df042b598cd08b4fb4e94a91`;
-  tree `ae7dfe4d659b8dbc43246d7f38d823ae86d8c562e36c3be1713965060f66ff40`;
-  wheel `aa99b7d8af34e783bdbed61e0bf51549b39f97f587092952f18254e318bb04b6`
+- Deployed implementation head: `1ea5a1dd7e9fab4c483e176726071ed55100721c`
+- Live: Friday `0.207.13` / `1ea5a1dd7e9fab4c483e176726071ed55100721c`;
+  tree `8238b99d8ecc1b36814a02986dbf4ba615953a6319b14d216177c04773390d8a`;
+  wheel `1eb583ba44fecbb180d4cb6665260511082152599a2073dcdbe8003f38a6e8a9`
+- Immediate predecessor and schema-capable fallback: Friday `0.207.13` /
+  `e5a7ba73be4091968630a3db0f459686bc9ddff5`;
+  tree `65a6af7ebd02e87b50a458e535e55f1cb7e356fa93ade2b996553ca20bf43bc6`;
+  wheel `c694de274b0be1d4a2376014253f181a640eea5d651856a78b6d8f56e0b9a692`
 - Database schema: 39
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean;
@@ -31,8 +31,10 @@ the current production identity, completed packages, active work and next order.
 Finish the optional detachable GPT-OSS-20B/SGLang node through physical
 acceptance, private shadow and bounded assist, preserving exact primary-only
 behavior whenever the laptop is absent. The provisional public-shadow cutover
-is complete. Work that requires a physical laptop power cut is paused until the
-owner is present; independent ICP review and implementation continue meanwhile.
+is complete. Its causal request witness is deployed and the exact deterministic
+and controlled-live evidence was rebuilt from that release. Work requiring a
+physical laptop power cut waits for the owner; ICP implementation continues in
+an isolated branch meanwhile.
 
 The measured provisional finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -127,16 +129,31 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Strengthen the causal mid-turn physical witness, then perform the real
-   owner-observed laptop cut/on and accept only the exact bound finalist.
+1. Perform the real owner-observed causal laptop cut/on and accept only the
+   exact bound finalist; the request-submission witness itself is deployed.
 2. Register the accepted profile in a separate immutable release; promote
    distinct candidates through private shadow and bounded assist, then repeat
    the physical cycle with product-linked counters.
-3. Independently accept the incoming durable-recall checkpoint and resume
-   `INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md` through the deployed
-   source/passage, coverage and late-reauthorization contracts.
+3. Finish the durable body-free ordered archive-candidate set and typed ordinal
+   question, then connect it atomically to the deployed selected-evidence replay.
 
 ## Completed and deployed (current package)
+
+### Causal physical-loss witness (`0.207.13`)
+
+- `physical-causal-request` signals the operator only after the complete
+  authenticated request body has reached the pinned-CA TLS endpoint. Physical
+  acceptance now requires that receipt and cannot pass on a manual assertion.
+- The receipt binds exact source, runner, candidate, process epoch and CA while
+  retaining no prompt, response, key, exception text, tool or effect material.
+- The primary continuity probe is explicitly separate from the later product
+  scheduler-fallback proof. The exact release passed 18,074 non-UI and 31 UI
+  tests, reproduced its wheel byte-for-byte and activated `clear` on schema 39.
+- Exact-release deterministic evidence passed 101 cases (SHA-256
+  `7a66c9a02628f0cc31c0ddfb33f52220386dcfe268d5873292189689abf0fc8b`);
+  controlled gateway/runtime loss and recovery passed (SHA-256
+  `4d344b3d810ebb0e2bb4e7af3c5750f3bdc79a8ed54b55bb1b6a59570440d395`).
+  Neither receipt claims a physical power loss.
 
 ### General public-web execution hotfix (`0.207.12`)
 
@@ -341,24 +358,25 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- The exact `0.207.12` canonical gate passed 18,067 non-UI tests plus 31 UI
-  tests; static checks and focused adversarial web matrices are green.
-- Friday `0.207.12` public shadow is live at the exact source/tree/wheel identity
-  above, schema 39, with the default-off `7913c633` release as transition
-  fallback.
+- The exact `0.207.13` canonical gate passed 18,074 non-UI tests plus 31 UI
+  tests, including the pinned Syncthing 2.1.3 smoke; static checks and focused
+  causal-secondary gates are green.
+- Friday `0.207.13` public shadow is live at the exact source/tree/wheel identity
+  above, schema 39, with `e5a7ba7` as both immediate predecessor and
+  schema-capable fallback. Independent post-activation audit found no drift.
 
 ## Next order
 
-1. Complete the causal physical-loss witness and the owner-observed cut/on;
-   accept and register only the exact finalist in a separate immutable release.
+1. Complete the owner-observed causal cut/on; accept and register only the exact
+   finalist in a separate immutable release.
 2. Promote distinct immutable candidates through private shadow and bounded
    assist; repeat laptop-off/disconnect-mid-turn with product-linked counters
    and prove primary fallback exactly once.
-3. Independently accept the final incoming ICP checkpoint and resume broader
-   ICP work from the deployed schema-39 archive-evidence vertical.
-4. Build durable DocumentCatalog/enrichment and add durable candidate
-   selection/pending-question state only when it preserves exact archive
-   coverage and survives restart without persisting model prose.
+3. Finish the durable body-free archive candidate-set/ordinal-question vertical,
+   including restart, expiry, authority/revision drift and CAS races, then
+   connect it to selected-evidence replay without a second search or model call.
+4. Build durable DocumentCatalog/enrichment only after that vertical preserves
+   exact archive coverage without persisting model prose.
 5. Add one uncertainty-aware common effect envelope and prove one idempotent,
    receipt-backed Obsidian mutation/reconciliation vertical.
 6. Extend existing immutable-release evidence into machine-reconcilable
