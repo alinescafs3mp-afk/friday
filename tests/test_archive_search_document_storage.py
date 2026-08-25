@@ -81,6 +81,8 @@ def _seed(
         "uploaded_by": owner,
     }
     if text_extraction_success is not None:
+        metadata["extraction_success"] = True
+        metadata["extraction_error"] = ""
         metadata["text_extraction_success"] = text_extraction_success
     raw = RawObject(
         id=raw_id,
@@ -596,7 +598,6 @@ def test_catalog_navigation_is_body_free_stably_ordered_and_honestly_capped(stor
 
 def test_current_exact_semantic_title_is_body_free_navigation_not_evidence(
     storage,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     raw_id, _ = _seed(
         storage,
@@ -611,11 +612,6 @@ def test_current_exact_semantic_title_is_body_free_navigation_not_evidence(
         storage,
         raw_id,
         semantic_title="Quarterly Solstice Ledger",
-    )
-    monkeypatch.setattr(
-        archive_document_storage,
-        "_document_catalog_contract",
-        lambda _conn: (True, 1),
     )
     catalog_request = _request(
         corpora=(ArchiveSearchCorpus.DOCUMENTS,),
@@ -722,11 +718,12 @@ def test_noncurrent_document_catalog_projection_is_distinct_backfill_coverage(
             stale_version=projection_state == "stale_version",
             stale_hash=projection_state == "stale_hash",
         )
-    monkeypatch.setattr(
-        archive_document_storage,
-        "_document_catalog_contract",
-        lambda _conn: (True, 1),
-    )
+    if projection_state in {"stale_version", "stale_hash", "invalid_title"}:
+        monkeypatch.setattr(
+            archive_document_storage,
+            "_document_catalog_contract",
+            lambda _conn: (True, 1),
+        )
     request = _request(
         corpora=(ArchiveSearchCorpus.DOCUMENTS,),
         query="Projected private navigation label",
@@ -816,7 +813,6 @@ def test_missing_or_counterfeit_catalog_schema_keeps_raw_navigation_but_not_abse
 
 def test_catalog_projection_join_is_authorized_first_indexed_and_bounded(
     storage,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     raw_id, _ = _seed(
         storage,
@@ -828,11 +824,6 @@ def test_catalog_projection_join_is_authorized_first_indexed_and_bounded(
     )
     _install_test_document_catalog(storage)
     _store_test_document_catalog_row(storage, raw_id, semantic_title="Bounded catalog title")
-    monkeypatch.setattr(
-        archive_document_storage,
-        "_document_catalog_contract",
-        lambda _conn: (True, 1),
-    )
     request = _request(
         corpora=(ArchiveSearchCorpus.DOCUMENTS,),
         query="Bounded catalog title",
@@ -866,7 +857,6 @@ def test_catalog_projection_join_is_authorized_first_indexed_and_bounded(
 
 def test_foreign_and_ignored_catalog_rows_cannot_match_or_degrade_owner_scope(
     storage,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     visible_id, _ = _seed(
         storage,
@@ -899,11 +889,6 @@ def test_foreign_and_ignored_catalog_rows_cannot_match_or_degrade_owner_scope(
         storage,
         foreign_id,
         semantic_title="Foreign projected secret 7721",
-    )
-    monkeypatch.setattr(
-        archive_document_storage,
-        "_document_catalog_contract",
-        lambda _conn: (True, 1),
     )
     request = _request(
         corpora=(ArchiveSearchCorpus.DOCUMENTS,),
