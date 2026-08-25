@@ -50,7 +50,9 @@ def _make_database(path: Path, *, lexical: bool = True) -> sqlite3.Connection:
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
             raw_object_id TEXT NOT NULL,
-            status TEXT NOT NULL
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            reviewed_at TEXT
         );
         CREATE TABLE private_entity_material_cache_state(
             singleton INTEGER PRIMARY KEY,
@@ -79,12 +81,29 @@ def _make_database(path: Path, *, lexical: bool = True) -> sqlite3.Connection:
                 content_rowid=rowid,
                 tokenize='unicode61 remove_diacritics 2'
             );
+            CREATE TRIGGER raw_objects_ai AFTER INSERT ON raw_objects BEGIN
+                INSERT INTO raw_fts(rowid, raw_content) VALUES (new.rowid, new.raw_content);
+            END;
+            CREATE TRIGGER raw_objects_ad AFTER DELETE ON raw_objects BEGIN
+                INSERT INTO raw_fts(raw_fts, rowid, raw_content)
+                VALUES ('delete', old.rowid, old.raw_content);
+            END;
+            CREATE TRIGGER raw_objects_au AFTER UPDATE ON raw_objects BEGIN
+                INSERT INTO raw_fts(raw_fts, rowid, raw_content)
+                VALUES ('delete', old.rowid, old.raw_content);
+                INSERT INTO raw_fts(rowid, raw_content) VALUES (new.rowid, new.raw_content);
+            END;
             """
         )
     conn.execute(
         "INSERT INTO schema_meta VALUES('schema_version', ?, '2026-08-20T00:00:00Z')",
         (str(SCHEMA_VERSION),),
     )
+    if lexical:
+        conn.execute(
+            "INSERT INTO schema_meta VALUES('fts_build', ?, '2026-08-20T00:00:00Z')",
+            (str(SCHEMA_VERSION),),
+        )
     conn.executemany(
         "INSERT INTO users(id,status) VALUES(?,?)",
         (("alice", "active"), ("bob", "active"), ("mallory", "active"), ("eve", "active")),
@@ -137,10 +156,12 @@ def _raw(
     if inbox_status is not None:
         inbox_id = f"inbox-{raw_id}"
         conn.execute(
-            "INSERT INTO inbox(id,user_id,raw_object_id,status) VALUES(?,?,?,?)",
+            """INSERT INTO inbox(
+                   id,user_id,raw_object_id,status,created_at,reviewed_at
+               ) VALUES(?,?,?,?, '2026-08-20T00:00:00+00:00',NULL)""",
             (inbox_id, tenant, raw_id, inbox_status),
         )
-        if public and inbox_status != "ignored":
+        if public:
             conn.execute(
                 "INSERT INTO private_entity_material_derivative_cache VALUES('inbox',?,?)",
                 (inbox_id, tenant),
@@ -157,8 +178,6 @@ def _seed_scope(conn: sqlite3.Connection, *, lexical: bool = True) -> None:
     _raw(conn, "other-uploader", uploader="mallory")
     _raw(conn, "empty-ocr", text="")
     _raw(conn, "foreign", tenant="eve")
-    if lexical:
-        conn.execute("INSERT INTO raw_fts(rowid,raw_content) SELECT rowid,raw_content FROM raw_objects")
     conn.commit()
 
 
@@ -269,6 +288,21 @@ def test_missing_lexical_row_is_explicit_and_never_called_complete(tmp_path: Pat
     assert report["completeness"]["lexical_complete"] is False
 
 
+def test_counterfeit_lexical_trigger_set_is_unsupported_not_complete(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.sqlite3"
+    conn = _make_database(path)
+    _seed_scope(conn)
+    conn.execute("DROP TRIGGER raw_objects_au")
+    conn.commit()
+    conn.close()
+
+    report = _audit_path(path)
+    assert report["projections"]["lexical_source_index"]["status"] == "unsupported"
+    assert report["counts"]["lexically_searchable_files"] == 0
+    assert report["incomplete_reasons"]["lexical_projection_not_available"] == 2
+    assert report["completeness"]["lexical_complete"] is False
+
+
 def test_absent_lexical_projection_is_zero_not_available_not_complete(tmp_path: Path) -> None:
     path = tmp_path / "synthetic.sqlite3"
     conn = _make_database(path, lexical=False)
@@ -315,6 +349,45 @@ def test_counterfeit_catalog_shape_is_unsupported_not_coverage(tmp_path: Path) -
     validate_report(report)
 
 
+def test_only_latest_canonical_inbox_verdict_controls_file_scope(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.sqlite3"
+    conn = _make_database(path)
+    _raw(conn, "multi", inbox_status="ignored")
+    conn.execute(
+        """INSERT INTO inbox(
+               id,user_id,raw_object_id,status,created_at,reviewed_at
+           ) VALUES(
+               'inbox-multi-new','alice','multi','pending',
+               '2026-08-20T01:00:00+00:00',NULL
+           )"""
+    )
+    conn.execute(
+        "INSERT INTO private_entity_material_derivative_cache VALUES('inbox','inbox-multi-new','alice')"
+    )
+    conn.commit()
+    conn.close()
+
+    report = _audit_path(path)
+    assert report["counts"]["tenant_file_rows_examined"] == 1
+    assert report["counts"]["registered_authorized_live_text_bearing_files"] == 1
+    assert report["counts"]["pending_registered_files"] == 1
+    assert report["excluded_by_policy"]["ignored_lifecycle"] == 0
+
+
+def test_invalid_inbox_ordering_fails_closed(tmp_path: Path) -> None:
+    path = tmp_path / "synthetic.sqlite3"
+    conn = _make_database(path)
+    _raw(conn, "bad-order", inbox_status="pending")
+    conn.execute(
+        "UPDATE inbox SET created_at='not-a-timestamp' WHERE raw_object_id='bad-order'"
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(ContractError, match="ordering is invalid"):
+        _audit_path(path)
+
+
 def test_foreign_tenant_mutation_cannot_change_scoped_report(tmp_path: Path) -> None:
     path = tmp_path / "synthetic.sqlite3"
     conn = _make_database(path)
@@ -324,11 +397,6 @@ def test_foreign_tenant_mutation_cannot_change_scoped_report(tmp_path: Path) -> 
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     _raw(conn, "foreign-second", tenant="eve", text=f"{SECRET} foreign mutation")
-    foreign = conn.execute("SELECT rowid,raw_content FROM raw_objects WHERE id='foreign-second'").fetchone()
-    conn.execute(
-        "INSERT INTO raw_fts(rowid,raw_content) VALUES(?,?)",
-        (foreign["rowid"], foreign["raw_content"]),
-    )
     conn.commit()
     conn.close()
     after = _audit_path(path)

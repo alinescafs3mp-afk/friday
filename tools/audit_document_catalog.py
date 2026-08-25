@@ -32,6 +32,7 @@ import sqlite3
 import stat
 import sys
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -40,9 +41,11 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from friday.storage import SCHEMA_VERSION  # noqa: E402
+from friday.storage._archive_search_documents import _canonical_utc_sql  # noqa: E402
 from friday.storage._privacy import (  # noqa: E402
     _exact_uploader_raw_dependency,
     _not_audio_document,
+    _not_private_inbox_dependency,
     _not_private_raw_dependency,
 )
 
@@ -216,6 +219,82 @@ def _schema_hash(conn: sqlite3.Connection, names: tuple[str, ...]) -> str | None
     return _sha256(_canonical_json(definitions)) if definitions else None
 
 
+_RAW_FTS_SCHEMA = """
+CREATE VIRTUAL TABLE raw_fts USING fts5(
+    raw_content,
+    content=raw_objects,
+    content_rowid=rowid,
+    tokenize='unicode61 remove_diacritics 2'
+);
+CREATE TRIGGER raw_objects_ai AFTER INSERT ON raw_objects BEGIN
+    INSERT INTO raw_fts(rowid, raw_content) VALUES (new.rowid, new.raw_content);
+END;
+CREATE TRIGGER raw_objects_ad AFTER DELETE ON raw_objects BEGIN
+    INSERT INTO raw_fts(raw_fts, rowid, raw_content) VALUES ('delete', old.rowid, old.raw_content);
+END;
+CREATE TRIGGER raw_objects_au AFTER UPDATE ON raw_objects BEGIN
+    INSERT INTO raw_fts(raw_fts, rowid, raw_content) VALUES ('delete', old.rowid, old.raw_content);
+    INSERT INTO raw_fts(rowid, raw_content) VALUES (new.rowid, new.raw_content);
+END;
+"""
+_RAW_FTS_OBJECT_NAMES = (
+    "raw_fts",
+    "raw_objects_ai",
+    "raw_objects_ad",
+    "raw_objects_au",
+)
+_RAW_FTS_SHADOW_TABLES = frozenset(
+    {"raw_fts_data", "raw_fts_idx", "raw_fts_docsize", "raw_fts_config"}
+)
+
+
+def _normalized_schema_objects(
+    conn: sqlite3.Connection,
+    names: tuple[str, ...],
+) -> dict[tuple[str, str], str]:
+    placeholders = ",".join("?" for _ in names)
+    return {
+        (str(row[0]), str(row[1])): re.sub(r"\s+", "", str(row[2]))
+        for row in conn.execute(
+            f"""SELECT type,name,sql FROM sqlite_master
+                 WHERE sql IS NOT NULL AND name IN ({placeholders})
+                 ORDER BY type,name""",  # nosec B608 - fixed placeholders only
+            names,
+        )
+    }
+
+
+@lru_cache(maxsize=1)
+def _canonical_raw_fts_objects() -> dict[tuple[str, str], str]:
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.execute("CREATE TABLE raw_objects(id TEXT PRIMARY KEY, raw_content TEXT NOT NULL)")
+        conn.executescript(_RAW_FTS_SCHEMA)
+        return _normalized_schema_objects(conn, _RAW_FTS_OBJECT_NAMES)
+    except sqlite3.OperationalError:
+        return {}
+    finally:
+        conn.close()
+
+
+def _raw_fts_schema_fingerprint(conn: sqlite3.Connection) -> str | None:
+    canonical = _canonical_raw_fts_objects()
+    if not canonical or _normalized_schema_objects(conn, _RAW_FTS_OBJECT_NAMES) != canonical:
+        return None
+    shadow_tables = {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name GLOB 'raw_fts_*'"
+        )
+    }
+    if not _RAW_FTS_SHADOW_TABLES.issubset(shadow_tables):
+        return None
+    marker = conn.execute("SELECT value FROM schema_meta WHERE key='fts_build'").fetchone()
+    if marker is None or str(marker[0]) != str(SCHEMA_VERSION):
+        return None
+    return _sha256(_canonical_json([sorted(canonical.items()), str(marker[0])]))
+
+
 def _document_catalog_schema_fingerprint(conn: sqlite3.Connection) -> str | None:
     """Delegate exact recognition to the shipped schema-41 validator."""
 
@@ -224,6 +303,7 @@ def _document_catalog_schema_fingerprint(conn: sqlite3.Connection) -> str | None
     except ImportError:
         return None
     try:
+        schema_module.register_document_catalog_connection_functions(conn)
         digest = schema_module.document_catalog_schema_fingerprint(conn)
     except (RuntimeError, ValueError, sqlite3.Error):
         return None
@@ -258,17 +338,57 @@ def _required_schema(conn: sqlite3.Connection) -> int:
     return version
 
 
+def _validate_inbox_ordering_scope(
+    conn: sqlite3.Connection,
+    *,
+    tenant: str,
+    uploader: str | None,
+) -> None:
+    """Reject an archive scope whose latest Inbox verdict cannot be ordered."""
+
+    uploader_expression = _exact_uploader_raw_dependency("r") if uploader else "1"
+    invalid_timestamp = f"""SELECT 1
+         FROM inbox i
+         JOIN raw_objects r ON r.id=i.raw_object_id AND r.user_id=i.user_id
+        WHERE r.user_id=? AND r.content_type='file' AND r.deleted_at IS NULL
+          AND ({_not_private_raw_dependency("r")})
+          AND ({_not_audio_document("r")})
+          AND ({uploader_expression})
+          AND (
+               NOT {_canonical_utc_sql("i.created_at")}
+               OR (i.reviewed_at IS NOT NULL AND NOT {_canonical_utc_sql("i.reviewed_at")})
+               OR i.status NOT IN ('pending','classified','archived','ignored')
+          )
+        LIMIT 1"""
+    parameters: tuple[Any, ...] = (tenant, uploader) if uploader else (tenant,)
+    try:
+        invalid = conn.execute(invalid_timestamp, parameters).fetchone()
+    except sqlite3.Error as exc:
+        raise ContractError("current Inbox authority shape is unavailable") from exc
+    if invalid is not None:
+        raise ContractError("current Inbox authority ordering is invalid")
+
+
 def _projection_report(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     raw_hash = _schema_hash(conn, ("raw_objects", "inbox"))
-    lexical_sql = _table_sql(conn, "raw_fts")
-    docsize_sql = _table_sql(conn, "raw_fts_docsize")
-    lexical_available = lexical_sql is not None and docsize_sql is not None
+    lexical_present = _table_sql(conn, "raw_fts") is not None
+    lexical_fingerprint = _raw_fts_schema_fingerprint(conn) if lexical_present else None
     projections: dict[str, dict[str, Any]] = {
         "raw_registry": {"status": "available", "revision_sha256": raw_hash},
         "lexical_source_index": {
-            "status": "available" if lexical_available else "not_available",
+            "status": (
+                "available"
+                if lexical_fingerprint is not None
+                else "unsupported"
+                if lexical_present
+                else "not_available"
+            ),
             "revision_sha256": (
-                _schema_hash(conn, ("raw_fts", "raw_fts_docsize")) if lexical_available else None
+                lexical_fingerprint
+                if lexical_fingerprint is not None
+                else _schema_hash(conn, ("raw_fts", "raw_fts_docsize"))
+                if lexical_present
+                else None
             ),
         },
     }
@@ -340,6 +460,11 @@ def audit_document_catalog(
     )
     if row_count > cap:
         raise ContractError("tenant file scope exceeds the explicit row bound")
+    _validate_inbox_ordering_scope(
+        conn,
+        tenant=tenant,
+        uploader=exact_uploader,
+    )
 
     projections = _projection_report(conn)
     lexical_available = projections["lexical_source_index"]["status"] == "available"
@@ -380,6 +505,9 @@ def audit_document_catalog(
                 AND typeof(c.extracted_text_sha256)='text'
                 AND length(c.extracted_text_sha256)=64
                 AND c.extracted_text_sha256 NOT GLOB '*[^0-9a-f]*'
+                AND CASE WHEN typeof(r.raw_content)='text'
+                         THEN friday_exact_text_sha256(r.raw_content)=c.extracted_text_sha256
+                         ELSE 0 END
                 AND c.title_authority='navigation_only'
                 AND (c.semantic_title IS NULL OR (
                     typeof(c.semantic_title)='text'
@@ -427,34 +555,40 @@ def audit_document_catalog(
         else ""
     )
     uploader_expression = _exact_uploader_raw_dependency("r") if exact_uploader else "1"
-    query = f"""
+    query = f"""WITH current_inbox AS MATERIALIZED (
+        SELECT inbox_id,raw_object_id,status FROM (
+            SELECT i.id AS inbox_id,i.raw_object_id,i.status,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY i.raw_object_id
+                       ORDER BY i.created_at DESC,
+                                COALESCE(i.reviewed_at,'') DESC,
+                                i.id DESC
+                   ) AS choice
+              FROM inbox i
+             WHERE i.user_id=?
+               AND ({_not_private_inbox_dependency("i")})
+        ) WHERE choice=1
+    )
         SELECT r.id AS opaque_id,
                r.version AS source_version,
                r.deleted_at IS NOT NULL AS is_deleted,
-               EXISTS (
-                   SELECT 1 FROM inbox ignored_inbox
-                    WHERE ignored_inbox.raw_object_id=r.id
-                      AND ignored_inbox.user_id=r.user_id
-                      AND ignored_inbox.status='ignored'
-               ) AS is_ignored,
+               (ci.status='ignored') AS is_ignored,
                ({_not_private_raw_dependency("r")}) AS is_public,
                ({_not_audio_document("r")}) AS is_document,
                ({uploader_expression}) AS uploader_allowed,
                (typeof(r.raw_content)='text' AND length(trim(r.raw_content))>0) AS has_text,
-               EXISTS (
-                   SELECT 1 FROM inbox pending_inbox
-                    WHERE pending_inbox.raw_object_id=r.id
-                      AND pending_inbox.user_id=r.user_id
-                      AND pending_inbox.status='pending'
-               ) AS is_pending,
+               (ci.status='pending') AS is_pending,
                ({lexical_expression}) AS has_lexical_row,
                {catalog_projection}
           FROM raw_objects r
+          LEFT JOIN current_inbox ci ON ci.raw_object_id=r.id
           {catalog_join}
          WHERE r.user_id=? AND r.content_type='file'
          ORDER BY r.rowid
     """  # nosec B608 - every interpolated fragment is a code-owned SQL predicate
-    params: tuple[Any, ...] = (exact_uploader, tenant) if exact_uploader else (tenant,)
+    params: tuple[Any, ...] = (
+        (tenant, exact_uploader, tenant) if exact_uploader else (tenant, tenant)
+    )
 
     excluded: Counter[str] = Counter()
     registered = 0
@@ -619,7 +753,11 @@ def audit_document_catalog(
             "status": "incomplete",
             "uncapped": True,
             "scope_accounted": True,
-            "catalog_complete": bool(catalog_available and catalogued == registered),
+            "catalog_complete": bool(
+                catalog_available
+                and catalogued == registered
+                and catalog_incomplete == 0
+            ),
             "lexical_complete": bool(lexical_available and lexical == registered),
             "semantic_complete": bool(catalog_available and semantic_titles == registered),
             "typed_dates_complete": False,
@@ -810,7 +948,9 @@ def validate_report(report: dict[str, Any]) -> None:
         and counts["lexically_searchable_files"] == registered
     )
     expected_catalog_complete = bool(
-        catalog_available and counts["catalogued_files"] == registered
+        catalog_available
+        and counts["catalogued_files"] == registered
+        and counts["files_with_incomplete_catalog"] == 0
     )
     expected_semantic_complete = bool(
         catalog_available and counts["files_with_semantic_title"] == registered
