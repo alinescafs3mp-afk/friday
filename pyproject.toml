@@ -1,6 +1,6 @@
 [project]
 name = "friday"
-version = "0.207.23"
+version = "0.207.24"
 description = "Local-first personal Knowledge Operating System with a provenance-first knowledge graph."
 readme = "README.md"
 license = "MIT"

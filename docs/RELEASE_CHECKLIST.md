@@ -81,7 +81,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.12`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.24`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -110,6 +110,14 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   `product-stage --stage public-shadow` receipt с exact SHA-256; только после
   его evidence `secondary_shadow_to_assist` меняет только
   `MODE=shadow→assist` и требует свежий `private-shadow` receipt;
+- candidate 0.207.24 должен реализовать только первый из этих
+  переходов: `ALLOW_PRIVATE_TEXT=0→1` при неизменных
+  `mode=shadow`/`workload=extract`; typed output выбрасывается, а
+  tools/effects/publication остаются только у primary;
+- на Windows-узле установлен и в release включён at-logon gateway
+  publication recovery: exact healthy gateway перезапускается не более
+  одного раза только после двух совпавших доказательств отсутствия
+  publication/listener; inconsistent evidence и любой model restart запрещены;
 - оба promotion activate передают `--secondary-rollout-receipt` и
   `--secondary-rollout-receipt-sha256`; attestation живёт не более 570 секунд,
   одноразово consume-ится до мутации и после потери ответа/неудачи не
@@ -140,7 +148,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 2 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.23`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.24`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
@@ -168,6 +176,10 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Проверить:
 
 - schema version = 41;
+- live release 0.207.23 уже имеет schema 41; переход 0.207.23 → 0.207.24
+  не меняет schema и готовит только distinct private discarded
+  shadow с `ALLOW_PRIVATE_TEXT=0→1`, fresh public product receipt и
+  неизменной primary-only властью над ответами/эффектами;
 - предыдущий release 0.207.22 уже имеет schema 41; переход 0.207.22 → 0.207.23
   меняет только code-owned admission exact GPT-OSS finalist с provisional на
   accepted и сохраняет public discarded `shadow/extract` без private text;

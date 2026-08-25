@@ -3,21 +3,24 @@
 - Updated: 2026-08-25
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
-- Phase: **profile accepted; accepted-registry public-shadow release prepared**
-- Live production: Friday `0.207.22` /
-  `331460d4219ec8a421f1ec0abe668ae989ca9cc5`, tree
-  `d16caa76c61f7afe98d9cc8512e62188af65033924f4e5fd166f935094192178`, wheel
-  `fee818502c41192dd54475e5622305f6ba730c9b5c1b87de13ea82aab57176c2`,
+- Phase: **accepted public shadow live; private-shadow source release prepared**
+- Live production: Friday `0.207.23` /
+  `ed9e48e2222ebe8031c2e57d161f56de3489586d`, tree
+  `d2a55f924c2bf2c3c6f67220221d8788d32f73807e02b86d721844d9d24f3231`, wheel
+  `183629850c03b45b62e1498183d80ef6e8e707ce0b25779b8a7ef9e8ec6b57c0`,
   schema 41; immediate predecessor and schema-capable fallback Friday
-  `0.207.21` / `27b9fc5545e88a38e111170f79d0f548edfbc646`, tree
-  `74ca567845d1f5de0656f8be8df2e4302d7d04ccb5de356335dec59514ee5a70`
+  `0.207.22` / `331460d4219ec8a421f1ec0abe668ae989ca9cc5`, tree
+  `d16caa76c61f7afe98d9cc8512e62188af65033924f4e5fd166f935094192178`,
+  wheel `fee818502c41192dd54475e5622305f6ba730c9b5c1b87de13ea82aab57176c2`
 - Rollout policy: the primary model remains required and final. The secondary
-  is enabled only for non-private discarded `shadow/extract`; it has no tool,
-  effect, publication or V12 authority. Source `0.207.23` binds exactly one
-  accepted profile and an empty provisional registry, while preserving public
-  discarded shadow; private shadow/`assist` remain closed.
-- Live `0.207.22` now fails soft against the promoted laptop manifest because
-  it predates accepted-registry admission; primary health remains `ok`.
+  is live only for non-private discarded `shadow/extract`; it has no tool,
+  effect, publication or V12 authority. Live `0.207.23` binds exactly one
+  accepted profile and an empty provisional registry. Source `0.207.24`
+  prepares only the distinct private-shadow transition
+  `ALLOW_PRIVATE_TEXT=0→1`; mode/workload and the primary-only authority
+  boundary remain unchanged, while `assist` stays closed.
+- Source `0.207.24` is not deployed and its required fresh public product
+  receipt is not yet accepted.
 
 ## Durable access and measured host
 
@@ -108,14 +111,20 @@
   power-loss claim: the full request body must have been submitted to the
   pinned-CA endpoint before transport loss. The deployed runner SHA-256 is
   `826607fbb48bd3192141a99b3d7ba81d32aa2e31948553d7524760f9eb8b30ac`.
-- Production retained the exact public-shadow ENV atomically. Live health is
-  `ok`; accepted-registry admission is prepared in source `0.207.23`, not yet
-  deployed. No private text is eligible and all shadow output is discarded.
+- Production retained the exact public-shadow ENV atomically. Live `0.207.23`
+  health is `ok`, the exact accepted manifest is admitted, no private text is
+  eligible and all shadow output is discarded.
+- A fail-closed at-logon gateway publication recovery is installed on the
+  laptop and included in source `0.207.24`. It waits for exact LAN/Docker and
+  healthy gateway identity, requires two consecutive matching proofs that both
+  the `192.168.1.35:8443` publication and listener are absent, and then allows
+  at most one restart of only `friday-secondary-gateway`. Inconsistent evidence
+  stops recovery; the model runtime is never restarted.
 
 ## Friday checkpoint
 
 - The accepted-profile path contains typed private Inbox extraction and bounded
-  private document map/reduce seams. Release `0.207.23` deliberately keeps its
+  private document map/reduce seams. Live `0.207.23` deliberately keeps its
   first accepted stage non-private, structured, text-only, effect-free and
   discarded `shadow/extract`. Every required result has
   exactly one primary fallback; optional advice is skipped; secondary output
@@ -125,20 +134,20 @@
   choice. Quality now includes deterministic near-limit recall derived from the
   profile context; endpoint/capacity evidence is bound to exact HTTPS, private
   CA, profile epoch, context and memory without retaining raw prompts.
-- The exact public-shadow source passed 18,074 non-UI and 31 UI tests. Static
-  and focused secondary gates are green.
+- The exact live `0.207.23` source passed 18,655 non-UI and 31 UI tests. Static
+  and focused secondary gates are green; two wheels reproduced byte-for-byte.
 
 ## Parallel parent checkpoint
 
 - ICP schema 40, the durable exact archive candidate-selection runtime and the
   bounded body-free DocumentCatalog worker/archive consumer are deployed.
   Common effect-envelope/Obsidian reconciliation work proceeds while the
-  accepted-registry release is prepared; private shadow remains the next stage.
+  distinct private-shadow release is prepared.
 
 ## Active order
 
-1. Release the exact accepted registry as public discarded shadow and capture
-   its immutable production evidence.
+1. Capture a fresh accepted public product receipt and deploy source `0.207.24`
+   through the exact `secondary_shadow_to_private_shadow` transition.
 2. Prove the separate private product-shadow stage before narrow assist,
    then repeat the physical cycle with product-linked counters in assist,
    including laptop-off and mid-turn disconnect behavior.
@@ -147,8 +156,7 @@
 
 ## Not yet claimed
 
-- The exact 4K/BF16 profile is accepted, but its registry release is not yet
-  deployed. Live production remains public shadow and fails soft while the
-  older release cannot admit the promoted manifest.
-- Private-shadow and assist operation, including product-linked physical-cycle
-  evidence, remain pending.
+- Source `0.207.24` private shadow is not deployed and its fresh public-stage
+  rollout receipt has not passed yet.
+- Private-shadow and assist product evidence, plus the assist-linked physical
+  cycle, remain pending. No secondary tools, effects or publication are claimed.

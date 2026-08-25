@@ -6,21 +6,21 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-25
 - Branch: `main`
-- Secondary acceptance base: the exact profile is accepted. Source `0.207.23`
-  prepares its one-entry accepted registry and empty provisional registry as a
-  public discarded-shadow release; private text and `assist` remain closed.
-- Deployed implementation head: `331460d4219ec8a421f1ec0abe668ae989ca9cc5`
-- Live: Friday `0.207.22` / `331460d4219ec8a421f1ec0abe668ae989ca9cc5`;
-  tree `d16caa76c61f7afe98d9cc8512e62188af65033924f4e5fd166f935094192178`;
-  wheel `fee818502c41192dd54475e5622305f6ba730c9b5c1b87de13ea82aab57176c2`
-- Immediate predecessor and schema-capable fallback: Friday `0.207.21` /
-  `27b9fc5545e88a38e111170f79d0f548edfbc646`, tree
-  `74ca567845d1f5de0656f8be8df2e4302d7d04ccb5de356335dec59514ee5a70`.
+- Secondary acceptance base: live `0.207.23` admits exactly one accepted
+  profile and has an empty provisional registry in public discarded shadow.
+  Source `0.207.24` prepares only the distinct private-shadow transition;
+  `assist` remains closed.
+- Deployed implementation head: `ed9e48e2222ebe8031c2e57d161f56de3489586d`
+- Live: Friday `0.207.23` / `ed9e48e2222ebe8031c2e57d161f56de3489586d`;
+  tree `d2a55f924c2bf2c3c6f67220221d8788d32f73807e02b86d721844d9d24f3231`;
+  wheel `183629850c03b45b62e1498183d80ef6e8e707ce0b25779b8a7ef9e8ec6b57c0`
+- Immediate predecessor and schema-capable fallback: Friday `0.207.22` /
+  `331460d4219ec8a421f1ec0abe668ae989ca9cc5`, tree
+  `d16caa76c61f7afe98d9cc8512e62188af65033924f4e5fd166f935094192178`.
 - Database schema: 41
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean;
-  exact profile is configured in public `shadow/extract`; live `0.207.22`
-  currently fails soft after the laptop manifest promotion, while
+  exact accepted profile is healthy in public discarded `shadow/extract`;
   primary remains final and no private material is eligible. The primary V12
   canary is installed for `archive_read` and `file_read` with a live exact
   attestation. The exact,
@@ -38,8 +38,10 @@ the current production identity, completed packages, active work and next order.
 Finish the optional detachable GPT-OSS-20B/SGLang node through accepted public
 shadow, private shadow and bounded assist, preserving exact primary-only
 behavior whenever the laptop is absent. Physical failure and profile acceptance
-are complete; source `0.207.23` prepares the exact accepted-registry public
-shadow stage without enabling private text or assist. The schema-41 DocumentCatalog,
+are complete and accepted public shadow is live. Source `0.207.24` prepares
+only `ALLOW_PRIVATE_TEXT=0→1` for distinct private discarded shadow with a
+fresh public product receipt; mode/workload are unchanged and assist remains
+closed. The schema-41 DocumentCatalog,
 archive candidate runtime, receipt-backed Obsidian effect vertical and
 selected-evidence V12 explanation are live. The next autonomous package is the
 next incomplete ICP/V12 golden journey and its release evidence.
@@ -68,8 +70,10 @@ accepted profile manifest hashes to
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
-Source `0.207.23` admits exactly that profile, with no provisional entries, but
-still permits only non-private discarded `shadow/extract`; `assist` is blocked.
+Live `0.207.23` admits exactly that profile, with no provisional entries, but
+permits only non-private discarded `shadow/extract`. Source `0.207.24` prepares
+private discarded extraction without granting tools, effects, publication or
+final-answer authority; `assist` is blocked.
 
 Detailed active tracker:
 `outer_sol/OPTIONAL_SECONDARY_BRAIN_IMPLEMENTATION_STATUS.md`.
@@ -144,15 +148,29 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Select and complete the next bounded ICP/V12 golden journey from the
-   evidence registry, retaining exact Work Item and source identities.
-2. Extend immutable-release evidence into machine-reconcilable journey
-   manifests without promoting component-only gates.
-3. When the owner is present, perform the real causal laptop cut/on and accept
-   only the exact bound finalist; then promote distinct private-shadow/assist
-   candidates with product-linked fallback evidence.
+1. Obtain a fresh exact public product receipt, then deploy source `0.207.24`
+   as the distinct private discarded-shadow candidate.
+2. Prove private shadow, promote a separate bounded-assist candidate, and close
+   its product-linked physical loss/recovery evidence.
+3. Resume the next bounded ICP/V12 golden journey and machine-reconcilable
+   release evidence without promoting component-only gates.
 
-## Completed and deployed (current package)
+## Completed and deployed packages
+
+### Accepted public GPT-OSS shadow (`0.207.23`)
+
+- The exact accepted profile is live in public discarded `shadow/extract`; the
+  provisional registry is empty and private input, assist, tools, effects and
+  publication remain closed.
+- The exact source passed 18,655 non-UI and 31 UI tests; two wheels reproduced
+  byte-for-byte. Immutable activation completed `clear`, health is `ok`, both
+  services are active and schema-41 integrity/FK checks are clean.
+
+### Natural questions about selected archive evidence (`0.207.22`)
+
+- Bounded RU/EN content questions reuse one exact durable archive selection
+  through the existing attested V12 explanation. Compound effects, external
+  sources and current attachments remain on their explicit routes.
 
 ### Attested selected-archive explanation (`0.207.21`)
 
@@ -472,29 +490,32 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- The exact `0.207.21` canonical gate passed 18,454 non-UI tests plus 31 UI
+- The exact live `0.207.23` canonical gate passed 18,655 non-UI tests plus 31 UI
   tests, including the pinned Syncthing 2.1.3 smoke; static checks and focused
-  schema-41 catalog/effect/worker/archive gates are green with zero skips. Two
+  schema-41/secondary gates are green with zero skips. Two
   clean wheels reproduced byte-for-byte, and `/tmp` returned to 2% after the
   gate-owned scratch tree was removed.
-- Friday `0.207.21` public shadow and primary V12 canary are live at the exact
-  source/tree/wheel identity above, schema 41, with reader-first `0.207.20` as
-  both immediate predecessor and schema-capable fallback. Immutable activation
-  completed `clear`; backend and
-  bridge are active with zero restarts/errors, health is `ok`, and SQLite
-  integrity and FK checks are clean. Optional secondary availability was false
-  at the post-deploy observation; primary V12 remained `canary_ready`, proving
-  the intended fail-soft boundary without making a physical-acceptance claim.
+- Friday `0.207.23` accepted public shadow and primary V12 canary are live at
+  the exact source/tree/wheel identity above, schema 41, with `0.207.22` as
+  immediate predecessor and schema-capable fallback. Immutable activation is
+  `clear`; backend and bridge are active, health is `ok`, and SQLite integrity
+  and FK checks are clean. Physical profile acceptance is closed; private
+  product shadow and assist evidence are not.
+- Source `0.207.24` includes the fail-closed at-logon recovery already installed
+  on the laptop for a missing exact gateway publication. It requires two
+  consecutive matching publication/listener failures, permits at most one
+  restart of only the gateway, and never restarts the model runtime. The source
+  release and its required fresh public product receipt are not yet deployed or
+  claimed as passed.
 
 ## Next order
 
-1. Select the next incomplete bounded ICP/V12 golden journey from the current
-   evidence registry and close it end-to-end.
-2. Extend existing immutable-release evidence into machine-reconcilable
-   source/wheel/schema/activation/fallback manifests, then register exact-release
-   journey evidence without promoting generic component gates.
-3. Complete the owner-observed causal laptop cut/on when the owner is present;
-   only then accept/register and promote distinct private-shadow/assist candidates.
+1. Capture a fresh public product receipt and release `0.207.24` through only
+   `secondary_shadow_to_private_shadow`.
+2. Capture fresh private-shadow evidence, release a distinct bounded-assist
+   candidate and close the assist-linked physical loss/recovery chain.
+3. Select the next incomplete bounded ICP/V12 golden journey and extend the
+   immutable release evidence into machine-reconcilable journey manifests.
 4. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
    certification; simulations remain labelled separately.
 5. Evaluate generic WorkGraph, broader effects or connectors only from the

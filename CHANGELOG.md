@@ -1,3 +1,24 @@
+## 0.207.24 — 2026-08-25
+
+### Отдельный private discarded shadow GPT-OSS
+
+- Этот source release готовит только distinct-candidate переход
+  из принятого public shadow: `ALLOW_PRIVATE_TEXT=0→1` при неизменных
+  `mode=shadow` и `workload=extract`. Activation допускается только со
+  свежим owner-private `product-stage --stage public-shadow` receipt.
+- Private input может попасть только в typed extraction; secondary output
+  валидируется и выбрасывается. Ответ, tools, effects и publication
+  по-прежнему принадлежат primary; `assist` остаётся закрыт.
+- Product witness не замыкается на просроченной demand admission:
+  public shadow отдельно пробирует exact endpoint и доказывает
+  ожидаемый privacy rejection. Private/assist допускают stale только
+  до product-call и требуют fresh admitted post-call state.
+- На Windows-ноутбуке установлен и в release включён fail-closed
+  at-logon recovery для потерянной Docker-публикации gateway `8443`.
+  Он требует два последовательных точных доказательства отсутствия
+  publication/listener, перезапускает не более одного exact gateway
+  container и не трогает model runtime.
+
 ## 0.207.23 — 2026-08-25
 
 ### Accepted optional GPT-OSS runtime profile

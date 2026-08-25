@@ -70,13 +70,27 @@ journal, без ручного запуска systemd или восстанов�
 ### Optional GPT-OSS secondary brain
 
 Релизы 0.207.11–0.207.22 ввели default-off поддержку и provisional public
-`shadow/extract`. В 0.207.23 complete physical/profile chain принят: code-owned
+`shadow/extract`. В live 0.207.23 complete physical/profile chain принят: code-owned
 accepted-реестр содержит ровно exact finalist с accepted-manifest SHA-256
 `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3`,
 а provisional-реестр пуст. Первый accepted release сохраняет public
 `shadow/extract` без private text: результат выбрасывается; ответ, tools,
 effects и publication остаются за primary. Регистрация профиля сама по себе не
 открывает private shadow или `assist`.
+
+Source 0.207.24 готовит только отдельный private-shadow candidate:
+`ALLOW_PRIVATE_TEXT=0→1` при неизменных `mode=shadow` и
+`workload=extract`. Он ещё не развёрнут, а его обязательный свежий
+public product receipt ещё не принят. Даже после этого cutover typed
+secondary output будет валидироваться и выбрасываться; ответ, tools,
+effects и publication останутся только у primary.
+
+На ноутбуке установлен и в source 0.207.24 включён fail-closed at-logon
+gateway publication recovery. После готовности LAN, Docker и exact healthy
+`friday-secondary-gateway` он требует два последовательных совпавших
+доказательства отсутствия exact `192.168.1.35:8443` publication и TCP
+listener. Только тогда допустим один restart этого gateway; несогласованные
+наблюдения закрывают recovery, а model container никогда не перезапускается.
 
 После приёмки самого default-off релиза оператор может подготовить
 owner-private ENV1. Это не отдельный env-файл: скопируйте exact ENV0 вместе с
@@ -136,6 +150,13 @@ distinct-candidate activation с
 `--secondary-rollout-receipt-sha256 <SHA256>`. Это
 единственная ступень для реального private Inbox shadow: typed output
 валидируется и выбрасывается, а ответ по-прежнему строит primary.
+
+Просроченная demand-admission freshness не блокирует product-stage.
+В public shadow runner отдельно пробирует exact TLS/profile endpoint и
+доказывает ожидаемый privacy rejection. В private shadow и assist
+stale admission допустима только в pre-call snapshot: product-call должен
+завершиться fresh admitted post-call state. Exact manifest, privacy и
+product-counter gates при этом не смягчаются.
 
 Только после принятого private-shadow evidence постройте ENV3 из exact
 ENV2, изменив только `FRIDAY_SECONDARY_LLM_MODE=assist`, и проведите
@@ -662,7 +683,7 @@ orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.23`.
+требуйте `status=ok` и `version=0.207.24`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту
