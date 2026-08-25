@@ -1,3 +1,16 @@
+## 0.207.16 — 2026-08-25
+
+### Schema-capable DocumentCatalog foundation
+
+- Schema 41 adds a rebuildable body-free `document_catalog` sidecar bound to
+  the exact authoritative Raw revision and deterministic extraction state.
+- Current, stale, missing and closed incomplete states remain distinct; titles
+  are bounded navigation metadata and never replace Raw evidence.
+- Migration, same-transaction ingestion, bounded backfill/reconciliation,
+  account deletion, purge, backup and a private offline coverage audit are
+  guarded by an exact schema fingerprint. This foundation does not yet change
+  archive routing.
+
 ## 0.207.15 — 2026-08-25
 
 ### Точный выбор источника из архивной выдачи
