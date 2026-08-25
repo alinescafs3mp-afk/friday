@@ -81,7 +81,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Для optional GPT-OSS secondary brain начиная с 0.207.11 дополнительно:
 
 - release принимается и первый раз запускается без `FRIDAY_SECONDARY_LLM_*`:
-  health имеет `status=ok`, `version=0.207.25`, `secondary.mode=disabled`,
+  health имеет `status=ok`, `version=0.207.26`, `secondary.mode=disabled`,
   `secondary.state=disabled` и `secondary.available=false`;
 - `ACCEPTED_SECONDARY_RUNTIME_PROFILES` содержит ровно finalist
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -114,7 +114,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   переходов: `ALLOW_PRIVATE_TEXT=0→1` при неизменных
   `mode=shadow`/`workload=extract`; typed output выбрасывается, а
   tools/effects/publication остаются только у primary;
-- candidate 0.207.25 должен менять только
+- candidate 0.207.26 должен менять только
   `MODE=shadow→assist` из exact private-shadow predecessor по свежему
   `product-stage --stage private-shadow` receipt; workload, private admission,
   endpoint и accepted profile не меняются;
@@ -155,7 +155,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - post-context load допускает bounded convergence не более 2 секунд с шагом
   50 мс только для valid same-epoch busy; invalid/epoch/deadline fail-closed, а
   initial idle и post-cancellation quiet остаются строгими;
-- final startup health имеет `status=ok`, `version=0.207.25`, configured/installed
+- final startup health имеет `status=ok`, `version=0.207.26`, configured/installed
   `canary`, routes `[archive_read, file_read]`, точный `profile_id`,
   `verified_context_tokens=8192` и непустой public `attestation_sha256`;
 - синтетические 1- и 2-файловые UTF-8 smokes дают одну публикацию с точными
@@ -183,7 +183,7 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 Проверить:
 
 - schema version = 41;
-- live release 0.207.24 уже имеет schema 41; переход 0.207.24 → 0.207.25
+- live release 0.207.24 уже имеет schema 41; переход 0.207.24 → 0.207.26
   не меняет schema и готовит только distinct bounded assist из
   уже принятого private discarded shadow;
 - live release 0.207.23 уже имеет schema 41; переход 0.207.23 → 0.207.24

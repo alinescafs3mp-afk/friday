@@ -15,7 +15,7 @@
 - Rollout policy: the primary model remains required and final. The secondary
   is live for private discarded `shadow/extract`; it has no tool, effect,
   publication or V12 authority. Live `0.207.24` binds exactly one accepted
-  profile and an empty provisional registry. Source `0.207.25` prepares only
+  profile and an empty provisional registry. Source `0.207.26` prepares only
   the distinct `mode=shadow→assist` transition with unchanged private admission,
   workload and profile. Assist remains closed until a fresh accepted
   private-shadow product receipt and immutable activation.
@@ -124,7 +124,7 @@
 
 - The accepted-profile path contains typed private Inbox extraction and bounded
   private document map/reduce seams. Live `0.207.24` runs structured, text-only,
-  effect-free private discarded `shadow/extract`. Source `0.207.25` changes only
+  effect-free private discarded `shadow/extract`. Source `0.207.26` changes only
   the mode to bounded assist. Every required result has
   exactly one primary fallback; optional advice is skipped; secondary output
   cannot execute tools or publish a final answer.
@@ -146,7 +146,7 @@
 ## Active order
 
 1. Capture a fresh accepted private-shadow product receipt and deploy source
-   `0.207.25` through the exact `secondary_shadow_to_assist` transition.
+   `0.207.26` through the exact `secondary_shadow_to_assist` transition.
 2. Prove assist product behavior, then repeat the physical cycle with
    product-linked counters, including laptop-off and mid-turn disconnect.
 3. Continue the common effect envelope and scheduled V12 refinement without
@@ -154,7 +154,7 @@
 
 ## Not yet claimed
 
-- Source `0.207.25` assist is not deployed and its fresh private-shadow-stage
+- Source `0.207.26` assist is not deployed and its fresh private-shadow-stage
   rollout receipt has not passed yet.
 - Assist product evidence and the assist-linked physical cycle remain pending.
   No secondary tools, effects or publication are claimed.

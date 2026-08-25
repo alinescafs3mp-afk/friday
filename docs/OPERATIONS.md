@@ -83,7 +83,7 @@ effects и publication остаются за primary. Регистрация п�
 Typed secondary output валидируется и выбрасывается; ответ, tools,
 effects и publication остаются только у primary.
 
-Source 0.207.25 готовит distinct assist-candidate: единственная
+Source 0.207.26 готовит distinct assist-candidate: единственная
 конфигурационная разница — `mode=shadow→assist`. До cutover нужен
 свежий `product-stage --stage private-shadow` receipt. В assist только
 валидированная typed Inbox extraction может заменить primary
@@ -688,7 +688,7 @@ orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.25`.
+требуйте `status=ok` и `version=0.207.26`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

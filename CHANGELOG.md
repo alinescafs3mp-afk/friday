@@ -1,3 +1,13 @@
+## 0.207.26 — 2026-08-25
+
+### Assist rollout witness hotfix
+
+- Sealed activation now mirrors the product runner's freshness contract:
+  an exact accepted private-shadow witness may start from a stale but healthy
+  endpoint, while its post-call snapshot must be fresh, healthy and available.
+- The failed-closed 0.207.25 activation changed no live state. This successor
+  keeps the same bounded-assist authority and requires a fresh exact receipt.
+
 ## 0.207.25 — 2026-08-25
 
 ### Bounded assist GPT-OSS

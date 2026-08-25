@@ -8,7 +8,7 @@ the current production identity, completed packages, active work and next order.
 - Branch: `main`
 - Secondary acceptance base: live `0.207.24` admits exactly one accepted
   profile and has an empty provisional registry in private discarded shadow.
-  Source `0.207.25` prepares only the distinct bounded-assist transition.
+  Source `0.207.26` prepares only the distinct bounded-assist transition.
 - Deployed implementation head: `9142765647b75d12cea22798df6782a09bc5c4b8`
 - Live: Friday `0.207.24` / `9142765647b75d12cea22798df6782a09bc5c4b8`;
   tree `ce654409f09b93cc651543968e81bb7254dd5af48d8698ae7cd06c0084d28f30`;
@@ -37,7 +37,7 @@ the current production identity, completed packages, active work and next order.
 Finish the optional detachable GPT-OSS-20B/SGLang node through accepted public
 shadow, private shadow and bounded assist, preserving exact primary-only
 behavior whenever the laptop is absent. Physical failure and profile acceptance
-are complete and accepted private discarded shadow is live. Source `0.207.25`
+are complete and accepted private discarded shadow is live. Source `0.207.26`
 prepares only `MODE=shadow→assist` with a fresh private-shadow product receipt;
 private admission, workload and exact profile remain unchanged. The schema-41 DocumentCatalog,
 archive candidate runtime, receipt-backed Obsidian effect vertical and
@@ -69,7 +69,7 @@ accepted profile manifest hashes to
 its accepted physical-failure evidence hashes to
 `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
 Live `0.207.24` admits exactly that profile, with no provisional entries, in
-private discarded `shadow/extract`. Source `0.207.25` prepares bounded assist
+private discarded `shadow/extract`. Source `0.207.26` prepares bounded assist
 without granting tools, effects, publication or knowledge-write authority;
 failure preserves the exact primary-only path.
 
@@ -147,7 +147,7 @@ course, with these repository-specific constraints:
 ## In progress
 
 1. Obtain a fresh exact private-shadow product receipt, then deploy source
-   `0.207.25` as the distinct bounded-assist candidate.
+   `0.207.26` as the distinct bounded-assist candidate.
 2. Prove assist and close its product-linked physical loss/recovery evidence.
 3. Resume the next bounded ICP/V12 golden journey and machine-reconcilable
    release evidence without promoting component-only gates.
@@ -510,12 +510,12 @@ claims at this checkpoint.
   on the laptop for a missing exact gateway publication. It requires two
   consecutive matching publication/listener failures, permits at most one
   restart of only the gateway, and never restarts the model runtime. The source
-  Source `0.207.25` is a metadata-only distinct assist candidate; its required
+  Source `0.207.26` is the distinct assist candidate; its required
   fresh private-shadow product receipt is not yet claimed as passed.
 
 ## Next order
 
-1. Capture fresh private-shadow evidence and release `0.207.25` through only
+1. Capture fresh private-shadow evidence and release `0.207.26` through only
    `secondary_shadow_to_assist`.
 2. Prove assist and close the assist-linked physical loss/recovery chain.
 3. Select the next incomplete bounded ICP/V12 golden journey and extend the
