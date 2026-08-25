@@ -34012,7 +34012,11 @@ class AgentRuntime:
                     )
                     prepared_candidate = None
                     initial_selected = None
-            if prepared_candidate is None or initial_selected is None:
+            if (
+                type(authorization) is not AuthorizationService
+                or prepared_candidate is None
+                or initial_selected is None
+            ):
                 return self._suspend_comparison_answer_source_free(
                     conversation_id=conversation_id,
                     person_id=person_id,
@@ -34021,6 +34025,7 @@ class AgentRuntime:
                     expected_revision=current.revision,
                     reason="candidate_unavailable",
                 )
+            assert isinstance(authorization, AuthorizationService)
 
             if not mark_request_effect_possible():
                 raise RuntimeError("request fence failed before comparison candidate resolution")

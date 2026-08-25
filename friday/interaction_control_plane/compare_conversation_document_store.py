@@ -1718,7 +1718,7 @@ def prepare_compare_conversation_document_filename_candidates_in_transaction(
         raise WorkItemAnchorError("comparison filename ambiguity is not a complete closed set")
 
     candidates: list[ArchiveCandidateItem] = []
-    display_rows: list[tuple[str, str, str]] = []
+    display_rows: list[tuple[str, str, str, str, int]] = []
     for ordinal, row in enumerate(rows, start=1):
         if not isinstance(row, Mapping):
             raise WorkItemAnchorError("comparison filename candidate row is invalid")

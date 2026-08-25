@@ -1,3 +1,16 @@
+## 0.207.29 — 2026-08-25
+
+### Durable conversation-to-document comparison journey
+
+- A selected conversation result can now continue through a restart-safe Q1/Q2
+  document reference flow, compare exact pinned message and document evidence,
+  and publish only after authority, source, completion and receipt checks pass.
+- Bare single-file replies, duplicate filename candidates, invalid ordinals,
+  explicit resume and global stop commands now have deterministic durable
+  behavior; unrelated turns no longer get captured by a restored comparison.
+- Every comparison publication carries a structural WorkTrace. Existing schema
+  42 remains byte-for-byte compatible with the deployed rollback release.
+
 ## 0.207.28 — 2026-08-25
 
 ### Bounded document-map shadow on the optional GPT-OSS node
