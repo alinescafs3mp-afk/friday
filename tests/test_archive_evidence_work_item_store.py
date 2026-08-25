@@ -34,6 +34,7 @@ from friday.orchestration.archive_recall_outcome import (
     ArchiveRecallLane,
     ArchiveRecallOutcome,
     ArchiveRecallStatus,
+    archive_evidence_explanation_plan_sha256,
     attach_accepted_archive_recall_outcome_receipt,
 )
 from friday.retrieval.archive_search_authority import (
@@ -135,7 +136,7 @@ def _initial_outcome(
         coverage_sha256=evidence.coverage_sha256,
         coverage_grade=grade,
         candidate_count=1,
-        used_citation_labels=("A1",),
+        used_citation_labels=("A1.1",),
         selected_evidence=selected,
         publication_attested=True,
         semantic_verified=False,
@@ -181,6 +182,40 @@ def _replay_outcome(
         selected_evidence=selected if source_bearing else None,
         publication_attested=True,
         semantic_verified=source_bearing,
+        answer_sha256=_sha(answer),
+    )
+
+
+def _explanation_outcome(
+    *,
+    request: str,
+    answer: str,
+    selected: ArchiveSearchSelectedEvidence,
+    evidence: SelectedArchiveEvidence,
+) -> ArchiveRecallOutcome:
+    evidence_identity = "6" * 64
+    grade = ArchiveSearchCoverageGrade(evidence.coverage_grade.value)
+    labels = tuple(f"A1.{index}" for index in range(1, len(selected.passage_refs) + 1))
+    return ArchiveRecallOutcome(
+        lane=ArchiveRecallLane.SELECTED_EVIDENCE_EXPLANATION,
+        status=(
+            ArchiveRecallStatus.COMPLETE
+            if grade is ArchiveSearchCoverageGrade.COMPLETE
+            else ArchiveRecallStatus.PARTIAL
+        ),
+        plan_sha256=archive_evidence_explanation_plan_sha256(
+            request,
+            selected_evidence=selected,
+            evidence_identity_sha256=evidence_identity,
+        ),
+        evidence_sha256=evidence_identity,
+        coverage_sha256=evidence.coverage_sha256,
+        coverage_grade=grade,
+        candidate_count=1,
+        used_citation_labels=labels,
+        selected_evidence=selected,
+        publication_attested=True,
+        semantic_verified=True,
         answer_sha256=_sha(answer),
     )
 
@@ -383,6 +418,61 @@ def test_exact_replay_reanchors_refreshes_ttl_and_supports_next_immediate_follow
             now=replay_now,
         )
     assert current == replayed
+
+
+def test_reader_accepts_and_reloads_selected_evidence_explanation_anchor(storage: Any) -> None:
+    item, selected = _create_work(storage, "archive-explanation-reader")
+    request = "Что в нём сказано?"
+    boundary = storage.store_message(
+        item.conversation_id,
+        item.user_id,
+        "user",
+        request,
+        reply_to=item.anchor_assistant_message_id,
+    )
+    labels = tuple(f"A1.{index}" for index in range(1, len(selected.passage_refs) + 1))
+    answer = "Проверенное пояснение выбранного источника " + " ".join(
+        f"[{label}]." for label in labels
+    )
+    outcome = _explanation_outcome(
+        request=request,
+        answer=answer,
+        selected=selected,
+        evidence=item.selected_evidence,
+    )
+    metadata, outcome_sha256 = _metadata(outcome)
+    assistant = storage.store_message(
+        item.conversation_id,
+        item.user_id,
+        "assistant",
+        answer,
+        metadata=metadata,
+        reply_to=boundary["id"],
+    )
+
+    with storage.transaction() as conn:
+        advanced = accept_recall_selected_archive_evidence_replay_in_transaction(
+            conn,
+            work_item_id=item.id,
+            user_id=item.user_id,
+            conversation_id=item.conversation_id,
+            expected_revision=item.revision,
+            new_boundary_user_message_id=boundary["id"],
+            new_assistant_message_id=assistant["id"],
+            new_accepted_plan_sha256=outcome.plan_sha256,
+            new_accepted_outcome_sha256=outcome_sha256,
+            now="2026-08-24T03:00:00+00:00",
+        )
+        reloaded = get_recall_selected_archive_evidence_work_item_in_transaction(
+            conn,
+            work_item_id=item.id,
+            user_id=item.user_id,
+            conversation_id=item.conversation_id,
+        )
+
+    assert reloaded == advanced
+    assert advanced.transition is WorkTransition.EVIDENCE_REPLAYED
+    assert advanced.revision == item.revision + 1
 
 
 def test_replay_requires_current_revision_and_exact_immediate_anchor(storage: Any) -> None:

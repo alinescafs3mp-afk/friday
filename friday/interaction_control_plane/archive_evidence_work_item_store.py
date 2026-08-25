@@ -48,6 +48,7 @@ from friday.orchestration.archive_recall_outcome import (
     ArchiveRecallLane,
     ArchiveRecallOutcomeError,
     ArchiveRecallStatus,
+    archive_evidence_explanation_plan_sha256,
     load_accepted_archive_recall_outcome_receipt,
 )
 from friday.retrieval.archive_search_authority import ArchiveSearchSelectedEvidence
@@ -215,7 +216,7 @@ def _validate_archive_anchor(
     accepted_plan_sha256: str,
     accepted_outcome_sha256: str,
     evidence: SelectedArchiveEvidence,
-    expected_lane: ArchiveRecallLane | None,
+    expected_lane: ArchiveRecallLane | tuple[ArchiveRecallLane, ...] | None,
     expected_source_bearing: bool | None,
     require_latest_message: bool,
     allow_disabled_owner: bool = False,
@@ -286,6 +287,11 @@ def _validate_archive_anchor(
     except (ArchiveRecallOutcomeError, TypeError, ValueError) as exc:
         raise WorkItemAnchorError("archive assistant has no accepted outcome") from exc
     outcome = receipt.outcome
+    lane_matches = expected_lane is None or (
+        outcome.lane in expected_lane
+        if isinstance(expected_lane, tuple)
+        else outcome.lane is expected_lane
+    )
     if (
         outcome.plan_sha256 != plan_digest
         or receipt.outcome_sha256 != outcome_digest
@@ -299,7 +305,7 @@ def _validate_archive_anchor(
         )
         or outcome.coverage_sha256 != evidence.coverage_sha256
         or outcome.coverage_grade.value != evidence.coverage_grade.value
-        or (expected_lane is not None and outcome.lane is not expected_lane)
+        or not lane_matches
     ):
         raise WorkItemAnchorError("archive assistant outcome does not match its Work Item")
 
@@ -322,6 +328,22 @@ def _validate_archive_anchor(
             _replay_plan_sha256(anchor["boundary_content"], evidence),
         ):
             raise WorkItemAnchorError("archive replay plan does not match its selected evidence")
+    elif outcome.lane is ArchiveRecallLane.SELECTED_EVIDENCE_EXPLANATION:
+        try:
+            expected_explanation_plan = archive_evidence_explanation_plan_sha256(
+                anchor["boundary_content"],
+                selected_evidence=selected,
+                evidence_identity_sha256=outcome.evidence_sha256,
+            )
+        except ArchiveRecallOutcomeError as exc:
+            raise WorkItemAnchorError("archive explanation plan is invalid") from exc
+        if not source_bearing or not hmac.compare_digest(
+            outcome.plan_sha256,
+            expected_explanation_plan,
+        ):
+            raise WorkItemAnchorError(
+                "archive explanation plan does not match its selected evidence"
+            )
     else:  # pragma: no cover - the closed outcome parser rejects future lanes
         raise WorkItemAnchorError("archive assistant outcome lane is unsupported")
 
@@ -564,11 +586,17 @@ def create_recall_selected_archive_evidence_work_item_in_transaction(
 
 def _anchor_expectations(
     item: RecallSelectedArchiveEvidenceWorkItem,
-) -> tuple[ArchiveRecallLane | None, bool | None]:
+) -> tuple[ArchiveRecallLane | tuple[ArchiveRecallLane, ...] | None, bool | None]:
     if item.transition is WorkTransition.CREATED:
         return ArchiveRecallLane.FEDERATED_SEARCH, True
     if item.transition is WorkTransition.EVIDENCE_REPLAYED:
-        return ArchiveRecallLane.SELECTED_EVIDENCE_REPLAY, True
+        return (
+            (
+                ArchiveRecallLane.SELECTED_EVIDENCE_REPLAY,
+                ArchiveRecallLane.SELECTED_EVIDENCE_EXPLANATION,
+            ),
+            True,
+        )
     return None, None
 
 
@@ -831,7 +859,14 @@ def _accept_archive_replay_publication(
         accepted_plan_sha256=plan_digest,
         accepted_outcome_sha256=outcome_digest,
         evidence=current.selected_evidence,
-        expected_lane=ArchiveRecallLane.SELECTED_EVIDENCE_REPLAY,
+        expected_lane=(
+            (
+                ArchiveRecallLane.SELECTED_EVIDENCE_REPLAY,
+                ArchiveRecallLane.SELECTED_EVIDENCE_EXPLANATION,
+            )
+            if source_bearing
+            else ArchiveRecallLane.SELECTED_EVIDENCE_REPLAY
+        ),
         expected_source_bearing=source_bearing,
         require_latest_message=True,
     )
@@ -882,7 +917,14 @@ def _accept_archive_replay_publication(
         accepted_plan_sha256=updated.accepted_plan_sha256,
         accepted_outcome_sha256=updated.accepted_outcome_sha256,
         evidence=updated.selected_evidence,
-        expected_lane=ArchiveRecallLane.SELECTED_EVIDENCE_REPLAY,
+        expected_lane=(
+            (
+                ArchiveRecallLane.SELECTED_EVIDENCE_REPLAY,
+                ArchiveRecallLane.SELECTED_EVIDENCE_EXPLANATION,
+            )
+            if source_bearing
+            else ArchiveRecallLane.SELECTED_EVIDENCE_REPLAY
+        ),
         expected_source_bearing=source_bearing,
         require_latest_message=True,
     )

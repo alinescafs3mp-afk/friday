@@ -1,4 +1,4 @@
-"""Body-free accepted outcome for the legacy federated archive-search lane.
+"""Body-free accepted outcomes for federated and selected archive recall.
 
 This is deliberately not ``CapabilityOutcome`` v1.  Archive search already has
 its own exact multi-page model ledger and phase-2 publication attestation.  The
@@ -37,6 +37,7 @@ ARCHIVE_RECALL_OUTCOME_SCHEMA = "friday.archive-recall-outcome.v2"
 _ARCHIVE_RECALL_OUTCOME_SCHEMA_V1 = "friday.archive-recall-outcome.v1"
 ARCHIVE_RECALL_OUTCOME_RECEIPT_SCHEMA = "friday.accepted-archive-recall-outcome-receipt.v1"
 ACCEPTED_ARCHIVE_RECALL_OUTCOME_METADATA_KEY = "accepted_archive_recall_outcome"
+SELECTED_ARCHIVE_EXPLANATION_PLAN_SCHEMA = "friday.explain-selected-archive-evidence-plan.v1"
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _CITATION = re.compile(r"A([1-9][0-9]{0,2})(?:\.[1-8])?\Z")
@@ -53,6 +54,7 @@ class ArchiveRecallOutcomeError(ValueError):
 class ArchiveRecallLane(StrEnum):
     FEDERATED_SEARCH = "federated_search"
     SELECTED_EVIDENCE_REPLAY = "selected_evidence_replay"
+    SELECTED_EVIDENCE_EXPLANATION = "selected_evidence_explanation"
 
 
 class ArchiveRecallStatus(StrEnum):
@@ -136,6 +138,39 @@ def _expected_status(
     )
 
 
+def archive_evidence_explanation_plan_sha256(
+    request: object,
+    *,
+    selected_evidence: ArchiveSearchSelectedEvidence,
+    evidence_identity_sha256: object,
+) -> str:
+    """Bind one explanation request to its selected and model-visible evidence."""
+
+    if type(request) is not str or not request or request != request.strip():
+        raise ArchiveRecallOutcomeError("archive explanation request is invalid")
+    try:
+        request_bytes = request.encode("utf-8", errors="strict")
+    except UnicodeEncodeError:
+        raise ArchiveRecallOutcomeError("archive explanation request is invalid") from None
+    if len(request_bytes) > 512 or type(selected_evidence) is not ArchiveSearchSelectedEvidence:
+        raise ArchiveRecallOutcomeError("archive explanation request is invalid")
+    evidence_digest = _digest(
+        evidence_identity_sha256,
+        label="evidence_identity_sha256",
+    )
+    selected_sha256 = hashlib.sha256(selected_evidence.to_private_json().encode("ascii")).hexdigest()
+    return hashlib.sha256(
+        _canonical_json(
+            {
+                "evidence_identity_sha256": evidence_digest,
+                "request_sha256": hashlib.sha256(request_bytes).hexdigest(),
+                "schema": SELECTED_ARCHIVE_EXPLANATION_PLAN_SCHEMA,
+                "selected_evidence_sha256": selected_sha256,
+            }
+        ).encode("ascii")
+    ).hexdigest()
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class ArchiveRecallOutcome:
     """Durable body-free truth projected from one accepted phase-2 attestation."""
@@ -190,6 +225,11 @@ class ArchiveRecallOutcome:
                 raise ArchiveRecallOutcomeError("federated archive recall cannot claim semantic verification")
         elif self.candidate_projection_sha256 is not None:
             raise ArchiveRecallOutcomeError("archive replay cannot carry a candidate projection")
+        elif (
+            self.lane is ArchiveRecallLane.SELECTED_EVIDENCE_EXPLANATION
+            and self.status not in {ArchiveRecallStatus.COMPLETE, ArchiveRecallStatus.PARTIAL}
+        ):
+            raise ArchiveRecallOutcomeError("archive explanation cannot claim a source-free result")
         elif self.status in {ArchiveRecallStatus.COMPLETE, ArchiveRecallStatus.PARTIAL}:
             if (
                 self.status is not _expected_status(self.coverage_grade, 1)
@@ -199,6 +239,12 @@ class ArchiveRecallOutcome:
                 or self.semantic_verified is not True
             ):
                 raise ArchiveRecallOutcomeError("archive replay success is internally inconsistent")
+            expected_labels = tuple(
+                f"A1.{index}"
+                for index in range(1, len(self.selected_evidence.passage_refs) + 1)
+            )
+            if labels != expected_labels:
+                raise ArchiveRecallOutcomeError("archive replay citations are internally inconsistent")
         elif (
             self.status
             not in {
@@ -481,6 +527,7 @@ def accept_archive_evidence_replay(
     selected_evidence: ArchiveSearchSelectedEvidence,
     coverage_sha256: str,
     coverage_grade: ArchiveSearchCoverageGrade,
+    explanation_unavailable: bool = False,
 ) -> tuple[str, ArchiveRecallOutcome]:
     """Render and accept one exact replay or one source-free terminal failure."""
 
@@ -493,6 +540,8 @@ def accept_archive_evidence_replay(
     coverage_digest = _digest(coverage_sha256, label="coverage_sha256")
     if type(coverage_grade) is not ArchiveSearchCoverageGrade:
         raise ArchiveRecallOutcomeError("archive replay coverage grade is invalid")
+    if type(explanation_unavailable) is not bool:
+        raise ArchiveRecallOutcomeError("archive replay fallback marker is invalid")
     expected_replay_grade = ArchiveEvidenceReplayCoverageGrade(coverage_grade.value)
     if result.corpus is not selected_evidence.corpus:
         raise ArchiveRecallOutcomeError("archive replay corpus changed")
@@ -526,7 +575,14 @@ def accept_archive_evidence_replay(
             != selected_evidence.resolved_snapshot_sha256
         ):
             raise ArchiveRecallOutcomeError("archive replay exact evidence changed")
-        lines = ["В выбранном источнике:"]
+        lines = (
+            [
+                "Не удалось сформировать проверенное объяснение; привожу точные выбранные фрагменты.",
+                "В выбранном источнике:",
+            ]
+            if explanation_unavailable
+            else ["В выбранном источнике:"]
+        )
         if coverage_grade is ArchiveSearchCoverageGrade.PARTIAL:
             lines.append("Охват исходного поиска был частичным.")
         lines.extend(f"[{item.citation_label}] {item.text}" for item in excerpts)
@@ -572,6 +628,78 @@ def accept_archive_evidence_replay(
         answer_sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
     )
     return content, outcome
+
+
+def accept_archive_evidence_explanation(
+    *,
+    answer: str,
+    plan_sha256: str,
+    evidence_identity_sha256: str,
+    citation_labels: tuple[str, ...],
+    result: ArchiveEvidenceReplayResult,
+    selected_evidence: ArchiveSearchSelectedEvidence,
+    coverage_sha256: str,
+    coverage_grade: ArchiveSearchCoverageGrade,
+) -> ArchiveRecallOutcome:
+    """Accept one verified explanation only while its exact replay is current."""
+
+    if type(result) is not ArchiveEvidenceReplayResult or not result.is_valid():
+        raise ArchiveRecallOutcomeError("archive explanation replay is unavailable")
+    if type(selected_evidence) is not ArchiveSearchSelectedEvidence:
+        raise ArchiveRecallOutcomeError("archive explanation selected evidence is invalid")
+    if type(coverage_grade) is not ArchiveSearchCoverageGrade:
+        raise ArchiveRecallOutcomeError("archive explanation coverage grade is invalid")
+    if result.status is not ArchiveEvidenceReplayStatus.EXACT:
+        raise ArchiveRecallOutcomeError("archive explanation requires an exact replay")
+    if result.corpus is not selected_evidence.corpus:
+        raise ArchiveRecallOutcomeError("archive explanation corpus changed")
+    expected_replay_grade = ArchiveEvidenceReplayCoverageGrade(coverage_grade.value)
+    resolved = result.resolved_source
+    excerpts = result.excerpts
+    if (
+        result.coverage_grade is not expected_replay_grade
+        or resolved is None
+        or tuple(item.passage_ref for item in excerpts) != selected_evidence.passage_refs
+        or tuple(item.citation_label for item in excerpts)
+        != tuple(f"A1.{index}" for index in range(1, len(excerpts) + 1))
+        or archive_selected_evidence_snapshot_sha256(
+            resolved,
+            selected_evidence.passage_refs,
+            tuple(item.text for item in excerpts),
+        )
+        != selected_evidence.resolved_snapshot_sha256
+    ):
+        raise ArchiveRecallOutcomeError("archive explanation exact evidence changed")
+    if type(answer) is not str or not answer or answer != answer.strip():
+        raise ArchiveRecallOutcomeError("archive explanation answer is invalid")
+    try:
+        encoded_answer = answer.encode("utf-8", errors="strict")
+    except UnicodeEncodeError:
+        raise ArchiveRecallOutcomeError("archive explanation answer is invalid") from None
+    if len(encoded_answer) > 100_000:
+        raise ArchiveRecallOutcomeError("archive explanation answer is too large")
+    labels = _labels(citation_labels)
+    detected = tuple(dict.fromkeys(re.findall(r"\[(A[1-9][0-9]{0,2}(?:\.[1-8])?)\]", answer)))
+    if not labels or detected != labels:
+        raise ArchiveRecallOutcomeError("archive explanation citations changed")
+
+    return ArchiveRecallOutcome(
+        lane=ArchiveRecallLane.SELECTED_EVIDENCE_EXPLANATION,
+        status=_expected_status(coverage_grade, 1),
+        plan_sha256=_digest(plan_sha256, label="plan_sha256"),
+        evidence_sha256=_digest(
+            evidence_identity_sha256,
+            label="evidence_identity_sha256",
+        ),
+        coverage_sha256=_digest(coverage_sha256, label="coverage_sha256"),
+        coverage_grade=coverage_grade,
+        candidate_count=1,
+        used_citation_labels=labels,
+        selected_evidence=selected_evidence,
+        publication_attested=True,
+        semantic_verified=True,
+        answer_sha256=hashlib.sha256(encoded_answer).hexdigest(),
+    )
 
 
 def attach_accepted_archive_recall_outcome_receipt(
@@ -667,7 +795,10 @@ __all__ = [
     "ArchiveRecallOutcomeError",
     "ArchiveRecallStatus",
     "ARCHIVE_EVIDENCE_REPLAY_UNAVAILABLE",
+    "SELECTED_ARCHIVE_EXPLANATION_PLAN_SCHEMA",
+    "accept_archive_evidence_explanation",
     "accept_archive_evidence_replay",
+    "archive_evidence_explanation_plan_sha256",
     "archive_recall_outcome_from_attestation",
     "attach_accepted_archive_recall_outcome_receipt",
     "load_accepted_archive_recall_outcome_receipt",
