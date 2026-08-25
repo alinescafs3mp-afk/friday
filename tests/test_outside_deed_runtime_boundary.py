@@ -1095,6 +1095,96 @@ def test_common_file_reminder_and_voice_completions_need_evidence(claim: str) ->
 
 
 @pytest.mark.parametrize(
+    "offer",
+    [
+        "Да, могу нарисовать картинку — готова помочь. Опиши сцену.",
+        "Готова проанализировать изображение, когда ты его пришлёшь.",
+        "Могу подготовить готовую картинку по твоему описанию.",
+        "Готовый документ могу перевести после уточнения языка.",
+        "Могу показать готовый документ после того, как ты его пришлёшь.",
+        "Могу проверить готовый документ.",
+        "Могу проанализировать готовый отчёт.",
+        "Могу перевести готовый документ.",
+        "Готова поделиться готовым документом.",
+        "Могу ознакомиться с готовым документом.",
+        "Да, я готова к этому и могу проанализировать картинку.",
+        "Готова к работе: могу описать картинку после загрузки.",
+        "Я готова, и могу сделать изображение.",
+        "Да, готова — могу проанализировать картинку.",
+        "Готова быстро проанализировать картинку.",
+        "Готова сама описать картинку.",
+        "Готова с радостью проверить картинку.",
+        "Готова по твоему описанию проверить картинку.",
+        "Картинку готова прямо сейчас проанализировать.",
+        "Напоминание готова при необходимости поставить.",
+        "Аудио готова без проблем записать.",
+        "Напоминание готова поставить, когда ты назовёшь время.",
+        "Аудио готова записать после уточнения текста.",
+        "Yes, I can review an image after you upload it.",
+        "I am able to prepare a document after you provide the source text.",
+        "I can help analyze a picture once you upload it.",
+    ],
+)
+def test_capability_and_readiness_propositions_are_not_completed_deeds(offer: str) -> None:
+    assert not _claims_an_unconfirmed_supported_deed(
+        offer,
+        has_file=False,
+        reminder_succeeded=False,
+        voice_succeeded=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Могу помочь, но файл уже готов.",
+        "Готова помочь с картинкой, но PNG уже отправлен.",
+        "Могу проанализировать картинку и уже отправила её.",
+        "Я уже создала картинку.",
+        "Картинка создана.",
+        "Готова помочь. Держи картинку.",
+        "Могу показать готовый документ — он доступен по ссылке.",
+        "Могу показать готовый документ: ссылка ниже.",
+        "Могу показать готовый документ: вот ссылка https://example.test/file.",
+        "Могу показать готовый документ: [скачать](https://example.test/file).",
+        "Готовый документ доступен здесь, могу показать.",
+        "Готовый документ уже у тебя, могу показать.",
+        "Готовый документ для тебя.",
+        "Готовый документ в чате.",
+        "Готовый документ открывается по ссылке.",
+        "Готовый документ: забирай по ссылке.",
+        "Готовая картинка: она ниже.",
+    ],
+)
+def test_capability_language_cannot_hide_an_independent_completed_effect(claim: str) -> None:
+    assert _claims_an_unconfirmed_supported_deed(
+        claim,
+        has_file=False,
+        reminder_succeeded=False,
+        voice_succeeded=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "На картинке художник нарисовал дом.",
+        "Нарисованная пользователем картинка содержит дом.",
+        "Я могу проанализировать нарисованную картинку.",
+        "Картинка была нарисована художником.",
+        "Пользователь нарисовал картинку вчера.",
+    ],
+)
+def test_drawing_content_and_history_are_not_current_assistant_deeds(statement: str) -> None:
+    assert not _claims_an_unconfirmed_supported_deed(
+        statement,
+        has_file=False,
+        reminder_succeeded=False,
+        voice_succeeded=False,
+    )
+
+
+@pytest.mark.parametrize(
     "statement",
     [
         "В инструкции сказано: файл создан.",
@@ -1122,6 +1212,130 @@ def test_a_nonactual_or_reported_supported_deed_is_not_a_completion(statement: s
         )
         is False
     )
+
+
+@pytest.mark.parametrize(
+    ("user_message", "model_answer"),
+    [
+        (
+            "А ты можешь проверить документ?",
+            "Да, могу проверить документ — готова помочь. Пришли файл.",
+        ),
+        (
+            "Ты умеешь анализировать документы?",
+            "Да. Готова проанализировать документ, когда ты его пришлёшь.",
+        ),
+        (
+            "Способна ли ты сделать готовый PDF?",
+            "Могу подготовить готовый PDF после того, как ты дашь содержание.",
+        ),
+        (
+            "Can you review documents?",
+            "Yes, I can review a document after you upload it.",
+        ),
+        (
+            "Are you able to prepare documents?",
+            "Yes. I am able to prepare a document after you provide the source text.",
+        ),
+        (
+            "Ты уже нарисовала картинку?",
+            "Нет, ещё не нарисовала. Готова помочь, когда будет описание.",
+        ),
+        (
+            "Проверь документ.",
+            "Готова проверить документ, но сначала нужен файл.",
+        ),
+    ],
+    ids=(
+        "live-russian-capability",
+        "russian-skill",
+        "russian-able",
+        "english-can",
+        "english-able",
+        "past-question-truthful-negative",
+        "imperative-honest-incomplete",
+    ),
+)
+@pytest.mark.asyncio
+async def test_nonactual_capability_answers_survive_the_complete_delivery_path(
+    settings,
+    storage,
+    monkeypatch,
+    user_message: str,
+    model_answer: str,
+) -> None:
+    runtime = _runtime(settings, storage, monkeypatch)
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {"content": model_answer, "tools_used": [], "_model_generated": True}
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        user_message,
+        actor=_actor(),
+        enable_tools=False,
+    )
+
+    assert reply["message"] == model_answer
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    guards = metadata["structural"].get("output_guards", {})
+    assert guards.get("supported_deed_replaced") is not True
+
+
+@pytest.mark.parametrize(
+    ("model_answer", "expected", "replaced"),
+    [
+        (
+            "Инструмент вернул ошибку: файл не создан. Могу повторить после нового запроса.",
+            "Инструмент вернул ошибку: файл не создан. Могу повторить после нового запроса.",
+            False,
+        ),
+        (
+            "Инструмент вернул ошибку, но файл уже создан.",
+            _UNCONFIRMED_SUPPORTED_DEED,
+            True,
+        ),
+    ],
+    ids=("truthful-tool-failure", "failed-tool-false-completion"),
+)
+@pytest.mark.asyncio
+async def test_a_failed_tool_does_not_turn_an_offer_into_completion_evidence(
+    settings,
+    storage,
+    monkeypatch,
+    model_answer: str,
+    expected: str,
+    replaced: bool,
+) -> None:
+    runtime = _runtime(settings, storage, monkeypatch)
+
+    async def generate(context, message, attachments):  # noqa: ANN001
+        del context, message, attachments
+        return {
+            "content": model_answer,
+            "tools_used": ["make_file"],
+            "tool_evidence": [
+                {"tool": "make_file", "success": False, "output": {"error": "synthetic_failure"}}
+            ],
+            "_model_generated": True,
+        }
+
+    monkeypatch.setattr(runtime, "_generate_response", generate)
+    reply = await runtime.chat(
+        "alice",
+        "Ты можешь создать файл?",
+        actor=_actor(),
+        enable_tools=False,
+    )
+
+    assert reply["message"] == expected
+    stored = storage.get_message(str(reply["message_id"]), "alice")
+    metadata = json.loads(str(stored["metadata_json"] or "{}"))
+    guards = metadata["structural"].get("output_guards", {})
+    assert (guards.get("supported_deed_replaced") is True) is replaced
 
 
 def test_supported_deed_evidence_is_bound_to_the_claimed_artifact() -> None:

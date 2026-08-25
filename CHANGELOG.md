@@ -1,3 +1,13 @@
+## 0.207.32 — 2026-08-26
+
+### Capability-offer output-guard hotfix
+
+- Russian capability, readiness and offer propositions no longer become false
+  completed-file claims when they mention a supported output carrier.
+- Explicit completed effects, passive object-ready assertions and hand-offs
+  remain evidence-guarded, including when mixed with capability language.
+- Schema, endpoints and secondary-brain routing policy are unchanged.
+
 ## 0.207.31 — 2026-08-26
 
 ### Evidence-bound document-map assist

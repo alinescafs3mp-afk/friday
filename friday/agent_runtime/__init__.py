@@ -7385,14 +7385,64 @@ _SUPPORTED_FILE_OBJECT = (
     r"(?:файл\w*|документ\w*|отч[её]т\w*|архив\w*|вложени\w*|pdf|"
     r"xlsx?|excel|word|docx?|картинк\w*|изображени\w*|png|jpe?g)"
 )
+_SUPPORTED_READY_STATE_MODIFIER = (
+    r"(?:уже|теперь|наконец|полностью|действительно|точно|тоже|вполне|"
+    r"окончательно|успешно|повторно|заново)"
+)
+_SUPPORTED_READY_STATE_MODIFIERS = rf"(?:\s+{_SUPPORTED_READY_STATE_MODIFIER}){{0,3}}"
+_SUPPORTED_READY_STATE_NEGATION = r"(?:\s+(?:ещ[её]\s+)?не)?"
+_SUPPORTED_READY_STATE_TRAILER = r"(?:\s+(?:сейчас|уже|теперь))?"
+_SUPPORTED_READY_MASCULINE_OBJECT = r"(?:файл|документ|отч[её]т|архив|pdf|xlsx?|excel|word|docx?|png|jpe?g)"
+_SUPPORTED_READY_FEMININE_OBJECT = r"(?:картинка)"
+_SUPPORTED_READY_NEUTER_OBJECT = r"(?:вложение|изображение)"
+_SUPPORTED_READY_PLURAL_OBJECT = r"(?:файлы|документы|отч[её]ты|архивы|вложения|картинки|изображения)"
+_SUPPORTED_READY_SOURCE_QUALIFIER = r"(?:\s+из\s+[а-яё0-9._-]{2,40})?"
+_SUPPORTED_FILE_READY_COMPLETION = (
+    rf"(?:\b{_SUPPORTED_FILE_OBJECT}\b(?:\s+и\s+\b{_SUPPORTED_FILE_OBJECT}\b)+"
+    rf"{_SUPPORTED_READY_STATE_MODIFIERS}\s+готовы\b|"
+    rf"\b{_SUPPORTED_READY_MASCULINE_OBJECT}\b{_SUPPORTED_READY_SOURCE_QUALIFIER}"
+    rf"{_SUPPORTED_READY_STATE_MODIFIERS}{_SUPPORTED_READY_STATE_NEGATION}\s+готов\b"
+    rf"{_SUPPORTED_READY_STATE_TRAILER}|"
+    rf"\b{_SUPPORTED_READY_FEMININE_OBJECT}\b{_SUPPORTED_READY_STATE_MODIFIERS}"
+    rf"{_SUPPORTED_READY_STATE_NEGATION}\s+готова\b{_SUPPORTED_READY_STATE_TRAILER}|"
+    rf"\b{_SUPPORTED_READY_NEUTER_OBJECT}\b{_SUPPORTED_READY_STATE_MODIFIERS}"
+    rf"{_SUPPORTED_READY_STATE_NEGATION}\s+готово\b{_SUPPORTED_READY_STATE_TRAILER}|"
+    rf"\b{_SUPPORTED_READY_PLURAL_OBJECT}\b{_SUPPORTED_READY_STATE_MODIFIERS}"
+    rf"{_SUPPORTED_READY_STATE_NEGATION}\s+готовы\b{_SUPPORTED_READY_STATE_TRAILER}|"
+    rf"\b(?:pdf|xlsx?|excel|word|docx?|png|jpe?g)[-\s]+версия\b"
+    rf"{_SUPPORTED_READY_STATE_MODIFIERS}\s+готова\b|"
+    rf"\bготов\s+{_SUPPORTED_READY_MASCULINE_OBJECT}\b|"
+    rf"\bготова\s+{_SUPPORTED_READY_FEMININE_OBJECT}\b|"
+    rf"\bготово\s+{_SUPPORTED_READY_NEUTER_OBJECT}\b|"
+    rf"\bготовы\s+{_SUPPORTED_READY_PLURAL_OBJECT}\b|"
+    rf"\bготово\s*[—–:-]\s*{_SUPPORTED_FILE_OBJECT}\b)"
+)
+_SUPPORTED_READY_FILE_REFERENCE = rf"\bготов(?:ый|ая|ое|ые)\s+{_SUPPORTED_FILE_OBJECT}\b"
+_SUPPORTED_FILE_STRONG_CARRIER_SUFFIX = (
+    r"(?:\b(?:он|она|оно|они)?\s*(?:уже\s+|теперь\s+)?"
+    r"(?:доступ\w*|наход\w*|леж\w*|открыва\w*)\b[^.!?\n]{0,24}"
+    r"(?:\b(?:здесь|тут|ниже)\b|\b(?:по|через)\s+ссылк\w*\b|"
+    r"\bв\s+чат\w*\b|\b(?:у|для)\s+(?:тебя|вас)\b)|"
+    r"\b(?:уже|теперь)\s+(?:(?:он|она|оно|они)\s+)?"
+    r"(?:у\s+(?:тебя|вас)|в\s+чат\w*)\b)"
+)
+_SUPPORTED_FILE_WEAK_CARRIER_SUFFIX = (
+    r"(?:\b(?:(?:он|она|оно|они)\s+)?"
+    r"(?:здесь|тут|ниже|в\s+чат\w*|для\s+(?:тебя|вас))\b|"
+    r"\b(?:вот\s+)?ссылк\w*(?:\s+(?:здесь|тут|ниже))?\b|"
+    r"https?://[^\s)\]>]+|\[[^\]\n]{1,120}\]\(https?://[^\s)]+\)|"
+    r"\b(?:держи(?:те)?|забирай(?:те)?|забери(?:те)?)\b"
+    r"[^.!?\n]{0,24}(?:\b(?:по|через)\s+ссылк\w*\b)?)"
+)
 _SUPPORTED_FILE_COMPLETION = re.compile(
     rf"(?:"
+    rf"{_SUPPORTED_FILE_READY_COMPLETION}|"
     rf"\b{_SUPPORTED_FILE_OBJECT}\b[^.!?\n]{{0,256}}"
-    r"\b(?:готов\w*|создан\w*|сделан\w*|сформирован\w*|сгенерирован\w*|"
+    r"\b(?:создан\w*|сделан\w*|сформирован\w*|сгенерирован\w*|"
     r"сохран[её]н\w*|экспортирован\w*|подготовлен\w*|собран\w*|"
     r"прикрепл[её]н\w*|приложен\w*|отправлен\w*|выгружен\w*|загружен\w*|"
     r"во\s+вложени\w*)\b|"
-    r"\b(?:готов\w*|создан\w*|сделан\w*|сформирован\w*|сгенерирован\w*|"
+    r"\b(?:создан\w*|сделан\w*|сформирован\w*|сгенерирован\w*|"
     r"сохран[её]н\w*|экспортирован\w*|подготовлен\w*|собран\w*)\b"
     rf"[^.!?\n]{{0,64}}\b{_SUPPORTED_FILE_OBJECT}\b|"
     r"\b(?:создал\w*|сделал\w*|сформировал\w*|сгенерировал\w*|сохранил\w*|"
@@ -7417,6 +7467,9 @@ _SUPPORTED_FILE_COMPLETION = re.compile(
     rf"{_SUPPORTED_FILE_OBJECT}\b(?=\s*(?:[.!?]|$))|"
     rf"\b{_SUPPORTED_FILE_OBJECT}\b[^.!?\n]{{0,32}}\b(?:уже|теперь)\s+в\s+чат\w*\b|"
     rf"\b{_SUPPORTED_FILE_OBJECT}\b[^.!?\n]{{0,24}}\b(?:наход\w*|леж\w*)\s+в\s+чат\w*\b"
+    rf"|\b{_SUPPORTED_FILE_OBJECT}\b[^.!?\n]{{0,96}}{_SUPPORTED_FILE_STRONG_CARRIER_SUFFIX}"
+    rf"|{_SUPPORTED_READY_FILE_REFERENCE}[^.!?\n]{{0,96}}{_SUPPORTED_FILE_WEAK_CARRIER_SUFFIX}"
+    rf"|{_SUPPORTED_READY_FILE_REFERENCE}\s*[:—–-]\s*(?:скачать|открыть|забрать)\b"
     r")",
     re.IGNORECASE,
 )
@@ -7570,9 +7623,11 @@ _UNCONFIRMED_OBSIDIAN_COMPLETION = re.compile(
     re.IGNORECASE,
 )
 _SUPPORTED_REMINDER_COMPLETION = re.compile(
+    rf"\b(?:напоминание|уведомление)\b{_SUPPORTED_READY_STATE_MODIFIERS}\s+готово\b|"
+    rf"\b(?:напоминания|уведомления)\b{_SUPPORTED_READY_STATE_MODIFIERS}\s+готовы\b|"
     r"\b(?:напоминани\w*|уведомлени\w*)\b[^.!?\n]{0,256}"
     r"\b(?:поставлен\w*|создан\w*|сохран[её]н\w*|установлен\w*|добавлен\w*|"
-    r"запланирован\w*|готов\w*|активирован\w*)\b|"
+    r"запланирован\w*|активирован\w*)\b|"
     r"\b(?:поставил\w*|создал\w*|сохранил\w*|установил\w*|добавил\w*|"
     r"запланировал\w*|зав[её]л\w*|активировал\w*)\b"
     r"[^.!?\n]{0,128}\b(?:напоминани\w*|уведомлени\w*)\b|"
@@ -7590,8 +7645,10 @@ _SUPPORTED_REMINDER_DELIVERY_PROMISE = re.compile(
 )
 _SUPPORTED_VOICE_COMPLETION = re.compile(
     r"(?:"
+    rf"\b(?:голосовое|аудио)\b{_SUPPORTED_READY_STATE_MODIFIERS}\s+готово\b|"
+    rf"\bозвучка\b{_SUPPORTED_READY_STATE_MODIFIERS}\s+готова\b|"
     r"\b(?:голосов\w*|аудио\w*|озвучк\w*)\b[^.!?\n]{0,128}"
-    r"\b(?:готов\w*|создан\w*|озвучен\w*|записан\w*|отправлен\w*|"
+    r"\b(?:создан\w*|озвучен\w*|записан\w*|отправлен\w*|"
     r"прикрепл[её]н\w*|в\s+чат\w*)\b|"
     r"\bозвучил\w*\b[^.!?\n]{0,128}\b(?:ответ\w*|текст\w*|голосов\w*|аудио\w*)\b|"
     r"\b(?:записал\w*|отправил\w*)\b[^.!?\n]{0,128}\b(?:голосов\w*|аудио\w*)\b|"
@@ -8205,6 +8262,9 @@ _READ_ONLY_ATTACHMENT_UNSAFE_DESCRIPTION_SUFFIX = re.compile(
     r"(?:(?:его|е[её]|их)\s+)?можно"
     r"(?:\s+(?:здесь|тут|ниже))?\b|"
     r"\b(?:скачивани|загрузк)\w*\s+(?:доступн\w*|здесь|ниже)\b|"
+    r"\bдоступ\s+к\s+(?:нему|ней|ним|файл\w*|документ\w*)\s+"
+    r"(?:открыт|предоставлен)\w*\b|"
+    r"\bхран\w*\s+в\s+(?:облак|хранилищ|диск)\w*\b|"
     # Predicative carrier state. Requiring a clause boundary/conjunction keeps
     # grounded descriptions like «журнал отправленных писем» read-only.
     r"(?:\bи\s+|[,;:—-]\s*)(?:уже\s+)?"
@@ -8256,7 +8316,7 @@ def _read_only_attachment_passive_file_description(
     source_match = _READ_ONLY_ATTACHMENT_SOURCE_DESCRIPTION.search(
         clause
     ) or _READ_ONLY_ATTACHMENT_READY_SOURCE_DESCRIPTION.search(clause)
-    if not evidence or _SUPPORTED_FILE_COMPLETION.search(clause) is None or source_match is None:
+    if not evidence or source_match is None:
         return False
     if (
         _OUTSIDE_SELF_SUBJECT.search(clause)
@@ -8373,7 +8433,9 @@ def _claims_an_unconfirmed_supported_deed(
 ) -> bool:
     if (
         (passive_source_state or read_only_attachment_review)
-        and _SUPPORTED_FILE_COMPLETION.search(answer)
+        and (
+            _SUPPORTED_FILE_COMPLETION.search(answer) or _PASSIVE_ATTACHMENT_READY_DESCRIPTION.search(answer)
+        )
         and (
             _SUPPORTED_FILE_BARE_HANDOFF.search(answer)
             or _READ_ONLY_ATTACHMENT_CARRIER_CLAIM.search(answer)
