@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import importlib
 import json
 import re
 import secrets
@@ -232,6 +233,32 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
         raise _fail("archive document storage is unavailable") from None
 
 
+def _document_catalog_contract(conn: sqlite3.Connection) -> tuple[bool, int]:
+    """Authenticate the optional schema-41 sidecar without trusting its name.
+
+    Schema 40 does not ship the document-catalog package.  Once schema 41 is
+    present, its fingerprint helper authenticates the complete table contour;
+    absent, partial, or counterfeit objects remain a coverage miss and are
+    never queried.
+    """
+
+    try:
+        schema = importlib.import_module("friday.document_catalog.schema")
+        fingerprint_reader = schema.document_catalog_schema_fingerprint
+        enrichment_revision = schema.DOCUMENT_CATALOG_ENRICHMENT_REVISION
+        fingerprint = fingerprint_reader(conn)
+    except (ImportError, AttributeError, TypeError, RuntimeError, ValueError, sqlite3.Error):
+        return False, 0
+    if (
+        type(enrichment_revision) is not int
+        or enrichment_revision < 1
+        or type(fingerprint) is not str
+        or _SHA256.fullmatch(fingerprint) is None
+    ):
+        return False, 0
+    return True, enrichment_revision
+
+
 def _ensure_archive_search_fold(conn: sqlite3.Connection) -> None:
     """Install the deterministic fold once without re-registering mid-snapshot."""
 
@@ -256,6 +283,35 @@ def _ensure_archive_search_fold(conn: sqlite3.Connection) -> None:
             raise _fail("archive document lexical fold is unavailable") from None
     if row is None or len(row) != 1 or type(row[0]) is not str or row[0] != expected:
         raise _fail("archive document lexical fold is unavailable")
+
+
+def _ensure_archive_catalog_title_validator(conn: sqlite3.Connection) -> None:
+    title_probes = ("Archive title", "unsafe\tarchive title")
+    try:
+        cursor = conn.execute(
+            "SELECT friday_archive_catalog_title_valid(?), friday_archive_catalog_title_valid(?)",
+            title_probes,
+        )
+        title_row = cursor.fetchone()
+        cursor.close()
+    except sqlite3.Error:
+        try:
+            conn.create_function(
+                "friday_archive_catalog_title_valid",
+                1,
+                _archive_catalog_title_valid,
+                deterministic=True,
+            )
+            cursor = conn.execute(
+                "SELECT friday_archive_catalog_title_valid(?), friday_archive_catalog_title_valid(?)",
+                title_probes,
+            )
+            title_row = cursor.fetchone()
+            cursor.close()
+        except sqlite3.Error:
+            raise _fail("archive document catalog title validation is unavailable") from None
+    if title_row is None or tuple(title_row) != (1, 0):
+        raise _fail("archive document catalog title validation is unavailable")
 
 
 def _authority_is_active(
@@ -359,6 +415,12 @@ def _archive_search_fold(value: object) -> str:
     )
 
 
+def _archive_catalog_title_valid(value: object) -> int:
+    if type(value) is not str:
+        return 0
+    return int(not any(unicodedata.category(character).startswith("C") for character in value))
+
+
 def _scope_suffix(
     request: ArchiveSearchRequest,
     corpus: ArchiveSearchCorpus,
@@ -435,6 +497,7 @@ def _page_seal_material(page: ArchiveDocumentLanePage) -> bytes:
         "authority_rechecked": page.authority_rechecked,
         "available": page.available,
         "binding": page._execution_handle,
+        "catalog_projection_current": page.catalog_projection_current,
         "candidates": candidate_digests,
         "corpus": page.corpus.value,
         "derivative_current": page.derivative_current,
@@ -463,6 +526,7 @@ class ArchiveDocumentLanePage:
     has_more: bool
     available: bool
     derivative_current: bool | None
+    catalog_projection_current: bool | None
     authority_scope_complete: bool
     authority_rechecked: bool
     snapshot_current: bool
@@ -504,12 +568,24 @@ class ArchiveDocumentLanePage:
             or type(self.authority_rechecked) is not bool
             or type(self.snapshot_current) is not bool
             or (self.derivative_current is not None and type(self.derivative_current) is not bool)
+            or (
+                self.catalog_projection_current is not None
+                and type(self.catalog_projection_current) is not bool
+            )
         ):
             raise _fail("archive document page is inconsistent")
         if self.lane is SearchLane.CATALOG and self.derivative_current is not None:
             raise _fail("archive catalog page cannot claim derivative health")
         if self.lane is SearchLane.LEXICAL and type(self.derivative_current) is not bool:
             raise _fail("archive lexical page requires derivative health")
+        document_catalog_page = (
+            self.corpus is ArchiveSearchCorpus.DOCUMENTS and self.lane is SearchLane.CATALOG
+        )
+        if self.available and document_catalog_page:
+            if type(self.catalog_projection_current) is not bool:
+                raise _fail("archive document catalog projection health is invalid")
+        elif self.catalog_projection_current is not None:
+            raise _fail("archive document catalog projection health is invalid")
         if not self.available and (
             self.total is not None or self.examined or self.matched or self.returned or self.has_more
         ):
@@ -617,6 +693,7 @@ class ArchiveDocumentLanePage:
                 not self.authority_scope_complete
                 or (self.total is not None and self.examined < self.total)
                 or (self.lane is SearchLane.LEXICAL and self.derivative_current is not True)
+                or self.catalog_projection_current is False
             ):
                 incomplete.add(CoverageState.BACKFILL_PENDING)
             if self.has_more:
@@ -653,6 +730,7 @@ def _new_page(
     has_more: bool,
     available: bool,
     derivative_current: bool | None,
+    catalog_projection_current: bool | None,
     authority_scope_complete: bool,
     authority_rechecked: bool,
     snapshot_current: bool,
@@ -689,6 +767,7 @@ def _new_page(
         ("has_more", has_more),
         ("available", available),
         ("derivative_current", derivative_current),
+        ("catalog_projection_current", catalog_projection_current),
         ("authority_scope_complete", authority_scope_complete),
         ("authority_rechecked", authority_rechecked),
         ("snapshot_current", snapshot_current),
@@ -732,6 +811,7 @@ def _unavailable_page(
         has_more=False,
         available=False,
         derivative_current=False if lane is SearchLane.LEXICAL else None,
+        catalog_projection_current=None,
         authority_scope_complete=False,
         authority_rechecked=authority_rechecked,
         snapshot_current=snapshot_current,
@@ -1159,6 +1239,114 @@ def _title_expression(alias: str = "s") -> str:
         THEN {alias}.knowledge_title ELSE '' END"""
 
 
+def _document_catalog_title_expression(alias: str = "dc") -> str:
+    return f"""CASE
+        WHEN typeof({alias}.semantic_title)='text'
+         AND length({alias}.semantic_title) BETWEEN 1 AND 240
+         AND length(CAST({alias}.semantic_title AS BLOB))<=1024
+         AND trim({alias}.semantic_title)={alias}.semantic_title
+         AND instr({alias}.semantic_title,char(0))=0
+         AND instr({alias}.semantic_title,char(10))=0
+         AND instr({alias}.semantic_title,char(13))=0
+         AND friday_archive_catalog_title_valid({alias}.semantic_title)=1
+        THEN {alias}.semantic_title ELSE '' END"""
+
+
+def _document_catalog_utc_sql(expression: str) -> str:
+    """Recognize the schema-41 second-precision ``...Z`` timestamp."""
+
+    return f"""(
+        typeof({expression})='text'
+        AND length({expression})=20
+        AND substr({expression},5,1)='-'
+        AND substr({expression},8,1)='-'
+        AND substr({expression},11,1)='T'
+        AND substr({expression},14,1)=':'
+        AND substr({expression},17,1)=':'
+        AND substr({expression},20,1)='Z'
+        AND substr({expression},1,4) NOT GLOB '*[^0-9]*'
+        AND substr({expression},6,2) NOT GLOB '*[^0-9]*'
+        AND substr({expression},9,2) NOT GLOB '*[^0-9]*'
+        AND substr({expression},12,2) NOT GLOB '*[^0-9]*'
+        AND substr({expression},15,2) NOT GLOB '*[^0-9]*'
+        AND substr({expression},18,2) NOT GLOB '*[^0-9]*'
+        AND date(substr({expression},1,10))=substr({expression},1,10)
+        AND CAST(substr({expression},12,2) AS INTEGER) BETWEEN 0 AND 23
+        AND CAST(substr({expression},15,2) AS INTEGER) BETWEEN 0 AND 59
+        AND CAST(substr({expression},18,2) AS INTEGER) BETWEEN 0 AND 59
+        AND strftime('%Y-%m-%dT%H:%M:%SZ',{expression})={expression}
+    )"""
+
+
+def _document_catalog_current_expression(
+    alias: str = "dc",
+    *,
+    enrichment_revision: int,
+) -> str:
+    semantic_title = _document_catalog_title_expression(alias)
+    enriched_at = _document_catalog_utc_sql(f"{alias}.enriched_at")
+    return f"""(
+        {alias}.raw_object_id IS NOT NULL
+        AND typeof({alias}.source_version)='integer'
+        AND {alias}.source_version>=1
+        AND typeof({alias}.source_content_sha256)='text'
+        AND length({alias}.source_content_sha256)=64
+        AND {alias}.source_content_sha256 NOT GLOB '*[^0-9a-f]*'
+        AND typeof({alias}.extracted_text_sha256)='text'
+        AND length({alias}.extracted_text_sha256)=64
+        AND {alias}.extracted_text_sha256 NOT GLOB '*[^0-9a-f]*'
+        AND ({alias}.semantic_title IS NULL OR {semantic_title}<>'')
+        AND {alias}.title_authority='navigation_only'
+        AND typeof({alias}.enrichment_revision)='integer'
+        AND {alias}.enrichment_revision={enrichment_revision}
+        AND {alias}.enrichment_status='current'
+        AND {alias}.incomplete_reason IS NULL
+        AND {enriched_at}
+    )"""
+
+
+def _catalog_projection_cte(
+    corpus: ArchiveSearchCorpus,
+    *,
+    document_catalog_available: bool,
+    enrichment_revision: int,
+) -> str:
+    if corpus is not ArchiveSearchCorpus.DOCUMENTS:
+        return """catalog_projection_sources AS MATERIALIZED (
+            SELECT s.*, 1 AS catalog_projection_current,
+                   '' AS catalog_semantic_title
+              FROM authorized_sources s
+        )"""
+    if not document_catalog_available:
+        return """catalog_projection_sources AS MATERIALIZED (
+            SELECT s.*, 0 AS catalog_projection_current,
+                   '' AS catalog_semantic_title
+              FROM authorized_sources s
+        )"""
+    current = _document_catalog_current_expression(
+        "dc",
+        enrichment_revision=enrichment_revision,
+    )
+    semantic_title = _document_catalog_title_expression("dc")
+    return f"""document_catalog_joined AS MATERIALIZED (
+        SELECT s.*,
+               CASE WHEN {current} THEN 1 ELSE 0 END AS catalog_projection_current,
+               {semantic_title} AS catalog_semantic_title_candidate
+          FROM authorized_sources s
+          LEFT JOIN document_catalog dc
+            ON dc.raw_object_id=s.raw_id
+           AND dc.source_version=s.raw_version
+           AND dc.source_content_sha256=s.content_hash
+    ),
+    catalog_projection_sources AS MATERIALIZED (
+        SELECT j.*,
+               CASE WHEN j.catalog_projection_current=1
+                    THEN j.catalog_semantic_title_candidate ELSE '' END
+                   AS catalog_semantic_title
+          FROM document_catalog_joined j
+    )"""
+
+
 def _like_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
 
@@ -1363,13 +1551,22 @@ def _catalog_sql(
     corpus: ArchiveSearchCorpus,
     request: ArchiveSearchRequest,
     owner_id: str,
+    *,
+    document_catalog_available: bool,
+    enrichment_revision: int,
 ) -> tuple[str, tuple[object, ...]]:
     source_cte, scope_parameters = _source_cte(corpus, request, include_body=False)
+    catalog_projection_cte = _catalog_projection_cte(
+        corpus,
+        document_catalog_available=document_catalog_available,
+        enrichment_revision=enrichment_revision,
+    )
     source_id = "c.raw_id"
     filename = _filename_expression("s")
     title = _title_expression("s")
     folded_filename = "friday_archive_fold(c.filename)"
     folded_title = "friday_archive_fold(c.title)"
+    folded_semantic_title = "friday_archive_fold(c.catalog_semantic_title)"
     folded_alias = "friday_archive_fold(a.supplied_filename)"
     folded_exact = "friday_archive_fold(n.exact)"
     folded_like = "friday_archive_fold(n.pattern)"
@@ -1377,6 +1574,7 @@ def _catalog_sql(
         SELECT 1 FROM needles n
          WHERE {folded_filename}={folded_exact}
             OR {folded_title}={folded_exact}
+            OR {folded_semantic_title}={folded_exact}
             OR EXISTS (SELECT 1 FROM authorized_aliases a
                         WHERE a.raw_object_id=c.raw_id AND {folded_alias}={folded_exact})
     )"""
@@ -1384,6 +1582,7 @@ def _catalog_sql(
         SELECT 1 FROM needles n
          WHERE {folded_filename} LIKE {folded_like}||'%' ESCAPE '\\'
             OR {folded_title} LIKE {folded_like}||'%' ESCAPE '\\'
+            OR {folded_semantic_title} LIKE {folded_like}||'%' ESCAPE '\\'
             OR EXISTS (SELECT 1 FROM authorized_aliases a
                         WHERE a.raw_object_id=c.raw_id
                           AND {folded_alias} LIKE {folded_like}||'%' ESCAPE '\\')
@@ -1392,6 +1591,7 @@ def _catalog_sql(
         SELECT 1 FROM needles n
          WHERE {folded_filename} LIKE '%'||{folded_like}||'%' ESCAPE '\\'
             OR {folded_title} LIKE '%'||{folded_like}||'%' ESCAPE '\\'
+            OR {folded_semantic_title} LIKE '%'||{folded_like}||'%' ESCAPE '\\'
             OR EXISTS (SELECT 1 FROM authorized_aliases a
                         WHERE a.raw_object_id=c.raw_id
                           AND {folded_alias} LIKE '%'||{folded_like}||'%' ESCAPE '\\')
@@ -1402,6 +1602,7 @@ def _catalog_sql(
         else ""
     )
     sql = f"""WITH {source_cte},
+        {catalog_projection_cte},
         needles AS MATERIALIZED (
             SELECT json_extract(value,'$.exact') AS exact,
                    json_extract(value,'$.like') AS pattern
@@ -1412,7 +1613,8 @@ def _catalog_sql(
         authorized_aliases AS MATERIALIZED (
             SELECT a.raw_object_id, a.supplied_filename
               FROM file_source_aliases a
-              JOIN authorized_sources s ON s.raw_id=a.raw_object_id AND s.user_id=a.user_id
+              JOIN catalog_projection_sources s
+                ON s.raw_id=a.raw_object_id AND s.user_id=a.user_id
              WHERE a.uploaded_by=?
                AND length(a.supplied_filename) BETWEEN 1 AND 260
                AND trim(a.supplied_filename)=a.supplied_filename
@@ -1441,13 +1643,14 @@ def _catalog_sql(
                                   a.supplied_filename ASC LIMIT 1), ''
                    ) AS display_filename,
                    COALESCE(
+                       NULLIF(s.catalog_semantic_title,''),
                        NULLIF({title},''), NULLIF({filename},''),
                        (SELECT a.supplied_filename FROM authorized_aliases a
                          WHERE a.raw_object_id=s.raw_id
                          ORDER BY friday_archive_fold(a.supplied_filename) ASC,
                                   a.supplied_filename ASC LIMIT 1), ''
                    ) AS display_text
-              FROM authorized_sources s
+              FROM catalog_projection_sources s
         ),
         matched_sources AS MATERIALIZED (
             SELECT c.*, {source_id} AS source_id,
@@ -1468,7 +1671,7 @@ def _catalog_sql(
                   FROM matched_sources m
             ) WHERE source_choice=1
         ),
-        indexed_sources AS MATERIALIZED (SELECT * FROM authorized_sources),
+        indexed_sources AS MATERIALIZED (SELECT * FROM catalog_projection_sources),
         ranked AS MATERIALIZED (
             SELECT m.*,
                    ROW_NUMBER() OVER (
@@ -1478,7 +1681,8 @@ def _catalog_sql(
               FROM source_choices m
         ),
         derivative_mismatches(value) AS MATERIALIZED (
-            SELECT 0
+            SELECT COUNT(*) FROM catalog_projection_sources
+             WHERE catalog_projection_current<>1
         ),
         page AS MATERIALIZED (
             SELECT * FROM ranked
@@ -1782,7 +1986,9 @@ def _candidate(
         evidence_authority=evidence_authority,
         lifecycle_state=lifecycle_state,
         matches=(ArchiveMatchRank(_MATCH_CHANNEL[lane], lane_rank),),
-        title=_safe_display(row.get("title") or row.get("knowledge_title")),
+        title=_safe_display(
+            row.get("catalog_semantic_title") or row.get("title") or row.get("knowledge_title")
+        ),
         filename=_safe_display(
             row.get("matching_alias") or row.get("filename") or row.get("display_filename")
         ),
@@ -2016,6 +2222,15 @@ def search_archive_document_lane(
             authority_rechecked=True,
         )
 
+    document_catalog_available = False
+    document_catalog_enrichment_revision = 0
+    if corpus is ArchiveSearchCorpus.DOCUMENTS and lane is SearchLane.CATALOG:
+        (
+            document_catalog_available,
+            document_catalog_enrichment_revision,
+        ) = _document_catalog_contract(conn)
+        if document_catalog_available:
+            _ensure_archive_catalog_title_validator(conn)
     if lane is SearchLane.LEXICAL:
         terms = _fts_terms(request.query)
         if not terms:
@@ -2040,7 +2255,13 @@ def search_archive_document_lane(
         )
     else:
         derivative_available = False
-        sql, lane_parameters = _catalog_sql(corpus, request, owner)
+        sql, lane_parameters = _catalog_sql(
+            corpus,
+            request,
+            owner,
+            document_catalog_available=document_catalog_available,
+            enrichment_revision=document_catalog_enrichment_revision,
+        )
 
     parameters = (
         *_authority_parameters(tenant, owner),
@@ -2101,6 +2322,11 @@ def search_archive_document_lane(
         available=True,
         derivative_current=(
             derivative_available and derivative_mismatches == 0 if lane is SearchLane.LEXICAL else None
+        ),
+        catalog_projection_current=(
+            document_catalog_available and derivative_mismatches == 0
+            if corpus is ArchiveSearchCorpus.DOCUMENTS and lane is SearchLane.CATALOG
+            else None
         ),
         authority_scope_complete=scope_complete,
         authority_rechecked=True,

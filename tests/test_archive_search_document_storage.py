@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+import friday.storage._archive_search_documents as archive_document_storage
 from friday.retrieval.archive_search_contract import (
     ArchiveEvidenceAuthority,
     ArchiveLifecycleConstraint,
@@ -68,10 +69,19 @@ def _seed(
     knowledge_title: str = "",
     knowledge_lifecycle: str = "active",
     content_hash: str | None = None,
+    text_extraction_success: bool | None = None,
 ) -> tuple[str, str | None]:
     storage.ensure_user(tenant)
     storage.ensure_user(owner)
     raw_id = _opaque("raw", number)
+    metadata: dict[str, object] = {
+        "filename": filename or f"document-{number}.pdf",
+        "mime_type": "application/pdf",
+        "media_kind": "document",
+        "uploaded_by": owner,
+    }
+    if text_extraction_success is not None:
+        metadata["text_extraction_success"] = text_extraction_success
     raw = RawObject(
         id=raw_id,
         user_id=tenant,
@@ -79,12 +89,7 @@ def _seed(
         source_ref=f"telegram-file:{number}",
         raw_content=body,
         content_type="file",
-        metadata_json={
-            "filename": filename or f"document-{number}.pdf",
-            "mime_type": "application/pdf",
-            "media_kind": "document",
-            "uploaded_by": owner,
-        },
+        metadata_json=metadata,
         content_hash=(
             hashlib.sha256(f"source-bytes-{number}".encode()).hexdigest()
             if content_hash is None
@@ -239,6 +244,111 @@ def _coverage(
         request=request,
         snapshot_discriminator=snapshot,
     )
+
+
+def _install_test_document_catalog(storage: Any) -> None:
+    """Install the future sidecar shape without changing production schema code."""
+
+    with storage.transaction() as conn:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS document_catalog(
+                   raw_object_id TEXT NOT NULL PRIMARY KEY
+                       REFERENCES raw_objects(id) ON DELETE CASCADE,
+                   source_version INTEGER,
+                   source_content_sha256 TEXT,
+                   extracted_text_sha256 TEXT,
+                   semantic_title TEXT,
+                   title_authority TEXT NOT NULL DEFAULT 'navigation_only',
+                   enrichment_revision INTEGER NOT NULL DEFAULT 1,
+                   enrichment_status TEXT NOT NULL,
+                   incomplete_reason TEXT,
+                   enriched_at TEXT NOT NULL
+               )"""
+        )
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS idx_document_catalog_status
+                 ON document_catalog(enrichment_status,raw_object_id)"""
+        )
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS idx_document_catalog_reason
+                 ON document_catalog(incomplete_reason,raw_object_id)
+              WHERE enrichment_status='incomplete'"""
+        )
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS idx_document_catalog_text
+                 ON document_catalog(extracted_text_sha256,raw_object_id)
+              WHERE enrichment_status='current'"""
+        )
+
+
+def _replace_with_loose_test_document_catalog(storage: Any) -> None:
+    """Explicitly bypass schema guards for impossible stale-row defense tests."""
+
+    with storage.transaction() as conn:
+        conn.execute("DROP TABLE IF EXISTS document_catalog")
+    _install_test_document_catalog(storage)
+
+
+def _delete_test_document_catalog_row(storage: Any, raw_id: str) -> None:
+    with storage.transaction() as conn:
+        conn.execute("DELETE FROM document_catalog WHERE raw_object_id=?", (raw_id,))
+
+
+def _store_test_document_catalog_row(
+    storage: Any,
+    raw_id: str,
+    *,
+    semantic_title: str | None,
+    status: str = "current",
+    stale_version: bool = False,
+    stale_hash: bool = False,
+) -> None:
+    raw = storage.conn.execute(
+        "SELECT version,content_hash,raw_content FROM raw_objects WHERE id=?",
+        (raw_id,),
+    ).fetchone()
+    assert raw is not None
+    source_version = int(raw[0]) + (1 if stale_version else 0)
+    source_hash = "0" * 64 if stale_hash else str(raw[1])
+    extracted_text_hash = hashlib.sha256(str(raw[2]).encode()).hexdigest()
+    incomplete = status == "incomplete"
+    with storage.transaction() as conn:
+        existing = conn.execute(
+            """SELECT enrichment_status,semantic_title
+                 FROM document_catalog WHERE raw_object_id=?""",
+            (raw_id,),
+        ).fetchone()
+        if existing is not None and not stale_version and not stale_hash:
+            if incomplete:
+                conn.execute(
+                    """UPDATE document_catalog
+                          SET extracted_text_sha256=NULL, semantic_title=NULL,
+                              enrichment_status='incomplete',
+                              incomplete_reason='backfill_pending', enriched_at=?
+                        WHERE raw_object_id=?""",
+                    ("2026-08-25T09:00:00Z", raw_id),
+                )
+                return
+            assert tuple(existing) == ("current", semantic_title)
+            return
+        assert existing is None
+        conn.execute(
+            """INSERT INTO document_catalog(
+                   raw_object_id,source_version,source_content_sha256,
+                   extracted_text_sha256,semantic_title,title_authority,
+                   enrichment_revision,enrichment_status,incomplete_reason,enriched_at
+               ) VALUES(?,?,?,?,?,'navigation_only',1,?,?,?)""",
+            (
+                raw_id,
+                source_version,
+                source_hash,
+                None if incomplete else extracted_text_hash,
+                None if incomplete else semantic_title,
+                status,
+                "backfill_pending" if incomplete else None,
+                "2026-08-25T09:00:00Z",
+            ),
+        )
 
 
 def test_lexical_lanes_authorize_before_counts_and_return_exact_revision_passages(storage) -> None:
@@ -474,10 +584,344 @@ def test_catalog_navigation_is_body_free_stably_ordered_and_honestly_capped(stor
     assert set(source_ids) <= {raw_exact, raw_prefix, raw_substring, raw_alias}
 
     coverage = _coverage(first, request)
-    assert coverage.states == (CoverageState.CAPPED, CoverageState.PARTIAL)
+    assert coverage.states == (
+        CoverageState.BACKFILL_PENDING,
+        CoverageState.CAPPED,
+        CoverageState.PARTIAL,
+    )
     assert coverage.eligible_authorized == coverage.examined == 4
     assert coverage.matched_at_least == 4 and coverage.returned == 2
     assert coverage.next_cursor_available is False
+
+
+def test_current_exact_semantic_title_is_body_free_navigation_not_evidence(
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_id, _ = _seed(
+        storage,
+        24,
+        filename="opaque-24.bin",
+        body="# Quarterly Solstice Ledger\nAuthoritative raw body phrase 5521",
+        inbox_status=InboxStatus.CLASSIFIED,
+        text_extraction_success=True,
+    )
+    _install_test_document_catalog(storage)
+    _store_test_document_catalog_row(
+        storage,
+        raw_id,
+        semantic_title="Quarterly Solstice Ledger",
+    )
+    monkeypatch.setattr(
+        archive_document_storage,
+        "_document_catalog_contract",
+        lambda _conn: (True, 1),
+    )
+    catalog_request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Quarterly Solstice Ledger",
+    )
+    reads: list[tuple[str, str]] = []
+
+    def authorizer(
+        action: int,
+        table: str | None,
+        column: str | None,
+        _database: str | None,
+        _trigger: str | None,
+    ) -> int:
+        if action == sqlite3.SQLITE_READ and table is not None and column is not None:
+            reads.append((table, column))
+        return sqlite3.SQLITE_OK
+
+    storage.conn.set_authorizer(authorizer)
+    try:
+        catalog = _search(
+            storage,
+            request=catalog_request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.CATALOG,
+        )
+    finally:
+        storage.conn.set_authorizer(None)
+
+    assert (catalog.total, catalog.examined, catalog.matched, catalog.returned) == (1, 1, 1, 1)
+    assert catalog.catalog_projection_current is True
+    candidate = catalog.candidates[0]
+    assert candidate.title == "Quarterly Solstice Ledger"
+    assert candidate.evidence_authority is ArchiveEvidenceAuthority.NAVIGATION_ONLY
+    assert candidate.navigation_only is True
+    assert candidate.passages == ()
+    assert _coverage(catalog, catalog_request).states == (CoverageState.COMPLETE,)
+    assert ("document_catalog", "semantic_title") in reads
+    assert ("raw_objects", "raw_content") not in reads
+    assert ("knowledge_objects", "content") not in reads
+
+    reads.clear()
+    storage.conn.set_authorizer(authorizer)
+    try:
+        semantic_lexical = _search(
+            storage,
+            request=catalog_request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.LEXICAL,
+        )
+    finally:
+        storage.conn.set_authorizer(None)
+    assert semantic_lexical.matched == semantic_lexical.returned == 1
+    assert semantic_lexical.candidates[0].evidence_authority is ArchiveEvidenceAuthority.CANONICAL
+    assert semantic_lexical.candidates[0].passages
+    assert not any(table == "document_catalog" for table, _column in reads)
+
+    body_request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Authoritative raw body phrase 5521",
+    )
+    body_hit = _search(
+        storage,
+        request=body_request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.LEXICAL,
+    ).candidates[0]
+    assert body_hit.evidence_authority is ArchiveEvidenceAuthority.CANONICAL
+    assert "Authoritative raw body phrase 5521" in body_hit.passages[0].excerpt
+
+
+@pytest.mark.parametrize(
+    "projection_state",
+    ["missing", "stale_version", "stale_hash", "incomplete", "invalid_title"],
+)
+def test_noncurrent_document_catalog_projection_is_distinct_backfill_coverage(
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+    projection_state: str,
+) -> None:
+    raw_id, _ = _seed(
+        storage,
+        25,
+        filename="opaque-25.bin",
+        body="# Projected private navigation label\nUnrelated authoritative body",
+        inbox_status=InboxStatus.CLASSIFIED,
+        text_extraction_success=True,
+    )
+    _install_test_document_catalog(storage)
+    if projection_state == "missing":
+        _delete_test_document_catalog_row(storage, raw_id)
+    else:
+        if projection_state in {"stale_version", "stale_hash", "invalid_title"}:
+            _replace_with_loose_test_document_catalog(storage)
+        _store_test_document_catalog_row(
+            storage,
+            raw_id,
+            semantic_title=(
+                "Projected private navigation label\t"
+                if projection_state == "invalid_title"
+                else "Projected private navigation label"
+            ),
+            status="incomplete" if projection_state == "incomplete" else "current",
+            stale_version=projection_state == "stale_version",
+            stale_hash=projection_state == "stale_hash",
+        )
+    monkeypatch.setattr(
+        archive_document_storage,
+        "_document_catalog_contract",
+        lambda _conn: (True, 1),
+    )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Projected private navigation label",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.CATALOG,
+    )
+    coverage = _coverage(page, request)
+
+    assert (page.total, page.examined, page.matched, page.returned) == (1, 1, 0, 0)
+    assert page.authority_scope_complete is True
+    assert page.catalog_projection_current is False
+    assert coverage.eligible_authorized == 1
+    assert coverage.states == (CoverageState.BACKFILL_PENDING, CoverageState.PARTIAL)
+    assert coverage.absence_decision().value == "not_established"
+
+
+@pytest.mark.parametrize("schema_state", ["missing", "counterfeit"])
+def test_missing_or_counterfeit_catalog_schema_keeps_raw_navigation_but_not_absence_authority(
+    storage,
+    schema_state: str,
+) -> None:
+    raw_id, _ = _seed(
+        storage,
+        26,
+        filename="authoritative-filename-26.pdf",
+        body="Authoritative body 26",
+        inbox_status=InboxStatus.CLASSIFIED,
+    )
+    with storage.transaction() as conn:
+        conn.execute("DROP TABLE IF EXISTS document_catalog")
+        if schema_state == "counterfeit":
+            conn.execute("CREATE TABLE document_catalog(opaque_future_shape TEXT)")
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="authoritative-filename-26.pdf",
+    )
+    reads: list[tuple[str, str]] = []
+
+    def authorizer(
+        action: int,
+        table: str | None,
+        column: str | None,
+        _database: str | None,
+        _trigger: str | None,
+    ) -> int:
+        if action == sqlite3.SQLITE_READ and table is not None and column is not None:
+            reads.append((table, column))
+        return sqlite3.SQLITE_OK
+
+    storage.conn.set_authorizer(authorizer)
+    try:
+        page = _search(
+            storage,
+            request=request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.CATALOG,
+        )
+    finally:
+        storage.conn.set_authorizer(None)
+    coverage = _coverage(page, request)
+
+    assert page.candidates[0].resolved_source.source_ref.canonical_object_id == raw_id
+    assert page.authority_scope_complete is True
+    assert page.catalog_projection_current is False
+    assert coverage.states == (CoverageState.BACKFILL_PENDING, CoverageState.PARTIAL)
+    assert coverage.absence_decision().value == "evidence_found"
+    assert not any(table == "document_catalog" for table, _column in reads)
+
+    absent_request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="not present in authoritative filename",
+    )
+    absent = _search(
+        storage,
+        request=absent_request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.CATALOG,
+    )
+    assert absent.matched == absent.returned == 0
+    assert _coverage(absent, absent_request).absence_decision().value == "not_established"
+
+
+def test_catalog_projection_join_is_authorized_first_indexed_and_bounded(
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_id, _ = _seed(
+        storage,
+        27,
+        filename="bounded-27.pdf",
+        body="# Bounded catalog title\nBounded body",
+        inbox_status=InboxStatus.CLASSIFIED,
+        text_extraction_success=True,
+    )
+    _install_test_document_catalog(storage)
+    _store_test_document_catalog_row(storage, raw_id, semantic_title="Bounded catalog title")
+    monkeypatch.setattr(
+        archive_document_storage,
+        "_document_catalog_contract",
+        lambda _conn: (True, 1),
+    )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Bounded catalog title",
+        limit=2,
+    )
+    statements: list[str] = []
+    storage.conn.set_trace_callback(statements.append)
+    try:
+        page = _search(
+            storage,
+            request=request,
+            corpus=ArchiveSearchCorpus.DOCUMENTS,
+            lane=SearchLane.CATALOG,
+        )
+    finally:
+        storage.conn.set_trace_callback(None)
+    query = next(item for item in statements if "document_catalog_joined AS MATERIALIZED" in item)
+    plan = tuple(str(row[3]) for row in storage.conn.execute("EXPLAIN QUERY PLAN " + query).fetchall())
+
+    assert page.returned == 1
+    assert query.index("authorized_sources AS MATERIALIZED") < query.index(
+        "document_catalog_joined AS MATERIALIZED"
+    )
+    assert query.index("document_catalog_joined AS MATERIALIZED") < query.index(
+        "LEFT JOIN document_catalog dc"
+    )
+    assert "LIMIT 3" in query
+    assert any("SEARCH dc USING INDEX" in detail and "raw_object_id=?" in detail for detail in plan), plan
+    assert not any("SCAN dc" in detail for detail in plan), plan
+
+
+def test_foreign_and_ignored_catalog_rows_cannot_match_or_degrade_owner_scope(
+    storage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    visible_id, _ = _seed(
+        storage,
+        28,
+        filename="visible-owner.pdf",
+        body="# Visible owner title\nVisible owner body",
+        inbox_status=InboxStatus.CLASSIFIED,
+        text_extraction_success=True,
+    )
+    foreign_id, _ = _seed(
+        storage,
+        29,
+        tenant=TENANT,
+        owner=OTHER_OWNER,
+        filename="foreign-owner.pdf",
+        body="# Foreign projected secret 7721\nForeign owner body",
+        inbox_status=InboxStatus.CLASSIFIED,
+        text_extraction_success=True,
+    )
+    _seed(
+        storage,
+        30,
+        filename="ignored-owner.pdf",
+        body="Ignored owner body",
+        inbox_status=InboxStatus.IGNORED,
+    )
+    _install_test_document_catalog(storage)
+    _store_test_document_catalog_row(storage, visible_id, semantic_title="Visible owner title")
+    _store_test_document_catalog_row(
+        storage,
+        foreign_id,
+        semantic_title="Foreign projected secret 7721",
+    )
+    monkeypatch.setattr(
+        archive_document_storage,
+        "_document_catalog_contract",
+        lambda _conn: (True, 1),
+    )
+    request = _request(
+        corpora=(ArchiveSearchCorpus.DOCUMENTS,),
+        query="Foreign projected secret 7721",
+    )
+
+    page = _search(
+        storage,
+        request=request,
+        corpus=ArchiveSearchCorpus.DOCUMENTS,
+        lane=SearchLane.CATALOG,
+    )
+    coverage = _coverage(page, request)
+
+    assert (page.total, page.examined, page.matched, page.returned) == (1, 1, 0, 0)
+    assert page.catalog_projection_current is True
+    assert coverage.states == (CoverageState.COMPLETE,)
+    assert coverage.absence_decision().value == "authorized_absence_confirmed"
 
 
 def test_internal_document_materialization_can_exceed_public_request_limit(storage) -> None:
@@ -1602,8 +2046,9 @@ def test_foreign_principal_catalog_corruption_does_not_degrade_owner_coverage(st
     coverage = _coverage(page, request)
     assert (page.total, page.examined, page.matched, page.returned) == (1, 1, 0, 0)
     assert page.authority_scope_complete is True
-    assert coverage.states == (CoverageState.COMPLETE,)
-    assert coverage.absence_decision().value == "authorized_absence_confirmed"
+    assert page.catalog_projection_current is False
+    assert coverage.states == (CoverageState.BACKFILL_PENDING, CoverageState.PARTIAL)
+    assert coverage.absence_decision().value == "not_established"
 
 
 def test_invalid_revision_and_private_factory_fail_closed_without_body_or_identifiers(storage) -> None:
