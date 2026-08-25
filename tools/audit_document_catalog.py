@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -111,18 +112,6 @@ FUTURE_TABLES = {
     "enrichment_revision": ("document_catalog",),
 }
 
-DOCUMENT_CATALOG_COLUMNS = (
-    "raw_object_id",
-    "source_version",
-    "source_content_sha256",
-    "extracted_text_sha256",
-    "semantic_title",
-    "title_authority",
-    "enrichment_revision",
-    "enrichment_status",
-    "incomplete_reason",
-    "enriched_at",
-)
 CURRENT_ENRICHMENT_REVISION = 1
 
 
@@ -218,35 +207,18 @@ def _schema_hash(conn: sqlite3.Connection, names: tuple[str, ...]) -> str | None
     return _sha256(_canonical_json(definitions)) if definitions else None
 
 
-def _exact_document_catalog_available(conn: sqlite3.Connection) -> bool:
-    """Accept the shipped body-free shape, never a same-named approximation."""
+def _document_catalog_schema_fingerprint(conn: sqlite3.Connection) -> str | None:
+    """Delegate exact recognition to the shipped schema-41 validator."""
 
-    sql = _table_sql(conn, "document_catalog")
-    if sql is None:
-        return False
-    rows = conn.execute("PRAGMA table_xinfo('document_catalog')").fetchall()
-    if tuple(str(row[1]) for row in rows) != DOCUMENT_CATALOG_COLUMNS:
-        return False
-    by_name = {str(row[1]): row for row in rows}
-    if int(by_name["raw_object_id"][5]) != 1:
-        return False
-    nullable = {"extracted_text_sha256", "semantic_title", "incomplete_reason"}
-    if any(int(by_name[name][3]) != int(name not in nullable) for name in DOCUMENT_CATALOG_COLUMNS):
-        return False
-    normalized = " ".join(sql.casefold().split())
-    required_fragments = (
-        "title_authority",
-        "navigation_only",
-        "enrichment_status",
-        "current",
-        "incomplete",
-        "incomplete_reason",
-        "raw_objects",
-    )
-    has_raw_reference = "references raw_objects" in normalized or (
-        "foreign key" in normalized and "raw_objects" in normalized
-    )
-    return has_raw_reference and all(fragment in normalized for fragment in required_fragments)
+    try:
+        schema_module = importlib.import_module("friday.document_catalog.schema")
+    except ImportError:
+        return None
+    try:
+        digest = schema_module.document_catalog_schema_fingerprint(conn)
+    except (RuntimeError, ValueError, sqlite3.Error):
+        return None
+    return str(digest) if HEX64.fullmatch(str(digest)) else None
 
 
 def _required_schema(conn: sqlite3.Connection) -> int:
@@ -291,7 +263,8 @@ def _projection_report(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
             ),
         },
     }
-    catalog_exact = _exact_document_catalog_available(conn)
+    catalog_fingerprint = _document_catalog_schema_fingerprint(conn)
+    catalog_exact = catalog_fingerprint is not None
     for name, tables in FUTURE_TABLES.items():
         present = any(_table_sql(conn, table) is not None for table in tables)
         implemented = catalog_exact and name in {
@@ -313,7 +286,13 @@ def _projection_report(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
         )
         projections[name] = {
             "status": status,
-            "revision_sha256": _schema_hash(conn, tables) if status != "not_available" else None,
+            "revision_sha256": (
+                catalog_fingerprint
+                if implemented
+                else _schema_hash(conn, tables)
+                if status != "not_available"
+                else None
+            ),
         }
     return {key: projections[key] for key in PROJECTION_KEYS}
 
