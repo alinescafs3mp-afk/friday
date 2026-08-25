@@ -6,17 +6,16 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-25
 - Branch: `main`
-- Secondary acceptance base: Friday `0.207.14` is live in provisional public
+- Secondary acceptance base: Friday `0.207.15` is live in provisional public
   shadow. The accepted-profile registry remains empty pending physical
   acceptance; private text and `assist` remain closed.
-- Deployed implementation head: `cce33d5daef12fa4ae239e4b3d891a0a4d907c93`
-- Live: Friday `0.207.14` / `cce33d5daef12fa4ae239e4b3d891a0a4d907c93`;
-  tree `d8b2d67dfe2099c900546e2157d451163fcace1e6befa3195966fb576b8cc5f2`;
-  wheel `b46ac29f6c190c325fd3593c4ba54a61700f6ab2c9bc151acd2ccc3145105c16`
-- Immediate predecessor: Friday `0.207.13` /
-  `1ea5a1dd7e9fab4c483e176726071ed55100721c`; schema-capable fallback:
-  Friday `0.207.14` / `4286f3ec5ff2415bc1754e1e4109141d9cd71b50`, tree
-  `2c7b14d2ba7586bbc9d503549f837890b0ef19ffc2d396347072a780e8d30eb6`
+- Deployed implementation head: `8f260ce05bc9ad7384df9780e2383c727b9ab35d`
+- Live: Friday `0.207.15` / `8f260ce05bc9ad7384df9780e2383c727b9ab35d`;
+  tree `b538ac0f07a72ee89a1837b62f318db236f56203f7f7aa91f420b38be1fd4ec0`;
+  wheel `5031ec389c95607555188a85f043641ccae85ecb32fef85e992c33891454c09b`
+- Immediate predecessor and schema-capable fallback: Friday `0.207.14` /
+  `cce33d5daef12fa4ae239e4b3d891a0a4d907c93`, tree
+  `d8b2d67dfe2099c900546e2157d451163fcace1e6befa3195966fb576b8cc5f2`
 - Database schema: 40
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean;
@@ -33,8 +32,9 @@ acceptance, private shadow and bounded assist, preserving exact primary-only
 behavior whenever the laptop is absent. The provisional public-shadow cutover
 is complete. Its causal request witness is deployed and the exact deterministic
 and controlled-live evidence was rebuilt from that release. Work requiring a
-physical laptop power cut waits for the owner. The schema-40 ICP foundation is
-live; its audited runtime continuation is the active autonomous package.
+physical laptop power cut waits for the owner. The schema-40 ICP candidate
+runtime is live. Durable DocumentCatalog/enrichment is the active autonomous
+package; the common effect envelope and V12 refinement follow it.
 
 The measured provisional finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -110,10 +110,10 @@ course, with these repository-specific constraints:
   owner, conversation, role and timezone identity. Expiry, cancellation,
   revision-CAS, restart, receipt/plan binding and atomic rollback are covered;
   unresolved references fail closed without a model or judge fallback.
-- Schema 40 is deployed as a dormant rollback-safe foundation: immutable,
-  body-free ordered archive candidates and a durable ordinal question are
-  restart/migration ready, but the user-visible runtime hook is not enabled in
-  this package.
+- Schema 40 now serves immutable body-free ordered archive candidates and a
+  durable ordinal question. Strict RU/EN ordinal replies replay the exact
+  authorized source/revision after restart without another search or model
+  call; expiry, cancellation, drift, replacement and races fail closed.
 - Detailed status: `outer_sol/INTERACTION_CONTROL_PLANE_IMPLEMENTATION_STATUS.md`.
 
 ### Typed read outcomes and durable receipts
@@ -133,13 +133,27 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Merge, gate and release the audited candidate-selection runtime on top of the
-   live schema-40 fallback.
+1. Implement the narrow durable DocumentCatalog/enrichment projection without
+   persisting source bodies or model prose.
 2. When the owner is present, perform the real causal laptop cut/on and accept
    only the exact bound finalist; then promote distinct private-shadow/assist
    candidates with product-linked fallback evidence.
 
 ## Completed and deployed (current package)
+
+### Durable archive candidate runtime (`0.207.15`)
+
+- An archive answer with 2–20 distinct replayable sources creates one exact
+  body-free choice. A strict RU/EN ordinal resumes the selected source and
+  revision without a second search or model call.
+- Admission is bound before attachment ingestion to exact
+  user/conversation/work-item/revision identity. Restart, expiry, cancellation,
+  mode/source/authority drift, stale receipts, replacement and CAS races fail
+  closed; `стоп` always wins.
+- The exact source passed 18,209 non-UI and 31 UI tests with real pinned
+  Syncthing 2.1.3. Two clean wheels reproduced byte-for-byte; immutable
+  activation completed `clear`, health is `ok`, both services are active and
+  schema 40 integrity/FK/FTS checks are clean.
 
 ### Schema-40 durable candidate foundation (`0.207.14`)
 
@@ -371,32 +385,29 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- The exact `0.207.14` canonical gate passed 18,164 non-UI tests plus 31 UI
+- The exact `0.207.15` canonical gate passed 18,209 non-UI tests plus 31 UI
   tests, including the pinned Syncthing 2.1.3 smoke; static checks and focused
   causal-secondary gates are green.
-- Friday `0.207.14` public shadow is live at the exact source/tree/wheel identity
-  above, schema 40, with distinct code-identical `4286f3e` as its schema-capable
-  fallback. Immutable activation completed `clear`.
+- Friday `0.207.15` public shadow is live at the exact source/tree/wheel identity
+  above, schema 40, with `cce33d5` (`0.207.14`) as its schema-capable fallback.
+  Immutable activation completed `clear`.
 
 ## Next order
 
-1. Release the audit-clean archive candidate-selection runtime, including
-   restart, expiry, authority/revision drift, stop/mode races and exact replay
-   without a second search or model call.
+1. Build the durable body-free DocumentCatalog/enrichment sidecar and expose
+   honest current/backfill-pending archive coverage.
 2. Complete the owner-observed causal cut/on when the owner is present; only then
    accept/register and promote distinct private-shadow/assist candidates.
-3. Build durable DocumentCatalog/enrichment only after that vertical preserves
-   exact archive coverage without persisting model prose.
-4. Add one uncertainty-aware common effect envelope and prove one idempotent,
+3. Add one uncertainty-aware common effect envelope and prove one idempotent,
    receipt-backed Obsidian mutation/reconciliation vertical.
-5. Extend existing immutable-release evidence into machine-reconcilable
+4. Extend existing immutable-release evidence into machine-reconcilable
    source/wheel/schema/activation/fallback manifests, then register exact-release
    journey evidence without promoting generic component gates.
-6. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
+5. Run actual Android/Syncthing, backup/clean-restore and bounded recovery/fault
    certification; simulations remain labelled separately.
-7. Begin V12 refinement with `ExplainSelectedArchiveEvidence`, and make the
+6. Begin V12 refinement with `ExplainSelectedArchiveEvidence`, and make the
    cross-feature search/file/Obsidian/dialogue battery mandatory for releases.
-8. Evaluate generic WorkGraph, broader effects or connectors only from the
+7. Evaluate generic WorkGraph, broader effects or connectors only from the
    golden journeys still failing after the preceding packages. Companion work
    remains out of scope.
 

@@ -1,11 +1,11 @@
 # Interaction Control Plane implementation status
 
-Status: **SCHEMA-40 CANDIDATE FOUNDATION DEPLOYED; AUDITED RUNTIME READY FOR RELEASE**
+Status: **SCHEMA-40 DURABLE CANDIDATE RUNTIME DEPLOYED**
 Date: 2026-08-25
 Branch: `main`
-Source/live: Friday `0.207.14` / `cce33d5daef12fa4ae239e4b3d891a0a4d907c93`,
-schema 40; previous `1ea5a1dd7e9fab4c483e176726071ed55100721c`;
-schema-capable fallback `4286f3ec5ff2415bc1754e1e4109141d9cd71b50`
+Source/live: Friday `0.207.15` / `8f260ce05bc9ad7384df9780e2383c727b9ab35d`,
+schema 40; previous/schema-capable fallback
+`cce33d5daef12fa4ae239e4b3d891a0a4d907c93`
 
 ## Release checkpoint
 
@@ -21,8 +21,8 @@ schema-capable fallback `4286f3ec5ff2415bc1754e1e4109141d9cd71b50`
 - `0.207.8` adds the authorized read-only federated `archive_search` foundation:
   stable source/passage identity, explicit per-corpus coverage, process-private
   carriers and same-transaction reauthorization/publication.
-- The live anchor resolves to `cce33d5`, with code-identical schema-40
-  `4286f3e` as rollback fallback. Backend and bridge are active,
+- The live anchor resolves to `8f260ce`, with schema-40 `cce33d5` as rollback
+  fallback. Backend and bridge are active,
   trusted-CA health is `ok`, and
   schema 40, SQLite integrity, foreign keys and FTS are clean.
 - The `912dc1a` schema-39 vertical is now deployed in `0.207.9`: one durable,
@@ -30,12 +30,11 @@ schema-capable fallback `4286f3ec5ff2415bc1754e1e4109141d9cd71b50`
   performs fresh authority and revision checks without search or model use;
   late denial and source drift suspend source-free. Broader ICP implementation
   now has restart, late-denial and source-drift evidence across document and
-  message lanes. The next ordered-candidate/ordinal-question slice is being
-  implemented without widening into a generic WorkGraph.
+  message lanes.
 - `0.207.14` deploys only the schema-capable candidate-set/question foundation.
-  The prompt is intentionally dormant. Runtime HEAD `5e27be9` passed 722 focused
-  integration tests plus an independent race/atomicity audit with no remaining
-  HIGH/MED finding and is the next release package.
+  `0.207.15` activates its audited runtime: exact ordinal replay, restart,
+  expiry, cancellation, stop/mode precedence, late denial, source drift,
+  replacement and CAS races are closed without a second search or model call.
 
 ## P0A implemented
 
@@ -79,29 +78,28 @@ schema-capable fallback `4286f3ec5ff2415bc1754e1e4109141d9cd71b50`
   complete; see `outer_sol/V12_FURTHER_REFINEMENT_STATUS.md`.
 - The durable Work Items currently released are the narrow
   `RecallConversation` exact-window canary and the body-free
-  `RecallSelectedArchiveEvidence` continuation. They must not be generalized
-  into a claim that generic document recall, Active Frames or WorkGraphs are
-  complete.
+  `RecallSelectedArchiveEvidence` continuation plus the bounded body-free
+  archive candidate selection. They must not be generalized into a claim that
+  generic document recall, Active Frames or WorkGraphs are complete.
 
 ## Next implementation order
 
 1. Use the canonical golden-journey/evidence registry in
    `outer_sol/PROJECT_IMPLEMENTATION_STATUS.md`; its machine validator owns the
    strict readiness and evidence rules.
-2. Release the already-audited body-free candidate runtime on the live schema-40
-   fallback.
-3. After activation, run the bounded production journey and register evidence
-   for strict RU/EN ordinal replay, restart, expiry, late denial, source drift,
-   stop/mode precedence and CAS races without a second search or model call.
-4. Keep generic autonomous WorkGraphs behind that complete user journey.
+2. Implement durable DocumentCatalog/enrichment as a narrow body-free sidecar
+   with honest current/backfill-pending coverage.
+3. Register product-linked candidate evidence from natural production use; do
+   not create a synthetic live test corpus.
+4. Keep generic autonomous WorkGraphs behind complete user journeys.
 
 ## Current cumulative gate
 
-- The exact live source passed 18,164 non-UI and 31 UI tests; the pinned real
+- The exact live source passed 18,209 non-UI and 31 UI tests; the pinned real
   Syncthing 2.1.3 smoke executed rather than remaining environment-skipped.
 - Schema-38 migration, lifecycle/privacy, revision-CAS, restart, temporal
   continuation, receipt/plan binding and named-inventory compatibility checks
   passed.
-- Ruff, mypy, compile and release diff checks passed. The `0.207.14` wheel
+- Ruff, mypy, compile and release diff checks passed. The `0.207.15` wheel
   reproduced byte-for-byte and immutable activation completed `clear`; Docker and
   companion-plugin work remained outside the primary release checkpoint.

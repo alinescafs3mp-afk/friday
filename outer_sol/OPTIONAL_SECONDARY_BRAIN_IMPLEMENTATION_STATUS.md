@@ -4,12 +4,12 @@
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
 - Phase: **provisional public shadow live; physical/profile acceptance pending**
-- Live production: Friday `0.207.14` /
-  `cce33d5daef12fa4ae239e4b3d891a0a4d907c93`, tree
-  `d8b2d67dfe2099c900546e2157d451163fcace1e6befa3195966fb576b8cc5f2`, wheel
-  `b46ac29f6c190c325fd3593c4ba54a61700f6ab2c9bc151acd2ccc3145105c16`,
-  schema 40; schema-capable fallback `4286f3ec5ff2415bc1754e1e4109141d9cd71b50`
-  / tree `2c7b14d2ba7586bbc9d503549f837890b0ef19ffc2d396347072a780e8d30eb6`
+- Live production: Friday `0.207.15` /
+  `8f260ce05bc9ad7384df9780e2383c727b9ab35d`, tree
+  `b538ac0f07a72ee89a1837b62f318db236f56203f7f7aa91f420b38be1fd4ec0`, wheel
+  `5031ec389c95607555188a85f043641ccae85ecb32fef85e992c33891454c09b`,
+  schema 40; schema-capable fallback `cce33d5daef12fa4ae239e4b3d891a0a4d907c93`
+  / tree `d8b2d67dfe2099c900546e2157d451163fcace1e6befa3195966fb576b8cc5f2`
 - Rollout policy: the primary model remains required and final. The secondary
   is enabled only for non-private discarded `shadow/extract`; it has no tool,
   effect, publication or V12 authority. The accepted registry is empty and
@@ -126,9 +126,9 @@
 
 ## Parallel parent checkpoint
 
-- ICP schema 39 and the narrow durable exact selected-archive-evidence replay
-  remain deployed. The next body-free candidate-selection foundation is under
-  isolated implementation while the owner-dependent physical cut waits.
+- ICP schema 40 and the durable exact archive candidate-selection runtime are
+  deployed. DocumentCatalog/enrichment proceeds while the owner-dependent
+  physical cut waits.
 
 ## Active order
 
@@ -139,8 +139,8 @@
 3. Prove the separate private product-shadow stage before narrow assist,
    then repeat the physical cycle with product-linked counters in assist,
    including laptop-off and mid-turn disconnect behavior.
-4. Finish the active ICP candidate-selection vertical, then continue broader ICP
-   and the scheduled V12 refinement.
+4. Continue DocumentCatalog, the common effect envelope and scheduled V12
+   refinement without widening secondary authority.
 
 ## Not yet claimed
 
