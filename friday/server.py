@@ -4339,10 +4339,7 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                     public_response=safe_diagnostics.render_ru(),
                 )
             pending_durable_original_attachment_surface = bool(
-                attachments
-                or incoming_documents
-                or staged_document_message_ids
-                or file_already_ingested
+                attachments or incoming_documents or staged_document_message_ids or file_already_ingested
             )
             pending_durable_original_reply_surface = bool(
                 str(body.get("reply_to") or "").strip()
@@ -4371,14 +4368,12 @@ def create_app(settings_override: FridaySettings | None = None) -> FastAPI:
                 and requested_mode is None
                 and not turn_policy.handled
             ):
-                pending_durable_intake_admission = (
-                    _pending_durable_turn_admission_before_ingestion(
-                        state.agent,
-                        person_id=actor.own_id,
-                        message=message,
-                        actor=actor,
-                        conversation_id=conversation_id,
-                    )
+                pending_durable_intake_admission = _pending_durable_turn_admission_before_ingestion(
+                    state.agent,
+                    person_id=actor.own_id,
+                    message=message,
+                    actor=actor,
+                    conversation_id=conversation_id,
                 )
 
             ingestion_result = None

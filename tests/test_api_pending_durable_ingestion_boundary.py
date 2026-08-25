@@ -69,6 +69,7 @@ def test_pending_durable_api_reply_suppresses_ingestion_planner_and_model(
             if admission == "exception":
                 raise RuntimeError("private lookup failed")
             if admission == "awaitable":
+
                 async def result() -> bool:
                     return True
 

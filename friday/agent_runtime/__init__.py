@@ -32428,12 +32428,15 @@ class AgentRuntime:
         while every other spelling receives the code-owned re-ask.
         """
 
-        return self.pending_durable_turn_admission(
-            user_id,
-            message,
-            actor=actor,
-            conversation_id=conversation_id,
-        ) is not False
+        return (
+            self.pending_durable_turn_admission(
+                user_id,
+                message,
+                actor=actor,
+                conversation_id=conversation_id,
+            )
+            is not False
+        )
 
     def pending_durable_turn_admission(
         self,
@@ -34373,8 +34376,7 @@ class AgentRuntime:
                 boundary_user_message_id=boundary_message_id,
             )
             if current is None or (
-                current.id != admitted_work_item.id
-                or current.revision != admitted_work_item.revision
+                current.id != admitted_work_item.id or current.revision != admitted_work_item.revision
             ):
                 raise WorkItemConflictError("archive candidate admission is no longer current")
             assistant_message = store_message_in_transaction(
@@ -34472,9 +34474,7 @@ class AgentRuntime:
                 person_id,
                 "assistant",
                 ARCHIVE_CANDIDATE_STALE,
-                metadata=self._archive_candidate_terminal_metadata(
-                    "archive_candidate_admission_stale"
-                ),
+                metadata=self._archive_candidate_terminal_metadata("archive_candidate_admission_stale"),
                 reply_to=boundary_message_id,
             )
             if assistant_message.get("content") != ARCHIVE_CANDIDATE_STALE:
@@ -39907,14 +39907,12 @@ class AgentRuntime:
                     require_latest_message=False,
                 )
                 if admitted_archive_candidate is not None:
-                    archive_candidate_is_displaced = (
-                        archive_candidate_selection_is_displaced_in_transaction(
-                            candidate_conn,
-                            work_item_id=admitted_archive_candidate.id,
-                            user_id=person_id,
-                            conversation_id=str(conversation_id),
-                            expected_revision=admitted_archive_candidate.revision,
-                        )
+                    archive_candidate_is_displaced = archive_candidate_selection_is_displaced_in_transaction(
+                        candidate_conn,
+                        work_item_id=admitted_archive_candidate.id,
+                        user_id=person_id,
+                        conversation_id=str(conversation_id),
+                        expected_revision=admitted_archive_candidate.revision,
                     )
 
         if archive_candidate_is_displaced:
@@ -39932,9 +39930,7 @@ class AgentRuntime:
                     expected_revision=admitted_archive_candidate.revision,
                 )
                 if retired is None:
-                    raise WorkItemConflictError(
-                        "displaced archive candidate admission is no longer current"
-                    )
+                    raise WorkItemConflictError("displaced archive candidate admission is no longer current")
             admitted_archive_candidate = None
 
         carried_admission = (
@@ -39962,9 +39958,7 @@ class AgentRuntime:
             and (admitted_archive_candidate is not None or _pending_durable_admission is not None)
         ):
             if not mark_request_effect_possible():
-                raise RuntimeError(
-                    "Request idempotency fence could not be committed before message storage"
-                )
+                raise RuntimeError("Request idempotency fence could not be committed before message storage")
             if admitted_archive_candidate is None:
                 return self._archive_candidate_unbound_silence_response(
                     conversation_id=str(conversation_id),
@@ -39992,13 +39986,11 @@ class AgentRuntime:
                 )
             except WorkItemConflictError:
                 with read_only_storage_snapshot(self.storage) as conflict_conn:
-                    conflict_current = (
-                        get_waiting_archive_candidate_selection_work_item_in_transaction(
-                            conflict_conn,
-                            user_id=person_id,
-                            conversation_id=str(conversation_id),
-                            require_latest_message=False,
-                        )
+                    conflict_current = get_waiting_archive_candidate_selection_work_item_in_transaction(
+                        conflict_conn,
+                        user_id=person_id,
+                        conversation_id=str(conversation_id),
+                        require_latest_message=False,
                     )
                 if conflict_current is not None and (
                     conflict_current.id == admitted_archive_candidate.id
@@ -40019,9 +40011,7 @@ class AgentRuntime:
             and not carried_binding_is_current
         ):
             if not mark_request_effect_possible():
-                raise RuntimeError(
-                    "Request idempotency fence could not be committed before message storage"
-                )
+                raise RuntimeError("Request idempotency fence could not be committed before message storage")
             return self._archive_candidate_stale_admission_response(
                 conversation_id=str(conversation_id),
                 person_id=person_id,
@@ -40056,9 +40046,7 @@ class AgentRuntime:
                         current_expired.id != admitted_archive_candidate.id
                         or current_expired.revision != admitted_archive_candidate.revision
                     ):
-                        raise WorkItemConflictError(
-                            "archive candidate expiry admission is no longer current"
-                        )
+                        raise WorkItemConflictError("archive candidate expiry admission is no longer current")
                     expire_archive_candidate_selection_in_transaction(
                         expiry_conn,
                         work_item_id=current_expired.id,

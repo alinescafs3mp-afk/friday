@@ -572,9 +572,7 @@ class OrchestrationRouter:
                     close = getattr(iterator, "close", None)
                     if callable(close):
                         close()
-                LOGGER.warning(
-                    "pending durable turn admission returned an awaitable; retaining legacy"
-                )
+                LOGGER.warning("pending durable turn admission returned an awaitable; retaining legacy")
                 return None
             if isinstance(result, PendingDurableTurnAdmission):
                 if not result.matches_scope(

@@ -1294,11 +1294,7 @@ async def test_archive_candidate_offer_preserves_citation_order_and_replays_stri
     )
     expected_offer = archive_candidate_selection_offer_suffix(("A2", "A1"))
     selected_body = _candidate_message_body(storage, created, 2)
-    other_body = (
-        _CANDIDATE_SECOND_BODY
-        if selected_body == _CANDIDATE_FIRST_BODY
-        else _CANDIDATE_FIRST_BODY
-    )
+    other_body = _CANDIDATE_SECOND_BODY if selected_body == _CANDIDATE_FIRST_BODY else _CANDIDATE_FIRST_BODY
     try:
         assert initial["message"].endswith(f"\n\n{expected_offer}")
         assert tuple(item.public_citation_label for item in created.candidate_set.candidates) == ("A2", "A1")
@@ -1502,9 +1498,15 @@ async def test_archive_candidate_cancel_survives_restart_and_never_resurrects(
     monkeypatch: pytest.MonkeyPatch,
     cancel_request: str,
 ) -> None:
-    _initial, created, _runtime_instance, _kernel, _actor, _model, web = (
-        await _create_durable_archive_candidate_work(settings, storage, monkeypatch)
-    )
+    (
+        _initial,
+        created,
+        _runtime_instance,
+        _kernel,
+        _actor,
+        _model,
+        web,
+    ) = await _create_durable_archive_candidate_work(settings, storage, monkeypatch)
     await web.close()
     restarted_storage = _reopen_storage(settings, storage)
     no_model = _DirectAnswerModel()
@@ -1578,9 +1580,15 @@ async def test_expired_candidate_is_owned_source_free_after_restart_and_never_re
         return original_now(value or "2000-01-01T00:00:00+00:00")
 
     monkeypatch.setattr(candidate_store_module, "_now", historical_now)
-    _initial, created, _runtime_instance, _kernel, _actor, _model, web = (
-        await _create_durable_archive_candidate_work(settings, storage, monkeypatch)
-    )
+    (
+        _initial,
+        created,
+        _runtime_instance,
+        _kernel,
+        _actor,
+        _model,
+        web,
+    ) = await _create_durable_archive_candidate_work(settings, storage, monkeypatch)
     monkeypatch.setattr(candidate_store_module, "_now", original_now)
     await web.close()
     restarted_storage = _reopen_storage(settings, storage)
@@ -1671,8 +1679,8 @@ async def test_emergency_stop_precedes_due_candidate_expiry_receipt(
         return original_now(value or "2000-01-01T00:00:00+00:00")
 
     monkeypatch.setattr(candidate_store_module, "_now", historical_now)
-    _initial, created, runtime, kernel, actor, model, web = (
-        await _create_durable_archive_candidate_work(settings, storage, monkeypatch)
+    _initial, created, runtime, kernel, actor, model, web = await _create_durable_archive_candidate_work(
+        settings, storage, monkeypatch
     )
     monkeypatch.setattr(candidate_store_module, "_now", original_now)
     admission = runtime.pending_durable_turn_admission(
@@ -2072,9 +2080,9 @@ async def test_failed_competing_surface_keeps_candidate_current_until_successful
         assert displaced_waiting is not None
         assert displaced_waiting.state is WorkState.WAITING_FOR_INPUT
         observed_before = str(
-            storage.execute(
-                "SELECT observed_at FROM relation_revision_context WHERE singleton=1"
-            ).fetchone()["observed_at"]
+            storage.execute("SELECT observed_at FROM relation_revision_context WHERE singleton=1").fetchone()[
+                "observed_at"
+            ]
         )
         assert not runtime.owns_pending_durable_turn(
             _OWNER,
@@ -2083,9 +2091,9 @@ async def test_failed_competing_surface_keeps_candidate_current_until_successful
             conversation_id=created.conversation_id,
         )
         observed_after = str(
-            storage.execute(
-                "SELECT observed_at FROM relation_revision_context WHERE singleton=1"
-            ).fetchone()["observed_at"]
+            storage.execute("SELECT observed_at FROM relation_revision_context WHERE singleton=1").fetchone()[
+                "observed_at"
+            ]
         )
         assert observed_after == observed_before
         with storage.transaction() as conn:
