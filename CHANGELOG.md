@@ -1,3 +1,17 @@
+## 0.207.23 — 2026-08-25
+
+### Accepted optional GPT-OSS runtime profile
+
+- The exact GPT-OSS-20B finalist is now bound to its completed immutable
+  quality, capacity, soak and physical-failure evidence chain. Friday accepts
+  only manifest SHA-256
+  `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3`;
+  the former provisional registry is empty.
+- This release preserves non-private discarded `shadow/extract`. Private
+  shadow and assist remain separate distinct-candidate ENV transitions with
+  fresh product-stage evidence; secondary tools, effects and publication stay
+  forbidden.
+
 ## 0.207.22 — 2026-08-25
 
 ### Natural questions about selected archive evidence

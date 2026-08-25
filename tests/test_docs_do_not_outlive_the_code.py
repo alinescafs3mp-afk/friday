@@ -80,15 +80,15 @@ def test_current_release_identity_matches_package_operator_docs_and_schema():
     assert int(checklist_schema.group(1)) == SCHEMA_VERSION
 
 
-def test_secondary_runbook_is_bound_to_the_only_provisional_finalist():
+def test_secondary_runbook_is_bound_to_the_only_accepted_finalist():
     """Operator copy/paste values must not drift from the code-owned admission."""
     from friday.secondary_brain.profiles import (
         ACCEPTED_SECONDARY_RUNTIME_PROFILES,
         PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES,
     )
 
-    assert ACCEPTED_SECONDARY_RUNTIME_PROFILES == {}
-    (profile,) = PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES.values()
+    (profile,) = ACCEPTED_SECONDARY_RUNTIME_PROFILES.values()
+    assert PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES == {}
     section = OPERATIONS.split("### Optional GPT-OSS secondary brain", 1)[1].split("## 2.", 1)[0]
 
     exact_lines = {

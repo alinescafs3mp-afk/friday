@@ -3,21 +3,21 @@
 - Updated: 2026-08-25
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
-- Phase: **provisional public shadow live; physical/profile acceptance pending**
-- Live production: Friday `0.207.21` /
-  `27b9fc5545e88a38e111170f79d0f548edfbc646`, tree
-  `74ca567845d1f5de0656f8be8df2e4302d7d04ccb5de356335dec59514ee5a70`, wheel
-  `afd630185ad4dd5a6f76c690c71aba84cda7891b82488e102d0f4f069d03f421`,
+- Phase: **profile accepted; accepted-registry public-shadow release prepared**
+- Live production: Friday `0.207.22` /
+  `331460d4219ec8a421f1ec0abe668ae989ca9cc5`, tree
+  `d16caa76c61f7afe98d9cc8512e62188af65033924f4e5fd166f935094192178`, wheel
+  `fee818502c41192dd54475e5622305f6ba730c9b5c1b87de13ea82aab57176c2`,
   schema 41; immediate predecessor and schema-capable fallback Friday
-  `0.207.20` / `05b7a817`, tree
-  `3fb11b5f5d7defd4059fd4389786932d37cd06c0be4c7ebb6f178d9ce3a193ad`
+  `0.207.21` / `27b9fc5545e88a38e111170f79d0f548edfbc646`, tree
+  `74ca567845d1f5de0656f8be8df2e4302d7d04ccb5de356335dec59514ee5a70`
 - Rollout policy: the primary model remains required and final. The secondary
   is enabled only for non-private discarded `shadow/extract`; it has no tool,
-  effect, publication or V12 authority. The accepted registry is empty and
-  private shadow/`assist` admission remain closed.
-- `0.207.21` post-deploy health observed the optional endpoint as unavailable
-  while the primary V12 profile remained `canary_ready`; this is a successful
-  fail-soft observation, not physical finalist acceptance.
+  effect, publication or V12 authority. Source `0.207.23` binds exactly one
+  accepted profile and an empty provisional registry, while preserving public
+  discarded shadow; private shadow/`assist` remain closed.
+- Live `0.207.22` now fails soft against the promoted laptop manifest because
+  it predates accepted-registry admission; primary health remains `ok`.
 
 ## Durable access and measured host
 
@@ -30,7 +30,7 @@
   `12.0`; the pinned CUDA container reproduced those facts.
 - The current released source and laptop finalist use the exact profile and
   runtime identities below. Fresh warm, 30-minute soak, cold-restart capacity-v2
-  and controlled-live evidence are closed; physical/profile acceptance is not.
+  and controlled-live evidence, physical failure and profile acceptance are closed.
 - The observed hardware receipt is
   `7b850221e7e11ac0063971d7baaf627c96eae5441368f1907cc070106832b0f3`;
   its protected accepted form is
@@ -53,7 +53,7 @@
 - The exact runtime is SGLang `0.5.17` image
   `lmsysorg/sglang@sha256:297f0bfea5e9f92680f8dd49ae18d048c9634f953be50b37f9bfe9509e947405`,
   source revision `29481685462732237d80d86076d6563e1f658102`.
-- The measured provisional finalist is profile
+- The measured and accepted finalist is profile
   `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`,
   candidate-manifest SHA-256
   `51af2164fa07ff3c01813e318076f7ac8b37eeecb73e695b6ca7543061c93439`
@@ -88,9 +88,10 @@
   `519b5912428f491dc65928c5ba2d2e33a6408566fe5f3496501ce2e760b9205e`.
   The earlier operational wrapper's v1 schema assertion was superseded and
   produced no false success. Earlier streaming capacity-v1 receipts remain
-  historical and ineligible. The finalist itself remains `candidate`, is
-  registered only for non-private discarded `shadow/extract`, and is not an
-  accepted production profile.
+  historical and ineligible. The accepted profile manifest SHA-256 is
+  `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3`;
+  accepted physical-failure evidence SHA-256 is
+  `9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
 
 ## Current production evidence
 
@@ -107,18 +108,16 @@
   power-loss claim: the full request body must have been submitted to the
   pinned-CA endpoint before transport loss. The deployed runner SHA-256 is
   `826607fbb48bd3192141a99b3d7ba81d32aa2e31948553d7524760f9eb8b30ac`.
-- Production retained the exact public-shadow ENV atomically. Health is `ok`;
-  diagnostics bind
-  `profile_admission=provisional_shadow`, matching profile/manifest/model and a
-  healthy endpoint. No private text is eligible and all shadow output is
-  discarded.
+- Production retained the exact public-shadow ENV atomically. Live health is
+  `ok`; accepted-registry admission is prepared in source `0.207.23`, not yet
+  deployed. No private text is eligible and all shadow output is discarded.
 
 ## Friday checkpoint
 
-- The dormant accepted-profile path contains typed private Inbox extraction and
-  bounded private document map/reduce seams. Neither is eligible for the
-  provisional finalist: its only admission is non-private, structured,
-  text-only, effect-free discarded `shadow/extract`. Every required result has
+- The accepted-profile path contains typed private Inbox extraction and bounded
+  private document map/reduce seams. Release `0.207.23` deliberately keeps its
+  first accepted stage non-private, structured, text-only, effect-free and
+  discarded `shadow/extract`. Every required result has
   exactly one primary fallback; optional advice is skipped; secondary output
   cannot execute tools or publish a final answer.
 - Product/runtime admission is profile-v2 and binds the exact source manifest,
@@ -134,25 +133,22 @@
 - ICP schema 40, the durable exact archive candidate-selection runtime and the
   bounded body-free DocumentCatalog worker/archive consumer are deployed.
   Common effect-envelope/Obsidian reconciliation work proceeds while the
-  owner-dependent physical cut waits.
+  accepted-registry release is prepared; private shadow remains the next stage.
 
 ## Active order
 
-1. Perform the owner-observed causal laptop cut/on without restarting Friday;
-   the code-owned submitted-request witness is already deployed.
-2. Run `accept-failure` and `accept-profile`, then register the resulting exact
-   accepted manifest in a separate immutable release.
-3. Prove the separate private product-shadow stage before narrow assist,
+1. Release the exact accepted registry as public discarded shadow and capture
+   its immutable production evidence.
+2. Prove the separate private product-shadow stage before narrow assist,
    then repeat the physical cycle with product-linked counters in assist,
    including laptop-off and mid-turn disconnect behavior.
-4. Continue the common effect envelope and scheduled V12 refinement without
+3. Continue the common effect envelope and scheduled V12 refinement without
    widening secondary authority.
 
 ## Not yet claimed
 
-- No secondary profile is accepted. Production performs bounded exact-profile
-  admission probes and may send only non-private discarded `shadow/extract`;
-  private text and assist are blocked.
-- The exact 4K/BF16 finalist is provisional. Capacity v2 is accepted, but
-  physical evidence, profile acceptance, registry promotion and end-to-end
-  private-shadow/assist operation remain pending.
+- The exact 4K/BF16 profile is accepted, but its registry release is not yet
+  deployed. Live production remains public shadow and fails soft while the
+  older release cannot admit the promoted manifest.
+- Private-shadow and assist operation, including product-linked physical-cycle
+  evidence, remain pending.

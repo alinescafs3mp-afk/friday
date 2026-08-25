@@ -6,20 +6,21 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-25
 - Branch: `main`
-- Secondary acceptance base: Friday `0.207.21` is live in provisional public
-  shadow. The accepted-profile registry remains empty pending physical
-  acceptance; private text and `assist` remain closed.
-- Deployed implementation head: `27b9fc5545e88a38e111170f79d0f548edfbc646`
-- Live: Friday `0.207.21` / `27b9fc5545e88a38e111170f79d0f548edfbc646`;
-  tree `74ca567845d1f5de0656f8be8df2e4302d7d04ccb5de356335dec59514ee5a70`;
-  wheel `afd630185ad4dd5a6f76c690c71aba84cda7891b82488e102d0f4f069d03f421`
-- Immediate predecessor and schema-capable fallback: Friday `0.207.20` /
-  `05b7a8177e8456a243cda5a7211ec9893b47ad47`, tree
-  `3fb11b5f5d7defd4059fd4389786932d37cd06c0be4c7ebb6f178d9ce3a193ad`.
+- Secondary acceptance base: the exact profile is accepted. Source `0.207.23`
+  prepares its one-entry accepted registry and empty provisional registry as a
+  public discarded-shadow release; private text and `assist` remain closed.
+- Deployed implementation head: `331460d4219ec8a421f1ec0abe668ae989ca9cc5`
+- Live: Friday `0.207.22` / `331460d4219ec8a421f1ec0abe668ae989ca9cc5`;
+  tree `d16caa76c61f7afe98d9cc8512e62188af65033924f4e5fd166f935094192178`;
+  wheel `fee818502c41192dd54475e5622305f6ba730c9b5c1b87de13ea82aab57176c2`
+- Immediate predecessor and schema-capable fallback: Friday `0.207.21` /
+  `27b9fc5545e88a38e111170f79d0f548edfbc646`, tree
+  `74ca567845d1f5de0656f8be8df2e4302d7d04ccb5de356335dec59514ee5a70`.
 - Database schema: 41
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean;
-  exact provisional profile is configured in public `shadow/extract`, while
+  exact profile is configured in public `shadow/extract`; live `0.207.22`
+  currently fails soft after the laptop manifest promotion, while
   primary remains final and no private material is eligible. The primary V12
   canary is installed for `archive_read` and `file_read` with a live exact
   attestation. The exact,
@@ -34,17 +35,16 @@ the current production identity, completed packages, active work and next order.
 
 ## Active objective
 
-Finish the optional detachable GPT-OSS-20B/SGLang node through physical
-acceptance, private shadow and bounded assist, preserving exact primary-only
-behavior whenever the laptop is absent. The provisional public-shadow cutover
-is complete. Its causal request witness is deployed and the exact deterministic
-and controlled-live evidence was rebuilt from that release. Work requiring a
-physical laptop power cut waits for the owner. The schema-41 DocumentCatalog,
+Finish the optional detachable GPT-OSS-20B/SGLang node through accepted public
+shadow, private shadow and bounded assist, preserving exact primary-only
+behavior whenever the laptop is absent. Physical failure and profile acceptance
+are complete; source `0.207.23` prepares the exact accepted-registry public
+shadow stage without enabling private text or assist. The schema-41 DocumentCatalog,
 archive candidate runtime, receipt-backed Obsidian effect vertical and
 selected-evidence V12 explanation are live. The next autonomous package is the
 next incomplete ICP/V12 golden journey and its release evidence.
 
-The measured provisional finalist is exact profile
+The measured and accepted finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
 with candidate-manifest SHA-256
 `51af2164fa07ff3c01813e318076f7ac8b37eeecb73e695b6ca7543061c93439`:
@@ -64,9 +64,12 @@ SHA-256 `9c60611b939098020faa4f9077debde3bec96c9ded2bffc3c3385fc94d5ffa87`.
 The verified v2 capacity wrapper hashes to
 `519b5912428f491dc65928c5ba2d2e33a6408566fe5f3496501ce2e760b9205e`;
 the superseded operational v1 assertion produced no false success. The
-accepted-profile registry remains empty. Production now performs exact-profile
-startup/admission probes and permits only non-private discarded
-`shadow/extract`; `assist` is blocked.
+accepted profile manifest hashes to
+`93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3` and
+its accepted physical-failure evidence hashes to
+`9dc72f80caed3320bd154cf1219a8bd6b1339142b690b00dd1cbe1fb05964006`.
+Source `0.207.23` admits exactly that profile, with no provisional entries, but
+still permits only non-private discarded `shadow/extract`; `assist` is blocked.
 
 Detailed active tracker:
 `outer_sol/OPTIONAL_SECONDARY_BRAIN_IMPLEMENTATION_STATUS.md`.

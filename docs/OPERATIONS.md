@@ -69,12 +69,14 @@ journal, без ручного запуска systemd или восстанов�
 
 ### Optional GPT-OSS secondary brain
 
-Release 0.207.11 и последующий 0.207.12 запускаются с secondary в состоянии `disabled`:
-переменные `FRIDAY_SECONDARY_LLM_*` в ENV0 не нужны. В этом релизе
-accepted-реестр пуст; единственная разрешённая ступень для exact
-finalist — provisional `shadow/extract` без private text. Его результат
-выбрасывается; ответ, tools, effects и publication остаются за primary.
-`assist` до отдельной accepted-регистрации запрещён.
+Релизы 0.207.11–0.207.22 ввели default-off поддержку и provisional public
+`shadow/extract`. В 0.207.23 complete physical/profile chain принят: code-owned
+accepted-реестр содержит ровно exact finalist с accepted-manifest SHA-256
+`93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3`,
+а provisional-реестр пуст. Первый accepted release сохраняет public
+`shadow/extract` без private text: результат выбрасывается; ответ, tools,
+effects и publication остаются за primary. Регистрация профиля сама по себе не
+открывает private shadow или `assist`.
 
 После приёмки самого default-off релиза оператор может подготовить
 owner-private ENV1. Это не отдельный env-файл: скопируйте exact ENV0 вместе с
@@ -118,14 +120,14 @@ cutover path.
 `secondary.mode=disabled`, `secondary.state=disabled`. После отдельной
 activation ENV1 и успешного exact TLS/profile/model probe админская
 `/api/admin/diagnostics` должна показать exact profile,
-`profile_admission=provisional_shadow`, `state=healthy` и `available=true`.
+`profile_admission=accepted`, `state=healthy` и `available=true`.
 Одной доступности ноутбука недостаточно. Его отсутствие не меняет `status=ok`
 и ведёт к обычному primary-only path.
 
-ENV1 не получает private Inbox text и не заменяет реальный
-product shadow. После приёмки и регистрации exact accepted profile в
-отдельном default-off release постройте ENV2 из exact ENV1, изменив
-только `FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=1`, и проведите новую
+ENV1 в accepted public-shadow release не получает private Inbox text и не
+заменяет реальный product shadow. Для следующего distinct release постройте
+ENV2 из exact ENV1, изменив только
+`FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT=1`, и проведите новую
 distinct-candidate activation с
 `--staged-config-transition secondary_shadow_to_private_shadow`. В эту же
 команду обязательны абсолютный путь к свежему owner-private автоматическому
@@ -660,7 +662,7 @@ orchestration.model_gate.verified_context_tokens = 8192
 ```
 
 Во время probe `/api/health` ещё недоступен. Ждите до 420 секунд и дополнительно
-требуйте `status=ok` и `version=0.207.22`.
+требуйте `status=ok` и `version=0.207.23`.
 
 HTTP `status=ok` при `installed_mode=legacy` означает безопасную деградацию, но
 не успешный canary. В `canary`/`v12` Sentinel не реже раза в минуту

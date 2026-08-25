@@ -455,16 +455,16 @@ class SecondaryRuntimeProfile:
         )
 
 
-# Exact content-free finalist admitted only for discarded shadow extraction.
-# Assist remains impossible until the physical-failure witness promotes an
-# accepted manifest with its own, different digest.
-_PROVISIONAL_GPT_OSS_20B_FINALIST = SecondaryRuntimeProfile(
+# Exact finalist accepted by the complete quality/capacity/soak/failure chain.
+# Product policy remains separate: the initial release keeps public discarded
+# shadow/extract, while private shadow and assist require distinct activations.
+_ACCEPTED_GPT_OSS_20B_FINALIST = SecondaryRuntimeProfile(
     profile_id=("gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"),
     endpoint_base_url="https://192.168.1.35:8443/v1",
     served_model_alias=(
         "friday-secondary-gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"
     ),
-    manifest_sha256="51af2164fa07ff3c01813e318076f7ac8b37eeecb73e695b6ca7543061c93439",
+    manifest_sha256="93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3",
     engine_binding_sha256=("2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"),
     hardware_runtime_receipt_sha256=("0c1c9e6f54aa0004c3dfc89acd6904cfbb0f834d0988e971e34b9699b3d9031f"),
     gateway_ca_certificate_sha256=("392756a74fd9100635c42f4fbf7e5a5f1822d18ea898ebb7848b9fdd0bddc1fe"),
@@ -515,15 +515,13 @@ _PROVISIONAL_GPT_OSS_20B_FINALIST = SecondaryRuntimeProfile(
 
 
 # Filled only from a completed live battery and an immutable profile manifest.
-# An empty registry deliberately makes every private-LAN endpoint fail closed.
-ACCEPTED_SECONDARY_RUNTIME_PROFILES: Mapping[str, SecondaryRuntimeProfile] = MappingProxyType({})
-
-# Filled only with one exact matrix finalist after quality/capacity/soak screening.
-# This registry never grants assist authority; the resolver below restricts it
-# further to the exact shadow/extract contour.
-PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES: Mapping[str, SecondaryRuntimeProfile] = MappingProxyType(
-    {_PROVISIONAL_GPT_OSS_20B_FINALIST.profile_id: _PROVISIONAL_GPT_OSS_20B_FINALIST}
+ACCEPTED_SECONDARY_RUNTIME_PROFILES: Mapping[str, SecondaryRuntimeProfile] = MappingProxyType(
+    {_ACCEPTED_GPT_OSS_20B_FINALIST.profile_id: _ACCEPTED_GPT_OSS_20B_FINALIST}
 )
+
+# Accepted and provisional registries are disjoint by construction.  A new
+# candidate must earn its own exact code-owned entry before public shadow.
+PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES: Mapping[str, SecondaryRuntimeProfile] = MappingProxyType({})
 
 
 class SecondaryProfileAdmission(StrEnum):
