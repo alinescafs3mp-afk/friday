@@ -32913,13 +32913,20 @@ class AgentRuntime:
         expected_revision: int,
         reply_to: str | None,
         reason: str,
+        capability_outcomes: tuple[tuple[CapabilityClass, OutcomeStatus], ...] = (
+            (CapabilityClass.DOCUMENT_RETRIEVAL, OutcomeStatus.UNAVAILABLE),
+        ),
+        failure_stage: FailureStage = FailureStage.CAPABILITY,
+        failure_reason: FailureReason = FailureReason.SOURCE_UNAVAILABLE,
+        model_calls: int = 0,
+        turn_started: float | None = None,
     ) -> dict[str, Any]:
         if not mark_request_effect_possible():
             raise RuntimeError("request fence failed before comparison suspension")
         content = "Не удалось завершить это сравнение. Запустите его заново."
         metadata = self._comparison_structural_metadata(
             verdict_kind="conversation_document_comparison_suspended",
-            model_spoke=False,
+            model_spoke=model_calls > 0,
         )
         metadata["structural"]["failure_class"] = reason  # type: ignore[index]
         with self.storage.transaction() as conn:
@@ -32932,10 +32939,12 @@ class AgentRuntime:
                 work_relation=WorkRelation.CONTINUED,
                 continuation=ContinuationKind.SAME_GOAL,
                 completion=CompletionDecision.FAILED,
-                capability_outcomes=((CapabilityClass.DOCUMENT_RETRIEVAL, OutcomeStatus.UNAVAILABLE),),
-                failure_stage=FailureStage.CAPABILITY,
-                failure_reason=FailureReason.SOURCE_UNAVAILABLE,
+                capability_outcomes=capability_outcomes,
+                failure_stage=failure_stage,
+                failure_reason=failure_reason,
                 authority_rechecked=True,
+                model_calls=model_calls,
+                turn_started=turn_started,
             )
             assistant = store_message_in_transaction(
                 conn,
@@ -33473,18 +33482,36 @@ class AgentRuntime:
                     comparison,
                     absolute_deadline=deadline,
                 )
+            except TimeoutError:
+                raise ConversationDocumentComparisonError(
+                    "comparison lease recheck timed out",
+                    model_calls=2,
+                    failure_stage=FailureStage.STATE_LOSS,
+                    failure_reason=FailureReason.TIMEOUT,
+                    synthesis_outcome=OutcomeStatus.SUCCEEDED,
+                    verification_outcome=OutcomeStatus.SUCCEEDED,
+                ) from None
             except Exception:
-                raise ConversationDocumentComparisonError("comparison lease recheck failed") from None
+                raise ConversationDocumentComparisonError(
+                    "comparison lease recheck failed",
+                    model_calls=2,
+                    failure_stage=FailureStage.STATE_LOSS,
+                    failure_reason=FailureReason.PROVIDER_FAILURE,
+                    synthesis_outcome=OutcomeStatus.SUCCEEDED,
+                    verification_outcome=OutcomeStatus.SUCCEEDED,
+                ) from None
             if not lease_current:
-                raise ConversationDocumentComparisonError("comparison lease became stale")
+                raise ConversationDocumentComparisonError(
+                    "comparison lease became stale",
+                    model_calls=2,
+                    failure_stage=FailureStage.STATE_LOSS,
+                    failure_reason=FailureReason.STALE_STATE,
+                    synthesis_outcome=OutcomeStatus.SUCCEEDED,
+                    verification_outcome=OutcomeStatus.SUCCEEDED,
+                )
         except WorkItemConflictError:
             raise
-        except (
-            ConversationDocumentComparisonError,
-            FileEvidenceUnavailable,
-            WorkItemAnchorError,
-            TimeoutError,
-        ) as exc:
+        except ConversationDocumentComparisonError as exc:
             LOGGER.warning("conversation-document-comparison: suspended (%s)", type(exc).__name__)
             return self._suspend_comparison_source_free(
                 conversation_id=conversation_id,
@@ -33493,6 +33520,27 @@ class AgentRuntime:
                 expected_revision=admitted_item.revision,
                 reply_to=boundary_id,
                 reason=type(exc).__name__,
+                capability_outcomes=(
+                    (CapabilityClass.MESSAGE_RETRIEVAL, OutcomeStatus.SUCCEEDED),
+                    (CapabilityClass.DOCUMENT_RETRIEVAL, OutcomeStatus.SUCCEEDED),
+                    (CapabilityClass.MODEL_SYNTHESIS, exc.synthesis_outcome),
+                    (CapabilityClass.VERIFICATION, exc.verification_outcome),
+                ),
+                failure_stage=exc.failure_stage,
+                failure_reason=exc.failure_reason,
+                model_calls=exc.model_calls,
+                turn_started=turn_started,
+            )
+        except (FileEvidenceUnavailable, WorkItemAnchorError, TimeoutError) as exc:
+            LOGGER.warning("conversation-document-comparison: suspended (%s)", type(exc).__name__)
+            return self._suspend_comparison_source_free(
+                conversation_id=conversation_id,
+                person_id=person_id,
+                work_item_id=admitted_item.id,
+                expected_revision=admitted_item.revision,
+                reply_to=boundary_id,
+                reason=type(exc).__name__,
+                turn_started=turn_started,
             )
         if not conversation_document_comparison_is_process_owned(comparison):
             return self._suspend_comparison_source_free(
@@ -33502,6 +33550,16 @@ class AgentRuntime:
                 expected_revision=admitted_item.revision,
                 reply_to=boundary_id,
                 reason="invalid_comparison",
+                capability_outcomes=(
+                    (CapabilityClass.MESSAGE_RETRIEVAL, OutcomeStatus.SUCCEEDED),
+                    (CapabilityClass.DOCUMENT_RETRIEVAL, OutcomeStatus.SUCCEEDED),
+                    (CapabilityClass.MODEL_SYNTHESIS, OutcomeStatus.SUCCEEDED),
+                    (CapabilityClass.VERIFICATION, OutcomeStatus.SUCCEEDED),
+                ),
+                failure_stage=FailureStage.COMPLETION,
+                failure_reason=FailureReason.INVALID_CONTRACT,
+                model_calls=2,
+                turn_started=turn_started,
             )
         if not self._comparison_answer_is_read_only(comparison.answer, prepared):
             return self._suspend_comparison_source_free(
@@ -33511,6 +33569,16 @@ class AgentRuntime:
                 expected_revision=admitted_item.revision,
                 reply_to=boundary_id,
                 reason="effect_claim_rejected",
+                capability_outcomes=(
+                    (CapabilityClass.MESSAGE_RETRIEVAL, OutcomeStatus.SUCCEEDED),
+                    (CapabilityClass.DOCUMENT_RETRIEVAL, OutcomeStatus.SUCCEEDED),
+                    (CapabilityClass.MODEL_SYNTHESIS, OutcomeStatus.SUCCEEDED),
+                    (CapabilityClass.VERIFICATION, OutcomeStatus.SUCCEEDED),
+                ),
+                failure_stage=FailureStage.COMPLETION,
+                failure_reason=FailureReason.PUBLICATION_REJECTED,
+                model_calls=2,
+                turn_started=turn_started,
             )
 
         try:
@@ -33620,7 +33688,7 @@ class AgentRuntime:
                     ),
                     state_restored=trace_state_restored,
                     authority_rechecked=True,
-                    model_calls=1,
+                    model_calls=2,
                     turn_started=turn_started,
                 )
                 if time.monotonic() >= deadline:
@@ -33682,6 +33750,20 @@ class AgentRuntime:
                 expected_revision=admitted_item.revision,
                 reply_to=boundary_id,
                 reason=type(exc).__name__,
+                capability_outcomes=(
+                    (CapabilityClass.MESSAGE_RETRIEVAL, OutcomeStatus.UNCERTAIN),
+                    (CapabilityClass.DOCUMENT_RETRIEVAL, OutcomeStatus.UNCERTAIN),
+                    (CapabilityClass.MODEL_SYNTHESIS, OutcomeStatus.SUCCEEDED),
+                    (CapabilityClass.VERIFICATION, OutcomeStatus.SUCCEEDED),
+                ),
+                failure_stage=(
+                    FailureStage.PUBLICATION if isinstance(exc, TimeoutError) else FailureStage.STATE_LOSS
+                ),
+                failure_reason=(
+                    FailureReason.TIMEOUT if isinstance(exc, TimeoutError) else FailureReason.STALE_STATE
+                ),
+                model_calls=2,
+                turn_started=turn_started,
             )
         return self._comparison_public_response(
             conversation_id=conversation_id,
@@ -33708,14 +33790,20 @@ class AgentRuntime:
         """Own the complete durable comparison journey before ordinary routing."""
 
         def carried_binding_matches(work_item_id: str, revision: int) -> bool:
+            if carried_admission is None:
+                return True
+            if not carried_admission.matches_scope(
+                person_id=person_id,
+                conversation_id=conversation_id,
+            ):
+                return False
+            # An uncertain or legacy unbound receipt is only an intake fence:
+            # it grants no Work Item authority, so use the exact state freshly
+            # read in this transaction.  A bound receipt remains a strict CAS.
+            if not carried_admission.is_bound:
+                return True
             return bool(
-                carried_admission is None
-                or carried_admission.is_owned
-                and carried_admission.is_bound
-                and carried_admission.matches_scope(
-                    person_id=person_id,
-                    conversation_id=conversation_id,
-                )
+                carried_admission.is_owned
                 and carried_admission.work_item_id == work_item_id
                 and carried_admission.revision == revision
             )
@@ -34387,58 +34475,88 @@ class AgentRuntime:
             )
 
         resolved_at = datetime.now(UTC).isoformat(timespec="seconds")
-        with self.storage.transaction() as conn:
-            user_metadata: dict[str, Any] = {
-                "private_context_lineage": True,
-                (
-                    "conversation_uploaded_raw_ids"
-                    if provenance is ResolvedDocumentProvenance.CURRENT_TURN_ATTACHMENT
-                    else "conversation_attachment_raw_ids"
-                ): list(prepared.raw_ids),
-            }
-            if provenance is ResolvedDocumentProvenance.CURRENT_TURN_ATTACHMENT:
-                user_metadata.update(
-                    {"had_attachments": True, "attachment_count": 1, "attachment_origin": "current"}
+        assert isinstance(authorization, AuthorizationService)
+        try:
+            with self.storage.transaction() as conn:
+                user_metadata: dict[str, Any] = {
+                    "private_context_lineage": True,
+                    (
+                        "conversation_uploaded_raw_ids"
+                        if provenance is ResolvedDocumentProvenance.CURRENT_TURN_ATTACHMENT
+                        else "conversation_attachment_raw_ids"
+                    ): list(prepared.raw_ids),
+                }
+                if provenance is ResolvedDocumentProvenance.CURRENT_TURN_ATTACHMENT:
+                    user_metadata.update(
+                        {"had_attachments": True, "attachment_count": 1, "attachment_origin": "current"}
+                    )
+                boundary = store_message_in_transaction(
+                    conn,
+                    conversation_id,
+                    person_id,
+                    "user",
+                    request,
+                    metadata=user_metadata,
                 )
-            boundary = store_message_in_transaction(
-                conn,
-                conversation_id,
-                person_id,
-                "user",
-                request,
-                metadata=user_metadata,
+                comparison_refreshed = (
+                    get_current_compare_conversation_with_document_work_item_in_transaction(
+                        conn,
+                        user_id=person_id,
+                        conversation_id=conversation_id,
+                        boundary_user_message_id=str(boundary["id"]),
+                    )
+                )
+                if (
+                    comparison_refreshed is None
+                    or comparison_refreshed.id != current.id
+                    or comparison_refreshed.revision != current.revision
+                ):
+                    raise WorkItemConflictError("comparison document admission is no longer current")
+                if not reauthorize_prepared_file_evidence_in_transaction(
+                    conn,
+                    authorization,
+                    self.settings.files_dir,
+                    actor,
+                    prepared,
+                    max_bytes=self.settings.max_upload_bytes,
+                    storage=self.storage,
+                ):
+                    raise FileEvidenceUnavailable("comparison_document_changed")
+                identity = self._comparison_document_identity(
+                    conn,
+                    actor=actor,
+                    person_id=person_id,
+                    item=comparison_refreshed,
+                    boundary_message_id=str(boundary["id"]),
+                    prepared=prepared,
+                    provenance=provenance,
+                    resolved_at=resolved_at,
+                )
+                active = resolve_compare_conversation_document_reference_in_transaction(
+                    conn,
+                    work_item_id=comparison_refreshed.id,
+                    user_id=person_id,
+                    conversation_id=conversation_id,
+                    expected_revision=comparison_refreshed.revision,
+                    boundary_user_message_id=str(boundary["id"]),
+                    document_evidence=identity,
+                    now=resolved_at,
+                )
+        except WorkItemConflictError:
+            raise
+        except (FileEvidenceUnavailable, WorkItemAnchorError, TimeoutError, ValueError) as exc:
+            LOGGER.warning(
+                "conversation-document-comparison: document final reauth failed (%s)",
+                type(exc).__name__,
             )
-            comparison_refreshed = get_current_compare_conversation_with_document_work_item_in_transaction(
-                conn,
-                user_id=person_id,
+            return self._suspend_comparison_answer_source_free(
                 conversation_id=conversation_id,
-                boundary_user_message_id=str(boundary["id"]),
-            )
-            if (
-                comparison_refreshed is None
-                or comparison_refreshed.id != current.id
-                or comparison_refreshed.revision != current.revision
-            ):
-                raise WorkItemConflictError("comparison document admission is no longer current")
-            identity = self._comparison_document_identity(
-                conn,
-                actor=actor,
                 person_id=person_id,
-                item=comparison_refreshed,
-                boundary_message_id=str(boundary["id"]),
-                prepared=prepared,
-                provenance=provenance,
-                resolved_at=resolved_at,
-            )
-            active = resolve_compare_conversation_document_reference_in_transaction(
-                conn,
-                work_item_id=comparison_refreshed.id,
-                user_id=person_id,
-                conversation_id=conversation_id,
-                expected_revision=comparison_refreshed.revision,
-                boundary_user_message_id=str(boundary["id"]),
-                document_evidence=identity,
-                now=resolved_at,
+                request=request,
+                work_item_id=current.id,
+                expected_revision=current.revision,
+                reason="document_changed",
+                fence_already_committed=True,
             )
         return await self._execute_active_conversation_document_comparison(
             actor=actor,

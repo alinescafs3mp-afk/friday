@@ -199,7 +199,14 @@ def select_owned_file_candidate_source_in_transaction(
     uploaded_by: str,
     raw_object_id: str,
 ) -> dict[str, Any] | None:
-    """Re-authorize one frozen candidate Raw and return its private snapshot."""
+    """Re-authorize one frozen candidate Raw and return its private snapshot.
+
+    Historical API uploads can predate ``file_source_aliases``.  Their bounded
+    Raw metadata uploader is already the authority used by the exact filename
+    selector; do not silently discard those same rows during Q2 revalidation.
+    The comparison writer mints a narrow body-free alias only for the finally
+    accepted document before schema-42 evidence is inserted.
+    """
 
     if type(conn) is not sqlite3.Connection or not conn.in_transaction:
         raise RuntimeError("exact file candidate source requires a transaction")
@@ -223,12 +230,23 @@ def select_owned_file_candidate_source_in_transaction(
                     WHERE exact_candidate_uploader.id=?
                       AND exact_candidate_uploader.status='active'
                )
-               AND EXISTS (
-                   SELECT 1 FROM file_source_aliases exact_candidate_alias
-                    WHERE exact_candidate_alias.user_id=r.user_id
-                      AND exact_candidate_alias.uploaded_by=?
-                      AND exact_candidate_alias.raw_object_id=r.id
-               )
+               AND (EXISTS (
+                       SELECT 1 FROM file_source_aliases exact_candidate_alias
+                        WHERE exact_candidate_alias.user_id=r.user_id
+                          AND exact_candidate_alias.uploaded_by=?
+                          AND exact_candidate_alias.raw_object_id=r.id
+                   ) OR (
+                       r.source='upload'
+                       AND typeof(r.metadata_json)='text'
+                       AND length(CAST(r.metadata_json AS BLOB))<=131072
+                       AND json_type(r.metadata_json)='object'
+                       AND NOT EXISTS (
+                           SELECT 1 FROM json_tree(r.metadata_json) member
+                            WHERE member.key IS NOT NULL
+                            GROUP BY member.parent,CAST(member.key AS TEXT)
+                           HAVING COUNT(*)>1
+                       )
+                   ))
                AND {_not_audio_document("r")}
                AND {_not_private_raw_dependency("r")}
                AND NOT EXISTS (

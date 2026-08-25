@@ -205,6 +205,9 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
   0.207.26 → 0.207.27 атомарно добавляет exact body-free dormant
   conversation/document Work Item projection; writer, admission и runtime route
   в этом release не активированы;
+- переход 0.207.28 → 0.207.29 не меняет schema 42 и активирует полный
+  selected-message → durable Q1/Q2 → exact comparison vertical с повторной
+  авторизацией источников, независимой проверкой и WorkTrace;
 - live release 0.207.24 уже имеет schema 41; переход 0.207.24 → 0.207.26
   не меняет schema и готовит только distinct bounded assist из
   уже принятого private discarded shadow;

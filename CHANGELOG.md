@@ -8,6 +8,9 @@
 - Bare single-file replies, duplicate filename candidates, invalid ordinals,
   explicit resume and global stop commands now have deterministic durable
   behavior; unrelated turns no longer get captured by a restored comparison.
+- Historical API uploads without a transport alias remain usable by exact-name
+  Q1/Q2: the accepted document receives one empty-name authority binding only
+  after a final transactional source and permission recheck.
 - Every comparison publication carries a structural WorkTrace. Existing schema
   42 remains byte-for-byte compatible with the deployed rollback release.
 

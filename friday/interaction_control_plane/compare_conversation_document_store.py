@@ -1168,25 +1168,22 @@ def _insert_document_evidence(
     )
 
 
-def _ensure_current_upload_alias_in_transaction(
+def _ensure_comparison_document_alias_in_transaction(
     conn: sqlite3.Connection,
     *,
     item: CompareConversationWithDocumentWorkItem,
     document: ResolvedDocumentIdentity,
 ) -> None:
-    """Durably bind an exact current upload for released schema-42 authority.
+    """Durably bind one exactly accepted document for schema-42 authority.
 
     API uploads historically kept their immutable Raw ``source_ref`` but did
     not create a ``file_source_aliases`` row, while the released schema-42
-    evidence trigger requires that uploader binding.  Mint one narrow,
-    code-owned message alias only after the current-turn boundary, Raw
-    registration and uploader metadata all agree.  Older runtimes safely
-    ignore the extra alias and the released trigger remains byte-for-byte
-    unchanged.
+    evidence trigger requires that uploader binding.  Mint one narrow empty-name
+    alias only after the accepted current/historical boundary or frozen Q2
+    ordinal, Raw registration and uploader metadata all agree.  The alias adds
+    no filename candidate and older runtimes safely ignore it.
     """
 
-    if document.provenance is not ResolvedDocumentProvenance.CURRENT_TURN_ATTACHMENT:
-        return
     existing = conn.execute(
         """SELECT 1 FROM file_source_aliases
             WHERE user_id=? AND uploaded_by=? AND raw_object_id=? LIMIT 1""",
@@ -1194,33 +1191,88 @@ def _ensure_current_upload_alias_in_transaction(
     ).fetchone()
     if existing is not None:
         return
-    exact = conn.execute(
-        """SELECT 1
-             FROM raw_objects raw
+    raw_exact = conn.execute(
+        """SELECT 1 FROM raw_objects raw
              JOIN users uploader ON uploader.id=? AND uploader.status='active'
-             JOIN messages boundary
-               ON boundary.id=? AND boundary.user_id=?
-              AND boundary.conversation_id=? AND boundary.role='user'
             WHERE raw.id=? AND raw.user_id=? AND raw.source='upload'
-              AND raw.content_type='file' AND raw.deleted_at IS NULL
+              AND raw.content_type='file'
+              AND raw.deleted_at IS NULL AND raw.content_hash=?
+              AND typeof(raw.metadata_json)='text'
+              AND length(CAST(raw.metadata_json AS BLOB))<=131072
+              AND json_valid(raw.metadata_json) AND json_type(raw.metadata_json)='object'
               AND json_type(raw.metadata_json,'$.uploaded_by')='text'
               AND json_extract(raw.metadata_json,'$.uploaded_by')=?
-              AND json_type(boundary.metadata_json,'$.conversation_uploaded_raw_ids')='array'
-              AND json_array_length(boundary.metadata_json,'$.conversation_uploaded_raw_ids')=1
-              AND json_extract(boundary.metadata_json,'$.conversation_uploaded_raw_ids[0]')=raw.id
+              AND json_type(raw.metadata_json,'$.sha256')='text'
+              AND json_extract(raw.metadata_json,'$.sha256')=?
+              AND NOT EXISTS (
+                    SELECT 1 FROM json_tree(raw.metadata_json) member
+                     WHERE member.key IS NOT NULL
+                     GROUP BY member.parent,CAST(member.key AS TEXT)
+                    HAVING COUNT(*)>1
+              )
             LIMIT 1""",
         (
             item.user_id,
-            document.origin_boundary_user_message_id,
-            item.user_id,
-            item.conversation_id,
             document.raw_object_id,
             document.source_ref.tenant_id,
+            document.raw_content_sha256,
             item.user_id,
+            document.content_sha256,
         ),
     ).fetchone()
-    if exact is None:
-        raise WorkItemAnchorError("current upload has no exact uploader authority")
+    if raw_exact is None or document.source_ref.principal_id != item.user_id:
+        raise WorkItemAnchorError("comparison document has no exact uploader authority")
+
+    if document.provenance in {
+        ResolvedDocumentProvenance.CURRENT_TURN_ATTACHMENT,
+        ResolvedDocumentProvenance.HISTORICAL_EXACT_REFERENCE,
+    }:
+        attachment_key = (
+            "conversation_uploaded_raw_ids"
+            if document.provenance is ResolvedDocumentProvenance.CURRENT_TURN_ATTACHMENT
+            else "conversation_attachment_raw_ids"
+        )
+        boundary_exact = conn.execute(
+            """SELECT 1 FROM messages boundary
+                WHERE boundary.id=? AND boundary.user_id=?
+                  AND boundary.conversation_id=? AND boundary.role='user'
+                  AND json_valid(boundary.metadata_json)
+                  AND json_type(boundary.metadata_json,?)='array'
+                  AND json_array_length(boundary.metadata_json,?)=1
+                  AND json_extract(boundary.metadata_json,?)=?
+                LIMIT 1""",
+            (
+                document.origin_boundary_user_message_id,
+                item.user_id,
+                item.conversation_id,
+                f"$.{attachment_key}",
+                f"$.{attachment_key}",
+                f"$.{attachment_key}[0]",
+                document.raw_object_id,
+            ),
+        ).fetchone()
+        if boundary_exact is None:
+            raise WorkItemAnchorError("comparison document boundary is not exact")
+    elif document.provenance is ResolvedDocumentProvenance.HISTORICAL_CANDIDATE_ORDINAL:
+        candidate_set = item.document_candidate_set
+        ordinal = document.selected_ordinal
+        if (
+            candidate_set is None
+            or document.candidate_set_id != candidate_set.id
+            or not isinstance(ordinal, int)
+            or isinstance(ordinal, bool)
+            or not 1 <= ordinal <= len(candidate_set.candidates)
+        ):
+            raise WorkItemAnchorError("comparison document candidate binding is not exact")
+        candidate = candidate_set.candidates[ordinal - 1]
+        if (
+            candidate.source_ref != document.source_ref
+            or candidate.source_snapshot_sha256 != document.candidate_source_snapshot_sha256
+        ):
+            raise WorkItemAnchorError("comparison document candidate source is not exact")
+    else:  # pragma: no cover - closed ResolvedDocumentIdentity contract
+        raise WorkItemAnchorError("comparison document provenance is not accepted")
+
     conn.execute(
         """INSERT INTO file_source_aliases(
                user_id,uploaded_by,source_ref,raw_object_id,supplied_filename,created_at
@@ -1228,7 +1280,11 @@ def _ensure_current_upload_alias_in_transaction(
         (
             document.source_ref.tenant_id,
             item.user_id,
-            f"friday-compare-current:{document.origin_boundary_user_message_id}",
+            (
+                f"friday-compare-current:{document.origin_boundary_user_message_id}"
+                if document.provenance is ResolvedDocumentProvenance.CURRENT_TURN_ATTACHMENT
+                else f"friday-compare-evidence:{document.origin_boundary_user_message_id}"
+            ),
             document.raw_object_id,
             "",
             document.resolved_at,
@@ -1956,7 +2012,7 @@ def _resolve_compare_document_in_transaction(
         )
         if question_cursor.rowcount != 1:
             raise WorkItemConflictError("comparison question CAS lost its state race")
-        _ensure_current_upload_alias_in_transaction(
+        _ensure_comparison_document_alias_in_transaction(
             conn,
             item=current,
             document=document_evidence,
@@ -2455,12 +2511,12 @@ def _cas_compare_lifecycle(
             require_latest_message=False,
         )
     except WorkItemAnchorError:
-        # Suspension is the fail-closed sink for a live comparison whose
+        # Suspension and expiry are fail-closed sinks for a live comparison whose
         # selected message or document pin drifted.  Requiring that stale
         # source to authenticate would make the mandated retirement
         # impossible.  The mutation below remains exact-owner/id/revision/state
         # CAS scoped and neither publishes nor retains source-bearing prose.
-        if target_state is not WorkState.SUSPENDED:
+        if target_state not in {WorkState.SUSPENDED, WorkState.EXPIRED}:
             raise
     savepoint = _begin_work_item_mutation_savepoint(conn)
     try:
@@ -2521,7 +2577,7 @@ def _cas_compare_lifecycle(
                 require_latest_message=False,
             )
         except WorkItemAnchorError:
-            if target_state is not WorkState.SUSPENDED:
+            if target_state not in {WorkState.SUSPENDED, WorkState.EXPIRED}:
                 raise
     except BaseException:
         _rollback_work_item_mutation_savepoint(conn, savepoint)

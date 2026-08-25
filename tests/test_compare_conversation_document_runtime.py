@@ -43,8 +43,13 @@ from friday.interaction_control_plane.compare_conversation_document_store import
     suspend_compare_conversation_with_document_in_transaction,
 )
 from friday.interaction_control_plane.turn_trace import (
+    CapabilityClass,
     CompletionDecision,
     ContinuationKind,
+    CountAccounting,
+    FailureReason,
+    FailureStage,
+    OutcomeStatus,
     TurnTrace,
     WorkRelation,
 )
@@ -90,6 +95,7 @@ def _register_exact_text_document(
     *,
     owner: str,
     filename: str,
+    create_alias: bool = True,
 ) -> RawObject:
     text = "В документе выбран обычный режим без CUDA graphs."
     content = text.encode("utf-8")
@@ -137,7 +143,7 @@ def _register_exact_text_document(
     )
     storage.store_raw_object(raw)
     with storage.transaction() as conn:
-        if (
+        if create_alias and (
             conn.execute(
                 "SELECT 1 FROM file_source_aliases WHERE user_id=? AND uploaded_by=? AND raw_object_id=?",
                 (owner, owner, raw.id),
@@ -400,6 +406,115 @@ async def test_active_comparison_restarts_without_an_intervening_ordinary_row(
 
 
 @pytest.mark.asyncio
+async def test_historical_api_upload_without_alias_completes_and_mints_narrow_authority(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "compare-historical-no-alias-owner"
+    conversation, waiting, _evidence = _create_writer_followup_waiting(storage, owner=owner)
+    filename = "old-api-upload.txt"
+    raw = _register_exact_text_document(
+        storage,
+        settings,
+        owner=owner,
+        filename=filename,
+        create_alias=False,
+    )
+    actor = AuthorizationService(storage).actor_for_user(owner, source="comparison-runtime-test")
+    raw_before = storage.execute(
+        "SELECT source_ref,metadata_json FROM raw_objects WHERE id=?",
+        (raw.id,),
+    ).fetchone()
+    replay = _exact_replay(waiting)
+    runtime = AgentRuntime(settings, storage, selected_archive_model=_ComparisonModel())
+    monkeypatch.setattr(
+        runtime,
+        "_comparison_replay_in_transaction",
+        lambda *_args, **_kwargs: replay,
+    )
+    monkeypatch.setattr(
+        comparison_module,
+        "archive_selected_evidence_snapshot_sha256",
+        lambda *_args, **_kwargs: waiting.selected_message_evidence.source_snapshot_sha256,
+    )
+
+    result = await runtime.chat(
+        owner,
+        filename,
+        actor=actor,
+        conversation_id=conversation["id"],
+    )
+
+    alias = storage.execute(
+        """SELECT source_ref,supplied_filename FROM file_source_aliases
+             WHERE user_id=? AND uploaded_by=? AND raw_object_id=?""",
+        (owner, owner, raw.id),
+    ).fetchone()
+    raw_after = storage.execute(
+        "SELECT source_ref,metadata_json FROM raw_objects WHERE id=?",
+        (raw.id,),
+    ).fetchone()
+    assert result["verified"] is True
+    assert alias is not None
+    assert str(alias["source_ref"]).startswith("friday-compare-evidence:msg_")
+    assert alias["supplied_filename"] == ""
+    assert tuple(raw_after) == tuple(raw_before)
+
+
+@pytest.mark.asyncio
+async def test_q1_final_reauth_drift_suspends_without_model_or_partial_alias(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "compare-q1-final-reauth-owner"
+    conversation, waiting, _evidence = _create_writer_followup_waiting(storage, owner=owner)
+    filename = "reauth-race.txt"
+    raw = _register_exact_text_document(
+        storage,
+        settings,
+        owner=owner,
+        filename=filename,
+        create_alias=False,
+    )
+    actor = AuthorizationService(storage).actor_for_user(owner, source="comparison-runtime-test")
+    model = _ComparisonModel()
+    runtime = AgentRuntime(settings, storage, selected_archive_model=model)
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "reauthorize_prepared_file_evidence_in_transaction",
+        lambda *_args, **_kwargs: False,
+    )
+
+    result = await runtime.chat(
+        owner,
+        filename,
+        actor=actor,
+        conversation_id=conversation["id"],
+    )
+
+    state = storage.execute(
+        "SELECT state,revision FROM work_items WHERE id=?",
+        (waiting.id,),
+    ).fetchone()
+    aliases = storage.execute(
+        "SELECT COUNT(*) FROM file_source_aliases WHERE raw_object_id=? AND uploaded_by=?",
+        (raw.id, owner),
+    ).fetchone()[0]
+    evidence_rows = storage.execute(
+        "SELECT COUNT(*) FROM work_item_compare_document_evidence WHERE work_item_id=?",
+        (waiting.id,),
+    ).fetchone()[0]
+    assert result["verified"] is False
+    assert result["context"]["compare_conversation_with_document"] == "suspended"
+    assert tuple(state) == ("suspended", waiting.revision + 1)
+    assert aliases == 0
+    assert evidence_rows == 0
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
 async def test_synthetic_bare_upload_answers_waiting_q1_in_runtime(
     settings: Any,
     storage: Any,
@@ -526,6 +641,45 @@ async def test_carried_comparison_revision_mismatch_preserves_newer_question(
     ).fetchone()[0]
     assert tuple(row) == ("waiting_for_input", waiting.revision)
     assert after == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("admission_kind", ["uncertain", "legacy_unbound"])
+async def test_unbound_intake_fence_uses_fresh_exact_comparison_binding(
+    settings: Any,
+    storage: Any,
+    admission_kind: str,
+) -> None:
+    owner = f"compare-fresh-carried-{admission_kind}-owner"
+    conversation, waiting, _evidence = _create_writer_followup_waiting(storage, owner=owner)
+    actor = AuthorizationService(storage).actor_for_user(owner, source="comparison-runtime-test")
+    admission = (
+        PendingDurableTurnAdmission.uncertain(
+            person_id=owner,
+            conversation_id=conversation["id"],
+        )
+        if admission_kind == "uncertain"
+        else PendingDurableTurnAdmission.owned(
+            person_id=owner,
+            conversation_id=conversation["id"],
+        )
+    )
+    runtime = AgentRuntime(settings, storage)
+
+    result = await runtime.chat(
+        owner,
+        "отмена",
+        actor=actor,
+        conversation_id=conversation["id"],
+        _pending_durable_admission=admission,
+    )
+
+    row = storage.execute(
+        "SELECT state,revision FROM work_items WHERE id=?",
+        (waiting.id,),
+    ).fetchone()
+    assert result["context"]["compare_conversation_with_document"] == "cancelled"
+    assert tuple(row) == ("cancelled", waiting.revision + 1)
 
 
 @pytest.mark.asyncio
@@ -742,6 +896,7 @@ async def _open_duplicate_filename_q2(
     storage: Any,
     *,
     owner: str,
+    create_alias: bool = True,
 ) -> tuple[Any, Any, Any, Any]:
     conversation, waiting, _evidence = _create_writer_followup_waiting(storage, owner=owner)
     first = _register_exact_text_document(
@@ -749,12 +904,14 @@ async def _open_duplicate_filename_q2(
         settings,
         owner=owner,
         filename="duplicate-decision.txt",
+        create_alias=create_alias,
     )
     second = _register_exact_text_document(
         storage,
         settings,
         owner=owner,
         filename="duplicate-decision.txt",
+        create_alias=create_alias,
     )
     actor = AuthorizationService(storage).actor_for_user(owner, source="comparison-runtime-test")
     runtime = AgentRuntime(settings, storage, selected_archive_model=_ComparisonModel())
@@ -873,6 +1030,14 @@ async def test_exact_q2_ordinal_reauthorizes_and_completes_comparison(
     final_trace = TurnTrace.parse(final_metadata["interaction_trace"])
     assert final_trace.completion is CompletionDecision.COMPLETE
     assert final_trace.continuation is ContinuationKind.CANDIDATE_SELECTION
+    assert final_trace.budget.model_calls == 2
+    assert final_trace.budget.model_call_accounting is CountAccounting.COMPLETE
+    assert {step.capability: step.outcome for step in final_trace.steps} == {
+        CapabilityClass.MESSAGE_RETRIEVAL: OutcomeStatus.SUCCEEDED,
+        CapabilityClass.DOCUMENT_RETRIEVAL: OutcomeStatus.SUCCEEDED,
+        CapabilityClass.MODEL_SYNTHESIS: OutcomeStatus.SUCCEEDED,
+        CapabilityClass.VERIFICATION: OutcomeStatus.SUCCEEDED,
+    }
     with storage.transaction() as conn:
         completed = get_compare_conversation_with_document_work_item_in_transaction(
             conn,
@@ -888,6 +1053,113 @@ async def test_exact_q2_ordinal_reauthorizes_and_completes_comparison(
         completed.resolved_document_evidence.raw_object_id
         == q2.document_candidate_set.candidates[1].source_ref.canonical_object_id
     )
+
+
+@pytest.mark.asyncio
+async def test_duplicate_historical_api_uploads_without_alias_reach_q2_and_bind_only_selection(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "compare-q2-no-alias-owner"
+    conversation, q2, actor, raws = await _open_duplicate_filename_q2(
+        settings,
+        storage,
+        owner=owner,
+        create_alias=False,
+    )
+    before = storage.execute(
+        "SELECT COUNT(*) FROM file_source_aliases WHERE uploaded_by=?",
+        (owner,),
+    ).fetchone()[0]
+    replay = _exact_replay(q2)
+    runtime = AgentRuntime(settings, storage, selected_archive_model=_ComparisonModel())
+    monkeypatch.setattr(
+        runtime,
+        "_comparison_replay_in_transaction",
+        lambda *_args, **_kwargs: replay,
+    )
+    monkeypatch.setattr(
+        comparison_module,
+        "archive_selected_evidence_snapshot_sha256",
+        lambda *_args, **_kwargs: q2.selected_message_evidence.source_snapshot_sha256,
+    )
+
+    result = await runtime.chat(
+        owner,
+        "2",
+        actor=actor,
+        conversation_id=conversation["id"],
+    )
+
+    aliases = storage.execute(
+        "SELECT raw_object_id FROM file_source_aliases WHERE uploaded_by=? ORDER BY raw_object_id",
+        (owner,),
+    ).fetchall()
+    selected_raw_id = q2.document_candidate_set.candidates[1].source_ref.canonical_object_id
+    assert before == 0
+    assert result["verified"] is True
+    assert [row["raw_object_id"] for row in aliases] == [selected_raw_id]
+    assert selected_raw_id in {raw.id for raw in raws}
+
+
+@pytest.mark.asyncio
+async def test_verifier_rejection_persists_exact_failed_comparison_trace(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = "compare-q2-verifier-trace-owner"
+    conversation, q2, actor, _raws = await _open_duplicate_filename_q2(
+        settings,
+        storage,
+        owner=owner,
+    )
+    replay = _exact_replay(q2)
+    runtime = AgentRuntime(
+        settings,
+        storage,
+        selected_archive_model=_ComparisonModel(verifier_supported=False),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_comparison_replay_in_transaction",
+        lambda *_args, **_kwargs: replay,
+    )
+    monkeypatch.setattr(
+        comparison_module,
+        "archive_selected_evidence_snapshot_sha256",
+        lambda *_args, **_kwargs: q2.selected_message_evidence.source_snapshot_sha256,
+    )
+
+    result = await runtime.chat(
+        owner,
+        "1",
+        actor=actor,
+        conversation_id=conversation["id"],
+    )
+
+    metadata = json.loads(
+        storage.execute(
+            "SELECT metadata_json FROM messages WHERE id=?",
+            (result["message_id"],),
+        ).fetchone()[0]
+    )
+    trace = TurnTrace.parse(metadata["interaction_trace"])
+    outcomes = {step.capability: step.outcome for step in trace.steps}
+    assert result["context"]["compare_conversation_with_document"] == "suspended"
+    assert metadata["structural"]["model_spoke"] is True
+    assert trace.completion is CompletionDecision.FAILED
+    assert trace.failure_stage is FailureStage.COMPLETION
+    assert trace.failure_reason is FailureReason.VERIFICATION_REJECTED
+    assert trace.budget.model_calls == 2
+    assert trace.budget.model_call_accounting is CountAccounting.COMPLETE
+    assert outcomes == {
+        CapabilityClass.MESSAGE_RETRIEVAL: OutcomeStatus.SUCCEEDED,
+        CapabilityClass.DOCUMENT_RETRIEVAL: OutcomeStatus.SUCCEEDED,
+        CapabilityClass.MODEL_SYNTHESIS: OutcomeStatus.SUCCEEDED,
+        CapabilityClass.VERIFICATION: OutcomeStatus.FAILED,
+    }
 
 
 @pytest.mark.asyncio

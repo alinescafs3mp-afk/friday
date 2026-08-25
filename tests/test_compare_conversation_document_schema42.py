@@ -2007,6 +2007,53 @@ def test_writer_lifecycle_closes_q1_and_expire_due_is_owner_scoped(storage: Any)
     assert expired.document_questions[-1].close_reason.value == "expired"
 
 
+def test_due_active_comparison_expires_after_its_raw_document_is_deleted(storage: Any) -> None:
+    owner = "compare-expire-deleted-raw-owner"
+    conversation, waiting, _old = _create_writer_followup_waiting(storage, owner=owner)
+    other_conversation, other, _old = _create_writer_followup_waiting(
+        storage,
+        owner="compare-expire-unrelated-owner",
+    )
+    boundary, document = _prepare_writer_document(
+        storage,
+        conversation=conversation,
+        item=waiting,
+        owner=owner,
+    )
+    with storage.transaction() as conn:
+        active = resolve_compare_conversation_document_reference_in_transaction(
+            conn,
+            work_item_id=waiting.id,
+            user_id=owner,
+            conversation_id=conversation["id"],
+            expected_revision=waiting.revision,
+            boundary_user_message_id=boundary["id"],
+            document_evidence=document,
+            now=_RESOLVED_AT,
+        )
+        conn.execute(
+            "UPDATE raw_objects SET deleted_at=? WHERE id=?",
+            (_RESOLVED_AT, document.raw_object_id),
+        )
+        count = expire_due_compare_conversation_with_document_work_items_in_transaction(
+            conn,
+            user_id=owner,
+            now="2026-08-25T20:01:00+00:00",
+        )
+        row = conn.execute(
+            "SELECT state,revision,closed_at FROM work_items WHERE id=?",
+            (active.id,),
+        ).fetchone()
+        unrelated = conn.execute(
+            "SELECT state,revision FROM work_items WHERE id=? AND conversation_id=?",
+            (other.id, other_conversation["id"]),
+        ).fetchone()
+
+    assert count == 1
+    assert tuple(row) == ("expired", active.revision + 1, "2026-08-25T20:01:00+00:00")
+    assert tuple(unrelated) == ("waiting_for_input", other.revision)
+
+
 def test_writer_expire_rejects_not_due_without_partial_question_close(storage: Any) -> None:
     conversation, waiting, _old = _create_writer_followup_waiting(storage)
     with storage.transaction() as conn:
