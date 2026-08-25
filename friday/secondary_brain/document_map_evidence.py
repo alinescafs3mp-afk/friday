@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from friday import __version__
+from friday.config import env as config_env
 from friday.permissions import LEGACY_OWNER_USER_ID
 from friday.private_fs import ensure_private_directory
 from friday.secondary_product_witness import (
@@ -606,7 +607,7 @@ def _live_release_identity(*, verify_tree: bool = False) -> dict[str, Any]:
     if anchor.resolve(strict=True) != root:
         raise ValueError("document-map live release anchor changed")
 
-    env_value = os.environ.get("FRIDAY_ENV_FILE", "")
+    env_value = config_env("FRIDAY_ENV_FILE", "")
     if not env_value or any(character in env_value for character in "\0\r\n"):
         raise ValueError("document-map live environment identity is unavailable")
     env_path = Path(os.path.abspath(Path(env_value).expanduser()))
