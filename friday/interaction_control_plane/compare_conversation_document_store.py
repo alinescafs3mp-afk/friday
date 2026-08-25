@@ -1581,12 +1581,21 @@ def _cas_compare_lifecycle(
     timestamp = _logical_now(now, current_updated_at=current.updated_at)
     if (current.expires_at <= timestamp) is not require_due:
         raise WorkItemConflictError("comparison Work Item revision/state is no longer current")
-    _validate_stored_item(
-        conn,
-        current,
-        allow_disabled_owner=True,
-        require_latest_message=False,
-    )
+    try:
+        _validate_stored_item(
+            conn,
+            current,
+            allow_disabled_owner=True,
+            require_latest_message=False,
+        )
+    except WorkItemAnchorError:
+        # Suspension is the fail-closed sink for a live comparison whose
+        # selected message or document pin drifted.  Requiring that stale
+        # source to authenticate would make the mandated retirement
+        # impossible.  The mutation below remains exact-owner/id/revision/state
+        # CAS scoped and neither publishes nor retains source-bearing prose.
+        if target_state is not WorkState.SUSPENDED:
+            raise
     savepoint = _begin_work_item_mutation_savepoint(conn)
     try:
         if current.state is WorkState.WAITING_FOR_INPUT:
@@ -1638,12 +1647,16 @@ def _cas_compare_lifecycle(
         )
         if updated is None:  # pragma: no cover
             raise WorkItemConflictError("comparison lifecycle state is not durable")
-        _validate_stored_item(
-            conn,
-            updated,
-            allow_disabled_owner=True,
-            require_latest_message=False,
-        )
+        try:
+            _validate_stored_item(
+                conn,
+                updated,
+                allow_disabled_owner=True,
+                require_latest_message=False,
+            )
+        except WorkItemAnchorError:
+            if target_state is not WorkState.SUSPENDED:
+                raise
     except BaseException:
         _rollback_work_item_mutation_savepoint(conn, savepoint)
         raise
