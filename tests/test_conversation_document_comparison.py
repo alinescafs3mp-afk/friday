@@ -5,7 +5,7 @@ import json
 import time
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any
+from typing import Any, TypedDict
 
 import pytest
 
@@ -30,6 +30,7 @@ from friday.orchestration.conversation_document_comparison import (
     compare_conversation_with_document,
     conversation_document_comparison_is_process_owned,
     conversation_document_comparison_lease_is_current,
+    conversation_document_comparison_plan_sha256,
     conversation_document_model_evidence_identity,
 )
 from friday.retrieval.archive_evidence_replay import (
@@ -59,6 +60,58 @@ from friday.retrieval.contracts import (
     SourceRevision,
 )
 from friday.source_identity import authorized_file_snapshot_token
+
+
+class _DurableEvidenceDigests(TypedDict):
+    message_evidence_sha256: str
+    document_evidence_sha256: str
+    evidence_bundle_sha256: str
+
+
+def _durable_evidence_digests(
+    selected: SelectedArchiveEvidence,
+    *,
+    document_evidence_sha256: str = "d" * 64,
+) -> _DurableEvidenceDigests:
+    message_evidence_sha256 = hashlib.sha256(
+        json.dumps(
+            selected.to_payload(),
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")
+    ).hexdigest()
+    evidence_bundle_sha256 = hashlib.sha256(
+        json.dumps(
+            {
+                "document_evidence_sha256": document_evidence_sha256,
+                "message_evidence_sha256": message_evidence_sha256,
+                "schema": "friday.compare-conversation-document-evidence-bundle.v1",
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("ascii")
+    ).hexdigest()
+    return {
+        "message_evidence_sha256": message_evidence_sha256,
+        "document_evidence_sha256": document_evidence_sha256,
+        "evidence_bundle_sha256": evidence_bundle_sha256,
+    }
+
+
+def _comparison_plan_sha256(durable: _DurableEvidenceDigests) -> str:
+    return conversation_document_comparison_plan_sha256(
+        request="Сопоставь выбранные сообщения с этим документом",
+        message_evidence_sha256=durable["message_evidence_sha256"],
+        document_evidence_sha256=durable["document_evidence_sha256"],
+        evidence_bundle_sha256=durable["evidence_bundle_sha256"],
+        message_model_evidence_sha256="1" * 64,
+        document_model_evidence_sha256="2" * 64,
+        model_evidence_sha256="3" * 64,
+    )
 
 
 def _message_evidence(
@@ -306,6 +359,7 @@ async def test_exact_two_source_comparison_uses_two_tools_disabled_calls_and_rec
     replay, selected = _message_evidence()
     document = _prepared_document()
     model = _ComparisonModel()
+    durable_digests = _durable_evidence_digests(selected)
 
     comparison = await compare_conversation_with_document(
         model,
@@ -313,6 +367,7 @@ async def test_exact_two_source_comparison_uses_two_tools_disabled_calls_and_rec
         message_replay=replay,
         selected_message_evidence=selected,
         prepared_document=document,
+        **durable_digests,
         absolute_deadline=time.monotonic() + 10,
     )
 
@@ -320,6 +375,9 @@ async def test_exact_two_source_comparison_uses_two_tools_disabled_calls_and_rec
     assert comparison.answer == model.answer
     assert comparison.citation_labels == ("M1.1", "D1")
     assert comparison.message_coverage_grade is ArchiveEvidenceReplayCoverageGrade.COMPLETE
+    assert comparison.message_evidence_sha256 == durable_digests["message_evidence_sha256"]
+    assert comparison.document_evidence_sha256 == durable_digests["document_evidence_sha256"]
+    assert comparison.evidence_bundle_sha256 == durable_digests["evidence_bundle_sha256"]
     assert conversation_document_model_evidence_identity(
         replay,
         selected,
@@ -393,6 +451,7 @@ async def test_synthesis_and_verifier_fail_closed(
             message_replay=replay,
             selected_message_evidence=selected,
             prepared_document=_prepared_document(),
+            **_durable_evidence_digests(selected),
             absolute_deadline=time.monotonic() + 10,
         )
 
@@ -414,6 +473,7 @@ async def test_stale_lease_and_message_snapshot_are_rejected_before_model_dispat
             message_replay=replay,
             selected_message_evidence=selected,
             prepared_document=_prepared_document(),
+            **_durable_evidence_digests(selected),
             absolute_deadline=time.monotonic() + 10,
         )
     assert stale.value.failure_reason is FailureReason.STALE_STATE
@@ -428,6 +488,7 @@ async def test_stale_lease_and_message_snapshot_are_rejected_before_model_dispat
             message_replay=replay,
             selected_message_evidence=drifted,
             prepared_document=_prepared_document(),
+            **_durable_evidence_digests(drifted),
             absolute_deadline=time.monotonic() + 10,
         )
     assert untouched_model.lease is None
@@ -446,6 +507,7 @@ async def test_verifier_max_answer_is_reserved_before_model_dispatch() -> None:
             message_replay=replay,
             selected_message_evidence=selected,
             prepared_document=_prepared_document(text="слово " * 50),
+            **_durable_evidence_digests(selected),
             absolute_deadline=time.monotonic() + 10,
         )
 
@@ -469,6 +531,7 @@ async def test_unsafe_model_projection_is_rejected_before_dispatch(
             message_replay=replay,
             selected_message_evidence=selected,
             prepared_document=_prepared_document(),
+            **_durable_evidence_digests(selected),
             absolute_deadline=time.monotonic() + 10,
         )
 
@@ -495,6 +558,46 @@ def test_plan_and_evidence_identities_are_body_sensitive_but_body_free() -> None
     assert "Вторая" not in encoded
 
 
+def test_plan_binds_each_durable_evidence_digest() -> None:
+    _replay, selected = _message_evidence()
+    durable = _durable_evidence_digests(selected)
+    baseline = _comparison_plan_sha256(durable)
+
+    changed_message = durable.copy()
+    changed_message["message_evidence_sha256"] = "a" * 64
+    assert baseline != _comparison_plan_sha256(changed_message)
+
+    changed_document = durable.copy()
+    changed_document["document_evidence_sha256"] = "b" * 64
+    assert baseline != _comparison_plan_sha256(changed_document)
+
+    changed_bundle = durable.copy()
+    changed_bundle["evidence_bundle_sha256"] = "c" * 64
+    assert baseline != _comparison_plan_sha256(changed_bundle)
+
+
+@pytest.mark.asyncio
+async def test_mismatched_durable_message_evidence_is_rejected_before_dispatch() -> None:
+    replay, selected = _message_evidence()
+    model = _ComparisonModel()
+    durable = _durable_evidence_digests(selected)
+    durable["message_evidence_sha256"] = "f" * 64
+
+    with pytest.raises(ConversationDocumentComparisonError, match="durable selected message"):
+        await compare_conversation_with_document(
+            model,
+            request="Сопоставь выбранные сообщения с этим документом",
+            message_replay=replay,
+            selected_message_evidence=selected,
+            prepared_document=_prepared_document(),
+            **durable,
+            absolute_deadline=time.monotonic() + 10,
+        )
+
+    assert model.lease is None
+    assert model.calls == []
+
+
 @pytest.mark.asyncio
 async def test_partial_message_coverage_is_visible_and_verified() -> None:
     replay, selected = _message_evidence(coverage=ArchiveEvidenceReplayCoverageGrade.PARTIAL)
@@ -506,6 +609,7 @@ async def test_partial_message_coverage_is_visible_and_verified() -> None:
         message_replay=replay,
         selected_message_evidence=selected,
         prepared_document=_prepared_document(),
+        **_durable_evidence_digests(selected),
         absolute_deadline=time.monotonic() + 10,
     )
 
@@ -523,6 +627,7 @@ async def test_accepted_value_revalidates_answer_contract_on_construction() -> N
         message_replay=replay,
         selected_message_evidence=selected,
         prepared_document=_prepared_document(),
+        **_durable_evidence_digests(selected),
         absolute_deadline=time.monotonic() + 10,
     )
 
@@ -539,6 +644,12 @@ async def test_accepted_value_revalidates_answer_contract_on_construction() -> N
         )
     with pytest.raises(ConversationDocumentComparisonError):
         replace(comparison, model_evidence_sha256="f" * 64)
+    with pytest.raises(ConversationDocumentComparisonError):
+        replace(comparison, message_evidence_sha256="f" * 64)
+    with pytest.raises(ConversationDocumentComparisonError):
+        replace(comparison, document_evidence_sha256="f" * 64)
+    with pytest.raises(ConversationDocumentComparisonError):
+        replace(comparison, evidence_bundle_sha256="f" * 64)
     with pytest.raises(ConversationDocumentComparisonError):
         replace(
             comparison,

@@ -57,7 +57,7 @@ from friday.retrieval.archive_evidence_snapshot import (
 )
 from friday.retrieval.archive_search_contract import ArchiveSearchCorpus
 
-CONVERSATION_DOCUMENT_COMPARISON_PLAN_SCHEMA = "friday.conversation-document-comparison-plan.v1"
+CONVERSATION_DOCUMENT_COMPARISON_PLAN_SCHEMA = "friday.conversation-document-comparison-plan.v2"
 CONVERSATION_DOCUMENT_COMPARISON_EVIDENCE_SCHEMA = "friday.conversation-document-comparison-evidence.v1"
 
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -260,6 +260,9 @@ def conversation_document_model_evidence_identity(
 def conversation_document_comparison_plan_sha256(
     *,
     request: str,
+    message_evidence_sha256: str,
+    document_evidence_sha256: str,
+    evidence_bundle_sha256: str,
     message_model_evidence_sha256: str,
     document_model_evidence_sha256: str,
     model_evidence_sha256: str,
@@ -275,8 +278,11 @@ def conversation_document_comparison_plan_sha256(
         or request != request.strip()
         or len(request_bytes) > _MAX_REQUEST_UTF8_BYTES
         or any(
-            _DIGEST_RE.fullmatch(value) is None
+            type(value) is not str or _DIGEST_RE.fullmatch(value) is None
             for value in (
+                message_evidence_sha256,
+                document_evidence_sha256,
+                evidence_bundle_sha256,
                 message_model_evidence_sha256,
                 document_model_evidence_sha256,
                 model_evidence_sha256,
@@ -287,8 +293,11 @@ def conversation_document_comparison_plan_sha256(
     return hashlib.sha256(
         _canonical_json(
             {
+                "document_evidence_sha256": document_evidence_sha256,
                 "document_model_evidence_sha256": document_model_evidence_sha256,
                 "effect": "read",
+                "evidence_bundle_sha256": evidence_bundle_sha256,
+                "message_evidence_sha256": message_evidence_sha256,
                 "model_evidence_sha256": model_evidence_sha256,
                 "max_tool_steps": 0,
                 "message_model_evidence_sha256": message_model_evidence_sha256,
@@ -403,6 +412,9 @@ def _comparison_process_seal(
     *,
     answer: str,
     plan_sha256: str,
+    message_evidence_sha256: str,
+    document_evidence_sha256: str,
+    evidence_bundle_sha256: str,
     message_model_evidence_sha256: str,
     document_model_evidence_sha256: str,
     model_evidence_sha256: str,
@@ -415,9 +427,12 @@ def _comparison_process_seal(
         {
             "answer_sha256": hashlib.sha256(answer.encode("utf-8")).hexdigest(),
             "citation_labels": citation_labels,
+            "document_evidence_sha256": document_evidence_sha256,
             "document_model_evidence_sha256": document_model_evidence_sha256,
+            "evidence_bundle_sha256": evidence_bundle_sha256,
             "lease_object_id": id(lease),
             "message_coverage_grade": message_coverage_grade.value,
+            "message_evidence_sha256": message_evidence_sha256,
             "message_model_evidence_sha256": message_model_evidence_sha256,
             "model_evidence_sha256": model_evidence_sha256,
             "plan_sha256": plan_sha256,
@@ -430,10 +445,13 @@ def _comparison_process_seal(
 
 @dataclass(frozen=True, slots=True, repr=False)
 class ConversationDocumentComparison:
-    """Process-local accepted comparison awaiting final durable publication."""
+    """Process-local acceptance binding durable sources and transient model evidence."""
 
     answer: str = field(repr=False)
     plan_sha256: str
+    message_evidence_sha256: str
+    document_evidence_sha256: str
+    evidence_bundle_sha256: str
     message_model_evidence_sha256: str
     document_model_evidence_sha256: str
     model_evidence_sha256: str
@@ -456,6 +474,9 @@ class ConversationDocumentComparison:
                 type(value) is not str or _DIGEST_RE.fullmatch(value) is None
                 for value in (
                     self.plan_sha256,
+                    self.message_evidence_sha256,
+                    self.document_evidence_sha256,
+                    self.evidence_bundle_sha256,
                     self.message_model_evidence_sha256,
                     self.document_model_evidence_sha256,
                     self.model_evidence_sha256,
@@ -497,6 +518,9 @@ class ConversationDocumentComparison:
             _comparison_process_seal(
                 answer=self.answer,
                 plan_sha256=self.plan_sha256,
+                message_evidence_sha256=self.message_evidence_sha256,
+                document_evidence_sha256=self.document_evidence_sha256,
+                evidence_bundle_sha256=self.evidence_bundle_sha256,
                 message_model_evidence_sha256=self.message_model_evidence_sha256,
                 document_model_evidence_sha256=self.document_model_evidence_sha256,
                 model_evidence_sha256=self.model_evidence_sha256,
@@ -528,6 +552,9 @@ async def compare_conversation_with_document(
     message_replay: ArchiveEvidenceReplayResult,
     selected_message_evidence: SelectedArchiveEvidence,
     prepared_document: PreparedFileEvidence,
+    message_evidence_sha256: str,
+    document_evidence_sha256: str,
+    evidence_bundle_sha256: str,
     absolute_deadline: float,
 ) -> ConversationDocumentComparison:
     """Synthesize and independently verify one exact two-source comparison."""
@@ -544,8 +571,18 @@ async def compare_conversation_with_document(
             selected_message_evidence,
             prepared_document,
         )
+        if type(message_evidence_sha256) is not str or not hmac.compare_digest(
+            message_evidence_sha256,
+            _selected_evidence_sha256(selected_message_evidence),
+        ):
+            raise ConversationDocumentComparisonError(
+                "durable selected message evidence changed before comparison"
+            )
         plan_sha256 = conversation_document_comparison_plan_sha256(
             request=request,
+            message_evidence_sha256=message_evidence_sha256,
+            document_evidence_sha256=document_evidence_sha256,
+            evidence_bundle_sha256=evidence_bundle_sha256,
             message_model_evidence_sha256=message_identity,
             document_model_evidence_sha256=document_identity,
             model_evidence_sha256=bundle_identity,
@@ -759,6 +796,9 @@ async def compare_conversation_with_document(
     process_seal_sha256 = _comparison_process_seal(
         answer=answer,
         plan_sha256=plan_sha256,
+        message_evidence_sha256=message_evidence_sha256,
+        document_evidence_sha256=document_evidence_sha256,
+        evidence_bundle_sha256=evidence_bundle_sha256,
         message_model_evidence_sha256=message_identity,
         document_model_evidence_sha256=document_identity,
         model_evidence_sha256=bundle_identity,
@@ -770,6 +810,9 @@ async def compare_conversation_with_document(
     return ConversationDocumentComparison(
         answer=answer,
         plan_sha256=plan_sha256,
+        message_evidence_sha256=message_evidence_sha256,
+        document_evidence_sha256=document_evidence_sha256,
+        evidence_bundle_sha256=evidence_bundle_sha256,
         message_model_evidence_sha256=message_identity,
         document_model_evidence_sha256=document_identity,
         model_evidence_sha256=bundle_identity,
