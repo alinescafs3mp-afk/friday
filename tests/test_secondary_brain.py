@@ -1262,6 +1262,109 @@ async def test_document_map_shadow_is_independent_from_live_extract_assist(
 
 
 @pytest.mark.asyncio
+async def test_current_document_assist_reports_selected_success_and_exact_fallback_diagnostics(
+    settings: Any,
+    storage: Any,
+) -> None:
+    online = True
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal online
+        if request.url.path.endswith("/friday-profile"):
+            return _profile_response()
+        if request.url.path.endswith("/models"):
+            return _models_response()
+        payload = json.loads(request.content)
+        messages = payload.get("messages") or []
+        if messages and messages[-1].get("content") == "Reply with exactly: ready":
+            return _response(content="ready")
+        if not online:
+            return httpx.Response(503)
+        return _response(content=json.dumps({"summary": "validated current-document hint"}))
+
+    configured = replace(
+        _configured_settings(settings, private=True),
+        secondary_llm_workloads=("document_map",),
+        secondary_llm_document_map_mode="assist",
+    )
+    scheduler = build_secondary_brain(configured, transport=httpx.MockTransport(handler))
+
+    class Primary:
+        enabled = True
+
+        def __init__(self) -> None:
+            self.calls: list[list[dict[str, Any]]] = []
+
+        async def chat(self, messages: list[dict[str, Any]], **_kwargs: Any) -> dict[str, Any]:
+            self.calls.append([dict(item) for item in messages])
+            return {"content": "primary final", "finish_reason": "stop"}
+
+    primary = Primary()
+    runtime = AgentRuntime(configured, storage, llm=primary, secondary_brain=scheduler)
+    source = _OwnedAttachment(
+        {
+            "filename": "small-current.txt",
+            "transient_text": "complete current source",
+            "extraction_success": True,
+            "verification_eligible": True,
+        }
+    )
+
+    def context(identity: str) -> AgentContext:
+        return AgentContext(
+            conversation_id=identity,
+            user_id="owner",
+            person_id="owner",
+            current_attachment_present=True,
+            focused_attachment_turn=True,
+        )
+
+    try:
+        request = runtime._current_document_secondary_map_request(  # noqa: SLF001
+            "Summarize this document.",
+            [source],
+            task_kind="summary",
+        )
+        assert request is not None
+        assisted = await runtime._current_document_secondary_assisted_response(  # noqa: SLF001
+            context("current-document-success"),
+            "Summarize this document.",
+            [source],
+            request=request,
+        )
+        assert assisted["content"] == "primary final"
+        assert agent_runtime_module._CURRENT_DOCUMENT_SECONDARY_HINT_PREFIX in "\n".join(
+            str(item.get("content") or "") for item in primary.calls[-1]
+        )
+        success = scheduler.diagnostics_status()
+        workload_success = success["workloads"]["document_map"]
+        assert workload_success["selected_total"] == 1
+        assert workload_success["success_total"] == 1
+        assert success["primary_fallback_total"] == 0
+
+        online = False
+        fallback = await runtime._current_document_secondary_assisted_response(  # noqa: SLF001
+            context("current-document-fallback"),
+            "Summarize this document.",
+            [source],
+            request=request,
+        )
+        assert fallback["content"] == "primary final"
+        assert agent_runtime_module._CURRENT_DOCUMENT_SECONDARY_HINT_PREFIX not in "\n".join(
+            str(item.get("content") or "") for item in primary.calls[-1]
+        )
+        diagnostics = scheduler.diagnostics_status()
+        workload = diagnostics["workloads"]["document_map"]
+        assert workload["selected_total"] == 2
+        assert workload["success_total"] == 1
+        assert workload["fallback_reasons"] == {"http_transient": 1}
+        assert diagnostics["primary_fallback_total"] == 1
+        assert len(primary.calls) == 2
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
 async def test_document_map_over_secondary_chunk_cap_reuses_complete_primary_plan_without_admission(
     settings: Any,
     storage: Any,

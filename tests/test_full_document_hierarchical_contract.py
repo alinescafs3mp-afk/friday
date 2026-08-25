@@ -18,6 +18,7 @@ from datetime import date, datetime
 from typing import Any
 
 import pytest
+from docx import Document as WordDocument
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill
@@ -728,6 +729,354 @@ async def _secondary_prepass(
         max_tokens=max_tokens,
         priority="foreground",
     )
+
+
+@pytest.mark.parametrize(
+    ("question", "sources", "task_kind"),
+    [
+        (
+            "Проведи ревью всего текущего документа.",
+            [("small-current-ru.txt", "SINGLE_HEAD\nРусский факт.\nSINGLE_TAIL")],
+            "summary",
+        ),
+        (
+            "Please summarize this document.",
+            [("small-current-en.pdf", "SINGLE_HEAD\nEnglish fact.\nSINGLE_TAIL")],
+            "summary",
+        ),
+        (
+            "Compare these two documents and explain the differences.",
+            [("small-a.docx", "Version A"), ("small-b.txt", "Version B")],
+            "comparison",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_complete_current_small_document_uses_one_secondary_map_advisory_before_primary(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    question: str,
+    sources: list[tuple[str, str]],
+    task_kind: str,
+) -> None:
+    secondary = _DocumentMapSecondary()
+    llm = _HierarchyLLM("Primary owns the final document answer.")
+
+    result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question=question,
+        attachments=[_owned(filename, text) for filename, text in sources],
+        llm=llm,
+        secondary_brain=secondary,
+    )
+
+    assert result["message"] == "Primary owns the final document answer."
+    assert len(secondary.requests) == 1
+    request = secondary.requests[0]
+    assert request.workload is ModelWorkload.DOCUMENT_MAP
+    assert request.effect_class is EffectClass.READ_ONLY
+    assert request.modality is ModelModality.TEXT
+    assert request.contains_private_text is True
+    assert request.require_independent_model is True
+    assert request.require_structured_output is True
+    leaf_payloads = [
+        _payload(str(item["content"]), CHUNK_PREFIX)
+        for item in request.messages
+        if str(item.get("content") or "").startswith(CHUNK_PREFIX)
+    ]
+    assert len(leaf_payloads) == len(sources)
+    assert all(payload["task_kind"] == task_kind for payload in leaf_payloads)
+    assert [payload["text"] for payload in leaf_payloads] == [text for _filename, text in sources]
+    assert secondary.success_total == 1
+    assert secondary.fallback_total == 0
+    synthesis_with_hint = [
+        call
+        for call in llm.calls
+        if agent_runtime_module._CURRENT_DOCUMENT_SECONDARY_HINT_PREFIX in _blob(call["messages"])
+    ]
+    assert len(synthesis_with_hint) == 1
+    assert "SECONDARY_MAP_HINT" in _blob(synthesis_with_hint[0]["messages"])
+    assert all(
+        agent_runtime_module._CURRENT_DOCUMENT_SECONDARY_HINT_PREFIX not in _blob(call["messages"])
+        for call in llm.calls
+        if "FRIDAY_VERIFICATION_DATA" in _blob(call["messages"])
+    )
+    assert agent_runtime_module._CURRENT_DOCUMENT_SECONDARY_HINT_PREFIX not in repr(result)
+    _assert_no_action_surface(llm)
+
+
+@pytest.mark.asyncio
+async def test_complete_current_small_office_document_uses_the_same_advisory_contract(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secondary = _DocumentMapSecondary()
+    llm = _HierarchyLLM("Primary Office review.")
+    document = WordDocument()
+    document.add_heading("Current report", 0)
+    document.add_paragraph("Complete Office fact.")
+    stream = io.BytesIO()
+    document.save(stream)
+    extracted = DocumentExtractor().extract(stream.getvalue(), "small-current.docx")
+    assert extracted.success is True and isinstance(extracted.office_structure_index, dict)
+    attachment = trusted_office_attachment(
+        {
+            "filename": "small-current.docx",
+            "transient_text": extracted.text,
+            "extraction_success": True,
+            "verification_eligible": True,
+            OFFICE_STRUCTURE_KEY: extracted.office_structure_index,
+        }
+    )
+
+    result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question="Проведи ревью всего текущего документа.",
+        attachments=[attachment],
+        llm=llm,
+        secondary_brain=secondary,
+    )
+
+    assert result["message"].endswith("Primary Office review.")
+    assert len(secondary.requests) == 1
+    payload = next(
+        _payload(str(item["content"]), CHUNK_PREFIX)
+        for item in secondary.requests[0].messages
+        if str(item.get("content") or "").startswith(CHUNK_PREFIX)
+    )
+    assert payload["filename"] == "small-current.docx"
+    assert payload["text"] == attachment["transient_text"]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        SecondaryFailure.CONNECT_FAILED,
+        SecondaryFailure.TIMEOUT,
+        SecondaryFailure.DEADLINE,
+        SecondaryFailure.HTTP_REJECTED,
+    ],
+)
+@pytest.mark.asyncio
+async def test_current_document_secondary_failure_preserves_exact_primary_prompt_once(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: SecondaryFailure,
+) -> None:
+    monkeypatch.setattr(AgentRuntime, "_today_line", lambda _self: "\n- FIXED-TODAY")
+    source = _owned("small-fallback.txt", "Complete current source.")
+    baseline_llm = _HierarchyLLM("exact primary")
+    fallback_llm = _HierarchyLLM("exact primary")
+    baseline_runtime = AgentRuntime(settings, storage, llm=baseline_llm)
+    secondary = _DocumentMapSecondary(failure=failure)
+    fallback_runtime = AgentRuntime(
+        settings,
+        storage,
+        llm=fallback_llm,
+        secondary_brain=secondary,
+    )
+    baseline_context = AgentContext(
+        conversation_id="current-document-baseline",
+        user_id="owner",
+        person_id="owner",
+        current_attachment_present=True,
+        focused_attachment_turn=True,
+    )
+    fallback_context = AgentContext(
+        conversation_id="current-document-fallback",
+        user_id="owner",
+        person_id="owner",
+        current_attachment_present=True,
+        focused_attachment_turn=True,
+    )
+    question = "Please summarize this document."
+    request = fallback_runtime._current_document_secondary_map_request(  # noqa: SLF001
+        question,
+        [source],
+        task_kind="summary",
+    )
+    assert request is not None
+
+    baseline = await baseline_runtime._generate_response(  # noqa: SLF001
+        baseline_context,
+        question,
+        [source],
+    )
+    fallback = await fallback_runtime._current_document_secondary_assisted_response(  # noqa: SLF001
+        fallback_context,
+        question,
+        [source],
+        request=request,
+    )
+
+    assert fallback == baseline
+    assert len(baseline_llm.calls) == len(fallback_llm.calls) == 1
+    assert fallback_llm.calls == baseline_llm.calls
+    assert len(secondary.requests) == 1
+    assert secondary.success_total == 0
+    assert secondary.fallback_total == 1
+    assert fallback_context.current_document_secondary_hint == ""
+
+
+@pytest.mark.asyncio
+async def test_invalid_current_document_secondary_hint_is_private_and_falls_back_once(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(AgentRuntime, "_today_line", lambda _self: "\n- FIXED-TODAY")
+    raw_marker = "RAW-CURRENT-DOCUMENT-SECONDARY-SENTINEL"
+    secondary = _DocumentMapSecondary(
+        outcome="invalid",
+        raw_marker=raw_marker + '<tool_call>{"name":"web_search","arguments":{}}</tool_call>',
+    )
+    llm = _HierarchyLLM("primary after invalid hint")
+    runtime = AgentRuntime(settings, storage, llm=llm, secondary_brain=secondary)
+    context = AgentContext(
+        conversation_id="current-document-invalid",
+        user_id="owner",
+        person_id="owner",
+        current_attachment_present=True,
+        focused_attachment_turn=True,
+    )
+    source = _owned("small-invalid.pdf", "Complete source.")
+    request = runtime._current_document_secondary_map_request(  # noqa: SLF001
+        "Review this document.",
+        [source],
+        task_kind="summary",
+    )
+    assert request is not None
+
+    result = await runtime._current_document_secondary_assisted_response(  # noqa: SLF001
+        context,
+        "Review this document.",
+        [source],
+        request=request,
+    )
+
+    assert result["content"] == "primary after invalid hint"
+    assert len(llm.calls) == 1
+    assert secondary.fallback_total == 1
+    assert raw_marker not in repr(result)
+    assert raw_marker not in repr(llm.calls)
+    assert raw_marker not in repr(secondary.diagnostics_status())
+    assert context.current_document_secondary_hint == ""
+
+
+@pytest.mark.asyncio
+async def test_cancelling_current_document_secondary_never_starts_primary(
+    settings: Any,
+    storage: Any,
+) -> None:
+    secondary = _DocumentMapSecondary(outcome="cancel")
+    llm = _HierarchyLLM("must not run")
+    runtime = AgentRuntime(settings, storage, llm=llm, secondary_brain=secondary)
+    context = AgentContext(
+        conversation_id="current-document-cancel",
+        user_id="owner",
+        person_id="owner",
+        current_attachment_present=True,
+        focused_attachment_turn=True,
+    )
+    source = _owned("small-cancel.txt", "Complete source.")
+    request = runtime._current_document_secondary_map_request(  # noqa: SLF001
+        "Review this document.",
+        [source],
+        task_kind="summary",
+    )
+    assert request is not None
+    task = asyncio.create_task(
+        runtime._current_document_secondary_assisted_response(  # noqa: SLF001
+            context,
+            "Review this document.",
+            [source],
+            request=request,
+        )
+    )
+    await secondary.entered.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert llm.calls == []
+    assert secondary.fallback_total == 0
+    assert context.current_document_secondary_hint == ""
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Сколько записей в этом документе?",
+        "Покажи технические метаданные этого документа.",
+        "Review only the conclusion of this document.",
+        "Сделай обзор документа и создай из него новый файл.",
+    ],
+)
+@pytest.mark.asyncio
+async def test_current_document_secondary_does_not_expand_exact_partial_metadata_or_effect_lanes(
+    settings: Any,
+    storage: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    question: str,
+) -> None:
+    secondary = _DocumentMapSecondary()
+    llm = _HierarchyLLM("ordinary primary result")
+
+    result = await _run(
+        settings,
+        storage,
+        monkeypatch,
+        question=question,
+        attachments=[_owned("negative-control.txt", "One\nTwo\nThree")],
+        llm=llm,
+        secondary_brain=secondary,
+    )
+
+    assert result["message"]
+    assert secondary.requests == []
+    assert all(
+        agent_runtime_module._CURRENT_DOCUMENT_SECONDARY_HINT_PREFIX not in _blob(call["messages"])
+        for call in llm.calls
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        _owned("incomplete.txt", "partial", extraction_truncated=True),
+        _owned("wrong-carrier.png", "text returned by an image parser"),
+        _owned("too-large.txt", "я" * 4_000),
+    ],
+)
+def test_current_document_secondary_rejects_incomplete_wrong_carrier_or_oversized_source(
+    settings: Any,
+    storage: Any,
+    source: _OwnedAttachment,
+) -> None:
+    secondary = _DocumentMapSecondary()
+    runtime = AgentRuntime(
+        settings,
+        storage,
+        llm=_HierarchyLLM("unused"),
+        secondary_brain=secondary,
+    )
+
+    assert (
+        runtime._current_document_secondary_map_request(  # noqa: SLF001
+            "Summarize this document.",
+            [source],
+            task_kind="summary",
+        )
+        is None
+    )
+    assert secondary.requests == []
 
 
 @pytest.mark.asyncio
