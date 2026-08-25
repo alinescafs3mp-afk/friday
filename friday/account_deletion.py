@@ -72,6 +72,21 @@ class _Scope:
 # its append-only trigger correctly refuses ordinary DELETE.
 _DELETE_SCOPES: tuple[_Scope, ...] = (
     _Scope(
+        "work_item_compare_outcomes",
+        "work_item_compare_outcomes",
+        "work_item_id IN (SELECT id FROM work_items WHERE user_id=?)",
+    ),
+    _Scope(
+        "work_item_compare_document_evidence",
+        "work_item_compare_document_evidence",
+        "work_item_id IN (SELECT id FROM work_items WHERE user_id=?)",
+    ),
+    _Scope(
+        "work_item_compare_document_questions",
+        "work_item_compare_document_questions",
+        "work_item_id IN (SELECT id FROM work_items WHERE user_id=?)",
+    ),
+    _Scope(
         "work_item_archive_candidate_questions",
         "work_item_archive_candidate_questions",
         "work_item_id IN (SELECT id FROM work_items WHERE user_id=?)",
@@ -162,6 +177,9 @@ _DELETE_SCOPES: tuple[_Scope, ...] = (
 
 _CANDIDATE_CASCADE_DELETE_KEYS = frozenset(
     {
+        "work_item_compare_outcomes",
+        "work_item_compare_document_evidence",
+        "work_item_compare_document_questions",
         "work_item_archive_candidate_questions",
         "work_item_archive_candidate_set_items",
         "work_item_archive_candidate_sets",
@@ -744,6 +762,10 @@ _CROSS_ACCOUNT_JSON_SCOPES = (
 )
 
 _WORK_ITEM_EVIDENCE_JSON_SCOPES = (
+    (
+        "work_item_compare_document_evidence",
+        ("source_ref_json",),
+    ),
     (
         "work_item_selected_evidence",
         ("source_ref_json", "passage_refs_json"),

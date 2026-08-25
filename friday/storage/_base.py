@@ -157,7 +157,10 @@ LOGGER = logging.getLogger("friday.storage")
 # schema-38/39 projections are authenticated before their Work Item tables rebuild.
 # 41 — durable body-free DocumentCatalog projection. Raw Object remains authority;
 # exact revision guards and explicit incomplete states make bounded backfill honest.
-SCHEMA_VERSION = 41
+# 42 — dormant reader-first conversation/document Work Item projection.  Exact
+# message selection, Raw document pins, ambiguity history and accepted completion
+# receipts survive restart without persisting prompts, paths, titles or bodies.
+SCHEMA_VERSION = 42
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно

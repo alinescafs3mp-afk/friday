@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+from friday.interaction_control_plane.work_item_schema import _WORK_ITEM_TABLES
 from friday.storage import SCHEMA_VERSION, FridayStorage, UnsupportedSchemaVersionError
 from friday.storage import _core as storage_core
 from friday.storage.models import normalize_known_at
@@ -57,6 +58,10 @@ def _make_schema_32(settings: Any, tmp_path: Path, name: str) -> Path:
         # sidecar table cannot remove it.  A synthetic v32 predecessor must not
         # retain that schema-41 authority artifact.
         predecessor.execute("DROP INDEX idx_document_catalog_source_owner_id")
+        # Work Items arrived in schema 38. Removing their tables also removes
+        # schema-42 triggers that reference the schema-33 alias authority.
+        for table in _WORK_ITEM_TABLES:
+            predecessor.execute(f'DROP TABLE "{table}"')
         predecessor.execute("DROP TABLE file_source_aliases")
         predecessor.execute("UPDATE schema_meta SET value='32' WHERE key IN ('schema_version','fts_build')")
     return database
@@ -237,7 +242,7 @@ def test_schema_31_to_32_preserves_evidence_and_installs_the_exact_current_contr
         assert migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[
             0
         ] == str(SCHEMA_VERSION)
-        assert SCHEMA_VERSION == 41
+        assert SCHEMA_VERSION == 42
         assert tuple(
             migrated.execute(
                 """SELECT singleton, batch_id, recorded_at, observed_at

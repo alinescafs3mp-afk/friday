@@ -399,6 +399,27 @@ class ConversationsMixin(StorageShared):
                       AND revision>=2147483647""",
                 (user_id, conversation_id),
             )
+            from friday.interaction_control_plane.work_item_store import (
+                _close_pending_compare_question_for_retirement,
+            )
+
+            pending_comparisons = conn.execute(
+                """SELECT id,state,revision,updated_at FROM work_items
+                    WHERE user_id=? AND conversation_id=?
+                      AND kind='compare_conversation_with_document'
+                      AND state='waiting_for_input' AND revision<2147483647""",
+                (user_id, conversation_id),
+            ).fetchall()
+            for pending in pending_comparisons:
+                retirement_at = max(str(pending["updated_at"]), now)
+                _close_pending_compare_question_for_retirement(
+                    conn,
+                    work_item_id=pending["id"],
+                    state=pending["state"],
+                    revision=int(pending["revision"]),
+                    closed_at=retirement_at,
+                    close_reason="cancelled",
+                )
             cancelled_work_items = conn.execute(
                 """UPDATE work_items
                       SET state='cancelled', transition='cancelled',

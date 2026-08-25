@@ -1959,6 +1959,9 @@ class MaintenanceMixin(StorageShared):
             from friday.interaction_control_plane.archive_evidence_work_item_store import (
                 get_recall_selected_archive_evidence_work_item_for_export_in_transaction,
             )
+            from friday.interaction_control_plane.compare_conversation_document_store import (
+                get_compare_conversation_with_document_work_item_for_export_in_transaction,
+            )
             from friday.interaction_control_plane.work_item_store import (
                 get_recall_conversation_work_item_for_export_in_transaction,
             )
@@ -1976,6 +1979,20 @@ class MaintenanceMixin(StorageShared):
                         )
                         if candidate_item is not None and candidate_item.conversation_id in conversation_ids:
                             item_payload = candidate_item.to_payload()
+                    elif row.get("kind") == "compare_conversation_with_document":
+                        comparison_item = (
+                            get_compare_conversation_with_document_work_item_for_export_in_transaction(
+                                conn,
+                                work_item_id=str(row.get("id") or ""),
+                                user_id=user_id,
+                                conversation_id=str(row.get("conversation_id") or ""),
+                            )
+                        )
+                        if (
+                            comparison_item is not None
+                            and comparison_item.conversation_id in conversation_ids
+                        ):
+                            item_payload = comparison_item.to_payload()
                     elif row.get("kind") == "recall_selected_archive_evidence":
                         archive_item = (
                             get_recall_selected_archive_evidence_work_item_for_export_in_transaction(

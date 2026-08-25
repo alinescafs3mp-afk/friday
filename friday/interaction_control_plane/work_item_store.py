@@ -130,6 +130,35 @@ def _row_mapping(cursor: sqlite3.Cursor, row: object) -> dict[str, object]:
     raise WorkItemContractError("work item query returned an invalid row")
 
 
+def _close_pending_compare_question_for_retirement(
+    conn: sqlite3.Connection,
+    *,
+    work_item_id: object,
+    state: object,
+    revision: int,
+    closed_at: str,
+    close_reason: str,
+) -> None:
+    """Close the compare sidecar before a generic parent-row retirement CAS."""
+
+    if state != WorkState.WAITING_FOR_INPUT.value:
+        return
+    row = conn.execute(
+        "SELECT kind FROM work_items WHERE id=? AND state='waiting_for_input' AND revision=?",
+        (work_item_id, revision),
+    ).fetchone()
+    if row is None or str(row[0]) != WorkKind.COMPARE_CONVERSATION_WITH_DOCUMENT.value:
+        return
+    cursor = conn.execute(
+        """UPDATE work_item_compare_document_questions
+              SET state='closed',closed_at=?,close_reason=?
+            WHERE work_item_id=? AND work_revision=? AND state='waiting'""",
+        (closed_at, close_reason, work_item_id, revision),
+    )
+    if cursor.rowcount != 1:
+        raise WorkItemConflictError("comparison question retirement lost its state race")
+
+
 def _begin_work_item_mutation_savepoint(conn: sqlite3.Connection) -> str:
     name = f"work_item_mutation_{uuid.uuid4().hex}"
     conn.execute(f'SAVEPOINT "{name}"')  # nosec B608 - generated hexadecimal identifier
@@ -459,6 +488,14 @@ def create_recall_conversation_work_item_in_transaction(
                     (active["id"], user, conversation, active["state"], active_revision),
                 )
             elif active_expiry <= timestamp:
+                _close_pending_compare_question_for_retirement(
+                    conn,
+                    work_item_id=active["id"],
+                    state=active["state"],
+                    revision=active_revision,
+                    closed_at=timestamp,
+                    close_reason=WorkState.EXPIRED.value,
+                )
                 retired = conn.execute(
                     """UPDATE work_items
                           SET state='expired',transition='expired',revision=revision+1,
@@ -477,6 +514,14 @@ def create_recall_conversation_work_item_in_transaction(
                     ),
                 )
             else:
+                _close_pending_compare_question_for_retirement(
+                    conn,
+                    work_item_id=active["id"],
+                    state=active["state"],
+                    revision=active_revision,
+                    closed_at=timestamp,
+                    close_reason=WorkState.SUSPENDED.value,
+                )
                 retired = conn.execute(
                     """UPDATE work_items
                           SET state='suspended',transition='suspended',revision=revision+1,

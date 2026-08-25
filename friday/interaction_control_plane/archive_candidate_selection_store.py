@@ -49,6 +49,7 @@ from friday.interaction_control_plane.work_item_store import (
     WorkItemAnchorError,
     WorkItemConflictError,
     _begin_work_item_mutation_savepoint,
+    _close_pending_compare_question_for_retirement,
     _release_work_item_mutation_savepoint,
     _rollback_work_item_mutation_savepoint,
 )
@@ -620,6 +621,14 @@ def _retire_open_conversation_work(
             (active["id"], user_id, conversation_id, active["state"], revision),
         )
     elif expires <= timestamp:
+        _close_pending_compare_question_for_retirement(
+            conn,
+            work_item_id=active["id"],
+            state=active["state"],
+            revision=revision,
+            closed_at=timestamp,
+            close_reason=WorkState.EXPIRED.value,
+        )
         retired = conn.execute(
             """UPDATE work_items
                   SET state='expired',transition='expired',revision=revision+1,
@@ -638,6 +647,14 @@ def _retire_open_conversation_work(
             ),
         )
     else:
+        _close_pending_compare_question_for_retirement(
+            conn,
+            work_item_id=active["id"],
+            state=active["state"],
+            revision=revision,
+            closed_at=timestamp,
+            close_reason=WorkState.SUSPENDED.value,
+        )
         retired = conn.execute(
             """UPDATE work_items
                   SET state='suspended',transition='suspended',revision=revision+1,

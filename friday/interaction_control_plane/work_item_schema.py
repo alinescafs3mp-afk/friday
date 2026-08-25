@@ -1,4 +1,4 @@
-"""Exact schema-40 projection for bounded durable recall and candidate Work Items."""
+"""Exact schema-42 projection for bounded durable interaction Work Items."""
 
 from __future__ import annotations
 
@@ -9,6 +9,9 @@ from functools import lru_cache
 from friday.interaction_control_plane.work_item_contract import (
     ARCHIVE_CANDIDATE_MAX_COUNT,
     ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_JSON,
+    COMPARE_CONVERSATION_DOCUMENT_ACTIVE_FRAME_JSON,
+    COMPARE_CONVERSATION_DOCUMENT_ANSWER_MAX_BYTES,
+    COMPARE_DOCUMENT_REFERENCE_PROMPT,
     RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_JSON,
     WORK_ITEM_ACTIVE_FRAME_MAX_BYTES,
     WORK_ITEM_TTL_HOURS,
@@ -21,12 +24,15 @@ from friday.interaction_control_plane.work_item_contract import (
 )
 from friday.orchestration.archive_recall_outcome import ARCHIVE_EVIDENCE_REPLAY_UNAVAILABLE
 
-WORK_ITEM_SCHEMA_VERSION = 40
+WORK_ITEM_SCHEMA_VERSION = 42
 WORK_ITEM_SELECTED_SOURCE_REF_MAX_BYTES = 4_096
 WORK_ITEM_SELECTED_PASSAGE_REFS_MAX_BYTES = 65_536
 WORK_ITEM_SELECTED_PASSAGE_MAX_COUNT = 8
 
 _WORK_ITEM_TABLES = (
+    "work_item_compare_outcomes",
+    "work_item_compare_document_evidence",
+    "work_item_compare_document_questions",
     "work_item_archive_candidate_questions",
     "work_item_archive_candidate_set_items",
     "work_item_archive_candidate_sets",
@@ -34,6 +40,10 @@ _WORK_ITEM_TABLES = (
     "work_items",
 )
 _WORK_ITEM_INDEXES = (
+    "idx_work_item_compare_outcomes_assistant",
+    "idx_work_item_compare_document_evidence_origin",
+    "uq_work_item_compare_document_question_waiting",
+    "idx_work_item_compare_document_questions_work",
     "idx_work_item_archive_candidate_items_work",
     "idx_work_item_archive_candidate_questions_work",
     "idx_work_item_archive_candidate_sets_origin",
@@ -56,6 +66,13 @@ _SCHEMA_38_INDEXES = (
     "idx_work_items_expiry",
     "idx_work_items_owner_state_updated",
     "uq_work_items_active_conversation",
+)
+_SCHEMA_40_TABLES = (
+    "work_item_archive_candidate_questions",
+    "work_item_archive_candidate_set_items",
+    "work_item_archive_candidate_sets",
+    "work_item_selected_evidence",
+    "work_items",
 )
 
 
@@ -82,6 +99,57 @@ _SCHEMA_39_COMPLETION_SQL = _sql_values(
 _SCHEMA_39_TRANSITION_SQL = _sql_values(
     (
         WorkTransition.CREATED,
+        WorkTransition.CONSTRAINT_UPDATED,
+        WorkTransition.EVIDENCE_REPLAYED,
+        WorkTransition.SUSPENDED,
+        WorkTransition.CANCELLED,
+        WorkTransition.EXPIRED,
+    )
+)
+_SCHEMA_40_KIND_SQL = _sql_values(
+    (
+        WorkKind.RECALL_CONVERSATION,
+        WorkKind.RECALL_SELECTED_ARCHIVE_EVIDENCE,
+        WorkKind.SELECT_ARCHIVE_CANDIDATE_AND_REPLAY_EVIDENCE,
+    )
+)
+_SCHEMA_40_GOAL_SQL = _sql_values(
+    (
+        WorkGoal.EXACT_CURRENT_CONVERSATION_RECALL,
+        WorkGoal.EXACT_SELECTED_ARCHIVE_EVIDENCE_RECALL,
+        WorkGoal.EXACT_ARCHIVE_CANDIDATE_SELECTION_AND_EVIDENCE_REPLAY,
+    )
+)
+_SCHEMA_40_STATE_SQL = _sql_values(
+    (
+        WorkState.ACTIVE,
+        WorkState.WAITING_FOR_INPUT,
+        WorkState.COMPLETED,
+        WorkState.SUSPENDED,
+        WorkState.CANCELLED,
+        WorkState.EXPIRED,
+    )
+)
+_SCHEMA_40_PLAYBOOK_SQL = _sql_values(
+    (
+        WorkPlaybook.RECALL_CONVERSATION,
+        WorkPlaybook.RECALL_SELECTED_ARCHIVE_EVIDENCE,
+        WorkPlaybook.SELECT_ARCHIVE_CANDIDATE_AND_REPLAY_EVIDENCE,
+    )
+)
+_SCHEMA_40_COMPLETION_SQL = _sql_values(
+    (
+        WorkCompletionContract.ACCEPTED_EXACT_OWNED_MESSAGE_WINDOW,
+        WorkCompletionContract.ACCEPTED_EXACT_SELECTED_ARCHIVE_EVIDENCE,
+        WorkCompletionContract.ACCEPTED_EXACT_ARCHIVE_CANDIDATE_AND_EVIDENCE_REPLAY,
+    )
+)
+_SCHEMA_40_TRANSITION_SQL = _sql_values(
+    (
+        WorkTransition.CREATED,
+        WorkTransition.QUESTION_ASKED,
+        WorkTransition.QUESTION_REASKED,
+        WorkTransition.CANDIDATE_REPLAYED,
         WorkTransition.CONSTRAINT_UPDATED,
         WorkTransition.EVIDENCE_REPLAYED,
         WorkTransition.SUSPENDED,
@@ -341,16 +409,16 @@ BEGIN
 END;
 """
 
-WORK_ITEM_SCHEMA = f"""
+_WORK_ITEM_SCHEMA_40 = f"""
 CREATE TABLE IF NOT EXISTS work_items (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
     conversation_id TEXT NOT NULL REFERENCES conversations(id),
-    kind TEXT NOT NULL CHECK(kind IN ({_KIND_SQL})),
-    goal TEXT NOT NULL CHECK(goal IN ({_GOAL_SQL})),
-    state TEXT NOT NULL CHECK(state IN ({_STATE_SQL})),
-    playbook TEXT NOT NULL CHECK(playbook IN ({_PLAYBOOK_SQL})),
-    completion_contract TEXT NOT NULL CHECK(completion_contract IN ({_COMPLETION_SQL})),
+    kind TEXT NOT NULL CHECK(kind IN ({_SCHEMA_40_KIND_SQL})),
+    goal TEXT NOT NULL CHECK(goal IN ({_SCHEMA_40_GOAL_SQL})),
+    state TEXT NOT NULL CHECK(state IN ({_SCHEMA_40_STATE_SQL})),
+    playbook TEXT NOT NULL CHECK(playbook IN ({_SCHEMA_40_PLAYBOOK_SQL})),
+    completion_contract TEXT NOT NULL CHECK(completion_contract IN ({_SCHEMA_40_COMPLETION_SQL})),
     active_frame_json TEXT NOT NULL CHECK(
         typeof(active_frame_json)='text'
         AND length(CAST(active_frame_json AS BLOB))<={WORK_ITEM_ACTIVE_FRAME_MAX_BYTES}
@@ -362,7 +430,7 @@ CREATE TABLE IF NOT EXISTS work_items (
     accepted_plan_sha256 TEXT NOT NULL,
     accepted_outcome_sha256 TEXT NOT NULL,
     revision INTEGER NOT NULL CHECK(revision BETWEEN 1 AND 2147483647),
-    transition TEXT NOT NULL CHECK(transition IN ({_TRANSITION_SQL})),
+    transition TEXT NOT NULL CHECK(transition IN ({_SCHEMA_40_TRANSITION_SQL})),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
@@ -1228,6 +1296,732 @@ END;
 """
 
 
+def _schema_42_full_from_40() -> str:
+    """Expand the exact schema-40 image with the complete dormant reader shape."""
+
+    schema = _WORK_ITEM_SCHEMA_40
+    replacements = (
+        (
+            f"kind TEXT NOT NULL CHECK(kind IN ({_SCHEMA_40_KIND_SQL}))",
+            f"kind TEXT NOT NULL CHECK(kind IN ({_KIND_SQL}))",
+        ),
+        (
+            f"goal TEXT NOT NULL CHECK(goal IN ({_SCHEMA_40_GOAL_SQL}))",
+            f"goal TEXT NOT NULL CHECK(goal IN ({_GOAL_SQL}))",
+        ),
+        (
+            f"playbook TEXT NOT NULL CHECK(playbook IN ({_SCHEMA_40_PLAYBOOK_SQL}))",
+            f"playbook TEXT NOT NULL CHECK(playbook IN ({_PLAYBOOK_SQL}))",
+        ),
+        (
+            f"completion_contract TEXT NOT NULL CHECK(completion_contract IN ({_SCHEMA_40_COMPLETION_SQL}))",
+            f"completion_contract TEXT NOT NULL CHECK(completion_contract IN ({_COMPLETION_SQL}))",
+        ),
+        (
+            f"transition TEXT NOT NULL CHECK(transition IN ({_SCHEMA_40_TRANSITION_SQL}))",
+            f"transition TEXT NOT NULL CHECK(transition IN ({_TRANSITION_SQL}))",
+        ),
+        (
+            """    CHECK((state='active' AND transition IN ('created','constraint_updated','evidence_replayed'))
+          OR (state='waiting_for_input' AND transition IN ('question_asked','question_reasked'))
+          OR (state='completed' AND transition='candidate_replayed')
+""",
+            """    CHECK((state='active' AND transition IN ('created','constraint_updated','evidence_replayed',
+                                                    'document_resolved'))
+          OR (state='waiting_for_input' AND transition IN ('question_asked','question_reasked'))
+          OR (state='completed' AND transition IN ('candidate_replayed','comparison_published'))
+""",
+        ),
+        (
+            """        (kind='select_archive_candidate_and_replay_evidence'
+         AND goal='exact_archive_candidate_selection_and_evidence_replay'
+         AND playbook='select_archive_candidate_and_replay_evidence'
+         AND completion_contract='accepted_exact_archive_candidate_and_evidence_replay'
+         AND state IN ('waiting_for_input','completed','suspended','cancelled','expired')
+         AND transition IN ('question_asked','question_reasked','candidate_replayed',
+                            'suspended','cancelled','expired'))
+""",
+            """        (kind='select_archive_candidate_and_replay_evidence'
+         AND goal='exact_archive_candidate_selection_and_evidence_replay'
+         AND playbook='select_archive_candidate_and_replay_evidence'
+         AND completion_contract='accepted_exact_archive_candidate_and_evidence_replay'
+         AND state IN ('waiting_for_input','completed','suspended','cancelled','expired')
+         AND transition IN ('question_asked','question_reasked','candidate_replayed',
+                            'suspended','cancelled','expired'))
+        OR
+        (kind='compare_conversation_with_document'
+         AND goal='compare_exact_message_evidence_with_document'
+         AND playbook='compare_conversation_with_document'
+         AND completion_contract='accepted_exact_message_and_document_comparison'
+         AND state IN ('waiting_for_input','active','completed','suspended','cancelled','expired')
+         AND transition IN ('question_asked','question_reasked','document_resolved',
+                            'comparison_published','suspended','cancelled','expired'))
+""",
+        ),
+        (
+            f"""    CHECK(kind<>'select_archive_candidate_and_replay_evidence'
+          OR active_frame_json='{ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_JSON}')
+""",
+            f"""    CHECK(kind<>'select_archive_candidate_and_replay_evidence'
+          OR active_frame_json='{ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_JSON}'),
+    CHECK(kind<>'compare_conversation_with_document'
+          OR active_frame_json='{COMPARE_CONVERSATION_DOCUMENT_ACTIVE_FRAME_JSON}')
+""",
+        ),
+        (
+            f"""         WHERE work.id=NEW.work_item_id
+           AND work.kind='recall_selected_archive_evidence'
+           AND work.active_frame_json='{RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_JSON}'
+           AND work.anchor_user_message_id=NEW.origin_boundary_user_message_id
+           AND json_extract(NEW.source_ref_json,'$.principal_id')=work.user_id
+""",
+            f"""         WHERE work.id=NEW.work_item_id
+           AND (
+                (work.kind='recall_selected_archive_evidence'
+                 AND work.active_frame_json='{RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_JSON}'
+                 AND work.anchor_user_message_id=NEW.origin_boundary_user_message_id)
+                OR
+                (work.kind='compare_conversation_with_document'
+                 AND work.state='waiting_for_input'
+                 AND work.transition='question_asked'
+                 AND work.revision=1
+                 AND work.active_frame_json='{COMPARE_CONVERSATION_DOCUMENT_ACTIVE_FRAME_JSON}'
+                 AND work.anchor_user_message_id=NEW.origin_boundary_user_message_id
+                 AND NEW.corpus='messages')
+           )
+           AND json_extract(NEW.source_ref_json,'$.principal_id')=work.user_id
+""",
+        ),
+        (
+            f"""         WHERE work.id=NEW.work_item_id
+           AND work.kind='select_archive_candidate_and_replay_evidence'
+           AND work.state='waiting_for_input'
+           AND work.transition='question_asked'
+           AND work.active_frame_json='{ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_JSON}'
+           AND work.anchor_user_message_id=NEW.origin_boundary_user_message_id
+""",
+            f"""         WHERE work.id=NEW.work_item_id
+           AND (
+                (work.kind='select_archive_candidate_and_replay_evidence'
+                 AND work.state='waiting_for_input'
+                 AND work.transition='question_asked'
+                 AND work.active_frame_json='{ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_JSON}'
+                 AND work.anchor_user_message_id=NEW.origin_boundary_user_message_id)
+                OR
+                (work.kind='compare_conversation_with_document'
+                 AND work.state='waiting_for_input'
+                 AND work.transition='question_asked'
+                 AND work.revision=1
+                 AND work.active_frame_json='{COMPARE_CONVERSATION_DOCUMENT_ACTIVE_FRAME_JSON}'
+                 AND EXISTS (
+                     SELECT 1 FROM work_item_compare_document_questions question
+                      WHERE question.work_item_id=work.id
+                        AND question.work_revision=1
+                        AND question.state='answered'
+                        AND question.answer_user_message_id=NEW.origin_boundary_user_message_id
+                 ))
+           )
+""",
+        ),
+        (
+            """           AND work.kind='select_archive_candidate_and_replay_evidence'
+           AND json_extract(NEW.source_ref_json,'$.principal_id')=work.user_id
+""",
+            """           AND work.kind IN ('select_archive_candidate_and_replay_evidence',
+                            'compare_conversation_with_document')
+           AND json_extract(NEW.source_ref_json,'$.principal_id')=work.user_id
+           AND (work.kind<>'compare_conversation_with_document'
+                OR (NEW.corpus='documents'
+                    AND json_type(NEW.source_ref_json,'$.tenant_id')='text'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM work_item_archive_candidate_set_items sibling
+                         WHERE sibling.candidate_set_id=NEW.candidate_set_id
+                           AND sibling.work_item_id=NEW.work_item_id
+                           AND json_extract(sibling.source_ref_json,'$.tenant_id')
+                               <>json_extract(NEW.source_ref_json,'$.tenant_id')
+                    )))
+""",
+        ),
+    )
+    for old, new in replacements:
+        if schema.count(old) != 1:
+            raise RuntimeError("released schema-40 transformation anchor is ambiguous")
+        schema = schema.replace(old, new)
+
+    return (
+        schema
+        + f"""
+
+CREATE TABLE IF NOT EXISTS work_item_compare_document_questions (
+    id TEXT PRIMARY KEY,
+    work_item_id TEXT NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK(kind IN ('provide_document_reference','select_document_candidate')),
+    admission_shape TEXT NOT NULL CHECK(admission_shape IN ('direct_compound','selected_evidence_followup')),
+    state TEXT NOT NULL CHECK(state IN ('waiting','answered','closed')),
+    created_at TEXT NOT NULL,
+    prompt_boundary_user_message_id TEXT NOT NULL REFERENCES messages(id),
+    prompt_assistant_message_id TEXT NOT NULL REFERENCES messages(id),
+    work_revision INTEGER NOT NULL CHECK(work_revision BETWEEN 1 AND 2),
+    candidate_set_id TEXT,
+    answered_at TEXT,
+    answer_user_message_id TEXT REFERENCES messages(id),
+    selected_ordinal INTEGER CHECK(selected_ordinal BETWEEN 1 AND {ARCHIVE_CANDIDATE_MAX_COUNT}),
+    accepted_search_plan_sha256 TEXT CHECK(
+        accepted_search_plan_sha256 IS NULL
+        OR (length(accepted_search_plan_sha256)=64
+            AND accepted_search_plan_sha256 NOT GLOB '*[^0-9a-f]*')
+    ),
+    accepted_search_outcome_sha256 TEXT CHECK(
+        accepted_search_outcome_sha256 IS NULL
+        OR (length(accepted_search_outcome_sha256)=64
+            AND accepted_search_outcome_sha256 NOT GLOB '*[^0-9a-f]*')
+    ),
+    closed_at TEXT,
+    close_reason TEXT CHECK(close_reason IN ('answered','suspended','cancelled','expired')),
+    UNIQUE(work_item_id,work_revision),
+    FOREIGN KEY(candidate_set_id,work_item_id)
+        REFERENCES work_item_archive_candidate_sets(id,work_item_id),
+    CHECK(length(id)=25 AND substr(id,1,9)='question_'
+          AND substr(id,10) NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(work_item_id)=21 AND substr(work_item_id,1,5)='work_'
+          AND substr(work_item_id,6) NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(prompt_boundary_user_message_id)=20
+          AND substr(prompt_boundary_user_message_id,1,4)='msg_'
+          AND substr(prompt_boundary_user_message_id,5) NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(prompt_assistant_message_id)=20
+          AND substr(prompt_assistant_message_id,1,4)='msg_'
+          AND substr(prompt_assistant_message_id,5) NOT GLOB '*[^0-9a-f]*'
+          AND prompt_assistant_message_id<>prompt_boundary_user_message_id),
+    CHECK(length(created_at) BETWEEN 20 AND 64 AND unixepoch(created_at) IS NOT NULL),
+    CHECK((kind='provide_document_reference' AND work_revision=1
+           AND candidate_set_id IS NULL AND selected_ordinal IS NULL
+           AND accepted_search_plan_sha256 IS NULL
+           AND accepted_search_outcome_sha256 IS NULL)
+          OR (kind='select_document_candidate' AND work_revision=2
+              AND candidate_set_id IS NOT NULL
+              AND accepted_search_plan_sha256 IS NOT NULL
+              AND accepted_search_outcome_sha256 IS NOT NULL)),
+    CHECK((state='waiting' AND answered_at IS NULL AND answer_user_message_id IS NULL
+           AND selected_ordinal IS NULL AND closed_at IS NULL AND close_reason IS NULL)
+          OR (state='answered' AND answered_at IS NOT NULL
+              AND answer_user_message_id IS NOT NULL AND closed_at=answered_at
+              AND close_reason='answered'
+              AND ((kind='provide_document_reference' AND selected_ordinal IS NULL)
+                   OR (kind='select_document_candidate' AND selected_ordinal IS NOT NULL)))
+          OR (state='closed' AND answered_at IS NULL AND answer_user_message_id IS NULL
+              AND selected_ordinal IS NULL AND closed_at IS NOT NULL
+              AND close_reason IN ('suspended','cancelled','expired'))),
+    CHECK((answered_at IS NULL OR (length(answered_at) BETWEEN 20 AND 64
+                                   AND unixepoch(answered_at) IS NOT NULL))
+          AND (closed_at IS NULL OR (length(closed_at) BETWEEN 20 AND 64
+                                     AND unixepoch(closed_at) IS NOT NULL
+                                     AND closed_at>=created_at)))
+);
+
+CREATE INDEX IF NOT EXISTS idx_work_item_compare_document_questions_work
+    ON work_item_compare_document_questions(work_item_id,state,id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_work_item_compare_document_question_waiting
+    ON work_item_compare_document_questions(work_item_id) WHERE state='waiting';
+
+CREATE TABLE IF NOT EXISTS work_item_compare_document_evidence (
+    work_item_id TEXT PRIMARY KEY REFERENCES work_items(id) ON DELETE CASCADE,
+    provenance TEXT NOT NULL CHECK(provenance IN (
+        'current_turn_attachment','historical_exact_reference','historical_candidate_ordinal'
+    )),
+    source_ref_json TEXT NOT NULL CHECK(
+        typeof(source_ref_json)='text'
+        AND length(CAST(source_ref_json AS BLOB)) BETWEEN 2 AND {WORK_ITEM_SELECTED_SOURCE_REF_MAX_BYTES}
+        AND json_valid(source_ref_json) AND json_type(source_ref_json)='object'
+    ),
+    raw_object_id TEXT NOT NULL REFERENCES raw_objects(id),
+    raw_source_identity_sha256 TEXT NOT NULL CHECK(
+        length(raw_source_identity_sha256)=64
+        AND raw_source_identity_sha256 NOT GLOB '*[^0-9a-f]*'
+    ),
+    raw_content_sha256 TEXT NOT NULL CHECK(
+        length(raw_content_sha256)=64 AND raw_content_sha256 NOT GLOB '*[^0-9a-f]*'
+    ),
+    content_sha256 TEXT NOT NULL CHECK(
+        length(content_sha256)=64 AND content_sha256 NOT GLOB '*[^0-9a-f]*'
+    ),
+    candidate_source_snapshot_sha256 TEXT CHECK(
+        candidate_source_snapshot_sha256 IS NULL
+        OR (length(candidate_source_snapshot_sha256)=64
+            AND candidate_source_snapshot_sha256 NOT GLOB '*[^0-9a-f]*')
+    ),
+    origin_boundary_user_message_id TEXT NOT NULL REFERENCES messages(id),
+    resolved_revision INTEGER NOT NULL CHECK(resolved_revision BETWEEN 2 AND 3),
+    resolved_at TEXT NOT NULL CHECK(length(resolved_at) BETWEEN 20 AND 64
+                                    AND unixepoch(resolved_at) IS NOT NULL),
+    candidate_set_id TEXT,
+    selected_ordinal INTEGER CHECK(selected_ordinal BETWEEN 1 AND {ARCHIVE_CANDIDATE_MAX_COUNT}),
+    FOREIGN KEY(candidate_set_id,work_item_id)
+        REFERENCES work_item_archive_candidate_sets(id,work_item_id),
+    CHECK(length(raw_object_id)=20 AND substr(raw_object_id,1,4)='raw_'
+          AND substr(raw_object_id,5) NOT GLOB '*[^0-9a-f]*'),
+    CHECK(json_extract(source_ref_json,'$.canonical_object_kind')='raw_object'
+          AND json_extract(source_ref_json,'$.canonical_object_id')=raw_object_id
+          AND json_extract(source_ref_json,'$.source_kind')
+              IN ('document','web_capture','generated_artifact')
+          AND json_extract(source_ref_json,'$.authority_scope')='tenant_principal'),
+    CHECK((provenance='historical_candidate_ordinal'
+           AND candidate_set_id IS NOT NULL AND selected_ordinal IS NOT NULL
+           AND candidate_source_snapshot_sha256 IS NOT NULL)
+          OR (provenance<>'historical_candidate_ordinal'
+              AND candidate_set_id IS NULL AND selected_ordinal IS NULL
+              AND candidate_source_snapshot_sha256 IS NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_work_item_compare_document_evidence_origin
+    ON work_item_compare_document_evidence(origin_boundary_user_message_id,work_item_id);
+
+CREATE TABLE IF NOT EXISTS work_item_compare_outcomes (
+    work_item_id TEXT PRIMARY KEY REFERENCES work_items(id) ON DELETE CASCADE,
+    answer_boundary_user_message_id TEXT NOT NULL REFERENCES messages(id),
+    answer_assistant_message_id TEXT NOT NULL REFERENCES messages(id),
+    accepted_plan_sha256 TEXT NOT NULL,
+    accepted_outcome_sha256 TEXT NOT NULL,
+    comparison_status TEXT NOT NULL CHECK(comparison_status IN ('complete','partial')),
+    message_coverage_grade TEXT NOT NULL CHECK(message_coverage_grade IN ('complete','partial')),
+    document_verification_complete INTEGER NOT NULL CHECK(document_verification_complete=1),
+    publication_attested INTEGER NOT NULL CHECK(publication_attested=1),
+    semantic_verified INTEGER NOT NULL CHECK(semantic_verified=1),
+    message_evidence_sha256 TEXT NOT NULL,
+    document_evidence_sha256 TEXT NOT NULL,
+    evidence_bundle_sha256 TEXT NOT NULL,
+    model_evidence_sha256 TEXT NOT NULL,
+    completed_revision INTEGER NOT NULL CHECK(completed_revision BETWEEN 3 AND 4),
+    completed_at TEXT NOT NULL,
+    CHECK(answer_boundary_user_message_id<>answer_assistant_message_id),
+    CHECK(comparison_status=message_coverage_grade),
+    CHECK(length(answer_boundary_user_message_id)=20
+          AND substr(answer_boundary_user_message_id,1,4)='msg_'
+          AND substr(answer_boundary_user_message_id,5) NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(answer_assistant_message_id)=20
+          AND substr(answer_assistant_message_id,1,4)='msg_'
+          AND substr(answer_assistant_message_id,5) NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(accepted_plan_sha256)=64 AND accepted_plan_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(accepted_outcome_sha256)=64 AND accepted_outcome_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(message_evidence_sha256)=64 AND message_evidence_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(document_evidence_sha256)=64 AND document_evidence_sha256 NOT GLOB '*[^0-9a-f]*'
+          AND length(evidence_bundle_sha256)=64 AND evidence_bundle_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(model_evidence_sha256)=64
+          AND model_evidence_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK(length(completed_at) BETWEEN 20 AND 64 AND unixepoch(completed_at) IS NOT NULL)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_work_item_compare_outcomes_assistant
+    ON work_item_compare_outcomes(answer_assistant_message_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_work_items_compare_document_initial_insert
+BEFORE INSERT ON work_items
+WHEN NEW.kind='compare_conversation_with_document'
+ AND (NEW.state<>'waiting_for_input' OR NEW.transition<>'question_asked'
+      OR NEW.revision<>1 OR NEW.closed_at IS NOT NULL
+      OR NEW.created_at<>NEW.updated_at OR NEW.expires_at<=NEW.updated_at)
+BEGIN SELECT RAISE(ABORT,'comparison Work Item initial state is invalid'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_questions_insert
+BEFORE INSERT ON work_item_compare_document_questions
+WHEN NOT EXISTS (
+    SELECT 1
+      FROM work_items work
+      JOIN work_item_selected_evidence evidence ON evidence.work_item_id=work.id
+      JOIN messages boundary ON boundary.id=NEW.prompt_boundary_user_message_id
+                            AND boundary.user_id=work.user_id
+                            AND boundary.conversation_id=work.conversation_id
+                            AND boundary.role='user'
+      JOIN messages assistant ON assistant.id=NEW.prompt_assistant_message_id
+                             AND assistant.user_id=work.user_id
+                             AND assistant.conversation_id=work.conversation_id
+                             AND assistant.role='assistant'
+                             AND assistant.reply_to=boundary.id
+                             AND NOT EXISTS (
+                                 SELECT 1 FROM messages intervening
+                                  WHERE intervening.user_id=work.user_id
+                                    AND intervening.conversation_id=work.conversation_id
+                                    AND intervening.rowid>boundary.rowid
+                                    AND intervening.rowid<assistant.rowid
+                             )
+     WHERE work.id=NEW.work_item_id
+       AND work.kind='compare_conversation_with_document'
+       AND work.state='waiting_for_input'
+       AND evidence.corpus='messages'
+       AND (
+           (NEW.kind='provide_document_reference' AND NEW.work_revision=1
+            AND work.revision=1 AND work.transition='question_asked'
+            AND json_extract(assistant.metadata_json,'$.structural.answer_present')=1
+            AND json_extract(assistant.metadata_json,'$.structural.model_spoke')=0
+            AND work.created_at=NEW.created_at
+            AND json_extract(assistant.metadata_json,'$.structural.verdict_kind')
+                ='compare_conversation_document_reference_required'
+            AND ((NEW.admission_shape='direct_compound'
+                  AND NEW.prompt_boundary_user_message_id=work.anchor_user_message_id
+                 AND NEW.prompt_assistant_message_id=work.anchor_assistant_message_id)
+                 OR (NEW.admission_shape='selected_evidence_followup'
+                     AND assistant.content='{COMPARE_DOCUMENT_REFERENCE_PROMPT}'
+                     AND NOT EXISTS (
+                         SELECT 1 FROM json_each(assistant.metadata_json) receipt
+                          WHERE receipt.key GLOB 'accepted_*_outcome'
+                     )
+                     AND EXISTS (
+                         SELECT 1 FROM messages origin
+                          WHERE origin.id=work.anchor_assistant_message_id
+                            AND origin.user_id=work.user_id
+                            AND origin.conversation_id=work.conversation_id
+                            AND origin.role='assistant' AND origin.rowid<boundary.rowid
+                            AND NOT EXISTS (
+                                SELECT 1 FROM messages intervening
+                                 WHERE intervening.user_id=work.user_id
+                                   AND intervening.conversation_id=work.conversation_id
+                                   AND intervening.rowid>origin.rowid
+                                   AND intervening.rowid<boundary.rowid
+                            )
+                     ))))
+           OR
+           (NEW.kind='select_document_candidate' AND NEW.work_revision=2
+            AND work.revision=1 AND work.transition='question_asked'
+            AND json_extract(assistant.metadata_json,
+                             '$.accepted_archive_recall_outcome.schema')
+                ='friday.accepted-archive-recall-outcome-receipt.v1'
+            AND json_extract(assistant.metadata_json,
+                             '$.accepted_archive_recall_outcome.outcome.plan_sha256')
+                =NEW.accepted_search_plan_sha256
+            AND json_extract(assistant.metadata_json,
+                             '$.accepted_archive_recall_outcome.outcome_sha256')
+                =NEW.accepted_search_outcome_sha256
+            AND EXISTS (
+                SELECT 1 FROM work_item_compare_document_questions first
+                 WHERE first.work_item_id=work.id AND first.work_revision=1
+                   AND first.state='answered'
+                   AND first.admission_shape=NEW.admission_shape
+                   AND first.answer_user_message_id=NEW.prompt_boundary_user_message_id
+                   AND NEW.created_at>=first.closed_at
+            )
+            AND EXISTS (
+                SELECT 1 FROM work_item_archive_candidate_sets candidate_set
+                 WHERE candidate_set.id=NEW.candidate_set_id
+                   AND candidate_set.work_item_id=work.id
+                   AND candidate_set.origin_boundary_user_message_id
+                       =NEW.prompt_boundary_user_message_id
+                   AND json_extract(assistant.metadata_json,
+                                    '$.accepted_archive_recall_outcome.outcome.lane')
+                       ='federated_search'
+                   AND json_extract(assistant.metadata_json,
+                                    '$.accepted_archive_recall_outcome.outcome.status')
+                       IN ('complete','partial')
+                   AND json_extract(assistant.metadata_json,
+                                    '$.accepted_archive_recall_outcome.outcome.evidence_sha256')
+                       =candidate_set.evidence_sha256
+                   AND json_extract(assistant.metadata_json,
+                                    '$.accepted_archive_recall_outcome.outcome.coverage_sha256')
+                       =candidate_set.coverage_sha256
+                   AND json_extract(assistant.metadata_json,
+                                    '$.accepted_archive_recall_outcome.outcome.coverage_grade')
+                       =candidate_set.coverage_grade
+                   AND json_extract(assistant.metadata_json,
+                                    '$.accepted_archive_recall_outcome.outcome.candidate_projection_sha256')
+                       =candidate_set.authority_projection_sha256
+                   AND json_extract(assistant.metadata_json,
+                                    '$.accepted_archive_recall_outcome.outcome.selected_evidence')
+                       IS NULL
+                   AND (SELECT COUNT(*) FROM work_item_archive_candidate_set_items item
+                         WHERE item.candidate_set_id=candidate_set.id
+                           AND item.work_item_id=work.id) BETWEEN 2 AND {ARCHIVE_CANDIDATE_MAX_COUNT}
+            ))
+       )
+)
+BEGIN
+    SELECT RAISE(ABORT,'comparison document question scope is invalid');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_questions_update
+BEFORE UPDATE ON work_item_compare_document_questions
+WHEN OLD.state<>'waiting'
+  OR NEW.id<>OLD.id OR NEW.work_item_id<>OLD.work_item_id OR NEW.kind<>OLD.kind
+  OR NEW.admission_shape<>OLD.admission_shape OR NEW.created_at<>OLD.created_at
+  OR NEW.prompt_boundary_user_message_id<>OLD.prompt_boundary_user_message_id
+  OR NEW.prompt_assistant_message_id<>OLD.prompt_assistant_message_id
+  OR NEW.work_revision<>OLD.work_revision
+  OR NEW.accepted_search_plan_sha256 IS NOT OLD.accepted_search_plan_sha256
+  OR NEW.accepted_search_outcome_sha256 IS NOT OLD.accepted_search_outcome_sha256
+  OR NOT (
+      (NEW.state='answered' AND NEW.close_reason='answered'
+       AND NEW.answered_at=NEW.closed_at AND NEW.answer_user_message_id IS NOT NULL
+       AND ((NEW.kind='provide_document_reference' AND NEW.selected_ordinal IS NULL)
+            OR (NEW.kind='select_document_candidate' AND NEW.selected_ordinal IS NOT NULL
+                AND EXISTS (
+                    SELECT 1 FROM work_item_archive_candidate_set_items candidate
+                     WHERE candidate.candidate_set_id=NEW.candidate_set_id
+                       AND candidate.work_item_id=NEW.work_item_id
+                       AND candidate.ordinal=NEW.selected_ordinal
+                )
+                AND EXISTS (
+                    SELECT 1 FROM messages answer
+                      JOIN work_items work ON work.id=NEW.work_item_id
+                     WHERE answer.id=NEW.answer_user_message_id
+                       AND answer.user_id=work.user_id
+                       AND answer.conversation_id=work.conversation_id
+                       AND answer.role='user'
+                       AND friday_archive_candidate_ordinal(answer.content)=NEW.selected_ordinal
+                ))))
+      OR
+      (NEW.state='closed' AND NEW.close_reason IN ('suspended','cancelled','expired')
+       AND NEW.closed_at IS NOT NULL AND NEW.answered_at IS NULL
+       AND NEW.answer_user_message_id IS NULL AND NEW.selected_ordinal IS NULL)
+  )
+  OR NOT EXISTS (
+      SELECT 1 FROM work_items work
+       WHERE work.id=OLD.work_item_id
+         AND work.kind='compare_conversation_with_document'
+         AND work.state='waiting_for_input'
+         AND work.revision=OLD.work_revision
+  )
+BEGIN
+    SELECT RAISE(ABORT,'comparison document question update is invalid');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_questions_delete
+BEFORE DELETE ON work_item_compare_document_questions
+WHEN EXISTS (SELECT 1 FROM work_items work WHERE work.id=OLD.work_item_id)
+BEGIN SELECT RAISE(ABORT,'comparison document question is immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_document_evidence_insert
+BEFORE INSERT ON work_item_compare_document_evidence
+WHEN NOT EXISTS (
+    SELECT 1 FROM work_items work
+      JOIN raw_objects raw ON raw.id=NEW.raw_object_id
+                          AND raw.user_id=json_extract(NEW.source_ref_json,'$.tenant_id')
+                          AND raw.deleted_at IS NULL
+      JOIN file_source_aliases alias ON alias.user_id=raw.user_id
+                                    AND alias.uploaded_by=work.user_id
+                                    AND alias.raw_object_id=raw.id
+      JOIN messages boundary ON boundary.id=NEW.origin_boundary_user_message_id
+                            AND boundary.user_id=work.user_id
+                            AND boundary.conversation_id=work.conversation_id
+                            AND boundary.role='user'
+     WHERE work.id=NEW.work_item_id
+       AND work.kind='compare_conversation_with_document'
+       AND work.state='waiting_for_input'
+       AND work.revision=NEW.resolved_revision-1
+       AND raw.content_hash=NEW.raw_content_sha256
+       AND json_extract(raw.metadata_json,'$.sha256')=NEW.content_sha256
+       AND json_extract(NEW.source_ref_json,'$.principal_id')=work.user_id
+       AND NOT EXISTS (
+           SELECT 1 FROM work_item_compare_document_questions open_question
+            WHERE open_question.work_item_id=work.id AND open_question.state<>'answered'
+       )
+       AND NEW.origin_boundary_user_message_id=(
+           SELECT answer_user_message_id FROM work_item_compare_document_questions latest
+            WHERE latest.work_item_id=work.id ORDER BY work_revision DESC LIMIT 1
+       )
+       AND NEW.resolved_revision=1+(
+           SELECT COUNT(*) FROM work_item_compare_document_questions question
+            WHERE question.work_item_id=work.id
+       )
+       AND ((NEW.provenance='historical_candidate_ordinal' AND EXISTS (
+                SELECT 1 FROM work_item_compare_document_questions selected
+                  JOIN work_item_archive_candidate_set_items candidate
+                    ON candidate.candidate_set_id=selected.candidate_set_id
+                   AND candidate.work_item_id=selected.work_item_id
+                   AND candidate.ordinal=selected.selected_ordinal
+                 WHERE selected.work_item_id=work.id AND selected.work_revision=2
+                   AND selected.state='answered'
+                   AND selected.candidate_set_id=NEW.candidate_set_id
+                   AND selected.selected_ordinal=NEW.selected_ordinal
+                   AND candidate.source_ref_json=NEW.source_ref_json
+                   AND candidate.source_snapshot_sha256
+                       =NEW.candidate_source_snapshot_sha256
+                   AND NOT EXISTS (
+                       SELECT 1 FROM json_each(candidate.passage_refs_json) passage
+                        WHERE json_extract(passage.value,'$.source_revision.kind')
+                                  <>'raw_content_sha256'
+                           OR json_extract(passage.value,'$.source_revision.value')
+                                  <>NEW.raw_content_sha256
+                   )
+            )) OR (NEW.provenance='current_turn_attachment'
+                    AND NOT EXISTS (SELECT 1 FROM work_item_archive_candidate_sets candidate_set
+                                     WHERE candidate_set.work_item_id=work.id)
+                    AND json_type(boundary.metadata_json,
+                                  '$.conversation_uploaded_raw_ids')='array'
+                    AND json_array_length(boundary.metadata_json,
+                                          '$.conversation_uploaded_raw_ids')=1
+                    AND json_extract(boundary.metadata_json,
+                                     '$.conversation_uploaded_raw_ids[0]')=NEW.raw_object_id)
+               OR (NEW.provenance='historical_exact_reference'
+                    AND NOT EXISTS (SELECT 1 FROM work_item_archive_candidate_sets candidate_set
+                                     WHERE candidate_set.work_item_id=work.id)
+                    AND json_type(boundary.metadata_json,
+                                  '$.conversation_attachment_raw_ids')='array'
+                    AND json_array_length(boundary.metadata_json,
+                                          '$.conversation_attachment_raw_ids')=1
+                    AND json_extract(boundary.metadata_json,
+                                     '$.conversation_attachment_raw_ids[0]')=NEW.raw_object_id))
+)
+BEGIN SELECT RAISE(ABORT,'comparison document evidence scope is invalid'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_document_evidence_update
+BEFORE UPDATE ON work_item_compare_document_evidence
+BEGIN SELECT RAISE(ABORT,'comparison document evidence is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_document_evidence_delete
+BEFORE DELETE ON work_item_compare_document_evidence
+WHEN EXISTS (SELECT 1 FROM work_items work WHERE work.id=OLD.work_item_id)
+BEGIN SELECT RAISE(ABORT,'comparison document evidence is immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_outcomes_insert
+BEFORE INSERT ON work_item_compare_outcomes
+WHEN NOT EXISTS (
+    SELECT 1 FROM work_items work
+      JOIN work_item_compare_document_evidence document ON document.work_item_id=work.id
+      JOIN work_item_selected_evidence selected_message ON selected_message.work_item_id=work.id
+      JOIN messages boundary ON boundary.id=NEW.answer_boundary_user_message_id
+                            AND boundary.user_id=work.user_id
+                            AND boundary.conversation_id=work.conversation_id
+                            AND boundary.role='user'
+      JOIN messages assistant ON assistant.id=NEW.answer_assistant_message_id
+                             AND assistant.user_id=work.user_id
+                             AND assistant.conversation_id=work.conversation_id
+                             AND assistant.role='assistant'
+                             AND assistant.reply_to=boundary.id
+     WHERE work.id=NEW.work_item_id
+       AND work.kind='compare_conversation_with_document'
+       AND work.state='active' AND work.transition='document_resolved'
+       AND NEW.completed_revision=work.revision+1
+       AND NEW.completed_at>=work.updated_at
+       AND NEW.message_coverage_grade=selected_message.coverage_grade
+       AND NEW.answer_boundary_user_message_id=document.origin_boundary_user_message_id
+       AND length(CAST(assistant.content AS BLOB))
+           BETWEEN 1 AND {COMPARE_CONVERSATION_DOCUMENT_ANSWER_MAX_BYTES}
+       AND json_extract(assistant.metadata_json,'$.structural.answer_present')=1
+       AND json_extract(assistant.metadata_json,'$.structural.model_spoke')=1
+       AND json_extract(assistant.metadata_json,
+                        '$.accepted_compare_conversation_document_outcome.schema')
+           ='friday.compare-conversation-document-outcome-receipt.v1'
+       AND json_extract(assistant.metadata_json,
+                        '$.accepted_compare_conversation_document_outcome.outcome_sha256')
+           =NEW.accepted_outcome_sha256
+       AND json_extract(assistant.metadata_json,
+                        '$.accepted_compare_conversation_document_outcome.outcome.plan_sha256')
+           =NEW.accepted_plan_sha256
+       AND json_extract(assistant.metadata_json,
+                        '$.accepted_compare_conversation_document_outcome.outcome.status')
+           =NEW.comparison_status
+       AND json_extract(assistant.metadata_json,
+                        '$.accepted_compare_conversation_document_outcome.outcome.message_coverage_grade')
+           =NEW.message_coverage_grade
+       AND json_extract(assistant.metadata_json,
+                        '$.accepted_compare_conversation_document_outcome.outcome.document_verification_complete')
+           =NEW.document_verification_complete
+       AND json_extract(assistant.metadata_json,
+                        '$.accepted_compare_conversation_document_outcome.outcome.publication_attested')
+           =NEW.publication_attested
+       AND json_extract(assistant.metadata_json,
+                        '$.accepted_compare_conversation_document_outcome.outcome.semantic_verified')
+           =NEW.semantic_verified
+       AND json_extract(assistant.metadata_json,
+                        '$.accepted_compare_conversation_document_outcome.outcome.message_evidence_sha256')
+           =NEW.message_evidence_sha256
+       AND json_extract(assistant.metadata_json,
+                        '$.accepted_compare_conversation_document_outcome.outcome.document_evidence_sha256')
+           =NEW.document_evidence_sha256
+       AND json_extract(assistant.metadata_json,
+                        '$.accepted_compare_conversation_document_outcome.outcome.evidence_bundle_sha256')
+           =NEW.evidence_bundle_sha256
+       AND json_extract(assistant.metadata_json,
+                        '$.accepted_compare_conversation_document_outcome.outcome.model_evidence_sha256')
+           =NEW.model_evidence_sha256
+)
+BEGIN SELECT RAISE(ABORT,'comparison outcome scope is invalid'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_outcomes_update
+BEFORE UPDATE ON work_item_compare_outcomes
+BEGIN SELECT RAISE(ABORT,'comparison outcome is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trg_work_item_compare_outcomes_delete
+BEFORE DELETE ON work_item_compare_outcomes
+WHEN EXISTS (SELECT 1 FROM work_items work WHERE work.id=OLD.work_item_id)
+BEGIN SELECT RAISE(ABORT,'comparison outcome is immutable'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_work_items_compare_document_lifecycle_update
+BEFORE UPDATE ON work_items
+WHEN OLD.kind='compare_conversation_with_document'
+ AND (
+      NEW.id<>OLD.id OR NEW.user_id<>OLD.user_id OR NEW.conversation_id<>OLD.conversation_id
+      OR NEW.kind<>OLD.kind OR NEW.goal<>OLD.goal OR NEW.playbook<>OLD.playbook
+      OR NEW.completion_contract<>OLD.completion_contract
+      OR NEW.active_frame_json<>OLD.active_frame_json
+      OR NEW.anchor_user_message_id<>OLD.anchor_user_message_id
+      OR NEW.anchor_assistant_message_id<>OLD.anchor_assistant_message_id
+      OR NEW.accepted_plan_sha256<>OLD.accepted_plan_sha256
+      OR NEW.accepted_outcome_sha256<>OLD.accepted_outcome_sha256
+      OR NEW.created_at<>OLD.created_at
+      OR (NEW.transition='question_reasked'
+          AND unixepoch(NEW.expires_at)-unixepoch(NEW.updated_at)
+              <>{WORK_ITEM_TTL_HOURS * 60 * 60})
+      OR (NEW.transition<>'question_reasked' AND NEW.expires_at<>OLD.expires_at)
+      OR NEW.revision<>OLD.revision+1 OR NEW.updated_at<OLD.updated_at
+      OR NOT (
+          (OLD.state='waiting_for_input' AND NEW.state='waiting_for_input'
+           AND NEW.transition='question_reasked' AND NEW.revision=2
+           AND EXISTS (
+               SELECT 1 FROM work_item_compare_document_questions question
+                WHERE question.work_item_id=OLD.id AND question.work_revision=2
+                  AND question.state='waiting'
+                  AND question.created_at=NEW.updated_at
+           ))
+          OR
+          (OLD.state='waiting_for_input' AND NEW.state='active'
+           AND NEW.transition='document_resolved'
+           AND EXISTS (
+               SELECT 1 FROM work_item_compare_document_evidence document
+                WHERE document.work_item_id=OLD.id
+                  AND document.resolved_revision=NEW.revision
+                  AND document.resolved_at=NEW.updated_at
+           ))
+          OR
+          (OLD.state='active' AND NEW.state='completed'
+           AND NEW.transition='comparison_published' AND NEW.closed_at=NEW.updated_at
+           AND EXISTS (
+               SELECT 1 FROM work_item_compare_outcomes outcome
+                WHERE outcome.work_item_id=OLD.id
+                  AND outcome.completed_revision=NEW.revision
+                  AND outcome.completed_at=NEW.updated_at
+           ))
+          OR
+          (OLD.state IN ('waiting_for_input','active') AND NEW.state='suspended'
+           AND NEW.transition='suspended')
+          OR
+          (OLD.state IN ('waiting_for_input','active','suspended')
+           AND NEW.state='cancelled' AND NEW.transition='cancelled'
+           AND NEW.closed_at=NEW.updated_at)
+          OR
+          (OLD.state IN ('waiting_for_input','active','suspended')
+           AND NEW.state='expired' AND NEW.transition='expired'
+           AND NEW.closed_at=NEW.updated_at AND NEW.expires_at<=NEW.updated_at)
+      )
+      OR (NEW.state IN ('active','waiting_for_input','suspended') AND NEW.closed_at IS NOT NULL)
+      OR (NEW.state IN ('active','waiting_for_input','suspended') AND NEW.expires_at<=NEW.updated_at)
+      OR (NEW.state IN ('suspended','cancelled','expired')
+          AND EXISTS (SELECT 1 FROM work_item_compare_document_questions question
+                       WHERE question.work_item_id=OLD.id AND question.state='waiting'))
+      OR (OLD.state='waiting_for_input'
+          AND NEW.state IN ('suspended','cancelled','expired')
+          AND NOT EXISTS (
+              SELECT 1 FROM work_item_compare_document_questions question
+               WHERE question.work_item_id=OLD.id
+                 AND question.work_revision=OLD.revision
+                 AND question.state='closed'
+                 AND question.close_reason=NEW.state
+                 AND question.closed_at=NEW.updated_at
+          ))
+ )
+BEGIN SELECT RAISE(ABORT,'comparison Work Item lifecycle is invalid'); END;
+"""
+    )
+
+
+WORK_ITEM_SCHEMA = _schema_42_full_from_40()
+
+
 def _normalize_schema_sql(value: str) -> str:
     return re.sub(r"\s+", "", value)
 
@@ -1299,6 +2093,17 @@ def _canonical_schema_39_objects() -> dict[tuple[str, str], str]:
         conn.close()
 
 
+@lru_cache(maxsize=1)
+def _canonical_schema_40_objects() -> dict[tuple[str, str], str]:
+    conn = sqlite3.connect(":memory:")
+    try:
+        register_work_item_connection_functions(conn)
+        _execute_schema(conn, _WORK_ITEM_SCHEMA_40)
+        return _schema_objects_for_tables(conn, _SCHEMA_40_TABLES)
+    finally:
+        conn.close()
+
+
 def _related_schema_objects(conn: sqlite3.Connection) -> dict[tuple[str, str], str]:
     return {
         (str(row[0]), str(row[1])): _normalize_schema_sql(str(row[2]))
@@ -1356,6 +2161,12 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
     from friday.interaction_control_plane.archive_evidence_work_item import (
         RecallSelectedArchiveEvidenceWorkItem,
     )
+    from friday.interaction_control_plane.compare_conversation_document_store import (
+        _fetch as _fetch_compare_item,
+    )
+    from friday.interaction_control_plane.compare_conversation_document_store import (
+        _validate_stored_item as _validate_compare_stored_item,
+    )
     from friday.interaction_control_plane.selected_archive_evidence import (
         SelectedArchiveEvidence,
         SelectedArchiveEvidenceError,
@@ -1372,19 +2183,74 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
         try:
             RecallConversationWorkItem.from_storage_row(row)
         except WorkItemContractError as exc:
-            raise sqlite3.DatabaseError("Schema 40 RecallConversation data is invalid") from exc
+            raise sqlite3.DatabaseError("Schema 42 RecallConversation data is invalid") from exc
 
     mismatch = conn.execute(
         """SELECT 1
              FROM work_items work
              LEFT JOIN work_item_selected_evidence evidence
                ON evidence.work_item_id=work.id
-            WHERE (work.kind='recall_selected_archive_evidence' AND evidence.work_item_id IS NULL)
-               OR (work.kind<>'recall_selected_archive_evidence' AND evidence.work_item_id IS NOT NULL)
+            WHERE (work.kind IN ('recall_selected_archive_evidence',
+                                 'compare_conversation_with_document')
+                   AND evidence.work_item_id IS NULL)
+               OR (work.kind NOT IN ('recall_selected_archive_evidence',
+                                     'compare_conversation_with_document')
+                   AND evidence.work_item_id IS NOT NULL)
             LIMIT 1"""
     ).fetchone()
     if mismatch is not None:
-        raise sqlite3.DatabaseError("Schema 40 selected evidence cardinality is invalid")
+        raise sqlite3.DatabaseError("Schema 42 selected evidence cardinality is invalid")
+
+    compare_mismatch = conn.execute(
+        """SELECT 1 FROM work_items work
+            WHERE (work.kind='compare_conversation_with_document'
+                   AND (SELECT COUNT(*) FROM work_item_compare_document_questions question
+                         WHERE question.work_item_id=work.id) NOT BETWEEN 1 AND 2)
+               OR (work.kind<>'compare_conversation_with_document'
+                   AND (SELECT COUNT(*) FROM work_item_compare_document_questions question
+                         WHERE question.work_item_id=work.id)<>0)
+               OR (work.kind='compare_conversation_with_document'
+                   AND ((work.state='waiting_for_input'
+                         AND (SELECT COUNT(*) FROM work_item_compare_document_evidence document
+                               WHERE document.work_item_id=work.id)<>0)
+                        OR (work.state IN ('active','completed')
+                            AND (SELECT COUNT(*) FROM work_item_compare_document_evidence document
+                                  WHERE document.work_item_id=work.id)<>1)
+                        OR (work.state='completed'
+                            AND (SELECT COUNT(*) FROM work_item_compare_outcomes outcome
+                                  WHERE outcome.work_item_id=work.id)<>1)
+                        OR (work.state<>'completed'
+                            AND (SELECT COUNT(*) FROM work_item_compare_outcomes outcome
+                                  WHERE outcome.work_item_id=work.id)<>0)))
+               OR (work.kind<>'compare_conversation_with_document'
+                   AND ((SELECT COUNT(*) FROM work_item_compare_document_evidence document
+                          WHERE document.work_item_id=work.id)<>0
+                        OR (SELECT COUNT(*) FROM work_item_compare_outcomes outcome
+                             WHERE outcome.work_item_id=work.id)<>0))
+            LIMIT 1"""
+    ).fetchone()
+    if compare_mismatch is not None:
+        raise sqlite3.DatabaseError("Schema 42 comparison question cardinality is invalid")
+
+    compare_orphan = conn.execute(
+        """SELECT 1
+              FROM work_item_compare_document_questions question
+              LEFT JOIN work_items work ON work.id=question.work_item_id
+             WHERE work.id IS NULL OR work.kind<>'compare_conversation_with_document'
+            UNION ALL
+            SELECT 1
+              FROM work_item_compare_document_evidence document
+              LEFT JOIN work_items work ON work.id=document.work_item_id
+             WHERE work.id IS NULL OR work.kind<>'compare_conversation_with_document'
+            UNION ALL
+            SELECT 1
+              FROM work_item_compare_outcomes outcome
+              LEFT JOIN work_items work ON work.id=outcome.work_item_id
+             WHERE work.id IS NULL OR work.kind<>'compare_conversation_with_document'
+             LIMIT 1"""
+    ).fetchone()
+    if compare_orphan is not None:
+        raise sqlite3.DatabaseError("Schema 42 comparison sidecar ownership is invalid")
 
     candidate_mismatch = conn.execute(
         """SELECT 1
@@ -1400,7 +2266,25 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
                               WHERE item.work_item_id=work.id) NOT BETWEEN 2 AND ?)
                   )
                OR (
-                    work.kind<>'select_archive_candidate_and_replay_evidence'
+                    work.kind='compare_conversation_with_document'
+                    AND (((SELECT COUNT(*) FROM work_item_compare_document_questions question
+                            WHERE question.work_item_id=work.id)=2
+                          AND ((SELECT COUNT(*) FROM work_item_archive_candidate_sets candidate_set
+                                 WHERE candidate_set.work_item_id=work.id)<>1
+                               OR (SELECT COUNT(*) FROM work_item_archive_candidate_set_items item
+                                    WHERE item.work_item_id=work.id) NOT BETWEEN 2 AND ?))
+                         OR ((SELECT COUNT(*) FROM work_item_compare_document_questions question
+                               WHERE question.work_item_id=work.id)=1
+                             AND ((SELECT COUNT(*) FROM work_item_archive_candidate_sets candidate_set
+                                    WHERE candidate_set.work_item_id=work.id)<>0
+                                  OR (SELECT COUNT(*) FROM work_item_archive_candidate_set_items item
+                                       WHERE item.work_item_id=work.id)<>0))
+                         OR (SELECT COUNT(*) FROM work_item_archive_candidate_questions question
+                              WHERE question.work_item_id=work.id)<>0)
+                  )
+               OR (
+                    work.kind NOT IN ('select_archive_candidate_and_replay_evidence',
+                                      'compare_conversation_with_document')
                     AND ((SELECT COUNT(*) FROM work_item_archive_candidate_sets candidate_set
                            WHERE candidate_set.work_item_id=work.id)<>0
                          OR (SELECT COUNT(*) FROM work_item_archive_candidate_questions question
@@ -1410,16 +2294,17 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
                               WHERE item.work_item_id=work.id)<>0)
                   )
             LIMIT 1""",
-        (ARCHIVE_CANDIDATE_MAX_COUNT,),
+        (ARCHIVE_CANDIDATE_MAX_COUNT, ARCHIVE_CANDIDATE_MAX_COUNT),
     ).fetchone()
     if candidate_mismatch is not None:
-        raise sqlite3.DatabaseError("Schema 40 candidate sidecar cardinality is invalid")
+        raise sqlite3.DatabaseError("Schema 42 candidate sidecar cardinality is invalid")
     candidate_orphan = conn.execute(
         """SELECT 1
               FROM work_item_archive_candidate_sets candidate_set
               LEFT JOIN work_items work ON work.id=candidate_set.work_item_id
              WHERE work.id IS NULL
-                OR work.kind<>'select_archive_candidate_and_replay_evidence'
+                OR work.kind NOT IN ('select_archive_candidate_and_replay_evidence',
+                                     'compare_conversation_with_document')
             UNION ALL
             SELECT 1
               FROM work_item_archive_candidate_set_items item
@@ -1437,7 +2322,7 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
              LIMIT 1"""
     ).fetchone()
     if candidate_orphan is not None:
-        raise sqlite3.DatabaseError("Schema 40 candidate sidecar ownership is invalid")
+        raise sqlite3.DatabaseError("Schema 42 candidate sidecar ownership is invalid")
     cursor = conn.execute("SELECT * FROM work_item_selected_evidence ORDER BY work_item_id")
     columns = tuple(str(item[0]) for item in cursor.description or ())
     for raw in cursor.fetchall():
@@ -1445,11 +2330,11 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
         try:
             evidence = SelectedArchiveEvidence.from_storage_row(row)
         except SelectedArchiveEvidenceError as exc:
-            raise sqlite3.DatabaseError("Schema 40 selected evidence identity is invalid") from exc
+            raise sqlite3.DatabaseError("Schema 42 selected evidence identity is invalid") from exc
         work_cursor = conn.execute("SELECT * FROM work_items WHERE id=?", (evidence.work_item_id,))
         raw_work = work_cursor.fetchone()
         if raw_work is None:  # pragma: no cover - the sidecar FK already proves this
-            raise sqlite3.DatabaseError("Schema 40 selected evidence owner is missing")
+            raise sqlite3.DatabaseError("Schema 42 selected evidence owner is missing")
         work_columns = tuple(str(item[0]) for item in work_cursor.description or ())
         work = (
             dict(raw_work)
@@ -1457,11 +2342,12 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
             else dict(zip(work_columns, raw_work, strict=True))
         )
         if evidence.source_ref.principal_id != work.get("user_id"):
-            raise sqlite3.DatabaseError("Schema 40 selected evidence owner is invalid")
-        try:
-            RecallSelectedArchiveEvidenceWorkItem.from_storage_rows(work, evidence)
-        except WorkItemContractError as exc:
-            raise sqlite3.DatabaseError("Schema 40 archive Work Item data is invalid") from exc
+            raise sqlite3.DatabaseError("Schema 42 selected evidence owner is invalid")
+        if work.get("kind") == WorkKind.RECALL_SELECTED_ARCHIVE_EVIDENCE.value:
+            try:
+                RecallSelectedArchiveEvidenceWorkItem.from_storage_rows(work, evidence)
+            except WorkItemContractError as exc:
+                raise sqlite3.DatabaseError("Schema 42 archive Work Item data is invalid") from exc
         boundary = conn.execute(
             """SELECT 1
                  FROM work_items work
@@ -1470,11 +2356,37 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
                   AND message.user_id=work.user_id
                   AND message.conversation_id=work.conversation_id
                   AND message.role='user'
-                WHERE work.id=? AND work.kind='recall_selected_archive_evidence'""",
+                WHERE work.id=?
+                  AND work.kind IN ('recall_selected_archive_evidence',
+                                    'compare_conversation_with_document')""",
             (evidence.origin_boundary_user_message_id, evidence.work_item_id),
         ).fetchone()
         if boundary is None:
-            raise sqlite3.DatabaseError("Schema 40 selected evidence boundary is invalid")
+            raise sqlite3.DatabaseError("Schema 42 selected evidence boundary is invalid")
+
+    compare_cursor = conn.execute(
+        """SELECT id,user_id,conversation_id FROM work_items
+            WHERE kind='compare_conversation_with_document' ORDER BY id"""
+    )
+    for raw_work in compare_cursor.fetchall():
+        work_id, owner_id, conversation_id = map(str, raw_work)
+        try:
+            compare_item = _fetch_compare_item(
+                conn,
+                work_item_id=work_id,
+                user_id=owner_id,
+                conversation_id=conversation_id,
+            )
+            if compare_item is None:  # pragma: no cover - selected above
+                raise WorkItemContractError("comparison Work Item disappeared")
+            _validate_compare_stored_item(
+                conn,
+                compare_item,
+                allow_disabled_owner=True,
+                require_latest_message=False,
+            )
+        except Exception as exc:
+            raise sqlite3.DatabaseError("Schema 42 comparison Work Item data is invalid") from exc
 
     work_cursor = conn.execute(
         """SELECT * FROM work_items
@@ -1524,7 +2436,7 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
         try:
             candidate_set = ArchiveCandidateSet.from_storage_rows(set_row, item_rows)
             question = ArchiveCandidateOrdinalQuestion.from_storage_row(question_row)
-            item = ArchiveCandidateSelectionWorkItem.from_storage_rows(
+            candidate_item = ArchiveCandidateSelectionWorkItem.from_storage_rows(
                 work,
                 candidate_set,
                 question,
@@ -1534,26 +2446,29 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
         try:
             _validate_stored_anchor(
                 conn,
-                item,
+                candidate_item,
                 require_latest_message=False,
                 allow_disabled_owner=True,
             )
         except Exception as exc:
             raise sqlite3.DatabaseError("Schema 40 candidate publication receipts are invalid") from exc
-        if any(candidate.source_ref.principal_id != item.user_id for candidate in candidate_set.candidates):
+        if any(
+            candidate.source_ref.principal_id != candidate_item.user_id
+            for candidate in candidate_set.candidates
+        ):
             raise sqlite3.DatabaseError("Schema 40 candidate owner is invalid")
         boundary = conn.execute(
             """SELECT 1 FROM messages
                 WHERE id=? AND user_id=? AND conversation_id=? AND role='user'""",
             (
                 candidate_set.origin_boundary_user_message_id,
-                item.user_id,
-                item.conversation_id,
+                candidate_item.user_id,
+                candidate_item.conversation_id,
             ),
         ).fetchone()
         if boundary is None:
             raise sqlite3.DatabaseError("Schema 40 candidate origin boundary is invalid")
-        if question.prompt_assistant_message_id != item.anchor_assistant_message_id:
+        if question.prompt_assistant_message_id != candidate_item.anchor_assistant_message_id:
             prompt = conn.execute(
                 """SELECT 1
                      FROM messages origin
@@ -1597,9 +2512,9 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
                     question.prompt_assistant_message_id,
                     archive_candidate_reask_prompt(question.maximum_ordinal),
                     ARCHIVE_CANDIDATE_REASK_VERDICT_KIND,
-                    item.anchor_assistant_message_id,
-                    item.user_id,
-                    item.conversation_id,
+                    candidate_item.anchor_assistant_message_id,
+                    candidate_item.user_id,
+                    candidate_item.conversation_id,
                 ),
             ).fetchone()
             if prompt is None:
@@ -1627,8 +2542,8 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
                 (
                     question.replay_assistant_message_id,
                     question.replay_boundary_user_message_id,
-                    item.user_id,
-                    item.conversation_id,
+                    candidate_item.user_id,
+                    candidate_item.conversation_id,
                 ),
             ).fetchone()
             if replay is None:
@@ -1674,8 +2589,8 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
                     question.failure_assistant_message_id,
                     ARCHIVE_EVIDENCE_REPLAY_UNAVAILABLE,
                     question.prompt_assistant_message_id,
-                    item.user_id,
-                    item.conversation_id,
+                    candidate_item.user_id,
+                    candidate_item.conversation_id,
                 ),
             ).fetchone()
             if failure is None:
@@ -1683,20 +2598,27 @@ def _validate_current_data(conn: sqlite3.Connection) -> None:
 
 
 def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True) -> None:
-    """Fail closed when the exact schema-40 Work Item projection is weakened."""
+    """Fail closed when the exact schema-42 Work Item projection is weakened."""
 
     row = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='work_items'").fetchone()
     if row is None:
         if required:
-            raise sqlite3.DatabaseError("Schema 40 work item store is missing")
+            raise sqlite3.DatabaseError("Schema 42 work item store is missing")
         if _related_schema_objects(conn):
-            raise sqlite3.DatabaseError("Schema 40 work item DDL is incomplete or altered")
+            raise sqlite3.DatabaseError("Schema 42 work item DDL is incomplete or altered")
         return
     register_work_item_connection_functions(conn)
     if _schema_objects(conn, current=True) != _canonical_work_item_schema_objects():
-        raise sqlite3.DatabaseError("Schema 40 work item DDL is incomplete or altered")
+        raise sqlite3.DatabaseError("Schema 42 work item DDL is incomplete or altered")
 
     expected_index_columns = {
+        "idx_work_item_compare_outcomes_assistant": ("answer_assistant_message_id",),
+        "idx_work_item_compare_document_evidence_origin": (
+            "origin_boundary_user_message_id",
+            "work_item_id",
+        ),
+        "uq_work_item_compare_document_question_waiting": ("work_item_id",),
+        "idx_work_item_compare_document_questions_work": ("work_item_id", "state", "id"),
         "uq_work_items_open_conversation": ("user_id", "conversation_id"),
         "idx_work_items_owner_state_updated": ("user_id", "state", "updated_at", "id"),
         "idx_work_items_conversation_updated": ("user_id", "conversation_id", "updated_at", "id"),
@@ -1725,7 +2647,7 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         for name in expected_index_columns
     }
     if named_index_columns != expected_index_columns:
-        raise sqlite3.DatabaseError("Schema 40 work item indexes are invalid")
+        raise sqlite3.DatabaseError("Schema 42 work item indexes are invalid")
 
     columns = {
         str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
@@ -1752,7 +2674,7 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         "expires_at": ("TEXT", 1, 0),
         "closed_at": ("TEXT", 0, 0),
     }:
-        raise sqlite3.DatabaseError("Schema 40 work item store shape is invalid")
+        raise sqlite3.DatabaseError("Schema 42 work item store shape is invalid")
     evidence_columns = {
         str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
         for item in conn.execute("PRAGMA table_info(work_item_selected_evidence)")
@@ -1767,7 +2689,74 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         "coverage_grade": ("TEXT", 1, 0),
         "origin_boundary_user_message_id": ("TEXT", 1, 0),
     }:
-        raise sqlite3.DatabaseError("Schema 40 selected evidence store shape is invalid")
+        raise sqlite3.DatabaseError("Schema 42 selected evidence store shape is invalid")
+    question_columns = {
+        str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
+        for item in conn.execute("PRAGMA table_info(work_item_compare_document_questions)")
+    }
+    if question_columns != {
+        "id": ("TEXT", 0, 1),
+        "work_item_id": ("TEXT", 1, 0),
+        "kind": ("TEXT", 1, 0),
+        "admission_shape": ("TEXT", 1, 0),
+        "state": ("TEXT", 1, 0),
+        "created_at": ("TEXT", 1, 0),
+        "prompt_boundary_user_message_id": ("TEXT", 1, 0),
+        "prompt_assistant_message_id": ("TEXT", 1, 0),
+        "work_revision": ("INTEGER", 1, 0),
+        "candidate_set_id": ("TEXT", 0, 0),
+        "answered_at": ("TEXT", 0, 0),
+        "answer_user_message_id": ("TEXT", 0, 0),
+        "selected_ordinal": ("INTEGER", 0, 0),
+        "accepted_search_plan_sha256": ("TEXT", 0, 0),
+        "accepted_search_outcome_sha256": ("TEXT", 0, 0),
+        "closed_at": ("TEXT", 0, 0),
+        "close_reason": ("TEXT", 0, 0),
+    }:
+        raise sqlite3.DatabaseError("Schema 42 comparison question store shape is invalid")
+    document_columns = {
+        str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
+        for item in conn.execute("PRAGMA table_info(work_item_compare_document_evidence)")
+    }
+    if document_columns != {
+        "work_item_id": ("TEXT", 0, 1),
+        "provenance": ("TEXT", 1, 0),
+        "source_ref_json": ("TEXT", 1, 0),
+        "raw_object_id": ("TEXT", 1, 0),
+        "raw_source_identity_sha256": ("TEXT", 1, 0),
+        "raw_content_sha256": ("TEXT", 1, 0),
+        "content_sha256": ("TEXT", 1, 0),
+        "candidate_source_snapshot_sha256": ("TEXT", 0, 0),
+        "origin_boundary_user_message_id": ("TEXT", 1, 0),
+        "resolved_revision": ("INTEGER", 1, 0),
+        "resolved_at": ("TEXT", 1, 0),
+        "candidate_set_id": ("TEXT", 0, 0),
+        "selected_ordinal": ("INTEGER", 0, 0),
+    }:
+        raise sqlite3.DatabaseError("Schema 42 comparison document store shape is invalid")
+    outcome_columns = {
+        str(item[1]): (str(item[2]).upper(), int(item[3]), int(item[5]))
+        for item in conn.execute("PRAGMA table_info(work_item_compare_outcomes)")
+    }
+    if outcome_columns != {
+        "work_item_id": ("TEXT", 0, 1),
+        "answer_boundary_user_message_id": ("TEXT", 1, 0),
+        "answer_assistant_message_id": ("TEXT", 1, 0),
+        "accepted_plan_sha256": ("TEXT", 1, 0),
+        "accepted_outcome_sha256": ("TEXT", 1, 0),
+        "comparison_status": ("TEXT", 1, 0),
+        "message_coverage_grade": ("TEXT", 1, 0),
+        "document_verification_complete": ("INTEGER", 1, 0),
+        "publication_attested": ("INTEGER", 1, 0),
+        "semantic_verified": ("INTEGER", 1, 0),
+        "message_evidence_sha256": ("TEXT", 1, 0),
+        "document_evidence_sha256": ("TEXT", 1, 0),
+        "evidence_bundle_sha256": ("TEXT", 1, 0),
+        "model_evidence_sha256": ("TEXT", 1, 0),
+        "completed_revision": ("INTEGER", 1, 0),
+        "completed_at": ("TEXT", 1, 0),
+    }:
+        raise sqlite3.DatabaseError("Schema 42 comparison outcome store shape is invalid")
 
     work_item_foreign_keys = {
         (str(item[3]), str(item[2]), str(item[4]), str(item[5]), str(item[6]))
@@ -1779,7 +2768,7 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         ("anchor_user_message_id", "messages", "id", "NO ACTION", "NO ACTION"),
         ("anchor_assistant_message_id", "messages", "id", "NO ACTION", "NO ACTION"),
     }:
-        raise sqlite3.DatabaseError("Schema 40 work item ownership anchors are invalid")
+        raise sqlite3.DatabaseError("Schema 42 work item ownership anchors are invalid")
     evidence_foreign_keys = {
         (str(item[3]), str(item[2]), str(item[4]), str(item[5]), str(item[6]))
         for item in conn.execute("PRAGMA foreign_key_list(work_item_selected_evidence)")
@@ -1788,7 +2777,42 @@ def validate_work_item_schema(conn: sqlite3.Connection, *, required: bool = True
         ("work_item_id", "work_items", "id", "NO ACTION", "CASCADE"),
         ("origin_boundary_user_message_id", "messages", "id", "NO ACTION", "NO ACTION"),
     }:
-        raise sqlite3.DatabaseError("Schema 40 selected evidence foreign keys are invalid")
+        raise sqlite3.DatabaseError("Schema 42 selected evidence foreign keys are invalid")
+    question_foreign_keys = {
+        (str(item[3]), str(item[2]), str(item[4]), str(item[5]), str(item[6]))
+        for item in conn.execute("PRAGMA foreign_key_list(work_item_compare_document_questions)")
+    }
+    if question_foreign_keys != {
+        ("work_item_id", "work_items", "id", "NO ACTION", "CASCADE"),
+        ("work_item_id", "work_item_archive_candidate_sets", "work_item_id", "NO ACTION", "NO ACTION"),
+        ("candidate_set_id", "work_item_archive_candidate_sets", "id", "NO ACTION", "NO ACTION"),
+        ("prompt_boundary_user_message_id", "messages", "id", "NO ACTION", "NO ACTION"),
+        ("prompt_assistant_message_id", "messages", "id", "NO ACTION", "NO ACTION"),
+        ("answer_user_message_id", "messages", "id", "NO ACTION", "NO ACTION"),
+    }:
+        raise sqlite3.DatabaseError("Schema 42 comparison question foreign keys are invalid")
+    document_foreign_keys = {
+        (str(item[3]), str(item[2]), str(item[4]), str(item[5]), str(item[6]))
+        for item in conn.execute("PRAGMA foreign_key_list(work_item_compare_document_evidence)")
+    }
+    if document_foreign_keys != {
+        ("work_item_id", "work_items", "id", "NO ACTION", "CASCADE"),
+        ("work_item_id", "work_item_archive_candidate_sets", "work_item_id", "NO ACTION", "NO ACTION"),
+        ("candidate_set_id", "work_item_archive_candidate_sets", "id", "NO ACTION", "NO ACTION"),
+        ("raw_object_id", "raw_objects", "id", "NO ACTION", "NO ACTION"),
+        ("origin_boundary_user_message_id", "messages", "id", "NO ACTION", "NO ACTION"),
+    }:
+        raise sqlite3.DatabaseError("Schema 42 comparison document foreign keys are invalid")
+    outcome_foreign_keys = {
+        (str(item[3]), str(item[2]), str(item[4]), str(item[5]), str(item[6]))
+        for item in conn.execute("PRAGMA foreign_key_list(work_item_compare_outcomes)")
+    }
+    if outcome_foreign_keys != {
+        ("work_item_id", "work_items", "id", "NO ACTION", "CASCADE"),
+        ("answer_boundary_user_message_id", "messages", "id", "NO ACTION", "NO ACTION"),
+        ("answer_assistant_message_id", "messages", "id", "NO ACTION", "NO ACTION"),
+    }:
+        raise sqlite3.DatabaseError("Schema 42 comparison outcome foreign keys are invalid")
     _validate_current_data(conn)
 
 
@@ -1801,8 +2825,20 @@ def _drop_legacy_schema_objects(
             conn.execute(f'DROP {kind.upper()} "{name}"')
 
 
+def _drop_current_work_item_triggers(conn: sqlite3.Connection) -> None:
+    """Disable only authenticated current triggers while legacy rows are copied."""
+
+    for (kind, name), _sql in _canonical_work_item_schema_objects().items():
+        if kind == "trigger":
+            conn.execute(f'DROP TRIGGER "{name}"')
+
+
 def _copy_work_items(conn: sqlite3.Connection, source_table: str) -> None:
-    if source_table not in {"work_items_schema38", "work_items_schema39"}:
+    if source_table not in {
+        "work_items_schema38",
+        "work_items_schema39",
+        "work_items_schema40",
+    }:
         raise sqlite3.DatabaseError("Work Item migration source is invalid")
     conn.execute(
         """INSERT INTO work_items(
@@ -1822,12 +2858,12 @@ def _copy_work_items(conn: sqlite3.Connection, source_table: str) -> None:
     )
 
 
-def upgrade_work_item_schema_to_40(
+def upgrade_work_item_schema_to_42(
     conn: sqlite3.Connection,
     *,
     required: bool,
 ) -> None:
-    """Authenticate and atomically rebuild only exact released schemas 38/39."""
+    """Authenticate and atomically rebuild only exact released schemas 38/39/40."""
 
     if not conn.in_transaction:
         raise RuntimeError("Work Item schema upgrade requires an existing transaction")
@@ -1840,13 +2876,14 @@ def upgrade_work_item_schema_to_40(
         validate_work_item_schema(conn)
         return
 
-    installed_39 = _schema_objects_for_tables(conn, _SCHEMA_39_TABLES)
-    if installed_39 == _canonical_schema_39_objects() and related == installed_39:
-        conn.execute("ALTER TABLE work_items RENAME TO work_items_schema39")
-        conn.execute("ALTER TABLE work_item_selected_evidence RENAME TO work_item_selected_evidence_schema39")
-        _drop_legacy_schema_objects(conn, _canonical_schema_39_objects())
+    installed_40 = _schema_objects_for_tables(conn, _SCHEMA_40_TABLES)
+    if installed_40 == _canonical_schema_40_objects() and related == installed_40:
+        for table in _SCHEMA_40_TABLES:
+            conn.execute(f'ALTER TABLE "{table}" RENAME TO "{table}_schema40"')
+        _drop_legacy_schema_objects(conn, _canonical_schema_40_objects())
         _execute_schema(conn, WORK_ITEM_SCHEMA)
-        _copy_work_items(conn, "work_items_schema39")
+        _drop_current_work_item_triggers(conn)
+        _copy_work_items(conn, "work_items_schema40")
         conn.execute(
             """INSERT INTO work_item_selected_evidence(
                    work_item_id,corpus,source_ref_json,passage_refs_json,
@@ -1856,19 +2893,65 @@ def upgrade_work_item_schema_to_40(
                SELECT work_item_id,corpus,source_ref_json,passage_refs_json,
                       source_snapshot_sha256,coverage_sha256,coverage_grade,
                       origin_boundary_user_message_id
-                 FROM work_item_selected_evidence_schema39"""
+                 FROM work_item_selected_evidence_schema40"""
         )
-        conn.execute("DROP TABLE work_item_selected_evidence_schema39")
-        conn.execute("DROP TABLE work_items_schema39")
-    else:
-        installed_38 = _schema_objects_for_tables(conn, ("work_items",))
-        if installed_38 != _canonical_schema_38_objects() or related != installed_38:
-            raise sqlite3.DatabaseError("Released Work Item DDL is incomplete or altered")
-        conn.execute("ALTER TABLE work_items RENAME TO work_items_schema38")
-        _drop_legacy_schema_objects(conn, _canonical_schema_38_objects())
+        conn.execute(
+            """INSERT INTO work_item_archive_candidate_sets
+               SELECT * FROM work_item_archive_candidate_sets_schema40"""
+        )
+        conn.execute(
+            """INSERT INTO work_item_archive_candidate_set_items
+               SELECT * FROM work_item_archive_candidate_set_items_schema40"""
+        )
+        conn.execute(
+            """INSERT INTO work_item_archive_candidate_questions
+               SELECT * FROM work_item_archive_candidate_questions_schema40"""
+        )
+        for table in (
+            "work_item_archive_candidate_questions_schema40",
+            "work_item_archive_candidate_set_items_schema40",
+            "work_item_archive_candidate_sets_schema40",
+            "work_item_selected_evidence_schema40",
+            "work_items_schema40",
+        ):
+            conn.execute(f'DROP TABLE "{table}"')
         _execute_schema(conn, WORK_ITEM_SCHEMA)
-        _copy_work_items(conn, "work_items_schema38")
-        conn.execute("DROP TABLE work_items_schema38")
+    else:
+        installed_39 = _schema_objects_for_tables(conn, _SCHEMA_39_TABLES)
+        if installed_39 == _canonical_schema_39_objects() and related == installed_39:
+            conn.execute("ALTER TABLE work_items RENAME TO work_items_schema39")
+            conn.execute(
+                "ALTER TABLE work_item_selected_evidence RENAME TO work_item_selected_evidence_schema39"
+            )
+            _drop_legacy_schema_objects(conn, _canonical_schema_39_objects())
+            _execute_schema(conn, WORK_ITEM_SCHEMA)
+            _drop_current_work_item_triggers(conn)
+            _copy_work_items(conn, "work_items_schema39")
+            conn.execute(
+                """INSERT INTO work_item_selected_evidence(
+                       work_item_id,corpus,source_ref_json,passage_refs_json,
+                       source_snapshot_sha256,coverage_sha256,coverage_grade,
+                       origin_boundary_user_message_id
+                   )
+                   SELECT work_item_id,corpus,source_ref_json,passage_refs_json,
+                          source_snapshot_sha256,coverage_sha256,coverage_grade,
+                          origin_boundary_user_message_id
+                     FROM work_item_selected_evidence_schema39"""
+            )
+            conn.execute("DROP TABLE work_item_selected_evidence_schema39")
+            conn.execute("DROP TABLE work_items_schema39")
+            _execute_schema(conn, WORK_ITEM_SCHEMA)
+        else:
+            installed_38 = _schema_objects_for_tables(conn, ("work_items",))
+            if installed_38 != _canonical_schema_38_objects() or related != installed_38:
+                raise sqlite3.DatabaseError("Released Work Item DDL is incomplete or altered")
+            conn.execute("ALTER TABLE work_items RENAME TO work_items_schema38")
+            _drop_legacy_schema_objects(conn, _canonical_schema_38_objects())
+            _execute_schema(conn, WORK_ITEM_SCHEMA)
+            _drop_current_work_item_triggers(conn)
+            _copy_work_items(conn, "work_items_schema38")
+            conn.execute("DROP TABLE work_items_schema38")
+            _execute_schema(conn, WORK_ITEM_SCHEMA)
     validate_work_item_schema(conn)
 
 
@@ -1876,6 +2959,6 @@ __all__ = [
     "WORK_ITEM_SCHEMA",
     "WORK_ITEM_SCHEMA_VERSION",
     "register_work_item_connection_functions",
-    "upgrade_work_item_schema_to_40",
+    "upgrade_work_item_schema_to_42",
     "validate_work_item_schema",
 ]

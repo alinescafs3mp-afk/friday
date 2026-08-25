@@ -43,9 +43,11 @@ from friday.interaction_control_plane.work_item_contract import (
 )
 from friday.interaction_control_plane.work_item_schema import (
     _WORK_ITEM_SCHEMA_39,
+    _WORK_ITEM_SCHEMA_40,
+    _WORK_ITEM_TABLES,
     WORK_ITEM_SCHEMA,
     _execute_schema,
-    upgrade_work_item_schema_to_40,
+    upgrade_work_item_schema_to_42,
     validate_work_item_schema,
 )
 from friday.interaction_control_plane.work_item_store import (
@@ -1491,9 +1493,9 @@ def test_expired_candidate_rejects_selection_and_exact_schema39_upgrades(storage
         )
         _execute_schema(conn, _WORK_ITEM_SCHEMA_39)
         with pytest.raises(RuntimeError, match="existing transaction"):
-            upgrade_work_item_schema_to_40(conn, required=True)
+            upgrade_work_item_schema_to_42(conn, required=True)
         conn.execute("BEGIN")
-        upgrade_work_item_schema_to_40(conn, required=True)
+        upgrade_work_item_schema_to_42(conn, required=True)
         conn.commit()
         validate_work_item_schema(conn)
         assert (
@@ -1567,13 +1569,66 @@ def test_exact_schema39_upgrade_preserves_selected_evidence_sidecar() -> None:
             evidence.to_storage_payload(),
         )
         expected = tuple(conn.execute("SELECT * FROM work_item_selected_evidence").fetchone())
-        upgrade_work_item_schema_to_40(conn, required=True)
+        upgrade_work_item_schema_to_42(conn, required=True)
         conn.commit()
 
         assert tuple(conn.execute("SELECT * FROM work_item_selected_evidence").fetchone()) == expected
         validate_work_item_schema(conn)
     finally:
         conn.close()
+
+
+def test_rowful_exact_schema40_candidate_journey_migrates_without_rewrite(
+    settings: Any,
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "rowful-schema40.sqlite3"
+    initial = FridayStorage(replace(settings, database_path=database))
+    expected_item = _create_work(initial, "schema40-candidate-owner")
+    table_order = (
+        "work_items",
+        "work_item_selected_evidence",
+        "work_item_archive_candidate_sets",
+        "work_item_archive_candidate_set_items",
+        "work_item_archive_candidate_questions",
+    )
+    expected_rows = {
+        table: tuple(tuple(row) for row in initial.execute(f'SELECT * FROM "{table}" ORDER BY rowid'))
+        for table in table_order
+    }
+    initial.close()
+
+    with sqlite3.connect(database) as conn:
+        conn.execute("PRAGMA foreign_keys=OFF")
+        for table in _WORK_ITEM_TABLES:
+            conn.execute(f'DROP TABLE "{table}"')
+        _execute_schema(conn, _WORK_ITEM_SCHEMA_40)
+        for table in table_order:
+            rows = expected_rows[table]
+            if not rows:
+                continue
+            placeholders = ",".join("?" for _value in rows[0])
+            conn.executemany(f'INSERT INTO "{table}" VALUES({placeholders})', rows)
+        conn.execute("UPDATE schema_meta SET value='41' WHERE key='schema_version'")
+
+    migrated = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
+    try:
+        for table in table_order:
+            assert (
+                tuple(tuple(row) for row in migrated.execute(f'SELECT * FROM "{table}" ORDER BY rowid'))
+                == expected_rows[table]
+            )
+        with migrated.transaction() as conn:
+            restored = get_archive_candidate_selection_work_item_in_transaction(
+                conn,
+                work_item_id=expected_item.id,
+                user_id=expected_item.user_id,
+                conversation_id=expected_item.conversation_id,
+            )
+            validate_work_item_schema(conn)
+        assert restored == expected_item
+    finally:
+        migrated.close()
 
 
 def test_schema_validator_rejects_digest_preserving_ddl_but_tampered_candidate_rows(

@@ -96,8 +96,8 @@ def _file(
 
 
 def test_schema_41_is_exact_body_free_and_fingerprinted(storage: FridayStorage) -> None:
-    assert SCHEMA_VERSION == 41
-    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "41"
+    assert SCHEMA_VERSION == 42
+    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "42"
     observed = {
         (str(row[0]), str(row[1])): "".join(str(row[2]).split())
         for row in storage.execute(
@@ -158,7 +158,7 @@ def test_exact_schema_40_file_migrates_to_backfill_pending_then_current(
     migrated = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "41"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "42"
         )
         pending = migrated.get_document_catalog_entry("fixture-owner", "raw-catalog-schema40-migration")
         assert pending is not None and pending["incomplete_reason"] == "backfill_pending"

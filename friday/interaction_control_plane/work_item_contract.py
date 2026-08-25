@@ -30,6 +30,16 @@ ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_SCHEMA = "friday.archive-candidate-sele
 ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_JSON = (
     '{"schema":"' + ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_SCHEMA + '"}'
 )
+COMPARE_CONVERSATION_DOCUMENT_ACTIVE_FRAME_SCHEMA = (
+    "friday.compare-conversation-with-document-active-frame.v1"
+)
+COMPARE_CONVERSATION_DOCUMENT_ACTIVE_FRAME_JSON = (
+    '{"schema":"' + COMPARE_CONVERSATION_DOCUMENT_ACTIVE_FRAME_SCHEMA + '"}'
+)
+COMPARE_DOCUMENT_REFERENCE_PROMPT = (
+    "Прикрепите документ или укажите его точное имя, чтобы я сравнил его с выбранной перепиской."
+)
+COMPARE_CONVERSATION_DOCUMENT_ANSWER_MAX_BYTES = 100_000
 ARCHIVE_CANDIDATE_MAX_COUNT = 20
 WORK_ITEM_ACTIVE_FRAME_MAX_BYTES = 4_096
 WORK_ITEM_TTL_HOURS = 12
@@ -51,6 +61,7 @@ class WorkKind(StrEnum):
     RECALL_CONVERSATION = "recall_conversation"
     RECALL_SELECTED_ARCHIVE_EVIDENCE = "recall_selected_archive_evidence"
     SELECT_ARCHIVE_CANDIDATE_AND_REPLAY_EVIDENCE = "select_archive_candidate_and_replay_evidence"
+    COMPARE_CONVERSATION_WITH_DOCUMENT = "compare_conversation_with_document"
 
 
 class WorkGoal(StrEnum):
@@ -59,12 +70,14 @@ class WorkGoal(StrEnum):
     EXACT_ARCHIVE_CANDIDATE_SELECTION_AND_EVIDENCE_REPLAY = (
         "exact_archive_candidate_selection_and_evidence_replay"
     )
+    COMPARE_EXACT_MESSAGE_EVIDENCE_WITH_DOCUMENT = "compare_exact_message_evidence_with_document"
 
 
 class WorkPlaybook(StrEnum):
     RECALL_CONVERSATION = "recall_conversation"
     RECALL_SELECTED_ARCHIVE_EVIDENCE = "recall_selected_archive_evidence"
     SELECT_ARCHIVE_CANDIDATE_AND_REPLAY_EVIDENCE = "select_archive_candidate_and_replay_evidence"
+    COMPARE_CONVERSATION_WITH_DOCUMENT = "compare_conversation_with_document"
 
 
 class WorkCompletionContract(StrEnum):
@@ -73,6 +86,7 @@ class WorkCompletionContract(StrEnum):
     ACCEPTED_EXACT_ARCHIVE_CANDIDATE_AND_EVIDENCE_REPLAY = (
         "accepted_exact_archive_candidate_and_evidence_replay"
     )
+    ACCEPTED_EXACT_MESSAGE_AND_DOCUMENT_COMPARISON = "accepted_exact_message_and_document_comparison"
 
 
 class WorkSourceScope(StrEnum):
@@ -107,6 +121,8 @@ class WorkTransition(StrEnum):
     CANDIDATE_REPLAYED = "candidate_replayed"
     CONSTRAINT_UPDATED = "constraint_updated"
     EVIDENCE_REPLAYED = "evidence_replayed"
+    DOCUMENT_RESOLVED = "document_resolved"
+    COMPARISON_PUBLISHED = "comparison_published"
     SUSPENDED = "suspended"
     CANCELLED = "cancelled"
     EXPIRED = "expired"
@@ -535,6 +551,10 @@ __all__ = [
     "ARCHIVE_CANDIDATE_MAX_COUNT",
     "ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_JSON",
     "ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_SCHEMA",
+    "COMPARE_CONVERSATION_DOCUMENT_ACTIVE_FRAME_JSON",
+    "COMPARE_CONVERSATION_DOCUMENT_ACTIVE_FRAME_SCHEMA",
+    "COMPARE_CONVERSATION_DOCUMENT_ANSWER_MAX_BYTES",
+    "COMPARE_DOCUMENT_REFERENCE_PROMPT",
     "RECALL_CONVERSATION_ACTIVE_FRAME_SCHEMA",
     "RECALL_CONVERSATION_WORK_ITEM_SCHEMA",
     "RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_JSON",
