@@ -4,19 +4,18 @@
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
 - Phase: **provisional public shadow live; physical/profile acceptance pending**
-- Live production: Friday `0.207.19` /
-  `9b5b6e45c421b73ba4813664f19948317785b1f9`, tree
-  `51caf63d71edb29187276130e3a734fe60f1509971ee8a8b971735c1c3ab9db3`, wheel
-  `85829483727cf551b203fe0a4287938bd2fa83df4dea045ee0ec14c38cc41836`,
-  schema 41; immediate predecessor Friday `0.207.18` / `94ceca1`, tree
-  `68a724a8b63d1c986431ea784e3e2e39b8b69100d6ed12e8ec584ad4d973c2fb`;
-  schema-capable fallback Friday `0.207.17` / `6c6ba88`, tree
-  `7ef44b47395f15b3f159cf8394b9f42ef4b07bb73198f82928731371419b442f`
+- Live production: Friday `0.207.21` /
+  `27b9fc5545e88a38e111170f79d0f548edfbc646`, tree
+  `74ca567845d1f5de0656f8be8df2e4302d7d04ccb5de356335dec59514ee5a70`, wheel
+  `afd630185ad4dd5a6f76c690c71aba84cda7891b82488e102d0f4f069d03f421`,
+  schema 41; immediate predecessor and schema-capable fallback Friday
+  `0.207.20` / `05b7a817`, tree
+  `3fb11b5f5d7defd4059fd4389786932d37cd06c0be4c7ebb6f178d9ce3a193ad`
 - Rollout policy: the primary model remains required and final. The secondary
   is enabled only for non-private discarded `shadow/extract`; it has no tool,
   effect, publication or V12 authority. The accepted registry is empty and
   private shadow/`assist` admission remain closed.
-- Post-deploy health observed the optional endpoint as unavailable while the
+- `0.207.21` post-deploy health observed the optional endpoint as unavailable while the
   primary V12 profile remained `canary_ready`; this is a successful fail-soft
   observation, not physical finalist acceptance.
 

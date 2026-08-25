@@ -1,12 +1,11 @@
 # V12 further refinement status
 
-Status: **P1A + P1B + P1C IMPLEMENTED AND DEPLOYED**
-Date: 2026-08-24
+Status: **P1A + P1B + P1C + SELECTED-EVIDENCE EXPLANATION DEPLOYED**
+Date: 2026-08-25
 Branch: `main`
-Source: `main` / `1e3834dd5d987f84c6ca6a490c0cd9b3ac2756ed`
-Live: Friday `0.207.9` / `2b197e1e467e93a085a1b4cc330fbda8b5b7b982`,
-schema 39; V12 canary remains scoped to `FILE_READ` and `ARCHIVE_READ`;
-fallback `f1426ca561f8914574cebf3a69f8dde83f79b568`
+Source/live: `main` / `27b9fc5545e88a38e111170f79d0f548edfbc646`
+Live: Friday `0.207.21`, schema 41; V12 canary remains scoped to `FILE_READ`
+and `ARCHIVE_READ`; reader-first fallback `05b7a8177e8456a243cda5a7211ec9893b47ad47`
 
 The current authority remains:
 
@@ -66,12 +65,24 @@ same two V12 routes:
 P1C added no schema, route, model profile, web/effect capability or companion
 plugin dependency.
 
+### Selected-evidence explanation (`0.207.21`)
+
+- A durable selected archive source can be explained through one attested V12
+  lease, bounded exact passage projection, synthesis and independent verifier.
+- Exact SourceRef/PassageRef identity, authority, source revision and lease are
+  rechecked before atomic publication; every accepted fact carries nested
+  passage citations and a reloadable private outcome receipt.
+- Endpoint, synthesis, verifier, lease or source failure retains the exact
+  structural replay. It never retries through the ordinary model or widens
+  effect/tool authority.
+- The canonical cross-feature product battery is now release-blocking. The
+  exact release gate passed 18,454 non-UI and 31 UI tests.
+
 ## Boundary and next order
 
 - `TurnPlan v1`, the attested model profile and the two-route canary boundary
   remain frozen.
 - No new V12 route is implied by P1A/P1B/P1C.
-- After P1C, widen typed outcomes deliberately to the next read-only capability;
-  do not jump directly to effects or a generic WorkGraph.
-- Durable Work Items and Active Frames remain downstream of stable typed outcome
-  and accepted-receipt contracts.
+- Select the next incomplete golden journey from the canonical registry and
+  widen only the typed outcome/Work Item semantics required by that journey.
+- Generic Active Frames and WorkGraphs remain behind proven bounded journeys.

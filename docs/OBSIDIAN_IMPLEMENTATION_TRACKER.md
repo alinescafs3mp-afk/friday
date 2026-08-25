@@ -2,8 +2,8 @@
 
 - Updated: 2026-08-25
 - Branch: `main`
-- Source/deployed baseline: Friday `0.207.19` at `9b5b6e4`
-- Target: Friday `0.207.19`, schema 41
+- Source/deployed baseline: Friday `0.207.21` at `27b9fc5`
+- Target: Friday `0.207.21`, schema 41
 - Architecture: `outer_sol/OBSIDIAN_INTEGRATION_ARCHITECTURE_AND_IMPLEMENTATION_PLAN.md`
 - Acceptance: `outer_sol/OBSIDIAN_INTEGRATION_ACCEPTANCE_BATTERY.md`
 
@@ -143,6 +143,10 @@ offline reconnect delivery and a real concurrent-edit conflict.
   Activation is `clear`, backend/bridge are active, health is `ok`, and schema
   41 integrity and foreign-key checks are clean. Physical Android evidence is
   still deliberately unclaimed.
+- 2026-08-25: `0.207.21` made the exact Obsidian/archive/web/file/dialogue
+  product battery release-blocking. The canonical gate passed 18,454 non-UI
+  and 31 UI tests; two wheels reproduced byte-for-byte and immutable activation
+  completed `clear`. No companion-plugin or physical-device claim was added.
 
 ## Physical-device acceptance still required
 

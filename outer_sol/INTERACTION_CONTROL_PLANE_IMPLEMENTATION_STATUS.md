@@ -1,15 +1,14 @@
 # Interaction Control Plane implementation status
 
-Status: **SCHEMA-41 EFFECT VERTICAL DEPLOYED; V12 REFINEMENT ACTIVE**
+Status: **SCHEMA-41 EFFECT + SELECTED-EVIDENCE V12 VERTICALS DEPLOYED**
 Date: 2026-08-25
 Branch: `main`
-Source/live: Friday `0.207.19` / `9b5b6e45c421b73ba4813664f19948317785b1f9`,
-tree `51caf63d71edb29187276130e3a734fe60f1509971ee8a8b971735c1c3ab9db3`,
-wheel `85829483727cf551b203fe0a4287938bd2fa83df4dea045ee0ec14c38cc41836`,
-schema 41; immediate predecessor Friday `0.207.18` / `94ceca1`, tree
-`68a724a8b63d1c986431ea784e3e2e39b8b69100d6ed12e8ec584ad4d973c2fb`;
-schema-capable fallback Friday `0.207.17` / `6c6ba88`, tree
-`7ef44b47395f15b3f159cf8394b9f42ef4b07bb73198f82928731371419b442f`
+Source/live: Friday `0.207.21` / `27b9fc5545e88a38e111170f79d0f548edfbc646`,
+tree `74ca567845d1f5de0656f8be8df2e4302d7d04ccb5de356335dec59514ee5a70`,
+wheel `afd630185ad4dd5a6f76c690c71aba84cda7891b82488e102d0f4f069d03f421`,
+schema 41; immediate predecessor and schema-capable fallback Friday `0.207.20` /
+`05b7a8177e8456a243cda5a7211ec9893b47ad47`, tree
+`3fb11b5f5d7defd4059fd4389786932d37cd06c0be4c7ebb6f178d9ce3a193ad`
 
 ## Release checkpoint
 
@@ -25,8 +24,8 @@ schema-capable fallback Friday `0.207.17` / `6c6ba88`, tree
 - `0.207.8` adds the authorized read-only federated `archive_search` foundation:
   stable source/passage identity, explicit per-corpus coverage, process-private
   carriers and same-transaction reauthorization/publication.
-- The live anchor resolves to `9b5b6e4`, with schema-41 `94ceca1` as immediate
-  predecessor and `6c6ba88` as rollback fallback. Backend and bridge are active,
+- The live anchor resolves to `27b9fc5`, with reader-first schema-41 `05b7a81`
+  as both immediate predecessor and rollback fallback. Backend and bridge are active,
   trusted-CA health is `ok`, and
   schema 41, SQLite integrity, foreign keys, FTS and body-free catalog bindings
   are clean; semantic enrichment coverage remains honestly partial.
@@ -53,6 +52,11 @@ schema-capable fallback Friday `0.207.17` / `6c6ba88`, tree
   accepted results are immutable, and prepared/uncertain effects reconcile by
   exact observation without replaying or rewriting the vault. Sync, re-ingest
   and physical-device observations remain separate facts.
+- `0.207.20` deploys the explanation-receipt reader without a writer.
+  `0.207.21` activates a closed selected-evidence explanation: two attested V12
+  calls, exact nested passage citations, independent verification, final
+  authority/source/lease rechecks and one atomic receipt/Work-Item CAS. Any
+  optional-lane failure publishes the exact structural replay instead.
 
 ## P0A implemented
 
@@ -108,21 +112,21 @@ schema-capable fallback Friday `0.207.17` / `6c6ba88`, tree
 1. Use the canonical golden-journey/evidence registry in
    `outer_sol/PROJECT_IMPLEMENTATION_STATUS.md`; its machine validator owns the
    strict readiness and evidence rules.
-2. Refine V12 with selected-archive evidence explanation and make the
-   cross-feature search/file/Obsidian/dialogue battery release-blocking.
+2. Select the next incomplete bounded ICP/V12 golden journey and close its
+   deterministic, integration, artifact and recovery evidence.
 3. Register product-linked candidate evidence from natural production use; do
    not create a synthetic live test corpus.
 4. Keep generic autonomous WorkGraphs behind complete user journeys.
 
 ## Current cumulative gate
 
-- The exact live source passed 18,436 non-UI and 31 UI tests; the pinned real
+- The exact live source passed 18,454 non-UI and 31 UI tests; the pinned real
   Syncthing 2.1.3 smoke executed rather than remaining environment-skipped.
 - Schema-38 migration, lifecycle/privacy, revision-CAS, restart, temporal
   continuation, receipt/plan binding and named-inventory compatibility checks
   passed.
 - Ruff, mypy, compile and release diff checks passed with zero skips. The
-  `0.207.19` wheel reproduced byte-for-byte and immutable activation completed
+  `0.207.21` wheel reproduced byte-for-byte and immutable activation completed
   `clear`; Docker and companion-plugin work remained outside the primary
   release checkpoint. Gate scratch is now owned and removed by the canonical
   runner, preventing repeated full runs from exhausting `/tmp`.

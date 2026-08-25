@@ -6,23 +6,23 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-25
 - Branch: `main`
-- Secondary acceptance base: Friday `0.207.19` is live in provisional public
+- Secondary acceptance base: Friday `0.207.21` is live in provisional public
   shadow. The accepted-profile registry remains empty pending physical
   acceptance; private text and `assist` remain closed.
-- Deployed implementation head: `9b5b6e45c421b73ba4813664f19948317785b1f9`
-- Live: Friday `0.207.19` / `9b5b6e45c421b73ba4813664f19948317785b1f9`;
-  tree `51caf63d71edb29187276130e3a734fe60f1509971ee8a8b971735c1c3ab9db3`;
-  wheel `85829483727cf551b203fe0a4287938bd2fa83df4dea045ee0ec14c38cc41836`
-- Immediate predecessor: Friday `0.207.18` /
-  `94ceca1b92bb8546e5f53e5ed0e3fd966bedc0c9`, tree
-  `68a724a8b63d1c986431ea784e3e2e39b8b69100d6ed12e8ec584ad4d973c2fb`.
-  Schema-capable fallback remains Friday `0.207.17` / `6c6ba88`, tree
-  `7ef44b47395f15b3f159cf8394b9f42ef4b07bb73198f82928731371419b442f`.
+- Deployed implementation head: `27b9fc5545e88a38e111170f79d0f548edfbc646`
+- Live: Friday `0.207.21` / `27b9fc5545e88a38e111170f79d0f548edfbc646`;
+  tree `74ca567845d1f5de0656f8be8df2e4302d7d04ccb5de356335dec59514ee5a70`;
+  wheel `afd630185ad4dd5a6f76c690c71aba84cda7891b82488e102d0f4f069d03f421`
+- Immediate predecessor and schema-capable fallback: Friday `0.207.20` /
+  `05b7a8177e8456a243cda5a7211ec9893b47ad47`, tree
+  `3fb11b5f5d7defd4059fd4389786932d37cd06c0be4c7ebb6f178d9ce3a193ad`.
 - Database schema: 41
 - Production state: immutable activation `clear`; backend and Telegram bridge
   active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean;
   exact provisional profile is configured in public `shadow/extract`, while
-  primary remains final and no private material is eligible. The exact,
+  primary remains final and no private material is eligible. The primary V12
+  canary is installed for `archive_read` and `file_read` with a live exact
+  attestation. The exact,
   body-free schema-41 DocumentCatalog now has its bounded durable worker and
   archive consumer in production. Obsidian create/append now publish an atomic
   body-free effect outcome and reconcile uncertainty by observation without
@@ -40,9 +40,9 @@ behavior whenever the laptop is absent. The provisional public-shadow cutover
 is complete. Its causal request witness is deployed and the exact deterministic
 and controlled-live evidence was rebuilt from that release. Work requiring a
 physical laptop power cut waits for the owner. The schema-41 DocumentCatalog,
-archive candidate runtime and receipt-backed Obsidian effect vertical are live.
-V12 evidence explanation and the cross-feature release battery are now the
-active autonomous package.
+archive candidate runtime, receipt-backed Obsidian effect vertical and
+selected-evidence V12 explanation are live. The next autonomous package is the
+next incomplete ICP/V12 golden journey and its release evidence.
 
 The measured provisional finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -141,13 +141,37 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Refine V12 with selected-archive evidence explanation and make the
-   search/file/Obsidian/dialogue product battery release-blocking.
-2. When the owner is present, perform the real causal laptop cut/on and accept
+1. Select and complete the next bounded ICP/V12 golden journey from the
+   evidence registry, retaining exact Work Item and source identities.
+2. Extend immutable-release evidence into machine-reconcilable journey
+   manifests without promoting component-only gates.
+3. When the owner is present, perform the real causal laptop cut/on and accept
    only the exact bound finalist; then promote distinct private-shadow/assist
    candidates with product-linked fallback evidence.
 
 ## Completed and deployed (current package)
+
+### Attested selected-archive explanation (`0.207.21`)
+
+- A closed explain follow-up to one durable selected document or message uses
+  one exact V12 lease for synthesis plus an independent verifier. The model sees
+  only bounded exact passage projections and every accepted fact retains nested
+  passage citations.
+- Authority, source revision, evidence identity and lease are rechecked before
+  one atomic message/receipt/Work-Item CAS. Model, verifier, lease and source
+  failures fall back to exact structural replay without ordinary-model retry.
+- The release-blocking battery now pins Obsidian mutation, archive isolation and
+  continuation, QNAP/web isolation, repeated Office reads, dialogue and V12
+  ordinal journeys. The exact gate passed 18,454 non-UI and 31 UI tests; two
+  wheels reproduced byte-for-byte. Immutable activation completed `clear`,
+  health is `ok`, both services and V12 routes are active, and schema 41
+  integrity/FK checks are clean.
+
+### Reader-first explanation compatibility (`0.207.20`)
+
+- Outcome and Work Item readers learned the new explanation receipt before the
+  writer was enabled, making `0.207.20` the schema-capable rollback target for
+  `0.207.21` without a schema change.
 
 ### Receipt-backed Obsidian effect reconciliation (`0.207.19`)
 
@@ -445,14 +469,15 @@ claims at this checkpoint.
 
 ## Current cumulative gate
 
-- The exact `0.207.19` canonical gate passed 18,436 non-UI tests plus 31 UI
+- The exact `0.207.21` canonical gate passed 18,454 non-UI tests plus 31 UI
   tests, including the pinned Syncthing 2.1.3 smoke; static checks and focused
   schema-41 catalog/effect/worker/archive gates are green with zero skips. Two
   clean wheels reproduced byte-for-byte, and `/tmp` returned to 2% after the
   gate-owned scratch tree was removed.
-- Friday `0.207.19` public shadow is live at the exact source/tree/wheel identity
-  above, schema 41, with `0.207.18` as immediate predecessor and `0.207.17` as
-  schema-capable fallback. Immutable activation completed `clear`; backend and
+- Friday `0.207.21` public shadow and primary V12 canary are live at the exact
+  source/tree/wheel identity above, schema 41, with reader-first `0.207.20` as
+  both immediate predecessor and schema-capable fallback. Immutable activation
+  completed `clear`; backend and
   bridge are active with zero restarts/errors, health is `ok`, and SQLite
   integrity and FK checks are clean. Optional secondary availability was false
   at the post-deploy observation; primary V12 remained `canary_ready`, proving
@@ -460,8 +485,8 @@ claims at this checkpoint.
 
 ## Next order
 
-1. Begin V12 refinement with `ExplainSelectedArchiveEvidence`, and make the
-   cross-feature search/file/Obsidian/dialogue battery mandatory for releases.
+1. Select the next incomplete bounded ICP/V12 golden journey from the current
+   evidence registry and close it end-to-end.
 2. Extend existing immutable-release evidence into machine-reconcilable
    source/wheel/schema/activation/fallback manifests, then register exact-release
    journey evidence without promoting generic component gates.
