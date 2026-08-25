@@ -1348,6 +1348,7 @@ async def test_selected_message_archive_evidence_replays_after_restart_then_fail
             model_override=no_model,
         )
         replay_authorize_calls: list[tuple[str, str]] = []
+        assert replay_kernel.authorization is not None
         original_authorize = replay_kernel.authorization.authorize
 
         def observe_replay_authorize(fresh_actor: ActorContext, security_id: str) -> Any:
