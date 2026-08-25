@@ -14,6 +14,9 @@
   ordinal now receive a deterministic all-row analysis profile instead of a
   lossy model MAP. Ambiguous layouts still fall back, and a positional row
   identity is never promoted to a semantic key for document comparison.
+- LibreOffice conversion always creates its private sandbox root directly
+  beneath the path admitted by Friday's wrapper, so an ambient `TMPDIR` can no
+  longer make otherwise valid legacy Office and StarOffice files fail.
 - Bounded secondary Inbox advice now requests a code-owned strict JSON schema
   within its admitted output envelope. Downstream validation and exact primary
   fallback are unchanged; secondary authority remains limited to Inbox

@@ -58,6 +58,8 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - large XLSX: a 291-row complete sheet with a section column before its dense
   ordinal yields a complete deterministic all-row profile without model MAP;
   ambiguous ordinals fall back and positional rows are not comparison identities;
+- real legacy Office/StarOffice conversion succeeds with an isolated ambient
+  `TMPDIR`; the converter root remains on the exact sandbox-wrapper path;
 - PDF/JPEG/OCR: mandatory ordered `pages[]`, singleton fallback и unreadable boundary
   без ложного `empty_text` success;
 - Telegram: per-sibling album receipts, partial replay, crash/timeout uncertainty fence,
