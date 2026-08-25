@@ -3,20 +3,17 @@
 - Updated: 2026-08-25
 - Architecture order:
   `outer_sol/OPTIONAL_SECONDARY_BRAIN_SGLANG_GPT_OSS_20B_ARCHITECT_BRIEF.md`
-- Phase: **default-off product-evidence release; physical/profile acceptance pending**
-- Last accepted production predecessor: Friday `0.207.10` /
-  `aaae455a3eec6024c1e4e338d8f00b31ee90f995`, tree
-  `4f5c5e9a130e33f47fbf8f9282362f77b18b8f625d00f313b0cda4124d7ab76e`, wheel
-  `a563ad94c678ca5332f0cfe142ef65a18c6cc4a12f7e07b9d64c2734d06181f6`,
-  schema 39; schema-capable fallback
-  `f1426ca561f8914574cebf3a69f8dde83f79b568` / tree
-  `eb8102ccf759b0f2a2d9a0a38584d9cda0c4938f14d389ac55246d87e536e6f7`
-- Current candidate source: Friday `0.207.11` in this revision; its immutable
-  source/tree/wheel identities are written by the release operator at cutover
-- Rollout policy: default-off; the primary model remains required and final;
-  the secondary has no tool, effect, publication or V12 authority. The
-  accepted registry is empty, `assist` admission is closed and production sends
-  no traffic to the laptop
+- Phase: **provisional public shadow live; physical/profile acceptance pending**
+- Live production: Friday `0.207.12` /
+  `a6e3c093939116d0e953db72c60de5dd54438812`, tree
+  `ce35dcf1bb68347f99e7e8037291043cee3d1b2651795766b0f8ba5f80e751c8`, wheel
+  `fcf502d5058c27b1b9c671f94ec5604281cac9123dc3705e17089cd54e72f6ad`,
+  schema 39; default-off transition fallback `7913c633954d3da2df042b598cd08b4fb4e94a91`
+  / tree `ae7dfe4d659b8dbc43246d7f38d823ae86d8c562e36c3be1713965060f66ff40`
+- Rollout policy: the primary model remains required and final. The secondary
+  is enabled only for non-private discarded `shadow/extract`; it has no tool,
+  effect, publication or V12 authority. The accepted registry is empty and
+  private shadow/`assist` admission remain closed.
 
 ## Durable access and measured host
 
@@ -28,8 +25,8 @@
 - RTX 5080 Laptop GPU: driver `610.88`, 16,303 MiB VRAM and compute capability
   `12.0`; the pinned CUDA container reproduced those facts.
 - The current released source and laptop finalist use the exact profile and
-  runtime identities below. Fresh warm, 30-minute soak and cold-restart
-  capacity-v2 evidence are closed; profile acceptance is not.
+  runtime identities below. Fresh warm, 30-minute soak, cold-restart capacity-v2
+  and controlled-live evidence are closed; physical/profile acceptance is not.
 - The observed hardware receipt is
   `7b850221e7e11ac0063971d7baaf627c96eae5441368f1907cc070106832b0f3`;
   its protected accepted form is
@@ -91,6 +88,24 @@
   registered only for non-private discarded `shadow/extract`, and is not an
   accepted production profile.
 
+## Current production evidence
+
+- Exact source `7913c633954d3da2df042b598cd08b4fb4e94a91` passed a fresh endpoint
+  probe; receipt SHA-256 is
+  `73a8e0036b81aecfaa2ac2a6f4a323ec60956d9947aa7a198c3e059adfd41269`.
+- Its 101-case deterministic failure receipt hashes to
+  `669da889b7fadb681df17aca7f9de68507bfc43bf029147bd47ff5d7929f8ff2`.
+  The old `aaae455` receipt is retained only as history and is ineligible for
+  acceptance against the current source epoch.
+- Controlled gateway loss, exact recovery, runtime restart and changed runtime
+  epoch passed; the receipt SHA-256 is
+  `26cf1c88f683aa1b0b85184a68cb7e321ea59460845ffdfe5bbaeb498dfff0bc`.
+- Distinct-candidate activation `a6e3c09` published the exact public-shadow ENV
+  atomically. Production health is `ok`; diagnostics bind
+  `profile_admission=provisional_shadow`, matching profile/manifest/model and a
+  healthy endpoint. No private text is eligible and all shadow output is
+  discarded.
+
 ## Friday checkpoint
 
 - The dormant accepted-profile path contains typed private Inbox extraction and
@@ -104,8 +119,8 @@
   choice. Quality now includes deterministic near-limit recall derived from the
   profile context; endpoint/capacity evidence is bound to exact HTTPS, private
   CA, profile epoch, context and memory without retaining raw prompts.
-- The canonical gate passed 18,021 tests. Static and focused secondary gates are
-  green.
+- The exact public-shadow source passed 18,067 non-UI and 31 UI tests. Static
+  and focused secondary gates are green.
 
 ## Paused parent checkpoint
 
@@ -115,11 +130,11 @@
 
 ## Active order
 
-1. Release this exact `0.207.11` product-evidence implementation default-off,
-   then complete deterministic, controlled-live and pre-acceptance physical
-   laptop-loss evidence from that immutable source; accept only the fully
-   evidence-bound finalist.
-2. Register the resulting accepted manifest in a separate default-off release.
+1. Strengthen the physical witness so a mid-turn loss is causally bound to a
+   code-owned submitted request, then perform the owner-observed laptop cut/on
+   without restarting Friday.
+2. Run `accept-failure` and `accept-profile`, then register the resulting exact
+   accepted manifest in a separate immutable release.
 3. Prove the separate private product-shadow stage before narrow assist,
    then repeat the physical cycle with product-linked counters in assist,
    including laptop-off and mid-turn disconnect behavior.
@@ -127,8 +142,9 @@
 
 ## Not yet claimed
 
-- No secondary profile is accepted and no production Friday request is sent to
-  the laptop. The deployed feature remains default-off and assist is blocked.
+- No secondary profile is accepted. Production performs bounded exact-profile
+  admission probes and may send only non-private discarded `shadow/extract`;
+  private text and assist are blocked.
 - The exact 4K/BF16 finalist is provisional. Capacity v2 is accepted, but
-  failure/product/physical evidence, profile acceptance, registry promotion and
-  end-to-end private-shadow/assist operation remain pending.
+  physical evidence, profile acceptance, registry promotion and end-to-end
+  private-shadow/assist operation remain pending.

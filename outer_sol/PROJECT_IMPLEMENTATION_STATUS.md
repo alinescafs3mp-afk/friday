@@ -6,24 +6,22 @@ the current production identity, completed packages, active work and next order.
 
 - Updated: 2026-08-25
 - Branch: `main`
-- Secondary acceptance base: released Friday `0.207.12`; sealed product
-  evidence and rollout-consume boundary are present, while the accepted-profile
-  registry remains empty pending physical acceptance
-- Deployed implementation head: `7913c633954d3da2df042b598cd08b4fb4e94a91`
-- Live: Friday `0.207.12` / `7913c633954d3da2df042b598cd08b4fb4e94a91`;
+- Secondary acceptance base: Friday `0.207.12` is live in provisional public
+  shadow. The accepted-profile registry remains empty pending physical
+  acceptance; private text and `assist` remain closed.
+- Deployed implementation head: `a6e3c093939116d0e953db72c60de5dd54438812`
+- Live: Friday `0.207.12` / `a6e3c093939116d0e953db72c60de5dd54438812`;
+  tree `ce35dcf1bb68347f99e7e8037291043cee3d1b2651795766b0f8ba5f80e751c8`;
+  wheel `fcf502d5058c27b1b9c671f94ec5604281cac9123dc3705e17089cd54e72f6ad`
+- Immediate predecessor and transition fallback: Friday `0.207.12` /
+  `7913c633954d3da2df042b598cd08b4fb4e94a91`;
   tree `ae7dfe4d659b8dbc43246d7f38d823ae86d8c562e36c3be1713965060f66ff40`;
   wheel `aa99b7d8af34e783bdbed61e0bf51549b39f97f587092952f18254e318bb04b6`
-- Immediate predecessor: Friday `0.207.11` /
-  `0c985cf41ee01e6beb2187134f42ff8dd8088deb`;
-  tree `3fd9b4730bcd55d61f426d9eb0d77bb24d0c62ba41e745923d62e44c4671aff4`;
-  wheel `a2d785d980b8b6b0208af7007c7fa39bd2230a1551221e63b35d6b710b1b9736`
-- Schema-capable fallback: Friday `0.207.10` /
-  `aaae455a3eec6024c1e4e338d8f00b31ee90f995`;
-  tree `4f5c5e9a130e33f47fbf8f9282362f77b18b8f625d00f313b0cda4124d7ab76e`;
-  wheel `a563ad94c678ca5332f0cfe142ef65a18c6cc4a12f7e07b9d64c2734d06181f6`
 - Database schema: 39
 - Production state: immutable activation `clear`; backend and Telegram bridge
-  active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean
+  active; trusted-CA HTTPS health `200`; SQLite integrity and FK checks clean;
+  exact provisional profile is configured in public `shadow/extract`, while
+  primary remains final and no private material is eligible
 - Delivery constraints: no Docker for primary Friday release certification;
   companion plugin untouched; small commits and immutable wheel-only production
   releases. The optional laptop inference node is a separate Docker contour.
@@ -31,10 +29,10 @@ the current production identity, completed packages, active work and next order.
 ## Active objective
 
 Finish the optional detachable GPT-OSS-20B/SGLang node through physical
-acceptance, public shadow, private shadow and bounded assist, preserving exact
-primary-only behavior whenever the laptop is absent. After the final incoming
-ICP checkpoint is independently accepted, resume the broader Interaction
-Control Plane and V12 work.
+acceptance, private shadow and bounded assist, preserving exact primary-only
+behavior whenever the laptop is absent. The provisional public-shadow cutover
+is complete. Work that requires a physical laptop power cut is paused until the
+owner is present; independent ICP review and implementation continue meanwhile.
 
 The measured provisional finalist is exact profile
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
@@ -56,8 +54,9 @@ SHA-256 `9c60611b939098020faa4f9077debde3bec96c9ded2bffc3c3385fc94d5ffa87`.
 The verified v2 capacity wrapper hashes to
 `519b5912428f491dc65928c5ba2d2e33a6408566fe5f3496501ce2e760b9205e`;
 the superseded operational v1 assertion produced no false success. The
-accepted-profile registry remains empty, deployment is default-off, production
-sends no traffic to the laptop and `assist` is blocked.
+accepted-profile registry remains empty. Production now performs exact-profile
+startup/admission probes and permits only non-private discarded
+`shadow/extract`; `assist` is blocked.
 
 Detailed active tracker:
 `outer_sol/OPTIONAL_SECONDARY_BRAIN_IMPLEMENTATION_STATUS.md`.
@@ -128,13 +127,12 @@ course, with these repository-specific constraints:
 
 ## In progress
 
-1. Complete deterministic, controlled-live and physical laptop-loss evidence
-   from the exact immutable release; accept and register only the bound
-   finalist in a separate default-off release.
-2. Promote distinct candidates through public shadow, private shadow and
-   bounded assist, proving exact primary fallback and repeating the physical
-   cycle with product-linked counters.
-3. Independently accept the incoming durable-recall checkpoint, then resume
+1. Strengthen the causal mid-turn physical witness, then perform the real
+   owner-observed laptop cut/on and accept only the exact bound finalist.
+2. Register the accepted profile in a separate immutable release; promote
+   distinct candidates through private shadow and bounded assist, then repeat
+   the physical cycle with product-linked counters.
+3. Independently accept the incoming durable-recall checkpoint and resume
    `INTERACTION_CONTROL_PLANE_AND_OPERATIONAL_MEMORY.md` through the deployed
    source/passage, coverage and late-reauthorization contracts.
 
@@ -150,6 +148,18 @@ course, with these repository-specific constraints:
 - The exact immutable source passed 18,067 non-UI and 31 UI tests, reproduced
   its wheel byte-for-byte and is live with schema 39, clean SQLite integrity/FK
   checks and both services active.
+
+### GPT-OSS provisional public shadow (`0.207.12`)
+
+- The exact finalist passed a fresh trusted-TLS endpoint probe, the 101-case
+  deterministic failure battery and controlled gateway/runtime restart from
+  deployed source `7913c633`; raw content and credentials were not retained.
+- A distinct immutable activation published public-only `shadow/extract` at
+  `a6e3c09`; health and diagnostics bind the exact profile with
+  `profile_admission=provisional_shadow`. Output is discarded and primary owns
+  every answer, tool and effect.
+- Physical power-loss evidence, accepted registration, private shadow and
+  assist remain unclaimed.
 
 ### Retrieval identity and coverage foundation (`0.207.5`)
 
@@ -333,19 +343,18 @@ claims at this checkpoint.
 
 - The exact `0.207.12` canonical gate passed 18,067 non-UI tests plus 31 UI
   tests; static checks and focused adversarial web matrices are green.
-- Friday `0.207.12` is live at the exact source/tree/wheel identity above,
-  schema 39, with `0.207.11` as immediate predecessor and `0.207.10` as the
-  explicit schema-capable fallback.
+- Friday `0.207.12` public shadow is live at the exact source/tree/wheel identity
+  above, schema 39, with the default-off `7913c633` release as transition
+  fallback.
 
 ## Next order
 
-1. Complete deterministic, controlled-live and physical laptop-loss evidence;
-   accept and register only the exact finalist in a separate default-off
-   release.
-2. Promote distinct immutable candidates through public shadow, private shadow
-   and bounded assist; repeat laptop-off/disconnect-mid-turn with product-linked
-   counters and prove primary fallback exactly once.
-3. Independently accept the final incoming ICP checkpoint, then resume broader
+1. Complete the causal physical-loss witness and the owner-observed cut/on;
+   accept and register only the exact finalist in a separate immutable release.
+2. Promote distinct immutable candidates through private shadow and bounded
+   assist; repeat laptop-off/disconnect-mid-turn with product-linked counters
+   and prove primary fallback exactly once.
+3. Independently accept the final incoming ICP checkpoint and resume broader
    ICP work from the deployed schema-39 archive-evidence vertical.
 4. Build durable DocumentCatalog/enrichment and add durable candidate
    selection/pending-question state only when it preserves exact archive
