@@ -129,6 +129,17 @@ failed/error/skipped-тест в любой фазе делает гейт кр�
 - в 0.207.27 Inbox advice использует exact code-owned strict JSON
   Schema и downstream validation; malformed/truncated response уходит в
   тот же primary fallback, а document review и web search не допущены;
+- document-map expansion не меняет accepted gateway manifest/profile или
+  Windows runtime: code-owned product policy
+  `c881eefe53d5b02baee3feb133605838021fabe642578b163bdd46e6bd8a2fc2`
+  связывает exact profile и допускает только text/read-only MAP/REDUCE с strict
+  JSON summary, concurrency `1`, output `512`, primary-once fallback и primary
+  final synthesis;
+- document-map проходит отдельно: `secondary_assist_enable_document_map_shadow`
+  атомарно добавляет workload и `DOCUMENT_MAP_MODE=shadow`, затем только после
+  отдельного shadow checkpoint
+  `secondary_document_map_shadow_to_assist` меняет одну policy-строку на
+  `assist`; прямой extract-assist→document-map-assist запрещён;
 - на Windows-узле установлен и в release включён at-logon gateway
   publication recovery: exact healthy gateway перезапускается не более
   одного раза только после двух совпавших доказательств отсутствия

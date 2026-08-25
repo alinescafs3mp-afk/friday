@@ -348,15 +348,29 @@ def secondary_configuration_is_admissible(
     workload_names: Iterable[str],
     mode: str,
     allow_private_text: bool = False,
+    document_map_mode: str = "disabled",
 ) -> bool:
     """One pure completeness/independence predicate for every projection."""
 
     allowed = {workload.value for workload in ADVISORY_WORKLOADS}
     workloads = {str(value).strip().casefold() for value in workload_names}
-    from .profiles import get_secondary_runtime_admission
+    from .profiles import get_secondary_runtime_admission, secondary_effective_workloads
 
     admission = get_secondary_runtime_admission(endpoint.profile_id, mode=mode)
     profile = admission.profile if admission is not None else None
+    effective_profile_workloads = (
+        secondary_effective_workloads(profile, global_mode=mode) if profile is not None else frozenset()
+    )
+    document_map_requested = "document_map" in workloads
+    document_map_policy_matches = bool(
+        (not document_map_requested and document_map_mode == "disabled")
+        or (
+            document_map_requested
+            and mode == "assist"
+            and document_map_mode in {"shadow", "assist"}
+            and allow_private_text
+        )
+    )
     provisional_policy_matches = bool(
         admission is None
         or not admission.is_provisional_shadow
@@ -373,7 +387,8 @@ def secondary_configuration_is_admissible(
         and profile.max_output_tokens == endpoint.max_output_tokens
         and mode in profile.allowed_modes
         and workloads
-        and workloads <= profile.allowed_workloads
+        and workloads <= effective_profile_workloads
+        and document_map_policy_matches
         and provisional_policy_matches
     )
     return bool(

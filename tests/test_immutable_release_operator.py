@@ -1931,6 +1931,74 @@ def _secondary_assist_enabled_port(
     )
 
 
+def _secondary_document_map_environment(assist: bytes, *, mode: str) -> bytes:
+    assert mode in {"shadow", "assist"}
+    values, unrelated = operator._secondary_environment_view(assist)  # noqa: SLF001
+    assert values["FRIDAY_SECONDARY_LLM_MODE"] == "assist"
+    assert values["FRIDAY_SECONDARY_LLM_WORKLOADS"] == "extract"
+    assert "FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE" not in values
+    values["FRIDAY_SECONDARY_LLM_WORKLOADS"] = "document_map,extract"
+    values["FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE"] = mode
+    return operator._canonical_secondary_environment(unrelated, values)  # noqa: SLF001
+
+
+def _secondary_document_map_shadow_enabled_port(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    unrelated: bytes | None = None,
+) -> tuple[operator.SystemdActivationPort, bytes]:
+    assist_port, assist = _secondary_assist_enabled_port(
+        tmp_path,
+        monkeypatch,
+        unrelated=unrelated,
+    )
+    shadow = _secondary_document_map_environment(assist, mode="shadow")
+    assist_port.config.env_file.write_bytes(shadow)
+    assist_port.config.env_file.chmod(0o600)
+    return (
+        operator.SystemdActivationPort(
+            replace(
+                assist_port.config,
+                env_file_sha256=hashlib.sha256(shadow).hexdigest(),
+            )
+        ),
+        shadow,
+    )
+
+
+def _secondary_document_map_stage(
+    base: operator.SystemdActivationPort,
+    *,
+    mode: str,
+    target: bytes | None = None,
+) -> tuple[Path, bytes, str]:
+    target = target or _secondary_document_map_environment(base.config.env_file.read_bytes(), mode=mode)
+    staged = base.config.state_dir / f"secondary-document-map-{mode}.env"
+    staged.write_bytes(target)
+    staged.chmod(0o600)
+    return staged, target, hashlib.sha256(target).hexdigest()
+
+
+def _secondary_document_map_shadow_to_assist_stage(
+    base: operator.SystemdActivationPort,
+    *,
+    target: bytes | None = None,
+) -> tuple[Path, bytes, str]:
+    shadow = base.config.env_file.read_bytes()
+    source = b"FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE=shadow\n"
+    assert shadow.count(source) == 1
+    target = target or shadow.replace(
+        source,
+        b"FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE=assist\n",
+        1,
+    )
+    staged = base.config.state_dir / "secondary-document-map-assist.env"
+    staged.write_bytes(target)
+    staged.chmod(0o600)
+    return staged, target, hashlib.sha256(target).hexdigest()
+
+
 def _secondary_assist_to_disabled_stage(
     base: operator.SystemdActivationPort,
     *,
@@ -2060,6 +2128,12 @@ def _secondary_staged_transition_case(
     elif transition == "secondary_shadow_to_assist":
         base, _enabled = _secondary_private_shadow_enabled_port(tmp_path, monkeypatch)
         staged, _target, target_sha256 = _secondary_shadow_to_assist_stage(base)
+    elif transition == "secondary_assist_enable_document_map_shadow":
+        base, _enabled = _secondary_assist_enabled_port(tmp_path, monkeypatch)
+        staged, _target, target_sha256 = _secondary_document_map_stage(base, mode="shadow")
+    elif transition == "secondary_document_map_shadow_to_assist":
+        base, _enabled = _secondary_document_map_shadow_enabled_port(tmp_path, monkeypatch)
+        staged, _target, target_sha256 = _secondary_document_map_shadow_to_assist_stage(base)
     else:
         assert transition == "secondary_assist_to_disabled"
         base, _enabled = _secondary_assist_enabled_port(tmp_path, monkeypatch)
@@ -2285,6 +2359,8 @@ def test_systemd_port_rejects_secondary_staged_transition_that_changes_two_polic
         "secondary_shadow_to_private_shadow",
         "secondary_shadow_to_assist",
         "secondary_assist_to_disabled",
+        "secondary_assist_enable_document_map_shadow",
+        "secondary_document_map_shadow_to_assist",
     ],
 )
 def test_systemd_port_applies_exact_secondary_assist_transitions_without_journaling_secrets(
@@ -2308,6 +2384,20 @@ def test_systemd_port_applies_exact_secondary_assist_transitions_without_journal
             unrelated=unrelated,
         )
         staged, target, target_sha256 = _secondary_shadow_to_assist_stage(base)
+    elif transition == "secondary_assist_enable_document_map_shadow":
+        base, predecessor = _secondary_assist_enabled_port(
+            tmp_path,
+            monkeypatch,
+            unrelated=unrelated,
+        )
+        staged, target, target_sha256 = _secondary_document_map_stage(base, mode="shadow")
+    elif transition == "secondary_document_map_shadow_to_assist":
+        base, predecessor = _secondary_document_map_shadow_enabled_port(
+            tmp_path,
+            monkeypatch,
+            unrelated=unrelated,
+        )
+        staged, target, target_sha256 = _secondary_document_map_shadow_to_assist_stage(base)
     else:
         base, predecessor = _secondary_assist_enabled_port(
             tmp_path,
@@ -2376,6 +2466,17 @@ def test_systemd_port_applies_exact_secondary_assist_transitions_without_journal
             **predecessor_values,
             "FRIDAY_SECONDARY_LLM_MODE": "assist",
         }
+    elif transition == "secondary_assist_enable_document_map_shadow":
+        assert target_values == {
+            **predecessor_values,
+            "FRIDAY_SECONDARY_LLM_WORKLOADS": "document_map,extract",
+            "FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE": "shadow",
+        }
+    elif transition == "secondary_document_map_shadow_to_assist":
+        assert target_values == {
+            **predecessor_values,
+            "FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE": "assist",
+        }
     else:
         assert target_values == {
             **predecessor_values,
@@ -2390,6 +2491,8 @@ def test_systemd_port_applies_exact_secondary_assist_transitions_without_journal
         "secondary_shadow_to_private_shadow",
         "secondary_shadow_to_assist",
         "secondary_assist_to_disabled",
+        "secondary_assist_enable_document_map_shadow",
+        "secondary_document_map_shadow_to_assist",
     ],
 )
 @pytest.mark.parametrize("mutation", ["api_key", "ca_path", "unrelated", "reordered"])
@@ -2407,6 +2510,26 @@ def test_systemd_port_rejects_secondary_assist_transition_drift(
         base, _predecessor = _secondary_private_shadow_enabled_port(tmp_path, monkeypatch)
         target = _secondary_assist_environment(base.config.env_file.read_bytes())
         stage = _secondary_shadow_to_assist_stage
+    elif transition == "secondary_assist_enable_document_map_shadow":
+        base, _predecessor = _secondary_assist_enabled_port(tmp_path, monkeypatch)
+        target = _secondary_document_map_environment(base.config.env_file.read_bytes(), mode="shadow")
+
+        def stage(
+            current: operator.SystemdActivationPort,
+            *,
+            target: bytes,
+        ) -> tuple[Path, bytes, str]:
+            return _secondary_document_map_stage(current, mode="shadow", target=target)
+
+    elif transition == "secondary_document_map_shadow_to_assist":
+        base, _predecessor = _secondary_document_map_shadow_enabled_port(tmp_path, monkeypatch)
+        shadow = base.config.env_file.read_bytes()
+        target = shadow.replace(
+            b"FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE=shadow\n",
+            b"FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE=assist\n",
+            1,
+        )
+        stage = _secondary_document_map_shadow_to_assist_stage
     else:
         base, _predecessor = _secondary_assist_enabled_port(tmp_path, monkeypatch)
         target = _secondary_assist_disabled_environment(base.config.env_file.read_bytes())
@@ -2442,12 +2565,97 @@ def test_systemd_port_rejects_secondary_assist_transition_drift(
         )
 
 
+def test_document_map_cannot_skip_its_discarded_shadow_transition(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base, assist = _secondary_assist_enabled_port(tmp_path, monkeypatch)
+    direct_assist = _secondary_document_map_environment(assist, mode="assist")
+    staged, _target, target_sha256 = _secondary_document_map_stage(
+        base,
+        mode="shadow",
+        target=direct_assist,
+    )
+
+    with pytest.raises(operator.ReleaseFailure, match="secondary_document_map_shadow_environment_invalid"):
+        operator.SystemdActivationPort(
+            replace(
+                base.config,
+                next_env_file=staged,
+                next_env_file_sha256=target_sha256,
+                staged_config_transition="secondary_assist_enable_document_map_shadow",
+            )
+        )
+
+    staged, _target, target_sha256 = _secondary_document_map_stage(
+        base,
+        mode="shadow",
+        target=direct_assist,
+    )
+    with pytest.raises(operator.ReleaseFailure, match="secondary_document_map_assist_predecessor_not_shadow"):
+        operator.SystemdActivationPort(
+            replace(
+                base.config,
+                next_env_file=staged,
+                next_env_file_sha256=target_sha256,
+                staged_config_transition="secondary_document_map_shadow_to_assist",
+            )
+        )
+
+
+@pytest.mark.parametrize("document_map_mode", ["shadow", "assist"])
+def test_assist_disable_preserves_document_map_rollout_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    document_map_mode: str,
+) -> None:
+    base, shadow = _secondary_document_map_shadow_enabled_port(tmp_path, monkeypatch)
+    enabled = shadow
+    if document_map_mode == "assist":
+        enabled = shadow.replace(
+            b"FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE=shadow\n",
+            b"FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE=assist\n",
+            1,
+        )
+        base.config.env_file.write_bytes(enabled)
+        base.config.env_file.chmod(0o600)
+        base = operator.SystemdActivationPort(
+            replace(
+                base.config,
+                env_file_sha256=hashlib.sha256(enabled).hexdigest(),
+            )
+        )
+    disabled = _secondary_assist_disabled_environment(enabled)
+    staged, _target, target_sha256 = _secondary_assist_to_disabled_stage(base, target=disabled)
+
+    port = operator.SystemdActivationPort(
+        replace(
+            base.config,
+            next_env_file=staged,
+            next_env_file_sha256=target_sha256,
+            staged_config_transition="secondary_assist_to_disabled",
+        )
+    )
+    port.activate_staged_config_transition(
+        "secondary_assist_to_disabled",
+        base.config.env_file_sha256,
+        staged,
+        target_sha256,
+    )
+    values, _unrelated = operator._secondary_environment_view(port.config.env_file.read_bytes())  # noqa: SLF001
+    assert values["FRIDAY_SECONDARY_LLM_ENABLED"] == "0"
+    assert values["FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE"] == document_map_mode
+    assert values["FRIDAY_SECONDARY_LLM_WORKLOADS"] == "document_map,extract"
+
+
 @pytest.mark.parametrize(
     "transition",
     [
         "secondary_shadow_to_private_shadow",
         "secondary_shadow_to_assist",
         "secondary_assist_to_disabled",
+        "secondary_assist_enable_document_map_shadow",
+        "secondary_document_map_shadow_to_assist",
     ],
 )
 @pytest.mark.parametrize("interruption", ["before_replace", "after_replace", "after_unlink"])
@@ -6479,6 +6687,8 @@ def test_secondary_shadow_disable_terminal_transition_recovery_and_replay_are_ex
         "secondary_shadow_to_private_shadow",
         "secondary_shadow_to_assist",
         "secondary_assist_to_disabled",
+        "secondary_assist_enable_document_map_shadow",
+        "secondary_document_map_shadow_to_assist",
     ],
 )
 @pytest.mark.parametrize("terminal_phase", ["rolled_back", "recovered"])

@@ -627,6 +627,10 @@ class FridaySettings:
     secondary_llm_profile: str
     secondary_llm_workloads: tuple[str, ...]
     secondary_llm_allow_private_text: bool
+    # Per-workload rollout keeps document mapping in discarded shadow while
+    # the already-live Inbox extraction remains in assist.  Unknown values are
+    # normalized to disabled by the closed env parser.
+    secondary_llm_document_map_mode: str
 
     embeddings_enabled: bool
     embeddings_base_url: str
@@ -1047,6 +1051,7 @@ class FridaySettings:
             workload_names=self.secondary_llm_workloads,
             mode=self.secondary_llm_mode,
             allow_private_text=self.secondary_llm_allow_private_text,
+            document_map_mode=self.secondary_llm_document_map_mode,
         )
 
     def public_dict(self) -> dict[str, object]:
@@ -1073,6 +1078,7 @@ class FridaySettings:
                 "max_concurrency": self.secondary_llm_max_concurrency,
                 "profile": self.secondary_llm_profile,
                 "allow_private_text": self.secondary_llm_allow_private_text,
+                "document_map_mode": self.secondary_llm_document_map_mode,
                 "workloads": list(self.secondary_llm_workloads),
             },
             "orchestration": {
@@ -1309,6 +1315,11 @@ def load_settings(profile_name: str | None = None) -> FridaySettings:
             )
         ),
         secondary_llm_allow_private_text=_bool_env("FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT", False),
+        secondary_llm_document_map_mode=_fail_closed_choice_env(
+            "FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE",
+            "disabled",
+            ("disabled", "shadow", "assist"),
+        ),
         embeddings_enabled=_bool_env("FRIDAY_EMBEDDINGS_ENABLED", False),
         embeddings_base_url=env("FRIDAY_EMBEDDINGS_BASE_URL", llm_base_url).rstrip("/"),
         # A separate embeddings service may share the LLM's token; default to it.

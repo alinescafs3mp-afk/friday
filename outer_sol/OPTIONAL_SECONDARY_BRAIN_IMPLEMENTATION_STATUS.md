@@ -141,6 +141,28 @@
   `0.207.26` hotfix passed its focused release/secondary gate; its wheel also
   reproduced byte-for-byte.
 
+## Document-map expansion implementation checkpoint (not deployed)
+
+- The existing bounded attachment MAP/REDUCE seam is now wired to a separate
+  code-owned product policy `gptoss20b-document-map-v1`, manifest SHA-256
+  `c881eefe53d5b02baee3feb133605838021fabe642578b163bdd46e6bd8a2fc2`.
+  It binds the unchanged accepted runtime profile and gateway manifest
+  `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3`;
+  no Windows image, model, launch arguments, served alias or container restart
+  is claimed or required by this source package.
+- Real document-map calls are text-only, private-lineage checked, read-only,
+  concurrency-one and capped by the accepted 4K/512 envelope. Output uses one
+  strict code-owned JSON `summary` schema. Invalid schema/content, deadline,
+  admission, transport, profile or model identity falls back to the unchanged
+  primary map exactly once. Primary still performs final synthesis and owns all
+  tools, effects and publication.
+- Rollout is independently staged while current Inbox extraction remains in
+  assist: `secondary_assist_enable_document_map_shadow` adds discarded
+  document-map shadow; `secondary_document_map_shadow_to_assist` changes only
+  that workload's mode after a separate shadow checkpoint. These source and
+  operator paths are implementation-ready, not evidence that either transition
+  has run on production.
+
 ## Parallel parent checkpoint
 
 - ICP schema 40, the durable exact archive candidate-selection runtime and the
@@ -150,8 +172,8 @@
 
 ## Active order
 
-1. Keep assist bounded and observe natural product use without widening its
-   authority or turning laptop availability into a user-visible dependency.
+1. Release the document-map policy dormant, activate its discarded shadow
+   transition, and inspect the separate shadow checkpoint before assist.
 2. Retain a separate product-counter outage/recovery drill as operational
    evidence; it is not a prerequisite for ordinary optional operation.
 3. Continue the next durable ICP journey and V12 refinement with the secondary

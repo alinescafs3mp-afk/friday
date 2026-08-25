@@ -94,6 +94,8 @@ _SECONDARY_SHADOW_DISABLE_TRANSITION = "secondary_shadow_disable"
 _SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION = "secondary_shadow_to_private_shadow"
 _SECONDARY_SHADOW_TO_ASSIST_TRANSITION = "secondary_shadow_to_assist"
 _SECONDARY_ASSIST_TO_DISABLED_TRANSITION = "secondary_assist_to_disabled"
+_SECONDARY_ASSIST_ENABLE_DOCUMENT_MAP_SHADOW_TRANSITION = "secondary_assist_enable_document_map_shadow"
+_SECONDARY_DOCUMENT_MAP_SHADOW_TO_ASSIST_TRANSITION = "secondary_document_map_shadow_to_assist"
 _SECONDARY_PRODUCT_STAGE_SCHEMA = "friday.secondary-product-stage-evidence.v2"
 _SECONDARY_PRODUCT_OPERATION_SCHEMA = "friday.secondary-product-operation-core.v1"
 _SECONDARY_PRODUCT_DIAGNOSTICS_SCHEMA = "friday.secondary-product-diagnostics.v1"
@@ -120,6 +122,8 @@ _SECONDARY_CONFIG_TRANSITIONS = frozenset(
         _SECONDARY_SHADOW_TO_PRIVATE_SHADOW_TRANSITION,
         _SECONDARY_SHADOW_TO_ASSIST_TRANSITION,
         _SECONDARY_ASSIST_TO_DISABLED_TRANSITION,
+        _SECONDARY_ASSIST_ENABLE_DOCUMENT_MAP_SHADOW_TRANSITION,
+        _SECONDARY_DOCUMENT_MAP_SHADOW_TO_ASSIST_TRANSITION,
     }
 )
 _STAGED_CONFIG_TRANSITIONS = frozenset(
@@ -148,6 +152,7 @@ _SECONDARY_LLM_ENV_KEYS = frozenset(
         "FRIDAY_SECONDARY_LLM_PROFILE",
         "FRIDAY_SECONDARY_LLM_READ_TIMEOUT_SEC",
         "FRIDAY_SECONDARY_LLM_WORKLOADS",
+        "FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE",
     }
 )
 _SECONDARY_FINALIST_PROFILE_ID = "gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"
@@ -464,6 +469,23 @@ _SECONDARY_ASSIST_EXACT_VALUES = {
 }
 _SECONDARY_ASSIST_DISABLED_EXACT_VALUES = {
     **_SECONDARY_ASSIST_EXACT_VALUES,
+    "FRIDAY_SECONDARY_LLM_ENABLED": "0",
+}
+_SECONDARY_DOCUMENT_MAP_SHADOW_EXACT_VALUES = {
+    **_SECONDARY_ASSIST_EXACT_VALUES,
+    "FRIDAY_SECONDARY_LLM_WORKLOADS": "document_map,extract",
+    "FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE": "shadow",
+}
+_SECONDARY_DOCUMENT_MAP_ASSIST_EXACT_VALUES = {
+    **_SECONDARY_DOCUMENT_MAP_SHADOW_EXACT_VALUES,
+    "FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE": "assist",
+}
+_SECONDARY_DOCUMENT_MAP_SHADOW_DISABLED_EXACT_VALUES = {
+    **_SECONDARY_DOCUMENT_MAP_SHADOW_EXACT_VALUES,
+    "FRIDAY_SECONDARY_LLM_ENABLED": "0",
+}
+_SECONDARY_DOCUMENT_MAP_ASSIST_DISABLED_EXACT_VALUES = {
+    **_SECONDARY_DOCUMENT_MAP_ASSIST_EXACT_VALUES,
     "FRIDAY_SECONDARY_LLM_ENABLED": "0",
 }
 BOOTSTRAP_WHEELS = (("pip", "26.1.2", "pip-26.1.2-py3-none-any.whl"),)
@@ -977,9 +999,11 @@ def _validate_secondary_finalist_values(
     exact_values: Mapping[str, str],
     invalid_code: str,
 ) -> None:
-    if set(values) != _SECONDARY_LLM_ENV_KEYS or any(
-        values.get(key) != value for key, value in exact_values.items()
-    ):
+    expected_keys = set(exact_values) | {
+        "FRIDAY_SECONDARY_LLM_API_KEY",
+        "FRIDAY_SECONDARY_LLM_CA_FILE",
+    }
+    if set(values) != expected_keys or any(values.get(key) != value for key, value in exact_values.items()):
         raise ReleaseFailure(invalid_code)
     api_key = values["FRIDAY_SECONDARY_LLM_API_KEY"]
     if _HEX64.fullmatch(api_key) is None:
@@ -1131,17 +1155,84 @@ def _validate_secondary_shadow_to_assist_environment(
     )
 
 
+def _validate_secondary_assist_enable_document_map_shadow_environment(
+    predecessor: bytes | None,
+    target: bytes,
+) -> None:
+    """Add one workload in discarded shadow without changing live extract assist."""
+
+    target_values, target_unrelated = _secondary_environment_view(target)
+    _validate_secondary_finalist_values(
+        target_values,
+        exact_values=_SECONDARY_DOCUMENT_MAP_SHADOW_EXACT_VALUES,
+        invalid_code="secondary_document_map_shadow_environment_invalid",
+    )
+    if target != _canonical_secondary_environment(target_unrelated, target_values):
+        raise ReleaseFailure("secondary_document_map_shadow_environment_invalid")
+    if predecessor is None:
+        return
+    predecessor_values, predecessor_unrelated = _secondary_environment_view(predecessor)
+    _validate_secondary_finalist_values(
+        predecessor_values,
+        exact_values=_SECONDARY_ASSIST_EXACT_VALUES,
+        invalid_code="secondary_document_map_shadow_predecessor_not_assist",
+    )
+    if predecessor_unrelated != target_unrelated:
+        raise ReleaseFailure("secondary_shadow_unrelated_environment_changed")
+    if predecessor != _canonical_secondary_environment(predecessor_unrelated, predecessor_values):
+        raise ReleaseFailure("secondary_document_map_shadow_predecessor_not_assist")
+    expected_values = {
+        **predecessor_values,
+        "FRIDAY_SECONDARY_LLM_WORKLOADS": "document_map,extract",
+        "FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE": "shadow",
+    }
+    if expected_values != target_values:
+        raise ReleaseFailure("secondary_document_map_shadow_environment_invalid")
+
+
+def _validate_secondary_document_map_shadow_to_assist_environment(
+    predecessor: bytes | None,
+    target: bytes,
+) -> None:
+    """Promote only document maps after their separate shadow checkpoint."""
+
+    _validate_exact_secondary_transition(
+        predecessor,
+        target,
+        predecessor_exact_values=_SECONDARY_DOCUMENT_MAP_SHADOW_EXACT_VALUES,
+        target_exact_values=_SECONDARY_DOCUMENT_MAP_ASSIST_EXACT_VALUES,
+        invalid_code="secondary_document_map_assist_environment_invalid",
+        predecessor_invalid_code="secondary_document_map_assist_predecessor_not_shadow",
+        replacements={"FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE": ("shadow", "assist")},
+    )
+
+
 def _validate_secondary_assist_to_disabled_environment(
     predecessor: bytes | None,
     target: bytes,
 ) -> None:
     """Disable exact assist by changing its one code-owned admission bit."""
 
+    target_values, _target_unrelated = _secondary_environment_view(target)
+    document_map_mode = target_values.get("FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE")
+    workloads = target_values.get("FRIDAY_SECONDARY_LLM_WORKLOADS")
+    if document_map_mode == "shadow" and workloads == "document_map,extract":
+        predecessor_values = _SECONDARY_DOCUMENT_MAP_SHADOW_EXACT_VALUES
+        disabled_values = _SECONDARY_DOCUMENT_MAP_SHADOW_DISABLED_EXACT_VALUES
+    elif document_map_mode == "assist" and workloads == "document_map,extract":
+        predecessor_values = _SECONDARY_DOCUMENT_MAP_ASSIST_EXACT_VALUES
+        disabled_values = _SECONDARY_DOCUMENT_MAP_ASSIST_DISABLED_EXACT_VALUES
+    elif document_map_mode is None and workloads == "extract":
+        predecessor_values = _SECONDARY_ASSIST_EXACT_VALUES
+        disabled_values = _SECONDARY_ASSIST_DISABLED_EXACT_VALUES
+    else:
+        raise ReleaseFailure("secondary_assist_to_disabled_environment_invalid")
+
     _validate_exact_secondary_transition(
         predecessor,
         target,
-        predecessor_exact_values=_SECONDARY_ASSIST_EXACT_VALUES,
-        target_exact_values=_SECONDARY_ASSIST_DISABLED_EXACT_VALUES,
+        predecessor_exact_values=predecessor_values,
+        target_exact_values=disabled_values,
         invalid_code="secondary_assist_to_disabled_environment_invalid",
         predecessor_invalid_code="secondary_assist_to_disabled_predecessor_not_assist",
         replacements={"FRIDAY_SECONDARY_LLM_ENABLED": ("1", "0")},
@@ -1161,6 +1252,12 @@ def _validate_secondary_config_transition(
         ),
         _SECONDARY_SHADOW_TO_ASSIST_TRANSITION: _validate_secondary_shadow_to_assist_environment,
         _SECONDARY_ASSIST_TO_DISABLED_TRANSITION: _validate_secondary_assist_to_disabled_environment,
+        _SECONDARY_ASSIST_ENABLE_DOCUMENT_MAP_SHADOW_TRANSITION: (
+            _validate_secondary_assist_enable_document_map_shadow_environment
+        ),
+        _SECONDARY_DOCUMENT_MAP_SHADOW_TO_ASSIST_TRANSITION: (
+            _validate_secondary_document_map_shadow_to_assist_environment
+        ),
     }
     try:
         validator = validators[transition]

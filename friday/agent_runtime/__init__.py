@@ -51563,6 +51563,19 @@ class AgentRuntime:
         secondary_max_tokens = (
             min(max_tokens, secondary_limits[1]) if secondary_limits is not None else max_tokens
         )
+        secondary_summary_max_chars = min(3_200, secondary_output_max_chars)
+        secondary_schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["summary"],
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": secondary_summary_max_chars,
+                }
+            },
+        }
 
         def request_factory() -> ModelRequest:
             return ModelRequest(
@@ -51583,26 +51596,48 @@ class AgentRuntime:
                 ),
                 effect_class=EffectClass.READ_ONLY,
                 modality=ModelModality.TEXT,
+                require_structured_output=True,
+                structured_output_schema=secondary_schema,
                 require_independent_model=True,
                 contains_private_text=True,
             )
 
-        def valid_secondary_hint(result: SecondaryResult) -> bool:
-            visible = result.visible_content.strip()
-            if not visible or _strip_tool_call_markup(visible).strip() != visible:
-                return False
+        def secondary_hint(result: SecondaryResult) -> str:
+            structured = result.structured_output
+            if not isinstance(structured, Mapping) or set(structured) != {"summary"}:
+                return ""
+            visible = structured.get("summary")
+            if not isinstance(visible, str):
+                return ""
+            visible = visible.strip()
+            if (
+                not visible
+                or len(visible) > secondary_summary_max_chars
+                or _strip_tool_call_markup(visible).strip() != visible
+            ):
+                return ""
             text, clipped = self._attachment_hierarchy_text(
                 {"content": visible, "finish_reason": "stop"},
                 max_chars=secondary_output_max_chars,
             )
-            return bool(text) and not clipped
+            return text if text and not clipped else ""
 
-        if secondary.mode is SecondaryMode.SHADOW:
+        def valid_secondary_hint(result: SecondaryResult) -> bool:
+            return bool(secondary_hint(result))
+
+        workload_mode = (
+            secondary.workload_mode(ModelWorkload.DOCUMENT_MAP)
+            if isinstance(secondary, SecondaryBrainScheduler)
+            else secondary.mode
+        )
+        if workload_mode is SecondaryMode.SHADOW:
             return await secondary.run_shadow(
                 request_factory,
                 primary_call,
                 validator=valid_secondary_hint,
             )
+        if workload_mode is not SecondaryMode.ASSIST:
+            return await primary_call()
 
         try:
             request = request_factory()
@@ -51614,7 +51649,10 @@ class AgentRuntime:
             validator=valid_secondary_hint,
         )
         if isinstance(selected, SecondaryResult):
-            return {"content": selected.visible_content, "finish_reason": "stop"}
+            hint = secondary_hint(selected)
+            if hint:
+                return {"content": hint, "finish_reason": "stop"}
+            return await primary_call()
         return selected
 
     def _secondary_document_map_profile_limits(self) -> tuple[int, int] | None:
@@ -51624,7 +51662,10 @@ class AgentRuntime:
         if secondary is None:
             return None
         from friday.secondary_brain import ModelWorkload, SecondaryBrainScheduler
-        from friday.secondary_brain.profiles import get_secondary_runtime_profile
+        from friday.secondary_brain.profiles import (
+            get_secondary_runtime_profile,
+            secondary_effective_workloads,
+        )
 
         if not isinstance(secondary, SecondaryBrainScheduler):
             return None
@@ -51634,7 +51675,7 @@ class AgentRuntime:
             profile is None
             or mode not in profile.allowed_modes
             or ModelWorkload.DOCUMENT_MAP not in secondary.allowed_workloads
-            or "document_map" not in profile.allowed_workloads
+            or "document_map" not in secondary_effective_workloads(profile, global_mode=mode)
             or not secondary.allow_private_text
             or secondary.served_model_alias != profile.served_model_alias
             or self.settings.secondary_llm_max_context_tokens != profile.max_context_tokens

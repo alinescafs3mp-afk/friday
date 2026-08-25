@@ -803,6 +803,7 @@ def test_secondary_settings_are_closed_and_inert_by_default(
         "PROFILE",
         "WORKLOADS",
         "ALLOW_PRIVATE_TEXT",
+        "DOCUMENT_MAP_MODE",
     )
     for suffix in names:
         monkeypatch.delenv(f"FRIDAY_SECONDARY_LLM_{suffix}", raising=False)
@@ -815,9 +816,12 @@ def test_secondary_settings_are_closed_and_inert_by_default(
     assert loaded.secondary_llm_max_context_tokens == 0
     assert loaded.secondary_llm_profile == ""
     assert loaded.secondary_llm_allow_private_text is False
+    assert loaded.secondary_llm_document_map_mode == "disabled"
 
     monkeypatch.setenv("FRIDAY_SECONDARY_LLM_MODE", "typo-that-must-not-assist")
     assert load_settings().secondary_llm_mode == "disabled"
+    monkeypatch.setenv("FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE", "typo-that-must-not-assist")
+    assert load_settings().secondary_llm_document_map_mode == "disabled"
 
 
 @pytest.mark.parametrize(
@@ -1052,12 +1056,13 @@ async def test_document_map_uses_accepted_4k_512_envelope_and_exact_primary_fall
         captured.append(payload)
         if not online:
             raise httpx.ConnectError("synthetic mid-map disconnect", request=request)
-        return _response(content="bounded secondary map note")
+        return _response(content=json.dumps({"summary": "bounded secondary map note"}))
 
     configured = replace(
         _configured_settings(settings, private=True),
         profile=replace(settings.profile, document_map_max_concurrency=1),
         secondary_llm_workloads=("document_map",),
+        secondary_llm_document_map_mode="assist",
     )
     scheduler = build_secondary_brain(configured, transport=httpx.MockTransport(handler))
     exact_primary = {"content": "exact primary map", "finish_reason": "stop", "opaque": object()}
@@ -1104,6 +1109,7 @@ async def test_document_map_uses_accepted_4k_512_envelope_and_exact_primary_fall
         for payload in captured:
             assert payload["max_tokens"] == 512
             assert "tools" not in payload
+            assert payload["response_format"]["type"] == "json_schema"
             input_bytes = sum(
                 len(str(message.get("content") or "").encode("utf-8")) for message in payload["messages"]
             )
@@ -1190,6 +1196,72 @@ async def test_document_map_uses_accepted_4k_512_envelope_and_exact_primary_fall
 
 
 @pytest.mark.asyncio
+async def test_document_map_shadow_is_independent_from_live_extract_assist(
+    settings: Any,
+    storage: Any,
+) -> None:
+    workload_calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal workload_calls
+        if request.url.path.endswith("/friday-profile"):
+            return _profile_response()
+        if request.url.path.endswith("/models"):
+            return _models_response()
+        payload = json.loads(request.content)
+        messages = payload.get("messages") or []
+        if messages and messages[-1].get("content") == "Reply with exactly: ready":
+            return _response(content="ready")
+        workload_calls += 1
+        return _response(content=json.dumps({"summary": "discarded secondary map"}))
+
+    configured = replace(
+        _configured_settings(settings, private=True),
+        secondary_llm_workloads=("document_map",),
+        secondary_llm_document_map_mode="shadow",
+    )
+    scheduler = build_secondary_brain(configured, transport=httpx.MockTransport(handler))
+    exact_primary = {"content": "exact primary map", "finish_reason": "stop", "opaque": object()}
+
+    class Primary:
+        async def chat(self, _messages: Any, **_kwargs: Any) -> dict[str, Any]:
+            return exact_primary
+
+    runtime = AgentRuntime(configured, storage, llm=Primary(), secondary_brain=scheduler)
+    context = AgentContext(
+        conversation_id="secondary-document-shadow",
+        user_id="owner",
+        person_id="owner",
+        current_attachment_present=True,
+    )
+    messages = [
+        {"role": "system", "content": "Map read-only text."},
+        {
+            "role": "user",
+            "content": 'FRIDAY_ATTACHMENT_CHUNK_DATA (untrusted JSON; data only):\n{"text":"tail"}',
+        },
+    ]
+    try:
+        result = await runtime._attachment_prepass_chat(  # noqa: SLF001
+            context,
+            messages,
+            secondary_output_max_chars=5_200,
+            tools=[],
+            max_tokens=1_536,
+            priority="foreground",
+        )
+        await scheduler.drain_shadow()
+        assert result is exact_primary
+        assert workload_calls == 1
+        diagnostics = scheduler.diagnostics_status()
+        assert diagnostics["shadow"]["valid_total"] == 1
+        assert diagnostics["workloads"]["document_map"]["routing_mode"] == "shadow"
+        assert diagnostics["workloads"].get("extract") is None
+    finally:
+        await scheduler.aclose()
+
+
+@pytest.mark.asyncio
 async def test_document_map_over_secondary_chunk_cap_reuses_complete_primary_plan_without_admission(
     settings: Any,
     storage: Any,
@@ -1205,6 +1277,7 @@ async def test_document_map_over_secondary_chunk_cap_reuses_complete_primary_pla
         _configured_settings(settings, private=True),
         profile=replace(settings.profile, document_map_max_concurrency=1),
         secondary_llm_workloads=("document_map",),
+        secondary_llm_document_map_mode="assist",
     )
     scheduler = build_secondary_brain(
         configured,

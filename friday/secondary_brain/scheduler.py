@@ -90,6 +90,7 @@ class SecondaryBrainScheduler:
         client: SecondaryEndpointClient | None,
         unavailable_state: SecondaryState,
         profile_admission: SecondaryProfileAdmission | None,
+        document_map_mode: SecondaryMode = SecondaryMode.DISABLED,
     ) -> None:
         self.mode = mode
         self.allowed_workloads = allowed_workloads & ADVISORY_WORKLOADS
@@ -97,6 +98,7 @@ class SecondaryBrainScheduler:
         self._client = client
         self._unavailable_state = unavailable_state
         self._profile_admission = profile_admission
+        self._document_map_mode = document_map_mode
         self._local_skipped_total = 0
         self._local_fallback_total = 0
         self._startup_probe_task: asyncio.Task[None] | None = None
@@ -150,6 +152,13 @@ class SecondaryBrainScheduler:
         budget = self._client.config.call_budget_sec if self._client is not None else 0.001
         return time.monotonic() + min(30.0, budget)
 
+    def workload_mode(self, workload: ModelWorkload) -> SecondaryMode:
+        """Return the code-owned rollout mode for one advisory workload."""
+
+        if workload is ModelWorkload.DOCUMENT_MAP:
+            return self._document_map_mode
+        return self.mode
+
     @classmethod
     def from_settings(
         cls,
@@ -161,6 +170,10 @@ class SecondaryBrainScheduler:
             mode = SecondaryMode(settings.secondary_llm_mode)
         except ValueError:
             mode = SecondaryMode.DISABLED
+        try:
+            document_map_mode = SecondaryMode(settings.secondary_llm_document_map_mode)
+        except ValueError:
+            document_map_mode = SecondaryMode.DISABLED
 
         workloads: set[ModelWorkload] = set()
         for raw_workload in settings.secondary_llm_workloads:
@@ -177,6 +190,7 @@ class SecondaryBrainScheduler:
                 client=None,
                 unavailable_state=SecondaryState.DISABLED,
                 profile_admission=None,
+                document_map_mode=document_map_mode,
             )
 
         admission = get_secondary_runtime_admission(
@@ -212,6 +226,7 @@ class SecondaryBrainScheduler:
                 workload_names=settings.secondary_llm_workloads,
                 mode=mode.value,
                 allow_private_text=settings.secondary_llm_allow_private_text,
+                document_map_mode=document_map_mode.value,
             )
             or not effective_workloads
             or admission is None
@@ -223,6 +238,7 @@ class SecondaryBrainScheduler:
                 client=None,
                 unavailable_state=SecondaryState.MISCONFIGURED,
                 profile_admission=None,
+                document_map_mode=document_map_mode,
             )
         try:
             client = SecondaryEndpointClient(
@@ -240,6 +256,7 @@ class SecondaryBrainScheduler:
                 client=None,
                 unavailable_state=SecondaryState.MISCONFIGURED,
                 profile_admission=None,
+                document_map_mode=document_map_mode,
             )
         return cls(
             mode=mode,
@@ -248,6 +265,7 @@ class SecondaryBrainScheduler:
             client=client,
             unavailable_state=SecondaryState.PROBING,
             profile_admission=admission.kind,
+            document_map_mode=document_map_mode,
         )
 
     async def aclose(self) -> None:
@@ -479,6 +497,7 @@ class SecondaryBrainScheduler:
             },
             "workloads": {
                 workload.value: {
+                    "routing_mode": self.workload_mode(workload).value,
                     "selected_total": self._selected_by_workload[workload],
                     "success_total": self._success_by_workload[workload],
                     "latency_count": self._success_by_workload[workload],
@@ -539,10 +558,11 @@ class SecondaryBrainScheduler:
         shadow: bool,
     ) -> SecondaryFailure | None:
         required_mode = SecondaryMode.SHADOW if shadow else SecondaryMode.ASSIST
-        if self.mode is not required_mode:
+        workload_mode = self.workload_mode(request.workload)
+        if workload_mode is not required_mode:
             return (
                 SecondaryFailure.DISABLED
-                if self.mode is SecondaryMode.DISABLED
+                if workload_mode is SecondaryMode.DISABLED
                 else SecondaryFailure.MODE_DISALLOWED
             )
         if self._client is None:

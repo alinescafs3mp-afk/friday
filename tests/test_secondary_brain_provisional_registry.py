@@ -8,10 +8,12 @@ from pathlib import Path
 from friday.secondary_brain.profiles import (
     ACCEPTED_SECONDARY_RUNTIME_PROFILES,
     PROVISIONAL_SHADOW_SECONDARY_RUNTIME_PROFILES,
+    SECONDARY_WORKLOAD_POLICIES,
     SecondaryProfileAdmission,
     SecondaryRuntimeAdmission,
     get_secondary_runtime_admission,
     get_secondary_runtime_profile,
+    secondary_effective_workloads,
 )
 
 _PROFILE_ID = "gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f"
@@ -19,6 +21,13 @@ _ACCEPTED_SHA256 = "93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d0
 _CANDIDATE_SHA256 = "51af2164fa07ff3c01813e318076f7ac8b37eeecb73e695b6ca7543061c93439"
 _ACCEPTED_PATH = Path(__file__).parent / "fixtures" / "secondary_finalist_profile_accepted.json"
 _CANDIDATE_PATH = Path(__file__).parent / "fixtures" / "secondary_finalist_profile_candidate.json"
+_DOCUMENT_MAP_POLICY_PATH = (
+    Path(__file__).parents[1]
+    / "deploy"
+    / "secondary-brain"
+    / "windows-sglang"
+    / "workload-policy.document-map.v1.json"
+)
 _EVIDENCE_KEYS = (
     "quality_evidence_sha256",
     "capacity_evidence_sha256",
@@ -85,3 +94,19 @@ def test_finalist_accepted_admission_rejects_manifest_lookalikes() -> None:
         kind=SecondaryProfileAdmission.ACCEPTED,
     )
     assert candidate_lookalike.accepts_manifest(candidate_raw) is False
+
+
+def test_document_map_policy_extends_product_work_only_without_rebinding_windows_runtime() -> None:
+    profile = ACCEPTED_SECONDARY_RUNTIME_PROFILES[_PROFILE_ID]
+    (policy,) = SECONDARY_WORKLOAD_POLICIES.values()
+    raw = _DOCUMENT_MAP_POLICY_PATH.read_bytes()
+
+    assert policy.is_well_formed is True
+    assert policy.accepts_manifest(raw) is True
+    assert policy.runtime_profile_id == profile.profile_id
+    assert policy.runtime_profile_manifest_sha256 == profile.manifest_sha256 == _ACCEPTED_SHA256
+    assert secondary_effective_workloads(profile, global_mode="shadow") == frozenset({"extract"})
+    assert secondary_effective_workloads(profile, global_mode="assist") == frozenset(
+        {"document_map", "extract"}
+    )
+    assert policy.accepts_manifest(raw + b" ") is False

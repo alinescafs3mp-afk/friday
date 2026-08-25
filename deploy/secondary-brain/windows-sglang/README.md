@@ -229,6 +229,18 @@ The resulting profile ID must be
 `gptoss20b-2335df123cac7fc0e13e347cde1e1ffa8562daafcaf0fc76ade1a851d2b0ff1f`
 and the exact candidate bytes must hash to
 `51af2164fa07ff3c01813e318076f7ac8b37eeecb73e695b6ca7543061c93439`.
+
+`workload-policy.document-map.v1.json` is a Friday-side product rollout
+manifest, not a replacement runtime profile. Its SHA-256 is
+`c881eefe53d5b02baee3feb133605838021fabe642578b163bdd46e6bd8a2fc2` and it
+binds the already accepted gateway manifest
+`93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3`.
+Never point
+`FRIDAY_SECONDARY_PROFILE_MANIFEST_PATH` at this policy file. Enabling its
+document-map shadow/assist stages changes neither file mounted by Compose nor
+the running SGLang/gateway containers, so the laptop needs no restart for that
+product-only transition.
+
 The profile ID and served-model alias are derived from the complete engine
 projection. `dtype=bfloat16`, `quantization=mxfp4`, global/prefill attention
 `triton`, `moe_runner_backend=flashinfer_mxfp4`, hybrid SWA memory, one running

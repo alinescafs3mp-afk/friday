@@ -150,6 +150,10 @@ course, with these repository-specific constraints:
    separate safe package with schema-capable fallback.
 3. Extend machine-reconcilable release evidence without promoting
    component-only gates, then start the next V12 refinement package.
+4. The bounded GPT-OSS document-map source/operator package is implementation-
+   ready but not deployed: first activate discarded shadow, then promote only
+   that workload after its separate checkpoint. The accepted laptop runtime
+   and gateway manifest remain unchanged.
 
 ## Completed and deployed packages
 

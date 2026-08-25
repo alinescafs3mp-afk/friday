@@ -67,7 +67,7 @@ BATTERY_CASE_IDS = ("D06", "D07", "D08")
 
 _EXPECTED_DEPENDENCY_HASHES = {
     "tools/document_contour_live_battery.py": (
-        "5e44bef8be18c3489f8132d6eef6855d2ea9c3f87077d5e98d1115620032a007"
+        "a20a650abd7929a527b09149e3f9bfd7151b51c9f739259f8f9199a6ab517c9c"
     ),
     "friday/diagnostics/__init__.py": ("3920ed6300c4a01ce374643b1e1cbdbeeb04edce5054f29ab6f721ef964cecee"),
     "friday/diagnostics/runtime_lease.py": (
@@ -102,6 +102,7 @@ _MODEL_ENV_ALLOWLIST = frozenset(
         "FRIDAY_SECONDARY_LLM_PROFILE",
         "FRIDAY_SECONDARY_LLM_WORKLOADS",
         "FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT",
+        "FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE",
         "FRIDAY_EMBEDDINGS_ENABLED",
         "FRIDAY_EMBEDDINGS_BASE_URL",
         "FRIDAY_EMBEDDINGS_API_KEY",
@@ -1249,6 +1250,7 @@ def _model_environment(settings: Any) -> dict[str, str]:
         "FRIDAY_SECONDARY_LLM_ALLOW_PRIVATE_TEXT": (
             "1" if settings.secondary_llm_allow_private_text else "0"
         ),
+        "FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE": settings.secondary_llm_document_map_mode,
         "FRIDAY_EMBEDDINGS_ENABLED": "1" if settings.embeddings_enabled else "0",
         "FRIDAY_EMBEDDINGS_BASE_URL": str(settings.embeddings_base_url),
         "FRIDAY_EMBEDDINGS_API_KEY": str(settings.embeddings_api_key),

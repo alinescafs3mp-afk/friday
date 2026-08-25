@@ -450,7 +450,11 @@ class _DocumentMapSecondary:
 
     def _candidate(self, request: ModelRequest) -> SecondaryResult:
         hint = self.raw_marker or self._hint(request)
-        return SecondaryResult(visible_content=hint, served_model_alias="synthetic-secondary")
+        return SecondaryResult(
+            visible_content=json.dumps({"summary": hint}, ensure_ascii=False),
+            structured_output={"summary": hint},
+            served_model_alias="synthetic-secondary",
+        )
 
     async def secondary_preferred_required_result(
         self,
@@ -752,6 +756,12 @@ async def test_secondary_document_map_is_only_a_read_only_hint_for_primary_synth
     assert all(request.modality is ModelModality.TEXT for request in secondary.requests)
     assert all(request.contains_private_text is True for request in secondary.requests)
     assert all(request.require_independent_model is True for request in secondary.requests)
+    assert all(request.require_structured_output is True for request in secondary.requests)
+    assert all(
+        request.structured_output_schema is not None
+        and request.structured_output_schema.get("required") == ["summary"]
+        for request in secondary.requests
+    )
     assert all(
         isinstance(message.get("content"), str)
         for request in secondary.requests

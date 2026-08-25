@@ -89,7 +89,35 @@ Live 0.207.26 завершил distinct `mode=shadow→assist` cutover
 typed Inbox extraction может заменить primary extraction; knowledge
 write всё равно требует review, а tools, effects и publication
 недоступны. Любая ошибка ведёт в exact primary fallback; отсутствие
-ноутбука не меняе ответственность primary.
+ноутбука не меняет ответственность primary.
+
+Следующее расширение `document_map` использует отдельную code-owned product
+policy `gptoss20b-document-map-v1` (SHA-256
+`c881eefe53d5b02baee3feb133605838021fabe642578b163bdd46e6bd8a2fc2`).
+Оно не меняет Windows/SGLang engine, profile ID, served-model alias или
+gateway manifest `93ea5698b8b6a9bf8a7dc697ffe37d7353055aa16555188991747bba73d059e3`;
+перезапуск контейнеров ноутбука для этого rollout не нужен. Secondary получает
+только bounded text-only MAP/REDUCE leaf, возвращает strict JSON `summary`, не
+видит tools и не публикует ответ. Primary остаётся финальным синтезатором, а
+любой отказ/таймаут/невалидный JSON запускает прежний primary map ровно один
+раз.
+
+Расширение включается двумя distinct-candidate activation, без ручной правки
+live env. Из текущего exact `assist/extract` сначала добавьте
+`FRIDAY_SECONDARY_LLM_WORKLOADS=document_map,extract` и
+`FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE=shadow`, затем используйте transition
+`secondary_assist_enable_document_map_shadow`. В этой фазе primary MAP остаётся
+пользовательским результатом, а secondary результат валидируется и
+выбрасывается. Только после отдельного shadow checkpoint измените одну строку
+на `FRIDAY_SECONDARY_LLM_DOCUMENT_MAP_MODE=assist` transition-ом
+`secondary_document_map_shadow_to_assist`. Прямой переход из `extract` сразу в
+document-map assist не является поддерживаемым operator path.
+Owner diagnostics показывает отдельный
+`workloads.document_map.routing_mode` и content-free counters этой ступени.
+
+На GPU эта дорога заметна только для документов, которые runtime разбивает на
+иерархические MAP/REDUCE-фрагменты. Небольшой документ, обычный диалог,
+web-search и финальный ответ по-прежнему могут вообще не обращаться к ноутбуку.
 
 Source 0.207.27 не расширяет полномочия secondary: bounded Inbox
 extraction запрашивает точную code-owned JSON Schema и по-прежнему
@@ -189,6 +217,8 @@ consume не разрешает повтор с тем же receipt: выпол�
 `FRIDAY_SECONDARY_LLM_ENABLED=0`, и выполните новую distinct-candidate
 activation с `secondary_shadow_disable`; privacy bit должен
 сохраниться. Из assist используйте `secondary_assist_to_disabled`.
+Для document-map shadow/assist этот же assist-disable сохраняет exact workload
+и `DOCUMENT_MAP_MODE`, меняя только `ENABLED=1→0`.
 При unfinished activation не запускайте disable: продолжайте только через
 `recover-activation` в identity существующего journal.
 

@@ -143,6 +143,32 @@ _EVIDENCE_HASH_KEYS = (
     "failure_evidence_sha256",
 )
 _ZERO_SHA256 = "0" * 64
+_WORKLOAD_POLICY_SCHEMA = "friday.secondary-workload-policy.v1"
+_WORKLOAD_POLICY_KEYS = frozenset(
+    {
+        "schema",
+        "status",
+        "policy_id",
+        "runtime_profile_id",
+        "runtime_profile_manifest_sha256",
+        "allowed_global_modes",
+        "document_map_modes",
+        "additional_workloads",
+        "modality",
+        "effect_class",
+        "private_text_required",
+        "max_context_tokens",
+        "max_output_tokens",
+        "max_concurrency",
+        "primary_fallback_required",
+        "primary_final_synthesis_required",
+        "secondary_publication_allowed",
+        "secondary_tools_allowed",
+        "secondary_effects_allowed",
+        "gateway_manifest_change_required",
+        "windows_container_restart_required",
+    }
+)
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -455,6 +481,74 @@ class SecondaryRuntimeProfile:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class SecondaryWorkloadPolicy:
+    """Code-owned product policy layered over one unchanged runtime identity."""
+
+    policy_id: str
+    manifest_sha256: str
+    runtime_profile_id: str
+    runtime_profile_manifest_sha256: str
+    allowed_global_modes: frozenset[str]
+    document_map_modes: frozenset[str]
+    additional_workloads: frozenset[str]
+    max_context_tokens: int
+    max_output_tokens: int
+    max_concurrency: int
+
+    def accepts_manifest(self, raw: bytes) -> bool:
+        if not 1 <= len(raw) <= 16_384 or hashlib.sha256(raw).hexdigest() != self.manifest_sha256:
+            return False
+        try:
+            value = json.loads(
+                raw.decode("utf-8", errors="strict"),
+                parse_constant=_reject_constant,
+            )
+        except (UnicodeError, ValueError, TypeError):
+            return False
+        return bool(
+            isinstance(value, dict)
+            and set(value) == _WORKLOAD_POLICY_KEYS
+            and raw == _canonical_json(value)
+            and value.get("schema") == _WORKLOAD_POLICY_SCHEMA
+            and value.get("status") == "implementation_ready"
+            and value.get("policy_id") == self.policy_id
+            and value.get("runtime_profile_id") == self.runtime_profile_id
+            and value.get("runtime_profile_manifest_sha256") == self.runtime_profile_manifest_sha256
+            and value.get("allowed_global_modes") == sorted(self.allowed_global_modes)
+            and value.get("document_map_modes") == sorted(self.document_map_modes)
+            and value.get("additional_workloads") == sorted(self.additional_workloads)
+            and value.get("modality") == "text"
+            and value.get("effect_class") == "read_only"
+            and value.get("private_text_required") is True
+            and value.get("max_context_tokens") == self.max_context_tokens
+            and value.get("max_output_tokens") == self.max_output_tokens
+            and value.get("max_concurrency") == self.max_concurrency
+            and value.get("primary_fallback_required") is True
+            and value.get("primary_final_synthesis_required") is True
+            and value.get("secondary_publication_allowed") is False
+            and value.get("secondary_tools_allowed") is False
+            and value.get("secondary_effects_allowed") is False
+            and value.get("gateway_manifest_change_required") is False
+            and value.get("windows_container_restart_required") is False
+        )
+
+    @property
+    def is_well_formed(self) -> bool:
+        return bool(
+            self.policy_id == "gptoss20b-document-map-v1"
+            and _SHA256_RE.fullmatch(self.manifest_sha256)
+            and _PROFILE_ID_RE.fullmatch(self.runtime_profile_id)
+            and _SHA256_RE.fullmatch(self.runtime_profile_manifest_sha256)
+            and self.allowed_global_modes == frozenset({"assist"})
+            and self.document_map_modes == frozenset({"assist", "shadow"})
+            and self.additional_workloads == frozenset({"document_map"})
+            and self.max_context_tokens == 4096
+            and self.max_output_tokens == 512
+            and self.max_concurrency == 1
+        )
+
+
 # Exact finalist accepted by the complete quality/capacity/soak/failure chain.
 # Product policy remains separate: the initial release keeps public discarded
 # shadow/extract, while private shadow and assist require distinct activations.
@@ -513,6 +607,28 @@ _ACCEPTED_GPT_OSS_20B_FINALIST = SecondaryRuntimeProfile(
     runtime_manifest_sha256=("15be7b3bdaa3cd76ace1bcc93ca461598a9583d920f4f3e55924db2f6b643428"),
 )
 
+# This policy deliberately does not alter the gateway-served runtime manifest.
+# The engine, Windows bundle, profile ID and accepted manifest digest remain
+# exactly the already-certified finalist.  It only admits one additional
+# product workload through an explicit release-operator transition; the model
+# still receives bounded text and can neither publish nor execute anything.
+_DOCUMENT_MAP_WORKLOAD_POLICY = SecondaryWorkloadPolicy(
+    policy_id="gptoss20b-document-map-v1",
+    manifest_sha256="c881eefe53d5b02baee3feb133605838021fabe642578b163bdd46e6bd8a2fc2",
+    runtime_profile_id=_ACCEPTED_GPT_OSS_20B_FINALIST.profile_id,
+    runtime_profile_manifest_sha256=_ACCEPTED_GPT_OSS_20B_FINALIST.manifest_sha256,
+    allowed_global_modes=frozenset({"assist"}),
+    document_map_modes=frozenset({"assist", "shadow"}),
+    additional_workloads=frozenset({"document_map"}),
+    max_context_tokens=4096,
+    max_output_tokens=512,
+    max_concurrency=1,
+)
+
+SECONDARY_WORKLOAD_POLICIES: Mapping[str, SecondaryWorkloadPolicy] = MappingProxyType(
+    {_DOCUMENT_MAP_WORKLOAD_POLICY.policy_id: _DOCUMENT_MAP_WORKLOAD_POLICY}
+)
+
 
 # Filled only from a completed live battery and an immutable profile manifest.
 ACCEPTED_SECONDARY_RUNTIME_PROFILES: Mapping[str, SecondaryRuntimeProfile] = MappingProxyType(
@@ -551,6 +667,41 @@ def get_secondary_runtime_profile(profile_id: str) -> SecondaryRuntimeProfile | 
     if profile is None or not profile.is_well_formed:
         return None
     return profile
+
+
+def get_secondary_workload_policy(
+    profile: SecondaryRuntimeProfile,
+    *,
+    global_mode: str,
+) -> SecondaryWorkloadPolicy | None:
+    """Resolve the exact product overlay without changing endpoint identity."""
+
+    policy = SECONDARY_WORKLOAD_POLICIES.get("gptoss20b-document-map-v1")
+    if (
+        policy is None
+        or not policy.is_well_formed
+        or policy.runtime_profile_id != profile.profile_id
+        or policy.runtime_profile_manifest_sha256 != profile.manifest_sha256
+        or global_mode not in policy.allowed_global_modes
+        or policy.max_context_tokens != profile.max_context_tokens
+        or policy.max_output_tokens != profile.max_output_tokens
+        or policy.max_concurrency != profile.max_concurrency
+    ):
+        return None
+    return policy
+
+
+def secondary_effective_workloads(
+    profile: SecondaryRuntimeProfile,
+    *,
+    global_mode: str,
+) -> frozenset[str]:
+    """Return runtime-certified workloads plus one exact product overlay."""
+
+    policy = get_secondary_workload_policy(profile, global_mode=global_mode)
+    if policy is None:
+        return profile.allowed_workloads
+    return profile.allowed_workloads | policy.additional_workloads
 
 
 def get_secondary_runtime_admission(
