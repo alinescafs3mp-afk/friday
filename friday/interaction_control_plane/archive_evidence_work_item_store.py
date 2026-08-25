@@ -40,6 +40,9 @@ from friday.interaction_control_plane.work_item_contract import (
 from friday.interaction_control_plane.work_item_store import (
     WorkItemAnchorError,
     WorkItemConflictError,
+    _begin_work_item_mutation_savepoint,
+    _release_work_item_mutation_savepoint,
+    _rollback_work_item_mutation_savepoint,
 )
 from friday.orchestration.archive_recall_outcome import (
     ArchiveRecallLane,
@@ -375,8 +378,9 @@ def _retire_active_conversation_work(
 ) -> str:
     timestamp = _now(now)
     cursor = conn.execute(
-        """SELECT id,revision,updated_at,expires_at FROM work_items
-            WHERE user_id=? AND conversation_id=? AND state='active' LIMIT 1""",
+        """SELECT id,state,revision,updated_at,expires_at FROM work_items
+            WHERE user_id=? AND conversation_id=?
+              AND state IN ('active','waiting_for_input') LIMIT 1""",
         (user_id, conversation_id),
     )
     row = cursor.fetchone()
@@ -394,8 +398,8 @@ def _retire_active_conversation_work(
         retired = conn.execute(
             """DELETE FROM work_items
                 WHERE id=? AND user_id=? AND conversation_id=?
-                  AND state='active' AND revision=?""",
-            (active["id"], user_id, conversation_id, revision),
+                  AND state=? AND revision=?""",
+            (active["id"], user_id, conversation_id, active["state"], revision),
         )
     elif expires <= timestamp:
         retired = conn.execute(
@@ -403,13 +407,14 @@ def _retire_active_conversation_work(
                   SET state='expired',transition='expired',revision=revision+1,
                       updated_at=?,closed_at=?
                 WHERE id=? AND user_id=? AND conversation_id=?
-                  AND state='active' AND revision=? AND expires_at<=?""",
+                  AND state=? AND revision=? AND expires_at<=?""",
             (
                 timestamp,
                 timestamp,
                 active["id"],
                 user_id,
                 conversation_id,
+                active["state"],
                 revision,
                 timestamp,
             ),
@@ -420,12 +425,13 @@ def _retire_active_conversation_work(
                   SET state='suspended',transition='suspended',revision=revision+1,
                       updated_at=?,closed_at=NULL
                 WHERE id=? AND user_id=? AND conversation_id=?
-                  AND state='active' AND revision=? AND expires_at>?""",
+                  AND state=? AND revision=? AND expires_at>?""",
             (
                 timestamp,
                 active["id"],
                 user_id,
                 conversation_id,
+                active["state"],
                 revision,
                 timestamp,
             ),
@@ -478,14 +484,15 @@ def create_recall_selected_archive_evidence_work_item_in_transaction(
         expected_source_bearing=True,
         require_latest_message=True,
     )
-    timestamp = _retire_active_conversation_work(
-        conn,
-        user_id=user,
-        conversation_id=conversation,
-        now=now,
-    )
-    frame = RecallSelectedArchiveEvidenceActiveFrame()
+    savepoint = _begin_work_item_mutation_savepoint(conn)
     try:
+        timestamp = _retire_active_conversation_work(
+            conn,
+            user_id=user,
+            conversation_id=conversation,
+            now=now,
+        )
+        frame = RecallSelectedArchiveEvidenceActiveFrame()
         conn.execute(
             """INSERT INTO work_items(
                    id,user_id,conversation_id,kind,goal,state,playbook,
@@ -525,29 +532,33 @@ def create_recall_selected_archive_evidence_work_item_in_transaction(
                         :origin_boundary_user_message_id)""",
             selected_evidence.to_storage_payload(),
         )
-    except sqlite3.IntegrityError as exc:
-        raise WorkItemConflictError("archive Work Item creation lost its state race") from exc
-    created = _fetch_archive_work_item(
-        conn,
-        work_item_id=identifier,
-        user_id=user,
-        conversation_id=conversation,
-    )
-    if created is None:  # pragma: no cover - the transaction inserted both rows
-        raise WorkItemConflictError("created archive Work Item is not durable")
-    _validate_archive_anchor(
-        conn,
-        user_id=user,
-        conversation_id=conversation,
-        boundary_user_message_id=created.anchor_user_message_id,
-        assistant_message_id=created.anchor_assistant_message_id,
-        accepted_plan_sha256=created.accepted_plan_sha256,
-        accepted_outcome_sha256=created.accepted_outcome_sha256,
-        evidence=created.selected_evidence,
-        expected_lane=ArchiveRecallLane.FEDERATED_SEARCH,
-        expected_source_bearing=True,
-        require_latest_message=True,
-    )
+        created = _fetch_archive_work_item(
+            conn,
+            work_item_id=identifier,
+            user_id=user,
+            conversation_id=conversation,
+        )
+        if created is None:  # pragma: no cover - the transaction inserted both rows
+            raise WorkItemConflictError("created archive Work Item is not durable")
+        _validate_archive_anchor(
+            conn,
+            user_id=user,
+            conversation_id=conversation,
+            boundary_user_message_id=created.anchor_user_message_id,
+            assistant_message_id=created.anchor_assistant_message_id,
+            accepted_plan_sha256=created.accepted_plan_sha256,
+            accepted_outcome_sha256=created.accepted_outcome_sha256,
+            evidence=created.selected_evidence,
+            expected_lane=ArchiveRecallLane.FEDERATED_SEARCH,
+            expected_source_bearing=True,
+            require_latest_message=True,
+        )
+    except BaseException as exc:
+        _rollback_work_item_mutation_savepoint(conn, savepoint)
+        if isinstance(exc, sqlite3.IntegrityError):
+            raise WorkItemConflictError("archive Work Item creation lost its state race") from exc
+        raise
+    _release_work_item_mutation_savepoint(conn, savepoint)
     return created
 
 

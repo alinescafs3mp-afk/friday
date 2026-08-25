@@ -395,7 +395,7 @@ class ConversationsMixin(StorageShared):
             exhausted_work_items = conn.execute(
                 """DELETE FROM work_items
                     WHERE user_id=? AND conversation_id=?
-                      AND state IN ('active','suspended')
+                      AND state IN ('active','waiting_for_input','suspended')
                       AND revision>=2147483647""",
                 (user_id, conversation_id),
             )
@@ -406,7 +406,7 @@ class ConversationsMixin(StorageShared):
                           updated_at=MAX(updated_at, ?),
                           closed_at=MAX(updated_at, ?)
                     WHERE user_id=? AND conversation_id=?
-                      AND state IN ('active','suspended')
+                      AND state IN ('active','waiting_for_input','suspended')
                       AND revision<2147483647""",
                 (now, now, user_id, conversation_id),
             )

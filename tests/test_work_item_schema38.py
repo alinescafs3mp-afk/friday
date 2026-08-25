@@ -1,4 +1,4 @@
-"""Schema-39 migration and fail-closed DDL contract for durable Work Items."""
+"""Schema-40 migration and fail-closed DDL contract for durable Work Items."""
 
 from __future__ import annotations
 
@@ -11,7 +11,11 @@ from pathlib import Path
 import pytest
 
 from friday.interaction_control_plane.work_item_contract import RecallConversationActiveFrame
-from friday.interaction_control_plane.work_item_schema import _WORK_ITEM_SCHEMA_38
+from friday.interaction_control_plane.work_item_schema import (
+    _WORK_ITEM_SCHEMA_38,
+    _WORK_ITEM_SCHEMA_39,
+    _canonical_work_item_schema_objects,
+)
 from friday.storage import SCHEMA_VERSION, FridayStorage
 
 SCHEMA_FIXTURES = Path(__file__).parent / "fixtures" / "schemas"
@@ -25,44 +29,39 @@ def _schema_37_copy(tmp_path: Path) -> Path:
 
 
 def _install_released_work_item_schema_38(conn: sqlite3.Connection) -> None:
+    conn.execute("DROP TABLE work_item_archive_candidate_questions")
+    conn.execute("DROP TABLE work_item_archive_candidate_set_items")
+    conn.execute("DROP TABLE work_item_archive_candidate_sets")
     conn.execute("DROP TABLE work_item_selected_evidence")
-    conn.execute("DROP TRIGGER trg_work_items_workflow_identity_immutable")
-    for index in (
-        "uq_work_items_active_conversation",
-        "idx_work_items_owner_state_updated",
-        "idx_work_items_conversation_updated",
-        "idx_work_items_expiry",
-    ):
-        conn.execute(f'DROP INDEX "{index}"')
     conn.execute("DROP TABLE work_items")
     conn.executescript(_WORK_ITEM_SCHEMA_38)
     conn.execute("UPDATE schema_meta SET value='38' WHERE key='schema_version'")
 
 
-def test_schema_39_installs_the_exact_work_item_projection(storage) -> None:
-    assert SCHEMA_VERSION == 39
-    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "39"
+def _install_released_work_item_schema_39(conn: sqlite3.Connection) -> None:
+    conn.execute("DROP TABLE work_item_archive_candidate_questions")
+    conn.execute("DROP TABLE work_item_archive_candidate_set_items")
+    conn.execute("DROP TABLE work_item_archive_candidate_sets")
+    conn.execute("DROP TABLE work_item_selected_evidence")
+    conn.execute("DROP TABLE work_items")
+    conn.executescript(_WORK_ITEM_SCHEMA_39)
+    conn.execute("UPDATE schema_meta SET value='39' WHERE key='schema_version'")
+
+
+def test_schema_40_installs_the_exact_work_item_projection(storage) -> None:
+    assert SCHEMA_VERSION == 40
+    assert storage.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "40"
     objects = {
-        (str(row[0]), str(row[1]))
+        (str(row[0]), str(row[1])): "".join(str(row[2]).split())
         for row in storage.execute(
-            """SELECT type,name FROM sqlite_master
+            """SELECT type,name,sql FROM sqlite_master
                 WHERE sql IS NOT NULL
-                  AND (name IN ('work_items','work_item_selected_evidence')
-                       OR tbl_name IN ('work_items','work_item_selected_evidence'))"""
+                  AND (name='work_items' OR name LIKE 'work_item_%'
+                       OR name LIKE '%work_items_%' OR tbl_name='work_items'
+                       OR tbl_name LIKE 'work_item_%')"""
         )
     }
-    assert objects == {
-        ("table", "work_items"),
-        ("index", "uq_work_items_active_conversation"),
-        ("index", "idx_work_items_owner_state_updated"),
-        ("index", "idx_work_items_conversation_updated"),
-        ("index", "idx_work_items_expiry"),
-        ("table", "work_item_selected_evidence"),
-        ("index", "idx_work_item_selected_evidence_origin_boundary"),
-        ("trigger", "trg_work_item_selected_evidence_scope_insert"),
-        ("trigger", "trg_work_item_selected_evidence_immutable"),
-        ("trigger", "trg_work_items_workflow_identity_immutable"),
-    }
+    assert objects == _canonical_work_item_schema_objects()
     foreign_keys = {
         (str(row[3]), str(row[2]), str(row[4]))
         for row in storage.execute("PRAGMA foreign_key_list(work_items)")
@@ -75,12 +74,12 @@ def test_schema_39_installs_the_exact_work_item_projection(storage) -> None:
     }
 
 
-def test_released_schema_37_migrates_to_39_without_losing_seed_data(settings, tmp_path) -> None:
+def test_released_schema_37_migrates_to_40_without_losing_seed_data(settings, tmp_path) -> None:
     database = _schema_37_copy(tmp_path)
     migrated = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "39"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "40"
         )
         assert (
             migrated.execute("SELECT COUNT(*) FROM raw_objects WHERE user_id='fixture-owner'").fetchone()[0]
@@ -97,15 +96,15 @@ def test_released_schema_37_migrates_to_39_without_losing_seed_data(settings, tm
             ).split()
         )
         assert "unixepoch(expires_at)-unixepoch(updated_at)<=43200" in migrated_ddl
-        assert "stateIN('cancelled','expired')ANDclosed_at=updated_at" in migrated_ddl
-        assert "transition<>'created'ANDrevision>=2" in migrated_ddl
+        assert "stateIN('completed','cancelled','expired')ANDclosed_at=updated_at" in migrated_ddl
+        assert "transitionNOTIN('created','question_asked')ANDrevision>=2" in migrated_ddl
         assert migrated.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert migrated.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         migrated.close()
 
 
-def test_exact_interrupted_37_to_39_attempt_is_recoverable(settings, tmp_path) -> None:
+def test_exact_interrupted_37_to_40_attempt_is_recoverable(settings, tmp_path) -> None:
     database = tmp_path / "interrupted-exact.sqlite3"
     initial = FridayStorage(replace(settings, database_path=database))
     initial.execute("SELECT 1")
@@ -117,7 +116,7 @@ def test_exact_interrupted_37_to_39_attempt_is_recoverable(settings, tmp_path) -
     try:
         assert (
             recovered.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0]
-            == "39"
+            == "40"
         )
         assert recovered.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     finally:
@@ -176,7 +175,7 @@ def test_released_schema_38_rebuild_preserves_every_recall_row(settings, tmp_pat
     try:
         assert tuple(migrated.execute("SELECT * FROM work_items").fetchone()) == row
         assert (
-            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "39"
+            migrated.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "40"
         )
         assert migrated.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert migrated.execute("PRAGMA foreign_key_check").fetchall() == []
@@ -195,13 +194,13 @@ def test_counterfeit_schema_38_is_rejected_before_rebuild(settings, tmp_path) ->
 
     rejected = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
-        with pytest.raises(sqlite3.DatabaseError, match="Schema 38 work item DDL"):
+        with pytest.raises(sqlite3.DatabaseError, match="Released Work Item DDL"):
             rejected.execute("SELECT 1")
     finally:
         rejected.close()
 
 
-@pytest.mark.parametrize("published_marker", ["37", "38", "39"])
+@pytest.mark.parametrize("published_marker", ["37", "38", "39", "40"])
 def test_missing_partial_unique_index_is_rejected_before_if_not_exists_can_hide_it(
     settings,
     tmp_path,
@@ -212,7 +211,7 @@ def test_missing_partial_unique_index_is_rejected_before_if_not_exists_can_hide_
     initial.execute("SELECT 1")
     initial.close()
     with sqlite3.connect(database) as conn:
-        conn.execute("DROP INDEX uq_work_items_active_conversation")
+        conn.execute("DROP INDEX uq_work_items_open_conversation")
         conn.execute(
             "UPDATE schema_meta SET value=? WHERE key='schema_version'",
             (published_marker,),
@@ -220,7 +219,7 @@ def test_missing_partial_unique_index_is_rejected_before_if_not_exists_can_hide_
 
     rejected = FridayStorage(replace(settings, database_path=database, database_must_exist=True))
     try:
-        with pytest.raises(sqlite3.DatabaseError, match="work item DDL"):
+        with pytest.raises(sqlite3.DatabaseError, match="[Ww]ork [Ii]tem DDL"):
             rejected.execute("SELECT 1")
     finally:
         rejected.close()

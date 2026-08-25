@@ -163,7 +163,8 @@ class RecallSelectedArchiveEvidenceWorkItem:
             WorkState.CANCELLED: {WorkTransition.CANCELLED},
             WorkState.EXPIRED: {WorkTransition.EXPIRED},
         }
-        if self.transition not in expected_transitions[self.state]:
+        admitted_transitions = expected_transitions.get(self.state)
+        if admitted_transitions is None or self.transition not in admitted_transitions:
             raise WorkItemContractError("selected archive transition does not match state")
         if self.transition is WorkTransition.CREATED:
             if self.revision != 1 or (

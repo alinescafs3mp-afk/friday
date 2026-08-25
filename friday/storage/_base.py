@@ -151,7 +151,9 @@ LOGGER = logging.getLogger("friday.storage")
 # 39 — one body-free selected-evidence sidecar and the closed
 # RecallSelectedArchiveEvidence workflow labels.  The released schema-38 table is
 # authenticated and rebuilt without changing any existing RecallConversation row.
-SCHEMA_VERSION = 39
+# 40 — closed body-free archive candidate sets and typed ordinal questions. Exact
+# schema-38/39 projections are authenticated before their Work Item tables rebuild.
+SCHEMA_VERSION = 40
 
 #: Определение таблицы внешних источников отдельной константой: миграция схемы 29
 #: пересоздаёт её, чтобы ключом стала ПАРА `(user_id, name)`, и должна брать ровно

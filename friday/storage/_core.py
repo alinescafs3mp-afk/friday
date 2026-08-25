@@ -37,7 +37,7 @@ from friday.interaction_control_plane.failure_schema import (
 from friday.interaction_control_plane.work_item_schema import (
     WORK_ITEM_SCHEMA,
     WORK_ITEM_SCHEMA_VERSION,
-    upgrade_work_item_schema_38_to_39,
+    upgrade_work_item_schema_to_40,
     validate_work_item_schema,
 )
 from friday.private_fs import prepare_private_sqlite, restrict_sqlite_files
@@ -2497,13 +2497,10 @@ class CoreMixin(StorageShared):
             if parsed_version is not None and parsed_version >= WORK_ITEM_SCHEMA_VERSION:
                 validate_work_item_schema(conn)
             else:
-                # Schema 39 widens closed workflow labels and adds one exact
-                # sidecar, so SQLite must rebuild the released schema-38 table.
-                # Accept only the byte-shape-equivalent released DDL or an exact
-                # already-completed 39 projection whose marker publication was
-                # interrupted.  Older databases may legitimately have no Work
-                # Item table yet; marker 38 may not.
-                upgrade_work_item_schema_38_to_39(
+                # Schema 40 adds the closed candidate-set/question projection.
+                # Authenticate exact released schema 38/39 DDL before rebuild;
+                # older databases may legitimately have no Work Item table.
+                upgrade_work_item_schema_to_40(
                     conn,
                     required=parsed_version is not None and parsed_version >= 38,
                 )

@@ -1933,6 +1933,9 @@ class MaintenanceMixin(StorageShared):
             # Import the transaction-local validator only on this export path.
             # Keeping it out of storage package initialisation avoids coupling
             # schema bootstrap to the orchestration/store dependency graph.
+            from friday.interaction_control_plane.archive_candidate_selection_store import (
+                get_archive_candidate_selection_work_item_for_export_in_transaction,
+            )
             from friday.interaction_control_plane.archive_evidence_work_item_store import (
                 get_recall_selected_archive_evidence_work_item_for_export_in_transaction,
             )
@@ -1944,7 +1947,16 @@ class MaintenanceMixin(StorageShared):
             for row in rows_by_table["work_items"]:
                 item_payload: dict[str, object] | None = None
                 try:
-                    if row.get("kind") == "recall_selected_archive_evidence":
+                    if row.get("kind") == "select_archive_candidate_and_replay_evidence":
+                        candidate_item = get_archive_candidate_selection_work_item_for_export_in_transaction(
+                            conn,
+                            work_item_id=str(row.get("id") or ""),
+                            user_id=user_id,
+                            conversation_id=str(row.get("conversation_id") or ""),
+                        )
+                        if candidate_item is not None and candidate_item.conversation_id in conversation_ids:
+                            item_payload = candidate_item.to_payload()
+                    elif row.get("kind") == "recall_selected_archive_evidence":
                         archive_item = (
                             get_recall_selected_archive_evidence_work_item_for_export_in_transaction(
                                 conn,
@@ -1955,7 +1967,7 @@ class MaintenanceMixin(StorageShared):
                         )
                         if archive_item is not None and archive_item.conversation_id in conversation_ids:
                             item_payload = archive_item.to_payload()
-                    else:
+                    elif row.get("kind") == "recall_conversation":
                         recall_item = get_recall_conversation_work_item_for_export_in_transaction(
                             conn,
                             work_item_id=str(row.get("id") or ""),

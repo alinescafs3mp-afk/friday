@@ -33,7 +33,8 @@ from friday.retrieval.archive_search_authority import (
     ArchiveSearchSelectedEvidence,
 )
 
-ARCHIVE_RECALL_OUTCOME_SCHEMA = "friday.archive-recall-outcome.v1"
+ARCHIVE_RECALL_OUTCOME_SCHEMA = "friday.archive-recall-outcome.v2"
+_ARCHIVE_RECALL_OUTCOME_SCHEMA_V1 = "friday.archive-recall-outcome.v1"
 ARCHIVE_RECALL_OUTCOME_RECEIPT_SCHEMA = "friday.accepted-archive-recall-outcome-receipt.v1"
 ACCEPTED_ARCHIVE_RECALL_OUTCOME_METADATA_KEY = "accepted_archive_recall_outcome"
 
@@ -151,6 +152,7 @@ class ArchiveRecallOutcome:
     publication_attested: bool
     semantic_verified: bool
     answer_sha256: str
+    candidate_projection_sha256: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.lane) is not ArchiveRecallLane:
@@ -173,6 +175,11 @@ class ArchiveRecallOutcome:
         )
         labels = _labels(self.used_citation_labels)
         if self.lane is ArchiveRecallLane.FEDERATED_SEARCH:
+            if self.candidate_projection_sha256 is not None:
+                _digest(
+                    self.candidate_projection_sha256,
+                    label="candidate_projection_sha256",
+                )
             if self.status is not _expected_status(self.coverage_grade, count):
                 raise ArchiveRecallOutcomeError("archive recall status contradicts coverage and count")
             if self.selected_evidence is not None and (
@@ -181,6 +188,8 @@ class ArchiveRecallOutcome:
                 raise ArchiveRecallOutcomeError("archive selected evidence is not supported by the outcome")
             if self.semantic_verified is not False:
                 raise ArchiveRecallOutcomeError("federated archive recall cannot claim semantic verification")
+        elif self.candidate_projection_sha256 is not None:
+            raise ArchiveRecallOutcomeError("archive replay cannot carry a candidate projection")
         elif self.status in {ArchiveRecallStatus.COMPLETE, ArchiveRecallStatus.PARTIAL}:
             if (
                 self.status is not _expected_status(self.coverage_grade, 1)
@@ -235,6 +244,7 @@ class ArchiveRecallOutcome:
                 publication_attested=True,
                 semantic_verified=False,
                 answer_sha256=attestation.answer_sha256,
+                candidate_projection_sha256=attestation.candidate_projection.canonical_sha256,
             )
         except ArchiveRecallOutcomeError:
             raise
@@ -242,7 +252,7 @@ class ArchiveRecallOutcome:
             raise ArchiveRecallOutcomeError("archive publication attestation is unavailable") from None
 
     def to_payload(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "answer_sha256": self.answer_sha256,
             "candidate_count": self.candidate_count,
             "coverage_grade": self.coverage_grade.value,
@@ -251,7 +261,11 @@ class ArchiveRecallOutcome:
             "lane": self.lane.value,
             "plan_sha256": self.plan_sha256,
             "publication_attested": self.publication_attested,
-            "schema": ARCHIVE_RECALL_OUTCOME_SCHEMA,
+            "schema": (
+                ARCHIVE_RECALL_OUTCOME_SCHEMA
+                if self.candidate_projection_sha256 is not None
+                else _ARCHIVE_RECALL_OUTCOME_SCHEMA_V1
+            ),
             "selected_evidence": (
                 None if self.selected_evidence is None else self.selected_evidence.to_private_payload()
             ),
@@ -260,6 +274,9 @@ class ArchiveRecallOutcome:
             "used_citation_count": len(self.used_citation_labels),
             "used_citation_labels": list(self.used_citation_labels),
         }
+        if self.candidate_projection_sha256 is not None:
+            payload["candidate_projection_sha256"] = self.candidate_projection_sha256
+        return payload
 
     def to_json(self) -> str:
         value = _canonical_json(self.to_payload())
@@ -297,28 +314,29 @@ class ArchiveRecallOutcome:
             decoded = value
         if not isinstance(decoded, Mapping):
             raise ArchiveRecallOutcomeError("archive recall outcome must be one object")
-        expected = frozenset(
-            {
-                "answer_sha256",
-                "candidate_count",
-                "coverage_grade",
-                "coverage_sha256",
-                "evidence_sha256",
-                "lane",
-                "plan_sha256",
-                "publication_attested",
-                "schema",
-                "selected_evidence",
-                "semantic_verified",
-                "status",
-                "used_citation_count",
-                "used_citation_labels",
-            }
-        )
-        if any(type(key) is not str for key in decoded) or frozenset(decoded) != expected:
-            raise ArchiveRecallOutcomeError("archive recall outcome keys do not match the contract")
-        if decoded["schema"] != ARCHIVE_RECALL_OUTCOME_SCHEMA:
+        schema = decoded.get("schema")
+        expected = {
+            "answer_sha256",
+            "candidate_count",
+            "coverage_grade",
+            "coverage_sha256",
+            "evidence_sha256",
+            "lane",
+            "plan_sha256",
+            "publication_attested",
+            "schema",
+            "selected_evidence",
+            "semantic_verified",
+            "status",
+            "used_citation_count",
+            "used_citation_labels",
+        }
+        if schema == ARCHIVE_RECALL_OUTCOME_SCHEMA:
+            expected.add("candidate_projection_sha256")
+        elif schema != _ARCHIVE_RECALL_OUTCOME_SCHEMA_V1:
             raise ArchiveRecallOutcomeError("archive recall outcome schema is unsupported")
+        if any(type(key) is not str for key in decoded) or frozenset(decoded) != frozenset(expected):
+            raise ArchiveRecallOutcomeError("archive recall outcome keys do not match the contract")
         raw_labels = decoded["used_citation_labels"]
         if type(raw_labels) is not list:
             raise ArchiveRecallOutcomeError("archive recall citation labels must be an array")
@@ -356,6 +374,14 @@ class ArchiveRecallOutcome:
                 publication_attested=decoded["publication_attested"],
                 semantic_verified=decoded["semantic_verified"],
                 answer_sha256=_digest(decoded["answer_sha256"], label="answer_sha256"),
+                candidate_projection_sha256=(
+                    _digest(
+                        decoded["candidate_projection_sha256"],
+                        label="candidate_projection_sha256",
+                    )
+                    if schema == ARCHIVE_RECALL_OUTCOME_SCHEMA
+                    else None
+                ),
             )
         except ArchiveRecallOutcomeError:
             raise

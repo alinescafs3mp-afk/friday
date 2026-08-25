@@ -1,4 +1,4 @@
-"""Closed contracts for Friday's two bounded durable recall Work Item kinds.
+"""Closed contracts for Friday's bounded durable Work Item kinds.
 
 This first vertical slice is intentionally smaller than the eventual generic
 work graph.  It retains only code-owned workflow labels, a bounded temporal
@@ -26,6 +26,11 @@ RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_SCHEMA = (
 RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_JSON = (
     '{"schema":"' + RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_SCHEMA + '"}'
 )
+ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_SCHEMA = "friday.archive-candidate-selection-active-frame.v1"
+ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_JSON = (
+    '{"schema":"' + ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_SCHEMA + '"}'
+)
+ARCHIVE_CANDIDATE_MAX_COUNT = 20
 WORK_ITEM_ACTIVE_FRAME_MAX_BYTES = 4_096
 WORK_ITEM_TTL_HOURS = 12
 WORK_ITEM_MAX_REVISION = 2_147_483_647
@@ -45,21 +50,29 @@ class WorkItemContractError(ValueError):
 class WorkKind(StrEnum):
     RECALL_CONVERSATION = "recall_conversation"
     RECALL_SELECTED_ARCHIVE_EVIDENCE = "recall_selected_archive_evidence"
+    SELECT_ARCHIVE_CANDIDATE_AND_REPLAY_EVIDENCE = "select_archive_candidate_and_replay_evidence"
 
 
 class WorkGoal(StrEnum):
     EXACT_CURRENT_CONVERSATION_RECALL = "exact_current_conversation_recall"
     EXACT_SELECTED_ARCHIVE_EVIDENCE_RECALL = "exact_selected_archive_evidence_recall"
+    EXACT_ARCHIVE_CANDIDATE_SELECTION_AND_EVIDENCE_REPLAY = (
+        "exact_archive_candidate_selection_and_evidence_replay"
+    )
 
 
 class WorkPlaybook(StrEnum):
     RECALL_CONVERSATION = "recall_conversation"
     RECALL_SELECTED_ARCHIVE_EVIDENCE = "recall_selected_archive_evidence"
+    SELECT_ARCHIVE_CANDIDATE_AND_REPLAY_EVIDENCE = "select_archive_candidate_and_replay_evidence"
 
 
 class WorkCompletionContract(StrEnum):
     ACCEPTED_EXACT_OWNED_MESSAGE_WINDOW = "accepted_exact_owned_message_window"
     ACCEPTED_EXACT_SELECTED_ARCHIVE_EVIDENCE = "accepted_exact_selected_archive_evidence"
+    ACCEPTED_EXACT_ARCHIVE_CANDIDATE_AND_EVIDENCE_REPLAY = (
+        "accepted_exact_archive_candidate_and_evidence_replay"
+    )
 
 
 class WorkSourceScope(StrEnum):
@@ -80,6 +93,8 @@ class RecallMessageRole(StrEnum):
 
 class WorkState(StrEnum):
     ACTIVE = "active"
+    WAITING_FOR_INPUT = "waiting_for_input"
+    COMPLETED = "completed"
     SUSPENDED = "suspended"
     CANCELLED = "cancelled"
     EXPIRED = "expired"
@@ -87,6 +102,9 @@ class WorkState(StrEnum):
 
 class WorkTransition(StrEnum):
     CREATED = "created"
+    QUESTION_ASKED = "question_asked"
+    QUESTION_REASKED = "question_reasked"
+    CANDIDATE_REPLAYED = "candidate_replayed"
     CONSTRAINT_UPDATED = "constraint_updated"
     EVIDENCE_REPLAYED = "evidence_replayed"
     SUSPENDED = "suspended"
@@ -394,7 +412,8 @@ class RecallConversationWorkItem:
             WorkState.CANCELLED: {WorkTransition.CANCELLED},
             WorkState.EXPIRED: {WorkTransition.EXPIRED},
         }
-        if self.transition not in expected_transitions[self.state]:
+        admitted_transitions = expected_transitions.get(self.state)
+        if admitted_transitions is None or self.transition not in admitted_transitions:
             raise WorkItemContractError("transition does not match work state")
         if self.transition is WorkTransition.CREATED:
             if self.revision != 1:
@@ -513,6 +532,9 @@ class RecallConversationWorkItem:
 
 
 __all__ = [
+    "ARCHIVE_CANDIDATE_MAX_COUNT",
+    "ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_JSON",
+    "ARCHIVE_CANDIDATE_SELECTION_ACTIVE_FRAME_SCHEMA",
     "RECALL_CONVERSATION_ACTIVE_FRAME_SCHEMA",
     "RECALL_CONVERSATION_WORK_ITEM_SCHEMA",
     "RECALL_SELECTED_ARCHIVE_EVIDENCE_ACTIVE_FRAME_JSON",

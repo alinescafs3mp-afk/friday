@@ -130,6 +130,22 @@ def _row_mapping(cursor: sqlite3.Cursor, row: object) -> dict[str, object]:
     raise WorkItemContractError("work item query returned an invalid row")
 
 
+def _begin_work_item_mutation_savepoint(conn: sqlite3.Connection) -> str:
+    name = f"work_item_mutation_{uuid.uuid4().hex}"
+    conn.execute(f'SAVEPOINT "{name}"')  # nosec B608 - generated hexadecimal identifier
+    return name
+
+
+def _rollback_work_item_mutation_savepoint(conn: sqlite3.Connection, name: str) -> None:
+    if conn.in_transaction:
+        conn.execute(f'ROLLBACK TO SAVEPOINT "{name}"')  # nosec B608 - internal identifier
+        conn.execute(f'RELEASE SAVEPOINT "{name}"')  # nosec B608 - internal identifier
+
+
+def _release_work_item_mutation_savepoint(conn: sqlite3.Connection, name: str) -> None:
+    conn.execute(f'RELEASE SAVEPOINT "{name}"')  # nosec B608 - internal identifier
+
+
 def _fetch_work_item(
     conn: sqlite3.Connection,
     *,
@@ -415,69 +431,70 @@ def create_recall_conversation_work_item_in_transaction(
         require_latest_message=True,
         expected_active_frame=frame,
     )
-    timestamp = _now(now)
-    active_cursor = conn.execute(
-        """SELECT id,revision,updated_at,expires_at FROM work_items
-            WHERE user_id=? AND conversation_id=? AND state='active'
-            LIMIT 1""",
-        (user, conversation),
-    )
-    active_row = active_cursor.fetchone()
-    if active_row is not None:
-        active = _row_mapping(active_cursor, active_row)
-        active_revision = active["revision"]
-        if not isinstance(active_revision, int) or isinstance(active_revision, bool):
-            raise WorkItemContractError("stored Work Item revision is invalid")
-        timestamp = _logical_now(now, current_updated_at=str(active["updated_at"] or ""))
-        active_expiry = canonical_work_item_instant(active["expires_at"], label="expires_at")
-        if active_expiry != active["expires_at"]:
-            raise WorkItemContractError("stored Work Item expiry is not canonical")
-        if active_revision >= WORK_ITEM_MAX_REVISION:
-            # This bounded operational frame has no children or outcome ledger in
-            # P2.  A saturated revision cannot be advanced honestly, so replace
-            # it atomically with the new full request instead of breaking chat.
-            retired = conn.execute(
-                """DELETE FROM work_items
-                    WHERE id=? AND user_id=? AND conversation_id=?
-                      AND state='active' AND revision=?""",
-                (active["id"], user, conversation, active_revision),
-            )
-        elif active_expiry <= timestamp:
-            retired = conn.execute(
-                """UPDATE work_items
-                      SET state='expired',transition='expired',revision=revision+1,
-                          updated_at=?,closed_at=?
-                    WHERE id=? AND user_id=? AND conversation_id=?
-                      AND state='active' AND revision=? AND expires_at<=?""",
-                (
-                    timestamp,
-                    timestamp,
-                    active["id"],
-                    user,
-                    conversation,
-                    active_revision,
-                    timestamp,
-                ),
-            )
-        else:
-            retired = conn.execute(
-                """UPDATE work_items
-                      SET state='suspended',transition='suspended',revision=revision+1,
-                          updated_at=?,closed_at=NULL
-                    WHERE id=? AND user_id=? AND conversation_id=?
-                      AND state='active' AND revision=? AND expires_at>?""",
-                (
-                    timestamp,
-                    active["id"],
-                    user,
-                    conversation,
-                    active_revision,
-                    timestamp,
-                ),
-            )
-        if retired.rowcount != 1:
-            raise WorkItemConflictError("active Work Item retirement lost its revision race")
+    savepoint = _begin_work_item_mutation_savepoint(conn)
     try:
+        timestamp = _now(now)
+        active_cursor = conn.execute(
+            """SELECT id,state,revision,updated_at,expires_at FROM work_items
+                WHERE user_id=? AND conversation_id=?
+                  AND state IN ('active','waiting_for_input')
+                LIMIT 1""",
+            (user, conversation),
+        )
+        active_row = active_cursor.fetchone()
+        if active_row is not None:
+            active = _row_mapping(active_cursor, active_row)
+            active_revision = active["revision"]
+            if not isinstance(active_revision, int) or isinstance(active_revision, bool):
+                raise WorkItemContractError("stored Work Item revision is invalid")
+            timestamp = _logical_now(now, current_updated_at=str(active["updated_at"] or ""))
+            active_expiry = canonical_work_item_instant(active["expires_at"], label="expires_at")
+            if active_expiry != active["expires_at"]:
+                raise WorkItemContractError("stored Work Item expiry is not canonical")
+            if active_revision >= WORK_ITEM_MAX_REVISION:
+                retired = conn.execute(
+                    """DELETE FROM work_items
+                        WHERE id=? AND user_id=? AND conversation_id=?
+                          AND state=? AND revision=?""",
+                    (active["id"], user, conversation, active["state"], active_revision),
+                )
+            elif active_expiry <= timestamp:
+                retired = conn.execute(
+                    """UPDATE work_items
+                          SET state='expired',transition='expired',revision=revision+1,
+                              updated_at=?,closed_at=?
+                        WHERE id=? AND user_id=? AND conversation_id=?
+                          AND state=? AND revision=? AND expires_at<=?""",
+                    (
+                        timestamp,
+                        timestamp,
+                        active["id"],
+                        user,
+                        conversation,
+                        active["state"],
+                        active_revision,
+                        timestamp,
+                    ),
+                )
+            else:
+                retired = conn.execute(
+                    """UPDATE work_items
+                          SET state='suspended',transition='suspended',revision=revision+1,
+                              updated_at=?,closed_at=NULL
+                        WHERE id=? AND user_id=? AND conversation_id=?
+                          AND state=? AND revision=? AND expires_at>?""",
+                    (
+                        timestamp,
+                        active["id"],
+                        user,
+                        conversation,
+                        active["state"],
+                        active_revision,
+                        timestamp,
+                    ),
+                )
+            if retired.rowcount != 1:
+                raise WorkItemConflictError("active Work Item retirement lost its revision race")
         conn.execute(
             """INSERT INTO work_items(
                    id,user_id,conversation_id,kind,goal,state,playbook,
@@ -507,27 +524,31 @@ def create_recall_conversation_work_item_in_transaction(
                 _expiry(timestamp),
             ),
         )
-    except sqlite3.IntegrityError as exc:
-        raise WorkItemConflictError("Work Item creation lost its current-state race") from exc
-    created = _fetch_work_item(
-        conn,
-        work_item_id=identifier,
-        user_id=user,
-        conversation_id=conversation,
-    )
-    if created is None:  # pragma: no cover - same transaction inserted the row
-        raise WorkItemConflictError("created Work Item is not durable in the caller transaction")
-    _validate_accepted_anchor(
-        conn,
-        user_id=user,
-        conversation_id=conversation,
-        boundary_user_message_id=created.anchor_user_message_id,
-        assistant_message_id=created.anchor_assistant_message_id,
-        accepted_plan_sha256=created.accepted_plan_sha256,
-        accepted_outcome_sha256=created.accepted_outcome_sha256,
-        require_latest_message=True,
-        expected_active_frame=created.active_frame,
-    )
+        created = _fetch_work_item(
+            conn,
+            work_item_id=identifier,
+            user_id=user,
+            conversation_id=conversation,
+        )
+        if created is None:  # pragma: no cover - same transaction inserted the row
+            raise WorkItemConflictError("created Work Item is not durable in the caller transaction")
+        _validate_accepted_anchor(
+            conn,
+            user_id=user,
+            conversation_id=conversation,
+            boundary_user_message_id=created.anchor_user_message_id,
+            assistant_message_id=created.anchor_assistant_message_id,
+            accepted_plan_sha256=created.accepted_plan_sha256,
+            accepted_outcome_sha256=created.accepted_outcome_sha256,
+            require_latest_message=True,
+            expected_active_frame=created.active_frame,
+        )
+    except BaseException as exc:
+        _rollback_work_item_mutation_savepoint(conn, savepoint)
+        if isinstance(exc, sqlite3.IntegrityError):
+            raise WorkItemConflictError("Work Item creation lost its current-state race") from exc
+        raise
+    _release_work_item_mutation_savepoint(conn, savepoint)
     return created
 
 
